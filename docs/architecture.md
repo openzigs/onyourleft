@@ -25,7 +25,7 @@ history.
 **One small instance, self-hostable, later.** It does only the four things a server is genuinely
 required for — inbound reachability for clients that cannot listen, indexing, authority for real-time
 state, and enforcement of privacy and erasure. Federation between instances is over signed records.
-This is Phase 3, [#7](https://github.com/openzigs/onyourleft/issues/7).
+This is Phase 4, [#7](https://github.com/openzigs/onyourleft/issues/7).
 
 **Not peer-to-peer.** A browser cannot be a peer; hole punching fails hardest on mobile-carrier
 symmetric NAT; and a CRDT/P2P history makes privacy zones, enforced visibility and account deletion
@@ -42,11 +42,11 @@ graph TB
         WEB --> FIT["packages/fit"]
         DOM["packages/domain"] -.used by all.-> WEB
     end
-    subgraph P3["Phase 3 — one small self-hostable instance"]
+    subgraph P4["Phase 4 — one small self-hostable instance"]
         INST["sync, index, authority, enforcement"]
     end
     STO -. "opt in, signed records (#61)" .-> INST
-    MOB["apps/mobile<br/>Capacitor, same web build"] -.Phase 4.-> WEB
+    MOB["apps/mobile<br/>Capacitor, same web build"] -.Phase 3.-> WEB
     style P3 stroke-dasharray: 5 5
     style MOB stroke-dasharray: 5 5
 ```
@@ -56,7 +56,7 @@ graph TB
 ```
 apps/                 AGPL-3.0-or-later, without exception
   web/                browser client — the Phase 1 product
-  mobile/             Capacitor shell wrapping the same web build (Phase 4)
+  mobile/             Capacitor shell wrapping the same web build (Phase 3)
 
 packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis
@@ -181,7 +181,7 @@ one.
 ### Where the shared/deployment-specific line falls, and why it is not the usual one
 
 Because the client owns the data and the **same computations must run identically on the device in
-Phase 1 and on an instance in Phase 3**, the shared packages are not "code the client and server
+Phase 1 and on an instance in Phase 4**, the shared packages are not "code the client and server
 happen to both need". They are **everything that is a function of the data rather than of the
 deployment**.
 

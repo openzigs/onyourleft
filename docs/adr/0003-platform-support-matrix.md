@@ -417,9 +417,24 @@ The rules, in the order they bind:
 
 The desktop client in #15 is expected to use the `webbluetooth` npm package. Its registry metadata,
 read **2026-09-03**, declares **`"license": "MIT"` on every published major from 0.x through 7.x**,
-while #15 records that the *bundled SimpleBLE build* differs by major and becomes progressively more
-restrictive. Both can be true: the manifest field describes the JavaScript, the bundled native
-library carries its own terms.
+while the *bundled SimpleBLE build* differs by major. Both can be true: the manifest field describes
+the JavaScript, the bundled native library carries its own terms.
+
+**Naming the majors turns this from a warning into a rule §3 already decides.** The package's own
+`dist-tags` state the bundled licence, read from `registry.npmjs.org/webbluetooth` on 2026-09-03:
+
+| dist-tag | Version | Bundled SimpleBLE licence | Admissible under `CLAUDE.md` §3? |
+|---|---|---|---|
+| `mit` | 3.6.0 | MIT | Yes, anywhere |
+| `latest` | **3.7.0** | MIT | Yes, anywhere |
+| `bsd-3` | 4.6.0 | BSD-3-Clause | Yes, anywhere |
+| `gpl-3.0` | 5.6.0 | **GPL-3.0** | **No** — a GPL dependency anywhere under `packages/` fails CI, no exemption. Admissible only under `apps/`. |
+| `busl-1.1` | 6.6.0 | **BUSL-1.1** | **No, anywhere.** Not an OSI licence; `CONTRIBUTING.md` requires an ADR before any non-open-source dependency. |
+| `next` | 7.0.0 | unverified | Unknown — treat as inadmissible until checked. |
+
+So the rule for #15 and #24 is concrete rather than cautionary: **pin `webbluetooth` within 3.x.** A
+caret range across a major is a silent relicensing, and 5.x and 6.x are both refused by rules this
+repository already has.
 
 The consequence is specific and it generalises past this one package: **a licence gate that reads
 manifests cannot see this.** `pnpm licenses list --json` would report MIT for every one of those
