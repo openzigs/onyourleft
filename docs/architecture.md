@@ -94,6 +94,14 @@ checkable.
 | `packages/physics` | Apache-2.0 | Power → speed, as separately testable terms | Any rendering, BLE or platform API | #88 |
 | `packages/store` | Apache-2.0 | Local activity and stream persistence, and its migrations | Anything under `apps/` | #27 |
 
+`packages/domain` is filled in as of [#25](https://github.com/openzigs/onyourleft/issues/25): the
+canonical representation of each quantity, the conversions into and out of the wire formats (FIT
+semicircles, the FIT 1989 epoch, the FIT altitude scale and offset, the wrapping 1/1024 s and 1/2048
+s event-time counters), and the validation that runs where an untrusted number becomes a typed one.
+Each is tabulated with its unit, its sign rule and the bug it prevents in
+[`packages/domain/README.md`](../packages/domain/README.md), which is the reference a consumer reads
+rather than this file.
+
 **Dependencies point one way: `apps/` → `packages/`, never the reverse.** Combined with the licence
 rule that is not a coincidence — Apache-2.0 code may be combined into an AGPL-3.0 work, but not the
 other way round, so a `packages/` → `apps/` import would be a licence violation as well as a layering

@@ -57,7 +57,7 @@ cover the paths, so a package arrives inside the rules rather than beside them.
 
 | Package | Purpose | Must not depend on |
 |---|---|---|
-| `packages/domain` | Canonical units and types; every conversion in the program goes through it. Also signing/verification and analysis, because those must run identically on the device and on an instance. | **Any platform API at all** — no DOM, no Node globals, no I/O, no network types |
+| `packages/domain` | Canonical units and types; every conversion in the program goes through it — the representations and the conversions are tabulated in [`packages/domain/README.md`](packages/domain/README.md). Also signing/verification and analysis, because those must run identically on the device and on an instance. | **Any platform API at all** — no DOM, no Node globals, no I/O, no network types |
 | `packages/fit` | FIT / GPX / TCX decode and encode | Anything server-specific; anything under `apps/` |
 | `packages/sensors` | BLE sensor and trainer abstraction, and the Web Bluetooth transport | Anything server-specific. Web Bluetooth types must not escape above the transport boundary |
 | `packages/physics` | Power → speed. Pure computation. | Any rendering, BLE or platform API |
@@ -372,6 +372,35 @@ pins the contract. And a floor set against a repository with no code is red on a
 it gets routed around rather than met. Coverage is still *reported*, because an untested branch is
 worth seeing in review. It is a signal, not a gate. **The mutation list is the gate.**
 
+### Verifying a *compile-time* guarantee
+
+A brand, a nominal type or a `@ts-expect-error` is only a guarantee while its absence breaks the
+build. So it is mutation-tested like everything else, and the mutation is specific:
+
+> **Remove the brand from the signature and confirm the suite goes red with
+> `TS2578: Unused '@ts-expect-error' directive`.**
+
+That error is the whole mechanism. It means the guard cannot rot silently: if someone later widens
+the parameter back to `number`, the directive that documented the guarantee becomes the thing that
+fails the build.
+
+**Two ways of "verifying" that do not work, both of which have produced a wrong answer in this
+repository:**
+
+1. **Grepping for the type name.** A brand can exist in a file and not be reachable from the
+   signature you care about. Presence is not enforcement.
+2. **Probing against the working tree.** A guarantee observed in a dirty tree may be supplied by
+   uncommitted changes. This is not hypothetical: during #25 an agent died mid-edit leaving branded
+   types uncommitted, a probe run in that tree reported type safety, the safety was credited to the
+   committed code, and the uncommitted changes were then discarded — closing a correct,
+   twice-raised blocking finding as a false positive. **Run `git status` before you probe, and read
+   the committed file with `git show HEAD:<path>` whenever a previous review round has been wrong
+   about it.**
+
+The same rule binds a *review*: if a fix commit claims a review finding was mistaken, that claim is
+unverified until you have re-run it yourself. A dismissal closes the loop, so a wrong dismissal is
+never raised again.
+
 ### The defect shape to hunt
 
 The dominant failure in this program's persistence work is **a write that reports success while the
@@ -578,5 +607,6 @@ top of an issue **supersedes its body**.
 | What counts as a vulnerability, and how to report it | `SECURITY.md` (added by [#96](https://github.com/openzigs/onyourleft/pull/96)) |
 | Which lint rule enforces which boundary | [`eslint.config.js`](eslint.config.js) and §4d |
 | Why a package's tsconfig narrows `lib` and `types` | `packages/domain/tsconfig.json` and §4d |
+| The canonical unit for a quantity, and the conversion into it | [`packages/domain/README.md`](packages/domain/README.md) |
 
-<!-- Last updated: 2026-09-03 by delivery:code-issue resolving #23 (workspace, toolchain and quality gates) -->
+<!-- Last updated: 2026-09-03 by delivery:code-issue resolving #25 (canonical units, types and validation) -->
