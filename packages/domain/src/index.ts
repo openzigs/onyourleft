@@ -74,6 +74,8 @@ export {
   DEGREES_PER_SEMICIRCLE,
   degreesLatitudeToSemicircles,
   degreesLongitudeToSemicircles,
+  latitudeSemicircles,
+  longitudeSemicircles,
   SEMICIRCLE_ROUND_TRIP_TOLERANCE_DEGREES,
   SEMICIRCLES_MAX,
   SEMICIRCLES_MIN,
@@ -82,6 +84,12 @@ export {
   semicirclesToDegreesLongitude,
   semicirclesToPosition,
 } from './position';
+
+// The labelling functions are the single point where an unlabelled sint32 off
+// the wire becomes a latitude or a longitude. #30 and #31 must call them at the
+// field read, where a reviewer can see which field is which; nothing downstream
+// re-labels, so a wrong label there is the one transposition no type can catch.
+export type { LatitudeSemicircles, LongitudeSemicircles } from './position';
 
 // --- Altitude: the FIT scale-and-offset encoding ----------------------------
 

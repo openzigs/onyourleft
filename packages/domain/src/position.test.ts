@@ -3,6 +3,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  latitudeSemicircles,
+  longitudeSemicircles,
   DEGREES_PER_SEMICIRCLE,
   degreesLatitude,
   degreesLatitudeToSemicircles,
@@ -78,7 +80,7 @@ describe('the semicircle scale factor', () => {
   });
 
   it('decodes -2^29 semicircles as exactly -45 degrees', () => {
-    expect(semicirclesToDegreesLatitude(-536870912)).toBe(-45);
+    expect(semicirclesToDegreesLatitude(latitudeSemicircles(-536870912))).toBe(-45);
   });
 
   it('is 180 degrees per half turn', () => {
@@ -88,7 +90,7 @@ describe('the semicircle scale factor', () => {
 
 describe('the sint32 range', () => {
   it('decodes the most negative sint32 as exactly -180 degrees of longitude', () => {
-    expect(semicirclesToDegreesLongitude(SEMICIRCLES_MIN)).toBe(-180);
+    expect(semicirclesToDegreesLongitude(longitudeSemicircles(SEMICIRCLES_MIN))).toBe(-180);
   });
 
   it('encodes -180 degrees as the most negative sint32, without clamping', () => {
@@ -101,30 +103,42 @@ describe('the sint32 range', () => {
     const encoded = degreesLongitudeToSemicircles(degreesLongitude(180));
     expect(encoded).toBe(SEMICIRCLES_MAX);
     expect(encoded).toBeGreaterThan(0);
-    expect(semicirclesToDegreesLongitude(encoded)).toBeCloseTo(180, 6);
+    expect(semicirclesToDegreesLongitude(longitudeSemicircles(encoded))).toBeCloseTo(180, 6);
   });
 
   it('rejects a semicircle value past the end of a sint32', () => {
-    expect(() => semicirclesToDegreesLongitude(SEMICIRCLES_MAX + 1)).toThrow(UnitError);
-    expect(() => semicirclesToDegreesLongitude(SEMICIRCLES_MIN - 1)).toThrow(UnitError);
+    expect(() => longitudeSemicircles(SEMICIRCLES_MAX + 1)).toThrow(UnitError);
+    expect(() => longitudeSemicircles(SEMICIRCLES_MIN - 1)).toThrow(UnitError);
   });
 
   it('rejects a negative field that was read as unsigned — the classic sint32 misread', () => {
     // -536870912 read out of a buffer as uint32 rather than sint32.
     const misread = 4294967296 - 536870912;
-    expect(() => semicirclesToDegreesLatitude(misread)).toThrow(UnitError);
+    expect(() => latitudeSemicircles(misread)).toThrow(UnitError);
   });
 
   it('rejects a fractional semicircle value', () => {
-    expect(() => semicirclesToDegreesLatitude(1.5)).toThrow(UnitError);
+    expect(() => latitudeSemicircles(1.5)).toThrow(UnitError);
   });
 });
 
 describe('latitude and longitude are not interchangeable', () => {
   it('rejects a semicircle value that decodes past the pole', () => {
-    // A longitude of about 143 degrees, offered to the latitude decoder.
+    // A longitude of about 143 degrees. Offering it to the latitude decoder is
+    // now a COMPILE error rather than a runtime one -- the label carries.
     const semicircles = degreesLongitudeToSemicircles(degreesLongitude(143));
-    expect(() => semicirclesToDegreesLatitude(semicircles)).toThrow(UnitError);
+
+    // Both properties on one call: the @ts-expect-error pins the COMPILE error
+    // (and fails the build if the brand is ever removed), while toThrow pins the
+    // runtime behaviour for a caller who casts past it.
+    expect(() =>
+      // @ts-expect-error a longitude in semicircles is not a latitude.
+      semicirclesToDegreesLatitude(semicircles),
+    ).toThrow(UnitError);
+
+    // Re-labelling it deliberately is caught too, because 143 degrees is past
+    // the pole.
+    expect(() => latitudeSemicircles(semicircles)).toThrow(UnitError);
     expect(semicirclesToDegreesLongitude(semicircles)).toBeCloseTo(143, 7);
   });
 });
@@ -140,10 +154,25 @@ describe('semicirclesToPosition', () => {
     expect(position.longitude).toBeCloseTo(-70.6693, 7);
   });
 
-  it('rejects a transposed pair rather than returning a plausible position', () => {
-    const latitude = degreesLatitudeToSemicircles(degreesLatitude(-33.4489));
-    const longitude = degreesLongitudeToSemicircles(degreesLongitude(-170.6693));
+  // This is the entry point packages/fit (#30, #31) calls from a decode loop,
+  // where position_lat and position_long sit one field apart and are both
+  // sint32. It is the more dangerous of the two constructors, not the less.
+  //
+  // The test this replaced chose -170.6693 -- outside +/-90 -- so it passed on
+  // the RANGE rule while being named for swap protection. A European pair has
+  // no such tell: both values are valid in each other's role.
+  it('makes a transposed European pair a COMPILE error, not a runtime one', () => {
+    const latitude = degreesLatitudeToSemicircles(degreesLatitude(51.5074)); // London
+    const longitude = degreesLongitudeToSemicircles(degreesLongitude(-0.1278));
 
-    expect(() => semicirclesToPosition(longitude, latitude)).toThrow(UnitError);
+    // @ts-expect-error the label is the guarantee. If this stops erroring, the
+    // directive itself fails the build, so the guard cannot rot silently.
+    semicirclesToPosition(longitude, latitude);
+
+    // Neither value is out of range in the swapped role, so no runtime check
+    // could have caught this pair -- which is why the type must.
+    const position = semicirclesToPosition(latitude, longitude);
+    expect(position.latitude).toBeCloseTo(51.5074, 7);
+    expect(position.longitude).toBeCloseTo(-0.1278, 7);
   });
 });

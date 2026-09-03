@@ -61,6 +61,14 @@ export const FIT_SYSTEM_TIME_MAX = 0x10000000 - 1;
  * denote a UTC instant.
  */
 export function isFitSystemTime(fitTimestamp: number): boolean {
+  // Validates, unlike the version this replaced. It was the only public function
+  // in the package that did not, and `isFitSystemTime(-1)` and `(0.5)` both
+  // returned `true` -- classifying an impossible field as "system time" rather
+  // than rejecting it. #30 and #31 will call this from a decode loop, so a
+  // malformed field would be silently absorbed rather than reported. Fixing it
+  // now is one line; fixing it after those ship is a breaking change to a
+  // predicate they branch on.
+  assertIntegerInRange(fitTimestamp, 0, FIT_TIMESTAMP_MAX, 'FIT date_time');
   return fitTimestamp <= FIT_SYSTEM_TIME_MAX;
 }
 

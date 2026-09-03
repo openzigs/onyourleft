@@ -100,6 +100,16 @@ describe('FIT system time', () => {
     expect(isFitSystemTime(FIT_SYSTEM_TIME_MAX + 1)).toBe(false);
     expect(isFitSystemTime(1157328000)).toBe(false);
   });
+
+  // Regression: isFitSystemTime was the only public function in the package
+  // that did not validate. Both of these returned `true` -- an impossible field
+  // classified as "system time" rather than rejected, which #30/#31 would have
+  // absorbed silently in a decode loop.
+  it('rejects a value that is not a valid FIT date_time at all', () => {
+    expect(() => isFitSystemTime(-1)).toThrow(UnitError);
+    expect(() => isFitSystemTime(0.5)).toThrow(UnitError);
+    expect(() => isFitSystemTime(FIT_TIMESTAMP_MAX + 1)).toThrow(UnitError);
+  });
 });
 
 describe('unsignedCounterDelta', () => {

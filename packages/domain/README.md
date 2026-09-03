@@ -26,7 +26,7 @@ already speak SI; the rest are conversions *out*.
 | Mass | kilogram | `Kilograms` | `kilograms()` | non-finite, zero or negative |
 | Latitude | decimal degree, WGS 84, north positive | `DegreesLatitude` | `degreesLatitude()` | non-finite, outside ±90 |
 | Longitude | decimal degree, WGS 84, east positive | `DegreesLongitude` | `degreesLongitude()` | non-finite, outside ±180 |
-| Position | the two above, as named fields | `GeographicPosition` | `geographicPosition()` | either coordinate |
+| Position | the two above, as named fields | `GeographicPosition` | `geographicPosition()` | nothing — it takes already-labelled coordinates, so a transposition is a **compile** error and the range checks already ran |
 | Duration | second | `Seconds` | `seconds()` | non-finite, negative |
 | Instant | second since the Unix epoch | `UnixSeconds` | `unixSeconds()` | non-finite |
 
