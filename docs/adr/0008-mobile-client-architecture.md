@@ -238,10 +238,22 @@ say so.
 
 | | Condition |
 | --- | --- |
-| **Frame rate** | **≥ 30 fps sustained** — the mean over the run, with **no more than 1 % of frames exceeding 33.3 ms** |
+| **Frame rate** | **≥ 30 fps sustained** — the mean over the run, with **no more than 1 % of frames exceeding 50 ms** |
 | **Duration** | **20 minutes continuous**, which is the shortest realistic session and long enough for thermal throttling to appear. A 30-second measurement measures a cold device |
 | **Device** | Hardware **at the D-4 floor**, not above it. A flagship result is not evidence about the floor |
 | **Configuration** | Inside a **Capacitor WebView**, at **720p world render**, with a **live BLE connection streaming notifications** for the whole run |
+
+**Why the tail threshold is 50 ms and not 33.3 ms.** An earlier draft used 33.3 ms, which is
+arithmetically unpassable at the frame rate D-4 specifies: a renderer running at a **30 fps cap**
+produces frame times clustered *on* 33.3 ms, so ordinary jitter puts far more than 1 % of frames
+marginally above it — on a run that is subjectively perfect. Read the other way, a 1 % tail bound at
+33.3 ms implies p99 ≤ 33.3 ms, which demands real headroom above 30 fps and makes the mean clause
+redundant. Either reading breaks the gate: it fails a device that meets the owner's ruling, or it
+silently tightens "30 fps sustained" into something considerably harder than what was decided.
+
+50 ms is 20 fps. The pair therefore says what the owner's ruling means: **the mean holds at 30, and
+the worst 1 % never drops below 20** — a bound on visible stutter rather than on jitter around the
+cap. The threshold is the author's, not the owner's; the 30 fps target is the owner's.
 
 The BLE condition is not decoration: GATT notifications arrive on the same JavaScript thread the
 renderer runs on, so a renderer measured without them has not been measured in the configuration it
@@ -347,6 +359,17 @@ It was **not** in #15's original ~34-point estimate. That estimate is understate
   work the React Native fallback needs too, and the shell is where the spike gets run.
 - **#91 (3D route renderer)** — **blocked on the D-2 spike**. Scoped to the D-5 fixed chase camera
   at the D-4 floor. A free camera is out of scope.
+
+> ⚠️ **Who runs the spike: #87.** This is stated because it was very nearly nobody. #91's body says
+> it "may not begin until the **#86** rendering spike passes" — but #86 is the ADR-writing issue and
+> the PR recording this ADR closes it, so after merge the gate would have pointed at a closed issue.
+> That is how a gate the owner said "must not be quietly dropped" gets dropped: not by anyone
+> deciding to, but by nobody being assigned it.
+>
+> **#87 owns running the spike, producing the measurement and recording the result in this ADR.**
+> It is the right home — the shell is where a WebView with a live BLE connection first exists — and
+> it is an added deliverable on #87, not a reason to block #87 itself. #87 is needed under the
+> React Native fallback too.
 - **#89 (route profile model, GPX import)** — is now on #91's critical path, because it is where
   the world comes from.
 - **#48–#51 (web client)** — **are now on #85's critical path in a way they were not before.**
