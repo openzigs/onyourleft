@@ -1,0 +1,19 @@
+{
+  // The whole package: `src/` (the codec, and today the region guard) plus
+  // `tools/` (the fixture generator) plus this package's Vitest config.
+  //
+  // `types: ["node"]` here and NOT in tsconfig.platform-free.json is the point
+  // of having two files. The generator writes files, so it needs `node:fs`; the
+  // codec must not, because docs/architecture.md places packages/fit above any
+  // platform. ESLint's project service resolves a file to the nearest
+  // `tsconfig.json`, so this is the config that has to cover every file in the
+  // package or lint reports "not found by the project service" rather than
+  // anything useful. The narrower program below is what actually enforces the
+  // boundary, and `pnpm run typecheck` runs both.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "tools/**/*.ts", "vitest.config.ts"]
+}

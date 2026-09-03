@@ -1,0 +1,21 @@
+{
+  // `src/` alone, with no platform surface at all: `lib` is ES2024 and `types`
+  // is empty, exactly as packages/domain does it.
+  //
+  // packages/fit decodes and encodes files that arrive from a browser File, a
+  // Capacitor filesystem read and (in Phase 3) an instance upload. It is handed
+  // bytes; it never opens anything. Without this program a `node:fs` import or
+  // a bare `fetch` inside `src/` would typecheck cleanly, because
+  // `tsconfig.json` above admits @types/node for the generator's sake.
+  //
+  // CLAUDE.md section 4d: that closure is conditional on nothing in the program
+  // pulling a `/// <reference types="node" />` back in through a `.d.ts`.
+  // `vitest.config.ts` is deliberately excluded here and imports nothing, for
+  // the reason packages/domain/vitest.config.ts records at length.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "types": []
+  },
+  "include": ["src/**/*.ts"]
+}

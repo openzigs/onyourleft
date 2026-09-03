@@ -1,0 +1,236 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * The GPX and TCX half of the corpus.
+ *
+ * Both are XML, and XML is where this program's file import gets attacked.
+ * `SECURITY.md` puts it plainly: *"Activity file parsing. FIT/GPX/TCX come from
+ * user-supplied files. Malformed input must produce an error — never memory
+ * corruption, a crash loop, resource exhaustion or code execution. XXE in GPX
+ * and TCX is specifically in scope."* So the corpus carries a hostile document
+ * in each format, and #32 has something to prove its rejection against rather
+ * than a code comment claiming one.
+ *
+ * The tracks are the same synthetic tracks the FIT fixtures use, so a round trip
+ * through either text format can be compared against the binary one point for
+ * point.
+ */
+
+import type { GeographicPosition } from '@onyourleft/domain';
+
+import type { TrackSpecification } from './ride';
+import { positionAt, RIDE_START_UNIX_SECONDS } from './ride';
+import { decimal, degrees, document, isoInstant, xmlText } from './xml-builder';
+
+const GPX_NAMESPACE = 'http://www.topografix.com/GPX/1/1';
+const GPX_TRACK_POINT_EXTENSION_NAMESPACE =
+  'http://www.garmin.com/xmlschemas/TrackPointExtension/v1';
+const TCX_NAMESPACE = 'http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2';
+const TCX_ACTIVITY_EXTENSION_NAMESPACE = 'http://www.garmin.com/xmlschemas/ActivityExtension/v2';
+
+/**
+ * The creator string every document in this corpus carries.
+ *
+ * It says what produced the file, which is this repository, and it deliberately
+ * does not impersonate a head unit. A fixture claiming to come from a real
+ * device invites the next contributor to compare it against a real one.
+ */
+const CREATOR = xmlText('On Your Left synthetic fixture generator');
+
+/** The track name every nominal document carries, escaped for the same reason. */
+const TRACK_NAME = xmlText('Synthetic fixture ride');
+
+/** A built text fixture: its text, and the positions it contains, in order. */
+export interface XmlFixture {
+  readonly text: string;
+  readonly positions: readonly GeographicPosition[];
+}
+
+interface TrackPoint {
+  readonly position: GeographicPosition;
+  readonly unixSeconds: number;
+  readonly altitudeMetres: number;
+  readonly distanceMetres: number;
+  readonly heartRate: number;
+  readonly cadence: number;
+  readonly power: number;
+}
+
+function trackPoints(track: TrackSpecification, count: number): readonly TrackPoint[] {
+  return Array.from({ length: count }, (_, index) => ({
+    position: positionAt(track, index),
+    unixSeconds: RIDE_START_UNIX_SECONDS + index,
+    altitudeMetres: 12 + ((index * 3) % 40) / 10,
+    distanceMetres: index * 7 + ((index * 13) % 5),
+    heartRate: 118 + ((index * 7) % 41),
+    cadence: 76 + ((index * 3) % 19),
+    power: 165 + ((index * 11) % 97),
+  }));
+}
+
+/** A nominal GPX 1.1 track with the extension channels a cycling file carries. */
+export function nominalGpx(track: TrackSpecification, count: number): XmlFixture {
+  const points = trackPoints(track, count);
+  const lines = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    `<gpx version="1.1" creator="${CREATOR}" xmlns="${GPX_NAMESPACE}" xmlns:gpxtpx="${GPX_TRACK_POINT_EXTENSION_NAMESPACE}">`,
+    '  <metadata>',
+    `    <time>${isoInstant(RIDE_START_UNIX_SECONDS)}</time>`,
+    '  </metadata>',
+    '  <trk>',
+    `    <name>${TRACK_NAME}</name>`,
+    '    <type>cycling</type>',
+    '    <trkseg>',
+    ...points.flatMap((point) => [
+      `      <trkpt lat="${degrees(point.position.latitude)}" lon="${degrees(point.position.longitude)}">`,
+      `        <ele>${decimal(point.altitudeMetres, 1)}</ele>`,
+      `        <time>${isoInstant(point.unixSeconds)}</time>`,
+      '        <extensions>',
+      '          <gpxtpx:TrackPointExtension>',
+      `            <gpxtpx:hr>${String(point.heartRate)}</gpxtpx:hr>`,
+      `            <gpxtpx:cad>${String(point.cadence)}</gpxtpx:cad>`,
+      '          </gpxtpx:TrackPointExtension>',
+      '        </extensions>',
+      '      </trkpt>',
+    ]),
+    '    </trkseg>',
+    '  </trk>',
+    '</gpx>',
+  ];
+  return { text: document(lines), positions: points.map((point) => point.position) };
+}
+
+/** A nominal TCX v2 activity with one lap. */
+export function nominalTcx(track: TrackSpecification | undefined, count: number): XmlFixture {
+  const points = track ? trackPoints(track, count) : trackPoints(NO_TRACK_PLACEHOLDER, count);
+  const last = points.at(-1);
+  const lines = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    `<TrainingCenterDatabase xmlns="${TCX_NAMESPACE}" xmlns:ns3="${TCX_ACTIVITY_EXTENSION_NAMESPACE}">`,
+    '  <Activities>',
+    '    <Activity Sport="Biking">',
+    `      <Id>${isoInstant(RIDE_START_UNIX_SECONDS)}</Id>`,
+    `      <Lap StartTime="${isoInstant(RIDE_START_UNIX_SECONDS)}">`,
+    `        <TotalTimeSeconds>${decimal(count - 1, 1)}</TotalTimeSeconds>`,
+    `        <DistanceMeters>${decimal(last ? last.distanceMetres : 0, 1)}</DistanceMeters>`,
+    '        <Intensity>Active</Intensity>',
+    '        <TriggerMethod>Manual</TriggerMethod>',
+    '        <Track>',
+    ...points.flatMap((point) => [
+      '          <Trackpoint>',
+      `            <Time>${isoInstant(point.unixSeconds)}</Time>`,
+      ...(track
+        ? [
+            '            <Position>',
+            `              <LatitudeDegrees>${degrees(point.position.latitude)}</LatitudeDegrees>`,
+            `              <LongitudeDegrees>${degrees(point.position.longitude)}</LongitudeDegrees>`,
+            '            </Position>',
+            `            <AltitudeMeters>${decimal(point.altitudeMetres, 1)}</AltitudeMeters>`,
+          ]
+        : []),
+      `            <DistanceMeters>${decimal(point.distanceMetres, 1)}</DistanceMeters>`,
+      '            <HeartRateBpm>',
+      `              <Value>${String(point.heartRate)}</Value>`,
+      '            </HeartRateBpm>',
+      `            <Cadence>${String(point.cadence)}</Cadence>`,
+      '            <Extensions>',
+      '              <ns3:TPX>',
+      `                <ns3:Watts>${String(point.power)}</ns3:Watts>`,
+      '              </ns3:TPX>',
+      '            </Extensions>',
+      '          </Trackpoint>',
+    ]),
+    '        </Track>',
+    '      </Lap>',
+    `      <Creator xsi:type="Device_t" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">`,
+    `        <Name>${CREATOR}</Name>`,
+    '      </Creator>',
+    '    </Activity>',
+    '  </Activities>',
+    '</TrainingCenterDatabase>',
+  ];
+  return {
+    text: document(lines),
+    positions: track ? points.map((point) => point.position) : [],
+  };
+}
+
+// Only ever used to generate the non-position channels of an indoor TCX; its
+// coordinates are never written into a document.
+const NO_TRACK_PLACEHOLDER: TrackSpecification = {
+  startLatitudeE7: 0,
+  startLongitudeE7: 0,
+  latitudeStepE7: 0,
+  longitudeStepE7: 0,
+};
+
+/**
+ * The XXE payload both hostile fixtures carry.
+ *
+ * An external general entity pointing at a local file, referenced from a text
+ * node. A parser that resolves external entities substitutes the contents of
+ * `/etc/passwd` into the track name; a parser that has disabled them either
+ * errors or leaves the reference unexpanded, and #32 must do one of those two.
+ *
+ * The document is otherwise well-formed and its coordinates are inside
+ * `NULL-ISLAND`, so it exercises the entity handling and nothing else. A file
+ * that was hostile in two ways at once would not tell you which defence failed.
+ */
+const XXE_DOCTYPE = (rootElement: string) => [
+  `<!DOCTYPE ${rootElement} [`,
+  '  <!ELEMENT name (#PCDATA)>',
+  '  <!ENTITY xxe SYSTEM "file:///etc/passwd">',
+  ']>',
+];
+
+export function xxeGpx(track: TrackSpecification, count: number): XmlFixture {
+  const points = trackPoints(track, count);
+  const lines = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    ...XXE_DOCTYPE('gpx'),
+    `<gpx version="1.1" creator="${CREATOR}" xmlns="${GPX_NAMESPACE}">`,
+    '  <trk>',
+    '    <name>&xxe;</name>',
+    '    <trkseg>',
+    ...points.flatMap((point) => [
+      `      <trkpt lat="${degrees(point.position.latitude)}" lon="${degrees(point.position.longitude)}">`,
+      `        <time>${isoInstant(point.unixSeconds)}</time>`,
+      '      </trkpt>',
+    ]),
+    '    </trkseg>',
+    '  </trk>',
+    '</gpx>',
+  ];
+  return { text: document(lines), positions: points.map((point) => point.position) };
+}
+
+export function xxeTcx(track: TrackSpecification, count: number): XmlFixture {
+  const points = trackPoints(track, count);
+  const lines = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    ...XXE_DOCTYPE('TrainingCenterDatabase'),
+    `<TrainingCenterDatabase xmlns="${TCX_NAMESPACE}">`,
+    '  <Activities>',
+    '    <Activity Sport="Biking">',
+    '      <Id>&xxe;</Id>',
+    `      <Lap StartTime="${isoInstant(RIDE_START_UNIX_SECONDS)}">`,
+    '        <Intensity>Active</Intensity>',
+    '        <TriggerMethod>Manual</TriggerMethod>',
+    '        <Track>',
+    ...points.flatMap((point) => [
+      '          <Trackpoint>',
+      `            <Time>${isoInstant(point.unixSeconds)}</Time>`,
+      '            <Position>',
+      `              <LatitudeDegrees>${degrees(point.position.latitude)}</LatitudeDegrees>`,
+      `              <LongitudeDegrees>${degrees(point.position.longitude)}</LongitudeDegrees>`,
+      '            </Position>',
+      '          </Trackpoint>',
+    ]),
+    '        </Track>',
+    '      </Lap>',
+    '    </Activity>',
+    '  </Activities>',
+    '</TrainingCenterDatabase>',
+  ];
+  return { text: document(lines), positions: points.map((point) => point.position) };
+}
