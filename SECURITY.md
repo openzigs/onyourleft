@@ -34,7 +34,8 @@ This project handles data that is genuinely sensitive, so the following are all 
 - **Location data from activity files.** GPS traces reveal where people live and ride. Anything that
   exposes a private activity, defeats a privacy zone, or leaks location through an API response,
   an export, a cache or an error message is in scope. See
-  [ADR 0004](docs/adr/) and issue [#21](https://github.com/openzigs/onyourleft/issues/21).
+  [ADR 0004](docs/adr/0004-privacy-and-location.md) and issue
+  [#21](https://github.com/openzigs/onyourleft/issues/21).
 - **Health data.** Heart rate and power are health data under both Google Play and App Store policy.
 - **Cross-athlete data exposure.** Any path where one athlete can read another's activity, stream or
   personal data — including a query that matches on an entity id without also filtering on the
