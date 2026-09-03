@@ -4,7 +4,17 @@
 - **Date**: 2026-09-03
 - **Deciders**: repository owner — **owner decision D5** (federated local-first, self-hosting
   unconditional, peer-to-peer ruled out) and **owner decision D6** (Phase 1 has no server, no
-  account and no network). This ADR does not re-open either; it records the reasoning, the
+  account and no network).
+
+  ⚠️ **Scope of that authority, stated precisely because every sibling ADR records an explicit
+  confirmation and this one derives its authority instead.** D5 and D6 settle the core: local-first,
+  federated, one small self-hostable instance, not peer-to-peer. They do **not** by themselves settle
+  the subsidiary choices made below — the deployment sizing, what federates and what does not, and
+  the leaderboard-scope table. Those follow from the core decision and the measurements recorded
+  here, and are the author's reasoning rather than the owner's ruling. **A reader who wants to
+  overturn one of them is arguing with this document, not with D5.**
+
+  This ADR does not re-open D5 or D6; it records the reasoning, the
   measurements and the limits, so that a future reader can argue with the decision instead of
   re-running the research
 - **Issue**: [#57](https://github.com/openzigs/onyourleft/issues/57)
@@ -426,7 +436,7 @@ inherited: it is true on the date above and nothing enforces it mechanically.
 This table is normative. **No downstream issue may promise a global all-time KOM**, because the
 architecture cannot deliver one without somebody volunteering to run an aggregator.
 
-| Leaderboard scope | Feasible without a central index? | Why |
+| Leaderboard scope | Feasible without a **global** aggregator? | What does the aggregating |
 |---|---|---|
 | **Personal bests** | **Yes, fully** | Your data, your device, no coordination. Works in Phase 1 with no network |
 | **Friends-only** | **Yes** | A bounded set you already sync with; cost is O(follows) |
