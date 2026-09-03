@@ -48,10 +48,11 @@ scripts/              dependency-free repository checks; run on a bare clone
   workflows/rules.yml runs those checks on every pull request — see §4c
 ```
 
-**`apps/web` and `packages/domain` exist**, created by
+**`apps/web`, `packages/domain` and `packages/sensors` exist** — the first two created by
 [#23](https://github.com/openzigs/onyourleft/issues/23) along with the workspace, the toolchain and
-the lockfile. The other four packages and `apps/mobile` do **not** — each is created by the issue
-that owns its content (§4b), from `packages/domain` as the template. The layout is fixed here
+the lockfile, and `packages/sensors` by [#39](https://github.com/openzigs/onyourleft/issues/39). The
+other three packages and `apps/mobile` do **not** — each is created by the issue that owns its
+content (§4b), from `packages/domain` as the template. The layout is fixed here
 because ~30 sub-issues reference it by name, and the workspace globs and lint boundaries already
 cover the paths, so a package arrives inside the rules rather than beside them.
 
@@ -195,6 +196,7 @@ pnpm run build
 
 # One package at a time, which is how you check a single package's harness:
 pnpm --filter @onyourleft/domain run test
+pnpm --filter @onyourleft/sensors run test
 pnpm --filter @onyourleft/web run test
 
 # All six bare-clone script checks in one command.
@@ -265,15 +267,18 @@ not.
 > ⛔ **None of the following runs today.** Do not copy these into a PR description as though you had
 > run them, and do not add them to a CI workflow before the issue that owns them lands.
 
-- **`apps/mobile`, `packages/fit`, `packages/sensors`, `packages/physics`, `packages/store`.** The
-  workspace globs (`apps/*`, `packages/*`) will pick each up the moment it appears, and the boundary
+- **`apps/mobile`, `packages/fit`, `packages/physics`, `packages/store`.** The workspace globs
+  (`apps/*`, `packages/*`) will pick each up the moment it appears, and the boundary
   and header rules already apply to its path — but the directories do not exist. They are created by
   the issues that own their content: [#29](https://github.com/openzigs/onyourleft/issues/29),
-  [#39](https://github.com/openzigs/onyourleft/issues/39),
   [#88](https://github.com/openzigs/onyourleft/issues/88),
   [#27](https://github.com/openzigs/onyourleft/issues/27) and
   [#85](https://github.com/openzigs/onyourleft/issues/85). Copy `packages/domain` as the template: a
   manifest, a `LICENSE`, a `tsconfig.json`, a `vitest.config.ts` and a test.
+  `packages/sensors` has landed with [#39](https://github.com/openzigs/onyourleft/issues/39) and is
+  a second worked example of the same template — but it holds **interfaces only**: the Web Bluetooth
+  transport (#40), the protocol clients (#41-#43) and the simulator (#44) are still to come, and
+  nothing under `packages/sensors` connects to a device yet.
 - **A per-package dependency-licence gate.** Nothing yet checks that a dependency's *own* licence is
   permitted under the path it lands in — only that the manifests and headers declare the right
   thing. `pnpm licenses list --json` exists and is unused. Second half of
@@ -325,8 +330,8 @@ would otherwise be documented and unenforced, which is the gap this project keep
 |---|---|
 | `headers/header-format` | a `.ts`/`.tsx` file whose first line is not the SPDX identifier its directory requires. Duplicates `LIC001`/`LIC002` on purpose: the script covers file types ESLint never parses and runs with no toolchain, the lint rule runs in the editor |
 | `boundaries/dependencies` | an import from `packages/*` into `apps/*`, in either the relative (`../../../apps/web/src/...`) or the workspace (`@onyourleft/web`) spelling. Dependencies point one way |
-| `@typescript-eslint/no-restricted-imports` in `packages/domain` | naming **any** Node builtin — the list is derived from `builtinModules`, not typed out, so `events`, `util` and `stream/promises` fail exactly as `node:fs` does — or `react`, `react-dom`, `vite` or `dexie` |
-| `no-restricted-globals` in `packages/domain` | naming a DOM global (`window`, `document`, `navigator`, `location`, `history`, `localStorage`, `sessionStorage`, `indexedDB`, `caches`), a Node global (`process`, `Buffer`, `__dirname`, `__filename`, `global`, `require`) or a network global (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Request`, `Response`, `Headers`). This one **is** a named list; the closure is the typechecker below |
+| `@typescript-eslint/no-restricted-imports` in `packages/domain` and `packages/sensors` | naming **any** Node builtin — the list is derived from `builtinModules`, not typed out, so `events`, `util` and `stream/promises` fail exactly as `node:fs` does — or `react`, `react-dom`, `vite` or `dexie` |
+| `no-restricted-globals` in `packages/domain` and `packages/sensors` | naming a DOM global (`window`, `document`, `navigator`, `location`, `history`, `localStorage`, `sessionStorage`, `indexedDB`, `caches`), a Node global (`process`, `Buffer`, `__dirname`, `__filename`, `global`, `require`) or a network global (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Request`, `Response`, `Headers`). This one **is** a named list; the closure is the typechecker below |
 
 `packages/domain/tsconfig.json` narrows `lib` to `ES2024` and sets `types: []`. That is the closure
 the lint list cannot be: with no ES library entry and no `@types` package in scope, *any* name from
@@ -345,8 +350,23 @@ survives the paragraph below.
 > `packages/domain`'s tsconfig program can reopen this**, which is why the ESLint rules are not
 > redundant with it: check both gates with a probe file, never one.
 
-When `packages/sensors` and the routing work arrive, their boundaries (#39, #40, #70) go in the same
-file, as more `boundaries/dependencies` policies.
+`packages/sensors` (#39) is isolated the same way and for a stricter reason: its interfaces have to
+be satisfied **unchanged** by Web Bluetooth, CoreBluetooth and the Android BLE APIs, so an interface
+that can name a browser type has already chosen one of the three. It carries one restriction
+`packages/domain` does not — a BLE-library denylist, because a library is not a global and neither
+the `lib` narrowing nor the globals list can see one.
+
+> ⚠️ **`no-restricted-imports` `group` patterns are matched with gitignore semantics**, where a
+> pattern containing no slash matches *any* path segment. The derived Node-builtin list therefore
+> matched `@onyourleft/domain` on the builtin named `domain`, and **no workspace package could
+> import the units package** until #39 added a `'!@onyourleft/*'` exemption to that group.
+> `packages/domain` never hit it because it does not import itself. The same collision waits for any
+> future `@onyourleft/<builtin-name>`.
+
+When `packages/sensors`' transport half and the routing work arrive, their boundaries (#40, #70) go
+in the same file — #40's Web Bluetooth adapter needs the DOM, so it arrives in its own directory
+under `packages/sensors` with its own tsconfig and its own entry in `eslint.config.js`, and
+`packages/sensors/src` stays platform-free.
 
 ---
 
@@ -609,4 +629,4 @@ top of an issue **supersedes its body**.
 | Why a package's tsconfig narrows `lib` and `types` | `packages/domain/tsconfig.json` and §4d |
 | The canonical unit for a quantity, and the conversion into it | [`packages/domain/README.md`](packages/domain/README.md) |
 
-<!-- Last updated: 2026-09-03 by delivery:code-issue resolving #25 (canonical units, types and validation) -->
+<!-- Last updated: 2026-09-03 by delivery:code-issue resolving #39 (transport-agnostic sensor abstraction) -->
