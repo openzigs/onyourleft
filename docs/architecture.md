@@ -206,6 +206,7 @@ share one.
 | ADR | Title | Issue |
 |---|---|---|
 | [0001](adr/0001-licence.md) | Licensing — AGPL-3.0 app + Apache-2.0 leaf packages | #18 |
+| [0004](adr/0004-privacy-and-location.md) | Activity privacy and the location-data model | #21 |
 | [0005](adr/0005-tech-stack.md) | Technology stack and workspace layout | #22 |
 
 ### Claimed by open issues — **check here before you pick a number**
@@ -219,7 +220,6 @@ share one.
 |---|---|---|
 | 0002 | #19 — clean-room posture | **#57 — local-first architecture** (ADR 0001 already refers to the local-first decision as "ADR 0002") |
 | 0003 | #20 — platform support matrix | — |
-| 0004 | #21 — privacy and location | — |
 | **0005** | **#22 — tech stack (written)** | **#57 — local-first architecture** |
 | 0006 | #58 — FIT codec licensing | **#27 — stream storage** |
 | 0007 | #59 — patent posture | — |
