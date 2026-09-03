@@ -20,6 +20,7 @@
 #   LIC003  every package manifest declares the licence its path requires
 #   LIC004  every leaf package under packages/ carries its own LICENSE file
 #   SCOPE001 no ANT+ reference in any source tree (owner decision D2)
+#   WF001   no pull_request_target trigger in .github/workflows/
 #   ADR001  no two ADRs share a number
 #   ADR002  every ADR filename is NNNN-kebab-case.md
 #
@@ -130,6 +131,31 @@ for dir in "${ROOT}/packages" "${ROOT}/apps"; do
     fi
   done < <(source_files "${dir}")
 done
+
+# --- WF001: pull_request_target is banned in workflows ------------------------
+# CLAUDE.md section 8. That trigger runs against the base repository with access
+# to secrets, and unlike `pull_request` it is not covered by the fork approval
+# gate at all -- so a fork's workflow change executes before anyone reviews it.
+# This repository is public, which is exactly the population that vector needs.
+#
+# Scoped to .github/workflows/ rather than the whole tree, for the same reason
+# SCOPE001 is scoped to source: CLAUDE.md and CONTRIBUTING.md have to be able to
+# name the trigger in order to ban it. A checker that fails on the file stating
+# the rule contradicts the rule.
+#
+# Matched as a fixed string with no word boundary. Unlike ANT+ there is no
+# benign substring to collide with, and a bare occurrence anywhere in a workflow
+# -- including inside a comment, ready to be uncommented -- is what we want to
+# catch.
+
+if [ -d "${ROOT}/.github/workflows" ]; then
+  while IFS= read -r workflow; do
+    [ -n "${workflow}" ] || continue
+    if grep -qF 'pull_request_target' "${workflow}" 2>/dev/null; then
+      report WF001 "${workflow#"${ROOT}"/}: pull_request_target is banned (CLAUDE.md section 8); use pull_request, which cannot read secrets from a fork"
+    fi
+  done < <(find "${ROOT}/.github/workflows" -type f \( -name '*.yml' -o -name '*.yaml' \) -print)
+fi
 
 # --- ADR001 / ADR002: ADR numbering and naming --------------------------------
 

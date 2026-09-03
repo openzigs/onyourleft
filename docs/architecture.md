@@ -65,6 +65,9 @@ docs/
   adr/                numbered architecture decision records
 
 scripts/              dependency-free repository checks; run on a bare clone
+
+.github/
+  workflows/rules.yml runs those checks on every pull request and on main
 ```
 
 There is deliberately **no `apps/api`** (Phase 1 has no server — owner decision D6), **no `infra/`**
@@ -115,15 +118,23 @@ lint-enforced by [#23](https://github.com/openzigs/onyourleft/issues/23):
 - No routing-engine type above the `RoutingProvider` interface (#70).
 - No import from `packages/*` into a client-only or server-only module.
 
-And these are enforced today, with no toolchain, by `scripts/check-repo-rules.sh`:
+And these are enforced today, with no toolchain, by `scripts/check-repo-rules.sh` and
+`scripts/check-licence-hashes.sh`:
 
 | Rule | Fails when |
 |---|---|
 | `LIC001` / `LIC002` | a source file's SPDX header does not match the licence its directory requires |
 | `LIC003` | a package manifest declares a licence its path does not permit |
 | `LIC004` | a package under `packages/` has no `LICENSE` file of its own |
+| `LIC005` | a licence text no longer matches the digest ADR 0001 records for it, or ADR 0001 no longer records one |
 | `SCOPE001` | ANT+ is referenced anywhere in a source tree |
+| `WF001` | `pull_request_target` appears in a workflow — it receives secrets and bypasses the fork-approval gate |
 | `ADR001` / `ADR002` | two ADRs share a number, or a filename is not `NNNN-kebab-case.md` |
+
+**Both run in CI**, on every pull request and every push to `main`, from
+[`.github/workflows/rules.yml`](../.github/workflows/rules.yml). Before that workflow existed the
+rules were checkable but unchecked — a distinction worth keeping in mind about every other row in
+this document that says "enforced".
 
 ## Technology
 

@@ -18,7 +18,8 @@ requires, deliberately: a path cannot be silently mis-declared the way a manifes
 Each package still carries its own `LICENSE` **and** a matching manifest declaration; the path
 rule backs those up rather than replacing them.
 
-Run `bash scripts/check-repo-rules.sh` to check it locally. It needs no install.
+Run `bash scripts/check-repo-rules.sh` to check it locally. It needs no install. CI runs the same
+script on every pull request, so it is faster to run it yourself than to find out from a red build.
 
 Full reasoning: [`docs/adr/0001-licence.md`](docs/adr/0001-licence.md) and
 [`docs/adr/0005-tech-stack.md`](docs/adr/0005-tech-stack.md).
@@ -75,6 +76,8 @@ Check the dependency's licence against the package it lands in **before** adding
 ## Before opening a pull request
 
 - Tests pass, and you have watched each new test fail before making it pass.
+- `bash scripts/check-repo-rules.sh` and `bash scripts/check-licence-hashes.sh` are clean. CI runs
+  both on every pull request, along with their own test suites and `shellcheck scripts/*.sh`.
 - The linter is clean on the files you changed.
 - Your commits are signed off.
 - The PR references the issue it resolves.

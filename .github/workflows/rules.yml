@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Enforce the repository rules that are checkable without a toolchain.
+#
+# CONTRIBUTING.md tells contributors the SPDX header rule "is linted in CI, so a
+# missing or mismatched header fails the build rather than being caught in
+# review", and CLAUDE.md says rule SCOPE001 "fails the build". This workflow is
+# what makes those statements true. Until it existed they were not.
+#
+# Everything here runs on a bare clone with bash and coreutils, so none of it
+# waits on the toolchain #23 introduces. The install / lint / typecheck / test /
+# coverage half of #24 is deliberately absent: CLAUDE.md section 4b says those
+# commands do not exist yet and must not be added to a workflow before #23 lands.
+name: Repository rules
+
+# `pull_request` runs in the fork's context with a read-only token and no access
+# to secrets. Its target-context counterpart -- which does receive secrets and is
+# not covered by the fork-approval gate at all -- is banned by CLAUDE.md section
+# 8 and enforced by rule WF001 in scripts/check-repo-rules.sh. That rule greps
+# this directory for the name, so the name cannot appear here even in a comment.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Set explicitly and minimally at workflow level: every step below reads the
+# checked-out tree and writes nothing back.
+permissions:
+  contents: read
+
+jobs:
+  rules:
+    name: Repository rules
+    # Standard label only. Larger runners (`4-core`, `8-core`, any `larger`
+    # label) are charged even on a public repository, while standard
+    # GitHub-hosted runners are free and unlimited -- CLAUDE.md section 8. It is
+    # a one-word diff that produces an invoice and nothing in the log warns you.
+    runs-on: ubuntu-latest
+    # These checks take seconds. The cap is a stop on a hung job rather than a
+    # budget; the platform default would let one run for six hours.
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        # Pinned to a full commit SHA, not a tag: a tag is mutable, and a
+        # compromised action runs with whatever permissions this job holds.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing here pushes, so the token has no reason to survive in
+          # .git/config where a later step could reach it.
+          persist-credentials: false
+
+      # CLAUDE.md section 4a. Every command below is one that file documents;
+      # CI accumulating private knowledge is how a contributor's local green
+      # becomes CI's red with no explanation.
+      - name: Repository rules (LIC001-4, SCOPE001, WF001, ADR001-2)
+        run: bash scripts/check-repo-rules.sh
+
+      - name: Repository rule checker tests
+        run: bash scripts/check-repo-rules.test.sh
+
+      # A silent edit to a licence text is a licensing incident, not a typo, and
+      # it is the shape of diff a human reviewer scrolls past.
+      - name: Licence text integrity (LIC005)
+        run: bash scripts/check-licence-hashes.sh
+
+      - name: Licence integrity checker tests
+        run: bash scripts/check-licence-hashes.test.sh
+
+      # shellcheck is preinstalled on the standard Ubuntu runner image
+      # (0.9.0 on ubuntu-24.04, which `ubuntu-latest` currently resolves to), so
+      # there is nothing to install. The version is printed because the runner's
+      # is older than a typical developer's and the two can disagree.
+      - name: Shell lint
+        run: |
+          shellcheck --version
+          shellcheck scripts/*.sh

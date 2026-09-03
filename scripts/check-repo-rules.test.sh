@@ -266,6 +266,79 @@ printf 'module.exports = {};\n' > "${fixture_root}/packages/domain/node_modules/
 printf 'export const x = 1;\n' > "${fixture_root}/packages/domain/dist/index.js"
 assert_clean "node_modules and dist are pruned, not scanned for headers"
 
+# --- WF001: pull_request_target is banned in .github/workflows/ --------------
+#
+# CLAUDE.md section 8: "pull_request_target is banned. It receives secrets and is
+# not subject to the first-time contributor approval gate." A ban stated in prose
+# is not a gate -- this repository is public and anyone may propose a workflow
+# change -- so the ban is checked by a machine.
+
+write_workflow() {
+  local name="$1" body="$2"
+  mkdir -p "${fixture_root}/.github/workflows"
+  printf '%s' "${body}" > "${fixture_root}/.github/workflows/${name}"
+}
+
+new_fixture
+write_workflow rules.yml 'on:
+  pull_request_target:
+jobs:
+  x:
+    runs-on: ubuntu-latest
+'
+assert_violation "pull_request_target in a workflow is rejected" WF001 \
+  ".github/workflows/rules.yml"
+
+# A workflow triggered by the safe `pull_request` event must not match. Without
+# this case a checker grepping for the shorter prefix would ban every workflow
+# in the repository and look correct doing it.
+new_fixture
+write_workflow rules.yml 'on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  x:
+    runs-on: ubuntu-latest
+'
+assert_clean "a workflow using only pull_request passes"
+
+# Surviving-mutant guard, the same shape as the `.tsx` case above: narrowing the
+# scan to '*.yml' leaves every other case green, and GitHub honours '*.yaml'
+# identically -- so half the rule could be deleted unnoticed.
+new_fixture
+write_workflow rules.yaml 'on: [pull_request_target]
+'
+assert_violation ".yaml workflows are scanned too, not only .yml" WF001 \
+  ".github/workflows/rules.yaml"
+
+# The mirror of the SCOPE001 documentation case, and the reason the rule is
+# scoped to .github/workflows/ rather than to the whole tree: CLAUDE.md and
+# CONTRIBUTING.md both name pull_request_target in order to ban it. A checker
+# that fails on the file stating the rule contradicts the rule it enforces.
+new_fixture
+mkdir -p "${fixture_root}/docs"
+printf 'pull_request_target is banned; see CLAUDE.md section 8.\n' \
+  > "${fixture_root}/docs/ci.md"
+write_workflow rules.yml 'on:
+  pull_request:
+'
+assert_clean "documentation may name pull_request_target to ban it"
+
+# The directory scope needs its own case. The one above is killed by widening
+# the scan to the whole tree, but not by widening it to every .yml in .github/ --
+# and issue-form templates and dependabot.yml both live there and are not
+# workflows. Without this case the scope could be loosened to `.github/` and
+# every test would stay green.
+new_fixture
+mkdir -p "${fixture_root}/.github/ISSUE_TEMPLATE"
+printf 'name: Bug\nbody:\n  - type: input\n    id: pull_request_target\n' \
+  > "${fixture_root}/.github/ISSUE_TEMPLATE/bug.yml"
+write_workflow rules.yml 'on:
+  pull_request:
+'
+assert_clean "a .yml under .github/ that is not a workflow is not scanned"
+
 # --- The real repository must pass -------------------------------------------
 
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
