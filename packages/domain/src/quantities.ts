@@ -244,12 +244,36 @@ export interface GeographicPosition {
   readonly longitude: DegreesLongitude;
 }
 
-/** @throws {UnitError} if either coordinate is out of range. */
-export function geographicPosition(latitude: number, longitude: number): GeographicPosition {
-  return {
-    latitude: degreesLatitude(latitude),
-    longitude: degreesLongitude(longitude),
-  };
+/**
+ * Assemble a position from coordinates that are **already labelled**.
+ *
+ * The parameters are branded, so `geographicPosition(lon, lat)` is a compile
+ * error rather than a runtime one. That distinction is the whole point here: a
+ * range check cannot see a transposition when both values are under 90 degrees,
+ * and that is most of Europe. London is 51.5074 N, 0.1278 W; the transposed
+ * pair (-0.1278, 51.5074) is a valid position in Kenya. Nothing throws, and the
+ * ride is drawn on the wrong continent.
+ *
+ * The cost is that callers must say which is which:
+ *
+ * ```ts
+ * geographicPosition(degreesLatitude(51.5074), degreesLongitude(-0.1278));
+ * ```
+ *
+ * That verbosity is the feature. A constructor taking two bare numbers reads
+ * more nicely and silently accepts the one input shape this package exists to
+ * reject.
+ *
+ * What no typing can prevent: applying the **wrong label** at the wire read,
+ * `degreesLatitude(longitudeField)`. The label is applied once, where an
+ * unlabelled number comes off the wire and a reviewer can see it, and is never
+ * re-applied downstream.
+ */
+export function geographicPosition(
+  latitude: DegreesLatitude,
+  longitude: DegreesLongitude,
+): GeographicPosition {
+  return { latitude, longitude };
 }
 
 // --- Time -------------------------------------------------------------------

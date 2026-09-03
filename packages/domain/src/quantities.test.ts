@@ -112,7 +112,7 @@ describe('mass', () => {
 
 describe('geographic position', () => {
   it('accepts a southern, western point — signs are carried, not stripped', () => {
-    const position = geographicPosition(-33.8688, -151.2093);
+    const position = geographicPosition(degreesLatitude(-33.8688), degreesLongitude(-151.2093));
     expect(position.latitude).toBe(-33.8688);
     expect(position.longitude).toBe(-151.2093);
   });
@@ -134,8 +134,30 @@ describe('geographic position', () => {
     expect(() => degreesLongitude(-180.1)).toThrow(UnitError);
   });
 
-  it('rejects a longitude offered as a latitude, which is how a swap surfaces', () => {
-    expect(() => geographicPosition(-151.2093, -33.8688)).toThrow(UnitError);
+  it('rejects an out-of-range value offered as a latitude', () => {
+    expect(() => degreesLatitude(-151.2093)).toThrow(UnitError);
+  });
+
+  // The check above fires only because -151.2093 is outside +/-90. It proves the
+  // RANGE rule, not swap protection -- and the test it replaced was named for
+  // swap protection while asserting the range rule, which is worse than no test:
+  // it reported a guarantee the code did not give. The European case is the one
+  // that matters, because both coordinates are valid in their swapped roles.
+  it('makes a transposed European pair a COMPILE error, not a runtime one', () => {
+    const latitude = degreesLatitude(51.5074); // London
+    const longitude = degreesLongitude(-0.1278);
+
+    // @ts-expect-error a longitude is not a latitude. If this ever stops being
+    // an error the directive itself fails the build, so the guard cannot rot
+    // silently.
+    geographicPosition(longitude, latitude);
+
+    // Neither value is individually out of range in the swapped role, so no
+    // runtime check could ever have caught this pair.
+    expect(() => degreesLatitude(-0.1278)).not.toThrow();
+    expect(() => degreesLongitude(51.5074)).not.toThrow();
+
+    expect(geographicPosition(latitude, longitude)).toEqual({ latitude, longitude });
   });
 });
 

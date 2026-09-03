@@ -12,12 +12,24 @@ describe('formatSpeed', () => {
     expect(formatSpeed(metresPerSecond(10))).toBe('36.0 km/h');
   });
 
-  it('propagates the domain package’s rejection of an impossible speed', () => {
-    // The guard lives in @onyourleft/domain, at the constructor that turns an
-    // untrusted number into a typed quantity, and this asserts it is still
-    // reached through this path: a client that swallowed it would render
-    // "NaN km/h" from a malformed sensor payload.
-    expect(() => formatSpeed(metresPerSecond(Number.NaN))).toThrow(/finite/);
+  it('cannot be handed an unvalidated number at all — a compile error, not a throw', () => {
+    // What actually protects this path is the TYPE, not a runtime check inside
+    // formatSpeed. A malformed sensor payload cannot reach here as a bare
+    // number, so "NaN km/h" is unrenderable by construction.
+    //
+    // @ts-expect-error a raw number is not a MetresPerSecond. If this stops
+    // being an error the directive fails the build, which is what keeps the
+    // guarantee honest.
+    formatSpeed(Number.NaN);
+  });
+
+  it('rejects an impossible speed at the domain constructor, before formatting', () => {
+    // This asserts the CONSTRUCTOR, and says so. The version this replaced read
+    // `expect(() => formatSpeed(metresPerSecond(Number.NaN))).toThrow(...)` and
+    // was named for propagation through formatSpeed -- but the throw happens
+    // while evaluating the argument, so formatSpeed is never entered. Mutating
+    // formatSpeed to return a constant left that test green.
+    expect(() => metresPerSecond(Number.NaN)).toThrow(/finite/);
   });
 });
 
