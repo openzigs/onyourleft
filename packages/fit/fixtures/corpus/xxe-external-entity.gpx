@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE gpx [
+  <!ELEMENT name (#PCDATA)>
+  <!ENTITY xxe SYSTEM "file:///etc/passwd">
+]>
+<gpx version="1.1" creator="On Your Left synthetic fixture generator" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk>
+    <name>&xxe;</name>
+    <trkseg>
+      <trkpt lat="-0.0180000" lon="-0.0180000">
+        <time>2024-06-15T09:00:00Z</time>
+      </trkpt>
+      <trkpt lat="-0.0177000" lon="-0.0177000">
+        <time>2024-06-15T09:00:01Z</time>
+      </trkpt>
+      <trkpt lat="-0.0174000" lon="-0.0174000">
+        <time>2024-06-15T09:00:02Z</time>
+      </trkpt>
+      <trkpt lat="-0.0171000" lon="-0.0171000">
+        <time>2024-06-15T09:00:03Z</time>
+      </trkpt>
+      <trkpt lat="-0.0168000" lon="-0.0168000">
+        <time>2024-06-15T09:00:04Z</time>
+      </trkpt>
+      <trkpt lat="-0.0165000" lon="-0.0165000">
+        <time>2024-06-15T09:00:05Z</time>
+      </trkpt>
+      <trkpt lat="-0.0162000" lon="-0.0162000">
+        <time>2024-06-15T09:00:06Z</time>
+      </trkpt>
+      <trkpt lat="-0.0159000" lon="-0.0159000">
+        <time>2024-06-15T09:00:07Z</time>
+      </trkpt>
+      <trkpt lat="-0.0156000" lon="-0.0156000">
+        <time>2024-06-15T09:00:08Z</time>
+      </trkpt>
+      <trkpt lat="-0.0153000" lon="-0.0153000">
+        <time>2024-06-15T09:00:09Z</time>
+      </trkpt>
+    </trkseg>
+  </trk>
+</gpx>

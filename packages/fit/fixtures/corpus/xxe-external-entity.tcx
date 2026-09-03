@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE TrainingCenterDatabase [
+  <!ELEMENT name (#PCDATA)>
+  <!ENTITY xxe SYSTEM "file:///etc/passwd">
+]>
+<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2">
+  <Activities>
+    <Activity Sport="Biking">
+      <Id>&xxe;</Id>
+      <Lap StartTime="2024-06-15T09:00:00Z">
+        <Intensity>Active</Intensity>
+        <TriggerMethod>Manual</TriggerMethod>
+        <Track>
+          <Trackpoint>
+            <Time>2024-06-15T09:00:00Z</Time>
+            <Position>
+              <LatitudeDegrees>0.4000000</LatitudeDegrees>
+              <LongitudeDegrees>179.9800000</LongitudeDegrees>
+            </Position>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2024-06-15T09:00:01Z</Time>
+            <Position>
+              <LatitudeDegrees>0.4000200</LatitudeDegrees>
+              <LongitudeDegrees>179.9810000</LongitudeDegrees>
+            </Position>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2024-06-15T09:00:02Z</Time>
+            <Position>
+              <LatitudeDegrees>0.4000400</LatitudeDegrees>
+              <LongitudeDegrees>179.9820000</LongitudeDegrees>
+            </Position>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2024-06-15T09:00:03Z</Time>
+            <Position>
+              <LatitudeDegrees>0.4000600</LatitudeDegrees>
+              <LongitudeDegrees>179.9830000</LongitudeDegrees>
+            </Position>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2024-06-15T09:00:04Z</Time>
+            <Position>
+              <LatitudeDegrees>0.4000800</LatitudeDegrees>
+              <LongitudeDegrees>179.9840000</LongitudeDegrees>
+            </Position>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2024-06-15T09:00:05Z</Time>
+            <Position>
+              <LatitudeDegrees>0.4001000</LatitudeDegrees>
+              <LongitudeDegrees>179.9850000</LongitudeDegrees>
+            </Position>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2024-06-15T09:00:06Z</Time>
+            <Position>
+              <LatitudeDegrees>0.4001200</LatitudeDegrees>
+              <LongitudeDegrees>179.9860000</LongitudeDegrees>
+            </Position>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2024-06-15T09:00:07Z</Time>
+            <Position>
+              <LatitudeDegrees>0.4001400</LatitudeDegrees>
+              <LongitudeDegrees>179.9870000</LongitudeDegrees>
+            </Position>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2024-06-15T09:00:08Z</Time>
+            <Position>
+              <LatitudeDegrees>0.4001600</LatitudeDegrees>
+              <LongitudeDegrees>179.9880000</LongitudeDegrees>
+            </Position>
+          </Trackpoint>
+          <Trackpoint>
+            <Time>2024-06-15T09:00:09Z</Time>
+            <Position>
+              <LatitudeDegrees>0.4001800</LatitudeDegrees>
+              <LongitudeDegrees>179.9890000</LongitudeDegrees>
+            </Position>
+          </Trackpoint>
+        </Track>
+      </Lap>
+    </Activity>
+  </Activities>
+</TrainingCenterDatabase>

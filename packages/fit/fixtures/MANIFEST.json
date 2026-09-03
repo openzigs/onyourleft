@@ -1,0 +1,160 @@
+{
+  "generatedBy": "pnpm --filter @onyourleft/fit run fixtures:generate",
+  "budgetBytes": 262144,
+  "totalBytes": 75173,
+  "totalPositionCount": 620,
+  "fixtures": [
+    {
+      "name": "nominal-outdoor-ride.fit",
+      "format": "fit",
+      "bytes": 3427,
+      "sha256": "88732452f9af031238c79b3ff7c3cf76b3d90807b768839eb9bbf14974b99836",
+      "positionCount": 120,
+      "purpose": "Baseline. 120 records at 1 Hz carrying every channel this product reads: position, altitude, distance, speed, heart rate, cadence, power and temperature, wrapped in the file_id / device_info / event / record / lap / session / activity message order a head unit writes. Every other FIT fixture is this one with something changed."
+    },
+    {
+      "name": "indoor-trainer-no-position.fit",
+      "format": "fit",
+      "bytes": 2461,
+      "sha256": "2ee0b2aaaaa9d8cc5b596fbd5d4dec04a33243e7bb85bfb96fe485c408a6918f",
+      "positionCount": 0,
+      "purpose": "An indoor trainer ride with no position channel at all — not a zeroed one, not one full of invalid markers: the record definition simply does not declare the two fields. Half this product is indoor riding, and a decoder that assumes position exists fails here rather than on a rare file."
+    },
+    {
+      "name": "paused-laps.fit",
+      "format": "fit",
+      "bytes": 3472,
+      "sha256": "d819bd15ebad8be535f042bc45ceaecbf2e14374e114909ae4c5224c2dbdd605",
+      "positionCount": 120,
+      "purpose": "Two laps separated by a 300 s pause with no records in it, each bracketed by timer start and stop events. Elapsed time and moving time differ by the pause, and a decoder that reports one as the other is wrong by five minutes in a way nothing else in the file contradicts."
+    },
+    {
+      "name": "sensor-dropout-30s.fit",
+      "format": "fit",
+      "bytes": 2647,
+      "sha256": "cfd00456f07a183adadcf9ae128ea20ac90863efc2011d8b2df93be39560651c",
+      "positionCount": 90,
+      "purpose": "Thirty consecutive seconds with heart rate, cadence and power set to their base types’ invalid markers, with position and timestamps uninterrupted either side. \"The strap was not reporting\" and \"the rider produced zero watts\" are different facts and both average plausibly; this is the file that separates them."
+    },
+    {
+      "name": "antimeridian-crossing.fit",
+      "format": "fit",
+      "bytes": 1347,
+      "sha256": "941f919a4c649ce28298eb8dd25f4a5f85d51ce5d462d069d26343be218e6a77",
+      "positionCount": 40,
+      "purpose": "A track walking east across +180 degrees. In semicircles the longitude steps from 2^31 - 1 to -2^31 between two consecutive records — the largest positive sint32 to the most negative. A decoder that reads the field as uint32, or that interpolates across the crossing, produces a track that spans the entire map."
+    },
+    {
+      "name": "point-nemo-southern-western.fit",
+      "format": "fit",
+      "bytes": 1867,
+      "sha256": "27ff693d91fc5e909c6f1854950969f95622080c1d52dd485e242d6eff7e6456",
+      "positionCount": 60,
+      "purpose": "A ride with negative latitude AND negative longitude throughout, neither crossing zero. A sign error survives every test written with two positive coordinates and puts a European ride in the Southern Ocean; packages/domain learned this in #25 and its position tests all use a negative pair for the same reason."
+    },
+    {
+      "name": "truncated-mid-record.fit",
+      "format": "fit",
+      "bytes": 967,
+      "sha256": "374b4245739016d462c66ad9e972b985d10c8709ff828e4df413b95409abe0c1",
+      "positionCount": 30,
+      "purpose": "A ride cut off nine bytes into a record message — past the header, past the timestamp, halfway through the latitude field. The file header still claims the full data size and there is no trailing CRC. This is the realistic corruption case: a head unit whose battery died. It must yield a structured error with a byte offset, never a crash and never a silent short read."
+    },
+    {
+      "name": "developer-fields.fit",
+      "format": "fit",
+      "bytes": 1250,
+      "sha256": "88d04a33bc2ef59f8ef968227a554051f0bae32138b740649a80b3b3395c8e16",
+      "positionCount": 30,
+      "purpose": "A developer_data_id and a field_description declaring a field from an application this program has never heard of, carried on every record message. FIT is extensible by design and an unknown developer field must be carried or skipped, never fatal."
+    },
+    {
+      "name": "heart-rate-16-bit.fit",
+      "format": "fit",
+      "bytes": 958,
+      "sha256": "83b5dbbdec1d9487cd0ed623f921f6cb7a46ac555497a2dcad34b072da408546",
+      "positionCount": 30,
+      "purpose": "record.heart_rate declared as a uint16 with values from 260 to 310. Legal: a definition message carries each field’s size and base type rather than inheriting them from the profile. A decoder that hard-codes one byte for heart rate does not merely misread this field, it desynchronises and misreads every field after it."
+    },
+    {
+      "name": "timestamp-epoch-boundary.fit",
+      "format": "fit",
+      "bytes": 81,
+      "sha256": "06fbd1a4546459d8b6853c53b178c9b161b3096325f07749bda4c5d81f6da18f",
+      "positionCount": 0,
+      "purpose": "date_time values at 0 (the FIT epoch, 1989-12-31, and legitimate), 1, the top of the reserved system-time range, the first value above it, and 0xFFFFFFFF (invalid). A value below the epoch cannot be written into a uint32 at all, which is why the rejection belongs on the encode side — see the note in fit-fixtures.ts and the test that pins it."
+    },
+    {
+      "name": "event-timestamp-1024-wrap.fit",
+      "format": "fit",
+      "bytes": 2151,
+      "sha256": "406ee9247cd23a2c7024866d6d85cd4aee94270058876b408f185a73da350c4a",
+      "positionCount": 0,
+      "purpose": "An hr.event_timestamp counter at 1/1024 s, declared as the uint16 the counter actually is and walked twice across its rollover at 65 536 ticks. Subtracting consecutive readings gives -65 488 once a minute and a negative cadence; packages/domain’s unsignedCounterDelta gives the right answer. #41 depends on this being handled."
+    },
+    {
+      "name": "zero-length.fit",
+      "format": "fit",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "positionCount": 0,
+      "purpose": "Nothing at all: zero bytes. What a failed write leaves on disk, and what an empty upload form posts. Must be rejected as too short for a header, not indexed out of bounds."
+    },
+    {
+      "name": "header-only.fit",
+      "format": "fit",
+      "bytes": 16,
+      "sha256": "c7d9db4012d96b45c3d5d94414771a53188b9e5b3b9af040bdbd3ffa3e8da103",
+      "positionCount": 0,
+      "purpose": "A valid 14-byte header declaring zero data bytes, its header CRC and the file CRC, and nothing else. Structurally valid and semantically empty — the boundary between \"corrupt\" and \"an activity with no records\", which are different errors to a user."
+    },
+    {
+      "name": "nominal-ride.gpx",
+      "format": "gpx",
+      "bytes": 10304,
+      "sha256": "2db76befca1ec89fabfe410730c57177fb8611f6d2904ad5824967c2174f5f60",
+      "positionCount": 30,
+      "purpose": "Baseline GPX 1.1: 30 track points with elevation, time and the TrackPointExtension heart rate and cadence a cycling file carries. The same track as the nominal FIT fixture, so a GPX import can be compared against the first 30 records of the binary one, point for point."
+    },
+    {
+      "name": "point-nemo.gpx",
+      "format": "gpx",
+      "bytes": 7064,
+      "sha256": "098945397b07a1c07a9c6b92edbc845333c5838dc3058b1caee31056d47ce3d8",
+      "positionCount": 20,
+      "purpose": "GPX with both coordinates negative throughout. In XML a coordinate is text, so the sign bug here is a formatting and parsing one rather than a two’s-complement one — a writer that drops the minus and a reader that parses it with parseInt both produce a valid file in the wrong hemisphere."
+    },
+    {
+      "name": "xxe-external-entity.gpx",
+      "format": "gpx",
+      "bytes": 1367,
+      "sha256": "13805ebfcfa89a547caf7ec86375a96576c31682bc18e9b69268d112b493757f",
+      "positionCount": 10,
+      "purpose": "A well-formed GPX whose DOCTYPE declares an external general entity pointing at file:///etc/passwd, referenced from the track name. SECURITY.md puts XXE in GPX and TCX specifically in scope; #32 must reject or refuse to expand it, and this is what that test asserts against."
+    },
+    {
+      "name": "nominal-ride.tcx",
+      "format": "tcx",
+      "bytes": 19602,
+      "sha256": "7250783a014eb3162d30e7380102ec078a97319a30f3c25d77bbe9772b256463",
+      "positionCount": 30,
+      "purpose": "Baseline TCX v2: one activity, one lap, 30 trackpoints with Position, AltitudeMeters, DistanceMeters, HeartRateBpm, Cadence and the ActivityExtension Watts. TCX nests its coordinates in elements rather than attributes, which is a different parsing path from GPX and fails differently."
+    },
+    {
+      "name": "indoor-no-position.tcx",
+      "format": "tcx",
+      "bytes": 13032,
+      "sha256": "3ae15bc793dc7dcd2cde8714ff31a8446e6f9eb86fa767e399082d6a57c2411b",
+      "positionCount": 0,
+      "purpose": "A TCX whose trackpoints carry no Position element at all. The indoor case again, in the format where \"no position\" is an absent child rather than an undeclared field — a reader that dereferences Position unconditionally throws on the first point."
+    },
+    {
+      "name": "xxe-external-entity.tcx",
+      "format": "tcx",
+      "bytes": 3160,
+      "sha256": "4eb050949a28d2206e06a5a528c99a178655a447ab4944047eb447ffa8205d39",
+      "positionCount": 10,
+      "purpose": "The TCX counterpart of the hostile GPX: an external general entity referenced from the activity Id. Both formats are carried because a parser is usually configured per format and hardening one is not hardening the other."
+    }
+  ]
+}
