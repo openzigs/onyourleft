@@ -432,11 +432,22 @@ export const NULL_ISLAND_TRACK = {
 };
 
 export const ANTIMERIDIAN_TRACK = {
-  // Walks east from 179.98 E, crosses +180 at sample 20 and continues at
-  // 179.99 W. In semicircles that is the step from 2^31 - 1 to -2^31: the
-  // largest positive sint32 to the most negative, one sample apart.
+  // Walks east from 179.9795 E and crosses the antimeridian BETWEEN samples 20
+  // and 21, without any sample landing on exactly +180.
+  //
+  // ⚠️ The start is offset by half a step deliberately, and moving it back is a
+  // defect. The earlier value put sample 20 on exactly +180.0000000, which
+  // `degreesLongitudeToSemicircles` clamps to 2^31 - 1 — and that is
+  // `INVALID_VALUE.sint32`, the FIT marker for "this field was not recorded".
+  // So the fixture that exists to prove antimeridian handling carried one
+  // record byte-indistinguishable from an absent position. A #30 decoder that
+  // correctly maps 0x7FFFFFFF to absent — which `sensor-dropout-30s.fit`
+  // requires — would drop that sample and look broken, and the plausible "fix"
+  // is to special-case position longitude to accept the invalid marker, which
+  // breaks dropout handling. `no-invalid-marker.test.ts` now makes this
+  // impossible to reintroduce silently.
   startLatitudeE7: 4_000_000,
-  startLongitudeE7: 1_799_800_000,
+  startLongitudeE7: 1_799_795_000,
   latitudeStepE7: 200,
   longitudeStepE7: 10_000,
 };

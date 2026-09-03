@@ -49,9 +49,21 @@ describe('every position in every committed fixture', () => {
     (name, entry) => {
       const positions = positionsIn(entry, committedBytes(name));
 
-      // The count the generator recorded and the count read back out of the
-      // committed file must agree, or a coordinate could be sitting somewhere
-      // this guard does not look.
+      // For the six XML fixtures this is a real check: the count comes from
+      // scanning tokens in the committed text, against a count the generator
+      // recorded separately.
+      //
+      // ⚠️ For the thirteen FIT fixtures it is a TAUTOLOGY, and saying so is the
+      // point. `entry.positionCount` is `built.positionOffsets.length` and
+      // `positionsInFitBytes` maps those same offsets, so it reduces to
+      // `offsets.length === offsets.length`. It was previously commented as
+      // though it closed a gap it cannot close. CLAUDE.md §5: a test that cannot
+      // fail is not a test.
+      //
+      // The property IS anchored, just not here — `MANIFEST.json` and the README
+      // both record `positionCount` independently of the generator, so shrinking
+      // `positionOffsets` reddens `corpus.test.ts`. That is the real guard; this
+      // line is kept for the XML half and is left honest about the rest.
       expect(positions).toHaveLength(entry.positionCount);
 
       positions.forEach((position, index) => {

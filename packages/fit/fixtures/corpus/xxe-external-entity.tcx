@@ -15,70 +15,70 @@
             <Time>2024-06-15T09:00:00Z</Time>
             <Position>
               <LatitudeDegrees>0.4000000</LatitudeDegrees>
-              <LongitudeDegrees>179.9800000</LongitudeDegrees>
+              <LongitudeDegrees>179.9795000</LongitudeDegrees>
             </Position>
           </Trackpoint>
           <Trackpoint>
             <Time>2024-06-15T09:00:01Z</Time>
             <Position>
               <LatitudeDegrees>0.4000200</LatitudeDegrees>
-              <LongitudeDegrees>179.9810000</LongitudeDegrees>
+              <LongitudeDegrees>179.9805000</LongitudeDegrees>
             </Position>
           </Trackpoint>
           <Trackpoint>
             <Time>2024-06-15T09:00:02Z</Time>
             <Position>
               <LatitudeDegrees>0.4000400</LatitudeDegrees>
-              <LongitudeDegrees>179.9820000</LongitudeDegrees>
+              <LongitudeDegrees>179.9815000</LongitudeDegrees>
             </Position>
           </Trackpoint>
           <Trackpoint>
             <Time>2024-06-15T09:00:03Z</Time>
             <Position>
               <LatitudeDegrees>0.4000600</LatitudeDegrees>
-              <LongitudeDegrees>179.9830000</LongitudeDegrees>
+              <LongitudeDegrees>179.9825000</LongitudeDegrees>
             </Position>
           </Trackpoint>
           <Trackpoint>
             <Time>2024-06-15T09:00:04Z</Time>
             <Position>
               <LatitudeDegrees>0.4000800</LatitudeDegrees>
-              <LongitudeDegrees>179.9840000</LongitudeDegrees>
+              <LongitudeDegrees>179.9835000</LongitudeDegrees>
             </Position>
           </Trackpoint>
           <Trackpoint>
             <Time>2024-06-15T09:00:05Z</Time>
             <Position>
               <LatitudeDegrees>0.4001000</LatitudeDegrees>
-              <LongitudeDegrees>179.9850000</LongitudeDegrees>
+              <LongitudeDegrees>179.9845000</LongitudeDegrees>
             </Position>
           </Trackpoint>
           <Trackpoint>
             <Time>2024-06-15T09:00:06Z</Time>
             <Position>
               <LatitudeDegrees>0.4001200</LatitudeDegrees>
-              <LongitudeDegrees>179.9860000</LongitudeDegrees>
+              <LongitudeDegrees>179.9855000</LongitudeDegrees>
             </Position>
           </Trackpoint>
           <Trackpoint>
             <Time>2024-06-15T09:00:07Z</Time>
             <Position>
               <LatitudeDegrees>0.4001400</LatitudeDegrees>
-              <LongitudeDegrees>179.9870000</LongitudeDegrees>
+              <LongitudeDegrees>179.9865000</LongitudeDegrees>
             </Position>
           </Trackpoint>
           <Trackpoint>
             <Time>2024-06-15T09:00:08Z</Time>
             <Position>
               <LatitudeDegrees>0.4001600</LatitudeDegrees>
-              <LongitudeDegrees>179.9880000</LongitudeDegrees>
+              <LongitudeDegrees>179.9875000</LongitudeDegrees>
             </Position>
           </Trackpoint>
           <Trackpoint>
             <Time>2024-06-15T09:00:09Z</Time>
             <Position>
               <LatitudeDegrees>0.4001800</LatitudeDegrees>
-              <LongitudeDegrees>179.9890000</LongitudeDegrees>
+              <LongitudeDegrees>179.9885000</LongitudeDegrees>
             </Position>
           </Trackpoint>
         </Track>

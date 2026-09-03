@@ -40,7 +40,7 @@
       "name": "antimeridian-crossing.fit",
       "format": "fit",
       "bytes": 1347,
-      "sha256": "941f919a4c649ce28298eb8dd25f4a5f85d51ce5d462d069d26343be218e6a77",
+      "sha256": "660f170013ee979519be7a4becde90ba8a494a24d4c21f5636f4a7b7326481bb",
       "positionCount": 40,
       "purpose": "A track walking east across +180 degrees. In semicircles the longitude steps from 2^31 - 1 to -2^31 between two consecutive records — the largest positive sint32 to the most negative. A decoder that reads the field as uint32, or that interpolates across the crossing, produces a track that spans the entire map."
     },
@@ -152,7 +152,7 @@
       "name": "xxe-external-entity.tcx",
       "format": "tcx",
       "bytes": 3160,
-      "sha256": "4eb050949a28d2206e06a5a528c99a178655a447ab4944047eb447ffa8205d39",
+      "sha256": "790c7d8983aa2e2731800fc0a9856c8abd7d502962550e07d6f537c98d72324d",
       "positionCount": 10,
       "purpose": "The TCX counterpart of the hostile GPX: an external general entity referenced from the activity Id. Both formats are carried because a parser is usually configured per format and hardening one is not hardening the other."
     }

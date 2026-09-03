@@ -34,14 +34,29 @@ describe('the tracks', () => {
     expect(latitudes.some((position) => position.longitude > 0)).toBe(true);
   });
 
-  it('crosses the antimeridian: +180 exactly, then a negative longitude', () => {
+  // Changed in review of PR #111. This previously asserted `toContain(180)` —
+  // it required the track to land on exactly +180, which is the defect, not the
+  // feature. `degreesLongitudeToSemicircles` clamps +180 to 2^31 - 1, and that
+  // is `INVALID_VALUE.sint32`, the FIT "field not recorded" marker. So the
+  // fixture proving antimeridian handling carried a position byte-identical to
+  // an absent one, and a correct #30 decoder would have looked broken against
+  // it. The crossing is what matters; landing on the singular value is not.
+  it('crosses the antimeridian between samples, without landing on +180', () => {
     const longitudes = Array.from(
       { length: 40 },
       (_unused, index) => positionAt(ANTIMERIDIAN_TRACK, index).longitude as number,
     );
-    expect(longitudes).toContain(180);
+
+    // The crossing still happens: east of +179 at the start, west of -179 by the
+    // end, so the sign flip is exercised.
     expect(longitudes.at(0)).toBeGreaterThan(179);
     expect(longitudes.at(-1)).toBeLessThan(-179);
+    expect(longitudes.some((longitude) => longitude > 179.9)).toBe(true);
+    expect(longitudes.some((longitude) => longitude < -179.9)).toBe(true);
+
+    // And no sample sits on the value that encodes to the invalid marker.
+    expect(longitudes).not.toContain(180);
+    expect(longitudes).not.toContain(-180);
   });
 
   it('keeps both Point Nemo coordinates negative for the whole ride', () => {
