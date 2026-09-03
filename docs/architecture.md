@@ -284,6 +284,7 @@ share one.
 | [0004](adr/0004-privacy-and-location.md) | Activity privacy and the location-data model | #21 |
 | [0005](adr/0005-tech-stack.md) | Technology stack and workspace layout | #22 |
 | [0006](adr/0006-fit-codec-licensing.md) | FIT codec licensing — implement from the public protocol documentation | #58 |
+| [0008](adr/0008-mobile-client-architecture.md) | Mobile client architecture and rendering stack — Capacitor, gated on a rendering spike | #86 |
 
 ### Claimed by open issues — **check here before you pick a number**
 
@@ -301,7 +302,7 @@ still a proposal.
 | 0005 | #22 — tech stack | Written |
 | 0006 | #58 — FIT codec licensing | Written |
 | **0007** | **#59 — patent posture** | Reserved |
-| **0008** | **#86 — mobile client architecture** | Reserved. Already cited as "ADR 0008" by `0005-tech-stack.md` (four times) and twice below. |
+| **0008** | **#86 — mobile client architecture** | [Written](adr/0008-mobile-client-architecture.md). Cited as "ADR 0008" by `0005-tech-stack.md` (four times), by ADR 0003 and twice below. |
 | **0009** | **#19 — clean-room posture** | Reserved. Renumbered from 0002, which #57 holds. |
 | **0010** | **#60 — map tiles and routing** | Reserved. Renumbered from 0008, which #86 holds. |
 | **0011** | **#27 — stream storage** | Reserved. Renumbered from 0006, which #58 holds. |
