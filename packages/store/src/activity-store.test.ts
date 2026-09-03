@@ -337,8 +337,134 @@ describe('on-delete behaviour — cascade, chosen explicitly', () => {
     expect(await store.deleteActivity(ATHLETE_A, ride.id)).toBe(true);
 
     const fresh = reopen();
+    // The activity itself, read back through a fresh connection. Review of
+    // PR #109 found that removing `#activities.delete(id)` left all 113 tests
+    // green: the laps went, the method returned true, and the ride stayed on
+    // disk and stayed listed. The laps were asserted; the thing the method is
+    // named after was not.
+    expect(await fresh.getActivity(ATHLETE_A, ride.id)).toBeUndefined();
+    expect(
+      (await fresh.listActivitySummaries(ATHLETE_A)).map((summary) => summary.id),
+    ).not.toContain(ride.id);
+    expect(await fresh.getActivity(ATHLETE_A, other.id)).toBeDefined();
+
     expect(await fresh.listLaps(ATHLETE_A, ride.id)).toEqual([]);
     expect(await fresh.listLaps(ATHLETE_A, other.id)).toHaveLength(1);
+  });
+});
+
+describe('the checks are inside the write’s transaction, not merely before it', () => {
+  // Non-blocking finding from the PR #109 review, made load-bearing. Moving
+  // `#requireAthlete` outside the transaction and narrowing its scope to
+  // [activities] left all 113 tests green: "refuses" and "writes nothing when it
+  // refuses" are both satisfied by a check that runs outside. The atomicity that
+  // is the entire stated reason for the placement was unguarded.
+  //
+  // Asserting a transaction's scope directly is not something Dexie exposes, so
+  // this pins the observable consequence instead: the write must be able to see
+  // the athletes table, and a refusal must leave nothing behind even when the
+  // check and the write are interleaved with another writer.
+
+  it('putActivity’s transaction spans athletes, so the check and the write are atomic', async () => {
+    await store.putAthlete(athlete());
+    const ride = indoorRide();
+
+    // A concurrent delete of the owning athlete, racing the write. Whichever
+    // order the engine picks, the store must not end up with an activity whose
+    // athlete is gone — which is only guaranteed if both tables are in one
+    // transaction.
+    await Promise.allSettled([store.putActivity(ride), store.deleteAthlete(ATHLETE_A)]);
+
+    const fresh = reopen();
+    const orphan = await fresh.getActivity(ATHLETE_A, ride.id);
+    const owner = await fresh.getAthlete(ATHLETE_A);
+    expect(
+      orphan === undefined || owner !== undefined,
+      'an activity survived without its athlete — the check and the write were not atomic',
+    ).toBe(true);
+  });
+});
+
+describe('cross-athlete exposure — the WRITE path, not only the read path', () => {
+  // Found in review of PR #109, and invisible to every fixture that existed:
+  // `Table.put` is keyed on the primary key alone, so a second athlete writing
+  // the same id silently destroyed the first athlete's row and then OWNED it —
+  // which chains, because the new owner can `deleteActivity` it and take the
+  // original owner's laps with it.
+  //
+  // A two-athlete *read* fixture cannot see this. CLAUDE.md §6 says "any
+  // query"; a `put` is one, and it was being read as a rule about reads.
+
+  it('refuses to overwrite another athlete’s activity, and leaves it intact', async () => {
+    await store.putAthlete(athlete());
+    await store.putAthlete(athlete(ATHLETE_B, 'B'));
+    const ride = indoorRide();
+    await store.putActivity(ride);
+
+    await expect(
+      store.putActivity({ ...indoorRide(), id: ride.id, athleteId: ATHLETE_B }),
+    ).rejects.toThrow(StoreReferentialError);
+
+    // The refusal is not the point — the row surviving is. Read back through a
+    // fresh connection, still owned by A.
+    const fresh = reopen();
+    const survivor = await fresh.getActivity(ATHLETE_A, ride.id);
+    expect(survivor).toBeDefined();
+    expect(await fresh.getActivity(ATHLETE_B, ride.id)).toBeUndefined();
+  });
+
+  it('refuses to overwrite another athlete’s lap', async () => {
+    await store.putAthlete(athlete());
+    await store.putAthlete(athlete(ATHLETE_B, 'B'));
+    const rideA = indoorRide();
+    await store.putActivity(rideA);
+    const lapA = lap(rideA, 0);
+    await store.putLap(lapA);
+
+    const rideB = indoorRide({ athleteId: ATHLETE_B });
+    await store.putActivity(rideB);
+
+    await expect(store.putLap({ ...lap(rideB, 0), id: lapA.id })).rejects.toThrow(
+      StoreReferentialError,
+    );
+
+    const fresh = reopen();
+    expect(await fresh.listLaps(ATHLETE_A, rideA.id)).toHaveLength(1);
+  });
+
+  it('refuses to overwrite another athlete’s privacy zone', async () => {
+    await store.putAthlete(athlete());
+    await store.putAthlete(athlete(ATHLETE_B, 'B'));
+    const zone = privacyZone();
+    await store.putPrivacyZone(zone);
+
+    await expect(
+      store.putPrivacyZone({ ...privacyZone(), id: zone.id, athleteId: ATHLETE_B }),
+    ).rejects.toThrow(StoreReferentialError);
+
+    const fresh = reopen();
+    expect(await fresh.listPrivacyZones(ATHLETE_A)).toHaveLength(1);
+    expect(await fresh.listPrivacyZones(ATHLETE_B)).toHaveLength(0);
+  });
+
+  it('closes the chain: B cannot take A’s activity and then delete A’s laps with it', async () => {
+    await store.putAthlete(athlete());
+    await store.putAthlete(athlete(ATHLETE_B, 'B'));
+    const rideA = indoorRide();
+    await store.putActivity(rideA);
+    await store.putLap(lap(rideA, 0));
+
+    // Step one of the chain, now refused.
+    await expect(
+      store.putActivity({ ...indoorRide(), id: rideA.id, athleteId: ATHLETE_B }),
+    ).rejects.toThrow(StoreReferentialError);
+
+    // Step two therefore finds nothing of B's to delete, and A keeps both.
+    expect(await store.deleteActivity(ATHLETE_B, rideA.id)).toBe(false);
+
+    const fresh = reopen();
+    expect(await fresh.getActivity(ATHLETE_A, rideA.id)).toBeDefined();
+    expect(await fresh.listLaps(ATHLETE_A, rideA.id)).toHaveLength(1);
   });
 });
 

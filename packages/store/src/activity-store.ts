@@ -267,6 +267,13 @@ export class ActivityStore {
     });
     await this.#db.transaction('rw', [this.#athletes, this.#activities], async () => {
       await this.#requireAthlete(record.athleteId);
+      // Inside the transaction, like the athlete check and for the same reason:
+      // read-then-write outside one lets a concurrent write land in between.
+      await this.#requireNotOwnedByAnother(
+        await this.#activities.get(record.id),
+        record.athleteId,
+        `activity ${record.id}`,
+      );
       await this.#activities.put(row);
     });
     return record.id;
@@ -389,6 +396,11 @@ export class ActivityStore {
           `cannot store lap ${record.id}: no activity ${record.activityId} exists`,
         );
       }
+      await this.#requireNotOwnedByAnother(
+        await this.#laps.get(record.id),
+        parent.athleteId as AthleteId,
+        `lap ${record.id}`,
+      );
       const lap: LapRecord = { ...record, athleteId: parent.athleteId as AthleteId };
       await this.#laps.put(toPersistedLap(lap));
       return record.id;
@@ -414,6 +426,11 @@ export class ActivityStore {
   async putPrivacyZone(record: PrivacyZoneRecord): Promise<PrivacyZoneId> {
     await this.#db.transaction('rw', [this.#athletes, this.#privacyZones], async () => {
       await this.#requireAthlete(record.athleteId);
+      await this.#requireNotOwnedByAnother(
+        await this.#privacyZones.get(record.id),
+        record.athleteId,
+        `privacy zone ${record.id}`,
+      );
       await this.#privacyZones.put(toPersistedPrivacyZone(record));
     });
     return record.id;
@@ -458,6 +475,35 @@ export class ActivityStore {
    *
    * @throws {StoreReferentialError}
    */
+  /**
+   * Refuse to overwrite a row that belongs to a different athlete.
+   *
+   * `Table.put` is keyed on the primary key alone, so without this a second
+   * athlete writing the same id silently **destroys** the first athlete's row —
+   * and then owns it, which chains: the new owner can `deleteActivity` it and
+   * take its laps with it.
+   *
+   * Found in review of PR #109. The read paths were already scoped and had
+   * two-athlete fixtures proving it; the write paths had neither, and a
+   * two-athlete *read* fixture is blind to this entirely. CLAUDE.md §6's
+   * scoped-query rule says "any query" — a `put` is one.
+   *
+   * Not exploitable while ids are opaque and device-generated and there is one
+   * local athlete. It becomes reachable the moment an id arrives from a user
+   * file, which is #51's import and #37's dedup.
+   */
+  async #requireNotOwnedByAnother(
+    existing: { readonly athleteId: string } | undefined,
+    owner: AthleteId,
+    what: string,
+  ): Promise<void> {
+    if (existing !== undefined && existing.athleteId !== owner) {
+      throw new StoreReferentialError(
+        `cannot overwrite ${what}: it belongs to a different athlete`,
+      );
+    }
+  }
+
   async #requireAthlete(owner: AthleteId): Promise<void> {
     const athlete = await this.#athletes.get(owner);
     if (athlete === undefined) {
