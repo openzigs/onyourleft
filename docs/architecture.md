@@ -335,6 +335,6 @@ the same reason.
   is not reopened. That conclusion is conditional — ADR 0006 names the three things that would
   overturn it, and the first is a Garmin FIT artefact reaching this repository, its lockfile, its CI
   or a contributor's toolchain. #59 is now [ADR 0007](adr/0007-patent-posture.md), which discharges
-the other half: it records what the two live patent families actually claim and the design
-constraints that keep #12's matching and #85's pacer clear of them, and it does not reopen ADR 0001
-either.
+  the other half: it records what the two live patent families actually claim and the design
+  constraints that keep #12's matching and #85's pacer clear of them, and it does not reopen ADR 0001
+  either.

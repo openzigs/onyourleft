@@ -1,13 +1,20 @@
 # ADR 0007: Patent posture, and the segment-matching design-around
 
-- **Status**: Accepted
+- **Status**: Accepted — on the strength of **D4**, which is the owner's recorded line. The
+  *reasoning* below was not put to the owner (see **Deciders**), so an owner who wants it ratified
+  before it binds #65/#66 should downgrade this to **Proposed** and say so here. Marking it
+  Accepted is the author's call, made because four open issues are already acting on D4 and an ADR
+  a reader is told not to rely on cannot correct them
 - **Date**: 2026-09-03
 - **Deciders**: The ✅/❌ line in decision **D4** is the **repository owner's**, recorded before this
   ADR in the bodies of [#92](https://github.com/openzigs/onyourleft/issues/92) and
   [#93](https://github.com/openzigs/onyourleft/issues/93) and in the Revision-2 block of
-  [#14](https://github.com/openzigs/onyourleft/issues/14), each of which states it in the same four
-  bullets. The **reasoning** below — the claim readings, the design-around in **D2**, **D3** and
-  **D6**, and the reconsideration procedure in **D5** — is the author's engineering work. **It was
+  [#14](https://github.com/openzigs/onyourleft/issues/14). **No one of those three states all four
+  parts**: #92 carries the synthetic-pacer ✅ and two ❌, #93 carries the own-ride ✅ and the same
+  two ❌, and #14's Revision-2 block states it as prose rather than as bullets. This ADR is the first
+  place all four sit together, and assembling them is the author's work; each part is the owner's.
+  The **reasoning** below — the claim readings, the design-around in **D2**, **D3** and **D6**, and
+  the reconsideration procedure in **D5** — is the author's engineering work. **It was
   not put to the owner and no new owner decision was sought or given for this ADR.** Where it
   corrects a fact stated in #59's own body, it says so and shows the source
 - **Issue**: [#59](https://github.com/openzigs/onyourleft/issues/59)
@@ -71,7 +78,7 @@ references let a reader reproduce each reading.
 | US 10,486,026 B2 — granted patent                   | `patentimages.storage.googleapis.com/6a/9f/62/9f6d408c3cb121/US10486026.pdf`                                    | 32 pp. Claims at cols. 15–18. Independent claims **1, 11**. Front page: PTA **0 days** under 35 U.S.C. 154(b)                                   |
 | US 11,170,886 B2 — granted patent                   | `patentimages.storage.googleapis.com/e8/2f/38/f81d7c377019e9/US11170886.pdf`                                    | 38 pp. Claims at cols. 15–20. Independent claims **1, 19, 26, 27**. Front page: PTA **0 days**                                                  |
 | Strava v. Garmin complaint, page 1                  | `garminrumors.com/wp-content/uploads/2025/10/Strava-vs-Garmin-Lawsuit-Segments-9-30.pdf`                        | Header reads `Case No. 1:25-cv-03074-DDD-CYC Document 1 filed 09/30/25 USDC Colorado pg 1 of 40`; captioned "COMPLAINT AND JURY DEMAND". **Only page 1 of 40 is served at this URL** |
-| Google Patents bibliographic pages                  | `patents.google.com/patent/US{9116922,9208175,9297651,9778053,10486026,11170886}B2/en`                          | Priority, filing, grant, assignee and "Anticipated expiration" as tabulated below. Legal status **Active** for all six; **no inter-partes-review certificate event appears on US 10,486,026** |
+| Google Patents bibliographic pages                  | `patents.google.com/patent/US{9116922,9208175,9297651,9778053,10486026,11170886}B2/en`                          | Priority, filing, grant, assignee and "Anticipated expiration" as tabulated below. Legal status **Active** for all six. **US 10,486,026 carries an `IPRC` legal event, effective 2023-03-27: "INTER PARTES REVIEW CERTIFICATE; TRIAL NO. IPR2020-01541 … CERTIFICATE ISSUED MAR. 27, 2023"** — re-read 2026-09-03, reproduce command below |
 | EP 2691888 — European member of the Strava family   | `patents.google.com/patent/EP2691888A4/en`                                                                     | Publication **A4** (search report) 2014-09-17. Legal events end at **"THE APPLICATION HAS BEEN WITHDRAWN", effective 2022-11-03**. **No B1 grant publication exists in the family list** |
 | Peloton / Echelon settlement                        | Reported from the joint press release of **2022-11-08** (`investor.onepeloton.com`, `sgbonline.com`, `bicycleretailer.com`) | Echelon agreed to cease using Peloton's patented leaderboard technology in its on-demand classes; all pending actions dismissed. Other terms undisclosed. **Peloton's own investor page timed out when fetched; this is secondary reporting of a joint release** |
 | Peloton / iFIT settlement                           | `engadget.com/peloton-ifit-settlement-193547478.html`                                                            | **2022-05-16**: "iFit will remove some leaderboard features from its devices"; Peloton licensed iFIT remote-control patents in return                                       |
@@ -218,14 +225,17 @@ serving them back. That structure is not incidental — it is most of the claim.
 - **Whether either family has pending continuations.** The Strava map family continued at least to
   US 10,240,939; a design-around checked against granted claims is not checked against claims that
   have not issued yet.
-- **The disposition of IPR2020-01541.** See below — this one is important enough to state as a
-  correction rather than an omission.
+- **Which claims of '026 the IPR2020-01541 certificate cancelled or confirmed.** That the proceeding
+  reached a final written decision *is* established below; the per-claim outcome is not, and this one
+  is important enough to state as a correction rather than as an omission.
 
 ### A correction: "US 10,486,026 survived IPR" is not established
 
-#59's body, #92's body, #93's body and #14's revision block all state that '026 "survived
-IPR2020-01541 (PTAB sided with Peloton, March 2021)". **This ADR could not verify that, and what it
-did verify points the other way.** What is established:
+**#59's body and #92's body** state that '026 "survived IPR2020-01541 (PTAB sided with Peloton,
+March 2021)" — and only those two: `gh issue view <n> --json body` on **#93** and **#14** returns no
+match for `IPR` at all (#93 cites the family without any validity assertion; #14's Revision-2 block
+quotes only the Echelon/iFIT settlement language). **This ADR could not verify the assertion, and
+what it did verify points elsewhere.** What is established:
 
 - Echelon Fitness Multimedia petitioned against three Peloton patents — IPR2020-01186 ('315),
   IPR2020-01187 ('590) and IPR2020-01541 ('026) — and **the Board instituted trial on all three in
@@ -238,23 +248,51 @@ did verify points the other way.** What is established:
   and the Federal Circuit dismissed the appeals by agreement with a mandate on **2022-12-02**
   (2022-1586, 2022-1588), shortly after the Echelon settlement. Appeals do not get taken from
   decisions Peloton won.
-- For **IPR2020-01541** the secondary record is contradictory: one summary reports a final written
+- For **IPR2020-01541** the *secondary* record is contradictory: one summary reports a final written
   decision dated 2022-03-02, another reports the parties jointly moving to file a confidential
-  settlement agreement, which would mean termination without a merits decision. Google Patents shows
-  '026 as Active with **no inter-partes-review certificate event**, which is consistent with either
-  (a certificate issues only after appeals are exhausted).
+  settlement agreement, which would mean termination without a merits decision. **The primary record
+  settles that much.** Google Patents' legal-event list for '026 carries, effective **2023-03-27**:
 
-**The honest statement is therefore: '026 has not been shown to have survived a validity challenge,
-and two of its close siblings did not.** That cuts both ways and both matter — it is not evidence
-that '026 is bulletproof, and it is not evidence that it is worthless.
+  ```
+  2023-04-04  IPRC  Trial and appeal board: inter partes review certificate
+    Kind code of ref document: K1
+    INTER PARTES REVIEW CERTIFICATE; TRIAL NO. IPR2020-01541, SEP. 1, 2020
+    INTER PARTES REVIEW CERTIFICATE FOR PATENT 10,486,026, ISSUED NOV. 26, 2019,
+      APPL. NO. 16/412,327, MAY 14, 2019
+    INTER PARTES REVIEW CERTIFICATE ISSUED MAR. 27, 2023
+  ```
 
-**The step that would settle it**, precisely: pull the IPR2020-01541 docket from PTAB (PTACTS) and
-read the terminating paper — a final written decision, or a termination on joint request under 35
-U.S.C. § 317. One document, one answer. **Owner: whoever takes the Question 1 claim chart below to a
-lawyer** — it is a five-minute retrieval for anyone with PTAB access and it should be bundled with
-that instruction rather than done twice. Until then, no issue in this repository may state that '026
-survived IPR; #59, #92, #93 and #14 each carry the claim today and each is corrected by a comment
-pointing here.
+  Read 2026-09-03; reproduce with
+
+  ```bash
+  curl -sL -A 'Mozilla/5.0' https://patents.google.com/patent/US10486026B2/en \
+    | grep -A24 '>IPRC<' | sed 's/<[^>]*>//g'
+  ```
+
+  Under **35 U.S.C. § 318(b)** and **37 C.F.R. § 42.80** a certificate issues *after* a final written
+  decision and after any appeal is terminated; a pre-decision termination on joint request under
+  **§ 317** produces no certificate at all. **So IPR2020-01541 did reach a final written decision** —
+  the settlement report, if accurate, describes a settlement of the appeal rather than of the trial,
+  and both facts then fit at once. What the legal-event line does **not** say is *which* claims the
+  certificate cancelled, confirmed or amended, and that is the whole of what remains open.
+
+**The honest statement is therefore: IPR2020-01541 reached a final written decision, and the
+per-claim outcome for '026 has not been read.** Two of its close siblings were held unpatentable.
+Neither "'026 survived IPR" nor "'026 was cancelled" may be asserted in this repository until the
+certificate itself is read. A maintenance fee was paid on '026 on 2023-05-07, after the certificate,
+which is *consistent with* claims having survived — but a maintenance fee is paid on a patent, not
+on a claim, and it settles nothing.
+
+**The step that would settle it**, precisely: read **the inter partes review certificate itself**
+(kind code **K1**, issued 2023-03-27), which recites on its face which claims were cancelled and
+which were confirmed. It is in the file wrapper for **App. No. 16/412,327** in Patent Center, and on
+the **IPR2020-01541** PTAB docket alongside the final written decision. One document, one answer.
+This ADR could not retrieve it without an account: Google Patents serves no `US10486026K1` document
+page (404 on 2026-09-03), `developer.uspto.gov/ptab-api` now redirects to the Open Data Portal and
+wants a key, and `ptacts.uspto.gov` returns 403 to a scripted fetch. **Owner: whoever takes the
+Question 1 claim chart below to a lawyer** — it should be bundled with that instruction rather than
+done twice. Until it is read, no issue in this repository may state that '026 survived IPR; **#59 and
+#92 carry that claim today** and each is corrected by a comment pointing here.
 
 ---
 
@@ -314,6 +352,13 @@ discrete Fréchet (Eiter & Mannila, 1994) available for the geometric fallback. 
 choose the approach — #65 does, on measurements.** It rules out the shapes above and requires the
 citation.
 
+> **On #59's acceptance criterion 2**, which asks this ADR to state the constraint in implementable
+> terms *"and name the chosen alternative"*: the naming half is **deliberately deferred to #65**.
+> #65 is a spike whose entire job is to choose on measurements, and an ADR choosing ahead of it
+> would be an architecture decision made on no data. Candidate 2 above is named as *satisfying* D2,
+> not as selected. This is a deviation from the criterion as written and is listed as one in the
+> pull request.
+
 > ⚠️ **D2 is not a privacy rule and does not replace one.** ADR 0004's `private-match` effort state
 > and #66's three-state effort model stand entirely independently. An effort that is invisible for
 > privacy reasons is not thereby outside a patent claim, and vice versa.
@@ -335,8 +380,9 @@ Binding on any heatmap, popularity layer or popularity-weighted routing, whereve
 
 ### D4 — The ghost line
 
-This is the owner's line, stated in #92, #93 and #14 before this ADR existed. What follows is why it
-holds against the claim language actually read.
+Each part of this line is the owner's, recorded in #92, #93 and #14 before this ADR existed — though
+no one of those three carries all four parts (see **Deciders**). What follows is why it holds against
+the claim language actually read.
 
 ✅ **A bot pacer is not a ghost at all** ([#92](https://github.com/openzigs/onyourleft/issues/92)).
 It is synthetic: computed from a target w/kg and a pacing rule, through the same physics model as the
@@ -409,8 +455,9 @@ the citation buys is that a future reader can see where the design came from.
 ### D7 — No patent claim enters this repository without a citation and a date
 
 An unverified patent assertion in an ADR is worse than an open question, because everything
-downstream inherits it as settled — which is exactly what happened with "'026 survived IPR", now
-carried by four issue bodies. So:
+downstream inherits it as settled — which is exactly what happened with "'026 survived IPR", written
+once in #59 and repeated in #92, and repeated again in the first draft of this ADR as a claim about
+which issues carried it. So:
 
 - Any statement in this repository about what a patent claims cites the **patent number, the claim
   number and the column**, and is read from the granted patent rather than from a family summary or
@@ -419,6 +466,28 @@ carried by four issue bodies. So:
   from a docket or from reporting.
 - Anything that could not be verified is **written as an open question with the step that would
   settle it and the person who owns that step** — as the IPR2020-01541 paragraph above does.
+
+### Which of D1–D7 a machine checks: **none of them**
+
+CLAUDE.md §8 says it about `WF001` — *"A documented ban is not a gate"* — and `docs/architecture.md`
+says it about itself: *"the rules were checkable but unchecked — a distinction worth keeping in mind
+about every other row in this document that says 'enforced'."* This ADR adds no script check, so:
+
+- **D2, D3, D4 and D5 are review-time obligations.** D2's five prohibitions are geometry; no grep
+  decides whether a matcher declares a crossing by extrapolating a point. They bite because they are
+  carried as acceptance criteria on #65, #66 and #68 and because a reviewer applies them.
+- **D1 and D6 are documentary obligations** on a spike write-up, checked by whoever reads it.
+- **D7 is the only one that could plausibly become a rule.** A `check-repo-rules.sh` check of the
+  shape *"a file under `docs/` naming a `US N,NNN,NNN` pattern must carry a claim number and a date
+  within N lines"* is writable. **It is not written**, and this ADR does not write it: that is a code
+  change in a docs-only change, and the false-positive rate against ordinary prose has not been
+  measured. If it is wanted it needs its own issue, next to
+  [#24](https://github.com/openzigs/onyourleft/issues/24)'s other unenforced gates.
+
+So nothing mechanical stops a future pull request re-asserting "'026 survived IPR" — which is the
+defect D7 exists to prevent and the defect that produced this ADR's own first-draft error. A
+reviewer noticing is the entire mechanism, and a reader should know that rather than infer an
+enforcement that is not there.
 
 ---
 
@@ -457,12 +526,14 @@ carried by four issue bodies. So:
 | [#93](https://github.com/openzigs/onyourleft/issues/93) | D4's second ✅, and D5 as the only route to widening it                                     |
 | [#14](https://github.com/openzigs/onyourleft/issues/14), [#16](https://github.com/openzigs/onyourleft/issues/16) | D4 entire                                                          |
 | [#55](https://github.com/openzigs/onyourleft/issues/55), [#60](https://github.com/openzigs/onyourleft/issues/60) | D3, when popularity data reaches routing                          |
-| #59, #92, #93, #14                            | The IPR correction above — each states "'026 survived IPR" and each needs a comment pointing here |
+| [#59](https://github.com/openzigs/onyourleft/issues/59), [#92](https://github.com/openzigs/onyourleft/issues/92) | The IPR correction above — both state "'026 survived IPR" and both need a comment pointing here. **#93 and #14 do not state it**; they inherit the family framing from #59 and need no correction |
 
 ### Open questions, and who owns each
 
-1. **The disposition of IPR2020-01541.** Owner: bundled with the lawyer questions below; one PTAB
-   docket retrieval. Stated in full above.
+1. **Which claims of US 10,486,026 the IPR certificate cancelled, confirmed or amended.** *Not*
+   whether the proceeding reached a decision — the certificate issued 2023-03-27 and under 35 U.S.C.
+   § 318(b) that means it did. One document, published: the K1 certificate itself. Owner: bundled
+   with the lawyer questions below. Stated in full above.
 2. **Non-US rights.** **EP 2691888 is resolved and is good news**: the European member of the Strava
    segment family reached only an A4 search-report publication and its legal events end at "the
    application has been withdrawn", effective 2022-11-03, with **no B1 grant in the family**. So
@@ -491,7 +562,7 @@ above that an engineer should not be deciding.
 Specifically: does an edge-sequence matcher over a map-matched way graph, with no start line and no
 extrapolation, read on any independent claim of either patent — including under the doctrine of
 equivalents, where "we snap to a graph instead of drawing a line" is exactly the kind of argument an
-engineer is unqualified to weigh? **Bundle the IPR2020-01541 docket retrieval with this.** Ask after
+engineer is unqualified to weigh? **Bundle the IPR2020-01541 certificate retrieval with this.** Ask after
 #65 has a recommendation and before #66 starts: a chart against a hypothetical design is wasted
 money.
 
@@ -545,9 +616,11 @@ enough that two funded companies chose to delete a feature instead. Both halves 
 
 ### What would make this ADR wrong
 
-- IPR2020-01541 turns out to have gone to a final written decision holding '026's claims
-  unpatentable, and the certificate has issued. D4 would not change — the ✅ items are outside the
-  claims either way and the ❌ items are also constrained by '886 — but the risk description would.
+- The IPR2020-01541 certificate turns out to have cancelled '026's independent claims. D4 would not
+  change — the ✅ items are outside those claims either way and the ❌ items are also constrained by
+  '886, which was never challenged — but the risk description would, and Open Question 1 would close
+  in this project's favour. The reverse (the certificate confirms them) is equally possible and is
+  why the question is open rather than assumed.
 - A continuation issues in either family with claims that reach the design D2 permits.
 - #65 recommends a geometric approach after all, on measurements. D2 still binds, but prohibitions 1,
   2 and 3 become live design pressure rather than a description of a design that already avoids them,
