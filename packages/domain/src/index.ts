@@ -80,6 +80,7 @@ export {
   SEMICIRCLES_MAX,
   SEMICIRCLES_MIN,
   SEMICIRCLES_PER_HALF_TURN,
+  SEMICIRCLES_PER_QUARTER_TURN,
   semicirclesToDegreesLatitude,
   semicirclesToDegreesLongitude,
   semicirclesToPosition,

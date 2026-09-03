@@ -39,8 +39,10 @@
  * declared that field to be a latitude and this package believes them. The
  * label is applied once, at the single point where an unlabelled number comes
  * off the wire, where it is visible in review; it is never re-applied
- * downstream. `src/unit-safety.test.ts` pins the compile errors, including the
- * European pair.
+ * downstream. The compile errors are pinned by `@ts-expect-error` in
+ * `src/position.test.ts` (the semicircle pair) and `src/quantities.test.ts` (the
+ * degree pair), both using London, where neither value is out of range in the
+ * swapped role.
  */
 
 import type { DegreesLatitude, DegreesLongitude, GeographicPosition } from './quantities';

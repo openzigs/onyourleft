@@ -108,6 +108,20 @@ A longitude of exactly +180° scales to 2³¹, one past the largest `sint32`, an
 on the globe but with a sign flip that turns a track crossing the line into one crossing the whole
 map. The clamp costs about 9 mm.
 
+**A raw `sint32` is not a coordinate until it is labelled.** `latitudeSemicircles()` and
+`longitudeSemicircles()` are the only way in, and they return distinct branded types
+(`LatitudeSemicircles`, `LongitudeSemicircles`) that every function here consumes and produces. So
+`semicirclesToPosition(longitude, latitude)` is a **compile** error, not a runtime one — which
+matters because a runtime range check cannot see a transposition when both values are under 90°, and
+that is most of Europe. London is 51.5074 N, 0.1278 W; transposed it is a valid position in Kenya.
+
+⚠️ **The one transposition no type can catch — read this before writing a decode loop.** Applying
+the *wrong label* at the field read — `latitudeSemicircles(positionLongField)` — declares that field
+to be a latitude and this package believes you. A FIT record message carries `position_lat` and
+`position_long` one field apart, both `sint32`, so #30 and #31 must call the labelling functions **at
+the field read**, where the field name is visible next to the label and a reviewer can check them
+against each other. Nothing downstream re-labels, so that single line is the whole trust boundary.
+
 ### The FIT epoch — `time.ts`
 
 FIT's `date_time` counts seconds from **1989-12-31T00:00:00Z**, 631 065 600 s after the Unix epoch.
