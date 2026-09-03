@@ -284,6 +284,7 @@ share one.
 | [0004](adr/0004-privacy-and-location.md) | Activity privacy and the location-data model | #21 |
 | [0005](adr/0005-tech-stack.md) | Technology stack and workspace layout | #22 |
 | [0006](adr/0006-fit-codec-licensing.md) | FIT codec licensing — implement from the public protocol documentation | #58 |
+| [0007](adr/0007-patent-posture.md) | Patent posture, and the segment-matching design-around | #59 |
 | [0008](adr/0008-mobile-client-architecture.md) | Mobile client architecture and rendering stack — Capacitor, gated on a rendering spike | #86 |
 
 ### Claimed by open issues — **check here before you pick a number**
@@ -301,8 +302,8 @@ still a proposal.
 | 0004 | #21 — privacy and location | Written |
 | 0005 | #22 — tech stack | Written |
 | 0006 | #58 — FIT codec licensing | Written |
-| **0007** | **#59 — patent posture** | Reserved |
-| **0008** | **#86 — mobile client architecture** | [Written](adr/0008-mobile-client-architecture.md). Cited as "ADR 0008" by `0005-tech-stack.md` (four times), by ADR 0003 and twice below. |
+| 0007 | #59 — patent posture | [Written](adr/0007-patent-posture.md) |
+| 0008 | #86 — mobile client architecture | [Written](adr/0008-mobile-client-architecture.md). Cited as "ADR 0008" by `0005-tech-stack.md` (four times), by ADR 0003 and twice below. |
 | **0009** | **#19 — clean-room posture** | Reserved. Renumbered from 0002, which #57 holds. |
 | **0010** | **#60 — map tiles and routing** | Reserved. Renumbered from 0008, which #86 holds. |
 | **0011** | **#27 — stream storage** | Reserved. Renumbered from 0006, which #58 holds. |
@@ -333,4 +334,7 @@ the same reason.
   documentation and depends on nothing carrying Garmin's terms, so §2(d) never attaches and ADR 0001
   is not reopened. That conclusion is conditional — ADR 0006 names the three things that would
   overturn it, and the first is a Garmin FIT artefact reaching this repository, its lockfile, its CI
-  or a contributor's toolchain. #59 remains open.
+  or a contributor's toolchain. #59 is now [ADR 0007](adr/0007-patent-posture.md), which discharges
+the other half: it records what the two live patent families actually claim and the design
+constraints that keep #12's matching and #85's pacer clear of them, and it does not reopen ADR 0001
+either.
