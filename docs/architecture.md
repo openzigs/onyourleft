@@ -27,9 +27,11 @@ required for — inbound reachability for clients that cannot listen, indexing, 
 state, and enforcement of privacy and erasure. Federation between instances is over signed records.
 This is Phase 4, [#7](https://github.com/openzigs/onyourleft/issues/7).
 
-**Not peer-to-peer.** A browser cannot be a peer; hole punching fails hardest on mobile-carrier
-symmetric NAT; and a CRDT/P2P history makes privacy zones, enforced visibility and account deletion
-unenforceable by construction. Recorded in the local-first ADR
+**Not peer-to-peer.** A browser cannot be a peer; roughly half of all peer pairs never reach a
+direct connection; a commit-reveal anti-cheat scheme has a latency floor set by the slowest rider;
+a global leaderboard is a global aggregate and needs an aggregator; and a CRDT/P2P history makes
+privacy zones, enforced visibility and account deletion unenforceable by construction. Decided, with
+the measurements and their sources, in [ADR 0002](adr/0002-local-first-architecture.md)
 ([#57](https://github.com/openzigs/onyourleft/issues/57)).
 
 ```mermaid
@@ -277,6 +279,7 @@ share one.
 | ADR | Title | Issue |
 |---|---|---|
 | [0001](adr/0001-licence.md) | Licensing — AGPL-3.0 app + Apache-2.0 leaf packages | #18 |
+| [0002](adr/0002-local-first-architecture.md) | Local-first architecture, one small self-hostable instance, and why not peer-to-peer | #57 |
 | [0003](adr/0003-platform-support-matrix.md) | Platform support matrix and permanent platform gaps | #20 |
 | [0004](adr/0004-privacy-and-location.md) | Activity privacy and the location-data model | #21 |
 | [0005](adr/0005-tech-stack.md) | Technology stack and workspace layout | #22 |
@@ -292,7 +295,7 @@ still a proposal.
 | Number | Owner | Status |
 |---|---|---|
 | 0001 | #18 — licensing | Written |
-| **0002** | **#57 — local-first architecture** | Reserved. Already cited as "ADR 0002" by `0001-licence.md:149` and three times in `0004-privacy-and-location.md`. |
+| 0002 | #57 — local-first architecture | Written |
 | 0003 | #20 — platform support matrix | Written |
 | 0004 | #21 — privacy and location | Written |
 | 0005 | #22 — tech stack | Written |
@@ -306,7 +309,8 @@ still a proposal.
 Three issues carry an acceptance criterion naming their old number — #19 (0002), #60 (0008) and #27
 (0006). **The number here wins**; each issue has been commented with its new one. Renumbering a
 written ADR would break citations in merged documents, which is the failure this table exists to
-prevent.
+prevent. #57's own body asks for 0005, which ADR 0005 already holds; it was written as **0002** for
+the same reason.
 
 ### Dependencies between decisions
 
@@ -314,9 +318,13 @@ prevent.
   precisely so the leaf packages and the web build are *shared* rather than reimplemented in a second
   language. Overturning TypeScript in ADR 0005 would invalidate ADR 0008; the dependency runs both
   ways and is recorded in both.
-- **ADR 0005 depends on the local-first decision (#57).** The architecture is what decides where the
-  boundary between shared domain code and deployment-specific code falls, which is what makes
-  `packages/domain` platform-free rather than merely server-free.
+- **ADR 0005 depends on [ADR 0002](adr/0002-local-first-architecture.md) (#57).** The architecture is
+  what decides where the boundary between shared domain code and deployment-specific code falls,
+  which is what makes `packages/domain` platform-free rather than merely server-free.
+- **ADR 0001's unconditional self-hosting depends on ADR 0002**, and ADR 0004 cites it three times —
+  for the federation model, for "the athlete's signed record is the source of truth", and for
+  "leaving an instance costs nothing but a re-sync". Those four citations are why 0002 is the number
+  and why it could not be renumbered.
 - **ADR 0005 is stricter than ADR 0001.** ADR 0001 permits per-package licence declaration; ADR 0005
   makes the boundary structural, decided by path. Deliberate: a path cannot be silently mis-declared.
 - **ADR 0001 is constrained by #58 and #59.** #58 is now [ADR 0006](adr/0006-fit-codec-licensing.md)
