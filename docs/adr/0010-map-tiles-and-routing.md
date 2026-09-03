@@ -191,10 +191,21 @@ plan.
 | Google Dynamic Maps | **$1,750.00** | billed per *load*: 10 k free; 90 k × $7.00/1k = $630; 200 k × $5.60/1k = $1,120 |
 | Mapbox GL JS Map Loads | **≈$950** *(not re-verified — see above)* | 50 k free, then the $5/$4/$3 per-1k ladder over 300 k loads |
 | Mapbox Vector Tiles API | **≈$925** *(not re-verified)* | 200 k free, then the $0.25/$0.20 per-1k ladder over 4.5 M |
-| PMTiles on AWS (S3 + CloudFront + Lambda) | **≈$42.59** | CloudFront GETs 4.5 M ÷ 10 k × $0.009 = $4.05; CloudFront egress 315 GB × $0.10 = $31.50; Lambda 2.25 M invocations ≈ $1.35 + ≈$2.26 compute; S3 GETs 2.25 M × $0.0004/1k = $0.90; S3 storage 110 GB × $0.023 = $2.53; S3→CloudFront $0.00 |
+| PMTiles on AWS (S3 + CloudFront + Lambda) | **≈$42.59** ⚠️ *rates unverified — see note* | CloudFront GETs 4.5 M ÷ 10 k × $0.009 = $4.05; CloudFront egress 315 GB × $0.10 = $31.50; Lambda 2.25 M invocations ≈ $1.35 + ≈$2.26 compute; S3 GETs 2.25 M × $0.0004/1k = $0.90; S3 storage 110 GB × $0.023 = $2.53; S3→CloudFront $0.00 |
 | **PMTiles on R2 + Cloudflare Worker** | **$7.46** | Workers paid plan $5.00 (4.5 M invocations are inside the 10 M included); R2 Class B 2.25 M × $0.36/M = $0.81; R2 storage 110 GB × $0.015 = $1.65; **egress $0.00** |
 | **PMTiles on R2, custom domain, no Worker** | **$2.46** | R2 Class B $0.81 + R2 storage $1.65 + egress $0.00. This is the shape Pinball Map actually runs |
 | OpenFreeMap public instance | **$0.00** — *someone else's* donation budget | see D-7 |
+
+⚠️ **The AWS row's unit rates are the only figures in this document with no source and no fetch
+date**, and that is worth stating rather than quietly leaving. Every other quoted figure — R2, B2,
+Google, the Protomaps calculator, Copernicus — appears in *Sources* with a URL and 2026-09-03. The
+five AWS rates do not, and they were carried from memory rather than read.
+
+**They are load-bearing**: the ~$40/month gap between AWS and R2 is the headline of this comparison,
+and it rests almost entirely on CloudFront egress at $0.10/GB against R2's $0.00. Anyone relying on
+that trade for a decision should re-read AWS's published rates first. The *direction* is not in
+doubt — zero-egress against metered egress is a structural difference, not a pricing accident — but
+the *magnitude* is unverified and should not be quoted as though it were measured.
 
 The cheapest commercial tile API is **≈124×** the Worker shape and **≈376×** the no-Worker shape, and
 the multiple grows with traffic, because R2 egress is $0 while every metered API's marginal rate is
@@ -471,6 +482,7 @@ at someone else's tiles.**
 | A map, minimum effort | **Nothing.** Point the configured basemap URL at the project's published archive | $0, 0 GB. Admissible because #63 already requires the URL to be configuration and proves it against a second archive |
 | A map, no external dependency | `pmtiles extract` a **regional cutout** of the archive, serve it from the same box with `pmtiles serve` or Caddy | A country-sized cutout is single-digit GB, not 120. Protomaps rates both local shapes **🚀🚀🚀 latency** — a self-hoster serving their own region gets *better* latency than the CDN deployment, not worse. `--maxzoom` trades detail for size: "each additional zoom level roughly doubles the size of the file" |
 | Routing | Valhalla over a **regional OSM extract** | Fits the reference box. ⚠️ A **planet** build does not, and this ADR does not claim to know what it needs — see *Open questions* |
+| **Elevation** | The **same Valhalla process**, plus a **Copernicus GLO-30 DEM for the operator's region** loaded into it | ⚠️ This row was missing from an earlier draft, and its absence was the sharper kind of gap: an operator who followed the routing row alone got a Valhalla that **answers `/route` and fails `/height`**, with no error explaining why. D-5 puts elevation on that process, so the DEM is a *separate download the routing row does not imply*. Sizes are region-dependent and this ADR does not have a measured figure — **#53 must record the actual download and disk footprint for the reference region when it stands the service up**, because "and also fetch a DEM" is not an instruction anyone can follow. |
 
 **Nothing in D-1 to D-5 adds a required cloud account to a self-host.** R2 is *this project's*
 hosting choice for *its own* published archive, if it ever publishes one; it is not a dependency of
