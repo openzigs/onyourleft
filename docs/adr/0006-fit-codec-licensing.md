@@ -2,7 +2,9 @@
 
 - **Status**: Accepted
 - **Date**: 2026-09-03
-- **Deciders**: repository owner
+- **Deciders**: repository owner, **confirmed 2026-09-03**. Option (c) was put to the owner
+  explicitly, alongside its cost — that #30 and #31 become genuine implementation work rather than
+  wiring up a library — and chosen
 - **Issue**: [#58](https://github.com/openzigs/onyourleft/issues/58)
 - **Supersedes**: nothing
 - **Constrains**: [#29](https://github.com/openzigs/onyourleft/issues/29),
