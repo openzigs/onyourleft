@@ -277,6 +277,7 @@ share one.
 | ADR | Title | Issue |
 |---|---|---|
 | [0001](adr/0001-licence.md) | Licensing — AGPL-3.0 app + Apache-2.0 leaf packages | #18 |
+| [0003](adr/0003-platform-support-matrix.md) | Platform support matrix and permanent platform gaps | #20 |
 | [0004](adr/0004-privacy-and-location.md) | Activity privacy and the location-data model | #21 |
 | [0005](adr/0005-tech-stack.md) | Technology stack and workspace layout | #22 |
 | [0006](adr/0006-fit-codec-licensing.md) | FIT codec licensing — implement from the public protocol documentation | #58 |
@@ -292,7 +293,7 @@ still a proposal.
 |---|---|---|
 | 0001 | #18 — licensing | Written |
 | **0002** | **#57 — local-first architecture** | Reserved. Already cited as "ADR 0002" by `0001-licence.md:149` and three times in `0004-privacy-and-location.md`. |
-| **0003** | **#20 — platform support matrix** | Reserved |
+| 0003 | #20 — platform support matrix | Written |
 | 0004 | #21 — privacy and location | Written |
 | 0005 | #22 — tech stack | Written |
 | 0006 | #58 — FIT codec licensing | Written |

@@ -25,6 +25,17 @@ Sensors and trainers connect over **Bluetooth Low Energy only**. ANT+ is out of 
 it is unreachable from any browser, has no iOS path at all, and its Shared Source License forbids
 redistributing source containing the network key.
 
+### Which browsers and devices this works on
+
+The web client needs **Web Bluetooth**, which only Chrome-family browsers implement. **Safari and
+Firefox do not have it at all** — on any platform, in any version — so the web client **cannot reach
+an iPhone**, and Chrome on Linux needs `chrome://flags/#enable-experimental-web-platform-features`.
+No browser can record in the background, so the tab has to stay open. Mobile and desktop clients are
+the answer to all of that, and they come later.
+
+Which platform, in which phase, with which capabilities — and which of those gaps are **permanent**
+rather than pending: [`docs/adr/0003-platform-support-matrix.md`](docs/adr/0003-platform-support-matrix.md).
+
 ## Technology
 
 TypeScript on Node, in a pnpm workspace: a React web client under `apps/`, and reusable leaf
