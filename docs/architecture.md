@@ -92,7 +92,7 @@ checkable.
 | `packages/fit` | Apache-2.0 | FIT / GPX / TCX decode and encode | Anything server-specific; anything under `apps/`; **anything carrying the Garmin FIT Protocol License — see [ADR 0006](adr/0006-fit-codec-licensing.md)** | #29–#32 |
 | `packages/sensors` | Apache-2.0 | BLE sensor and trainer abstraction; Web Bluetooth transport | Anything server-specific. Web Bluetooth types must not escape above the transport boundary | #39–#44 |
 | `packages/physics` | Apache-2.0 | Power → speed, as separately testable terms | Any rendering, BLE or platform API | #88 |
-| `packages/store` | Apache-2.0 | Local activity and stream persistence, and its migrations | Anything under `apps/` | #27 |
+| `packages/store` | Apache-2.0 | Local activity and stream persistence, and its migrations | Anything under `apps/` | #26, #27 |
 
 `packages/domain` is filled in as of [#25](https://github.com/openzigs/onyourleft/issues/25): the
 canonical representation of each quantity, the conversions into and out of the wire formats (FIT
@@ -101,6 +101,77 @@ s event-time counters), and the validation that runs where an untrusted number b
 Each is tabulated with its unit, its sign rule and the bug it prevents in
 [`packages/domain/README.md`](../packages/domain/README.md), which is the reference a consumer reads
 rather than this file.
+
+`packages/store` is filled in as of [#26](https://github.com/openzigs/onyourleft/issues/26):
+the athlete, activity, lap and privacy-zone object stores, the indexes each read goes through, the
+referential behaviour IndexedDB cannot declare, and the migration `up`/`down` contract. Stream
+storage is still [#27](https://github.com/openzigs/onyourleft/issues/27)'s. The entity model:
+
+```mermaid
+erDiagram
+    ATHLETE ||--o{ ACTIVITY : owns
+    ATHLETE ||--o{ PRIVACY_ZONE : defines
+    ACTIVITY ||--o{ LAP : contains
+
+    ATHLETE {
+        string  id           PK "opaque; #61 keys it to the device keypair"
+        string  displayName
+        number  createdAt        "UnixSeconds"
+    }
+    ACTIVITY {
+        string  id                 PK
+        string  athleteId          FK "every read filters on it"
+        string  name
+        number  startedAt              "UnixSeconds — the absolute instant"
+        string  startedAtTimeZone      "IANA id — the rider's local time"
+        number  elapsedTime            "Seconds, pauses included"
+        number  movingTime             "Seconds, pauses excluded"
+        number  distance               "Metres"
+        string  visibility             "private | followers | public; default private"
+        boolean hasPosition            "false is first class — the indoor case"
+        number  averagePower           "Watts, optional"
+        string  originalFileKey        "optional; the file itself is #27's"
+        string  originalFileSha256     "optional; #37 deduplicates on it"
+        number  createdAt              "UnixSeconds"
+    }
+    LAP {
+        string  id           PK
+        string  activityId   FK
+        string  athleteId    FK "denormalised: it is the scoping column"
+        number  ordinal          "zero-based position in the activity"
+        number  startedAt        "UnixSeconds"
+        number  elapsedTime      "Seconds"
+        number  movingTime       "Seconds"
+        number  distance         "Metres"
+        number  averagePower     "Watts, optional"
+    }
+    PRIVACY_ZONE {
+        string  id         PK
+        string  athleteId  FK
+        number  latitude       "DegreesLatitude — never leaves the device"
+        number  longitude      "DegreesLongitude — never leaves the device"
+        number  radius         "Metres; 500 by default (ADR 0004 decision B)"
+        string  label
+        number  createdAt      "UnixSeconds"
+    }
+```
+
+Three things that diagram does not say, and that a reader coming from a relational schema will
+otherwise assume:
+
+- **`FK` is a description, not a mechanism.** IndexedDB has no foreign keys and no `ON DELETE`
+  clause. Deleting an athlete cascades to their activities, laps and zones, and deleting an activity
+  cascades to its laps — because `packages/store` does it, in one transaction, and not because the
+  engine does. The choice and its cost are argued in `packages/store/src/activity-store.ts`.
+- **`visibility` is present from version 1 with a `private` default**, per
+  [ADR 0004](adr/0004-privacy-and-location.md) decision A. There is no stored start position to go
+  with it: that ADR forbids a `start_lat`/`start_lng` pair a list query would select, so `hasPosition`
+  carries the one bit the activity list needs.
+- **No stream data, no devices and no gear.** Streams are #27's and are never stored as per-sample
+  rows; devices and gear are additive object stores in a later schema version.
+
+The indexes, the query each one serves, and the reasoning for every field are in
+[`packages/store/README.md`](../packages/store/README.md).
 
 **Dependencies point one way: `apps/` → `packages/`, never the reverse.** Combined with the licence
 rule that is not a coincidence — Apache-2.0 code may be combined into an AGPL-3.0 work, but not the
@@ -184,7 +255,7 @@ alternatives are there.
 | Package manager | pnpm 11 workspaces |
 | Web client | React 19 + Vite 8 |
 | Mobile client | Capacitor, wrapping the same web build — **not scaffolded yet**; #85 |
-| Local data layer | IndexedDB via Dexie 4.4.5 — **not installed yet**; #27 adds it |
+| Local data layer | IndexedDB via Dexie 4.4.5 — installed by #26, in `packages/store` |
 | Migrations | Dexie's own versioned schema; `up`/`down` pairs with a tested `down` |
 | Instance data layer | **deferred to #7** |
 | Test runner | Vitest 4.1.11 |

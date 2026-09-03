@@ -1,0 +1,22 @@
+{
+  // `lib` is ES2024 + DOM, and `types` is empty.
+  //
+  // This package is **not** platform-isolated the way packages/domain is, and
+  // it must not be: IndexedDB is a DOM global, and Dexie's own declarations are
+  // written against lib.dom. `packages/domain`'s narrowing (`lib: ["ES2024"]`)
+  // would make `indexedDB`, `IDBKeyRange` and `structuredClone` compile errors
+  // here, which is the point of that package and would be nonsense in this one.
+  // The eslint.config.js `no-restricted-globals` block is scoped to
+  // packages/domain for the same reason; do not widen it to cover this package
+  // and do not weaken it to accommodate this package.
+  //
+  // `types: []` still holds: this package has no business reaching @types/node
+  // from the workspace root, so `process` and `Buffer` remain compile errors.
+  // The DOM is the only platform surface added, and it is added deliberately.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "types": []
+  },
+  "include": ["src/**/*.ts", "vitest.config.ts"]
+}

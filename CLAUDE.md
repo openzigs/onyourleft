@@ -62,7 +62,7 @@ cover the paths, so a package arrives inside the rules rather than beside them.
 | `packages/fit` | FIT / GPX / TCX decode and encode | Anything server-specific; anything under `apps/` |
 | `packages/sensors` | BLE sensor and trainer abstraction, and the Web Bluetooth transport | Anything server-specific. Web Bluetooth types must not escape above the transport boundary |
 | `packages/physics` | Power → speed. Pure computation. | Any rendering, BLE or platform API |
-| `packages/store` | Local activity and stream persistence | Anything under `apps/` |
+| `packages/store` | Local activity and stream persistence, and its migrations | Anything under `apps/` |
 
 ---
 
@@ -267,27 +267,39 @@ not.
 > ⛔ **None of the following runs today.** Do not copy these into a PR description as though you had
 > run them, and do not add them to a CI workflow before the issue that owns them lands.
 
-- **`apps/mobile`, `packages/fit`, `packages/physics`, `packages/store`.** The workspace globs
-  (`apps/*`, `packages/*`) will pick each up the moment it appears, and the boundary
-  and header rules already apply to its path — but the directories do not exist. They are created by
-  the issues that own their content: [#29](https://github.com/openzigs/onyourleft/issues/29),
-  [#88](https://github.com/openzigs/onyourleft/issues/88),
-  [#27](https://github.com/openzigs/onyourleft/issues/27) and
-  [#85](https://github.com/openzigs/onyourleft/issues/85). Copy `packages/domain` as the template: a
+- **`apps/mobile` and `packages/physics` do not exist.** The workspace globs (`apps/*`,
+  `packages/*`) will pick each up the moment it appears, and the boundary and header rules already
+  apply to its path. They are created by the issues that own their content:
+  [#85](https://github.com/openzigs/onyourleft/issues/85) and
+  [#88](https://github.com/openzigs/onyourleft/issues/88). Copy `packages/domain` as the template: a
   manifest, a `LICENSE`, a `tsconfig.json`, a `vitest.config.ts` and a test.
-  `packages/sensors` has landed with [#39](https://github.com/openzigs/onyourleft/issues/39) and is
-  a second worked example of the same template — but it holds **interfaces only**: the Web Bluetooth
-  transport (#40), the protocol clients (#41-#43) and the simulator (#44) are still to come, and
-  nothing under `packages/sensors` connects to a device yet.
+
+  **What does exist, and what each is not yet:**
+
+  - **`packages/sensors`** ([#39](https://github.com/openzigs/onyourleft/issues/39)) holds
+    **interfaces only**. The Web Bluetooth transport (#40), the protocol clients (#41–#43) and the
+    simulator (#44) are still to come, and nothing under it connects to a device yet.
+  - **`packages/fit`** ([#107](https://github.com/openzigs/onyourleft/issues/107)) holds the
+    **synthetic fixture corpus and its generator**, not a codec. The decoder (#30), the encoder
+    (#31) and GPX/TCX (#32) are still to come, and per ADR 0006 they are written from the published
+    protocol documentation — nothing carrying Garmin's terms may enter this package.
+  - **`packages/store`** ([#26](https://github.com/openzigs/onyourleft/issues/26)) holds athletes,
+    activities, laps and privacy zones with the migration `up`/`down` contract. Stream storage is
+    still [#27](https://github.com/openzigs/onyourleft/issues/27)'s. ⚠️ It is **not**
+    platform-isolated the way `packages/domain` is — it uses `indexedDB`, so its `tsconfig.json`
+    includes the DOM lib, and `eslint.config.js`'s `no-restricted-globals` block stays scoped to
+    `packages/domain`.
 - **A per-package dependency-licence gate.** Nothing yet checks that a dependency's *own* licence is
   permitted under the path it lands in — only that the manifests and headers declare the right
   thing. `pnpm licenses list --json` exists and is unused. Second half of
   [#24](https://github.com/openzigs/onyourleft/issues/24).
 - **A coverage gate demonstrated to fail.** Coverage is reported and nothing enforces it, which is
   §5's deliberate design; what #24 still owes is the demonstration that the report is real.
-- **`dexie`, `react-router` and the rest of the runtime dependency list in ADR 0005.** Only the
-  toolchain, React 19, React DOM and Vite are installed. Add each in the issue that first needs it,
-  after checking its licence against the directory it lands in (CONTRIBUTING.md).
+- **`react-router` and the rest of the runtime dependency list in ADR 0005.** The toolchain,
+  React 19, React DOM, Vite and — since #26 — `dexie` 4.4.5 and `fake-indexeddb` 6.2.5 (both
+  Apache-2.0, both zero-dependency, both under `packages/store`) are installed; nothing else from
+  that list is. Add each in the issue that first needs it, after checking its licence against the
+  directory it lands in (CONTRIBUTING.md).
 - **`apps/api`, or anything else server-shaped.** Not "not yet" — not in Phase 1 at all. Owner
   decision D6.
 
@@ -629,4 +641,4 @@ top of an issue **supersedes its body**.
 | Why a package's tsconfig narrows `lib` and `types` | `packages/domain/tsconfig.json` and §4d |
 | The canonical unit for a quantity, and the conversion into it | [`packages/domain/README.md`](packages/domain/README.md) |
 
-<!-- Last updated: 2026-09-03 by delivery:code-issue resolving #39 (transport-agnostic sensor abstraction) -->
+<!-- Last updated: 2026-09-03 by delivery:code-issue resolving #39 (sensor abstraction), #107 (FIT fixture corpus) and #26 (local store schema and migrations) -->
