@@ -43,6 +43,9 @@ docs/
   adr/                numbered architecture decision records
 
 scripts/              dependency-free repository checks; run on a bare clone
+
+.github/
+  workflows/rules.yml runs those checks on every pull request — see §4c
 ```
 
 **None of `apps/` or `packages/` exists yet.** [#23](https://github.com/openzigs/onyourleft/issues/23)
@@ -107,11 +110,19 @@ downstream issue's acceptance criteria depend on these.
 # Exits 0 clean; exits 1 listing each violation by rule id.
 bash scripts/check-repo-rules.sh
 
-# Test the checker itself. Fixture-driven; 22 cases.
+# Test the checker itself. Fixture-driven; 27 cases.
 bash scripts/check-repo-rules.test.sh
 
-# Verify the licence texts are byte-identical to the canonical ones.
-# Must reproduce the two hashes recorded in docs/adr/0001-licence.md.
+# Verify the licence texts are byte-identical to the canonical ones, by
+# reproducing the two SHA-256 digests recorded in docs/adr/0001-licence.md.
+# The digests are read out of the ADR rather than duplicated in the script, and
+# a required digest that is missing fails — checking nothing is not a pass.
+bash scripts/check-licence-hashes.sh
+
+# Test that checker. Fixture-driven; 9 cases.
+bash scripts/check-licence-hashes.test.sh
+
+# The same two digests, printed for reading by eye.
 shasum -a 256 LICENSE LICENSES/Apache-2.0.txt
 ```
 
@@ -119,6 +130,9 @@ shasum -a 256 LICENSE LICENSES/Apache-2.0.txt
 
 ```bash
 # Requires shellcheck (brew install shellcheck / apt install shellcheck).
+# Preinstalled on the standard Ubuntu runner, so CI runs it without installing
+# anything — but the runner's shellcheck is older than a typical developer's
+# (0.9.0 on ubuntu-24.04), and the two can disagree. CI prints its version.
 shellcheck scripts/*.sh
 
 # Requires npm and network access.
@@ -135,8 +149,16 @@ npm view typescript-eslint peerDependencies.typescript
 | `LIC003` | a package manifest declares a licence its path does not permit |
 | `LIC004` | a package under `packages/` has no `LICENSE` file of its own |
 | `SCOPE001` | ANT+ is referenced anywhere in a source tree (see §6) |
+| `WF001` | `pull_request_target` appears in a `.github/workflows/` file (see §8) |
 | `ADR001` | two ADRs share a number |
 | `ADR002` | an ADR filename is not `NNNN-kebab-case.md` |
+
+`scripts/check-licence-hashes.sh` enforces one more, separately because it hashes files rather than
+reading paths:
+
+| Rule | Fails when |
+|---|---|
+| `LIC005` | a licence text no longer matches the SHA-256 digest ADR 0001 records for it, **or** ADR 0001 no longer records a digest for one of them |
 
 ### 4b. Does **not** exist yet — to be established by [#23](https://github.com/openzigs/onyourleft/issues/23)
 
@@ -166,6 +188,27 @@ specification, not a fact**: `install`, `lint`, `format`, `typecheck`, `test`, `
 
 **When you run tests, always use the run-once form.** Vitest defaults to watch mode and a watching
 process never belongs in a gate.
+
+### 4c. What CI runs, and what it deliberately does not
+
+[`.github/workflows/rules.yml`](.github/workflows/rules.yml) runs on every pull request and on every
+push to `main`. It runs **exactly** four §4a bare-clone commands — `check-repo-rules.sh`, its test
+suite, `check-licence-hashes.sh` and its test suite — plus `shellcheck scripts/*.sh`, which §4a
+lists under *needs a tool installed* rather than as bare-clone, and which is available only because
+`ubuntu-latest` preinstalls it. Nothing else. If CI ever needs a step this file does not list, **this file is wrong and gets fixed in
+the same PR**; CI must not accumulate private knowledge, because that is how a contributor's local
+green becomes CI's red with no explanation.
+
+It runs on `ubuntu-latest`, holds `permissions: contents: read`, and pins `actions/checkout` to a
+full commit SHA. All three are §8 rules rather than preferences.
+
+**Everything in §4b is deliberately absent from CI** until [#23](https://github.com/openzigs/onyourleft/issues/23)
+lands: install, lint, format, typecheck, test and the coverage report. That is the second half of
+[#24](https://github.com/openzigs/onyourleft/issues/24), which stays open until they exist.
+
+Repository-level security scanning — CodeQL default setup, secret scanning with push protection, and
+Dependabot alerts and security updates — is **already enabled on the repository** and needs no
+workflow step. Adding one would duplicate it.
 
 ---
 
@@ -339,7 +382,9 @@ you.
 
 **`pull_request_target` is banned.** It receives secrets and is not subject to the first-time
 contributor approval gate. It is the single most common Actions compromise vector, and this is a
-public repository where anyone can propose a workflow change.
+public repository where anyone can propose a workflow change. **Enforced, not merely stated** — rule
+`WF001` fails the build if it appears anywhere under `.github/workflows/`. A documented ban is not a
+gate. Prose may name it in order to ban it; the rule is scoped to workflow files for that reason.
 
 **Pin every third-party action to a full commit SHA**, never a tag. A tag is mutable.
 
@@ -366,6 +411,7 @@ top of an issue **supersedes its body**.
 | Layout, boundaries, ADR index | [`docs/architecture.md`](docs/architecture.md) |
 | Why AGPL + Apache, and what it forecloses | [`docs/adr/0001-licence.md`](docs/adr/0001-licence.md) |
 | Sign-off, SPDX, adding a dependency | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+| What CI runs on every pull request | [`.github/workflows/rules.yml`](.github/workflows/rules.yml) and §4c |
 | What counts as a vulnerability, and how to report it | `SECURITY.md` (added by [#96](https://github.com/openzigs/onyourleft/pull/96)) |
 
-<!-- Last updated: 2026-09-03 by delivery:code-issue resolving #22 -->
+<!-- Last updated: 2026-09-03 by delivery:code-issue resolving #99 (part 1 of #24) -->
