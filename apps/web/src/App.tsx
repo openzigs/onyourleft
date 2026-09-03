@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { metresPerSecond } from '@onyourleft/domain';
 import type { JSX } from 'react';
 
 import { formatSpeed } from './format';
@@ -18,7 +19,7 @@ export function App(): JSX.Element {
         Ride tracking, indoor trainer control and live sensor capture over Bluetooth Low Energy.
         Entirely local — no server, no account.
       </p>
-      <p>Example speed: {formatSpeed(10)}</p>
+      <p>Example speed: {formatSpeed(metresPerSecond(10))}</p>
     </main>
   );
 }

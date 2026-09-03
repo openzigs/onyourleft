@@ -57,7 +57,7 @@ cover the paths, so a package arrives inside the rules rather than beside them.
 
 | Package | Purpose | Must not depend on |
 |---|---|---|
-| `packages/domain` | Canonical units and types; every conversion in the program goes through it. Also signing/verification and analysis, because those must run identically on the device and on an instance. | **Any platform API at all** — no DOM, no Node globals, no I/O, no network types |
+| `packages/domain` | Canonical units and types; every conversion in the program goes through it — the representations and the conversions are tabulated in [`packages/domain/README.md`](packages/domain/README.md). Also signing/verification and analysis, because those must run identically on the device and on an instance. | **Any platform API at all** — no DOM, no Node globals, no I/O, no network types |
 | `packages/fit` | FIT / GPX / TCX decode and encode | Anything server-specific; anything under `apps/` |
 | `packages/sensors` | BLE sensor and trainer abstraction, and the Web Bluetooth transport | Anything server-specific. Web Bluetooth types must not escape above the transport boundary |
 | `packages/physics` | Power → speed. Pure computation. | Any rendering, BLE or platform API |
@@ -578,5 +578,6 @@ top of an issue **supersedes its body**.
 | What counts as a vulnerability, and how to report it | `SECURITY.md` (added by [#96](https://github.com/openzigs/onyourleft/pull/96)) |
 | Which lint rule enforces which boundary | [`eslint.config.js`](eslint.config.js) and §4d |
 | Why a package's tsconfig narrows `lib` and `types` | `packages/domain/tsconfig.json` and §4d |
+| The canonical unit for a quantity, and the conversion into it | [`packages/domain/README.md`](packages/domain/README.md) |
 
-<!-- Last updated: 2026-09-03 by delivery:code-issue resolving #23 (workspace, toolchain and quality gates) -->
+<!-- Last updated: 2026-09-03 by delivery:code-issue resolving #25 (canonical units, types and validation) -->

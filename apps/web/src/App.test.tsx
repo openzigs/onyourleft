@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { metresPerSecond } from '@onyourleft/domain';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
@@ -8,14 +9,15 @@ import { formatSpeed } from './format';
 
 describe('formatSpeed', () => {
   it('renders one decimal place and the unit', () => {
-    expect(formatSpeed(10)).toBe('36.0 km/h');
+    expect(formatSpeed(metresPerSecond(10))).toBe('36.0 km/h');
   });
 
   it('propagates the domain package’s rejection of an impossible speed', () => {
-    // The guard lives in @onyourleft/domain and this asserts it is still
+    // The guard lives in @onyourleft/domain, at the constructor that turns an
+    // untrusted number into a typed quantity, and this asserts it is still
     // reached through this path: a client that swallowed it would render
     // "NaN km/h" from a malformed sensor payload.
-    expect(() => formatSpeed(Number.NaN)).toThrow(/finite/);
+    expect(() => formatSpeed(metresPerSecond(Number.NaN))).toThrow(/finite/);
   });
 });
 
