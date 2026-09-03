@@ -269,7 +269,7 @@ export class ActivityStore {
       await this.#requireAthlete(record.athleteId);
       // Inside the transaction, like the athlete check and for the same reason:
       // read-then-write outside one lets a concurrent write land in between.
-      await this.#requireNotOwnedByAnother(
+      this.#requireNotOwnedByAnother(
         await this.#activities.get(record.id),
         record.athleteId,
         `activity ${record.id}`,
@@ -396,7 +396,7 @@ export class ActivityStore {
           `cannot store lap ${record.id}: no activity ${record.activityId} exists`,
         );
       }
-      await this.#requireNotOwnedByAnother(
+      this.#requireNotOwnedByAnother(
         await this.#laps.get(record.id),
         parent.athleteId as AthleteId,
         `lap ${record.id}`,
@@ -426,7 +426,7 @@ export class ActivityStore {
   async putPrivacyZone(record: PrivacyZoneRecord): Promise<PrivacyZoneId> {
     await this.#db.transaction('rw', [this.#athletes, this.#privacyZones], async () => {
       await this.#requireAthlete(record.athleteId);
-      await this.#requireNotOwnedByAnother(
+      this.#requireNotOwnedByAnother(
         await this.#privacyZones.get(record.id),
         record.athleteId,
         `privacy zone ${record.id}`,
@@ -492,11 +492,13 @@ export class ActivityStore {
    * local athlete. It becomes reachable the moment an id arrives from a user
    * file, which is #51's import and #37's dedup.
    */
-  async #requireNotOwnedByAnother(
+  // Synchronous: the caller awaits the row and passes it in, so the guard runs
+  // inside the caller's transaction without adding another suspension point.
+  #requireNotOwnedByAnother(
     existing: { readonly athleteId: string } | undefined,
     owner: AthleteId,
     what: string,
-  ): Promise<void> {
+  ): void {
     if (existing !== undefined && existing.athleteId !== owner) {
       throw new StoreReferentialError(
         `cannot overwrite ${what}: it belongs to a different athlete`,
