@@ -1,0 +1,12 @@
+{
+  // The browser client may use the DOM. It is the only half of the workspace
+  // that may: the licence boundary and the platform boundary are the same line
+  // (docs/architecture.md), and `apps/` is the side that gets a platform.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "types": ["vite/client", "node"],
+    "jsx": "react-jsx"
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts", "vitest.config.ts"]
+}

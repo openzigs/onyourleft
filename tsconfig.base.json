@@ -1,0 +1,25 @@
+{
+  // Shared compiler options. Every package extends this and then narrows `lib`
+  // and `types` to the platform it is actually allowed to touch — that
+  // narrowing is what makes ADR 0005's "packages/domain depends on no platform
+  // API at all" a typechecker error rather than a code-review convention.
+  "compilerOptions": {
+    "target": "ES2024",
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "forceConsistentCasingInFileNames": true
+  }
+}

@@ -1,0 +1,17 @@
+{
+  // `lib` is ES2024 and nothing else, and `types` is empty.
+  //
+  // That is not tidiness. ADR 0005 and docs/architecture.md require
+  // packages/domain to depend on *no platform API at all* — not merely no
+  // server API — because the same code signs a record on a phone and verifies
+  // it on an instance in Phase 3. Without the DOM lib, `document` and `window`
+  // are compile errors here; with `types: []`, so are `process` and `Buffer`,
+  // even though @types/node is installed at the workspace root and would
+  // otherwise be picked up by the default `@types` lookup.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "types": []
+  },
+  "include": ["src/**/*.ts", "vitest.config.ts"]
+}

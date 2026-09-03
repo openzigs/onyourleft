@@ -1,0 +1,18 @@
+# ADR 0005 decision D. `apps/*` is AGPL-3.0-or-later, `packages/*` is
+# Apache-2.0, and the licence boundary is the directory itself.
+#
+# There is deliberately no `apps/api` entry: Phase 1 has no server (owner
+# decision D6). The glob will pick one up when #7 adds it in Phase 3.
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# unrs-resolver (a transitive dependency of eslint-import-resolver-typescript)
+# ships a postinstall script. It also ships prebuilt native bindings as platform
+# optional dependencies, which is the path pnpm actually installs, so the script
+# has nothing left to do. Denied rather than left undecided: an install script
+# runs arbitrary code with the developer's privileges before any lint or test
+# gate sees the package, and this is the one dependency in the workspace that
+# asks for that.
+allowBuilds:
+  unrs-resolver: false

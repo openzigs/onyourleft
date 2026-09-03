@@ -48,8 +48,12 @@ scripts/              dependency-free repository checks; run on a bare clone
   workflows/rules.yml runs those checks on every pull request — see §4c
 ```
 
-**None of `apps/` or `packages/` exists yet.** [#23](https://github.com/openzigs/onyourleft/issues/23)
-creates them. The layout is fixed here because ~30 sub-issues reference it by name.
+**`apps/web` and `packages/domain` exist**, created by
+[#23](https://github.com/openzigs/onyourleft/issues/23) along with the workspace, the toolchain and
+the lockfile. The other four packages and `apps/mobile` do **not** — each is created by the issue
+that owns its content (§4b), from `packages/domain` as the template. The layout is fixed here
+because ~30 sub-issues reference it by name, and the workspace globs and lint boundaries already
+cover the paths, so a package arrives inside the rules rather than beside them.
 
 | Package | Purpose | Must not depend on |
 |---|---|---|
@@ -122,8 +126,67 @@ bash scripts/check-licence-hashes.sh
 # Test that checker. Fixture-driven; 9 cases.
 bash scripts/check-licence-hashes.test.sh
 
+# Every environment variable the code reads is listed in .env.example.
+# Exits 1 naming the file and the variable. A missing .env.example also fails —
+# a template that is not there documents nothing.
+bash scripts/check-env-example.sh
+
+# Test that checker. Fixture-driven; 15 cases.
+bash scripts/check-env-example.test.sh
+
 # The same two digests, printed for reading by eye.
 shasum -a 256 LICENSE LICENSES/Apache-2.0.txt
+```
+
+**The workspace — needs Node 24 and pnpm 11, and the first run needs the network.**
+Executed in this order on a clean clone on 2026-09-03, from nothing installed to green:
+
+```bash
+# Node 24 "Krypton", read from .nvmrc so the runner and you cannot disagree.
+# With nvm: `nvm install` then `nvm use`. Any other version manager is fine;
+# what matters is that `node --version` reports v24.
+nvm install && nvm use
+
+# pnpm 11, from the `packageManager` field in package.json rather than a global
+# install, so the version is the one the lockfile was written by. Corepack ships
+# with Node.
+corepack enable pnpm
+
+# Install. --frozen-lockfile is what CI runs: it fails rather than quietly
+# resolving something the committed lockfile does not describe.
+pnpm install --frozen-lockfile
+
+# Prettier. `format:check` reports and exits 1; `format` rewrites.
+pnpm run format:check
+pnpm run format
+
+# ESLint 10 + typescript-eslint, type-aware. Also enforces the SPDX header and
+# the package boundaries — see §3 and §4d.
+pnpm run lint
+
+# tsc --noEmit, per package, because each package is allowed a different
+# platform surface. Runs the root config too.
+pnpm run typecheck
+
+# Vitest, run-once. Never `vitest` on its own: watch mode does not belong in a
+# gate, and a watching process in an agent session never exits.
+pnpm run test
+
+# The same run with a coverage report. There is no percentage threshold and you
+# must not add one — see §5.
+pnpm run test:coverage
+
+# tsc --noEmit followed by `vite build`, for apps/web. A green typecheck is not
+# a green build: the bundler resolves imports the typechecker only reads types
+# from, so run this before claiming a change compiles.
+pnpm run build
+
+# One package at a time, which is how you check a single package's harness:
+pnpm --filter @onyourleft/domain run test
+pnpm --filter @onyourleft/web run test
+
+# All six bare-clone script checks in one command.
+pnpm run check:repo
 ```
 
 **Need a tool installed, or the network** — these work, but not on a bare clone:
@@ -160,14 +223,13 @@ reading paths:
 |---|---|
 | `LIC005` | a licence text no longer matches the SHA-256 digest ADR 0001 records for it, **or** ADR 0001 no longer records a digest for one of them |
 
-### 4b. Does **not** exist yet — to be established by [#23](https://github.com/openzigs/onyourleft/issues/23)
+`scripts/check-env-example.sh` enforces one more, separately because it reads code rather than paths:
 
-> ⛔ **None of the following runs today.** There is no manifest and no lockfile in this repository.
-> Do not copy these into a PR description as though you had run them; do not add them to a CI
-> workflow before #23 lands. #23 must **replace this subsection with the real, executed commands**
-> and correct anything below that reality contradicts.
+| Rule | Fails when |
+|---|---|
+| `ENV001` | a source file under `apps/` or `packages/` reads an environment variable `.env.example` does not list, **or** `.env.example` is missing |
 
-The stack these will be built on is decided in ADR 0005 and is not open:
+The stack the workspace is built on is decided in ADR 0005 and is not open:
 
 | Concern | Decision |
 |---|---|
@@ -182,33 +244,86 @@ The stack these will be built on is decided in ADR 0005 and is not open:
 | Migration tool | **Dexie's own versioned schema** — no separate migrator; see §5 |
 | Monorepo task runner | none |
 
-The commands #23 is expected to establish, named here so the vocabulary is stable — **but each is a
-specification, not a fact**: `install`, `lint`, `format`, `typecheck`, `test`, `test:coverage`,
-`build`.
-
 **When you run tests, always use the run-once form.** Vitest defaults to watch mode and a watching
-process never belongs in a gate.
+process never belongs in a gate. `pnpm run test` is already the run-once form; `pnpm exec vitest` is
+not.
+
+### 4b. Does **not** exist yet
+
+> ⛔ **None of the following runs today.** Do not copy these into a PR description as though you had
+> run them, and do not add them to a CI workflow before the issue that owns them lands.
+
+- **`apps/mobile`, `packages/fit`, `packages/sensors`, `packages/physics`, `packages/store`.** The
+  workspace globs (`apps/*`, `packages/*`) will pick each up the moment it appears, and the boundary
+  and header rules already apply to its path — but the directories do not exist. They are created by
+  the issues that own their content: [#29](https://github.com/openzigs/onyourleft/issues/29),
+  [#39](https://github.com/openzigs/onyourleft/issues/39),
+  [#88](https://github.com/openzigs/onyourleft/issues/88),
+  [#27](https://github.com/openzigs/onyourleft/issues/27) and
+  [#85](https://github.com/openzigs/onyourleft/issues/85). Copy `packages/domain` as the template: a
+  manifest, a `LICENSE`, a `tsconfig.json`, a `vitest.config.ts` and a test.
+- **A per-package dependency-licence gate.** Nothing yet checks that a dependency's *own* licence is
+  permitted under the path it lands in — only that the manifests and headers declare the right
+  thing. `pnpm licenses list --json` exists and is unused. Second half of
+  [#24](https://github.com/openzigs/onyourleft/issues/24).
+- **A coverage gate demonstrated to fail.** Coverage is reported and nothing enforces it, which is
+  §5's deliberate design; what #24 still owes is the demonstration that the report is real.
+- **`dexie`, `react-router` and the rest of the runtime dependency list in ADR 0005.** Only the
+  toolchain, React 19, React DOM and Vite are installed. Add each in the issue that first needs it,
+  after checking its licence against the directory it lands in (CONTRIBUTING.md).
+- **`apps/api`, or anything else server-shaped.** Not "not yet" — not in Phase 1 at all. Owner
+  decision D6.
 
 ### 4c. What CI runs, and what it deliberately does not
 
 [`.github/workflows/rules.yml`](.github/workflows/rules.yml) runs on every pull request and on every
-push to `main`. It runs **exactly** four §4a bare-clone commands — `check-repo-rules.sh`, its test
-suite, `check-licence-hashes.sh` and its test suite — plus `shellcheck scripts/*.sh`, which §4a
-lists under *needs a tool installed* rather than as bare-clone, and which is available only because
-`ubuntu-latest` preinstalls it. Nothing else. If CI ever needs a step this file does not list, **this file is wrong and gets fixed in
-the same PR**; CI must not accumulate private knowledge, because that is how a contributor's local
-green becomes CI's red with no explanation.
+push to `main`. It runs **exactly** the §4a commands and nothing else: the six bare-clone script
+checks, `shellcheck scripts/*.sh`, then `pnpm install --frozen-lockfile`, `format:check`, `lint`,
+`typecheck`, `test:coverage` and `build`. If CI ever needs a step this file does not list, **this
+file is wrong and gets fixed in the same PR**; CI must not accumulate private knowledge, because
+that is how a contributor's local green becomes CI's red with no explanation.
 
-It runs on `ubuntu-latest`, holds `permissions: contents: read`, and pins `actions/checkout` to a
-full commit SHA. All three are §8 rules rather than preferences.
+> ⚠️ **The workflow's `name:` and its job's `name:` are both `Repository rules`, and `main` requires
+> a status check whose context is exactly that string.** Rename either and the required check never
+> reports, which makes every subsequent pull request unmergeable — including the one doing the
+> renaming. Extend the existing job; do not add a second job for a new gate, because a second job
+> reports under a different context and its failure would not block a merge.
 
-**Everything in §4b is deliberately absent from CI** until [#23](https://github.com/openzigs/onyourleft/issues/23)
-lands: install, lint, format, typecheck, test and the coverage report. That is the second half of
-[#24](https://github.com/openzigs/onyourleft/issues/24), which stays open until they exist.
+It runs on `ubuntu-latest`, holds `permissions: contents: read`, and pins `actions/checkout` and
+`actions/setup-node` to full commit SHAs with the `gh api` command that produced each in a comment.
+All of that is §8 rules rather than preference. Node comes from `.nvmrc` and pnpm from
+`packageManager` via corepack, so the runner cannot drift from a contributor. There is deliberately
+**no dependency cache**: it would mean another action to pin and a writable cache in every job's
+dependency path, to save seconds on a workspace this size.
+
+**Still absent from CI**, and owned by the second half of
+[#24](https://github.com/openzigs/onyourleft/issues/24): the per-package dependency-licence
+allowlist, and a coverage gate demonstrated to fail.
 
 Repository-level security scanning — CodeQL default setup, secret scanning with push protection, and
 Dependabot alerts and security updates — is **already enabled on the repository** and needs no
 workflow step. Adding one would duplicate it.
+
+### 4d. The boundaries the linter enforces
+
+`eslint.config.js` is not only style. Three of its blocks are the enforcement half of decisions that
+would otherwise be documented and unenforced, which is the gap this project keeps closing:
+
+| Enforced by | What fails |
+|---|---|
+| `headers/header-format` | a `.ts`/`.tsx` file whose first line is not the SPDX identifier its directory requires. Duplicates `LIC001`/`LIC002` on purpose: the script covers file types ESLint never parses and runs with no toolchain, the lint rule runs in the editor |
+| `boundaries/dependencies` | an import from `packages/*` into `apps/*`, in either the relative (`../../../apps/web/src/...`) or the workspace (`@onyourleft/web`) spelling. Dependencies point one way |
+| `@typescript-eslint/no-restricted-imports` in `packages/domain` | naming a Node builtin, `react`, `react-dom`, `vite` or `dexie` |
+| `no-restricted-globals` in `packages/domain` | naming `window`, `document`, `navigator`, `localStorage`, `process`, `Buffer` or `__dirname` |
+
+`packages/domain/tsconfig.json` narrows `lib` to `ES2024` and sets `types: []`, which makes the
+*globals* compile errors as well. **It does not make the imports compile errors** — `types: []`
+suppresses automatic inclusion of `@types` packages, but an explicit `import … from 'node:fs'` still
+resolves through the workspace root's `@types/node`. That is why both mechanisms are configured and
+why removing either leaves a hole.
+
+When `packages/sensors` and the routing work arrive, their boundaries (#39, #40, #70) go in the same
+file, as more `boundaries/dependencies` policies.
 
 ---
 
@@ -374,6 +489,23 @@ admits 7.x.
 
 **Vitest 5 is in release candidate.** Ship on 4.1.11.
 
+**pnpm 11 refuses a lockfile entry published in the last 24 hours.** `minimumReleaseAge` is a
+default, not something this repository configured, and it is a supply-chain control worth keeping:
+the window it closes is the one where a compromised release is published and pulled again. It bites
+when you pin the newest version of something: `pnpm install` writes the entry, then fails the
+lockfile policy check on the next run with `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`. **Pin a version
+that is more than a day old rather than adding a `minimumReleaseAgeExclude`** — the exclusion turns
+the protection off for that package permanently. Rewriting a lockfile that already contains a
+too-new entry needs `pnpm clean --lockfile` first; deleting `pnpm-lock.yaml` alone is not enough,
+because the copy under `node_modules/.pnpm` is read too.
+
+**An install script is a decision, recorded in `pnpm-workspace.yaml`.** pnpm 11 does not run
+dependency build scripts until `allowBuilds` names them, and leaves `pnpm install` exiting 1 until
+each is answered `true` or `false`. Answer it rather than deleting the entry: an install script runs
+arbitrary code with your privileges before any lint or test gate sees the package. The one entry
+today is `unrs-resolver`, answered `false` — it ships prebuilt native bindings as platform optional
+dependencies, so the script has nothing to do.
+
 **CI runners: use only the standard labels** — `ubuntu-latest`, `windows-latest`, `macos-latest`.
 Standard GitHub-hosted runners are free and unlimited on public repositories, and this repository is
 public. **Larger runners (`4-core`, `8-core`, any `larger` label) are ALWAYS charged, even on a
@@ -413,5 +545,7 @@ top of an issue **supersedes its body**.
 | Sign-off, SPDX, adding a dependency | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 | What CI runs on every pull request | [`.github/workflows/rules.yml`](.github/workflows/rules.yml) and §4c |
 | What counts as a vulnerability, and how to report it | `SECURITY.md` (added by [#96](https://github.com/openzigs/onyourleft/pull/96)) |
+| Which lint rule enforces which boundary | [`eslint.config.js`](eslint.config.js) and §4d |
+| Why a package's tsconfig narrows `lib` and `types` | `packages/domain/tsconfig.json` and §4d |
 
-<!-- Last updated: 2026-09-03 by delivery:code-issue resolving #99 (part 1 of #24) -->
+<!-- Last updated: 2026-09-03 by delivery:code-issue resolving #23 (workspace, toolchain and quality gates) -->
