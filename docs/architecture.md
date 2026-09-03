@@ -286,6 +286,7 @@ share one.
 | [0006](adr/0006-fit-codec-licensing.md) | FIT codec licensing — implement from the public protocol documentation | #58 |
 | [0007](adr/0007-patent-posture.md) | Patent posture, and the segment-matching design-around | #59 |
 | [0008](adr/0008-mobile-client-architecture.md) | Mobile client architecture and rendering stack — Capacitor, gated on a rendering spike | #86 |
+| [0010](adr/0010-map-tiles-and-routing.md) | Map tiles, routing and elevation — providers, licences and cost | #60 |
 
 ### Claimed by open issues — **check here before you pick a number**
 
@@ -305,7 +306,7 @@ still a proposal.
 | 0007 | #59 — patent posture | [Written](adr/0007-patent-posture.md) |
 | 0008 | #86 — mobile client architecture | [Written](adr/0008-mobile-client-architecture.md). Cited as "ADR 0008" by `0005-tech-stack.md` (four times), by ADR 0003 and twice below. |
 | **0009** | **#19 — clean-room posture** | Reserved. Renumbered from 0002, which #57 holds. |
-| **0010** | **#60 — map tiles and routing** | Reserved. Renumbered from 0008, which #86 holds. |
+| **0010** | **#60 — map tiles and routing** | [Written](adr/0010-map-tiles-and-routing.md). Renumbered from 0008, which #86 holds; #60's own criterion still names 0008 and is stale. |
 | **0011** | **#27 — stream storage** | Reserved. Renumbered from 0006, which #58 holds. |
 
 Three issues carry an acceptance criterion naming their old number — #19 (0002), #60 (0008) and #27
