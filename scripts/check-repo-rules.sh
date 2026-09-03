@@ -109,14 +109,26 @@ fi
 # Owner decision D2. Documentation may name ANT+ to explain why it is excluded;
 # a source tree may not, because naming it there means someone started building it.
 
+# The pattern is anchored on a non-word character rather than bare `ant[+]`.
+# Without that anchor `quadrant+1` and `CONSTANT+2` both match -- and the package
+# where that arithmetic lives, packages/physics, is the one place it is certain
+# to appear. `[[:<:]]`/`\b` are not portable between GNU and BSD grep, so the
+# boundary is spelled out as "start of line, or a character that is not part of
+# an identifier".
+ANTPLUS_RE='(^|[^[:alnum:]_])(ant[+]|ant-plus|antplus|thisisant)'
+
+# Scoped to SOURCE files, not to the whole tree. CLAUDE.md and ADR 0005 both say
+# documentation may name ANT+ to explain why it is excluded; scanning every file
+# under packages/ made `packages/sensors/README.md` doing exactly that fail the
+# build, so the checker contradicted the rule it exists to enforce.
 for dir in "${ROOT}/packages" "${ROOT}/apps"; do
   [ -d "${dir}" ] || continue
-  while IFS= read -r hit; do
-    [ -n "${hit}" ] || continue
-    report SCOPE001 "${hit#"${ROOT}"/}: ANT+ is out of scope permanently (owner decision D2, ADR 0003)"
-  done < <(grep -rliE 'ant[+]|ant-plus|antplus|thisisant' "${dir}" \
-             --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=build \
-             --exclude-dir=coverage 2>/dev/null)
+  while IFS= read -r file; do
+    [ -n "${file}" ] || continue
+    if grep -qiE "${ANTPLUS_RE}" "${file}" 2>/dev/null; then
+      report SCOPE001 "${file#"${ROOT}"/}: ANT+ is out of scope permanently (owner decision D2, ADR 0005 \"Scope exclusions\")"
+    fi
+  done < <(source_files "${dir}")
 done
 
 # --- ADR001 / ADR002: ADR numbering and naming --------------------------------

@@ -100,23 +100,28 @@ downstream issue's acceptance criteria depend on these.
 
 ### 4a. Works today — executed and observed to succeed on 2026-09-03
 
-These need **no install and no toolchain**. They run on a bare clone.
+**Bare clone — bash and coreutils only, no install, no network:**
 
 ```bash
 # Enforce the repository rules that are checkable by path.
 # Exits 0 clean; exits 1 listing each violation by rule id.
 bash scripts/check-repo-rules.sh
 
-# Test the checker itself. Fixture-driven; 15 cases.
+# Test the checker itself. Fixture-driven; 22 cases.
 bash scripts/check-repo-rules.test.sh
-
-# Lint the shell scripts.
-shellcheck scripts/*.sh
 
 # Verify the licence texts are byte-identical to the canonical ones.
 # Must reproduce the two hashes recorded in docs/adr/0001-licence.md.
 shasum -a 256 LICENSE LICENSES/Apache-2.0.txt
+```
 
+**Need a tool installed, or the network** — these work, but not on a bare clone:
+
+```bash
+# Requires shellcheck (brew install shellcheck / apt install shellcheck).
+shellcheck scripts/*.sh
+
+# Requires npm and network access.
 # Check whether typed linting has caught up with TypeScript 7 yet (see §8).
 npm view typescript-eslint peerDependencies.typescript
 ```
@@ -126,7 +131,7 @@ npm view typescript-eslint peerDependencies.typescript
 | Rule | Fails when |
 |---|---|
 | `LIC001` | a source file under `packages/` is missing an SPDX header, or declares one other than `Apache-2.0` |
-| `LIC002` | a source file under `apps/` declares one other than `AGPL-3.0-or-later` |
+| `LIC002` | a source file under `apps/` is missing an SPDX header, **or** declares one other than `AGPL-3.0-or-later` |
 | `LIC003` | a package manifest declares a licence its path does not permit |
 | `LIC004` | a package under `packages/` has no `LICENSE` file of its own |
 | `SCOPE001` | ANT+ is referenced anywhere in a source tree (see §6) |
@@ -339,8 +344,9 @@ public repository where anyone can propose a workflow change.
 **Pin every third-party action to a full commit SHA**, never a tag. A tag is mutable.
 
 **Web Bluetooth constraints are product constraints, not bugs.** No Safari (desktop or iOS), no
-Firefox, anywhere, ever — `caniuse` `usage_perc_y` is 76.46%, so roughly a quarter of visitors cannot
-use the core feature. `requestDevice()` needs a **user gesture per device** and cannot be called
+Firefox, anywhere, ever — `caniuse` `usage_perc_y` was **76.46% when read on 2026-09-02** (a
+browser-share figure that drifts monthly; re-read it rather than quoting this), so roughly a quarter
+of visitors cannot use the core feature. `requestDevice()` needs a **user gesture per device** and cannot be called
 programmatically; there is **no silent reconnect**; it is unavailable in Web Workers; and there is no
 background operation. **Plan for ~3 concurrent connections**, not 7. Do not design a UI that hides
 any of this.
