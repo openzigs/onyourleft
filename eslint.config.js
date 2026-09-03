@@ -59,6 +59,20 @@ const spdxHeader = (content) => ({
  * carry the `node:` prefix in that array (`node:test`, `node:sqlite`) are
  * dropped here because the `node:*` group below covers every prefixed
  * spelling, including builtins added by a future Node.
+ *
+ * ⚠️ **The trailing negation is not optional.** `group` patterns are matched
+ * with gitignore semantics, where a pattern containing no slash matches *any
+ * path segment* — so the bare builtin `domain` matches the specifier
+ * `@onyourleft/domain`, and every workspace package that imports the units
+ * package is reported as importing a Node builtin. `packages/domain` never hit
+ * it because it does not import itself; `packages/sensors` (#39) hit it on the
+ * first import, and `packages/fit` (#29) and `packages/store` (#26) would each
+ * have hit it too. The same collision is waiting for `@onyourleft/test`,
+ * `@onyourleft/http` and any other scope member whose last segment is a
+ * builtin's name, which is why the exemption is written for the scope rather
+ * than for `domain` alone. It exempts nothing that is not already governed by
+ * `boundaries/dependencies`, which is what decides which workspace package may
+ * import which.
  */
 const NODE_BUILTIN_SPECIFIERS = [
   ...new Set(
@@ -66,37 +80,63 @@ const NODE_BUILTIN_SPECIFIERS = [
       .filter((name) => !name.startsWith('node:'))
       .flatMap((name) => [name, `${name}/*`]),
   ),
+  '!@onyourleft/*',
 ];
 
 /**
- * Module specifiers `packages/domain` may not name. The DOM, Node and network
- * globals are unreachable there through `tsconfig.json`; what remains reachable
- * is an `import`, because a module specifier is resolved before `lib` has
- * anything to say about it — and because an explicit `import … from 'events'`
- * resolves through the workspace root's @types/node whatever `types: []` says.
+ * Module specifiers a platform-isolated package may not name. The DOM, Node and
+ * network globals are unreachable there through its `tsconfig.json`; what
+ * remains reachable is an `import`, because a module specifier is resolved
+ * before `lib` has anything to say about it — and because an explicit
+ * `import … from 'events'` resolves through the workspace root's @types/node
+ * whatever `types: []` says.
+ *
+ * The messages do not name a package, because two packages now share this list
+ * — `packages/domain` (#25) and `packages/sensors` (#39). They are isolated for
+ * the same reason in different words: domain's code signs a record on a device
+ * and verifies it on an instance, and sensors' interfaces have to be satisfied
+ * unchanged by Web Bluetooth, CoreBluetooth and the Android BLE APIs.
  */
 const PLATFORM_IMPORT_PATTERNS = [
   {
     group: ['node:*'],
     message:
-      'packages/domain depends on no platform API at all — the same code signs a record on a device and verifies it on an instance (docs/architecture.md).',
+      'This package depends on no platform API at all — the same code has to run in a browser, in a native shell and on an instance (docs/architecture.md).',
   },
   {
     group: NODE_BUILTIN_SPECIFIERS,
     message:
-      'packages/domain depends on no platform API at all. A Node builtin here means this package can no longer run in a browser.',
+      'This package depends on no platform API at all. A Node builtin here means it can no longer run in a browser.',
   },
   {
     group: ['react', 'react-dom', 'react-dom/*', 'vite', 'dexie'],
     message:
-      'packages/domain is rendering-, storage- and framework-free. Rendering belongs in apps/web; persistence belongs in packages/store.',
+      'This package is rendering-, storage- and framework-free. Rendering belongs in apps/web; persistence belongs in packages/store.',
   },
 ];
 
 /**
- * Globals `packages/domain` may not name.
+ * What `packages/sensors` may not name on top of the shared list.
  *
- * `packages/domain/tsconfig.json` is the closure here — `lib: ["ES2024"]` with
+ * A BLE *library* is not a platform global, so neither the `lib` narrowing nor
+ * `PLATFORM_GLOBALS` can see it — and importing one is the single most likely
+ * way for #39's abstraction to acquire a transport. The point of #39 is that the
+ * same interfaces are implemented by Web Bluetooth (#40), by the Capacitor
+ * plugin over CoreBluetooth and Android BLE (#15) and by the simulator (#44);
+ * a package that imports any one of them has chosen it for all three.
+ */
+const BLE_LIBRARY_IMPORT_PATTERNS = [
+  {
+    group: ['@capacitor-community/bluetooth-le', '@capacitor/*', 'webbluetooth', 'noble', 'bleno'],
+    message:
+      'packages/sensors defines the transport-agnostic abstraction and implements no transport. A BLE library belongs in the adapter that owns it — #40 for Web Bluetooth, #15 for the native stacks.',
+  },
+];
+
+/**
+ * Globals a platform-isolated package may not name.
+ *
+ * The package's own `tsconfig.json` is the closure here — `lib: ["ES2024"]` with
  * `types: []` makes *any* name outside the ES library a compile error, which is
  * a guarantee no denylist can offer. This list is the fast duplicate: it fires
  * in the editor on keystroke and in `pnpm run lint` seconds before a typecheck
@@ -122,7 +162,7 @@ const PLATFORM_GLOBALS = [
   'global',
   'require',
   // Network I/O. `fetch` is the one that matters most: it is a global in both
-  // Node 24 and every browser, so it is the shortest path from "pure domain
+  // Node 24 and every browser, so it is the shortest path from "pure leaf
   // package" to an outbound request.
   'fetch',
   'XMLHttpRequest',
@@ -132,6 +172,30 @@ const PLATFORM_GLOBALS = [
   'Response',
   'Headers',
 ];
+
+/**
+ * The rules that make "this package depends on no platform API at all" a lint
+ * error as well as a compile error.
+ *
+ * A function rather than a copied block, because two packages now use it and a
+ * copy is the version that gets extended in one place only. `extraPatterns` is
+ * for restrictions that belong to one package — the BLE libraries, for
+ * `packages/sensors`.
+ */
+const platformIsolation = (extraPatterns = []) => ({
+  '@typescript-eslint/no-restricted-imports': [
+    'error',
+    { patterns: [...PLATFORM_IMPORT_PATTERNS, ...extraPatterns] },
+  ],
+  'no-restricted-globals': [
+    'error',
+    ...PLATFORM_GLOBALS.map((name) => ({
+      name,
+      message:
+        'This package depends on no platform API at all (ADR 0005 decision D, docs/architecture.md).',
+    })),
+  ],
+});
 
 export default tseslint.config(
   {
@@ -231,17 +295,30 @@ export default tseslint.config(
   // gap nobody notices at the moment it starts to matter.
   {
     files: ['packages/domain/**/*.{ts,tsx}'],
-    rules: {
-      '@typescript-eslint/no-restricted-imports': ['error', { patterns: PLATFORM_IMPORT_PATTERNS }],
-      'no-restricted-globals': [
-        'error',
-        ...PLATFORM_GLOBALS.map((name) => ({
-          name,
-          message:
-            'packages/domain depends on no platform API at all (ADR 0005 decision D, docs/architecture.md).',
-        })),
-      ],
-    },
+    rules: platformIsolation(),
+  },
+
+  // --- packages/sensors depends on no platform API either --------------------
+  // #39 defines the shape every BLE transport implements, and its second
+  // acceptance criterion is that Web Bluetooth *and* a native stack satisfy it
+  // unchanged. An interface that can name `navigator.bluetooth` — or a
+  // `BluetoothRemoteGATTCharacteristic`, or a `DataView` full of GATT payload —
+  // has already chosen one of the three, and #15 becomes a rewrite of the
+  // protocol layer rather than an adapter. `packages/sensors/tsconfig.json`
+  // narrows `lib` and empties `types` for the same reason; these rules are the
+  // half that does not depend on that narrowing surviving a stray
+  // `/// <reference types="node" />`.
+  //
+  // ⚠️ **#40's Web Bluetooth adapter needs the DOM and does not belong under
+  // this block.** docs/architecture.md puts the transport in this package with
+  // the constraint that "Web Bluetooth types must not escape above the transport
+  // boundary" — so the adapter arrives in its own directory with its own
+  // tsconfig (DOM in `lib`) and its own entry here, and `packages/sensors/src`
+  // stays platform-free. Narrow this block's `files` when that lands; do not
+  // widen the tsconfig.
+  {
+    files: ['packages/sensors/**/*.{ts,tsx}'],
+    rules: platformIsolation(BLE_LIBRARY_IMPORT_PATTERNS),
   },
 
   // --- Tests -----------------------------------------------------------------

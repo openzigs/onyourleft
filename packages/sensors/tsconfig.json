@@ -1,0 +1,27 @@
+{
+  // `lib` is ES2024 and nothing else, and `types` is empty — the same closure
+  // packages/domain uses, for the same reason and one more.
+  //
+  // The reason it shares: docs/architecture.md requires that "no Web Bluetooth
+  // type escapes above the transport boundary", and this package *is* above the
+  // transport boundary. Without the DOM lib, `navigator`, `BluetoothDevice` and
+  // `BluetoothRemoteGATTCharacteristic` are compile errors here rather than
+  // review findings; with `types: []`, so are `process` and `Buffer`.
+  //
+  // The reason it is stricter than it looks: the whole point of #39 is that the
+  // same interfaces are implemented by Web Bluetooth (#40), and later by
+  // CoreBluetooth and the Android BLE APIs (#15). An interface that can name a
+  // browser type has already chosen one of the three.
+  //
+  // ⚠️ This closure is conditional. `types: []` suppresses the automatic @types
+  // lookup; it does *not* stop a `/// <reference types="node" />` inside a
+  // `.d.ts` that a file in this program imports. That is why `vitest.config.ts`
+  // imports nothing — see the comment at the top of it — and why
+  // eslint.config.js keeps a denylist that does not depend on this holding.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "types": []
+  },
+  "include": ["src/**/*.ts", "vitest.config.ts"]
+}
