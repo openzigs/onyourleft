@@ -73,10 +73,10 @@ product at all. That was a category error: it read a contract binding Strava's A
 it were a rule of general application.
 
 Every other term the first pass quoted at itself has the same shape — the restriction on displaying
-other athletes' data, the restriction on use in connection with AI, the 2026 developer-programme
-changes. **They are excellent reasons not to build on the Strava API. They are not reasons not to
-build a cycling app.** Since this project makes no API call, none of them attaches to anything it
-does.
+other athletes' data, the restriction on use in connection with AI (API Policy §5.3, quoted below),
+the 2026 developer-programme changes. **They are excellent reasons not to build on the Strava API.
+They are not reasons not to build a cycling app.** Since this project makes no API call, none of
+them attaches to anything it does.
 
 Nine issues inherited the error and were corrected in the same pass. This ADR records the reversal
 rather than quietly assuming the corrected position, because an ADR that silently reverses itself
@@ -111,7 +111,8 @@ Read on **2026-09-03** unless stated otherwise.
 | Source | Where | What it says, verbatim where it matters |
 | --- | --- | --- |
 | Strava **Terms of Service (2026)** | `strava.com/legal/terms` | Header: *"Terms of Service (2026) … Effective Date: January 1, 2026"*. Acceptance, §1: *"You indicate your acceptance of these Terms by accessing, using, or signing up for any Services."* §19 Proprietary Rights: *"Automated access to or collection of data from the Services—by any means, including data mining, robots, screen scraping, scripts, or similar data-gathering tools or software such as browser extensions and crawlers—is prohibited. This prohibition applies regardless of whether you are logged into a Strava account at the time of such automated access or collection."* Also §19: *"you agree not to … reverse engineer, reverse assemble, or otherwise attempt to discover any source code"* |
-| Strava **API Agreement (2026)** | `strava.com/legal/api` | *"Effective Date: June 1, 2026"*. Preamble: *"By accessing or using the Strava API Materials, you acknowledge that you have read, and agree to abide by, this Agreement…"* Parties: *"made and entered into by and between Strava, Inc., or, if you are in the European Economic Area ('EEA'), Strava Ireland Limited … and you."* Highlights: *"You may not create applications that compete with or replicate Strava functionality."* §9.2: *"You understand that Strava may currently or in the future develop products and services that may be similar to or compete with your Developer Applications."* **§5 is "Privacy" and has only §5.1 and §5.2 — see the correction below** |
+| Strava **API Agreement (2026)** | `strava.com/legal/api` | *"Effective Date: June 1, 2026"*. Preamble: *"By accessing or using the Strava API Materials, you acknowledge that you have read, and agree to abide by, this Agreement…"* Parties: *"made and entered into by and between Strava, Inc., or, if you are in the European Economic Area ('EEA'), Strava Ireland Limited … and you."* Highlights: *"You may not create applications that compete with or replicate Strava functionality."* §9.2: *"You understand that Strava may currently or in the future develop products and services that may be similar to or compete with your Developer Applications."* **Note that §5 of *this* document is "Privacy" and has only §5.1 and §5.2. The use restrictions are in the separate API Policy on the next row — see [Checking #19's citations](#checking-19s-citations-against-the-documents)** |
+| Strava **API Policy (2026)** | `strava.com/legal/api_policy` — **a distinct document from the API Agreement above, at an adjacent path** | *"Effective Date: June 1, 2026"*. §1: *"To use the Strava API, developers must comply with this Strava API Policy (the 'Policy'), which is incorporated by reference into, and forms part of, the Strava API Agreement (the 'Agreement')."* **§5 is "Use Restrictions", running §5.1–§5.16.** §5.2 No Competing or Imitating Applications: *"You may not use the Strava API Materials in any manner that is competitive to Strava or the Strava Platform…"*, and may not *"create an application that imitates the look, imagery, or brand identity of Strava or the Strava Platform"*. §5.3: *"You may not use the Strava API Materials or Strava Data, directly or indirectly, in connection with the development, training, evaluation, or operation of any AI Application."* §5.4 No Aggregation: *"You may not process or disclose Strava Data—even publicly viewable Strava Data—including in an aggregated, de-identified, or anonymized manner, for the purposes of analytics."* §5.5 No Scraping/Bulk Export: no *"web scraping, web harvesting, web data extraction methods, or any other automated means to extract data from the Strava Platform."* §5.16 No Abstraction Layers: no *"abstraction layer, integration-platform-as-a-service…that re-exposes the Strava API Materials."* **Every one of these opens "You may not use the Strava API Materials" — they are conditions on API access, and §1 gives the Policy exactly the Agreement's reach over exactly the Agreement's parties** |
 | Zwift **Terms of Service** | `zwift.com/clubs/tos`; **last updated 2019-05-28**. `zwift.com/terms` 301-redirects to `support.zwift.com/categories/legal-rkCaoNtJS`, which did not render on fetch, and `zwift.com/eula` returns 404 | §5(h): *"Reverse engineer any aspect of our Platform or do anything that might discover source code or bypass or circumvent measures employed to prevent or limit access to any part of our Platform"*. §5(i): *"Use any data mining, robots or similar data gathering or extraction methods designed to scrape or extract data from our Platform…"*. §5(k): *"Develop or use any applications that interact with our Platform without our prior written authorization, including any cheats, mods or matchmaking services or applications that emulate or redirect the communication protocols used by Zwift…"* |
 | **STRAVA** word mark | USPTO TSDR, `tsdr.uspto.gov/statusview/sn77693713` | Ser. 77693713 → **Reg. 3877582**, Strava, Inc. Filed 2009-03-18, registered 2010-11-16. Status **Live**: *"The registration has been renewed"*, status date 2021-07-27 |
 | **KOM CHALLENGE** | USPTO TSDR, `tsdr.uspto.gov/statusview/sn85486389` | Ser. 85486389, BikeRx, LLC. **Dead** — *"Abandoned because the applicant failed to respond or filed a late response to an Office action"*, status date **2012-10-13** |
@@ -119,31 +120,52 @@ Read on **2026-09-03** unless stated otherwise.
 | `zoffline/zwift-offline` | GitHub repository **metadata only**, via `gh api repos/zoffline/zwift-offline`. **The source was not opened** — that is the point of **R2** | Description *"Use Zwift offline"*. Licence **AGPL-3.0**. Created 2017-11-26, last push 2026-06-02, not archived, 1,365 stars |
 | `incyclist/devices` | `gh api repos/incyclist/devices` | Licence **MIT**. Confirms the one exception in `CLAUDE.md` §6's prior-art table |
 
-### Corrections to #19's own body
+### Checking #19's citations against the documents
 
-Three things in the issue text did not survive contact with the documents. Recording them is the
-point of having fetch dates.
+**Strava publishes three separate legal documents at adjacent paths** — `/legal/terms` (Terms of
+Service), `/legal/api` (the API **Agreement**) and `/legal/api_policy` (the API **Policy**) — and
+their section numbering is independent. Reading the neighbour of the document you meant therefore
+produces a confident, verbatim-quoted, wholly wrong answer.
 
-1. **The §5.4 / §5.5 citation of the 2026 API Policy is withdrawn, not merely unverified.** #19
-   flagged it as coming from a search-result snippet. On fetching the agreement, **§5 is "Privacy"
-   and contains only §5.1 and §5.2.** Those subsection numbers do not exist. Nothing in this ADR
-   ever depended on them.
-2. **The "no AI Application" clause and the no-intermediary rule were not located** in the
-   2026-06-01 API Agreement text as fetched. They may exist under different numbering, or may have
-   been dropped, or the fetch may have missed them. Treat both as **unconfirmed**. Again nothing
-   depends on them: they are conditions on API data, and there is no API data.
-3. **The API Agreement's effective date is 2026-06-01**, distinct from the Terms of Service's
-   2026-01-01. Two documents, two dates; #19 blurred them into "the June 2026 developer-programme
-   changes".
+An earlier draft of this ADR did exactly that. It fetched `/legal/api`, found §5 of the *Agreement*
+to be "Privacy" with two subsections, and on that basis **withdrew #19's §5.4/§5.5 citation and
+recorded the AI-application and no-intermediary clauses as "not located"**. Review caught it before
+merge. **All three of #19's citations are correct**, and the retraction is retracted here rather
+than shipped into a citable record:
 
-> ⚠️ **On the standard of the reading.** #19's acceptance criterion asks that both Strava documents
-> be re-read *in full* before merge. What was actually done: each was fetched on 2026-09-03 through
-> a Markdown-converting fetch tool and queried for the clauses above, and the quotes in the table
-> reproduce verbatim from those fetches. **That is not the same as a human reading forty pages page
-> by page, and a converter can silently drop content** — which is exactly how correction (2) above
-> could be a false negative. Anyone whose decision turns on a clause **not** quoted in that table
-> must read the document themselves first. This is stated rather than glossed because the whole
-> failure this ADR corrects began with somebody trusting a paraphrase.
+1. **#19's §5.4 / §5.5 citation stands.** API Policy §5.4 is "No Aggregation, Analytics, or
+   De-Identified Processing" and §5.5 is "No Scraping, Bulk Export, Harvesting, or Automated
+   Extraction". Both are quoted in the sources table.
+2. **The AI-application clause and the abstraction-layer clause both exist**, at API Policy §5.3
+   and §5.16. Neither was missing; the wrong document was open.
+3. **The API Agreement and the API Policy are both effective 2026-06-01**, distinct from the Terms
+   of Service's 2026-01-01. "The June 2026 developer-programme changes" is a fair description of
+   the pair, but a citation to either has to say which — that is the whole content of the mistake
+   above.
+
+**None of this touches the decision.** API Policy §1 states that the Policy *"is incorporated by
+reference into, and forms part of, the Strava API Agreement"* and that *"[t]o use the Strava API,
+developers must comply with"* it. It therefore has exactly the Agreement's reach over exactly the
+Agreement's parties: people who use the Strava API. This project is not one of them, so §5.3, §5.4,
+§5.5 and §5.16 bind it no more than the competing-applications clause does. They are four further
+excellent reasons not to build on the Strava API and no reason at all not to build a cycling app.
+**D1 stands, unchanged and unweakened.**
+
+> ⚠️ **The durable lesson, recorded because it nearly went into the permanent record.** When a
+> source is cited by **URL**, fetch *that* URL, and check the returned document's own title and
+> effective date against the one you meant to read before you read a word of the analysis. A
+> neighbouring document is worse than no document: it supplies real quotes for the wrong
+> instrument, and a "this clause does not exist" written from one is stated with full confidence.
+
+> ⚠️ **On the standard of the reading.** #19's acceptance criterion asks that the Strava documents
+> be re-read *in full* before merge. What was actually done: each of the three was fetched on
+> 2026-09-03 through a Markdown-converting fetch tool and queried for the clauses above, and the
+> quotes in the table reproduce verbatim from those fetches. **That is not the same as a human
+> reading forty pages page by page, and a converter can silently drop content.** Anyone whose
+> decision turns on a clause **not** quoted in that table must read the document themselves first.
+> This is stated rather than glossed because the whole failure this ADR corrects began with
+> somebody trusting a paraphrase — and because the withdrawn retraction above came from fetching
+> the wrong URL, which no amount of care about the converter would have caught.
 
 ---
 
@@ -177,7 +199,7 @@ artefact a reviewer looks at.
 | **L1** | **No Strava or Zwift name, mark, logo, stylisation, brand colour or overall get-up in the product.** | Grep the diff for `strava` and `zwift`, case-insensitively. **Every hit must be either prose in `docs/`, `README.md`, `CLAUDE.md`, an issue or an ADR, or an exact instance of the R3 template.** None may be a product name, a package name in a manifest, a directory or file name, an asset filename, a domain, an app-store listing field, a CSS custom property, or a UI label. Separately: the design system (#49) is ours — **do not reproduce their screen layout, colour palette and icon set as a set**, which is trade dress and is protected independently of any single mark | STRAVA is live on the US register (Reg. 3877582, renewed 2021-07-27). This is precisely what trademark law exists to stop and there is no fair-use argument for it. The trade-dress limb is the author's addition: "concepts are free" is true and stops short of a screen-for-screen copy |
 | **L2** | **No Strava or Zwift code, asset, map data or course geometry, by any route.** | For any file in the diff that could plausibly have come from somewhere, **the PR body says where it came from.** No image, texture, 3D model, typeface, audio, avatar art, world geometry or marketing string derived from either product — including "for reference" and including machine-translated or decompiler output. Terrain comes from the athlete's own imported route (ADR 0008 D-5) or from OpenStreetMap | Their source, art and world geometry are protected expression. ADR 0008's "there is no world to design" is a *benefit* of this line, not a shortcut around it |
 | **L3** | **No other athlete's data from any service.** | Every fixture in the repository is **synthetic** (as `packages/fit`'s corpus already is, per #107) or contributed by its own subject. No GPS trace, activity, name or avatar belonging to a person who is not a user of this project enters the tree, the store or a test | Other athletes' geolocation is personal data this project would have no lawful basis for, and the EU *sui generis* database right (Directive 96/9/EC) protects their compilation independently of copyright. ADR 0004 covers the same ground from the privacy side and is not superseded here |
-| **L4** | **No scraping. Ever, of anyone.** | This project ships **no HTTP client, headless browser, crawler or browser extension pointed at `strava.com`, `zwift.com` or any third-party web UI**, and no test fixture is a saved response from one. Phase 1 makes this trivially checkable: owner decision D6 means there is no server and no outbound network call anywhere in the tree | Strava's Terms of Service bind **site visitors, not only API users** — acceptance is "by accessing", and §19's automated-access ban applies "regardless of whether you are logged into a Strava account". The exposure is **contract, not CFAA**: *hiQ v. LinkedIn* (9th Cir. 2022-04-18) and *Van Buren* (2021) narrowed the CFAA route, and then N.D. Cal. granted LinkedIn summary judgment on **breach of contract** (2022-11-04), ending in a consent judgment (#19 records $500,000), a permanent injunction and destruction of source and data. Quite bad enough |
+| **L4** | **No scraping. Ever, of anyone.** | This project ships **no HTTP client, headless browser, crawler or browser extension pointed at `strava.com`, `zwift.com` or any third-party web UI**, and no test fixture is a saved response from one. **That is the durable form of the check: it is about what is fetched and from whom, not about whether anything is fetched at all**, so it survives the product growing a network. Today it is trivially checkable — owner decision D6 means there is no server, and until #60's map tiles land there is no outbound network call anywhere in the tree — and that convenience is temporary while the rule is not | Strava's Terms of Service bind **site visitors, not only API users** — acceptance is "by accessing", and §19's automated-access ban applies "regardless of whether you are logged into a Strava account". The exposure is **contract, not CFAA**: *hiQ v. LinkedIn* (9th Cir. 2022-04-18) and *Van Buren* (2021) narrowed the CFAA route, and then N.D. Cal. granted LinkedIn summary judgment on **breach of contract** (2022-11-04), ending in a consent judgment (#19 records $500,000), a permanent injunction and destruction of source and data. Quite bad enough |
 | **L5** | **This project does not reverse engineer either product at all, and no contributor accepts a vendor agreement in order to study one.** | No decompiler or disassembler output in any diff. No PR whose work required installing or running the Zwift client in order to observe it. **Observing BLE traffic from hardware you own is a different act, is lawful, and is permitted** — that is how #40–#44 are built, from published FTMS, CPS, CSCS and HRS specifications | *Davidson & Associates v. Jung*, 422 F.3d 630 (8th Cir. 2005): a clean-room server reimplementation lost because the developers had clicked through a EULA banning reverse engineering, and the court held the **fair-use right waived by contract**. Zwift's ToS §5(h) carries such a clause and Strava's §19 does too — and Strava's binds anyone who has ever loaded the site, which is most cyclists. **The reliable answer is not to need the defence.** Reverse engineering is lawful in itself (*Kewanee Oil v. Bicron*, 416 U.S. 470 (1974)); DMCA §1201 is not engaged by plaintext GATT writes and §1201(f) permits circumvention for interoperability regardless; and EU law is stronger still — Software Directive 2009/24/EC Art. 6 grants a decompilation right for interoperability and **Art. 8 makes contrary contractual terms null and void**. None of that is needed, because nothing in this product's design requires reading their software |
 
 ### R1 — What a contributor may take from prior art, and what they may not
@@ -321,7 +343,12 @@ data alike, with design-by-default access obligations biting for products placed
 after **2026-09-12**.
 
 **The check**: every byte this product parses arrived from a file the user chose in a file picker.
-`packages/fit` and `apps/web` contain no HTTP client and no third-party host name. Implementation is
+`packages/fit` and `apps/web` contain no HTTP client and issue no network request. They do contain
+third-party host names, and a grep for one gets hits — the GPX and TCX fixtures and their generator
+carry `topografix.com`, `garmin.com` and `w3.org` XML **namespace URIs**. Those are format
+identifiers, not addresses: a conforming parser never dereferences one, and under `CLAUDE.md` §6 a
+parser that does is precisely the XXE defect the corpus's `xxe-external-entity` fixtures exist to
+catch. **The check is "no fetch", not "no host name in a string".** Implementation is
 [#5](https://github.com/openzigs/onyourleft/issues/5) and
 [#51](https://github.com/openzigs/onyourleft/issues/51); the codec is #30–#32 under ADR 0006; the
 fixture corpus (#107) is already synthetic, which is L3 discharged in advance.
@@ -406,7 +433,9 @@ and the division is clean:
   feature.
 
 If those two ever appear to conflict on the same feature, **ADR 0007 wins on anything patent-shaped**
-and a successor ADR reconciles them. Nothing here loosens D2's five prohibitions.
+and a successor ADR reconciles them. Nothing here loosens **ADR 0007's D2** and its five
+prohibitions on the segment matcher — written out in full because a bare "D2" in this repository is
+more often owner decision D2, the ANT+ exclusion in `CLAUDE.md` §6.
 
 ---
 
@@ -438,7 +467,8 @@ if this project ships a parser tuned to that export's layout?** Nothing in the d
 the file is the athlete's own — but #5's bulk-import UI is where a surprising answer would bite.
 
 **Three things a lawyer is deliberately not being asked**, because nothing depends on them:
-whether the API Agreement binds this project (it does not; there is no contract, and that is D1);
+whether the API Agreement and its incorporated API Policy bind this project (they do not; there
+is no contract, and that is D1);
 whether product concepts are copyrightable at the margin (§102(b) is adequate and this project
 copies nothing regardless); and whether to register a mark of this project's own (a business
 decision, not this ADR's).
@@ -478,8 +508,8 @@ not confirm and who would settle it.
 
 | Unverified | Who settles it |
 | --- | --- |
-| Whether the 2026 API Agreement contains an AI-application or no-intermediary clause under some other numbering — not located in the fetched text | Nobody. Nothing depends on it; there is no API use |
-| Whether either Strava document contains a clause not quoted in the sources table. The fetch was tool-converted and queried, **not a page-by-page human read** | Whoever first wants to rely on a clause that is not quoted above. Read it yourself first |
+| Whether Strava publishes further developer terms at some other path. **Three** documents were read — `/legal/terms`, `/legal/api` and `/legal/api_policy` — and the API Policy names a developer site that may carry more | Nobody, today. Nothing depends on it; there is no API use. Whoever first proposes to use the API reads the set afresh |
+| Whether any of the three Strava documents contains a clause not quoted in the sources table. Each fetch was tool-converted and queried, **not a page-by-page human read** | Whoever first wants to rely on a clause that is not quoted above. Read it yourself first |
 | Zwift's *current* general Terms of Service. `zwift.com/terms` redirects to a support category that did not render and `zwift.com/eula` 404s; the quoted document is the **Clubs** ToS, last updated **2019-05-28** | Whoever first needs a live Zwift term. L5's conclusion does not depend on which document it is, because this project reverse engineers neither product |
 | **QOM** was not searched on any trademark register at all | Whoever first proposes to brand a feature "QOM <something>". R4's ❌ covers it in the meantime |
 | Whether common-law rights subsist in "KOM CHALLENGE" or "KOM AIR" despite both registrations being dead | Same. A dead registration is not a clearance |
