@@ -283,19 +283,29 @@ share one.
 
 ### Claimed by open issues — **check here before you pick a number**
 
-> ⚠️ **Three numbers are claimed twice.** Read from the issue bodies on 2026-09-03, and tracked in
-> [#97](https://github.com/openzigs/onyourleft/issues/97). Until that is settled, whoever writes the
-> second ADR of a colliding pair must renumber, and amend the acceptance criterion in their own issue
-> when they do.
+The numbering below is **settled**. It was contested — 0002, 0006 and 0008 were each claimed by two
+open issues (#97) — and it is resolved here in favour of the number that merged ADRs already cite,
+because a citation in a merged document is a fact and an acceptance criterion in an open issue is
+still a proposal.
 
-| Number | Claimed by | Also claimed by |
+| Number | Owner | Status |
 |---|---|---|
-| 0002 | #19 — clean-room posture | **#57 — local-first architecture** (ADR 0001 already refers to the local-first decision as "ADR 0002") |
-| 0003 | #20 — platform support matrix | — |
-| **0005** | **#22 — tech stack (written)** | **#57 — local-first architecture** |
-| **0006** | **#58 — FIT codec licensing (written)** | **#27 — stream storage** |
-| 0007 | #59 — patent posture | — |
-| 0008 | #86 — mobile client architecture | **#60 — tiles and routing** |
+| 0001 | #18 — licensing | Written |
+| **0002** | **#57 — local-first architecture** | Reserved. Already cited as "ADR 0002" by `0001-licence.md:149` and three times in `0004-privacy-and-location.md`. |
+| **0003** | **#20 — platform support matrix** | Reserved |
+| 0004 | #21 — privacy and location | Written |
+| 0005 | #22 — tech stack | Written |
+| 0006 | #58 — FIT codec licensing | Written |
+| **0007** | **#59 — patent posture** | Reserved |
+| **0008** | **#86 — mobile client architecture** | Reserved. Already cited as "ADR 0008" by `0005-tech-stack.md` (four times) and twice below. |
+| **0009** | **#19 — clean-room posture** | Reserved. Renumbered from 0002, which #57 holds. |
+| **0010** | **#60 — map tiles and routing** | Reserved. Renumbered from 0008, which #86 holds. |
+| **0011** | **#27 — stream storage** | Reserved. Renumbered from 0006, which #58 holds. |
+
+Three issues carry an acceptance criterion naming their old number — #19 (0002), #60 (0008) and #27
+(0006). **The number here wins**; each issue has been commented with its new one. Renumbering a
+written ADR would break citations in merged documents, which is the failure this table exists to
+prevent.
 
 ### Dependencies between decisions
 
