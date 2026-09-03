@@ -37,9 +37,14 @@ permissions:
 # saves nothing today; it is here so the habit predates the toolchain half of
 # #24, when a run becomes long enough for two to overlap and the stale one to
 # report against code that no longer exists.
+#
+# Pull requests only. On `main` every commit's run is a record of whether that
+# commit was green, and two merges in quick succession would otherwise cancel
+# the first -- leaving a commit on the default branch with no completed run
+# against it, which is the one place the history matters.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   rules:
@@ -130,6 +135,16 @@ jobs:
       # --frozen-lockfile: fail rather than silently resolve something the
       # committed lockfile does not describe. pnpm 11 also verifies every
       # lockfile entry against its supply-chain policies here.
+      #
+      # This step runs the install described by the *fork's* checkout on a pull
+      # request, so `pnpm-workspace.yaml`'s `allowBuilds` block is a
+      # security-relevant file: flipping an entry to `true` is what lets a
+      # dependency's install script execute here. What keeps that acceptable is
+      # already in place -- `pull_request` rather than its target-context
+      # counterpart, `permissions: contents: read`, no secrets in this job,
+      # `persist-credentials: false`, and GitHub's first-time-contributor
+      # approval gate. Read that block on every fork pull request anyway
+      # (CLAUDE.md section 8).
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 

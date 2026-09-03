@@ -19,8 +19,18 @@
 # and the ADR is the copy a person would go and read. The ADR is itself a
 # protected path, amended only by a superseding ADR.
 #
+# The same reasoning applies to the copy of each text a leaf package carries
+# under apps/ and packages/ — CLAUDE.md section 3's "belt and braces". Those are
+# not recorded in the ADR and must not be: four more digests in a protected
+# document would need a superseding ADR every time a package is added. Instead
+# each copy is required to be byte-identical to the canonical text its path
+# requires, and the canonical text is the one the ADR records. The chain holds
+# without the ADR knowing how many packages exist.
+#
 # Rule:
-#   LIC005  a recorded licence digest does not reproduce, or is not recorded
+#   LIC005  a recorded licence digest does not reproduce, or is not recorded,
+#           or a per-package LICENSE copy is not byte-identical to the canonical
+#           text its path requires
 #
 # Usage: scripts/check-licence-hashes.sh [ROOT]   (ROOT defaults to the repo root)
 # Exit:  0 every required digest is recorded and reproduces, 1 otherwise.
@@ -87,11 +97,41 @@ for required in ${REQUIRED_PATHS}; do
   esac
 done
 
+# --- The per-package copies ---------------------------------------------------
+#
+# Every leaf package carries its own LICENSE (rule LIC004 in
+# check-repo-rules.sh requires the file to exist; this requires it to say the
+# right thing). A copy that has drifted is the same licensing incident as an
+# edit to the canonical text, and it is even easier to miss: nobody re-reads the
+# fourth copy of the Apache licence.
+copies=0
+
+check_copies() {
+  local dir="$1" canonical_rel="$2" canonical="${ROOT}/$2" want got copy
+  [ -d "${dir}" ] || return 0
+  # A canonical text that is missing or unverifiable was already reported above;
+  # comparing against it here would only add noise.
+  [ -f "${canonical}" ] || return 0
+  want="$(digest_of "${canonical}")"
+  while IFS= read -r copy; do
+    [ -n "${copy}" ] || continue
+    copies=$((copies + 1))
+    got="$(digest_of "${copy}")"
+    if [ "${got}" != "${want}" ]; then
+      report "${copy#"${ROOT}"/}: not byte-identical to ${canonical_rel} (that text digests to ${want}, this one to ${got})"
+    fi
+  done < <(find "${dir}" -name node_modules -prune -o -type f \
+    \( -name LICENSE -o -name LICENSE.txt \) -print)
+}
+
+check_copies "${ROOT}/packages" "LICENSES/Apache-2.0.txt"
+check_copies "${ROOT}/apps" "LICENSE"
+
 if [ "${findings}" -gt 0 ]; then
   printf '\n%s licence-integrity violation(s). See docs/adr/0001-licence.md and CLAUDE.md "Protected paths".\n' \
     "${findings}" >&2
   exit 1
 fi
 
-printf 'check-licence-hashes: %s recorded digest(s) reproduce (%s)\n' \
-  "$(printf '%s\n' "${records}" | grep -c . )" "${ROOT}"
+printf 'check-licence-hashes: %s recorded digest(s) reproduce, %s per-package copy(ies) match (%s)\n' \
+  "$(printf '%s\n' "${records}" | grep -c . )" "${copies}" "${ROOT}"

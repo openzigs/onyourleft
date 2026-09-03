@@ -138,6 +138,62 @@ write_source 'packages/domain/src/units.ts' \
 assert_violation "a read under packages/ is rejected, not only one under apps/" \
   "packages/domain/src/units.ts"
 
+# The destructured read. Review of PR #101 found this spelling escaped the
+# checker entirely: `check-env-example: clean`, exit 0, on a file that reads an
+# undocumented key. It is the vacuous pass this suite's header names, arriving
+# through the one form nobody thought to grep for.
+new_fixture
+write_source 'apps/web/src/config.ts' \
+  'const { OYL_UNDOCUMENTED_API_KEY } = import.meta.env;' \
+  'export const k = OYL_UNDOCUMENTED_API_KEY;'
+assert_violation "a destructured import.meta.env read is rejected" \
+  "reads OYL_UNDOCUMENTED_API_KEY"
+
+new_fixture
+write_source 'apps/web/src/config.ts' \
+  'const { LOG_LEVEL } = process.env;' \
+  'export const level = LOG_LEVEL;'
+assert_violation "a destructured process.env read is rejected" \
+  "reads LOG_LEVEL"
+
+# A rename binds a different local name, and a default gives the read a value on
+# every machine -- which is precisely how an undocumented variable survives to
+# production looking like it works. Both must report the name in .env.example's
+# vocabulary, not the local one.
+new_fixture
+write_source 'apps/web/src/config.ts' \
+  "const { SIGNING_KEY: key, LOG_LEVEL = 'info' } = process.env;" \
+  'export const k = key + LOG_LEVEL;'
+assert_violation "a renamed destructured read reports the template's name, not the local one" \
+  "reads SIGNING_KEY"
+
+new_fixture
+write_env 'OYL_API_KEY=placeholder'
+write_source 'apps/web/src/config.ts' \
+  'const { OYL_API_KEY } = import.meta.env;' \
+  'export const k = OYL_API_KEY;'
+assert_clean "a documented destructured read passes"
+
+# The root's own toolchain files are outside both package trees. Scanning only
+# apps/ and packages/ left vitest.config.ts and eslint.config.js free to read
+# anything.
+new_fixture
+write_source 'vitest.config.ts' \
+  'export default { define: { k: process.env.OYL_ROOT_ONLY } };'
+assert_violation "a read in a root-level toolchain file is rejected" \
+  "vitest.config.ts: reads OYL_ROOT_ONLY"
+
+# A known limit, pinned rather than endorsed: the destructuring pattern is
+# line-oriented, so a binding list split across lines is not seen. Recorded as a
+# case so the next reader learns it here rather than from a leaked variable.
+new_fixture
+write_source 'apps/web/src/config.ts' \
+  'const {' \
+  '  OYL_SPLIT_OVER_LINES,' \
+  '} = import.meta.env;' \
+  'export const k = OYL_SPLIT_OVER_LINES;'
+assert_clean "KNOWN LIMIT: a multi-line destructuring is not matched"
+
 # --- The ways a template silently stops documenting anything ------------------
 
 new_fixture

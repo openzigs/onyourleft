@@ -157,6 +157,52 @@ rm "${fixture_root}/docs/adr/0001-licence.md"
 assert_violation "a missing ADR 0001 is rejected" \
   "docs/adr/0001-licence.md: not found"
 
+# --- The per-package copies of those texts ------------------------------------
+#
+# LIC004 requires every leaf package to carry its own LICENSE; these cases
+# require it to carry the right one. A drifted copy is the same licensing
+# incident as an edited canonical text and is easier to miss, because nobody
+# re-reads the fourth copy of the Apache licence.
+
+new_fixture
+mkdir -p "${fixture_root}/packages/domain" "${fixture_root}/apps/web"
+cp "${fixture_root}/LICENSES/Apache-2.0.txt" "${fixture_root}/packages/domain/LICENSE"
+cp "${fixture_root}/LICENSE" "${fixture_root}/apps/web/LICENSE"
+assert_clean "byte-identical per-package copies pass"
+
+new_fixture
+mkdir -p "${fixture_root}/packages/domain"
+cp "${fixture_root}/LICENSES/Apache-2.0.txt" "${fixture_root}/packages/domain/LICENSE"
+printf 'with a field-of-use restriction we added ourselves\n' \
+  >> "${fixture_root}/packages/domain/LICENSE"
+assert_violation "a drifted packages/ LICENSE copy is rejected" \
+  "packages/domain/LICENSE: not byte-identical to LICENSES/Apache-2.0.txt"
+
+# The wrong canonical text, not a mangled one: an Apache leaf package carrying
+# the AGPL text is well-formed, plausible on a hurried copy-paste, and inverts
+# the licence boundary ADR 0001 exists to hold.
+new_fixture
+mkdir -p "${fixture_root}/packages/domain"
+cp "${fixture_root}/LICENSE" "${fixture_root}/packages/domain/LICENSE"
+assert_violation "a packages/ leaf carrying the AGPL text is rejected" \
+  "packages/domain/LICENSE: not byte-identical to LICENSES/Apache-2.0.txt"
+
+# Both trees, not only the first one walked.
+new_fixture
+mkdir -p "${fixture_root}/apps/web"
+cp "${fixture_root}/LICENSES/Apache-2.0.txt" "${fixture_root}/apps/web/LICENSE"
+assert_violation "an apps/ leaf carrying the Apache text is rejected" \
+  "apps/web/LICENSE: not byte-identical to LICENSE"
+
+# node_modules holds thousands of third-party LICENSE files, none of which this
+# repository's boundary has anything to say about. Walking into it would fail
+# every clone that has run an install.
+new_fixture
+mkdir -p "${fixture_root}/packages/domain/node_modules/left-pad"
+cp "${fixture_root}/LICENSES/Apache-2.0.txt" "${fixture_root}/packages/domain/LICENSE"
+printf 'MIT License\n' > "${fixture_root}/packages/domain/node_modules/left-pad/LICENSE"
+assert_clean "a dependency's own LICENSE under node_modules is not compared"
+
 # --- The sha256sum fallback ---------------------------------------------------
 #
 # Review of PR #100 found this branch was a surviving mutant: deleting the whole

@@ -18,10 +18,18 @@
  *      a layering one, because AGPL code cannot be combined into an Apache-2.0
  *      work.
  *   3. `no-restricted-imports` / `no-restricted-globals` in `packages/domain` —
- *      "no platform API at all". `packages/domain/tsconfig.json` already makes
- *      `document` and `process` type errors by narrowing `lib` and `types`;
- *      this catches the module specifiers a `lib` narrowing cannot see.
+ *      "no platform API at all". `packages/domain/tsconfig.json` narrows `lib`
+ *      to ES2024 and empties `types`, which is a closure no denylist can match:
+ *      every name and every module outside the ES library becomes a compile
+ *      error. But that closure is conditional — one `.d.ts` with a
+ *      `/// <reference types="node" />` anywhere in the package's program
+ *      reopens it, and until #23's review `vitest.config.ts` did exactly that,
+ *      so `fetch` and `process` typechecked cleanly inside the package that
+ *      forbids them. These rules are the half that does not depend on that
+ *      condition holding. Keep both; check both with a probe file.
  */
+
+import { builtinModules } from 'node:module';
 
 import js from '@eslint/js';
 import boundaries from 'eslint-plugin-boundaries';
@@ -40,10 +48,32 @@ const spdxHeader = (content) => ({
 });
 
 /**
- * Module specifiers `packages/domain` may not name. The DOM and Node globals are
- * already unreachable there through `tsconfig.json`; what remains reachable is an
- * `import`, because a module specifier is resolved before `lib` has anything to
- * say about it.
+ * Every Node builtin, in its bare spelling and every subpath — `events`,
+ * `stream/promises`, `util` and the ~40 others — derived from the running
+ * Node's own `builtinModules` rather than typed out.
+ *
+ * Derived, not enumerated, deliberately. A hand-written sample of the list is
+ * indistinguishable from the complete list until someone imports the one that
+ * was left off, and a partial guard behind a doc that says "no Node globals"
+ * is worse than no guard: it reads as a solved problem. Names that already
+ * carry the `node:` prefix in that array (`node:test`, `node:sqlite`) are
+ * dropped here because the `node:*` group below covers every prefixed
+ * spelling, including builtins added by a future Node.
+ */
+const NODE_BUILTIN_SPECIFIERS = [
+  ...new Set(
+    builtinModules
+      .filter((name) => !name.startsWith('node:'))
+      .flatMap((name) => [name, `${name}/*`]),
+  ),
+];
+
+/**
+ * Module specifiers `packages/domain` may not name. The DOM, Node and network
+ * globals are unreachable there through `tsconfig.json`; what remains reachable
+ * is an `import`, because a module specifier is resolved before `lib` has
+ * anything to say about it — and because an explicit `import … from 'events'`
+ * resolves through the workspace root's @types/node whatever `types: []` says.
  */
 const PLATFORM_IMPORT_PATTERNS = [
   {
@@ -52,18 +82,7 @@ const PLATFORM_IMPORT_PATTERNS = [
       'packages/domain depends on no platform API at all — the same code signs a record on a device and verifies it on an instance (docs/architecture.md).',
   },
   {
-    group: [
-      'fs',
-      'fs/*',
-      'path',
-      'os',
-      'crypto',
-      'http',
-      'https',
-      'net',
-      'stream',
-      'child_process',
-    ],
+    group: NODE_BUILTIN_SPECIFIERS,
     message:
       'packages/domain depends on no platform API at all. A Node builtin here means this package can no longer run in a browser.',
   },
@@ -72,6 +91,46 @@ const PLATFORM_IMPORT_PATTERNS = [
     message:
       'packages/domain is rendering-, storage- and framework-free. Rendering belongs in apps/web; persistence belongs in packages/store.',
   },
+];
+
+/**
+ * Globals `packages/domain` may not name.
+ *
+ * `packages/domain/tsconfig.json` is the closure here — `lib: ["ES2024"]` with
+ * `types: []` makes *any* name outside the ES library a compile error, which is
+ * a guarantee no denylist can offer. This list is the fast duplicate: it fires
+ * in the editor on keystroke and in `pnpm run lint` seconds before a typecheck
+ * finishes, with a message that says why rather than "Cannot find name".
+ * Grouped by what each name would drag in.
+ */
+const PLATFORM_GLOBALS = [
+  // DOM and browser storage.
+  'window',
+  'document',
+  'navigator',
+  'location',
+  'history',
+  'localStorage',
+  'sessionStorage',
+  'indexedDB',
+  'caches',
+  // Node.
+  'process',
+  'Buffer',
+  '__dirname',
+  '__filename',
+  'global',
+  'require',
+  // Network I/O. `fetch` is the one that matters most: it is a global in both
+  // Node 24 and every browser, so it is the shortest path from "pure domain
+  // package" to an outbound request.
+  'fetch',
+  'XMLHttpRequest',
+  'WebSocket',
+  'EventSource',
+  'Request',
+  'Response',
+  'Headers',
 ];
 
 export default tseslint.config(
@@ -116,7 +175,7 @@ export default tseslint.config(
 
   // --- Package boundaries ----------------------------------------------------
   {
-    files: ['apps/**/*.{ts,tsx}', 'packages/**/*.ts'],
+    files: ['apps/**/*.{ts,tsx}', 'packages/**/*.{ts,tsx}'],
     plugins: { boundaries },
     settings: {
       'boundaries/elements': [
@@ -166,21 +225,17 @@ export default tseslint.config(
   },
 
   // --- packages/domain depends on no platform API at all ---------------------
+  // `.tsx` is included even though a package that renders is already a design
+  // error: the header block above already covers `packages/**/*.{ts,tsx}`, and
+  // two rules that disagree about which files they cover is exactly the kind of
+  // gap nobody notices at the moment it starts to matter.
   {
-    files: ['packages/domain/**/*.ts'],
+    files: ['packages/domain/**/*.{ts,tsx}'],
     rules: {
       '@typescript-eslint/no-restricted-imports': ['error', { patterns: PLATFORM_IMPORT_PATTERNS }],
       'no-restricted-globals': [
         'error',
-        ...[
-          'window',
-          'document',
-          'navigator',
-          'localStorage',
-          'process',
-          'Buffer',
-          '__dirname',
-        ].map((name) => ({
+        ...PLATFORM_GLOBALS.map((name) => ({
           name,
           message:
             'packages/domain depends on no platform API at all (ADR 0005 decision D, docs/architecture.md).',

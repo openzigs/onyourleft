@@ -85,6 +85,15 @@ What this means in practice:
 - A **GPL or AGPL dependency anywhere under `packages/`** fails CI. If a package needs one, the code
   moves to `apps/` or the dependency is replaced. There is no third option and no exemption.
 - **Permissive** dependencies (MIT, BSD-2/3, Apache-2.0, ISC) are fine anywhere.
+- **Weak, file-level copyleft (MPL-2.0, EPL) and permissive licences this list does not name** —
+  `BlueOak-1.0.0`, `0BSD` — are **not ruled on yet**, and three are already in the tree as build-time
+  devDependencies: `lightningcss` (MPL-2.0) and `minimatch` (BlueOak-1.0.0). Nothing is violated —
+  neither is GPL or AGPL, and neither is linked into a distributed artefact. Note that `lightningcss`
+  reaches **`packages/domain`** through Vitest, not only `apps/web`: an allowlist written against
+  "the MPL one is under `apps/`" would scope itself to the wrong tree and pass vacuously. The
+  per-package dependency-licence allowlist in
+  [#24](https://github.com/openzigs/onyourleft/issues/24) decides these explicitly. Verify with
+  `pnpm licenses list --json` rather than from this paragraph, which ages.
 - Anything **non-OSI** — BUSL, SSPL, CC-BY-NC, "commercial use requires a licence" — fails
   everywhere and needs an ADR before it is even discussed.
 - Where a change lands is therefore a **licence question answered before you write the code**, not a
@@ -114,7 +123,7 @@ downstream issue's acceptance criteria depend on these.
 # Exits 0 clean; exits 1 listing each violation by rule id.
 bash scripts/check-repo-rules.sh
 
-# Test the checker itself. Fixture-driven; 27 cases.
+# Test the checker itself. Fixture-driven; 28 cases.
 bash scripts/check-repo-rules.test.sh
 
 # Verify the licence texts are byte-identical to the canonical ones, by
@@ -123,7 +132,7 @@ bash scripts/check-repo-rules.test.sh
 # a required digest that is missing fails — checking nothing is not a pass.
 bash scripts/check-licence-hashes.sh
 
-# Test that checker. Fixture-driven; 11 cases.
+# Test that checker. Fixture-driven; 16 cases.
 bash scripts/check-licence-hashes.test.sh
 
 # Every environment variable the code reads is listed in .env.example.
@@ -131,7 +140,7 @@ bash scripts/check-licence-hashes.test.sh
 # a template that is not there documents nothing.
 bash scripts/check-env-example.sh
 
-# Test that checker. Fixture-driven; 15 cases.
+# Test that checker. Fixture-driven; 21 cases.
 bash scripts/check-env-example.test.sh
 
 # The same two digests, printed for reading by eye.
@@ -213,7 +222,7 @@ npm view typescript-eslint peerDependencies.typescript
 | `LIC001` | a source file under `packages/` is missing an SPDX header, or declares one other than `Apache-2.0` |
 | `LIC002` | a source file under `apps/` is missing an SPDX header, **or** declares one other than `AGPL-3.0-or-later` |
 | `LIC003` | a package manifest declares a licence its path does not permit |
-| `LIC004` | a package under `packages/` has no `LICENSE` file of its own |
+| `LIC004` | a package under `packages/` **or `apps/`** has no `LICENSE` file of its own |
 | `SCOPE001` | ANT+ is referenced anywhere in a source tree (see §6) |
 | `WF001` | `pull_request_target` appears in a `.github/workflows/` file (see §8) |
 | `ADR001` | two ADRs share a number |
@@ -224,7 +233,7 @@ reading paths:
 
 | Rule | Fails when |
 |---|---|
-| `LIC005` | a licence text no longer matches the SHA-256 digest ADR 0001 records for it, **or** ADR 0001 no longer records a digest for one of them |
+| `LIC005` | a licence text no longer matches the SHA-256 digest ADR 0001 records for it, **or** ADR 0001 no longer records a digest for one of them, **or** a leaf package's own `LICENSE` is not byte-identical to the canonical text its path requires |
 
 `scripts/check-env-example.sh` enforces one more, separately because it reads code rather than paths:
 
@@ -316,14 +325,25 @@ would otherwise be documented and unenforced, which is the gap this project keep
 |---|---|
 | `headers/header-format` | a `.ts`/`.tsx` file whose first line is not the SPDX identifier its directory requires. Duplicates `LIC001`/`LIC002` on purpose: the script covers file types ESLint never parses and runs with no toolchain, the lint rule runs in the editor |
 | `boundaries/dependencies` | an import from `packages/*` into `apps/*`, in either the relative (`../../../apps/web/src/...`) or the workspace (`@onyourleft/web`) spelling. Dependencies point one way |
-| `@typescript-eslint/no-restricted-imports` in `packages/domain` | naming a Node builtin, `react`, `react-dom`, `vite` or `dexie` |
-| `no-restricted-globals` in `packages/domain` | naming `window`, `document`, `navigator`, `localStorage`, `process`, `Buffer` or `__dirname` |
+| `@typescript-eslint/no-restricted-imports` in `packages/domain` | naming **any** Node builtin — the list is derived from `builtinModules`, not typed out, so `events`, `util` and `stream/promises` fail exactly as `node:fs` does — or `react`, `react-dom`, `vite` or `dexie` |
+| `no-restricted-globals` in `packages/domain` | naming a DOM global (`window`, `document`, `navigator`, `location`, `history`, `localStorage`, `sessionStorage`, `indexedDB`, `caches`), a Node global (`process`, `Buffer`, `__dirname`, `__filename`, `global`, `require`) or a network global (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Request`, `Response`, `Headers`). This one **is** a named list; the closure is the typechecker below |
 
-`packages/domain/tsconfig.json` narrows `lib` to `ES2024` and sets `types: []`, which makes the
-*globals* compile errors as well. **It does not make the imports compile errors** — `types: []`
-suppresses automatic inclusion of `@types` packages, but an explicit `import … from 'node:fs'` still
-resolves through the workspace root's `@types/node`. That is why both mechanisms are configured and
-why removing either leaves a hole.
+`packages/domain/tsconfig.json` narrows `lib` to `ES2024` and sets `types: []`. That is the closure
+the lint list cannot be: with no ES library entry and no `@types` package in scope, *any* name from
+outside ES2024 is a compile error, `fetch` and `WebSocket` included, and so is `import … from
+'events'` (`Cannot find name 'events'`). The lint rules are the fast duplicate — they fire in the
+editor with a message that says why, seconds before a typecheck finishes — and they are the half that
+survives the paragraph below.
+
+> ⚠️ **That closure is conditional, and it was silently broken until #23's review.** `types: []`
+> suppresses the automatic `@types` lookup; it does **not** stop a `/// <reference types="node" />`
+> inside a `.d.ts` the package imports. `packages/domain/vitest.config.ts` used to
+> `import { defineConfig } from 'vitest/config'`, which pulled Vite's declarations — and through them
+> all of `@types/node` — into the same program as `src/`, so `process`, `Buffer` and `fetch` all
+> typechecked cleanly inside the package that forbids them. That file now **imports nothing** and
+> exports a plain object, and says so at the top. **Any import added to a file inside
+> `packages/domain`'s tsconfig program can reopen this**, which is why the ESLint rules are not
+> redundant with it: check both gates with a probe file, never one.
 
 When `packages/sensors` and the routing work arrive, their boundaries (#39, #40, #70) go in the same
 file, as more `boundaries/dependencies` policies.
@@ -508,6 +528,14 @@ each is answered `true` or `false`. Answer it rather than deleting the entry: an
 arbitrary code with your privileges before any lint or test gate sees the package. The one entry
 today is `unrs-resolver`, answered `false` — it ships prebuilt native bindings as platform optional
 dependencies, so the script has nothing to do.
+
+**That block is therefore a security-relevant file on every fork pull request.** CI installs from the
+*fork's* `pnpm-workspace.yaml`, so flipping an entry to `true` and adding a dependency is what makes
+that dependency's install script run on the runner. The controls that keep it acceptable are all
+already in place — `pull_request` rather than its target-context counterpart, `permissions: contents:
+read`, no secrets in the job, `persist-credentials: false`, and the first-time-contributor approval
+gate — and the residual exposure is runner CPU and outbound network, which is inherent to running an
+install in CI at all. Read the block anyway when reviewing a fork's pull request.
 
 **CI runners: use only the standard labels** — `ubuntu-latest`, `windows-latest`, `macos-latest`.
 Standard GitHub-hosted runners are free and unlimited on public repositories, and this repository is

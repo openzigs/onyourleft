@@ -122,15 +122,23 @@ A boundary maintained by review discipline will not survive a program this size.
 | Rule | Fails when |
 |---|---|
 | `boundaries/dependencies` | anything under `packages/*` imports anything under `apps/*`, in either the relative or the `@onyourleft/…` workspace spelling |
-| `@typescript-eslint/no-restricted-imports` | `packages/domain` names a Node builtin, `react`, `react-dom`, `vite` or `dexie` |
-| `no-restricted-globals` | `packages/domain` names `window`, `document`, `navigator`, `localStorage`, `process`, `Buffer` or `__dirname` |
+| `@typescript-eslint/no-restricted-imports` | `packages/domain` names **any** Node builtin — the pattern list is derived from `builtinModules` rather than typed out, so `events`, `util` and `stream/promises` fail exactly as `node:fs` does — or `react`, `react-dom`, `vite` or `dexie` |
+| `no-restricted-globals` | `packages/domain` names a DOM global (`window`, `document`, `navigator`, `location`, `history`, `localStorage`, `sessionStorage`, `indexedDB`, `caches`), a Node global (`process`, `Buffer`, `__dirname`, `__filename`, `global`, `require`) or a network global (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Request`, `Response`, `Headers`). A named list, not a closure — the closure is the typechecker |
 | `headers/header-format` | a `.ts`/`.tsx` file's first line is not the SPDX identifier its directory requires |
 
-`packages/domain/tsconfig.json` backs the platform rules up by narrowing `lib` to `ES2024` and
-setting `types: []`, which turns the globals into compile errors as well. It does **not** turn the
-imports into compile errors — `types: []` suppresses automatic `@types` inclusion, while an explicit
-`import … from 'node:fs'` still resolves through the workspace root's `@types/node`. Both mechanisms
-are needed; neither is redundant.
+`packages/domain/tsconfig.json` is what makes the platform rules a *closure* rather than a denylist:
+`lib: ["ES2024"]` with `types: []` leaves no ES-external name and no `@types` package in scope, so
+`fetch`, `WebSocket`, `process` and `import … from 'events'` are all compile errors, not just the
+ones somebody remembered to list.
+
+That closure is conditional and it was broken until this section was written. `types: []` suppresses
+the automatic `@types` lookup but does not stop a `/// <reference types="node" />` inside a `.d.ts`
+the package imports, and `packages/domain/vitest.config.ts` used to import `vitest/config` — which
+pulled Vite's declarations, and through them `@types/node`, into the same TypeScript program as
+`src/`. Everything above typechecked cleanly inside the package that forbids it. That config file now
+imports nothing. **Any import added to a file in this package's program can reopen it**, which is why
+the ESLint rules above are not redundant with the tsconfig, and why a row in this table is checked by
+writing the file it forbids and running both gates — never by reading the row.
 
 **Still to be enforced**, each by the issue that introduces the code it constrains:
 
@@ -144,8 +152,8 @@ And these are enforced with no toolchain at all, by `scripts/check-repo-rules.sh
 |---|---|
 | `LIC001` / `LIC002` | a source file's SPDX header does not match the licence its directory requires |
 | `LIC003` | a package manifest declares a licence its path does not permit |
-| `LIC004` | a package under `packages/` has no `LICENSE` file of its own |
-| `LIC005` | a licence text no longer matches the digest ADR 0001 records for it, or ADR 0001 no longer records one |
+| `LIC004` | a package under `packages/` or `apps/` has no `LICENSE` file of its own |
+| `LIC005` | a licence text no longer matches the digest ADR 0001 records for it, or ADR 0001 no longer records one, or a leaf package's own `LICENSE` is not byte-identical to the canonical text its path requires |
 | `SCOPE001` | ANT+ is referenced anywhere in a source tree |
 | `WF001` | `pull_request_target` appears in a workflow — it receives secrets and bypasses the fork-approval gate |
 | `ADR001` / `ADR002` | two ADRs share a number, or a filename is not `NNNN-kebab-case.md` |
