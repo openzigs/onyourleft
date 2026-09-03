@@ -123,7 +123,7 @@ bash scripts/check-repo-rules.test.sh
 # a required digest that is missing fails — checking nothing is not a pass.
 bash scripts/check-licence-hashes.sh
 
-# Test that checker. Fixture-driven; 9 cases.
+# Test that checker. Fixture-driven; 11 cases.
 bash scripts/check-licence-hashes.test.sh
 
 # Every environment variable the code reads is listed in .env.example.
@@ -149,7 +149,10 @@ nvm install && nvm use
 
 # pnpm 11, from the `packageManager` field in package.json rather than a global
 # install, so the version is the one the lockfile was written by. Corepack ships
-# with Node.
+# with Node. The first `pnpm` command after this downloads that exact version,
+# and in an interactive terminal corepack asks before it does — answer yes, or
+# set COREPACK_ENABLE_DOWNLOAD_PROMPT=0. CI sets neither because corepack does
+# not prompt when CI=true.
 corepack enable pnpm
 
 # Install. --frozen-lockfile is what CI runs: it fails rather than quietly
