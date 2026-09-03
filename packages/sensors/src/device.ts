@@ -66,7 +66,12 @@ export function deviceId(value: string): DeviceId {
   if (value.trim() === '') {
     throw new SensorError('invalid-device-id', 'a device id must not be empty or blank');
   }
-  return value as DeviceId;
+  // Trimmed, not the raw string. Validating with `.trim()` while returning the
+  // original made `deviceId(' abc')` and `deviceId('abc')` two distinct ids that
+  // `sameDevice` would never match — a stray newline out of storage becomes a
+  // device this program cannot recognise. The doc above already reasons about
+  // aliasing; normalising here is what makes that reasoning true.
+  return value.trim() as DeviceId;
 }
 
 /**

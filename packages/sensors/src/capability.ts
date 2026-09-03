@@ -85,17 +85,50 @@ export type SensorCapability = MeasurementCapability | ControlCapability;
  * restated list is the one that goes stale. The order is the order a rider
  * reads them, not an alphabetical one.
  */
-export const MEASUREMENT_CAPABILITIES: readonly MeasurementCapability[] = [
-  'power',
-  'cadence',
-  'heart-rate',
-  'speed',
-];
+const MEASUREMENT_CAPABILITY_ORDER = {
+  power: 0,
+  cadence: 1,
+  'heart-rate': 2,
+  speed: 3,
+} as const satisfies Record<MeasurementCapability, number>;
+
+/**
+ * Every measurement capability, in a stable order.
+ *
+ * Exported so a caller can iterate them without restating the union — a
+ * restated list is the one that goes stale.
+ *
+ * ## Why this is derived rather than written out
+ *
+ * Review of PR #108 falsified the claim this file used to make. The list was a
+ * literal annotated `readonly MeasurementCapability[]`, which checks only that
+ * every ENTRY is in the union — it says nothing about every union member being
+ * an entry. Adding `| 'temperature'` to the union and touching nothing else left
+ * typecheck clean and 233 tests green, with the list silently stale, so a
+ * pairing UI iterating it would never have offered the new capability.
+ *
+ * `Record<MeasurementCapability, number>` checks the other direction: it cannot
+ * be satisfied unless every member of the union has a key. Deriving the array
+ * from those keys means there is one source of truth and the two cannot drift.
+ * The explicit ordinals fix the order a rider reads them in, rather than relying
+ * on key-insertion order.
+ */
+export const MEASUREMENT_CAPABILITIES: readonly MeasurementCapability[] = (
+  Object.keys(MEASUREMENT_CAPABILITY_ORDER) as MeasurementCapability[]
+)
+  .slice()
+  .sort((a, b) => MEASUREMENT_CAPABILITY_ORDER[a] - MEASUREMENT_CAPABILITY_ORDER[b]);
+
+const CONTROL_CAPABILITY_ORDER = {
+  'trainer-control': 0,
+} as const satisfies Record<ControlCapability, number>;
 
 /** Every capability, measurement and control alike, in a stable order. */
 export const SENSOR_CAPABILITIES: readonly SensorCapability[] = [
   ...MEASUREMENT_CAPABILITIES,
-  'trainer-control',
+  ...(Object.keys(CONTROL_CAPABILITY_ORDER) as ControlCapability[])
+    .slice()
+    .sort((a, b) => CONTROL_CAPABILITY_ORDER[a] - CONTROL_CAPABILITY_ORDER[b]),
 ];
 
 /**
@@ -108,5 +141,12 @@ export const SENSOR_CAPABILITIES: readonly SensorCapability[] = [
 export function isMeasurementCapability(
   capability: SensorCapability,
 ): capability is MeasurementCapability {
-  return capability !== 'trainer-control';
+  // Membership, not `!== 'trainer-control'`. The negation was correct only while
+  // ControlCapability had exactly one member: review of PR #108 showed that
+  // adding `| 'trainer-firmware'` left typecheck clean, 233 tests green, and
+  // `isMeasurementCapability('trainer-firmware')` returning TRUE — handing a
+  // caller a control capability typed as a measurement, which is precisely what
+  // this guard exists to prevent. Deriving it from the list cannot drift,
+  // because the list is now exhaustive over the union by compile-time check.
+  return capability in MEASUREMENT_CAPABILITY_ORDER;
 }

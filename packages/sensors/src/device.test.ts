@@ -38,6 +38,18 @@ describe('labelling a device id', () => {
     expect(deviceId('C4:2C:03:1A:9B:7E')).toBe('C4:2C:03:1A:9B:7E');
   });
 
+  // Regression from the PR #108 review. `deviceId` validated with `.trim()` but
+  // returned the raw string, so ' abc' and 'abc' were two distinct ids that
+  // `sameDevice` would never match — a stray newline out of storage becomes a
+  // device this program cannot recognise. The fix was one call; this is the test
+  // that stops it being reverted, because removing the trim left every test green.
+  it('normalises surrounding whitespace, so a stored id survives a round trip', () => {
+    expect(deviceId('  C4:2C:03:1A:9B:7E  ')).toBe('C4:2C:03:1A:9B:7E');
+    expect(deviceId('C4:2C:03:1A:9B:7E\n')).toBe('C4:2C:03:1A:9B:7E');
+    // The property that matters: padded and unpadded forms are the SAME id.
+    expect(deviceId(' abc ')).toBe(deviceId('abc'));
+  });
+
   it('rejects an empty or blank id, because a blank id aliases every device', () => {
     expect(() => deviceId('')).toThrow(/must not be empty/);
     expect(() => deviceId('   ')).toThrow(/must not be empty/);

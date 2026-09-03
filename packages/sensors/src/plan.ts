@@ -134,9 +134,14 @@ export function planCapabilitySources(
     let bestCoverage: readonly SensorCapability[] = [];
 
     for (const device of devices) {
-      if (connections.includes(device)) {
-        continue;
-      }
+      // No `connections.includes(device)` skip here. It read as a guard but could
+      // never change the outcome, and deleting it left all 233 tests green
+      // (PR #108 review): a device already chosen has had every capability it
+      // covers spliced out of `outstanding`, so its coverage is empty, and
+      // `0 > bestCoverage.length` is false from the first iteration because
+      // `bestCoverage` starts empty. It executed on every pass — which is why
+      // branch coverage still read 100% — while deciding nothing. A line that
+      // cannot fail a test is not a guard, it is decoration that reads like one.
       const coverage = outstanding.filter((capability) => deviceProvides(device, capability));
       // Strictly greater, so a tie goes to the earlier device and the result is
       // deterministic for a given input order.
