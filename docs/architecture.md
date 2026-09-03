@@ -6,9 +6,14 @@ that produced them.
 The reasoning lives in the ADRs — this file describes **what** the structure is and **where** each
 line falls. [`docs/adr/0005-tech-stack.md`](adr/0005-tech-stack.md) says why.
 
-> **Status: none of `apps/` or `packages/` exists yet.** The layout is fixed here because roughly
-> thirty sub-issues reference it by name, and moving it later means touching most of them.
-> [#23](https://github.com/openzigs/onyourleft/issues/23) creates it.
+> **Status: `apps/web` and `packages/domain` exist**, created by
+> [#23](https://github.com/openzigs/onyourleft/issues/23) with the pnpm workspace, the toolchain, a
+> committed lockfile and the lint-enforced boundaries. The other four packages and `apps/mobile` do
+> not; each is created by the issue that owns its content, using `packages/domain` as the template.
+> The layout is fixed here because roughly thirty sub-issues reference it by name, and moving it
+> later means touching most of them. The workspace globs (`apps/*`, `packages/*`) and every rule
+> below are written against these paths already, so a package arrives inside the rules rather than
+> beside them.
 
 ## The shape of the product
 
@@ -110,28 +115,51 @@ belong to the instance, and none exists in Phase 1.
 
 ### Boundaries that are enforced, not merely documented
 
-A boundary maintained by review discipline will not survive a program this size. These are
-lint-enforced by [#23](https://github.com/openzigs/onyourleft/issues/23):
+A boundary maintained by review discipline will not survive a program this size.
 
-- No platform or network type in `packages/domain` (#25, #45, #66, #75).
+**Enforced by `eslint.config.js`** since [#23](https://github.com/openzigs/onyourleft/issues/23):
+
+| Rule | Fails when |
+|---|---|
+| `boundaries/dependencies` | anything under `packages/*` imports anything under `apps/*`, in either the relative or the `@onyourleft/…` workspace spelling |
+| `@typescript-eslint/no-restricted-imports` | `packages/domain` names **any** Node builtin — the pattern list is derived from `builtinModules` rather than typed out, so `events`, `util` and `stream/promises` fail exactly as `node:fs` does — or `react`, `react-dom`, `vite` or `dexie` |
+| `no-restricted-globals` | `packages/domain` names a DOM global (`window`, `document`, `navigator`, `location`, `history`, `localStorage`, `sessionStorage`, `indexedDB`, `caches`), a Node global (`process`, `Buffer`, `__dirname`, `__filename`, `global`, `require`) or a network global (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Request`, `Response`, `Headers`). A named list, not a closure — the closure is the typechecker |
+| `headers/header-format` | a `.ts`/`.tsx` file's first line is not the SPDX identifier its directory requires |
+
+`packages/domain/tsconfig.json` is what makes the platform rules a *closure* rather than a denylist:
+`lib: ["ES2024"]` with `types: []` leaves no ES-external name and no `@types` package in scope, so
+`fetch`, `WebSocket`, `process` and `import … from 'events'` are all compile errors, not just the
+ones somebody remembered to list.
+
+That closure is conditional and it was broken until this section was written. `types: []` suppresses
+the automatic `@types` lookup but does not stop a `/// <reference types="node" />` inside a `.d.ts`
+the package imports, and `packages/domain/vitest.config.ts` used to import `vitest/config` — which
+pulled Vite's declarations, and through them `@types/node`, into the same TypeScript program as
+`src/`. Everything above typechecked cleanly inside the package that forbids it. That config file now
+imports nothing. **Any import added to a file in this package's program can reopen it**, which is why
+the ESLint rules above are not redundant with the tsconfig, and why a row in this table is checked by
+writing the file it forbids and running both gates — never by reading the row.
+
+**Still to be enforced**, each by the issue that introduces the code it constrains:
+
 - No Web Bluetooth type above the transport boundary in `packages/sensors` (#39, #40).
 - No routing-engine type above the `RoutingProvider` interface (#70).
-- No import from `packages/*` into a client-only or server-only module.
 
-And these are enforced today, with no toolchain, by `scripts/check-repo-rules.sh` and
-`scripts/check-licence-hashes.sh`:
+And these are enforced with no toolchain at all, by `scripts/check-repo-rules.sh`,
+`scripts/check-licence-hashes.sh` and `scripts/check-env-example.sh`:
 
 | Rule | Fails when |
 |---|---|
 | `LIC001` / `LIC002` | a source file's SPDX header does not match the licence its directory requires |
 | `LIC003` | a package manifest declares a licence its path does not permit |
-| `LIC004` | a package under `packages/` has no `LICENSE` file of its own |
-| `LIC005` | a licence text no longer matches the digest ADR 0001 records for it, or ADR 0001 no longer records one |
+| `LIC004` | a package under `packages/` or `apps/` has no `LICENSE` file of its own |
+| `LIC005` | a licence text no longer matches the digest ADR 0001 records for it, or ADR 0001 no longer records one, or a leaf package's own `LICENSE` is not byte-identical to the canonical text its path requires |
 | `SCOPE001` | ANT+ is referenced anywhere in a source tree |
 | `WF001` | `pull_request_target` appears in a workflow — it receives secrets and bypasses the fork-approval gate |
 | `ADR001` / `ADR002` | two ADRs share a number, or a filename is not `NNNN-kebab-case.md` |
+| `ENV001` | a source file reads an environment variable `.env.example` does not list, or `.env.example` is missing |
 
-**Both run in CI**, on every pull request and every push to `main`, from
+**All of them run in CI**, on every pull request and every push to `main`, from
 [`.github/workflows/rules.yml`](../.github/workflows/rules.yml). Before that workflow existed the
 rules were checkable but unchecked — a distinction worth keeping in mind about every other row in
 this document that says "enforced".
@@ -147,14 +175,18 @@ alternatives are there.
 | Runtime | Node 24 "Krypton" (Active LTS until 2026-10-20) |
 | Package manager | pnpm 11 workspaces |
 | Web client | React 19 + Vite 8 |
-| Mobile client | Capacitor, wrapping the same web build |
-| Local data layer | IndexedDB via Dexie 4.4.5 |
+| Mobile client | Capacitor, wrapping the same web build — **not scaffolded yet**; #85 |
+| Local data layer | IndexedDB via Dexie 4.4.5 — **not installed yet**; #27 adds it |
 | Migrations | Dexie's own versioned schema; `up`/`down` pairs with a tested `down` |
 | Instance data layer | **deferred to #7** |
 | Test runner | Vitest 4.1.11 |
 | Coverage gate | **no percentage** — every new code path covered by a test proven to fail without the change |
 | Linter / formatter | ESLint 10 + typescript-eslint + Prettier 3 |
 | Real-time transport | deferred to [#16](https://github.com/openzigs/onyourleft/issues/16) |
+
+Installed as of #23: the toolchain above, React 19.2.8, React DOM 19.2.8 and Vite 8.2.2. Everything
+else in the table is a decision that no `package.json` has acted on yet. `CLAUDE.md` section 4b
+keeps that list; the commands are in section 4a.
 
 ## Decision record index
 

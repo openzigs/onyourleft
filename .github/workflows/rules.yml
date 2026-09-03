@@ -7,10 +7,15 @@
 # review", and CLAUDE.md says rule SCOPE001 "fails the build". This workflow is
 # what makes those statements true. Until it existed they were not.
 #
-# Everything here runs on a bare clone with bash and coreutils, so none of it
-# waits on the toolchain #23 introduces. The install / lint / typecheck / test /
-# coverage half of #24 is deliberately absent: CLAUDE.md section 4b says those
-# commands do not exist yet and must not be added to a workflow before #23 lands.
+# The first half of the job runs on a bare clone with bash and coreutils and
+# needs no toolchain at all. The second half is the workspace gate #23
+# established -- install, format, lint, typecheck, test and build. They share one
+# job deliberately: `main` requires a status check whose context is exactly
+# "Repository rules", so a second job would report under a different context and
+# a toolchain failure would not block a merge.
+#
+# Still not here, and owned by the second half of #24: the per-package
+# dependency-licence allowlist, and a coverage gate demonstrated to fail.
 name: Repository rules
 
 # `pull_request` runs in the fork's context with a read-only token and no access
@@ -32,9 +37,14 @@ permissions:
 # saves nothing today; it is here so the habit predates the toolchain half of
 # #24, when a run becomes long enough for two to overlap and the stale one to
 # report against code that no longer exists.
+#
+# Pull requests only. On `main` every commit's run is a record of whether that
+# commit was green, and two merges in quick succession would otherwise cancel
+# the first -- leaving a commit on the default branch with no completed run
+# against it, which is the one place the history matters.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   rules:
@@ -79,6 +89,12 @@ jobs:
       - name: Licence integrity checker tests
         run: bash scripts/check-licence-hashes.test.sh
 
+      - name: Environment template completeness (ENV001)
+        run: bash scripts/check-env-example.sh
+
+      - name: Environment template checker tests
+        run: bash scripts/check-env-example.test.sh
+
       # shellcheck is preinstalled on the standard Ubuntu runner image
       # (0.9.0 on ubuntu-24.04, which `ubuntu-latest` currently resolves to), so
       # there is nothing to install. The version is printed because the runner's
@@ -87,3 +103,68 @@ jobs:
         run: |
           shellcheck --version
           shellcheck scripts/*.sh
+
+      # --- The workspace toolchain, from here down (CLAUDE.md section 4a) ------
+
+      # Reads .nvmrc so the runner and a contributor cannot disagree about the
+      # major version. ADR 0005 pins Node 24 "Krypton"; Node 26 becomes Active
+      # LTS on 2026-10-28 and the move happens on that date, not before.
+      - name: Set up Node
+        # Pinned to a full commit SHA, not a tag. Provenance, so a reviewer can
+        # check rather than trust:
+        #   gh api repos/actions/setup-node/git/ref/tags/v7.0.0 --jq .object.sha
+        #   -> 820762786026740c76f36085b0efc47a31fe5020   (verified 2026-09-03)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      # pnpm comes from the `packageManager` field via corepack rather than from
+      # a third-party setup action, so the version is pinned by the manifest that
+      # a contributor also reads and there is one less action to trust.
+      #
+      # No dependency cache: it would mean a second action to pin and a writable
+      # cache in the dependency path of every job, to save a couple of seconds on
+      # a workspace this size. Revisit when the install is slow enough to notice.
+      - name: Enable pnpm through corepack
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          corepack enable pnpm
+          pnpm --version
+
+      # --frozen-lockfile: fail rather than silently resolve something the
+      # committed lockfile does not describe. pnpm 11 also verifies every
+      # lockfile entry against its supply-chain policies here.
+      #
+      # This step runs the install described by the *fork's* checkout on a pull
+      # request, so `pnpm-workspace.yaml`'s `allowBuilds` block is a
+      # security-relevant file: flipping an entry to `true` is what lets a
+      # dependency's install script execute here. What keeps that acceptable is
+      # already in place -- `pull_request` rather than its target-context
+      # counterpart, `permissions: contents: read`, no secrets in this job,
+      # `persist-credentials: false`, and GitHub's first-time-contributor
+      # approval gate. Read that block on every fork pull request anyway
+      # (CLAUDE.md section 8).
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Formatting
+        run: pnpm run format:check
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      # `test:coverage`, not `test`. ADR 0005 decision C sets no percentage
+      # floor and forbids inventing one -- the gate is the mutation list in the
+      # pull request body. The report is here because an untested branch is
+      # worth seeing in review, and because it costs nothing to print.
+      - name: Tests and coverage report
+        run: pnpm run test:coverage
+
+      # A green typecheck is not a green build: the bundler resolves imports the
+      # typechecker only reads types from.
+      - name: Build
+        run: pnpm run build

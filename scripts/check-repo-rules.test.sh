@@ -87,6 +87,7 @@ write_good_app() {
     > "${fixture_root}/apps/${name}/src/main.ts"
   printf '{ "name": "@onyourleft/%s", "license": "AGPL-3.0-or-later" }\n' "${name}" \
     > "${fixture_root}/apps/${name}/package.json"
+  printf 'GNU Affero General Public License v3\n' > "${fixture_root}/apps/${name}/LICENSE"
 }
 
 # --- LIC001: source under packages/ must be Apache-2.0 -----------------------
@@ -148,6 +149,15 @@ write_good_package domain
 rm "${fixture_root}/packages/domain/LICENSE"
 assert_violation "leaf package without its own LICENSE is rejected" LIC004 \
   "packages/domain: no LICENSE file"
+
+# Both trees. CLAUDE.md section 3 says "each package" carries its own LICENSE and
+# means apps/ too; until this case existed, deleting apps/web/LICENSE outright
+# failed nothing at all.
+new_fixture
+write_good_app web
+rm "${fixture_root}/apps/web/LICENSE"
+assert_violation "app without its own LICENSE is rejected" LIC004 \
+  "apps/web: no LICENSE file"
 
 # --- SCOPE001: no ANT+ anywhere in the source trees --------------------------
 

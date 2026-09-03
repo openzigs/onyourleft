@@ -1,0 +1,36 @@
+{
+  "name": "onyourleft",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "description": "A free, open alternative to Strava + Zwift for cycling — workspace root.",
+  "packageManager": "pnpm@11.18.0",
+  "engines": {
+    "node": ">=24 <25",
+    "pnpm": ">=11 <12"
+  },
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit --project tsconfig.json && pnpm --recursive run typecheck",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "build": "pnpm --recursive run build",
+    "check:repo": "bash scripts/check-repo-rules.sh && bash scripts/check-repo-rules.test.sh && bash scripts/check-licence-hashes.sh && bash scripts/check-licence-hashes.test.sh && bash scripts/check-env-example.sh && bash scripts/check-env-example.test.sh"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.13.3",
+    "@vitest/coverage-v8": "4.1.11",
+    "eslint": "10.9.1",
+    "eslint-import-resolver-typescript": "4.4.5",
+    "eslint-plugin-boundaries": "7.2.0",
+    "eslint-plugin-headers": "1.3.4",
+    "prettier": "3.9.6",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.69.0",
+    "vitest": "4.1.11"
+  }
+}

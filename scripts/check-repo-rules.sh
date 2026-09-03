@@ -18,7 +18,7 @@
 #   LIC001  every source file under packages/ declares SPDX Apache-2.0
 #   LIC002  every source file under apps/ declares SPDX AGPL-3.0-or-later
 #   LIC003  every package manifest declares the licence its path requires
-#   LIC004  every leaf package under packages/ carries its own LICENSE file
+#   LIC004  every leaf package under packages/ or apps/ carries its own LICENSE
 #   SCOPE001 no ANT+ reference in any source tree (owner decision D2)
 #   WF001   no pull_request_target trigger in .github/workflows/
 #   ADR001  no two ADRs share a number
@@ -95,16 +95,26 @@ check_manifests "${ROOT}/apps" "AGPL-3.0-or-later"
 # --- LIC004: each leaf package carries its own LICENSE ------------------------
 # ADR 0001: "A package that does not do both is AGPL by default." The path rule
 # does not replace the per-package file, it backs it up.
+#
+# Both trees, not only packages/. CLAUDE.md section 3 says "each package still
+# carries its own LICENSE file AND a matching license manifest field -- belt and
+# braces", and it says it of apps/ as well. Checking only one tree meant deleting
+# apps/web/LICENSE failed nothing.
 
-if [ -d "${ROOT}/packages" ]; then
+check_package_licences() {
+  local dir="$1" licence="$2" manifest pkgdir
+  [ -d "${dir}" ] || return 0
   while IFS= read -r manifest; do
     [ -n "${manifest}" ] || continue
     pkgdir="$(dirname "${manifest}")"
     if [ ! -f "${pkgdir}/LICENSE" ] && [ ! -f "${pkgdir}/LICENSE.txt" ]; then
-      report LIC004 "${pkgdir#"${ROOT}"/}: no LICENSE file; every Apache-2.0 leaf package carries its own"
+      report LIC004 "${pkgdir#"${ROOT}"/}: no LICENSE file; every ${licence} leaf package carries its own"
     fi
-  done < <(find "${ROOT}/packages" -name node_modules -prune -o -type f -name package.json -print)
-fi
+  done < <(find "${dir}" -name node_modules -prune -o -type f -name package.json -print)
+}
+
+check_package_licences "${ROOT}/packages" "Apache-2.0"
+check_package_licences "${ROOT}/apps" "AGPL-3.0-or-later"
 
 # --- SCOPE001: no ANT+ anywhere in a source tree ------------------------------
 # Owner decision D2. Documentation may name ANT+ to explain why it is excluded;

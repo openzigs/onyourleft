@@ -1,0 +1,18 @@
+# Build output and dependencies.
+node_modules/
+dist/
+coverage/
+pnpm-lock.yaml
+
+# Prose and legal text. CLAUDE.md section 7: "do not reformat files you did not
+# come to change". Prettier's Markdown printer rewraps every paragraph in the
+# repository, which would bury every real diff in this project's documentation,
+# and reformatting a licence text is a licensing incident (see LIC005).
+*.md
+LICENSE
+LICENSES/
+COPYRIGHT
+
+# The workflow is line-by-line commented with provenance for its pinned action
+# SHAs and its runner label. Reflowing it costs more in review than it buys.
+.github/

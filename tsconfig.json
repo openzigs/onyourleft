@@ -1,0 +1,12 @@
+{
+  // The workspace root's own TypeScript files: the Vitest root config and
+  // anything else that configures the toolchain rather than shipping in a
+  // package. Package sources are typechecked by their own tsconfig, because
+  // each is allowed a different platform surface.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "types": ["node"]
+  },
+  "include": ["*.ts"]
+}

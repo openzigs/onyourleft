@@ -5,7 +5,8 @@ and live sensor capture over Bluetooth Low Energy.
 
 ## Status
 
-Planning. No application code yet — see the [open epics and issues](https://github.com/openzigs/onyourleft/issues).
+Early. The workspace, toolchain and quality gates exist; the product does not yet — see the
+[open epics and issues](https://github.com/openzigs/onyourleft/issues).
 
 The first milestone is deliberately small and entirely local: pair a Bluetooth trainer, record a
 ride, store it and view it, with **no server, no account and no hosting bill**. Everything else
@@ -32,6 +33,31 @@ packages — domain types, FIT/GPX/TCX codec, BLE sensor layer, physics model, l
 
 The layout and the boundaries between components: [`docs/architecture.md`](docs/architecture.md).
 The choices, and what was rejected: [`docs/adr/0005-tech-stack.md`](docs/adr/0005-tech-stack.md).
+
+## Getting started
+
+Needs Node 24 and pnpm 11. Both are pinned by the repository — `.nvmrc` for Node, the
+`packageManager` field for pnpm — so neither is a choice you have to make.
+
+```bash
+nvm install && nvm use        # or any version manager; `node --version` must report v24
+corepack enable pnpm
+pnpm install --frozen-lockfile
+
+pnpm --filter @onyourleft/web run dev   # the browser client on http://localhost:5173
+pnpm run test                           # every package, run once
+pnpm run lint && pnpm run typecheck && pnpm run build
+```
+
+The repository's own rules — licence headers, the licence boundary, ADR numbering, the environment
+template — are checked by scripts that need no toolchain at all:
+
+```bash
+pnpm run check:repo           # or run each script under scripts/ directly with bash
+```
+
+`CLAUDE.md` section 4 is the complete and current list of commands, including which ones do not
+exist yet and why.
 
 ## Licence
 
