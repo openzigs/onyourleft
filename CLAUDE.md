@@ -14,7 +14,7 @@ layout and component boundaries are in [`docs/architecture.md`](docs/architectur
 smart-trainer control, and live sensor capture over **Bluetooth Low Energy**.
 
 The first milestone (v0.1) is deliberately small and **entirely local**: pair a BLE trainer, record a
-ride, store it, view it. **No server, no account, no hosting bill.** A server arrives in Phase 3 with
+ride, store it, view it. **No server, no account, no hosting bill.** A server arrives in Phase 4 with
 [#7](https://github.com/openzigs/onyourleft/issues/7).
 
 > ⚠️ **There is no server in Phase 1.** Do not add one, do not scaffold `apps/api`, and do not write
@@ -29,7 +29,7 @@ ride, store it, view it. **No server, no account, no hosting bill.** A server ar
 ```
 apps/                 AGPL-3.0-or-later, without exception
   web/                browser client — the Phase 1 product (#48-#51)
-  mobile/             Capacitor shell wrapping the same web build (#85; Phase 4)
+  mobile/             Capacitor shell wrapping the same web build (#85; Phase 3)
 
 packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis (#25)
