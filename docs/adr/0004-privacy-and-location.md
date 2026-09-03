@@ -2,9 +2,10 @@
 
 - **Status**: Accepted
 - **Date**: 2026-09-03
-- **Deciders**: repository owner, through the acceptance criteria in #21 and its comment of
-  2026-09-03; each choice below is recorded with its reasoning so a superseding ADR has
-  something to argue with
+- **Deciders**: repository owner, **confirmed 2026-09-03**. Decision A (private by default) and
+  decision B (500 m default radius) were put to the owner explicitly and chosen; the remaining
+  decisions follow from #21's acceptance criteria and its comment of 2026-09-03. Each choice below
+  is recorded with its reasoning so a superseding ADR has something to argue with
 - **Issue**: [#21](https://github.com/openzigs/onyourleft/issues/21)
 - **Depends on**: [ADR 0001](0001-licence.md) (self-hosting is unconditional), the local-first
   architecture decision ([#57](https://github.com/openzigs/onyourleft/issues/57)), and owner
@@ -170,11 +171,19 @@ geometry problem, which is a real improvement and is not the same thing as prote
 
 What this ADR requires to blunt it:
 
-1. **Jitter the trim radius per activity.** The trim radius is `r · (1 + u)` with `u` drawn from
-   `[0, 0.25]`, so the emitted first point lies in an annulus rather than on a circle. The draw must
-   be **deterministic in (activity id, zone id)** — a keyed, stable derivation, not a fresh random
-   number — because re-emitting the same activity twice with two different draws hands an observer
-   two constraints instead of one and makes the jitter worth less than nothing.
+1. **Jitter the trim radius per activity, symmetrically.** The trim radius is `r · (1 + u)` with
+   `u` drawn from **`[−0.125, +0.125]`**, so the emitted first point lies in an annulus centred on
+   `r` rather than on a circle.
+
+   The interval is two-sided deliberately. An earlier draft used `u ∈ [0, 0.25]`, which is
+   one-sided: **every** emitted point then lies at or outside the true radius, so an observer takes
+   the minimum over many rides and converges on `r` from above with no error term. A one-sided
+   jitter does not hide the radius, it hands the attacker a free estimator and a guarantee that the
+   estimate is never too small. Symmetric noise costs nothing extra and removes the bias.
+
+   The draw must be **deterministic in (activity id, zone id)** — a keyed, stable derivation, not a
+   fresh random number — because re-emitting the same activity twice with two different draws hands
+   an observer two constraints instead of one and makes the jitter worth less than nothing.
 2. **Trim along the path, and represent a mid-ride passage as a gap.** A ride that passes home in
    the middle is emitted as two segments with an explicit gap between them, never as one polyline.
    A renderer that joins across the gap draws a chord whose perpendicular bisector passes through
