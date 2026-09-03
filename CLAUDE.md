@@ -192,9 +192,10 @@ process never belongs in a gate.
 ### 4c. What CI runs, and what it deliberately does not
 
 [`.github/workflows/rules.yml`](.github/workflows/rules.yml) runs on every pull request and on every
-push to `main`. It runs **exactly** the five bare-clone commands from §4a — `check-repo-rules.sh`,
-its test suite, `check-licence-hashes.sh`, its test suite, and `shellcheck scripts/*.sh` — and
-nothing else. If CI ever needs a step this file does not list, **this file is wrong and gets fixed in
+push to `main`. It runs **exactly** four §4a bare-clone commands — `check-repo-rules.sh`, its test
+suite, `check-licence-hashes.sh` and its test suite — plus `shellcheck scripts/*.sh`, which §4a
+lists under *needs a tool installed* rather than as bare-clone, and which is available only because
+`ubuntu-latest` preinstalls it. Nothing else. If CI ever needs a step this file does not list, **this file is wrong and gets fixed in
 the same PR**; CI must not accumulate private knowledge, because that is how a contributor's local
 green becomes CI's red with no explanation.
 

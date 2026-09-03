@@ -28,6 +28,14 @@ on:
 permissions:
   contents: read
 
+# Supersede an in-flight run when a PR is pushed again. At ~7 seconds a run this
+# saves nothing today; it is here so the habit predates the toolchain half of
+# #24, when a run becomes long enough for two to overlap and the stale one to
+# report against code that no longer exists.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   rules:
     name: Repository rules
@@ -43,6 +51,11 @@ jobs:
       - name: Check out the repository
         # Pinned to a full commit SHA, not a tag: a tag is mutable, and a
         # compromised action runs with whatever permissions this job holds.
+        # Pinned to a full commit SHA, not a tag: tags are mutable, and a
+        # retagged action runs with this job's permissions. Provenance, so a
+        # reviewer can check rather than trust:
+        #   gh api repos/actions/checkout/git/ref/tags/v7.0.1 --jq .object.sha
+        #   -> 3d3c42e5aac5ba805825da76410c181273ba90b1   (verified 2026-09-03)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Nothing here pushes, so the token has no reason to survive in

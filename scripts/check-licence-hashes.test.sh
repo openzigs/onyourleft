@@ -157,6 +157,85 @@ rm "${fixture_root}/docs/adr/0001-licence.md"
 assert_violation "a missing ADR 0001 is rejected" \
   "docs/adr/0001-licence.md: not found"
 
+# --- The sha256sum fallback ---------------------------------------------------
+#
+# Review of PR #100 found this branch was a surviving mutant: deleting the whole
+# `elif command -v sha256sum` arm left the suite green, because every machine the
+# suite had run on so far had `shasum`. CI runs on ubuntu-latest, where the
+# fallback is the arm that actually executes -- so the untested branch was the
+# one carrying the real workload.
+#
+# Forcing it needs a PATH with sha256sum and WITHOUT shasum. The script uses only
+# four external commands, so a curated stub directory is small enough to be
+# honest rather than fragile.
+
+new_fixture
+stub_bin="$(mktemp -d)"
+# PATH is curated to hide shasum from the SCRIPT. The interpreter itself is
+# invoked by absolute path, because PATH no longer contains bash either.
+bash_abs="$(command -v bash)"
+for tool in cut dirname grep sed; do
+  tool_path="$(command -v "${tool}")"
+  ln -s "${tool_path}" "${stub_bin}/${tool}"
+done
+# A sha256sum emitting the same "<digest>  <path>" shape coreutils does. It
+# delegates to whichever real digest tool this host has, captured as an ABSOLUTE
+# path at generation time -- the curated PATH hides those from the stub too, and
+# the point is to exercise OUR fallback branch, not to reimplement SHA-256.
+if command -v shasum >/dev/null 2>&1; then
+  real_digest="$(command -v shasum) -a 256"
+elif command -v sha256sum >/dev/null 2>&1; then
+  real_digest="$(command -v sha256sum)"
+else
+  printf 'SKIP no digest tool on this host; cannot build the sha256sum stub\n'
+  real_digest=""
+fi
+# SC2016 is the point here, not a mistake: these printf bodies are the TEXT of a
+# script being generated. `${f}` and `${d}` must survive into the stub unexpanded
+# and be evaluated when the stub runs, so they are deliberately single-quoted.
+# The two values that must expand now -- the interpreter and the real digest tool
+# -- are passed as printf arguments instead.
+# shellcheck disable=SC2016
+{
+  printf '#!%s\n' "${bash_abs}"
+  printf 'for f in "$@"; do\n'
+  printf '  [ "${f}" = "-" ] && continue\n'
+  printf '  d="$(%s "${f}" | %s -d" " -f1)"\n' "${real_digest}" "$(command -v cut)"
+  printf '  printf "%%s  %%s\\n" "${d}" "${f}"\n'
+  printf 'done\n'
+} > "${stub_bin}/sha256sum"
+chmod +x "${stub_bin}/sha256sum"
+
+out="$(PATH="${stub_bin}" "${bash_abs}" "${CHECKER}" "${fixture_root}" 2>&1)"
+status=$?
+if [ "${status}" -eq 0 ]; then
+  pass=$((pass + 1))
+  printf 'ok   the sha256sum fallback verifies digests when shasum is absent\n'
+else
+  fail=$((fail + 1))
+  printf 'FAIL the sha256sum fallback verifies digests when shasum is absent\n     expected exit 0, got %s\n%s\n' \
+    "${status}" "${out}"
+fi
+cleanup_fixture
+
+# And it must still CATCH a bad digest on that path -- a fallback that always
+# passes is worse than no fallback, because it reports success on a tampered
+# licence file.
+new_fixture
+printf 'tampered\n' >> "${fixture_root}/LICENSE"
+out="$(PATH="${stub_bin}" "${bash_abs}" "${CHECKER}" "${fixture_root}" 2>&1)"
+status=$?
+if [ "${status}" -ne 0 ] && printf '%s' "${out}" | grep -q "^LIC005: "; then
+  pass=$((pass + 1))
+  printf 'ok   the sha256sum fallback still rejects an edited LICENSE\n'
+else
+  fail=$((fail + 1))
+  printf 'FAIL the sha256sum fallback still rejects an edited LICENSE\n     expected exit != 0 with a LIC005 line; got exit %s\n%s\n' \
+    "${status}" "${out}"
+fi
+cleanup_fixture
+rm -rf "${stub_bin}"
+
 # --- The real repository must pass --------------------------------------------
 
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
