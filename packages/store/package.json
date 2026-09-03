@@ -1,0 +1,26 @@
+{
+  "name": "@onyourleft/store",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "Local activity store — athletes, activities and laps in IndexedDB via Dexie, and the migration up/down pairs.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit --project tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@onyourleft/domain": "workspace:*",
+    "dexie": "4.4.5"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "6.2.5",
+    "typescript": "6.0.3",
+    "vitest": "4.1.11"
+  }
+}
