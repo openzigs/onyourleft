@@ -1,0 +1,26 @@
+On Your Left
+Copyright (C) 2026 The On Your Left contributors
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License along
+with this program. If not, see <https://www.gnu.org/licenses/>.
+
+---
+
+Exception: the reusable leaf packages are licensed Apache-2.0, not AGPL-3.0.
+
+Each carries its own LICENSE file and declares Apache-2.0 in its manifest; the
+full text is in LICENSES/Apache-2.0.txt. Anything NOT explicitly marked
+Apache-2.0 is AGPL-3.0-or-later. See docs/adr/0001-licence.md for the reasoning
+and for which packages these are.
+
+No contributor assigns copyright. Each retains their own, and contributions are
+made under the Developer Certificate of Origin 1.1 (see CONTRIBUTING.md).
