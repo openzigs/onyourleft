@@ -9,11 +9,19 @@ This project uses two licences, split along a deliberate boundary:
 | The application — instance server, web app, deployed product | `AGPL-3.0-or-later` | Nobody can run a closed hosted fork of this service |
 | The reusable leaf packages — domain types, FIT/GPX/TCX codec, BLE sensor layer | `Apache-2.0` | Others can adopt them freely, and they carry an express patent grant |
 
-Anything **not** explicitly marked Apache-2.0 is AGPL-3.0-or-later. If you are unsure
-which side of the boundary your change lands on, ask in the issue before you write it —
-the boundary is easier to get right than to move later.
+Anything **not** explicitly marked Apache-2.0 is AGPL-3.0-or-later.
 
-Full reasoning: [`docs/adr/0001-licence.md`](docs/adr/0001-licence.md).
+**The boundary is a path.** Everything under `packages/` is Apache-2.0 and everything under
+`apps/` is AGPL-3.0-or-later, without exception — so the directory your change lands in
+answers the licence question, and you do not have to ask. This is stricter than ADR 0001
+requires, deliberately: a path cannot be silently mis-declared the way a manifest field can.
+Each package still carries its own `LICENSE` **and** a matching manifest declaration; the path
+rule backs those up rather than replacing them.
+
+Run `bash scripts/check-repo-rules.sh` to check it locally. It needs no install.
+
+Full reasoning: [`docs/adr/0001-licence.md`](docs/adr/0001-licence.md) and
+[`docs/adr/0005-tech-stack.md`](docs/adr/0005-tech-stack.md).
 
 ## Sign your commits (DCO)
 
