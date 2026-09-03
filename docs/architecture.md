@@ -89,7 +89,7 @@ checkable.
 | `apps/web` | AGPL-3.0-or-later | Routing, screens, design system, accessibility baseline, the live ride screen | — | #48–#51 |
 | `apps/mobile` | AGPL-3.0-or-later | Capacitor shell, native permissions, foreground service | — | #85, #87 |
 | `packages/domain` | Apache-2.0 | Canonical units and types; every conversion in the program; signing/verification; analysis computations | **Any platform API at all** — no DOM, no Node globals, no I/O, no network types | #25, #61, #66, #75–#78 |
-| `packages/fit` | Apache-2.0 | FIT / GPX / TCX decode and encode | Anything server-specific; anything under `apps/` | #29–#32 |
+| `packages/fit` | Apache-2.0 | FIT / GPX / TCX decode and encode | Anything server-specific; anything under `apps/`; **anything carrying the Garmin FIT Protocol License — see [ADR 0006](adr/0006-fit-codec-licensing.md)** | #29–#32 |
 | `packages/sensors` | Apache-2.0 | BLE sensor and trainer abstraction; Web Bluetooth transport | Anything server-specific. Web Bluetooth types must not escape above the transport boundary | #39–#44 |
 | `packages/physics` | Apache-2.0 | Power → speed, as separately testable terms | Any rendering, BLE or platform API | #88 |
 | `packages/store` | Apache-2.0 | Local activity and stream persistence, and its migrations | Anything under `apps/` | #27 |
@@ -208,6 +208,7 @@ share one.
 | [0001](adr/0001-licence.md) | Licensing — AGPL-3.0 app + Apache-2.0 leaf packages | #18 |
 | [0004](adr/0004-privacy-and-location.md) | Activity privacy and the location-data model | #21 |
 | [0005](adr/0005-tech-stack.md) | Technology stack and workspace layout | #22 |
+| [0006](adr/0006-fit-codec-licensing.md) | FIT codec licensing — implement from the public protocol documentation | #58 |
 
 ### Claimed by open issues — **check here before you pick a number**
 
@@ -221,7 +222,7 @@ share one.
 | 0002 | #19 — clean-room posture | **#57 — local-first architecture** (ADR 0001 already refers to the local-first decision as "ADR 0002") |
 | 0003 | #20 — platform support matrix | — |
 | **0005** | **#22 — tech stack (written)** | **#57 — local-first architecture** |
-| 0006 | #58 — FIT codec licensing | **#27 — stream storage** |
+| **0006** | **#58 — FIT codec licensing (written)** | **#27 — stream storage** |
 | 0007 | #59 — patent posture | — |
 | 0008 | #86 — mobile client architecture | **#60 — tiles and routing** |
 
@@ -236,5 +237,9 @@ share one.
   `packages/domain` platform-free rather than merely server-free.
 - **ADR 0005 is stricter than ADR 0001.** ADR 0001 permits per-package licence declaration; ADR 0005
   makes the boundary structural, decided by path. Deliberate: a path cannot be silently mis-declared.
-- **ADR 0001 is constrained by #58 and #59.** If #58 concludes the Garmin FIT licence conflicts with
-  every licence ADR 0001 could have chosen, ADR 0001 is reopened rather than the codec shipped.
+- **ADR 0001 is constrained by #58 and #59.** #58 is now [ADR 0006](adr/0006-fit-codec-licensing.md)
+  and it **discharges that constraint**: the codec is implemented from the public FIT protocol
+  documentation and depends on nothing carrying Garmin's terms, so §2(d) never attaches and ADR 0001
+  is not reopened. That conclusion is conditional — ADR 0006 names the three things that would
+  overturn it, and the first is a Garmin FIT artefact reaching this repository, its lockfile, its CI
+  or a contributor's toolchain. #59 remains open.
