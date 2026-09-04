@@ -24,6 +24,7 @@ import {
 } from './index';
 import { activityId, athleteId, lapId, privacyZoneId } from './ids';
 import { StoreReferentialError } from './errors';
+import { createStoreHarness } from './testing';
 import { DEFAULT_PRIVACY_ZONE_RADIUS_METRES } from './records';
 import type { PersistedActivity } from './persisted';
 import { TABLE, STORES_V1, SCHEMA_VERSION } from './schema';
@@ -95,18 +96,32 @@ afterEach(async () => {
 });
 
 describe('persistence — the write must be visible to a reader that was not there when it happened', () => {
+  // The two cases below are written against the #28 harness rather than this
+  // file's own `reopen()`, which is what #28's "at least one existing test from
+  // #26 is rewritten to use it" asks for. They are the proof that the harness
+  // is usable on #26's records and not only on #27's streams, and they read
+  // shorter than the originals — which is the property #28 actually needs,
+  // because a correct pattern that is harder than the wrong one does not get
+  // used. The rest of this file keeps `reopen()`: rewriting forty passing tests
+  // to prove a point buries the change that matters.
   it('an activity with no position data at all survives a close and reopen', async () => {
-    await store.putAthlete(athlete());
-    const ride = indoorRide();
-    await store.putActivity(ride);
+    const harness = createStoreHarness();
+    try {
+      await harness.write(async (fresh) => fresh.putAthlete(athlete()));
+      const ride = indoorRide();
 
-    const fresh = reopen();
-    const read = await fresh.getActivity(ATHLETE_A, ride.id);
+      const read = await harness.roundTrip(
+        async (fresh) => fresh.putActivity(ride),
+        async (fresh) => fresh.getActivity(ATHLETE_A, ride.id),
+      );
 
-    expect(read).toBeDefined();
-    expect(read?.hasPosition).toBe(false);
-    expect(read?.name).toBe('Zwift Watopia');
-    expect(read?.distance).toBe(40_000);
+      expect(read).toBeDefined();
+      expect(read?.hasPosition).toBe(false);
+      expect(read?.name).toBe('Zwift Watopia');
+      expect(read?.distance).toBe(40_000);
+    } finally {
+      await harness.destroy();
+    }
   });
 
   it('moving time and elapsed time survive the round trip as distinct values', async () => {
@@ -138,17 +153,27 @@ describe('persistence — the write must be visible to a reader that was not the
   });
 
   it('laps survive a close and reopen, in ordinal order', async () => {
-    await store.putAthlete(athlete());
-    const ride = indoorRide();
-    await store.putActivity(ride);
-    await store.putLap(lap(ride, 2));
-    await store.putLap(lap(ride, 0));
-    await store.putLap(lap(ride, 1));
+    const harness = createStoreHarness();
+    try {
+      const ride = indoorRide();
+      await harness.write(async (fresh) => {
+        await fresh.putAthlete(athlete());
+        await fresh.putActivity(ride);
+      });
 
-    const read = await reopen().listLaps(ATHLETE_A, ride.id);
+      const laps = await harness.roundTrip(
+        async (fresh) => {
+          await fresh.putLap(lap(ride, 1));
+          await fresh.putLap(lap(ride, 0));
+        },
+        async (fresh) => fresh.listLaps(ATHLETE_A, ride.id),
+      );
 
-    expect(read.map((l) => l.ordinal)).toEqual([0, 1, 2]);
-    expect(read[0]?.athleteId).toBe(ATHLETE_A);
+      expect(laps.map((each) => each.ordinal)).toEqual([0, 1]);
+      expect(laps[0]?.athleteId).toBe(ATHLETE_A);
+    } finally {
+      await harness.destroy();
+    }
   });
 
   it('optional quantities round trip when present and stay absent when not', async () => {
@@ -272,7 +297,7 @@ describe('on-delete behaviour — cascade, chosen explicitly', () => {
     await store.putLap(lap(ride, 1));
 
     const counts = await store.deleteAthlete(ATHLETE_A);
-    expect(counts).toEqual({ activities: 1, laps: 2, privacyZones: 0 });
+    expect(counts).toEqual({ activities: 1, laps: 2, privacyZones: 0, streamSets: 0 });
 
     // Re-create the athlete before reading. If the cascade had left the rows
     // behind, the scoped reads below would find them again — which is the
@@ -322,6 +347,7 @@ describe('on-delete behaviour — cascade, chosen explicitly', () => {
       activities: 0,
       laps: 0,
       privacyZones: 0,
+      streamSets: 0,
     });
   });
 

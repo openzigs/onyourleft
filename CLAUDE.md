@@ -36,7 +36,7 @@ packages/             Apache-2.0, without exception
   fit/                FIT / GPX / TCX codec (#29-#32)
   sensors/            sensor abstraction and BLE transport (#39-#44) — BLE only
   physics/            cycling power/speed model, Martin et al. 1998 (#88)
-  store/              local activity and stream store (#27)
+  store/              local activity and stream store, and the round-trip harness (#26-#28)
 
 docs/
   architecture.md     layout, component boundaries, ADR index
@@ -283,12 +283,16 @@ not.
     **synthetic fixture corpus and its generator**, not a codec. The decoder (#30), the encoder
     (#31) and GPX/TCX (#32) are still to come, and per ADR 0006 they are written from the published
     protocol documentation — nothing carrying Garmin's terms may enter this package.
-  - **`packages/store`** ([#26](https://github.com/openzigs/onyourleft/issues/26)) holds athletes,
-    activities, laps and privacy zones with the migration `up`/`down` contract. Stream storage is
-    still [#27](https://github.com/openzigs/onyourleft/issues/27)'s. ⚠️ It is **not**
-    platform-isolated the way `packages/domain` is — it uses `indexedDB`, so its `tsconfig.json`
-    includes the DOM lib, and `eslint.config.js`'s `no-restricted-globals` block stays scoped to
-    `packages/domain`.
+  - **`packages/store`** holds athletes, activities, laps and privacy zones
+    ([#26](https://github.com/openzigs/onyourleft/issues/26)) with the migration `up`/`down`
+    contract, **per-second streams** at schema version 2
+    ([#27](https://github.com/openzigs/onyourleft/issues/27), decided in
+    [ADR 0011](docs/adr/0011-stream-storage.md)) and the **round-trip persistence harness**
+    ([#28](https://github.com/openzigs/onyourleft/issues/28)) at `@onyourleft/store/testing` — see
+    §5. Devices and gear are still additive object stores in a later schema version. ⚠️ It is
+    **not** platform-isolated the way `packages/domain` is — it uses `indexedDB` and
+    `CompressionStream`, so its `tsconfig.json` includes the DOM lib, and `eslint.config.js`'s
+    `no-restricted-globals` block stays scoped to `packages/domain`.
 - **A per-package dependency-licence gate.** Nothing yet checks that a dependency's *own* licence is
   permitted under the path it lands in — only that the manifests and headers declare the right
   thing. `pnpm licenses list --json` exists and is unused. Second half of
@@ -443,6 +447,52 @@ the object it just constructed rather than a fresh read).
 
 **Always assert by reading back through the same path a real consumer uses.** Line coverage cannot
 see any of these, which is part of why §5 has no percentage in it.
+
+#### The round-trip harness — use it rather than writing the naive version
+
+[`@onyourleft/store/testing`](packages/store/src/testing/index.ts) (#28) exists so that no later
+issue has to remember all four causes. Its primitive is **write through the public path → close
+every connection → open a fresh one → read through the public path → compare**, and its `read()`
+*cannot* be served by the handle that wrote: it discards every open handle before it opens another.
+
+```ts
+import {
+  createStoreHarness, seedAthletes, seedRide, streamSetFor, assertStreamSetRoundTrip, ATHLETE_A,
+} from '@onyourleft/store/testing';
+
+const harness = createStoreHarness();          // its own database, per test
+await seedAthletes(harness);                   // three athletes, always — see below
+const ride = await seedRide(harness, ATHLETE_A);
+
+// The whole round trip in one call:
+await assertStreamSetRoundTrip(harness, streamSetFor(ride));
+
+// Or the two halves, for anything else:
+const read = await harness.roundTrip(
+  async (store) => store.putActivity(ride),
+  async (store) => store.getActivity(ATHLETE_A, ride.id),
+);
+
+await harness.destroy();                       // in afterEach
+```
+
+Four things to know before you use it:
+
+- **The fixtures carry three athletes, not two.** Two cannot distinguish "scoped correctly" from
+  "returns everything the requester is connected to". The scoping *assertions* that need the third
+  belong with #34 in Phase 3; the fixture is there now because retrofitting it is a rewrite.
+- **`seedRide` and `streamSetFor` take an owner**, so the write-path scoping case is as short to
+  write as the read-path one. #26's review found that a two-athlete *read* fixture is blind to a
+  write-path hole entirely.
+- **The assertions throw `RoundTripFailure`; they are not `expect` calls.** That is what lets the
+  same assertion body run green against the real store and red against a fake, which is the only
+  honest proof that a harness works.
+- **`fakes.ts` holds three deliberately broken stores** — one that writes to memory, one that
+  commits to the real database under a key the reader does not use, and one that fills every gap
+  with a zero. `harness.test.ts` runs the same round trip against all three and requires each to go
+  red. **If you add a write path to `packages/store`, the `PersistentStore` type fails to compile
+  until the fakes account for it.** That is deliberate: it is what stops a write path shipping with
+  nothing proving the harness catches its failure.
 
 ### Migrations
 
@@ -641,4 +691,4 @@ top of an issue **supersedes its body**.
 | Why a package's tsconfig narrows `lib` and `types` | `packages/domain/tsconfig.json` and §4d |
 | The canonical unit for a quantity, and the conversion into it | [`packages/domain/README.md`](packages/domain/README.md) |
 
-<!-- Last updated: 2026-09-03 by delivery:code-issue resolving #39 (sensor abstraction), #107 (FIT fixture corpus) and #26 (local store schema and migrations) -->
+<!-- Last updated: 2026-09-03 by delivery:code-issue resolving #39 (sensor abstraction), #107 (FIT fixture corpus), #26 (local store schema and migrations) and #27/#28 (stream storage and the round-trip harness) -->

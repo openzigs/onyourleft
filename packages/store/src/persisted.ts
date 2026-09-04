@@ -108,7 +108,7 @@ export interface PersistedPrivacyZone {
  * and this is the message an operator sees when their own device has data on it
  * that will not load.
  */
-function decoded<T>(field: string, value: number, construct: (value: number) => T): T {
+export function decoded<T>(field: string, value: number, construct: (value: number) => T): T {
   try {
     return construct(value);
   } catch (cause) {
@@ -119,14 +119,14 @@ function decoded<T>(field: string, value: number, construct: (value: number) => 
   }
 }
 
-function decodedNumber(field: string, value: unknown): number {
+export function decodedNumber(field: string, value: unknown): number {
   if (typeof value !== 'number') {
     throw new StoreDecodeError(`${field}: expected a number, found ${typeof value}`);
   }
   return value;
 }
 
-function decodedString(field: string, value: unknown): string {
+export function decodedString(field: string, value: unknown): string {
   if (typeof value !== 'string') {
     throw new StoreDecodeError(`${field}: expected a string, found ${typeof value}`);
   }

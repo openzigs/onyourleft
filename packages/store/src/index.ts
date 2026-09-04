@@ -59,9 +59,41 @@ export {
 
 // --- Schema and migrations --------------------------------------------------
 
-export { DEXIE_IDB_VERSION_MULTIPLIER, INDEX, SCHEMA_VERSION, STORES_V1, TABLE } from './schema';
+export {
+  DEXIE_IDB_VERSION_MULTIPLIER,
+  INDEX,
+  SCHEMA_VERSION,
+  SCHEMA_VERSIONS,
+  STORES_V1,
+  STORES_V2,
+  TABLE,
+} from './schema';
 export type { AnyRecordMigration, RecordMigration } from './migrations';
 export { migrateDown, migrateUp, SCHEMA_MIGRATIONS, upgradeWith } from './migrations';
+
+// --- Streams (#27) ----------------------------------------------------------
+
+export type {
+  NewStreamSet,
+  Samples,
+  StreamChannel,
+  StreamChannels,
+  StreamChannelValue,
+  StreamSet,
+  StreamSetSummary,
+} from './streams';
+export {
+  CHANNEL_RESOLUTION,
+  hasPositionChannels,
+  POSITION_CHANNELS,
+  STREAM_CHANNELS,
+} from './streams';
+
+export type { ChannelEncoding, EncodedChannel } from './stream-codec';
+export { channelBytesPerSample, decodeChannel, encodeChannel } from './stream-codec';
+
+export type { StreamCompression } from './stream-compression';
+export { STREAM_COMPRESSION, StreamSizeError } from './stream-compression';
 
 // --- On-disk shapes ---------------------------------------------------------
 //
@@ -74,6 +106,8 @@ export type {
   PersistedLap,
   PersistedPrivacyZone,
 } from './persisted';
+export type { PersistedStreamBlob, PersistedStreamSet } from './stream-persisted';
+export { fromPersistedStreamSet, parseStreamChannel } from './stream-persisted';
 export {
   fromPersistedActivity,
   fromPersistedAthlete,

@@ -56,7 +56,12 @@
 
 import Dexie, { type Table } from 'dexie';
 
-import { StoreReferentialError, StoreValidationError, StoreVersionError } from './errors';
+import {
+  StoreDecodeError,
+  StoreReferentialError,
+  StoreValidationError,
+  StoreVersionError,
+} from './errors';
 import type { ActivityId, AthleteId, LapId, PrivacyZoneId } from './ids';
 import {
   fromPersistedActivity,
@@ -81,7 +86,36 @@ import type {
   NewLap,
   PrivacyZoneRecord,
 } from './records';
-import { DEXIE_IDB_VERSION_MULTIPLIER, INDEX, SCHEMA_VERSION, STORES_V1, TABLE } from './schema';
+import {
+  DEXIE_IDB_VERSION_MULTIPLIER,
+  INDEX,
+  SCHEMA_VERSION,
+  SCHEMA_VERSIONS,
+  TABLE,
+} from './schema';
+import { channelBytesPerSample, decodeChannel, encodeChannel } from './stream-codec';
+import {
+  compressStreamBytes,
+  decompressStreamBytes,
+  STREAM_COMPRESSION,
+  StreamSizeError,
+} from './stream-compression';
+import {
+  fromPersistedStreamBlob,
+  fromPersistedStreamSet,
+  parseStreamChannel,
+  persistedBlobBytes,
+  type PersistedStreamBlob,
+  type PersistedStreamSet,
+} from './stream-persisted';
+import {
+  STREAM_CHANNELS,
+  type NewStreamSet,
+  type Samples,
+  type StreamChannel,
+  type StreamSet,
+  type StreamSetSummary,
+} from './streams';
 import { DEFAULT_VISIBILITY } from './visibility';
 
 /** How `listActivitySummaries` orders its results. */
@@ -107,6 +141,13 @@ export interface AthleteDeletionCounts {
   readonly activities: number;
   readonly laps: number;
   readonly privacyZones: number;
+  /**
+   * Stream sets removed. One per activity that had streams, not one per
+   * channel: the blob rows go with their set and counting them would report a
+   * number eight times larger than the number of rides erased, which is the
+   * number #62's confirmation dialogue has to say out loud.
+   */
+  readonly streamSets: number;
 }
 
 /**
@@ -144,7 +185,12 @@ export class ActivityStore {
 
   constructor(name: string) {
     this.#db = new Dexie(name);
-    this.#db.version(SCHEMA_VERSION).stores(STORES_V1);
+    // Every version is declared, in order, on every open. Dexie needs the whole
+    // history to know how to upgrade a database that is behind — declaring only
+    // the newest would leave a version-1 database on disk with no path forward.
+    SCHEMA_VERSIONS.forEach((stores, index) => {
+      this.#db.version(index + 1).stores(stores);
+    });
     // Fires on every open, including the lazy one the first query triggers, and
     // throwing here rejects that open. See `#assertNotDowngraded`.
     this.#db.on('ready', () => {
@@ -201,6 +247,14 @@ export class ActivityStore {
     return this.#db.table<PersistedPrivacyZone, string>(TABLE.privacyZones);
   }
 
+  get #streamSets(): Table<PersistedStreamSet, string> {
+    return this.#db.table<PersistedStreamSet, string>(TABLE.streamSets);
+  }
+
+  get #streamBlobs(): Table<PersistedStreamBlob, [string, string]> {
+    return this.#db.table<PersistedStreamBlob, [string, string]>(TABLE.streamBlobs);
+  }
+
   // --- Athletes -------------------------------------------------------------
 
   async putAthlete(record: AthleteRecord): Promise<AthleteId> {
@@ -224,8 +278,20 @@ export class ActivityStore {
   async deleteAthlete(id: AthleteId): Promise<AthleteDeletionCounts> {
     return this.#db.transaction(
       'rw',
-      [this.#athletes, this.#activities, this.#laps, this.#privacyZones],
+      [
+        this.#athletes,
+        this.#activities,
+        this.#laps,
+        this.#privacyZones,
+        this.#streamSets,
+        this.#streamBlobs,
+      ],
       async () => {
+        await this.#streamBlobs.where(INDEX.streamBlobByAthlete).equals(id).delete();
+        const streamSets = await this.#streamSets
+          .where(INDEX.streamSetByAthlete)
+          .equals(id)
+          .delete();
         const laps = await this.#laps.where(INDEX.lapByAthlete).equals(id).delete();
         const activities = await this.#activities
           .where(INDEX.activityByAthlete)
@@ -236,7 +302,7 @@ export class ActivityStore {
           .equals(id)
           .delete();
         await this.#athletes.delete(id);
-        return { activities, laps, privacyZones };
+        return { activities, laps, privacyZones, streamSets };
       },
     );
   }
@@ -361,18 +427,29 @@ export class ActivityStore {
    * `false`, rather than deleting it.
    */
   async deleteActivity(owner: AthleteId, id: ActivityId): Promise<boolean> {
-    return this.#db.transaction('rw', [this.#activities, this.#laps], async () => {
-      const existing = await this.#activities
-        .where(INDEX.activityByAthleteAndId)
-        .equals([owner, id])
-        .first();
-      if (existing === undefined) {
-        return false;
-      }
-      await this.#laps.where(INDEX.lapByActivity).equals(id).delete();
-      await this.#activities.delete(id);
-      return true;
-    });
+    return this.#db.transaction(
+      'rw',
+      [this.#activities, this.#laps, this.#streamSets, this.#streamBlobs],
+      async () => {
+        const existing = await this.#activities
+          .where(INDEX.activityByAthleteAndId)
+          .equals([owner, id])
+          .first();
+        if (existing === undefined) {
+          return false;
+        }
+        await this.#laps.where(INDEX.lapByActivity).equals(id).delete();
+        // The streams go with the activity, for the reason the laps do: every
+        // read of them is scoped to an activity that no longer exists, so
+        // leaving them behind holds a GPS trace on the device that nothing can
+        // reach and nothing can remove. On a per-second stream set that is also
+        // the largest thing this store ever orphans.
+        await this.#streamBlobs.where(INDEX.streamBlobByActivity).equals(id).delete();
+        await this.#streamSets.delete(id);
+        await this.#activities.delete(id);
+        return true;
+      },
+    );
   }
 
   // --- Laps -----------------------------------------------------------------
@@ -440,6 +517,193 @@ export class ActivityStore {
   async listPrivacyZones(owner: AthleteId): Promise<PrivacyZoneRecord[]> {
     const rows = await this.#privacyZones.where(INDEX.privacyZoneByAthlete).equals(owner).toArray();
     return rows.map(fromPersistedPrivacyZone);
+  }
+
+  // --- Streams (#27) --------------------------------------------------------
+
+  /**
+   * Stores an activity's whole stream set, replacing any set already there.
+   *
+   * ## The write is one transaction across both stores
+   *
+   * #27 asks for a test proving that "a failed stream write does not leave a
+   * partial object referenced by a committed database row". On a SQL server
+   * plus an object store that is a genuinely hard two-phase problem. Here it
+   * is a property of one Dexie read-write transaction spanning `activities`,
+   * `streamSets` and `streamBlobs`: if any blob put throws, the transaction
+   * aborts and neither the metadata row nor any blob lands.
+   * `stream-store.test.ts` proves it by making `IDBObjectStore.put` fail
+   * part-way through the eight channels, then reopening on a fresh connection
+   * and finding nothing.
+   *
+   * ## Encoding happens outside the transaction, deliberately
+   *
+   * Compression is asynchronous, and awaiting a promise Dexie did not create
+   * inside a transaction lets the underlying IndexedDB transaction commit out
+   * from under the code still using it. So every channel is encoded and
+   * compressed first and the transaction does nothing but write bytes it
+   * already holds. That also means a channel that cannot be encoded — a power
+   * value outside `uint16`, a latitude the domain rejects — fails before any
+   * write is attempted rather than half way through one.
+   *
+   * @throws {StoreReferentialError} if this athlete has no such activity.
+   * @throws {StoreValidationError} if a channel's length disagrees with
+   * `sampleCount`, or a sample is outside what its channel can encode.
+   */
+  async putStreamSet(set: NewStreamSet): Promise<ActivityId> {
+    const { summary, blobs } = await this.#encodeStreamSet(set);
+
+    await this.#db.transaction(
+      'rw',
+      [this.#activities, this.#streamSets, this.#streamBlobs],
+      async () => {
+        // Scoped, and inside the transaction: this is both the foreign key the
+        // engine does not have and the write-path ownership check. There is no
+        // way to attach streams to an activity by id alone, so streams cannot
+        // be filed against another athlete's ride.
+        const activity = await this.#activities
+          .where(INDEX.activityByAthleteAndId)
+          .equals([set.athleteId, set.activityId])
+          .first();
+        if (activity === undefined) {
+          throw new StoreReferentialError(
+            `cannot store streams for activity ${set.activityId}: this athlete has no such activity`,
+          );
+        }
+        // The second guard, for the reason `putActivity` has one: `put` is
+        // keyed on the primary key alone, and `activityId` is that key. A
+        // stream set already on disk under another athlete must not be
+        // overwritten and thereby taken over. Found on the activity write path
+        // in review of PR #109; the same hole is reachable here the moment an
+        // id arrives from an imported file (#51).
+        this.#requireNotOwnedByAnother(
+          await this.#streamSets.get(set.activityId),
+          set.athleteId,
+          `the stream set for activity ${set.activityId}`,
+        );
+        // Replace rather than merge: the new set's channel list may be shorter
+        // than the old one's, and a stale blob left behind would be decoded as
+        // part of the next read and disagree with the summary.
+        await this.#streamBlobs.where(INDEX.streamBlobByActivity).equals(set.activityId).delete();
+        await this.#streamSets.put(summary);
+        await this.#streamBlobs.bulkPut(blobs);
+      },
+    );
+    return set.activityId;
+  }
+
+  /**
+   * Reads an activity's whole stream set back, gaps included.
+   *
+   * The public retrieval path #27's round-trip criterion names. Athlete-scoped
+   * like every other read here, through `[athleteId+activityId]`.
+   *
+   * @throws {StoreDecodeError} if the stored bytes do not decode, or if a
+   * channel the summary claims has no blob row. The second case is the
+   * half-written set this store is built not to produce, and failing on it is
+   * the point: a chart silently missing its heart-rate trace is indistinguish-
+   * able from a ride recorded without a strap.
+   */
+  async getStreamSet(owner: AthleteId, activity: ActivityId): Promise<StreamSet | undefined> {
+    const stored = await this.#readStreamRows(owner, activity);
+    if (stored === undefined) {
+      return undefined;
+    }
+    const summary = fromPersistedStreamSet(stored.set);
+    const channels: MutableStreamChannels = {};
+    for (const row of stored.blobs) {
+      const channel = parseStreamChannel(row.channel);
+      // The channel name is only known at run time, so the mapped type's
+      // per-channel index signature cannot be satisfied statically here. The
+      // cast is sound because `decodeChannel` dispatches on the same validated
+      // name: the samples it returns are that channel's own quantity, and the
+      // brands erase at run time. This and the one at the end of
+      // `decodeChannel` are the only two casts in the stream path.
+      (channels as Record<StreamChannel, Samples<StreamChannel>>)[channel] =
+        await this.#decodeBlob(row);
+    }
+    for (const channel of summary.channels) {
+      if (channels[channel] === undefined) {
+        throw new StoreDecodeError(
+          `stream set for activity ${activity}: the stored set claims a ${channel} channel and ` +
+            `no bytes for it were found`,
+        );
+      }
+    }
+    return {
+      activityId: summary.activityId,
+      athleteId: summary.athleteId,
+      startedAt: summary.startedAt,
+      sampleInterval: summary.sampleInterval,
+      sampleCount: summary.sampleCount,
+      channels,
+    };
+  }
+
+  /**
+   * What is known about a stored set **without decoding a single sample**.
+   *
+   * This is the read #62's activity list and #35's export manifest can afford,
+   * and it is the reason the metadata and the bytes are two object stores
+   * rather than one row: answering "does this ride have a power trace, and how
+   * many bytes does it cost" must not mean inflating a quarter of a megabyte.
+   */
+  async getStreamSetSummary(
+    owner: AthleteId,
+    activity: ActivityId,
+  ): Promise<StreamSetSummary | undefined> {
+    const row = await this.#streamSets
+      .where(INDEX.streamSetByAthleteAndActivity)
+      .equals([owner, activity])
+      .first();
+    return row === undefined ? undefined : fromPersistedStreamSet(row);
+  }
+
+  /**
+   * Reads **one** channel.
+   *
+   * The read that justifies a blob per channel rather than one blob per set: a
+   * chart of power alone inflates and decodes 29 KB instead of 239 KB. Routed
+   * through `[athleteId+activityId+channel]`, so it is an exact index lookup
+   * rather than the whole set followed by a filter.
+   *
+   * @throws {StoreDecodeError}
+   */
+  async getStreamChannel<C extends StreamChannel>(
+    owner: AthleteId,
+    activity: ActivityId,
+    channel: C,
+  ): Promise<Samples<C> | undefined> {
+    const row = await this.#streamBlobs
+      .where(INDEX.streamBlobByAthleteAndActivityAndChannel)
+      .equals([owner, activity, channel])
+      .first();
+    if (row === undefined) {
+      return undefined;
+    }
+    return (await this.#decodeBlob(row)) as Samples<C>;
+  }
+
+  /**
+   * Deletes an activity's stream set and every one of its channel blobs.
+   *
+   * Scoped: another athlete's activity id deletes nothing and returns `false`.
+   * Deleting a set that is not there is a no-op, for `deleteAthlete`'s reason —
+   * a caller retrying after a crash must not be told the retry failed.
+   */
+  async deleteStreamSet(owner: AthleteId, activity: ActivityId): Promise<boolean> {
+    return this.#db.transaction('rw', [this.#streamSets, this.#streamBlobs], async () => {
+      const existing = await this.#streamSets
+        .where(INDEX.streamSetByAthleteAndActivity)
+        .equals([owner, activity])
+        .first();
+      if (existing === undefined) {
+        return false;
+      }
+      await this.#streamBlobs.where(INDEX.streamBlobByActivity).equals(activity).delete();
+      await this.#streamSets.delete(activity);
+      return true;
+    });
   }
 
   // --- Internal -------------------------------------------------------------
@@ -512,6 +776,138 @@ export class ActivityStore {
       throw new StoreReferentialError(`no athlete ${owner} exists`);
     }
   }
+
+  // --- Streams: internal ----------------------------------------------------
+
+  /**
+   * Encodes and compresses every channel, and computes the row the summary
+   * store holds. Runs entirely outside any transaction — see `putStreamSet`.
+   */
+  async #encodeStreamSet(
+    set: NewStreamSet,
+  ): Promise<{ summary: PersistedStreamSet; blobs: PersistedStreamBlob[] }> {
+    if (!Number.isInteger(set.sampleCount) || set.sampleCount < 0) {
+      throw new StoreValidationError(
+        `sampleCount must be a non-negative integer, received ${String(set.sampleCount)}`,
+      );
+    }
+    if (set.sampleInterval <= 0) {
+      throw new StoreValidationError(
+        `sampleInterval must be greater than zero, received ${String(set.sampleInterval)}`,
+      );
+    }
+
+    const blobs: PersistedStreamBlob[] = [];
+    const channels: StreamChannel[] = [];
+    let encodedBytes = 0;
+
+    // Iterating `STREAM_CHANNELS` rather than `Object.keys(set.channels)` fixes
+    // the stored order and ignores any key that is not a channel, so a caller
+    // handing over an object with an extra property stores eight channels at
+    // most and always in the same order.
+    for (const channel of STREAM_CHANNELS) {
+      const samples = set.channels[channel];
+      if (samples === undefined) {
+        continue;
+      }
+      if (samples.length !== set.sampleCount) {
+        throw new StoreValidationError(
+          `stream channel ${channel}: has ${String(samples.length)} samples but the set declares ` +
+            `${String(set.sampleCount)}. Every channel shares one time base, so sample i of one ` +
+            `channel is the same instant as sample i of another`,
+        );
+      }
+      const encoded = encodeChannel(channel, samples);
+      const values = await compressStreamBytes(encoded.values);
+      const present =
+        encoded.present === undefined ? undefined : await compressStreamBytes(encoded.present);
+      const row: PersistedStreamBlob = {
+        activityId: set.activityId,
+        channel,
+        athleteId: set.athleteId,
+        encoding: encoded.encoding,
+        compression: STREAM_COMPRESSION,
+        sampleCount: encoded.sampleCount,
+        values,
+        ...(present === undefined ? {} : { present }),
+      };
+      blobs.push(row);
+      channels.push(channel);
+      encodedBytes += persistedBlobBytes(row);
+    }
+
+    return {
+      summary: {
+        activityId: set.activityId,
+        athleteId: set.athleteId,
+        startedAt: set.startedAt,
+        sampleIntervalSeconds: set.sampleInterval,
+        sampleCount: set.sampleCount,
+        channels,
+        encodedBytes,
+      },
+      blobs,
+    };
+  }
+
+  /**
+   * Reads the summary row and every blob row in **one** read transaction, so
+   * the two cannot come from either side of a concurrent write.
+   *
+   * Returns the rows still compressed. Inflating them here would mean awaiting
+   * a promise Dexie did not create while a transaction is open.
+   */
+  async #readStreamRows(
+    owner: AthleteId,
+    activity: ActivityId,
+  ): Promise<{ set: PersistedStreamSet; blobs: PersistedStreamBlob[] } | undefined> {
+    return this.#db.transaction('r', [this.#streamSets, this.#streamBlobs], async () => {
+      const set = await this.#streamSets
+        .where(INDEX.streamSetByAthleteAndActivity)
+        .equals([owner, activity])
+        .first();
+      if (set === undefined) {
+        return undefined;
+      }
+      const blobs = await this.#streamBlobs
+        .where(INDEX.streamBlobByAthleteAndActivityAndChannel)
+        .between([owner, activity, Dexie.minKey], [owner, activity, Dexie.maxKey], true, true)
+        .toArray();
+      return { set, blobs };
+    });
+  }
+
+  /**
+   * Inflates and decodes one blob row.
+   *
+   * @throws {StoreDecodeError} — including for a compression framing this build
+   * does not write and for bytes that are not a valid stream. A corrupt channel
+   * must fail loudly: silently yielding an empty series would draw a chart with
+   * a gap the athlete's ride did not have.
+   */
+  async #decodeBlob(row: PersistedStreamBlob): Promise<Samples<StreamChannel>> {
+    const channel = parseStreamChannel(row.channel);
+    if (row.compression !== STREAM_COMPRESSION) {
+      throw new StoreDecodeError(
+        `stream channel ${channel}: stored compression ${String(row.compression)} is not the ` +
+          `${STREAM_COMPRESSION} this build writes`,
+      );
+    }
+    // The declared sample count is what bounds the inflation, so it is
+    // validated *before* a single byte is decompressed rather than after.
+    const declared = fromPersistedStreamBlob(row, EMPTY_BYTES, undefined).sampleCount;
+    const values = await inflate(
+      channel,
+      'values',
+      row.values,
+      declared * channelBytesPerSample(channel),
+    );
+    const present =
+      row.present === undefined
+        ? undefined
+        : await inflate(channel, 'present', row.present, Math.ceil(declared / 8));
+    return decodeChannel(channel, fromPersistedStreamBlob(row, values, present));
+  }
 }
 
 /**
@@ -553,4 +949,40 @@ function summaryOf(record: ActivityRecord): ActivitySummary {
     createdAt,
     ...(averagePower === undefined ? {} : { averagePower }),
   };
+}
+
+/** Stands in for a blob's bytes while only its declared sample count is being read. */
+const EMPTY_BYTES = new Uint8Array(0);
+
+/** A `StreamChannels` under construction. The public type is deeply readonly. */
+type MutableStreamChannels = { -readonly [C in StreamChannel]?: Samples<C> };
+
+/**
+ * Decompresses one of a blob row's two byte arrays.
+ *
+ * The bytes came off disk and are untrusted, so a `DecompressionStream`
+ * rejection — or a `StreamSizeError` from inflating past what the row declares
+ * — becomes a `StoreDecodeError` naming the channel and which array, `values`
+ * or `present`, rather than the platform's own message, which says only that a
+ * stream was corrupt.
+ */
+async function inflate(
+  channel: StreamChannel,
+  what: 'values' | 'present',
+  bytes: Uint8Array,
+  limit: number,
+): Promise<Uint8Array> {
+  try {
+    return await decompressStreamBytes(bytes, limit);
+  } catch (cause) {
+    // The two failures are reported apart because they mean different things to
+    // whoever reads the message: one is a corrupt stream, the other is a stream
+    // that is not corrupt at all and is claiming to be a row it is not.
+    if (cause instanceof StreamSizeError) {
+      throw new StoreDecodeError(`stream channel ${channel}: the stored ${what} ${cause.message}`);
+    }
+    throw new StoreDecodeError(
+      `stream channel ${channel}: the stored ${what} are not a valid ${STREAM_COMPRESSION} stream`,
+    );
+  }
 }

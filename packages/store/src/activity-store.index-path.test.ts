@@ -35,13 +35,13 @@
  */
 
 import Dexie from 'dexie';
-import { metres, seconds, unixSeconds } from '@onyourleft/domain';
+import { beatsPerMinute, metres, seconds, unixSeconds, watts } from '@onyourleft/domain';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { deleteActivityStore, openActivityStore, type ActivityStore } from './index';
 import { activityId, athleteId, lapId } from './ids';
 import type { PersistedActivity } from './persisted';
-import { SCHEMA_VERSION, STORES_V1, TABLE } from './schema';
+import { SCHEMA_VERSIONS, TABLE } from './schema';
 
 const ATHLETE_A = athleteId('athlete-a');
 const ATHLETE_B = athleteId('athlete-b');
@@ -137,7 +137,12 @@ describe('the counters can tell the two access paths apart', () => {
     // The implementation #26 forbids, written out so that every "did not scan"
     // assertion below is known to be capable of failing.
     const raw = new Dexie(databaseName);
-    raw.version(SCHEMA_VERSION).stores(STORES_V1);
+    // Every version, not only the newest: Dexie drops any object store a
+    // declared version does not mention, so a handle declaring version 2 with
+    // version 1's four stores would delete #27's two.
+    SCHEMA_VERSIONS.forEach((stores, index) => {
+      raw.version(index + 1).stores(stores);
+    });
 
     const [scanned, counts] = await countAccess(async () => {
       const all = await raw.table<PersistedActivity, string>(TABLE.activities).toArray();
@@ -234,5 +239,53 @@ describe('the athlete-scoped lookups read through their compound indexes', () =>
     expect(found?.id).toBe('a-00');
     expect(counts.index).toBeGreaterThan(0);
     expect(counts.objectStoreScan).toBe(0);
+  });
+});
+
+describe('the stream reads route through their compound indexes too', () => {
+  it('getStreamSet reads the summary and the blobs through [athleteId+activityId...]', async () => {
+    await store.putStreamSet({
+      activityId: activityId('a-04'),
+      athleteId: ATHLETE_A,
+      startedAt: unixSeconds(1_004),
+      sampleInterval: seconds(1),
+      sampleCount: 3,
+      channels: { power: [watts(100), watts(110), watts(120)] },
+    });
+
+    const [read, counts] = await countAccess(() =>
+      store.getStreamSet(ATHLETE_A, activityId('a-04')),
+    );
+
+    expect(read?.channels.power).toHaveLength(3);
+    expect(counts.index).toBeGreaterThan(0);
+    expect(counts.objectStoreScan).toBe(0);
+    // Not a primary-key read followed by an owner check in JavaScript: the
+    // stream set's primary key *is* the activity id, so that shape is the easy
+    // mistake here and it is the one that returns another athlete's ride.
+    expect(counts.objectStorePointRead).toBe(0);
+  });
+
+  it('getStreamChannel uses [athleteId+activityId+channel] rather than reading the whole set', async () => {
+    await store.putStreamSet({
+      activityId: activityId('a-06'),
+      athleteId: ATHLETE_A,
+      startedAt: unixSeconds(1_006),
+      sampleInterval: seconds(1),
+      sampleCount: 2,
+      channels: {
+        power: [watts(100), watts(110)],
+        heartRate: [beatsPerMinute(120), beatsPerMinute(121)],
+      },
+    });
+
+    const [power, counts] = await countAccess(() =>
+      store.getStreamChannel(ATHLETE_A, activityId('a-06'), 'power'),
+    );
+
+    expect(power).toEqual([100, 110]);
+    expect(counts.index).toBeGreaterThan(0);
+    expect(counts.objectStoreScan).toBe(0);
+    expect(counts.objectStorePointRead).toBe(0);
   });
 });

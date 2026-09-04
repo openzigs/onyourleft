@@ -8,10 +8,11 @@
  * second source of truth for the schema version alongside the one IndexedDB
  * already maintains.
  *
- * There is exactly one version today, because this is a new store: a database
- * that has never shipped has nothing to migrate from. `migrations.ts` holds the
- * `up`/`down` contract the first schema change will use, and its registry is
- * empty and says so.
+ * There are two versions. Version 1 (#26) is athletes, activities, laps and
+ * privacy zones. Version 2 (#27) **adds** `streamSets` and `streamBlobs` and
+ * touches nothing that already exists, so it needs no record migration —
+ * `migrations.ts` holds the `up`/`down` contract the first record-shape change
+ * will use, and its registry is still empty and says why.
  *
  * ## What is indexed, and which query each index is for
  *
@@ -28,8 +29,21 @@
  * CLAUDE.md section 6 warns about is awkward to write by accident.
  */
 
-/** The current schema version. Bumping it means adding a migration pair. */
-export const SCHEMA_VERSION = 1;
+/**
+ * The current schema version.
+ *
+ * **2** since #27. Version 2 adds two object stores — `streamSets` and
+ * `streamBlobs` — and changes **no existing record's shape**. That is why
+ * `SCHEMA_MIGRATIONS` in `migrations.ts` is still empty: the registry holds
+ * *record* migrations, and there is no record to transform. The version bump
+ * itself is real and is tested — `migrations.test.ts` opens a version-1
+ * database, writes rows into it, reopens at version 2, and asserts every row
+ * came through and the new stores are usable.
+ *
+ * Bumping this for a change that *does* alter a record's shape means adding a
+ * migration pair.
+ */
+export const SCHEMA_VERSION = 2;
 
 /**
  * Dexie stores its schema version in IndexedDB multiplied by ten, leaving room
@@ -50,6 +64,10 @@ export const TABLE = {
   activities: 'activities',
   laps: 'laps',
   privacyZones: 'privacyZones',
+  /** #27: one small indexed row per activity — the time base and the channel list. */
+  streamSets: 'streamSets',
+  /** #27: one row per channel per activity, holding the packed, compressed bytes. */
+  streamBlobs: 'streamBlobs',
 } as const;
 
 /**
@@ -78,6 +96,21 @@ export const INDEX = {
   lapByAthlete: 'athleteId',
   /** `listPrivacyZones`. */
   privacyZoneByAthlete: 'athleteId',
+  /** `getStreamSet` and `getStreamSetSummary` — the athlete-scoped point lookup. */
+  streamSetByAthleteAndActivity: '[athleteId+activityId]',
+  /** `deleteAthlete`'s cascade over stream sets. */
+  streamSetByAthlete: 'athleteId',
+  /**
+   * `getStreamSet`'s whole-set fetch and `getStreamChannel`'s single-channel
+   * one. Three components rather than two so the single-channel read is an
+   * exact index lookup rather than a scan of the set followed by a filter —
+   * which is the same reason `listLaps` has `[athleteId+activityId+ordinal]`.
+   */
+  streamBlobByAthleteAndActivityAndChannel: '[athleteId+activityId+channel]',
+  /** `deleteActivity`'s cascade over blobs. */
+  streamBlobByActivity: 'activityId',
+  /** `deleteAthlete`'s cascade over blobs. */
+  streamBlobByAthlete: 'athleteId',
 } as const;
 
 /**
@@ -113,3 +146,51 @@ export const STORES_V1: Readonly<Record<string, string>> = {
   ].join(', '),
   [TABLE.privacyZones]: ['id', INDEX.privacyZoneByAthlete].join(', '),
 };
+
+/**
+ * Version 2 — #27's stream storage, added beside version 1 rather than over it.
+ *
+ * Dexie merges a version's `stores()` with the previous version's, so only the
+ * two new entries are needed. They are declared beside a comment naming the
+ * unchanged four rather than repeated, because repeating them invites the two
+ * copies to drift and a re-declared store with a changed index string is a
+ * silent index rebuild.
+ *
+ * `streamBlobs` has a **compound primary key**, `[activityId+channel]`. That is
+ * the identity of the row — a channel of an activity — and making it the key
+ * rather than a synthesised id means a re-encode of one channel replaces its
+ * row rather than accumulating a second copy of the same bytes. It is also why
+ * there is no `id` field on the row: there is nothing an id would say that the
+ * pair does not.
+ *
+ * Every stream index leads with `athleteId`, for the reason every activity and
+ * lap index does: there is no index that answers "the stream set for this
+ * activity" without also being told whose it is.
+ */
+export const STORES_V2: Readonly<Record<string, string>> = {
+  // athletes, activities, laps and privacyZones are inherited from version 1
+  // unchanged. Dexie carries forward any store a version does not mention.
+  [TABLE.streamSets]: [
+    'activityId',
+    INDEX.streamSetByAthlete,
+    INDEX.streamSetByAthleteAndActivity,
+  ].join(', '),
+  [TABLE.streamBlobs]: [
+    '[activityId+channel]',
+    INDEX.streamBlobByActivity,
+    INDEX.streamBlobByAthlete,
+    INDEX.streamBlobByAthleteAndActivityAndChannel,
+  ].join(', '),
+};
+
+/**
+ * Every schema version this build knows, in ascending order.
+ *
+ * `ActivityStore` declares all of them on every open, because Dexie needs the
+ * whole history to upgrade a database that is behind — declaring only the
+ * newest leaves a version-1 database on disk with no path forward. Driving that
+ * from one array rather than from a list of hand-written `version(n)` calls is
+ * what keeps `SCHEMA_VERSION` and the declarations from drifting apart;
+ * `migrations.test.ts` asserts they agree.
+ */
+export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [STORES_V1, STORES_V2];
