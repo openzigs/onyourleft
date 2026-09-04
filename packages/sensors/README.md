@@ -13,10 +13,11 @@ cannot see. See [`docs/architecture.md`](../../docs/architecture.md).
 
 | | Issue | Where |
 |---|---|---|
-| The interfaces below | #39 | here |
+| The interfaces below | #39 | here, `src/` |
 | The Web Bluetooth adapter | #40 | `packages/sensors`, in its own directory with its own tsconfig |
 | Heart Rate, CSC, Cycling Power, FTMS clients | #41–#43 | below the transport boundary |
-| The device simulator | #44 | its own transport |
+| The device simulator | #44 | `src/simulator/`, exported as `@onyourleft/sensors/simulator` — [below](#the-device-simulator) |
+| The transport conformance suite | #44 | `src/simulator/conformance.ts`, exported as `@onyourleft/sensors/conformance` |
 | CoreBluetooth and Android BLE | #15 | the Capacitor plugin, behind the same interface |
 
 A service UUID, a characteristic UUID or a `DataView` of GATT payload in this directory means the
@@ -42,8 +43,10 @@ redistributing source containing the network key.
 | Spending the connection budget | `planCapabilitySources` | prefers the trainer's own stream |
 | Failure | `SensorError` + `SensorErrorCode` | "nothing found" and "not permitted" are different codes |
 
-Nothing here has a runtime dependency. `@onyourleft/domain` is imported for its types only —
-`src/` calls no constructor from it — so the abstraction contributes no code to a bundle.
+Nothing here has a runtime dependency. The abstraction — everything `@onyourleft/sensors` exports —
+imports `@onyourleft/domain` for its types only and calls no constructor from it, so it contributes
+no code to a bundle. The simulator is a separate entry point precisely because it does call them:
+it labels every value it emits, and it is not in the bundle unless something imports it by name.
 
 ## Validating the interface against more than one BLE stack
 
@@ -177,6 +180,172 @@ is the one that costs a ride:
 - **A signed grade type** — FTMS inclination.
 - **`Kilojoules`** — FTMS total energy, which the characteristic reports in kilojoules *and* in
   kilocalories; they are not the same quantity.
+
+## The device simulator
+
+`@onyourleft/sensors/simulator` is a **second implementation of `SensorTransport`** with no radio
+behind it, and a bench for driving it. It exists for three reasons, and the third is the one that
+justifies its cost:
+
+1. **CI can test the sensor layer with no hardware.** `ubuntu-latest` has no Bluetooth adapter; the
+   simulator's suite runs there on every pull request.
+2. **A hardware bug report becomes a scenario.** A contributor's trainer refuses a control write, or
+   goes quiet for thirty seconds, or wraps a counter at an awkward moment; the maintainer encodes
+   that as a script and reproduces it without buying the trainer. The worked example is
+   [below](#adding-a-misbehaviour-from-a-bug-report).
+3. **It is evidence that #39's interface is transport-agnostic.** An interface with one
+   implementation is a description of that implementation. The simulator satisfies `SensorTransport`
+   **unchanged**; if it could not have, that would have been a finding against #39, not something
+   to fix by widening the interface.
+
+Two further consequences that research established and nothing else records:
+
+- **This is the contributor on-ramp.** Without it, contributing to the BLE layer requires owning a
+  smart trainer — a contributor pool of roughly one. With it, every protocol client and every piece
+  of pairing UI can be written and tested by someone who has never seen one.
+- **It is also the App Store reviewability story.** An app reviewer has no smart trainer, and the
+  standard `bluetooth-central` rejection fires when a reviewer cannot see the Bluetooth functionality
+  the app declares. A reviewer-reachable demo mode built on this simulator is what prevents that. It
+  is a downstream use for the native shell (#15), not scope here; it is noted so that #15 does not
+  rediscover the need.
+
+### Two faces
+
+```ts
+import { seconds, watts } from '@onyourleft/domain';
+import { deviceId } from '@onyourleft/sensors';
+import { createSimulator, modernTrainer } from '@onyourleft/sensors/simulator';
+
+const { transport, bench } = createSimulator({ devices: [modernTrainer({ id: 'kickr' })] });
+
+// The transport face: SensorTransport, exactly as apps/web will drive #40's adapter.
+const device = await transport.discover({ capabilities: ['power', 'cadence', 'speed'] });
+await transport.connect(device.identity.id);
+await transport.subscribe(device.identity.id, 'power', (m) => console.log(m.at, m.power));
+
+// The bench face: a virtual clock, the rider, scenarios, inspection, the FTMS control point.
+bench.advance(seconds(5)); // five notifications, five power measurements
+bench.rider.set({ power: watts(310) });
+bench.device(device.identity.id).script({ kind: 'notification-dropout', duration: seconds(30) });
+```
+
+Nothing on the bench is part of `SensorTransport`. The control point in particular is on the bench
+because #39 has no write path — `transport.ts` says why — and #43 owns the command surface. The
+simulator serves the *device* side of that surface now so that #43's client has something to be
+tested against when it arrives.
+
+### Time is virtual
+
+`lib` is `ES2024` and `types` is empty, so there is no `setTimeout` and no `Date` in this package.
+The clock moves only when `bench.advance(seconds(n))` is called, one second at a time — the
+notification period every profile here uses, and the cadence at which a real FTMS host has been
+observed writing setpoints. A thirty-second dropout takes microseconds to run and is exactly
+reproducible. `advance` takes a `Seconds`, not a number, and refuses a fraction.
+
+### What it emulates
+
+| Builder | Services | Declares | Notes |
+|---|---|---|---|
+| `hrsStrap()` | Heart Rate | `heart-rate` | 1 Hz, the rider's heart rate |
+| `cpsPowerMeter()` | Cycling Power | `power`, `cadence` | crank-based; cadence is **derived** from the `uint16` crank counter and its 1/1024 s event time, exactly as #42 must derive it |
+| `cscsSensor()` | Cycling Speed and Cadence | `cadence` | wheel (`uint32`) and crank (`uint16`) counters both modelled; **not** `speed`, because that needs the athlete's wheel circumference — `capability.ts` states the rule |
+| `ftmsTrainer()` | FTMS | `power`, `cadence`, `speed`, `trainer-control` | Indoor Bike Data fanned out with **one instant**; Control Point; Fitness Machine Status |
+| `modernTrainer()` | FTMS + Cycling Power + CSC | all four | **one `deviceId`**, one capability set; power arrives **once** per cycle although two services carry it |
+
+The modern trainer is the case that matters most. It is #39's design decision — capabilities are a
+set on one device — made concrete enough to break an adapter that gets it wrong: a `SensorDevice`
+per service fails the identity assertions, and delivering power from both FTMS and CPS fails the
+once-per-cycle assertion. A simulator with one profile per device could catch neither.
+
+Frames are **field-presence records**, not bytes: each service's frame carries the fields the
+characteristic's flags say are present, as labelled quantities or as the raw counters the profile
+defines. There is no `DataView` here, because this directory bars GATT payload and because the
+encoder for each characteristic is the mirror image of the decoder #41–#43 write — it belongs
+beside them, where the two can be checked against each other. The frames are shaped so that an
+encoder is a table lookup away (`INDOOR_BIKE_DATA_FLAG_BIT` records the bits, including the
+inverted sense of bit 0).
+
+### Scripted misbehaviour, each one watched to fire
+
+Every scenario has a test that scripts it and asserts the consequence **through
+`SensorTransport`** — what a subscriber received, what a state observer saw. A scenario that only
+changes internal state is decoration.
+
+| Scenario | Observable consequence | Test |
+|---|---|---|
+| `disconnect` | state → `disconnected`; nothing more delivered; the ATT bearer's state (indications, control, a queued response) is gone | `scenarios.test.ts`, `control-point.test.ts` |
+| `disconnect` with `recoverAfter` | state → `reconnecting`, nothing delivered meanwhile, → `connected` on its own; **refused** on a transport whose traits say it cannot | `scenarios.test.ts` |
+| `notification-dropout` (30 s) | 30 s gap in every stream while the state never leaves `connected` | `scenarios.test.ts` |
+| `notification-dropout` (70 s, past the 64 s horizon) | the first cadence afterwards is **not emitted** — `eventTimeIntervalIsAmbiguous` says the counter has lapped an unknown number of times | `scenarios.test.ts` |
+| `counter-wrap` | crank count and event time both lap on the next frames; the cadence stream does not notice | `scenarios.test.ts` |
+| `control-permission-lost` | Fitness Machine Status `0xFF`; the next setpoint answers `0x05`; the power stream does not move | `control-point.test.ts` |
+| `indoor-bike-data-fields` | speed present with flag bit 0 **clear**, total distance present, no cadence: the cadence stream goes quiet, power and speed continue | `scenarios.test.ts` |
+
+The trainer's control-point refusals are not scenarios — they are its ordinary behaviour under the
+sequence of writes that provokes them, so a client reaches them by writing:
+
+| Write sequence | Answer | Source |
+|---|---|---|
+| Set Target Power before Request Control | result `0x05` Control Not Permitted, power unchanged | FTMS 4.16.2 — the routine case on a phone that reconnected |
+| Request Control, Set Target Power | `0x01`, `0x01`, status `0x08` Target Power Changed, power holds the target | FTMS 4.16.2 |
+| Set Target Power above the supported range | `0x03` Invalid Parameter | FTMS 4.16.2.5 |
+| Reset | `0x01`, status `0x01`, **and the client's own control is revoked** | FTMS 4.16.2.1 |
+| any write before indications are enabled | ATT error `0xFD` CCCD Improperly Configured | Core Spec Supplement, Part B |
+| a write while a response is outstanding | ATT error `0xFE` Procedure Already in Progress | Core Spec Supplement, Part B |
+| a write at 1 Hz for thirty seconds | thirty successes | observed host behaviour |
+
+### Adding a misbehaviour from a bug report
+
+Suppose a contributor reports: *"My trainer sends Indoor Bike Data with the power field missing for
+a second or two after every ERG change. The app shows zero watts and my ride file has a hole."*
+
+1. **Find the observable consequence.** Not "the flag byte is `0x44`" — the consequence through
+   `SensorTransport`: a `power` subscriber receives nothing for those frames while `cadence` and
+   `speed` continue, and the frames carry the same `at`.
+2. **Check whether an existing scenario reaches it.** Here `indoor-bike-data-fields` already does:
+   script `new Set(['instantaneous-speed', 'instantaneous-cadence'])` after a Set Target Power and
+   the power stream goes quiet. If it does, the work is a test, not a scenario.
+3. **If it does not, add a variant to `Scenario` in `src/simulator/scenario.ts`**, with a doc
+   comment that names the real device or the specification clause it comes from. A scenario nobody
+   can trace to a source is one nobody can decide to remove.
+4. **Implement it in `script()` in `src/simulator/simulator.ts`**, or in the service model it
+   concerns (`ftms.ts`, `profiles.ts`, `counters.ts`). Refuse it with `capability-unsupported` on a
+   device that does not have the service it needs, rather than ignoring it.
+5. **Write the test first**, in `scenarios.test.ts`: script it, `advance`, and assert on what the
+   subscriber received. Watch it fail against the unmodified simulator.
+6. **Mutate the implementation** — invert the condition, delete the write — and watch the test go
+   red again. List the mutation in the pull request; CLAUDE.md §5 makes that the gate.
+7. **Add a row to the table above.** The table is how the next contributor finds out the fault is
+   already reproducible.
+
+### The conformance suite, and pointing it at hardware
+
+`@onyourleft/sensors/conformance` exports `describeTransportConformance(name, subject)`: what every
+`SensorTransport` must do, written once as a function of a factory. It asserts only what is true of
+every transport and every real device — the lifecycle runs `disconnected → connecting → connected`,
+each declared capability delivers within five seconds, nothing arrives before connection or after
+disconnection, every measurement names the device — so it cannot check an exact value or script a
+fault; the simulator's own tests do those.
+
+`simulator.test.ts` runs it against all five device kinds. When #40 lands, the same call with a
+factory that wraps the Web Bluetooth adapter runs it against a trainer on the desk, and a contributor
+with hardware can report the diff. The factory supplies `settle(duration)`: the simulator advances
+its clock, a real transport waits.
+
+### What is deliberately not here
+
+- **Bytes.** No characteristic encoding, for the reason given above. The byte-level cases in #44's
+  revision block — the `uint24` total distance, the five-octet expended-energy triple behind bit 8,
+  the Cycling Power qualifier bits 1 and 3 that are not presence bits — are decoder fixtures, and
+  they arrive with the decoders in #41–#43.
+- **Set Indoor Bike Simulation Parameters (`0x11`)** needs a grade type `@onyourleft/domain` does
+  not have. Left out rather than typed as a bare number, like the units listed
+  [above](#units-this-package-still-needs-from-onyourleftdomain).
+- **Result codes no scenario reaches** (`0x02` Op Code Not Supported, `0x04` Operation Failed) and
+  Indoor Bike Data fields with no unit (expended energy, heart rate, metabolic equivalent).
+- **Noise, fatigue and physics.** The rider is steady until the bench changes it. Power → speed is
+  `packages/physics` (#88), and a second model of it in a test fixture would be a second source of
+  truth.
 
 ## Running it
 
