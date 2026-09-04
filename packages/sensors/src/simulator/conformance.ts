@@ -105,6 +105,29 @@ export function describeTransportConformance(name: string, subject: ConformanceS
       expect(transport.connectionState(device.identity.id)).toBe('disconnected');
     });
 
+    it('returns known devices that are its own, distinct, and addressable', async () => {
+      const { transport } = await subject.create();
+      const known = await transport.knownDevices();
+
+      // Deliberately not "how many". Web Bluetooth returns none, a native stack
+      // returns its restorable peripherals, and the simulator returns its
+      // catalogue — all three are correct, so a count assertion would only be
+      // asserting which transport is under test. What must hold everywhere is
+      // that each entry is usable: issued by *this* transport, not a duplicate,
+      // and accepted by the id-keyed methods.
+      const ids = known.map((device) => device.identity.id);
+      expect(new Set(ids).size, 'a duplicate id aliases two devices to one handle').toBe(
+        ids.length,
+      );
+      for (const device of known) {
+        expect(device.identity.transport).toBe(transport.traits.id);
+        // `connectionState` throws `device-not-found` for an id this transport
+        // did not issue, so calling it is the check: a transport that hands back
+        // a device it cannot then address has reported a device that is not there.
+        expect(() => transport.connectionState(device.identity.id)).not.toThrow();
+      }
+    });
+
     it('connects through connecting, and connecting again is a no-op', async () => {
       const { transport, request } = await subject.create();
       const device = await transport.discover(request);

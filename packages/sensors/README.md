@@ -327,6 +327,15 @@ each declared capability delivers within five seconds, nothing arrives before co
 disconnection, every measurement names the device — so it cannot check an exact value or script a
 fault; the simulator's own tests do those.
 
+`knownDevices()` is asserted the same way, and the shape of that assertion is worth stating because
+it is the one method where transports legitimately disagree. Web Bluetooth returns none, a native
+stack returns its restorable peripherals, and the simulator returns its catalogue; **all three are
+correct**, so the suite does not assert a count — that would only be asserting which transport is
+under test. It asserts that each entry is *usable*: issued by this transport, not a duplicate (a
+repeated id aliases two devices onto one handle, the failure `device.ts` exists to prevent), and
+accepted by the id-keyed methods, since a transport that returns a device it cannot then address has
+reported a device that is not there.
+
 `simulator.test.ts` runs it against all five device kinds. When #40 lands, the same call with a
 factory that wraps the Web Bluetooth adapter runs it against a trainer on the desk, and a contributor
 with hardware can report the diff. The factory supplies `settle(duration)`: the simulator advances
