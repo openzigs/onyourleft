@@ -24,6 +24,8 @@
  */
 
 import {
+  eventTickRate,
+  eventTicks,
   eventTimeIntervalIsAmbiguous,
   eventTimeIntervalSeconds,
   revolutionsPerMinute,
@@ -174,11 +176,16 @@ export function deriveCadence(
   if (eventTimeIntervalIsAmbiguous(elapsed, options.ticksPerSecond)) {
     return { cadence: undefined, next: current };
   }
-  const interval = eventTimeIntervalSeconds(
-    previous.reading.lastEventTimeTicks,
-    current.reading.lastEventTimeTicks,
-    options.ticksPerSecond,
-  );
+  // Named fields, not positional arguments. #103 changed this signature for the
+  // reason this call site demonstrates: the three values are all plausible
+  // `number`s in each other's roles, and the positional form this replaced
+  // typechecked whichever order they were written in. `(1512, 1000, 1024)`
+  // returned 63.98 s -- a counter wrap misread as a long interval -- silently.
+  const interval = eventTimeIntervalSeconds({
+    previousTicks: eventTicks(previous.reading.lastEventTimeTicks),
+    currentTicks: eventTicks(current.reading.lastEventTimeTicks),
+    ticksPerSecond: eventTickRate(options.ticksPerSecond),
+  });
   return {
     cadence: revolutionsPerMinute((revolutions / interval) * 60),
     next: current,
