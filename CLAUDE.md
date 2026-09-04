@@ -36,6 +36,7 @@ packages/             Apache-2.0, without exception
   fit/                FIT / GPX / TCX codec (#29-#32)
   sensors/            sensor abstraction and BLE transport (#39-#44) — BLE only
     src/                the transport-agnostic abstraction; no platform API at all
+    protocol/           the GATT profile clients (#41, #42) — service UUIDs, payload decoding
     web-bluetooth/      the browser transport (#40) — the one place a BluetoothDevice exists
   physics/            cycling power/speed model, Martin et al. 1998 (#88)
   store/              local activity and stream store, and the round-trip harness (#26-#28)
@@ -286,8 +287,17 @@ not.
     holds the browser transport: the `DeviceId → device/server/service/characteristic` map, the
     global GATT operation queue, `createWebBluetoothTransport`, and a scripted Web Bluetooth stack
     at `@onyourleft/sensors/web-bluetooth/testing`. It holds **no profile** — not one service UUID
-    and not one byte of payload. The protocol clients (#41–#43) supply `GattProfile`s, and until
-    they land the adapter decodes nothing on a real device.
+    and not one byte of payload.
+    **`packages/sensors/protocol`** ([#41](https://github.com/openzigs/onyourleft/issues/41),
+    [#42](https://github.com/openzigs/onyourleft/issues/42)) is where the profiles are: Heart Rate
+    (`0x180D`), Cycling Speed and Cadence (`0x1816`) and Cycling Power (`0x1818`), exported as
+    `@onyourleft/sensors/protocol`. **FTMS (`0x1826`) is not there yet** — it is #43's, with its own
+    review, because its control point applies physical resistance to a person who is pedalling. ⚠️
+    `protocol/` is a **third** directory rather than part of either neighbour, and it is
+    platform-free: `src/` bars a service UUID and a `DataView` of GATT payload by its own rule, and
+    a decoder inside `web-bluetooth/` would make the native stacks (#15) depend on the browser
+    adapter, when the promise is that it is "the same parser, unchanged". `DataView` is an
+    ECMAScript built-in, which is why a payload decoder can be platform-free at all.
   - **`packages/fit`** holds the **synthetic fixture corpus and its generator**
     ([#107](https://github.com/openzigs/onyourleft/issues/107)) and the **FIT activity file
     decoder** ([#30](https://github.com/openzigs/onyourleft/issues/30)) in `src/decode/`, exported
@@ -366,8 +376,8 @@ would otherwise be documented and unenforced, which is the gap this project keep
 |---|---|
 | `headers/header-format` | a `.ts`/`.tsx` file whose first line is not the SPDX identifier its directory requires. Duplicates `LIC001`/`LIC002` on purpose: the script covers file types ESLint never parses and runs with no toolchain, the lint rule runs in the editor |
 | `boundaries/dependencies` | an import from `packages/*` into `apps/*`, in either the relative (`../../../apps/web/src/...`) or the workspace (`@onyourleft/web`) spelling. Dependencies point one way |
-| `@typescript-eslint/no-restricted-imports` in `packages/domain`, `packages/sensors/src` and `packages/sensors/web-bluetooth` | naming **any** Node builtin — the list is derived from `builtinModules`, not typed out, so `events`, `util` and `stream/promises` fail exactly as `node:fs` does — or `react`, `react-dom`, `vite` or `dexie`, or a BLE library |
-| `no-restricted-globals` in `packages/domain` and `packages/sensors/src` | naming a DOM global (`window`, `document`, `navigator`, `location`, `history`, `localStorage`, `sessionStorage`, `indexedDB`, `caches`), a Node global (`process`, `Buffer`, `__dirname`, `__filename`, `global`, `require`) or a network global (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Request`, `Response`, `Headers`). This one **is** a named list; the closure is the typechecker below |
+| `@typescript-eslint/no-restricted-imports` in `packages/domain`, `packages/sensors/src`, `packages/sensors/protocol` and `packages/sensors/web-bluetooth` | naming **any** Node builtin — the list is derived from `builtinModules`, not typed out, so `events`, `util` and `stream/promises` fail exactly as `node:fs` does — or `react`, `react-dom`, `vite` or `dexie`, or a BLE library |
+| `no-restricted-globals` in `packages/domain`, `packages/sensors/src` and `packages/sensors/protocol` | naming a DOM global (`window`, `document`, `navigator`, `location`, `history`, `localStorage`, `sessionStorage`, `indexedDB`, `caches`), a Node global (`process`, `Buffer`, `__dirname`, `__filename`, `global`, `require`) or a network global (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Request`, `Response`, `Headers`). This one **is** a named list; the closure is the typechecker below |
 | `no-restricted-globals` in `packages/sensors/web-bluetooth` | naming any of the same list **except `navigator`** — the adapter is the transport boundary and `navigator.bluetooth` is the one platform API it exists to reach. The exception is derived by subtracting one name from the list above rather than restating it, so the two cannot drift |
 
 `packages/domain/tsconfig.json` narrows `lib` to `ES2024` and sets `types: []`. That is the closure
@@ -399,9 +409,10 @@ that file has to cover the whole package — including `web-bluetooth/`, which n
 reports "not found by the project service" instead of anything useful. So
 `packages/sensors/tsconfig.json` is the wide program (`lib: ["ES2024", "DOM"]`,
 `types: ["web-bluetooth"]`) and **`packages/sensors/tsconfig.platform-free.json` is the one that
-enforces**: `src/` alone, `lib: ["ES2024"]`, `types: []`. `pnpm run typecheck` runs both, and a
-`navigator` in `src/` fails the second while passing the first. Reading only the first is how this
-would be believed to be broken; reading only the second is how a lint config change would be missed.
+enforces**: `src/` **and `protocol/`**, `lib: ["ES2024"]`, `types: []`. `pnpm run typecheck` runs
+both, and a `navigator` in either fails the second while passing the first. Reading only the first
+is how this would be believed to be broken; reading only the second is how a lint config change
+would be missed.
 
 > ⚠️ **`no-restricted-imports` `group` patterns are matched with gitignore semantics**, where a
 > pattern containing no slash matches *any* path segment. The derived Node-builtin list therefore
@@ -412,8 +423,9 @@ would be believed to be broken; reading only the second is how a lint config cha
 
 #40's Web Bluetooth adapter needed the DOM, so it arrived in its own directory
 (`packages/sensors/web-bluetooth`) with its own entry in `eslint.config.js`, and
-`packages/sensors/src` stayed platform-free. The routing work (#70) goes in the same file when it
-lands.
+`packages/sensors/src` stayed platform-free. #41 and #42's protocol clients arrived on the same
+terms in `packages/sensors/protocol` — a third entry, and `platformIsolation` verbatim, because they
+name a wire format but no platform. The routing work (#70) goes in the same file when it lands.
 
 ---
 

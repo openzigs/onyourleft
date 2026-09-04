@@ -308,13 +308,18 @@ export default tseslint.config(
   // --- packages/sensors/src depends on no platform API either ----------------
   // #39 defines the shape every BLE transport implements, and its second
   // acceptance criterion is that Web Bluetooth *and* a native stack satisfy it
-  // unchanged. An interface that can name `navigator.bluetooth` — or a
-  // `BluetoothRemoteGATTCharacteristic`, or a `DataView` full of GATT payload —
-  // has already chosen one of the three, and #15 becomes a rewrite of the
-  // protocol layer rather than an adapter.
+  // unchanged. An interface that can name `navigator.bluetooth` or a
+  // `BluetoothRemoteGATTCharacteristic` has already chosen one of the three, and
+  // #15 becomes a rewrite of the protocol layer rather than an adapter.
   // `packages/sensors/tsconfig.platform-free.json` narrows `lib` and empties
   // `types` for the same reason; these rules are the half that does not depend
   // on that narrowing surviving a stray `/// <reference types="node" />`.
+  //
+  // ⚠️ A `DataView` full of GATT payload does not belong in `src/` either, but
+  // **nothing here or in the tsconfig makes that a compile error** — `DataView`
+  // is an ECMAScript built-in and is in `lib: ["ES2024"]`. That one is a
+  // documented rule enforced in review (`packages/sensors/README.md`), and the
+  // place payload does belong is `packages/sensors/protocol` below.
   //
   // ⚠️ **`files` is `src/` and this package's Vitest config, not the whole
   // package.** #40's adapter needs the DOM, so it lives beside `src/` in
@@ -325,6 +330,25 @@ export default tseslint.config(
   // before (CLAUDE.md section 4d).
   {
     files: ['packages/sensors/src/**/*.{ts,tsx}', 'packages/sensors/vitest.config.ts'],
+    rules: platformIsolation(BLE_LIBRARY_IMPORT_PATTERNS),
+  },
+
+  // --- packages/sensors/protocol depends on no platform API either -----------
+  // #41 and #42's GATT decoders. They sit beside `src/` rather than inside it,
+  // because `src/` bars a service UUID and a `DataView` of GATT payload by its
+  // own rule — #39's abstraction must not know a wire format. And they sit
+  // beside `web-bluetooth/` rather than inside it, because `README.md` promises
+  // they are "the same parser, unchanged" for the Capacitor plugin over
+  // CoreBluetooth and Android BLE (#15): a decoder inside the browser adapter
+  // would make the native stacks depend on it.
+  //
+  // So the isolation is `src/`'s, verbatim — the BLE-library denylist included,
+  // for the same reason. `DataView` is an ECMAScript built-in and survives
+  // `lib: ["ES2024"]` with `types: []`, which is what makes a payload decoder
+  // platform-free at all; `navigator` and every Web Bluetooth type do not, and
+  // `packages/sensors/tsconfig.platform-free.json` compiles this directory too.
+  {
+    files: ['packages/sensors/protocol/**/*.{ts,tsx}'],
     rules: platformIsolation(BLE_LIBRARY_IMPORT_PATTERNS),
   },
 

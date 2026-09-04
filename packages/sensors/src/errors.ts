@@ -100,6 +100,23 @@ export type SensorErrorCode =
    */
   | 'capability-unsupported'
   /**
+   * A notification's payload could not be decoded: a flag claimed a field the
+   * buffer does not contain, a mandatory field is missing, or a field holds a
+   * value the profile does not permit.
+   *
+   * **A device fault or an attack, never a caller fault** — which is why it is
+   * its own code rather than folded into `capability-unsupported`. Sensor data
+   * is untrusted input (SECURITY.md, CLAUDE.md §6): the payload comes from a
+   * device that may not be what it claims, and the obvious attack on a
+   * flags-gated variable-length characteristic is a flag claiming a field that
+   * is not there. The alternative to a code here is a bare `RangeError` out of
+   * a `DataView`, which a caller cannot tell from a bug in this package.
+   *
+   * Costs one notification. `packages/sensors/protocol` raises it and the
+   * adapter drops that notification and carries on — see `onProtocolError`.
+   */
+  | 'malformed-payload'
+  /**
    * The plan needs more simultaneous connections than the platform will carry.
    * See `MAX_RECOMMENDED_CONCURRENT_CONNECTIONS` in `plan.ts`: the budget is
    * OS-wide and shared with whatever else the athlete has paired, so this is a

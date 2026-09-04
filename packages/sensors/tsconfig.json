@@ -23,5 +23,5 @@
     "lib": ["ES2024", "DOM"],
     "types": ["web-bluetooth"]
   },
-  "include": ["src/**/*.ts", "web-bluetooth/**/*.ts", "vitest.config.ts"]
+  "include": ["src/**/*.ts", "protocol/**/*.ts", "web-bluetooth/**/*.ts", "vitest.config.ts"]
 }
