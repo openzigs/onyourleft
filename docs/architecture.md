@@ -107,6 +107,19 @@ Each is tabulated with its unit, its sign rule and the bug it prevents in
 [`packages/domain/README.md`](../packages/domain/README.md), which is the reference a consumer reads
 rather than this file.
 
+`packages/fit` holds the **FIT activity file decoder** as of
+[#30](https://github.com/openzigs/onyourleft/issues/30), alongside the synthetic fixture corpus and
+generator from [#29](https://github.com/openzigs/onyourleft/issues/29). `decodeFitActivity(bytes)`
+returns the file's contents in `@onyourleft/domain` quantities plus every recoverable fault, each
+carrying the byte offset it was found at; it opens nothing, so
+[`packages/fit/tsconfig.platform-free.json`](../packages/fit/tsconfig.platform-free.json) compiles
+`src/` with `lib: ["ES2024"]` and `types: []` and a `TextDecoder` is a compile error there. The
+profile it reads is the narrow, enumerated subset [ADR 0006](adr/0006-fit-codec-licensing.md) R2
+requires, and the provenance of every number in it — with the two that rest on the fixture corpus
+alone named as such — is in [`packages/fit/README.md`](../packages/fit/README.md), which is the
+reference a consumer reads rather than this file. The encoder is #31 and GPX/TCX are #32; both
+consume the same shape, so `packages/fit` still depends on nothing but `@onyourleft/domain`.
+
 `packages/store` is filled in as of [#26](https://github.com/openzigs/onyourleft/issues/26) — the
 athlete, activity, lap and privacy-zone object stores, the indexes each read goes through, the
 referential behaviour IndexedDB cannot declare, and the migration `up`/`down` contract — and of

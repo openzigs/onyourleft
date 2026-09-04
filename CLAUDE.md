@@ -288,10 +288,20 @@ not.
     at `@onyourleft/sensors/web-bluetooth/testing`. It holds **no profile** — not one service UUID
     and not one byte of payload. The protocol clients (#41–#43) supply `GattProfile`s, and until
     they land the adapter decodes nothing on a real device.
-  - **`packages/fit`** ([#107](https://github.com/openzigs/onyourleft/issues/107)) holds the
-    **synthetic fixture corpus and its generator**, not a codec. The decoder (#30), the encoder
-    (#31) and GPX/TCX (#32) are still to come, and per ADR 0006 they are written from the published
-    protocol documentation — nothing carrying Garmin's terms may enter this package.
+  - **`packages/fit`** holds the **synthetic fixture corpus and its generator**
+    ([#107](https://github.com/openzigs/onyourleft/issues/107)) and the **FIT activity file
+    decoder** ([#30](https://github.com/openzigs/onyourleft/issues/30)) in `src/decode/`, exported
+    as `decodeFitActivity(bytes)`. The encoder (#31) and GPX/TCX (#32) are still to come. Per
+    ADR 0006 all of them are written from the published protocol documentation and from the #29
+    fixtures — **nothing carrying Garmin's terms may enter this package**, and R2 requires the
+    provenance of every profile number to be recorded per message. The decoder's record is
+    [`packages/fit/README.md`](packages/fit/README.md) §3 and the corpus's is
+    `packages/fit/fixtures/README.md` §5; they are **deliberately separate and independently
+    derived**, and a test asserts the two tables agree so that a disagreement is visible rather
+    than shared. ⚠️ Like `packages/store` it is not one program: `tsconfig.json` admits
+    `@types/node` for the generator under `tools/`, and `tsconfig.platform-free.json` compiles
+    `src/` alone with `lib: ["ES2024"]` and `types: []`. A `TextDecoder` in `src/` is therefore a
+    compile error, which is why the decoder carries its own UTF-8 reader.
   - **`packages/store`** holds athletes, activities, laps and privacy zones
     ([#26](https://github.com/openzigs/onyourleft/issues/26)) with the migration `up`/`down`
     contract, **per-second streams** at schema version 2
@@ -722,5 +732,6 @@ top of an issue **supersedes its body**.
 | Which lint rule enforces which boundary | [`eslint.config.js`](eslint.config.js) and §4d |
 | Why a package's tsconfig narrows `lib` and `types` | `packages/domain/tsconfig.json` and §4d |
 | The canonical unit for a quantity, and the conversion into it | [`packages/domain/README.md`](packages/domain/README.md) |
+| Where a FIT profile number came from, and what the decoder does with a bad file | [`packages/fit/README.md`](packages/fit/README.md) |
 
-<!-- Last updated: 2026-09-03 by delivery:code-issue resolving #39 (sensor abstraction), #107 (FIT fixture corpus), #26 (local store schema and migrations) and #27/#28 (stream storage and the round-trip harness) -->
+<!-- Last updated: 2026-09-04 by delivery:code-issue resolving #30 (the FIT activity file decoder) -->
