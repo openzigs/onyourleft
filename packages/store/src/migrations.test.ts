@@ -25,8 +25,12 @@
  * disk rather than what is in the connection.
  */
 
+import { seconds, unixSeconds, watts } from '@onyourleft/domain';
 import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { openActivityStore } from './activity-store';
+import { activityId, athleteId } from './ids';
 
 import {
   migrateDown,
@@ -35,7 +39,7 @@ import {
   upgradeWith,
   type RecordMigration,
 } from './migrations';
-import { SCHEMA_VERSION } from './schema';
+import { SCHEMA_VERSION, SCHEMA_VERSIONS, STORES_V1, TABLE } from './schema';
 
 /**
  * A fixture migration. Not a production one — see `SCHEMA_MIGRATIONS`.
@@ -217,13 +221,79 @@ describe('the same pair, applied to a database that contains rows', () => {
 });
 
 describe('the production registry', () => {
-  it('is empty, because schema version 1 is the initial schema', () => {
-    expect(SCHEMA_VERSION).toBe(1);
+  it('is empty of record migrations, because no version has changed a record’s shape', () => {
+    // Version 2 (#27) **adds** `streamSets` and `streamBlobs` and rewrites
+    // nothing, so there is no record to transform and no `down` to write.
+    // Asserted rather than left implicit: the day a version does change a
+    // record's shape, this test is what says the registry must gain an entry.
+    expect(SCHEMA_VERSION).toBe(2);
     expect(SCHEMA_MIGRATIONS).toEqual([]);
+  });
+
+  it('declares exactly as many schemas as the version it claims to be at', () => {
+    // `ActivityStore` drives its `version(n).stores(...)` calls from this array,
+    // so a schema added without bumping the version — or the reverse — is a
+    // database that opens at the wrong version and quietly reads the wrong
+    // shape. That is the same defect class as the downgrade `StoreVersionError`
+    // guards against, arriving from the other direction.
+    expect(SCHEMA_VERSIONS).toHaveLength(SCHEMA_VERSION);
   });
 
   it('would hold migrations in ascending toVersion order', () => {
     const versions = SCHEMA_MIGRATIONS.map((migration) => migration.toVersion);
     expect(versions).toEqual([...versions].sort((a, b) => a - b));
+  });
+});
+
+describe('version 1 to version 2 — an additive schema change, against a database with rows in it', () => {
+  /**
+   * #27 bumps the schema to add two object stores. No record changes shape, so
+   * there is no `up`/`down` pair to test — but "no migration needed" is a claim
+   * about an athlete's existing data, and the only honest way to make it is to
+   * put rows in a version-1 database and open them at version 2.
+   */
+  it('keeps every version-1 record and makes the new stores usable', async () => {
+    const v1 = new Dexie(databaseName);
+    v1.version(1).stores(STORES_V1);
+    await v1.table(TABLE.athletes).put({ id: 'athlete-a', displayName: 'A', createdAt: 1 });
+    await v1.table(TABLE.activities).put({
+      id: 'ride-1',
+      athleteId: 'athlete-a',
+      name: 'before the upgrade',
+      startedAt: 1_700_000_000,
+      startedAtTimeZone: 'UTC',
+      elapsedTime: 60,
+      movingTime: 60,
+      distance: 1_000,
+      visibility: 'private',
+      hasPosition: false,
+      createdAt: 1_700_000_000,
+    });
+    const beforeVersion = v1.backendDB().version;
+    v1.close();
+
+    const store = openActivityStore(databaseName);
+    const ride = await store.getActivity(athleteId('athlete-a'), activityId('ride-1'));
+    await store.putStreamSet({
+      activityId: activityId('ride-1'),
+      athleteId: athleteId('athlete-a'),
+      startedAt: unixSeconds(1_700_000_000),
+      sampleInterval: seconds(1),
+      sampleCount: 2,
+      channels: { power: [watts(200), watts(210)] },
+    });
+    store.close();
+
+    // A third connection, so the assertion reads what is on disk rather than
+    // what the connection that ran the upgrade is holding.
+    const reopened = openActivityStore(databaseName);
+    const streams = await reopened.getStreamSet(athleteId('athlete-a'), activityId('ride-1'));
+    const stillThere = await reopened.getActivity(athleteId('athlete-a'), activityId('ride-1'));
+    reopened.close();
+
+    expect(ride?.name).toBe('before the upgrade');
+    expect(stillThere?.name).toBe('before the upgrade');
+    expect(streams?.channels.power).toEqual([200, 210]);
+    expect(beforeVersion).toBeLessThan(SCHEMA_VERSION * 10);
   });
 });

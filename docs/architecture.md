@@ -94,7 +94,7 @@ checkable.
 | `packages/fit` | Apache-2.0 | FIT / GPX / TCX decode and encode | Anything server-specific; anything under `apps/`; **anything carrying the Garmin FIT Protocol License — see [ADR 0006](adr/0006-fit-codec-licensing.md)** | #29–#32 |
 | `packages/sensors` | Apache-2.0 | BLE sensor and trainer abstraction; Web Bluetooth transport | Anything server-specific. Web Bluetooth types must not escape above the transport boundary | #39–#44 |
 | `packages/physics` | Apache-2.0 | Power → speed, as separately testable terms | Any rendering, BLE or platform API | #88 |
-| `packages/store` | Apache-2.0 | Local activity and stream persistence, and its migrations | Anything under `apps/` | #26, #27 |
+| `packages/store` | Apache-2.0 | Local activity and stream persistence, its migrations, and the round-trip test harness | Anything under `apps/` | #26, #27, #28 |
 
 `packages/domain` is filled in as of [#25](https://github.com/openzigs/onyourleft/issues/25): the
 canonical representation of each quantity, the conversions into and out of the wire formats (FIT
@@ -104,16 +104,19 @@ Each is tabulated with its unit, its sign rule and the bug it prevents in
 [`packages/domain/README.md`](../packages/domain/README.md), which is the reference a consumer reads
 rather than this file.
 
-`packages/store` is filled in as of [#26](https://github.com/openzigs/onyourleft/issues/26):
-the athlete, activity, lap and privacy-zone object stores, the indexes each read goes through, the
-referential behaviour IndexedDB cannot declare, and the migration `up`/`down` contract. Stream
-storage is still [#27](https://github.com/openzigs/onyourleft/issues/27)'s. The entity model:
+`packages/store` is filled in as of [#26](https://github.com/openzigs/onyourleft/issues/26) — the
+athlete, activity, lap and privacy-zone object stores, the indexes each read goes through, the
+referential behaviour IndexedDB cannot declare, and the migration `up`/`down` contract — and of
+[#27](https://github.com/openzigs/onyourleft/issues/27), which adds per-second streams as schema
+version 2 and decides their shape in [ADR 0011](adr/0011-stream-storage.md). The entity model:
 
 ```mermaid
 erDiagram
     ATHLETE ||--o{ ACTIVITY : owns
     ATHLETE ||--o{ PRIVACY_ZONE : defines
     ACTIVITY ||--o{ LAP : contains
+    ACTIVITY ||--o| STREAM_SET : "has at most one"
+    STREAM_SET ||--o{ STREAM_BLOB : "one row per channel"
 
     ATHLETE {
         string  id           PK "opaque; #61 keys it to the device keypair"
@@ -156,6 +159,25 @@ erDiagram
         string  label
         number  createdAt      "UnixSeconds"
     }
+    STREAM_SET {
+        string  activityId            PK "a stream set IS its activity's"
+        string  athleteId             FK "the scoping column"
+        number  startedAt                "UnixSeconds — the instant of sample 0"
+        number  sampleIntervalSeconds    "Seconds; 1 for the 1 Hz case"
+        number  sampleCount              "shared by every channel — one time base"
+        string  channels                 "which channels have a blob row"
+        number  encodedBytes             "what this ride costs, after compression"
+    }
+    STREAM_BLOB {
+        string  activityId   PK "with channel: the compound primary key"
+        string  channel      PK "power | heartRate | cadence | speed | latitude | longitude | altitude | temperature"
+        string  athleteId    FK "denormalised: the scoping column"
+        string  encoding        "uint16 | uint8 | sint8 | uint16-milli | uint16-fit-altitude | sint32-semicircle"
+        string  compression     "deflate-raw"
+        number  sampleCount
+        bytes   values          "packed, little-endian, compressed"
+        bytes   present         "optional presence bitmap; absent when the channel is dense"
+    }
 ```
 
 Three things that diagram does not say, and that a reader coming from a relational schema will
@@ -169,8 +191,13 @@ otherwise assume:
   [ADR 0004](adr/0004-privacy-and-location.md) decision A. There is no stored start position to go
   with it: that ADR forbids a `start_lat`/`start_lng` pair a list query would select, so `hasPosition`
   carries the one bit the activity list needs.
-- **No stream data, no devices and no gear.** Streams are #27's and are never stored as per-sample
-  rows; devices and gear are additive object stores in a later schema version.
+- **Streams are packed binary, never per-sample rows.** One `Uint8Array` per channel per activity,
+  each channel at a declared resolution, gaps carried as a packed presence bitmap so an absent
+  sample is distinguishable from a zero. **A four-hour 1 Hz eight-channel ride costs a measured
+  22.2 KiB per recorded hour** — 88.6 KiB stored, 239 KiB packed, 2.70× from `deflate-raw`. The
+  reasoning, the alternatives and every measured figure are in
+  [ADR 0011](adr/0011-stream-storage.md). Devices and gear are still additive object stores in a
+  later schema version.
 
 The indexes, the query each one serves, and the reasoning for every field are in
 [`packages/store/README.md`](../packages/store/README.md).
@@ -288,6 +315,7 @@ share one.
 | [0008](adr/0008-mobile-client-architecture.md) | Mobile client architecture and rendering stack — Capacitor, gated on a rendering spike | #86 |
 | [0009](adr/0009-clean-room-posture.md) | Clean-room posture toward Strava and Zwift | #19 |
 | [0010](adr/0010-map-tiles-and-routing.md) | Map tiles, routing and elevation — providers, licences and cost | #60 |
+| [0011](adr/0011-stream-storage.md) | Activity stream storage — per-channel packed binary in IndexedDB | #27 |
 
 ### Claimed by open issues — **check here before you pick a number**
 
@@ -308,7 +336,7 @@ still a proposal.
 | 0008 | #86 — mobile client architecture | [Written](adr/0008-mobile-client-architecture.md). Cited as "ADR 0008" by `0005-tech-stack.md` (four times), by ADR 0003 and twice below. |
 | 0009 | #19 — clean-room posture | [Written](adr/0009-clean-room-posture.md). Renumbered from 0002, which #57 holds. |
 | 0010 | #60 — map tiles and routing | [Written](adr/0010-map-tiles-and-routing.md). Renumbered from 0008, which #86 holds. |
-| **0011** | **#27 — stream storage** | Reserved. Renumbered from 0006, which #58 holds. |
+| 0011 | #27 — stream storage | [Written](adr/0011-stream-storage.md). Renumbered from 0006, which #58 holds. Records the measured cost: **22.2 KiB per recorded hour** for a 1 Hz eight-channel ride. |
 
 Three issues carry an acceptance criterion naming their old number — #19 (0002), #60 (0008) and #27
 (0006). **The number here wins**; each issue has been commented with its new one. Renumbering a

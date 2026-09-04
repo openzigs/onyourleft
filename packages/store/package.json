@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "license": "Apache-2.0",
-  "description": "Local activity store — athletes, activities and laps in IndexedDB via Dexie, and the migration up/down pairs.",
+  "description": "Local activity store \u2014 athletes, activities, laps and per-second streams in IndexedDB via Dexie, the migration up/down pairs, and the round-trip persistence harness.",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./testing": "./src/testing/index.ts"
   },
   "main": "./src/index.ts",
   "types": "./src/index.ts",
