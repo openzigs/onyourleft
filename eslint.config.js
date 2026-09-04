@@ -349,7 +349,37 @@ export default tseslint.config(
   // `packages/sensors/tsconfig.platform-free.json` compiles this directory too.
   {
     files: ['packages/sensors/protocol/**/*.{ts,tsx}'],
-    rules: platformIsolation(BLE_LIBRARY_IMPORT_PATTERNS),
+    rules: {
+      ...platformIsolation(BLE_LIBRARY_IMPORT_PATTERNS),
+      // The direction, as well as the isolation. `platformIsolation` above stops
+      // this directory NAMING a platform API; it says nothing about importing
+      // the directory that is allowed to. `web-bluetooth/` may depend on
+      // `protocol/` — a transport decoding a payload is the whole point — and
+      // the reverse is what would let a Web Bluetooth type reach a decoder that
+      // has to run unchanged on CoreBluetooth and the Android BLE APIs.
+      //
+      // Enforced rather than documented, because until this rule existed the
+      // direction held only by habit: a probe importing `web-bluetooth/gatt.ts`
+      // from here drew no ESLint error at all, and the platform-free `tsc`
+      // caught it only incidentally, because that particular file happens to
+      // name `setTimeout`. An import of a file that named no global would have
+      // passed both gates.
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/web-bluetooth/**', '../web-bluetooth/*', '../../web-bluetooth/*'],
+              message:
+                'packages/sensors/protocol must not import the Web Bluetooth adapter. ' +
+                'Dependencies point one way: web-bluetooth/ -> protocol/. A decoder that ' +
+                'can name a browser type has already chosen one of the three platforms ' +
+                'its interfaces must satisfy unchanged.',
+            },
+          ],
+        },
+      ],
+    },
   },
 
   // --- packages/sensors/web-bluetooth may name one platform API, and one only -

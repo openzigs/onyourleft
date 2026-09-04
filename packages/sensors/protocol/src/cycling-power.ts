@@ -61,6 +61,7 @@ import {
 
 import type { MeasurementCapability } from '../../src/capability';
 import {
+  COAST_HORIZON,
   deriveCadence,
   deriveSpeed,
   type CounterShape,
@@ -95,12 +96,14 @@ export const CYCLING_POWER_SENSOR_LOCATION: GattUuid = '00002a5d-0000-1000-8000-
 export const CYCLING_POWER_WHEEL_COUNTER: CounterShape = {
   revolutionModulus: UINT32_MODULUS,
   ticksPerSecond: EVENT_TICKS_PER_SECOND_2048,
+  coastHorizon: COAST_HORIZON,
 };
 
 /** Crank Revolution Data: `uint16` revolutions, `uint16` event time at **1/1024 s**. */
 export const CYCLING_POWER_CRANK_COUNTER: CounterShape = {
   revolutionModulus: UINT16_MODULUS,
   ticksPerSecond: EVENT_TICKS_PER_SECOND_1024,
+  coastHorizon: COAST_HORIZON,
 };
 
 /** Accumulated Torque is transmitted in 1/32 N·m. */
@@ -360,12 +363,34 @@ export function cyclingPowerCapabilities(
   return capabilities;
 }
 
+/**
+ * How long an accumulated-torque reading stays differenceable, in seconds.
+ *
+ * Accumulated Torque is a `uint16` of 1/32 N·m, so it laps at **2 048 N·m** —
+ * and it accumulates once per revolution, at (torque × revolutions per second)
+ * N·m per second. A rider putting 100 N·m through the cranks at 120 rpm is
+ * accumulating 200 N·m/s, which laps the counter in about **ten seconds of
+ * riding**. `unsignedCounterDelta` cannot tell one lap from none, so past a gap
+ * of half that the difference is a guess and the field is dropped instead.
+ *
+ * This is the same reasoning `eventTimeIntervalIsAmbiguous` applies to the
+ * revolution counters next door, at a different scale because this counter is
+ * driven by effort rather than by a clock.
+ *
+ * **Accumulated Energy needs no such horizon**, which is why there is only one
+ * constant here: it is a `uint16` of kilojoules, so it laps at 65 536 kJ —
+ * over nine hours at a sustained 2 000 W, and longer than any single link.
+ */
+export const ACCUMULATED_TORQUE_HORIZON_SECONDS = 5;
+
 /** What one Cycling Power link remembers between notifications. */
 interface CyclingPowerState {
   wheel: TimedReading | undefined;
   crank: TimedReading | undefined;
   torqueRaw: number | undefined;
   energyKilojoules: number | undefined;
+  /** When the frame that set the two scalars above arrived. */
+  accumulatedAt: UnixSeconds | undefined;
 }
 
 /**
@@ -390,7 +415,12 @@ export interface CyclingPowerAccumulation {
  *
  * Exported so the wrap is testable without a transport. Returns `undefined` for
  * a field the current frame does not carry, and for the first frame that does —
- * a difference needs two readings.
+ * a difference needs two readings — and for a torque reading older than
+ * {@link ACCUMULATED_TORQUE_HORIZON_SECONDS}, which cannot be told from one that
+ * has lapped.
+ *
+ * @param elapsedSeconds wall-clock time since the frame `previous` was read
+ * from, or `undefined` when there was no such frame.
  */
 export function accumulate(
   previous: {
@@ -398,10 +428,15 @@ export function accumulate(
     readonly energyKilojoules: number | undefined;
   },
   current: CyclingPowerReading,
+  elapsedSeconds: number | undefined,
 ): CyclingPowerAccumulation {
+  const torqueIsAmbiguous =
+    elapsedSeconds === undefined || elapsedSeconds > ACCUMULATED_TORQUE_HORIZON_SECONDS;
   return {
     torqueNewtonMetres:
-      previous.torqueRaw === undefined || current.accumulatedTorqueRaw === undefined
+      torqueIsAmbiguous ||
+      previous.torqueRaw === undefined ||
+      current.accumulatedTorqueRaw === undefined
         ? undefined
         : unsignedCounterDelta(previous.torqueRaw, current.accumulatedTorqueRaw, UINT16_MODULUS) /
           TORQUE_UNITS_PER_NEWTON_METRE,
@@ -439,6 +474,7 @@ export function createCyclingPowerProfile(options?: {
     crank: undefined,
     torqueRaw: undefined,
     energyKilojoules: undefined,
+    accumulatedAt: undefined,
   }));
 
   const capabilities: readonly MeasurementCapability[] =
@@ -484,12 +520,22 @@ export function createCyclingPowerProfile(options?: {
         }
       }
 
-      const accumulation = accumulate(state, reading);
+      const accumulation = accumulate(
+        state,
+        reading,
+        state.accumulatedAt === undefined ? undefined : at - state.accumulatedAt,
+      );
       if (reading.accumulatedTorqueRaw !== undefined) {
         state.torqueRaw = reading.accumulatedTorqueRaw;
       }
       if (reading.accumulatedEnergyKilojoules !== undefined) {
         state.energyKilojoules = reading.accumulatedEnergyKilojoules;
+      }
+      if (
+        reading.accumulatedTorqueRaw !== undefined ||
+        reading.accumulatedEnergyKilojoules !== undefined
+      ) {
+        state.accumulatedAt = at;
       }
       if (
         accumulation.torqueNewtonMetres !== undefined ||

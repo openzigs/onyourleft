@@ -74,6 +74,29 @@ describe('reading a payload', () => {
     expect(() => createPayloadReader(createPayloadWriter().view(), 'x').u8('f')).toThrow(
       /only 0 octets/,
     );
+
+    // The second half of the title, which this test used to claim and not check.
+    // A payload reader is given a LABEL and never an identity, so there is no
+    // device id it could name — and that is the property worth pinning, because
+    // the obvious "improvement" to these messages is to say which device sent
+    // the bad frame. SECURITY.md puts anything that leaks a device or its
+    // location through an error message in scope, and an error string reaches
+    // logs and crash reports that the measurement itself never does.
+    const identity = 'aa:bb:cc:dd:ee:ff';
+    const labelled = createPayloadReader(createPayloadWriter().u8(1).view(), 'a CSC Measurement');
+    let thrown: unknown;
+    try {
+      labelled.u32('cumulative wheel revolutions');
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeDefined();
+    const message = String(thrown);
+    expect(message).not.toContain(identity);
+    // Nothing that looks like a device identifier at all, rather than only the
+    // one literal above — a message built from a template would pass that.
+    expect(message).not.toMatch(/([0-9a-f]{2}:){5}[0-9a-f]{2}/i);
+    expect(message).not.toMatch(/\bdevice\b/i);
   });
 
   it('refuses a partial read without consuming what it could have', () => {

@@ -103,7 +103,14 @@ export type {
   TimedReading,
 } from './revolutions';
 
-export { deriveCadence, deriveRevolutionInterval, deriveSpeed } from './revolutions';
+export {
+  COAST_HORIZON,
+  deriveCadence,
+  deriveRevolutionInterval,
+  deriveSpeed,
+  MAX_PLAUSIBLE_CADENCE_RPM,
+  MAX_PLAUSIBLE_SPEED_METRES_PER_SECOND,
+} from './revolutions';
 
 // --- The transport interface ------------------------------------------------
 

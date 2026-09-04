@@ -66,12 +66,65 @@ export interface TimedReading {
   readonly at: UnixSeconds;
 }
 
-/** Which counter is being differenced: its width, and the rate its clock ticks at. */
+/**
+ * How long a counter may stand still before the rider is reported as stopped.
+ *
+ * #41 requires that *"a notification with no change in revolutions produces a
+ * cadence of zero — a coasting rider — rather than a … retained stale value"*.
+ * Emitting zero on the **first** such notification satisfies the words and
+ * produces a number nobody can use: a sensor notifies at about 1 Hz and a
+ * crank at 40 rpm completes a revolution every 1.5 s, so a third of the frames
+ * of ordinary slow pedalling carry no new revolution and the ride screen would
+ * alternate between the real cadence and nought.
+ *
+ * So the rule is a horizon rather than a frame: hold while a revolution could
+ * still plausibly be in progress, and report zero once one could not. Five
+ * seconds is one revolution at **12 rpm** — below any cadence a rider sustains,
+ * and comfortably above the 3 s of a 20 rpm crawl up a wall — while staying far
+ * inside the ambiguity horizon below (32 s at 2048 Hz), so the two never
+ * contend for the same reading.
+ *
+ * A consumer that wants faster than five seconds can pass its own; this is the
+ * value both profiles in #41 and #42 use.
+ */
+export const COAST_HORIZON: Seconds = seconds(5);
+
+/**
+ * The cadence above which a derived figure is a decode fault rather than a rider.
+ *
+ * The same posture as `MAX_PLAUSIBLE_POWER_WATTS` in the Cycling Power decoder,
+ * and here for the reason CLAUDE.md §6 gives: a revolution counter is untrusted
+ * input, and the numerator and the denominator of this division both come off
+ * the wire. A device reporting a 60 000-revolution jump against a one-tick
+ * event interval yields tens of millions of rpm, which `revolutionsPerMinute`
+ * accepts — it rejects only negatives. A track sprinter peaks near 240 rpm.
+ */
+export const MAX_PLAUSIBLE_CADENCE_RPM = 300;
+
+/**
+ * The ground speed above which a derived figure is a decode fault, in m/s.
+ *
+ * 40 m/s is 144 km/h — above the fastest recorded road descent and far below
+ * what a hostile or mis-walked wheel counter produces.
+ */
+export const MAX_PLAUSIBLE_SPEED_METRES_PER_SECOND = 40;
+
+/** Which counter is being differenced: its width, its clock rate, and its coast horizon. */
 export interface CounterShape {
   /** 2^16 for a crank or a Cycling Power wheel count, 2^32 for a CSC wheel count. */
   readonly revolutionModulus: number;
   /** 1024 for CSC and the Cycling Power crank, 2048 for the Cycling Power wheel. */
   readonly ticksPerSecond: number;
+  /**
+   * Wall-clock time with no completed revolution after which zero is reported.
+   *
+   * Required, with no default — {@link COAST_HORIZON} is the value both
+   * profiles pass. A field rather than a constant because it is the one number
+   * here that is a *policy* rather than a property of the wire format, and
+   * because making it required is what proves no construction site was missed
+   * when it was introduced.
+   */
+  readonly coastHorizon: Seconds;
 }
 
 /** The turning between two readings, when there was any that could be trusted. */
@@ -86,6 +139,15 @@ export interface RevolutionInterval {
 export interface RevolutionDerivation {
   /** The turning to report, or nothing — see {@link deriveRevolutionInterval}. */
   readonly interval: RevolutionInterval | undefined;
+  /**
+   * The counter has stood still for longer than {@link CounterShape.coastHorizon}.
+   *
+   * There is no interval to report and there is still something to say: the
+   * rider is coasting or stopped, and the derived quantity is **zero**, not the
+   * last one. Never `true` at the same time as an `interval` — the two are the
+   * "report a rate" and the "report a nought" halves of the same decision.
+   */
+  readonly coasting: boolean;
   /** What the client should hold as "previous" for the next reading. */
   readonly next: TimedReading;
 }
@@ -96,9 +158,16 @@ export interface RevolutionDerivation {
  * Reports nothing in three cases, each deliberate, **checked in this order**:
  *
  * - **No previous reading.** A rate needs an interval.
- * - **No new revolution.** A stopped crank is "no reading", not zero and not
- *   the last value; the previous reading is kept so the interval keeps
- *   accumulating until a revolution arrives.
+ * - **No new revolution.** Within {@link CounterShape.coastHorizon} this is
+ *   "no reading yet" rather than a rate: the previous reading is kept so the
+ *   interval keeps accumulating until a revolution arrives, and a rider
+ *   pedalling slowly is not told they have stopped between one turn and the
+ *   next. **Past the horizon the same case sets `coasting`**, and the caller
+ *   reports zero — a coasting rider, which is #41's criterion and what stops
+ *   every consumer holding the last cadence for the length of a descent. The
+ *   previous reading is still kept, because the event clock a stopped crank
+ *   reports is the one from before it stopped and restarting from it is what
+ *   would make the next turn read as a few seconds against a truth of seventy.
  * - **Too much real time has passed since the last reading that carried an
  *   event.** Beyond the counter's period (64 s at 1024 Hz, 32 s at 2048 Hz) the
  *   interval is unrecoverable — `eventTimeIntervalSeconds` documents why — so
@@ -123,19 +192,23 @@ export function deriveRevolutionInterval(
   shape: CounterShape,
 ): RevolutionDerivation {
   if (previous === undefined) {
-    return { interval: undefined, next: current };
+    return { interval: undefined, coasting: false, next: current };
   }
   const revolutions = unsignedCounterDelta(
     previous.reading.revolutions,
     current.reading.revolutions,
     shape.revolutionModulus,
   );
-  if (revolutions === 0) {
-    return { interval: undefined, next: previous };
-  }
   const sinceLastReading = seconds(current.at - previous.at);
+  if (revolutions === 0) {
+    return {
+      interval: undefined,
+      coasting: sinceLastReading >= shape.coastHorizon,
+      next: previous,
+    };
+  }
   if (eventTimeIntervalIsAmbiguous(sinceLastReading, shape.ticksPerSecond)) {
-    return { interval: undefined, next: current };
+    return { interval: undefined, coasting: false, next: current };
   }
   // Named fields, not positional arguments. #103 changed this signature for the
   // reason this call site demonstrates: the three values are all plausible
@@ -153,9 +226,9 @@ export function deriveRevolutionInterval(
     // would produce `Infinity`, which `revolutionsPerMinute` rejects — but it
     // would reject it as a unit error from inside the derivation rather than
     // here, where the reason can be recorded and the sample simply dropped.
-    return { interval: undefined, next: current };
+    return { interval: undefined, coasting: false, next: current };
   }
-  return { interval: { revolutions, elapsed }, next: current };
+  return { interval: { revolutions, elapsed }, coasting: false, next: current };
 }
 
 /** A cadence to emit, or nothing, and the reading to keep. */
@@ -170,18 +243,28 @@ export interface CadenceDerivation {
  * `Δrevolutions / Δevent-time × 60`, with both deltas taken modulo their
  * counters. The event time is the sensor's own clock rather than the receive
  * instant, which is what makes the answer right when a notification is late.
+ *
+ * **Zero when the crank has stood still past the coast horizon**, which is
+ * #41's criterion: a coasting rider reads nought, not the cadence they were
+ * turning before they stopped. Undefined — hold whatever you had — only while
+ * the answer is genuinely unknown: before the first pair, within the horizon,
+ * and across a gap the event clock cannot span.
+ *
+ * A figure above {@link MAX_PLAUSIBLE_CADENCE_RPM} is dropped rather than
+ * reported: a counter is untrusted input and no rider turns a crank that fast.
  */
 export function deriveCadence(
   previous: TimedReading | undefined,
   current: TimedReading,
   shape: CounterShape,
 ): CadenceDerivation {
-  const { interval, next } = deriveRevolutionInterval(previous, current, shape);
+  const { interval, coasting, next } = deriveRevolutionInterval(previous, current, shape);
+  if (interval === undefined) {
+    return { cadence: coasting ? revolutionsPerMinute(0) : undefined, next };
+  }
+  const rpm = (interval.revolutions / interval.elapsed) * 60;
   return {
-    cadence:
-      interval === undefined
-        ? undefined
-        : revolutionsPerMinute((interval.revolutions / interval.elapsed) * 60),
+    cadence: rpm > MAX_PLAUSIBLE_CADENCE_RPM ? undefined : revolutionsPerMinute(rpm),
     next,
   };
 }
@@ -203,18 +286,24 @@ export interface SpeedDerivation {
  * problem — a rider on 650b or a 29er gets a ride whose distance is wrong by
  * several percent with nothing on screen to say so. It is a rider setting, not
  * a device property, so the profile cannot supply one and the caller must.
+ *
+ * **Zero when the wheel has stood still past the coast horizon** — a rider at
+ * the lights, and the speed half of #41's coasting criterion. Above
+ * {@link MAX_PLAUSIBLE_SPEED_METRES_PER_SECOND} the sample is dropped, for the
+ * reason {@link deriveCadence} gives.
  */
 export function deriveSpeed(
   previous: TimedReading | undefined,
   current: TimedReading,
   shape: CounterShape & { readonly wheelCircumference: Metres },
 ): SpeedDerivation {
-  const { interval, next } = deriveRevolutionInterval(previous, current, shape);
+  const { interval, coasting, next } = deriveRevolutionInterval(previous, current, shape);
+  if (interval === undefined) {
+    return { speed: coasting ? metresPerSecond(0) : undefined, next };
+  }
+  const rate = (interval.revolutions * shape.wheelCircumference) / interval.elapsed;
   return {
-    speed:
-      interval === undefined
-        ? undefined
-        : metresPerSecond((interval.revolutions * shape.wheelCircumference) / interval.elapsed),
+    speed: rate > MAX_PLAUSIBLE_SPEED_METRES_PER_SECOND ? undefined : metresPerSecond(rate),
     next,
   };
 }

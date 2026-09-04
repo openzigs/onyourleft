@@ -22,9 +22,12 @@ import {
 } from '@onyourleft/domain';
 
 import {
+  COAST_HORIZON,
   deriveCadence,
   deriveRevolutionInterval,
   deriveSpeed,
+  MAX_PLAUSIBLE_CADENCE_RPM,
+  MAX_PLAUSIBLE_SPEED_METRES_PER_SECOND,
   type CounterShape,
   type TimedReading,
 } from './revolutions';
@@ -32,11 +35,13 @@ import {
 const CRANK: CounterShape = {
   revolutionModulus: UINT16_MODULUS,
   ticksPerSecond: EVENT_TICKS_PER_SECOND_1024,
+  coastHorizon: COAST_HORIZON,
 };
 
 const CPS_WHEEL: CounterShape = {
   revolutionModulus: UINT32_MODULUS,
   ticksPerSecond: EVENT_TICKS_PER_SECOND_2048,
+  coastHorizon: COAST_HORIZON,
 };
 
 const START = 1_800_000_000;
@@ -52,6 +57,7 @@ describe('differencing two readings', () => {
 
     expect(deriveRevolutionInterval(undefined, current, CRANK)).toEqual({
       interval: undefined,
+      coasting: false,
       next: current,
     });
   });
@@ -65,6 +71,7 @@ describe('differencing two readings', () => {
 
     expect(deriveRevolutionInterval(previous, current, CRANK)).toEqual({
       interval: undefined,
+      coasting: false,
       next: previous,
     });
   });
@@ -78,6 +85,7 @@ describe('differencing two readings', () => {
 
     expect(deriveRevolutionInterval(previous, current, CRANK)).toEqual({
       interval: undefined,
+      coasting: false,
       next: current,
     });
   });
@@ -135,6 +143,98 @@ describe('differencing two readings', () => {
     expect(() =>
       deriveRevolutionInterval(at(0, 0, 0), at(UINT16_MODULUS, 1024, 1), CRANK),
     ).toThrow();
+  });
+});
+
+describe('a counter that has stood still', () => {
+  // #41: "a notification with no change in revolutions produces a cadence of
+  // zero — a coasting rider — rather than a division by zero or a retained
+  // stale value". The horizon is what makes that a usable number rather than a
+  // flicker; `revolutions.ts` sets out why a per-frame zero is not the answer.
+
+  it('holds inside the horizon, so slow pedalling is not reported as stopped', () => {
+    // 4 s is one revolution at 15 rpm. A rider grinding up a wall is still
+    // pedalling, and telling them they have stopped between one turn and the
+    // next is the flicker the horizon exists to prevent.
+    const previous = at(10, 1024, 0);
+
+    expect(deriveRevolutionInterval(previous, at(10, 1024, 4), CRANK).coasting).toBe(false);
+    expect(deriveCadence(previous, at(10, 1024, 4), CRANK).cadence).toBeUndefined();
+  });
+
+  it('coasts at exactly the horizon, not only beyond it', () => {
+    const previous = at(10, 1024, 0);
+
+    expect(deriveRevolutionInterval(previous, at(10, 1024, 5), CRANK).coasting).toBe(true);
+    expect(deriveRevolutionInterval(previous, at(10, 1024, 4), CRANK).coasting).toBe(false);
+  });
+
+  it('reports a cadence of zero, not nothing, once past the horizon', () => {
+    expect(deriveCadence(at(10, 1024, 0), at(10, 1024, 6), CRANK).cadence).toBe(0);
+  });
+
+  it('reports a speed of zero for a wheel that has stopped', () => {
+    expect(
+      deriveSpeed(at(10, 1024, 0), at(10, 1024, 6), {
+        ...CPS_WHEEL,
+        wheelCircumference: metres(2.105),
+      }).speed,
+    ).toBe(0);
+  });
+
+  it('keeps reporting zero for as long as the crank is still', () => {
+    // The whole point: a consumer must not be left holding the last cadence for
+    // the length of a descent. `next` stays the older reading, so the coast
+    // keeps growing and every frame after the horizon reports nought.
+    const previous = at(10, 1024, 0);
+    let state = previous;
+
+    const readings = [10, 20, 30, 70].map((second) => {
+      const derived = deriveCadence(state, at(10, 1024, second), CRANK);
+      state = derived.next;
+      return derived.cadence;
+    });
+
+    expect(readings).toEqual([0, 0, 0, 0]);
+    expect(state).toEqual(previous);
+  });
+
+  it('measures the first turn after a short coast against the whole coast', () => {
+    // Reporting zero must not have cost the accumulator its reference. Seven
+    // seconds after the last event, one revolution is about 8.6 rpm — the rate
+    // over the coast, not the rate of the single turn.
+    const derived = deriveCadence(at(10, 1024, 0), at(11, 1024 + 7 * 1024, 7), CRANK);
+
+    expect(derived.cadence).toBeCloseTo(60 / 7, 6);
+  });
+});
+
+describe('a figure a rider could not have produced', () => {
+  // A revolution counter is untrusted input (CLAUDE.md section 6), and both the
+  // numerator and the denominator of these divisions come off the wire.
+
+  it('drops a cadence above the ceiling and keeps one at it', () => {
+    expect(deriveCadence(at(0, 0, 0), at(5, 1024, 1), CRANK).cadence).toBe(
+      MAX_PLAUSIBLE_CADENCE_RPM,
+    );
+    expect(deriveCadence(at(0, 0, 0), at(1000, 1024, 1), CRANK).cadence).toBeUndefined();
+  });
+
+  it('drops a speed above the ceiling and keeps one at it', () => {
+    const wheel = { ...CPS_WHEEL, wheelCircumference: metres(2) };
+
+    expect(deriveSpeed(at(0, 0, 0), at(20, 2048, 1), wheel).speed).toBe(
+      MAX_PLAUSIBLE_SPEED_METRES_PER_SECOND,
+    );
+    expect(deriveSpeed(at(0, 0, 0), at(21, 2048, 1), wheel).speed).toBeUndefined();
+  });
+
+  it('still advances the accumulator when it drops one', () => {
+    // Otherwise one hostile frame pins the reference and every later frame is
+    // differenced against it.
+    const current = at(1000, 1024, 1);
+
+    expect(deriveCadence(at(0, 0, 0), current, CRANK).next).toEqual(current);
   });
 });
 

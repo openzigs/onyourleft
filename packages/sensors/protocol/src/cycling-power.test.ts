@@ -25,6 +25,7 @@ import { metres, unixSeconds, watts, type UnixSeconds } from '@onyourleft/domain
 import { isSensorError } from '../../src/errors';
 
 import {
+  ACCUMULATED_TORQUE_HORIZON_SECONDS,
   accumulate,
   createCyclingPowerProfile,
   CYCLING_POWER_MEASUREMENT,
@@ -418,7 +419,7 @@ describe('the accumulating scalars', () => {
 
   it('reports nothing from the first frame — a difference needs two readings', () => {
     expect(
-      accumulate({ torqueRaw: undefined, energyKilojoules: undefined }, reading(100, 5)),
+      accumulate({ torqueRaw: undefined, energyKilojoules: undefined }, reading(100, 5), undefined),
     ).toEqual({ torqueNewtonMetres: undefined, energyKilojoules: undefined });
   });
 
@@ -426,21 +427,46 @@ describe('the accumulating scalars', () => {
     // #42: "a test proves accumulated torque and accumulated energy handle
     // counter wrap". 65 500 → 36 is 72 raw units, not -65 464.
     expect(
-      accumulate({ torqueRaw: 65_500, energyKilojoules: undefined }, reading(36, undefined)),
+      accumulate({ torqueRaw: 65_500, energyKilojoules: undefined }, reading(36, undefined), 1),
     ).toMatchObject({ torqueNewtonMetres: 72 / 32 });
   });
 
   it('differences accumulated energy across its uint16 wrap', () => {
     // 65 536 kJ is reached by a long ride at any real power.
     expect(
-      accumulate({ torqueRaw: undefined, energyKilojoules: 65_530 }, reading(undefined, 4)),
+      accumulate({ torqueRaw: undefined, energyKilojoules: 65_530 }, reading(undefined, 4), 1),
     ).toMatchObject({ energyKilojoules: 10 });
   });
 
   it('reports nothing for a field the current frame does not carry', () => {
     expect(
-      accumulate({ torqueRaw: 100, energyKilojoules: 20 }, reading(undefined, undefined)),
+      accumulate({ torqueRaw: 100, energyKilojoules: 20 }, reading(undefined, undefined), 1),
     ).toEqual({ torqueNewtonMetres: undefined, energyKilojoules: undefined });
+  });
+
+  it('drops a torque difference across a gap the counter could have lapped in', () => {
+    // Accumulated Torque laps at 2 048 N·m and accumulates at (torque x rev/s):
+    // about ten seconds of hard riding. `unsignedCounterDelta` cannot tell one
+    // lap from none, so past half that the answer is a guess. Energy survives
+    // the same gap — it laps after nine hours, not after ten seconds.
+    const across = accumulate(
+      { torqueRaw: 65_500, energyKilojoules: 65_530 },
+      reading(36, 4),
+      ACCUMULATED_TORQUE_HORIZON_SECONDS + 1,
+    );
+
+    expect(across.torqueNewtonMetres).toBeUndefined();
+    expect(across.energyKilojoules).toBe(10);
+  });
+
+  it('keeps a torque difference at exactly the horizon', () => {
+    expect(
+      accumulate(
+        { torqueRaw: 65_500, energyKilojoules: undefined },
+        reading(36, undefined),
+        ACCUMULATED_TORQUE_HORIZON_SECONDS,
+      ),
+    ).toMatchObject({ torqueNewtonMetres: 72 / 32 });
   });
 
   it('reaches a caller through the profile, frame after frame', () => {

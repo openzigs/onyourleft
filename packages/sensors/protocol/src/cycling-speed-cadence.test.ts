@@ -206,10 +206,11 @@ describe('deriving cadence', () => {
     expect(reported.cadences[0]).toBeCloseTo((2 / (1365 / 1024)) * 60, 6);
   });
 
-  it('reports nothing for a coasting rider rather than dividing by zero', () => {
+  it('reports nothing INSIDE the coast horizon rather than dividing by zero', () => {
     // #41: no change in revolutions must produce neither a division by zero
-    // nor a retained stale value. It produces no reading, and the previous
-    // reading is kept so the interval keeps accumulating.
+    // nor a retained stale value. Inside the five-second horizon it produces no
+    // reading, and the previous reading is kept so the interval keeps
+    // accumulating; past the horizon it produces a nought — the test below.
     const reported = run(profile(), [
       { view: cscFrame({ crank: { revolutions: 100, ticks: 1024 } }), at: unixSeconds(START) },
       { view: cscFrame({ crank: { revolutions: 100, ticks: 1024 } }), at: unixSeconds(START + 1) },
@@ -241,7 +242,12 @@ describe('deriving cadence', () => {
       { view: cscFrame({ crank: { revolutions: 101, ticks: 1024 } }), at: unixSeconds(START + 65) },
     ]);
 
-    expect(reported.cadences).toEqual([]);
+    // Every frame from the fifth second to the sixty-fourth reports a nought —
+    // sixty of them, which is #41's coasting criterion. What the reference
+    // being kept buys is the *absence* of a sixty-first reading: the turn of
+    // the crank at 65 s is 65 s after the last event, past the counter's
+    // period, and is honestly dropped rather than reported as about 8 rpm.
+    expect(reported.cadences).toEqual(Array.from({ length: 60 }, () => 0));
   });
 
   it('drops a sample whose event-time interval is beyond the counter’s period', () => {

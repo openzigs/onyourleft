@@ -40,6 +40,7 @@ import type { Metres, UnixSeconds } from '@onyourleft/domain';
 import { EVENT_TICKS_PER_SECOND_1024, UINT16_MODULUS, UINT32_MODULUS } from '@onyourleft/domain';
 
 import {
+  COAST_HORIZON,
   deriveCadence,
   deriveSpeed,
   type CounterShape,
@@ -76,12 +77,14 @@ export const CSC_FEATURE: GattUuid = '00002a5c-0000-1000-8000-00805f9b34fb';
 export const CSC_WHEEL_COUNTER: CounterShape = {
   revolutionModulus: UINT32_MODULUS,
   ticksPerSecond: EVENT_TICKS_PER_SECOND_1024,
+  coastHorizon: COAST_HORIZON,
 };
 
 /** Crank Revolution Data: `uint16` revolutions, `uint16` event time at 1/1024 s. */
 export const CSC_CRANK_COUNTER: CounterShape = {
   revolutionModulus: UINT16_MODULUS,
   ticksPerSecond: EVENT_TICKS_PER_SECOND_1024,
+  coastHorizon: COAST_HORIZON,
 };
 
 /** One CSC Measurement notification, decoded. Either half may be absent. */

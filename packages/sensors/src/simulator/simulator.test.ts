@@ -240,7 +240,11 @@ describe('what each device kind reports', () => {
     }
   });
 
-  it('a stopped crank produces no cadence rather than a stale or zero one', async () => {
+  it('a stopped crank holds inside the coast horizon and then reports zero', async () => {
+    // #41: no change in revolutions must produce a cadence of zero rather than
+    // a retained stale value — but not on the first such frame, or slow
+    // pedalling alternates between the real cadence and nought. So: hold for
+    // the horizon, then report the stop.
     const { transport, bench } = createSimulator({ devices: [cpsPowerMeter({ id: 'pm' })] });
     await transport.connect(deviceId('pm'));
     const cadences: MeasurementFor<'cadence'>[] = [];
@@ -248,9 +252,14 @@ describe('what each device kind reports', () => {
 
     bench.advance(seconds(2));
     bench.rider.set({ cadence: revolutionsPerMinute(0) });
-    bench.advance(seconds(5));
+    bench.advance(seconds(4));
 
     expect(cadences).toHaveLength(1);
+
+    bench.advance(seconds(1));
+
+    expect(cadences).toHaveLength(2);
+    expect(cadences[1]?.cadence).toBe(0);
   });
 
   it('a crank stopped for longer than the counter period yields no cadence on the first turn', async () => {
@@ -273,7 +282,13 @@ describe('what each device kind reports', () => {
     bench.rider.set({ cadence: revolutionsPerMinute(90) });
     bench.advance(seconds(3));
 
-    expect(cadences.map((m) => m.at)).toEqual([1_800_000_002, 1_800_000_074, 1_800_000_075]);
+    // The stop itself now reads as a stop rather than as a held value, so the
+    // discriminating assertion is on the frames that carry a *rate*: there is
+    // none at 1_800_000_073, the first turn of the crank after the stop.
+    expect(cadences.filter((m) => m.cadence !== 0).map((m) => m.at)).toEqual([
+      1_800_000_002, 1_800_000_074, 1_800_000_075,
+    ]);
+    expect(cadences.filter((m) => m.cadence === 0).length).toBeGreaterThan(0);
   });
 
   it('starts the client accumulator afresh on every new link', async () => {

@@ -42,7 +42,12 @@ export type {
   TimedReading,
 } from '../revolutions';
 
-export { deriveCadence, deriveRevolutionInterval, deriveSpeed } from '../revolutions';
+export {
+  COAST_HORIZON,
+  deriveCadence,
+  deriveRevolutionInterval,
+  deriveSpeed,
+} from '../revolutions';
 
 /** The device half. */
 export interface RevolutionCounter {

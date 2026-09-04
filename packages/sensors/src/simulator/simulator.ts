@@ -65,7 +65,13 @@ import type {
   TransportAvailability,
   TransportTraits,
 } from '../transport';
-import { deriveCadence, type RevolutionReading, type TimedReading } from './counters';
+import {
+  COAST_HORIZON,
+  deriveCadence,
+  type CounterShape,
+  type RevolutionReading,
+  type TimedReading,
+} from './counters';
 import { capabilitiesOf, type SimulatedDeviceSpec } from './devices';
 import {
   createFtmsMachine,
@@ -89,6 +95,21 @@ import {
 } from './profiles';
 import { DEFAULT_RIDER, type RiderProfile } from './rider';
 import type { Scenario } from './scenario';
+
+/**
+ * The client-half shapes the simulator differences its own frames against.
+ *
+ * `profiles.ts`' constants are the **device** half — a counter's width and the
+ * rate its clock ticks at. The coast horizon is a client policy rather than a
+ * property of the wire, so it is added here, at the only place in this file
+ * that plays the client, and with the same value the real profiles use.
+ */
+const SIMULATED_CPS_CRANK_SHAPE: CounterShape = {
+  ...CYCLING_POWER_CRANK,
+  coastHorizon: COAST_HORIZON,
+};
+
+const SIMULATED_CSC_CRANK_SHAPE: CounterShape = { ...CSC_CRANK, coastHorizon: COAST_HORIZON };
 
 export interface SimulatorOptions {
   readonly devices: readonly SimulatedDeviceSpec[];
@@ -248,7 +269,7 @@ export function createSimulator(options: SimulatorOptions): Simulator {
       const derived = deriveCadence(
         client.get(source),
         { reading, at },
-        source === 'cps' ? CYCLING_POWER_CRANK : CSC_CRANK,
+        source === 'cps' ? SIMULATED_CPS_CRANK_SHAPE : SIMULATED_CSC_CRANK_SHAPE,
       );
       client.set(source, derived.next);
       return derived.cadence === undefined
