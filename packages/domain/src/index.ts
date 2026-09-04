@@ -109,6 +109,8 @@ export {
 export {
   EVENT_TICKS_PER_SECOND_1024,
   EVENT_TICKS_PER_SECOND_2048,
+  eventTickRate,
+  eventTicks,
   eventTimeAmbiguityHorizonSeconds,
   eventTimeIntervalIsAmbiguous,
   eventTimeIntervalSeconds,
@@ -122,3 +124,9 @@ export {
   unixSecondsToFitTimestamp,
   unsignedCounterDelta,
 } from './time';
+
+// The event-time reading is a named-field object rather than three positional
+// numbers, because all three are small non-negative integers and every wrong
+// ordering of the old signature typechecked (#103). The two brands are what
+// stop a tick rate being written into a counter reading's field.
+export type { EventTickRate, EventTicks, EventTimeReading } from './time';

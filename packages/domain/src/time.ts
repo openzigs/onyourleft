@@ -22,6 +22,7 @@
 
 import type { Seconds, UnixSeconds } from './quantities';
 import { seconds, unixSeconds } from './quantities';
+import type { Quantity } from './quantity';
 import { assertIntegerInRange, UnitError } from './unit-error';
 
 // --- The FIT epoch ----------------------------------------------------------
@@ -120,10 +121,55 @@ export const UINT16_MODULUS = 65536;
 export const UINT32_MODULUS = 4294967296;
 
 /**
+ * One reading of a `uint16` event-time counter, in ticks.
+ *
+ * Branded, and validated to the counter's range, because the numbers an
+ * event-time interval is computed from are all small non-negative integers that
+ * are plausible in each other's roles. See {@link EventTimeReading}.
+ */
+export type EventTicks = Quantity<'tick of a uint16 event-time counter'>;
+
+/**
+ * Label a raw `uint16` event-time field as a counter reading.
+ *
+ * @throws {UnitError} if the value is not a whole number in `[0, 65535]`.
+ */
+export function eventTicks(value: number): EventTicks {
+  assertIntegerInRange(value, 0, UINT16_MODULUS - 1, 'event-time counter reading');
+  return value as EventTicks;
+}
+
+/**
+ * The rate at which an event-time counter ticks, in ticks per second.
+ *
+ * A different quantity from a counter reading — one is a position on a dial,
+ * the other the dial's scale — and a distinct brand so the two cannot be
+ * exchanged. The two rates this program meets are
+ * {@link EVENT_TICKS_PER_SECOND_1024} and {@link EVENT_TICKS_PER_SECOND_2048}.
+ *
+ * A literal union `1024 | 2048` was considered for this and rejected: both
+ * constants are members of it, so passing the CPS **crank** rate where the CPS
+ * **wheel** rate belongs still compiles — and those two live one field apart in
+ * the same packet, which is the confusion that actually happens.
+ */
+export type EventTickRate = Quantity<'event-time tick per second'>;
+
+/**
+ * Label a tick rate.
+ *
+ * @throws {UnitError} if the value is not a whole number of at least 1. Zero is
+ * rejected here rather than dividing by it two calls later.
+ */
+export function eventTickRate(value: number): EventTickRate {
+  assertIntegerInRange(value, 1, Number.MAX_SAFE_INTEGER, 'event tick rate');
+  return value as EventTickRate;
+}
+
+/**
  * The tick rate of the CSCS wheel and crank event times, and of the CPS **crank**
  * event time: 1/1024 s.
  */
-export const EVENT_TICKS_PER_SECOND_1024 = 1024;
+export const EVENT_TICKS_PER_SECOND_1024 = eventTickRate(1024);
 
 /**
  * The tick rate of the CPS **wheel** event time: 1/2048 s.
@@ -132,7 +178,7 @@ export const EVENT_TICKS_PER_SECOND_1024 = 1024;
  * apart in the same packet. Hard-coding 1024 for both halves the wheel speed,
  * which is why every function here takes the rate as an argument instead.
  */
-export const EVENT_TICKS_PER_SECOND_2048 = 2048;
+export const EVENT_TICKS_PER_SECOND_2048 = eventTickRate(2048);
 
 /**
  * The forward distance between two readings of a free-running unsigned counter.
@@ -150,6 +196,60 @@ export function unsignedCounterDelta(previous: number, current: number, modulus:
   assertIntegerInRange(previous, 0, modulus - 1, 'previous counter reading');
   assertIntegerInRange(current, 0, modulus - 1, 'current counter reading');
   return (current - previous + modulus) % modulus;
+}
+
+/**
+ * Two successive readings of one event-time counter, and the rate it ticks at.
+ *
+ * **Named fields rather than three positional numbers**, for the reason
+ * `GeographicPosition` is not a tuple. The three values are all small
+ * non-negative integers and all plausible in each other's roles, so on the
+ * three-argument form every wrong ordering typechecked and returned a
+ * plausible answer. Measured, not hypothesised:
+ *
+ * | Call | Returned | |
+ * |---|---|---|
+ * | `(1000, 1512, 1024)` | 0.5 s | correct |
+ * | `(1000, 1024, 1512)` | 0.0159 s | silently wrong |
+ * | `(1512, 1000, 1024)` | 63.5 s | a wrap read as a stopped bike |
+ *
+ * None of the three threw. The first mis-ordering is now a compile error twice
+ * over: there is one argument, so there is no order to get wrong, and
+ * {@link EventTicks} and {@link EventTickRate} are different types, so a rate
+ * cannot be written into a reading's field nor a reading into the rate's.
+ *
+ * **The third is not a compile error and cannot be made one.**
+ * `previousTicks` and `currentTicks` are the same kind of value — this
+ * notification's reading *becomes* the next one's previous — so a per-role
+ * brand would have to be re-applied on every notification and would erode into
+ * a cast within one decode loop. What the named fields buy is that the mistake
+ * becomes a **mislabel**, written out in full at the call site where a reviewer
+ * can see it, rather than an argument order nobody reads. That is the same
+ * irreducible residue `position.ts` records for
+ * `latitudeSemicircles(longitudeField)`.
+ *
+ * That row matters more than it looks: 63.5 s is a hair under the 64 s
+ * ambiguity horizon at 1024 Hz, so a transposed pair does not read as nonsense
+ * — it reads as a bike that has been stopped for a minute, which is a state
+ * #41 and #42 are required to handle.
+ */
+export interface EventTimeReading {
+  /** The counter as it read at the previous notification. */
+  readonly previousTicks: EventTicks;
+  /**
+   * The counter as it reads now.
+   *
+   * Legitimately **lower** than {@link EventTimeReading.previousTicks}: that is
+   * a wrap, and it is the case this whole module exists for.
+   */
+  readonly currentTicks: EventTicks;
+  /**
+   * The rate this particular counter ticks at.
+   *
+   * Not a constant of the program: CPS carries a 1/2048 s wheel event time and
+   * a 1/1024 s crank event time one field apart in the same packet.
+   */
+  readonly ticksPerSecond: EventTickRate;
 }
 
 /**
@@ -176,17 +276,15 @@ export function unsignedCounterDelta(previous: number, current: number, modulus:
  * is "no reading" rather than a number derived from a counter that lapped an
  * unknown number of times.
  *
- * @throws {UnitError} if either reading is not a whole number in `[0, 65535]`,
- * or the tick rate is not a positive whole number.
+ * Both readings and the rate were validated by {@link eventTicks} and
+ * {@link eventTickRate} when they were labelled, which is why this function
+ * does not check them again — the brands are the evidence. `UnitError` still
+ * reaches a caller who built the reading inline, because that is where the
+ * constructors run.
  */
-export function eventTimeIntervalSeconds(
-  previousTicks: number,
-  currentTicks: number,
-  ticksPerSecond: number,
-): Seconds {
-  assertIntegerInRange(ticksPerSecond, 1, Number.MAX_SAFE_INTEGER, 'event tick rate');
-  const delta = unsignedCounterDelta(previousTicks, currentTicks, UINT16_MODULUS);
-  return seconds(delta / ticksPerSecond);
+export function eventTimeIntervalSeconds(reading: EventTimeReading): Seconds {
+  const delta = unsignedCounterDelta(reading.previousTicks, reading.currentTicks, UINT16_MODULUS);
+  return seconds(delta / reading.ticksPerSecond);
 }
 
 /**
@@ -194,6 +292,14 @@ export function eventTimeIntervalSeconds(
  * 2048 Hz.
  *
  * The horizon beyond which {@link eventTimeIntervalSeconds} is guessing.
+ *
+ * **Takes a bare `number`, deliberately.** {@link EventTickRate} is assignable
+ * to `number`, so both published rates still pass, and there is no
+ * transposition to close here: one argument has no order to get wrong. Widening
+ * it to the brand would buy nothing and would move this function's own
+ * validation into a constructor, which is a real assertion this suite would
+ * lose. The same reasoning applies to
+ * {@link eventTimeIntervalIsAmbiguous}, whose other argument is already branded.
  *
  * @throws {UnitError} if the tick rate is not a positive whole number.
  */
