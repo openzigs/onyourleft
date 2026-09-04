@@ -228,19 +228,27 @@ branded types, so a fixture that transposed latitude and longitude would not com
 Each of these is a real gap, named so nobody assumes it is covered:
 
 - **A big-endian file.** Every definition message here declares little-endian architecture. A
-  big-endian fixture is cheap and worth adding when #30 reaches the architecture byte.
-- **A compressed timestamp header.** The container's 5-bit time offset wraps every 32 seconds and #30
-  must handle it. It is not here because it is not on this issue's list, and it should be added by
-  whoever writes the header decoder.
-- **A file that rebinds a local message type mid-file.** #30 has an acceptance criterion for it; the
-  builder allows it by not tracking bindings, so the fixture is a few lines when it is wanted.
+  big-endian fixture is cheap and worth adding.
+- **A compressed timestamp header.** The container's 5-bit time offset wraps every 32 seconds.
+- **A file that rebinds a local message type mid-file.** The builder allows it by not tracking
+  bindings, so the fixture is a few lines when it is wanted.
 - **A bad CRC.** Every valid file here has a correct one; `truncated-mid-record.fit` has none at all.
   A file with a *wrong* CRC is a different rejection path from a missing one.
+
+  > **All four are covered by #30, and none of them by a fixture.** The decoder handles the
+  > architecture byte, the compressed timestamp header and mid-file rebinding, and rejects a wrong
+  > CRC; each is tested in `packages/fit/src/decode/container.test.ts` against bytes laid out by
+  > hand there, and the wrong-CRC case is tested by damaging the *committed* bytes of
+  > `nominal-outdoor-ride.fit`. They stay listed as corpus gaps because they are still gaps in the
+  > corpus, and #31's encoder will want fixtures for the first three.
 - **UTF-8 outside ASCII.** `ByteWriter.asciiString` throws rather than transcoding, so a UTF-8 fixture
   would be a deliberate addition rather than a by-product of somebody pasting an accented character
   into a device name.
-- **A real decoder.** Nothing here reads a FIT file. A fixture validated only by the code under test
-  proves that the two share a bug; #30's decoder must be able to disagree with this generator.
+- **A real decoder.** Nothing in `tools/fixture-corpus/` reads a FIT file, and nothing here may: a
+  fixture validated only by the code under test proves that the two share a bug. #30's decoder lives
+  in `packages/fit/src/decode/` with its own independently derived profile table and its own CRC, and
+  `decode-corpus.test.ts` is where the two are made to agree — or, if they ever stop agreeing, where
+  that becomes visible.
 
 ---
 
