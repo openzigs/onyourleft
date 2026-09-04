@@ -638,6 +638,13 @@ export function createWebBluetoothTransport(
       // "Anything this program can use", with no capability named. No filter
       // expresses that, so the chooser is opened wide — which is exactly what
       // the athlete is shown and consents to.
+      //
+      // ⚠️ A device discovered this way registers with an EMPTY capability set
+      // (`register` fixes it to what was requested) and therefore refuses every
+      // `subscribe`. The chooser behaviour here is right; the registration below
+      // is what needs to resolve capabilities from the device's own services.
+      // That is #131, and until it lands this path yields a device that connects
+      // and delivers nothing.
       return namePrefix === undefined
         ? { acceptAllDevices: true, optionalServices: everyService }
         : { filters: [{ namePrefix }], optionalServices: everyService };
@@ -689,6 +696,31 @@ export function createWebBluetoothTransport(
 
   // --- Connecting -----------------------------------------------------------
 
+  /**
+   * Drop the radio link and suppress the `gattserverdisconnected` it is expected
+   * to raise.
+   *
+   * The counter is raised **before** the platform call because the event can
+   * arrive synchronously, and lowered again if the call throws — because then no
+   * event is coming, and a counter left raised swallows the next *genuine*
+   * disconnect instead. That failure surfaces one lifecycle event after the bug
+   * that caused it: a device physically dropping would be absorbed as though it
+   * were this adapter's own teardown, leaving the session reporting `connecting`
+   * for ever.
+   *
+   * `disconnect()` is a no-op on a dropped link where it is specified and a
+   * throw in at least one shim, which is why the identical call in `disconnect`
+   * below has always been wrapped. These two sites were not.
+   */
+  const dropRadioLink = (record: DeviceRecord, server: GattServerPort): void => {
+    record.suppressedDisconnects += 1;
+    try {
+      server.disconnect();
+    } catch {
+      record.suppressedDisconnects -= 1;
+    }
+  };
+
   const establish = async (record: DeviceRecord, server: GattServerPort): Promise<void> => {
     const id = record.identity.id;
     record.session.transitionTo('connecting');
@@ -700,8 +732,7 @@ export function createWebBluetoothTransport(
           // `gatt.connect()` on an already-connected device has behaved
           // differently across Chrome versions. Drop it and start clean — and do
           // not let the resulting event tear down the connect that caused it.
-          record.suppressedDisconnects += 1;
-          server.disconnect();
+          dropRadioLink(record, server);
         }
         await server.connect();
         const link = await resolveLink(record, server);
@@ -730,8 +761,7 @@ export function createWebBluetoothTransport(
         // for a device this adapter has no handles for — so the athlete's third
         // sensor refuses to pair and nothing says why. Dropping it here is what
         // makes `holdingASlot()` an honest count.
-        record.suppressedDisconnects += 1;
-        server.disconnect();
+        dropRadioLink(record, server);
       }
       if (record.session.state === 'connecting') {
         record.session.transitionTo('disconnected');
@@ -827,10 +857,10 @@ export function createWebBluetoothTransport(
         );
       }
 
-      const attempt = establish(record, server);
-      record.connecting = attempt;
+      const connecting = establish(record, server);
+      record.connecting = connecting;
       try {
-        await attempt;
+        await connecting;
       } finally {
         record.connecting = undefined;
       }

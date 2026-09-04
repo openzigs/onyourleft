@@ -83,6 +83,17 @@ export interface FakeDeviceSpec {
    * `not-connected` rather than dereference it.
    */
   readonly withoutGatt?: boolean;
+  /**
+   * `gatt.disconnect()` throws instead of dropping the link.
+   *
+   * Not hypothetical, and not the same as a link that is already gone: the
+   * adapter's own `disconnect` has always wrapped this call, with a comment
+   * saying it is "a throw in at least one shim". Two other call sites did not,
+   * and the failure they produced was invisible until this option existed —
+   * a raised suppression counter with no event coming to lower it, which
+   * swallows the NEXT genuine disconnect rather than the one it was raised for.
+   */
+  readonly disconnectThrows?: boolean;
 }
 
 export interface FakeDeviceHandle {
@@ -358,6 +369,9 @@ export function createFakeBluetooth(options: FakeBluetoothOptions): FakeBluetoot
         // adapter dropped a link is the assertion in more than one test and the
         // operation log is where the order of everything else is read.
         operations.push(`${spec.id}:disconnect`);
+        if (spec.disconnectThrows === true) {
+          throw domError('NetworkError', 'disconnect failed');
+        }
         if (!state.connected) {
           return;
         }

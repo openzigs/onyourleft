@@ -253,15 +253,14 @@ export default tseslint.config(
           // file it actually names rather than being written off as external —
           // which is what makes the boundary rule below reach an import written
           // as `@onyourleft/web` and not only one written as a relative path.
-          // The last entry reaches an adapter that lives in its own directory
-          // beside a package's `src/` with its own tsconfig — see
-          // `packages/sensors/web-bluetooth` (#40).
-          project: [
-            'tsconfig.json',
-            'apps/*/tsconfig.json',
-            'packages/*/tsconfig.json',
-            'packages/*/*/tsconfig.json',
-          ],
+          //
+          // `packages/sensors/web-bluetooth` (#40) needs no entry of its own: it
+          // has no tsconfig, and is covered because `packages/sensors`'s own
+          // tsconfig `include`s `web-bluetooth/**/*.ts`. A
+          // `packages/*/*/tsconfig.json` glob was added here for it and matched
+          // nothing — a resolver entry that matches no file is indistinguishable
+          // from one that works, so it is left out rather than left in.
+          project: ['tsconfig.json', 'apps/*/tsconfig.json', 'packages/*/tsconfig.json'],
           noWarnOnMultipleProjects: true,
         },
       },
