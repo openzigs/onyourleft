@@ -22,7 +22,7 @@ import { SCHEMA_VERSIONS, TABLE } from './schema';
 import { channelBytesPerSample } from './stream-codec';
 import { compressStreamBytes } from './stream-compression';
 import type { PersistedStreamBlob, PersistedStreamSet } from './stream-persisted';
-import { MAX_INFLATED_SAMPLES, STREAM_COMPRESSION } from './stream-compression';
+import { MAX_INFLATED_SAMPLES } from './stream-compression';
 import { hasPositionChannels, STREAM_CHANNELS, type NewStreamSet } from './streams';
 import {
   assertStreamSetRoundTrip,
