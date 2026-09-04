@@ -65,6 +65,7 @@ packages/             Apache-2.0, without exception
   fit/                FIT / GPX / TCX codec
   sensors/            sensor abstraction and BLE transport — BLE only
     src/                the transport-agnostic abstraction; no platform API at all
+    protocol/           the GATT profile clients (#41, #42); no platform API either
     web-bluetooth/      the browser transport (#40); the one place a BluetoothDevice exists
   physics/            cycling power/speed model
   store/              local activity and stream store
@@ -95,7 +96,8 @@ checkable.
 | `packages/domain` | Apache-2.0 | Canonical units and types; every conversion in the program; signing/verification; analysis computations | **Any platform API at all** — no DOM, no Node globals, no I/O, no network types | #25, #61, #66, #75–#78 |
 | `packages/fit` | Apache-2.0 | FIT / GPX / TCX decode and encode | Anything server-specific; anything under `apps/`; **anything carrying the Garmin FIT Protocol License — see [ADR 0006](adr/0006-fit-codec-licensing.md)** | #29–#32 |
 | `packages/sensors/src` | Apache-2.0 | BLE sensor and trainer abstraction, and the simulator | **Any platform API at all**, as `packages/domain` — plus any BLE library, because an abstraction that names one has chosen it for all three stacks | #39, #44 |
-| `packages/sensors/web-bluetooth` | Apache-2.0 | The browser transport: the `DeviceId → device/server/service/characteristic` map, the global GATT operation queue, and the profile seam #41–#43 fill | Anything server-specific; every platform global except `navigator`. **Web Bluetooth types must not escape above the transport boundary** | #40 |
+| `packages/sensors/protocol` | Apache-2.0 | The GATT profile clients: Heart Rate, Cycling Speed and Cadence and Cycling Power — service and characteristic UUIDs, bounds-checked payload decoding, and the `GattProfile` seam itself | **Any platform API at all**, as `packages/sensors/src` — it is compiled by the same platform-free program, because the same decoders serve the browser adapter and the native stacks | #41, #42 |
+| `packages/sensors/web-bluetooth` | Apache-2.0 | The browser transport: the `DeviceId → device/server/service/characteristic` map, the global GATT operation queue, and the profile registry `packages/sensors/protocol` fills | Anything server-specific; every platform global except `navigator`. **Web Bluetooth types must not escape above the transport boundary** | #40 |
 | `packages/physics` | Apache-2.0 | Power → speed, as separately testable terms | Any rendering, BLE or platform API | #88 |
 | `packages/store` | Apache-2.0 | Local activity and stream persistence, its migrations, and the round-trip test harness | Anything under `apps/` | #26, #27, #28 |
 
@@ -247,7 +249,7 @@ A boundary maintained by review discipline will not survive a program this size.
 |---|---|
 | `boundaries/dependencies` | anything under `packages/*` imports anything under `apps/*`, in either the relative or the `@onyourleft/…` workspace spelling |
 | `@typescript-eslint/no-restricted-imports` | `packages/domain` names **any** Node builtin — the pattern list is derived from `builtinModules` rather than typed out, so `events`, `util` and `stream/promises` fail exactly as `node:fs` does — or `react`, `react-dom`, `vite` or `dexie` |
-| `no-restricted-globals` | `packages/domain` or `packages/sensors/src` names a DOM global (`window`, `document`, `navigator`, `location`, `history`, `localStorage`, `sessionStorage`, `indexedDB`, `caches`), a Node global (`process`, `Buffer`, `__dirname`, `__filename`, `global`, `require`) or a network global (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Request`, `Response`, `Headers`). A named list, not a closure — the closure is the typechecker |
+| `no-restricted-globals` | `packages/domain`, `packages/sensors/src` or `packages/sensors/protocol` names a DOM global (`window`, `document`, `navigator`, `location`, `history`, `localStorage`, `sessionStorage`, `indexedDB`, `caches`), a Node global (`process`, `Buffer`, `__dirname`, `__filename`, `global`, `require`) or a network global (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Request`, `Response`, `Headers`). A named list, not a closure — the closure is the typechecker |
 | `no-restricted-globals`, again | `packages/sensors/web-bluetooth` names any of the same list **except `navigator`**, which is the one platform API the transport boundary is allowed. The exception is derived by subtraction from that list rather than written out, so the two cannot drift |
 | `headers/header-format` | a `.ts`/`.tsx` file's first line is not the SPDX identifier its directory requires |
 
@@ -269,8 +271,14 @@ writing the file it forbids and running both gates — never by reading the row.
 `tsconfig.json` covers the whole package and admits the DOM, because ESLint's project service
 resolves every file to the nearest one and a file outside every program is reported as "not found by
 the project service" rather than as anything useful. **`tsconfig.platform-free.json` is the program
-that enforces**: `src/` alone, `lib: ["ES2024"]`, `types: []`, so a `navigator`, a `BluetoothDevice`
-or a `DataView` of GATT payload is a compile error there. `pnpm run typecheck` runs both.
+that enforces**: `src/` **and `protocol/`**, `lib: ["ES2024"]`, `types: []`, so a `navigator` or a
+`BluetoothDevice` is a compile error in either. `pnpm run typecheck` runs both.
+
+⚠️ This paragraph used to add "or a `DataView` of GATT payload" to that list, and that was never
+true — `DataView` is an ECMAScript built-in and is in `lib: ["ES2024"]`. #41 depends on it being
+there: a decoder that could not name a `DataView` could not be the *same parser, unchanged* for the
+native stacks. What keeps GATT payload out of `packages/sensors/src` is that directory's documented
+rule and review, not the typechecker.
 
 **Still to be enforced**, by the issue that introduces the code it constrains:
 

@@ -40,6 +40,6 @@ export default {
     // uses — and running it where `navigator` exists with no `bluetooth` on it
     // is the Safari, Firefox and plain-HTTP path, asserted for real rather
     // than simulated by deleting a global.
-    include: ['src/**/*.test.ts', 'web-bluetooth/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'protocol/**/*.test.ts', 'web-bluetooth/**/*.test.ts'],
   },
 };

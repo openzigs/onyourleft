@@ -1,49 +1,53 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The wrapping revolution counters CSC and Cycling Power sensors report, and the
- * client-side arithmetic that turns two readings into a cadence.
+ * The device half of a wrapping revolution counter: what a CSC or Cycling Power
+ * sensor would put in its next notification.
  *
- * ## Both halves live here on purpose
+ * ## The client half moved out in #41
  *
  * A real sensor transmits a cumulative revolution count and the event time of
  * the last revolution, both as free-running unsigned integers that lap. A real
  * client differences two readings — with the modulus, or it produces a negative
- * interval roughly once a minute. The simulator plays both roles: the device
- * half (`createRevolutionCounter`) produces readings that lap exactly as the
- * profile says, and the client half (`deriveCadence`) reads them the way #41
- * and #42 will have to, using `@onyourleft/domain`'s wrap-aware arithmetic and
- * its ambiguity horizon. A wrap that the device half performs and the client
- * half survives is a wrap that has been **watched to fire**, which is what #44
- * asks for.
+ * interval roughly once a minute. Both halves used to live in this file, so
+ * that a wrap the device half performs and the client half survives is a wrap
+ * that has been **watched to fire**, which is what #44 asks for. That is still
+ * true and `simulator.ts` still does it.
+ *
+ * What changed is that the client half acquired a **production** consumer: the
+ * protocol clients in #41 and #42 difference exactly these counters off a real
+ * GATT payload. So it moved to [`../revolutions.ts`](../revolutions.ts), where
+ * both the simulator and `packages/sensors/protocol` reach it, and this file
+ * re-exports it so that `@onyourleft/sensors/simulator` is unchanged. Two
+ * implementations of a wrapping subtraction is precisely the outcome #41's
+ * brief said to avoid.
  *
  * Wire counters stay `number` here — a tick count and a revolution count are
  * dimensionless, and `@onyourleft/domain` has no brand for them. They do not
- * cross the `SensorTransport` boundary: what leaves this file towards a
- * subscriber is a `RevolutionsPerMinute`.
+ * cross the `SensorTransport` boundary: what leaves towards a subscriber is a
+ * `RevolutionsPerMinute` or a `MetresPerSecond`.
  */
 
-import {
-  eventTickRate,
-  eventTicks,
-  eventTimeIntervalIsAmbiguous,
-  eventTimeIntervalSeconds,
-  revolutionsPerMinute,
-  seconds,
-  UINT16_MODULUS,
-  unsignedCounterDelta,
-  type RevolutionsPerMinute,
-  type Seconds,
-  type UnixSeconds,
-} from '@onyourleft/domain';
+import { UINT16_MODULUS, type RevolutionsPerMinute, type Seconds } from '@onyourleft/domain';
 
-/** One reading of a revolution counter, as the profile transmits it. */
-export interface RevolutionReading {
-  /** Cumulative revolutions, modulo the field's width. */
-  readonly revolutions: number;
-  /** Time of the last revolution in ticks, modulo 2^16. */
-  readonly lastEventTimeTicks: number;
-}
+import type { RevolutionReading } from '../revolutions';
+
+export type {
+  CadenceDerivation,
+  CounterShape,
+  RevolutionDerivation,
+  RevolutionInterval,
+  RevolutionReading,
+  SpeedDerivation,
+  TimedReading,
+} from '../revolutions';
+
+export {
+  COAST_HORIZON,
+  deriveCadence,
+  deriveRevolutionInterval,
+  deriveSpeed,
+} from '../revolutions';
 
 /** The device half. */
 export interface RevolutionCounter {
@@ -116,78 +120,5 @@ export function createRevolutionCounter(options: {
       tickOffset =
         (tickOffset + targetTicks - current.lastEventTimeTicks + UINT16_MODULUS) % UINT16_MODULUS;
     },
-  };
-}
-
-/** A reading, and when the client received it. */
-export interface TimedReading {
-  readonly reading: RevolutionReading;
-  readonly at: UnixSeconds;
-}
-
-/** What the client half concluded from a new reading. */
-export interface CadenceDerivation {
-  /** A cadence to emit, or nothing — see `deriveCadence` for the three reasons. */
-  readonly cadence: RevolutionsPerMinute | undefined;
-  /** What the client should hold as "previous" for the next reading. */
-  readonly next: TimedReading;
-}
-
-/**
- * The client half: two readings in, at most one cadence out.
- *
- * Emits nothing in three cases, each deliberate, **checked in this order**:
- *
- * - **No previous reading.** A rate needs an interval.
- * - **No new revolution.** A stopped crank is "no reading", not zero and not
- *   the last value; the previous reading is kept so the interval keeps
- *   accumulating until a revolution arrives.
- * - **Too much real time has passed since the last reading that carried an
- *   event.** Beyond the counter's period (64 s at 1024 Hz) the interval is
- *   unrecoverable — `eventTimeIntervalSeconds` documents why — so the sample is
- *   dropped and the accumulator restarts from this reading. Trusting it would
- *   report about a thousand rpm after a 70-second dropout.
- *
- * The order is load-bearing, and it was found by a test going red. With the
- * horizon checked before the revolution delta, a crank that stops for longer
- * than a period trips the horizon on a reading that carries **no** event, the
- * accumulator restarts from that reading's stale event time, and the first
- * turn of the crank afterwards produces an interval of a few seconds against a
- * truth of seventy — about 9 rpm, plausible and wrong. Only a reading that
- * carries a new event can be too old to pair with.
- */
-export function deriveCadence(
-  previous: TimedReading | undefined,
-  current: TimedReading,
-  options: { readonly revolutionModulus: number; readonly ticksPerSecond: number },
-): CadenceDerivation {
-  if (previous === undefined) {
-    return { cadence: undefined, next: current };
-  }
-  const revolutions = unsignedCounterDelta(
-    previous.reading.revolutions,
-    current.reading.revolutions,
-    options.revolutionModulus,
-  );
-  if (revolutions === 0) {
-    return { cadence: undefined, next: previous };
-  }
-  const elapsed = seconds(current.at - previous.at);
-  if (eventTimeIntervalIsAmbiguous(elapsed, options.ticksPerSecond)) {
-    return { cadence: undefined, next: current };
-  }
-  // Named fields, not positional arguments. #103 changed this signature for the
-  // reason this call site demonstrates: the three values are all plausible
-  // `number`s in each other's roles, and the positional form this replaced
-  // typechecked whichever order they were written in. `(1512, 1000, 1024)`
-  // returned 63.98 s -- a counter wrap misread as a long interval -- silently.
-  const interval = eventTimeIntervalSeconds({
-    previousTicks: eventTicks(previous.reading.lastEventTimeTicks),
-    currentTicks: eventTicks(current.reading.lastEventTimeTicks),
-    ticksPerSecond: eventTickRate(options.ticksPerSecond),
-  });
-  return {
-    cadence: revolutionsPerMinute((revolutions / interval) * 60),
-    next: current,
   };
 }

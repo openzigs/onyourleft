@@ -1,16 +1,32 @@
 {
-  // `src/` alone, with no platform surface at all: `lib` is ES2024 and `types`
-  // is empty, exactly as packages/domain does it. **This is the program that
-  // enforces the boundary**, and it is the reason the wider one above is
-  // allowed to admit the DOM.
+  // `src/` and `protocol/`, with no platform surface at all: `lib` is ES2024
+  // and `types` is empty, exactly as packages/domain does it. **This is the
+  // program that enforces the boundary**, and it is the reason the wider one
+  // above is allowed to admit the DOM.
+  //
+  // `protocol/` (#41, #42) is in here rather than beside `web-bluetooth/`
+  // because the GATT decoders are shared with the native stacks (#15) — a
+  // decoder that could name a browser type would be a decoder #15 had to
+  // rewrite. `DataView` is an ECMAScript built-in and survives `lib: ["ES2024"]`
+  // with `types: []`, which is the whole reason a payload decoder can be
+  // platform-free at all; `BluetoothRemoteGATTCharacteristic` and `navigator`
+  // do not, and are compile errors there exactly as they are in `src/`.
   //
   // The whole point of #39 is that the same interfaces are satisfied, unchanged,
   // by Web Bluetooth (#40), by CoreBluetooth and the Android BLE APIs (#15) and
   // by the simulator (#44). An interface that can name a browser type has
   // already chosen one of the three — so in this program `navigator`,
-  // `BluetoothDevice`, `BluetoothRemoteGATTCharacteristic` and even `DataView`'s
-  // GATT-shaped uses are compile errors rather than review findings, and with
-  // `types: []` so are `process` and `Buffer`.
+  // `BluetoothDevice` and `BluetoothRemoteGATTCharacteristic` are compile
+  // errors rather than review findings, and with `types: []` so are `process`
+  // and `Buffer`.
+  //
+  // ⚠️ **`DataView` is NOT.** This comment used to name "`DataView`'s
+  // GATT-shaped uses" alongside them, and that was never true: `DataView` is an
+  // ECMAScript built-in and is in `lib: ["ES2024"]`. #41 depends on it being
+  // there — a payload decoder that could not name a `DataView` could not be
+  // shared with the native stacks. What keeps GATT payload out of `src/` is
+  // that directory's own documented rule and review; it is not a compile error
+  // and must not be believed to be one.
   //
   // CLAUDE.md section 4d: that closure is conditional on nothing in the program
   // pulling a `/// <reference types="node" />` back in through a `.d.ts`.
@@ -21,5 +37,5 @@
     "lib": ["ES2024"],
     "types": []
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "protocol/**/*.ts"]
 }

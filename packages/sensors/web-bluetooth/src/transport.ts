@@ -412,7 +412,13 @@ export function createWebBluetoothTransport(
       // instant.
       live.at = now();
       try {
-        entry.profile.decode(value, live.sink);
+        // Handed to the decoder as well as stamped on the envelope. A cadence
+        // or a speed is a difference against a `uint16` event counter that laps
+        // every 32 or 64 seconds, and telling one lap from none needs the
+        // wall-clock gap — see `GattProfile.decode`. Passing this transport's
+        // own `now` rather than letting a decoder read a clock is what keeps
+        // the protocol directory platform-free and this timing testable.
+        entry.profile.decode(value, live.sink, live.at);
       } catch (error) {
         // A hostile or malformed payload costs this notification and nothing
         // more. Rethrowing would put an exception into the browser's event

@@ -24,13 +24,15 @@ is `navigator`. It is the transport boundary (#40); nothing it declares escapes 
 |---|---|---|
 | The interfaces below | #39 | here, `src/` |
 | The Web Bluetooth adapter | #40 | `web-bluetooth/`, its own directory with its own place in `eslint.config.js` — [below](#the-web-bluetooth-adapter) |
-| Heart Rate, CSC, Cycling Power, FTMS clients | #41–#43 | below the transport boundary |
+| Heart Rate, CSC and Cycling Power clients | #41, #42 | `protocol/`, its own directory on the same terms, exported as `@onyourleft/sensors/protocol` — [below](#the-protocol-clients) |
+| The FTMS client | #43 | `protocol/`, when it lands |
 | The device simulator | #44 | `src/simulator/`, exported as `@onyourleft/sensors/simulator` — [below](#the-device-simulator) |
 | The transport conformance suite | #44 | `src/simulator/conformance.ts`, exported as `@onyourleft/sensors/conformance` |
 | CoreBluetooth and Android BLE | #15 | the Capacitor plugin, behind the same interface |
 
-A service UUID, a characteristic UUID or a `DataView` of GATT payload in this directory means the
-boundary has been crossed.
+A service UUID, a characteristic UUID or a `DataView` of GATT payload in **`src/`** means the
+boundary has been crossed. All three belong in `protocol/`, which is why that is a directory of its
+own rather than a subdirectory of either neighbour.
 
 **Bluetooth Low Energy only.** The other wireless sensor standard for cycling is out of scope
 permanently — owner decision D2, recorded in [ADR 0005](../../docs/adr/0005-tech-stack.md) and
@@ -113,7 +115,7 @@ it takes bytes and returns `SensorMeasurement`s, and both adapters hand it bytes
 | Web Bluetooth needs a user gesture per `requestDevice()` | `traits.requiresUserGestureToDiscover`, and the `user-gesture-required` error code |
 | Web Bluetooth has no silent reconnect | `traits.canReconnectWithoutUserGesture` is `false`, so its transport never enters `reconnecting` |
 | Native stacks work in the background | `traits.canRestoreConnectionsInBackground` |
-| "Nothing found" is not "not permitted" | four `TransportAvailability` kinds and ten `SensorErrorCode`s |
+| "Nothing found" is not "not permitted" | four `TransportAvailability` kinds and eleven `SensorErrorCode`s |
 | Device ids are not portable between stacks | `DeviceIdentity` carries the `TransportId`, and `sameDevice` compares both |
 | The connection budget is small and OS-wide | `traits.maxConcurrentConnections`, and `planCapabilitySources` |
 
@@ -419,19 +421,24 @@ up**, so a device switched off during `gatt.connect()` sends no event — and We
 no timeout for anything. Without a deadline that await never ends and the ride screen sits on a
 spinner for ever. `DEFAULT_GATT_OPERATION_TIMEOUT` is 30 seconds; `operationTimeout` overrides it.
 
-### Profiles come from #41–#43
+### Profiles come from `protocol/`
 
 This directory contains no service UUID and decodes no payload. A `GattProfile` is a service, a
-characteristic, the capabilities it supplies and a `decode(value, sink)`, and #41 (Heart Rate), #42
-(Cycling Speed and Cadence) and #43 (FTMS, Cycling Power) supply them. Three things the seam
-guarantees, so a decoder cannot get them wrong:
+characteristic, the capabilities it supplies and a `decode(value, sink, at)`, and
+[`protocol/`](#the-protocol-clients) supplies them — Heart Rate, Cycling Speed and Cadence and
+Cycling Power today (#41, #42), FTMS with #43. Three things the seam guarantees, so a decoder cannot
+get them wrong:
 
 - **It cannot misattribute a measurement.** The device identity is the adapter's.
 - **It cannot misdate one.** The receive instant is stamped once per notification, before `decode`
-  runs, so every field out of one frame shares it.
+  runs, so every field out of one frame shares it — and since #41 it is passed *into* `decode` as
+  well, because telling one lap of a wrapping event counter from none needs the wall-clock gap and
+  a decoder must not read a clock of its own.
 - **It cannot allocate per notification.** The sink is built once per characteristic per link and
   the `DataView` is the characteristic's own — so a decoder must not retain either, because the
-  browser reuses the buffer for the next notification.
+  browser reuses the buffer for the next notification. A stateful profile keys its per-link
+  accumulator on the sink through a `WeakMap`, which is a weak reference and not a retention; see
+  `protocol/src/derivation.ts`.
 
 A decoder that throws costs that one notification. Sensor data is untrusted input from a device that
 may not be what it claims (`SECURITY.md`), and an exception let into the browser's event dispatch is
@@ -463,6 +470,119 @@ bench.hold('startNotifications');       // a trainer that stops answering
 bench.device('my-device').drop();       // the link goes, mid-operation
 bench.device('my-device').listeners(service, characteristic);   // count the leak
 ```
+
+## The protocol clients
+
+`protocol/`, exported as `@onyourleft/sensors/protocol` (#41, #42). The half of the stack that turns
+an untrusted little-endian GATT payload into branded domain quantities.
+
+```ts
+import {
+  heartRateProfile,
+  createCyclingSpeedCadenceProfile,
+  createCyclingPowerProfile,
+} from '@onyourleft/sensors/protocol';
+import { metres } from '@onyourleft/domain';
+
+const transport = createWebBluetoothTransport({
+  profiles: [
+    heartRateProfile,
+    createCyclingPowerProfile({ wheelCircumference: rider.wheelCircumference }),
+    createCyclingSpeedCadenceProfile({ wheelCircumference: rider.wheelCircumference }),
+  ],
+});
+```
+
+### Why a third directory
+
+| Where it could go | Why it does not |
+|---|---|
+| `src/` | that directory bars a service UUID and a `DataView` of GATT payload by its own rule — #39's abstraction must not know a wire format |
+| `web-bluetooth/` | the same decoders are the native stacks' (#15). A decoder inside the browser adapter makes CoreBluetooth and Android depend on it, and this file's own table promises "**the same parser, unchanged**" |
+
+So it arrives the way `web-bluetooth/` did: its own entry in `eslint.config.js` and its own paths in
+both tsconfig programs. It is **platform-free** — `tsconfig.platform-free.json` compiles it with
+`lib: ["ES2024"]` and `types: []`, so `navigator` and every Web Bluetooth type are compile errors
+here exactly as in `src/`. `DataView` is an ECMAScript built-in, which is the whole reason a payload
+decoder can be platform-free at all.
+
+### What each service reports, and what has to be derived
+
+| Service | Reports on the wire | This program reports |
+|---|---|---|
+| Heart Rate `0x180D` | beats per minute (8- or 16-bit), sensor contact, energy expended, RR intervals | `heart-rate` — **withheld** when the strap says it has lost contact, because the zero it transmits is a valid `BeatsPerMinute` |
+| Cycling Speed and Cadence `0x1816` | cumulative revolutions and a last-event time. **Neither an rpm nor a km/h** | `cadence`, `speed` — both differenced client-side |
+| Cycling Power `0x1818` | a mandatory `sint16` of watts, and up to twelve optional flag-gated fields | `power`, `cadence`, and `speed` when a wheel circumference is configured |
+
+**Wheel circumference has no default and is a required argument.** It is a rider setting, not a
+device property, and a default of 700×25c silently misreports distance for everyone else.
+
+### The counters, and which of them actually wrap
+
+| Counter | Width | Tick rate | Wraps |
+|---|---|---|---|
+| CSC wheel / crank event time | `uint16` | 1/1024 s | **every ~64 s** — on every ride |
+| CPS **wheel** event time | `uint16` | **1/2048 s** | every ~32 s |
+| CPS **crank** event time | `uint16` | 1/1024 s | every ~64 s |
+| Cumulative crank revolutions | `uint16` | — | ≈ 12 h at 90 rpm |
+| Cumulative wheel revolutions | `uint32` | — | effectively never |
+| Accumulated torque, accumulated energy | `uint16` | — | on a long ride |
+
+⚠️ **The same field name means different things in `0x1818` and `0x1816`.** Every helper takes the
+tick rate and the modulus as parameters; there is one wrapping subtraction in this program,
+`@onyourleft/domain`'s `unsignedCounterDelta`, and one derivation, `src/revolutions.ts`.
+
+### The UUIDs, re-verified
+
+#41 requires re-verification against the primary source, because both issue bodies carried values
+corroborated from secondary sources during planning. Every value below was read on **2026-09-04**
+from the Bluetooth SIG's own machine-readable assigned numbers — the `bluetooth-SIG/public`
+repository, `assigned_numbers/uuids/service_uuids.yaml` and `characteristic_uuids.yaml`. **All ten
+matched the issue text.**
+
+| Name | Assigned number |
+|---|---|
+| Heart Rate | `0x180D` |
+| Heart Rate Measurement | `0x2A37` |
+| Body Sensor Location | `0x2A38` |
+| Cycling Speed and Cadence | `0x1816` |
+| CSC Measurement | `0x2A5B` |
+| CSC Feature | `0x2A5C` |
+| Cycling Power | `0x1818` |
+| Cycling Power Measurement | `0x2A63` |
+| Cycling Power Feature | `0x2A65` |
+| Sensor Location | `0x2A5D` |
+
+The transcription into 128-bit form is checked rather than trusted:
+`web-bluetooth/src/protocol-registry.test.ts` asserts each literal equals `canonicalUuid` of its own
+assigned number. A transposed digit is otherwise a sensor that pairs and then reports nothing, which
+is the hardest failure in this stack to diagnose.
+
+### Sensor data is untrusted input
+
+Every read is bounds-checked and every failure is a `SensorError('malformed-payload')` — never a
+bare `RangeError`, never an out-of-bounds `DataView` read. A flag claiming a field the buffer does
+not contain is the obvious attack on a flags-gated variable-length characteristic, and
+`cycling-power.test.ts` truncates a full packet at **every** field boundary rather than at one.
+
+A profile decodes the whole frame before it reports anything. Instantaneous power is mandatory and
+comes first, so the tempting implementation reports it and then fails on a later field — it must
+not, because the truncation means the offsets are not what they were read as.
+
+### What is deliberately not here
+
+- **Control points** (`0x2A39`, `0x2A55`, `0x2A66`). `SensorTransport` has no write path, and #43
+  owns the command surface.
+- **FTMS `0x1826`.** #43's, with its own review: its control point applies physical resistance to a
+  person who is pedalling, which CLAUDE.md §6 calls a safety problem rather than only a security one.
+- **Reading the Feature characteristics on connect.** `decodeCyclingPowerFeature` and
+  `decodeCscFeature` exist and are tested; wiring a characteristic *read* into the transport belongs
+  with [#131](https://github.com/openzigs/onyourleft/issues/131), which is the issue that owns a
+  device's capability set being fixed to what was requested.
+- **Scaling a left-only power meter's doubled figure.** The device's number is passed through
+  unscaled and the pedal power balance and its reference are surfaced beside it. There is no field
+  that distinguishes a meter that doubles from one that does not, so guessing would halve the power
+  of the riders whose meter does not.
 
 ## Running it
 

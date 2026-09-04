@@ -25,20 +25,38 @@
  *    that drifts from the browser API is a compile error rather than a bug that
  *    shows up on somebody's trainer.
  *
- * ⚠️ **Nothing in this file may be re-exported above the transport boundary.**
- * `docs/architecture.md` requires that no Web Bluetooth type escape, and
- * `packages/sensors/tsconfig.platform-free.json` is what makes that true for
- * `../../src`: that program has no DOM lib at all, so a `DataView` of GATT
- * payload or a `BluetoothDevicePort` cannot even be named there.
+ * ⚠️ **None of the port interfaces below may be re-exported above the transport
+ * boundary.** `docs/architecture.md` requires that no Web Bluetooth type
+ * escape, and `packages/sensors/tsconfig.platform-free.json` is what makes that
+ * true for `../../src` and `../../protocol`: those programs have no DOM lib and
+ * no `@types` at all, so a `BluetoothDevicePort`, a `BluetoothRemoteGATT…` or
+ * any other name from outside ES2024 is a compile error there.
+ *
+ * ⚠️ **`DataView` is not one of them, and this file used to say it was.** The
+ * paragraph above previously claimed that "a `DataView` of GATT payload cannot
+ * even be named" in the platform-free program. That is false and always was:
+ * `DataView` is an ECMAScript built-in, present in `lib: ["ES2024"]`, and #41
+ * depends on the fact — it is the whole reason a payload decoder can live in
+ * `../../protocol` and be shared, unchanged, with the native stacks (#15). The
+ * thing that keeps GATT payload out of `../../src` is that directory's own
+ * documented rule and review, not the typechecker; do not read the narrowing as
+ * enforcing it.
  */
+
+import type { GattUuid } from '../../protocol/src/uuid';
 
 /**
  * A GATT UUID, in the canonical lowercase 128-bit form the browser normalises
- * to. Not branded: it is only ever compared with `===` against another string
- * this adapter produced, and a brand here would have to be applied by every
- * profile in #41–#43 to no benefit.
+ * to.
+ *
+ * **Declared in `packages/sensors/protocol/src/uuid.ts` since #41** and
+ * re-exported here so every import in this directory is unchanged. A UUID is a
+ * Bluetooth SIG assigned number rather than a Web Bluetooth type —
+ * CoreBluetooth's `CBUUID` and Android's `java.util.UUID` carry the same value —
+ * and the protocol clients that name one have to compile without this directory
+ * in scope at all. See that file's header.
  */
-export type GattUuid = string;
+export type { GattUuid };
 
 /**
  * One characteristic on one link.

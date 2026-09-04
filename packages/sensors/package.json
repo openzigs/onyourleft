@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "license": "Apache-2.0",
-  "description": "Transport-agnostic BLE sensor abstraction: discovery, connection lifecycle, capabilities and typed measurement streams. src/ depends on no platform API at all; web-bluetooth/ is the browser adapter.",
+  "description": "Transport-agnostic BLE sensor abstraction: discovery, connection lifecycle, capabilities and typed measurement streams. src/ and protocol/ depend on no platform API at all; web-bluetooth/ is the browser adapter.",
   "exports": {
     ".": "./src/index.ts",
+    "./protocol": "./protocol/src/index.ts",
     "./simulator": "./src/simulator/index.ts",
     "./conformance": "./src/simulator/conformance.ts",
     "./web-bluetooth": "./web-bluetooth/src/index.ts",

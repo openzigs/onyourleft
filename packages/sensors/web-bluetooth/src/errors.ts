@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Turning a browser failure into one of `SensorErrorCode`'s ten states.
+ * Turning a browser failure into one of `SensorErrorCode`'s states. Ten of the
+ * eleven are reachable from here; `malformed-payload` is raised by the protocol
+ * decoders rather than by the transport, and is the one code below that no
+ * browser failure maps to.
  *
  * ## Why this is a file and not three `catch` blocks
  *

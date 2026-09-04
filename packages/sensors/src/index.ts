@@ -85,6 +85,33 @@ export type { DeviceSession } from './session';
 
 export { createDeviceSession } from './session';
 
+// --- Wrapping revolution counters -------------------------------------------
+//
+// The client-side arithmetic that turns two readings of a lapping counter into
+// a cadence or a speed. Here rather than in a profile because CSC and Cycling
+// Power carry four such counters between them at three different widths and two
+// different tick rates, and the simulator plays the device half of all four —
+// so a second implementation of a wrapping subtraction is the thing to avoid.
+
+export type {
+  CadenceDerivation,
+  CounterShape,
+  RevolutionDerivation,
+  RevolutionInterval,
+  RevolutionReading,
+  SpeedDerivation,
+  TimedReading,
+} from './revolutions';
+
+export {
+  COAST_HORIZON,
+  deriveCadence,
+  deriveRevolutionInterval,
+  deriveSpeed,
+  MAX_PLAUSIBLE_CADENCE_RPM,
+  MAX_PLAUSIBLE_SPEED_METRES_PER_SECOND,
+} from './revolutions';
+
 // --- The transport interface ------------------------------------------------
 
 export type {
