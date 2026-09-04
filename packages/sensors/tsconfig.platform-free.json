@@ -1,0 +1,25 @@
+{
+  // `src/` alone, with no platform surface at all: `lib` is ES2024 and `types`
+  // is empty, exactly as packages/domain does it. **This is the program that
+  // enforces the boundary**, and it is the reason the wider one above is
+  // allowed to admit the DOM.
+  //
+  // The whole point of #39 is that the same interfaces are satisfied, unchanged,
+  // by Web Bluetooth (#40), by CoreBluetooth and the Android BLE APIs (#15) and
+  // by the simulator (#44). An interface that can name a browser type has
+  // already chosen one of the three — so in this program `navigator`,
+  // `BluetoothDevice`, `BluetoothRemoteGATTCharacteristic` and even `DataView`'s
+  // GATT-shaped uses are compile errors rather than review findings, and with
+  // `types: []` so are `process` and `Buffer`.
+  //
+  // CLAUDE.md section 4d: that closure is conditional on nothing in the program
+  // pulling a `/// <reference types="node" />` back in through a `.d.ts`.
+  // `vitest.config.ts` is deliberately excluded here and imports nothing, for
+  // the reason its own header records at length.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "types": []
+  },
+  "include": ["src/**/*.ts"]
+}

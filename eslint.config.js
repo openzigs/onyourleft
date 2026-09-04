@@ -253,7 +253,15 @@ export default tseslint.config(
           // file it actually names rather than being written off as external —
           // which is what makes the boundary rule below reach an import written
           // as `@onyourleft/web` and not only one written as a relative path.
-          project: ['tsconfig.json', 'apps/*/tsconfig.json', 'packages/*/tsconfig.json'],
+          // The last entry reaches an adapter that lives in its own directory
+          // beside a package's `src/` with its own tsconfig — see
+          // `packages/sensors/web-bluetooth` (#40).
+          project: [
+            'tsconfig.json',
+            'apps/*/tsconfig.json',
+            'packages/*/tsconfig.json',
+            'packages/*/*/tsconfig.json',
+          ],
           noWarnOnMultipleProjects: true,
         },
       },
@@ -298,27 +306,59 @@ export default tseslint.config(
     rules: platformIsolation(),
   },
 
-  // --- packages/sensors depends on no platform API either --------------------
+  // --- packages/sensors/src depends on no platform API either ----------------
   // #39 defines the shape every BLE transport implements, and its second
   // acceptance criterion is that Web Bluetooth *and* a native stack satisfy it
   // unchanged. An interface that can name `navigator.bluetooth` — or a
   // `BluetoothRemoteGATTCharacteristic`, or a `DataView` full of GATT payload —
   // has already chosen one of the three, and #15 becomes a rewrite of the
-  // protocol layer rather than an adapter. `packages/sensors/tsconfig.json`
-  // narrows `lib` and empties `types` for the same reason; these rules are the
-  // half that does not depend on that narrowing surviving a stray
-  // `/// <reference types="node" />`.
+  // protocol layer rather than an adapter.
+  // `packages/sensors/tsconfig.platform-free.json` narrows `lib` and empties
+  // `types` for the same reason; these rules are the half that does not depend
+  // on that narrowing surviving a stray `/// <reference types="node" />`.
   //
-  // ⚠️ **#40's Web Bluetooth adapter needs the DOM and does not belong under
-  // this block.** docs/architecture.md puts the transport in this package with
-  // the constraint that "Web Bluetooth types must not escape above the transport
-  // boundary" — so the adapter arrives in its own directory with its own
-  // tsconfig (DOM in `lib`) and its own entry here, and `packages/sensors/src`
-  // stays platform-free. Narrow this block's `files` when that lands; do not
-  // widen the tsconfig.
+  // ⚠️ **`files` is `src/` and this package's Vitest config, not the whole
+  // package.** #40's adapter needs the DOM, so it lives beside `src/` in
+  // `web-bluetooth/` with its own block below — which is what the note this
+  // paragraph replaces asked for. `vitest.config.ts` is named explicitly
+  // because it is part of the platform-free program's neighbourhood and a
+  // `defineConfig` import there is precisely how the closure was broken once
+  // before (CLAUDE.md section 4d).
   {
-    files: ['packages/sensors/**/*.{ts,tsx}'],
+    files: ['packages/sensors/src/**/*.{ts,tsx}', 'packages/sensors/vitest.config.ts'],
     rules: platformIsolation(BLE_LIBRARY_IMPORT_PATTERNS),
+  },
+
+  // --- packages/sensors/web-bluetooth may name one platform API, and one only -
+  // #40's adapter is the transport boundary: docs/architecture.md allows it Web
+  // Bluetooth and requires that no Web Bluetooth type escape above it. So the
+  // DOM globals are permitted here — and `navigator` is the *only* one of
+  // `PLATFORM_GLOBALS` that is, derived by subtraction rather than by writing a
+  // second list, because a second list is the one that goes stale.
+  //
+  // Everything else stays forbidden and each for its own reason: Node, because
+  // this runs in a browser; the network globals, because a transport that can
+  // `fetch` is a transport that can exfiltrate a device list, and Phase 1 has
+  // no server at all (owner decision D6); `indexedDB`, `localStorage` and
+  // `caches`, because persistence is packages/store's; and the BLE libraries,
+  // because an adapter that wraps `webbluetooth` or the Capacitor plugin has
+  // taken a dependency this issue exists to avoid.
+  {
+    files: ['packages/sensors/web-bluetooth/**/*.{ts,tsx}'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        { patterns: [...PLATFORM_IMPORT_PATTERNS, ...BLE_LIBRARY_IMPORT_PATTERNS] },
+      ],
+      'no-restricted-globals': [
+        'error',
+        ...PLATFORM_GLOBALS.filter((name) => name !== 'navigator').map((name) => ({
+          name,
+          message:
+            'The Web Bluetooth adapter is allowed `navigator` and nothing else — it is the transport boundary, not a second platform layer (docs/architecture.md).',
+        })),
+      ],
+    },
   },
 
   // --- Tests -----------------------------------------------------------------

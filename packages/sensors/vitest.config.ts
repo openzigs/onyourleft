@@ -25,6 +25,12 @@ export default {
     // well as for Web Bluetooth. A run under jsdom would hide an accidental
     // `navigator` reference behind a global that happened to exist.
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    // `web-bluetooth/` is here too, and under the same `node` environment
+    // rather than a DOM one. That is deliberate twice over. The adapter is
+    // handed its `BluetoothPort`, so a DOM environment would add nothing it
+    // uses — and running it where `navigator` exists with no `bluetooth` on it
+    // is the Safari, Firefox and plain-HTTP path, asserted for real rather
+    // than simulated by deleting a global.
+    include: ['src/**/*.test.ts', 'web-bluetooth/**/*.test.ts'],
   },
 };

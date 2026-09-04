@@ -4,22 +4,25 @@
   "private": true,
   "type": "module",
   "license": "Apache-2.0",
-  "description": "Transport-agnostic BLE sensor abstraction: discovery, connection lifecycle, capabilities and typed measurement streams. No platform API at all.",
+  "description": "Transport-agnostic BLE sensor abstraction: discovery, connection lifecycle, capabilities and typed measurement streams. src/ depends on no platform API at all; web-bluetooth/ is the browser adapter.",
   "exports": {
     ".": "./src/index.ts",
     "./simulator": "./src/simulator/index.ts",
-    "./conformance": "./src/simulator/conformance.ts"
+    "./conformance": "./src/simulator/conformance.ts",
+    "./web-bluetooth": "./web-bluetooth/src/index.ts",
+    "./web-bluetooth/testing": "./web-bluetooth/src/testing/index.ts"
   },
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {
-    "typecheck": "tsc --noEmit --project tsconfig.json",
+    "typecheck": "tsc --noEmit --project tsconfig.json && tsc --noEmit --project tsconfig.platform-free.json",
     "test": "vitest run"
   },
   "dependencies": {
     "@onyourleft/domain": "workspace:*"
   },
   "devDependencies": {
+    "@types/web-bluetooth": "0.0.21",
     "typescript": "6.0.3",
     "vitest": "4.1.11"
   }
