@@ -1,27 +1,27 @@
 {
-  // `lib` is ES2024 and nothing else, and `types` is empty — the same closure
-  // packages/domain uses, for the same reason and one more.
+  // The whole package: `src/` (the transport-agnostic abstraction and the
+  // simulator), `web-bluetooth/` (#40's adapter) and this package's Vitest
+  // config.
   //
-  // The reason it shares: docs/architecture.md requires that "no Web Bluetooth
-  // type escapes above the transport boundary", and this package *is* above the
-  // transport boundary. Without the DOM lib, `navigator`, `BluetoothDevice` and
-  // `BluetoothRemoteGATTCharacteristic` are compile errors here rather than
-  // review findings; with `types: []`, so are `process` and `Buffer`.
+  // `lib: ["ES2024", "DOM"]` here and NOT in tsconfig.platform-free.json is the
+  // point of having two files, for exactly the reason packages/fit has two.
+  // ESLint's project service resolves a file to the nearest `tsconfig.json`, so
+  // this is the config that has to cover every file in the package or lint
+  // reports "not found by the project service" instead of anything useful. The
+  // narrower program below is what actually enforces the boundary, and
+  // `pnpm run typecheck` runs both.
   //
-  // The reason it is stricter than it looks: the whole point of #39 is that the
-  // same interfaces are implemented by Web Bluetooth (#40), and later by
-  // CoreBluetooth and the Android BLE APIs (#15). An interface that can name a
-  // browser type has already chosen one of the three.
-  //
-  // ⚠️ This closure is conditional. `types: []` suppresses the automatic @types
-  // lookup; it does *not* stop a `/// <reference types="node" />` inside a
-  // `.d.ts` that a file in this program imports. That is why `vitest.config.ts`
-  // imports nothing — see the comment at the top of it — and why
-  // eslint.config.js keeps a denylist that does not depend on this holding.
+  // `types: ["web-bluetooth"]` is types-only, MIT, and has no dependencies. It
+  // is here so that `gatt-conformance.test.ts` can assert that the real
+  // `Bluetooth`, `BluetoothDevice`, `BluetoothRemoteGATTServer`,
+  // `BluetoothRemoteGATTService` and `BluetoothRemoteGATTCharacteristic` are
+  // each assignable to the port `web-bluetooth/src/gatt.ts` declares. A
+  // hand-written port that drifts from the browser API is otherwise a bug that
+  // only shows up on somebody's trainer.
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ES2024"],
-    "types": []
+    "lib": ["ES2024", "DOM"],
+    "types": ["web-bluetooth"]
   },
-  "include": ["src/**/*.ts", "vitest.config.ts"]
+  "include": ["src/**/*.ts", "web-bluetooth/**/*.ts", "vitest.config.ts"]
 }

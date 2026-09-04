@@ -237,4 +237,78 @@ describe('subscriptions', () => {
 
     expect(second).toHaveLength(1);
   });
+
+  it('does not deliver to a listener another listener removed mid-notify', () => {
+    // ⚠️ This is the behaviour that says `emit` no longer copies its listener
+    // array — a copy captures the second listener before it is removed and calls
+    // it anyway, which is a delivery after unsubscribe. `emit` runs on every
+    // notification from every sensor once #40's adapter is driving it, so the
+    // copy was an array allocated and discarded ten thousand times an hour.
+    const session = connectedSession();
+    const second: SensorMeasurement[] = [];
+    let stopSecond: () => void = () => undefined;
+    session.onMeasurement(() => {
+      stopSecond();
+    });
+    stopSecond = session.onMeasurement((measurement) => second.push(measurement));
+
+    session.report(powerAt(1_800_000_000, 200));
+
+    expect(second).toHaveLength(0);
+  });
+
+  it('does not call a listener added from inside a notification for that notification', () => {
+    const session = connectedSession();
+    const late: SensorMeasurement[] = [];
+    session.onMeasurement(() => {
+      session.onMeasurement((measurement) => late.push(measurement));
+    });
+
+    session.report(powerAt(1_800_000_000, 200));
+    expect(late).toHaveLength(0);
+
+    session.report(powerAt(1_800_000_001, 201));
+    // One subscriber was added by the first report and a second by the second,
+    // so the value added first sees exactly one delivery.
+    expect(late).toHaveLength(1);
+  });
+
+  it('keeps delivering to the survivors after a removal during a notification', () => {
+    // The blanked slot has to be compacted, and compacted correctly: an
+    // off-by-one here silently drops whichever subscriber followed the removed
+    // one, for the rest of the ride.
+    const session = connectedSession();
+    const first: SensorMeasurement[] = [];
+    const third: SensorMeasurement[] = [];
+    session.onMeasurement((measurement) => first.push(measurement));
+    const stopSecond = session.onMeasurement(() => {
+      stopSecond();
+    });
+    session.onMeasurement((measurement) => third.push(measurement));
+
+    session.report(powerAt(1_800_000_000, 200));
+    session.report(powerAt(1_800_000_001, 201));
+    session.report(powerAt(1_800_000_002, 202));
+
+    expect(first).toHaveLength(3);
+    expect(third).toHaveLength(3);
+  });
+
+  it('keeps notifying after a listener throws', () => {
+    // A caller's listener is a caller's code. Without the `finally`, the depth
+    // counter never returns to zero, every later removal is blanked and never
+    // compacted, and the list is quietly broken for the life of the page.
+    const session = connectedSession();
+    const later: SensorMeasurement[] = [];
+    const stop = session.onMeasurement(() => {
+      throw new Error('a subscriber blew up');
+    });
+
+    expect(() => session.report(powerAt(1_800_000_000, 200))).toThrow('a subscriber blew up');
+    stop();
+    session.onMeasurement((measurement) => later.push(measurement));
+    session.report(powerAt(1_800_000_001, 201));
+
+    expect(later).toHaveLength(1);
+  });
 });

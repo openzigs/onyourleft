@@ -82,32 +82,93 @@ export interface DeviceSession {
 }
 
 /**
- * A listener list that survives a listener unsubscribing itself mid-notify.
+ * A listener list that survives a listener unsubscribing itself mid-notify, and
+ * that allocates nothing while notifying.
  *
- * The copy in `emit` is the whole reason this exists: a subscriber that
- * unsubscribes from inside its own callback — which a "stop recording once the
- * trainer reports zero power" rule does naturally — mutates the array being
- * iterated, and the next listener in the list is skipped. That is a dropped
+ * ## The problem it solves
+ *
+ * A subscriber that unsubscribes from inside its own callback — which a "stop
+ * recording once the trainer reports zero power" rule does naturally — mutates
+ * the list being iterated, and the next listener is skipped. That is a dropped
  * sample nobody can reproduce.
+ *
+ * ## Why it is a tombstone rather than a copy
+ *
+ * ⚠️ **`emit` runs on every notification from every sensor.** This function was
+ * written for #39, where nothing called it in a loop; #40 is its first hot-path
+ * consumer, and three connected sensors reporting at 1 Hz reach it about ten
+ * thousand times an hour per stream. The obvious fix — iterate `[...listeners]`
+ * — is an array allocated and thrown away on every one of them, and #40's fifth
+ * acceptance criterion is that notification handling allocates nothing per
+ * notification.
+ *
+ * So a removal *during* a notification blanks its slot instead of splicing it
+ * out, and the blanks are compacted once the outermost notification finishes.
+ * The loop is bounded before it starts, so a listener that subscribes from
+ * inside its own callback is not called for the event it is handling — the same
+ * rule the copy gave, arrived at without the copy.
+ *
+ * One deliberate behaviour change comes with it: a listener removed by *another*
+ * listener mid-notification is no longer called for that notification. The copy
+ * called it, having captured it before it was removed. Not calling it is the
+ * `transport.ts` contract — nothing is delivered after unsubscribe — so this is
+ * the version that agrees with the conformance suite.
  */
 function listenerList<T>(): {
   add: (listener: Listener<T>) => Unsubscribe;
   emit: (value: T) => void;
 } {
-  const listeners: Listener<T>[] = [];
+  const listeners: (Listener<T> | undefined)[] = [];
+  /** Nesting depth: a listener may report, which notifies this list again. */
+  let notifying = 0;
+  let blanks = 0;
+
+  const compact = (): void => {
+    let write = 0;
+    for (let read = 0; read < listeners.length; read += 1) {
+      const listener = listeners[read];
+      if (listener !== undefined) {
+        listeners[write] = listener;
+        write += 1;
+      }
+    }
+    listeners.length = write;
+    blanks = 0;
+  };
+
   return {
     add(listener) {
       listeners.push(listener);
       return () => {
         const index = listeners.indexOf(listener);
-        if (index !== -1) {
-          listeners.splice(index, 1);
+        if (index === -1) {
+          return;
         }
+        if (notifying > 0) {
+          listeners[index] = undefined;
+          blanks += 1;
+          return;
+        }
+        listeners.splice(index, 1);
       };
     },
     emit(value) {
-      for (const listener of [...listeners]) {
-        listener(value);
+      notifying += 1;
+      try {
+        // Bounded before the loop rather than read each time round, so a
+        // listener that subscribes from inside its own callback is not called
+        // for the event it is handling.
+        const upTo = listeners.length;
+        for (let index = 0; index < upTo; index += 1) {
+          listeners[index]?.(value);
+        }
+      } finally {
+        notifying -= 1;
+        // Only the outermost notification compacts: doing it from a nested one
+        // would move the entries the outer loop is still walking.
+        if (notifying === 0 && blanks > 0) {
+          compact();
+        }
       }
     },
   };

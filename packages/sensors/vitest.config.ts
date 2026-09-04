@@ -5,16 +5,25 @@
  *
  * **Deliberately imports nothing**, for the reason `packages/domain`'s copy of
  * this file records: `import { defineConfig } from 'vitest/config'` pulls Vite's
- * type declarations into this package's TypeScript program, and those declare
- * `/// <reference types="node" />`. That reference reaches @types/node from the
- * workspace root and defeats the `types: []` narrowing in `tsconfig.json` —
- * which is the thing that makes `process`, `Buffer`, `fetch` and `navigator`
- * compile errors here. A config file is part of the same program as `src/`, so
- * a type that leaks in here leaks in everywhere.
+ * type declarations into whichever TypeScript program contains this file, and
+ * those declare `/// <reference types="node" />`. That reference reaches
+ * @types/node from the workspace root and defeats a `types` narrowing — which is
+ * the thing that makes `process`, `Buffer` and `fetch` compile errors.
  *
  * That is not a hypothetical: it is exactly how the guard was silently broken in
  * `packages/domain` until #23's review (CLAUDE.md §4d). Vitest accepts a plain
  * object, and `defineConfig` is only an identity function for editor typing.
+ *
+ * **What changed in #40, since CLAUDE.md §4d sends readers here.** This package
+ * now has two programs. `tsconfig.json` includes `src/`, `web-bluetooth/` and
+ * this file, and carries `lib: ["ES2024", "DOM"]` with
+ * `types: ["web-bluetooth"]`, because the adapter needs the DOM.
+ * `tsconfig.platform-free.json` includes `src/**` alone with neither — and it is
+ * that program, not this one, which holds the platform-free closure over
+ * `packages/sensors/src`. So this file is no longer in a `types: []` program and
+ * the narrowing it protects is on the other config. Importing here would still
+ * be wrong: it would pull Node's declarations into the program that typechecks
+ * the adapter, where `no-restricted-globals` is the only thing left saying no.
  */
 export default {
   test: {
@@ -25,6 +34,12 @@ export default {
     // well as for Web Bluetooth. A run under jsdom would hide an accidental
     // `navigator` reference behind a global that happened to exist.
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    // `web-bluetooth/` is here too, and under the same `node` environment
+    // rather than a DOM one. That is deliberate twice over. The adapter is
+    // handed its `BluetoothPort`, so a DOM environment would add nothing it
+    // uses — and running it where `navigator` exists with no `bluetooth` on it
+    // is the Safari, Firefox and plain-HTTP path, asserted for real rather
+    // than simulated by deleting a global.
+    include: ['src/**/*.test.ts', 'web-bluetooth/**/*.test.ts'],
   },
 };

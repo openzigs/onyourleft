@@ -35,6 +35,8 @@ packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis (#25)
   fit/                FIT / GPX / TCX codec (#29-#32)
   sensors/            sensor abstraction and BLE transport (#39-#44) — BLE only
+    src/                the transport-agnostic abstraction; no platform API at all
+    web-bluetooth/      the browser transport (#40) — the one place a BluetoothDevice exists
   physics/            cycling power/speed model, Martin et al. 1998 (#88)
   store/              local activity and stream store, and the round-trip harness (#26-#28)
 
@@ -60,7 +62,7 @@ cover the paths, so a package arrives inside the rules rather than beside them.
 |---|---|---|
 | `packages/domain` | Canonical units and types; every conversion in the program goes through it — the representations and the conversions are tabulated in [`packages/domain/README.md`](packages/domain/README.md). Also signing/verification and analysis, because those must run identically on the device and on an instance. | **Any platform API at all** — no DOM, no Node globals, no I/O, no network types |
 | `packages/fit` | FIT / GPX / TCX decode and encode | Anything server-specific; anything under `apps/` |
-| `packages/sensors` | BLE sensor and trainer abstraction, and the Web Bluetooth transport | Anything server-specific. Web Bluetooth types must not escape above the transport boundary |
+| `packages/sensors` | BLE sensor and trainer abstraction (`src/`), and the Web Bluetooth transport (`web-bluetooth/`) | `src/`: **any platform API at all**, and any BLE library. `web-bluetooth/`: every platform global except `navigator`. Web Bluetooth types must not escape above the transport boundary |
 | `packages/physics` | Power → speed. Pure computation. | Any rendering, BLE or platform API |
 | `packages/store` | Local activity and stream persistence, and its migrations | Anything under `apps/` |
 
@@ -194,7 +196,9 @@ pnpm run test:coverage
 # from, so run this before claiming a change compiles.
 pnpm run build
 
-# One package at a time, which is how you check a single package's harness:
+# One package at a time, which is how you check a single package's harness.
+# `@onyourleft/sensors`' typecheck runs TWO programs — see §4d — and both have
+# to pass; the second is the one that enforces the platform boundary.
 pnpm --filter @onyourleft/domain run test
 pnpm --filter @onyourleft/sensors run test
 pnpm --filter @onyourleft/web run test
@@ -276,9 +280,14 @@ not.
 
   **What does exist, and what each is not yet:**
 
-  - **`packages/sensors`** ([#39](https://github.com/openzigs/onyourleft/issues/39)) holds
-    **interfaces only**. The Web Bluetooth transport (#40), the protocol clients (#41–#43) and the
-    simulator (#44) are still to come, and nothing under it connects to a device yet.
+  - **`packages/sensors/src`** ([#39](https://github.com/openzigs/onyourleft/issues/39)) holds the
+    interfaces, `createDeviceSession`, `planCapabilitySources` and the simulator (#44).
+    **`packages/sensors/web-bluetooth`** ([#40](https://github.com/openzigs/onyourleft/issues/40))
+    holds the browser transport: the `DeviceId → device/server/service/characteristic` map, the
+    global GATT operation queue, `createWebBluetoothTransport`, and a scripted Web Bluetooth stack
+    at `@onyourleft/sensors/web-bluetooth/testing`. It holds **no profile** — not one service UUID
+    and not one byte of payload. The protocol clients (#41–#43) supply `GattProfile`s, and until
+    they land the adapter decodes nothing on a real device.
   - **`packages/fit`** holds the **synthetic fixture corpus and its generator**
     ([#107](https://github.com/openzigs/onyourleft/issues/107)) and the **FIT activity file
     decoder** ([#30](https://github.com/openzigs/onyourleft/issues/30)) in `src/decode/`, exported
@@ -310,9 +319,10 @@ not.
 - **A coverage gate demonstrated to fail.** Coverage is reported and nothing enforces it, which is
   §5's deliberate design; what #24 still owes is the demonstration that the report is real.
 - **`react-router` and the rest of the runtime dependency list in ADR 0005.** The toolchain,
-  React 19, React DOM, Vite and — since #26 — `dexie` 4.4.5 and `fake-indexeddb` 6.2.5 (both
-  Apache-2.0, both zero-dependency, both under `packages/store`) are installed; nothing else from
-  that list is. Add each in the issue that first needs it, after checking its licence against the
+  React 19, React DOM, Vite, — since #26 — `dexie` 4.4.5 and `fake-indexeddb` 6.2.5 (both
+  Apache-2.0, both zero-dependency, both under `packages/store`) and — since #40 —
+  `@types/web-bluetooth` 0.0.21 (MIT, zero-dependency, types only, a devDependency of
+  `packages/sensors`) are installed; nothing else from that list is. Add each in the issue that first needs it, after checking its licence against the
   directory it lands in (CONTRIBUTING.md).
 - **`apps/api`, or anything else server-shaped.** Not "not yet" — not in Phase 1 at all. Owner
   decision D6.
@@ -356,8 +366,9 @@ would otherwise be documented and unenforced, which is the gap this project keep
 |---|---|
 | `headers/header-format` | a `.ts`/`.tsx` file whose first line is not the SPDX identifier its directory requires. Duplicates `LIC001`/`LIC002` on purpose: the script covers file types ESLint never parses and runs with no toolchain, the lint rule runs in the editor |
 | `boundaries/dependencies` | an import from `packages/*` into `apps/*`, in either the relative (`../../../apps/web/src/...`) or the workspace (`@onyourleft/web`) spelling. Dependencies point one way |
-| `@typescript-eslint/no-restricted-imports` in `packages/domain` and `packages/sensors` | naming **any** Node builtin — the list is derived from `builtinModules`, not typed out, so `events`, `util` and `stream/promises` fail exactly as `node:fs` does — or `react`, `react-dom`, `vite` or `dexie` |
-| `no-restricted-globals` in `packages/domain` and `packages/sensors` | naming a DOM global (`window`, `document`, `navigator`, `location`, `history`, `localStorage`, `sessionStorage`, `indexedDB`, `caches`), a Node global (`process`, `Buffer`, `__dirname`, `__filename`, `global`, `require`) or a network global (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Request`, `Response`, `Headers`). This one **is** a named list; the closure is the typechecker below |
+| `@typescript-eslint/no-restricted-imports` in `packages/domain`, `packages/sensors/src` and `packages/sensors/web-bluetooth` | naming **any** Node builtin — the list is derived from `builtinModules`, not typed out, so `events`, `util` and `stream/promises` fail exactly as `node:fs` does — or `react`, `react-dom`, `vite` or `dexie`, or a BLE library |
+| `no-restricted-globals` in `packages/domain` and `packages/sensors/src` | naming a DOM global (`window`, `document`, `navigator`, `location`, `history`, `localStorage`, `sessionStorage`, `indexedDB`, `caches`), a Node global (`process`, `Buffer`, `__dirname`, `__filename`, `global`, `require`) or a network global (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Request`, `Response`, `Headers`). This one **is** a named list; the closure is the typechecker below |
+| `no-restricted-globals` in `packages/sensors/web-bluetooth` | naming any of the same list **except `navigator`** — the adapter is the transport boundary and `navigator.bluetooth` is the one platform API it exists to reach. The exception is derived by subtracting one name from the list above rather than restating it, so the two cannot drift |
 
 `packages/domain/tsconfig.json` narrows `lib` to `ES2024` and sets `types: []`. That is the closure
 the lint list cannot be: with no ES library entry and no `@types` package in scope, *any* name from
@@ -376,11 +387,21 @@ survives the paragraph below.
 > `packages/domain`'s tsconfig program can reopen this**, which is why the ESLint rules are not
 > redundant with it: check both gates with a probe file, never one.
 
-`packages/sensors` (#39) is isolated the same way and for a stricter reason: its interfaces have to
-be satisfied **unchanged** by Web Bluetooth, CoreBluetooth and the Android BLE APIs, so an interface
-that can name a browser type has already chosen one of the three. It carries one restriction
-`packages/domain` does not — a BLE-library denylist, because a library is not a global and neither
-the `lib` narrowing nor the globals list can see one.
+`packages/sensors/src` (#39) is isolated the same way and for a stricter reason: its interfaces have
+to be satisfied **unchanged** by Web Bluetooth, CoreBluetooth and the Android BLE APIs, so an
+interface that can name a browser type has already chosen one of the three. It carries one
+restriction `packages/domain` does not — a BLE-library denylist, because a library is not a global
+and neither the `lib` narrowing nor the globals list can see one.
+
+⚠️ **`packages/sensors` narrows through a *second* tsconfig, not its main one**, for the reason
+`packages/fit` does. ESLint's project service resolves a file to the nearest `tsconfig.json`, so
+that file has to cover the whole package — including `web-bluetooth/`, which needs the DOM — or lint
+reports "not found by the project service" instead of anything useful. So
+`packages/sensors/tsconfig.json` is the wide program (`lib: ["ES2024", "DOM"]`,
+`types: ["web-bluetooth"]`) and **`packages/sensors/tsconfig.platform-free.json` is the one that
+enforces**: `src/` alone, `lib: ["ES2024"]`, `types: []`. `pnpm run typecheck` runs both, and a
+`navigator` in `src/` fails the second while passing the first. Reading only the first is how this
+would be believed to be broken; reading only the second is how a lint config change would be missed.
 
 > ⚠️ **`no-restricted-imports` `group` patterns are matched with gitignore semantics**, where a
 > pattern containing no slash matches *any* path segment. The derived Node-builtin list therefore
@@ -389,10 +410,10 @@ the `lib` narrowing nor the globals list can see one.
 > `packages/domain` never hit it because it does not import itself. The same collision waits for any
 > future `@onyourleft/<builtin-name>`.
 
-When `packages/sensors`' transport half and the routing work arrive, their boundaries (#40, #70) go
-in the same file — #40's Web Bluetooth adapter needs the DOM, so it arrives in its own directory
-under `packages/sensors` with its own tsconfig and its own entry in `eslint.config.js`, and
-`packages/sensors/src` stays platform-free.
+#40's Web Bluetooth adapter needed the DOM, so it arrived in its own directory
+(`packages/sensors/web-bluetooth`) with its own entry in `eslint.config.js`, and
+`packages/sensors/src` stayed platform-free. The routing work (#70) goes in the same file when it
+lands.
 
 ---
 
@@ -676,9 +697,20 @@ gate. Prose may name it in order to ban it; the rule is scoped to workflow files
 Firefox, anywhere, ever — `caniuse` `usage_perc_y` was **76.46% when read on 2026-09-02** (a
 browser-share figure that drifts monthly; re-read it rather than quoting this), so roughly a quarter
 of visitors cannot use the core feature. `requestDevice()` needs a **user gesture per device** and cannot be called
-programmatically; there is **no silent reconnect**; it is unavailable in Web Workers; and there is no
+programmatically; there is **no silent reconnect that is shippable in 2026** — `getDevices()`,
+`watchAdvertisements()` and Persistent Device Permissions all exist behind `chrome://flags`, with
+`watchAdvertisements` absent on ChromeOS and Linux entirely, so the product conclusion is unchanged:
+do not build automatic reconnection; it is unavailable in Web Workers; and there is no
 background operation. **Plan for ~3 concurrent connections**, not 7. Do not design a UI that hides
 any of this.
+
+**And `'bluetooth' in navigator` is not the feature detect.** Chrome on Linux exposes the object and
+WebBluetoothCG's own status file says *"Linux is partially implemented and not supported"*. #40's
+`readAvailability` requires both `requestDevice` and `getAvailability` to be callable and treats a
+`getAvailability` that throws as `unsupported`. **Web Bluetooth also specifies no timeout for any
+operation, and `gattserverdisconnected` fires only for a link that was up** — so a device switched
+off during `gatt.connect()` produces no event and no rejection. #40's queue bounds every operation
+for that reason; anything else awaiting a GATT promise must too.
 
 **Read the issue's revision block first.** Most issue bodies in this repository predate owner
 decisions D2, D5 and D6, and several state things that are now false — including "#18 is still open"

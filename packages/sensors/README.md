@@ -4,17 +4,26 @@ The transport-agnostic sensor abstraction: the shape every Bluetooth Low Energy 
 implements. Device discovery, connection lifecycle, capability description and typed measurement
 streams — and **no transport and no protocol**.
 
-Apache-2.0, like everything under `packages/`. **No platform API at all** — no DOM, no
-`navigator.bluetooth`, no Node globals, no network types. `tsconfig.json` narrows `lib` to `ES2024`
-and empties `types`; `eslint.config.js` restates it for the module specifiers a `lib` narrowing
-cannot see. See [`docs/architecture.md`](../../docs/architecture.md).
+Apache-2.0, like everything under `packages/`.
+
+**`src/` depends on no platform API at all** — no DOM, no `navigator.bluetooth`, no Node globals, no
+network types. `tsconfig.platform-free.json` narrows `lib` to `ES2024` and empties `types` for that
+directory alone; `eslint.config.js` restates it for the module specifiers a `lib` narrowing cannot
+see. `tsconfig.json` covers the whole package and admits the DOM, because ESLint's project service
+resolves every file to the nearest config and a file outside every program is reported as "not found
+by the project service" rather than as anything useful — the narrower program is the one that
+enforces, and `pnpm run typecheck` runs both.
+
+**`web-bluetooth/` is the one directory that may name a platform API**, and the only one it may name
+is `navigator`. It is the transport boundary (#40); nothing it declares escapes above it. See
+[`docs/architecture.md`](../../docs/architecture.md).
 
 ## What lives here, and what does not
 
 | | Issue | Where |
 |---|---|---|
 | The interfaces below | #39 | here, `src/` |
-| The Web Bluetooth adapter | #40 | `packages/sensors`, in its own directory with its own tsconfig |
+| The Web Bluetooth adapter | #40 | `web-bluetooth/`, its own directory with its own place in `eslint.config.js` — [below](#the-web-bluetooth-adapter) |
 | Heart Rate, CSC, Cycling Power, FTMS clients | #41–#43 | below the transport boundary |
 | The device simulator | #44 | `src/simulator/`, exported as `@onyourleft/sensors/simulator` — [below](#the-device-simulator) |
 | The transport conformance suite | #44 | `src/simulator/conformance.ts`, exported as `@onyourleft/sensors/conformance` |
@@ -336,10 +345,13 @@ repeated id aliases two devices onto one handle, the failure `device.ts` exists 
 accepted by the id-keyed methods, since a transport that returns a device it cannot then address has
 reported a device that is not there.
 
-`simulator.test.ts` runs it against all five device kinds. When #40 lands, the same call with a
-factory that wraps the Web Bluetooth adapter runs it against a trainer on the desk, and a contributor
-with hardware can report the diff. The factory supplies `settle(duration)`: the simulator advances
-its clock, a real transport waits.
+`simulator.test.ts` runs it against all five device kinds, and since #40
+`web-bluetooth/src/conformance.test.ts` runs the **same** suite against the Web Bluetooth adapter
+with a scripted stack underneath it — the second point on the line the criterion draws. The same call
+with a factory that wraps the adapter over a real `navigator.bluetooth` runs it against a trainer on
+the desk, and a contributor with hardware can report the diff. The factory supplies
+`settle(duration)`: the simulator advances its clock, the scripted stack notifies once per simulated
+second, a real transport waits.
 
 ### What is deliberately not here
 
@@ -355,6 +367,102 @@ its clock, a real transport waits.
 - **Noise, fatigue and physics.** The rider is steady until the bench changes it. Power → speed is
   `packages/physics` (#88), and a second model of it in a test fixture would be a second source of
   truth.
+
+## The Web Bluetooth adapter
+
+`@onyourleft/sensors/web-bluetooth` is `SensorTransport` over `navigator.bluetooth`, and it is the
+**only place in this program where a `BluetoothDevice` exists** (#40). It owns the flattening
+`src/transport.ts` describes: a `DeviceId → { device, server, service, characteristic }` map, so that
+the flat, `deviceId`-keyed interface every other stack fits is what the rest of the program sees.
+
+```ts
+import { createWebBluetoothTransport } from '@onyourleft/sensors/web-bluetooth';
+
+const transport = createWebBluetoothTransport({ profiles: [heartRate, indoorBikeData] });
+
+const availability = await transport.availability();
+if (availability.kind !== 'available') { /* Safari, Firefox, Linux, or the radio is off */ }
+
+button.addEventListener('click', async () => {          // one gesture, one device
+  const strap = await transport.discover({ capabilities: ['heart-rate'] });
+  await transport.connect(strap.identity.id);
+  await transport.subscribe(strap.identity.id, 'heart-rate', render);
+});
+```
+
+### ⚠️ The constraints a caller must design around, not work around
+
+These are platform facts. #49's pairing UX and #48's browser-support screen are built on them, and a
+UI that hides any of them promises the athlete something the browser will not do.
+
+| Constraint | What it means for a caller |
+|---|---|
+| **`requestDevice()` needs a user gesture, and one per device** | `traits.requiresUserGestureToDiscover` is `true`. A trainer plus two sensors is **three separate clicks**. There is no "pair everything" button, and the adapter checks `navigator.userActivation` before it calls, so a programmatic `discover` fails with `user-gesture-required` rather than as a `SecurityError` that also means three other things. |
+| **There is no silent reconnect, and there will not be one in 2026** | `traits.canReconnectWithoutUserGesture` is `false` and `knownDevices()` returns nothing. `getDevices()`, `watchAdvertisements()` and Persistent Device Permissions all sit behind `chrome://flags`, with `watchAdvertisements` absent on ChromeOS and Linux entirely and MDN marking `getDevices()` "Limited availability / Experimental". **Do not build automatic reconnection.** A page reload costs a button press per device. |
+| **Reconnecting *within* a session is free, and the adapter does the re-arming** | Only `requestDevice()` needs a gesture; `gatt.connect()` does not. So a dropout is recovered by calling `connect` again — and every subscription the caller still holds starts delivering again by itself. Do not re-subscribe: the `Unsubscribe` handles stayed valid, and re-subscribing would double the readings. |
+| **This transport never enters `reconnecting`** | That state means "being restored without asking the athlete for anything", which Web Bluetooth cannot promise. A UI that showed it would be promising a recovery that does not arrive. |
+| **No Safari, no Firefox, no Web Workers, no background** | `availability()` answers `unsupported` for the first two rather than throwing, which is the difference between a support message and a blank screen. The tab must stay live. |
+| **Chrome on Linux is `unsupported`, even though the object is there** | WebBluetoothCG's own status file: *"Linux is partially implemented and not supported"*. The adapter requires both `requestDevice` and `getAvailability` to be callable and treats a `getAvailability` that throws as `unsupported`, so `'bluetooth' in navigator` is **not** the check. |
+| **About three concurrent connections, not seven** | `traits.maxConcurrentConnections` is `MAX_RECOMMENDED_CONCURRENT_CONNECTIONS`. The budget is OS-wide and shared with the athlete's earbuds and watch. Use `planCapabilitySources`. |
+| **The declared capability set is what you asked for** | Web Bluetooth cannot reveal a device's services before a link exists, and `SensorTransport` has no way to amend a `SensorDevice` afterwards. So `discover` declares the request's capabilities, and `subscribe` is the truthful check — it refuses one that no service on the connected device supplies. |
+
+### One global GATT queue, across every device
+
+`createGattQueue` serialises **every** GATT operation on **every** device onto one chain.
+WebBluetoothCG records that some GATT operations cannot run in parallel (`web-bluetooth#188`), and
+FTMS §4.16.3 independently permits one control-point procedure at a time; a per-device queue
+satisfies neither. Pairing three sensors is therefore serial, and that is the cost of the operations
+completing at all.
+
+The queue also bounds every operation. `gattserverdisconnected` fires only for a link that **was
+up**, so a device switched off during `gatt.connect()` sends no event — and Web Bluetooth specifies
+no timeout for anything. Without a deadline that await never ends and the ride screen sits on a
+spinner for ever. `DEFAULT_GATT_OPERATION_TIMEOUT` is 30 seconds; `operationTimeout` overrides it.
+
+### Profiles come from #41–#43
+
+This directory contains no service UUID and decodes no payload. A `GattProfile` is a service, a
+characteristic, the capabilities it supplies and a `decode(value, sink)`, and #41 (Heart Rate), #42
+(Cycling Speed and Cadence) and #43 (FTMS, Cycling Power) supply them. Three things the seam
+guarantees, so a decoder cannot get them wrong:
+
+- **It cannot misattribute a measurement.** The device identity is the adapter's.
+- **It cannot misdate one.** The receive instant is stamped once per notification, before `decode`
+  runs, so every field out of one frame shares it.
+- **It cannot allocate per notification.** The sink is built once per characteristic per link and
+  the `DataView` is the characteristic's own — so a decoder must not retain either, because the
+  browser reuses the buffer for the next notification.
+
+A decoder that throws costs that one notification. Sensor data is untrusted input from a device that
+may not be what it claims (`SECURITY.md`), and an exception let into the browser's event dispatch is
+one nothing this program wrote can catch. `onProtocolError` is where a malformed stream becomes
+diagnosable rather than merely silent.
+
+### Testing against it
+
+`@onyourleft/sensors/web-bluetooth/testing` is a scripted Web Bluetooth stack — devices, services,
+characteristics, notifications, and a bench that can drop the link at a chosen instant, hold a GATT
+call open for ever, and count installed listeners.
+
+It exists **beside** the simulator rather than instead of it, and the boundary is worth stating.
+The simulator is a second `SensorTransport`: it stands where this adapter stands, and
+`src/simulator/profiles.ts` is explicit that it models field presence and not bytes. So there is
+nothing under it for a Web Bluetooth adapter to sit on — no GATT server, no characteristic, no
+`DataView`, and no way to script a disconnect in the middle of an operation. The adapter is run
+against the simulator where the simulator fits: `web-bluetooth/src/conformance.test.ts` runs the same
+`describeTransportConformance` suite against it that `src/transport-conformance.test.ts` runs against
+the simulator, which is the cross-implementation diff #44's fifth criterion asks for.
+
+```ts
+import { createFakeBluetooth } from '@onyourleft/sensors/web-bluetooth/testing';
+
+const { bluetooth, bench } = createFakeBluetooth({ devices: [myDevice] });
+const transport = createWebBluetoothTransport({ profiles: [mine], bluetooth });
+
+bench.hold('startNotifications');       // a trainer that stops answering
+bench.device('my-device').drop();       // the link goes, mid-operation
+bench.device('my-device').listeners(service, characteristic);   // count the leak
+```
 
 ## Running it
 
