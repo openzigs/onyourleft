@@ -86,7 +86,15 @@ starts to compile, `pnpm run typecheck` fails and CI fails with it. A runtime te
 that assertion — by the time a test runs the brand has erased and the wrong-unit call would happily
 return a wrong number.
 
-A cast still defeats it. This is a guard against mistakes, not against a determined author.
+A cast still defeats it — which is why nothing in this package casts to produce a value it returns.
+Every conversion returns through the constructor of the type it produces, so a quantity handed out
+here is one its own constructor would have accepted. That is not decoration: `metresPerSecond(
+Number.MAX_VALUE)` is a legitimate speed, and times 3.6 it is `Infinity`, which
+`kilometresPerHour()` rejects. While `speed.ts` cast, the package could produce a value it would
+itself refuse. It now throws instead (#103).
+
+The guard is against mistakes, not against a determined author: a caller can still write
+`10 as unknown as Metres`.
 
 ## The conversions, and the bug each one prevents
 
@@ -148,6 +156,30 @@ CSCS and CPS report the time of the last wheel or crank event as a **`uint16` th
 field away in the same packet, is 1/2048 s (`EVENT_TICKS_PER_SECOND_2048`). Hard-coding either
 halves or doubles the result.
 
+**The interval is computed from a named-field reading, not from three positional numbers** (#103):
+
+```ts
+eventTimeIntervalSeconds({
+  previousTicks: eventTicks(1000),
+  currentTicks: eventTicks(1512),
+  ticksPerSecond: EVENT_TICKS_PER_SECOND_1024,
+}); // 0.5
+```
+
+All three values are small non-negative integers and all are plausible in each other's roles, so on
+the old three-argument form every wrong ordering typechecked and returned a plausible answer:
+`(1000, 1024, 1512)` gave 0.0159 s and `(1512, 1000, 1024)` gave 63.5 s — a rollover read as a bike
+stopped for a minute, one tick short of the ambiguity horizon below. Nothing threw. A literal union
+`1024 | 2048` for the rate does not fix it, because both constants are in the union and the CPS
+crank and wheel rates are exactly the pair that gets confused. Named fields remove the ordering, and
+`EventTicks` and `EventTickRate` are different brands so a rate cannot be written into a reading's
+field.
+
+What remains, and cannot be typed away: `previousTicks` and `currentTicks` hold the same kind of
+value — this notification's reading becomes the next one's previous — so naming them the wrong way
+round still compiles. It is now a **mislabel written out at the call site**, the same irreducible
+residue as `latitudeSemicircles(longitudeField)`.
+
 **A wrap is not distinguishable from a very long interval, and it cannot be made so.** The counter
 carries the elapsed time only modulo 65 536 ticks — 64 s at 1024 Hz, 32 s at 2048 Hz. Within one
 period the modulus recovers the interval exactly, rollover included. Beyond it, an interval of 636
@@ -174,6 +206,10 @@ absurd enough to notice in an averaged elevation profile.
 
 FTMS Indoor Bike Data carries speed as a `uint16` in units of **0.01 km/h**.
 `hundredthsKilometresPerHourToMetresPerSecond()` undoes both the scaling and the unit in one place.
+
+Every function in this file returns through a constructor rather than casting, so
+`metresPerSecondToKilometresPerHour(metresPerSecond(Number.MAX_VALUE))` throws `UnitError` instead
+of handing back `Infinity` labelled `KilometresPerHour` (#103).
 
 ## Not decided here
 

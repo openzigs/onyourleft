@@ -58,6 +58,36 @@ describe('hundredthsKilometresPerHourToMetresPerSecond', () => {
   });
 });
 
+describe('a conversion cannot hand out a value its own constructor would reject (#103)', () => {
+  // The bypass #102 removed from `semicirclesToPosition`, surviving here. While
+  // these functions cast their result instead of constructing it, the package
+  // can produce a branded value it would itself refuse — which makes "has a
+  // unit" and "has been checked" different statements.
+
+  it('throws rather than returning Infinity typed as KilometresPerHour', () => {
+    // Number.MAX_VALUE is a legitimate MetresPerSecond: finite and
+    // non-negative, so `metresPerSecond` accepts it. Times 3.6 it overflows.
+    const fastest = metresPerSecond(Number.MAX_VALUE);
+    expect(fastest * 3.6).toBe(Number.POSITIVE_INFINITY);
+    expect(() => kilometresPerHour(Number.POSITIVE_INFINITY)).toThrow(UnitError);
+
+    expect(() => metresPerSecondToKilometresPerHour(fastest)).toThrow(UnitError);
+  });
+
+  it('names the unit it rejected, so a caller can tell which conversion failed', () => {
+    expect(() => metresPerSecondToKilometresPerHour(metresPerSecond(Number.MAX_VALUE))).toThrow(
+      /kilometres per hour/,
+    );
+  });
+
+  it('still converts every speed a bicycle can reach', () => {
+    // The guard is on the overflow, not on plausibility: 1000 km/h is not a
+    // bike and is converted without complaint, because rejecting the merely
+    // unlikely is analysis and not this package's job.
+    expect(metresPerSecondToKilometresPerHour(metresPerSecond(277.8))).toBeCloseTo(1000.08, 6);
+  });
+});
+
 describe('the constructors validate, so the conversions do not have to', () => {
   it('rejects NaN, which is what a malformed GATT payload decodes to', () => {
     expect(() => metresPerSecond(Number.NaN)).toThrow(UnitError);
