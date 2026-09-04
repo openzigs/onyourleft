@@ -163,13 +163,21 @@ describe('persistence — the write must be visible to a reader that was not the
 
       const laps = await harness.roundTrip(
         async (fresh) => {
-          await fresh.putLap(lap(ride, 1));
+          // Three laps, written out of order, restored from the pre-harness
+          // version of this test. The harness rewrite had reduced it to two
+          // (1, 0) asserting [0, 1] — the weakest possible ordering assertion,
+          // since plenty of wrong comparators still turn [1, 0] into [0, 1].
+          // Three exists so a middle element has somewhere to go wrong, and the
+          // point of the rewrite was to show the harness is usable, not to
+          // trade coverage for it.
+          await fresh.putLap(lap(ride, 2));
           await fresh.putLap(lap(ride, 0));
+          await fresh.putLap(lap(ride, 1));
         },
         async (fresh) => fresh.listLaps(ATHLETE_A, ride.id),
       );
 
-      expect(laps.map((each) => each.ordinal)).toEqual([0, 1]);
+      expect(laps.map((each) => each.ordinal)).toEqual([0, 1, 2]);
       expect(laps[0]?.athleteId).toBe(ATHLETE_A);
     } finally {
       await harness.destroy();

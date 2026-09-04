@@ -22,6 +22,7 @@ import { SCHEMA_VERSIONS, TABLE } from './schema';
 import { channelBytesPerSample } from './stream-codec';
 import { compressStreamBytes } from './stream-compression';
 import type { PersistedStreamBlob, PersistedStreamSet } from './stream-persisted';
+import { MAX_INFLATED_SAMPLES, STREAM_COMPRESSION } from './stream-compression';
 import { hasPositionChannels, STREAM_CHANNELS, type NewStreamSet } from './streams';
 import {
   assertStreamSetRoundTrip,
@@ -604,6 +605,37 @@ describe('half-written data is refused loudly', () => {
     await expect(
       harness.read(async (store) => store.getStreamSetSummary(ATHLETE_A, ride)),
     ).rejects.toThrow(/stream channel must be one of/);
+  });
+
+  // Review of PR #124 reproduced a decompression bomb: the inflation guard was
+  // bounded by `row.sampleCount`, the same untrusted row whose bytes it was
+  // defending against, so the attacker set the limit. A 24,464-byte row
+  // declaring 12,582,912 samples inflated to +170 MiB of resident memory.
+  //
+  // MAX_INFLATED_SAMPLES is the ceiling the guard was missing, and it is checked
+  // BEFORE any byte is decompressed. This test plants a declaration above it and
+  // asserts the read is refused rather than attempted — if it ever passes by
+  // inflating first and failing after, the memory is already gone.
+  it('a row declaring more samples than this build will inflate is refused', async () => {
+    const ride = await seedRide(harness, ATHLETE_A, { hasPosition: true });
+    await harness.write(async (store) => store.putStreamSet(streamSetFor(ride)));
+    await harness.discard();
+
+    // Take a real, valid blob row and change only the one field the guard used
+    // to trust: its own declared sample count. Everything else stays exactly as
+    // the writer produced it, so nothing but the ceiling can be what refuses it.
+    const raw = rawHandle();
+    const blobs = raw.table<PersistedStreamBlob, [string, string]>(TABLE.streamBlobs);
+    const existing = await blobs.where('activityId').equals(ride.id).first();
+    if (existing === undefined) {
+      throw new Error('fixture produced no stream blob to corrupt');
+    }
+    await blobs.put({ ...existing, sampleCount: MAX_INFLATED_SAMPLES + 1 });
+    raw.close();
+
+    await expect(
+      harness.read(async (store) => store.getStreamSet(ATHLETE_A, ride.id)),
+    ).rejects.toThrow(/this build will inflate/);
   });
 
   it('a summary row with a fractional sample count is refused', async () => {

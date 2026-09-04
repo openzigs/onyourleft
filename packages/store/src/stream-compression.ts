@@ -52,6 +52,29 @@
 /** The one framing this build writes. Stored per blob so a second one can be added later. */
 export const STREAM_COMPRESSION = 'deflate-raw';
 
+/**
+ * The largest sample count this build will inflate, whatever a stored row says.
+ *
+ * ## Why a constant and not the row's own field
+ *
+ * Review of PR #124 found the inflation guard bounded by `row.sampleCount` — the
+ * same untrusted row whose `values` were being defended against. The attacker
+ * therefore set the limit. Reproduced: a **24,464-byte row declaring 12,582,912
+ * samples inflated to +170 MiB of resident memory**. A guard whose bound comes
+ * from the input is a guard against corruption, not against a crafted row, and
+ * the PR body's "bounded by the exact size the row declares — not a magic
+ * ceiling" named the missing thing exactly.
+ *
+ * ## Where the number comes from
+ *
+ * 30 days at 1 Hz. A ride is hours; the longest plausible single recording is a
+ * multi-day event, and 30 days is roughly an order of magnitude above that. It
+ * is deliberately generous: this is a bomb ceiling, not a product limit, and a
+ * legitimate recording must never meet it. If one ever does, that is a finding
+ * about the product rather than a number to raise quietly.
+ */
+export const MAX_INFLATED_SAMPLES = 30 * 24 * 60 * 60;
+
 /** What a blob row's `compression` field may say. */
 export type StreamCompression = typeof STREAM_COMPRESSION;
 

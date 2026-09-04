@@ -97,6 +97,7 @@ import { channelBytesPerSample, decodeChannel, encodeChannel } from './stream-co
 import {
   compressStreamBytes,
   decompressStreamBytes,
+  MAX_INFLATED_SAMPLES,
   STREAM_COMPRESSION,
   StreamSizeError,
 } from './stream-compression';
@@ -893,9 +894,19 @@ export class ActivityStore {
           `${STREAM_COMPRESSION} this build writes`,
       );
     }
-    // The declared sample count is what bounds the inflation, so it is
-    // validated *before* a single byte is decompressed rather than after.
+    // The declared sample count bounds the inflation, so it is validated before a
+    // single byte is decompressed rather than after.
     const declared = fromPersistedStreamBlob(row, EMPTY_BYTES, undefined).sampleCount;
+    // ...and the declaration is itself bounded, because it comes from the same
+    // untrusted row as the bytes it is supposed to bound. Without this the
+    // attacker sets the limit: review of PR #124 reproduced a 24,464-byte row
+    // declaring 12,582,912 samples inflating to +170 MiB.
+    if (declared > MAX_INFLATED_SAMPLES) {
+      throw new StoreDecodeError(
+        `stream channel ${channel}: declares ${declared} samples, above the ` +
+          `${MAX_INFLATED_SAMPLES} this build will inflate`,
+      );
+    }
     const values = await inflate(
       channel,
       'values',
