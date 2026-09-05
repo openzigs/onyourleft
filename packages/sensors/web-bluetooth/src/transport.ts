@@ -218,14 +218,50 @@ interface Link {
    * Not resolved with the measurement characteristics in `resolveLink`,
    * deliberately: most devices serve no control point, and a failed
    * `getPrimaryService` there would have to be swallowed on every heart rate
-   * strap in the world.
+   * strap in the world. `controllable` below is the cheap half that *is*
+   * resolved there, and it costs a heart rate strap nothing because the
+   * Fitness Machine Service is not in such a device's grant at all.
    */
   control: Promise<FitnessMachineCharacteristics> | undefined;
+  /**
+   * The Fitness Machine Control Point resolved on this link — so this device
+   * genuinely provides `trainer-control`.
+   *
+   * Observed rather than assumed, for the reason the whole of #131 exists: a
+   * device that reported `trainer-control` because a caller *asked* for it is
+   * a pairing screen offering ERG on a heart rate strap. SECURITY.md and
+   * CLAUDE.md §6 both treat trainer control as a safety problem, and the safe
+   * direction is to claim it only where the characteristic answered.
+   */
+  readonly controllable: boolean;
 }
 
 interface DeviceRecord {
   readonly native: BluetoothDevicePort;
   readonly device: SensorDevice;
+  /**
+   * The set behind `device.capabilities`, which is a `ReadonlySet` to everyone
+   * else and this record's own mutable object here.
+   *
+   * **The same object, never a copy.** `createDeviceSession` captured `device`
+   * and `session.report` reads `device.capabilities` on every measurement, so
+   * a resolved set assigned as a new `Set` would have to be a new `SensorDevice`
+   * — and a new device means a new session and the loss of every subscription
+   * the caller holds. `applyResolved` is the only writer.
+   */
+  readonly capabilities: Set<SensorCapability>;
+  /**
+   * The services this origin may reach on this device: what `requestDevice` was
+   * given, unioned across every discovery that returned this device.
+   *
+   * ⚠️ **The grant bounds what `resolveLink` may even attempt** (#132). A
+   * `getPrimaryService` for a service outside it rejects with `SecurityError`
+   * whatever the device serves, so attempting one is a guaranteed failure and a
+   * console entry per connect. Tracking it also keeps the adapter's model of the
+   * grant explicit rather than inferred from a swallowed rejection — and if the
+   * browser is *stricter* than this set, `resolveLink`'s `catch` still covers it.
+   */
+  readonly granted: Set<GattUuid>;
   readonly identity: DeviceIdentity;
   readonly session: DeviceSession;
   readonly onDisconnected: () => void;
@@ -552,27 +588,56 @@ export function createWebBluetoothTransport(
   };
 
   /**
-   * Resolve every service and characteristic the device's declared capabilities
-   * need, and choose one source per capability.
+   * Resolve every capability the device's **own services** supply, within the
+   * services this origin was granted, and choose one source per capability.
+   *
+   * ⚠️ **Driven by the grant, not by the request** (#131). The loop used to
+   * skip any capability outside `record.device.capabilities` — which
+   * `register` had fixed to whatever the caller asked for — so a device could
+   * only ever report back what it was looked for with, and a chooser opened
+   * wide produced a device that connected and refused every `subscribe` for
+   * ever. What a device supplies is a property of the device; the request's job
+   * ended at the chooser.
    *
    * A service the device does not offer is skipped rather than fatal: a request
    * for power and heart rate reaches a trainer with no Heart Rate Service, and
-   * the honest outcome is a link that delivers power, not a failed connect.
+   * the honest outcome is a link that delivers power, not a failed connect. A
+   * service outside the grant is skipped by the same rule and one step earlier,
+   * because `getPrimaryService` for one cannot succeed.
    */
   const resolveLink = async (record: DeviceRecord, server: GattServerPort): Promise<Link> => {
     const characteristics = new Map<string, LiveCharacteristic>();
     const sources = new Map<MeasurementCapability, LiveCharacteristic>();
+    // One `getPrimaryService` per service per link, however many profiles name
+    // it. FTMS is named by its measurement profile and again by the control
+    // point below, and two round trips for one service is one more than the
+    // link needs.
+    const resolved = new Map<GattUuid, Promise<GattServicePort>>();
+    const serviceFor = (uuid: GattUuid): Promise<GattServicePort> => {
+      const existing = resolved.get(uuid);
+      if (existing !== undefined) {
+        return existing;
+      }
+      const pending = server.getPrimaryService(uuid);
+      resolved.set(uuid, pending);
+      // A rejection is a legitimate answer here — the device does not serve it —
+      // so it is cached like any other, and this keeps it from being an
+      // unhandled rejection while a later profile is still awaiting its own.
+      pending.catch(() => undefined);
+      return pending;
+    };
 
     for (const entry of entries) {
-      const wanted = entry.profile.capabilities.filter(
-        (capability) => record.device.capabilities.has(capability) && !sources.has(capability),
-      );
+      if (!record.granted.has(entry.service)) {
+        continue;
+      }
+      const wanted = entry.profile.capabilities.filter((capability) => !sources.has(capability));
       if (wanted.length === 0) {
         continue;
       }
       let characteristic: GattCharacteristicPort;
       try {
-        const service = await server.getPrimaryService(entry.service);
+        const service = await serviceFor(entry.service);
         characteristic = await service.getCharacteristic(entry.characteristic);
       } catch {
         // Not on this device. Every capability this profile would have supplied
@@ -587,7 +652,62 @@ export function createWebBluetoothTransport(
       }
     }
 
-    return { characteristics, sources, control: undefined };
+    let controllable = false;
+    if (record.granted.has(FITNESS_MACHINE_SERVICE)) {
+      // Only inside the grant, which is what answers `Link.control`'s objection
+      // to resolving anything FTMS-shaped here: a heart rate strap paired for
+      // heart rate was never granted this service, so this branch is not
+      // reached and costs it nothing. Where it *is* reached the service handle
+      // is usually already resolved above, so the cost is one
+      // `getCharacteristic`.
+      try {
+        await (
+          await serviceFor(FITNESS_MACHINE_SERVICE)
+        ).getCharacteristic(FITNESS_MACHINE_CONTROL_POINT);
+        controllable = true;
+      } catch {
+        // No control point, or none reachable. `trainer-control` is simply not
+        // among this device's capabilities, which is the whole answer.
+      }
+    }
+
+    return { characteristics, sources, control: undefined, controllable };
+  };
+
+  /**
+   * Make the device report what the link just found, in place.
+   *
+   * ## The rule, which #131 asks for as a rule rather than an accident
+   *
+   * 1. **Before any connect**, a device's capability set is what the caller
+   *    asked for — empty when the chooser was opened wide. Web Bluetooth cannot
+   *    reveal a device's services before a link exists (see `requestOptionsFor`),
+   *    so there is nothing better to say and a claim is marked as one by the
+   *    fact that nothing has been observed yet.
+   * 2. **Every successful connect replaces it with what was observed**, so the
+   *    set widens past the request as readily as it narrows below it.
+   * 3. **It is mutated, never reassigned.** See `DeviceRecord.capabilities`:
+   *    the session and every subscription hang off the `SensorDevice` this set
+   *    belongs to.
+   * 4. **A reconnect that supplies less narrows it.** Multi-mode trainers do
+   *    come back advertising a different profile, and continuing to claim a
+   *    capability the device no longer serves would put a control on screen
+   *    that the device will refuse — the failure #49's revision block calls
+   *    worse than not offering it at all. A subscription to a capability that
+   *    vanished stays held and delivers nothing; its entry in `record.demand`
+   *    survives, so a later reconnect that brings the service back re-arms it
+   *    without the caller doing anything.
+   * 5. **A disconnect changes nothing.** The last observation stands until the
+   *    next one, so a pairing list does not blank itself on every dropout.
+   */
+  const applyResolved = (record: DeviceRecord, link: Link): void => {
+    record.capabilities.clear();
+    for (const capability of link.sources.keys()) {
+      record.capabilities.add(capability);
+    }
+    if (link.controllable) {
+      record.capabilities.add('trainer-control');
+    }
   };
 
   // --- The FTMS control point, which is a write and not a subscription ------
@@ -746,18 +866,23 @@ export function createWebBluetoothTransport(
   /**
    * Give a chosen device a record, or hand back the one it already has.
    *
-   * ⚠️ **The declared capability set is fixed by the first discovery.** A second
-   * `requestDevice` for the same device returns the record that exists, name and
-   * capabilities and session and subscriptions intact — widening the set would
-   * mean a new `SensorDevice`, and `createDeviceSession` captured the old one,
-   * so it would mean a new session and the loss of every subscription the caller
-   * holds. Web Bluetooth cannot reveal a device's services before a link exists
-   * (see `requestOptionsFor`), so no version of this is fully truthful;
-   * `subscribe` is where the truth is told either way.
+   * ⚠️ **A second discovery of the same device widens the grant and nothing
+   * else.** `requestDevice` returns the record that exists — name, session and
+   * subscriptions intact — because replacing the `SensorDevice` would replace
+   * the session `createDeviceSession` captured and lose every subscription the
+   * caller holds. The origin's allowed-services list, though, genuinely does
+   * accumulate across calls in the browser, so `granted` unions rather than
+   * ignoring the second call: a device first chosen for heart rate and later
+   * chosen again for power can serve both on the next link.
+   *
+   * The capability set is left alone here. Before a link exists it is the
+   * caller's claim; `applyResolved` turns it into an observation on the first
+   * connect, and a second discovery is not one.
    */
   const register = (
     native: BluetoothDevicePort,
     capabilities: ReadonlySet<SensorCapability>,
+    granted: ReadonlySet<GattUuid>,
   ): DeviceRecord => {
     const id = labelDeviceId(native.id);
     const existing = records.get(id);
@@ -765,18 +890,26 @@ export function createWebBluetoothTransport(
       // The same `BluetoothDevice` object, not merely an equal one: the
       // specification keeps a device instance map per realm and `requestDevice`
       // returns the entry in it, so there is no stale wrapper to rebind.
+      for (const service of granted) {
+        existing.granted.add(service);
+      }
       return existing;
     }
 
     const identity: DeviceIdentity = { transport: WEB_BLUETOOTH, id };
+    // Built once and held by the record, because it is what `session.report`
+    // reads on every measurement and what `applyResolved` writes.
+    const declared = new Set(capabilities);
     const device: SensorDevice = {
       identity,
       ...(native.name === undefined ? {} : { name: native.name }),
-      capabilities: new Set(capabilities),
+      capabilities: declared,
     };
     const record: DeviceRecord = {
       native,
       device,
+      capabilities: declared,
+      granted: new Set(granted),
       identity,
       session: createDeviceSession(device),
       onDisconnected: () => {
@@ -793,17 +926,44 @@ export function createWebBluetoothTransport(
   };
 
   /**
-   * Turn a capability request into what the chooser is given.
+   * Turn a capability request into what the chooser is given, and what the
+   * origin is thereby granted.
    *
    * ⚠️ **The filters are an OR, and Web Bluetooth cannot tell the adapter which
    * one matched.** A device is returned because it advertised one of these
    * services, and its actual service list is unknowable until a link exists —
    * there is no `getDevices`-shaped answer that does not need a connection. So
-   * the declared capability set is what the caller asked for, and `subscribe` is
-   * the truthful check: it refuses a capability no service on the connected
-   * device supplies.
+   * the set a device is *registered* with is what the caller asked for, and the
+   * first connect replaces it with what the device turned out to serve; see
+   * `applyResolved`.
+   *
+   * ## The grant is the request's, not the registry's (#132)
+   *
+   * `optionalServices` used to be every service any registered profile names,
+   * on every request. Asking for heart rate therefore granted this origin the
+   * **Fitness Machine Control Point** on the athlete's chosen device — a
+   * characteristic that sets physical resistance on a machine someone is
+   * pedalling, which CLAUDE.md §6 and SECURITY.md both class as a safety
+   * problem rather than only a security one. Chrome does not surface
+   * `optionalServices` in the chooser, so the athlete is never shown the wider
+   * authorisation, which is exactly why it has to be minimal.
+   *
+   * So the grant is the services that supply what was asked for, and no more.
+   * Two consequences worth stating rather than discovering:
+   *
+   * - **It bounds `resolveLink` too**, which is the seam with #131. A device
+   *   still reports what its own services supply — but only within the services
+   *   this origin may reach. Asking for power on a modern trainer grants FTMS,
+   *   which supplies cadence and speed as well, so the resolved set genuinely
+   *   exceeds the request. Asking for heart rate grants the Heart Rate Service
+   *   and the trainer's control point stays out of reach.
+   * - **The wide chooser still grants everything**, because there the athlete
+   *   was shown every device this program can use and consented to that. The
+   *   difference is that it is now a *request* for it rather than the default.
    */
-  const requestOptionsFor = (request: DiscoveryRequest): RequestDevicePortOptions => {
+  const requestOptionsFor = (
+    request: DiscoveryRequest,
+  ): { readonly options: RequestDevicePortOptions; readonly granted: ReadonlySet<GattUuid> } => {
     const services = [
       ...new Set(
         entries
@@ -827,24 +987,27 @@ export function createWebBluetoothTransport(
     if (services.length === 0) {
       // "Anything this program can use", with no capability named. No filter
       // expresses that, so the chooser is opened wide — which is exactly what
-      // the athlete is shown and consents to.
-      //
-      // ⚠️ A device discovered this way registers with an EMPTY capability set
-      // (`register` fixes it to what was requested) and therefore refuses every
-      // `subscribe`. The chooser behaviour here is right; the registration below
-      // is what needs to resolve capabilities from the device's own services.
-      // That is #131, and until it lands this path yields a device that connects
-      // and delivers nothing.
-      return namePrefix === undefined
-        ? { acceptAllDevices: true, optionalServices: everyService }
-        : { filters: [{ namePrefix }], optionalServices: everyService };
+      // the athlete is shown and consents to, and the grant matches it.
+      return {
+        options:
+          namePrefix === undefined
+            ? { acceptAllDevices: true, optionalServices: everyService }
+            : { filters: [{ namePrefix }], optionalServices: everyService },
+        granted: new Set(everyService),
+      };
     }
 
     const filters: BluetoothScanFilterPort[] = services.map((service) => ({
       services: [service],
       ...(namePrefix === undefined ? {} : { namePrefix }),
     }));
-    return { filters, optionalServices: everyService };
+    // Declared as optional as well as filtered. A service named only in a
+    // filter is granted by the specification, but the filters are an OR and a
+    // device is returned for matching *one* of them — so the second supplying
+    // service would otherwise be unreachable on a trainer that serves both,
+    // which is the mistake that makes a trainer's second profile permanently
+    // invisible.
+    return { options: { filters, optionalServices: services }, granted: new Set(services) };
   };
 
   // --- Availability ---------------------------------------------------------
@@ -940,6 +1103,13 @@ export function createWebBluetoothTransport(
         // `record.link` and a notification can arrive the instant
         // `startNotifications` resolves.
         record.link = link;
+        // And in the same breath, for the same reason: `session.report` refuses
+        // a measurement whose capability the device does not declare, so a
+        // notification arriving between these two lines would be dropped as
+        // undeclared. Applied only past the check above, so a link that dropped
+        // while it was being resolved leaves the last good observation standing
+        // rather than replacing it with what a half-built link found.
+        applyResolved(record, link);
         await restoreNotifications(record, link);
       });
     } catch (error) {
@@ -1034,14 +1204,14 @@ export function createWebBluetoothTransport(
           `this transport is ${availability.kind}`,
         );
       }
-      const options = requestOptionsFor(request);
+      const { options, granted } = requestOptionsFor(request);
       let native: BluetoothDevicePort;
       try {
         native = await bluetooth.requestDevice(options);
       } catch (error) {
         throw discoveryError(error);
       }
-      return register(native, new Set(request.capabilities)).device;
+      return register(native, new Set(request.capabilities), granted).device;
     },
 
     knownDevices(): Promise<readonly SensorDevice[]> {
@@ -1131,13 +1301,13 @@ export function createWebBluetoothTransport(
           deviceId: id,
         });
       }
-      if (!record.device.capabilities.has(capability)) {
-        throw new SensorError(
-          'capability-unsupported',
-          `this device does not provide ${capability}`,
-          { deviceId: id },
-        );
-      }
+      // One check, not two. Until #131 this asked first whether the device
+      // *declared* the capability and then whether a service supplied it, and
+      // the two could disagree because the declaration came from the discovery
+      // request. Now `applyResolved` derives the declaration from
+      // `link.sources`, so on a connected device the two questions have the same
+      // answer — and a second branch that cannot go red is not a check, it is
+      // unreachable code that a mutation test would expose as such.
       const live = record.link?.sources.get(capability);
       if (live === undefined) {
         throw new SensorError(

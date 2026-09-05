@@ -67,14 +67,41 @@ describe('discover', () => {
     ]);
   });
 
-  it('declares every registered service as optional, not only the filtered ones', async () => {
+  it('grants exactly the services that supply what was asked for, and no others', async () => {
     const { transport, bench } = fixture();
     await transport.discover({ capabilities: ['heart-rate'] });
 
-    // `getPrimaryService` on a service that was in neither `filters` nor
-    // `optionalServices` rejects with `SecurityError` whatever the device
-    // offers. Passing only the filtered service is the mistake that makes a
-    // trainer's second profile permanently unreachable.
+    // ⚠️ **Equality, not containment** — #132 says so explicitly, because a
+    // containment assertion passes against the bug it is written to catch. The
+    // adapter used to pass every registered service on every request, so asking
+    // for heart rate granted this origin the trainer's services too.
+    expect(new Set(bench.requests[0]?.optionalServices)).toEqual(
+      new Set([canonicalUuid(STUB_HEART_RATE_SERVICE)]),
+    );
+  });
+
+  it('grants both supplying services when either could carry the capability', async () => {
+    const { transport, bench } = fixture();
+    await transport.discover({ capabilities: ['power'] });
+
+    // The other half of the same rule, and the reason `optionalServices` is not
+    // simply dropped in favour of the filters. The filters are an OR and the
+    // device is returned for matching *one* of them, so a trainer serving both
+    // would have its second profile permanently unreachable if only the matched
+    // filter's service were granted.
+    expect(new Set(bench.requests[0]?.optionalServices)).toEqual(
+      new Set([canonicalUuid(STUB_MULTI_SERVICE), canonicalUuid(STUB_SINGLE_SERVICE)]),
+    );
+  });
+
+  it('grants everything the program can read when the athlete browsed wide', async () => {
+    const { transport, bench } = fixture();
+    await transport.discover({ capabilities: [] });
+
+    // Not a default any more — a request. The chooser was opened wide and the
+    // athlete was shown every device this program can use, so the grant matches
+    // what they chose from. `apps/web` never takes this path: all four pairing
+    // roles name their capabilities.
     expect(new Set(bench.requests[0]?.optionalServices)).toEqual(
       new Set([
         canonicalUuid(STUB_MULTI_SERVICE),
@@ -82,6 +109,26 @@ describe('discover', () => {
         canonicalUuid(STUB_HEART_RATE_SERVICE),
       ]),
     );
+  });
+
+  it('accumulates the grant across two discoveries of the same device', async () => {
+    const { transport, bench } = fixture();
+    // The strap first, then a name-prefixed wide browse that returns it again.
+    await transport.discover({ capabilities: ['heart-rate'] });
+    await transport.discover({ capabilities: [], namePrefix: 'STUB STRAP' });
+
+    // What the browser now holds for this device, which is the union across
+    // both calls — not what either call asked for on its own.
+    expect(new Set(bench.device('stub-strap').allowedServices)).toEqual(
+      new Set([
+        canonicalUuid(STUB_HEART_RATE_SERVICE),
+        canonicalUuid(STUB_MULTI_SERVICE),
+        canonicalUuid(STUB_SINGLE_SERVICE),
+      ]),
+    );
+    // And only that device. The trainer was never chosen, so nothing was
+    // granted on it — the grant is per origin *and* per device.
+    expect(bench.device('stub-trainer').allowedServices).toEqual([]);
   });
 
   it('offers one filter per supplying service, so either one matches', async () => {

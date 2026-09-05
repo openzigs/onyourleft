@@ -347,11 +347,16 @@ describe('indications and status', () => {
     await channel.writeControlPoint(Uint8Array.from([0x00]));
 
     expect(controlPointWrites(fake)).toHaveLength(1);
-    // Two links, two resolutions of the control point characteristic. The first
-    // link's handle is dead — Chrome rejects a write on it with
+    // The first link's handle is dead — Chrome rejects a write on it with
     // `InvalidStateError` — so a channel that cached it would report a setpoint
     // refused rather than a link that went.
-    expect(controlPointResolutions(fake)).toBe(resolutionsBefore + 1);
+    //
+    // Two, because the new link is resolved twice over: once by `resolveLink`
+    // asking whether this device provides `trainer-control` at all, and once by
+    // this channel arming itself for the write. A channel that cached the dead
+    // handle would leave this at one, which is what keeps the assertion sharp
+    // despite counting somebody else's work as well as its own.
+    expect(controlPointResolutions(fake)).toBe(resolutionsBefore + 2);
   });
 });
 
@@ -418,8 +423,13 @@ function serviceResolutions(fake: FakeBluetooth): number {
 /**
  * How many times the control point *characteristic* has been resolved.
  *
- * Unlike the service, nothing else in the adapter asks for it — `resolveLink`
- * resolves Indoor Bike Data — so this counts exactly this channel's work.
+ * ⚠️ **Two per link, not one, since #131.** `resolveLink` now resolves this
+ * characteristic once itself, to decide whether the device provides
+ * `trainer-control` — a claim that used to come from the discovery request and
+ * so was true of a heart rate strap someone asked for it on. This channel's own
+ * resolution is the second. Counted rather than asserted absolutely for the
+ * same reason `serviceResolutions` is: the interesting quantity is how the
+ * count moves across a reconnect.
  */
 function controlPointResolutions(fake: FakeBluetooth): number {
   return fake.bench.operations.filter(

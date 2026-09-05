@@ -148,6 +148,28 @@ export interface FakeDeviceHandle {
   notifying(service: GattUuid | number, characteristic: GattUuid | number): boolean;
   /** Every payload written to a characteristic, in order, however it was written. */
   writes(service: GattUuid | number, characteristic: GattUuid | number): readonly Uint8Array[];
+  /**
+   * The services this origin has been granted **on this device**, canonicalised.
+   *
+   * `bench.requests` says what was asked for; this says what the browser now
+   * holds, which is the union across every `requestDevice` that returned this
+   * device. The two differ the moment a device is chosen twice, and the second
+   * is the one a security assertion wants.
+   */
+  readonly allowedServices: readonly GattUuid[];
+  /**
+   * Stop the device serving a service it has, or start it again.
+   *
+   * A multi-mode trainer genuinely does this: it comes back from a dropout
+   * advertising a different profile, and `getPrimaryService` then answers
+   * `NotFoundError` for a service that resolved on the previous link. That is
+   * the reconnect #131 has to define behaviour for, and `FakeDeviceSpec` is
+   * fixed at construction, so the change has to be scriptable from here.
+   *
+   * Hidden is *absent*, not *forbidden*: the grant check comes first, so
+   * hiding a service does not disguise itself as one the origin may not reach.
+   */
+  setServiceVisible(service: GattUuid | number, visible: boolean): void;
 }
 
 /**
@@ -259,6 +281,23 @@ interface DeviceState {
   readonly services: Map<GattUuid, Map<GattUuid, CharacteristicState>>;
   readonly disconnectListeners: Set<() => void>;
   readonly native: BluetoothDevicePort;
+  /**
+   * The origin's **allowed services** for this device, as `requestDevice`
+   * builds them: the union of every filter's `services` and every call's
+   * `optionalServices`, accumulated across calls that returned this device.
+   *
+   * ⚠️ **Modelled rather than ignored, because a fake that grants everything
+   * cannot fail the assertion that matters.** Chrome rejects
+   * `getPrimaryService` for a service outside this set with `SecurityError`,
+   * whatever the device actually serves — that is the entire mechanism behind
+   * #132, and until this was here a test could narrow `optionalServices` to
+   * nothing at all and every service would still resolve. That is CLAUDE.md
+   * §5's *wrong harness*: the assertion passes because the double is
+   * permissive, not because the code is right.
+   */
+  readonly allowed: Set<GattUuid>;
+  /** Services the device has but is not serving right now. See `setServiceVisible`. */
+  readonly hidden: Set<GattUuid>;
   connected: boolean;
 }
 
@@ -338,6 +377,8 @@ export function createFakeBluetooth(options: FakeBluetoothOptions): FakeBluetoot
       id: spec.id,
       services,
       disconnectListeners: new Set(),
+      allowed: new Set(),
+      hidden: new Set(),
       connected: false,
       native: undefined as unknown as BluetoothDevicePort,
     };
@@ -455,7 +496,16 @@ export function createFakeBluetooth(options: FakeBluetoothOptions): FakeBluetoot
         const wanted = canonicalUuid(uuid);
         return perform(spec.id, 'getPrimaryService', wanted, () => {
           requireLink(state);
-          if (!services.has(wanted)) {
+          if (!state.allowed.has(wanted)) {
+            // Before the "is it there" check, because that is the order the
+            // browser answers in: an origin that was not granted a service
+            // cannot learn whether the device serves it. Reversing the two
+            // would leak the device's service list to a request that has no
+            // right to it — and would let a test tell "not granted" from "not
+            // present", which a real caller cannot.
+            throw domError('SecurityError', 'this origin may not access that service');
+          }
+          if (!services.has(wanted) || state.hidden.has(wanted)) {
             throw domError('NotFoundError', 'no such service');
           }
         }).then(() => makeService(state, wanted));
@@ -601,6 +651,17 @@ export function createFakeBluetooth(options: FakeBluetoothOptions): FakeBluetoot
       if (match === undefined) {
         return Promise.reject(domError('NotFoundError', 'no device matched'));
       }
+      // The grant is per origin **and** per device, and it accumulates: a second
+      // `requestDevice` that returns the same device adds to what the first
+      // allowed rather than replacing it. Only the chosen device is granted
+      // anything, which is what makes "the strap was never granted the control
+      // point" an assertion a test can make.
+      for (const uuid of [
+        ...filters.flatMap((filter) => filter.services ?? []),
+        ...(inspection.optionalServices ?? []),
+      ]) {
+        match.allowed.add(canonicalUuid(uuid));
+      }
       return Promise.resolve(match.native);
     },
   };
@@ -664,6 +725,17 @@ export function createFakeBluetooth(options: FakeBluetoothOptions): FakeBluetoot
         },
         get disconnectListeners() {
           return state.disconnectListeners.size;
+        },
+        get allowedServices() {
+          return [...state.allowed];
+        },
+        setServiceVisible(service, visible) {
+          const uuid = canonicalUuid(service);
+          if (visible) {
+            state.hidden.delete(uuid);
+            return;
+          }
+          state.hidden.add(uuid);
         },
         notify(service, characteristic, bytes) {
           const found = characteristicState(state, service, characteristic);
