@@ -3,12 +3,16 @@
 /**
  * `@onyourleft/sensors/protocol` — the GATT profile clients.
  *
- * Heart Rate (0x180D), Cycling Speed and Cadence (0x1816) and Cycling Power
- * (0x1818): the half of the sensor stack that turns an untrusted little-endian
- * GATT payload into branded domain quantities. FTMS (0x1826) is #43's, and is
- * deliberately not here — it carries a control point that applies physical
- * resistance to a person who is pedalling, which CLAUDE.md §6 calls a safety
- * problem rather than only a security one.
+ * Heart Rate (0x180D), Cycling Speed and Cadence (0x1816), Cycling Power
+ * (0x1818) and the Fitness Machine Service (0x1826): the half of the sensor
+ * stack that turns an untrusted little-endian GATT payload into branded domain
+ * quantities.
+ *
+ * FTMS (#43) is the one that also **writes**. Its control point applies
+ * physical resistance to a person who is pedalling, which CLAUDE.md §6 calls a
+ * safety problem rather than only a security one, so it arrived with its own
+ * issue and its own review and it is split across two files:
+ * `fitness-machine.ts` reads, `fitness-machine-control.ts` writes.
  *
  * ## Why this is a third directory rather than part of `src/` or `web-bluetooth/`
  *
@@ -95,6 +99,64 @@ export {
   decodeCscFeature,
   decodeCscMeasurement,
 } from './cycling-speed-cadence';
+
+// --- Fitness Machine Service (0x1826) ---------------------------------------
+
+export type {
+  FitnessMachineFeatureBits,
+  FitnessMachineFeatures,
+  IndoorBikeDataReading,
+  SupportedPowerRange,
+  SupportedResistanceLevelRange,
+  TargetSettingFeatureBits,
+} from './fitness-machine';
+
+export {
+  createIndoorBikeDataProfile,
+  decodeFitnessMachineFeature,
+  decodeIndoorBikeData,
+  decodeSupportedPowerRange,
+  decodeSupportedResistanceLevelRange,
+  FITNESS_MACHINE_CONTROL_POINT,
+  FITNESS_MACHINE_FEATURE,
+  FITNESS_MACHINE_SERVICE,
+  FITNESS_MACHINE_STATUS,
+  fitnessMachineCapabilities,
+  INDOOR_BIKE_DATA,
+  INDOOR_BIKE_DATA_FLAG,
+  MAX_PLAUSIBLE_TARGET_POWER_WATTS,
+  SUPPORTED_POWER_RANGE,
+  SUPPORTED_RESISTANCE_LEVEL_RANGE,
+} from './fitness-machine';
+
+// --- The Fitness Machine Control Point (0x2AD9) -----------------------------
+
+export type {
+  ControlLossReason,
+  ControlRequest,
+  ControlResponse,
+  ControlResult,
+  FitnessMachineChannel,
+  MachineStatus,
+  ScheduleTimeout,
+  SimulationParameters,
+  TargetPower,
+  TrainerControl,
+  TrainerControlOptions,
+} from './fitness-machine-control';
+
+export {
+  CONTROL_POINT_PROCEDURE_TIMEOUT_SECONDS,
+  createTrainerControl,
+  decodeControlResponse,
+  decodeFitnessMachineStatus,
+  encodeControlRequest,
+  FITNESS_MACHINE_STATUS_OP_CODE,
+  FTMS_OP_CODE,
+  FTMS_RESULT_CODE,
+  MAX_ENCODABLE_RESISTANCE_LEVEL,
+  MAX_PLAUSIBLE_GRADE_PERCENT,
+} from './fitness-machine-control';
 
 // --- Cycling Power Service (0x1818) -----------------------------------------
 

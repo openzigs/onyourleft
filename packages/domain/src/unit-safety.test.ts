@@ -26,7 +26,14 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { DegreesLongitude, Metres, MetresPerSecond } from './index';
+import type {
+  DegreesLongitude,
+  GradePercent,
+  Metres,
+  MetresPerSecond,
+  ResistanceLevel,
+  Watts,
+} from './index';
 import {
   altitudeMetres,
   degreesLatitude,
@@ -36,12 +43,15 @@ import {
   eventTimeIntervalIsAmbiguous,
   eventTimeIntervalSeconds,
   EVENT_TICKS_PER_SECOND_1024,
+  gradePercent,
   degreesLongitude,
   kilometresPerHourToMetresPerSecond,
   metres,
   metresPerSecond,
   metresPerSecondToKilometresPerHour,
+  resistanceLevel,
   seconds,
+  watts,
   UnitError,
   unixSeconds,
 } from './index';
@@ -161,6 +171,38 @@ describe('an event-time reading cannot be assembled in the wrong order (#103)', 
         ticksPerSecond: EVENT_TICKS_PER_SECOND_1024,
       }),
     ).toBe(0.5);
+  });
+});
+
+describe('the two setpoints written to a trainer are not interchangeable', () => {
+  // Both are small non-negative numbers and both are written to the same
+  // control point, one octet apart in the op code. An ERG target of 250 W and a
+  // resistance level of 250 are the same literal, and only one of them is a
+  // setpoint any trainer should be given — so the brands, not a range check,
+  // are what keeps them apart. `packages/sensors` treats trainer control as a
+  // safety problem for exactly this reason.
+  it('does not accept a resistance level where an ERG target in watts belongs', () => {
+    // @ts-expect-error a unitless brake level is not a power
+    const target: Watts = resistanceLevel(250);
+    expect(target).toBe(250);
+  });
+
+  it('does not accept watts where a resistance level belongs', () => {
+    // @ts-expect-error a power is not a brake level, however alike the numbers look
+    const level: ResistanceLevel = watts(250);
+    expect(level).toBe(250);
+  });
+
+  it('does not accept a distance where a gradient belongs', () => {
+    // @ts-expect-error metres of rise are not a percentage of grade
+    const grade: GradePercent = metres(8);
+    expect(grade).toBe(8);
+  });
+
+  it('does not accept a gradient where a distance belongs — a grade is signed', () => {
+    // @ts-expect-error a gradient is signed and is not a distance travelled
+    const distance: Metres = gradePercent(-8);
+    expect(distance).toBe(-8);
   });
 });
 

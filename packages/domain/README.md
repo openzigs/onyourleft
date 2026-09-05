@@ -29,6 +29,8 @@ already speak SI; the rest are conversions *out*.
 | Position | the two above, as named fields | `GeographicPosition` | `geographicPosition()` | nothing — it takes already-labelled coordinates, so a transposition is a **compile** error and the range checks already ran |
 | Duration | second | `Seconds` | `seconds()` | non-finite, negative |
 | Instant | second since the Unix epoch | `UnixSeconds` | `unixSeconds()` | non-finite |
+| Gradient | percent of grade, **signed** | `GradePercent` | `gradePercent()` | non-finite |
+| Resistance | unitless brake level | `ResistanceLevel` | `resistanceLevel()` | non-finite, negative |
 
 Presentation-only, never stored or transmitted: `KilometresPerHour` (`kilometresPerHour()`).
 

@@ -289,10 +289,15 @@ not.
     at `@onyourleft/sensors/web-bluetooth/testing`. It holds **no profile** — not one service UUID
     and not one byte of payload.
     **`packages/sensors/protocol`** ([#41](https://github.com/openzigs/onyourleft/issues/41),
-    [#42](https://github.com/openzigs/onyourleft/issues/42)) is where the profiles are: Heart Rate
-    (`0x180D`), Cycling Speed and Cadence (`0x1816`) and Cycling Power (`0x1818`), exported as
-    `@onyourleft/sensors/protocol`. **FTMS (`0x1826`) is not there yet** — it is #43's, with its own
-    review, because its control point applies physical resistance to a person who is pedalling. ⚠️
+    [#42](https://github.com/openzigs/onyourleft/issues/42),
+    [#43](https://github.com/openzigs/onyourleft/issues/43)) is where the profiles are: Heart Rate
+    (`0x180D`), Cycling Speed and Cadence (`0x1816`), Cycling Power (`0x1818`) and the Fitness
+    Machine Service (`0x1826`), exported as `@onyourleft/sensors/protocol`. FTMS is split in two
+    because it is the one that also **writes**: `fitness-machine.ts` reads Indoor Bike Data
+    (**`0x2AD2`** — the issue body's `0x2AD3` is Training Status and is wrong), the Feature
+    characteristic and the two supported ranges; `fitness-machine-control.ts` drives the control
+    point, which applies physical resistance to a person who is pedalling and is bounded before it
+    writes rather than after — see `packages/sensors/README.md` §"Trainer control". ⚠️
     `protocol/` is a **third** directory rather than part of either neighbour, and it is
     platform-free: `src/` bars a service UUID and a `DataView` of GATT payload by its own rule, and
     a decoder inside `web-bluetooth/` would make the native stacks (#15) depend on the browser

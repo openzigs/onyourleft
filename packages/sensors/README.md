@@ -25,7 +25,7 @@ is `navigator`. It is the transport boundary (#40); nothing it declares escapes 
 | The interfaces below | #39 | here, `src/` |
 | The Web Bluetooth adapter | #40 | `web-bluetooth/`, its own directory with its own place in `eslint.config.js` — [below](#the-web-bluetooth-adapter) |
 | Heart Rate, CSC and Cycling Power clients | #41, #42 | `protocol/`, its own directory on the same terms, exported as `@onyourleft/sensors/protocol` — [below](#the-protocol-clients) |
-| The FTMS client | #43 | `protocol/`, when it lands |
+| The FTMS client and trainer control | #43 | `protocol/`, split into `fitness-machine.ts` (reads) and `fitness-machine-control.ts` (writes) — [below](#trainer-control) |
 | The device simulator | #44 | `src/simulator/`, exported as `@onyourleft/sensors/simulator` — [below](#the-device-simulator) |
 | The transport conformance suite | #44 | `src/simulator/conformance.ts`, exported as `@onyourleft/sensors/conformance` |
 | CoreBluetooth and Android BLE | #15 | the Capacitor plugin, behind the same interface |
@@ -187,10 +187,16 @@ five transports that will implement this interface.
 Left out rather than typed as a bare `number`, because the first unlabelled number on this boundary
 is the one that costs a ride:
 
-- **`Percent`** — battery level (every BLE sensor exposes it), and FTMS resistance level.
-- **A signed grade type** — FTMS inclination.
+- **`Percent`** — battery level, which every BLE sensor exposes.
 - **`Kilojoules`** — FTMS total energy, which the characteristic reports in kilojoules *and* in
-  kilocalories; they are not the same quantity.
+  kilocalories; they are not the same quantity. #43 reports the kilocalorie fields as raw numbers on
+  `IndoorBikeDataReading` and fans neither out as a capability.
+
+**Two of these arrived with #43**, because trainer control could not be typed without them:
+`GradePercent` (signed — a descent is a negative grade, and dropping the sign makes a descent feel
+like a climb) and `ResistanceLevel` (unitless and non-negative, and deliberately *not* the same
+brand as `Watts`, because an ERG target of 250 and a brake level of 250 are the same literal written
+to the same control point one op code apart).
 
 ## The device simulator
 
@@ -260,7 +266,7 @@ reproducible. `advance` takes a `Seconds`, not a number, and refuses a fraction.
 | `hrsStrap()` | Heart Rate | `heart-rate` | 1 Hz, the rider's heart rate |
 | `cpsPowerMeter()` | Cycling Power | `power`, `cadence` | crank-based; cadence is **derived** from the `uint16` crank counter and its 1/1024 s event time, exactly as #42 must derive it |
 | `cscsSensor()` | Cycling Speed and Cadence | `cadence` | wheel (`uint32`) and crank (`uint16`) counters both modelled; **not** `speed`, because that needs the athlete's wheel circumference — `capability.ts` states the rule |
-| `ftmsTrainer()` | FTMS | `power`, `cadence`, `speed`, `trainer-control` | Indoor Bike Data fanned out with **one instant**; Control Point; Fitness Machine Status |
+| `ftmsTrainer()` | FTMS | `power`, `cadence`, `speed`, `trainer-control` | Indoor Bike Data fanned out with **one instant**; Control Point; Fitness Machine Status. Since #43 it also answers Set Target Resistance Level, Set Indoor Bike Simulation Parameters and Stop or Pause, and reports its supported ranges on the bench handle |
 | `modernTrainer()` | FTMS + Cycling Power + CSC | all four | **one `deviceId`**, one capability set; power arrives **once** per cycle although two services carry it |
 
 The modern trainer is the case that matters most. It is #39's design decision — capabilities are a
@@ -300,6 +306,7 @@ sequence of writes that provokes them, so a client reaches them by writing:
 | Set Target Power before Request Control | result `0x05` Control Not Permitted, power unchanged | FTMS 4.16.2 — the routine case on a phone that reconnected |
 | Request Control, Set Target Power | `0x01`, `0x01`, status `0x08` Target Power Changed, power holds the target | FTMS 4.16.2 |
 | Set Target Power above the supported range | `0x03` Invalid Parameter | FTMS 4.16.2.5 |
+| Set Indoor Bike Simulation Parameters on a machine built `supportsSimulation: false` | `0x02` Op Code Not Supported | FTMS 4.16.2.22 — what a trainer with Target Setting bit 13 clear does |
 | Reset | `0x01`, status `0x01`, **and the client's own control is revoked** | FTMS 4.16.2.1 |
 | any write before indications are enabled | ATT error `0xFD` CCCD Improperly Configured | Core Spec Supplement, Part B |
 | a write while a response is outstanding | ATT error `0xFE` Procedure Already in Progress | Core Spec Supplement, Part B |
@@ -361,11 +368,10 @@ second, a real transport waits.
   revision block — the `uint24` total distance, the five-octet expended-energy triple behind bit 8,
   the Cycling Power qualifier bits 1 and 3 that are not presence bits — are decoder fixtures, and
   they arrive with the decoders in #41–#43.
-- **Set Indoor Bike Simulation Parameters (`0x11`)** needs a grade type `@onyourleft/domain` does
-  not have. Left out rather than typed as a bare number, like the units listed
-  [above](#units-this-package-still-needs-from-onyourleftdomain).
-- **Result codes no scenario reaches** (`0x02` Op Code Not Supported, `0x04` Operation Failed) and
-  Indoor Bike Data fields with no unit (expended energy, heart rate, metabolic equivalent).
+- **Result codes no scenario reaches** — `0x04` Operation Failed. `0x02` Op Code Not Supported was
+  in this list until #43 gave it a scenario (`supportsSimulation: false`).
+- **Indoor Bike Data fields with no unit** — expended energy, heart rate, metabolic equivalent. The
+  *decoder* reads all three (#43); the simulator's frames do not carry them.
 - **Noise, fatigue and physics.** The rider is steady until the bench changes it. Power → speed is
   `packages/physics` (#88), and a second model of it in a test fixture would be a second source of
   truth.
@@ -473,20 +479,23 @@ bench.device('my-device').listeners(service, characteristic);   // count the lea
 
 ## The protocol clients
 
-`protocol/`, exported as `@onyourleft/sensors/protocol` (#41, #42). The half of the stack that turns
-an untrusted little-endian GATT payload into branded domain quantities.
+`protocol/`, exported as `@onyourleft/sensors/protocol` (#41, #42, #43). The half of the stack that
+turns an untrusted little-endian GATT payload into branded domain quantities — and, for FTMS, the
+half that writes back.
 
 ```ts
 import {
   heartRateProfile,
   createCyclingSpeedCadenceProfile,
   createCyclingPowerProfile,
+  createIndoorBikeDataProfile,
 } from '@onyourleft/sensors/protocol';
 import { metres } from '@onyourleft/domain';
 
 const transport = createWebBluetoothTransport({
   profiles: [
     heartRateProfile,
+    createIndoorBikeDataProfile(),
     createCyclingPowerProfile({ wheelCircumference: rider.wheelCircumference }),
     createCyclingSpeedCadenceProfile({ wheelCircumference: rider.wheelCircumference }),
   ],
@@ -513,6 +522,12 @@ decoder can be platform-free at all.
 | Heart Rate `0x180D` | beats per minute (8- or 16-bit), sensor contact, energy expended, RR intervals | `heart-rate` — **withheld** when the strap says it has lost contact, because the zero it transmits is a valid `BeatsPerMinute` |
 | Cycling Speed and Cadence `0x1816` | cumulative revolutions and a last-event time. **Neither an rpm nor a km/h** | `cadence`, `speed` — both differenced client-side |
 | Cycling Power `0x1818` | a mandatory `sint16` of watts, and up to twelve optional flag-gated fields | `power`, `cadence`, and `speed` when a wheel circumference is configured |
+| Fitness Machine `0x1826` | Indoor Bike Data: a speed in 0.01 km/h, a cadence in half-rpm, a `uint24` of metres, and up to thirteen flag-gated fields | `power`, `cadence`, `speed` — **one notification, one instant, three measurements**, which is why `planCapabilitySources` spends one connection here instead of three |
+
+⚠️ **FTMS carries a Heart Rate field and this program does not report it.** It is whatever strap the
+*machine* paired with itself; fanning it out would stamp the trainer's device identity on a reading
+from a device the athlete never connected, and would let a trainer outrank the strap the athlete did
+choose. It is on `IndoorBikeDataReading` for a caller who asks for it by name.
 
 **Wheel circumference has no default and is a required argument.** It is a rider setting, not a
 device property, and a default of 700×25c silently misreports distance for everyone else.
@@ -553,6 +568,23 @@ matched the issue text.**
 | Cycling Power Feature | `0x2A65` |
 | Sensor Location | `0x2A5D` |
 
+#43 added seven more, read from the same source on the same date:
+
+| Name | Assigned number |
+|---|---|
+| Fitness Machine | `0x1826` |
+| Fitness Machine Feature | `0x2ACC` |
+| **Indoor Bike Data** | **`0x2AD2`** |
+| Supported Resistance Level Range | `0x2AD6` |
+| Supported Power Range | `0x2AD8` |
+| Fitness Machine Control Point | `0x2AD9` |
+| Fitness Machine Status | `0x2ADA` |
+
+⚠️ **#43's issue body names `0x2AD3` for Indoor Bike Data and is wrong** — `0x2AD3` is Training
+Status. Its own revision block corrects it. `protocol-registry.test.ts` pins both the correct value
+and the fact that it is *not* the wrong one, because a client subscribed to Training Status pairs,
+reports connected and delivers nothing.
+
 The transcription into 128-bit form is checked rather than trusted:
 `web-bluetooth/src/protocol-registry.test.ts` asserts each literal equals `canonicalUuid` of its own
 assigned number. A transposed digit is otherwise a sensor that pairs and then reports nothing, which
@@ -568,6 +600,129 @@ not contain is the obvious attack on a flags-gated variable-length characteristi
 A profile decodes the whole frame before it reports anything. Instantaneous power is mandatory and
 comes first, so the tempting implementation reports it and then fails on a later field — it must
 not, because the truncation means the offsets are not what they were read as.
+
+### Indoor Bike Data has three traps a bit loop cannot survive
+
+1. **Flag bit 0 is inverted.** It is *More Data*, and Instantaneous Speed is present when the bit is
+   **clear** (FTMS 1.0 §4.9.1.2). Every other bit is normal polarity, so "for each set bit, consume
+   a field" reads a speed that is not there on the first packet and misaligns everything after it.
+2. **Bit 8 gates three fields and five octets** — Total Energy `uint16`, Energy per Hour `uint16`,
+   Energy per Minute `uint8`. A decoder that reads one reads the heart rate out of the middle of the
+   energy triple. Each has a "Data Not Available" sentinel (`0xFFFF`, `0xFF`) that is reported as
+   absent rather than as 65 535 kcal.
+3. **Total Distance is a `uint24`.** There is no `DataView.getUint24`.
+
+**Recorded, not resolved: FTMS 1.0 and GSS v9 disagree about bit 2.** Table 4.10 describes the
+Instantaneous Cadence bit with *inverted* polarity — the same wording as the More Data row directly
+above it — while GSS v9 §3.124 says the field is present when the bit is set. The field is two
+octets, so choosing wrongly shifts everything after it. **This client implements GSS v9**: it is six
+years newer and is the delegated authority, the equivalent Cross Trainer table inverts only bit 0,
+and the duplicated wording reads as a copy-paste erratum. The SIG states Errata Correction 23224 is
+mandatory for FTMS 1.0 compliance and it was not obtained; it is the likely resolution. Both
+readings are pinned by tests, so a correction changes a test rather than surprising a rider.
+
+## Trainer control
+
+`fitness-machine-control.ts` is **the file that applies physical resistance to a person who is
+pedalling**. CLAUDE.md §6 and SECURITY.md both call that a safety problem rather than only a
+security one.
+
+```ts
+import {
+  createTrainerControl,
+  decodeSupportedPowerRange,
+} from '@onyourleft/sensors/protocol';
+import { gradePercent, watts } from '@onyourleft/domain';
+
+const trainer = createTrainerControl(channel, {
+  powerRange: decodeSupportedPowerRange(await readSupportedPowerRange()),
+  scheduleTimeout,            // a clock this package cannot have; see below
+});
+
+await trainer.requestControl();          // until this succeeds, nothing is written
+await trainer.setTargetPower(watts(250)); // resolves with the QUANTISED value, or throws
+await trainer.setSimulationParameters({ grade: gradePercent(-6.2) }); // a descent stays a descent
+```
+
+### The control point is a protocol, not a write
+
+A fire-and-forget implementation *appears to work*, because the developer writing it is usually also
+pedalling. It fails for a rider in a workout, silently, for the rest of the session.
+
+| What has to happen | What goes wrong without it |
+|---|---|
+| `0x2AD9` is configured for **indications** — CCCD `0x0002`, not `0x0001` | silence, or an ATT error, which reads as a broken trainer |
+| **Request Control** succeeds before any setpoint | the machine does not error on a setpoint, it **ignores** it (FTMS §4.16.2) |
+| every write awaits its indication and **correlates the op code** | an ERG target the trainer rejected is reported as applied |
+| a non-success result code becomes an error | the same, one layer down |
+| control loss is detected — **three different ways** | a stale control assumption is how two apps fight over resistance |
+
+The three ways control is lost, all of which this client watches for:
+
+- Fitness Machine Status **`0xFF`** — at the *top* of the range, not the bottom. The only push
+  signal that another client took control.
+- A **`0x05` Control Not Permitted** result with no status notification at all. The routine case on
+  a phone that reconnected.
+- **This client's own Reset.** FTMS §4.16.2.1: control permission ends when the client initiates a
+  Reset. The trap for a workout player that resets between intervals and keeps sending targets.
+
+### The bounds, in order
+
+The device is an **actuator** as well as a sensor, so its own advertised limits are not trusted on
+their own:
+
+1. **This client's ceiling.** `MAX_PLAUSIBLE_TARGET_POWER_WATTS` (2 000 W) and
+   `MAX_PLAUSIBLE_GRADE_PERCENT` (±40 %). `decodeSupportedPowerRange` **refuses a device that
+   advertises a maximum above the first**, so a hostile trainer cannot define its own ceiling.
+2. **The device's advertised range**, read from Supported Power Range `0x2AD8` — three fields, not
+   two, the third being the minimum increment. A range whose increment is zero is refused, because
+   it divides by zero the moment a setpoint is quantised.
+3. **Quantisation to that increment**, measured from the device's minimum and never rounded up past
+   its maximum.
+
+A setpoint failing any of them is refused **without being written**. `setTargetPower` resolves with
+the value actually written, which is not always the value asked for.
+
+⚠️ **`MAX_ENCODABLE_RESISTANCE_LEVEL` is 25.5, and FTMS 1.0 is internally inconsistent about it.**
+The Supported Resistance Level Range is a `sint16` at 0.1 (so up to 3 276.7, and machines
+advertising 32 are common) while the Set Target Resistance Level parameter is a `uint8` at 0.1. A
+level above 25.5 is refused rather than truncated — truncating the octet would set 6.4 where 32 was
+asked for.
+
+### What the client believes, and how sure it is
+
+`targetPower()` returns one of three states, not `Watts | undefined`:
+
+| State | Means |
+|---|---|
+| `none` | nothing is set, or control was lost and whoever took it may change it |
+| `confirmed` | the machine answered this exact value with `0x01` |
+| `unknown` | a procedure timed out, or the link dropped while a target was held — the machine may or may not be holding it, and **this client can no longer change it** |
+
+`unknown` is the state a UI has to be able to show. It is the honest answer to *"what happens on
+disconnect mid-ERG?"*: the trainer keeps applying whatever it last accepted, nothing this program
+can write will reach it, and reporting the last confirmed figure would tell the rider everything is
+fine.
+
+### The procedure timeout is an injected port
+
+`protocol/` is platform-free, so there is no `setTimeout` and no `Date` here.
+`TrainerControlOptions.scheduleTimeout` is how a transport lends this client a clock; without one, a
+machine that never answers leaves its procedure pending until `linkLost()` — and because writes are
+serialised, every later setpoint waits behind it. **Pass one.** FTMS §4.16.4 names no timeout and the
+ATT transaction timeout underneath is 30 s; `CONTROL_POINT_PROCEDURE_TIMEOUT_SECONDS` is 5 s, a
+product choice: a rider whose ERG target has not moved in five seconds has already noticed.
+
+### What is deliberately not implemented
+
+- **The vendor control characteristic inside `0x1818`.** #43's revision block records its op codes
+  *and* records that two independent open-source implementations disagree by a factor of ten on the
+  rolling-resistance scaling. Writing an unverifiable scaling to a brake is exactly what this file
+  is careful about. GoldenCheetah's precedence rule is adopted regardless and costs nothing: prefer
+  a standard controllable service and fall back only when none was found.
+- **Spin Down (`0x13`)**, whose success response carries a parameter no other procedure has and
+  which needs hardware to be worth anything.
+- **Set Target Speed, Inclination and Heart Rate**, which an indoor bike client has no use for.
 
 ### What is deliberately not here
 

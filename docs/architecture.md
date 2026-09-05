@@ -65,7 +65,7 @@ packages/             Apache-2.0, without exception
   fit/                FIT / GPX / TCX codec
   sensors/            sensor abstraction and BLE transport — BLE only
     src/                the transport-agnostic abstraction; no platform API at all
-    protocol/           the GATT profile clients (#41, #42); no platform API either
+    protocol/           the GATT profile clients (#41, #42, #43); no platform API either
     web-bluetooth/      the browser transport (#40); the one place a BluetoothDevice exists
   physics/            cycling power/speed model
   store/              local activity and stream store
