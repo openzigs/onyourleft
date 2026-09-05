@@ -246,8 +246,28 @@ describe('athlete, lap and privacy zone encode and decode', () => {
     expect(fromPersistedPrivacyZone(toPersistedPrivacyZone(ZONE))).toEqual(ZONE);
   });
 
-  it('a privacy zone with an impossible latitude is rejected, and the error names no coordinate', () => {
-    const row = { ...toPersistedPrivacyZone(ZONE), latitude: 91 };
+  // ADR 0004 decision D, at the single most sensitive coordinate this program
+  // holds: a privacy-zone centre is a home address the athlete asked to be
+  // hidden, and a decode error string reaches a console, a crash report and a
+  // bug tracker.
+  //
+  // ⚠️ The version of this test before #104 asserted only that the message did
+  // not contain the stored LONGITUDE -- which was never in it. The offending
+  // LATITUDE was, because `decoded` propagates the domain constructor's message
+  // verbatim and that message ended `, received 91`. A test written for a
+  // property that its assertion could not observe: it would have stayed green
+  // through the whole leak. The assertion below is on the digits instead, so it
+  // cannot pass over a value in a different spelling either.
+  it.each([
+    // Out of range in either role. Not a real place, but it is the shape a
+    // corrupted row takes.
+    ['an impossible latitude', 91],
+    // The one that matters: a REAL coordinate, valid as the longitude it
+    // probably is, in the latitude column because the two were transposed on
+    // the way in. 151.2093 is Sydney. This is a home address in a bug report.
+    ['a transposed longitude in the latitude column', 151.2093],
+  ])('a privacy zone with %s is rejected, and the error names no coordinate', (_, latitude) => {
+    const row = { ...toPersistedPrivacyZone(ZONE), latitude };
     let message = '';
     try {
       fromPersistedPrivacyZone(row);
@@ -256,9 +276,12 @@ describe('athlete, lap and privacy zone encode and decode', () => {
     }
 
     expect(message).toMatch(/privacyZone.centre.latitude/);
-    // ADR 0004 decision D: a zone centre is a home address, and an error string
-    // reaches a console, a crash report and a bug tracker. The stored longitude
-    // is valid and must not be echoed alongside the complaint about latitude.
-    expect(message).not.toContain('-0.1246');
+    // Every run of digits in the message must be one of the constraint's own
+    // bounds. That admits "must be between -90 and 90" and rejects the stored
+    // latitude, the stored longitude, and any rounded or truncated form of
+    // either -- 151.2093 clipped to 151 is still Sydney.
+    const leaked = (message.match(/\d+/g) ?? []).filter((run) => run !== '90');
+    expect(leaked, `privacy-zone decode error named a number that is not a bound: ${message}`) //
+      .toEqual([]);
   });
 });
