@@ -54,13 +54,18 @@ import {
   decodeTcx,
   readFitContainer,
 } from '../../src';
+import type { TrackDecodeResult } from '../../src';
 import { CORPUS_DIRECTORY } from '../fixture-corpus/corpus-files';
 import type { FuzzBudget, FuzzCase, FuzzSeedFile } from './cases';
 import { describeCase, fuzzCases } from './cases';
 import {
+  assertDoctypeRefusedBeforeItsContents,
   assertMessagesInsideTheDataSection,
+  assertNestingWithinTheParsersLimit,
   assertOutputBoundedByInput,
   assertTypedFailure,
+  assertXmlOutputBoundedByInput,
+  readXmlShape,
 } from './invariants';
 
 /**
@@ -152,18 +157,35 @@ function runFitCase(fuzzCase: FuzzCase, seed: number): void {
   assertOutputBoundedByInput(container, result, fuzzCase.bytes, reproduction);
 }
 
-function runXmlCase(fuzzCase: FuzzCase, seed: number, decode: (text: string) => unknown): void {
+function runXmlCase(
+  fuzzCase: FuzzCase,
+  seed: number,
+  decode: (text: string) => TrackDecodeResult,
+): void {
   const reproduction = describeCase(seed, fuzzCase);
   const text = AS_TEXT.decode(fuzzCase.bytes);
+  let result;
   try {
-    decode(text);
+    result = decode(text);
   } catch (error) {
     // The shared, self-tested helper -- not a second copy. This arm carried its
     // own inline version until #146, and because `harness.test.ts` only ever
     // exercised the shared one, nothing proved this arm could fail. It could
     // not: two real guards were removed from the parser and it stayed green.
     assertTypedFailure(error, reproduction, ActivityXmlError);
+    // And #149's first structural invariant, which is the one that says the
+    // refusal happened in the right *place*. The error type alone cannot: a
+    // parser that skipped a DOCTYPE rather than refusing it throws all the same,
+    // at the entity reference instead of at the declaration.
+    assertDoctypeRefusedBeforeItsContents(text, error, reproduction);
+    return;
   }
+  // The document was accepted, which is where the other two live -- #149. A
+  // missing depth limit throws nothing at all, and neither would a reader that
+  // grew its output past what the document could encode.
+  const shape = readXmlShape(text, reproduction);
+  assertNestingWithinTheParsersLimit(shape, reproduction);
+  assertXmlOutputBoundedByInput(shape, text, result, reproduction);
 }
 
 describe('the FIT decoder survives a seeded corpus fuzz', () => {

@@ -35,6 +35,8 @@ import {
 } from './fit-fixtures';
 import {
   billionLaughsGpx,
+  deepNestingGpx,
+  deepNestingTcx,
   nominalGpx,
   nominalTcx,
   truncatedGpx,
@@ -245,6 +247,16 @@ export function buildCorpus(): readonly CorpusEntry[] {
       billionLaughsGpx(),
     ),
     xml(
+      'deep-nesting.gpx',
+      'gpx',
+      'A well-formed GPX whose track extensions nest an element deeper than the parser will go. ' +
+        'The third structural attack after entity resolution and entity expansion, and the one ' +
+        'the fuzz cannot invent for itself: its cases are byte substitutions and truncations of ' +
+        'these files, and no run of single-byte edits produces three hundred levels of nesting. ' +
+        'Without a depth limit the parser would build a stack whose size the document chose.',
+      deepNestingGpx(),
+    ),
+    xml(
       'truncated-mid-trackpoint.gpx',
       'gpx',
       'The nominal GPX cut off in the middle of its last track point’s time element: past that ' +
@@ -277,6 +289,15 @@ export function buildCorpus(): readonly CorpusEntry[] {
         'activity Id. Both formats are carried because a parser is usually configured per format ' +
         'and hardening one is not hardening the other.',
       xxeTcx(ANTIMERIDIAN_TRACK, 10),
+    ),
+    xml(
+      'deep-nesting.tcx',
+      'tcx',
+      'The TCX counterpart of deep-nesting.gpx. Both formats are carried for the reason the XXE ' +
+        'pair is — but here the sharper reason is the fuzz rather than the parser: its .gpx and ' +
+        '.tcx arms seed from their own extensions, so a fixture in one format leaves the other ' +
+        'arm with nothing structural to mutate and its depth invariant unproven.',
+      deepNestingTcx(),
     ),
   ];
 }
