@@ -58,7 +58,12 @@ graph TB
 ```
 apps/                 AGPL-3.0-or-later, without exception
   web/                browser client — the Phase 1 product
+    src/a11y/           the accessibility gate: rules, per-route audit, contrast (#48)
+    src/design/         design tokens, theme.css and the primitives (#48)
     src/recording/      the composition root: engine + checkpoints + recovery (#46)
+    src/shell/          the hash route table, the router hook and AppShell (#48)
+    src/support/        browser-capability detection and its notice (#48)
+    src/views/          one component per route (#48)
   mobile/             Capacitor shell wrapping the same web build (Phase 3)
 
 packages/             Apache-2.0, without exception
@@ -250,6 +255,40 @@ otherwise assume:
 
 The indexes, the query each one serves, and the reasoning for every field are in
 [`packages/store/README.md`](../packages/store/README.md).
+
+### `apps/web`: the shell, the design system and the accessibility baseline
+
+Added by [#48](https://github.com/openzigs/onyourleft/issues/48), which also carries the design
+system — [ADR 0009](adr/0009-clean-room-posture.md) §419 attributes it to #49, and the mismatch is
+recorded here rather than by editing a protected ADR in place.
+
+Three decisions were made in that issue rather than by adding a dependency, and each is reversible
+in one file:
+
+- **Routing is hash-based and written here** (`src/shell/routes.ts`, `useRoute.ts`), not
+  `react-router`. Path routing needs a server that rewrites unknown paths to `index.html`, and
+  Phase 1 has no server at all (owner decision D6) — so a refresh on a deep link would 404 against
+  whatever static host is serving the files. A fragment never reaches a server, works from
+  `file://`, and makes every navigation a plain `<a href="#/activities">` whose keyboard, middle-click
+  and open-in-new-tab behaviour is the browser's rather than ours. Revisit with
+  [#7](https://github.com/openzigs/onyourleft/issues/7).
+- **The design system is ours** (`src/design/`): tokens in TypeScript, one hand-written stylesheet,
+  four primitives. No CSS framework and no component library. `theme.css` is asserted equal to
+  `tokens.ts` in both directions, which is what makes the token-level contrast check a statement
+  about what the browser paints.
+- **The accessibility checker is ours too** (`src/a11y/`), for the licence and headless-DOM reasons
+  in CLAUDE.md §4e. It runs on every route, in CI, as a step of its own, and it fails the build.
+
+**The unsupported-browser experience is a feature of this component, not an error path.**
+`src/support/bluetooth-support.ts` classifies the browser into six states —
+available, adapter-unavailable, not-permitted, insecure-context, absent, incomplete — by probing
+capability through `@onyourleft/sensors/web-bluetooth`, never by reading a user agent.
+[ADR 0003](adr/0003-platform-support-matrix.md) decision D-7 is the source: the two states a
+`'bluetooth' in navigator` check cannot tell apart are Chrome-on-Linux, where the object is present
+and the adapter is unusable, and a page served over plain HTTP, where the object is withheld and the
+browser gets the blame. Where the browser cannot pair, **no pairing control is rendered at all** —
+a disabled one is out of the tab order and announces no reason, which is the silent failure the
+issue exists to prevent.
 
 **Dependencies point one way: `apps/` → `packages/`, never the reverse.** Combined with the licence
 rule that is not a coincidence — Apache-2.0 code may be combined into an AGPL-3.0 work, but not the

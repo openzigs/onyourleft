@@ -29,7 +29,12 @@ ride, store it, view it. **No server, no account, no hosting bill.** A server ar
 ```
 apps/                 AGPL-3.0-or-later, without exception
   web/                browser client — the Phase 1 product (#48-#51)
+    src/a11y/           the accessibility gate: rules, routes, contrast (#48) — see §4e
+    src/design/         design tokens, theme.css and the primitives (#48)
     src/recording/      the recorder: engine + durable checkpoints + recovery (#46)
+    src/shell/          the hash route table, the router hook and AppShell (#48)
+    src/support/        browser-capability detection and its notice (#48)
+    src/views/          one component per route (#48)
   mobile/             Capacitor shell wrapping the same web build (#85; Phase 3)
 
 packages/             Apache-2.0, without exception
@@ -195,6 +200,13 @@ pnpm run test
 # The same run with a coverage report. There is no percentage threshold and you
 # must not add one — see §5.
 pnpm run test:coverage
+
+# The accessibility gate (#48): every route in apps/web is rendered into a DOM
+# and audited, and the design tokens are checked for WCAG 2.2 AA contrast. This
+# is a SUBSET of `pnpm run test` — the same files, run again under a name that
+# says what broke. Unlike coverage it DOES gate: criterion 4 of #48 is that a
+# violation fails the build. See §4e.
+pnpm run test:a11y
 
 # tsc --noEmit followed by `vite build`, for apps/web. A green typecheck is not
 # a green build: the bundler resolves imports the typechecker only reads types
@@ -384,7 +396,7 @@ not.
 [`.github/workflows/rules.yml`](.github/workflows/rules.yml) runs on every pull request and on every
 push to `main`. It runs **exactly** the §4a commands and nothing else: the six bare-clone script
 checks, `shellcheck scripts/*.sh`, then `pnpm install --frozen-lockfile`, `format:check`, `lint`,
-`typecheck`, `test:coverage`, `bash scripts/coverage-summary.test.sh` and `build` — then
+`typecheck`, `test:coverage`, `bash scripts/coverage-summary.test.sh`, `test:a11y` and `build` — then
 publishes the coverage table to the run summary and uploads the HTML report as an artefact.
 Those last two carry `if: always()` and cannot fail the job: the run where coverage moved
 unexpectedly is exactly the one whose table you want, and a reporting step that can fail a
@@ -472,6 +484,41 @@ would be missed.
 `packages/sensors/src` stayed platform-free. #41 and #42's protocol clients arrived on the same
 terms in `packages/sensors/protocol` — a third entry, and `platformIsolation` verbatim, because they
 name a wire format but no platform. The routing work (#70) goes in the same file when it lands.
+
+### 4e. The accessibility gate
+
+Added by [#48](https://github.com/openzigs/onyourleft/issues/48), whose fourth acceptance criterion
+is that *automated accessibility checks run on every route in CI and fail the build on a violation*.
+It lives in [`apps/web/src/a11y/`](apps/web/src/a11y/) and it is **the one gate in this repository
+with a real pass/fail line in it** — coverage deliberately has none (§5), and this one is not a
+percentage.
+
+| File | What it decides |
+|---|---|
+| `audit.ts` | fourteen structural rules over a rendered DOM — an unnamed control, a control not in the tab order, a broken heading order, a dangling ARIA reference, a positive `tabindex`, and so on. `tabbableElements` is the tab-order model the keyboard tests rest on |
+| `audit.test.ts` | a violating fixture for **every** rule, plus an assertion that every rule in `ACCESSIBILITY_RULES` has one. A rule added without a failing fixture fails the build |
+| `routes.a11y.test.tsx` | renders every entry in `shell/routes.ts` and audits it. A route added to the table is audited without anyone editing this file |
+| `contrast.a11y.test.ts` | WCAG 2.2 AA contrast for every declared token pair, and that every token appears in a pair |
+| `theme.a11y.test.ts` | that `theme.css` carries the same values as `design/tokens.ts`, in both directions |
+| `index-html.a11y.test.ts` | `lang`, and that the viewport meta does not block zoom |
+| `degradation.a11y.test.tsx` | that a chart which throws is replaced by its table and does not take the page with it |
+
+**There is no `axe-core` and adding one is a decision, not a tidy-up.** It is MPL-2.0, which §3
+records as *not ruled on yet* and [#24](https://github.com/openzigs/onyourleft/issues/24)'s to
+decide; and its highest-value rule — colour contrast — is inert under a headless DOM, because jsdom
+performs no layout and resolves no custom property. That is why contrast is checked at the tokens
+instead.
+
+⚠️ **The suite loads no stylesheet, so an element hidden by CSS alone looks focusable to
+`tabbableElements`.** The shell therefore hides nothing that way: the skip link is moved off-screen
+with a `transform` and stays focusable. Hiding a control with `display: none` in a stylesheet would
+make this checker wrong rather than make the control safe.
+
+⚠️ **jsdom updates `location.hash` when a fragment link is clicked and then does not fire
+`hashchange`**, which the HTML standard requires and every browser does. `testing/mount.tsx`
+supplies the missing event. Do not "fix" that by making the router set the hash itself in a click
+handler — that would be changing shipping behaviour to suit a test double, and it costs the
+browser's own middle-click and open-in-new-tab handling.
 
 ---
 
