@@ -23,6 +23,7 @@
 #   WF001   no pull_request_target trigger in .github/workflows/
 #   ADR001  no two ADRs share a number
 #   ADR002  every ADR filename is NNNN-kebab-case.md
+#   ADR003  an ADR's "## Amendments" section is single, last, and dated
 #
 # Usage: scripts/check-repo-rules.sh [ROOT]   (ROOT defaults to the repo root)
 # Exit:  0 clean, 1 if any rule is violated.
@@ -204,6 +205,104 @@ if [ -d "${ROOT}/docs/adr" ]; then
         seen_pairs="${seen_pairs}${number}:${base} " ;;
     esac
   done < <(find "${ROOT}/docs/adr" -type f -name '*.md' | sort)
+fi
+
+# --- ADR003: an amendment is appended, and only appended -----------------------
+#
+# ADR 0013 (#147) establishes the one lighter-than-supersession mechanism this
+# repository has: a dated entry APPENDED to an "## Amendments" section at the
+# end of an accepted ADR, recording that a statement of fact in the body has
+# become false. The body itself is still never edited.
+#
+# That convention needs a gate for the reason CLAUDE.md section 8 gives for
+# banning pull_request_target with a rule rather than a paragraph: the two
+# things it distinguishes -- appending a note, and editing the body while
+# calling it an amendment -- produce diffs that look similar in review and are
+# opposites in what they do to the record. Three properties are checkable from
+# the file alone:
+#
+#   one section   a second "## Amendments" heading is a pile, not a log
+#   last section  anything after it means the note went INTO the body
+#   dated entries an undated note cannot be placed against the ADR's own date
+#
+# Whether the change was literally an append is a property of the diff, not of
+# the file, and is deliberately NOT checked here -- a rule that reads git
+# history would not run on the bare clone this script is written for.
+#
+# Matched on '^## Amendments' anchored at a level-2 heading. An ADR that
+# DISCUSSES the convention -- 0013 does -- names it as a '### Amendments'
+# sub-heading, and shows the shape it prescribes inside a fence. Neither is the
+# section, so the fences are blanked before anything is matched: without that,
+# the rule would make its own ADR unwritable, because 0013's worked example puts
+# '## Amendments' at column one and '## Consequences' after it.
+
+# Replace every fenced line, and the fence markers, with a blank line. Line
+# NUMBERING is preserved -- the section's position matters and an editor's line
+# numbers are what a reader has -- so this blanks rather than deletes. Only
+# backtick fences: this repository writes no tilde-fenced block, and a rule that
+# guesses at a syntax nobody uses is a rule nobody can predict.
+strip_fences() {
+  awk '
+    /^[[:space:]]*```/ { infence = !infence; print ""; next }
+    { print (infence ? "" : $0) }
+  ' "$1"
+}
+
+#
+# Every message carries the line the reader has to go and look at. An ADR here
+# runs to several hundred lines, and "something follows it" without a number
+# sends the reader back to scroll for what -- the same complaint #118 made of
+# ADR001's old message. The numbers are the FILE's, which is what `strip_fences`
+# blanking rather than deleting is for.
+
+check_adr_amendments() {
+  local adr base body start after following entries numbered undated
+  while IFS= read -r adr; do
+    [ -n "${adr}" ] || continue
+    base="$(basename "${adr}")"
+    body="$(strip_fences "${adr}")"
+
+    # Line numbers of every level-2 Amendments heading, oldest first.
+    start="$(printf '%s\n' "${body}" | grep -n '^## Amendments[[:space:]]*$' | cut -d: -f1)"
+    [ -n "${start}" ] || continue
+
+    if [ "$(printf '%s\n' "${start}" | wc -l | tr -d '[:space:]')" -gt 1 ]; then
+      report ADR003 "docs/adr/${base}: two '## Amendments' sections, at lines $(printf '%s' "${start}" | tr '\n' ' ' | sed 's/ $//' | sed 's/ / and /g'); an amendment is a new dated entry in the one section, not a second section (ADR 0013)"
+      continue
+    fi
+
+    after="$(printf '%s\n' "${body}" | tail -n +"$((start + 1))")"
+
+    following="$(printf '%s\n' "${after}" | grep -n -m 1 '^## ')"
+    if [ -n "${following}" ]; then
+      report ADR003 "docs/adr/${base}: '## Amendments' (line ${start}) must be the last section, but '${following#*:}' follows it at line $((start + ${following%%:*})); an amendment is appended to the end of the file, never inserted into the body (ADR 0013)"
+      continue
+    fi
+
+    entries="$(printf '%s\n' "${after}" | grep -n '^-[[:space:]]')"
+    if [ -z "${entries}" ]; then
+      report ADR003 "docs/adr/${base}: '## Amendments' (line ${start}) has no entries; a section that records nothing reads as though it records something (ADR 0013)"
+      continue
+    fi
+
+    # Every top-level bullet is an entry and every entry is dated. A wrapped
+    # entry continues on an INDENTED line, which is not matched here, so a
+    # paragraph-length amendment is not read as a pile of undated ones.
+    #
+    # The date's SHAPE is checked, not its validity: "2026-13-99" passes. A
+    # calendar in bash 3.2 without GNU date is not worth the lines, and the
+    # failure it would catch -- a typo in a date nobody disputes -- is not the
+    # one this rule exists for.
+    while IFS= read -r numbered; do
+      [ -n "${numbered}" ] || continue
+      undated="${numbered#*:}"
+      report ADR003 "docs/adr/${base}: line $((start + ${numbered%%:*})): amendment entry must open with a bold ISO date, as in \"- **2026-09-05** — ...\"; found \"${undated}\" (ADR 0013)"
+    done < <(printf '%s\n' "${entries}" | grep -vE '^[0-9]+:- \*\*[0-9]{4}-[0-9]{2}-[0-9]{2}\*\*[[:space:]]')
+  done < <(find "${ROOT}/docs/adr" -type f -name '*.md' | sort)
+}
+
+if [ -d "${ROOT}/docs/adr" ]; then
+  check_adr_amendments
 fi
 
 # --- Result -------------------------------------------------------------------

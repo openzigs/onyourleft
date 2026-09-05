@@ -52,12 +52,19 @@ assert_clean() {
 # inverting the header comparison kept these cases green because the fixture's
 # well-formed file was then the one being reported. The assertion must name the
 # file the rule is supposed to catch.
+#
+# `grep -qF -- "${needle}"`, with the `--`, because a needle beginning with a
+# hyphen is otherwise read as a bundle of options. ADR003 quotes the offending
+# Markdown bullet back at the reader, so "- Decision C drifted too." is a needle
+# a caller will reasonably pass; without the `--` that case reports a checker
+# failure that is really a harness failure, which is the most expensive red
+# there is.
 assert_violation() {
   local name="$1" rule="$2" needle="$3" out status
   out="$(bash "${CHECKER}" "${fixture_root}" 2>&1)"
   status=$?
   if [ "${status}" -ne 0 ] \
-     && printf '%s' "${out}" | grep "^${rule}: " | grep -qF "${needle}"; then
+     && printf '%s' "${out}" | grep "^${rule}: " | grep -qF -- "${needle}"; then
     pass=$((pass + 1))
     printf 'ok   %s\n' "${name}"
   else
@@ -75,25 +82,51 @@ assert_violation() {
 # one finding names both colliding files, and two separate single-needle
 # assertions would also pass against a checker that emitted two findings naming
 # one file each -- which is the behaviour being replaced.
+#
+# It asks whether ANY ONE reported line carries every needle, not whether the
+# FIRST one does. #147: it used to take `head -1`, which made it silently
+# order-dependent -- a fixture in which the checker legitimately reports two
+# findings for the rule failed whenever the line being asserted was the second,
+# and the failure read as a checker bug. That is the same shape as the defect
+# #118 fixed in ADR001 itself: a helper deciding from `sort` order, which
+# carries no information about what is being looked for. `needle` is `local`
+# for the same reason every other variable here is; it was the one that was not,
+# and a loop variable left in the global scope is a cross-test coupling waiting
+# to be depended on.
 assert_violation_all() {
-  local name="$1" rule="$2" out status line missing=""
+  local name="$1" rule="$2" out status line needle missing="" matched=""
   shift 2
   out="$(bash "${CHECKER}" "${fixture_root}" 2>&1)"
   status=$?
-  line="$(printf '%s' "${out}" | grep "^${rule}: " | head -1)"
-  for needle in "$@"; do
-    printf '%s' "${line}" | grep -qF "${needle}" || missing="${missing} \"${needle}\""
-  done
-  if [ "${status}" -ne 0 ] && [ -n "${line}" ] && [ -z "${missing}" ]; then
+  while IFS= read -r line; do
+    [ -n "${line}" ] || continue
+    missing=""
+    for needle in "$@"; do
+      printf '%s' "${line}" | grep -qF -- "${needle}" || missing="${missing} \"${needle}\""
+    done
+    if [ -z "${missing}" ]; then
+      matched="${line}"
+      break
+    fi
+  done < <(printf '%s\n' "${out}" | grep "^${rule}: ")
+  if [ "${status}" -ne 0 ] && [ -n "${matched}" ]; then
     pass=$((pass + 1))
     printf 'ok   %s\n' "${name}"
   else
     fail=$((fail + 1))
-    printf 'FAIL %s\n     the "%s: " line was missing:%s; got exit %s\n%s\n' \
-      "${name}" "${rule}" "${missing:- (no such line)}" "${status}" "${out}"
+    printf 'FAIL %s\n     no single "%s: " line carried every needle; got exit %s\n%s\n' \
+      "${name}" "${rule}" "${status}" "${out}"
   fi
   cleanup_fixture
 }
+
+# A Markdown code fence and a bare dollar, as variables rather than literals:
+# three backticks, and a `$(`, inside single quotes both read as an unexpanded
+# expression to shellcheck (SC2016), and CI treats an info-level finding as a
+# failure. Both are wanted verbatim in a fixture -- one is Markdown, the other
+# is the hostile input the ADR003 probe feeds the checker.
+FENCE='```'
+DOLLAR='$'
 
 # A minimal well-formed Apache-2.0 leaf package.
 write_good_package() {
@@ -286,6 +319,63 @@ else
 fi
 cleanup_fixture
 
+# --- assert_violation_all's own regressions, found in the #144 review (#147) --
+#
+# Two collisions on two different numbers, so the checker reports two ADR001
+# lines and the one being asserted is the SECOND. `find | sort` puts
+# 0002-alpha, 0002-beta, 0003-delta, 0003-gamma in that order, so the 0002
+# finding is printed first. The helper used to read `head -1` and compare the
+# needles against that line alone, so this case failed -- reporting a checker
+# defect that did not exist. A helper that is right only when the checker
+# reports exactly one finding is a helper whose name overstates it, which is
+# what #147 raised.
+new_fixture
+printf '# ADR 0002\n' > "${fixture_root}/docs/adr/0002-alpha.md"
+printf '# ADR 0002\n' > "${fixture_root}/docs/adr/0002-beta.md"
+printf '# ADR 0003\n' > "${fixture_root}/docs/adr/0003-delta.md"
+printf '# ADR 0003\n' > "${fixture_root}/docs/adr/0003-gamma.md"
+assert_violation_all "a collision is found on a line that is not the first reported" ADR001 \
+  "docs/adr/0003-delta.md" \
+  "docs/adr/0003-gamma.md" \
+  "share ADR number 0003"
+
+# ...and it must still be able to FAIL. Needles that no single line carries --
+# one file from each collision -- must not pass merely because both appear
+# somewhere in the output. Run inline rather than through the helper, because
+# the expected outcome here is the helper reporting a failure.
+new_fixture
+printf '# ADR 0002\n' > "${fixture_root}/docs/adr/0002-alpha.md"
+printf '# ADR 0002\n' > "${fixture_root}/docs/adr/0002-beta.md"
+printf '# ADR 0003\n' > "${fixture_root}/docs/adr/0003-delta.md"
+printf '# ADR 0003\n' > "${fixture_root}/docs/adr/0003-gamma.md"
+before_fail="${fail}"
+assert_violation_all "(expected to fail) needles spread across two lines" ADR001 \
+  "docs/adr/0002-alpha.md" "docs/adr/0003-gamma.md" > /dev/null
+if [ "${fail}" -eq $((before_fail + 1)) ]; then
+  fail="${before_fail}"
+  pass=$((pass + 1))
+  printf 'ok   assert_violation_all rejects needles spread across two reported lines\n'
+else
+  printf 'FAIL assert_violation_all rejects needles spread across two reported lines\n     it passed, so the helper accepts needles that no single line carries\n'
+fi
+
+# `needle` is declared local. A loop variable surviving into the global scope is
+# a coupling a later case can come to depend on without anyone deciding to.
+new_fixture
+printf '# ADR 0002\n' > "${fixture_root}/docs/adr/0002-alpha.md"
+printf '# ADR 0002\n' > "${fixture_root}/docs/adr/0002-beta.md"
+unset needle
+assert_violation_all "a collision names both paths (scope probe)" ADR001 \
+  "docs/adr/0002-alpha.md" "docs/adr/0002-beta.md" > /dev/null
+pass=$((pass - 1))   # that call's own tally is not this case's result
+if [ -z "${needle+set}" ]; then
+  pass=$((pass + 1))
+  printf 'ok   assert_violation_all does not leak needle into the global scope\n'
+else
+  fail=$((fail + 1))
+  printf 'FAIL assert_violation_all does not leak needle into the global scope\n     needle survived the call as "%s"\n' "${needle}"
+fi
+
 # --- ADR002: ADR filenames follow NNNN-kebab-case.md -------------------------
 
 new_fixture
@@ -297,6 +387,163 @@ new_fixture
 printf '# ADR\n' > "${fixture_root}/docs/adr/0005-Tech_Stack.md"
 assert_violation "ADR filename that is not kebab-case is rejected" ADR002 \
   "docs/adr/0005-Tech_Stack.md"
+
+# --- ADR003: an amendment is appended, and only appended (#147) --------------
+#
+# ADR 0013 establishes the section. The rule exists because the convention is
+# otherwise the honour system applied to a protected path: "append a dated note"
+# and "edit the body and call it an amendment" produce diffs that look alike in
+# review and are opposites in what they do to the record. The three things the
+# rule can check from the file alone are that there is ONE section, that NOTHING
+# follows it, and that every entry carries a date. Whether a change was actually
+# an append is a property of the diff, not of the file, and is not checked here.
+
+# The shape ADR 0013 prescribes, which must pass.
+write_amended_adr() {
+  local path="$1"
+  {
+    printf '# ADR 0011: Stream storage\n\n- **Status**: Accepted\n\n'
+    printf '## Context\n\nSomething was true.\n\n'
+    printf '## Amendments\n\n'
+    printf -- '- **2026-09-05** — Decision H: the sentence is no longer true (#147).\n'
+  } > "${path}"
+}
+
+new_fixture
+write_amended_adr "${fixture_root}/docs/adr/0011-stream-storage.md"
+assert_clean "an ADR whose last section is a dated ## Amendments passes"
+
+# The failure the rule exists for: a section AFTER Amendments means the note was
+# inserted into the body rather than appended to the end of the file.
+new_fixture
+write_amended_adr "${fixture_root}/docs/adr/0011-stream-storage.md"
+printf '\n## Notes\n\nStill here.\n' >> "${fixture_root}/docs/adr/0011-stream-storage.md"
+assert_violation "a section after ## Amendments is rejected" ADR003 \
+  "docs/adr/0011-stream-storage.md: '## Amendments' (line 9) must be the last section"
+
+# The offending heading is named, for the same reason ADR001 names both
+# colliding files: a message that says only "something follows it" sends the
+# reader back to scroll a 300-line ADR looking for what.
+new_fixture
+write_amended_adr "${fixture_root}/docs/adr/0011-stream-storage.md"
+printf '\n## Notes\n\nStill here.\n' >> "${fixture_root}/docs/adr/0011-stream-storage.md"
+assert_violation "the section that follows ## Amendments is named, with its line" ADR003 \
+  "'## Notes' follows it at line 13"
+
+# Two sections rather than two entries. Appending a second heading each time is
+# the shape that turns an append-only log into a pile.
+new_fixture
+write_amended_adr "${fixture_root}/docs/adr/0011-stream-storage.md"
+{
+  printf '\n## Amendments\n\n'
+  printf -- '- **2026-09-06** — And another thing.\n'
+} >> "${fixture_root}/docs/adr/0011-stream-storage.md"
+assert_violation "two ## Amendments sections are rejected" ADR003 \
+  "docs/adr/0011-stream-storage.md: two '## Amendments' sections"
+
+# An undated entry. The date is the whole point: it is what tells a reader
+# whether the amendment predates the thing they are holding.
+new_fixture
+write_amended_adr "${fixture_root}/docs/adr/0011-stream-storage.md"
+printf -- '- Decision C drifted too.\n' >> "${fixture_root}/docs/adr/0011-stream-storage.md"
+assert_violation "an amendment entry without a date is rejected, and its line named" ADR003 \
+  "line 12: amendment entry must open with a bold ISO date" \
+  "- Decision C drifted too."
+
+# An empty section records nothing while looking like it records something.
+new_fixture
+printf '# ADR 0011\n\n## Context\n\nA thing.\n\n## Amendments\n' \
+  > "${fixture_root}/docs/adr/0011-stream-storage.md"
+assert_violation "an empty ## Amendments section is rejected" ADR003 \
+  "docs/adr/0011-stream-storage.md: '## Amendments' (line 7) has no entries"
+
+# Over-strictness guard: an entry is a paragraph, not a line. A continuation
+# line is indented and carries no date of its own, and must not be read as a
+# second, undated entry. The INDENTED BULLET is the case that matters: a rule
+# that matched a bullet anywhere in the line rather than at column one would
+# reject a nested list inside an entry, which is how an amendment naming two
+# drifted lines would reasonably be written.
+new_fixture
+write_amended_adr "${fixture_root}/docs/adr/0011-stream-storage.md"
+{
+  printf '  It named a value it no longer names, since #104.\n'
+  printf '  - Decision H, second paragraph.\n'
+  printf '  - Decision H, the sentence about the codec.\n'
+} >> "${fixture_root}/docs/adr/0011-stream-storage.md"
+assert_clean "an indented continuation line or sub-bullet is not a second entry"
+
+# Over-strictness guard: the section is a level-2 heading. A '### Amendments'
+# inside a body -- an ADR discussing this very convention, for instance -- is
+# not the section and must not be checked as one.
+new_fixture
+{
+  printf '# ADR 0013\n\n## Decision\n\n### Amendments\n\nHow the section works.\n\n'
+  printf '## Consequences\n\nIt is enforced.\n'
+} > "${fixture_root}/docs/adr/0013-adr-amendments.md"
+assert_clean "a level-3 Amendments heading in a body is not the section"
+
+# Over-strictness guard: a FENCED EXAMPLE of the section is not the section.
+# Without this the rule makes its own ADR unwritable -- 0013 has to show the
+# shape it prescribes, and a heading at column one inside a fence would be read
+# as the real thing, with '## Consequences' then "following" it.
+new_fixture
+{
+  printf '# ADR 0013\n\n## Decision\n\nAppend a section shaped like this:\n\n'
+  printf '%smarkdown\n## Amendments\n\n- **2026-09-05** — What became false (#147).\n%s\n\n' "${FENCE}" "${FENCE}"
+  printf '## Consequences\n\nIt is enforced.\n'
+} > "${fixture_root}/docs/adr/0013-adr-amendments.md"
+assert_clean "a fenced example of ## Amendments is not the section"
+
+# ...and the fence must not blind the checker to the real section further down.
+# A rule that skipped everything after the first fence would pass this file,
+# which carries a genuinely undated entry.
+new_fixture
+{
+  printf '# ADR 0013\n\n## Decision\n\n'
+  printf '%smarkdown\n## Amendments\n%s\n\n' "${FENCE}" "${FENCE}"
+  printf '## Amendments\n\n- No date on this one.\n'
+} > "${fixture_root}/docs/adr/0013-adr-amendments.md"
+assert_violation_all "an undated entry is still caught after a fenced example" ADR003 \
+  "line 11: amendment entry must open with a bold ISO date" \
+  "- No date on this one."
+
+# This checker runs on a bare clone of a FORK's tree in CI, so ADR content is
+# untrusted input. The rule quotes the offending line back into a message and
+# derives line numbers from it; both would be an execution vector if the text
+# ever reached `eval`, a printf FORMAT, or bash arithmetic -- `$(( ))` evaluates
+# a command substitution inside an array subscript. It reaches none of them:
+# `report` uses `%s`, and the line numbers come from `grep -n`, which always
+# prefixes digits. Asserted rather than reasoned about, because the reasoning is
+# what goes stale when someone reformats a message.
+new_fixture
+canary="${fixture_root}/CANARY"
+{
+  printf '# ADR 0011\n\n## Amendments\n\n'
+  printf -- '- %s(touch %s) not a date\n' "${DOLLAR}" "${canary}"
+  printf -- '- x[0%s(touch %s)] also not a date\n' "${DOLLAR}" "${canary}"
+} > "${fixture_root}/docs/adr/0011-stream-storage.md"
+out="$(bash "${CHECKER}" "${fixture_root}" 2>&1)"
+status=$?
+if [ "${status}" -ne 0 ] \
+   && [ ! -e "${canary}" ] \
+   && printf '%s' "${out}" | grep -q '^ADR003: '; then
+  pass=$((pass + 1))
+  printf 'ok   a command substitution in an amendment entry is reported, not executed\n'
+else
+  fail=$((fail + 1))
+  printf 'FAIL a command substitution in an amendment entry is reported, not executed\n     canary present: %s; exit %s\n%s\n' \
+    "$(if [ -e "${canary}" ]; then printf yes; else printf no; fi)" "${status}" "${out}"
+fi
+cleanup_fixture
+
+# The date's SHAPE is what is checked, not its validity. Recorded as a test so
+# that "ADR003 validates dates" is never claimed on this rule's behalf.
+new_fixture
+{
+  printf '# ADR 0011\n\n## Amendments\n\n'
+  printf -- '- **2026-13-99** — a date that does not exist, and is accepted.\n'
+} > "${fixture_root}/docs/adr/0011-stream-storage.md"
+assert_clean "an impossible-but-well-shaped date is accepted; the rule checks shape"
 
 # --- SCOPE001 regressions found in review of PR #98 --------------------------
 #

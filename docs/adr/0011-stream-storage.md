@@ -323,3 +323,27 @@ tight assertion on a shared runner measures the runner.
   harness in the same change, and that is not a coincidence: every claim above about what survives a
   write is asserted through a connection that was closed and reopened, because a read through the
   writing handle cannot tell "persisted" from "still in this connection's transaction queue".
+
+---
+
+## Amendments
+
+Appended under the convention established by [ADR 0013](0013-adr-amendments.md) (#147). Nothing
+above this line has been edited; each entry records what has since become false, and the body still
+says what it said on the date at the top.
+
+- **2026-09-05** — **Decision H's second sentence is no longer true.** It says
+  "`@onyourleft/domain`'s `UnitError` does name it — `assertInRange` appends `received 91.2`". Since
+  [#104](https://github.com/openzigs/onyourleft/issues/104) (merged in
+  [#144](https://github.com/openzigs/onyourleft/pull/144)) the shared guards in
+  `packages/domain/src/unit-error.ts` derive coordinate-ness from the field label and **omit** the
+  `, received X` clause for a latitude or longitude. #110 corrected the same sentence where it
+  appeared in `CLAUDE.md` and [`docs/architecture.md`](../architecture.md), and left this copy
+  because an ADR is a protected path — which is the drift that opened
+  [#147](https://github.com/openzigs/onyourleft/issues/147).
+  **Decision H itself still stands, and the codec's masking is still necessary**, for a reason the
+  sentence's premise no longer supplies: the domain's label rule matches `latitude` and `longitude`
+  only, so `altitudeMetres` — whose label is `altitude in metres` — still has its value named by a
+  `UnitError`. Altitude is a coordinate only when it is reported beside one, which the domain cannot
+  know and `packages/store/src/stream-codec.ts` can. Read the third and fourth sentences of decision
+  H as written; read the second as history. (#147)
