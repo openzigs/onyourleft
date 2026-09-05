@@ -414,6 +414,24 @@ export default tseslint.config(
     },
   },
 
+  // --- Repository tooling ----------------------------------------------------
+  // `scripts/` is not a package: it sits outside both licence trees, it ships in
+  // no artefact, and it genuinely runs on Node. Without this block `eslint .`
+  // reports `process` and `console` as undefined here, which is a true statement
+  // about the default environment and a useless one about a file whose first
+  // line is a Node shebang.
+  //
+  // Scoped to `scripts/` deliberately. The Node globals stay forbidden inside
+  // `packages/domain` and `packages/sensors` (§4d), and widening them there is
+  // the mistake this narrow block exists to avoid making by accident.
+  {
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: { console: 'readonly', process: 'readonly' },
+      sourceType: 'module',
+    },
+  },
+
   // --- Tests -----------------------------------------------------------------
   {
     files: ['**/*.test.{ts,tsx}'],

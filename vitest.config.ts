@@ -11,7 +11,11 @@ export default defineConfig({
     projects: ['packages/*', 'apps/*'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'html'],
+      // `json-summary` is what the CI step renders into the run summary; `html`
+      // is what gets uploaded as an artefact when a number looks wrong; `text`
+      // stays because it is what you read locally. None of the three gates
+      // anything -- see the note below.
+      reporter: ['text', 'html', 'json-summary'],
       // The second pattern is for an adapter that needs a platform library
       // and therefore lives in its own directory beside `src/` with its own
       // tsconfig — `packages/sensors/web-bluetooth/src/**` today (#40), and
