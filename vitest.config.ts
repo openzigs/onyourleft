@@ -22,6 +22,16 @@ export default defineConfig({
       // whatever #15 adds for the native stacks. Without it those files are
       // reported at 0% by being absent from the report entirely, which reads
       // in review as "not written" rather than "not measured".
+      //
+      // `packages/fit/tools/**` is deliberately NOT here, decided in #110.
+      // It is the #29 fixture generator: authoring-time code that produces a
+      // committed artefact and ships in nothing. Its tests run (its own
+      // vitest.config.ts includes `tools/**/*.test.ts`) and its output is
+      // asserted by the corpus tests; what would change by adding it is only
+      // the denominator of `packages/fit`'s percentage, mixing a generator's
+      // coverage into a codec's. #107 observed this report listing `apps/web`
+      // alone at 125 statements — that predated the `packages/*/*/src/**`
+      // pattern and is no longer true; all five packages appear.
       include: ['packages/*/src/**', 'packages/*/*/src/**', 'apps/*/src/**'],
       // No thresholds, deliberately. ADR 0005 decision C: the gate is the
       // mutation list in the pull request body, not a percentage. Coverage is

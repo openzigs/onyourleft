@@ -51,6 +51,19 @@ export type FitFaultCode =
   | 'undefined-local-message-type'
   /** A compressed-timestamp record arrived before any full timestamp. Collected. */
   | 'compressed-timestamp-without-reference'
+  /**
+   * A second `file_id` message arrived after the first. Collected.
+   *
+   * The first one is kept and the later one is dropped, because `file_id` is
+   * the file's identity and the protocol puts it first: manufacturer, serial
+   * number and time created are what an importer deduplicates and attributes
+   * on. Letting a message further down the file rewrite them means the identity
+   * a consumer sees depends on the last such message rather than the first,
+   * which is a property a crafted file gets to choose. Reported rather than
+   * silently resolved either way, so an importer can refuse a file whose
+   * identity is ambiguous.
+   */
+  | 'duplicate-file-id'
   /** A field decoded to a value `@onyourleft/domain` rejects. Collected. */
   | 'invalid-field-value';
 

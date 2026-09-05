@@ -31,14 +31,16 @@
  * decoder would be checking the decoder against its own assumptions"*. The
  * corpus tests are only a cross-check while these numbers are arrived at
  * independently, so this file duplicates them on purpose and
- * `profile.test.ts` pins the ones both files carry.
+ * [`tools/fixture-corpus/decode-corpus.test.ts`](../../tools/fixture-corpus/decode-corpus.test.ts)
+ * — under `describe('the decoder profile and the generator profile were
+ * derived independently')` — pins the ones both files carry.
  *
  * ## Only the subset is supported
  *
  * ADR 0006: *"A narrow profile means files containing messages outside it
  * decode with those messages skipped, not with an error."* A message this file
  * does not name is counted in
- * {@link FitActivity.skippedGlobalMessageNumbers} and dropped.
+ * {@link FitActivity.skippedGlobalMessages} and dropped.
  */
 
 /** The global message numbers this decoder reads. */

@@ -55,14 +55,15 @@
  *
  * Three channels carry coordinates: `latitude`, `longitude`, and `altitude`,
  * which in a stream is always reported beside them. **No error raised for those
- * three may name the value.** `@onyourleft/domain`'s `UnitError` does name it —
- * `assertInRange` appends `received 91.2` — which is recorded against ADR 0004
- * and carried by #104. So this file does not let a `UnitError` escape from a
- * coordinate channel: `coordinateSafe` below catches it and re-raises with the
- * channel, the sample index and the constraint, and nothing else. The other
- * five channels keep their values in the message, which is what decision D
- * explicitly chose: "a blanket rule would buy a coordinate's privacy at the
- * cost of every other quantity's debuggability".
+ * three may name the value.** `@onyourleft/domain`'s `UnitError` used to name it
+ * — `assertInRange` appended `received 91.2` — and #104 has since stopped it for
+ * a latitude or a longitude. This file does not rely on that: `coordinateSafe`
+ * below catches a `UnitError` from a coordinate channel and re-raises with the
+ * channel, the sample index and the constraint, and nothing else. It is the
+ * layer that knows `altitude` is beside a position, which the domain package
+ * cannot know from one number. The other five channels keep their values in the
+ * message, which is what decision D explicitly chose: "a blanket rule would buy
+ * a coordinate's privacy at the cost of every other quantity's debuggability".
  */
 
 import {
@@ -282,10 +283,16 @@ const COORDINATE_CHANNELS = new Set<StreamChannel>([...POSITION_CHANNELS, 'altit
  *
  * ADR 0004 decision D: for a latitude, a longitude or an altitude reported
  * beside one, a message may name **the field and the constraint** and must not
- * name **the value**. `@onyourleft/domain`'s guards do name it (#104), so the
- * three coordinate channels never propagate a `UnitError`'s text — they raise
- * the channel, the sample index and the constraint instead. Every other channel
- * keeps the domain message, because for those the number is the diagnostic.
+ * name **the value**. Since #104 `@onyourleft/domain`'s guards no longer name a
+ * coordinate's value either, so this is now the second of two independent
+ * redactions rather than the only one — and it stays, for three reasons it
+ * covers on its own: `altitude`, which the domain package cannot redact because
+ * it never sees the position the value sits beside; a `UnitError` raised by a
+ * non-coordinate guard reached through a coordinate channel; and the sample
+ * index, which is this layer's alone to add. The three coordinate channels
+ * never propagate a `UnitError`'s text — they raise the channel, the sample
+ * index and the constraint instead. Every other channel keeps the domain
+ * message, because for those the number is the diagnostic.
  */
 function coordinateSafe<T>(
   channel: StreamChannel,

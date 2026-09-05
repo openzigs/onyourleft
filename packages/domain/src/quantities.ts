@@ -256,6 +256,13 @@ export function resistanceLevel(value: number): ResistanceLevel {
 }
 
 // --- Geographic position ----------------------------------------------------
+//
+// ADR 0004 decision D binds the two constructors below and the two in
+// `position.ts`: a message about a coordinate names the field and the
+// constraint and never the value, because the value continues past the `throw`
+// into a log line, a toast or a crash report that the throw site does not
+// control. `unit-error.ts` applies it from the field label. Every other
+// quantity in this file keeps its value, deliberately.
 
 /**
  * A latitude in decimal degrees on WGS 84, north positive.

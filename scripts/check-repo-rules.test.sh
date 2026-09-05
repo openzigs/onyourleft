@@ -68,6 +68,33 @@ assert_violation() {
   cleanup_fixture
 }
 
+# assert_violation_all <name> <expected-rule-id> <expected-substring>...
+#
+# assert_violation with more than one needle, all of which must appear on the
+# SAME reported line. ADR001 needs it: the rule's whole point after #118 is that
+# one finding names both colliding files, and two separate single-needle
+# assertions would also pass against a checker that emitted two findings naming
+# one file each -- which is the behaviour being replaced.
+assert_violation_all() {
+  local name="$1" rule="$2" out status line missing=""
+  shift 2
+  out="$(bash "${CHECKER}" "${fixture_root}" 2>&1)"
+  status=$?
+  line="$(printf '%s' "${out}" | grep "^${rule}: " | head -1)"
+  for needle in "$@"; do
+    printf '%s' "${line}" | grep -qF "${needle}" || missing="${missing} \"${needle}\""
+  done
+  if [ "${status}" -ne 0 ] && [ -n "${line}" ] && [ -z "${missing}" ]; then
+    pass=$((pass + 1))
+    printf 'ok   %s\n' "${name}"
+  else
+    fail=$((fail + 1))
+    printf 'FAIL %s\n     the "%s: " line was missing:%s; got exit %s\n%s\n' \
+      "${name}" "${rule}" "${missing:- (no such line)}" "${status}" "${out}"
+  fi
+  cleanup_fixture
+}
+
 # A minimal well-formed Apache-2.0 leaf package.
 write_good_package() {
   local name="$1"
@@ -180,12 +207,84 @@ new_fixture
 printf '# ADR 0005\n' > "${fixture_root}/docs/adr/0005-tech-stack.md"
 printf '# ADR 0005\n' > "${fixture_root}/docs/adr/0005-local-first-architecture.md"
 assert_violation "two ADRs sharing a number are rejected" ADR001 \
-  "docs/adr/0005-tech-stack.md: ADR number 0005 is already taken"
+  "share ADR number 0005"
 
 new_fixture
 printf '# ADR 0005\n' > "${fixture_root}/docs/adr/0005-tech-stack.md"
 printf '# ADR 0006\n' > "${fixture_root}/docs/adr/0006-fit-codec-licensing.md"
 assert_clean "distinct ADR numbers pass"
+
+# --- ADR001 regressions found in #118 ----------------------------------------
+#
+# The checker iterated `find | sort` and reported whichever of two colliding
+# files sorted SECOND, with a message telling the reader to renumber it. Sort
+# order carries no information about which file is new, so about half the time
+# that named the MERGED ADR -- and told the contributor to renumber the one file
+# that must never be renumbered, since ADRs are cited by number from other ADRs
+# and from docs/architecture.md. The build failed correctly and advised wrongly.
+#
+# Both orderings are asserted, because the old behaviour was right by accident
+# in one of them and a single case cannot tell the two apart.
+
+# The new file's slug sorts BEFORE the merged one -- the case that produced the
+# wrong advice. `find | sort` reports 0002-local-first-architecture.md, which is
+# the merged ADR cited by ADR 0001, ADR 0004 and ADR 0005.
+new_fixture
+printf '# ADR 0002\n' > "${fixture_root}/docs/adr/0002-clean-room-posture.md"
+printf '# ADR 0002\n' > "${fixture_root}/docs/adr/0002-local-first-architecture.md"
+assert_violation_all "a collision names BOTH paths when the new file sorts first" ADR001 \
+  "docs/adr/0002-clean-room-posture.md" \
+  "docs/adr/0002-local-first-architecture.md" \
+  "share ADR number 0002"
+
+# The same collision the other way round, where the old message happened to be
+# correct. It must keep naming both, or the fix is only half applied.
+new_fixture
+printf '# ADR 0002\n' > "${fixture_root}/docs/adr/0002-local-first-architecture.md"
+printf '# ADR 0002\n' > "${fixture_root}/docs/adr/0002-zzz-probe.md"
+assert_violation_all "a collision names BOTH paths when the new file sorts second" ADR001 \
+  "docs/adr/0002-local-first-architecture.md" \
+  "docs/adr/0002-zzz-probe.md" \
+  "share ADR number 0002"
+
+# The checker cannot know which file is new, so it must not imply that it does.
+# Asserted as the ABSENCE of the old instruction plus the presence of the
+# pointer that replaces it: the ownership table is where the answer actually is.
+new_fixture
+printf '# ADR 0002\n' > "${fixture_root}/docs/adr/0002-clean-room-posture.md"
+printf '# ADR 0002\n' > "${fixture_root}/docs/adr/0002-local-first-architecture.md"
+out="$(bash "${CHECKER}" "${fixture_root}" 2>&1)"
+status=$?
+if [ "${status}" -ne 0 ] \
+   && printf '%s' "${out}" | grep -q '^ADR001: ' \
+   && ! printf '%s' "${out}" | grep -qF 'is already taken' \
+   && printf '%s' "${out}" | grep -qF 'docs/architecture.md'; then
+  pass=$((pass + 1))
+  printf 'ok   ADR001 points at the ownership table instead of naming a file to renumber\n'
+else
+  fail=$((fail + 1))
+  printf 'FAIL ADR001 points at the ownership table instead of naming a file to renumber\n     got exit %s\n%s\n' \
+    "${status}" "${out}"
+fi
+cleanup_fixture
+
+# Three files on one number: every collision is reported, not just the first.
+new_fixture
+printf '# ADR 0002\n' > "${fixture_root}/docs/adr/0002-alpha.md"
+printf '# ADR 0002\n' > "${fixture_root}/docs/adr/0002-beta.md"
+printf '# ADR 0002\n' > "${fixture_root}/docs/adr/0002-gamma.md"
+out="$(bash "${CHECKER}" "${fixture_root}" 2>&1)"
+status=$?
+count="$(printf '%s\n' "${out}" | grep -c '^ADR001: ')"
+if [ "${status}" -ne 0 ] && [ "${count}" -eq 2 ]; then
+  pass=$((pass + 1))
+  printf 'ok   three ADRs on one number report two collisions\n'
+else
+  fail=$((fail + 1))
+  printf 'FAIL three ADRs on one number report two collisions\n     expected 2 ADR001 lines, got %s at exit %s\n%s\n' \
+    "${count}" "${status}" "${out}"
+fi
+cleanup_fixture
 
 # --- ADR002: ADR filenames follow NNNN-kebab-case.md -------------------------
 

@@ -6,14 +6,26 @@ that produced them.
 The reasoning lives in the ADRs — this file describes **what** the structure is and **where** each
 line falls. [`docs/adr/0005-tech-stack.md`](adr/0005-tech-stack.md) says why.
 
-> **Status: `apps/web` and `packages/domain` exist**, created by
-> [#23](https://github.com/openzigs/onyourleft/issues/23) with the pnpm workspace, the toolchain, a
-> committed lockfile and the lint-enforced boundaries. The other four packages and `apps/mobile` do
-> not; each is created by the issue that owns its content, using `packages/domain` as the template.
+> **Status: `apps/web`, `packages/domain`, `packages/sensors`, `packages/fit` and `packages/store`
+> exist.** The first two were created by [#23](https://github.com/openzigs/onyourleft/issues/23)
+> with the pnpm workspace, the toolchain, a committed lockfile and the lint-enforced boundaries;
+> `packages/sensors` by [#39](https://github.com/openzigs/onyourleft/issues/39) and
+> [#40](https://github.com/openzigs/onyourleft/issues/40)–[#44](https://github.com/openzigs/onyourleft/issues/44),
+> `packages/fit` by [#107](https://github.com/openzigs/onyourleft/issues/107) and
+> [#30](https://github.com/openzigs/onyourleft/issues/30)–[#32](https://github.com/openzigs/onyourleft/issues/32),
+> and `packages/store` by [#26](https://github.com/openzigs/onyourleft/issues/26)–[#28](https://github.com/openzigs/onyourleft/issues/28)
+> and [#46](https://github.com/openzigs/onyourleft/issues/46). **`packages/physics`
+> ([#88](https://github.com/openzigs/onyourleft/issues/88)) and `apps/mobile`
+> ([#85](https://github.com/openzigs/onyourleft/issues/85)) do not exist yet**; each is created by
+> the issue that owns its content, using `packages/domain` as the template.
 > The layout is fixed here because roughly thirty sub-issues reference it by name, and moving it
 > later means touching most of them. The workspace globs (`apps/*`, `packages/*`) and every rule
 > below are written against these paths already, so a package arrives inside the rules rather than
 > beside them.
+>
+> Reconciled once, after those branches landed, by
+> [#110](https://github.com/openzigs/onyourleft/issues/110) — which exists because three concurrent
+> branches editing this paragraph is two rebases and a conflict.
 
 ## The shape of the product
 

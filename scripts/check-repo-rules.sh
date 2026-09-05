@@ -168,9 +168,25 @@ if [ -d "${ROOT}/.github/workflows" ]; then
 fi
 
 # --- ADR001 / ADR002: ADR numbering and naming --------------------------------
+#
+# ADR001 reports BOTH colliding paths and tells the reader neither of them is
+# the one to renumber. That is not politeness: this loop walks `find | sort`, so
+# the file it reaches second is whichever slug sorts later, which carries no
+# information at all about which file is new. The message it used to print --
+# "<the second one>: ADR number NNNN is already taken; renumber before merging"
+# -- was therefore wrong about half the time, and its wrong half named a MERGED
+# ADR. Those are cited by number from other ADRs and from docs/architecture.md,
+# so renumbering one is precisely the thing the ownership table exists to
+# prevent. Found in #118, from ADR 0009's own mutation test.
+#
+# The pairs are accumulated in a space-delimited string rather than an
+# associative array: this script targets the bash on a bare macOS clone, which
+# is 3.2 and has none. Both fields are safe to pack that way because ADR002 runs
+# FIRST and `continue`s, so anything reaching here matches NNNN-kebab-case.md
+# and can contain neither a space nor a colon.
 
 if [ -d "${ROOT}/docs/adr" ]; then
-  seen_numbers=""
+  seen_pairs=" "
   while IFS= read -r adr; do
     [ -n "${adr}" ] || continue
     base="$(basename "${adr}")"
@@ -179,11 +195,13 @@ if [ -d "${ROOT}/docs/adr" ]; then
       continue
     fi
     number="${base%%-*}"
-    case " ${seen_numbers} " in
-      *" ${number} "*)
-        report ADR001 "docs/adr/${base}: ADR number ${number} is already taken; renumber before merging" ;;
+    case "${seen_pairs}" in
+      *" ${number}:"*)
+        rest="${seen_pairs#* "${number}":}"
+        first="${rest%% *}"
+        report ADR001 "docs/adr/${first} and docs/adr/${base} share ADR number ${number}; the one that is not yet merged must be renumbered -- see the ownership table in docs/architecture.md" ;;
       *)
-        seen_numbers="${seen_numbers} ${number}" ;;
+        seen_pairs="${seen_pairs}${number}:${base} " ;;
     esac
   done < <(find "${ROOT}/docs/adr" -type f -name '*.md' | sort)
 fi

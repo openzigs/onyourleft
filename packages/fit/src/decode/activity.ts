@@ -532,6 +532,23 @@ export function decodeActivity(container: FitContainer): FitDecodeResult {
   for (const message of container.messages) {
     switch (message.globalMessageNumber) {
       case GLOBAL_MESSAGE.fileId:
+        // First one wins, and a second is a fault rather than a replacement.
+        // `file_id` is the file's identity — the manufacturer, serial number
+        // and creation time an importer attributes and deduplicates on — and
+        // the protocol puts it first. Overwriting would let a message near the
+        // end of the file choose that identity, which is a decision a crafted
+        // file should not get to make silently. See `duplicate-file-id`.
+        if (fileId !== undefined) {
+          faults.push(
+            new FitDecodeError(
+              'duplicate-file-id',
+              message.byteOffset,
+              'a second file_id message arrived after the file identity was already read; ' +
+                'the first one is kept and this one is dropped',
+            ),
+          );
+          break;
+        }
         fileId = {
           type: numeric(message, FIELD.fileId.type),
           manufacturer: numeric(message, FIELD.fileId.manufacturer),

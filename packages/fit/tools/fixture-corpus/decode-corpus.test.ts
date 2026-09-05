@@ -45,7 +45,11 @@ import { describe, expect, it } from 'vitest';
 import type { FitDateTime, FitRecord } from '../../src/decode';
 import {
   decodeFitActivity,
+  EVENT_TIMER,
+  EVENT_TYPE_START,
+  EVENT_TYPE_STOP,
   FIELD,
+  FILE_TYPE_ACTIVITY,
   fitCrc16,
   GLOBAL_MESSAGE,
   SPORT_CYCLING,
@@ -54,6 +58,7 @@ import { CORPUS_DIRECTORY } from './corpus-files';
 import { fitCrc16 as generatorCrc16 } from './fit-crc';
 import { ANTIMERIDIAN_TRACK, NULL_ISLAND_TRACK, POINT_NEMO_TRACK } from './fit-fixtures';
 import {
+  ENUM_VALUE as GENERATOR_ENUM_VALUE,
   FIELD as GENERATOR_FIELD,
   GLOBAL_MESSAGE as GENERATOR_GLOBAL_MESSAGE,
 } from './fit-profile';
@@ -623,5 +628,71 @@ describe('the decoder profile and the generator profile were derived independent
     expect(FIELD.developerDataId).toEqual(GENERATOR_FIELD.developerDataId);
     expect(FIELD.fieldDescription).toEqual(GENERATOR_FIELD.fieldDescription);
     expect(FIELD.hr).toEqual(GENERATOR_FIELD.hr);
+  });
+
+  /**
+   * #129 finding 6. `FILE_TYPE_ACTIVITY`, `EVENT_TIMER`, `EVENT_TYPE_START` and
+   * `EVENT_TYPE_STOP` were exported with **zero readers and zero assertions**,
+   * so a wrong value would have propagated into whatever first consumed them
+   * rather than surfacing. `SPORT_CYCLING` was already pinned by
+   * `nominal-outdoor-ride.fit`'s session assertion; these four were not pinned
+   * by anything.
+   *
+   * The generator's `ENUM_VALUE` table is the independent derivation, exactly
+   * as `GLOBAL_MESSAGE` and `FIELD` above.
+   */
+  it('agrees on every enumerated value both tables carry', () => {
+    expect(FILE_TYPE_ACTIVITY).toBe(GENERATOR_ENUM_VALUE.fileTypeActivity);
+    expect(SPORT_CYCLING).toBe(GENERATOR_ENUM_VALUE.sportCycling);
+    expect(EVENT_TIMER).toBe(GENERATOR_ENUM_VALUE.eventTimer);
+    expect(EVENT_TYPE_START).toBe(GENERATOR_ENUM_VALUE.eventTypeStart);
+    expect(EVENT_TYPE_STOP).toBe(GENERATOR_ENUM_VALUE.eventTypeStop);
+  });
+});
+
+/**
+ * The same four constants, read back out of committed bytes — #129 finding 6,
+ * from the *reading* side.
+ *
+ * The agreement test above pins two tables against each other. This one pins
+ * them against a file: the generator wrote `ENUM_VALUE.fileTypeActivity` into
+ * `nominal-outdoor-ride.fit` in 2026, the bytes are committed and CI checks
+ * them out, and the decoder reads that byte back. Changing
+ * `FILE_TYPE_ACTIVITY` now fails against an artefact rather than against
+ * another table that a single edit could move with it.
+ *
+ * This is the shape #129 says this repository's mutation discipline
+ * under-covers: *"values threaded through a data structure for a later
+ * consumer"*. The exported constant **is** the later consumer's ground truth,
+ * so it needs an assertion that a consumer would make.
+ */
+describe('the exported profile enumerations name what the committed corpus holds', () => {
+  const { activity } = decodeFitActivity(fixture('nominal-outdoor-ride.fit'));
+
+  it('reads file_id.type as FILE_TYPE_ACTIVITY', () => {
+    expect(activity.fileId?.type).toBe(FILE_TYPE_ACTIVITY);
+  });
+
+  it('reads session.sport as SPORT_CYCLING', () => {
+    expect(activity.sessions.at(0)?.sport).toBe(SPORT_CYCLING);
+  });
+
+  it('reads the bracketing events as EVENT_TIMER started and stopped', () => {
+    expect(activity.events.map((event) => [event.event, event.eventType])).toEqual([
+      [EVENT_TIMER, EVENT_TYPE_START],
+      [EVENT_TIMER, EVENT_TYPE_STOP],
+    ]);
+  });
+
+  it('reads all four of paused-laps.fit’s timer events through the same constants', () => {
+    // Two start/stop pairs, so `EVENT_TYPE_START` and `EVENT_TYPE_STOP` are
+    // each read twice from a second file rather than once from one.
+    const paused = decodeFitActivity(fixture('paused-laps.fit')).activity;
+    expect(paused.events.map((event) => [event.event, event.eventType])).toEqual([
+      [EVENT_TIMER, EVENT_TYPE_START],
+      [EVENT_TIMER, EVENT_TYPE_STOP],
+      [EVENT_TIMER, EVENT_TYPE_START],
+      [EVENT_TIMER, EVENT_TYPE_STOP],
+    ]);
   });
 });
