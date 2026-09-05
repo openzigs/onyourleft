@@ -23,6 +23,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import type { BluetoothPort } from '@onyourleft/sensors/web-bluetooth';
 
+import { ridingSnapshot, stubRideController } from '../ride/testing';
 import { AppShell } from '../shell/AppShell';
 import { ALL_ROUTES, hrefFor, ROUTES, routeById } from '../shell/routes';
 import type { CapabilityProbe } from '../support/bluetooth-support';
@@ -55,9 +56,23 @@ afterEach(() => {
   globalThis.location.hash = '';
 });
 
+/**
+ * The ride screen, mid-ride.
+ *
+ * The **busiest** state on purpose: recording, a trainer under ERG control, a
+ * stale channel, a paired sensor with a "forget" control and four pairing
+ * buttons. That is where the controls are, and a route audited in its empty
+ * state is a route audited where there is nothing to get wrong. #49's controls
+ * are all reachable from here, so they are all covered by the loops below
+ * without this file naming any of them.
+ */
+function midRide(): Parameters<typeof AppShell>[0]['rideController'] {
+  return stubRideController(ridingSnapshot()).controller;
+}
+
 async function open(path: string, capabilities: CapabilityProbe = CAPABLE): Promise<Mounted> {
   globalThis.location.hash = `#${path}`;
-  const result = await mount(<AppShell capabilities={capabilities} />);
+  const result = await mount(<AppShell capabilities={capabilities} rideController={midRide()} />);
   await settle();
   mounted = result;
   return result;
@@ -87,6 +102,19 @@ describe('criterion 4 — every route passes the automated audit', () => {
     await open('/devices', NO_BLUETOOTH);
     expect(document.body.textContent).toContain('Safari and Firefox');
     expectClean('devices with no Bluetooth');
+  });
+
+  it('the ride route passes with no controller, which is what Safari and Firefox get', async () => {
+    // The other branch of the ride screen: an explanation and a link, and no
+    // control that cannot work. Auditing only the mid-ride state would leave
+    // the branch a quarter of visitors see unchecked, exactly as the
+    // no-Bluetooth devices case above.
+    globalThis.location.hash = '#/';
+    mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} />);
+    await settle();
+
+    expect(document.body.textContent).toContain('cannot pair Bluetooth sensors');
+    expectClean('ride with no controller');
   });
 
   it('the devices route passes while the probe is still in flight', async () => {

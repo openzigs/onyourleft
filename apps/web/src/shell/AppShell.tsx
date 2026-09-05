@@ -43,6 +43,8 @@ import { ActivitiesView } from '../views/ActivitiesView';
 import { DevicesView } from '../views/DevicesView';
 import { NotFoundView } from '../views/NotFoundView';
 import { RideView } from '../views/RideView';
+import { RideSession } from '../ride/RideSession';
+import type { RideController } from '../ride/controller';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 
 import { hrefFor, ROUTES, type RouteDefinition } from './routes';
@@ -64,12 +66,27 @@ export interface AppShellProps {
    * one caller that reads the real browser.
    */
   readonly capabilities: CapabilityProbe;
+  /**
+   * The live ride screen's state machine (#49), built by `main.tsx` from the
+   * transport and the store.
+   *
+   * Passed in rather than built here for the same reason `capabilities` is: the
+   * shell is rendered by the accessibility suite on a machine with no Bluetooth
+   * adapter and no IndexedDB worth the name, and a component that constructed
+   * its own transport could not be. `undefined` renders the honest
+   * cannot-pair-here screen, which is also what Safari and Firefox get.
+   */
+  readonly rideController?: RideController | undefined;
 }
 
-function viewFor(route: RouteDefinition, capabilities: CapabilityProbe): JSX.Element {
+function viewFor(
+  route: RouteDefinition,
+  capabilities: CapabilityProbe,
+  rideController: RideController | undefined,
+): JSX.Element {
   switch (route.id) {
     case 'ride':
-      return <RideView />;
+      return <RideView controller={rideController} />;
     case 'activities':
       return <ActivitiesView />;
     case 'devices':
@@ -81,7 +98,7 @@ function viewFor(route: RouteDefinition, capabilities: CapabilityProbe): JSX.Ele
   }
 }
 
-export function AppShell({ capabilities }: AppShellProps): JSX.Element {
+export function AppShell({ capabilities, rideController }: AppShellProps): JSX.Element {
   const route = useRoute();
   const mainRef = useRef<HTMLElement>(null);
   const previousRouteId = useRef<string | null>(null);
@@ -107,6 +124,15 @@ export function AppShell({ capabilities }: AppShellProps): JSX.Element {
 
   return (
     <div className="oyl-shell">
+      {/*
+        Outside `main`, and deliberately: a recording belongs to the app and not
+        to whichever page is on screen. Mounted inside `viewFor` — as it was
+        until #49's review — a route change unmounts the ride's clock and its
+        unload guard, which stops the recorder checkpointing and lets the tab
+        close without asking. It renders nothing. See `ride/RideSession.tsx`.
+      */}
+      {rideController === undefined ? null : <RideSession controller={rideController} />}
+
       <a className="oyl-skip-link" href={`#${MAIN_ID}`} onClick={skipToContent}>
         Skip to main content
       </a>
@@ -142,7 +168,7 @@ export function AppShell({ capabilities }: AppShellProps): JSX.Element {
       >
         <h1 id={VIEW_TITLE_ID}>{route.title}</h1>
         <p className="oyl-muted">{route.summary}</p>
-        {viewFor(route, capabilities)}
+        {viewFor(route, capabilities, rideController)}
       </main>
 
       <footer className="oyl-footer">

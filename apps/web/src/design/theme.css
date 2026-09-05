@@ -52,6 +52,8 @@
   --oyl-font-size-md: 1rem;
   --oyl-font-size-lg: 1.25rem;
   --oyl-font-size-xl: 1.75rem;
+  /* A live ride metric. See tokens.ts — this one has an acceptance criterion. */
+  --oyl-font-size-metric: 4rem;
 
   --oyl-radius: 0.375rem;
   --oyl-measure: 68ch;
@@ -286,6 +288,96 @@ body {
   border: 1px solid var(--oyl-color-border);
   padding: var(--oyl-space-xs) var(--oyl-space-sm);
   text-align: left;
+}
+
+/* --- The live ride screen (#49) ------------------------------------------- */
+
+/*
+ * Four numbers, side by side while there is room and stacked when there is not.
+ * `auto-fit` rather than a media query: the breakpoint is then the width at
+ * which a metric stops fitting, which is the only thing the layout is actually
+ * about.
+ */
+.oyl-metric-grid {
+  display: grid;
+  gap: var(--oyl-space-md);
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  list-style: none;
+  margin: var(--oyl-space-lg) 0;
+  padding: 0;
+}
+
+.oyl-metric {
+  background: var(--oyl-color-surface);
+  border: 1px solid var(--oyl-color-border);
+  border-radius: var(--oyl-radius);
+  padding: var(--oyl-space-md);
+}
+
+.oyl-metric__label {
+  color: var(--oyl-color-ink-muted);
+  display: block;
+  font-size: var(--oyl-font-size-sm);
+  text-transform: uppercase;
+}
+
+.oyl-metric__value {
+  display: block;
+  font-size: var(--oyl-font-size-metric);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.oyl-metric__note {
+  color: var(--oyl-color-ink-muted);
+  display: block;
+  font-size: var(--oyl-font-size-sm);
+}
+
+/*
+ * A channel with nothing to say is drawn in the muted ink as well as reading
+ * "unavailable". Colour is never the only carrier — the note beside it says the
+ * same thing in words, which is what survives greyscale and a screen reader.
+ */
+.oyl-metric--stale .oyl-metric__value,
+.oyl-metric--unpaired .oyl-metric__value,
+.oyl-metric--waiting .oyl-metric__value {
+  color: var(--oyl-color-ink-muted);
+}
+
+.oyl-ride__clock {
+  font-size: var(--oyl-font-size-lg);
+  font-variant-numeric: tabular-nums;
+}
+
+.oyl-trainer__state {
+  font-size: var(--oyl-font-size-lg);
+}
+
+.oyl-trainer__form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oyl-space-sm);
+  align-items: center;
+}
+
+.oyl-input {
+  background: var(--oyl-color-canvas);
+  border: 1px solid var(--oyl-color-border);
+  border-radius: var(--oyl-radius);
+  color: var(--oyl-color-ink);
+  font-size: var(--oyl-font-size-lg);
+  padding: var(--oyl-space-sm);
+  width: 8rem;
+}
+
+.oyl-sensor-list,
+.oyl-pairing-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oyl-space-sm);
+  list-style: none;
+  padding: 0;
 }
 
 /*
