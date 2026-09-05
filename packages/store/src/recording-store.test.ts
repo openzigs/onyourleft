@@ -696,6 +696,16 @@ describe('listing what can be recovered', () => {
 });
 
 describe('what the checkpoints cost', () => {
+  // ⚠️ An explicit timeout, because this case has a real time budget and
+  // Vitest's default 5 s was never one. It writes 2,880 chunk rows through
+  // fake-indexeddb — around 0.7 s on a developer's machine, and several times
+  // that on a two-core shared runner. It went red for the first time in #48,
+  // which added twelve jsdom test environments to the workspace and roughly
+  // doubled the suite's wall time; nothing about this test or the code it
+  // measures changed. Raising it rather than shrinking the ride keeps the
+  // assertions below exact, which is the whole point of them. 30 s is still a
+  // stop on a hang: a genuine regression here would be orders of magnitude,
+  // not a factor of two.
   it('measures a four-hour, 1 Hz, eight-channel recording and records the headroom', async () => {
     const ride = await seedRide(harness, ATHLETE_A, { hasPosition: true });
     const set = streamSetFor(ride, { gaps: [DROPPED_STRAP] });
@@ -729,7 +739,7 @@ describe('what the checkpoints cost', () => {
     expect(footprint?.encodedBytes).toBe(17 * FOUR_HOUR_SAMPLE_COUNT + 6);
     // 239.07 KiB — under a quarter of a mebibyte for a four-hour ride.
     expect((footprint?.encodedBytes ?? 0) / 1024).toBeCloseTo(239.07, 2);
-  });
+  }, 30_000);
 
   it('counts nothing for a recording with no chunks yet', async () => {
     const recording = await seedRecording(harness, ATHLETE_A);
