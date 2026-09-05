@@ -22,7 +22,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import type { FitContainer, FitDecodeResult, FitMessage } from '../../src';
-import { decodeFitActivity, FitDecodeError, readFitContainer } from '../../src';
+import { ActivityXmlError, decodeFitActivity, FitDecodeError, readFitContainer } from '../../src';
 import { CORPUS_DIRECTORY } from '../fixture-corpus/corpus-files';
 import type { FuzzBudget } from './cases';
 import { describeCase, fuzzCases, repairFitChecksums } from './cases';
@@ -199,6 +199,29 @@ describe('assertTypedFailure', () => {
         reproduction,
       );
     }).toThrow(FuzzFailure);
+  });
+
+  it('accepts a different error type when the caller names one', () => {
+    // The GPX/TCX arm passes `ActivityXmlError`. Without this case the widened
+    // parameter is untested, and an arm that names the wrong constructor would
+    // silently accept every failure -- which is how the inline copy this
+    // replaced managed to be green with two parser guards removed.
+    expect(() =>
+      assertTypedFailure(
+        new ActivityXmlError('malformed-markup', 0, 'a fixture'),
+        'r',
+        ActivityXmlError,
+      ),
+    ).not.toThrow();
+  });
+
+  it('rejects a FitDecodeError when the caller asked for an XML one', () => {
+    // The direction that matters. If `expected` were ignored and the check fell
+    // back to FitDecodeError, this would pass and the XML arm would be accepting
+    // FIT errors as though they were its own.
+    expect(() =>
+      assertTypedFailure(new FitDecodeError('bad-file-crc', 0, 'a fixture'), 'r', ActivityXmlError),
+    ).toThrow(FuzzFailure);
   });
 
   it('rejects a TypeError and a thrown non-Error', () => {

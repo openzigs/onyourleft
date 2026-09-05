@@ -209,7 +209,7 @@ export function fuzzCases(
 
     if (budget.byteSweep) {
       for (let offset = 0; offset < file.bytes.length; offset += 1) {
-        for (const value of [(file.bytes[offset] ?? 0) | 0x80, 0xff]) {
+        for (const value of [(file.bytes[offset] ?? 0) ^ 0x80, 0xff]) {
           const mutated = setByte(file.bytes, offset, value);
           push(
             'byte-sweep',

@@ -57,7 +57,6 @@ import {
 import { CORPUS_DIRECTORY } from '../fixture-corpus/corpus-files';
 import type { FuzzBudget, FuzzCase, FuzzSeedFile } from './cases';
 import { describeCase, fuzzCases } from './cases';
-import { FuzzFailure } from './invariants';
 import {
   assertMessagesInsideTheDataSection,
   assertOutputBoundedByInput,
@@ -159,14 +158,11 @@ function runXmlCase(fuzzCase: FuzzCase, seed: number, decode: (text: string) => 
   try {
     decode(text);
   } catch (error) {
-    if (error instanceof ActivityXmlError) return;
-    const described =
-      error instanceof Error ? `${error.name}: ${error.message}` : `a non-Error ${typeof error}`;
-    throw new FuzzFailure(
-      `decoding threw ${described}, which is not an ActivityXmlError`,
-      reproduction,
-      error,
-    );
+    // The shared, self-tested helper -- not a second copy. This arm carried its
+    // own inline version until #146, and because `harness.test.ts` only ever
+    // exercised the shared one, nothing proved this arm could fail. It could
+    // not: two real guards were removed from the parser and it stayed green.
+    assertTypedFailure(error, reproduction, ActivityXmlError);
   }
 }
 

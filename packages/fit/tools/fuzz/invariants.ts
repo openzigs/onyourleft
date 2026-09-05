@@ -52,12 +52,23 @@ export class FuzzFailure extends Error {
  * undefined read, a bare `Error` — is a decoder that has left its own contract,
  * and is what `SECURITY.md` means by *"malformed input must produce an error"*.
  */
-export function assertTypedFailure(error: unknown, reproduction: string): void {
-  if (error instanceof FitDecodeError) return;
+export function assertTypedFailure(
+  error: unknown,
+  reproduction: string,
+  expected: { new (...args: never[]): Error; readonly name: string } = FitDecodeError,
+): void {
+  // The expected type is a parameter, and defaults to `FitDecodeError`, because
+  // the GPX/TCX arm needs `ActivityXmlError` and used to re-implement this
+  // function inline to get it. That copy was never covered by `harness.test.ts`
+  // -- so the XML arm could not go red, and the #146 review proved it: removing
+  // the element-nesting-depth guard from `src/xml/parse.ts` left the fuzz suite
+  // at 8 passed of 8. A harness with nothing proving it catches a failure is
+  // the exact thing #128 exists to stop, and it had it in half its own body.
+  if (error instanceof expected) return;
   const described =
     error instanceof Error ? `${error.name}: ${error.message}` : `a non-Error ${typeof error}`;
   throw new FuzzFailure(
-    `decoding threw ${described}, which is not a FitDecodeError`,
+    `decoding threw ${described}, which is not a ${expected.name}`,
     reproduction,
     error,
   );
