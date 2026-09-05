@@ -76,6 +76,18 @@ const COORDINATE_LABEL = /\b(?:latitude|longitude)\b/;
  * #104 names, because a guard that redacts on one branch and echoes on the
  * others is one edit away from echoing on all of them. The bounds of the
  * constraint are not the caller's value and may still appear.
+ *
+ * ⚠️ **This covers the shared guards, and only those.** A constructor that
+ * builds its own message inline bypasses it entirely — `degreesCelsius` and
+ * `kilograms` already do, legitimately, because their values are not
+ * coordinates. So "a coordinate added later inherits the rule" is true of the
+ * guards and NOT of the style those two established, and the #144 review was
+ * right to say so.
+ *
+ * `coordinate-redaction.test.ts` is what makes the guarantee real rather than
+ * conventional: it enumerates the package's own exports for a name carrying
+ * `latitude` or `longitude` and fails if any of them names a rejected value.
+ * A future coordinate written in the inline style is caught there, not here.
  */
 function received(value: number, what: string): string {
   return COORDINATE_LABEL.test(what) ? '' : `, received ${show(value)}`;
