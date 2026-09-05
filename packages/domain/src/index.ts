@@ -134,3 +134,43 @@ export {
 // ordering of the old signature typechecked (#103). The two brands are what
 // stop a tick rate being written into a counter reading's field.
 export type { EventTickRate, EventTicks, EventTimeReading } from './time';
+
+// --- Recording: the session state machine and the stream merge (#45) --------
+//
+// Generic over a channel map rather than naming the eight stream channels,
+// because this package cannot import the two places those are already spelled
+// out — `@onyourleft/store` and `@onyourleft/sensors` both depend on it.
+// `recording/channels.ts` records the reasoning; `apps/web` is the composition
+// root that instantiates it.
+
+export type {
+  ChannelOf,
+  ChannelReading,
+  PauseReason,
+  RecordedChannels,
+  RecordedPause,
+  RecordedSamples,
+  RecordedSeries,
+  RecordedSlice,
+  RecordingChannelMap,
+} from './recording/channels';
+export { seriesTimestamps } from './recording/channels';
+
+export type { RecordingErrorCode } from './recording/errors';
+export { RecordingError } from './recording/errors';
+
+export type {
+  AutoPausePolicy,
+  RecordingOutcome,
+  RecordingSession,
+  RecordingSessionOptions,
+  RecordingSnapshot,
+  RecordingState,
+} from './recording/session';
+export {
+  createRecordingSession,
+  DEFAULT_FUTURE_TOLERANCE_SECONDS,
+  DEFAULT_LATE_TOLERANCE_SECONDS,
+  DEFAULT_MAX_SAMPLE_COUNT,
+  restoreRecordingSession,
+} from './recording/session';

@@ -30,7 +30,8 @@
  * (the comparison is against what came back).
  */
 
-import type { StreamChannel, StreamSet } from '../streams';
+import type { RecoveredRecording } from '../recording';
+import type { StreamChannel, StreamChannels, StreamSet } from '../streams';
 import { STREAM_CHANNELS, type NewStreamSet } from '../streams';
 
 import type { StoreHarness } from './harness';
@@ -175,4 +176,68 @@ function requireEqual(field: string, expected: unknown, actual: unknown): void {
       `${field}: wrote ${String(expected)} and read back ${String(actual)}`,
     );
   }
+}
+
+/**
+ * What a recording is expected to look like once recovered.
+ *
+ * Deliberately **not** the recording the caller wrote chunk by chunk. A crash
+ * test's whole subject is the difference between what was offered and what
+ * survived, so the expectation is stated as the assembled series a fresh
+ * connection should be able to produce — which is the thing a rider gets back.
+ */
+export interface ExpectedRecording {
+  readonly sampleCount: number;
+  readonly channels: StreamChannels;
+}
+
+/**
+ * Discards every connection, reads a recording back through the public
+ * recovery path, and asserts it is the series expected.
+ *
+ * The write half is the caller's, because a recording is written by many calls
+ * over time and a crash test needs to choose where the crash lands. What this
+ * supplies is the half that must not be hand-rolled: the fresh connection, and
+ * a sample-by-sample comparison that distinguishes a gap from a zero.
+ *
+ * @returns what came back, so a caller can make further assertions about it.
+ * @throws {RoundTripFailure}
+ */
+export async function assertRecordingRecovers(
+  harness: StoreHarness,
+  owner: RecoveredRecording['athleteId'],
+  id: RecoveredRecording['id'],
+  expected: ExpectedRecording,
+): Promise<RecoveredRecording> {
+  const read = await harness.read(async (store) => store.recoverRecording(owner, id));
+
+  if (read === undefined) {
+    throw new RoundTripFailure(
+      `recording ${id} was checkpointed and reported success, and a fresh connection cannot ` +
+        `see it`,
+    );
+  }
+  if (read.sampleCount !== expected.sampleCount) {
+    throw new RoundTripFailure(
+      `recording ${id}: expected ${String(expected.sampleCount)} samples to survive and ` +
+        `${String(read.sampleCount)} did`,
+    );
+  }
+  for (const channel of STREAM_CHANNELS) {
+    const before = expected.channels[channel];
+    const after = read.channels[channel];
+    if (before === undefined && after === undefined) {
+      continue;
+    }
+    if (before === undefined) {
+      throw new RoundTripFailure(
+        `channel ${channel} was not recorded and came back with ${String(after?.length)} samples`,
+      );
+    }
+    if (after === undefined) {
+      throw new RoundTripFailure(`channel ${channel} was recorded and did not come back at all`);
+    }
+    assertSameSamples(channel, before, after);
+  }
+  return read;
 }

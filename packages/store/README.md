@@ -19,6 +19,8 @@ erDiagram
     ACTIVITY ||--o{ LAP : contains
     ACTIVITY ||--o| STREAM_SET : "has at most one"
     STREAM_SET ||--o{ STREAM_BLOB : "one row per channel"
+    ATHLETE ||--o{ RECORDING_SESSION : "is recording"
+    RECORDING_SESSION ||--o{ RECORDING_CHUNK : "one row per flush"
 
     ATHLETE {
         string  id           PK "opaque; #61 keys it to the device keypair"
@@ -80,11 +82,29 @@ erDiagram
         bytes   values          "packed, little-endian, compressed"
         bytes   present         "optional presence bitmap; absent when dense"
     }
+    RECORDING_SESSION {
+        string  id                    PK
+        string  athleteId             FK "the scoping column"
+        number  startedAt                "UnixSeconds — the instant of sample 0"
+        number  sampleIntervalSeconds    "Seconds; 1 for the 1 Hz case"
+        string  state                    "recording | paused | stopped"
+        number  updatedAt                "UnixSeconds — what the recovery list orders by"
+        string  pauses                   "the intervals that keep a pause apart from a dropout"
+    }
+    RECORDING_CHUNK {
+        string  sessionId    PK "with seq: the compound primary key"
+        number  seq          PK "append order, from zero"
+        string  athleteId    FK "denormalised: the scoping column"
+        number  fromIndex       "this window's first slot in the whole recording"
+        number  sampleCount
+        string  channels        "packed bytes per channel; NOT compressed"
+    }
 ```
 
 Version 1 (#26) is the first four object stores. **Version 2 (#27) adds `streamSets` and
-`streamBlobs` and changes no existing record's shape**, which is why `SCHEMA_MIGRATIONS` is still
-empty — see *Migrations* below.
+`streamBlobs`**, and **version 3 (#46) adds `recordingSessions` and `recordingChunks`**. Neither
+later version changes an existing record's shape, which is why `SCHEMA_MIGRATIONS` is still empty —
+see *Migrations* below.
 
 `FK` in that diagram is a description, not a mechanism: **IndexedDB has no foreign keys**. Both
 edges are enforced by code in `activity-store.ts`, and both are tested.
@@ -112,6 +132,10 @@ quantity, and a UTC offset cannot be `Seconds`, which is non-negative by constru
 | `[athleteId+activityId]` on `streamSets` | `getStreamSet`, `getStreamSetSummary` |
 | `[athleteId+activityId+channel]` on `streamBlobs` | `getStreamSet`'s blob fetch and `getStreamChannel`'s single-channel one |
 | `athleteId` on `streamSets`, `activityId`/`athleteId` on `streamBlobs` | the cascades |
+| `[athleteId+id]` on `recordingSessions` | `getRecordingSession` — the athlete-scoped point lookup |
+| `[athleteId+updatedAt]` on `recordingSessions` | `listRecordingSessions`, newest checkpoint first |
+| `[athleteId+sessionId+seq]` on `recordingChunks` | `recoverRecording` and `getRecordingFootprint`, walking the append order |
+| `athleteId` on `recordingSessions`, `sessionId`/`athleteId` on `recordingChunks` | the cascades |
 
 Every activity and lap index leads with `athleteId`. That is not for speed: it means there is no
 index that answers "the record with this id" without also being told whose it is, so the
@@ -124,8 +148,12 @@ IndexedDB has no `EXPLAIN`, so "this query uses an index" is asserted one level 
 
 | Deleting | Also deletes |
 |---|---|
-| an athlete | their activities, those activities' laps, their privacy zones, their stream sets and blobs |
+| an athlete | their activities, those activities' laps, their privacy zones, their stream sets and blobs, **and their recordings in progress with every chunk** |
 | an activity | that activity's laps, its stream set and its blobs |
+
+A half-recorded ride is a GPS trace like any other, so erasure that left it behind would leave the
+athlete's route on the device under a row no scoped read can reach. That is the orphan-as-privacy-
+liability case, and it is why the recording cascade is not optional.
 
 Each cascade runs in one Dexie read-write transaction across every affected store. The reasoning,
 including what cascade costs, is at the top of `activity-store.ts`.
@@ -199,6 +227,44 @@ const power   = await store.getStreamChannel(owner, activityId, 'power');  // on
 const summary = await store.getStreamSetSummary(owner, activityId); // no samples decoded
 ```
 
+## Recording checkpoints — #46
+
+A **recording in progress** is stored differently from a finished ride, and the difference is the
+whole of #46's guarantee.
+
+| | `streamSets` + `streamBlobs` (#27) | `recordingSessions` + `recordingChunks` (#46) |
+|---|---|---|
+| Written | once, when the ride is saved | every few seconds, while it is being ridden |
+| Shape | whole set, replaced | contiguous windows, appended |
+| Compressed | yes, `deflate-raw` | **no** — packed only |
+| Lifetime | the athlete's history | until the ride is finalised or discarded |
+
+**Append-only is what makes a crash survivable.** A chunk covers `[fromIndex, fromIndex +
+sampleCount)` and is never revisited, and an IndexedDB transaction either commits or does not — so a
+crash mid-write leaves the chunk absent, never half-written, and the chunks before it are still a
+correct prefix of the ride.
+
+`recoverRecording` therefore reads the **contiguous prefix** and stops at the first hole, counting
+what it skipped in `chunksAfterGap`. Rows either side of a lost flush are both real, and joining
+them would shift every later sample onto the wrong second while producing an array of exactly the
+length a caller expects — the right shape and the wrong ride.
+
+**Chunks are deliberately not compressed.** Deflate earns its place on a finished set (239 KB to
+about 53 KB) and not on a five-sample chunk: it would emit more bytes than it saved,
+`CompressionStream` is asynchronous so it would put a suspension point in the one path that must
+complete before the tab dies, and a chunk lives for minutes. The bytes are still packed by
+`stream-codec.ts`, gaps included as a presence bitmap — a recovery that filled its gaps would return
+a ride that reads as complete and is not.
+
+**Measured**, by `recording-store.test.ts` and asserted exactly there: a four-hour, 1 Hz,
+eight-channel recording occupies **244,806 bytes — 239.07 KiB** of packed samples across 2,880
+chunk rows. 17 bytes per sample, plus one presence-bitmap byte per chunk that carries a gap. Against
+the 1 GiB an origin can conservatively rely on, that is headroom for roughly four thousand
+simultaneous four-hour checkpoints, and a checkpoint is transient.
+
+The flush cadence, and the data-loss bound that follows from it, belong to the client:
+`apps/web/src/recording/recorder.ts`.
+
 ## The round-trip harness — #28
 
 `@onyourleft/store/testing`. The primitive is **write through the public path → close every
@@ -216,11 +282,12 @@ await assertStreamSetRoundTrip(harness, streamSetFor(ride));
 await harness.destroy();
 ```
 
-It is **proved by deliberately breaking persistence**: `fakes.ts` holds three broken repositories —
+It is **proved by deliberately breaking persistence**: `fakes.ts` holds four broken repositories —
 one that writes to memory, one that commits to the real database under a key the reader does not
-use, and one that fills every gap with a zero — and `harness.test.ts` runs the *same* assertion body
-against all three and requires each to go red. Adding a write path to `ActivityStore` fails to
-compile until `fakes.ts` accounts for it.
+use, one that fills every gap with a zero, and one whose every second flush is acknowledged and
+never written — and `harness.test.ts` runs the *same* assertion body against each and requires it to
+go red. Adding a write path to `ActivityStore` fails to compile until `fakes.ts` accounts for it,
+which is how the fourth fake arrived with #46's checkpoint write.
 
 `CLAUDE.md` section 5 documents it for the issues that will consume it.
 

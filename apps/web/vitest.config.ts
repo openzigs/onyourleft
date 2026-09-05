@@ -12,6 +12,12 @@ export default defineConfig({
     // dependency that buys nothing. #48 adds one when there is interaction to
     // test.
     environment: 'node',
+    // `fake-indexeddb/auto` for the same reason `packages/store` uses it: the
+    // recorder's tests need **IndexedDB**, not a DOM. It installs `indexedDB`
+    // and the `IDB*` constructors on `globalThis` and nothing else, so an
+    // accidental `document` reference in a recorder still fails rather than
+    // being hidden behind a working global.
+    setupFiles: ['fake-indexeddb/auto'],
     include: ['src/**/*.test.{ts,tsx}'],
   },
 });

@@ -39,8 +39,15 @@ export { DEFAULT_PRIVACY_ZONE_RADIUS_METRES } from './records';
 
 // --- Identifiers ------------------------------------------------------------
 
-export type { ActivityId, AthleteId, EntityId, LapId, PrivacyZoneId } from './ids';
-export { activityId, athleteId, lapId, privacyZoneId } from './ids';
+export type {
+  ActivityId,
+  AthleteId,
+  EntityId,
+  LapId,
+  PrivacyZoneId,
+  RecordingSessionId,
+} from './ids';
+export { activityId, athleteId, lapId, privacyZoneId, recordingSessionId } from './ids';
 
 // --- Visibility (ADR 0004 decision A) ---------------------------------------
 
@@ -66,6 +73,7 @@ export {
   SCHEMA_VERSIONS,
   STORES_V1,
   STORES_V2,
+  STORES_V3,
   TABLE,
 } from './schema';
 export type { AnyRecordMigration, RecordMigration } from './migrations';
@@ -89,6 +97,19 @@ export {
   STREAM_CHANNELS,
 } from './streams';
 
+// --- Recording checkpoints (#46) --------------------------------------------
+
+export type {
+  NewRecordingChunk,
+  NewRecordingSession,
+  RecordingChunkRecord,
+  RecordingFootprint,
+  RecordingSessionRecord,
+  RecordingStoredState,
+  RecoveredRecording,
+} from './recording';
+export { RECORDING_STORED_STATES } from './recording';
+
 export type { ChannelEncoding, EncodedChannel } from './stream-codec';
 export { channelBytesPerSample, decodeChannel, encodeChannel } from './stream-codec';
 
@@ -106,6 +127,17 @@ export type {
   PersistedLap,
   PersistedPrivacyZone,
 } from './persisted';
+export type {
+  PersistedRecordingChannel,
+  PersistedRecordingChunk,
+  PersistedRecordingPause,
+  PersistedRecordingSession,
+} from './recording-persisted';
+export {
+  fromPersistedRecordingSession,
+  parseRecordingState,
+  toPersistedRecordingSession,
+} from './recording-persisted';
 export type { PersistedStreamBlob, PersistedStreamSet } from './stream-persisted';
 export { fromPersistedStreamSet, parseStreamChannel } from './stream-persisted';
 export {

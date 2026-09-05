@@ -305,7 +305,13 @@ describe('on-delete behaviour — cascade, chosen explicitly', () => {
     await store.putLap(lap(ride, 1));
 
     const counts = await store.deleteAthlete(ATHLETE_A);
-    expect(counts).toEqual({ activities: 1, laps: 2, privacyZones: 0, streamSets: 0 });
+    expect(counts).toEqual({
+      activities: 1,
+      laps: 2,
+      privacyZones: 0,
+      streamSets: 0,
+      recordings: 0,
+    });
 
     // Re-create the athlete before reading. If the cascade had left the rows
     // behind, the scoped reads below would find them again — which is the
@@ -356,6 +362,7 @@ describe('on-delete behaviour — cascade, chosen explicitly', () => {
       laps: 0,
       privacyZones: 0,
       streamSets: 0,
+      recordings: 0,
     });
   });
 

@@ -62,7 +62,7 @@ import {
   StoreValidationError,
   StoreVersionError,
 } from './errors';
-import type { ActivityId, AthleteId, LapId, PrivacyZoneId } from './ids';
+import type { ActivityId, AthleteId, LapId, PrivacyZoneId, RecordingSessionId } from './ids';
 import {
   fromPersistedActivity,
   fromPersistedAthlete,
@@ -86,6 +86,23 @@ import type {
   NewLap,
   PrivacyZoneRecord,
 } from './records';
+import type {
+  NewRecordingChunk,
+  NewRecordingSession,
+  RecordingFootprint,
+  RecordingSessionRecord,
+  RecoveredRecording,
+} from './recording';
+import {
+  chunkChannelEncoding,
+  decodedChunkChannels,
+  fromPersistedRecordingSession,
+  persistedChunkBytes,
+  toPersistedRecordingSession,
+  type PersistedRecordingChannel,
+  type PersistedRecordingChunk,
+  type PersistedRecordingSession,
+} from './recording-persisted';
 import {
   DEXIE_IDB_VERSION_MULTIPLIER,
   INDEX,
@@ -149,6 +166,12 @@ export interface AthleteDeletionCounts {
    * number #62's confirmation dialogue has to say out loud.
    */
   readonly streamSets: number;
+  /**
+   * Recordings in progress removed, chunks not counted — for `streamSets`'
+   * reason. A ride that was being recorded when erasure ran is erased with the
+   * rest; it is the athlete's data and it holds a GPS trace.
+   */
+  readonly recordings: number;
 }
 
 /**
@@ -256,6 +279,14 @@ export class ActivityStore {
     return this.#db.table<PersistedStreamBlob, [string, string]>(TABLE.streamBlobs);
   }
 
+  get #recordingSessions(): Table<PersistedRecordingSession, string> {
+    return this.#db.table<PersistedRecordingSession, string>(TABLE.recordingSessions);
+  }
+
+  get #recordingChunks(): Table<PersistedRecordingChunk, [string, number]> {
+    return this.#db.table<PersistedRecordingChunk, [string, number]>(TABLE.recordingChunks);
+  }
+
   // --- Athletes -------------------------------------------------------------
 
   async putAthlete(record: AthleteRecord): Promise<AthleteId> {
@@ -286,11 +317,22 @@ export class ActivityStore {
         this.#privacyZones,
         this.#streamSets,
         this.#streamBlobs,
+        this.#recordingSessions,
+        this.#recordingChunks,
       ],
       async () => {
         await this.#streamBlobs.where(INDEX.streamBlobByAthlete).equals(id).delete();
         const streamSets = await this.#streamSets
           .where(INDEX.streamSetByAthlete)
+          .equals(id)
+          .delete();
+        // A half-recorded ride is a GPS trace like any other. Erasure that left
+        // it behind would leave the athlete's route on the device under a row
+        // no scoped read can reach — the orphan-as-privacy-liability case the
+        // note at the top of this file argues cascade for.
+        await this.#recordingChunks.where(INDEX.recordingChunkByAthlete).equals(id).delete();
+        const recordings = await this.#recordingSessions
+          .where(INDEX.recordingSessionByAthlete)
           .equals(id)
           .delete();
         const laps = await this.#laps.where(INDEX.lapByAthlete).equals(id).delete();
@@ -303,7 +345,7 @@ export class ActivityStore {
           .equals(id)
           .delete();
         await this.#athletes.delete(id);
-        return { activities, laps, privacyZones, streamSets };
+        return { activities, laps, privacyZones, streamSets, recordings };
       },
     );
   }
@@ -707,6 +749,241 @@ export class ActivityStore {
     });
   }
 
+  // --- Recording checkpoints (#46) ------------------------------------------
+
+  /**
+   * Inserts or replaces a recording's header row.
+   *
+   * Written once when the recording starts and rewritten on every checkpoint,
+   * because `state`, `updatedAt` and `pauses` all move. The chunks are the
+   * expensive part and they are appended, never rewritten — see `recording.ts`.
+   *
+   * @throws {StoreReferentialError} if `record.athleteId` names no athlete, or
+   * if a recording with this id already belongs to a different athlete.
+   * @throws {StoreValidationError} if the sample interval is not positive.
+   */
+  async putRecordingSession(record: NewRecordingSession): Promise<RecordingSessionId> {
+    if (!Number.isFinite(record.sampleInterval) || record.sampleInterval <= 0) {
+      throw new StoreValidationError(
+        `recording sampleInterval must be greater than zero, received ` +
+          `${String(record.sampleInterval)}`,
+      );
+    }
+    const row = toPersistedRecordingSession(record);
+    await this.#db.transaction('rw', [this.#athletes, this.#recordingSessions], async () => {
+      await this.#requireAthlete(record.athleteId);
+      this.#requireNotOwnedByAnother(
+        await this.#recordingSessions.get(record.id),
+        record.athleteId,
+        `recording session ${record.id}`,
+      );
+      await this.#recordingSessions.put(row);
+    });
+    return record.id;
+  }
+
+  /** The athlete-scoped point lookup. There is deliberately no unscoped one. */
+  async getRecordingSession(
+    owner: AthleteId,
+    id: RecordingSessionId,
+  ): Promise<RecordingSessionRecord | undefined> {
+    const row = await this.#recordingSessions
+      .where(INDEX.recordingSessionByAthleteAndId)
+      .equals([owner, id])
+      .first();
+    return row === undefined ? undefined : fromPersistedRecordingSession(row);
+  }
+
+  /**
+   * Every recording this athlete has on the device, most recently checkpointed
+   * first.
+   *
+   * This is what a client reads on start-up to answer "was a ride interrupted".
+   * Headers only — never a chunk — for the reason `listActivitySummaries` never
+   * reads a stream blob: deciding whether to *offer* a recovery must not cost
+   * the price of performing one.
+   */
+  async listRecordingSessions(owner: AthleteId): Promise<RecordingSessionRecord[]> {
+    const rows = await this.#recordingSessions
+      .where(INDEX.recordingSessionByAthleteAndUpdatedAt)
+      .between([owner, Dexie.minKey], [owner, Dexie.maxKey], true, true)
+      .reverse()
+      .toArray();
+    return rows.map(fromPersistedRecordingSession);
+  }
+
+  /**
+   * Appends one flush.
+   *
+   * The whole point of #46 lives in this method's cost: it must be cheap enough
+   * to run every few seconds for four hours, because the gap between two of its
+   * calls **is** the data-loss bound. So it encodes (packs, does not compress —
+   * see `recording.ts`) outside the transaction and writes a single row inside
+   * one, and it never reads or rewrites a chunk already on disk.
+   *
+   * `put` rather than `add`, so retrying a flush whose outcome is unknown
+   * replaces the row instead of failing on a duplicate key. A recorder that
+   * could not safely retry would have to choose between losing the window and
+   * storing it twice.
+   *
+   * @throws {StoreReferentialError} if this athlete has no such recording.
+   * @throws {StoreValidationError} if `seq`, `fromIndex` or `sampleCount` is
+   * not a non-negative integer, or a channel's length disagrees with
+   * `sampleCount`.
+   */
+  async appendRecordingChunk(chunk: NewRecordingChunk): Promise<number> {
+    const row = this.#encodeRecordingChunk(chunk);
+    await this.#db.transaction('rw', [this.#recordingSessions, this.#recordingChunks], async () => {
+      // Scoped, and inside the transaction: this is both the foreign key the
+      // engine does not have and the write-path ownership check. There is no
+      // way to append to a recording by id alone, so a chunk cannot be filed
+      // against another athlete's ride.
+      const session = await this.#recordingSessions
+        .where(INDEX.recordingSessionByAthleteAndId)
+        .equals([chunk.athleteId, chunk.sessionId])
+        .first();
+      if (session === undefined) {
+        throw new StoreReferentialError(
+          `cannot append to recording ${chunk.sessionId}: this athlete has no such recording`,
+        );
+      }
+      // The second guard, for the reason `putActivity` and `putStreamSet`
+      // have one: `put` is keyed on `[sessionId+seq]` alone. The session
+      // lookup above already makes this unreachable while ids are opaque, and
+      // it stays because "unreachable through today's callers" is not the
+      // same statement as "cannot happen".
+      this.#requireNotOwnedByAnother(
+        await this.#recordingChunks.get([chunk.sessionId, chunk.seq]),
+        chunk.athleteId,
+        `chunk ${String(chunk.seq)} of recording ${chunk.sessionId}`,
+      );
+      await this.#recordingChunks.put(row);
+    });
+    return chunk.seq;
+  }
+
+  /**
+   * Reassembles a recording from its chunks — the read #46's recovery path uses.
+   *
+   * **Stops at the first hole.** A chunk whose `seq` or `fromIndex` does not
+   * continue the prefix ends the recovery, and every row beyond it is counted
+   * in `chunksAfterGap` rather than concatenated. That is the whole difference
+   * between recovering a ride and recovering a plausible-looking fiction: rows
+   * either side of a lost flush are both real, and joining them would shift
+   * every later sample onto the wrong second with nothing to show for it.
+   *
+   * @throws {StoreDecodeError} if a stored chunk is not a shape this build can
+   * read. A corrupt chunk fails loudly rather than being skipped, for the
+   * reason `getStreamSet` refuses a set with a missing blob.
+   */
+  async recoverRecording(
+    owner: AthleteId,
+    id: RecordingSessionId,
+  ): Promise<RecoveredRecording | undefined> {
+    const stored = await this.#readRecordingRows(owner, id);
+    if (stored === undefined) {
+      return undefined;
+    }
+    const header = fromPersistedRecordingSession(stored.session);
+    const prefix = contiguousChunkPrefix(stored.chunks);
+
+    const channels: MutableStreamChannels = {};
+    for (const row of prefix.rows) {
+      for (const stream of decodedChunkChannels(row)) {
+        const channel = parseStreamChannel(stream.channel);
+        const samples = decodeChannel(channel, {
+          channel,
+          encoding: chunkChannelEncoding(stream),
+          sampleCount: stream.sampleCount,
+          values: stream.values,
+          ...(stream.present === undefined ? {} : { present: stream.present }),
+        });
+        if (samples.length !== row.sampleCount) {
+          throw new StoreDecodeError(
+            `recording ${id} chunk ${String(row.seq)}: channel ${channel} holds ` +
+              `${String(samples.length)} samples but the chunk declares ${String(row.sampleCount)}`,
+          );
+        }
+        // Allocated at the full recovered length on first sight of the channel,
+        // so a channel that only appears half way through the ride — a strap
+        // paired late — is absent for the earlier slots rather than shifted
+        // into them.
+        const target = ((channels as Record<StreamChannel, unknown[]>)[channel] ??=
+          new Array<unknown>(prefix.sampleCount));
+        for (let index = 0; index < samples.length; index += 1) {
+          target[row.fromIndex + index] = samples[index];
+        }
+      }
+    }
+
+    return {
+      id: header.id,
+      athleteId: header.athleteId,
+      startedAt: header.startedAt,
+      sampleInterval: header.sampleInterval,
+      sampleCount: prefix.sampleCount,
+      channels,
+      pauses: header.pauses,
+      state: header.state,
+      chunks: prefix.rows.length,
+      chunksAfterGap: stored.chunks.length - prefix.rows.length,
+    };
+  }
+
+  /**
+   * What a stored recording costs, **without decoding a sample**.
+   *
+   * #46 asks for the four-hour figure to be measured and its headroom recorded.
+   * Measuring it by recovering the ride would measure the recovery instead.
+   */
+  async getRecordingFootprint(
+    owner: AthleteId,
+    id: RecordingSessionId,
+  ): Promise<RecordingFootprint | undefined> {
+    const stored = await this.#readRecordingRows(owner, id);
+    if (stored === undefined) {
+      return undefined;
+    }
+    let encodedBytes = 0;
+    for (const row of stored.chunks) {
+      encodedBytes += persistedChunkBytes(row);
+    }
+    return {
+      sessionId: id,
+      athleteId: owner,
+      chunks: stored.chunks.length,
+      sampleCount: contiguousChunkPrefix(stored.chunks).sampleCount,
+      encodedBytes,
+    };
+  }
+
+  /**
+   * Deletes a recording and every one of its chunks.
+   *
+   * Called when a ride is finalised into an activity, and when the athlete
+   * declines to recover one. Scoped: another athlete's recording id deletes
+   * nothing and returns `false`. Deleting one that is not there is a no-op, for
+   * `deleteAthlete`'s reason.
+   */
+  async deleteRecordingSession(owner: AthleteId, id: RecordingSessionId): Promise<boolean> {
+    return this.#db.transaction(
+      'rw',
+      [this.#recordingSessions, this.#recordingChunks],
+      async () => {
+        const existing = await this.#recordingSessions
+          .where(INDEX.recordingSessionByAthleteAndId)
+          .equals([owner, id])
+          .first();
+        if (existing === undefined) {
+          return false;
+        }
+        await this.#recordingChunks.where(INDEX.recordingChunkBySession).equals(id).delete();
+        await this.#recordingSessions.delete(id);
+        return true;
+      },
+    );
+  }
+
   // --- Internal -------------------------------------------------------------
 
   /**
@@ -918,6 +1195,131 @@ export class ActivityStore {
         ? undefined
         : await inflate(channel, 'present', row.present, Math.ceil(declared / 8));
     return decodeChannel(channel, fromPersistedStreamBlob(row, values, present));
+  }
+
+  // --- Recording checkpoints: internal --------------------------------------
+
+  /**
+   * Packs one chunk's channels. Synchronous, and that is the point.
+   *
+   * `#encodeStreamSet` is asynchronous because it compresses; this is not,
+   * because it does not (see `recording.ts`). A flush is the operation racing
+   * the tab's death, and every `await` in it is another place the tab can die
+   * between the caller believing the write started and the transaction opening.
+   *
+   * @throws {StoreValidationError}
+   */
+  #encodeRecordingChunk(chunk: NewRecordingChunk): PersistedRecordingChunk {
+    requireCount('recording chunk seq', chunk.seq);
+    requireCount('recording chunk fromIndex', chunk.fromIndex);
+    requireCount('recording chunk sampleCount', chunk.sampleCount);
+
+    const channels: PersistedRecordingChannel[] = [];
+    // `STREAM_CHANNELS` rather than `Object.keys`, for `#encodeStreamSet`'s
+    // reason: it fixes the stored order and ignores any key that is not a
+    // channel.
+    for (const channel of STREAM_CHANNELS) {
+      const samples = chunk.channels[channel];
+      if (samples === undefined) {
+        continue;
+      }
+      if (samples.length !== chunk.sampleCount) {
+        throw new StoreValidationError(
+          `recording chunk channel ${channel}: has ${String(samples.length)} samples but the ` +
+            `chunk declares ${String(chunk.sampleCount)}. Every channel shares one time base`,
+        );
+      }
+      const encoded = encodeChannel(channel, samples);
+      channels.push({
+        channel,
+        encoding: encoded.encoding,
+        sampleCount: encoded.sampleCount,
+        values: encoded.values,
+        ...(encoded.present === undefined ? {} : { present: encoded.present }),
+      });
+    }
+
+    return {
+      sessionId: chunk.sessionId,
+      seq: chunk.seq,
+      athleteId: chunk.athleteId,
+      fromIndex: chunk.fromIndex,
+      sampleCount: chunk.sampleCount,
+      channels,
+    };
+  }
+
+  /**
+   * Reads the header and every chunk row in **one** read transaction, so the
+   * two cannot come from either side of a concurrent flush.
+   *
+   * Ordered by the `[athleteId+sessionId+seq]` index rather than sorted after
+   * the fact, so the append order is the storage engine's answer and not this
+   * process's.
+   */
+  async #readRecordingRows(
+    owner: AthleteId,
+    id: RecordingSessionId,
+  ): Promise<
+    { session: PersistedRecordingSession; chunks: PersistedRecordingChunk[] } | undefined
+  > {
+    return this.#db.transaction('r', [this.#recordingSessions, this.#recordingChunks], async () => {
+      const session = await this.#recordingSessions
+        .where(INDEX.recordingSessionByAthleteAndId)
+        .equals([owner, id])
+        .first();
+      if (session === undefined) {
+        return undefined;
+      }
+      const chunks = await this.#recordingChunks
+        .where(INDEX.recordingChunkByAthleteAndSessionAndSeq)
+        .between([owner, id, Dexie.minKey], [owner, id, Dexie.maxKey], true, true)
+        .toArray();
+      return { session, chunks };
+    });
+  }
+}
+
+/**
+ * The longest run of chunks from `seq` 0 whose windows join end to end.
+ *
+ * A recording is only as long as its **contiguous** prefix. `seq` must run
+ * 0, 1, 2… and each window must start exactly where the previous one ended;
+ * the first row that breaks either rule ends the prefix, and everything after
+ * it is reported rather than used.
+ *
+ * Both conditions are needed and neither implies the other. A missing `seq`
+ * is a flush that never committed. A `fromIndex` that does not continue is a
+ * row written by a different recorder, or one whose window was recomputed
+ * against a series this one does not have — and joining those two would shift
+ * every later sample onto the wrong second while producing an array of exactly
+ * the length a caller expects.
+ */
+function contiguousChunkPrefix(chunks: readonly PersistedRecordingChunk[]): {
+  rows: PersistedRecordingChunk[];
+  sampleCount: number;
+} {
+  const rows: PersistedRecordingChunk[] = [];
+  let sampleCount = 0;
+  for (const [index, row] of chunks.entries()) {
+    if (row.seq !== index || row.fromIndex !== sampleCount) {
+      break;
+    }
+    if (!Number.isInteger(row.sampleCount) || row.sampleCount < 0) {
+      break;
+    }
+    rows.push(row);
+    sampleCount += row.sampleCount;
+  }
+  return { rows, sampleCount };
+}
+
+/** @throws {StoreValidationError} */
+function requireCount(what: string, value: number): void {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new StoreValidationError(
+      `${what} must be a non-negative integer, received ${String(value)}`,
+    );
   }
 }
 

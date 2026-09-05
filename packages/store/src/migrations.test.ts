@@ -30,7 +30,7 @@ import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { openActivityStore } from './activity-store';
-import { activityId, athleteId } from './ids';
+import { activityId, athleteId, recordingSessionId } from './ids';
 
 import {
   migrateDown,
@@ -39,7 +39,7 @@ import {
   upgradeWith,
   type RecordMigration,
 } from './migrations';
-import { SCHEMA_VERSION, SCHEMA_VERSIONS, STORES_V1, TABLE } from './schema';
+import { SCHEMA_VERSION, SCHEMA_VERSIONS, STORES_V1, STORES_V2, TABLE } from './schema';
 
 /**
  * A fixture migration. Not a production one — see `SCHEMA_MIGRATIONS`.
@@ -226,7 +226,7 @@ describe('the production registry', () => {
     // nothing, so there is no record to transform and no `down` to write.
     // Asserted rather than left implicit: the day a version does change a
     // record's shape, this test is what says the registry must gain an entry.
-    expect(SCHEMA_VERSION).toBe(2);
+    expect(SCHEMA_VERSION).toBe(3);
     expect(SCHEMA_MIGRATIONS).toEqual([]);
   });
 
@@ -294,6 +294,72 @@ describe('version 1 to version 2 — an additive schema change, against a databa
     expect(ride?.name).toBe('before the upgrade');
     expect(stillThere?.name).toBe('before the upgrade');
     expect(streams?.channels.power).toEqual([200, 210]);
+    expect(beforeVersion).toBeLessThan(SCHEMA_VERSION * 10);
+  });
+});
+
+describe('version 2 to version 3 — the same claim, for #46’s recording checkpoints', () => {
+  /**
+   * #46 bumps the schema to add `recordingSessions` and `recordingChunks`. No
+   * record changes shape, so again there is no `up`/`down` pair to test — and
+   * again "no migration needed" is a claim about an athlete's existing data,
+   * which is only honest if rows written by the older build are opened by this
+   * one and found intact.
+   */
+  it('keeps every version-2 record and makes the recording stores usable', async () => {
+    // A database at version 2 exactly as the previous build left it: the four
+    // version-1 stores plus the two stream stores, and no more.
+    const v2 = new Dexie(databaseName);
+    v2.version(1).stores(STORES_V1);
+    v2.version(2).stores(STORES_V2);
+    await v2.table(TABLE.athletes).put({ id: 'athlete-a', displayName: 'A', createdAt: 1 });
+    await v2.table(TABLE.activities).put({
+      id: 'ride-1',
+      athleteId: 'athlete-a',
+      name: 'recorded before the upgrade',
+      startedAt: 1_700_000_000,
+      startedAtTimeZone: 'UTC',
+      elapsedTime: 60,
+      movingTime: 60,
+      distance: 1_000,
+      visibility: 'private',
+      hasPosition: false,
+      createdAt: 1_700_000_000,
+    });
+    const beforeVersion = v2.backendDB().version;
+    v2.close();
+
+    const store = openActivityStore(databaseName);
+    const recording = recordingSessionId('recovered-after-upgrade');
+    await store.putRecordingSession({
+      id: recording,
+      athleteId: athleteId('athlete-a'),
+      startedAt: unixSeconds(1_700_000_000),
+      sampleInterval: seconds(1),
+      state: 'recording',
+      updatedAt: unixSeconds(1_700_000_060),
+      pauses: [],
+    });
+    await store.appendRecordingChunk({
+      sessionId: recording,
+      athleteId: athleteId('athlete-a'),
+      seq: 0,
+      fromIndex: 0,
+      sampleCount: 2,
+      channels: { power: [watts(200), watts(210)] },
+    });
+    store.close();
+
+    // A third connection, so the assertion reads what is on disk rather than
+    // what the connection that ran the upgrade is holding.
+    const reopened = openActivityStore(databaseName);
+    const stillThere = await reopened.getActivity(athleteId('athlete-a'), activityId('ride-1'));
+    const recovered = await reopened.recoverRecording(athleteId('athlete-a'), recording);
+    reopened.close();
+
+    expect(stillThere?.name).toBe('recorded before the upgrade');
+    expect(recovered?.sampleCount).toBe(2);
+    expect(recovered?.channels.power).toEqual([200, 210]);
     expect(beforeVersion).toBeLessThan(SCHEMA_VERSION * 10);
   });
 });

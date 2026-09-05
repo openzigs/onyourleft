@@ -58,17 +58,19 @@ graph TB
 ```
 apps/                 AGPL-3.0-or-later, without exception
   web/                browser client — the Phase 1 product
+    src/recording/      the composition root: engine + checkpoints + recovery (#46)
   mobile/             Capacitor shell wrapping the same web build (Phase 3)
 
 packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis
+    recording/          the recording session state machine and the stream merge (#45)
   fit/                FIT / GPX / TCX codec
   sensors/            sensor abstraction and BLE transport — BLE only
     src/                the transport-agnostic abstraction; no platform API at all
     protocol/           the GATT profile clients (#41, #42, #43); no platform API either
     web-bluetooth/      the browser transport (#40); the one place a BluetoothDevice exists
   physics/            cycling power/speed model
-  store/              local activity and stream store
+  store/              local activity, stream and recording-checkpoint store
 
 docs/
   architecture.md     this file
@@ -137,7 +139,9 @@ under #31's ruling; `packages/fit/README.md` §1 records why that is consistent 
 athlete, activity, lap and privacy-zone object stores, the indexes each read goes through, the
 referential behaviour IndexedDB cannot declare, and the migration `up`/`down` contract — and of
 [#27](https://github.com/openzigs/onyourleft/issues/27), which adds per-second streams as schema
-version 2 and decides their shape in [ADR 0011](adr/0011-stream-storage.md). The entity model:
+version 2 and decides their shape in [ADR 0011](adr/0011-stream-storage.md), and of
+[#46](https://github.com/openzigs/onyourleft/issues/46), which adds **recording checkpoints** as
+schema version 3. The entity model:
 
 ```mermaid
 erDiagram
@@ -227,6 +231,22 @@ otherwise assume:
   reasoning, the alternatives and every measured figure are in
   [ADR 0011](adr/0011-stream-storage.md). Devices and gear are still additive object stores in a
   later schema version.
+- **A recording in progress is a session header plus append-only chunks**, and it is a different
+  shape from a finished ride for a different job: written every few seconds rather than once,
+  appended rather than replaced, and **packed but not compressed**, because deflate on a
+  five-sample window costs more than it saves and its asynchrony would put a suspension point in
+  the one path that must complete before the tab dies. Recovery reads the **contiguous prefix** and
+  stops at the first hole — joining the rows either side of a lost flush would shift every later
+  sample onto the wrong second while producing an array of exactly the length a caller expects. The
+  reasoning and the measured cost (**239.07 KiB packed for a four-hour ride**) are in
+  [`packages/store/README.md`](../packages/store/README.md) §"Recording checkpoints".
+- **The recording engine is generic over a channel map and lives in `packages/domain`.** It cannot
+  name the eight channels: `@onyourleft/store` and `@onyourleft/sensors` both already do and both
+  depend on it, so `apps/web/src/recording/channels.ts` is the composition root that instantiates
+  the engine at the store's own `StreamChannelValue` and adapts a `SensorMeasurement` into a
+  reading. The engine reads no clock and schedules nothing — every instant is a parameter — which is
+  what lets #85's native shell reuse it unchanged and what makes every timing case testable without
+  fake timers.
 
 The indexes, the query each one serves, and the reasoning for every field are in
 [`packages/store/README.md`](../packages/store/README.md).

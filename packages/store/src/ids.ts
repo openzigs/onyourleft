@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Nominal identifiers for the three entities this store models.
+ * Nominal identifiers for the entities this store models.
  *
  * The same reasoning as `Quantity` in `@onyourleft/domain`: an `AthleteId`, an
  * `ActivityId` and a `LapId` are all `string` to TypeScript, so passing one
@@ -46,6 +46,17 @@ export type LapId = EntityId<'lap'>;
 /** Identifies one local-only privacy zone (ADR 0004 decision B). */
 export type PrivacyZoneId = EntityId<'privacy zone'>;
 
+/**
+ * Identifies one recording in progress (#46).
+ *
+ * Distinct from `ActivityId` on purpose. A recording becomes an activity only
+ * when it is finalised, and several recordings can exist on a device at once —
+ * a crashed one waiting to be recovered, and the one being ridden now. Sharing
+ * the brand would make "the activity this recording will become" and "the
+ * recording itself" the same type, and the two have different lifetimes.
+ */
+export type RecordingSessionId = EntityId<'recording session'>;
+
 function assertUsableId(value: string, what: string): void {
   if (value.length === 0) {
     throw new StoreValidationError(`${what} must not be empty`);
@@ -80,4 +91,10 @@ export function lapId(value: string): LapId {
 export function privacyZoneId(value: string): PrivacyZoneId {
   assertUsableId(value, 'privacy zone id');
   return value as PrivacyZoneId;
+}
+
+/** @throws {StoreValidationError} if empty or blank. */
+export function recordingSessionId(value: string): RecordingSessionId {
+  assertUsableId(value, 'recording session id');
+  return value as RecordingSessionId;
 }
