@@ -82,6 +82,45 @@ export interface GattCharacteristicPort {
   readonly value?: DataView | undefined;
   startNotifications(): Promise<unknown>;
   stopNotifications(): Promise<unknown>;
+  /**
+   * Read the characteristic's current value.
+   *
+   * The three FTMS descriptor-shaped characteristics are reads, not
+   * notifications: Supported Power Range (`0x2AD8`), Supported Resistance Level
+   * Range (`0x2AD6`) and Fitness Machine Feature (`0x2ACC`). #49's revision
+   * block makes reading them a requirement rather than a nicety — an ERG
+   * setpoint has to be bounded and quantised by the range **the device
+   * reported**, and offering a control whose feature bit is clear is worse
+   * than not offering it.
+   */
+  readValue(): Promise<DataView>;
+  /**
+   * An **acknowledged** write: the promise settles when the peer's Write
+   * Response arrives, so an ATT error is a rejection rather than silence.
+   *
+   * This is the only write this adapter performs, and the Fitness Machine
+   * Control Point is why. `../../protocol/src/fitness-machine-control.ts`
+   * requires an acknowledged write because `CCCD Improperly Configured` and
+   * `Procedure Already In Progress` are *only* observable as ATT errors — with
+   * an unacknowledged write an unwritten setpoint is indistinguishable from a
+   * machine that never answered, and the rider pedals against a resistance
+   * nobody chose.
+   */
+  writeValueWithResponse(value: BufferSource): Promise<unknown>;
+  /**
+   * ⚠️ **Declared so that using it is a test failure rather than an
+   * unwritable mutation. Nothing in this package calls it.**
+   *
+   * A comment saying "use the acknowledged write" is not a gate: swapping the
+   * one call in `fitness-machine-channel.ts` to this method compiles and leaves
+   * every other test in the repository green, which is precisely the
+   * fire-and-forget failure the FTMS client exists to prevent. Declaring it
+   * here lets `fitness-machine-channel.test.ts` assert that the fake stack's
+   * unacknowledged write is **never reached**, so the swap turns a test red on
+   * a one-line diff. Removing this declaration would make that assertion
+   * unwritable and the guarantee unenforced again.
+   */
+  writeValueWithoutResponse(value: BufferSource): Promise<unknown>;
   addEventListener(type: 'characteristicvaluechanged', listener: () => void): void;
   removeEventListener(type: 'characteristicvaluechanged', listener: () => void): void;
 }

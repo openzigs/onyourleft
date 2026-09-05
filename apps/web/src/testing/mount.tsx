@@ -186,6 +186,30 @@ export async function activateWithKeyboard(element: HTMLElement): Promise<void> 
   }
 }
 
+/**
+ * Type a value into a **controlled** input, the way a person would.
+ *
+ * ⚠️ Setting `input.value` directly and dispatching `input` does not work in
+ * React 19 and looks as though it does: React tracks the last value it wrote on
+ * the node, sees the assignment as a no-op, and skips the `onChange` — so the
+ * component keeps its old state and the test reads the *default* value back out
+ * of the handler. That is a green-looking assertion about the wrong number,
+ * which on this screen would be the wrong ERG target.
+ *
+ * The native setter on the prototype bypasses React's own descriptor, which is
+ * what makes the subsequent event carry the new value.
+ */
+export async function typeInto(input: HTMLInputElement, value: string): Promise<void> {
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+  if (descriptor?.set === undefined) {
+    throw new Error('this DOM implementation has no HTMLInputElement value setter');
+  }
+  await inAct(() => {
+    descriptor.set?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
 /** Every element matching a selector, as an array, typed. */
 export function queryAll<T extends Element = HTMLElement>(root: ParentNode, selector: string): T[] {
   return [...root.querySelectorAll<T>(selector)];

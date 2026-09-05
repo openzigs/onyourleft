@@ -47,6 +47,13 @@ export { createGattQueue, DEFAULT_GATT_OPERATION_TIMEOUT } from './queue';
 
 export { isUsableBluetooth, readAvailability } from './availability';
 
-export type { WebBluetoothTransportOptions } from './transport';
+export type {
+  FitnessMachineCharacteristics,
+  FitnessMachineChannelPorts,
+} from './fitness-machine-channel';
+
+export { createFitnessMachineChannel } from './fitness-machine-channel';
+
+export type { WebBluetoothTransport, WebBluetoothTransportOptions } from './transport';
 
 export { createWebBluetoothTransport } from './transport';

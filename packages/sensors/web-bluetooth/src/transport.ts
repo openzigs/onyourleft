@@ -69,14 +69,34 @@ import type {
   TransportAvailability,
   TransportTraits,
 } from '../../src/transport';
+import {
+  decodeFitnessMachineFeature,
+  decodeSupportedPowerRange,
+  decodeSupportedResistanceLevelRange,
+  FITNESS_MACHINE_CONTROL_POINT,
+  FITNESS_MACHINE_FEATURE,
+  FITNESS_MACHINE_SERVICE,
+  FITNESS_MACHINE_STATUS,
+  SUPPORTED_POWER_RANGE,
+  SUPPORTED_RESISTANCE_LEVEL_RANGE,
+  type FitnessMachineFeatures,
+  type SupportedPowerRange,
+  type SupportedResistanceLevelRange,
+} from '../../protocol/src/fitness-machine';
+import type { FitnessMachineChannel } from '../../protocol/src/fitness-machine-control';
 import { readAvailability } from './availability';
 import { connectionError, discoveryError, missingProfileError } from './errors';
+import {
+  createFitnessMachineChannel,
+  type FitnessMachineCharacteristics,
+} from './fitness-machine-channel';
 import type {
   BluetoothDevicePort,
   BluetoothPort,
   BluetoothScanFilterPort,
   GattCharacteristicPort,
   GattServerPort,
+  GattServicePort,
   GattUuid,
   RequestDevicePortOptions,
 } from './gatt';
@@ -186,6 +206,21 @@ interface Link {
   readonly characteristics: Map<string, LiveCharacteristic>;
   /** Which profile supplies each capability, fixed when the link came up. */
   readonly sources: Map<MeasurementCapability, LiveCharacteristic>;
+  /**
+   * The FTMS control point and status characteristics, resolved on demand.
+   *
+   * A **promise** rather than the value, so two concurrent procedures resolve
+   * the service once — `getPrimaryService` is a queued round trip, and a
+   * second one racing the first is how a client ends up holding two
+   * characteristic objects for the same attribute and installs two handlers.
+   * Cleared when it rejects, so a device that was not yet ready is retried.
+   *
+   * Not resolved with the measurement characteristics in `resolveLink`,
+   * deliberately: most devices serve no control point, and a failed
+   * `getPrimaryService` there would have to be swallowed on every heart rate
+   * strap in the world.
+   */
+  control: Promise<FitnessMachineCharacteristics> | undefined;
 }
 
 interface DeviceRecord {
@@ -229,9 +264,67 @@ const NOOP_SINK: MeasurementSink = {
   speed: NOOP,
 };
 
+/**
+ * `SensorTransport`, plus the one thing FTMS needs that a measurement transport
+ * cannot express.
+ *
+ * `../../src/transport.ts` is deliberately read-only: it is satisfied unchanged
+ * by Web Bluetooth, CoreBluetooth and the Android BLE APIs, and a write path on
+ * it would be a command surface every transport had to implement before any of
+ * them had a device to write to. Trainer control is a *protocol* rather than a
+ * transport capability — `../../protocol` owns it — so what this adapter adds
+ * is not a write method but the seam the protocol client plugs into.
+ *
+ * The return type is widened rather than the interface: every existing consumer
+ * holds a `SensorTransport` and is unaffected, and a caller that wants control
+ * has to name this type and therefore this decision.
+ */
+export interface WebBluetoothTransport extends SensorTransport {
+  /**
+   * Open the Fitness Machine Control Point on a **connected** trainer, and read
+   * what the machine says about itself.
+   *
+   * The channel is for `createTrainerControl`; nothing above the transport
+   * boundary should be encoding op codes itself. It survives a reconnection —
+   * it re-resolves its characteristics and re-attaches its handlers — but
+   * control does not: FTMS §4.16.2.1 ends control permission with the
+   * connection, so the caller drives `linkLost()` and `linkRestored()` and
+   * requests control again.
+   *
+   * @throws {SensorError} `device-not-found` for an id this transport did not
+   * issue, `not-connected` when there is no link, and `capability-unsupported`
+   * when the device serves no Fitness Machine Service.
+   */
+  openFitnessMachine(id: DeviceId): Promise<FitnessMachine>;
+}
+
+/**
+ * A connected trainer's control point, and the three characteristics that say
+ * what may be written to it.
+ *
+ * All three are read **from the device**. #49's revision block is explicit that
+ * ERG is gated on Target Setting bit 3, gradient on bit 13, and that a setpoint
+ * is quantised to the Supported Power Range's own minimum increment — *"offering
+ * a control the trainer will refuse is worse than not offering it"*. A default
+ * here would be the hard-coded assumption #43's acceptance criteria forbid.
+ */
+export interface FitnessMachine {
+  readonly channel: FitnessMachineChannel;
+  /**
+   * `undefined` when the machine did not report one — which, per
+   * `TrainerControlOptions.powerRange`, means no ERG client can be built for it
+   * at all. That is the safe direction: an unbounded setpoint on a machine
+   * whose limits are unknown is the one failure this whole path exists to
+   * prevent.
+   */
+  readonly powerRange: SupportedPowerRange | undefined;
+  readonly resistanceRange: SupportedResistanceLevelRange | undefined;
+  readonly features: FitnessMachineFeatures | undefined;
+}
+
 export function createWebBluetoothTransport(
   options: WebBluetoothTransportOptions,
-): SensorTransport {
+): WebBluetoothTransport {
   const traits: TransportTraits = {
     id: WEB_BLUETOOTH,
     // `requestDevice()` throws outside a user activation and cannot ask for one.
@@ -494,7 +587,98 @@ export function createWebBluetoothTransport(
       }
     }
 
-    return { characteristics, sources };
+    return { characteristics, sources, control: undefined };
+  };
+
+  // --- The FTMS control point, which is a write and not a subscription ------
+
+  /**
+   * The control point and status characteristics on the link that is up now.
+   *
+   * ⚠️ **Resolved against `record.link`, never captured.** Every handle from a
+   * dropped link is dead — Chrome rejects a write on a stale characteristic
+   * with `InvalidStateError` — so a channel that held one would report a
+   * setpoint refused rather than a link that went, and a rider would be told
+   * their trainer rejected a target it never received.
+   */
+  const controlCharacteristicsFor = async (
+    record: DeviceRecord,
+  ): Promise<FitnessMachineCharacteristics> => {
+    const id = record.identity.id;
+    const link = record.link;
+    if (record.session.state !== 'connected' || link === undefined) {
+      throw new SensorError('not-connected', 'the control point needs a connection', {
+        deviceId: id,
+      });
+    }
+    if (link.control === undefined) {
+      link.control = queue
+        .run(id, async () => {
+          const service = await server(record).getPrimaryService(FITNESS_MACHINE_SERVICE);
+          const controlPoint = await service.getCharacteristic(FITNESS_MACHINE_CONTROL_POINT);
+          let status: GattCharacteristicPort | undefined;
+          try {
+            status = await service.getCharacteristic(FITNESS_MACHINE_STATUS);
+          } catch {
+            // Optional in FTMS. A machine without it never announces a
+            // withdrawn control permission, and the client finds out from the
+            // next setpoint being refused — which is worse and is still
+            // correct, so it is not a reason to refuse the whole channel.
+            status = undefined;
+          }
+          return { service, controlPoint, status, link };
+        })
+        .catch((error: unknown) => {
+          // A rejection must not be cached: a trainer whose service was not yet
+          // discovered would then refuse control for the life of the link.
+          link.control = undefined;
+          throw error instanceof SensorError ? error : missingProfileError(error, id);
+        });
+    }
+    return link.control;
+  };
+
+  /**
+   * Read one of FTMS's three descriptor-shaped characteristics, or `undefined`.
+   *
+   * ⚠️ **A failed read is `undefined`, not a rejection.** Supported Resistance
+   * Level Range is optional in FTMS; Fitness Machine Feature is mandatory and
+   * is nonetheless absent or unreadable on real hardware. Refusing the whole
+   * machine because one of the three could not be read would take ERG away
+   * from a trainer that supports it — and the consumer of each already has to
+   * handle "not reported": `TrainerControlOptions.features` documents that an
+   * omitted feature set gates nothing, precisely so that a transport which
+   * could not read it does not have every setpoint refused.
+   *
+   * A **malformed** payload is `undefined` too, and for the same reason a
+   * notification decoder that throws costs one notification: SECURITY.md
+   * treats what a device sends as untrusted input.
+   */
+  const readDescriptorLike = async <T>(
+    record: DeviceRecord,
+    service: GattServicePort,
+    characteristic: GattUuid,
+    decode: (value: DataView) => T,
+  ): Promise<T | undefined> => {
+    try {
+      const value = await queue.run(record.identity.id, async () =>
+        (await service.getCharacteristic(characteristic)).readValue(),
+      );
+      return decode(value);
+    } catch (error) {
+      onProtocolError?.(error);
+      return undefined;
+    }
+  };
+
+  const server = (record: DeviceRecord): GattServerPort => {
+    const gatt = record.native.gatt;
+    if (gatt === undefined) {
+      throw new SensorError('not-connected', 'this device exposes no GATT server', {
+        deviceId: record.identity.id,
+      });
+    }
+    return gatt;
   };
 
   /** Turn notifications on for a characteristic, once, however many capabilities want it. */
@@ -785,8 +969,43 @@ export function createWebBluetoothTransport(
 
   // --- The interface --------------------------------------------------------
 
-  const transport: SensorTransport = {
+  const transport: WebBluetoothTransport = {
     traits,
+
+    async openFitnessMachine(id: DeviceId): Promise<FitnessMachine> {
+      const record = recordFor(id);
+      // Resolved once here rather than lazily on the first write, so that "this
+      // device serves no Fitness Machine Service" is answered while the athlete
+      // is looking at a pairing screen — not silently, three intervals into a
+      // workout, as a refused setpoint.
+      const resolved = await controlCharacteristicsFor(record);
+      const channel = createFitnessMachineChannel({
+        characteristics: async () => controlCharacteristicsFor(record),
+        run: async (operation) => queue.run(id, operation),
+      });
+      const service = resolved.service;
+      return {
+        channel,
+        powerRange: await readDescriptorLike(
+          record,
+          service,
+          SUPPORTED_POWER_RANGE,
+          decodeSupportedPowerRange,
+        ),
+        resistanceRange: await readDescriptorLike(
+          record,
+          service,
+          SUPPORTED_RESISTANCE_LEVEL_RANGE,
+          decodeSupportedResistanceLevelRange,
+        ),
+        features: await readDescriptorLike(
+          record,
+          service,
+          FITNESS_MACHINE_FEATURE,
+          decodeFitnessMachineFeature,
+        ),
+      };
+    },
 
     // `../../src/transport.ts` requires that no promise-returning method throws
     // synchronously — the obvious `connect(id)` looks the device up and throws

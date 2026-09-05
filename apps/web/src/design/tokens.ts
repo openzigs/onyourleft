@@ -106,6 +106,18 @@ export const FONT_SIZE_TOKENS = {
   md: '1rem',
   lg: '1.25rem',
   xl: '1.75rem',
+  /**
+   * A live ride metric, read from two metres away while pedalling.
+   *
+   * #49's eighth acceptance criterion asks for a **stated** minimum size for
+   * the primary metrics, and this is it. It is not a heading size with a
+   * different name: `xl` is 1.75 rem and is what a section title uses, and a
+   * power number at 1.75 rem is unreadable from a bike.
+   * `ride/MetricGrid.tsx` states the floor and
+   * `a11y/ride-legibility.a11y.test.ts` fails the build if this value drops
+   * below it.
+   */
+  metric: '4rem',
 } as const satisfies Record<string, string>;
 
 /**

@@ -32,6 +32,7 @@ apps/                 AGPL-3.0-or-later, without exception
     src/a11y/           the accessibility gate: rules, routes, contrast (#48) — see §4e
     src/design/         design tokens, theme.css and the primitives (#48)
     src/recording/      the recorder: engine + durable checkpoints + recovery (#46)
+    src/ride/           the live ride screen: its state machine, panels and trainer wiring (#49)
     src/shell/          the hash route table, the router hook and AppShell (#48)
     src/support/        browser-capability detection and its notice (#48)
     src/views/          one component per route (#48)
@@ -313,7 +314,15 @@ not.
     holds the browser transport: the `DeviceId → device/server/service/characteristic` map, the
     global GATT operation queue, `createWebBluetoothTransport`, and a scripted Web Bluetooth stack
     at `@onyourleft/sensors/web-bluetooth/testing`. It holds **no profile** — not one service UUID
-    and not one byte of payload.
+    and not one byte of payload. ⚠️ Since [#49](https://github.com/openzigs/onyourleft/issues/49)
+    it also holds `fitness-machine-channel.ts`, the **production `FitnessMachineChannel`** and the
+    only place in the program that writes to a GATT characteristic. That write must be
+    `writeValueWithResponse`; `gatt.ts` declares the unacknowledged sibling *and never calls it* so
+    that a swap is a red test rather than a silent regression, and
+    `fitness-machine-channel.test.ts` is the test. `transport.openFitnessMachine(id)` returns the
+    channel together with the Supported Power Range, the Supported Resistance Level Range and the
+    Fitness Machine Feature bits, all **read from the device** — a setpoint bounded by anything
+    else is the hard-coded assumption #43's criteria forbid.
     **`packages/sensors/protocol`** ([#41](https://github.com/openzigs/onyourleft/issues/41),
     [#42](https://github.com/openzigs/onyourleft/issues/42),
     [#43](https://github.com/openzigs/onyourleft/issues/43)) is where the profiles are: Heart Rate
@@ -861,5 +870,6 @@ top of an issue **supersedes its body**.
 | Where a FIT profile number came from, and what the decoder does with a bad file | [`packages/fit/README.md`](packages/fit/README.md) §1–§5 |
 | Which GPX/TCX schema versions are targeted, what each format loses, and how XXE is refused | [`packages/fit/README.md`](packages/fit/README.md) §7 |
 | How a ride is recorded, checkpointed and recovered, and the stated data-loss bound | [`packages/store/README.md`](packages/store/README.md) §"Recording checkpoints", `apps/web/src/recording/recorder.ts`, `README.md` §"If the tab closes mid-ride" |
+| What the live ride screen may claim about a trainer, and why a stale metric shows no number | `apps/web/src/ride/controller.ts`, `apps/web/src/ride/metrics.ts`, `apps/web/src/ride/TrainerPanel.tsx` |
 
-<!-- Last updated: 2026-09-05 by delivery:code-issue resolving #45 and #46 (the recording engine, and offline-first persistence) -->
+<!-- Last updated: 2026-09-05 by delivery:code-issue resolving #49 (the live ride screen, and the production FTMS control channel) -->

@@ -53,8 +53,21 @@ export type FakeGattOperation =
   | 'connect'
   | 'getPrimaryService'
   | 'getCharacteristic'
+  | 'readValue'
   | 'startNotifications'
-  | 'stopNotifications';
+  | 'stopNotifications'
+  | 'writeValueWithResponse'
+  /**
+   * ⚠️ **Modelled so that a client using it can be caught, and for no other
+   * reason.** It succeeds here exactly as it would on a real stack — that is
+   * the trap: an unacknowledged control point write compiles, resolves, and
+   * turns nothing red, while `CCCD Improperly Configured` and `Procedure
+   * Already In Progress` stop being observable at all. The assertion that this
+   * operation never appears in {@link FakeBluetoothBench.operations} is what
+   * makes `../fitness-machine-channel.ts`'s choice enforced rather than
+   * commented.
+   */
+  | 'writeValueWithoutResponse';
 
 /** One held call, and the two ways out of it. */
 export interface HeldOperation {
@@ -69,6 +82,15 @@ export interface HeldOperation {
 export interface FakeServiceSpec {
   readonly uuid: GattUuid | number;
   readonly characteristics: readonly (GattUuid | number)[];
+  /**
+   * What each characteristic answers a read with.
+   *
+   * Keyed by the characteristic's UUID in whatever form the spec above wrote
+   * it. A characteristic with no entry rejects a read the way a device without
+   * the Read property does, which is the case a client that assumes every
+   * descriptor-shaped characteristic is readable has to survive.
+   */
+  readonly readValues?: Readonly<Record<string, Uint8Array>>;
 }
 
 export interface FakeDeviceSpec {
@@ -124,6 +146,8 @@ export interface FakeDeviceHandle {
   /** How many `gattserverdisconnected` listeners are attached right now. */
   readonly disconnectListeners: number;
   notifying(service: GattUuid | number, characteristic: GattUuid | number): boolean;
+  /** Every payload written to a characteristic, in order, however it was written. */
+  writes(service: GattUuid | number, characteristic: GattUuid | number): readonly Uint8Array[];
 }
 
 /**
@@ -195,6 +219,19 @@ export interface FakeBluetoothOptions {
  * that decision — if the mapping ever goes back to `instanceof`, every one of
  * these stops matching.
  */
+/**
+ * A copy of what was written, because the caller owns the array it handed in.
+ *
+ * `BufferSource` rather than `Uint8Array` for the reason `../gatt.ts` gives:
+ * that is the shape the browser declares, and a port that narrowed it would
+ * stop describing the API it stands in for.
+ */
+function copyOf(value: BufferSource): Uint8Array {
+  return value instanceof ArrayBuffer
+    ? new Uint8Array(value.slice(0))
+    : new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+}
+
 function asError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
 }
@@ -209,6 +246,8 @@ interface CharacteristicState {
   readonly uuid: GattUuid;
   readonly listeners: Set<() => void>;
   readonly port: GattCharacteristicPort;
+  /** Copied on write, because the caller owns the array it handed in. */
+  readonly writes: Uint8Array[];
   value: DataView | undefined;
   buffer: ArrayBuffer | undefined;
   notifying: boolean;
@@ -306,11 +345,16 @@ export function createFakeBluetooth(options: FakeBluetoothOptions): FakeBluetoot
     for (const service of spec.services) {
       const serviceUuid = canonicalUuid(service.uuid);
       const characteristics = new Map<GattUuid, CharacteristicState>();
+      const readable = new Map<GattUuid, Uint8Array>();
+      for (const [key, bytes] of Object.entries(service.readValues ?? {})) {
+        readable.set(canonicalUuid(key), bytes);
+      }
       for (const raw of service.characteristics) {
         const uuid = canonicalUuid(raw);
         const characteristic: CharacteristicState = {
           uuid,
           listeners: new Set(),
+          writes: [],
           value: undefined,
           buffer: undefined,
           notifying: false,
@@ -332,10 +376,39 @@ export function createFakeBluetooth(options: FakeBluetoothOptions): FakeBluetoot
                 characteristic.notifying = true;
               });
             },
+            readValue() {
+              return perform(spec.id, 'readValue', uuid, () => {
+                requireLink(state);
+              }).then(() => {
+                const bytes = readable.get(uuid);
+                if (bytes === undefined) {
+                  throw domError('NotSupportedError', 'this characteristic is not readable');
+                }
+                return new DataView(
+                  bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+                );
+              });
+            },
             stopNotifications() {
               return perform(spec.id, 'stopNotifications', uuid, () => {
                 requireLink(state);
                 characteristic.notifying = false;
+              });
+            },
+            writeValueWithResponse(value: BufferSource) {
+              return perform(spec.id, 'writeValueWithResponse', uuid, () => {
+                requireLink(state);
+                characteristic.writes.push(copyOf(value));
+              });
+            },
+            writeValueWithoutResponse(value: BufferSource) {
+              // Deliberately as permissive as the acknowledged write. See
+              // `FakeGattOperation`: a stack that refused here would catch the
+              // wrong client for the wrong reason, and would prove nothing
+              // about a real one.
+              return perform(spec.id, 'writeValueWithoutResponse', uuid, () => {
+                requireLink(state);
+                characteristic.writes.push(copyOf(value));
               });
             },
             addEventListener(_type: 'characteristicvaluechanged', listener: () => void) {
@@ -631,6 +704,9 @@ export function createFakeBluetooth(options: FakeBluetoothOptions): FakeBluetoot
         },
         notifying(service, characteristic) {
           return characteristicState(state, service, characteristic).notifying;
+        },
+        writes(service, characteristic) {
+          return characteristicState(state, service, characteristic).writes;
         },
       };
     },
