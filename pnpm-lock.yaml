@@ -47,6 +47,12 @@ importers:
       '@onyourleft/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@onyourleft/sensors':
+        specifier: workspace:*
+        version: link:../../packages/sensors
+      '@onyourleft/store':
+        specifier: workspace:*
+        version: link:../../packages/store
       react:
         specifier: 19.2.8
         version: 19.2.8
@@ -54,6 +60,9 @@ importers:
         specifier: 19.2.8
         version: 19.2.8(react@19.2.8)
     devDependencies:
+      '@onyourleft/fit':
+        specifier: workspace:*
+        version: link:../../packages/fit
       '@types/node':
         specifier: 24.13.3
         version: 24.13.3
@@ -66,6 +75,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: 6.1.1
         version: 6.1.1(vite@8.2.2(@types/node@24.13.3))
+      fake-indexeddb:
+        specifier: 6.2.5
+        version: 6.2.5
       typescript:
         specifier: 6.0.3
         version: 6.0.3

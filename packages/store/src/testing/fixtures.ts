@@ -62,8 +62,18 @@ import {
   type UnixSeconds,
 } from '@onyourleft/domain';
 
-import { activityId, athleteId, lapId, type ActivityId, type AthleteId, type LapId } from '../ids';
+import {
+  activityId,
+  athleteId,
+  lapId,
+  recordingSessionId,
+  type ActivityId,
+  type AthleteId,
+  type LapId,
+  type RecordingSessionId,
+} from '../ids';
 import type { AthleteRecord, NewActivity, NewLap } from '../records';
+import type { NewRecordingChunk, NewRecordingSession } from '../recording';
 import { STREAM_CHANNELS, type NewStreamSet, type Samples, type StreamChannel } from '../streams';
 
 import type { StoreHarness } from './harness';
@@ -114,6 +124,7 @@ let rideCounter = 0;
 /** Resets the id counter, so a test's ids do not depend on what ran before it. */
 export function resetFixtureIds(): void {
   rideCounter = 0;
+  recordingCounter = 0;
 }
 
 /**
@@ -276,9 +287,92 @@ function absentIndexes(gaps: readonly StreamGap[], channel: StreamChannel): Read
 /** The thirty-second heart-rate dropout #27 names, starting at ten minutes in. */
 export const DROPPED_STRAP: StreamGap = { channel: 'heartRate', from: 600, count: 30 };
 
+let recordingCounter = 0;
+
+/**
+ * A recording in progress, for one athlete.
+ *
+ * Takes an owner for `rideFor`'s reason: the write-path scoping case — athlete
+ * B appending to athlete A's recording — has to be as short to write as the
+ * read-path one, or it does not get written.
+ */
+export function recordingFor(
+  owner: AthleteId,
+  overrides: Partial<NewRecordingSession> = {},
+): NewRecordingSession {
+  recordingCounter += 1;
+  return {
+    id: recordingSessionId(`recording-${String(recordingCounter)}`),
+    athleteId: owner,
+    startedAt: unixSeconds(FIXTURE_EPOCH + 100_000),
+    sampleInterval: seconds(1),
+    state: 'recording',
+    updatedAt: unixSeconds(FIXTURE_EPOCH + 100_000),
+    pauses: [],
+    ...overrides,
+  };
+}
+
+/** Writes a recording header through the public path, and returns it. */
+export async function seedRecording(
+  harness: StoreHarness,
+  owner: AthleteId,
+  overrides: Partial<NewRecordingSession> = {},
+): Promise<NewRecordingSession> {
+  const recording = recordingFor(owner, overrides);
+  await harness.write(async (store) => store.putRecordingSession(recording));
+  return recording;
+}
+
+/**
+ * Slices a stream set into the flushes a recorder would have written.
+ *
+ * Built from `streamSetFor`'s output rather than from fresh generators, so a
+ * recording fixture and a stream-set fixture carry **the same samples and the
+ * same gaps** — which is what makes "the recovered recording equals the ride
+ * that was ridden" a comparison against something independent of the recording
+ * path rather than against the recording path's own output.
+ *
+ * The last window is short when `chunkSamples` does not divide the set, which
+ * is the normal case: a ride ends when the rider stops, not on a flush
+ * boundary.
+ */
+export function chunksOf(
+  recording: NewRecordingSession,
+  set: NewStreamSet,
+  chunkSamples: number,
+): NewRecordingChunk[] {
+  const chunks: NewRecordingChunk[] = [];
+  let seq = 0;
+  for (let from = 0; from < set.sampleCount; from += chunkSamples) {
+    const count = Math.min(chunkSamples, set.sampleCount - from);
+    const channels: { -readonly [C in StreamChannel]?: Samples<C> } = {};
+    for (const channel of STREAM_CHANNELS) {
+      const samples = set.channels[channel];
+      if (samples === undefined) {
+        continue;
+      }
+      (channels as Record<StreamChannel, readonly unknown[]>)[channel] = samples.slice(
+        from,
+        from + count,
+      );
+    }
+    chunks.push({
+      sessionId: recording.id,
+      athleteId: recording.athleteId,
+      seq,
+      fromIndex: from,
+      sampleCount: count,
+      channels,
+    });
+    seq += 1;
+  }
+  return chunks;
+}
+
 /** Everything but the two position channels — the indoor trainer case. */
 export const CHANNELS_WITHOUT_POSITION: readonly StreamChannel[] = STREAM_CHANNELS.filter(
   (channel) => channel !== 'latitude' && channel !== 'longitude',
 );
 
-export type { ActivityId, AthleteId, LapId };
+export type { ActivityId, AthleteId, LapId, RecordingSessionId };

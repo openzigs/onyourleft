@@ -15,8 +15,8 @@
  * that lives in a pull-request description is a screenshot; this one fails the
  * build the day the harness stops catching anything.
  *
- * Two fakes rather than one, because a harness that catches a single failure
- * shape is calibrated to that shape:
+ * Several fakes rather than one, because a harness that catches a single
+ * failure shape is calibrated to that shape:
  *
  * 1. **`memoryWriteStoreFactory`** — the write goes to memory. The literal fake
  *    the criterion names.
@@ -25,6 +25,12 @@
  *    read path does not use. Every layer reports success. This is CLAUDE.md
  *    section 5's *wrong storage* in the form that survives a naive test, and it
  *    is the one worth having.
+ * 3. **`gapFillingStoreFactory`** — the set comes back whole and a dropped
+ *    strap has become thirty seconds at 0 bpm.
+ * 4. **`droppedFlushStoreFactory`** — #46's checkpoint write, acknowledged at
+ *    the edge and never reaching the database. It arrived with that write path,
+ *    which is the rule: a new write path may not ship without a fake proving
+ *    the harness catches its failure.
  */
 
 import { beatsPerMinute, seconds, unixSeconds, watts } from '@onyourleft/domain';
@@ -34,12 +40,14 @@ import { activityId } from '../ids';
 import type { NewStreamSet, StreamChannels, StreamSet } from '../streams';
 
 import {
+  droppedFlushStoreFactory,
   gapFillingStoreFactory,
   memoryWriteStoreFactory,
   misroutedBlobStoreFactory,
 } from './fakes';
 import { createStoreHarness, type StoreHarness } from './harness';
 import {
+  assertRecordingRecovers,
   assertSameSamples,
   assertSameStreamSet,
   assertStreamSetRoundTrip,
@@ -54,6 +62,7 @@ import {
   resetFixtureIds,
   rideFor,
   seedAthletes,
+  seedRecording,
   seedRide,
   streamSetFor,
 } from './fixtures';
@@ -229,6 +238,94 @@ describe('deliberately breaking persistence — the criterion that makes #28 wor
 
     expect(read?.channels.heartRate).toHaveLength(900);
     expect(read?.channels.heartRate?.[600]).toBe(0);
+  });
+
+  it('a repository whose flush is acknowledged and never written fails the recovery round trip', async () => {
+    // #46's shape, and the one that belongs to the new write path: every
+    // `appendRecordingChunk` resolves with the sequence number the caller
+    // expects, and every second row is simply not there. A recovery that
+    // concatenated the survivors would return a series of almost the right
+    // length with every sample after the first hole on the wrong second.
+    const harness = harnessWith(droppedFlushStoreFactory());
+    await seedAthletes(harness);
+    const recording = await seedRecording(harness, ATHLETE_A);
+    const chunks = [0, 1, 2, 3].map((seq) => ({
+      sessionId: recording.id,
+      athleteId: ATHLETE_A,
+      seq,
+      fromIndex: seq * 2,
+      sampleCount: 2,
+      channels: { power: [watts(100 + seq), watts(200 + seq)] },
+    }));
+
+    await harness.write(async (store) => {
+      for (const chunk of chunks) {
+        // Every one of these resolves. Nothing throws anywhere.
+        await store.appendRecordingChunk(chunk);
+      }
+    });
+
+    await expect(
+      assertRecordingRecovers(harness, ATHLETE_A, recording.id, {
+        sampleCount: 8,
+        channels: { power: chunks.flatMap((chunk) => chunk.channels.power) },
+      }),
+    ).rejects.toThrow(/expected 8 samples to survive and 2 did/);
+  });
+
+  it('a repository that fills a recovered gap with a zero fails the recovery round trip', async () => {
+    // The shape a recovery that only asked "did anything come back" misses
+    // entirely, and the reason `assertRecordingRecovers` compares sample by
+    // sample: a ride recovered after a crash with every dropout turned into
+    // zeroes is the right length, decodes cleanly, and is not the ride.
+    //
+    // This case exists because a mutation run proved the comparison could be
+    // deleted from `assertRecordingRecovers` with nothing in this package going
+    // red — the identical hole that was found for `assertStreamSetRoundTrip`.
+    const harness = harnessWith(gapFillingStoreFactory());
+    await seedAthletes(harness);
+    const recording = await seedRecording(harness, ATHLETE_A);
+    const samples = [beatsPerMinute(140), undefined, beatsPerMinute(142)];
+
+    await harness.write(async (store) =>
+      store.appendRecordingChunk({
+        sessionId: recording.id,
+        athleteId: ATHLETE_A,
+        seq: 0,
+        fromIndex: 0,
+        sampleCount: 3,
+        channels: { heartRate: samples },
+      }),
+    );
+
+    await expect(
+      assertRecordingRecovers(harness, ATHLETE_A, recording.id, {
+        sampleCount: 3,
+        channels: { heartRate: samples },
+      }),
+    ).rejects.toThrow(/channel heartRate, sample 1: wrote a gap and read back 0/);
+  });
+
+  it('the dropped-flush fake really does report every flush as successful', async () => {
+    // Otherwise the case above would be satisfied by a fake that threw, which
+    // proves nothing about the read.
+    const harness = harnessWith(droppedFlushStoreFactory());
+    await seedAthletes(harness);
+    const recording = await seedRecording(harness, ATHLETE_A);
+
+    const written = await harness.write(async (store) =>
+      store.appendRecordingChunk({
+        sessionId: recording.id,
+        athleteId: ATHLETE_A,
+        seq: 1,
+        fromIndex: 0,
+        sampleCount: 1,
+        channels: { power: [watts(1)] },
+      }),
+    );
+    // The second call in this handle's life, so it is the one that is dropped —
+    // and it still resolves with the sequence number.
+    expect(written).toBe(1);
   });
 
   it('the misrouting fake really does commit to the real database', async () => {

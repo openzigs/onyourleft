@@ -8,11 +8,12 @@
  * second source of truth for the schema version alongside the one IndexedDB
  * already maintains.
  *
- * There are two versions. Version 1 (#26) is athletes, activities, laps and
- * privacy zones. Version 2 (#27) **adds** `streamSets` and `streamBlobs` and
- * touches nothing that already exists, so it needs no record migration —
- * `migrations.ts` holds the `up`/`down` contract the first record-shape change
- * will use, and its registry is still empty and says why.
+ * There are three versions. Version 1 (#26) is athletes, activities, laps and
+ * privacy zones. Version 2 (#27) **adds** `streamSets` and `streamBlobs`.
+ * Version 3 (#46) **adds** `recordingSessions` and `recordingChunks`. Each of
+ * the two later versions touches nothing that already exists, so neither needs
+ * a record migration — `migrations.ts` holds the `up`/`down` contract the first
+ * record-shape change will use, and its registry is still empty and says why.
  *
  * ## What is indexed, and which query each index is for
  *
@@ -32,18 +33,19 @@
 /**
  * The current schema version.
  *
- * **2** since #27. Version 2 adds two object stores — `streamSets` and
- * `streamBlobs` — and changes **no existing record's shape**. That is why
- * `SCHEMA_MIGRATIONS` in `migrations.ts` is still empty: the registry holds
- * *record* migrations, and there is no record to transform. The version bump
- * itself is real and is tested — `migrations.test.ts` opens a version-1
- * database, writes rows into it, reopens at version 2, and asserts every row
- * came through and the new stores are usable.
+ * **3** since #46. Version 2 added `streamSets` and `streamBlobs`; version 3
+ * adds `recordingSessions` and `recordingChunks`. Both are purely additive and
+ * change **no existing record's shape**. That is why `SCHEMA_MIGRATIONS` in
+ * `migrations.ts` is still empty: the registry holds *record* migrations, and
+ * there is no record to transform. The version bumps themselves are real and
+ * are tested — `migrations.test.ts` opens a version-1 database, writes rows
+ * into it, reopens at the current version, and asserts every row came through
+ * and the new stores are usable.
  *
  * Bumping this for a change that *does* alter a record's shape means adding a
  * migration pair.
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 /**
  * Dexie stores its schema version in IndexedDB multiplied by ten, leaving room
@@ -68,6 +70,10 @@ export const TABLE = {
   streamSets: 'streamSets',
   /** #27: one row per channel per activity, holding the packed, compressed bytes. */
   streamBlobs: 'streamBlobs',
+  /** #46: one small indexed row per recording in progress — the time base and the pauses. */
+  recordingSessions: 'recordingSessions',
+  /** #46: one append-only row per flush, holding that window's packed bytes. */
+  recordingChunks: 'recordingChunks',
 } as const;
 
 /**
@@ -111,6 +117,26 @@ export const INDEX = {
   streamBlobByActivity: 'activityId',
   /** `deleteAthlete`'s cascade over blobs. */
   streamBlobByAthlete: 'athleteId',
+  /** `getRecordingSession` — the athlete-scoped point lookup. */
+  recordingSessionByAthleteAndId: '[athleteId+id]',
+  /** `listRecordingSessions`, newest checkpoint first — what #46's recovery prompt reads. */
+  recordingSessionByAthleteAndUpdatedAt: '[athleteId+updatedAt]',
+  /** `deleteAthlete`'s cascade over recordings. */
+  recordingSessionByAthlete: 'athleteId',
+  /**
+   * `readRecordingChunks` and `getRecordingFootprint` — the athlete-scoped
+   * range read, in append order.
+   *
+   * Three components rather than two so recovery walks the chunks of one
+   * recording in `seq` order through the index, rather than reading every chunk
+   * on the device and sorting. A recovery path that scanned would get slower
+   * with every ride the athlete has ever half-recorded.
+   */
+  recordingChunkByAthleteAndSessionAndSeq: '[athleteId+sessionId+seq]',
+  /** `deleteRecordingSession`'s cascade. */
+  recordingChunkBySession: 'sessionId',
+  /** `deleteAthlete`'s cascade over chunks. */
+  recordingChunkByAthlete: 'athleteId',
 } as const;
 
 /**
@@ -184,6 +210,37 @@ export const STORES_V2: Readonly<Record<string, string>> = {
 };
 
 /**
+ * Version 3 — #46's recording checkpoints, added beside versions 1 and 2.
+ *
+ * `recordingChunks` has a **compound primary key**, `[sessionId+seq]`, for the
+ * reason `streamBlobs` has `[activityId+channel]`: that pair *is* the row's
+ * identity, so re-writing a chunk after a failed flush replaces it rather than
+ * accumulating a second copy of the same window. It is also what makes the
+ * append order a key rather than a convention — recovery reads a contiguous
+ * prefix, and a prefix is only meaningful if `seq` is part of the key.
+ *
+ * Every index leads with `athleteId`, for the reason every other index in this
+ * file does: there is no index that answers "the chunks of this recording"
+ * without also being told whose recording it is.
+ */
+export const STORES_V3: Readonly<Record<string, string>> = {
+  // The four stores of version 1 and the two of version 2 are inherited
+  // unchanged. Dexie carries forward any store a version does not mention.
+  [TABLE.recordingSessions]: [
+    'id',
+    INDEX.recordingSessionByAthlete,
+    INDEX.recordingSessionByAthleteAndId,
+    INDEX.recordingSessionByAthleteAndUpdatedAt,
+  ].join(', '),
+  [TABLE.recordingChunks]: [
+    '[sessionId+seq]',
+    INDEX.recordingChunkBySession,
+    INDEX.recordingChunkByAthlete,
+    INDEX.recordingChunkByAthleteAndSessionAndSeq,
+  ].join(', '),
+};
+
+/**
  * Every schema version this build knows, in ascending order.
  *
  * `ActivityStore` declares all of them on every open, because Dexie needs the
@@ -193,4 +250,8 @@ export const STORES_V2: Readonly<Record<string, string>> = {
  * what keeps `SCHEMA_VERSION` and the declarations from drifting apart;
  * `migrations.test.ts` asserts they agree.
  */
-export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [STORES_V1, STORES_V2];
+export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
+  STORES_V1,
+  STORES_V2,
+  STORES_V3,
+];

@@ -237,7 +237,27 @@ issue that first needs it.
 | `position.ts` | the FIT semicircle encoding |
 | `altitude.ts` | the FIT altitude scale and offset |
 | `time.ts` | the FIT epoch, and wrapping event-time counters |
+| `recording/channels.ts` | what the recorder merges and produces, generic over a channel map |
+| `recording/session.ts` | the recording session state machine and the stream merge (#45) |
+| `recording/errors.ts` | `RecordingError` and its codes |
 | `index.ts` | the public surface; consumers import from here and never from a file inside |
+
+`recording/` is the one part of this package that is not a unit or a conversion, and it is here for
+the reason signing and analysis are: **it must run identically on the device and on an instance**,
+and #85's native shell has to reuse it unchanged. Two constraints fall out of that and are worth
+knowing before you extend it:
+
+- **It reads no clock and schedules nothing.** `setTimeout` is not a declared name in this package
+  — `tsconfig.json` narrows `lib` to `ES2024` with `types: []` — so a session that wanted to
+  auto-pause after thirty seconds could not schedule it if it tried. Every instant is a parameter:
+  `start(at)`, `observe({ at })`, `advanceTo(now)`. That makes every timing case testable without
+  fake timers, which is the better design anyway.
+- **It is generic over a channel map** rather than naming the eight stream channels.
+  `@onyourleft/store` and `@onyourleft/sensors` both already name them and both depend on this
+  package, so it can import neither; the composition root (`apps/web/src/recording/channels.ts`)
+  instantiates it. A reading is still typed per channel — `ChannelReading` is a discriminated union
+  over the map, so a heart rate in the power channel is a compile error, and
+  `recording/recording-safety.test.ts` pins that with `@ts-expect-error`.
 
 Tests sit beside their module and import from `./index`, so a function that exists but is not
 exported from the barrel — which is a function no consumer can call — fails its own test.

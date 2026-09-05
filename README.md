@@ -33,6 +33,33 @@ an iPhone**, and Chrome on Linux needs `chrome://flags/#enable-experimental-web-
 No browser can record in the background, so the tab has to stay open. Mobile and desktop clients are
 the answer to all of that, and they come later.
 
+### If the tab closes mid-ride
+
+A tab that has to stay open for four hours will sometimes be closed by accident, discarded by the
+browser under memory pressure, or lost to a sleeping laptop. So the ride is written to local storage
+**as it happens**, and the next time the client opens it offers the interrupted ride back to be
+continued or discarded.
+
+> **At most eight seconds of a ride can be lost to a crash.**
+
+That is the whole guarantee, and it is a number rather than a reassurance: five seconds between
+checkpoints, two seconds during which a sensor reading may still arrive for a second already past,
+and the one second currently being recorded. There is no server in this milestone, so there is no
+backup, no re-upload and no support ticket — the copy on the device is the only copy in existence,
+and everything else about the recorder follows from that.
+
+That bound is about a crash, and a crash is not the only way to lose a second. If the device's
+clock is corrected **backwards** mid-ride — an NTP step, or a laptop waking with the wrong time —
+the ride loses roughly the seconds the clock rewinds, because readings stamped with the corrected
+time land behind seconds already recorded and are dropped rather than overwriting them. That is what
+keeps the recording in order, and the client counts both the steps and the samples they cost rather
+than passing over them.
+
+Two things the recovered ride keeps that a naive one would not: a sensor dropout comes back as
+**missing data**, never as zeroes, and a pause comes back as a **pause** rather than as a dropout
+that happens to look like one. If the device runs out of storage mid-ride the recording does not
+stop — it keeps going in memory, keeps everything already written, and says so.
+
 Which platform, in which phase, with which capabilities — and which of those gaps are **permanent**
 rather than pending: [`docs/adr/0003-platform-support-matrix.md`](docs/adr/0003-platform-support-matrix.md).
 

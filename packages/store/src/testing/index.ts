@@ -25,11 +25,13 @@ export type { StoreHarness, StoreHarnessOptions } from './harness';
 export type { PersistentStore, StoreFactory } from './store';
 
 export {
+  assertRecordingRecovers,
   assertSameSamples,
   assertSameStreamSet,
   assertStreamSetRoundTrip,
   RoundTripFailure,
 } from './round-trip';
+export type { ExpectedRecording } from './round-trip';
 
 export {
   ATHLETE_A,
@@ -38,19 +40,23 @@ export {
   ATHLETES,
   athleteRecord,
   CHANNELS_WITHOUT_POSITION,
+  chunksOf,
   DROPPED_STRAP,
   FIXTURE_EPOCH,
   FOUR_HOUR_SAMPLE_COUNT,
   lapFor,
   resetFixtureIds,
+  recordingFor,
   rideFor,
   seedAthletes,
+  seedRecording,
   seedRide,
   streamSetFor,
 } from './fixtures';
 export type { StreamFixtureOptions, StreamGap } from './fixtures';
 
 export {
+  droppedFlushStoreFactory,
   gapFillingStoreFactory,
   memoryWriteStoreFactory,
   misroutedBlobStoreFactory,

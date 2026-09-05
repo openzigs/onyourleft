@@ -29,17 +29,20 @@ ride, store it, view it. **No server, no account, no hosting bill.** A server ar
 ```
 apps/                 AGPL-3.0-or-later, without exception
   web/                browser client — the Phase 1 product (#48-#51)
+    src/recording/      the recorder: engine + durable checkpoints + recovery (#46)
   mobile/             Capacitor shell wrapping the same web build (#85; Phase 3)
 
 packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis (#25)
+    recording/          the recording session state machine and stream merge (#45)
   fit/                FIT / GPX / TCX codec (#29-#32)
   sensors/            sensor abstraction and BLE transport (#39-#44) — BLE only
     src/                the transport-agnostic abstraction; no platform API at all
     protocol/           the GATT profile clients (#41, #42) — service UUIDs, payload decoding
     web-bluetooth/      the browser transport (#40) — the one place a BluetoothDevice exists
   physics/            cycling power/speed model, Martin et al. 1998 (#88)
-  store/              local activity and stream store, and the round-trip harness (#26-#28)
+  store/              local activity, stream and recording-checkpoint store, and the
+                      round-trip harness (#26-#28, #46)
 
 docs/
   architecture.md     layout, component boundaries, ADR index
@@ -51,21 +54,22 @@ scripts/              dependency-free repository checks; run on a bare clone
   workflows/rules.yml runs those checks on every pull request — see §4c
 ```
 
-**`apps/web`, `packages/domain` and `packages/sensors` exist** — the first two created by
-[#23](https://github.com/openzigs/onyourleft/issues/23) along with the workspace, the toolchain and
-the lockfile, and `packages/sensors` by [#39](https://github.com/openzigs/onyourleft/issues/39). The
-other three packages and `apps/mobile` do **not** — each is created by the issue that owns its
-content (§4b), from `packages/domain` as the template. The layout is fixed here
+**`apps/web`, `packages/domain`, `packages/sensors`, `packages/fit` and `packages/store` exist.**
+The first two were created by [#23](https://github.com/openzigs/onyourleft/issues/23) along with the
+workspace, the toolchain and the lockfile, and `packages/sensors` by
+[#39](https://github.com/openzigs/onyourleft/issues/39). **`packages/physics` and `apps/mobile` do
+not** — each is created by the issue that owns its content (§4b), from `packages/domain` as the
+template. The layout is fixed here
 because ~30 sub-issues reference it by name, and the workspace globs and lint boundaries already
 cover the paths, so a package arrives inside the rules rather than beside them.
 
 | Package | Purpose | Must not depend on |
 |---|---|---|
-| `packages/domain` | Canonical units and types; every conversion in the program goes through it — the representations and the conversions are tabulated in [`packages/domain/README.md`](packages/domain/README.md). Also signing/verification and analysis, because those must run identically on the device and on an instance. | **Any platform API at all** — no DOM, no Node globals, no I/O, no network types |
+| `packages/domain` | Canonical units and types; every conversion in the program goes through it — the representations and the conversions are tabulated in [`packages/domain/README.md`](packages/domain/README.md). Also signing/verification, analysis, and the **recording engine** (#45), because those must run identically on the device and on an instance. | **Any platform API at all** — no DOM, no Node globals, no I/O, no network types. The recording engine may not read a clock or schedule anything: time arrives as a parameter |
 | `packages/fit` | FIT / GPX / TCX decode and encode | Anything server-specific; anything under `apps/` |
 | `packages/sensors` | BLE sensor and trainer abstraction (`src/`), and the Web Bluetooth transport (`web-bluetooth/`) | `src/`: **any platform API at all**, and any BLE library. `web-bluetooth/`: every platform global except `navigator`. Web Bluetooth types must not escape above the transport boundary |
 | `packages/physics` | Power → speed. Pure computation. | Any rendering, BLE or platform API |
-| `packages/store` | Local activity and stream persistence, and its migrations | Anything under `apps/` |
+| `packages/store` | Local activity, stream and **recording-checkpoint** persistence, and its migrations | Anything under `apps/` |
 
 ---
 
@@ -348,7 +352,11 @@ not.
     ([#26](https://github.com/openzigs/onyourleft/issues/26)) with the migration `up`/`down`
     contract, **per-second streams** at schema version 2
     ([#27](https://github.com/openzigs/onyourleft/issues/27), decided in
-    [ADR 0011](docs/adr/0011-stream-storage.md)) and the **round-trip persistence harness**
+    [ADR 0011](docs/adr/0011-stream-storage.md)), **recording checkpoints** at schema version 3
+    ([#46](https://github.com/openzigs/onyourleft/issues/46) — a session header plus append-only
+    chunks, packed but deliberately **not** compressed, recovered as a contiguous prefix that stops
+    at the first hole; `packages/store/README.md` §"Recording checkpoints" records why) and the
+    **round-trip persistence harness**
     ([#28](https://github.com/openzigs/onyourleft/issues/28)) at `@onyourleft/store/testing` — see
     §5. Devices and gear are still additive object stores in a later schema version. ⚠️ It is
     **not** platform-isolated the way `packages/domain` is — it uses `indexedDB` and
@@ -568,12 +576,14 @@ Four things to know before you use it:
 - **The assertions throw `RoundTripFailure`; they are not `expect` calls.** That is what lets the
   same assertion body run green against the real store and red against a fake, which is the only
   honest proof that a harness works.
-- **`fakes.ts` holds three deliberately broken stores** — one that writes to memory, one that
-  commits to the real database under a key the reader does not use, and one that fills every gap
-  with a zero. `harness.test.ts` runs the same round trip against all three and requires each to go
-  red. **If you add a write path to `packages/store`, the `PersistentStore` type fails to compile
-  until the fakes account for it.** That is deliberate: it is what stops a write path shipping with
-  nothing proving the harness catches its failure.
+- **`fakes.ts` holds four deliberately broken stores** — one that writes to memory, one that
+  commits to the real database under a key the reader does not use, one that fills every gap
+  with a zero, and one whose every second flush is acknowledged and never written.
+  `harness.test.ts` runs the same round trip against each and requires it to go red. **If you add a
+  write path to `packages/store`, the `PersistentStore` type fails to compile until the fakes
+  account for it.** That is deliberate: it is what stops a write path shipping with nothing proving
+  the harness catches its failure — and it is how the fourth fake arrived, with #46's checkpoint
+  write.
 
 ### Migrations
 
@@ -755,6 +765,13 @@ gate. Prose may name it in order to ban it; the rule is scoped to workflow files
 
 **Pin every third-party action to a full commit SHA**, never a tag. A tag is mutable.
 
+**A recorder fed only power auto-pauses, and that is correct.** `apps/web/src/recording/channels.ts`
+counts speed and cadence as movement and deliberately **not** power: an ERG-mode trainer holds a
+power target while the rider is off the bike getting a drink, and a crank-based meter reports the
+torque of a bike being wheeled. A test that feeds power alone and expects a sixty-second ride gets
+ten seconds of moving time and fifty of automatic pause — which cost an afternoon to diagnose the
+first time. Feed a movement signal, or pass `autoPause: null`.
+
 **Web Bluetooth constraints are product constraints, not bugs.** No Safari (desktop or iOS), no
 Firefox, anywhere, ever — `caniuse` `usage_perc_y` was **76.46% when read on 2026-09-02** (a
 browser-share figure that drifts monthly; re-read it rather than quoting this), so roughly a quarter
@@ -796,5 +813,6 @@ top of an issue **supersedes its body**.
 | The canonical unit for a quantity, and the conversion into it | [`packages/domain/README.md`](packages/domain/README.md) |
 | Where a FIT profile number came from, and what the decoder does with a bad file | [`packages/fit/README.md`](packages/fit/README.md) §1–§5 |
 | Which GPX/TCX schema versions are targeted, what each format loses, and how XXE is refused | [`packages/fit/README.md`](packages/fit/README.md) §7 |
+| How a ride is recorded, checkpointed and recovered, and the stated data-loss bound | [`packages/store/README.md`](packages/store/README.md) §"Recording checkpoints", `apps/web/src/recording/recorder.ts`, `README.md` §"If the tab closes mid-ride" |
 
-<!-- Last updated: 2026-09-04 by delivery:code-issue resolving #31 and #32 (the FIT encoder, and GPX 1.1 / TCX v2) -->
+<!-- Last updated: 2026-09-05 by delivery:code-issue resolving #45 and #46 (the recording engine, and offline-first persistence) -->
