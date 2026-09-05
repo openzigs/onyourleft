@@ -360,6 +360,16 @@ not.
     entity, so refusing the declaration is what closes XXE and billion-laughs together, and the
     only entity references resolved at all are the five XML predefines. Do not swap in a
     general-purpose XML parser without reading `packages/fit/README.md` §7 first.
+    ⚠️ **`tools/fuzz/` runs a seeded corpus fuzz inside `pnpm run test`**
+    ([#128](https://github.com/openzigs/onyourleft/issues/128)) — about six seconds, no CI job of
+    its own. Two things about it are easy to get wrong and are recorded in
+    `packages/fit/README.md` §5: it **repairs the FIT checksums on half its mutations**, because a
+    file CRC is verified before any record is read and a fuzzer that skips the repair tests
+    `bad-file-crc` tens of thousands of times and never reaches the record loop; and its assertions
+    go **beyond the error type**, because `subarray` clamps rather than throwing, so a bounds bug
+    in this decoder produces no exception to watch for. Change the seed or the budget deliberately,
+    and re-run the M16 mutation in `src/decode/container.ts` afterwards — that is the mutation the
+    harness exists to catch and the only thing that says it still can.
   - **`packages/store`** holds athletes, activities, laps and privacy zones
     ([#26](https://github.com/openzigs/onyourleft/issues/26)) with the migration `up`/`down`
     contract, **per-second streams** at schema version 2

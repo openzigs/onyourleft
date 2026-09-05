@@ -89,6 +89,7 @@ and **collects a fault** when the file is readable up to a point.
 | `undefined-local-message-type` | a data message names a local type no definition has bound |
 | `compressed-timestamp-without-reference` | a compressed-timestamp record arrived before any full timestamp |
 | `invalid-field-value` | a field decoded to a value `@onyourleft/domain` rejects |
+| `duplicate-file-id` | a second `file_id` arrived after the first; **the first is kept** |
 
 A truncated file therefore returns **the records that were readable, plus a fault naming the byte
 offset of the cut**. It never discards the ride and it never returns a silently empty activity — a
@@ -343,6 +344,17 @@ is slower and is the point.
   another. Nothing in this profile subset does, and the decoder does not implement it.
 - **Chained files.** A FIT file may be followed immediately by another complete FIT file. Bytes after
   the first file's trailing CRC are ignored rather than decoded as a second activity.
+- **`hr.event_timestamp` above 65535.** The decoder reads the field through
+  `@onyourleft/domain`'s `eventTicks`, which is a **`uint16`** counter reading and rejects anything
+  above 65535. Real FIT declares the field as a `uint32` ticking at 1024 Hz, so a file whose `hr`
+  messages run past **≈ 64 seconds** carries values the reading rejects: those messages get an
+  `invalid-field-value` fault and lose that one field, while every other field of the message — and
+  the whole rest of the ride — decodes. This is a real interoperability limit against real head
+  units, not a theoretical one, and it is why `event-timestamp-1024-wrap.fit` walks a `uint16`
+  counter rather than a `uint32` one. Widening it means widening the domain quantity and the
+  `unsignedCounterDelta` modulus with it, which is a change to a merged package and belongs in its
+  own issue. Tested at `src/decode/activity.test.ts` — *"drops an hr event timestamp wider than the
+  uint16 counter it is read as"*.
 
 The encoder's own gaps, which are not the same list:
 
@@ -371,6 +383,26 @@ The decoder is tested against the **committed** corpus in
 field, with expectations computed from the generator's ride model rather than from the decoder. That
 file lives under `tools/` because it reads files off disk and `src/` is compiled with no platform
 surface at all — the decoder it exercises has no such dependency; the harness around it does.
+
+### The corpus is also fuzz seed material
+
+[`tools/fuzz/`](tools/fuzz/) mutates the committed corpus and requires the FIT decoder and the
+GPX/TCX readers to survive it — #128. It runs inside `pnpm run test` and adds no CI job.
+
+- **Seeded, not random.** Every case is a pure function of `FUZZ_SEED` in
+  [`decode-fuzz.test.ts`](tools/fuzz/decode-fuzz.test.ts), the committed corpus and a stated budget.
+  A failure prints the seed, the case index, the mutation kind, the seed file and the byte offset,
+  which is the whole reproduction.
+- **Two things it asserts beyond "it did not crash."** No message may report bytes from outside the
+  data section the header declared, and no decode may produce more output than the input could
+  encode. The first is what catches a missing record-length check: `subarray` clamps rather than
+  throwing, so a bounds bug in this decoder has no exception to watch for.
+- **It repairs the checksums on half the mutations, deliberately.** A FIT file's trailing CRC is
+  verified before any record is read, so a fuzzer that does not recompute it tests `bad-file-crc`
+  tens of thousands of times and never reaches the record loop at all.
+- **The harness is itself tested** in [`harness.test.ts`](tools/fuzz/harness.test.ts): each
+  invariant is run against input that violates it and required to go red, the same discipline
+  `@onyourleft/store/testing` uses for the round-trip harness.
 
 ## 6. Commands
 

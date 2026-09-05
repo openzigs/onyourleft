@@ -209,6 +209,73 @@ describe('date_time', () => {
       instant: FIT_TIME + 3 + FIT_EPOCH_UNIX_SECONDS,
     });
   });
+
+  /**
+   * #129 finding 7. A record can carry both a compressed timestamp header and
+   * an explicit field 253, and `dateTime` decides which wins. The rule is
+   * *explicit field first*, and a mutation of it survived #125's whole suite
+   * because no file in the corpus or the unit tests carried both.
+   *
+   * Explicit is right because the five-bit header offset is a delta against
+   * whatever timestamp happened to come last, while field 253 is the message's
+   * own absolute reading. Where the file states both, the one that does not
+   * depend on preceding context is the one to believe.
+   */
+  it('prefers an explicit timestamp field over the compressed header on the same record', () => {
+    const file = new FitBytes()
+      .definition(0, GLOBAL_MESSAGE.record, [
+        { number: FIELD.timestamp, size: 4, baseType: UINT32 },
+        { number: FIELD.record.heartRate, size: 1, baseType: UINT8 },
+      ])
+      .data(0, [...bytes.u32(FIT_TIME), 120])
+      // Local type 1 carries field 253 *and* arrives under a compressed header
+      // whose five-bit offset expands to FIT_TIME + 7. The body says + 600.
+      .definition(1, GLOBAL_MESSAGE.record, [
+        { number: FIELD.timestamp, size: 4, baseType: UINT32 },
+        { number: FIELD.record.heartRate, size: 1, baseType: UINT8 },
+      ])
+      .compressed(1, (FIT_TIME + 7) & 0x1f, [...bytes.u32(FIT_TIME + 600), 121])
+      .finish();
+    const { activity, faults } = decodeFitActivity(file);
+    expect(faults).toEqual([]);
+    expect(activity.records.at(1)?.heartRate).toBe(121);
+    expect(activity.records.at(1)?.timestamp).toEqual({
+      kind: 'instant',
+      instant: FIT_TIME + 600 + FIT_EPOCH_UNIX_SECONDS,
+    });
+    // Named, because this is the reading the other precedence gives and both
+    // are instants a few minutes apart in a plausible ride.
+    expect(activity.records.at(1)?.timestamp).not.toEqual({
+      kind: 'instant',
+      instant: FIT_TIME + 7 + FIT_EPOCH_UNIX_SECONDS,
+    });
+  });
+
+  /**
+   * The other half of the same rule: an explicit field 253 holding the `uint32`
+   * invalid marker is still an explicit statement that the message has no
+   * timestamp, so the compressed header does not fill the gap. Without this,
+   * "prefer the explicit field" could be implemented as "prefer the explicit
+   * *value*", which reads a gap as an invitation.
+   */
+  it('does not fall back to the compressed header when the explicit field is a gap', () => {
+    const file = new FitBytes()
+      .definition(0, GLOBAL_MESSAGE.record, [
+        { number: FIELD.timestamp, size: 4, baseType: UINT32 },
+        { number: FIELD.record.heartRate, size: 1, baseType: UINT8 },
+      ])
+      .data(0, [...bytes.u32(FIT_TIME), 120])
+      .definition(1, GLOBAL_MESSAGE.record, [
+        { number: FIELD.timestamp, size: 4, baseType: UINT32 },
+        { number: FIELD.record.heartRate, size: 1, baseType: UINT8 },
+      ])
+      .compressed(1, (FIT_TIME + 7) & 0x1f, [...bytes.u32(0xffffffff), 121])
+      .finish();
+    const { activity, faults } = decodeFitActivity(file);
+    expect(faults).toEqual([]);
+    expect(activity.records.at(1)?.heartRate).toBe(121);
+    expect(activity.records.at(1)?.timestamp).toBeUndefined();
+  });
 });
 
 describe('a field value the domain rejects', () => {
@@ -410,6 +477,68 @@ describe('developer fields', () => {
     expect(activity.developerFieldDescriptions).toEqual([]);
   });
 
+  /**
+   * #129 finding 1. `FitDeveloperFieldValue.littleEndian` is written by
+   * `container.ts` from the definition message's architecture byte and read by
+   * `activity.ts` when the description finally says how wide the field is —
+   * one layer writes it, a different layer reads it, and nothing asserted the
+   * link. Hardcoding it to `true` in `readDeveloperFields` left all 307 tests
+   * of #125 green.
+   *
+   * The two tests below are a pair on purpose. The same numeral, 1042, is
+   * written once in each order into an otherwise identical file; if the flag
+   * stopped being consulted, one of the two would read 4612.
+   */
+  function bigEndianRecordWithDeveloperField(file: FitBytes, value: number[]): FitBytes {
+    return file
+      .definition(
+        4,
+        GLOBAL_MESSAGE.record,
+        [{ number: FIELD.record.power, size: 2, baseType: UINT16 }],
+        { bigEndian: true, developerFields: [{ number: 0, size: 2, developerDataIndex: 0 }] },
+      )
+      .data(4, [...bytes.u16be(231), ...value]);
+  }
+
+  it('reads a developer field with the byte order its definition message declared', () => {
+    const file = bigEndianRecordWithDeveloperField(
+      fieldDescription(developerDataId(new FitBytes())),
+      bytes.u16be(1042),
+    ).finish();
+    const { activity, faults } = decodeFitActivity(file);
+    expect(faults).toEqual([]);
+    // The native field beside it is the control: it is read big-endian too, so
+    // a wrong answer here would be the whole record rather than the developer
+    // field alone.
+    expect(activity.records.at(0)?.power).toBe(231);
+    expect(activity.records.at(0)?.developerFields.at(0)?.numeric).toBe(1042);
+    // Named explicitly, because 4612 is what the little-endian reading of these
+    // same two bytes gives and it is a perfectly plausible power-meter number.
+    expect(activity.records.at(0)?.developerFields.at(0)?.numeric).not.toBe(4612);
+  });
+
+  it('reads the little-endian spelling of the same value from the same bytes', () => {
+    const file = fieldDescription(developerDataId(new FitBytes()))
+      .definition(
+        5,
+        GLOBAL_MESSAGE.record,
+        [{ number: FIELD.record.power, size: 2, baseType: UINT16 }],
+        { developerFields: [{ number: 0, size: 2, developerDataIndex: 0 }] },
+      )
+      .data(5, [...bytes.u16(231), ...bytes.u16(1042)])
+      .finish();
+    const { activity, faults } = decodeFitActivity(file);
+    expect(faults).toEqual([]);
+    expect(activity.records.at(0)?.power).toBe(231);
+    expect(activity.records.at(0)?.developerFields.at(0)?.numeric).toBe(1042);
+    // The two files hold *different* bytes for the developer field — 0x04 0x12
+    // against 0x12 0x04 — and decode to the same number. That is the flag
+    // doing the work rather than a coincidence of a palindromic value.
+    expect([...(activity.records.at(0)?.developerFields.at(0)?.bytes ?? [])]).toEqual(
+      bytes.u16(1042),
+    );
+  });
+
   it('lists every description the file carried', () => {
     const file = fieldDescription(developerDataId(new FitBytes())).finish();
     expect(decodeFitActivity(file).activity.developerFieldDescriptions).toEqual([
@@ -505,6 +634,72 @@ describe('the messages around the records', () => {
     // 65024 and 12, not 63.5 and 0.01: dividing a wrapped counter by its tick
     // rate destroys the modulus unsignedCounterDelta needs.
     expect(activity.heartRateEvents.map((event) => event.eventTimestamp)).toEqual([65_024, 12]);
+  });
+
+  /**
+   * #129 finding 8. A second `file_id` used to overwrite the first in silence,
+   * untested, and a mutation of it survived.
+   *
+   * The rule pinned here is **first wins, and the second is a fault**.
+   * `file_id` is the file's identity — the manufacturer, serial number and
+   * creation time an importer attributes and deduplicates a ride on — and the
+   * protocol writes it first. Under overwrite, the identity a consumer ends up
+   * with is chosen by the *last* such message, which is a byte range at the end
+   * of an untrusted file. Reported rather than resolved in silence, so an
+   * importer can decline a file whose identity is ambiguous instead of
+   * discovering later that it attributed a ride from one head unit's serial
+   * number to another's.
+   */
+  it('keeps the first file_id and reports the second, rather than overwriting', () => {
+    const fileIdFields = [
+      { number: FIELD.fileId.type, size: 1, baseType: ENUM },
+      { number: FIELD.fileId.serialNumber, size: 4, baseType: UINT32 },
+    ];
+    const file = new FitBytes()
+      .definition(0, GLOBAL_MESSAGE.fileId, fileIdFields)
+      .data(0, [4, ...bytes.u32(0x00c0ffee)])
+      .definition(1, GLOBAL_MESSAGE.record, [
+        { number: FIELD.record.heartRate, size: 1, baseType: UINT8 },
+      ])
+      .data(1, [140])
+      .definition(2, GLOBAL_MESSAGE.fileId, fileIdFields)
+      .data(2, [4, ...bytes.u32(0x0badf00d)])
+      .finish();
+
+    const { activity, faults } = decodeFitActivity(file);
+    expect(activity.fileId?.serialNumber).toBe(0x00c0ffee);
+    expect(activity.fileId?.serialNumber).not.toBe(0x0badf00d);
+    expect(faults.map((fault) => fault.code)).toEqual(['duplicate-file-id']);
+    // The rest of the file is unaffected: this is a collected fault, not a
+    // reason to lose the ride.
+    expect(activity.records.at(0)?.heartRate).toBe(140);
+  });
+
+  it('names the byte offset of the second file_id, not of the first', () => {
+    const fileIdFields = [
+      { number: FIELD.fileId.type, size: 1, baseType: ENUM },
+      { number: FIELD.fileId.serialNumber, size: 4, baseType: UINT32 },
+    ];
+    const file = new FitBytes()
+      .definition(0, GLOBAL_MESSAGE.fileId, fileIdFields)
+      .data(0, [4, ...bytes.u32(0x00c0ffee)])
+      .definition(2, GLOBAL_MESSAGE.fileId, fileIdFields)
+      .data(2, [4, ...bytes.u32(0x0badf00d)])
+      .finish();
+
+    // The offending message is the last record in the file: six bytes of
+    // payload — its record header and the two fields — then the two trailing
+    // CRC bytes. Counted from the end so the arithmetic does not restate the
+    // definition-message layout that `FitBytes` already owns.
+    const secondFileIdStart = file.length - 2 - 6;
+    const { faults } = decodeFitActivity(file);
+    expect(faults.at(0)?.byteOffset).toBe(secondFileIdStart);
+    // And it is not the offset of the first, which is inside the header.
+    expect(faults.at(0)?.byteOffset).toBeGreaterThan(14);
+    // ADR 0004 decision D: the field and the constraint, never the value. A
+    // serial number is a device identifier and does not belong in a message.
+    expect(faults.at(0)?.message).not.toContain('c0ffee');
+    expect(faults.at(0)?.message).not.toContain('badf00d');
   });
 });
 
