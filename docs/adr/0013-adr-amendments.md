@@ -64,7 +64,11 @@ A dated note may be **appended** to an ADR, in a section named `## Amendments`, 
 something stated in the body has since become false. The shape:
 
 ```markdown
+---
+
 ## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
 
 - **2026-09-05** — Decision H's second paragraph is no longer true. `UnitError` stopped naming a
   coordinate value in #104; the codec's per-channel masking it describes is still in force, and
@@ -72,7 +76,16 @@ something stated in the body has since become false. The shape:
 ```
 
 The section goes at the **end of the file**, nothing follows it, and each entry is one bullet
-opening with a bold ISO date.
+opening with a bold ISO date. Entries are **in date order**, because they are appended.
+
+The horizontal rule and the standing line under the heading are **part of the prescribed shape, not
+decoration**, and they are one line each on purpose. The rule separates a section that is not part
+of the argument above it from one that is; the standing line answers the question a reader arriving
+here asks first — *has the body been edited?* — where they are, rather than in an ADR they would
+have to go and find. Neither is an entry: `ADR003` reads entries as top-level bullets, so prose
+before the first one is not checked for a date. Anything longer than that line belongs in this ADR,
+which is why the two amendments this convention was established for carry exactly it and nothing
+more.
 
 ### D-2. The body above it is never edited. That rule does not move
 
@@ -107,11 +120,20 @@ log that can be rewritten is not a record either.
 ### D-5. Enforced by rule `ADR003`, not by this document
 
 `scripts/check-repo-rules.sh` fails the build when an ADR has two `## Amendments` sections, when
-anything follows the section, or when an entry does not open with a bold ISO date. That is the
-enforcement half, and it is not optional politeness: the two things D-1 distinguishes — *appending a
-note* and *editing the body while calling it an amendment* — produce diffs that look alike in review
-and are opposites in what they do to the record. `CLAUDE.md` §8 already makes this argument about
-`pull_request_target`: "a documented ban is not a gate".
+**any heading at all** follows the section, when an entry does not open with a bold ISO date, when
+an entry is dated **before the one above it**, or when an unclosed code fence would hide any of
+those. That is the enforcement half, and it is not optional politeness: the two things D-1
+distinguishes — *appending a note* and *editing the body while calling it an amendment* — produce
+diffs that look alike in review and are opposites in what they do to the record. `CLAUDE.md` §8
+already makes this argument about `pull_request_target`: "a documented ban is not a gate".
+
+The **date order** check is the one part of "it was an append" that is visible in the file rather
+than only in the diff: an entry put at the top of the section — the natural move if you read the
+section as a newest-first changelog — leaves an older date below a newer one. It cannot catch an
+append carrying a backdated date, and does not claim to. The **unclosed fence** check is there
+because the rule skips fenced blocks, so an odd number of fences does not weaken it, it switches it
+off for that ADR: the heading is blanked with everything after it, the file is skipped whole, and a
+second section, a following section and an undated entry all pass in silence.
 
 **What `ADR003` cannot check** is that the change was literally an append. That is a property of the
 diff, not of the file, and `scripts/check-repo-rules.sh` runs on a bare clone with no git history by
@@ -164,6 +186,28 @@ a superseding ADR for that document and a stricter reading of D-3 — not a four
   column one without the rule reading it as this ADR's own section. The tests for that are in
   `scripts/check-repo-rules.test.sh`, both directions: a fenced example is not the section, and a
   fence does not blind the checker to a real section further down.
+- **A setext heading after the section is deliberately not caught.** `Notes` underlined with hyphens
+  is a heading in CommonMark, and `ADR003` matches only `#`-prefixed ones. A row of hyphens at
+  column one is also a horizontal rule and a table separator, this repository writes no setext
+  heading, and `strip_fences` settles the same question the same way for tilde fences: a rule that
+  guesses at a syntax nobody uses is a rule nobody can predict. A test records the limit so it stays
+  a decision rather than becoming an oversight.
+- **Whether appending to a merged ADR is itself "editing it in place" was a live question**, raised
+  in the review of [#150](https://github.com/openzigs/onyourleft/pull/150) against #119's third
+  acceptance criterion and against the instruction on both issues to stop if you find yourself
+  editing `0001-licence.md` or `0011-stream-storage.md`. It is answered **no**, on the ground that
+  #147's option 3 — the option that comment goes on to endorse by name — *is defined as* appending
+  to an existing ADR, so a reading under which the append is forbidden establishes a convention
+  that can never be applied to the two documents it was established for, and leaves #147's third
+  acceptance criterion (a reader arriving at ADR 0011 line 200 can tell the sentence is no longer
+  true) unmet by anything short of the superseding ADR #147 rejected as disproportionate. The
+  substantive test is the one D-2 states and the diff answers: **0 deletions, 0 modified lines**.
+  The ruling is still the owner's, and it is cheap to reverse: each append is a trailing
+  `## Amendments` section and nothing else in either file changed, so dropping both is deleting
+  those two sections. What would then need a second edit is *Context* item 1 and 2 here and the
+  first paragraph of *Consequences*, which say the two known cases were repaired in the pull request
+  that established this. Nothing in `ADR003`, in the 0012 reservation or in the test harness depends
+  on them.
 - **`ADR003` checks a date's shape, not its validity** — `2026-13-99` passes, and a test records
   that it does so the rule is never credited with more than it checks. A calendar in the bash 3.2 a
   bare macOS clone ships is not worth the lines, and a typo in a date nobody disputes is not the

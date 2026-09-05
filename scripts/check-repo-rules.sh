@@ -23,7 +23,8 @@
 #   WF001   no pull_request_target trigger in .github/workflows/
 #   ADR001  no two ADRs share a number
 #   ADR002  every ADR filename is NNNN-kebab-case.md
-#   ADR003  an ADR's "## Amendments" section is single, last, and dated
+#   ADR003  an ADR's "## Amendments" section is single, last, dated, and in
+#           date order -- and no unclosed fence hides it
 #
 # Usage: scripts/check-repo-rules.sh [ROOT]   (ROOT defaults to the repo root)
 # Exit:  0 clean, 1 if any rule is violated.
@@ -255,11 +256,34 @@ strip_fences() {
 # ADR001's old message. The numbers are the FILE's, which is what `strip_fences`
 # blanking rather than deleting is for.
 
+# A numbered (`grep -n`) amendment entry that opens with a bold ISO date. ONE
+# definition, used with `grep -E` to select the dated entries and with `grep -vE`
+# to select the undated ones, because two spellings of "dated" drift and the
+# pair are each other's complement by construction.
+DATED_ENTRY='^[0-9]+:-[[:space:]]+\*\*[0-9]{4}-[0-9]{2}-[0-9]{2}\*\*[[:space:]]'
+
 check_adr_amendments() {
   local adr base body start after following entries numbered undated
+  local fences date previous
   while IFS= read -r adr; do
     [ -n "${adr}" ] || continue
     base="$(basename "${adr}")"
+
+    # An UNCLOSED fence would blank the whole rest of the file, which does not
+    # weaken this rule -- it switches it off, silently, for that ADR. The
+    # heading disappears, so `start` is empty and the file is skipped whole:
+    # a section that is not last, an entry with no date and a second section
+    # all pass. Reported before anything else is read, because everything
+    # after it is read through `strip_fences`. #150's review found the same
+    # shape in the test harness (a guard that printed a failure and could not
+    # fail the build); a rule a typo can disable is worse than one that misses
+    # a case, because nothing tells you it happened.
+    fences="$(grep -c '^[[:space:]]*```' "${adr}")"
+    if [ $((fences % 2)) -ne 0 ]; then
+      report ADR003 "docs/adr/${base}: unclosed code fence (${fences} fence lines, an odd number); everything after the last one is read as code, which would hide an '## Amendments' section and anything wrong inside it (ADR 0013)"
+      continue
+    fi
+
     body="$(strip_fences "${adr}")"
 
     # Line numbers of every level-2 Amendments heading, oldest first.
@@ -273,7 +297,18 @@ check_adr_amendments() {
 
     after="$(printf '%s\n' "${body}" | tail -n +"$((start + 1))")"
 
-    following="$(printf '%s\n' "${after}" | grep -n -m 1 '^## ')"
+    # ANY heading at column one, not only a level-2 one. "Nothing follows the
+    # section" is the rule; a '# Appendix' or a '### Postscript' after it is the
+    # same defect as a '## Notes', and matching '^## ' alone let the first of
+    # those through (#150's review). An entry is a bullet, so no legitimate
+    # amendment puts a heading here.
+    #
+    # A setext heading -- 'Notes' underlined with hyphens -- is deliberately NOT
+    # matched. This repository writes none, a row of hyphens at column one is
+    # also a horizontal rule and a table separator, and `strip_fences` already
+    # settles the same question the same way: a rule that guesses at a syntax
+    # nobody uses is a rule nobody can predict.
+    following="$(printf '%s\n' "${after}" | grep -n -m 1 -E '^#{1,6} ')"
     if [ -n "${following}" ]; then
       report ADR003 "docs/adr/${base}: '## Amendments' (line ${start}) must be the last section, but '${following#*:}' follows it at line $((start + ${following%%:*})); an amendment is appended to the end of the file, never inserted into the body (ADR 0013)"
       continue
@@ -293,11 +328,41 @@ check_adr_amendments() {
     # calendar in bash 3.2 without GNU date is not worth the lines, and the
     # failure it would catch -- a typo in a date nobody disputes -- is not the
     # one this rule exists for.
+    #
+    # `-[[:space:]]` here and in the entry match above, not `- `: a tab after
+    # the bullet hyphen is a list item in every Markdown renderer, and matching
+    # it as an entry while requiring a literal space to see its date reported a
+    # correctly dated entry as undated (#150's review). The two patterns have to
+    # admit the same whitespace or the second is judging a line the first
+    # already misread.
     while IFS= read -r numbered; do
       [ -n "${numbered}" ] || continue
       undated="${numbered#*:}"
       report ADR003 "docs/adr/${base}: line $((start + ${numbered%%:*})): amendment entry must open with a bold ISO date, as in \"- **2026-09-05** — ...\"; found \"${undated}\" (ADR 0013)"
-    done < <(printf '%s\n' "${entries}" | grep -vE '^[0-9]+:- \*\*[0-9]{4}-[0-9]{2}-[0-9]{2}\*\*[[:space:]]')
+    done < <(printf '%s\n' "${entries}" | grep -vE "${DATED_ENTRY}")
+
+    # Dates never go backwards. This is the one part of "it was an append" that
+    # IS visible in the file: an entry put at the TOP of the section -- the
+    # natural move if you read the section as a newest-first changelog -- leaves
+    # an older date below a newer one, and D-4 makes the section an append-only
+    # log. It cannot catch an append carrying a backdated date, and does not
+    # claim to; ISO dates sort lexically, which is why no date parsing happens.
+    #
+    # A STRING comparison, deliberately, not `-lt` on the digits: this text
+    # comes from a fork's tree, and arithmetic is the one context where a
+    # `$(( ))` inside it would be evaluated. Both operands are fixed-width and
+    # matched by DATED_ENTRY, so they are digits and hyphens in the same
+    # positions, and no locale collates ASCII digits out of order.
+    previous=""
+    while IFS= read -r numbered; do
+      [ -n "${numbered}" ] || continue
+      date="${numbered#*\*\*}"
+      date="${date:0:10}"
+      if [ -n "${previous}" ] && [[ "${date}" < "${previous}" ]]; then
+        report ADR003 "docs/adr/${base}: line $((start + ${numbered%%:*})): amendment entry dated ${date} follows one dated ${previous}; the section is an append-only log, so its dates never go backwards (ADR 0013 D-4)"
+      fi
+      previous="${date}"
+    done < <(printf '%s\n' "${entries}" | grep -E "${DATED_ENTRY}")
   done < <(find "${ROOT}/docs/adr" -type f -name '*.md' | sort)
 }
 

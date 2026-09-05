@@ -328,9 +328,7 @@ tight assertion on a shared runner measures the runner.
 
 ## Amendments
 
-Appended under the convention established by [ADR 0013](0013-adr-amendments.md) (#147). Nothing
-above this line has been edited; each entry records what has since become false, and the body still
-says what it said on the date at the top.
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
 
 - **2026-09-05** — **Decision H's second sentence is no longer true.** It says
   "`@onyourleft/domain`'s `UnitError` does name it — `assertInRange` appends `received 91.2`". Since

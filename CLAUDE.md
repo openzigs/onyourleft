@@ -139,7 +139,7 @@ downstream issue's acceptance criteria depend on these.
 # Exits 0 clean; exits 1 listing each violation by rule id.
 bash scripts/check-repo-rules.sh
 
-# Test the checker itself. Fixture-driven; 47 cases.
+# Test the checker itself. Fixture-driven; 59 cases.
 bash scripts/check-repo-rules.test.sh
 
 # Verify the licence texts are byte-identical to the canonical ones, by
@@ -273,7 +273,7 @@ npm view typescript-eslint peerDependencies.typescript
 | `WF001` | `pull_request_target` appears in a `.github/workflows/` file (see §8) |
 | `ADR001` | two ADRs share a number |
 | `ADR002` | an ADR filename is not `NNNN-kebab-case.md` |
-| `ADR003` | an ADR's `## Amendments` section is not the last section, or there are two of them, or an entry does not open with a bold ISO date — see §7 and [ADR 0013](docs/adr/0013-adr-amendments.md) |
+| `ADR003` | an ADR's `## Amendments` section is followed by **any** heading, or there are two of them, or an entry does not open with a bold ISO date, or an entry is dated **before the one above it**, or an **unclosed code fence** would hide any of those — see §7 and [ADR 0013](docs/adr/0013-adr-amendments.md) |
 
 `scripts/check-licence-hashes.sh` enforces one more, separately because it hashes files rather than
 reading paths:
