@@ -77,7 +77,9 @@
  * - **A clock.** This directory is platform-free, so there is no `setTimeout`.
  *   The procedure timeout is an **injected port**
  *   ({@link TrainerControlOptions.scheduleTimeout}); omit it and a machine that
- *   never answers leaves its procedure pending until `linkLost()`.
+ *   never answers leaves its procedure pending until `linkLost()` or
+ *   `close()`, each of which rejects it rather than leaving the queue wedged
+ *   behind an answer that can no longer arrive.
  */
 
 import {
@@ -189,8 +191,22 @@ const MAX_ROLLING_RESISTANCE_COEFFICIENT = 255 / ROLLING_RESISTANCE_UNITS_PER_UN
 /** Wind resistance is a `uint8` at 0.01 kg/m. */
 const MAX_WIND_RESISTANCE_COEFFICIENT = 255 / WIND_RESISTANCE_UNITS_PER_KILOGRAM_PER_METRE;
 
-/** Wind speed is a `sint16` at 0.001 m/s. This client writes only tailwind-free values. */
-const MAX_WIND_SPEED_METRES_PER_SECOND = SINT16_MAX / WIND_SPEED_UNITS_PER_METRE_PER_SECOND;
+/**
+ * Wind speed is a `sint16` at 0.001 m/s, so the field carries ±32.767 m/s.
+ *
+ * ⚠️ A **field-width limit, not a plausibility bound** — unlike every
+ * `MAX_PLAUSIBLE_*` in this program, which is a product judgement about what a
+ * reading can credibly be. 32.767 m/s is 118 km/h of headwind, so nothing this
+ * client would ever simulate reaches it.
+ *
+ * The *usable* range is narrower still and in one direction only: `sint16`
+ * admits a tailwind, `MetresPerSecond` is non-negative, so a tailwind cannot be
+ * expressed through this parameter at all. That is #16's problem to raise when
+ * it drives conditions from a course, and it is a domain-type question rather
+ * than a wire one.
+ */
+const MAX_ENCODABLE_WIND_SPEED_METRES_PER_SECOND =
+  SINT16_MAX / WIND_SPEED_UNITS_PER_METRE_PER_SECOND;
 
 /**
  * The simulated course conditions a trainer is asked to reproduce.
@@ -486,6 +502,15 @@ export interface FitnessMachineChannel {
    * @returns a promise that rejects with the **ATT error** when the write
    * itself was refused, and resolves when the machine acknowledged the write.
    * Resolving says nothing about the result: that arrives as an indication.
+   *
+   * ⚠️ **An implementation must use an acknowledged write** —
+   * `writeValueWithResponse()` on Web Bluetooth, `write` rather than
+   * `writeWithoutResponse` on a native stack. Filling this with an
+   * unacknowledged write compiles, satisfies every test in this file, and
+   * reintroduces exactly the fire-and-forget failure the client exists to
+   * prevent: `CCCD Improperly Configured` and `Procedure Already In Progress`
+   * would never reject, so an unwritten setpoint would be indistinguishable
+   * from a machine that simply never answered.
    */
   writeControlPoint(value: Uint8Array): Promise<void>;
 }
@@ -621,7 +646,13 @@ export interface TrainerControl {
    * descriptor survived.
    */
   linkRestored(): void;
-  /** Unsubscribe from the channel and refuse everything after. */
+  /**
+   * Unsubscribe from the channel and refuse everything after.
+   *
+   * Rejects the procedure in flight, as {@link TrainerControl.linkLost} does
+   * and for the same reason: the indication is unsubscribed here, so its answer
+   * can no longer arrive, and `enqueue` chains every later call behind it.
+   */
   close(): void;
 }
 
@@ -727,6 +758,16 @@ export function createTrainerControl(
       // 0x2AD9 is indications, CCCD 0x0002. Before this, every write is an ATT
       // error at best.
       await channel.enableControlPointIndications();
+      if (closed || !linkUp) {
+        // ⚠️ Re-checked, because this is the one await that happens BEFORE the
+        // indication waiter is armed — so a teardown landing here finds no
+        // `pending` to reject, and the procedure would go on to arm a waiter
+        // that `close()` has already unsubscribed, or to claim control on a
+        // link that is down. Recording the CCCD as enabled would be wrong
+        // twice over: it is per-connection, so a reconnection has to write it
+        // again.
+        throw fail('not-connected', 'a control point write needs a connection');
+      }
       indicationsEnabled = true;
     }
 
@@ -931,7 +972,15 @@ export function createTrainerControl(
           quantise(
             requested,
             resistanceRange.minimum,
-            resistanceRange.maximum,
+            // ⚠️ The effective maximum is the smaller of what the device
+            // advertised and what the wire field can carry. `quantise` rounds
+            // to the *nearest* step, so a grid that does not land on its own
+            // maximum (0.6 in steps of 25) rounds a level both guards above
+            // admitted up past the uint8 ceiling. Capping here steps back down
+            // onto the grid, rather than failing two layers away in
+            // `encodeControlRequest` with a message about a parameter the
+            // caller never named.
+            Math.min(resistanceRange.maximum, MAX_ENCODABLE_RESISTANCE_LEVEL),
             resistanceRange.increment,
           ),
         );
@@ -972,11 +1021,11 @@ export function createTrainerControl(
         }
         if (
           parameters.windSpeed !== undefined &&
-          parameters.windSpeed > MAX_WIND_SPEED_METRES_PER_SECOND
+          parameters.windSpeed > MAX_ENCODABLE_WIND_SPEED_METRES_PER_SECOND
         ) {
           throw outOfRange(
             `a wind speed of ${String(parameters.windSpeed)} m/s is above ${String(
-              MAX_WIND_SPEED_METRES_PER_SECOND,
+              MAX_ENCODABLE_WIND_SPEED_METRES_PER_SECOND,
             )} m/s`,
           );
         }
@@ -1057,6 +1106,18 @@ export function createTrainerControl(
       closed = true;
       stopIndications();
       stopStatus();
+      // The indication is unsubscribed above, so the answer this procedure is
+      // waiting on can no longer arrive by any route. Left pending it never
+      // settles — and `enqueue` chains every later call behind it, so one
+      // orphaned procedure wedges the client rather than failing locally.
+      const waiting = pending;
+      pending = undefined;
+      if (waiting !== undefined) {
+        waiting.cancelTimeout();
+        waiting.reject(
+          fail('not-connected', 'the client was closed while a procedure was outstanding'),
+        );
+      }
       lossListeners.splice(0);
       held = false;
     },

@@ -57,6 +57,14 @@ interface ScriptedMachine {
   answer(opCode: number, result: number): void;
   /** Answer nothing at all, so the procedure never completes. */
   goSilent(): void;
+  /**
+   * Hold the CCCD write open, and return the release.
+   *
+   * The one await inside a procedure that happens *before* the client arms its
+   * indication waiter, so it is the window in which a teardown can land on a
+   * procedure that does not yet exist to be rejected.
+   */
+  holdIndicationEnable(): () => void;
   /** Reject the ATT write itself, as an ATT error does. */
   refuseWrites(error: Error): void;
   /** Push a Fitness Machine Status notification. */
@@ -72,6 +80,8 @@ function scriptedMachine(): ScriptedMachine {
   const answers = new Map<number, number>();
   let silent = false;
   let writeError: Error | undefined;
+  let enableGate: Promise<void> | undefined;
+  let releaseEnable: (() => void) | undefined;
 
   const viewOf = (bytes: Uint8Array): DataView =>
     new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -86,9 +96,11 @@ function scriptedMachine(): ScriptedMachine {
     writes,
     indicationsEnabled: false,
     channel: {
-      enableControlPointIndications: () => {
+      enableControlPointIndications: async () => {
+        if (enableGate !== undefined) {
+          await enableGate;
+        }
         machine.indicationsEnabled = true;
-        return Promise.resolve();
       },
       onControlPointIndication(listener): Unsubscribe {
         indicationListeners.push(listener);
@@ -130,6 +142,15 @@ function scriptedMachine(): ScriptedMachine {
     },
     goSilent() {
       silent = true;
+    },
+    holdIndicationEnable() {
+      enableGate = new Promise<void>((resolve) => {
+        releaseEnable = resolve;
+      });
+      return () => {
+        enableGate = undefined;
+        releaseEnable?.();
+      };
     },
     refuseWrites(error) {
       writeError = error;
@@ -176,6 +197,31 @@ async function inFlight(): Promise<void> {
   for (let tick = 0; tick < 10; tick += 1) {
     await Promise.resolve();
   }
+}
+
+/**
+ * Whether `promise` settles at all, within a bounded number of microtask ticks.
+ *
+ * A procedure that is never settled does not fail — it hangs, and every later
+ * call queued behind it hangs with it. Asserting on this rather than awaiting
+ * the promise is what makes that failure read as a red assertion in
+ * milliseconds instead of a test-runner timeout.
+ */
+async function settles(promise: Promise<unknown>): Promise<boolean> {
+  let done = false;
+  const observed = promise.then(
+    () => {
+      done = true;
+    },
+    () => {
+      done = true;
+    },
+  );
+  for (let tick = 0; tick < 50 && !done; tick += 1) {
+    await Promise.resolve();
+  }
+  await (done ? observed : Promise.resolve());
+  return done;
 }
 
 // --- The wire format --------------------------------------------------------
@@ -800,6 +846,31 @@ describe('the link dropping mid-ERG', () => {
     expect(machine.indicationsEnabled).toBe(true);
   });
 
+  it('abandons a procedure whose CCCD write was still in flight when the link went', async () => {
+    // `linkLost()` clears `indicationsEnabled` — but the enable that was in
+    // flight sets it back to true when it resolves, and the CCCD does not
+    // survive a connection. A client that believed it did would write to an
+    // unconfigured descriptor for the rest of the ride.
+    const trainer = control({ reacquireControl: false });
+    const release = machine.holdIndicationEnable();
+
+    const first = trainer.requestControl();
+    await inFlight();
+
+    trainer.linkLost();
+    release();
+
+    expect(await settles(first)).toBe(true);
+    await expect(first).rejects.toThrow(SensorError);
+    expect(trainer.hasControl()).toBe(false);
+
+    machine.indicationsEnabled = false;
+    trainer.linkRestored();
+    await trainer.requestControl();
+
+    expect(machine.indicationsEnabled).toBe(true);
+  });
+
   it('does not restore control just because a link came back', async () => {
     const trainer = control({ reacquireControl: false });
     await trainer.requestControl();
@@ -967,6 +1038,28 @@ describe('the resistance setpoint', () => {
     await expect(trainer.setTargetResistance(resistanceLevel(30))).rejects.toThrow(
       new RegExp(String(MAX_ENCODABLE_RESISTANCE_LEVEL)),
     );
+  });
+
+  it('quantises DOWN when the device grid would round a legal level past the uint8 ceiling', async () => {
+    // A grid that does not land on its own maximum: 0.6 in steps of 25 gives
+    // 0.6, 25.6, 50.6 … so 25.5 — a level both the device range and the wire
+    // field admit — rounds UP to 25.6, which the uint8 parameter cannot carry.
+    // The step below it is the setpoint, and it is the safe direction: less
+    // resistance than was asked for, reported back as what was set.
+    const offGrid = {
+      minimum: resistanceLevel(0.6),
+      maximum: resistanceLevel(30),
+      increment: resistanceLevel(25),
+    };
+    const trainer = control({ resistanceRange: offGrid });
+    await trainer.requestControl();
+
+    const written = await trainer.setTargetResistance(
+      resistanceLevel(MAX_ENCODABLE_RESISTANCE_LEVEL),
+    );
+
+    expect(written).toBeCloseTo(0.6, 10);
+    expect([...(machine.writes.at(-1) ?? [])]).toStrictEqual([0x04, 6]);
   });
 });
 
@@ -1228,5 +1321,86 @@ describe('closing the client', () => {
     trainer.close();
 
     await expect(trainer.setTargetPower(watts(250))).rejects.toThrow(SensorError);
+  });
+
+  it('rejects the procedure that was in flight rather than leaving it pending for ever', async () => {
+    // `close()` unsubscribes from the indication, so the answer this procedure
+    // is waiting on can no longer arrive by any route. With no `scheduleTimeout`
+    // — the default — nothing else will ever settle it either.
+    const trainer = control();
+    await trainer.requestControl();
+    machine.goSilent();
+
+    const pending = trainer.setTargetPower(watts(250));
+    await inFlight();
+    expect(machine.writes).toHaveLength(2);
+
+    trainer.close();
+
+    expect(await settles(pending)).toBe(true);
+    await expect(pending).rejects.toThrow(SensorError);
+    await pending.catch((error: unknown) => {
+      expect(isSensorError(error, 'not-connected')).toBe(true);
+    });
+  });
+
+  it('does not wedge the queue behind the procedure it orphaned', async () => {
+    // Every call is chained off the one in flight, so a single procedure that
+    // never settles takes every later call with it — the setpoint after this
+    // one would hang rather than being refused.
+    const trainer = control();
+    await trainer.requestControl();
+    machine.goSilent();
+
+    const orphaned = trainer.setTargetPower(watts(250));
+    await inFlight();
+    trainer.close();
+    await settles(orphaned);
+
+    expect(await settles(trainer.setTargetPower(watts(200)))).toBe(true);
+  });
+
+  it('refuses a procedure whose CCCD write was still in flight when it closed', async () => {
+    // The teardown lands on the one await that happens BEFORE the indication
+    // waiter is armed, so there is no `pending` for `close()` to reject. A
+    // procedure that arms itself after that point waits on a listener that has
+    // already been unsubscribed.
+    const trainer = control();
+    const release = machine.holdIndicationEnable();
+
+    const first = trainer.requestControl();
+    await inFlight();
+    expect(machine.writes).toHaveLength(0);
+
+    trainer.close();
+    release();
+
+    expect(await settles(first)).toBe(true);
+    await expect(first).rejects.toThrow(SensorError);
+    // And nothing reached the control point of a client that had been closed.
+    expect(machine.writes).toHaveLength(0);
+  });
+
+  it('cancels the outstanding timeout, leaving no timer armed on a closed client', async () => {
+    const cancelled: number[] = [];
+    const trainer = control({
+      scheduleTimeout: (after) => () => {
+        cancelled.push(after);
+      },
+    });
+    await trainer.requestControl();
+    machine.goSilent();
+
+    const pending = trainer.setTargetPower(watts(250));
+    await inFlight();
+    expect(cancelled).toStrictEqual([CONTROL_POINT_PROCEDURE_TIMEOUT_SECONDS]);
+
+    trainer.close();
+    await settles(pending);
+
+    expect(cancelled).toStrictEqual([
+      CONTROL_POINT_PROCEDURE_TIMEOUT_SECONDS,
+      CONTROL_POINT_PROCEDURE_TIMEOUT_SECONDS,
+    ]);
   });
 });

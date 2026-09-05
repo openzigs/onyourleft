@@ -708,8 +708,8 @@ fine.
 
 `protocol/` is platform-free, so there is no `setTimeout` and no `Date` here.
 `TrainerControlOptions.scheduleTimeout` is how a transport lends this client a clock; without one, a
-machine that never answers leaves its procedure pending until `linkLost()` — and because writes are
-serialised, every later setpoint waits behind it. **Pass one.** FTMS §4.16.4 names no timeout and the
+machine that never answers leaves its procedure pending until `linkLost()` or `close()` — and
+because writes are serialised, every later setpoint waits behind it. **Pass one.** FTMS §4.16.4 names no timeout and the
 ATT transaction timeout underneath is 30 s; `CONTROL_POINT_PROCEDURE_TIMEOUT_SECONDS` is 5 s, a
 product choice: a rider whose ERG target has not moved in five seconds has already noticed.
 
