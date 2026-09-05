@@ -101,6 +101,20 @@ describe('each rule rejects the failure it is for', () => {
     expectRule('heading-order', CLEAN_BODY.replace('<h2>Sensors</h2>', '<h4>Sensors</h4>'));
   });
 
+  it('heading-order: an outline that starts below h1', () => {
+    // `page-has-one-h1` does not cover this: the `h1` is still present and
+    // still unique, it is just not the first heading. Before #143 the first
+    // heading was exempt from the sequence check entirely, so a page opening
+    // at `h3` produced no violation at all.
+    expectRule(
+      'heading-order',
+      CLEAN_BODY.replace(
+        '<h1 id="title">Ride</h1>\n    <h2>Sensors</h2>',
+        '<h3>Sensors</h3>\n    <h1 id="title">Ride</h1>',
+      ),
+    );
+  });
+
   it('heading-order: an empty heading', () => {
     expectRule('heading-order', CLEAN_BODY.replace('<h2>Sensors</h2>', '<h2></h2>'));
   });
@@ -336,8 +350,12 @@ describe('landmark naming follows ARIA rather than the generic name algorithm', 
   it('accepts two navs distinguished by aria-labelledby', () => {
     expect(
       rulesFiredBy(
-        `<h2 id="secondary-label">Secondary</h2>
-         ${CLEAN_BODY}
+        // The labelling heading sits AFTER the clean body rather than before
+        // it: since #143 the first heading in a document must be the `h1`, and
+        // a fixture that opened on this `h2` would fire `heading-order` and
+        // fail this case for a reason that has nothing to do with landmarks.
+        `${CLEAN_BODY}
+         <h2 id="secondary-label">Secondary</h2>
          <nav aria-labelledby="secondary-label"><ul><li><a href="#/about">About</a></li></ul></nav>`,
       ),
     ).toEqual([]);

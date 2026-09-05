@@ -238,6 +238,13 @@ describe('criterion 3 — an unavailable metric shows no number', () => {
       node.textContent?.trim(),
     );
     expect(announced).toContain('Power: 248 W');
+    // Speed is the one metric whose canonical unit is not the one it is shown
+    // in: the fixture's 9.4 m/s is 33.84 km/h, rendered to one decimal. The
+    // conversion and the decimal count both come from `format.ts`, which #143
+    // gave this caller — before that the grid carried its own copy of both and
+    // `format.ts` had no production consumer at all. A `* 3.6` or a
+    // `.toFixed(0)` reappearing here fails this line.
+    expect(announced).toContain('Speed: 33.8 km/h');
     // A reader must not hear "Heart rate: dash".
     expect(announced).toContain('Heart rate: unavailable — no reading for 12 s');
     // And nothing in the cell is announced twice.

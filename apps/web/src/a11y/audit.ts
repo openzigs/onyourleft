@@ -22,7 +22,7 @@
  *    supplies neither, so that rule is inert wherever it is installed here.
  *    Criterion 6 is met at the tokens instead — see `design/contrast.ts`.
  * 3. **A rule set nobody can see is a rule set nobody maintains.** Every rule
- *    below has a unit test in `audit.test.ts` that feeds it a violating
+ *    below has a unit test in `audit.a11y.test.ts` that feeds it a violating
  *    fixture and requires it to fire. A checker that silently stopped matching
  *    would be indistinguishable from a clean tree; these cannot be.
  *
@@ -337,7 +337,24 @@ const headingOrder: Rule = (doc) => {
       continue;
     }
     const level = Number.parseInt(heading.tagName.slice(1), 10);
-    if (previous !== 0 && level > previous + 1) {
+    if (previous === 0) {
+      // The FIRST heading is checked too, against an implied level 0, so a page
+      // whose outline starts at `h3` fails. It used to be exempt, which meant a
+      // document could open two levels down and this rule said nothing —
+      // `page-has-one-h1` does not catch it either, because a page may carry
+      // its one `h1` further down and still open at `h3`. A reader jumping by
+      // heading hears a subsection with no section above it.
+      if (level > 1) {
+        violations.push({
+          rule: 'heading-order',
+          message:
+            `The first heading is a level ${String(level)}. An outline starts at \`h1\`; ` +
+            'opening below it reads to a screen-reader user as a section that is missing ' +
+            'everything above it.',
+          html: snippet(heading),
+        });
+      }
+    } else if (level > previous + 1) {
       violations.push({
         rule: 'heading-order',
         message:
@@ -574,7 +591,7 @@ const landmarksAreDistinguishable: Rule = (doc) => {
 /**
  * Every rule, in the order a failure is most useful to read.
  *
- * Exported so `audit.test.ts` can assert that each one is exercised — a rule
+ * Exported so `audit.a11y.test.ts` can assert that each one is exercised — a rule
  * added here without a test that proves it fires is caught by that assertion
  * rather than by nobody.
  */
