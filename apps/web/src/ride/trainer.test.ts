@@ -38,9 +38,9 @@ import {
   type FakeServiceSpec,
 } from '@onyourleft/sensors/web-bluetooth/testing';
 import { deviceId } from '@onyourleft/sensors';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { openWebBluetoothTrainer } from './trainer';
+import { browserTimeouts, openWebBluetoothTrainer, TRAINER_PROCEDURE_TIMEOUT } from './trainer';
 
 const TRAINER = deviceId('kickr');
 
@@ -251,5 +251,49 @@ describe('the procedure timeout', () => {
 
     expect(scheduled).toEqual([5]);
     connection?.control.close();
+  });
+
+  describe('browserTimeouts — the scheduler production actually uses', () => {
+    // The default is what ships; every case above injects a substitute for it,
+    // which is exactly how a default goes untested. Seconds to milliseconds is
+    // the whole of its logic and it is a factor of a thousand wrong when it is
+    // wrong: a five-second bound becomes five milliseconds or eighty minutes,
+    // and neither turns a hung trainer into a visible refusal.
+
+    it('runs after the stated number of seconds, and not before', () => {
+      vi.useFakeTimers();
+      try {
+        let ran = 0;
+        browserTimeouts(TRAINER_PROCEDURE_TIMEOUT, () => {
+          ran += 1;
+        });
+
+        vi.advanceTimersByTime(TRAINER_PROCEDURE_TIMEOUT * 1000 - 1);
+        expect(ran).toBe(0);
+        vi.advanceTimersByTime(1);
+        expect(ran).toBe(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('cancels, so a procedure that answered does not time out afterwards', () => {
+      vi.useFakeTimers();
+      try {
+        let ran = 0;
+        const cancel = browserTimeouts(TRAINER_PROCEDURE_TIMEOUT, () => {
+          ran += 1;
+        });
+
+        cancel();
+        vi.advanceTimersByTime(TRAINER_PROCEDURE_TIMEOUT * 1000 * 2);
+
+        // A timeout that fired after its own procedure completed would reject a
+        // setpoint the trainer had already accepted.
+        expect(ran).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });

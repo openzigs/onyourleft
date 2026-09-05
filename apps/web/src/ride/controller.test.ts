@@ -46,6 +46,7 @@ import {
 } from '@onyourleft/store/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { DEFAULT_AUTO_PAUSE_AFTER_SECONDS } from '../recording/channels';
 import type { RecordingCheckpointStore } from '../recording/recorder';
 
 import { createRideController, type RideController } from './controller';
@@ -406,6 +407,84 @@ describe('criterion 4 — a dropout leaves a gap and does not end the ride', () 
   });
 });
 
+// --- Auto-pause: the engine can leave a pause on its own ---------------------
+
+describe('the screen agrees with the engine about pausing, in both directions', () => {
+  /**
+   * Long enough that the engine has auto-paused **while the signal is still
+   * gone**, so the paused assertion is not racing the reading that ends it.
+   */
+  const STOPPED_FOR_SECONDS = DEFAULT_AUTO_PAUSE_AFTER_SECONDS + 5;
+
+  /**
+   * ⚠️ **The engine auto-resumes.**
+   *
+   * `RecordingSession.observe` ends an *automatic* pause the moment a moving
+   * reading arrives (`packages/domain/src/recording/session.ts`), so a mirror
+   * that only ever copies `paused` onto the screen sticks there for the rest of
+   * the ride: the recording carries on and `movingTime` climbs while the screen
+   * offers a Resume button the controller refuses — which leaves Pause
+   * unreachable too, because it is the other arm of the same branch.
+   *
+   * Reaching it needs a gap longer than the auto-pause threshold in **speed and
+   * cadence together**, which is why no fixture with a movement signal running
+   * can see it. That is what these two cases exist to be.
+   */
+  it('pauses itself when the movement signal stops, and comes back when it returns', async () => {
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 5);
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+
+    // The rider stops pedalling: nothing arrives on speed or cadence for longer
+    // than `DEFAULT_AUTO_PAUSE_AFTER_SECONDS`.
+    rig.bench.device(TRAINER).script({
+      kind: 'notification-dropout',
+      duration: seconds(STOPPED_FOR_SECONDS),
+    });
+    await ride(rig, DEFAULT_AUTO_PAUSE_AFTER_SECONDS + 2);
+
+    expect(rig.controller.getSnapshot().phase).toBe('paused');
+    const movingWhilePaused = rig.controller.getSnapshot().movingSeconds;
+
+    // And back on the pedals: the readings resume when the dropout ends.
+    await ride(rig, STOPPED_FOR_SECONDS);
+
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    // Not a phase that merely reads better: the engine really is recording
+    // again, and moving time is climbing with it.
+    expect(rig.controller.getSnapshot().movingSeconds).toBeGreaterThan(movingWhilePaused);
+    rig.controller.dispose();
+  });
+
+  it('says "recording" from the reading that woke the engine, not from the next tick', async () => {
+    // The measurement is what wakes the engine, and a screen that waited for a
+    // tick would offer Resume for up to a second after the ride resumed —
+    // pressing it reaches `resume()` on a session that is already recording.
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 3);
+
+    rig.bench.device(TRAINER).script({
+      kind: 'notification-dropout',
+      duration: seconds(STOPPED_FOR_SECONDS),
+    });
+    await ride(rig, DEFAULT_AUTO_PAUSE_AFTER_SECONDS + 2);
+    expect(rig.controller.getSnapshot().phase).toBe('paused');
+
+    // Readings, with no tick behind them.
+    rig.bench.advance(seconds(STOPPED_FOR_SECONDS));
+
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    // So the control the screen offers is the one the controller will take.
+    await rig.controller.pause();
+    expect(rig.controller.getSnapshot().phase).toBe('paused');
+    rig.controller.dispose();
+  });
+});
+
 // --- Criterion 6: stop is confirmed -----------------------------------------
 
 describe('criterion 6 — one click cannot end a ride', () => {
@@ -600,6 +679,150 @@ describe('criterion 2 — losing control is said out loud', () => {
     expect(trainer.paired).toBe(true);
     expect(trainer.controllable).toBe(false);
     expect(trainer.canSetPower).toBe(false);
+    rig.controller.dispose();
+  });
+});
+
+// --- Pausing by hand, ending ERG by hand, and the controller's own clock -----
+
+describe('pausing and resuming by hand', () => {
+  it('pauses the engine, not only the screen, and checkpoints it as paused', async () => {
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 5);
+
+    await rig.controller.pause();
+
+    expect(rig.controller.getSnapshot().phase).toBe('paused');
+    // Read back on a connection this controller never wrote through — the
+    // harness discards every open handle first. A pause the screen believes in
+    // and the disk does not comes back from a crash as moving time.
+    const sessionId = rig.sessionIds[0] as RecordingSessionId;
+    const paused = await harness.read(async (store) =>
+      store.recoverRecording(ATHLETE_A, sessionId),
+    );
+    expect(paused?.state).toBe('paused');
+    rig.controller.dispose();
+  });
+
+  it('stops moving time while paused, and starts it again on resume', async () => {
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 5);
+
+    await rig.controller.pause();
+    const movingAtPause = rig.controller.getSnapshot().movingSeconds;
+    await ride(rig, 5);
+
+    expect(rig.controller.getSnapshot().phase).toBe('paused');
+    // A rider off the bike is not riding, and the ride clock says so.
+    expect(rig.controller.getSnapshot().movingSeconds).toBe(movingAtPause);
+
+    await rig.controller.resume();
+    await ride(rig, 5);
+
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    expect(rig.controller.getSnapshot().movingSeconds).toBeGreaterThan(movingAtPause);
+    // The same recording, not a second one: `newSessionId` was called once.
+    expect(rig.sessionIds).toHaveLength(1);
+    rig.controller.dispose();
+  });
+
+  it('is not woken by a reading, because a manual pause is not an automatic one', async () => {
+    // The engine's rule, and the screen has to keep it: a rider who paused at a
+    // cafe and knocked the cranks has not restarted their ride.
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 3);
+    await rig.controller.pause();
+
+    await ride(rig, 5);
+
+    expect(rig.controller.getSnapshot().phase).toBe('paused');
+    rig.controller.dispose();
+  });
+
+  it('ignores a pause or a resume that the phase does not allow', async () => {
+    // `RecordingSession` throws on a transition it does not permit, and these
+    // two are reachable from a button that was on screen a moment ago. An
+    // unhandled rejection out of a click handler is the failure this prevents.
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+
+    await rig.controller.pause();
+    await rig.controller.resume();
+    expect(rig.controller.getSnapshot().phase).toBe('idle');
+
+    await rig.controller.start();
+    await rig.controller.resume();
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+
+    await rig.controller.pause();
+    await rig.controller.pause();
+    expect(rig.controller.getSnapshot().phase).toBe('paused');
+    rig.controller.dispose();
+  });
+});
+
+describe('ending ERG by hand — the "End ERG" button', () => {
+  it('takes the trainer out of ERG without ending the ride', async () => {
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await rig.controller.requestTrainerControl();
+    await rig.controller.setTargetPower(watts(210));
+    expect(rig.targetOnTheTrainer()).toBe(210);
+
+    await rig.controller.clearTargetPower();
+
+    // Read from the device, not from the client that asked: the machine is no
+    // longer holding a target.
+    expect(rig.targetOnTheTrainer()).toBeUndefined();
+    expect(rig.controller.getSnapshot().trainer.target).toEqual({ kind: 'none' });
+    // And the ride carries on, which is the whole difference between this
+    // control and Stop.
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    rig.controller.dispose();
+  });
+
+  it('does nothing at all when there is no trainer to end ERG on', async () => {
+    const rig = benchWith({ withTrainerControl: false });
+    await rig.controller.pair('trainer');
+
+    await rig.controller.clearTargetPower();
+
+    expect(rig.controller.getSnapshot().trainer.refusal).toBeUndefined();
+    rig.controller.dispose();
+  });
+});
+
+describe("tickNow — the browser interval's entry point", () => {
+  it("advances at the controller's own clock, so no second clock can disagree", async () => {
+    // `useRideClock` calls this and nothing else, so a `tickNow` that did not
+    // reach `tick` would leave the recorder frozen while the screen carried on
+    // rendering — #46's loss bound stopping in silence.
+    //
+    // ⚠️ Asserted through **staleness**, not through elapsed time: a reading
+    // moves the engine's timeline by itself, so an elapsed clock climbs whether
+    // or not anything ticked and a test built on it passes against a `tickNow`
+    // that does nothing. Nothing but a tick moves the controller's own clock.
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 3);
+    expect(metric(rig, 'power').kind).toBe('live');
+
+    rig.bench.device(TRAINER).script({ kind: 'notification-dropout', duration: seconds(30) });
+    rig.bench.advance(seconds(METRIC_STALE_AFTER_SECONDS + 2));
+    await rig.controller.tickNow();
+
+    expect(metric(rig, 'power').kind).toBe('stale');
+    expect(rig.controller.getSnapshot().elapsedSeconds).toBeGreaterThanOrEqual(
+      METRIC_STALE_AFTER_SECONDS,
+    );
     rig.controller.dispose();
   });
 });

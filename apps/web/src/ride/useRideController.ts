@@ -36,6 +36,25 @@ export function useRideSnapshot(controller: RideController): RideSnapshot {
   );
 }
 
+/**
+ * Whether a ride is under way — recording or paused, and in either case not yet
+ * finished.
+ *
+ * A **boolean** rather than the snapshot, so React's own bail-out applies:
+ * `RideSession` renders `null` and must not re-render four times a second for
+ * four hours to keep doing so.
+ *
+ * A paused ride counts. It is unsaved in exactly the way a recording one is,
+ * and the athlete gets no second chance to say "not yet" once the tab is gone.
+ */
+export function useRideInProgress(controller: RideController): boolean {
+  const read = (): boolean => {
+    const { phase } = controller.getSnapshot();
+    return phase === 'recording' || phase === 'paused';
+  };
+  return useSyncExternalStore((onChange) => controller.subscribe(onChange), read, read);
+}
+
 /** Drive the controller's clock while the component is mounted. */
 export function useRideClock(controller: RideController): void {
   useEffect(() => {

@@ -25,6 +25,8 @@ import type { JSX } from 'react';
 
 import { metresPerSecondToKilometresPerHour, type MetresPerSecond } from '@onyourleft/domain';
 
+import { VisuallyHidden } from '../design/VisuallyHidden';
+
 import type { RideMetric } from './controller';
 import type { MetricState, RideMetricId } from './metrics';
 
@@ -60,6 +62,21 @@ const PRESENTATION: Readonly<Record<RideMetricId, MetricPresentation>> = {
 
 /** The em dash a channel shows when there is no number it may show. */
 const NO_VALUE = '—';
+
+/**
+ * The one sentence a screen reader announces for a cell.
+ *
+ * ⚠️ It is rendered as **visually hidden text**, not as an `aria-label` on the
+ * value. `aria-label` is *prohibited* on an element with no role — a bare
+ * `span` maps to `role=generic` — and browsers and screen readers are entitled
+ * to ignore it, which several do. So the cell said "Heart rate: dash" in
+ * exactly the case #49's third criterion is about. The visible spans are
+ * `aria-hidden` so the sentence is heard once rather than beside the fragments
+ * it is made of.
+ */
+export function metricSentence(label: string, text: { value: string; note: string }): string {
+  return `${label}: ${text.value === NO_VALUE ? text.note : `${text.value} ${text.note}`}`;
+}
 
 /** What the value line reads, and what is announced alongside it. */
 export function metricText(
@@ -100,20 +117,26 @@ export function MetricGrid({ metrics }: MetricGridProps): JSX.Element {
               A `dt`/`dd` pair would be more semantic and is worse here: the
               audit requires a list's children to be list items, and a
               definition list inside a grid of four is markup a screen reader
-              reads as a glossary. The label is a plain span, and the whole
-              cell carries one accessible name through `aria-label` below.
+              reads as a glossary.
+
+              The three spans below are what the eye reads and are hidden from
+              assistive technology; `VisuallyHidden` carries the same content as
+              one sentence for the ear. Split that way because the em dash is
+              read as "dash" or as nothing at all, and because a `span` may not
+              carry an `aria-label` — see `metricSentence`. None of the hidden
+              spans is focusable, so no keyboard focus lands in an `aria-hidden`
+              subtree; `audit.ts` fails the build if that ever changes.
             */}
-            <span className="oyl-metric__label">{presentation.label}</span>
-            <span
-              className="oyl-metric__value"
-              // The number and its state, as one string, because a reader
-              // moving through the grid hears the cell and not the CSS class.
-              // Without this a stale channel announces "dash".
-              aria-label={`${presentation.label}: ${text.value === NO_VALUE ? text.note : `${text.value} ${text.note}`}`}
-            >
+            <span className="oyl-metric__label" aria-hidden="true">
+              {presentation.label}
+            </span>
+            <span className="oyl-metric__value" aria-hidden="true">
               {text.value}
             </span>
-            <span className="oyl-metric__note">{text.note}</span>
+            <span className="oyl-metric__note" aria-hidden="true">
+              {text.note}
+            </span>
+            <VisuallyHidden>{metricSentence(presentation.label, text)}</VisuallyHidden>
           </li>
         );
       })}

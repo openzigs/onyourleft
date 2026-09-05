@@ -338,6 +338,36 @@ export function createRideController(options: RideControllerOptions): RideContro
     };
   };
 
+  /**
+   * Copy the engine's own state onto the screen's phase — **in both
+   * directions**.
+   *
+   * ⚠️ The engine pauses itself after ten seconds with no movement signal *and
+   * ends that pause itself* on the first moving reading
+   * (`RecordingSession.observe`). A mirror that only ever wrote `paused` — the
+   * shape this had until #49's review — sticks there for the rest of the ride:
+   * the recording carries on, moving time climbs, and the screen keeps offering
+   * Resume, whose handler the controller refuses because the session is already
+   * recording. Pause is unreachable for the same reason, being the other arm of
+   * the same branch.
+   *
+   * A *manual* pause is safe from this: the engine never wakes one, so the
+   * mirror reads `paused` back and the phase stays where the rider put it.
+   *
+   * Written out rather than as `state === 'paused' ? 'paused' : 'recording'` so
+   * that no engine state the caller has not thought about can be mapped onto
+   * `recording` by falling through.
+   */
+  const syncPhaseWithEngine = (): void => {
+    if (recorder === undefined || (phase !== 'recording' && phase !== 'paused')) {
+      return;
+    }
+    const engine = recorder.session.state;
+    if (engine === 'paused' || engine === 'recording') {
+      phase = engine;
+    }
+  };
+
   // --- Measurements ---------------------------------------------------------
 
   const onMeasurement = (measurement: SensorMeasurement): void => {
@@ -349,6 +379,10 @@ export function createRideController(options: RideControllerOptions): RideContro
     // a screen that showed a reading the recorder never saw would be the
     // "wrong layer" defect in its most visible form.
     recorder?.observe(measurement);
+    // The reading is what wakes an automatic pause, so the phase moves with it
+    // rather than on the next tick: for that second the screen would otherwise
+    // offer a Resume the controller refuses.
+    syncPhaseWithEngine();
     changed();
   };
 
@@ -619,8 +653,9 @@ export function createRideController(options: RideControllerOptions): RideContro
         await recorder.tick(at);
         // The engine may have paused itself — no movement signal for ten
         // seconds — and the screen has to agree with it rather than keep
-        // saying "recording".
-        phase = recorder.session.state === 'paused' ? 'paused' : phase;
+        // saying "recording". @see syncPhaseWithEngine for why this is not a
+        // one-way copy.
+        syncPhaseWithEngine();
       }
       // Unconditionally: staleness is a function of the clock, so a channel
       // goes quiet on the tick whether or not anything is recording.

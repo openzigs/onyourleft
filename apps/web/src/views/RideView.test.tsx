@@ -226,16 +226,24 @@ describe('criterion 3 — an unavailable metric shows no number', () => {
     expect(document.body.textContent).toContain('248');
   });
 
-  it('gives every metric an accessible name that says its state in words', async () => {
+  it('says every metric and its state in words, for a reader moving through the grid', async () => {
     const stub = stubRideController(ridingSnapshot());
     await show(stub);
 
-    const names = queryAll(document, '.oyl-metric__value').map((value) =>
-      value.getAttribute('aria-label'),
+    // ⚠️ Read from the text a screen reader is given, not from an `aria-label`:
+    // `aria-label` is prohibited on a `span`, whose role is `generic`, and is
+    // ignored by real assistive technology. The visible spans are `aria-hidden`
+    // so this sentence is heard once and not beside its own fragments.
+    const announced = queryAll(document, '.oyl-metric .oyl-visually-hidden').map((node) =>
+      node.textContent?.trim(),
     );
-    expect(names).toContain('Power: 248 W');
-    // A reader moving through the grid must not hear "Heart rate: dash".
-    expect(names).toContain('Heart rate: unavailable — no reading for 12 s');
+    expect(announced).toContain('Power: 248 W');
+    // A reader must not hear "Heart rate: dash".
+    expect(announced).toContain('Heart rate: unavailable — no reading for 12 s');
+    // And nothing in the cell is announced twice.
+    expect(queryAll(document, '.oyl-metric__value[aria-hidden="true"]')).toHaveLength(
+      announced.length,
+    );
   });
 });
 
@@ -271,62 +279,11 @@ describe('criterion 6 — one click cannot end a ride', () => {
   });
 });
 
-describe('criterion 5 — closing the tab mid-ride asks first', () => {
-  it('cancels a beforeunload while recording', async () => {
-    const stub = stubRideController(ridingSnapshot());
-    await show(stub);
-
-    const event = new Event('beforeunload', { cancelable: true });
-    globalThis.dispatchEvent(event);
-
-    expect(event.defaultPrevented).toBe(true);
-  });
-
-  it('cancels it while paused too, because a paused ride is still unsaved', async () => {
-    const stub = stubRideController(ridingSnapshot());
-    stub.set({ phase: 'paused' });
-    await show(stub);
-
-    const event = new Event('beforeunload', { cancelable: true });
-    globalThis.dispatchEvent(event);
-
-    expect(event.defaultPrevented).toBe(true);
-  });
-
-  it('does not interfere before a ride has started', async () => {
-    const stub = stubRideController(idleSnapshot());
-    await show(stub);
-
-    const event = new Event('beforeunload', { cancelable: true });
-    globalThis.dispatchEvent(event);
-
-    expect(event.defaultPrevented).toBe(false);
-  });
-
-  it('stops interfering once the ride is stopped', async () => {
-    const stub = stubRideController(ridingSnapshot());
-    await show(stub);
-    stub.set({ phase: 'stopped' });
-    await settle();
-
-    const event = new Event('beforeunload', { cancelable: true });
-    globalThis.dispatchEvent(event);
-
-    expect(event.defaultPrevented).toBe(false);
-  });
-
-  it('removes the guard when the screen unmounts, so it cannot outlive the page', async () => {
-    const stub = stubRideController(ridingSnapshot());
-    const view = await show(stub);
-    view.unmount();
-    mounted = undefined;
-
-    const event = new Event('beforeunload', { cancelable: true });
-    globalThis.dispatchEvent(event);
-
-    expect(event.defaultPrevented).toBe(false);
-  });
-});
+// Criterion 5 — closing the tab mid-ride — is asserted in
+// `../ride/RideSession.test.tsx`, through `AppShell` and across a route change.
+// The guard is no longer this component's, and a copy of the assertion mounted
+// on `RideView` alone would pass while the shipping app let a tab close mid-ride
+// from any other page.
 
 describe('pairing is one gesture per device, and the screen says so', () => {
   it('offers a separate control for each kind of sensor', async () => {
@@ -385,6 +342,41 @@ describe('the storage notice', () => {
     await show(stub);
 
     expect(document.body.textContent).toContain('next checkpoint will try again');
+  });
+});
+
+describe('the notice a stopped ride ends on', () => {
+  it('says the ride is safe once the last checkpoint has landed', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ phase: 'stopped' });
+    await show(stub);
+
+    expect(document.body.textContent).toContain('every second of it is saved');
+    expect(document.body.textContent).toContain('Closing the tab is safe now');
+  });
+
+  it('does not say the tab is safe to close when the last checkpoint failed', async () => {
+    // ⚠️ Both notices are on screen at once: this one and `StorageNotice`. Two
+    // live regions, one saying the device is full and the other saying the ride
+    // is saved and the tab is safe — and the rider acts on the reassuring one.
+    // The final flush happens inside `confirmStop` and can be refused.
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ phase: 'stopped', storage: 'quota-exceeded' });
+    await show(stub);
+
+    expect(document.body.textContent).not.toContain('Closing the tab is safe now');
+    expect(document.body.textContent).toContain('Do not close it yet');
+    // And the notice that explains why is still there, so the two agree.
+    expect(document.body.textContent).toContain('no room left');
+  });
+
+  it('says the same about a transient failure, which is equally unsaved', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ phase: 'stopped', storage: 'failed' });
+    await show(stub);
+
+    expect(document.body.textContent).not.toContain('Closing the tab is safe now');
+    expect(document.body.textContent).toContain('only in this tab');
   });
 });
 

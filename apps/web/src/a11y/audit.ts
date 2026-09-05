@@ -437,6 +437,62 @@ const ariaHiddenNotFocusable: Rule = (doc) =>
       html: snippet(element),
     }));
 
+/**
+ * Elements whose implicit role **prohibits a name**.
+ *
+ * ARIA lists `generic`, `paragraph`, `caption`, `code`, `deletion`,
+ * `emphasis`, `insertion`, `mark`, `presentation`, `strong`, `subscript`,
+ * `superscript`, `term` and `time` as name-prohibited: `aria-label` and
+ * `aria-labelledby` on one of them are *ignored*, and browsers and screen
+ * readers differ about how completely. So the label is not a small
+ * over-specification; it is text nobody may hear.
+ *
+ * The tags below are the ones that carry a name-prohibited role by default and
+ * that this app actually renders. An explicit `role` takes over the mapping, so
+ * an element that declares one is left to the other rules.
+ */
+const NAME_PROHIBITED_TAGS = new Set([
+  'span',
+  'div',
+  'p',
+  'code',
+  'em',
+  'strong',
+  'small',
+  'b',
+  'i',
+  'mark',
+  'del',
+  'ins',
+  'sub',
+  'sup',
+  'time',
+  'caption',
+]);
+
+/**
+ * A name on an element that cannot carry one.
+ *
+ * Found in #49's review: the ride screen's metric value was a `<span>` with an
+ * `aria-label` giving the number *and* what it meant — the whole of criterion
+ * 3's "unavailable, not frozen" for anyone listening — on the one element type
+ * that is entitled to drop it. Use visually hidden text, or give the element a
+ * role that takes a name.
+ */
+const nameOnProhibitedRole: Rule = (doc) =>
+  [...doc.querySelectorAll('[aria-label], [aria-labelledby]')]
+    .filter((element) => !element.hasAttribute('role'))
+    .filter((element) => NAME_PROHIBITED_TAGS.has(element.tagName.toLowerCase()))
+    .filter((element) => !element.matches(FOCUSABLE_SELECTOR))
+    .map((element) => ({
+      rule: 'name-on-prohibited-role',
+      message:
+        `\`${element.tagName.toLowerCase()}\` has no role of its own, so it is \`generic\` — a ` +
+        'role ARIA forbids a name on. The label is ignored, and whatever it was saying is said ' +
+        'nowhere. Use visually hidden text instead.',
+      html: snippet(element),
+    }));
+
 const ariaReferenceResolves: Rule = (doc) => {
   const violations: AccessibilityViolation[] = [];
   for (const attribute of ['aria-labelledby', 'aria-describedby', 'aria-controls']) {
@@ -533,6 +589,7 @@ export const ACCESSIBILITY_RULES: readonly (readonly [string, Rule])[] = [
   ['link-has-href', linkHasHref],
   ['image-has-alt', imageHasAlt],
   ['aria-hidden-not-focusable', ariaHiddenNotFocusable],
+  ['name-on-prohibited-role', nameOnProhibitedRole],
   ['aria-reference-resolves', ariaReferenceResolves],
   ['unique-id', uniqueIds],
   ['list-structure', listStructure],

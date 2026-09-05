@@ -43,6 +43,7 @@ import { ActivitiesView } from '../views/ActivitiesView';
 import { DevicesView } from '../views/DevicesView';
 import { NotFoundView } from '../views/NotFoundView';
 import { RideView } from '../views/RideView';
+import { RideSession } from '../ride/RideSession';
 import type { RideController } from '../ride/controller';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 
@@ -123,6 +124,15 @@ export function AppShell({ capabilities, rideController }: AppShellProps): JSX.E
 
   return (
     <div className="oyl-shell">
+      {/*
+        Outside `main`, and deliberately: a recording belongs to the app and not
+        to whichever page is on screen. Mounted inside `viewFor` — as it was
+        until #49's review — a route change unmounts the ride's clock and its
+        unload guard, which stops the recorder checkpointing and lets the tab
+        close without asking. It renders nothing. See `ride/RideSession.tsx`.
+      */}
+      {rideController === undefined ? null : <RideSession controller={rideController} />}
+
       <a className="oyl-skip-link" href={`#${MAIN_ID}`} onClick={skipToContent}>
         Skip to main content
       </a>

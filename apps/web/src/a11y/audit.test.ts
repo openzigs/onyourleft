@@ -175,6 +175,26 @@ describe('each rule rejects the failure it is for', () => {
     );
   });
 
+  it('name-on-prohibited-role: a span whose whole meaning is in an aria-label', () => {
+    // The shape #49's review found on the ride screen: the metric value said
+    // "Heart rate: unavailable — no reading for 12 s" in an attribute a
+    // `generic` element may have its label dropped from, over a visible em
+    // dash. Nothing else in the fixture changes, so the rule is what fires.
+    expectRule(
+      'name-on-prohibited-role',
+      CLEAN_BODY.replace('<p>Nothing paired.</p>', '<p><span aria-label="248 W">—</span></p>'),
+    );
+  });
+
+  it('name-on-prohibited-role: leaves an element that declares a role alone', () => {
+    // A role that takes a name is somebody's deliberate choice, and the other
+    // rules judge it. Only the roles ARIA prohibits a name on are this rule's.
+    const fired = rulesFiredBy(
+      CLEAN_BODY.replace('<p>Nothing paired.</p>', '<div role="status" aria-label="Saved"></div>'),
+    );
+    expect(fired).not.toContain('name-on-prohibited-role');
+  });
+
   it('aria-reference-resolves: a labelledby pointing at nothing', () => {
     expectRule(
       'aria-reference-resolves',

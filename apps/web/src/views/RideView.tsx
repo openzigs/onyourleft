@@ -18,6 +18,14 @@
  * FTMS stream to be the path of least resistance rather than an expert option —
  * one connection of about three, instead of three.
  *
+ * ## The clock and the unload guard are **not** here
+ *
+ * They are mounted by `AppShell` from `ride/RideSession.tsx`, above the router.
+ * A recording belongs to the app rather than to the page being looked at, and a
+ * hook owned by this component stops the moment an athlete taps Activities —
+ * which stops the recorder checkpointing and lets the tab close without asking.
+ * Do not move them back down here.
+ *
  * ## Nothing here is disabled to say "not now"
  *
  * `design/Button.tsx` records the rule: a disabled control leaves the tab order,
@@ -43,7 +51,7 @@ import { StatusMessage } from '../design/StatusMessage';
 import { MetricGrid } from '../ride/MetricGrid';
 import { TrainerPanel } from '../ride/TrainerPanel';
 import type { PairingRole, RideController, RideSnapshot } from '../ride/controller';
-import { useRecordingGuard, useRideClock, useRideSnapshot } from '../ride/useRideController';
+import { useRideSnapshot } from '../ride/useRideController';
 import { hrefFor, routeById } from '../shell/routes';
 
 export interface RideViewProps {
@@ -83,8 +91,6 @@ export function RideView({ controller }: RideViewProps): JSX.Element {
 
 function LiveRide({ controller }: { readonly controller: RideController }): JSX.Element {
   const snapshot = useRideSnapshot(controller);
-  useRideClock(controller);
-  useRecordingGuard(snapshot.phase === 'recording' || snapshot.phase === 'paused');
 
   return (
     <>
@@ -146,6 +152,21 @@ function RideControls({
   }
 
   if (snapshot.phase === 'stopped') {
+    // ⚠️ Only when the last checkpoint landed. The final flush happens inside
+    // `confirmStop`, and it can be refused — a full device, an aborted
+    // transaction — which leaves the last seconds of the ride in this tab and
+    // nowhere else. Gated on the phase alone, this claimed "every second of it
+    // is saved … Closing the tab is safe now" directly above `StorageNotice`
+    // saying the device had no room left. The rider believes the reassuring one
+    // and closes the tab.
+    if (snapshot.storage !== 'ok') {
+      return (
+        <StatusMessage tone="warning" label="Stopped" live>
+          The ride is stopped, but the last checkpoint did not save, so its final seconds are only
+          in this tab. Do not close it yet.
+        </StatusMessage>
+      );
+    }
     // Deliberately not "see it in your activities". What is on disk is a
     // finished *recording* — #46's checkpointed session — and turning one into
     // a listed activity is #51's work, not this screen's. Saying otherwise
