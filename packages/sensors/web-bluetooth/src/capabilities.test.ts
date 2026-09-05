@@ -331,8 +331,8 @@ describe('trainer-control, which is a safety claim and not a request', () => {
     ],
   });
 
-  const ftmsFixture = (device: FakeDeviceSpec) => {
-    const fake = createFakeBluetooth({ devices: [device] });
+  const ftmsFixture = (device: FakeDeviceSpec, grantsEveryService = false) => {
+    const fake = createFakeBluetooth({ devices: [device], grantsEveryService });
     return {
       ...fake,
       transport: createWebBluetoothTransport({
@@ -419,6 +419,72 @@ describe('trainer-control, which is a safety claim and not a request', () => {
       () => expect.unreachable('this origin was never granted the Fitness Machine Service'),
       (error: unknown) => expect(isSensorError(error, 'capability-unsupported')).toBe(true),
     );
+  });
+
+  it('resolves a service named twice in one link exactly once', async () => {
+    // The memo at `transport.ts:616`. The #152 review probed it: deleting the
+    // lookup left all 678 sensors tests green, so a new code path shipped with
+    // nothing proving it — CLAUDE.md §5 exactly.
+    //
+    // FTMS is the case the memo exists for: it is named once by its measurement
+    // profile and again by the control point, so an unmemoised link asks the
+    // device for the same service twice. On a real trainer that is a second
+    // round trip during connect, when the athlete is waiting.
+    const trainer: FakeDeviceSpec = {
+      id: 'trainer',
+      name: 'TRAINER 55A1',
+      services: [
+        {
+          uuid: FITNESS_MACHINE_SERVICE,
+          characteristics: [INDOOR_BIKE_DATA, FITNESS_MACHINE_CONTROL_POINT],
+        },
+      ],
+    };
+    const { transport, bench } = ftmsFixture(trainer);
+    const device = await transport.discover({ capabilities: ['power'] });
+    await transport.connect(device.identity.id);
+
+    const resolutions = bench.operations.filter(
+      (entry) => entry.includes('getPrimaryService') && entry.includes(FITNESS_MACHINE_SERVICE),
+    );
+    expect(resolutions).toHaveLength(1);
+  });
+
+  it('refuses it even against a browser that would allow it', async () => {
+    // The test above passes whether or not this adapter checks anything: the
+    // fake refuses an ungranted service with `SecurityError` exactly as Chrome
+    // does, so the browser's guard is doing the work and ours is untested. The
+    // #152 review made that point with a permissive fake and found exactly one
+    // test red, which is one too few for a safety property.
+    //
+    // `grantsEveryService` turns the browser's refusal off. What is left is the
+    // guard this program owns — and it has to be ours, because the browser's
+    // does not exist on the CoreBluetooth and Android paths these interfaces
+    // must satisfy unchanged, and FTMS applies physical resistance to a rider.
+    const strap: FakeDeviceSpec = {
+      id: 'strap',
+      name: 'STRAP 1B7E',
+      services: [
+        { uuid: HEART_RATE_SERVICE, characteristics: [HEART_RATE_MEASUREMENT] },
+        { uuid: FITNESS_MACHINE_SERVICE, characteristics: [FITNESS_MACHINE_CONTROL_POINT] },
+      ],
+    };
+    const { transport, bench } = ftmsFixture(strap, true);
+    const device = await transport.discover({ capabilities: ['heart-rate'] });
+    await transport.connect(device.identity.id);
+
+    // Counted from here, not from zero: connecting resolves the heart rate
+    // service legitimately, and that IS a `getPrimaryService`.
+    const before = bench.operations.length;
+
+    await transport.openFitnessMachine(device.identity.id).then(
+      () => expect.unreachable('a device paired for heart rate must not yield a control point'),
+      (error: unknown) => expect(isSensorError(error, 'capability-unsupported')).toBe(true),
+    );
+    // And it refused before touching the radio. A guard that lets the GATT call
+    // happen and then throws has already asked for the thing it is refusing —
+    // which on a real trainer means the control point was resolved.
+    expect(bench.operations.slice(before)).toEqual([]);
   });
 });
 

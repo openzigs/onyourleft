@@ -229,6 +229,21 @@ export interface FakeBluetoothOptions {
   readonly chooser?: FakeChooser;
   /** Omit `addEventListener` and `removeEventListener`, as a shim may. */
   readonly withoutEvents?: boolean;
+  /**
+   * `getPrimaryService` resolves any service the device serves, granted or not.
+   *
+   * **Not a convenience — it is how a grant check is proved to be ours.** The
+   * faithful fake refuses an ungranted service with `SecurityError`, exactly as
+   * Chrome does, which means a test asserting "the strap's control point is
+   * refused" passes whether or not this adapter checks anything. Turning the
+   * browser's refusal off is the only way to tell a guard we own from one we
+   * are borrowing.
+   *
+   * That distinction matters most for FTMS: the browser's refusal does not
+   * exist on the CoreBluetooth and Android paths these interfaces must satisfy
+   * unchanged, and CLAUDE.md §6 calls trainer control a safety issue.
+   */
+  readonly grantsEveryService?: boolean;
 }
 
 /**
@@ -503,7 +518,9 @@ export function createFakeBluetooth(options: FakeBluetoothOptions): FakeBluetoot
             // would leak the device's service list to a request that has no
             // right to it — and would let a test tell "not granted" from "not
             // present", which a real caller cannot.
-            throw domError('SecurityError', 'this origin may not access that service');
+            if (options.grantsEveryService !== true) {
+              throw domError('SecurityError', 'this origin may not access that service');
+            }
           }
           if (!services.has(wanted) || state.hidden.has(wanted)) {
             throw domError('NotFoundError', 'no such service');

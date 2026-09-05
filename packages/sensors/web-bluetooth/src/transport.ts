@@ -731,6 +731,27 @@ export function createWebBluetoothTransport(
         deviceId: id,
       });
     }
+    // ⚠️ The grant, checked here as well as in `resolveLink`.
+    //
+    // `resolveLink` gates every measurement service on `record.granted`; this
+    // path did not, so the only thing standing between `openFitnessMachine` and
+    // a control point on a strap the athlete paired for heart rate was Chrome's
+    // own `SecurityError` on `getPrimaryService`. That is a real refusal and it
+    // is not ours: it is a control this program does not own, cannot test
+    // against a simulator, and does not exist at all on the CoreBluetooth and
+    // Android paths `packages/sensors` interfaces have to satisfy unchanged.
+    //
+    // FTMS sets physical resistance on a person who is pedalling, and CLAUDE.md
+    // §6 calls trainer control a safety issue rather than only a security one.
+    // A grant the athlete never gave should be refused by us, in a message that
+    // says so, before any GATT call is made.
+    if (!record.granted.has(FITNESS_MACHINE_SERVICE)) {
+      throw new SensorError(
+        'capability-unsupported',
+        'this device was not discovered for trainer control, so its control point was never granted',
+        { deviceId: id },
+      );
+    }
     if (link.control === undefined) {
       link.control = queue
         .run(id, async () => {
