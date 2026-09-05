@@ -127,7 +127,7 @@ Every source file carries an SPDX identifier in its opening lines:
 not exist yet. A documented command nobody has run is the most expensive kind of wrong, because every
 downstream issue's acceptance criteria depend on these.
 
-### 4a. Works today — executed and observed to succeed on 2026-09-03
+### 4a. Works today — executed and observed to succeed on 2026-09-05
 
 **Bare clone — bash and coreutils only, no install, no network:**
 
@@ -136,7 +136,7 @@ downstream issue's acceptance criteria depend on these.
 # Exits 0 clean; exits 1 listing each violation by rule id.
 bash scripts/check-repo-rules.sh
 
-# Test the checker itself. Fixture-driven; 28 cases.
+# Test the checker itself. Fixture-driven; 32 cases.
 bash scripts/check-repo-rules.test.sh
 
 # Verify the licence texts are byte-identical to the canonical ones, by
@@ -214,11 +214,21 @@ pnpm run test:a11y
 pnpm run build
 
 # One package at a time, which is how you check a single package's harness.
-# `@onyourleft/sensors`' typecheck runs TWO programs — see §4d — and both have
-# to pass; the second is the one that enforces the platform boundary.
+# `@onyourleft/sensors`' and `@onyourleft/fit`'s typechecks each run TWO
+# programs — see §4d — and both have to pass; the second is the one that
+# enforces the platform boundary.
 pnpm --filter @onyourleft/domain run test
+pnpm --filter @onyourleft/fit run test
 pnpm --filter @onyourleft/sensors run test
+pnpm --filter @onyourleft/store run test
 pnpm --filter @onyourleft/web run test
+
+# Regenerate the #29 synthetic FIT fixture corpus from its generator. It is
+# DETERMINISTIC: running it on a clean tree leaves `git status` clean, which is
+# what makes a corpus that is committed and generated the same corpus. It writes
+# only under `packages/fit/fixtures/corpus`, and prints the byte budget it is
+# inside. Run it after changing the generator, never to "fix" a failing test.
+pnpm --filter @onyourleft/fit run fixtures:generate
 
 # All six bare-clone script checks in one command.
 pnpm run check:repo
@@ -293,10 +303,12 @@ The stack the workspace is built on is decided in ADR 0005 and is not open:
 process never belongs in a gate. `pnpm run test` is already the run-once form; `pnpm exec vitest` is
 not.
 
-### 4b. Does **not** exist yet
+### 4b. Does **not** exist yet — and, below the line, what does
 
-> ⛔ **None of the following runs today.** Do not copy these into a PR description as though you had
-> run them, and do not add them to a CI workflow before the issue that owns them lands.
+> ⛔ **None of the bullets in the first list runs today.** Do not copy these into a PR description
+> as though you had run them, and do not add them to a CI workflow before the issue that owns them
+> lands. The ⛔ stops at "What exists, and what each is **not** yet" — everything under that heading
+> is in the tree, and its commands are in §4a.
 
 - **`apps/mobile` and `packages/physics` do not exist.** The workspace globs (`apps/*`,
   `packages/*`) will pick each up the moment it appears, and the boundary and header rules already
@@ -304,8 +316,24 @@ not.
   [#85](https://github.com/openzigs/onyourleft/issues/85) and
   [#88](https://github.com/openzigs/onyourleft/issues/88). Copy `packages/domain` as the template: a
   manifest, a `LICENSE`, a `tsconfig.json`, a `vitest.config.ts` and a test.
+- **A per-package dependency-licence gate.** Nothing yet checks that a dependency's *own* licence is
+  permitted under the path it lands in — only that the manifests and headers declare the right
+  thing. `pnpm licenses list --json` exists and is unused. Second half of
+  [#24](https://github.com/openzigs/onyourleft/issues/24).
+- **A coverage gate demonstrated to fail.** Coverage is reported and nothing enforces it, which is
+  §5's deliberate design; what #24 still owes is the demonstration that the report is real.
+- **`react-router` and the rest of the runtime dependency list in ADR 0005.** See the dependency
+  paragraph below the next heading for what *is* installed.
+- **`apps/api`, or anything else server-shaped.** Not "not yet" — not in Phase 1 at all. Owner
+  decision D6.
 
-  **What does exist, and what each is not yet:**
+#### What exists, and what each is **not** yet
+
+Reconciled by [#110](https://github.com/openzigs/onyourleft/issues/110) once
+[#107](https://github.com/openzigs/onyourleft/issues/107),
+[#39](https://github.com/openzigs/onyourleft/issues/39) and
+[#26](https://github.com/openzigs/onyourleft/issues/26) had all landed, rather than by each of the
+three editing this list on its own branch and conflicting with the other two.
 
   - **`packages/sensors/src`** ([#39](https://github.com/openzigs/onyourleft/issues/39)) holds the
     interfaces, `createDeviceSession`, `planCapabilitySources` and the simulator (#44).
@@ -384,22 +412,16 @@ not.
     **not** platform-isolated the way `packages/domain` is — it uses `indexedDB` and
     `CompressionStream`, so its `tsconfig.json` includes the DOM lib, and `eslint.config.js`'s
     `no-restricted-globals` block stays scoped to `packages/domain`.
-- **A per-package dependency-licence gate.** Nothing yet checks that a dependency's *own* licence is
-  permitted under the path it lands in — only that the manifests and headers declare the right
-  thing. `pnpm licenses list --json` exists and is unused. Second half of
-  [#24](https://github.com/openzigs/onyourleft/issues/24).
-- **A coverage gate demonstrated to fail.** Coverage is reported and nothing enforces it, which is
-  §5's deliberate design; what #24 still owes is the demonstration that the report is real.
-- **`react-router` and the rest of the runtime dependency list in ADR 0005.** The toolchain,
-  React 19, React DOM, Vite, — since #26 — `dexie` 4.4.5 and `fake-indexeddb` 6.2.5 (both
-  Apache-2.0, both zero-dependency, both under `packages/store`) and — since #40 —
-  `@types/web-bluetooth` 0.0.21 (MIT, zero-dependency, types only, a devDependency of
-  `packages/sensors`) and — since #31 — `fit-file-parser` 5.0.2 (MIT, a devDependency of
-  `packages/fit`, whose closure is `buffer` MIT → `base64-js` MIT and `ieee754` BSD-3-Clause) are
-  installed; nothing else from that list is. Add each in the issue that first needs it, after checking its licence against the
-  directory it lands in (CONTRIBUTING.md).
-- **`apps/api`, or anything else server-shaped.** Not "not yet" — not in Phase 1 at all. Owner
-  decision D6.
+
+**And the dependencies that exist.** The toolchain,
+React 19, React DOM, Vite, — since #26 — `dexie` 4.4.5 and `fake-indexeddb` 6.2.5 (both
+Apache-2.0, both zero-dependency, both under `packages/store`) and — since #40 —
+`@types/web-bluetooth` 0.0.21 (MIT, zero-dependency, types only, a devDependency of
+`packages/sensors`) and — since #31 — `fit-file-parser` 5.0.2 (MIT, a devDependency of
+`packages/fit`, whose closure is `buffer` MIT → `base64-js` MIT and `ieee754` BSD-3-Clause) are
+installed; **nothing else from ADR 0005's runtime list is**, `react-router` included. Add each in
+the issue that first needs it, after checking its licence against the
+directory it lands in (CONTRIBUTING.md).
 
 ### 4c. What CI runs, and what it deliberately does not
 
@@ -464,6 +486,14 @@ survives the paragraph below.
 > exports a plain object, and says so at the top. **Any import added to a file inside
 > `packages/domain`'s tsconfig program can reopen this**, which is why the ESLint rules are not
 > redundant with it: check both gates with a probe file, never one.
+
+`packages/fit` narrows through a second tsconfig for the same reason and with the same shape:
+`tsconfig.json` is the wide program, because it has to cover `tools/` — the fixture generator, which
+reads and writes files and legitimately needs `@types/node` — and
+**`tsconfig.platform-free.json` is the one that enforces**, compiling `src/` alone with
+`lib: ["ES2024"]` and `types: []`. That is why the codec carries its own UTF-8 reader and its own
+XML reader: a `TextDecoder` in `src/` is a compile error. `pnpm --filter @onyourleft/fit run
+typecheck` runs both, and reading only the first is how the boundary would be believed absent.
 
 `packages/sensors/src` (#39) is isolated the same way and for a stricter reason: its interfaces have
 to be satisfied **unchanged** by Web Bluetooth, CoreBluetooth and the Android BLE APIs, so an
@@ -553,6 +583,16 @@ not behaviour asserted: a test that calls a function and asserts nothing scores 
 pins the contract. And a floor set against a repository with no code is red on arrival, which means
 it gets routed around rather than met. Coverage is still *reported*, because an untested branch is
 worth seeing in review. It is a signal, not a gate. **The mutation list is the gate.**
+
+**What the report covers**, decided in [#110](https://github.com/openzigs/onyourleft/issues/110) and
+recorded in `vitest.config.ts` beside the patterns: `packages/*/src/**`, `packages/*/*/src/**` (the
+adapter directories that need a platform library — `packages/sensors/web-bluetooth/src` today) and
+`apps/*/src/**`. The `packages/fit/tools/` tree is **deliberately outside it**: it is the #29 fixture
+generator, authoring-time code that produces a committed artefact and ships in nothing. Its tests do
+run — `packages/fit/vitest.config.ts` includes `tools/**/*.test.ts` — and the corpus tests assert
+its output; including it in the report would only mix a generator's coverage into a codec's
+denominator. #107's observation that the report listed `apps/web` alone at 125 statements predated
+the second pattern and is no longer true: all five packages appear.
 
 ### Verifying a *compile-time* guarantee
 
@@ -711,7 +751,14 @@ Facts are not copyrightable: a physical constant or an equation from a published
 
 - **Location data.** GPS traces reveal where people live. Anything that exposes a private activity,
   defeats a privacy zone, or leaks location through an API response, an export, a cache **or an error
-  message** is in scope.
+  message** is in scope. The error-message half is ADR 0004 decision D and it is now applied, not
+  merely stated: **a message about a coordinate names the field and the constraint and never the
+  value**, and every other quantity keeps its value because for those the number is the diagnostic.
+  `packages/domain/src/unit-error.ts` applies it from the field label (#104) and
+  `packages/store/src/stream-codec.ts` applies it per channel, where it also covers `altitude`,
+  which is a coordinate only when it is reported beside one. The rule binds **every layer that
+  formats a coordinate into a string** — a log line, a toast, a crash report, a Phase 3 error body —
+  not only those two files.
 - **Cross-athlete exposure.** Any query matching on an entity id **without also filtering on the
   owning athlete**. This passes every single-athlete test in the suite.
 - **Sensor data is untrusted input.** Malformed or hostile GATT payloads come from a device that may
@@ -868,8 +915,9 @@ top of an issue **supersedes its body**.
 | Which lint rule enforces which boundary | [`eslint.config.js`](eslint.config.js) and §4d |
 | Why a package's tsconfig narrows `lib` and `types` | `packages/domain/tsconfig.json` and §4d |
 | The canonical unit for a quantity, and the conversion into it | [`packages/domain/README.md`](packages/domain/README.md) |
+| What an error message may say about a coordinate, and what it may not | [`packages/domain/README.md`](packages/domain/README.md) §"A coordinate message names the field and the constraint, never the value", [ADR 0004](docs/adr/0004-privacy-and-location.md) decision D |
 | Where a FIT profile number came from, and what the decoder does with a bad file | [`packages/fit/README.md`](packages/fit/README.md) §1–§5 |
 | Which GPX/TCX schema versions are targeted, what each format loses, and how XXE is refused | [`packages/fit/README.md`](packages/fit/README.md) §7 |
 | How a ride is recorded, checkpointed and recovered, and the stated data-loss bound | [`packages/store/README.md`](packages/store/README.md) §"Recording checkpoints", `apps/web/src/recording/recorder.ts`, `README.md` §"If the tab closes mid-ride" |
 
-<!-- Last updated: 2026-09-05 by delivery:code-issue resolving #45 and #46 (the recording engine, and offline-first persistence) -->
+<!-- Last updated: 2026-09-05 by delivery:code-issue resolving #104, #118 and #110 (the coordinate-message rule, the ADR001 message, and the post-landing documentation reconciliation) -->

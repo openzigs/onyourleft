@@ -62,6 +62,53 @@ plausibility check placed here would silently drop real data from the one athlet
 
 Everything rejected throws `UnitError`, and the message names the field and the reason.
 
+### A coordinate message names the field and the constraint, never the value
+
+[ADR 0004](../../docs/adr/0004-privacy-and-location.md) decision D, applied here by
+[#104](https://github.com/openzigs/onyourleft/issues/104):
+
+> When the quantity being reported is a coordinate — a latitude, a longitude, a semicircle field of
+> either, a position, or an altitude reported together with one — a message may name **the field**
+> and **the constraint** and must not name **the value**. Every other quantity keeps its value in
+> the message.
+
+```text
+latitude in semicircles must be a whole number                                    ✅
+latitude in semicircles must be between -1073741824 and 1073741824                ✅ bounds are the constraint
+latitude in semicircles must be a whole number, received 614507218.4              ❌ 51.5074°N
+latitude in semicircles must be between … and …, received 1803997218              ❌ 151.2093°E, and VALID
+heart rate in beats per minute must not be negative, received -1                  ✅ not a coordinate
+```
+
+The second bad line is the one worth understanding, because it leaks a coordinate that is *correct*.
+`latitudeSemicircles` bounds its argument at the pole (±2^30) rather than at the field width, so a
+transposed `position_lat` / `position_long` pair — the bug `position.ts` exists to catch — reaches
+the range guard for every athlete whose longitude is outside ±90°: the Americas, Oceania and East
+Asia. A European pair never gets there, which is why it was invisible in the review of
+[#102](https://github.com/openzigs/onyourleft/pull/102).
+
+The rule is **narrow on purpose**. For a malformed GATT payload, a doubly scaled FIT field or an
+out-of-epoch timestamp the offending number is most of the diagnostic, so a blanket redaction would
+buy a coordinate's privacy at the cost of every other quantity's debuggability.
+`src/coordinate-message.test.ts` asserts both halves, so over-applying it fails a test rather than
+passing review.
+
+**Adding a coordinate quantity: name it.** `unit-error.ts` decides whether to redact by reading the
+field label the constructor passes — any label containing the whole word `latitude` or `longitude`
+is redacted — so a new coordinate inherits the rule instead of depending on its author having read
+this section. The corollary is that the labels are load-bearing: a coordinate labelled something
+that says neither word is not covered, and needs `COORDINATE_LABEL` widened along with it.
+
+**Altitude keeps its value here**, because the ADR makes it a coordinate only when it is "reported
+together with" a latitude or longitude, and nothing in this package ever reports it together with
+anything: `altitudeMetres` takes one number and knows of no position. The layer that *does* have the
+positional context applies the rule where the context is — `packages/store`'s stream codec redacts
+the `altitude` channel alongside `latitude` and `longitude`, because in a stream all three arrive at
+the same sample index.
+
+Decision D binds **every layer that formats a coordinate into a string**, not only this package: log
+lines, UI toasts, crash reports, analytics breadcrumbs and any Phase 3 API error body.
+
 ## Unit safety is a compile error
 
 `Quantity<Unit>` intersects `number` with a phantom property keyed on a `unique symbol` that is

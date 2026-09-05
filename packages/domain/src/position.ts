@@ -43,6 +43,15 @@
  * `src/position.test.ts` (the semicircle pair) and `src/quantities.test.ts` (the
  * degree pair), both using London, where neither value is out of range in the
  * swapped role.
+ *
+ * ## The errors raised here name no coordinate
+ *
+ * ADR 0004 decision D: a message about a coordinate may name the field and the
+ * constraint and must not name the value. Both guards below reach it — the
+ * whole-number branch on a fractional semicircle, and the range branch on
+ * exactly the transposition described above, since a longitude outside ±90°
+ * offered as a latitude is past the pole bound. `unit-error.ts` applies the
+ * rule from the field label; `src/coordinate-message.test.ts` asserts it.
  */
 
 import type { DegreesLatitude, DegreesLongitude, GeographicPosition } from './quantities';
