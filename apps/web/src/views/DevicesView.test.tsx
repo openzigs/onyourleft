@@ -63,6 +63,44 @@ function pairingControls(root: ParentNode): Element[] {
   );
 }
 
+/**
+ * A probe that never settles, so the view stays in its in-flight state.
+ *
+ * `open()` above awaits `settle()`, which is right for every other test and
+ * wrong for this one: the state worth asserting is the one that exists *before*
+ * the answer arrives, and it lasted microseconds in every other test here.
+ */
+const NEVER_ANSWERS: CapabilityProbe = {
+  bluetooth: { ...WORKING, getAvailability: () => new Promise<boolean>(() => undefined) },
+  secureContext: true,
+};
+
+describe('while the browser check is still running', () => {
+  it('does not claim pairing is impossible before it knows', async () => {
+    // The view used to read `support?.canPair === true`, which collapses "not
+    // yet known" into the same branch as "known impossible" -- so this page
+    // said "Sensors cannot be paired in this browser" at the same moment the
+    // notice above it said "Checking". Criterion 1 exists to stop the app
+    // being dishonest about what the browser can do, and a false negative
+    // delivered before the answer is known is exactly that.
+    const result = await mount(<DevicesView capabilities={NEVER_ANSWERS} />);
+    mounted = result;
+
+    const text = result.container.textContent ?? '';
+    expect(text).not.toMatch(/cannot be paired/i);
+    // And it must not silently render nothing either -- an empty section is
+    // the other way to fail this, and is what the `?.` version would have done
+    // if the else branch had been dropped instead of widened.
+    expect(text).toMatch(/\S/);
+  });
+
+  it('offers no pairing control while it is still checking', async () => {
+    const result = await mount(<DevicesView capabilities={NEVER_ANSWERS} />);
+    mounted = result;
+    expect(pairingControls(result.container)).toHaveLength(0);
+  });
+});
+
 describe('in a browser that cannot pair', () => {
   it('renders no pairing control — not a disabled one, none', async () => {
     const { container } = await open(ABSENT);

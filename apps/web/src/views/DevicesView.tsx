@@ -39,7 +39,17 @@ export function DevicesView({ capabilities }: DevicesViewProps): JSX.Element {
       <BluetoothSupportNotice support={support} onRecheck={recheck} />
 
       <h2>Paired sensors</h2>
-      {support?.canPair === true ? (
+      {support === undefined ? (
+        // Three states, not two. `support` is `undefined` while the probe is in
+        // flight, and `support?.canPair === true` collapses that into the same
+        // branch as a browser that genuinely cannot pair -- so the page told the
+        // athlete "Sensors cannot be paired in this browser" *while the notice
+        // above it still said "Checking"*. A contradiction on screen is bad; a
+        // false negative delivered before the answer is known is worse, because
+        // criterion 1 of this issue exists to stop exactly that kind of
+        // dishonesty about what the browser can do.
+        <p className="oyl-muted">Waiting for the browser check to finish.</p>
+      ) : support.canPair ? (
         <StatusMessage tone="info" label="Not built yet">
           Nothing is paired. Choosing and connecting a sensor is the next change; this page reports
           what the browser can do so that it never offers a control that cannot work.

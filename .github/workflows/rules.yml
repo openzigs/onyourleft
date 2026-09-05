@@ -176,9 +176,17 @@ jobs:
       # report under a different one and could not block a merge (CLAUDE.md
       # section 4c).
       #
-      # The filter is a path match, and Vitest exits non-zero when a filter
-      # selects no files -- so deleting or renaming apps/web/src/a11y/ fails
-      # this step rather than passing it vacuously.
+      # ⚠️ The filter is a path SUBSTRING, and that is weaker than it looks.
+      # DELETING apps/web/src/a11y/ fails this step, because Vitest exits
+      # non-zero when a filter selects no files. RENAMING it does not: renaming
+      # to src/accessibility/ still matches nothing named `a11y`, drops
+      # audit.test.ts -- the suite proving every rule actually fires -- and
+      # exits 0 with 5 files instead of 6. Measured, not reasoned: 56 tests
+      # instead of 94, green.
+      #
+      # So this gate fails closed against deletion and OPEN against a rename.
+      # Making the selection robust is #142; until then, treat a change to the
+      # a11y directory's name or layout as a change to this gate.
       - name: Accessibility
         run: pnpm run test:a11y
 
