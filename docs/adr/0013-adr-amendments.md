@@ -2,10 +2,18 @@
 
 - **Status**: Accepted
 - **Date**: 2026-09-05
-- **Deciders**: No owner decision was sought or given for this ADR, and none is claimed. The decision
-  below is the author's engineering work, constrained by one rule that is already merged:
-  `CLAUDE.md` §7, which lists `docs/adr/*.md` as a protected path and says an ADR is amended by a
-  **new** ADR that supersedes it, not by editing it in place
+- **Deciders**: repository owner, on the specific question this ADR raised — **confirmed 2026-09-05,
+  "keep the appends"**. The reviewer of [#150](https://github.com/openzigs/onyourleft/pull/150)
+  escalated the two appends to `0001-licence.md` and `0011-stream-storage.md` as an owner ruling
+  rather than a defect, because `CLAUDE.md` §7's imperative and this ADR's own reading disagreed and
+  no engineering argument settles which governs. The owner ruled for the appends, so the convention
+  below is established **and** the two documents it was written for are repaired by it.
+
+  Everything except that one ruling is the author's engineering work, constrained by the rule
+  already merged: `CLAUDE.md` §7 lists `docs/adr/*.md` as a protected path and says an ADR is
+  amended by a **new** ADR that supersedes it, not by editing it in place. This ADR narrows that
+  rule rather than overturning it — an append adds a dated section and changes no existing line,
+  which the diff shows as 0 deletions and 0 modified lines
 - **Issue**: [#147](https://github.com/openzigs/onyourleft/issues/147)
 - **Number**: **0013**, not 0012. `0012` is reserved in
   [`docs/architecture.md`](../architecture.md)'s ownership table for
@@ -202,9 +210,11 @@ a superseding ADR for that document and a stricter reading of D-3 — not a four
   acceptance criterion (a reader arriving at ADR 0011 line 200 can tell the sentence is no longer
   true) unmet by anything short of the superseding ADR #147 rejected as disproportionate. The
   substantive test is the one D-2 states and the diff answers: **0 deletions, 0 modified lines**.
-  The ruling is still the owner's, and it is cheap to reverse: each append is a trailing
+  **The owner ruled on 2026-09-05: keep the appends.** The reasoning above stands as the argument
+  that was put; the ruling is what settles it. The reversal path is left recorded because a decision
+  is worth more when the cost of undoing it is written down: each append is a trailing
   `## Amendments` section and nothing else in either file changed, so dropping both is deleting
-  those two sections. What would then need a second edit is *Context* item 1 and 2 here and the
+  those two sections. What would then need a second edit is *Context* items 1 and 2 here and the
   first paragraph of *Consequences*, which say the two known cases were repaired in the pull request
   that established this. Nothing in `ADR003`, in the 0012 reservation or in the test harness depends
   on them.
