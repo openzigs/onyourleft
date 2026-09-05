@@ -324,8 +324,19 @@ export function toPersistedPrivacyZone(record: PrivacyZoneRecord): PersistedPriv
  * location values out of scope for error text, and a privacy-zone centre is the
  * most sensitive coordinate this program holds — it is a home address the
  * athlete asked to be hidden. `decoded` reports the field name and the domain
- * constructor's own message ("latitude must be between -90 and 90"), never the
- * value.
+ * constructor's own message ("latitude in degrees must be between -90 and 90"),
+ * never the value.
+ *
+ * ⚠️ **That sentence was aspirational until #104 and this comment claimed it as
+ * fact.** `decoded` propagates the cause's message verbatim, and until #104 the
+ * domain guard ended it with `, received 151.2093` — so a transposed or
+ * corrupted zone centre was echoed into a `StoreDecodeError`, which is a
+ * console line, a crash report and a bug tracker. The redaction now happens in
+ * `@onyourleft/domain`, where every caller inherits it. What holds it there is
+ * `records.test.ts`, which asserts that no digit run in this message is
+ * anything but a bound of the constraint — the assertion the previous version
+ * of that test could not make, because it checked only for a value that was
+ * never in the string.
  */
 export function fromPersistedPrivacyZone(row: PersistedPrivacyZone): PrivacyZoneRecord {
   const latitude = decoded(
