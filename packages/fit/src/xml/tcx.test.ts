@@ -7,13 +7,15 @@
  * difference between the two files is a difference between the two formats.
  */
 
+import { unixSeconds } from '@onyourleft/domain';
 import { describe, expect, it } from 'vitest';
 
 import { ActivityXmlError } from './errors';
 import { TCX_ACTIVITY_EXTENSION_V2 } from './extensions';
 import { decodeGpx, encodeGpx } from './gpx';
 import { decodeTcx, encodeTcx, TCX_NAMESPACE, withoutTcxLossyChannels } from './tcx';
-import { indoorActivity, sampleActivity } from './testing';
+import { indoorActivity, RIDE_START_UNIX_SECONDS, sampleActivity } from './testing';
+import type { TrackActivity } from './track';
 import { trackPointsOf } from './track';
 
 function faultCode(text: string): string {
@@ -225,5 +227,68 @@ describe('writing', () => {
     expect(encodeTcx({ ...sampleActivity(), creator: undefined })).toContain(
       '<Name>On Your Left</Name>',
     );
+  });
+});
+
+/**
+ * Where the exporter decides something the input did not say.
+ *
+ * A normaliser used for a round-trip comparison has to describe **the export
+ * the encoder actually performs**, not a tidier one. Three places it did not:
+ * `Sport` is a required attribute with three admitted values, so an activity
+ * with none is exported as `Other`; `<Id>` and `Lap@StartTime` are derived from
+ * the first point when the activity or the lap has no start of its own.
+ * `sampleActivity()` sets all three, so none of it was visible.
+ */
+describe('what TCX supplies when the activity does not', () => {
+  function withoutSportOrStart(): TrackActivity {
+    const activity = sampleActivity();
+    return {
+      ...activity,
+      sport: undefined,
+      startTime: undefined,
+      laps: activity.laps.map((lap) => ({ ...lap, startTime: undefined })),
+    };
+  }
+
+  it('round-trips against the normaliser, which says what the format does', () => {
+    const original = withoutSportOrStart();
+    const { activity, faults } = decodeTcx(encodeTcx(original));
+    expect(faults).toEqual([]);
+    expect(activity).toEqual(withoutTcxLossyChannels(original));
+  });
+
+  it('exports an activity with no sport as Sport="Other", and reads it back', () => {
+    const written = encodeTcx(withoutSportOrStart());
+    expect(written).toContain('<Activity Sport="Other">');
+    expect(decodeTcx(written).activity.sport).toBe('Other');
+  });
+
+  it('derives the activity’s Id and each lap’s StartTime from the first point', () => {
+    const { activity } = decodeTcx(encodeTcx(withoutSportOrStart()));
+    expect(activity.startTime).toBe(RIDE_START_UNIX_SECONDS);
+    expect(activity.laps.map((lap) => lap.startTime)).toEqual([
+      RIDE_START_UNIX_SECONDS,
+      RIDE_START_UNIX_SECONDS + 10,
+    ]);
+  });
+
+  it('keeps a lap’s own StartTime when it has one, unlike GPX', () => {
+    // The attribute exists in TCX, so the derivation is a fallback rather than
+    // an overwrite. This is what stops the normaliser being copied across.
+    const activity = sampleActivity();
+    const displaced = {
+      ...activity,
+      laps: activity.laps.map((lap) => ({
+        ...lap,
+        startTime: unixSeconds((lap.points[0]?.timestamp ?? 0) - 60),
+      })),
+    };
+    const reread = decodeTcx(encodeTcx(displaced)).activity;
+    expect(reread.laps.map((lap) => lap.startTime)).toEqual([
+      RIDE_START_UNIX_SECONDS - 60,
+      RIDE_START_UNIX_SECONDS + 10 - 60,
+    ]);
+    expect(reread).toEqual(withoutTcxLossyChannels(displaced));
   });
 });

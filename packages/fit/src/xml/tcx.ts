@@ -441,14 +441,31 @@ function writeTrackpoint(writer: XmlWriter, point: TrackPoint): void {
 /** The channels a TCX v2 document cannot carry. See the module comment. */
 export const TCX_LOSSY_CHANNELS = ['point.temperature', 'activity.name'];
 
-/** An activity with the channels TCX cannot carry removed, for a comparison. */
+/**
+ * An activity with the channels TCX cannot carry removed, for a comparison.
+ *
+ * ⚠️ **Not only a channel filter: it also applies the derivations the exporter
+ * makes**, because a normaliser that describes a different export from the one
+ * {@link encodeTcx} performs turns a round-trip test into a test of the
+ * fixture. Three of them:
+ *
+ * - `Sport` is a required attribute with three admitted values, so an activity
+ *   with **no** sport is exported as `Sport="Other"` and comes back as
+ *   `'Other'`, never as absent. Mapping only a sport that was already there is
+ *   what this used to do, and it disagreed with the encoder one line above.
+ * - `<Id>` is the activity's start, written from the first point when the
+ *   activity has none of its own.
+ * - `Lap@StartTime` likewise.
+ */
 export function withoutTcxLossyChannels(activity: TrackActivity): TrackActivity {
   return {
     ...activity,
     name: undefined,
-    sport: activity.sport === undefined ? undefined : tcxSport(activity.sport),
+    sport: tcxSport(activity.sport),
+    startTime: activity.startTime ?? activity.laps[0]?.points[0]?.timestamp,
     laps: activity.laps.map((lap) => ({
       ...lap,
+      startTime: lap.startTime ?? lap.points[0]?.timestamp,
       points: lap.points.map((point) => ({ ...point, temperature: undefined })),
     })),
   };

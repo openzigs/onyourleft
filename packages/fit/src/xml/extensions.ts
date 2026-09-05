@@ -68,11 +68,23 @@ export function extensionChannelOf(localName: string): ExtensionChannel | undefi
   return CHANNELS.get(localName.toLowerCase());
 }
 
-/** Garmin's `TrackPointExtension` v1 namespace — what a GPX export writes. */
+/**
+ * Garmin's `TrackPointExtension` v1 namespace — read, never written.
+ *
+ * The #29 corpus's GPX fixtures declare it and so do most files in the wild.
+ * `encodeGpx` writes {@link GPX_TRACK_POINT_EXTENSION_V2}, because v1 has no
+ * `speed`.
+ */
 export const GPX_TRACK_POINT_EXTENSION_V1 =
   'http://www.garmin.com/xmlschemas/TrackPointExtension/v1';
 
-/** Garmin's `TrackPointExtension` v2 namespace, which adds `speed` and `course`. */
+/**
+ * Garmin's `TrackPointExtension` v2 namespace, which adds `speed` and `course`.
+ *
+ * **This is the one a GPX export writes.** Recognition is still by local name
+ * whatever the namespace, per the module comment — the URI matters on the way
+ * out, not on the way in.
+ */
 export const GPX_TRACK_POINT_EXTENSION_V2 =
   'http://www.garmin.com/xmlschemas/TrackPointExtension/v2';
 

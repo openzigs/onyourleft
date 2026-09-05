@@ -145,7 +145,6 @@ function positionOf(
 export function decodeGpx(text: string): TrackDecodeResult {
   const faults: ActivityXmlError[] = [];
   const laps: TrackLap[] = [];
-  const namespaces = new Set<string>();
 
   // A plain stack, popped in place. `path.slice(0, -1)` would allocate a new
   // array on every end tag — about six per track point, so ninety thousand
@@ -176,7 +175,6 @@ export function decodeGpx(text: string): TrackDecodeResult {
         }
         creator = element.attributes.find((attribute) => attribute.local === 'creator')?.value;
       }
-      if (element.namespace !== undefined) namespaces.add(element.namespace);
       path.push(element.local);
       characters = '';
 
@@ -398,12 +396,30 @@ function writeTrackPoint(writer: XmlWriter, point: TrackPoint): void {
  */
 export const GPX_LOSSY_CHANNELS = ['point.distance', 'lap.totalElapsedTime', 'lap.totalDistance'];
 
-/** A lap with the channels GPX cannot carry removed, for a round-trip comparison. */
+/**
+ * A lap with the channels GPX cannot carry removed, for a round-trip comparison.
+ *
+ * ⚠️ **Not only a channel filter: it also applies the derivations the exporter
+ * makes**, because a normaliser that describes a different export from the one
+ * {@link encodeGpx} performs turns a round-trip test into a test of the
+ * fixture. Two of them:
+ *
+ * - GPX has no element for a *lap's* start, so `<trkseg>` carries none and the
+ *   importer takes the first point's timestamp. A lap's own `startTime` never
+ *   survives; the first point's does.
+ * - An activity with no `startTime` is exported with the first point's
+ *   timestamp in `<metadata><time>`, so it comes back derived rather than
+ *   absent.
+ *
+ * Both were invisible while the fixture set every `startTime` to exactly the
+ * value the derivation produces.
+ */
 export function withoutGpxLossyChannels(activity: TrackActivity): TrackActivity {
   return {
     ...activity,
+    startTime: activity.startTime ?? activity.laps[0]?.points[0]?.timestamp,
     laps: activity.laps.map((lap) => ({
-      startTime: lap.startTime,
+      startTime: lap.points[0]?.timestamp,
       totalElapsedTime: undefined as ReturnType<typeof seconds> | undefined,
       totalDistance: undefined,
       points: lap.points.map((point) => ({ ...point, distance: undefined })),

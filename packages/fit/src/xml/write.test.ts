@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { parseXml } from './parse';
+import { isXmlCharacter, parseXml } from './parse';
 import { decimal, degrees, escapeXmlAttribute, escapeXmlText, integer, XmlWriter } from './write';
 
 describe('escaping', () => {
@@ -32,6 +32,71 @@ describe('escaping', () => {
       },
     });
     expect(read).toBe(hostile);
+  });
+});
+
+/**
+ * ⚠️ A leniency shared by both ends of a codec is invisible to a round trip.
+ *
+ * The importer used to accept `&#1;` and the exporter used to write the
+ * character it produced out raw, so a control character went in, came back out,
+ * compared equal — and left a document XML 1.0 does not allow, which every
+ * conformant reader refuses and this one accepted. Closing one end alone would
+ * have left the other able to reopen it.
+ */
+describe('characters XML cannot carry', () => {
+  it('drops a C0 control from a text node rather than writing it out raw', () => {
+    expect(escapeXmlText('Morning\u0001 ride')).toBe('Morning ride');
+    expect(escapeXmlAttribute('Morning\u0001 ride')).toBe('Morning ride');
+  });
+
+  it('keeps the three whitespace controls XML does allow', () => {
+    expect(escapeXmlText('a\tb\nc\rd')).toBe('a\tb\nc\rd');
+  });
+
+  it('keeps a character outside the BMP whole', () => {
+    // The `u` flag: a surrogate pair is one code point and not in the class.
+    // Without it each half matches on its own and the emoji is deleted.
+    expect(escapeXmlText('Ride \u{1F6B4} home')).toBe('Ride \u{1F6B4} home');
+  });
+
+  it('drops an unpaired surrogate, which no encoder can represent', () => {
+    expect(escapeXmlText('Ride \uD800 home')).toBe('Ride  home');
+  });
+
+  it('refuses a numeric character reference to one, rather than expanding it', () => {
+    // The other end. `&#1;` is as ill-formed as a literal 0x01 byte.
+    for (const reference of ['&#1;', '&#x1;', '&#xFFFE;', '&#xD800;']) {
+      expect(() => {
+        parseXml(`<name>${reference}</name>`, {});
+      }).toThrowError(/bad-character-reference|character XML can carry/);
+    }
+  });
+
+  it('agrees with the parser about which characters those are', () => {
+    // The two ends are one rule spelled twice — a predicate and a character
+    // class — so this pins them to each other across the whole BMP rather than
+    // trusting a comment to keep them in step.
+    for (let codePoint = 0; codePoint <= 0xffff; codePoint += 1) {
+      const character = String.fromCharCode(codePoint);
+      if (character === '&' || character === '<' || character === '>') continue;
+      expect([codePoint, escapeXmlText(character) !== '']).toEqual([
+        codePoint,
+        isXmlCharacter(codePoint),
+      ]);
+    }
+  });
+
+  it('writes a document a conformant reader can read, from a hostile name', () => {
+    const document = new XmlWriter().leaf('name', 'Ride\u0001 & \u0000home').finish();
+    expect(document).not.toContain('\u0001');
+    let read = '';
+    parseXml(document, {
+      text: (value) => {
+        read += value;
+      },
+    });
+    expect(read).toBe('Ride & home');
   });
 });
 

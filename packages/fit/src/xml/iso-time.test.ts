@@ -81,3 +81,36 @@ describe('writing an ISO 8601 instant', () => {
     }
   });
 });
+
+describe('an instant no ISO 8601 timestamp of this shape can carry', () => {
+  /**
+   * ⚠️ `Date.prototype.toISOString` spells a year outside 0000–9999 as
+   * `+010000-01-01T00:00:00.000Z`, and the nineteen-character slice this
+   * formatter takes turned that into `+010000-01-01T00:00Z` — a timestamp that
+   * looks well formed, parses, and means a different moment. A refusal is the
+   * lesser outcome.
+   */
+  it.each([
+    ['the year after 9999', 253_402_300_800],
+    ['a year long before 0000', -62_167_219_201],
+    ['past the range Date itself holds', 8.64e12 + 1],
+  ])('refuses %s rather than writing a truncated one', (_what, seconds) => {
+    expect(() => formatIsoInstant(unixSeconds(seconds))).toThrow(RangeError);
+  });
+
+  it('writes the last instant it can, and the first', () => {
+    expect(formatIsoInstant(unixSeconds(253_402_300_799))).toBe('9999-12-31T23:59:59Z');
+    expect(formatIsoInstant(unixSeconds(-62_167_219_200))).toBe('0000-01-01T00:00:00Z');
+  });
+
+  it('never names the instant in the message', () => {
+    // An exception from an export is the string most likely to be pasted into a
+    // public issue, and a ride's timestamps are metadata about a rider.
+    try {
+      formatIsoInstant(unixSeconds(253_402_300_800));
+    } catch (cause) {
+      expect((cause as Error).message).not.toContain('253402300800');
+      expect((cause as Error).message).not.toContain('10000');
+    }
+  });
+});

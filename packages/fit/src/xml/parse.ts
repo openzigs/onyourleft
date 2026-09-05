@@ -123,6 +123,28 @@ const SURROGATE_FIRST = 0xd800;
 const SURROGATE_LAST = 0xdfff;
 const MAX_CODE_POINT = 0x10ffff;
 
+/**
+ * Whether a code point is one XML 1.0 permits at all — its `Char` production.
+ *
+ * Tab, line feed and carriage return, then everything from the space up, with
+ * the surrogate range and the two noncharacters at the end of the BMP removed.
+ * **Every other C0 control is not a character XML can carry**, however it is
+ * spelled: `&#1;` is as ill-formed as a literal `0x01` byte, and a conformant
+ * parser rejects a document containing either.
+ *
+ * ⚠️ This is a **leniency that had to be closed at both ends at once**. A
+ * parser that accepts `&#1;` and a writer that emits the raw character it
+ * produced round-trip each other perfectly, and hand a rider a file every
+ * other reader refuses. `escapeXmlText` in `write.ts` is the other end.
+ */
+export function isXmlCharacter(codePoint: number): boolean {
+  if (codePoint === 0x09 || codePoint === 0x0a || codePoint === 0x0d) return true;
+  if (codePoint < 0x20) return false;
+  if (codePoint >= SURROGATE_FIRST && codePoint <= SURROGATE_LAST) return false;
+  if (codePoint === 0xfffe || codePoint === 0xffff) return false;
+  return codePoint <= MAX_CODE_POINT;
+}
+
 interface Scope {
   readonly prefix: string | undefined;
   readonly local: string;
@@ -463,16 +485,11 @@ class Parser {
       const digits = name.slice(hexadecimal ? 2 : 1);
       const valid = hexadecimal ? /^[0-9a-fA-F]+$/.test(digits) : /^[0-9]+$/.test(digits);
       const codePoint = valid ? Number.parseInt(digits, hexadecimal ? 16 : 10) : Number.NaN;
-      if (
-        !Number.isInteger(codePoint) ||
-        codePoint < 1 ||
-        codePoint > MAX_CODE_POINT ||
-        (codePoint >= SURROGATE_FIRST && codePoint <= SURROGATE_LAST)
-      ) {
+      if (!Number.isInteger(codePoint) || !isXmlCharacter(codePoint)) {
         this.#offset = offset;
         this.#fail(
           'bad-character-reference',
-          'a numeric character reference does not denote a character',
+          'a numeric character reference does not denote a character XML can carry',
         );
       }
       return String.fromCodePoint(codePoint);

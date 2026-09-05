@@ -170,7 +170,15 @@ subset produces reaches it.
   no `position_lat` field rather than a channel of invalid markers, and certainly not one of zeros.
 - **A record missing a channel other records carry gets that base type's invalid marker.** Never a
   zero: "the strap was not reporting" and "the rider produced no watts" are different facts and both
-  average plausibly.
+  average plausibly. **The marker fills the field's whole declared width**, one element at a time —
+  a sixteen-byte `developer_data_id.application_id` that a message does not carry is sixteen bytes
+  of `0xFF`, not four. A data message has no delimiters, so a field written at the wrong width moves
+  every field and every record after it; the encoder reports `faults: []` and the decoder reports
+  `truncated-record`. ⚠️ **The corpus cannot see this and a round trip through it stays green**:
+  `developer-fields.fit` carries the same two-byte field on all thirty of its records, and two is
+  one of the three widths a base-type-driven writer gets right by accident. It is covered in
+  `src/encode/container.test.ts` and `src/encode/activity.test.ts` instead, at widths 1, 2, 3, 4, 5,
+  8 and 16.
 - **A channel is widened when its values do not fit its natural base type.** `heart-rate-16-bit.fit`
   carries 260–310 bpm in a `uint16`, which is legal, and an encoder that always wrote a `uint8` would
   turn 260 into 4. A value that is *equal* to a base type's invalid marker — 255 bpm in a `uint8` —
@@ -414,11 +422,20 @@ line rather than only describing it.
 | lap `totalElapsedTime`, `totalDistance` | **lost** — GPX has no lap | native |
 | activity name | `<trk><name>` | **lost** — `<Notes>` is a rider's note, not a title |
 | lap boundaries | one `<trkseg>` per lap; the count survives | native |
-| sport | `<type>`, free text, passed through | `Sport`, mapped onto `Biking` / `Running` / `Other` |
+| sport | `<type>`, free text, passed through | `Sport`, mapped onto `Biking` / `Running` / `Other`; **an absent sport becomes `Other`, not absent** |
+| activity start | `<metadata><time>`; **derived from the first point when absent** | `<Id>`; derived the same way |
+| lap start | **lost** — GPX has no per-segment time, so the first point's timestamp comes back | `Lap@StartTime`, native; derived from the first point only when absent |
 
 A GPX lap is a `<trkseg>`, which is the nearest thing the format has. A ride imported from TCX and
 exported as GPX keeps its points, its segments and every channel with an extension; it loses each
 lap's totals because there is nowhere to put them.
+
+⚠️ **The last three rows are things the exporter *supplies*, not channels it drops**, and they are
+the reason `withoutGpxLossyChannels` and `withoutTcxLossyChannels` apply those derivations rather
+than only stripping channels. A normaliser that described a tidier export than the encoder performs
+would turn every round-trip test into a test of the fixture — which is what happened while
+`sampleActivity()` set every start time to exactly the value the derivation produces, and while the
+TCX normaliser mapped an absent sport to absent and the encoder beside it wrote `Sport="Other"`.
 
 ### Timestamps
 
@@ -455,6 +472,15 @@ The defence is **two independent layers**, because one control is a single edit 
    string and never a passthrough.
 
 Plus a nesting depth limit of 256, against a document built out of ten megabytes of `<a>`.
+
+**A character XML 1.0 forbids is refused on the way in and dropped on the way out.** A `&#1;` is
+`bad-character-reference`, and `escapeXmlText` removes any C0 control other than tab, line feed and
+carriage return, along with unpaired surrogates and `U+FFFE`/`U+FFFF`. Both halves at once,
+deliberately: this package accepted `&#1;` on import and wrote the character back out raw, so a
+control character round-tripped through a codec that agreed with itself and produced a document expat
+rejects. **A leniency shared by both ends of a codec is invisible to a round-trip test**, which is
+why `write.test.ts` pins the writer's character class to the parser's `isXmlCharacter` rather than
+trusting the two to stay in step.
 
 Asserted against the **committed** hostile fixtures in
 [`tools/fixture-corpus/xml-corpus.test.ts`](tools/fixture-corpus/xml-corpus.test.ts):

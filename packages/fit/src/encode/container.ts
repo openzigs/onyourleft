@@ -21,7 +21,7 @@
  * `Fitgen` or `ActivityRepairTool` was consulted, downloaded, installed or read
  * in the course of this work** (ADR 0006 R1, R4).
  *
- * ## Three things this writer does that a naive one does not
+ * ## Four things this writer does that a naive one does not
  *
  * 1. **A definition always precedes the first data message that uses it.**
  *    That is #31's first practical constraint and it is structural here rather
@@ -38,13 +38,26 @@
  *    actually written**, never from a running total kept alongside them. A
  *    counter that drifts from the buffer produces a file every reader rejects
  *    and nothing local notices.
+ * 4. **A field occupies exactly the number of bytes its definition declared**,
+ *    whatever its base type. There are no delimiters in a data message, so a
+ *    field written at the wrong width moves every field and every record after
+ *    it. The width comes from the definition and the *elements* come from the
+ *    base type — see {@link FitContainerWriter.message}'s value writer — and
+ *    the two are not the same number for a `byte` field carrying a sixteen-byte
+ *    application id, or for a developer field carried at the width the file it
+ *    came from used.
  *
  * Everything is written little-endian, and the definition messages say so —
  * the architecture byte is `0`. The decoder reads either order; there is no
  * reason for a writer to offer a choice.
  */
 
-import { baseTypeInvalidValue, baseTypeIsSigned, BASE_TYPE_NUMBER } from '../decode/base-types';
+import {
+  baseTypeElementSize,
+  baseTypeInvalidValue,
+  baseTypeIsSigned,
+  BASE_TYPE_NUMBER,
+} from '../decode/base-types';
 import { FIT_HEADER_SIZE } from '../decode/container';
 import { fitCrc16, FIT_CRC_SIZE } from '../decode/crc';
 import { ByteSink } from './byte-sink';
@@ -150,6 +163,33 @@ export function textValue(value: string): EncodeValue {
 /** Raw bytes, for a `byte` field or a developer field carried verbatim. */
 export function bytesValue(value: Uint8Array): EncodeValue {
   return { kind: 'bytes', value };
+}
+
+/**
+ * The byte this writer pads with, and the marker for a type that reserves none.
+ *
+ * `byte` and `string` have no single invalid number — theirs is per byte — and
+ * `0xFF` is the pattern the decoder's `isInvalidByteArray` reads as absent.
+ * Never zero, which is a legal value of both.
+ */
+const BYTE_INVALID = 0xff;
+
+/**
+ * The width of one element of `baseType`, when this writer can emit a number of
+ * that width, and `undefined` otherwise.
+ *
+ * Every member of {@link BASE_TYPE} is one, two or four bytes wide, so the
+ * `undefined` case is a base type only a hand-built shape can name — a
+ * `float64`, or a byte this profile subset does not read. Returning
+ * `undefined` for those is what keeps the one invariant that matters here:
+ * **a field occupies exactly the number of bytes its definition declared.** A
+ * writer that guesses a width instead desynchronises every record after it,
+ * reports no fault, and produces a file this project's own decoder rejects
+ * with `truncated-record`.
+ */
+function writableElementSize(baseType: number): number | undefined {
+  const size = baseTypeElementSize(baseType);
+  return size === 1 || size === 2 || size === 4 ? size : undefined;
 }
 
 /** A key that is equal exactly when two shapes would produce the same definition. */
@@ -264,30 +304,42 @@ export class FitContainerWriter {
       this.#sink.raw(bytes);
       // A short `byte` field is padded with the invalid marker for that type,
       // which is 0xFF per element — never zero, which is a legal byte value.
-      for (let index = bytes.length; index < size; index += 1) this.#sink.u8(0xff);
+      for (let index = bytes.length; index < size; index += 1) this.#sink.u8(BYTE_INVALID);
       return;
     }
 
     const raw = value?.kind === 'numeric' ? value.value : undefined;
-    const invalid = baseTypeInvalidValue(baseType);
-    if (raw === undefined) {
-      // A gap. Write the invalid marker across the whole field, per element, so
-      // an array-shaped field is as absent as a scalar one.
-      const pattern = invalid ?? 0xff;
-      this.#writeNumber(size, baseType, pattern);
-      return;
+    // The declared size is the whole field's width, which is not the same as
+    // one element's: a `byte` field carrying a sixteen-byte application id
+    // declares sixteen, and a developer field declares whatever the file it
+    // came from did. So the field is written **element by element until the
+    // declared width is filled**, with any value in the first element and the
+    // invalid marker in the rest — and never as one write whose width was
+    // chosen from the base type alone.
+    const elementSize = writableElementSize(baseType);
+    const pattern = baseTypeInvalidValue(baseType) ?? BYTE_INVALID;
+    let written = 0;
+    if (elementSize !== undefined) {
+      for (; written + elementSize <= size; written += elementSize) {
+        this.#writeElement(elementSize, baseType, written === 0 ? (raw ?? pattern) : pattern);
+      }
     }
-    this.#writeNumber(size, baseType, raw);
+    // Whatever the elements did not cover: the tail of a field whose declared
+    // width is not a whole number of elements, all of a field narrower than one
+    // element, and all of one whose base type this writer emits no numbers for.
+    // A byte of `0xFF` rather than a zero, for the reason the `bytes` path
+    // above pads that way.
+    for (; written < size; written += 1) this.#sink.u8(BYTE_INVALID);
   }
 
-  #writeNumber(size: number, baseType: number, raw: number): void {
+  #writeElement(elementSize: number, baseType: number, raw: number): void {
     const signed = baseTypeIsSigned(baseType);
-    if (size === 1) {
+    if (elementSize === 1) {
       if (signed) this.#sink.i8(raw);
       else this.#sink.u8(raw);
       return;
     }
-    if (size === 2) {
+    if (elementSize === 2) {
       if (signed) this.#sink.i16(raw);
       else this.#sink.u16(raw);
       return;

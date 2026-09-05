@@ -198,3 +198,139 @@ describe('the header', () => {
     expect(container.messages.at(-1)?.fields[0]?.numeric).toBe(399 % 200);
   });
 });
+
+/**
+ * A field wider than the base type's own element — a `byte` field carrying a
+ * UUID, or a developer field carried verbatim — has a **declared size** that is
+ * not the one, two or four bytes a scalar occupies. A gap in such a field is
+ * still exactly `size` bytes wide: the definition message said so, and a reader
+ * counts the field's bytes off the record by that number and nothing else.
+ *
+ * ⚠️ This is the case a round trip through a corpus cannot see. `developer-fields.fit`
+ * carries the same two-byte field on all thirty of its records, and two happens
+ * to be a width a scalar writer gets right — so the corpus exercises exactly one
+ * of the widths this covers. Writing four bytes where sixteen were declared
+ * desynchronises every record after it, and the encoder reports `faults: []`
+ * while the decoder reports `truncated-record`.
+ */
+describe('a gap in a field wider than one element', () => {
+  const SENTINEL = { number: 253, size: 1, baseType: BASE_TYPE.uint8 };
+
+  it.each([1, 2, 3, 4, 5, 8, 16])(
+    'writes exactly the %i bytes the definition declared, all invalid markers',
+    (size) => {
+      const bytes = new FitContainerWriter()
+        .message(
+          {
+            globalMessageNumber: 207,
+            fields: [{ number: 1, size, baseType: BASE_TYPE.byte }, SENTINEL],
+          },
+          [numericValue(undefined), numericValue(9)],
+        )
+        .finish();
+
+      // The data message is the record header, the field, then the sentinel,
+      // sitting immediately before the two-byte file CRC.
+      const body = [...bytes.subarray(bytes.length - 2 - size - 1, bytes.length - 2)];
+      expect(body).toEqual([...new Array<number>(size).fill(0xff), 9]);
+    },
+  );
+
+  it.each([1, 2, 3, 4, 5, 8, 16])(
+    'leaves every following record readable, at a declared width of %i',
+    (size) => {
+      const shape = {
+        globalMessageNumber: 207,
+        fields: [{ number: 1, size, baseType: BASE_TYPE.byte }, SENTINEL],
+      };
+      const container = readFitContainer(
+        new FitContainerWriter()
+          .message(shape, [numericValue(undefined), numericValue(1)])
+          .message(shape, [numericValue(undefined), numericValue(2)])
+          .finish(),
+      );
+
+      expect(container.faults).toEqual([]);
+      expect(container.messages).toHaveLength(2);
+      expect(container.messages.map((message) => message.fields[1]?.numeric)).toEqual([1, 2]);
+      expect(container.messages[0]?.fields[0]?.bytes).toHaveLength(size);
+    },
+  );
+
+  it('writes one marker per element for a multi-element numeric field', () => {
+    // Three `uint16` elements in one six-byte field: six bytes of 0xFF, not a
+    // single 0xFFFF and not a four-byte write.
+    const bytes = new FitContainerWriter()
+      .message(
+        {
+          globalMessageNumber: 207,
+          fields: [{ number: 1, size: 6, baseType: BASE_TYPE.uint16 }, SENTINEL],
+        },
+        [numericValue(undefined), numericValue(9)],
+      )
+      .finish();
+    expect([...bytes.subarray(bytes.length - 9, bytes.length - 2)]).toEqual([
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 9,
+    ]);
+  });
+});
+
+/**
+ * A definition whose declared width and base type do not fit each other.
+ *
+ * `encodeActivity` never builds one — its numeric fields take their size from
+ * the base type — but {@link FitContainerWriter} is exported, so the shapes
+ * below are reachable, and the answer that matters for both is the same one:
+ * **exactly the declared number of bytes, whatever else is true.** Anything
+ * else moves every record after it.
+ */
+describe('a definition the base type cannot fill exactly', () => {
+  const SENTINEL = { number: 253, size: 1, baseType: BASE_TYPE.uint8 };
+
+  /** The data message's payload: everything between its header and the CRC. */
+  function payload(bytes: Uint8Array, width: number): number[] {
+    return [...bytes.subarray(bytes.length - 2 - width - 1, bytes.length - 2)];
+  }
+
+  it('fills a base type this writer emits no numbers for with markers', () => {
+    // Base type 9 is `float64`. It is in the decoder's table with an element
+    // width of eight and in no candidate list, so nothing chooses it — but a
+    // caller can declare it, and a four-byte write would truncate the field.
+    const bytes = new FitContainerWriter()
+      .message(
+        { globalMessageNumber: 207, fields: [{ number: 1, size: 8, baseType: 9 }, SENTINEL] },
+        [numericValue(1.5), numericValue(9)],
+      )
+      .finish();
+    expect(payload(bytes, 8)).toEqual([0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 9]);
+  });
+
+  it('writes a marker rather than overrunning a field narrower than its element', () => {
+    // Two bytes declared for a `uint32`. The value does not fit the space the
+    // definition gave it, so it is a gap — and it is two bytes, not four.
+    const bytes = new FitContainerWriter()
+      .message(
+        {
+          globalMessageNumber: 207,
+          fields: [{ number: 1, size: 2, baseType: BASE_TYPE.uint32 }, SENTINEL],
+        },
+        [numericValue(70_000), numericValue(9)],
+      )
+      .finish();
+    expect(payload(bytes, 2)).toEqual([0xff, 0xff, 9]);
+  });
+
+  it('pads the tail of a width that is not a whole number of elements', () => {
+    // Five bytes of `uint16`: two elements, then one byte left over.
+    const bytes = new FitContainerWriter()
+      .message(
+        {
+          globalMessageNumber: 207,
+          fields: [{ number: 1, size: 5, baseType: BASE_TYPE.uint16 }, SENTINEL],
+        },
+        [numericValue(0x1234), numericValue(9)],
+      )
+      .finish();
+    expect(payload(bytes, 5)).toEqual([0x34, 0x12, 0xff, 0xff, 0xff, 9]);
+  });
+});

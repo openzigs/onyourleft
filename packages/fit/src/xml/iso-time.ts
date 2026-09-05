@@ -112,13 +112,42 @@ export function parseIsoInstant(text: string): UnixSeconds | undefined {
 }
 
 /**
+ * The last instant `YYYY-MM-DDTHH:MM:SSZ` can spell, and the first.
+ *
+ * `Date.prototype.toISOString` spells a year outside 0000–9999 in the expanded
+ * form — `+010000-01-01T00:00:00.000Z` — and beyond ±8.64e15 milliseconds it
+ * throws instead. Both are outside what this exporter may write, so the range
+ * is stated here rather than discovered at the slice.
+ */
+const LATEST_ISO_SECONDS = 253_402_300_799; // 9999-12-31T23:59:59Z
+const EARLIEST_ISO_SECONDS = -62_167_219_200; // 0000-01-01T00:00:00Z
+
+/**
  * An instant as `YYYY-MM-DDTHH:MM:SSZ`.
  *
  * Always UTC and always with the `Z`, whatever zone the ride was ridden in.
  * A local time with an offset would round-trip equally well and would put the
  * rider's approximate longitude into a file they may have exported precisely
  * because they wanted to share it without that.
+ *
+ * ⚠️ **An instant outside the four-digit-year range is refused, not written.**
+ * The expanded form `Date` produces for one is nineteen characters longer at
+ * the front, so the fixed slice below cut `+010000-01-01T00:00:00.000Z` down to
+ * `+010000-01-01T00:00` and appended a `Z` — a timestamp that looks well formed
+ * and means something else. A refusal is the lesser outcome, and it matches
+ * `decimal`'s treatment of a value it cannot render.
+ *
+ * @throws {RangeError} for an instant no ISO 8601 `dateTime` in this form can
+ * carry. The instant is deliberately **not** named in the message: an exception
+ * from an export is the string most likely to end up in a public issue, and the
+ * timestamps of a rider's ride are the metadata half of what ADR 0004
+ * decision D keeps out of one.
  */
 export function formatIsoInstant(instant: UnixSeconds): string {
+  if (!Number.isFinite(instant) || instant < EARLIEST_ISO_SECONDS || instant > LATEST_ISO_SECONDS) {
+    throw new RangeError(
+      'an instant outside the range an ISO 8601 timestamp with a four-digit year can carry',
+    );
+  }
   return `${new Date(instant * 1000).toISOString().slice(0, 19)}Z`;
 }

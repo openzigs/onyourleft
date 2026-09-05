@@ -19,7 +19,8 @@ import {
   GPX_TRACK_POINT_EXTENSION_V2,
 } from './extensions';
 import { decodeGpx, encodeGpx, GPX_NAMESPACE, withoutGpxLossyChannels } from './gpx';
-import { indoorActivity, sampleActivity, samplePoint } from './testing';
+import { indoorActivity, RIDE_START_UNIX_SECONDS, sampleActivity, samplePoint } from './testing';
+import type { TrackActivity } from './track';
 import { trackPointsOf } from './track';
 
 function faultCode(text: string): string {
@@ -310,5 +311,53 @@ describe('writing', () => {
     expect(written).toContain('creator="On Your Left"');
     expect(written).toContain(`xmlns="${GPX_NAMESPACE}"`);
     expect(written).toContain('version="1.1"');
+  });
+});
+
+/**
+ * The start times the fixture cannot disagree with the exporter about.
+ *
+ * `sampleActivity()` sets the activity's start and each lap's start to exactly
+ * the value the exporter would derive if they were absent, so it agrees with a
+ * normaliser that derives nothing — and every round trip stayed green while
+ * `withoutGpxLossyChannels` said a lap's own `startTime` survives, which in GPX
+ * it never does.
+ */
+describe('start times GPX derives rather than carries', () => {
+  /** The same ride, with the two starts moved off the values GPX would derive. */
+  function displacedStarts(): TrackActivity {
+    const activity = sampleActivity();
+    return {
+      ...activity,
+      startTime: undefined,
+      laps: activity.laps.map((lap) => ({
+        // A minute before the lap's first point. GPX has no element for it, so
+        // this is the value that cannot come back.
+        startTime: unixSeconds((lap.points[0]?.timestamp ?? 0) - 60),
+        totalElapsedTime: lap.totalElapsedTime,
+        totalDistance: lap.totalDistance,
+        points: lap.points,
+      })),
+    };
+  }
+
+  it('round-trips against the normaliser, which says what the format does', () => {
+    const original = displacedStarts();
+    const { activity, faults } = decodeGpx(encodeGpx(original));
+    expect(faults).toEqual([]);
+    expect(activity).toEqual(withoutGpxLossyChannels(original));
+  });
+
+  it('gives each lap its first point’s timestamp, not the one it was handed', () => {
+    const { activity } = decodeGpx(encodeGpx(displacedStarts()));
+    expect(activity.laps.map((lap) => lap.startTime)).toEqual([
+      RIDE_START_UNIX_SECONDS,
+      RIDE_START_UNIX_SECONDS + 10,
+    ]);
+  });
+
+  it('writes the first point’s timestamp when the activity has no start of its own', () => {
+    const { activity } = decodeGpx(encodeGpx(displacedStarts()));
+    expect(activity.startTime).toBe(RIDE_START_UNIX_SECONDS);
   });
 });

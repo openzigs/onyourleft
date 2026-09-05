@@ -181,6 +181,90 @@ describe('an activity with nothing in it', () => {
   });
 });
 
+/**
+ * A field whose declared width is not one, two or four bytes.
+ *
+ * `container.ts` writes each field element by element until the declared width
+ * is filled. Before that it chose the width from the base type and wrote one
+ * number, so a `byte` field of any other declared size was written short — and
+ * the two places this encoder declares such a field are both here rather than
+ * in a hand-built shape: `developer_data_id.application_id` is a sixteen-byte
+ * UUID, and a developer field is carried at whatever width the file it came
+ * from used.
+ *
+ * ⚠️ **The corpus cannot see this.** `developer-fields.fit` carries the same
+ * two-byte developer field on all thirty of its records, and a single
+ * `developer_data_id` that does carry its id — so no message in the corpus ever
+ * leaves a wide field empty. What the shortfall produces is the shape CLAUDE.md
+ * §5 names: `encodeActivity` returns `faults: []`, and the decoder reading the
+ * bytes back reports `truncated-record` and drops the records after it.
+ */
+describe('a message that omits a field wider than one element', () => {
+  it('still writes the sixteen bytes an absent application id declared', () => {
+    const applicationId = Uint8Array.from({ length: 16 }, (_byte, index) => index + 1);
+    const { faults, decoded } = roundTrip({
+      developerApplications: [
+        { developerDataIndex: 0, applicationId, manufacturerId: 255, applicationVersion: 1 },
+        // The second application carries no id at all, so the field it shares
+        // with the first is a sixteen-byte gap.
+        {
+          developerDataIndex: 1,
+          applicationId: undefined,
+          manufacturerId: 255,
+          applicationVersion: 1,
+        },
+      ],
+    });
+
+    expect(faults).toEqual([]);
+    expect(decoded.faults).toEqual([]);
+    expect(decoded.activity.developerApplications).toHaveLength(2);
+    expect(decoded.activity.developerApplications[0]?.applicationId).toEqual(applicationId);
+    expect(decoded.activity.developerApplications[0]?.developerDataIndex).toBe(0);
+    // The message after the short write is what proves the framing: its own
+    // fields are read from the offset the first message left behind.
+    expect(decoded.activity.developerApplications[1]?.developerDataIndex).toBe(1);
+    expect(decoded.activity.developerApplications[1]?.applicationId).toBeUndefined();
+  });
+
+  it.each([3, 5, 8, 16])(
+    'keeps every record readable when a %i-byte developer field is missing from one',
+    (width) => {
+      const carried = Uint8Array.from({ length: width }, (_byte, index) => index + 1);
+      const developerField = {
+        developerDataIndex: 0,
+        fieldDefinitionNumber: 7,
+        name: undefined,
+        units: undefined,
+        numeric: undefined,
+        text: undefined,
+        bytes: carried,
+      };
+      const { faults, decoded } = roundTrip({
+        records: [
+          record({ timestamp: instant(0), power: watts(200), developerFields: [developerField] }),
+          // The middle record does not carry it. The definition still declares
+          // it, so the gap has to occupy the same width or the record after it
+          // is read from the wrong offset.
+          record({ timestamp: instant(1), power: watts(201) }),
+          record({ timestamp: instant(2), power: watts(202), developerFields: [developerField] }),
+        ],
+      });
+
+      expect(faults).toEqual([]);
+      expect(decoded.faults).toEqual([]);
+      expect(decoded.activity.records.map((item) => item.power)).toEqual([200, 201, 202]);
+      expect(decoded.activity.records[0]?.developerFields[0]?.bytes).toEqual(carried);
+      expect(decoded.activity.records[2]?.developerFields[0]?.bytes).toEqual(carried);
+      // A gap is the invalid marker across the whole width, never a zero: a
+      // developer field of zeros is a reading, and one of 0xFF is an absence.
+      expect(decoded.activity.records[1]?.developerFields[0]?.bytes).toEqual(
+        new Uint8Array(width).fill(0xff),
+      );
+    },
+  );
+});
+
 function instant(offsetSeconds: number): { kind: 'instant'; instant: UnixSeconds } {
   // 2024-06-15T09:00:00Z, the instant the #29 corpus starts at.
   return { kind: 'instant', instant: unixSeconds(1_718_442_000 + offsetSeconds) };

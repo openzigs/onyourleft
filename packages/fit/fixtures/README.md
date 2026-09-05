@@ -144,7 +144,15 @@ the provenance of every profile number to be recorded, naming the source and the
 
 **No Garmin FIT SDK, `Profile.xlsx`, `fit-sdk-tools` artefact, `FitCSVTool`, `Fitgen` or
 `ActivityRepairTool` was consulted, downloaded, installed or read in the course of this work, and
-neither `@garmin/fitsdk` nor `fit-file-parser` is a dependency of anything here** (R1, R4).
+`@garmin/fitsdk` appears in no dependency block of this repository or its lockfile** (R1, R4).
+
+⚠️ That sentence **used to name `fit-file-parser` as well**. Since
+[#31](https://github.com/openzigs/onyourleft/issues/31) it is a devDependency of `packages/fit` —
+MIT, pinned at 5.0.2, imported from `tools/fixture-corpus/third-party-acceptance.test.ts` and never
+from `src/` — adopted under that issue's revision block, which struck "validate with the SDK's own
+checker" under R1. **No number in this corpus or in `tools/fixture-corpus/fit-profile.ts` came from
+it**; it reads the fixtures in order to disagree with this project's own reader. The reconciliation
+is in [`../README.md`](../README.md) §1.
 
 ### Sources
 

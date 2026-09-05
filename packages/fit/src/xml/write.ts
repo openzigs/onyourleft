@@ -22,10 +22,50 @@
  * coordinate.
  */
 
-/** Escape the three characters that cannot appear literally in a text node. */
+/**
+ * Escape the three characters that cannot appear literally in a text node, and
+ * drop the ones XML cannot carry at all.
+ *
+ * Escaping and dropping are two different problems and only the first has a
+ * spelling: `<` becomes `&lt;`, but a `0x01` has **no** representation in an
+ * XML 1.0 document — not raw and not as `&#1;`, both of which a conformant
+ * parser refuses. So it is removed, and the alternative of failing the export
+ * is worse: a stray control character in a name a rider typed would cost them
+ * the whole ride file.
+ *
+ * ⚠️ Paired with the `Char` check in `parse.ts`, and neither half is enough on
+ * its own. This package's own parser once accepted `&#1;` on import and this
+ * writer emitted the character it produced verbatim, so a control character
+ * survived a round trip through a codec that agreed with itself and produced a
+ * document expat rejects. That is the shape a round-trip test cannot see: both
+ * ends were lenient in the same direction.
+ */
 export function escapeXmlText(value: string): string {
-  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  return value
+    .replaceAll(NON_XML_CHARACTERS, '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
 }
+
+/**
+ * Everything XML 1.0's `Char` production forbids: the C0 controls other than
+ * tab, line feed and carriage return, unpaired surrogates, and the two
+ * noncharacters at the end of the BMP.
+ *
+ * ⚠️ The `u` flag is load-bearing rather than decorative. In unicode mode the
+ * engine matches **code points**, so a well-formed surrogate pair is one
+ * character outside this class and survives intact; without the flag the
+ * class would match each half of every emoji and tear it in two.
+ *
+ * Spelled with escapes rather than the characters themselves, because a file
+ * holding a literal `0x01` is one every tool downstream treats as binary.
+ * `write.test.ts` pins this class to `parse.ts`'s `isXmlCharacter`, so the two
+ * ends of the codec cannot drift back into agreeing with each other.
+ */
+const NON_XML_CHARACTERS =
+  // eslint-disable-next-line no-control-regex -- the point of the class is the control characters
+  /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uD800-\uDFFF\uFFFE\uFFFF]/gu;
 
 /** Escape a value for a double-quoted attribute. */
 export function escapeXmlAttribute(value: string): string {
