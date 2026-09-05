@@ -34,6 +34,14 @@ describe('Button', () => {
     expect(mounted.container.querySelector('button')?.getAttribute('type')).toBe('button');
   });
 
+  it('passes type="submit" through when a form genuinely needs one', async () => {
+    // The other half of the default above, and the half nothing pinned until
+    // #143 removed the ternary that was silently returning its own argument.
+    // With no test here, hardcoding `type="button"` would have been green.
+    mounted = await mount(<Button type="submit">Save</Button>);
+    expect(mounted.container.querySelector('button')?.getAttribute('type')).toBe('submit');
+  });
+
   it('carries a description through aria-describedby when given one', async () => {
     mounted = await mount(
       <>

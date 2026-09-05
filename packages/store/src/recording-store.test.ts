@@ -696,16 +696,23 @@ describe('listing what can be recovered', () => {
 });
 
 describe('what the checkpoints cost', () => {
-  // ⚠️ An explicit timeout, because this case has a real time budget and
-  // Vitest's default 5 s was never one. It writes 2,880 chunk rows through
-  // fake-indexeddb — around 0.7 s on a developer's machine, and several times
-  // that on a two-core shared runner. It went red for the first time in #48,
-  // which added twelve jsdom test environments to the workspace and roughly
-  // doubled the suite's wall time; nothing about this test or the code it
-  // measures changed. Raising it rather than shrinking the ride keeps the
-  // assertions below exact, which is the whole point of them. 30 s is still a
-  // stop on a hang: a genuine regression here would be orders of magnitude,
-  // not a factor of two.
+  // ⚠️ The 30 s below is a **contention allowance, not a performance bound**,
+  // and the description it used to carry claimed otherwise. #143 measured this
+  // file at 951 ms and confirmed it still passes with the timeout reverted to
+  // Vitest's 5 s default — so a number 30× the observed runtime was tolerating
+  // a real 6× regression in silence while reading like a budget.
+  //
+  // It is kept, and only as a stop on a hang. The case writes 2,880 chunk rows
+  // through fake-indexeddb: under a second on a developer's machine, several
+  // times that on a two-core shared runner alongside the twelve jsdom
+  // environments #48 added, and the default went red on exactly that
+  // contention with nothing about this code changed. A wall-clock assertion is
+  // deliberately NOT added in its place — it would measure the runner rather
+  // than the store, and would be the flakiest gate in the repository.
+  //
+  // What this case actually measures is the byte count, asserted exactly
+  // below. That number moves when the encoding does, and it is the same on
+  // every machine.
   it('measures a four-hour, 1 Hz, eight-channel recording and records the headroom', async () => {
     const ride = await seedRide(harness, ATHLETE_A, { hasPosition: true });
     const set = streamSetFor(ride, { gaps: [DROPPED_STRAP] });

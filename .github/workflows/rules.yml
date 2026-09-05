@@ -176,19 +176,38 @@ jobs:
       # report under a different one and could not block a merge (CLAUDE.md
       # section 4c).
       #
-      # ⚠️ The filter is a path SUBSTRING, and that is weaker than it looks.
-      # DELETING apps/web/src/a11y/ fails this step, because Vitest exits
-      # non-zero when a filter selects no files. RENAMING it does not: renaming
-      # to src/accessibility/ still matches nothing named `a11y`, drops
-      # audit.test.ts -- the suite proving every rule actually fires -- and
-      # exits 0 with 5 files instead of 6. Measured, not reasoned: 56 tests
-      # instead of 94, green.
+      # The filter is a path substring, and until #142 it was the DIRECTORY
+      # name. That failed closed against deleting apps/web/src/a11y/ -- Vitest
+      # exits non-zero when a filter selects no files -- and OPEN against
+      # renaming it: renaming to src/accessibility/ matched nothing named
+      # `a11y`, dropped audit.test.ts (the suite proving every rule actually
+      # fires) and exited 0 with 6 files and 61 tests instead of 7 and 101.
+      # Measured on this branch, not reasoned about.
       #
-      # So this gate fails closed against deletion and OPEN against a rename.
-      # Making the selection robust is #142; until then, treat a change to the
-      # a11y directory's name or layout as a change to this gate.
+      # It is now `.a11y.test.`, which matches the FILENAME. No directory rename
+      # can drop a file out of the gate, and a file added under the convention
+      # is picked up without editing this workflow.
+      #
+      # The check that runs first closes the remaining hole: a genuine
+      # accessibility test named without the convention would be silently
+      # outside the gate, so check-a11y-suite.mjs compares what Vitest selects
+      # against what is on disk and fails on a difference. It runs BEFORE the
+      # gate, so a mis-scoped gate is reported as that rather than as a green
+      # run over fewer files.
       - name: Accessibility
-        run: pnpm run test:a11y
+        run: |
+          pnpm run check:a11y-suite
+          pnpm run test:a11y
+
+      # The checker above decides what counts as an accessibility test from
+      # paths and from package.json's own script, so it has a suite, and the
+      # suite runs here. Same reasoning as the coverage renderer below: a check
+      # that silently stopped checking is indistinguishable from a clean tree.
+      #
+      # Not part of `pnpm run check:repo`: that is the bare-clone set, and this
+      # one needs Node.
+      - name: Accessibility gate checker tests
+        run: bash scripts/check-a11y-suite.test.sh
 
       # The renderer has logic of its own -- it decides which package a covered
       # file belongs to, from absolute paths that differ between a checkout, a

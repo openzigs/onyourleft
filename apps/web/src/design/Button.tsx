@@ -48,10 +48,14 @@ export function Button({
   describedBy,
 }: ButtonProps): JSX.Element {
   const className = variant === 'primary' ? 'oyl-button' : 'oyl-button oyl-button--secondary';
+  // `type` is passed straight through. It used to go through a ternary that
+  // returned its own argument (#143) — which read like a guard against a third
+  // value and was not one, because the prop is `'button' | 'submit'` and is
+  // defaulted above, so no third value can reach here.
   return (
     <button
       className={className}
-      type={type === 'submit' ? 'submit' : 'button'}
+      type={type}
       onClick={onClick}
       disabled={disabled}
       aria-describedby={describedBy}

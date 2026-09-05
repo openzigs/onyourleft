@@ -102,14 +102,27 @@ What this means in practice:
   moves to `apps/` or the dependency is replaced. There is no third option and no exemption.
 - **Permissive** dependencies (MIT, BSD-2/3, Apache-2.0, ISC) are fine anywhere.
 - **Weak, file-level copyleft (MPL-2.0, EPL) and permissive licences this list does not name** —
-  `BlueOak-1.0.0`, `0BSD` — are **not ruled on yet**, and three are already in the tree as build-time
-  devDependencies: `lightningcss` (MPL-2.0) and `minimatch` (BlueOak-1.0.0). Nothing is violated —
-  neither is GPL or AGPL, and neither is linked into a distributed artefact. Note that `lightningcss`
-  reaches **`packages/domain`** through Vitest, not only `apps/web`: an allowlist written against
-  "the MPL one is under `apps/`" would scope itself to the wrong tree and pass vacuously. The
-  per-package dependency-licence allowlist in
+  `BlueOak-1.0.0`, `CC0-1.0`, `MIT-0`, `0BSD` — are **not ruled on yet**, and six are already in the
+  tree as build-time devDependencies. Read on 2026-09-05 from `pnpm licenses list --json`:
+  `lightningcss` and `lightningcss-darwin-arm64` (MPL-2.0), `lru-cache` and `minimatch`
+  (BlueOak-1.0.0), `mdn-data` (CC0-1.0), and `@csstools/color-helpers` and
+  `@csstools/css-syntax-patches-for-csstree` (MIT-0). Nothing is violated — none is GPL or AGPL, and
+  none is linked into a distributed artefact. **All of them reach `packages/*` through Vitest**, not
+  only `apps/web`: an allowlist written against "the MPL one is under `apps/`" would scope itself to
+  the wrong tree and pass vacuously. The per-package dependency-licence allowlist in
   [#24](https://github.com/openzigs/onyourleft/issues/24) decides these explicitly. Verify with
   `pnpm licenses list --json` rather than from this paragraph, which ages.
+- ⚠️ **An "it lands under `apps/`" argument is checked with `pnpm why <pkg> --recursive`, and a
+  clean `require.resolve` probe is not evidence of anything.** This trap has now caught two
+  dependencies — `lightningcss` and, in #141, `jsdom` — so #143 recorded how to check it.
+  `pnpm why lru-cache --recursive` lists `@onyourleft/domain`, `fit`, `sensors` and `store` under
+  `vitest`, because pnpm re-resolves `vitest` per importer with the peer in the key and a
+  devDependency declared under `apps/` reaches every package through that graph. The other probe
+  answers a **narrower** question — whether that package's own source could `import` the name — and
+  under pnpm's isolated `node_modules` it returns *not resolvable* for every transitive dependency,
+  **`lightningcss` from `packages/domain` included**, which the bullet above records as reaching
+  there. Both probes were re-run for #143 and that is what they said; a "not resolvable" therefore
+  proves the package cannot be imported by name, and nothing about the licence boundary.
 - Anything **non-OSI** — BUSL, SSPL, CC-BY-NC, "commercial use requires a licence" — fails
   everywhere and needs an ADR before it is even discussed.
 - Where a change lands is therefore a **licence question answered before you write the code**, not a
@@ -210,6 +223,16 @@ pnpm run test:coverage
 # says what broke. Unlike coverage it DOES gate: criterion 4 of #48 is that a
 # violation fails the build. See §4e.
 pnpm run test:a11y
+
+# What proves that gate selects every accessibility test there is (#142). Runs
+# `vitest list` with the same selector `test:a11y` uses — read out of
+# package.json, never copied — and compares it against the files on disk. Needs
+# Node and an install, so it is NOT part of `check:repo`.
+pnpm run check:a11y-suite
+
+# Its own suite. Fixture-driven; 21 cases. Needs Node, so also not in
+# `check:repo`.
+bash scripts/check-a11y-suite.test.sh
 
 # tsc --noEmit followed by `vite build`, for apps/web. A green typecheck is not
 # a green build: the bundler resolves imports the typechecker only reads types
@@ -440,7 +463,8 @@ directory it lands in (CONTRIBUTING.md).
 [`.github/workflows/rules.yml`](.github/workflows/rules.yml) runs on every pull request and on every
 push to `main`. It runs **exactly** the §4a commands and nothing else: the six bare-clone script
 checks, `shellcheck scripts/*.sh`, then `pnpm install --frozen-lockfile`, `format:check`, `lint`,
-`typecheck`, `test:coverage`, `bash scripts/coverage-summary.test.sh`, `test:a11y` and `build` — then
+`typecheck`, `test:coverage`, `bash scripts/coverage-summary.test.sh`, `check:a11y-suite`,
+`test:a11y`, `bash scripts/check-a11y-suite.test.sh` and `build` — then
 publishes the coverage table to the run summary and uploads the HTML report as an artefact.
 Those last two carry `if: always()` and cannot fail the job: the run where coverage moved
 unexpectedly is exactly the one whose table you want, and a reporting step that can fail a
@@ -548,12 +572,27 @@ percentage.
 | File | What it decides |
 |---|---|
 | `audit.ts` | fourteen structural rules over a rendered DOM — an unnamed control, a control not in the tab order, a broken heading order, a dangling ARIA reference, a positive `tabindex`, and so on. `tabbableElements` is the tab-order model the keyboard tests rest on |
-| `audit.test.ts` | a violating fixture for **every** rule, plus an assertion that every rule in `ACCESSIBILITY_RULES` has one. A rule added without a failing fixture fails the build |
+| `audit.a11y.test.ts` | a violating fixture for **every** rule, plus an assertion that every rule in `ACCESSIBILITY_RULES` has one. A rule added without a failing fixture fails the build |
 | `routes.a11y.test.tsx` | renders every entry in `shell/routes.ts` and audits it. A route added to the table is audited without anyone editing this file |
 | `contrast.a11y.test.ts` | WCAG 2.2 AA contrast for every declared token pair, and that every token appears in a pair |
 | `theme.a11y.test.ts` | that `theme.css` carries the same values as `design/tokens.ts`, in both directions |
 | `index-html.a11y.test.ts` | `lang`, and that the viewport meta does not block zoom |
 | `degradation.a11y.test.tsx` | that a chart which throws is replaced by its table and does not take the page with it |
+
+⚠️ **An accessibility test file is named `*.a11y.test.{ts,tsx}`, and that name is what the gate
+selects on** — `test:a11y` is `vitest run --project web .a11y.test.`. Until
+[#142](https://github.com/openzigs/onyourleft/issues/142) the filter was the *directory* name, which
+failed closed against deleting `apps/web/src/a11y/` and **open** against renaming it: renaming to
+`src/accessibility/` dropped `audit.test.ts` and the step stayed green with 6 files and 61 tests
+instead of 7 and 101. A filename cannot be moved out of the gate by a directory rename, and a new
+file that carries the convention is picked up with no CI edit.
+
+`scripts/check-a11y-suite.mjs` closes what the convention alone cannot: a test file inside a
+directory named `a11y` or `accessibility` that does **not** carry the convention fails the build,
+rather than sitting silently outside the gate. It takes the selector out of `package.json` and asks
+`vitest list` which files it picks, so the check and the gate cannot drift apart; a `test:a11y` it
+cannot parse is a failure, not a pass. Run it with `pnpm run check:a11y-suite`, and its own suite
+with `bash scripts/check-a11y-suite.test.sh`.
 
 **There is no `axe-core` and adding one is a decision, not a tidy-up.** It is MPL-2.0, which §3
 records as *not ruled on yet* and [#24](https://github.com/openzigs/onyourleft/issues/24)'s to
