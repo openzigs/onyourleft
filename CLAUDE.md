@@ -304,19 +304,36 @@ not.
     adapter, when the promise is that it is "the same parser, unchanged". `DataView` is an
     ECMAScript built-in, which is why a payload decoder can be platform-free at all.
   - **`packages/fit`** holds the **synthetic fixture corpus and its generator**
-    ([#107](https://github.com/openzigs/onyourleft/issues/107)) and the **FIT activity file
-    decoder** ([#30](https://github.com/openzigs/onyourleft/issues/30)) in `src/decode/`, exported
-    as `decodeFitActivity(bytes)`. The encoder (#31) and GPX/TCX (#32) are still to come. Per
+    ([#107](https://github.com/openzigs/onyourleft/issues/107)), the **FIT activity file decoder**
+    ([#30](https://github.com/openzigs/onyourleft/issues/30)) in `src/decode/` as
+    `decodeFitActivity(bytes)`, the **FIT activity file encoder**
+    ([#31](https://github.com/openzigs/onyourleft/issues/31)) in `src/encode/` as
+    `encodeFitActivity(activity)`, and **GPX 1.1 / TCX v2 import and export**
+    ([#32](https://github.com/openzigs/onyourleft/issues/32)) in `src/xml/` as
+    `decodeGpx` / `encodeGpx` / `decodeTcx` / `encodeTcx`. Per
     ADR 0006 all of them are written from the published protocol documentation and from the #29
     fixtures — **nothing carrying Garmin's terms may enter this package**, and R2 requires the
-    provenance of every profile number to be recorded per message. The decoder's record is
+    provenance of every profile number to be recorded per message.
+    The codec's record is
     [`packages/fit/README.md`](packages/fit/README.md) §3 and the corpus's is
     `packages/fit/fixtures/README.md` §5; they are **deliberately separate and independently
     derived**, and a test asserts the two tables agree so that a disagreement is visible rather
     than shared. ⚠️ Like `packages/store` it is not one program: `tsconfig.json` admits
     `@types/node` for the generator under `tools/`, and `tsconfig.platform-free.json` compiles
     `src/` alone with `lib: ["ES2024"]` and `types: []`. A `TextDecoder` in `src/` is therefore a
-    compile error, which is why the decoder carries its own UTF-8 reader.
+    compile error, which is why the codec carries its own UTF-8 reader **and its own XML reader**.
+    ⚠️ **`fit-file-parser` 5.0.2 (MIT) is now a devDependency of `packages/fit`**, imported from
+    one test file (`tools/fixture-corpus/third-party-acceptance.test.ts`) and never from `src/`. It
+    is the independent third-party FIT reader #31's acceptance criterion requires, adopted under
+    that issue's revision block, which struck "validate with the SDK's own checker" under
+    ADR 0006 R1. `packages/fit/README.md` §1 records the reconciliation; that README's declaration
+    no longer claims the package depends on nothing named `fit-file-parser`, and a reviewer
+    expecting the old sentence should read the new one.
+    ⚠️ **`src/xml` refuses a `<!DOCTYPE` outright rather than configuring a parser to be safe.**
+    That is not a setting to be revisited: a DTD is the only place an XML document can declare an
+    entity, so refusing the declaration is what closes XXE and billion-laughs together, and the
+    only entity references resolved at all are the five XML predefines. Do not swap in a
+    general-purpose XML parser without reading `packages/fit/README.md` §7 first.
   - **`packages/store`** holds athletes, activities, laps and privacy zones
     ([#26](https://github.com/openzigs/onyourleft/issues/26)) with the migration `up`/`down`
     contract, **per-second streams** at schema version 2
@@ -337,7 +354,9 @@ not.
   React 19, React DOM, Vite, — since #26 — `dexie` 4.4.5 and `fake-indexeddb` 6.2.5 (both
   Apache-2.0, both zero-dependency, both under `packages/store`) and — since #40 —
   `@types/web-bluetooth` 0.0.21 (MIT, zero-dependency, types only, a devDependency of
-  `packages/sensors`) are installed; nothing else from that list is. Add each in the issue that first needs it, after checking its licence against the
+  `packages/sensors`) and — since #31 — `fit-file-parser` 5.0.2 (MIT, a devDependency of
+  `packages/fit`, whose closure is `buffer` MIT → `base64-js` MIT and `ieee754` BSD-3-Clause) are
+  installed; nothing else from that list is. Add each in the issue that first needs it, after checking its licence against the
   directory it lands in (CONTRIBUTING.md).
 - **`apps/api`, or anything else server-shaped.** Not "not yet" — not in Phase 1 at all. Owner
   decision D6.
@@ -749,6 +768,7 @@ top of an issue **supersedes its body**.
 | Which lint rule enforces which boundary | [`eslint.config.js`](eslint.config.js) and §4d |
 | Why a package's tsconfig narrows `lib` and `types` | `packages/domain/tsconfig.json` and §4d |
 | The canonical unit for a quantity, and the conversion into it | [`packages/domain/README.md`](packages/domain/README.md) |
-| Where a FIT profile number came from, and what the decoder does with a bad file | [`packages/fit/README.md`](packages/fit/README.md) |
+| Where a FIT profile number came from, and what the decoder does with a bad file | [`packages/fit/README.md`](packages/fit/README.md) §1–§5 |
+| Which GPX/TCX schema versions are targeted, what each format loses, and how XXE is refused | [`packages/fit/README.md`](packages/fit/README.md) §7 |
 
-<!-- Last updated: 2026-09-04 by delivery:code-issue resolving #30 (the FIT activity file decoder) -->
+<!-- Last updated: 2026-09-04 by delivery:code-issue resolving #31 and #32 (the FIT encoder, and GPX 1.1 / TCX v2) -->

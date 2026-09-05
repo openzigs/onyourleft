@@ -124,11 +124,13 @@ a recorded purpose cannot exist. A test asserts this block matches the corpus.
 | `nominal-ride.gpx` | 10304 | 30 | Baseline GPX 1.1: 30 track points with elevation, time and the TrackPointExtension heart rate and cadence a cycling file carries. The same track as the nominal FIT fixture, so a GPX import can be compared against the first 30 records of the binary one, point for point. |
 | `point-nemo.gpx` | 7064 | 20 | GPX with both coordinates negative throughout. In XML a coordinate is text, so the sign bug here is a formatting and parsing one rather than a two’s-complement one — a writer that drops the minus and a reader that parses it with parseInt both produce a valid file in the wrong hemisphere. |
 | `xxe-external-entity.gpx` | 1367 | 10 | A well-formed GPX whose DOCTYPE declares an external general entity pointing at file:///etc/passwd, referenced from the track name. SECURITY.md puts XXE in GPX and TCX specifically in scope; #32 must reject or refuse to expand it, and this is what that test asserts against. |
+| `billion-laughs.gpx` | 753 | 0 | A well-formed GPX whose DOCTYPE declares six levels of nested entities, so its track name expands to a million copies of a three-character string — three megabytes out of a document under a kilobyte. The XXE fixtures cover entity *resolution*; this covers entity *expansion*, which is the same class and needs the same defence, and carrying both is what proves the defence was not written against one example. |
+| `truncated-mid-trackpoint.gpx` | 4098 | 12 | The nominal GPX cut off in the middle of its last track point’s time element: past that point’s coordinates, so every coordinate in the file still pairs, and with no closing tag for anything. The text counterpart of truncated-mid-record.fit — a partial silent success here is a ride that imports short and says nothing. |
 | `nominal-ride.tcx` | 19602 | 30 | Baseline TCX v2: one activity, one lap, 30 trackpoints with Position, AltitudeMeters, DistanceMeters, HeartRateBpm, Cadence and the ActivityExtension Watts. TCX nests its coordinates in elements rather than attributes, which is a different parsing path from GPX and fails differently. |
 | `indoor-no-position.tcx` | 13032 | 0 | A TCX whose trackpoints carry no Position element at all. The indoor case again, in the format where "no position" is an absent child rather than an undeclared field — a reader that dereferences Position unconditionally throws on the first point. |
 | `xxe-external-entity.tcx` | 3160 | 10 | The TCX counterpart of the hostile GPX: an external general entity referenced from the activity Id. Both formats are carried because a parser is usually configured per format and hardening one is not hardening the other. |
 
-**19 fixtures, 75173 bytes of the 262144 byte budget (29%), 620 positions.** Regenerated with the corpus, so it cannot go stale.
+**21 fixtures, 80024 bytes of the 262144 byte budget (31%), 632 positions.** Regenerated with the corpus, so it cannot go stale.
 
 <!-- END GENERATED FIXTURE TABLE -->
 
@@ -142,7 +144,15 @@ the provenance of every profile number to be recorded, naming the source and the
 
 **No Garmin FIT SDK, `Profile.xlsx`, `fit-sdk-tools` artefact, `FitCSVTool`, `Fitgen` or
 `ActivityRepairTool` was consulted, downloaded, installed or read in the course of this work, and
-neither `@garmin/fitsdk` nor `fit-file-parser` is a dependency of anything here** (R1, R4).
+`@garmin/fitsdk` appears in no dependency block of this repository or its lockfile** (R1, R4).
+
+⚠️ That sentence **used to name `fit-file-parser` as well**. Since
+[#31](https://github.com/openzigs/onyourleft/issues/31) it is a devDependency of `packages/fit` —
+MIT, pinned at 5.0.2, imported from `tools/fixture-corpus/third-party-acceptance.test.ts` and never
+from `src/` — adopted under that issue's revision block, which struck "validate with the SDK's own
+checker" under R1. **No number in this corpus or in `tools/fixture-corpus/fit-profile.ts` came from
+it**; it reads the fixtures in order to disagree with this project's own reader. The reconciliation
+is in [`../README.md`](../README.md) §1.
 
 ### Sources
 

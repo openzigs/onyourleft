@@ -200,10 +200,39 @@ describe('the cases the issue requires', () => {
     }
   });
 
-  it('carries no entity declaration in any other fixture', () => {
+  it('carries a nested entity expansion in the billion-laughs fixture', () => {
+    const text = new TextDecoder().decode(committedBytes('billion-laughs.gpx'));
+    expect(text).toContain('<!DOCTYPE gpx [');
+    expect(text).toContain('<!ENTITY lol6 ');
+    expect(text).toContain('&lol6;');
+    // Small on disk, enormous expanded: that asymmetry is the attack. A fixture
+    // that had lost its nesting would still contain the strings above.
+    expect(text.length).toBeLessThan(1024);
+  });
+
+  it('has a truncated GPX that really is cut off mid-element', () => {
+    const text = new TextDecoder().decode(committedBytes('truncated-mid-trackpoint.gpx'));
+    expect(text).not.toContain('</gpx>');
+    expect(text).not.toContain('</trkseg>');
+    expect(text.endsWith('\n')).toBe(false);
+    // Past the last trkpt's coordinates, so every coordinate still pairs and
+    // the region guard can see all of them. See `truncatedGpx`.
+    expect(text.endsWith('<time>2024-06-')).toBe(true);
+  });
+
+  it('carries no entity declaration in any fixture that is not one of the three hostile ones', () => {
+    // An allowlist by exact name rather than by prefix. `xxe-` was a prefix and
+    // a prefix is a rule a future fixture can join by accident; these three are
+    // the documents that are *meant* to carry a DTD and nothing else may.
+    const hostile = new Set([
+      'xxe-external-entity.gpx',
+      'xxe-external-entity.tcx',
+      'billion-laughs.gpx',
+    ]);
     for (const entry of corpus) {
-      if (entry.name.startsWith('xxe-')) continue;
+      if (hostile.has(entry.name)) continue;
       expect(new TextDecoder().decode(entry.bytes), entry.name).not.toContain('<!ENTITY');
+      expect(new TextDecoder().decode(entry.bytes), entry.name).not.toContain('<!DOCTYPE');
     }
   });
 });

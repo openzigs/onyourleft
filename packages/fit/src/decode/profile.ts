@@ -14,8 +14,15 @@
  *
  * **No Garmin FIT SDK, `Profile.xlsx`, `fit-sdk-tools` artefact, `FitCSVTool`,
  * `Fitgen` or `ActivityRepairTool` was consulted, downloaded, installed or read
- * in the course of this work, and neither `@garmin/fitsdk` nor
- * `fit-file-parser` is a dependency of anything here** (R1, R4).
+ * in the course of this work, and `@garmin/fitsdk` appears in no dependency
+ * block of this repository or its lockfile** (R1, R4).
+ *
+ * ⚠️ That sentence **used to name `fit-file-parser` as well**. Since #31 it is
+ * a devDependency of this package — MIT, pinned at 5.0.2, imported from one
+ * test file and never from `src/` — adopted under #31's revision block, which
+ * struck "validate with the SDK's own checker" under R1. Not a number in this
+ * file came from it: it exists to read this package's output and *disagree*.
+ * `packages/fit/README.md` §1 records the reconciliation.
  *
  * ## Why this is not `tools/fixture-corpus/fit-profile.ts`
  *

@@ -119,8 +119,19 @@ carrying the byte offset it was found at; it opens nothing, so
 profile it reads is the narrow, enumerated subset [ADR 0006](adr/0006-fit-codec-licensing.md) R2
 requires, and the provenance of every number in it — with the two that rest on the fixture corpus
 alone named as such — is in [`packages/fit/README.md`](../packages/fit/README.md), which is the
-reference a consumer reads rather than this file. The encoder is #31 and GPX/TCX are #32; both
-consume the same shape, so `packages/fit` still depends on nothing but `@onyourleft/domain`.
+reference a consumer reads rather than this file.
+
+It also holds the **FIT activity file encoder** as of
+[#31](https://github.com/openzigs/onyourleft/issues/31) — `encodeFitActivity(activity)`, the same
+shape in the other direction, so `encode(decode(x))` needs no adapter — and **GPX 1.1 and TCX v2
+import and export** as of [#32](https://github.com/openzigs/onyourleft/issues/32). The two text
+formats share one shape of their own (`TrackActivity`) rather than reusing the FIT one, because a
+GPX file has no `file_id`, no developer fields and no `date_time` union; what they share with
+everything else is the units. `packages/fit` still depends on nothing but `@onyourleft/domain` at
+runtime — including for XML, which it parses with its own reader rather than a dependency, so that
+a `<!DOCTYPE` can be refused by the grammar rather than disabled by a setting. Its one
+devDependency of note is `fit-file-parser` (MIT), a test-time-only independent FIT reader adopted
+under #31's ruling; `packages/fit/README.md` §1 records why that is consistent with ADR 0006.
 
 `packages/store` is filled in as of [#26](https://github.com/openzigs/onyourleft/issues/26) — the
 athlete, activity, lap and privacy-zone object stores, the indexes each read goes through, the

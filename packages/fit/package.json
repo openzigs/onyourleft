@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "license": "Apache-2.0",
-  "description": "FIT / GPX / TCX codec. Today: the FIT activity file decoder, the synthetic fixture corpus and its generator, and the ADR 0004 decision G region guard.",
+  "description": "FIT / GPX / TCX codec: the FIT activity file decoder and encoder, GPX 1.1 and TCX v2 import and export, the synthetic fixture corpus and its generator, and the ADR 0004 decision G region guard.",
   "exports": {
     ".": "./src/index.ts"
   },
@@ -19,6 +19,7 @@
     "@onyourleft/domain": "workspace:*"
   },
   "devDependencies": {
+    "fit-file-parser": "5.0.2",
     "typescript": "6.0.3",
     "vitest": "4.1.11"
   }

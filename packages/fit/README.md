@@ -1,10 +1,10 @@
 # `@onyourleft/fit`
 
-The FIT / GPX / TCX codec. Today it holds the **FIT activity file decoder**
-([#30](https://github.com/openzigs/onyourleft/issues/30)) and the synthetic fixture corpus and
-generator ([#29](https://github.com/openzigs/onyourleft/issues/29)). The FIT encoder is
-[#31](https://github.com/openzigs/onyourleft/issues/31) and GPX/TCX import and export are
-[#32](https://github.com/openzigs/onyourleft/issues/32).
+The FIT / GPX / TCX codec. It holds the **FIT activity file decoder**
+([#30](https://github.com/openzigs/onyourleft/issues/30)), the **FIT activity file encoder**
+([#31](https://github.com/openzigs/onyourleft/issues/31)), **GPX 1.1 and TCX v2 import and export**
+([#32](https://github.com/openzigs/onyourleft/issues/32)), and the synthetic fixture corpus and
+generator ([#29](https://github.com/openzigs/onyourleft/issues/29)).
 
 Apache-2.0, like everything under `packages/`.
 
@@ -22,15 +22,42 @@ served FIT protocol documentation and depend on nothing carrying Garmin's terms.
 
 > **No Garmin FIT SDK in any language, `Profile.xlsx`, `garmin/fit-sdk-tools` artefact, `FitCSVTool`,
 > `Fitgen` or `ActivityRepairTool` was consulted, downloaded, installed or read in the course of the
-> work in this package, and neither `@garmin/fitsdk` nor `fit-file-parser` appears in any dependency
-> block of this repository or its lockfile.** (R1, R4.)
+> work in this package, and `@garmin/fitsdk` appears in no dependency block of this repository or its
+> lockfile.** (R1, R4.)
 
 Section 3 below is the R2 record: where every profile number came from, per message, with the date it
 was read.
 
+### `fit-file-parser` is a test-time devDependency, and that is a ruling rather than a lapse
+
+⚠️ The sentence above **used to say** that `fit-file-parser` appeared in no dependency block either.
+It now does, pinned exactly at **5.0.2 (MIT)** in this package's `devDependencies`. That changed with
+#31 and it changed because #31's revision block ruled on it directly.
+
+The original acceptance criterion was *"validating with the SDK's own checker rather than our own"*.
+That criterion is **struck**, under **R1** — obtaining and running `FitCSVTool` makes the operator a
+Licensee, and a Licensee contributing to an Apache-2.0 package is the §2(d) event ADR 0006 exists to
+avoid. The permitted replacement the block names is *"an independent non-Garmin decoder, as a
+test-time devDependency that is never shipped. `fit-file-parser` (MIT) and `dtcooper/python-fitparse`
+(MIT) both qualify."*
+
+That is consistent with ADR 0006 rejecting option (b) rather than in tension with it: (b) was
+rejected for putting SDK-derived material into a **distributed** artefact, and a devDependency is
+neither distributed nor linked into one. It is severable in one line.
+
+Concretely:
+
+- It is imported from **exactly one file**,
+  [`tools/fixture-corpus/third-party-acceptance.test.ts`](tools/fixture-corpus/third-party-acceptance.test.ts),
+  and never from `src/`. `packages/fit`'s `exports` do not reach it.
+- Its dependency closure is `buffer` (MIT) → `base64-js` (MIT), `ieee754` (BSD-3-Clause). All
+  permissive, all fine under `packages/` per CLAUDE.md §3. Verified with `pnpm licenses list --json`.
+- It exists to **disagree with this package**. Its own reading of a file is what #31's third-party
+  acceptance criterion is asserted against.
+
 ---
 
-## 2. Using the decoder
+## 2. Using the FIT codec
 
 ```ts
 import { decodeFitActivity } from '@onyourleft/fit';
@@ -108,6 +135,57 @@ type FitDateTime =
 
 `packages/domain`'s `time.ts` asks for exactly this, and `timestamp-epoch-boundary.fit` is the
 fixture that pins it.
+
+### Using the encoder
+
+```ts
+import { decodeFitActivity, encodeFitActivity } from '@onyourleft/fit';
+
+const { activity } = decodeFitActivity(bytes);
+const { bytes: written, faults } = encodeFitActivity(activity);
+```
+
+`FitActivity` satisfies `FitEncodeInput` structurally, so `encode(decode(x))` needs no adapter —
+which is what makes the corpus round trip a test of the encoder rather than a test of a mapping
+written to make it pass. Every collection is optional, so a ride recorded on a trainer is
+`{ records, laps, sessions, summary }` and nothing else.
+
+`faults` is every field of the input that could not be carried into the bytes, each naming the global
+message number and field number it came from. A caller that ignores them still gets a valid file.
+
+| Fault | When |
+|---|---|
+| `nothing-to-encode` | the activity carries no messages at all, so the file is a header and a checksum |
+| `value-not-representable` | a value no base type in this profile subset can hold, or one `@onyourleft/domain` rejects. **The one value is written as a gap; the channel is kept** |
+| `instant-not-representable` | an instant before the 1989 epoch or past `uint32`. Dropped, never wrapped |
+| `instant-reads-back-as-system-time` | an instant whose FIT `date_time` falls in the range reserved for "seconds since the device powered on" — before 1998-07-03T21:24:15Z. Written anyway, because the format offers no alternative, and reported |
+
+`too-many-message-types` is the only **thrown** `FitEncodeError`: an activity needing more than the
+sixteen local message types a FIT file can bind at once has no file to write. Nothing this profile
+subset produces reaches it.
+
+#### What the encoder decides that the caller does not
+
+- **A channel no record carries is not declared at all**, so an indoor ride's record definition has
+  no `position_lat` field rather than a channel of invalid markers, and certainly not one of zeros.
+- **A record missing a channel other records carry gets that base type's invalid marker.** Never a
+  zero: "the strap was not reporting" and "the rider produced no watts" are different facts and both
+  average plausibly. **The marker fills the field's whole declared width**, one element at a time —
+  a sixteen-byte `developer_data_id.application_id` that a message does not carry is sixteen bytes
+  of `0xFF`, not four. A data message has no delimiters, so a field written at the wrong width moves
+  every field and every record after it; the encoder reports `faults: []` and the decoder reports
+  `truncated-record`. ⚠️ **The corpus cannot see this and a round trip through it stays green**:
+  `developer-fields.fit` carries the same two-byte field on all thirty of its records, and two is
+  one of the three widths a base-type-driven writer gets right by accident. It is covered in
+  `src/encode/container.test.ts` and `src/encode/activity.test.ts` instead, at widths 1, 2, 3, 4, 5,
+  8 and 16.
+- **A channel is widened when its values do not fit its natural base type.** `heart-rate-16-bit.fit`
+  carries 260–310 bpm in a `uint16`, which is legal, and an encoder that always wrote a `uint8` would
+  turn 260 into 4. A value that is *equal* to a base type's invalid marker — 255 bpm in a `uint8` —
+  counts as not fitting, because every reader would read it as a gap.
+- **The natural width is a floor, never a ceiling.** `manufacturer` is written as a `uint16` even
+  when it would fit a byte. Squeezing it is a gratuitous way to find out which third-party readers
+  read the definition message properly.
 
 ---
 
@@ -265,7 +343,21 @@ is slower and is the point.
   another. Nothing in this profile subset does, and the decoder does not implement it.
 - **Chained files.** A FIT file may be followed immediately by another complete FIT file. Bytes after
   the first file's trailing CRC are ignored rather than decoded as a second activity.
-- **GPX and TCX.** #32.
+
+The encoder's own gaps, which are not the same list:
+
+- **It never writes a compressed timestamp header.** The decoder reads them, because real files use
+  them; the encoder writes an ordinary `timestamp` field on every message. A compressed header saves
+  three bytes per record and costs a class of bug — a five-bit offset relative to the most recent
+  full timestamp — that no reader can diagnose from the outside.
+- **It never rebinds a local message type.** Sixteen distinct message shapes is the limit and
+  exceeding it is `too-many-message-types` rather than a silent rebinding, which would make every
+  earlier definition unreadable to a streaming reader.
+- **It writes little-endian only.** The decoder reads either order; a writer has no reason to offer
+  a choice.
+- **A developer field is carried verbatim** — its bytes, its size and its application index, exactly
+  as the decoder found them. Nothing is re-derived from a `field_description` the encoder may never
+  have been given.
 
 ---
 
@@ -287,3 +379,127 @@ pnpm --filter @onyourleft/fit run test        # run once; never `vitest` on its 
 pnpm --filter @onyourleft/fit run typecheck   # both programs: the package, and src/ alone
 pnpm --filter @onyourleft/fit run fixtures:generate
 ```
+
+---
+
+## 7. GPX and TCX — #32
+
+### The schema versions this package targets
+
+#32's last acceptance criterion is that these are pinned here rather than inferred from the code.
+
+| What | Namespace / version | Read | Written |
+| --- | --- | :---: | :---: |
+| **GPX 1.1** | `http://www.topografix.com/GPX/1/1` | yes | yes |
+| GPX 1.0 | `http://www.topografix.com/GPX/1/0` | as far as `trk`/`trkseg`/`trkpt` allows | **no** |
+| Garmin `TrackPointExtension` v1 | `http://www.garmin.com/xmlschemas/TrackPointExtension/v1` | yes | no |
+| Garmin `TrackPointExtension` v2 | `http://www.garmin.com/xmlschemas/TrackPointExtension/v2` | yes | yes |
+| Garmin `PowerExtension` v1 | `http://www.garmin.com/xmlschemas/PowerExtension/v1` | yes | yes |
+| **TCX v2** | `http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2` | yes | yes |
+| Garmin `ActivityExtension` v2 (`TPX`) | `http://www.garmin.com/xmlschemas/ActivityExtension/v2` | yes | yes |
+
+**Extensions are recognised by local element name, case-insensitively, and only inside an
+`<extensions>` / `<Extensions>` subtree.** Matching on namespace URI alone would be correct and
+would drop most real files: Garmin has two `TrackPointExtension` versions in the wild, and Strava,
+Wahoo, Hammerhead and Zwift each write their own. Power alone appears as `PowerInWatts`, `power` and
+`Watts`. The scoping to an extensions subtree is what keeps that from being reckless — a `<name>`
+element elsewhere in the document is not a channel.
+
+### What each format cannot carry
+
+Round-trip is *"semantically equal for every channel the format can represent, with the lossy
+channels documented explicitly"*. This is that list, and `gpx.test.ts` and `tcx.test.ts` assert each
+line rather than only describing it.
+
+| Channel | GPX 1.1 | TCX v2 |
+| --- | :---: | :---: |
+| position, altitude, time | yes | yes |
+| heart rate, cadence | `gpxtpx` | native |
+| power | `gpxpx:PowerInWatts` | `ns3:TPX/Watts` |
+| speed | `gpxtpx:speed` | `ns3:TPX/Speed` |
+| temperature | `gpxtpx:atemp` | **lost** — no element in TCX v2 or `ActivityExtension` |
+| per-point distance | **lost** — no element in GPX 1.1 or any extension written here | native |
+| lap `totalElapsedTime`, `totalDistance` | **lost** — GPX has no lap | native |
+| activity name | `<trk><name>` | **lost** — `<Notes>` is a rider's note, not a title |
+| lap boundaries | one `<trkseg>` per lap; the count survives | native |
+| sport | `<type>`, free text, passed through | `Sport`, mapped onto `Biking` / `Running` / `Other`; **an absent sport becomes `Other`, not absent** |
+| activity start | `<metadata><time>`; **derived from the first point when absent** | `<Id>`; derived the same way |
+| lap start | **lost** — GPX has no per-segment time, so the first point's timestamp comes back | `Lap@StartTime`, native; derived from the first point only when absent |
+
+A GPX lap is a `<trkseg>`, which is the nearest thing the format has. A ride imported from TCX and
+exported as GPX keeps its points, its segments and every channel with an extension; it loses each
+lap's totals because there is nowhere to put them.
+
+⚠️ **The last three rows are things the exporter *supplies*, not channels it drops**, and they are
+the reason `withoutGpxLossyChannels` and `withoutTcxLossyChannels` apply those derivations rather
+than only stripping channels. A normaliser that described a tidier export than the encoder performs
+would turn every round-trip test into a test of the fixture — which is what happened while
+`sampleActivity()` set every start time to exactly the value the derivation produces, and while the
+TCX normaliser mapped an absent sport to absent and the encoder beside it wrote `Sport="Other"`.
+
+### Timestamps
+
+Both formats carry absolute instants and nothing else, so `TrackPoint.timestamp` is a `UnixSeconds`
+rather than the FIT decoder's `{ instant } | { systemTime }` union — XML has no way to write "seconds
+since the device powered on" and no file does.
+
+ISO 8601 is parsed and written by hand rather than through `new Date(text)`, because ECMAScript
+leaves parsing outside its own Date Time String Format implementation-defined and these files arrive
+hand-edited. **A timestamp with no zone designator is refused, not assumed to be UTC and not read as
+local time** — the same file would otherwise import as a different ride depending on where the rider
+is sitting. Fractional seconds are truncated toward the past, never rounded; rounding moves a sample
+past the next one. Everything is written as `YYYY-MM-DDTHH:MM:SSZ`, always UTC: a local time with an
+offset would round-trip equally well and would put the rider's approximate longitude into a file they
+may have exported precisely to share without it.
+
+### XML is a security boundary, and the defence is the grammar
+
+`SECURITY.md` names **XXE in GPX and TCX specifically**. This package parses XML with its own reader
+([`src/xml/parse.ts`](src/xml/parse.ts)) rather than a dependency, for three reasons in this order:
+`src/` has no platform surface so `DOMParser` is a compile error; a parser dependency under
+`packages/` is a licence question before it is a technical one (CLAUDE.md §3, and MPL/EPL/BlueOak are
+unruled until #24); and the subset needed is small enough that the FIT decoder's precedent —
+depending on nothing — applies.
+
+The defence is **two independent layers**, because one control is a single edit away from being none:
+
+1. **A `<!DOCTYPE` is a fatal error before its contents are read.** A DTD is the only place an XML
+   document can declare an entity, so this closes external entity resolution *and* billion-laughs
+   entity expansion at the same point and by the same rule. It is a property of the grammar, not a
+   parser setting that can be re-enabled.
+2. **The only entity references resolved at all are the five XML predefines and numeric character
+   references.** `&xxe;` in a document with no DOCTYPE is `unknown-entity` — never a silent empty
+   string and never a passthrough.
+
+Plus a nesting depth limit of 256, against a document built out of ten megabytes of `<a>`.
+
+**A character XML 1.0 forbids is refused on the way in and dropped on the way out.** A `&#1;` is
+`bad-character-reference`, and `escapeXmlText` removes any C0 control other than tab, line feed and
+carriage return, along with unpaired surrogates and `U+FFFE`/`U+FFFF`. Both halves at once,
+deliberately: this package accepted `&#1;` on import and wrote the character back out raw, so a
+control character round-tripped through a codec that agreed with itself and produced a document expat
+rejects. **A leniency shared by both ends of a codec is invisible to a round-trip test**, which is
+why `write.test.ts` pins the writer's character class to the parser's `isXmlCharacter` rather than
+trusting the two to stay in step.
+
+Asserted against the **committed** hostile fixtures in
+[`tools/fixture-corpus/xml-corpus.test.ts`](tools/fixture-corpus/xml-corpus.test.ts):
+`xxe-external-entity.gpx`, `xxe-external-entity.tcx` and `billion-laughs.gpx`. Deleting either layer
+turns those tests red, which is what makes this paragraph a description of behaviour rather than a
+claim about intent.
+
+**Nothing under `src/xml` reads a file, opens a socket or resolves a URI.** It cannot: `src/`
+compiles with `lib: ["ES2024"]` and `types: []`.
+
+### Errors
+
+`ActivityXmlError` carries a `code` and a **character offset**, and splits the same way the FIT
+decoder's does. Structural problems — not well-formed, a DOCTYPE, a truncation, the wrong root
+element — are **thrown**, because there is no partial answer to give and offering one for a DOCTYPE
+is the vulnerability. A single unreadable value inside an otherwise readable document — a latitude
+that is not a number, a timestamp with no zone, a heart rate `@onyourleft/domain` rejects — is a
+**collected fault**, the point is dropped, and the rest of the ride survives.
+
+A message never carries the value that caused it (ADR 0004 decision D). That matters more here than
+in the FIT decoder: an XML parse error naturally wants to quote the offending text, and the offending
+text in a GPX file is very often a coordinate.

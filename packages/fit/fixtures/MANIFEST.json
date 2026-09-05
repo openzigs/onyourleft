@@ -1,8 +1,8 @@
 {
   "generatedBy": "pnpm --filter @onyourleft/fit run fixtures:generate",
   "budgetBytes": 262144,
-  "totalBytes": 75173,
-  "totalPositionCount": 620,
+  "totalBytes": 80024,
+  "totalPositionCount": 632,
   "fixtures": [
     {
       "name": "nominal-outdoor-ride.fit",
@@ -131,6 +131,22 @@
       "sha256": "13805ebfcfa89a547caf7ec86375a96576c31682bc18e9b69268d112b493757f",
       "positionCount": 10,
       "purpose": "A well-formed GPX whose DOCTYPE declares an external general entity pointing at file:///etc/passwd, referenced from the track name. SECURITY.md puts XXE in GPX and TCX specifically in scope; #32 must reject or refuse to expand it, and this is what that test asserts against."
+    },
+    {
+      "name": "billion-laughs.gpx",
+      "format": "gpx",
+      "bytes": 753,
+      "sha256": "7f20d0c70664d6d38b42a8cddccef29faa6732d77d80841513fd2c72917c7f99",
+      "positionCount": 0,
+      "purpose": "A well-formed GPX whose DOCTYPE declares six levels of nested entities, so its track name expands to a million copies of a three-character string — three megabytes out of a document under a kilobyte. The XXE fixtures cover entity *resolution*; this covers entity *expansion*, which is the same class and needs the same defence, and carrying both is what proves the defence was not written against one example."
+    },
+    {
+      "name": "truncated-mid-trackpoint.gpx",
+      "format": "gpx",
+      "bytes": 4098,
+      "sha256": "cf2b703e87e6b726f7b1723fb8b90282360f0eb2a1dc37f608e9415a4bcd85d3",
+      "positionCount": 12,
+      "purpose": "The nominal GPX cut off in the middle of its last track point’s time element: past that point’s coordinates, so every coordinate in the file still pairs, and with no closing tag for anything. The text counterpart of truncated-mid-record.fit — a partial silent success here is a ride that imports short and says nothing."
     },
     {
       "name": "nominal-ride.tcx",

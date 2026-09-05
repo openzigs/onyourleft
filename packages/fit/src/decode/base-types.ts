@@ -145,6 +145,26 @@ export function baseTypeElementSize(baseTypeByte: number): number | undefined {
   return BASE_TYPES.get(baseTypeNumberOf(baseTypeByte))?.size;
 }
 
+/**
+ * The bit pattern a base type reserves to mean "this field was not recorded",
+ * or `undefined` for a type whose invalid marker is not a single number.
+ *
+ * Exported for the encoder (#31), which has to write the marker the decoder
+ * reads. This is the one table the two halves of the codec **must** share: an
+ * encoder with its own copy of the invalid markers can drift from the decoder
+ * silently, and the symptom is a gap that comes back as data. Contrast
+ * `tools/fixture-corpus/fit-profile.ts`, which duplicates the markers on
+ * purpose so the corpus can disagree with `src/`.
+ */
+export function baseTypeInvalidValue(baseTypeByte: number): number | undefined {
+  return BASE_TYPES.get(baseTypeNumberOf(baseTypeByte))?.invalid;
+}
+
+/** Whether a base type's numeric values are two's-complement signed. */
+export function baseTypeIsSigned(baseTypeByte: number): boolean {
+  return BASE_TYPES.get(baseTypeNumberOf(baseTypeByte))?.signed ?? false;
+}
+
 /** One field of a data message, decoded as far as its base type allows. */
 export interface FitFieldValue {
   /** The field definition number, from the definition message. */

@@ -33,7 +33,14 @@ import {
   truncatedMidRecordRide,
   zeroLengthFile,
 } from './fit-fixtures';
-import { nominalGpx, nominalTcx, xxeGpx, xxeTcx } from './xml-fixtures';
+import {
+  billionLaughsGpx,
+  nominalGpx,
+  nominalTcx,
+  truncatedGpx,
+  xxeGpx,
+  xxeTcx,
+} from './xml-fixtures';
 
 /**
  * The size the whole corpus must stay under: 256 KiB.
@@ -226,6 +233,25 @@ export function buildCorpus(): readonly CorpusEntry[] {
         'specifically in scope; #32 must reject or refuse to expand it, and this is what that ' +
         'test asserts against.',
       xxeGpx(NULL_ISLAND_TRACK, 10),
+    ),
+    xml(
+      'billion-laughs.gpx',
+      'gpx',
+      'A well-formed GPX whose DOCTYPE declares six levels of nested entities, so its track name ' +
+        'expands to a million copies of a three-character string — three megabytes out of a ' +
+        'document under a kilobyte. The XXE fixtures cover entity *resolution*; this covers ' +
+        'entity *expansion*, which is the same class and needs the same defence, and carrying ' +
+        'both is what proves the defence was not written against one example.',
+      billionLaughsGpx(),
+    ),
+    xml(
+      'truncated-mid-trackpoint.gpx',
+      'gpx',
+      'The nominal GPX cut off in the middle of its last track point’s time element: past that ' +
+        'point’s coordinates, so every coordinate in the file still pairs, and with no closing ' +
+        'tag for anything. The text counterpart of truncated-mid-record.fit — a partial silent ' +
+        'success here is a ride that imports short and says nothing.',
+      truncatedGpx(NULL_ISLAND_TRACK, 12),
     ),
     xml(
       'nominal-ride.tcx',
