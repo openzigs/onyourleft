@@ -232,7 +232,33 @@ describe('the FIT decoder survives a seeded corpus fuzz', () => {
 
   it(
     'produces a decode or a FitDecodeError for every case, and nothing else',
-    { timeout: 60_000 },
+    // 180 s, and the number is measured rather than chosen.
+    //
+    // This is a HANG GUARD, not a performance budget: a wedged record loop never
+    // terminates, so any finite ceiling catches it and the only question is how
+    // much honest work fits underneath. 60 s did not, and it failed on `main`
+    // rather than on the pull request that broke it.
+    //
+    // What the original 60 s missed is that CI runs `test:coverage`, not `test`.
+    // Measured on one machine, same commit, same seed:
+    //
+    //     this file, `pnpm run test`           6.8 s
+    //     this file, `pnpm run test:coverage` 22.7 s   <- 3.3x, v8 instrumenting
+    //                                                    a hot decode loop
+    //
+    // A GitHub runner is roughly 2-3x slower again, which puts the real cost at
+    // 45-70 s -- straddling the old ceiling. #146 then changed `| 0x80` to
+    // `^ 0x80` in `cases.ts`, which was correct (the old form was a no-op on the
+    // 30.3% of corpus bytes already carrying the high bit) and which turned 15.1%
+    // of sweep cases from a pristine re-decode into real work. That is what
+    // pushed a marginal case over.
+    //
+    // Do not "fix" a future timeout here by trimming the sweep. `byteSweep`
+    // guarantees EVERY offset is enlarged, which is what makes the M16 mutation
+    // reproducible; a stride would keep the runtime and lose the property. The
+    // sweep is ~75% of this file's cost (6.4 s of 8.1 s uninstrumented, measured
+    // by zeroing the other knobs) and it is the part worth paying for.
+    { timeout: 180_000 },
     () => {
       // The timeout is the hang guard: a wedged record loop never reaches an
       // assertion, so the only thing that can catch it is the runner.
@@ -256,7 +282,13 @@ describe('the GPX and TCX readers survive the same fuzz', () => {
 
     it(
       `produces a decode or an ActivityXmlError for every mutated ${extension} case`,
-      { timeout: 60_000 },
+      // Same ceiling as the FIT arm above, for the same reason. This arm has no
+      // byte sweep and costs a fraction of it, so 60 s was not close to failing
+      // here -- but it was calibrated against `pnpm run test` exactly as the
+      // other one was, and the 3.3x coverage multiplier applies to both. Leaving
+      // a second number to be discovered the same way, on `main`, is the bug
+      // rather than a saving.
+      { timeout: 180_000 },
       () => {
         for (const fuzzCase of cases) runXmlCase(fuzzCase, FUZZ_SEED, decode);
       },
