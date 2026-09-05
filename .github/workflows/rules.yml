@@ -164,6 +164,24 @@ jobs:
       - name: Tests and coverage report
         run: pnpm run test:coverage
 
+      # #48's fourth acceptance criterion: automated accessibility checks run on
+      # every route and fail the build on a violation. The checks are Vitest
+      # tests, so the step above already ran them and this one runs them again
+      # -- deliberately. A failure buried among two hundred other cases is a
+      # failure somebody scrolls past; under a step called "Accessibility" it is
+      # not. The whole set takes under a second.
+      #
+      # In this job rather than a job of its own: `main` requires a status check
+      # whose context is exactly "Repository rules", and a second job would
+      # report under a different one and could not block a merge (CLAUDE.md
+      # section 4c).
+      #
+      # The filter is a path match, and Vitest exits non-zero when a filter
+      # selects no files -- so deleting or renaming apps/web/src/a11y/ fails
+      # this step rather than passing it vacuously.
+      - name: Accessibility
+        run: pnpm run test:a11y
+
       # The renderer has logic of its own -- it decides which package a covered
       # file belongs to, from absolute paths that differ between a checkout, a
       # runner and a worktree -- so it has a suite, and the suite runs here. Its

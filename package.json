@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit --project tsconfig.json && pnpm --recursive run typecheck",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:a11y": "vitest run --project web a11y",
     "build": "pnpm --recursive run build",
     "check:repo": "bash scripts/check-repo-rules.sh && bash scripts/check-repo-rules.test.sh && bash scripts/check-licence-hashes.sh && bash scripts/check-licence-hashes.test.sh && bash scripts/check-env-example.sh && bash scripts/check-env-example.test.sh"
   },

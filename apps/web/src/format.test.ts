@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { metresPerSecond, UnitError } from '@onyourleft/domain';
-import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
-import { App } from './App';
 import { formatSpeed } from './format';
 
+// These three cases arrived with the workspace scaffold in #23 and lived in
+// `App.test.tsx`, which #48 replaced with the real shell. They are moved here
+// unchanged rather than dropped: the second is a compile-time guarantee, and
+// CLAUDE.md §5 is explicit that such a guarantee only holds while its absence
+// breaks the build.
 describe('formatSpeed', () => {
   it('renders one decimal place and the unit', () => {
     expect(formatSpeed(metresPerSecond(10))).toBe('36.0 km/h');
@@ -37,18 +40,5 @@ describe('formatSpeed', () => {
     // while evaluating the argument, so formatSpeed is never entered. Mutating
     // formatSpeed to return a constant left that test green.
     expect(() => metresPerSecond(Number.NaN)).toThrow(/finite/);
-  });
-});
-
-describe('App', () => {
-  it('renders the speed produced by the shared domain package', () => {
-    // Rendered rather than inspected: this is the workspace's first consumer of
-    // @onyourleft/domain, and reading the value back out of the markup is the
-    // only assertion that proves the whole path resolves — workspace link, TS
-    // config and JSX transform included.
-    const markup = renderToStaticMarkup(<App />);
-
-    expect(markup).toContain('36.0 km/h');
-    expect(markup).toContain('On Your Left');
   });
 });
