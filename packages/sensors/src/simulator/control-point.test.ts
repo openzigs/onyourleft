@@ -15,7 +15,7 @@
  * worked around by widening the interface here.
  */
 
-import { seconds, watts } from '@onyourleft/domain';
+import { gradePercent, metresPerSecond, resistanceLevel, seconds, watts } from '@onyourleft/domain';
 import { describe, expect, it } from 'vitest';
 
 import { deviceId, isSensorError, type MeasurementFor } from '../index';
@@ -29,19 +29,23 @@ import {
   hrsStrap,
   type FitnessMachineStatus,
   type FtmsControlResponse,
+  type FtmsOptions,
+  type FtmsSimulationParameters,
 } from './index';
 
 const TRAINER = deviceId('trainer');
 
-async function connectedTrainer(options: { maxTargetPower?: number } = {}) {
+/** A descent, with the road-bike coefficients #43's client defaults to. */
+const SIMULATION: FtmsSimulationParameters = {
+  grade: gradePercent(-6.2),
+  windSpeed: metresPerSecond(0),
+  rollingResistanceCoefficient: 0.004,
+  windResistanceCoefficient: 0.51,
+};
+
+async function connectedTrainer(options: FtmsOptions = {}) {
   const { transport, bench } = createSimulator({
-    devices: [
-      ftmsTrainer({
-        id: 'trainer',
-        maxTargetPower:
-          options.maxTargetPower === undefined ? undefined : watts(options.maxTargetPower),
-      }),
-    ],
+    devices: [ftmsTrainer({ id: 'trainer', ...options })],
   });
   await transport.connect(TRAINER);
   const handle = bench.device(TRAINER);
@@ -70,21 +74,195 @@ describe('the spec constants a client will switch on', () => {
     expect(FTMS_CONTROL_OP_CODE).toEqual({
       'request-control': 0x00,
       reset: 0x01,
+      'set-target-resistance': 0x04,
       'set-target-power': 0x05,
+      'stop-or-pause': 0x08,
+      'set-simulation-parameters': 0x11,
     });
     expect(FTMS_RESULT_CODE).toEqual({
       success: 0x01,
+      'op-code-not-supported': 0x02,
       'invalid-parameter': 0x03,
       'control-not-permitted': 0x05,
     });
     expect(FITNESS_MACHINE_STATUS_OP_CODE).toEqual({
       reset: 0x01,
+      'stopped-or-paused': 0x02,
+      'target-resistance-changed': 0x07,
       'target-power-changed': 0x08,
+      'simulation-parameters-changed': 0x12,
       'control-permission-lost': 0xff,
     });
     expect(ATT_ERROR_CODE).toEqual({
       'cccd-improperly-configured': 0xfd,
       'procedure-already-in-progress': 0xfe,
+    });
+  });
+});
+
+describe('the op codes #43 added to this machine', () => {
+  it('answers 0x05 for a resistance level, a simulation or a stop before Request Control', async () => {
+    const { bench, controlPoint, responses } = await connectedTrainer();
+    controlPoint.enableIndications();
+
+    for (const request of [
+      { opCode: 'set-target-resistance', level: resistanceLevel(5) },
+      { opCode: 'set-simulation-parameters', parameters: SIMULATION },
+      { opCode: 'stop-or-pause', stop: true },
+    ] as const) {
+      controlPoint.write(request);
+      bench.advance(seconds(1));
+    }
+
+    expect(responses.map((response) => response.result)).toEqual([
+      'control-not-permitted',
+      'control-not-permitted',
+      'control-not-permitted',
+    ]);
+    expect(bench.device(TRAINER).inspect().ftms).toMatchObject({
+      targetResistance: undefined,
+      simulation: undefined,
+      stopped: false,
+    });
+  });
+
+  it('rejects a resistance level outside its own supported range as 0x03', async () => {
+    const { bench, controlPoint, responses } = await connectedTrainer({
+      maxResistanceLevel: resistanceLevel(10),
+    });
+    controlPoint.enableIndications();
+    controlPoint.write({ opCode: 'request-control' });
+    bench.advance(seconds(1));
+
+    controlPoint.write({ opCode: 'set-target-resistance', level: resistanceLevel(15) });
+    bench.advance(seconds(1));
+
+    expect(responses.at(-1)).toEqual({
+      requestOpCode: 'set-target-resistance',
+      result: 'invalid-parameter',
+    });
+    expect(bench.device(TRAINER).inspect().ftms?.targetResistance).toBeUndefined();
+  });
+
+  it('rejects a target power BELOW its own supported range as 0x03', async () => {
+    const { bench, controlPoint, responses } = await connectedTrainer({
+      minTargetPower: watts(50),
+    });
+    controlPoint.enableIndications();
+    controlPoint.write({ opCode: 'request-control' });
+    bench.advance(seconds(1));
+
+    controlPoint.write({ opCode: 'set-target-power', target: watts(20) });
+    bench.advance(seconds(1));
+
+    expect(responses.at(-1)?.result).toBe('invalid-parameter');
+  });
+
+  it('answers 0x02 Op Code Not Supported on a machine that cannot simulate', async () => {
+    const { bench, controlPoint, responses } = await connectedTrainer({
+      supportsSimulation: false,
+    });
+    controlPoint.enableIndications();
+    controlPoint.write({ opCode: 'request-control' });
+    bench.advance(seconds(1));
+
+    controlPoint.write({ opCode: 'set-simulation-parameters', parameters: SIMULATION });
+    bench.advance(seconds(1));
+
+    expect(responses.at(-1)).toEqual({
+      requestOpCode: 'set-simulation-parameters',
+      result: 'op-code-not-supported',
+    });
+    expect(bench.device(TRAINER).inspect().ftms?.simulation).toBeUndefined();
+  });
+
+  it('lets each mode displace the others, because no machine holds two at once', async () => {
+    const { bench, controlPoint, statuses } = await connectedTrainer();
+    controlPoint.enableIndications();
+    controlPoint.write({ opCode: 'request-control' });
+    bench.advance(seconds(1));
+
+    controlPoint.write({ opCode: 'set-target-power', target: watts(250) });
+    bench.advance(seconds(1));
+    expect(bench.device(TRAINER).inspect().ftms?.targetPower).toBe(250);
+
+    controlPoint.write({ opCode: 'set-target-resistance', level: resistanceLevel(5) });
+    bench.advance(seconds(1));
+    expect(bench.device(TRAINER).inspect().ftms).toMatchObject({
+      targetPower: undefined,
+      targetResistance: 5,
+    });
+
+    controlPoint.write({ opCode: 'set-simulation-parameters', parameters: SIMULATION });
+    bench.advance(seconds(1));
+    expect(bench.device(TRAINER).inspect().ftms).toMatchObject({
+      targetPower: undefined,
+      targetResistance: undefined,
+    });
+    expect(bench.device(TRAINER).inspect().ftms?.simulation?.grade).toBeCloseTo(-6.2, 10);
+
+    expect(statuses.map((status) => status.kind)).toEqual([
+      'target-power-changed',
+      'target-resistance-changed',
+      'simulation-parameters-changed',
+    ]);
+  });
+
+  it('keeps the setpoints on a PAUSE and drops them on a STOP', async () => {
+    const { bench, controlPoint } = await connectedTrainer();
+    controlPoint.enableIndications();
+    controlPoint.write({ opCode: 'request-control' });
+    bench.advance(seconds(1));
+    controlPoint.write({ opCode: 'set-target-power', target: watts(250) });
+    bench.advance(seconds(1));
+
+    controlPoint.write({ opCode: 'stop-or-pause', stop: false });
+    bench.advance(seconds(1));
+    expect(bench.device(TRAINER).inspect().ftms).toMatchObject({
+      stopped: true,
+      targetPower: 250,
+    });
+
+    controlPoint.write({ opCode: 'stop-or-pause', stop: true });
+    bench.advance(seconds(1));
+    expect(bench.device(TRAINER).inspect().ftms).toMatchObject({
+      stopped: true,
+      targetPower: undefined,
+    });
+  });
+
+  it('reports the ranges its two supported-range characteristics would carry', async () => {
+    const { bench } = await connectedTrainer({
+      minTargetPower: watts(10),
+      maxTargetPower: watts(1200),
+      powerIncrement: watts(5),
+    });
+
+    expect(bench.device(TRAINER).supportedRanges).toMatchObject({
+      minTargetPower: 10,
+      maxTargetPower: watts(1200),
+      powerIncrement: 5,
+    });
+  });
+
+  it('clears every setpoint on a Reset, not only the ERG target', async () => {
+    const { bench, controlPoint } = await connectedTrainer();
+    controlPoint.enableIndications();
+    controlPoint.write({ opCode: 'request-control' });
+    bench.advance(seconds(1));
+    controlPoint.write({ opCode: 'set-simulation-parameters', parameters: SIMULATION });
+    bench.advance(seconds(1));
+
+    controlPoint.write({ opCode: 'request-control' });
+    bench.advance(seconds(1));
+    controlPoint.write({ opCode: 'reset' });
+    bench.advance(seconds(1));
+
+    expect(bench.device(TRAINER).inspect().ftms).toMatchObject({
+      controlHeld: false,
+      targetPower: undefined,
+      targetResistance: undefined,
+      simulation: undefined,
     });
   });
 });
@@ -127,12 +305,15 @@ describe('the happy path: Request Control, then Set Target Power', () => {
       controlHeld: true,
       indicationsEnabled: true,
       targetPower: 250,
+      targetResistance: undefined,
+      simulation: undefined,
+      stopped: false,
     });
   });
 
   it('rejects a target above the supported power range as 0x03 Invalid Parameter', async () => {
     const { bench, controlPoint, responses, powers } = await connectedTrainer({
-      maxTargetPower: 1000,
+      maxTargetPower: watts(1000),
     });
     controlPoint.enableIndications();
     controlPoint.write({ opCode: 'request-control' });

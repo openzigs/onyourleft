@@ -23,6 +23,8 @@
  * | position | decimal degree, WGS 84 | `GeographicPosition` | signed |
  * | duration | second | `Seconds` | non-negative |
  * | instant | second since the Unix epoch | `UnixSeconds` | signed |
+ * | gradient | percent | `GradePercent` | **signed** |
+ * | resistance | unitless level | `ResistanceLevel` | non-negative |
  *
  * **Validation is definitional only.** A guard here rejects values that are not
  * the quantity at all — `NaN`, a negative distance, a temperature below
@@ -195,6 +197,62 @@ export function kilograms(value: number): Kilograms {
     throw new UnitError('mass in kilograms must be greater than zero, received 0');
   }
   return value as Kilograms;
+}
+
+// --- Gradient ---------------------------------------------------------------
+
+/**
+ * A road gradient, as a percentage of rise over run. **Signed.**
+ *
+ * A descent is a negative grade, and that is the whole reason this is not
+ * `Metres`-style non-negative and not a bare `number`. FTMS transmits the grade
+ * of a simulated course as a `sint16`, and a client that drops the sign turns
+ * every descent into a climb — a fault the rider feels in their legs rather
+ * than reads in a log. `packages/sensors` names the trap explicitly and #43's
+ * acceptance criteria require the sign to be asserted in both directions.
+ *
+ * Percent rather than a dimensionless ratio, because percent is what the wire
+ * format, the course file and the rider all use: a 7 % climb is 7 here, not
+ * 0.07. Naming the unit in the brand is what stops the two being interchanged.
+ *
+ * **Validation is definitional only**, as everywhere else in this file: any
+ * finite number is a gradient. A vertical wall is 100 % and an overhang is more
+ * than that, so there is no non-arbitrary bound to impose — and a bound here
+ * would silently truncate a course rather than report it. The *plausibility*
+ * ceiling that protects a rider from a hostile trainer belongs beside the
+ * device, in `packages/sensors`, where it can be stated as a decode fault.
+ */
+export type GradePercent = Quantity<'percent of grade'>;
+
+/** @throws {UnitError} if not a finite number. Negative grades are valid. */
+export function gradePercent(value: number): GradePercent {
+  assertFinite(value, 'gradient in percent');
+  return value as GradePercent;
+}
+
+// --- Resistance -------------------------------------------------------------
+
+/**
+ * A trainer's brake resistance level. **Unitless**, and non-negative.
+ *
+ * Not a percentage and not a power: FTMS calls it "unitless", every trainer
+ * scales it differently, and the only meaning it has is relative to the range
+ * that same trainer reports in its Supported Resistance Level Range
+ * characteristic. That is exactly why it needs a brand — an unlabelled number
+ * here is one that can be written to a device that interprets it on a different
+ * scale, and the consequence is physical.
+ *
+ * A separate type from {@link Watts} deliberately, because the two are the
+ * arguments of two different control procedures with the same shape: an ERG
+ * target of 250 and a resistance level of 250 are both `number`, and only one
+ * of them is a setpoint any trainer should accept.
+ */
+export type ResistanceLevel = Quantity<'resistance level'>;
+
+/** @throws {UnitError} if not a finite, non-negative number. */
+export function resistanceLevel(value: number): ResistanceLevel {
+  assertNotNegative(value, 'resistance level');
+  return value as ResistanceLevel;
 }
 
 // --- Geographic position ----------------------------------------------------

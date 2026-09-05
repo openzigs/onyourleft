@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The protocol clients (#41, #42) driven through the real adapter (#40).
+ * The protocol clients (#41, #42, #43) driven through the real adapter (#40).
  *
  * **This is the first consumer the profile seam has ever had**, and building it
  * is what surfaces the seam's defects rather than the decoders'. Three things
@@ -31,15 +31,23 @@ import {
   BODY_SENSOR_LOCATION,
   createCyclingPowerProfile,
   createCyclingSpeedCadenceProfile,
+  createIndoorBikeDataProfile,
   CSC_FEATURE,
   CSC_MEASUREMENT,
   CYCLING_POWER_FEATURE,
   CYCLING_POWER_MEASUREMENT,
   CYCLING_POWER_SENSOR_LOCATION,
   CYCLING_SPEED_CADENCE_SERVICE,
+  FITNESS_MACHINE_CONTROL_POINT,
+  FITNESS_MACHINE_FEATURE,
+  FITNESS_MACHINE_SERVICE,
+  FITNESS_MACHINE_STATUS,
   HEART_RATE_MEASUREMENT,
   HEART_RATE_SERVICE,
   heartRateProfile,
+  INDOOR_BIKE_DATA,
+  SUPPORTED_POWER_RANGE,
+  SUPPORTED_RESISTANCE_LEVEL_RANGE,
   CYCLING_POWER_SERVICE,
 } from '../../protocol/src/index';
 
@@ -58,6 +66,14 @@ describe('the assigned numbers this program hard-codes', () => {
    * `characteristic_uuids.yaml`. #41 requires the re-verification because both
    * issue bodies carried values corroborated from secondary sources during
    * planning. All ten matched.
+   *
+   * The seven FTMS entries were added by #43 and checked on **2026-09-04**
+   * against the same assigned characteristic numbers. ⚠️ **#43's issue body
+   * names `0x2AD3` for Indoor Bike Data and is wrong** — `0x2AD3` is Training
+   * Status. Its own revision block corrects it to `0x2AD2`, and this table is
+   * where that correction is enforced rather than merely written down: a client
+   * subscribed to Training Status pairs, reports connected, and delivers
+   * nothing.
    */
   const assigned: readonly (readonly [string, number, string])[] = [
     ['Heart Rate', 0x180d, HEART_RATE_SERVICE],
@@ -70,6 +86,13 @@ describe('the assigned numbers this program hard-codes', () => {
     ['Cycling Power Measurement', 0x2a63, CYCLING_POWER_MEASUREMENT],
     ['Cycling Power Feature', 0x2a65, CYCLING_POWER_FEATURE],
     ['Sensor Location', 0x2a5d, CYCLING_POWER_SENSOR_LOCATION],
+    ['Fitness Machine', 0x1826, FITNESS_MACHINE_SERVICE],
+    ['Fitness Machine Feature', 0x2acc, FITNESS_MACHINE_FEATURE],
+    ['Indoor Bike Data', 0x2ad2, INDOOR_BIKE_DATA],
+    ['Supported Resistance Level Range', 0x2ad6, SUPPORTED_RESISTANCE_LEVEL_RANGE],
+    ['Supported Power Range', 0x2ad8, SUPPORTED_POWER_RANGE],
+    ['Fitness Machine Control Point', 0x2ad9, FITNESS_MACHINE_CONTROL_POINT],
+    ['Fitness Machine Status', 0x2ada, FITNESS_MACHINE_STATUS],
   ];
 
   for (const [name, number, literal] of assigned) {
@@ -81,10 +104,16 @@ describe('the assigned numbers this program hard-codes', () => {
     });
   }
 
-  it('uses ten distinct UUIDs', () => {
+  it('uses a distinct UUID for every entry', () => {
     // A copy-paste that left two constants equal would otherwise pass every
     // assertion above except its own.
     expect(new Set(assigned.map(([, , literal]) => literal)).size).toBe(assigned.length);
+  });
+
+  it('does not name Training Status, which is the UUID #43 s body got wrong', () => {
+    // The specific transposition, pinned. 0x2AD3 is Training Status and a
+    // client that subscribed to it would deliver nothing at all.
+    expect(INDOOR_BIKE_DATA).not.toBe(canonicalUuid(0x2ad3));
   });
 });
 
@@ -111,6 +140,44 @@ function powerMeter(): FakeDeviceSpec {
       },
     ],
   };
+}
+
+/** A smart trainer, serving the real Fitness Machine service. */
+function ftmsTrainerDevice(): FakeDeviceSpec {
+  return {
+    id: 'ftms-trainer',
+    name: 'KICKR 1F2A',
+    services: [
+      {
+        uuid: FITNESS_MACHINE_SERVICE,
+        characteristics: [
+          INDOOR_BIKE_DATA,
+          FITNESS_MACHINE_FEATURE,
+          FITNESS_MACHINE_CONTROL_POINT,
+          FITNESS_MACHINE_STATUS,
+          SUPPORTED_POWER_RANGE,
+        ],
+      },
+    ],
+  };
+}
+
+/**
+ * One Indoor Bike Data notification carrying speed, cadence and power.
+ *
+ * ⚠️ Flag bit 0 is More Data and is **clear** here, which is what makes the
+ * speed present. Written with literal offsets rather than through
+ * `protocol/src/testing.ts`, so this fixture and the decoder do not share an
+ * arithmetic mistake.
+ */
+function indoorBikeDataFrame(hundredthsKph: number, halfRpm: number, watts: number): Uint8Array {
+  const bytes = new Uint8Array(8);
+  const view = new DataView(bytes.buffer);
+  view.setUint16(0, (1 << 2) | (1 << 6), true);
+  view.setUint16(2, hundredthsKph, true);
+  view.setUint16(4, halfRpm, true);
+  view.setInt16(6, watts, true);
+  return bytes;
 }
 
 /** A heart rate strap. */
@@ -403,6 +470,97 @@ describe('one profile object, two sensors', () => {
     // Each sensor's first frame is its own first: nothing to difference.
     expect(fromSecond).toEqual([]);
     expect(fromFirst).toEqual([]);
+  });
+});
+
+describe('a smart trainer over FTMS, end to end', () => {
+  it('fans one Indoor Bike Data notification out into power, cadence and speed', async () => {
+    // The arrangement `capability.ts` describes and `planCapabilitySources`
+    // depends on: one connection covering three capabilities. Asserted here
+    // through the real adapter rather than about the decoder, because it is the
+    // adapter that resolves the characteristic and splits the frame.
+    const clock = scriptedClock();
+    const fake = createFakeBluetooth({ devices: [ftmsTrainerDevice()] });
+    const transport = createWebBluetoothTransport({
+      profiles: [createIndoorBikeDataProfile()],
+      bluetooth: fake.bluetooth,
+      hasUserActivation: () => true,
+      now: clock.now,
+    });
+
+    const device = await transport.discover({ capabilities: ['power', 'cadence', 'speed'] });
+    await transport.connect(device.identity.id);
+    const received: SensorMeasurement[] = [];
+    for (const capability of ['power', 'cadence', 'speed'] as const) {
+      await transport.subscribe(device.identity.id, capability, (m) => received.push(m));
+    }
+
+    fake.bench
+      .device('ftms-trainer')
+      .notify(FITNESS_MACHINE_SERVICE, INDOOR_BIKE_DATA, indoorBikeDataFrame(2543, 180, 214));
+
+    expect(received.map((m) => m.capability)).toEqual(['power', 'cadence', 'speed']);
+    // One notification, one instant: a consumer can correlate the three.
+    expect(new Set(received.map((m) => m.at))).toStrictEqual(new Set([START]));
+    expect(received[0]).toMatchObject({ power: 214 });
+    expect(received[1]).toMatchObject({ cadence: 90 });
+    expect(received[2]).toMatchObject({ capability: 'speed' });
+  });
+
+  it('resolves the real Indoor Bike Data characteristic and not Training Status', async () => {
+    // A trainer that serves ONLY 0x2AD2 — as every real one does. If the
+    // profile named 0x2AD3 the characteristic would not resolve, the connect
+    // would fail, and no unit test in `protocol/` would notice.
+    const fake = createFakeBluetooth({
+      devices: [
+        {
+          id: 'ftms-trainer',
+          name: 'KICKR 1F2A',
+          services: [{ uuid: FITNESS_MACHINE_SERVICE, characteristics: [INDOOR_BIKE_DATA] }],
+        },
+      ],
+    });
+    const transport = createWebBluetoothTransport({
+      profiles: [createIndoorBikeDataProfile()],
+      bluetooth: fake.bluetooth,
+      hasUserActivation: () => true,
+    });
+
+    const device = await transport.discover({ capabilities: ['power'] });
+    await transport.connect(device.identity.id);
+    const powers: SensorMeasurement[] = [];
+    await transport.subscribe(device.identity.id, 'power', (m) => powers.push(m));
+
+    fake.bench
+      .device('ftms-trainer')
+      .notify(FITNESS_MACHINE_SERVICE, INDOOR_BIKE_DATA, indoorBikeDataFrame(2543, 180, 214));
+
+    expect(powers).toHaveLength(1);
+  });
+
+  it('drops an Indoor Bike Data frame whose flags claim a field it does not carry', async () => {
+    const fake = createFakeBluetooth({ devices: [ftmsTrainerDevice()] });
+    const errors: unknown[] = [];
+    const transport = createWebBluetoothTransport({
+      profiles: [createIndoorBikeDataProfile()],
+      bluetooth: fake.bluetooth,
+      hasUserActivation: () => true,
+      onProtocolError: (error) => errors.push(error),
+    });
+
+    const device = await transport.discover({ capabilities: ['power'] });
+    await transport.connect(device.identity.id);
+    const powers: SensorMeasurement[] = [];
+    await transport.subscribe(device.identity.id, 'power', (m) => powers.push(m));
+
+    // Flags claim cadence and power; the payload stops after the speed.
+    const truncated = new Uint8Array(4);
+    new DataView(truncated.buffer).setUint16(0, (1 << 2) | (1 << 6), true);
+    fake.bench.device('ftms-trainer').notify(FITNESS_MACHINE_SERVICE, INDOOR_BIKE_DATA, truncated);
+
+    expect(powers).toStrictEqual([]);
+    expect(errors).toHaveLength(1);
+    expect(transport.connectionState(device.identity.id)).toBe('connected');
   });
 });
 

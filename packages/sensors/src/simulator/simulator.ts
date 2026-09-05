@@ -78,6 +78,7 @@ import {
   type FtmsControlPoint,
   type FtmsInspection,
   type FtmsMachine,
+  type FtmsSupportedRanges,
   type IndoorBikeDataFrame,
 } from './ftms';
 import {
@@ -147,6 +148,16 @@ export interface SimulatedDevice {
   readonly device: SensorDevice;
   /** Present when the device serves FTMS. */
   readonly controlPoint: FtmsControlPoint | undefined;
+  /**
+   * What this machine's two supported-range characteristics would report.
+   * Present when the device serves FTMS.
+   *
+   * On the bench rather than in the frames, because a range is read once on
+   * connect rather than notified — and because #43's client must bound an ERG
+   * setpoint by the range **the device reported**, so a test of that has to be
+   * able to ask the device what it would report.
+   */
+  readonly supportedRanges: FtmsSupportedRanges | undefined;
   /**
    * @throws {SensorError} `capability-unsupported` when the scenario needs a
    * service this device does not serve; `not-connected` for a link scenario on
@@ -490,6 +501,7 @@ export function createSimulator(options: SimulatorOptions): Simulator {
     record.handle ??= {
       device: record.device,
       controlPoint: record.ftms?.controlPoint,
+      supportedRanges: record.ftms?.supportedRanges(),
 
       script(scenario) {
         switch (scenario.kind) {

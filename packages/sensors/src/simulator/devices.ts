@@ -108,8 +108,24 @@ export function modernTrainer(options: DeviceOptions & FtmsOptions = {}): Simula
 }
 
 function ftmsOptionsOf(options: FtmsOptions): FtmsOptions {
+  // Copied key by key rather than spread wholesale, so a `DeviceOptions` field
+  // — `id`, `name` — cannot leak into the machine's own options.
   return {
+    ...(options.minTargetPower === undefined ? {} : { minTargetPower: options.minTargetPower }),
     ...(options.maxTargetPower === undefined ? {} : { maxTargetPower: options.maxTargetPower }),
+    ...(options.powerIncrement === undefined ? {} : { powerIncrement: options.powerIncrement }),
+    ...(options.minResistanceLevel === undefined
+      ? {}
+      : { minResistanceLevel: options.minResistanceLevel }),
+    ...(options.maxResistanceLevel === undefined
+      ? {}
+      : { maxResistanceLevel: options.maxResistanceLevel }),
+    ...(options.resistanceIncrement === undefined
+      ? {}
+      : { resistanceIncrement: options.resistanceIncrement }),
+    ...(options.supportsSimulation === undefined
+      ? {}
+      : { supportsSimulation: options.supportsSimulation }),
     ...(options.fields === undefined ? {} : { fields: options.fields }),
   };
 }

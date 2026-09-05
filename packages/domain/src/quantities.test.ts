@@ -18,9 +18,11 @@ import {
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
+  gradePercent,
   kilograms,
   metres,
   metresPerSecond,
+  resistanceLevel,
   revolutionsPerMinute,
   seconds,
   UnitError,
@@ -77,6 +79,44 @@ describe('altitude, which is signed', () => {
 
   it('still rejects NaN', () => {
     expect(() => altitudeMetres(Number.NaN)).toThrow(UnitError);
+  });
+});
+
+describe('gradient, which is signed', () => {
+  it('accepts a descent — the sign is the point, and dropping it makes a descent a climb', () => {
+    expect(gradePercent(-8.5)).toBe(-8.5);
+  });
+
+  it('accepts flat and a climb', () => {
+    expect(gradePercent(0)).toBe(0);
+    expect(gradePercent(12.5)).toBe(12.5);
+  });
+
+  it('accepts a gradient above 100 %, because a wall is 100 % and an overhang is more', () => {
+    expect(gradePercent(140)).toBe(140);
+  });
+
+  it('rejects NaN, which is what a truncated simulation parameter array decodes to', () => {
+    expect(() => gradePercent(Number.NaN)).toThrow(UnitError);
+  });
+
+  it('names the quantity in the message', () => {
+    expect(() => gradePercent(Number.NaN)).toThrow(/gradient in percent/);
+  });
+});
+
+describe('resistance level, which is unitless and non-negative', () => {
+  it('accepts a level and zero', () => {
+    expect(resistanceLevel(0)).toBe(0);
+    expect(resistanceLevel(7.5)).toBe(7.5);
+  });
+
+  it('rejects a negative level', () => {
+    expect(() => resistanceLevel(-1)).toThrow(/resistance level/);
+  });
+
+  it('rejects NaN', () => {
+    expect(() => resistanceLevel(Number.NaN)).toThrow(UnitError);
   });
 });
 

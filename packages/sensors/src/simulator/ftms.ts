@@ -22,14 +22,22 @@
  *
  * ## What is modelled, and what is not
  *
- * Three op codes: Request Control, Reset and Set Target Power — the ones an ERG
- * workout needs and the ones the grounded misbehaviours involve. Set Indoor
- * Bike Simulation Parameters (`0x11`) needs a grade type `@onyourleft/domain`
- * does not have yet and is left out rather than typed as a bare number. Result
- * codes are the three this machine can actually produce; a code no scenario
- * reaches is a branch no test can cover (`../errors.ts` makes the same
- * argument). The expended-energy and heart-rate fields of Indoor Bike Data are
- * omitted for the same unit reason `../measurement.ts` records.
+ * Six op codes: Request Control, Reset, Set Target Power, **Set Target
+ * Resistance Level, Set Indoor Bike Simulation Parameters and Stop or Pause**.
+ * The last three arrived with #43, which needed a device answering the whole
+ * control surface its client writes. #44 shipped the first three because those
+ * are the ones the grounded misbehaviours involve, and left `0x11` out because
+ * `@onyourleft/domain` had no grade type; it has `GradePercent` now, so the
+ * parameter array is modelled rather than typed as a bare number.
+ *
+ * Result codes are the four this machine can actually produce. `0x02` Op Code
+ * Not Supported joined them with #43 and it is reachable: a trainer built with
+ * `supportsSimulation: false` answers it, which is what a client gating its
+ * gradient UI on Target Setting bit 13 has to cope with. `0x04` Operation
+ * Failed is still absent, because a code no scenario reaches is a branch no
+ * test can cover (`../errors.ts` makes the same argument). The expended-energy
+ * and heart-rate fields of Indoor Bike Data are omitted for the same unit
+ * reason `../measurement.ts` records.
  *
  * ⚠️ **The control point is reached through the simulator's bench.** #39 has no
  * write path — `../transport.ts` says so and why — and #43 owns the command
@@ -40,9 +48,12 @@
 
 import {
   metres,
+  resistanceLevel,
   watts,
+  type GradePercent,
   type Metres,
   type MetresPerSecond,
+  type ResistanceLevel,
   type RevolutionsPerMinute,
   type Seconds,
   type Watts,
@@ -91,25 +102,47 @@ export interface IndoorBikeDataFrame {
 
 // --- Fitness Machine Control Point (0x2AD9) ---------------------------------
 
-export type FtmsControlOpCode = 'request-control' | 'reset' | 'set-target-power';
+export type FtmsControlOpCode =
+  | 'request-control'
+  | 'reset'
+  | 'set-target-resistance'
+  | 'set-target-power'
+  | 'stop-or-pause'
+  | 'set-simulation-parameters';
 
 /** FTMS 1.0 Table 4.15. */
 export const FTMS_CONTROL_OP_CODE = {
   'request-control': 0x00,
   reset: 0x01,
+  'set-target-resistance': 0x04,
   'set-target-power': 0x05,
+  'stop-or-pause': 0x08,
+  'set-simulation-parameters': 0x11,
 } as const satisfies Record<FtmsControlOpCode, number>;
+
+/** The simulated course conditions, FTMS Table 4.20. `grade` is **signed**. */
+export interface FtmsSimulationParameters {
+  readonly grade: GradePercent;
+  readonly windSpeed: MetresPerSecond;
+  readonly rollingResistanceCoefficient: number;
+  readonly windResistanceCoefficient: number;
+}
 
 export type FtmsControlRequest =
   | { readonly opCode: 'request-control' }
   | { readonly opCode: 'reset' }
-  | { readonly opCode: 'set-target-power'; readonly target: Watts };
+  | { readonly opCode: 'set-target-resistance'; readonly level: ResistanceLevel }
+  | { readonly opCode: 'set-target-power'; readonly target: Watts }
+  | { readonly opCode: 'stop-or-pause'; readonly stop: boolean }
+  | { readonly opCode: 'set-simulation-parameters'; readonly parameters: FtmsSimulationParameters };
 
-export type FtmsResultCode = 'success' | 'invalid-parameter' | 'control-not-permitted';
+export type FtmsResultCode =
+  'success' | 'op-code-not-supported' | 'invalid-parameter' | 'control-not-permitted';
 
-/** FTMS 1.0 Table 4.24, the three values this machine produces. */
+/** FTMS 1.0 Table 4.24, the four values this machine produces. */
 export const FTMS_RESULT_CODE = {
   success: 0x01,
+  'op-code-not-supported': 0x02,
   'invalid-parameter': 0x03,
   'control-not-permitted': 0x05,
 } as const satisfies Record<FtmsResultCode, number>;
@@ -139,13 +172,19 @@ export type FtmsWriteOutcome =
 
 export type FitnessMachineStatus =
   | { readonly kind: 'reset' }
+  | { readonly kind: 'stopped-or-paused' }
+  | { readonly kind: 'target-resistance-changed'; readonly level: ResistanceLevel }
   | { readonly kind: 'target-power-changed'; readonly target: Watts }
+  | { readonly kind: 'simulation-parameters-changed' }
   | { readonly kind: 'control-permission-lost' };
 
-/** FTMS 1.0 Table 4.26, the three values this machine produces. */
+/** FTMS 1.0 Table 4.26, the values this machine produces. */
 export const FITNESS_MACHINE_STATUS_OP_CODE = {
   reset: 0x01,
+  'stopped-or-paused': 0x02,
+  'target-resistance-changed': 0x07,
   'target-power-changed': 0x08,
+  'simulation-parameters-changed': 0x12,
   'control-permission-lost': 0xff,
 } as const satisfies Record<FitnessMachineStatus['kind'], number>;
 
@@ -174,18 +213,63 @@ export interface FtmsInspection {
   readonly controlHeld: boolean;
   readonly indicationsEnabled: boolean;
   readonly targetPower: Watts | undefined;
+  readonly targetResistance: ResistanceLevel | undefined;
+  readonly simulation: FtmsSimulationParameters | undefined;
+  readonly stopped: boolean;
+}
+
+/**
+ * What this machine's Supported Power Range and Supported Resistance Level
+ * Range characteristics would report if they were read.
+ *
+ * Exposed as values rather than served as bytes, because this directory bars
+ * GATT payload — `../README.md` §"What is deliberately not here". A client
+ * reads them through whatever bridge encodes them, exactly as it does Indoor
+ * Bike Data.
+ */
+export interface FtmsSupportedRanges {
+  readonly minTargetPower: Watts;
+  readonly maxTargetPower: Watts;
+  readonly powerIncrement: Watts;
+  readonly minResistanceLevel: ResistanceLevel;
+  readonly maxResistanceLevel: ResistanceLevel;
+  readonly resistanceIncrement: ResistanceLevel;
 }
 
 // --- The machine ------------------------------------------------------------
 
 export interface FtmsOptions {
+  /** Bottom of the Supported Power Range. Defaults to 0 W. */
+  readonly minTargetPower?: Watts;
   /** Top of the Supported Power Range. Defaults to 2000 W. */
   readonly maxTargetPower?: Watts;
+  /** Minimum Increment of the Supported Power Range. Defaults to 1 W. */
+  readonly powerIncrement?: Watts;
+  /** Bottom of the Supported Resistance Level Range. Defaults to 0. */
+  readonly minResistanceLevel?: ResistanceLevel;
+  /** Top of the Supported Resistance Level Range. Defaults to 20. */
+  readonly maxResistanceLevel?: ResistanceLevel;
+  /** Minimum Increment of the Supported Resistance Level Range. Defaults to 0.5. */
+  readonly resistanceIncrement?: ResistanceLevel;
+  /**
+   * Whether this machine answers Set Indoor Bike Simulation Parameters.
+   *
+   * Defaults to `true`. Built `false`, the machine answers `0x02` Op Code Not
+   * Supported — which is what a trainer whose Target Setting bit 13 is clear
+   * does, and the case a client gating its gradient UI on that bit has to cope
+   * with.
+   */
+  readonly supportsSimulation?: boolean;
   /** Which Indoor Bike Data fields to carry. Defaults to speed, cadence, power. */
   readonly fields?: ReadonlySet<IndoorBikeDataField>;
 }
 
+export const DEFAULT_MIN_TARGET_POWER: Watts = watts(0);
 export const DEFAULT_MAX_TARGET_POWER: Watts = watts(2000);
+export const DEFAULT_POWER_INCREMENT: Watts = watts(1);
+export const DEFAULT_MIN_RESISTANCE_LEVEL: ResistanceLevel = resistanceLevel(0);
+export const DEFAULT_MAX_RESISTANCE_LEVEL: ResistanceLevel = resistanceLevel(20);
+export const DEFAULT_RESISTANCE_INCREMENT: ResistanceLevel = resistanceLevel(0.5);
 
 /** The simulated trainer, device side. Driven by `simulator.ts`. */
 export interface FtmsMachine {
@@ -196,6 +280,8 @@ export interface FtmsMachine {
   frame(rider: RiderProfile): IndoorBikeDataFrame;
   /** The target in ERG mode, the rider's own power otherwise. */
   effectivePower(rider: RiderProfile): Watts;
+  /** What the two supported-range characteristics would report. */
+  supportedRanges(): FtmsSupportedRanges;
   /** Deliver the queued response and status messages. Called once per tick while connected. */
   flush(): void;
   /** Scenario: another client, or the trainer itself, takes control away. */
@@ -215,12 +301,23 @@ export function createFtmsMachine(
   options: FtmsOptions,
   link: { readonly deviceId: string; isConnected(): boolean },
 ): FtmsMachine {
-  const maxTargetPower = options.maxTargetPower ?? DEFAULT_MAX_TARGET_POWER;
+  const ranges: FtmsSupportedRanges = {
+    minTargetPower: options.minTargetPower ?? DEFAULT_MIN_TARGET_POWER,
+    maxTargetPower: options.maxTargetPower ?? DEFAULT_MAX_TARGET_POWER,
+    powerIncrement: options.powerIncrement ?? DEFAULT_POWER_INCREMENT,
+    minResistanceLevel: options.minResistanceLevel ?? DEFAULT_MIN_RESISTANCE_LEVEL,
+    maxResistanceLevel: options.maxResistanceLevel ?? DEFAULT_MAX_RESISTANCE_LEVEL,
+    resistanceIncrement: options.resistanceIncrement ?? DEFAULT_RESISTANCE_INCREMENT,
+  };
+  const supportsSimulation = options.supportsSimulation ?? true;
   let fields = options.fields ?? DEFAULT_INDOOR_BIKE_DATA_FIELDS;
 
   let controlHeld = false;
   let indicationsEnabled = false;
   let targetPower: Watts | undefined;
+  let targetResistance: ResistanceLevel | undefined;
+  let simulation: FtmsSimulationParameters | undefined;
+  let stopped = false;
   let totalDistance = 0;
   let pendingResponse: FtmsControlResponse | undefined;
   const pendingStatus: FitnessMachineStatus[] = [];
@@ -242,17 +339,65 @@ export function createFtmsMachine(
         // the control permission — the client that asked for it loses it.
         controlHeld = false;
         targetPower = undefined;
+        targetResistance = undefined;
+        simulation = undefined;
         pendingStatus.push({ kind: 'reset' });
         return 'success';
       case 'set-target-power':
         if (!controlHeld) {
           return 'control-not-permitted';
         }
-        if (request.target > maxTargetPower) {
+        if (request.target < ranges.minTargetPower || request.target > ranges.maxTargetPower) {
           return 'invalid-parameter';
         }
         targetPower = request.target;
+        targetResistance = undefined;
+        simulation = undefined;
         pendingStatus.push({ kind: 'target-power-changed', target: request.target });
+        return 'success';
+      case 'set-target-resistance':
+        if (!controlHeld) {
+          return 'control-not-permitted';
+        }
+        if (
+          request.level < ranges.minResistanceLevel ||
+          request.level > ranges.maxResistanceLevel
+        ) {
+          return 'invalid-parameter';
+        }
+        targetResistance = request.level;
+        // Setting a brake level ends ERG. FTMS 4.16.2: a procedure that
+        // contradicts a previously triggered one aborts it, and no machine
+        // holds a watt target and a brake level at the same time.
+        targetPower = undefined;
+        simulation = undefined;
+        pendingStatus.push({ kind: 'target-resistance-changed', level: request.level });
+        return 'success';
+      case 'set-simulation-parameters':
+        if (!controlHeld) {
+          return 'control-not-permitted';
+        }
+        if (!supportsSimulation) {
+          return 'op-code-not-supported';
+        }
+        simulation = request.parameters;
+        targetPower = undefined;
+        targetResistance = undefined;
+        pendingStatus.push({ kind: 'simulation-parameters-changed' });
+        return 'success';
+      case 'stop-or-pause':
+        if (!controlHeld) {
+          return 'control-not-permitted';
+        }
+        stopped = true;
+        if (request.stop) {
+          // A stop ends the session, so the setpoints go with it. A pause holds
+          // them — which is the whole difference the parameter octet carries.
+          targetPower = undefined;
+          targetResistance = undefined;
+          simulation = undefined;
+        }
+        pendingStatus.push({ kind: 'stopped-or-paused' });
         return 'success';
     }
   };
@@ -289,6 +434,8 @@ export function createFtmsMachine(
   return {
     controlPoint,
     effectivePower,
+
+    supportedRanges: () => ranges,
 
     advance(rider, duration) {
       totalDistance += rider.speed * duration;
@@ -331,7 +478,14 @@ export function createFtmsMachine(
     },
 
     inspect() {
-      return { controlHeld, indicationsEnabled, targetPower };
+      return {
+        controlHeld,
+        indicationsEnabled,
+        targetPower,
+        targetResistance,
+        simulation,
+        stopped,
+      };
     },
   };
 }

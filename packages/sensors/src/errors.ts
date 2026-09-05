@@ -117,6 +117,46 @@ export type SensorErrorCode =
    */
   | 'malformed-payload'
   /**
+   * A setpoint was attempted without control of the machine, or the machine
+   * answered `0x05` Control Not Permitted.
+   *
+   * **The most important code in the trainer-control surface.** FTMS §4.16.2 is
+   * explicit that a machine which has not granted control does not error on a
+   * setpoint — it *ignores* it. So a client that writes anyway reports a target
+   * the trainer never took, the rider pedals against whatever resistance was
+   * already set, and the screen says otherwise for the rest of the session.
+   * This code is what the client raises instead of writing.
+   */
+  | 'control-not-held'
+  /**
+   * The machine ran the procedure and refused it — Op Code Not Supported,
+   * Invalid Parameter, Operation Failed, or a reserved result code — or the ATT
+   * write itself was refused.
+   *
+   * Distinct from `control-not-held` because it says nothing about whether this
+   * client still holds control, and distinct from `control-out-of-range`
+   * because the refusal came from the device rather than from this program.
+   */
+  | 'control-rejected'
+  /**
+   * A setpoint was refused **before it was written**, because it is outside the
+   * range the device reported or outside this client's own ceiling.
+   *
+   * Its own code because the difference matters to a UI and to a bug report: no
+   * byte reached the trainer. CLAUDE.md §6 — trainer control is a safety
+   * problem, and the value that never reaches the brake is the safe one.
+   */
+  | 'control-out-of-range'
+  /**
+   * A control point procedure went unanswered.
+   *
+   * The Fitness Machine Control Point is request/response: until the indication
+   * arrives, whether the machine applied the setpoint is unknown. Reported as
+   * its own code because "unknown" is a different state from "refused" — the
+   * trainer may well be holding a target nobody confirmed.
+   */
+  | 'control-timed-out'
+  /**
    * The plan needs more simultaneous connections than the platform will carry.
    * See `MAX_RECOMMENDED_CONCURRENT_CONNECTIONS` in `plan.ts`: the budget is
    * OS-wide and shared with whatever else the athlete has paired, so this is a
