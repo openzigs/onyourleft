@@ -183,6 +183,69 @@ const XXE_DOCTYPE = (rootElement: string) => [
   ']>',
 ];
 
+/**
+ * A GPX whose DOCTYPE declares nested entities — the billion-laughs shape.
+ *
+ * Six levels of ten, so `&lol6;` expands to a million copies of `lol`: three
+ * megabytes out of a document under a kilobyte. Ten levels is the classic
+ * demonstration and would be a billion; six is chosen because it is already
+ * three orders of magnitude and a parser that *does* expand entities should
+ * fail this test by taking three megabytes, not by hanging a CI runner for
+ * minutes before anyone sees a result.
+ *
+ * #32's revision block asks for this specifically: *"Billion-laughs / entity
+ * expansion is the same class and is not covered by the two [XXE] fixtures —
+ * add one."* It is the same class because both need a DTD, and the defence is
+ * therefore the same one; carrying both files is what proves the defence was
+ * not written against one example.
+ *
+ * The document is otherwise well-formed and carries no coordinates at all, so
+ * it exercises the entity handling and nothing else.
+ */
+export function billionLaughsGpx(): XmlFixture {
+  const levels = Array.from({ length: 6 }, (_, index) => {
+    const name = `lol${String(index + 1)}`;
+    const inner = index === 0 ? 'lol' : `lol${String(index)}`;
+    return `  <!ENTITY ${name} "${`&${inner};`.repeat(10)}">`;
+  });
+  const lines = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE gpx [',
+    '  <!ELEMENT name (#PCDATA)>',
+    '  <!ENTITY lol "lol">',
+    ...levels,
+    ']>',
+    `<gpx version="1.1" creator="${CREATOR}" xmlns="${GPX_NAMESPACE}">`,
+    '  <trk>',
+    '    <name>&lol6;</name>',
+    '    <trkseg/>',
+    '  </trk>',
+    '</gpx>',
+  ];
+  return { text: document(lines), positions: [] };
+}
+
+/**
+ * The nominal GPX, cut off in the middle of its last track point's `<time>`.
+ *
+ * The FIT half of the corpus has `truncated-mid-record.fit` and the text half
+ * had nothing equivalent, so #32's criterion — *"a truncated XML file produces
+ * a structured error, not a partial silent success"* — had only a
+ * string-slicing test to assert against. This is the committed artefact.
+ *
+ * The cut is deliberately **past** the final `<trkpt>`'s `lat` and `lon`
+ * attributes, so every coordinate in the file still pairs and the ADR 0004
+ * decision G region guard can see all of them. A file whose coordinates did not
+ * pair would fail that guard for a reason that has nothing to do with
+ * truncation.
+ */
+export function truncatedGpx(track: TrackSpecification, count: number): XmlFixture {
+  const full = nominalGpx(track, count);
+  const marker = '<time>';
+  const lastTime = full.text.lastIndexOf(marker);
+  return { text: full.text.slice(0, lastTime + marker.length + 8), positions: full.positions };
+}
+
 export function xxeGpx(track: TrackSpecification, count: number): XmlFixture {
   const points = trackPoints(track, count);
   const lines = [
