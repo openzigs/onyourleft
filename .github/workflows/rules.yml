@@ -164,6 +164,46 @@ jobs:
       - name: Tests and coverage report
         run: pnpm run test:coverage
 
+      # The renderer has logic of its own -- it decides which package a covered
+      # file belongs to, from absolute paths that differ between a checkout, a
+      # runner and a worktree -- so it has a suite, and the suite runs here. Its
+      # first version attributed a dependency's own `packages/<name>/` directory
+      # to a workspace package of that name; the suite caught it.
+      #
+      # Not part of `pnpm run check:repo`: that is the bare-clone set, and this
+      # one needs Node.
+      - name: Coverage renderer tests
+        run: bash scripts/coverage-summary.test.sh
+
+      # Coverage is REPORTED, never gated -- ADR 0005 decision C and CLAUDE.md
+      # §5 make the mutation list the gate and forbid a percentage floor. This
+      # step exists because the numbers were being computed and then thrown
+      # away: `text` goes into this log under the install and build output, and
+      # `html` is written to a runner that is destroyed with it.
+      #
+      # `if: always()` so a failing suite still publishes what it measured --
+      # the run where coverage moved unexpectedly is the one you want the table
+      # for. It cannot fail the job: the renderer exits non-zero only when the
+      # report is missing or unparseable, and `|| true` keeps even that from
+      # turning a reporting step into a gate.
+      - name: Publish the coverage summary
+        if: always()
+        run: node scripts/coverage-summary.mjs >> "$GITHUB_STEP_SUMMARY" || true
+
+      # The full HTML report, for the run where a number in the table above
+      # looks wrong and the question is which line.
+      #
+      # SHA from:
+      #   gh api repos/actions/upload-artifact/git/ref/tags/v7.0.1 --jq .object.sha
+      - name: Upload the coverage report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 7
+          if-no-files-found: warn
+
       # A green typecheck is not a green build: the bundler resolves imports the
       # typechecker only reads types from.
       - name: Build

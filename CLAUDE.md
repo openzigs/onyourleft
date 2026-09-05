@@ -206,6 +206,16 @@ pnpm --filter @onyourleft/web run test
 
 # All six bare-clone script checks in one command.
 pnpm run check:repo
+
+# Render coverage per package as Markdown. Reads coverage/coverage-summary.json,
+# so it runs AFTER `test:coverage`. Prints; never gates — see §5. Exits non-zero
+# only when the report is missing or unparseable, because an empty table reads
+# like good news.
+node scripts/coverage-summary.mjs
+
+# Its tests. Needs Node, so it is deliberately NOT in `check:repo`, which is the
+# bare-clone set. 17 cases.
+bash scripts/coverage-summary.test.sh
 ```
 
 **Need a tool installed, or the network** — these work, but not on a bare clone:
@@ -366,7 +376,11 @@ not.
 [`.github/workflows/rules.yml`](.github/workflows/rules.yml) runs on every pull request and on every
 push to `main`. It runs **exactly** the §4a commands and nothing else: the six bare-clone script
 checks, `shellcheck scripts/*.sh`, then `pnpm install --frozen-lockfile`, `format:check`, `lint`,
-`typecheck`, `test:coverage` and `build`. If CI ever needs a step this file does not list, **this
+`typecheck`, `test:coverage`, `bash scripts/coverage-summary.test.sh` and `build` — then
+publishes the coverage table to the run summary and uploads the HTML report as an artefact.
+Those last two carry `if: always()` and cannot fail the job: the run where coverage moved
+unexpectedly is exactly the one whose table you want, and a reporting step that can fail a
+build is a percentage floor arriving by the back door, which §5 forbids. If CI ever needs a step this file does not list, **this
 file is wrong and gets fixed in the same PR**; CI must not accumulate private knowledge, because
 that is how a contributor's local green becomes CI's red with no explanation.
 
@@ -653,6 +667,18 @@ Never open a public issue with vulnerability details — use GitHub private vuln
 - **Branches**: `feature/issue-{number}-{slug}`, from `main`. (Observed convention — `#18` used
   `feature/issue-18-licence`.)
 - **PRs** reference the issue they resolve, and carry the mutation list from §5.
+- **A closing keyword must be correct when the pull request is OPENED.** GitHub creates the
+  issue link at open time, and **editing the body afterwards does not remove it** — neither
+  does overriding the squash commit message with `gh pr merge --body`. An issue linked by an
+  `Closes #N` that was later softened to `Refs #N` still closes on merge, and the close event
+  carries no commit id, which is the only outward tell. This cost #42, #43 and #31, each of
+  which was closed against an explicit, written decision not to close it. If a PR must not
+  close an issue — because an acceptance criterion is deferred, or needs hardware nobody in
+  the loop has — **write `Refs #N` in the body you open with**. If you discover it too late,
+  the honest repair is to file the remainder as its own issue and say on the closed one what
+  happened; reopening leaves a mostly-done issue open for something that is really separate
+  work. Prose that merely *mentions* a keyword counts too: #29 was closed by `Resolves #29`
+  inside an ADR table cell.
 - **ADRs**: `docs/adr/NNNN-kebab-case.md`, with **Status, Context, Decision, Consequences**. Numbers
   are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
   **and which are claimed by open issues** before you pick one.
