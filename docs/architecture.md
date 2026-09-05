@@ -379,6 +379,7 @@ And these are enforced with no toolchain at all, by `scripts/check-repo-rules.sh
 | `SCOPE001` | ANT+ is referenced anywhere in a source tree |
 | `WF001` | `pull_request_target` appears in a workflow — it receives secrets and bypasses the fork-approval gate |
 | `ADR001` / `ADR002` | two ADRs share a number, or a filename is not `NNNN-kebab-case.md` |
+| `ADR003` | an ADR's `## Amendments` section is not the last section, or there are two of them, or an entry does not open with a bold ISO date — see [ADR 0013](adr/0013-adr-amendments.md) |
 | `ENV001` | a source file reads an environment variable `.env.example` does not list, or `.env.example` is missing |
 
 **All of them run in CI**, on every pull request and every push to `main`, from
@@ -430,6 +431,21 @@ share one.
 | [0009](adr/0009-clean-room-posture.md) | Clean-room posture toward Strava and Zwift | #19 |
 | [0010](adr/0010-map-tiles-and-routing.md) | Map tiles, routing and elevation — providers, licences and cost | #60 |
 | [0011](adr/0011-stream-storage.md) | Activity stream storage — per-channel packed binary in IndexedDB | #27 |
+| [0013](adr/0013-adr-amendments.md) | Amending an accepted ADR — a dated, append-only `## Amendments` section | #147 |
+
+**0012 is deliberately absent from that list and is not free** — see the row for it below.
+
+### An ADR may now carry a dated `## Amendments` section
+
+[ADR 0013](adr/0013-adr-amendments.md) (#147) adds one mechanism beside supersession: a dated entry
+**appended** to an `## Amendments` section at the end of an accepted ADR, recording that a statement
+of fact in the body has become false. The body is still never edited, `Status` does not change, and
+**reversing a decision still needs a superseding ADR**. Rule `ADR003` enforces the shape.
+
+**This index does not gain a row per amendment** (ADR 0013 D-6): an amendment is a change within an
+ADR, found by reading it, and a second partial copy of the amendment logs here would drift. Two ADRs
+carry one today — [0001](adr/0001-licence.md), for the deferral pointer #119 reports, and
+[0011](adr/0011-stream-storage.md), for the sentence #147 was opened for.
 
 ### Claimed by open issues — **check here before you pick a number**
 
@@ -451,6 +467,8 @@ still a proposal.
 | 0009 | #19 — clean-room posture | [Written](adr/0009-clean-room-posture.md). Renumbered from 0002, which #57 holds. |
 | 0010 | #60 — map tiles and routing | [Written](adr/0010-map-tiles-and-routing.md). Renumbered from 0008, which #86 holds. |
 | 0011 | #27 — stream storage | [Written](adr/0011-stream-storage.md). Renumbered from 0006, which #58 holds. Records the measured cost: **22.2 KiB per recorded hour** for a 1 Hz eight-channel ride. |
+| 0012 | **#64 — the data licence: whether OSM-derived segment geometry inherits ODbL** | **Reserved, not written.** [ADR 0001](adr/0001-licence.md)'s *Data* section defers this question and names "ADR 0007" as its destination — but 0007 is the [patent posture](adr/0007-patent-posture.md) (#59) and says nothing about ODbL, so the pointer resolved to the wrong document and this table reserved nothing for it (#119). It does now. **Reserving is not deciding**: the ODbL question is #64's, [ADR 0010](adr/0010-map-tiles-and-routing.md) deliberately does not touch it, and ADR 0001's constraint stands as written — OSM attribution on any instance serving OSM-derived tiles or routes, and the question answered before segment geometry is persisted anywhere. #64 and #73 stay blocked on it. ADR 0001 carries an amendment recording the wrong number. |
+| 0013 | #147 — amending an accepted ADR | [Written](adr/0013-adr-amendments.md). Took 0013 rather than 0012 **on purpose**: 0012 is reserved one row up, and consuming it in the same pull request that reserved it would have moved #119's dangling pointer down a row instead of repairing it. |
 
 Three issues carry an acceptance criterion naming their old number — #19 (0002), #60 (0008) and #27
 (0006). **The number here wins**; each issue has been commented with its new one. Renumbering a

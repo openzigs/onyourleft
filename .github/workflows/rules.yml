@@ -75,7 +75,7 @@ jobs:
       # CLAUDE.md section 4a. Every command below is one that file documents;
       # CI accumulating private knowledge is how a contributor's local green
       # becomes CI's red with no explanation.
-      - name: Repository rules (LIC001-4, SCOPE001, WF001, ADR001-2)
+      - name: Repository rules (LIC001-4, SCOPE001, WF001, ADR001-3)
         run: bash scripts/check-repo-rules.sh
 
       - name: Repository rule checker tests

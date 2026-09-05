@@ -205,3 +205,26 @@ rights we have.
 This ADR is an engineering decision recorded by engineers. It is not legal advice. The two places
 where a lawyer would genuinely add value, rather than confirm the obvious, are the §2(d) FIT
 conflict (#58) and the ODbL derivative-database question (#64).
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-09-05** — **The *Data* section's deferral names the wrong ADR.** It reads "Deferred to
+  ADR 0007, owned by #64", and [ADR 0007](0007-patent-posture.md) is the **patent posture** (#59) —
+  it says nothing about ODbL and should not, because that was never its subject. When this ADR was
+  written no number had been allocated for the data-licence decision, and 0007 was a guess at the
+  next free one that a later renumbering overtook. **The number now reserved for it is `0012`**,
+  recorded against #64 in [`docs/architecture.md`](../architecture.md)'s ownership table, so the
+  deferral has a destination. Read "ADR 0007" in that one sentence as "the ADR reserved at 0012".
+  It is the only place in this document that names a number for the deferral: *Constraints this
+  places on other work* item 4 says only that "#64 and #73 are blocked on the deferred
+  data-licence question above", which is still exactly right and needs no re-reading.
+  **Nothing else in the *Data* section changes.** The substantive constraint stands exactly as
+  written — any instance serving OSM-derived tiles or routes must display OSM attribution, and the
+  ODbL question must be answered before segment geometry is persisted anywhere — and #64 and #73
+  remain blocked on it. **The ODbL question itself is not decided here and is still #64's**, which
+  [ADR 0010](0010-map-tiles-and-routing.md) records in its own *Notes* and deliberately does not
+  touch. (#119, #147)

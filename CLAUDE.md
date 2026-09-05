@@ -62,8 +62,10 @@ scripts/              dependency-free repository checks; run on a bare clone
 
 **`apps/web`, `packages/domain`, `packages/sensors`, `packages/fit` and `packages/store` exist.**
 The first two were created by [#23](https://github.com/openzigs/onyourleft/issues/23) along with the
-workspace, the toolchain and the lockfile, and `packages/sensors` by
-[#39](https://github.com/openzigs/onyourleft/issues/39). **`packages/physics` and `apps/mobile` do
+workspace, the toolchain and the lockfile, `packages/sensors` by
+[#39](https://github.com/openzigs/onyourleft/issues/39), `packages/store` by
+[#26](https://github.com/openzigs/onyourleft/issues/26) and `packages/fit` by
+[#107](https://github.com/openzigs/onyourleft/issues/107). **`packages/physics` and `apps/mobile` do
 not** — each is created by the issue that owns its content (§4b), from `packages/domain` as the
 template. The layout is fixed here
 because ~30 sub-issues reference it by name, and the workspace globs and lint boundaries already
@@ -137,7 +139,7 @@ downstream issue's acceptance criteria depend on these.
 # Exits 0 clean; exits 1 listing each violation by rule id.
 bash scripts/check-repo-rules.sh
 
-# Test the checker itself. Fixture-driven; 32 cases.
+# Test the checker itself. Fixture-driven; 59 cases.
 bash scripts/check-repo-rules.test.sh
 
 # Verify the licence texts are byte-identical to the canonical ones, by
@@ -271,6 +273,7 @@ npm view typescript-eslint peerDependencies.typescript
 | `WF001` | `pull_request_target` appears in a `.github/workflows/` file (see §8) |
 | `ADR001` | two ADRs share a number |
 | `ADR002` | an ADR filename is not `NNNN-kebab-case.md` |
+| `ADR003` | an ADR's `## Amendments` section is followed by **any** heading, or there are two of them, or an entry does not open with a bold ISO date, or an entry is dated **before the one above it**, or an **unclosed code fence** would hide any of those — see §7 and [ADR 0013](docs/adr/0013-adr-amendments.md) |
 
 `scripts/check-licence-hashes.sh` enforces one more, separately because it hashes files rather than
 reading paths:
@@ -804,7 +807,10 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   inside an ADR table cell.
 - **ADRs**: `docs/adr/NNNN-kebab-case.md`, with **Status, Context, Decision, Consequences**. Numbers
   are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one.
+  **and which are claimed by open issues** before you pick one. ⚠️ **`0012` is reserved and not
+  free** — it belongs to [#64](https://github.com/openzigs/onyourleft/issues/64)'s data-licence
+  decision, which is the destination ADR 0001's *Data* deferral had no number for
+  ([#119](https://github.com/openzigs/onyourleft/issues/119)). The next free number is **0014**.
 - **Changelog**: there is **no `CHANGELOG.md` and no changelog convention** in this repository. Do
   not add one as a drive-by; if a release needs one, that is its own issue.
 - **Versions**: do not bump any version unless the issue asks for it.
@@ -817,7 +823,7 @@ Never open a public issue with vulnerability details — use GitHub private vuln
 | `LICENSE` | Byte-identical AGPL-3.0 text. Editing licence text is itself a licensing problem. SHA-256 recorded in ADR 0001. |
 | `LICENSES/Apache-2.0.txt` | Same, for Apache-2.0. |
 | `COPYRIGHT` | Copyright is held by "The On Your Left contributors", each retaining their own. |
-| `docs/adr/*.md` | An ADR is amended by a **new** ADR that supersedes it, not by editing it in place. |
+| `docs/adr/*.md` | An ADR is amended by a **new** ADR that supersedes it, not by editing it in place — **with one narrow exception, [ADR 0013](docs/adr/0013-adr-amendments.md)**: a dated entry may be **appended** to an `## Amendments` section at the end of the file, recording that a statement of fact in the body has become false. The body is still never edited, `Status` does not change, and **reversing a decision still needs a superseding ADR**. Rule `ADR003` checks the shape; it cannot check that the change was an append, so a reviewer reading a `docs/adr/` diff asks the one question that matters — **does any hunk touch a line that already existed?** |
 
 `.gitignore` un-ignores `.env.example` while ignoring `.env` and `.env.*`. Honour that: a committed
 template with placeholder values, real secrets never. **Never `git add -f` past an ignore rule** —
