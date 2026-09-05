@@ -20,9 +20,8 @@
  * installed or read** (R1, R4).
  */
 
-import { decodeActivity } from './activity';
+import { decodeFitActivityFromBytes } from './activity';
 import type { FitDecodeResult } from './activity';
-import { readFitContainer } from './container';
 
 export type {
   FitActivity,
@@ -55,6 +54,7 @@ export {
 
 export type {
   FitContainer,
+  FitContainerSummary,
   FitDeveloperFieldDefinition,
   FitDeveloperFieldValue,
   FitFieldDefinition,
@@ -70,6 +70,7 @@ export {
   FIT_HEADER_SIZE,
   FIT_LEGACY_HEADER_SIZE,
   readFitContainer,
+  streamFitContainer,
 } from './container';
 
 export { FIT_CRC_INITIAL_VALUE, FIT_CRC_REFLECTED_POLYNOMIAL, FIT_CRC_SIZE, fitCrc16 } from './crc';
@@ -88,7 +89,11 @@ export {
   SPORT_CYCLING,
 } from './profile';
 
-export { decodeActivity } from './activity';
+export {
+  decodeActivity,
+  decodeFitActivityFromBytes,
+  MAXIMUM_RETAINED_BYTES_PER_INPUT_BYTE,
+} from './activity';
 export { decodeFitString, decodeUtf8, REPLACEMENT_CHARACTER } from './utf8';
 
 /**
@@ -103,7 +108,20 @@ export { decodeFitString, decodeUtf8, REPLACEMENT_CHARACTER } from './utf8';
  * @throws {FitDecodeError} when nothing about the bytes can be believed: they
  * are too short for a header, they are not a FIT file, or a checksum says they
  * are not the bytes that were written.
+ *
+ * ## What a caller may assume about memory — #127
+ *
+ * It **streams**: the whole `FitMessage[]` is never built, so what survives the
+ * call is the activity and nothing else. Bounded by
+ * {@link MAXIMUM_RETAINED_BYTES_PER_INPUT_BYTE}, which is a constant in this
+ * package and never a number the file supplies, and measured at 10.5 bytes per
+ * input byte on a 4.55 MiB ride. Before #127 the same file retained 97.2, and a
+ * 20 MiB one — the top of what a four-hour ride reaches — would have taken the
+ * browser tab with it.
+ *
+ * `decodeActivity(readFitContainer(bytes))` is still the two-step spelling and
+ * still gives an identical result, but it is the shape that costs the array.
  */
 export function decodeFitActivity(bytes: Uint8Array): FitDecodeResult {
-  return decodeActivity(readFitContainer(bytes));
+  return decodeFitActivityFromBytes(bytes);
 }

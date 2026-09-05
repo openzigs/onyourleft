@@ -84,6 +84,7 @@ import {
 import type { FitFieldValue } from './base-types';
 import { isInvalidByteArray, readFieldValue } from './base-types';
 import type { FitContainer, FitFileHeader, FitMessage } from './container';
+import { streamFitContainer } from './container';
 import { FitDecodeError } from './errors';
 import { FIELD, GLOBAL_MESSAGE, SCALE } from './profile';
 
@@ -496,28 +497,70 @@ function readDeveloperFields(
 
 // --- Assembly ---------------------------------------------------------------
 
-/** Turn a read container into the decoded activity. Never throws on content. */
-export function decodeActivity(container: FitContainer): FitDecodeResult {
-  const faults: FitDecodeError[] = [...container.faults];
-
+/**
+ * The `field_description` messages a file carries, gathered on their own.
+ *
+ * The first of the two passes assembly needs, split out so that it can be run
+ * over a *stream* of messages rather than over an array of them — #127. It is
+ * the pass that cannot be folded into the second: a `field_description` may
+ * arrive after the record it describes, which is the alignment requirement
+ * #30's revision block names, so the map has to be complete before the first
+ * record is mapped.
+ *
+ * What it retains is bounded by the file's descriptions rather than by its
+ * records, which is what makes streaming worth doing: a four-hour ride is
+ * hundreds of thousands of records and a handful of descriptions.
+ */
+function createDescriptionCollector(): {
+  accept: (message: FitMessage) => void;
+  readonly descriptions: ReadonlyMap<string, FitDeveloperFieldDescription>;
+  readonly descriptionList: readonly FitDeveloperFieldDescription[];
+} {
   const descriptions = new Map<string, FitDeveloperFieldDescription>();
   const descriptionList: FitDeveloperFieldDescription[] = [];
-  for (const message of container.messages) {
-    if (message.globalMessageNumber !== GLOBAL_MESSAGE.fieldDescription) continue;
-    const developerDataIndex = numeric(message, FIELD.fieldDescription.developerDataIndex);
-    const fieldDefinitionNumber = numeric(message, FIELD.fieldDescription.fieldDefinitionNumber);
-    if (developerDataIndex === undefined || fieldDefinitionNumber === undefined) continue;
-    const description: FitDeveloperFieldDescription = {
-      developerDataIndex,
-      fieldDefinitionNumber,
-      fitBaseTypeId: numeric(message, FIELD.fieldDescription.fitBaseTypeId),
-      name: text(message, FIELD.fieldDescription.fieldName),
-      units: text(message, FIELD.fieldDescription.units),
-    };
-    descriptions.set(descriptionKey(developerDataIndex, fieldDefinitionNumber), description);
-    descriptionList.push(description);
-  }
+  return {
+    descriptions,
+    descriptionList,
+    accept(message: FitMessage): void {
+      if (message.globalMessageNumber !== GLOBAL_MESSAGE.fieldDescription) return;
+      const developerDataIndex = numeric(message, FIELD.fieldDescription.developerDataIndex);
+      const fieldDefinitionNumber = numeric(message, FIELD.fieldDescription.fieldDefinitionNumber);
+      if (developerDataIndex === undefined || fieldDefinitionNumber === undefined) return;
+      const description: FitDeveloperFieldDescription = {
+        developerDataIndex,
+        fieldDefinitionNumber,
+        fitBaseTypeId: numeric(message, FIELD.fieldDescription.fitBaseTypeId),
+        name: text(message, FIELD.fieldDescription.fieldName),
+        units: text(message, FIELD.fieldDescription.units),
+      };
+      descriptions.set(descriptionKey(developerDataIndex, fieldDefinitionNumber), description);
+      descriptionList.push(description);
+    },
+  };
+}
 
+/**
+ * The second pass, as something that takes one message at a time.
+ *
+ * This is the body of what used to be `decodeActivity`'s second loop, turned
+ * inside out so that the caller decides where the messages come from: an array
+ * for {@link decodeActivity}, a container walk for
+ * {@link decodeFitActivityFromBytes}. Nothing about *what* it does changed, and
+ * two tests say so rather than one: `decode-corpus.test.ts` compares the two
+ * spellings over every committed fixture, and the fuzz harness's *"pins the
+ * public entry point"* case compares them on mutated files, throw for throw.
+ *
+ * `faults` is passed in already seeded with the container's own, because their
+ * order relative to the assembly's is part of the result.
+ */
+function createActivityAssembler(
+  descriptions: ReadonlyMap<string, FitDeveloperFieldDescription>,
+  descriptionList: readonly FitDeveloperFieldDescription[],
+  faults: FitDecodeError[],
+): {
+  accept: (message: FitMessage) => void;
+  finish: (header: FitFileHeader) => FitDecodeResult;
+} {
   let fileId: FitFileId | undefined;
   let summary: FitActivitySummary | undefined;
   const deviceInfos: FitDeviceInfo[] = [];
@@ -529,7 +572,7 @@ export function decodeActivity(container: FitContainer): FitDecodeResult {
   const developerApplications: FitDeveloperApplication[] = [];
   const skippedGlobalMessages = new Map<number, number>();
 
-  for (const message of container.messages) {
+  function accept(message: FitMessage): void {
     switch (message.globalMessageNumber) {
       case GLOBAL_MESSAGE.fileId:
         // First one wins, and a second is a fault rather than a replacement.
@@ -701,21 +744,117 @@ export function decodeActivity(container: FitContainer): FitDecodeResult {
     }
   }
 
-  return {
-    activity: {
-      header: container.header,
-      fileId,
-      deviceInfos,
-      events,
-      records,
-      laps,
-      sessions,
-      summary,
-      heartRateEvents,
-      developerApplications,
-      developerFieldDescriptions: descriptionList,
-      skippedGlobalMessages,
-    },
-    faults,
-  };
+  function finish(header: FitFileHeader): FitDecodeResult {
+    return {
+      activity: {
+        header,
+        fileId,
+        deviceInfos,
+        events,
+        records,
+        laps,
+        sessions,
+        summary,
+        heartRateEvents,
+        developerApplications,
+        developerFieldDescriptions: descriptionList,
+        skippedGlobalMessages,
+      },
+      faults,
+    };
+  }
+
+  return { accept, finish };
+}
+
+/**
+ * Turn a read container into the decoded activity. Never throws on content.
+ *
+ * Takes every message at once, so its peak retention is the caller's array plus
+ * the activity. `container.test.ts` and the fuzz harness use it because they
+ * want the messages themselves; **an importer handed an untrusted file should
+ * call {@link decodeFitActivityFromBytes} instead**, which is the same decode
+ * without the array — see #127 and the note on `streamFitContainer`.
+ */
+export function decodeActivity(container: FitContainer): FitDecodeResult {
+  const collector = createDescriptionCollector();
+  for (const message of container.messages) collector.accept(message);
+  const assembler = createActivityAssembler(collector.descriptions, collector.descriptionList, [
+    ...container.faults,
+  ]);
+  for (const message of container.messages) assembler.accept(message);
+  return assembler.finish(container.header);
+}
+
+/**
+ * What a caller may assume about how much memory decoding a file costs — #127.
+ *
+ * **A constant, and deliberately not a number read from the file.** That is the
+ * #27 lesson restated: the guard that failed there was bounded by the row's own
+ * declared sample count, so a hostile row raised its own ceiling. Nothing below
+ * or above consults the header's `dataSize`, a field count or any other value
+ * the file supplies.
+ *
+ * The number is a **ceiling, measured rather than chosen**, and it is not a
+ * budget to spend: on the 4.55 MiB fixture the streaming decode peaks at 10.5
+ * bytes of heap per byte of file and the array-building spelling at 97.2, so 32
+ * sits with a 3x margin on each side. `tools/memory/retention.test.ts` asserts
+ * both — that the decoder is under it *and* that the shape #127 was filed about
+ * is over it. A bound only one implementation can fail is a bound; a bound
+ * every implementation passes is a comment.
+ *
+ * What it is **not** is a promise about a file crafted to be pathological. The
+ * shape #127 measured is linear per-record overhead on an ordinary ride, and
+ * this is the answer to that; a file that is nothing but two-byte
+ * `field_description` records still costs more per byte than a ride does,
+ * because the descriptions are the one thing pass 1 keeps.
+ * `assertOutputBoundedByInput` in `tools/fuzz/invariants.ts` is what bounds
+ * *that* — it is checked on every one of the fuzz's tens of thousands of cases,
+ * where a heap measurement cannot go.
+ *
+ * #51 is the first production caller. It may size an import against this: a
+ * 20 MiB file, the top of what a multi-hour ride reaches, costs under 640 MiB
+ * at the ceiling and about 210 MiB in practice.
+ */
+export const MAXIMUM_RETAINED_BYTES_PER_INPUT_BYTE = 32;
+
+/**
+ * Decode a FIT activity without ever holding the whole message stream — #127.
+ *
+ * Two walks of the same bytes, neither of which retains a message:
+ *
+ * 1. gather the `field_description` messages, which is the pass that has to
+ *    finish before any record is mapped;
+ * 2. assemble, one message at a time.
+ *
+ * The container walk is deterministic in its input, so the second walk produces
+ * the same messages and the same faults as the first — which is why the faults
+ * the assembler is seeded with can come from the first pass and the ordering
+ * still matches {@link decodeActivity} exactly.
+ *
+ * **The cost is a second walk of the record stream; the saving is the array.**
+ * Measured on the 4.55 MiB fixture, Node 24:
+ *
+ *     peak heap   442.5 MiB -> 48.1 MiB     97.2 bytes per input byte -> 10.5
+ *     wall clock    0.33 s  ->  0.41 s
+ *
+ * A second full walk costs 25% rather than 100% because the walk was never the
+ * expensive half: allocating and keeping 177 800 message objects was, and the
+ * second walk reuses the memory the first one finished with.
+ *
+ * `tools/memory/retention.test.ts` is the measurement, and it asserts both
+ * halves: that this path holds {@link MAXIMUM_RETAINED_BYTES_PER_INPUT_BYTE}
+ * and that the array-building path does not, so the bound cannot be quietly
+ * raised until anything passes it.
+ *
+ * @throws {FitDecodeError} exactly as `streamFitContainer` does.
+ */
+export function decodeFitActivityFromBytes(bytes: Uint8Array): FitDecodeResult {
+  const collector = createDescriptionCollector();
+  const described = streamFitContainer(bytes, collector.accept);
+  const assembler = createActivityAssembler(collector.descriptions, collector.descriptionList, [
+    ...described.faults,
+  ]);
+  streamFitContainer(bytes, assembler.accept);
+  return assembler.finish(described.header);
 }

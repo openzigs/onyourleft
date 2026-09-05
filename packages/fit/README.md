@@ -101,6 +101,45 @@ field, because the message that reports a rejected latitude and the message that
 cadence are written by the same code, and an exemption is where the next coordinate leaks into a
 public CI log.
 
+### What decoding a file costs, and why it is a number rather than a hope — #127
+
+`decodeFitActivity` **streams**. It walks the record stream twice — once to gather the
+`field_description` messages, which have to be complete before any record is mapped, and once to
+assemble — and it never builds the intermediate `FitMessage[]` at all. What survives the call is the
+activity and nothing else.
+
+**The bound a caller may assume is `MAXIMUM_RETAINED_BYTES_PER_INPUT_BYTE`, exported from this
+package, and it is 32.** It is a constant in the code and never a value read from the file being
+decoded, which is the lesson [#27](https://github.com/openzigs/onyourleft/issues/27) left: the guard
+that failed there was bounded by the row's own declared sample count, so a hostile row raised its own
+ceiling.
+
+Measured on Node 24, on a 4.55 MiB file built by repeating the baseline ride 1 400 times:
+
+| | peak bytes of heap per byte of file | a 20 MiB ride |
+|---|---:|---|
+| `decodeFitActivity`, before #127 | 97.2 | ~1.9 GiB — the browser tab |
+| `decodeFitActivity`, now | 10.5 | ~210 MiB |
+| the declared ceiling | 32 | 640 MiB |
+
+The second walk costs wall clock, and less of it than a second walk sounds like: **0.33 s → 0.41 s**
+on the same file. Allocating and keeping 177 800 message objects was the expensive half, not walking
+the records.
+
+`decodeActivity(readFitContainer(bytes))` still works, still gives an identical result, and is still
+the shape that costs the array — `readFitContainer` is for callers that want every message at once
+and know the file is small. A new caller handed an untrusted file should use `decodeFitActivity`, or
+`streamFitContainer` if it wants the messages themselves.
+
+⚠️ **The measurement is a peak, and a peak is not observable with `process.memoryUsage()`.** A decode
+is synchronous, so nothing can sample the heap while it runs, and by the time it returns the
+intermediate has already become collectable — `heapUsed` after a forced collection reads 47.9 MiB for
+the array spelling and 48.4 MiB for the streaming one, which is to say it cannot tell them apart. So
+[`tools/memory/retention.test.ts`](tools/memory/retention.test.ts) runs each spelling in a child
+process whose old space is capped at `32 × the input's own length` and lets V8 decide, and it asserts
+**both directions**: the streaming decode has to fit, and the array-building one has to fail. A
+ceiling every implementation passes is a comment.
+
 ### A gap is `undefined`
 
 Every field of the decoded shape is optional, and a field the file did not record is `undefined` —
@@ -397,6 +436,20 @@ GPX/TCX readers to survive it — #128. It runs inside `pnpm run test` and adds 
   data section the header declared, and no decode may produce more output than the input could
   encode. The first is what catches a missing record-length check: `subarray` clamps rather than
   throwing, so a bounds bug in this decoder has no exception to watch for.
+- **Three more on the GPX/TCX arm, added by
+  [#149](https://github.com/openzigs/onyourleft/issues/149).** That arm watched the error type and
+  nothing else, and #149 proved what that was worth: removing the element-nesting-depth guard from
+  `src/xml/parse.ts` left the suite at 8 passed of 8. The reasoning above transfers verbatim, so the
+  arm now also asserts that a `<!DOCTYPE` was refused **at or before** the declaration rather than
+  somewhere after it; that a document the reader *accepted* did not nest past `MAXIMUM_DEPTH`; and
+  that no more track points, laps, faults, elements or **characters of text** came out than the
+  document had characters to encode. The last of those is entity expansion stated as arithmetic:
+  every escape this parser resolves contracts, so a reader that emitted more than it was handed
+  grew it from somewhere.
+- **The corpus had to grow for two of those to mean anything.** `deep-nesting.gpx` and
+  `deep-nesting.tcx` are committed fixtures because the fuzz cannot invent the attack: its cases are
+  byte substitutions and truncations, and no run of single-byte edits on a nominal file produces
+  three hundred levels of nesting.
 - **It repairs the checksums on half the mutations, deliberately.** A FIT file's trailing CRC is
   verified before any record is read, so a fuzzer that does not recompute it tests `bad-file-crc`
   tens of thousands of times and never reaches the record loop at all.
@@ -503,7 +556,12 @@ The defence is **two independent layers**, because one control is a single edit 
    references.** `&xxe;` in a document with no DOCTYPE is `unknown-entity` — never a silent empty
    string and never a passthrough.
 
-Plus a nesting depth limit of 256, against a document built out of ten megabytes of `<a>`.
+Plus a nesting depth limit of 256, against a document built out of ten megabytes of `<a>`. That
+third defence had **no fixture and no test that could see it removed** until
+[#149](https://github.com/openzigs/onyourleft/issues/149): deleting the check throws nothing at all,
+because the parser is iterative and simply accepts the document. `deep-nesting.gpx` and
+`deep-nesting.tcx` are the fixtures, and the fuzz invariant that a document the reader *accepted* did
+not nest past `MAXIMUM_DEPTH` is what turns their deletion red.
 
 **A character XML 1.0 forbids is refused on the way in and dropped on the way out.** A `&#1;` is
 `bad-character-reference`, and `escapeXmlText` removes any C0 control other than tab, line feed and
@@ -516,9 +574,14 @@ trusting the two to stay in step.
 
 Asserted against the **committed** hostile fixtures in
 [`tools/fixture-corpus/xml-corpus.test.ts`](tools/fixture-corpus/xml-corpus.test.ts):
-`xxe-external-entity.gpx`, `xxe-external-entity.tcx` and `billion-laughs.gpx`. Deleting either layer
-turns those tests red, which is what makes this paragraph a description of behaviour rather than a
-claim about intent.
+`xxe-external-entity.gpx`, `xxe-external-entity.tcx`, `billion-laughs.gpx`, `deep-nesting.gpx` and
+`deep-nesting.tcx`. Deleting any layer turns those tests red, which is what makes this paragraph a
+description of behaviour rather than a claim about intent.
+
+⚠️ **Layer 1 and layer 2 hide each other from an error-type check, and that is why the fuzz watches
+the offset.** Make the parser *skip* a DOCTYPE instead of refusing it and `billion-laughs.gpx` is
+still refused — layer 2 catches `&lol6;` — with the same error type, at a different place. #149's
+`assertDoctypeRefusedBeforeItsContents` is what notices the difference.
 
 **Nothing under `src/xml` reads a file, opens a socket or resolves a URI.** It cannot: `src/`
 compiles with `lib: ["ES2024"]` and `types: []`.
