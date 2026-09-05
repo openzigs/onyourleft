@@ -28,6 +28,14 @@
  * local copy is the only copy in existence (owner decision D6). So this belongs
  * in user-facing documentation, and `README.md` carries it.
  *
+ * **The bound is about a crash, and a crash is not the only way to lose a
+ * second.** A device clock corrected *backwards* mid-ride costs roughly the
+ * seconds it rewinds: readings stamped with the corrected clock land behind
+ * slots the engine has already sealed, and dropping them is what keeps the
+ * series monotonic and duplicate-free. That is the trade, not an oversight —
+ * but it is not silent either, and `README.md` says so too. The count is
+ * `session.clockRegressions` and the samples it cost are `session.dropped.late`.
+ *
  * Shortening the flush interval shortens the bound and costs an IndexedDB
  * transaction more often; five seconds is 2,880 transactions over four hours,
  * each writing about 85 packed bytes per channel. Lengthening it is a decision
@@ -47,6 +55,10 @@
  * recorder stops attempting. Any other write failure is **transient** — a
  * transaction aborted by a background tab, a momentary lock — so the flush
  * cursor stays where it was and the next tick tries the same window again.
+ *
+ * The terminal latch covers writes and **not** {@link Recorder.discard}: a
+ * delete is the operation that frees the space the latch is reporting, and it
+ * is the action the rider is being asked to take.
  */
 
 import {
@@ -85,13 +97,34 @@ export const DEFAULT_FLUSH_INTERVAL_SECONDS = 5;
 export const DEFAULT_LATE_TOLERANCE_SECONDS = 2;
 
 /**
- * The stated maximum data loss between checkpoints, in seconds.
+ * The bound on how much of a ride a crash can take, for a given configuration.
  *
- * Derived from the defaults above and the one open slot. See the table at the
- * top of this file; `recorder.test.ts` asserts a crash never loses more.
+ * The flush interval and the late tolerance are both per-recorder options, so
+ * the bound is a function of them and not a constant: a recorder built with
+ * `flushIntervalSeconds: 30` risks 33 seconds, and a UI that quoted
+ * {@link MAX_DATA_LOSS_SECONDS} at it would be quoting the wrong number at the
+ * rider. See the table at the top of this file for where each term comes from.
+ *
+ * The `+ 1` is the open slot rather than the sample interval: the grid is 1 Hz
+ * and `sampleInterval` is not an option a recorder built by this file varies.
  */
-export const MAX_DATA_LOSS_SECONDS =
-  DEFAULT_FLUSH_INTERVAL_SECONDS + DEFAULT_LATE_TOLERANCE_SECONDS + 1;
+export function maxDataLossSeconds(
+  options: Pick<RecorderOptions, 'flushIntervalSeconds' | 'lateToleranceSeconds'> = {},
+): number {
+  return (
+    (options.flushIntervalSeconds ?? DEFAULT_FLUSH_INTERVAL_SECONDS) +
+    (options.lateToleranceSeconds ?? DEFAULT_LATE_TOLERANCE_SECONDS) +
+    1
+  );
+}
+
+/**
+ * The stated maximum data loss between checkpoints **at the defaults**, in
+ * seconds. This is the number `README.md` gives as a product guarantee.
+ *
+ * `recorder.test.ts` asserts a crash never loses more.
+ */
+export const MAX_DATA_LOSS_SECONDS = maxDataLossSeconds();
 
 /**
  * The part of `@onyourleft/store`'s `ActivityStore` a recorder needs.
@@ -149,7 +182,13 @@ export interface RecorderOptions {
 /** A recording being written to disk as it happens. */
 export interface Recorder {
   readonly sessionId: RecordingSessionId;
-  /** The engine. Read `state`, `elapsedTime`, `movingTime` and `series()` from it. */
+  /**
+   * The engine. Read `state`, `elapsedTime`, `movingTime` and `series()` from
+   * it — and `clockRegressions` and `dropped`, which are how a UI can tell a
+   * rider that a corrected device clock cost them part of the ride. Exposed
+   * through the session rather than mirrored here, so there is one count and
+   * not two that can disagree.
+   */
   readonly session: RecordingSession<StreamChannelValue>;
   readonly storageState: RecorderStorageState;
   /** What the last failed write threw, for a UI that wants to say more than "failed". */
@@ -178,8 +217,20 @@ export interface Recorder {
    * the cursor where it was. @returns how many samples were written.
    */
   flush(): Promise<number>;
-  /** Removes this recording's checkpoint. What "discard the recovered ride" calls. */
-  discard(): Promise<void>;
+  /**
+   * Removes this recording's checkpoint. What "discard the recovered ride" calls.
+   *
+   * **Runs even when {@link Recorder.storageState} is `quota-exceeded`.** The
+   * terminal latch is right for a write and wrong for the one operation that
+   * *frees* space, which is what a rider who has just been told the device is
+   * full is being asked to do.
+   *
+   * @returns whether the recording is gone from disk — `true` also when there
+   * was nothing there to remove. A `false` leaves the reason in
+   * {@link Recorder.storageError}, because the caller needs to be able to say
+   * "that did not work" rather than showing a list the row is still in.
+   */
+  discard(): Promise<boolean>;
 }
 
 /** Starts a new recording. Nothing is written until `start`. */
@@ -338,6 +389,32 @@ function recorderOver(
     }
   }
 
+  /**
+   * Removes this recording, and deliberately **not** through {@link attempt}.
+   *
+   * A delete is not a write: it is the operation that frees the space the quota
+   * latch is reporting, so latching it off is latching off the remedy. It is
+   * also the only path that removes a stored GPS trace, and a discard that
+   * silently did nothing would leave one on the device after the rider asked
+   * for it to go.
+   *
+   * A success does not clear `storageState`: the device may still be full, and
+   * one row deleted does not prove the next chunk fits. What it clears is the
+   * recording.
+   *
+   * @returns whether the delete ran without error.
+   */
+  async function attemptDelete(): Promise<boolean> {
+    try {
+      await store.deleteRecordingSession(athleteId, sessionId);
+      return true;
+    } catch (error: unknown) {
+      storageError = error instanceof Error ? error : new Error(String(error));
+      storageState = isQuotaExceeded(error) ? 'quota-exceeded' : 'failed';
+      return false;
+    }
+  }
+
   const recorder: Recorder = {
     sessionId,
     session,
@@ -454,8 +531,8 @@ function recorderOver(
       return to - from;
     },
 
-    async discard(): Promise<void> {
-      await attempt(async () => store.deleteRecordingSession(athleteId, sessionId));
+    async discard(): Promise<boolean> {
+      return attemptDelete();
     },
   };
 

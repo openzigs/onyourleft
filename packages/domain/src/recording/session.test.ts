@@ -50,6 +50,16 @@ interface TestChannels {
 
 const T0 = 1_700_000_000;
 
+/**
+ * An offset far beyond any tolerance — `T0 + FAR_FUTURE` is in the year 2150.
+ *
+ * What a sensor with a wildly wrong clock, or a hostile one, reports. It is a
+ * number rather than a plausible-looking skew because the failure it guards is
+ * an allocation: the engine sizes arrays from instants, so the interesting case
+ * is the one that would size them to the cap.
+ */
+const FAR_FUTURE = 4_000_000_000;
+
 function at(offset: number) {
   return unixSeconds(T0 + offset);
 }
@@ -537,6 +547,59 @@ describe('untrusted timestamps', () => {
     expect(session.sampleCount).toBe(41);
   });
 
+  it('refuses a far-future reading offered while auto-paused, which is the wake path', () => {
+    // The guard has to run *before* the wake, not after it. Waking calls
+    // `resume(reading.at)`, and `resume` ratchets the timeline to the very
+    // instant the guard would then compare against — so a guard placed after
+    // the wake can never fire, whatever it says.
+    const session = started({
+      futureToleranceSeconds: 60,
+      autoPause: { after: seconds(10), isMoving: (reading) => reading.channel === 'speed' },
+    });
+    session.advanceTo(at(20));
+    expect(session.state).toBe('paused');
+    const before = session.sampleCount;
+
+    expect(session.observe(speed(FAR_FUTURE, 8))).toBe('future');
+
+    expect(session.dropped.future).toBe(1);
+    // Still paused: a timestamp this engine will not trust is not evidence the
+    // rider started pedalling either.
+    expect(session.state).toBe('paused');
+    expect(session.timeline).toBe(at(20));
+    expect(session.sampleCount).toBe(before);
+    // ...and the ride still records. A timeline dragged to the year 2150 would
+    // seal every remaining slot, so every genuine reading after it would be
+    // `late` and the recording would silently stop.
+    expect(session.observe(speed(21, 8))).toBe('recorded');
+    expect(session.state).toBe('recording');
+    expect(session.series().channels.speed?.[21]).toBe(8);
+  });
+
+  it('refuses a far-future sensor connection instant, and still records the sensor', () => {
+    // The third timeline-advancing entry point. `sensorConnected` and
+    // `sensorDisconnected` take an instant from outside exactly as `observe`
+    // does, so they are held to the same tolerance.
+    const session = started({ futureToleranceSeconds: 60 });
+    session.advanceTo(at(10));
+
+    session.sensorConnected('trainer-1', at(FAR_FUTURE));
+    expect(session.timeline).toBe(at(10));
+    expect(session.sampleCount).toBe(11);
+    // The connection itself is still recorded: the instant was refused, not
+    // the event.
+    expect(session.connectedSensors).toEqual(['trainer-1']);
+
+    session.sensorDisconnected('trainer-1', at(FAR_FUTURE));
+    expect(session.timeline).toBe(at(10));
+    expect(session.sampleCount).toBe(11);
+    expect(session.connectedSensors).toEqual([]);
+
+    // A plausible instant still moves it. This is a tolerance, not a ban.
+    session.sensorConnected('strap-1', at(40));
+    expect(session.timeline).toBe(at(40));
+  });
+
   it('caps the series however long the session runs', () => {
     const session = started({ maxSampleCount: 100, futureToleranceSeconds: 10_000 });
     session.advanceTo(at(5_000));
@@ -726,6 +789,29 @@ describe('restoring an interrupted session', () => {
     expect(once.sampleCount).toBe(first.sampleCount);
     expect(twice.sampleCount).toBe(first.sampleCount);
     expect(twice.channels.power).toEqual(first.channels.power);
+  });
+
+  it('restores a header-only snapshot as the one second it had entered, and stays there', () => {
+    // #46 writes the session header before the first chunk, so a crash in that
+    // window recovers `sampleCount: 0` — the one snapshot `snapshot()` itself
+    // never produces, because a started recording has entered its first second.
+    // The restore therefore rounds up to that second rather than down to
+    // nothing, and the point of the test is the second line: it does not keep
+    // rounding up every time the tab is reopened.
+    const headerOnly = {
+      id: 'header-only',
+      startedAt: unixSeconds(T0),
+      sampleInterval: seconds(1),
+      sampleCount: 0,
+      channels: {},
+      pauses: [],
+    };
+    const once = restoreRecordingSession<TestChannels>({}, headerOnly).snapshot();
+    const twice = restoreRecordingSession<TestChannels>({}, once).snapshot();
+
+    expect(once.sampleCount).toBe(1);
+    expect(twice.sampleCount).toBe(1);
+    expect(once.startedAt).toBe(unixSeconds(T0));
   });
 
   it('refuses a snapshot whose channel lengths disagree with its sample count', () => {

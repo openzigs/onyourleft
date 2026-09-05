@@ -7,10 +7,15 @@
  *
  * #46 names the trap by name: *"the natural test appends samples, then asserts
  * against the recorder's in-memory buffer. That test passes whether or not a
- * single byte reached durable storage."* So no assertion below reads
- * `recorder.session`. The recorder object is **dropped**, every connection is
- * closed, and what is asserted is what a fresh handle can produce — which is
- * what a rider gets back after a crash.
+ * single byte reached durable storage."* So no assertion below reads a
+ * **sample** out of `recorder.session`. The recorder object is **dropped**,
+ * every connection is closed, and what is asserted is what a fresh handle can
+ * produce — which is what a rider gets back after a crash.
+ *
+ * The exception, and it is not the trap: a handful of cases read the recorder's
+ * own **counters** — `storageState`, `clockRegressions`, `dropped` — because
+ * there the counter *is* the subject, and each of those cases still reads the
+ * ride itself back off disk.
  *
  * `@onyourleft/store/testing`'s harness supplies that guarantee mechanically:
  * its `read` discards every open handle before it opens another, so there is no
@@ -29,6 +34,7 @@ import {
   type UnixSeconds,
   type Watts,
 } from '@onyourleft/domain';
+import { decodeFitActivity, encodeFitActivity, type FitRecord } from '@onyourleft/fit';
 import { deviceId, WEB_BLUETOOTH, type SensorMeasurement } from '@onyourleft/sensors';
 import { athleteId, recordingSessionId, type RecordingSessionId } from '@onyourleft/store';
 import {
@@ -46,6 +52,7 @@ import {
   createRecorder,
   listRecoverableRecordings,
   MAX_DATA_LOSS_SECONDS,
+  maxDataLossSeconds,
   recoverRecorder,
   type Recorder,
   type RecordingCheckpointStore,
@@ -209,6 +216,89 @@ describe('a whole ride survives the tab being killed', () => {
   });
 });
 
+describe('gap versus zero, from the recorder to the bytes of a FIT file', () => {
+  it('keeps a dropout absent and a coasting zero a zero, through storage and #31’s encoder', async () => {
+    // #45's first acceptance criterion asks for the distinction to survive
+    // "both in the in-memory series and in the FIT file written by #31", and
+    // #31 landed in #136 — so this is the whole span: recorder → IndexedDB →
+    // a fresh connection → `encodeFitActivity` → bytes → `decodeFitActivity`.
+    //
+    // The one thing this test must not do is read `recorder.session`: the
+    // series it encodes comes back off disk on a connection this process never
+    // wrote through.
+    const recorder = newRecorder();
+    await recorder.start(at(0));
+    for (let t = 0; t < 120; t += 1) {
+      // The rider coasts from t=30 to t=59: **zero power is a reading**.
+      recorder.observeReading(powerReading(t, t >= 30 && t < 60 ? 0 : 220));
+      recorder.observeReading(speedReading(t, 9));
+      // The strap drops over exactly the same window: **no heart rate is an
+      // absence**. Same slots, opposite meanings — that is the whole criterion.
+      if (t < 30 || t >= 60) {
+        recorder.observeReading({ channel: 'heartRate', value: beatsPerMinute(150), at: at(t) });
+      }
+      await recorder.tick(at(t));
+    }
+    await recorder.stop(at(119));
+    const sessionId = recorder.sessionId;
+
+    await harness.discard();
+    const recovered = await harness.read(async (store) =>
+      store.recoverRecording(ATHLETE_A, sessionId),
+    );
+    const power = recovered?.channels.power ?? [];
+    const heartRate = recovered?.channels.heartRate ?? [];
+
+    // Off disk first, because a file encoded from a series that had already
+    // lost the distinction would still pass every assertion below.
+    expect(recovered?.sampleCount).toBe(120);
+    expect(power[45]).toBe(0);
+    expect(heartRate[45]).toBeUndefined();
+
+    // The one mapping this criterion needs: an absent sample writes no field,
+    // and a zero writes a zero. `undefined` is what the encoder is told to omit
+    // and there is no sentinel anywhere in between.
+    const records: FitRecord[] = [];
+    for (let index = 0; index < (recovered?.sampleCount ?? 0); index += 1) {
+      records.push({
+        timestamp: { kind: 'instant', instant: at(index) },
+        position: undefined,
+        altitude: undefined,
+        distance: undefined,
+        speed: undefined,
+        heartRate: heartRate[index],
+        cadence: undefined,
+        power: power[index],
+        temperature: undefined,
+        developerFields: [],
+      });
+    }
+
+    const encoded = encodeFitActivity({ records });
+    const decoded = decodeFitActivity(encoded.bytes);
+    expect(encoded.faults).toEqual([]);
+    expect(decoded.faults).toEqual([]);
+    expect(decoded.activity.records).toHaveLength(120);
+
+    for (let index = 30; index < 60; index += 1) {
+      const record = decoded.activity.records[index];
+      // In the file itself: heart rate is *absent*, not zero and not
+      // interpolated, over exactly the seconds power is a genuine zero.
+      expect(record?.heartRate).toBeUndefined();
+      expect(record?.power).toBe(0);
+    }
+    expect(decoded.activity.records[29]?.heartRate).toBe(150);
+    expect(decoded.activity.records[60]?.heartRate).toBe(150);
+    expect(decoded.activity.records[29]?.power).toBe(220);
+    // Thirty absent heart-rate seconds in the file, and not one more; and no
+    // power sample was lost to the encoder at all.
+    expect(
+      decoded.activity.records.filter((record) => record.heartRate === undefined),
+    ).toHaveLength(30);
+    expect(decoded.activity.records.filter((record) => record.power === undefined)).toHaveLength(0);
+  });
+});
+
 describe('the data-loss bound between checkpoints', () => {
   it('never holds more than the stated bound in memory alone', async () => {
     const recorder = newRecorder();
@@ -249,6 +339,77 @@ describe('the data-loss bound between checkpoints', () => {
     expect(lost).toBe(heldInMemory);
     // What did survive is the ride, not a plausible-looking prefix.
     expect(recovered?.channels.power?.slice(0, 10)).toEqual(offered.power.slice(0, 10));
+  });
+});
+
+describe('the data-loss bound for a recorder that is not at the defaults', () => {
+  it('is the bound this recorder was built with, which the constant would understate', async () => {
+    // Both terms of the bound are per-recorder options, so a recorder that
+    // checkpoints every thirty seconds risks thirty-three and not eight. The
+    // interesting assertion is the last one: at this configuration the constant
+    // is *wrong*, so a UI quoting it would be telling the rider a number the
+    // recorder does not honour.
+    const flushIntervalSeconds = 30;
+    const bound = maxDataLossSeconds({ flushIntervalSeconds });
+    const recorder = newRecorder({ flushIntervalSeconds });
+    // Long enough to have checkpointed ten times, and stopping just short of
+    // the eleventh — which is where the loss is at its worst.
+    const offered = await ride(recorder, 329);
+    const sessionId = recorder.sessionId;
+
+    // The tab dies here: no `stop`, no final flush.
+    await harness.discard();
+    const recovered = await harness.read(async (store) =>
+      store.recoverRecording(ATHLETE_A, sessionId),
+    );
+    const lost = offered.power.length - (recovered?.sampleCount ?? 0);
+
+    expect(lost).toBeLessThanOrEqual(bound);
+    expect(lost).toBeGreaterThan(MAX_DATA_LOSS_SECONDS);
+    expect(bound).toBe(33);
+    expect(maxDataLossSeconds()).toBe(MAX_DATA_LOSS_SECONDS);
+  });
+});
+
+describe('a device clock corrected backwards mid-ride', () => {
+  it('costs the rewound seconds, and counts them where a UI can read them', async () => {
+    const recorder = newRecorder();
+    await recorder.start(at(0));
+    for (let t = 0; t < 120; t += 1) {
+      recorder.observeReading(powerReading(t, 200));
+      recorder.observeReading(speedReading(t, 9));
+      await recorder.tick(at(t));
+    }
+
+    // NTP pulls the clock back sixty seconds. The ride carries on, ticking and
+    // notifying with the corrected time.
+    for (let t = 60; t < 120; t += 1) {
+      recorder.observeReading(powerReading(t, 999));
+      await recorder.tick(at(t));
+    }
+    await recorder.stop(at(120));
+    const sessionId = recorder.sessionId;
+
+    // The loss is real and it is *counted*: this is the exception to the
+    // eight-second bound, and a rider can be told about it.
+    expect(recorder.session.clockRegressions).toBeGreaterThan(0);
+    expect(recorder.session.dropped.late).toBeGreaterThan(0);
+
+    await harness.discard();
+    const recovered = await harness.read(async (store) =>
+      store.recoverRecording(ATHLETE_A, sessionId),
+    );
+    // What is on disk is the ride as first recorded — one sample per second, in
+    // order, with the rewound readings dropped rather than overwriting the
+    // seconds they collided with. The exception is the two seconds still inside
+    // the late tolerance when the clock stepped: those slots were open, so the
+    // newest value for them wins, which is the tolerance doing its job and not
+    // the rewind winning.
+    const power = recovered?.channels.power ?? [];
+    expect(recovered?.sampleCount).toBe(121);
+    expect(power[80]).toBe(200);
+    expect(power.slice(0, 118).filter((sample) => sample === 999)).toEqual([]);
+    expect(power.filter((sample) => sample === 999)).toHaveLength(2);
   });
 });
 
@@ -485,6 +646,49 @@ describe('running out of storage', () => {
     await recorder.flush();
     expect(bounded.attempts()).toBe(2);
     expect(recorder.checkpoints).toBe(1);
+  });
+
+  it('still discards after quota is refused, because a delete is the thing that frees space', async () => {
+    // The terminal latch is right for a write and wrong for a delete. A rider
+    // told the device is full is being asked to remove something; a discard
+    // that silently did nothing would leave the only action the message asks
+    // for unavailable, and the row it left behind holds a GPS trace.
+    const recorder = newRecorder({ store: quotaBoundStore(1).store });
+    await ride(recorder, 60);
+    const sessionId = recorder.sessionId;
+    expect(recorder.storageState).toBe('quota-exceeded');
+
+    await expect(recorder.discard()).resolves.toBe(true);
+
+    await harness.discard();
+    await expect(
+      harness.read(async (store) => store.recoverRecording(ATHLETE_A, sessionId)),
+    ).resolves.toBeUndefined();
+    await expect(
+      harness.read(async (store) => store.listRecordingSessions(ATHLETE_A)),
+    ).resolves.toEqual([]);
+  });
+
+  it('says a discard did not happen rather than returning as though it had', async () => {
+    const real = harnessStore();
+    const recorder = newRecorder({
+      store: {
+        ...real,
+        deleteRecordingSession: () => Promise.reject(new Error('the transaction was aborted')),
+      },
+    });
+    await ride(recorder, 10);
+    const sessionId = recorder.sessionId;
+
+    await expect(recorder.discard()).resolves.toBe(false);
+    expect(recorder.storageState).toBe('failed');
+    expect(recorder.storageError?.message).toBe('the transaction was aborted');
+
+    // And the recording is still there, which is what the `false` was about.
+    await harness.discard();
+    await expect(
+      harness.read(async (store) => store.recoverRecording(ATHLETE_A, sessionId)),
+    ).resolves.toBeDefined();
   });
 
   it('retries the same window after a transient failure, and catches up', async () => {

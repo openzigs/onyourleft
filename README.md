@@ -48,6 +48,13 @@ and the one second currently being recorded. There is no server in this mileston
 backup, no re-upload and no support ticket — the copy on the device is the only copy in existence,
 and everything else about the recorder follows from that.
 
+That bound is about a crash, and a crash is not the only way to lose a second. If the device's
+clock is corrected **backwards** mid-ride — an NTP step, or a laptop waking with the wrong time —
+the ride loses roughly the seconds the clock rewinds, because readings stamped with the corrected
+time land behind seconds already recorded and are dropped rather than overwriting them. That is what
+keeps the recording in order, and the client counts both the steps and the samples they cost rather
+than passing over them.
+
 Two things the recovered ride keeps that a naive one would not: a sensor dropout comes back as
 **missing data**, never as zeroes, and a pause comes back as a **pause** rather than as a dropout
 that happens to look like one. If the device runs out of storage mid-ride the recording does not

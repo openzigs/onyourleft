@@ -54,6 +54,18 @@
  * long the session runs. Neither refusal throws: an exception here would let one
  * bad notification end a four-hour ride, which is a worse outcome than the
  * dropped sample it is trying to report.
+ *
+ * **Every instant that arrives from outside the caller's own clock is checked
+ * by the same helper, before anything moves.** There are three such paths —
+ * `observe`, `sensorConnected` and `sensorDisconnected` — and the timeline is a
+ * quantity a state transition mutates, so a check written *after* a transition
+ * compares that quantity against itself and can never fire. `observe`'s check
+ * therefore runs above the auto-pause wake, which resumes at the reading's own
+ * instant, and the other two go through `ratchetExternal`. The host's own
+ * lifecycle instants (`start`, `pause`, `resume`, `stop`, `advanceTo`) are
+ * deliberately *not* held to the tolerance: a throttled tab that resumes after
+ * ten minutes has to be able to say so, and a forward step there is a gap
+ * rather than an allocation.
  */
 
 import { seconds, unixSeconds, type Seconds, type UnixSeconds } from '../quantities';
@@ -386,9 +398,19 @@ function newSession<Channels extends RecordingChannelMap>(
     // by one empty slot every time it runs, because the timeline would already
     // have entered the next slot. A recording recovered, snapshotted and
     // recovered again would gain a second each round. Anchoring on the last
-    // slot's own instant makes snapshot and restore exactly idempotent, and
-    // costs less than one sample interval of precision on where the
-    // interruption began.
+    // slot's own instant makes snapshot and restore idempotent for every
+    // snapshot a recording produces, and costs less than one sample interval of
+    // precision on where the interruption began.
+    //
+    // **One snapshot is not one a recording produces, and it is not idempotent:
+    // `sampleCount: 0`.** `session.snapshot()` of a started session always
+    // reports at least one slot, because a recording that has started has by
+    // definition entered its first second — but #46 writes the session header
+    // before the first chunk, so a crash in that window recovers a header with
+    // no samples. Restoring it yields one empty leading slot rather than none,
+    // which is that first second and not an invented one. Restoring *that*
+    // snapshot is stable, so nothing accumulates; `session.test.ts` pins both
+    // halves.
     const lastRecoveredSlot = from.startedAt + Math.max(0, from.sampleCount - 1) * interval;
     timeline = Math.max(from.startedAt, lastRecoveredSlot);
     lastMovementAt = timeline;
@@ -459,6 +481,41 @@ function newSession<Channels extends RecordingChannelMap>(
       timeline = at;
     }
     return timeline;
+  }
+
+  /**
+   * Whether an instant that arrived from *outside* the caller's own clock is
+   * close enough to the timeline to be allowed to move it.
+   *
+   * Read this against {@link ratchetExternal} below, and note where each is
+   * called from. The distinction is the caller, not the value: `advanceTo`,
+   * `start`, `pause`, `resume` and `stop` carry the host's own clock, and a
+   * throttled tab that resumes after ten minutes has to be able to say so — so
+   * those are not held to a tolerance. A sensor reading's `at` and a connection
+   * event's `at` are the untrusted ones, and they are the ones that can size an
+   * array.
+   */
+  function withinFutureTolerance(at: number): boolean {
+    return at <= timeline + futureTolerance;
+  }
+
+  /**
+   * The **only** way an instant from outside may move the timeline.
+   *
+   * Every such path goes through here rather than checking for itself, because
+   * a check written next to one caller is a check the next caller does not
+   * have — and because a guard placed *after* a call that ratchets is not a
+   * guard at all: `resume()` and `ratchet()` both move the very quantity the
+   * comparison is against, so by the time it runs it can only ever be false.
+   *
+   * @returns whether `at` was trusted. An untrusted instant moves nothing.
+   */
+  function ratchetExternal(at: number): boolean {
+    if (!withinFutureTolerance(at)) {
+      return false;
+    }
+    ratchet(at);
+    return true;
   }
 
   function closeOpenPause(at: number): void {
@@ -609,6 +666,15 @@ function newSession<Channels extends RecordingChannelMap>(
         dropped['not-recording'] += 1;
         return 'not-recording';
       }
+      // Before the wake below, and before anything else that could move the
+      // timeline. `session.resume(reading.at)` ratchets to this reading's own
+      // instant, so a tolerance checked after it compares the instant against
+      // itself and can never fire — and an untrusted instant that got that far
+      // would seal every slot behind it, which silently ends the recording.
+      if (!withinFutureTolerance(reading.at)) {
+        dropped.future += 1;
+        return 'future';
+      }
       if (state === 'paused') {
         const wakes =
           pauses.at(-1)?.reason === 'automatic' &&
@@ -622,10 +688,6 @@ function newSession<Channels extends RecordingChannelMap>(
         // pause is never ended this way: a rider who pressed pause at a cafe
         // and knocked the cranks has not restarted their ride.
         session.resume(reading.at);
-      }
-      if (reading.at > timeline + futureTolerance) {
-        dropped.future += 1;
-        return 'future';
       }
       // A reading is itself evidence that time has passed, so it moves the
       // timeline — but only forward, exactly like `advanceTo`.
@@ -657,7 +719,11 @@ function newSession<Channels extends RecordingChannelMap>(
 
     sensorConnected(sensorId: string, at: UnixSeconds): void {
       if (state !== 'idle' && state !== 'stopped') {
-        ratchet(at);
+        // The instant is held to the same tolerance a reading's is, and for the
+        // same reason: it comes from a device event. A refused instant costs
+        // nothing — the next tick moves the timeline — while an accepted one in
+        // the year 2150 would end the ride.
+        ratchetExternal(at);
       }
       if (!sensors.includes(sensorId)) {
         sensors.push(sensorId);
@@ -666,7 +732,7 @@ function newSession<Channels extends RecordingChannelMap>(
 
     sensorDisconnected(sensorId: string, at: UnixSeconds): void {
       if (state !== 'idle' && state !== 'stopped') {
-        ratchet(at);
+        ratchetExternal(at);
       }
       const index = sensors.indexOf(sensorId);
       if (index >= 0) {

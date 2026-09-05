@@ -60,6 +60,9 @@ importers:
         specifier: 19.2.8
         version: 19.2.8(react@19.2.8)
     devDependencies:
+      '@onyourleft/fit':
+        specifier: workspace:*
+        version: link:../../packages/fit
       '@types/node':
         specifier: 24.13.3
         version: 24.13.3
