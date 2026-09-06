@@ -137,7 +137,15 @@ describe('export → downgrade → re-import', () => {
     // it — and a `CryptoKey` is exactly such a reference, which is why no key
     // material can be in here.
     const file = JSON.stringify(exported);
-    expect(file).not.toContain('privateKey');
+    // Asserted as a round trip rather than as `not.toContain('privateKey')`,
+    // which cannot fail: `Export` has no such member, so that string was a
+    // grep for something the type forbids. This one **can** fail — any member
+    // that survived only as a live object reference (a `CryptoKey`, a `Map`, a
+    // `Date`) comes back different or not at all — which is the property the
+    // comment above is actually about. The private key's absence is asserted
+    // where it has bytes to look for: `identity-safety.test.ts`, and the
+    // second test in this file.
+    expect(JSON.parse(file)).toEqual(exported);
 
     // --- 3. Downgrade: the newer database is removed, and an older build's --
     //        schema is created in its place. This is what "run the previous
@@ -159,20 +167,38 @@ describe('export → downgrade → re-import', () => {
     }
     older.close();
 
-    // --- 4. The records still verify, and the older build's rows are intact -
+    // --- 4. Upgrade again and re-import the records through the public write
+    //        path, which is what "re-import" means. Reopening at version 4 is
+    //        what an athlete does by running the newer build again.
     const back = openActivityStore(databaseName);
     const activities = await back.listActivitySummaries(owner);
-    back.close();
-
     expect(activities.map((activity) => activity.id).sort()).toEqual(
       rides.map((ride) => ride.id).sort(),
     );
+    expect(reimported.records).toHaveLength(2);
     for (const row of reimported.records) {
-      await expect(verifyRecordSignature(row.record, webCryptoVerifier)).resolves.toMatchObject({
+      await back.putActivityRecord(row);
+    }
+    back.close();
+
+    // --- 5. And they verify on a FRESH connection, read back through the same
+    //        path a real consumer uses. Verifying `reimported` here instead
+    //        would only prove that `JSON.parse` round-trips an object this test
+    //        is still holding — the "wrong harness" shape in CLAUDE.md §5, and
+    //        blind to a re-import that acknowledged the write and stored
+    //        nothing.
+    const reopened = openActivityStore(databaseName);
+    const readBack = await Promise.all(
+      rides.map(async (ride) => reopened.getActivityRecord(owner, ride.id)),
+    );
+    reopened.close();
+
+    expect(readBack.filter((row) => row !== undefined)).toHaveLength(2);
+    for (const row of readBack) {
+      await expect(verifyRecordSignature(row?.record, webCryptoVerifier)).resolves.toMatchObject({
         status: 'verified',
       });
     }
-    expect(reimported.records).toHaveLength(2);
   });
 
   it('cannot bring the private key back, and says so by having nowhere to put it', async () => {

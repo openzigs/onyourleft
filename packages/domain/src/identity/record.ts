@@ -36,14 +36,21 @@
  * the duration — which is what a public activity list shows anyway — and
  * nothing about where.
  *
- * That is enforced three ways, because a comment is not enforcement:
+ * That is enforced four ways, because a comment is not enforcement — and the
+ * first of them is weaker than it looks, which is why the second exists:
  *
- * 1. {@link ActivityClaims} has no coordinate member, so a literal carrying one
- *    fails to compile (excess property checking).
- * 2. {@link parseSignedActivityRecord} rejects **any** member it does not name,
+ * 1. {@link ActivityClaims} has no coordinate member, so an object **literal**
+ *    carrying one fails to compile (excess property checking). ⚠️ That check
+ *    fires for literals **only**. A variable of a structurally wider type is
+ *    assignable to `ActivityClaims` with no error whatsoever, so this bullet
+ *    on its own does not stop a `latitude` reaching the signing bytes.
+ * 2. `signActivityRecord` rejects **any** claim member it does not name, at
+ *    run time, through the same `assertClaims` the parser uses. This is the
+ *    one that holds for a non-literal caller.
+ * 3. {@link parseSignedActivityRecord} rejects **any** member it does not name,
  *    at both levels, so a record arriving over the wire with a `latitude`
  *    cannot be parsed into one this build will verify.
- * 3. `record-safety.test.ts` serialises a record built from the widest fixture
+ * 4. `record-safety.test.ts` serialises a record built from the widest fixture
  *    the fixtures offer and fails if the text contains a coordinate-shaped
  *    member name.
  *
@@ -318,10 +325,20 @@ export async function verifyRecordSignature(
 }
 
 /**
- * The full check: the file's bytes, then the signature.
+ * The full check: the signature, then the file's bytes.
+ *
+ * The order is the one `docs/architecture.md` publishes — verify at step 4,
+ * hash independently at step 5 — and it is load-bearing rather than
+ * incidental. See the comment in the body.
  *
  * @param fileDigest - the SHA-256 of the activity file **as it is now**, from
  * {@link Sha256}. Compared against the record's `contentHash`.
+ * @throws {IdentityError} if `fileDigest` is not {@link DIGEST_BYTES} bytes.
+ * Deliberately a throw rather than a sixth {@link RecordVerification}: every
+ * status in that union is a statement about the *record*, and a caller that
+ * passed the wrong number of bytes has a bug in itself, not evidence about
+ * somebody's ride. Answering it with a status would let that bug be logged as
+ * a failed verification and never fixed.
  */
 export async function verifyActivityRecord(
   value: unknown,
@@ -333,16 +350,27 @@ export async function verifyActivityRecord(
   }
   const record = parsed.record;
 
-  // The content check runs **first**, and its failure is reported as itself.
-  // The signature over a record whose file has changed is still valid — the
-  // signer hashed the file as it was — so a verifier that checked the signature
-  // first would report a pass, and one that folded the two together would
-  // report a forgery. Neither is what happened.
+  // The signature is checked **first**, and its failure short-circuits.
+  // `content-mismatch` is documented one screen up as an *authenticated*
+  // answer — "the record is authentic; the file is not the one it vouches
+  // for" — and a verifier that compared the hash first would hand that answer,
+  // and the attacker-supplied `expected` string inside it, to a wholly forged
+  // record that was never signed by anybody.
+  //
+  // Checking the signature first does **not** collapse the distinction the
+  // issue asks for, because this does not return on a good signature: it falls
+  // through to the content comparison. A record whose file changed by one byte
+  // still comes back `content-mismatch` and not `signature-mismatch`, which is
+  // what `record.test.ts` pins from both directions.
+  const signature = await checkSignature(record, options.verifier);
+  if (signature.status !== 'verified') {
+    return signature;
+  }
   const actual = formatContentHash(options.fileDigest);
   if (actual !== record.contentHash) {
     return { status: 'content-mismatch', expected: record.contentHash, actual };
   }
-  return checkSignature(record, options.verifier);
+  return signature;
 }
 
 /**
@@ -518,9 +546,28 @@ function parseClaims(
  * format has two definitions and the stricter one is whichever code path a
  * reader happened to look at.
  *
+ * **That includes the closed member set**, which is why the unknown-member
+ * check is here and not only in {@link parseClaims}. TypeScript's excess
+ * property check fires on object **literals** only, so a caller holding a
+ * variable of a structurally wider type — a row read from somewhere, a spread
+ * of a bigger object — assigns to `ActivityClaims` with no error at all. That
+ * is how a `latitude` reached the canonical signing bytes with a clean
+ * typecheck, a passing lint and a green suite: the build would sign it, and
+ * then {@link parseSignedActivityRecord} would refuse the record the same
+ * build had just produced. ADR 0004's item 1 is a property of what this
+ * package **writes** as much as of what it reads, so it is checked at runtime
+ * on both paths.
+ *
  * @throws {IdentityError}
  */
 function assertClaims(claims: ActivityClaims): void {
+  const unknownMember = firstUnknownMember(
+    claims as unknown as Record<string, unknown>,
+    CLAIM_MEMBERS,
+  );
+  if (unknownMember !== undefined) {
+    throw new IdentityError(`a record's claims must not carry the member "${unknownMember}"`);
+  }
   assertNonEmptyString(claims.activityId, 'activityId');
   assertString(claims.name, 'name');
   assertNonEmptyString(claims.startedAtTimeZone, 'startedAtTimeZone');

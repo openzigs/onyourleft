@@ -175,6 +175,33 @@ describe('signActivityRecord — what it refuses to sign', () => {
   ])('refuses %s', async (_label, claims) => {
     await expect(sign(claims)).rejects.toThrow(IdentityError);
   });
+
+  it('refuses a claim member the format does not name, from a variable and not a literal', async () => {
+    // ⚠️ The distinction is the whole test, and every assignment below is
+    // deliberate. TypeScript's excess property check fires on object
+    // **literals** only, so `{ ...CLAIMS, latitude: 51.5074 }` passed straight
+    // to `sign` would be a compile error — and a value of a structurally wider
+    // type, which is what a caller spreading a row or a bigger domain object
+    // actually holds, is assignable to `ActivityClaims` with no error at all.
+    //
+    // Without the member check inside `assertClaims` this build signs it: the
+    // canonical bytes come out carrying `"latitude":51.5074` — a coordinate
+    // inside the artefact ADR 0004 exists to keep coordinates out of — and
+    // `parseSignedActivityRecord` then refuses the record this same build has
+    // just produced.
+    const wider: ActivityClaims & { readonly latitude: number } = { ...CLAIMS, latitude: 51.5074 };
+    const claims: ActivityClaims = wider;
+
+    await expect(sign(claims)).rejects.toThrow(/latitude/);
+  });
+
+  it('signs nothing the parser would then refuse — the two directions are one predicate', async () => {
+    // The property the docstring on `assertClaims` claims, asserted rather
+    // than described: anything `signActivityRecord` produces parses back.
+    const record = await sign();
+
+    expect(parseSignedActivityRecord(record)).toEqual({ ok: true, record });
+  });
 });
 
 describe('verifyActivityRecord — the five answers', () => {
@@ -211,6 +238,45 @@ describe('verifyActivityRecord — the five answers', () => {
       status: 'verified',
       record,
     });
+  });
+
+  it('reports signature-mismatch — not content-mismatch — for a wholly forged record', async () => {
+    // The ordering test, and the reason the signature is checked first.
+    // `content-mismatch` is documented as an *authenticated* answer: "the
+    // record is authentic; the file is not the one it vouches for". Nothing
+    // below was ever signed by anybody — the key and the signature are made up
+    // and the content hash is a string the forger chose — so answering
+    // `content-mismatch` would assert authenticity about a forgery, and would
+    // hand the caller the forger's own `expected` string to display.
+    //
+    // Note that the file digest deliberately does **not** match the record's
+    // contentHash. That is what makes this test sensitive to the order: under
+    // a content-first verifier it returns `content-mismatch` and this fails.
+    const forged = {
+      ...(await sign()),
+      publicKey: 'ab'.repeat(32),
+      signature: 'ff'.repeat(64),
+      contentHash: await contentHashOf(new Uint8Array([0x99]), stubSha256),
+    };
+
+    const outcome = await verifyActivityRecord(forged, {
+      verifier: stubVerifier,
+      fileDigest: await stubSha256(FILE_BYTES),
+    });
+
+    expect(outcome).toEqual({ status: 'signature-mismatch' });
+  });
+
+  it('throws rather than answering when the caller hands it a digest of the wrong length', async () => {
+    // Deliberately not a sixth status. Every member of `RecordVerification` is
+    // a statement about the *record*; a digest of the wrong length is a bug in
+    // the caller, and answering it with a status would let that bug be logged
+    // as somebody's ride failing to verify.
+    const record = await sign();
+
+    await expect(
+      verifyActivityRecord(record, { verifier: stubVerifier, fileDigest: new Uint8Array(16) }),
+    ).rejects.toThrow(IdentityError);
   });
 
   it('reports signature-mismatch when a claim is edited after signing', async () => {

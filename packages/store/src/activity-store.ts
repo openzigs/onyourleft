@@ -1070,14 +1070,32 @@ export class ActivityStore {
   /**
    * Files a signed record against the ride it vouches for.
    *
-   * Three refusals, all inside one transaction:
+   * Three refusals:
    *
    * 1. the activity must exist **and belong to this athlete** — a record filed
    *    against somebody else's ride is the cross-athlete shape;
    * 2. the record's own `claims.activityId` must be the ride it is being filed
    *    against. Without this a valid, correctly signed record for ride A could
    *    be stored as the record for ride B and would verify perfectly, which is
-   *    a forgery this store would have performed itself.
+   *    a forgery this store would have performed itself;
+   * 3. if this athlete has a device key, the record must be signed by **that**
+   *    key. `putDeviceKey` makes an identity write-once and ADR 0014 rules out
+   *    rotation in Phase 1, so an athlete has exactly one public key and a
+   *    record bearing another one is not theirs. Nothing in this build reaches
+   *    it today — every record is signed by the key `ensureSigningKey`
+   *    returned — but [#37](https://github.com/openzigs/onyourleft/issues/37)'s
+   *    import is a path from a file into this method, and ADR 0014 names it as
+   *    constrained by this. A record stored here is re-served and re-exported
+   *    as the athlete's own, so accepting a foreign-signed one would make the
+   *    store the thing that vouched for it.
+   *
+   *    **An athlete with *no* device key is allowed**, deliberately: that is
+   *    the state after the export → downgrade → re-import rollback, where the
+   *    non-extractable private key cannot come back and the records must. If a
+   *    later ADR adds the additive rotation ADR 0014 describes, this widens to
+   *    "any key in the athlete's key history" — it does not get deleted.
+   *
+   * The last two are inside one transaction with the read they depend on.
    *
    * There is deliberately **no** `#requireNotOwnedByAnother` here, unlike on
    * every other write path. It would be unreachable: an activity id belongs to
@@ -1098,18 +1116,29 @@ export class ActivityStore {
       );
     }
     const persisted = toPersistedActivityRecord(row);
-    await this.#db.transaction('rw', [this.#activities, this.#activityRecords], async () => {
-      const activity = await this.#activities
-        .where(INDEX.activityByAthleteAndId)
-        .equals([row.athleteId, row.activityId])
-        .first();
-      if (activity === undefined) {
-        throw new StoreReferentialError(
-          `no activity ${row.activityId} belongs to athlete ${row.athleteId}`,
-        );
-      }
-      await this.#activityRecords.put(persisted);
-    });
+    await this.#db.transaction(
+      'rw',
+      [this.#activities, this.#activityRecords, this.#deviceKeys],
+      async () => {
+        const activity = await this.#activities
+          .where(INDEX.activityByAthleteAndId)
+          .equals([row.athleteId, row.activityId])
+          .first();
+        if (activity === undefined) {
+          throw new StoreReferentialError(
+            `no activity ${row.activityId} belongs to athlete ${row.athleteId}`,
+          );
+        }
+        const deviceKey = await this.#deviceKeys.get(row.athleteId);
+        if (deviceKey !== undefined && deviceKey.publicKey !== row.record.publicKey) {
+          throw new StoreValidationError(
+            `the record filed against activity ${row.activityId} is signed by a key that is ` +
+              `not athlete ${row.athleteId}'s`,
+          );
+        }
+        await this.#activityRecords.put(persisted);
+      },
+    );
     return row.activityId;
   }
 

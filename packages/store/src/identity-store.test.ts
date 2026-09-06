@@ -299,10 +299,59 @@ describe('a signed record', () => {
     );
   });
 
+  it('refuses a record signed by a key that is not this athlete’s', async () => {
+    // `putDeviceKey` makes an identity write-once and ADR 0014 rules out
+    // rotation in Phase 1, so an athlete has exactly one public key. A record
+    // bearing another one is not theirs, and a store that filed it would then
+    // re-serve and re-export it as though it were.
+    //
+    // Nothing in this build reaches it today — #37's import is the path that
+    // will — which is why the record below is constructed with a key that was
+    // never `putDeviceKey`d rather than obtained through a code path.
+    await seedAthletes(harness);
+    const ride = await seedRide(harness, ATHLETE_A);
+    await keyFor(); // athlete A's real identity
+    const stranger = signingKeyFor(await generateDeviceKey(ATHLETE_A, unixSeconds(1_700_000_100)));
+    const row = await signedRecordFor(ride, stranger);
+
+    await expect(harness.write(async (store) => store.putActivityRecord(row))).rejects.toThrow(
+      StoreValidationError,
+    );
+    // And nothing landed: the refusal is inside the transaction with the read
+    // it depends on, so there is no half-written row to find on a fresh open.
+    await expect(
+      harness.read(async (store) => store.getActivityRecord(ATHLETE_A, ride.id)),
+    ).resolves.toBeUndefined();
+  });
+
+  it('accepts a record for an athlete who has no device key, which is the post-rollback state', async () => {
+    // The permissive half of the guard above, and it is load-bearing rather
+    // than an oversight. After export → downgrade → re-import the athlete's
+    // non-extractable private key cannot come back, so `deviceKeys` is empty
+    // and every record they own is signed by a key the store no longer holds.
+    // Refusing on absence would make the rollback ADR 0014 documents impossible
+    // to complete.
+    await seedAthletes(harness);
+    const ride = await seedRide(harness, ATHLETE_A);
+    const orphaned = signingKeyFor(await generateDeviceKey(ATHLETE_A, unixSeconds(1_700_000_100)));
+    const row = await signedRecordFor(ride, orphaned);
+
+    const read = await harness.roundTrip(
+      async (store) => store.putActivityRecord(row),
+      async (store) => store.getActivityRecord(ATHLETE_A, ride.id),
+    );
+
+    expect(read?.record).toEqual(row.record);
+  });
+
   it('refuses to decode a row somebody hand-edited into an unreadable record', async () => {
     // What comes back out of IndexedDB is untrusted — `persisted.ts`'s rule,
     // and a signed record has the stronger reason: it may have arrived from
     // somebody else's device.
+    //
+    // The hand-edit is the signature and not the public key, because refusal 3
+    // above now catches a swapped public key on the way *in* — which is the
+    // point of it, and would make this test pass for the wrong reason.
     await seedAthletes(harness);
     const ride = await seedRide(harness, ATHLETE_A);
     const key = await keyFor();
@@ -310,7 +359,7 @@ describe('a signed record', () => {
     await harness.write(async (store) =>
       store.putActivityRecord({
         ...row,
-        record: { ...row.record, publicKey: 'not-a-key' },
+        record: { ...row.record, signature: 'not-a-signature' },
       }),
     );
 

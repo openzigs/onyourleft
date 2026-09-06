@@ -16,7 +16,9 @@
  * record-format tests need in order to show that a tampered claim, a swapped
  * key or a re-ordered member changes the signing input. Real Ed25519 signatures
  * are produced and verified in `packages/store`, where WebCrypto exists, and
- * `signed-record.test.ts` there is what proves the format end to end.
+ * `identity-verifier.test.ts` there is what proves the format end to end — it
+ * verifies with `crypto.subtle` directly, from `docs/architecture.md`'s prose
+ * and RFC 8785, and imports nothing from this package.
  *
  * It is not exported from `src/index.ts`. Nothing outside this package's tests
  * can reach it.

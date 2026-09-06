@@ -357,7 +357,10 @@ ADR 0014 D-5.
 `verified`; `content-mismatch` (the record is authentic and the *file* is not the one it vouches
 for — the signature is still valid); `signature-mismatch` (altered after signing, or a different
 key); `unsupported` (a version or scheme this build does not know — **not** a forgery); and
-`malformed`.
+`malformed`. ⚠️ **`content-mismatch` is only reachable after step 4 has passed**, which is why step 4
+comes before step 5 above. It is an *authenticated* answer — it says the record is genuine — so a
+verifier that compared the content hash first would hand it, and the `expected` string inside it, to
+a record nobody signed.
 
 **Key rotation and key loss** are documented behaviours with stated consequences, in
 [ADR 0014](adr/0014-portable-identity.md) §Consequences and in

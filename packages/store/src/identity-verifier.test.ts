@@ -7,9 +7,9 @@
  * satisfy: *"If only our own code can check our own signature, the format is
  * not portable and the whole point is lost."*
  *
- * So everything below the fixture line is written from `docs/architecture.md`'s
- * *The signed activity record* section and from RFC 8785, and calls **nothing**
- * from `@onyourleft/domain`:
+ * So `verifyFromTheSpec` and every helper it reaches are written from
+ * `docs/architecture.md`'s *The signed activity record* section and from
+ * RFC 8785, and call **nothing** from `@onyourleft/domain`:
  *
  * | Step | This file | What the product does |
  * |---|---|---|
@@ -24,6 +24,14 @@
  * every step rather than a wrapper around ours. A test that imported
  * `signingInput` would prove only that our code agrees with itself.
  *
+ * ⚠️ **The last test in the file is the deliberate exception, and it calls
+ * both.** An independent verifier that returns both booleans and never
+ * short-circuits — which is the right shape for a spec implementation — is
+ * structurally blind to the product taking those two checks in the wrong
+ * *order*, and that is a real defect this PR's review found. Closing it needs
+ * one test that runs the two side by side and asserts they agree, so that test
+ * imports `verifyActivityRecord`. Nothing above the fixture line does.
+ *
  * The reason `JSON.stringify` is a legitimate independent canonicaliser here:
  * RFC 8785 is *specified in terms of ECMAScript* — its number rule is
  * `Number::toString` and its string rule is JSON's minimal escaping — so a
@@ -32,7 +40,7 @@
  * loudly rather than silently.
  */
 
-import { ensureSigningKey, unixSeconds } from '@onyourleft/domain';
+import { ensureSigningKey, unixSeconds, verifyActivityRecord } from '@onyourleft/domain';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -45,7 +53,7 @@ import {
   signedRecordFor,
   type StoreHarness,
 } from './testing';
-import { createWebCryptoKeystore } from './web-crypto';
+import { createWebCryptoKeystore, webCryptoSha256, webCryptoVerifier } from './web-crypto';
 
 // --- The independent verifier ----------------------------------------------
 
@@ -191,5 +199,34 @@ describe('a verifier written from the spec', () => {
       signature: true,
       contentHash: false,
     });
+  });
+
+  it('agrees with the product about a record nobody signed, and does not call it authentic', async () => {
+    // The independent verifier above returns **both** booleans and never
+    // short-circuits, which is right for a spec implementation and is exactly
+    // why it cannot, on its own, see the product taking them in the wrong
+    // order. This test is the cross-check that closes that: it asserts the two
+    // *agree* on the case where the order is observable.
+    //
+    // `content-mismatch` is documented as an authenticated answer, so it may
+    // only be reached where this file reports `signature: true`. A verifier
+    // that hashed first would answer `content-mismatch` below, with the
+    // forger's own `contentHash` as its `expected`.
+    const { published } = await publishedRecord();
+    const forged = {
+      ...(published as Record<string, unknown>),
+      publicKey: 'ab'.repeat(32),
+      signature: 'ff'.repeat(64),
+      contentHash: `sha256:${'cd'.repeat(32)}`,
+    };
+
+    const independent = await verifyFromTheSpec(forged, FIXTURE_FILE_BYTES);
+    const product = await verifyActivityRecord(forged, {
+      verifier: webCryptoVerifier,
+      fileDigest: await webCryptoSha256(FIXTURE_FILE_BYTES),
+    });
+
+    expect(independent).toEqual({ signature: false, contentHash: false });
+    expect(product).toEqual({ status: 'signature-mismatch' });
   });
 });
