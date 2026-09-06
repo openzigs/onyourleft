@@ -22,7 +22,7 @@
 
 import { useSyncExternalStore } from 'react';
 
-import { routeForHash, type RouteDefinition } from './routes';
+import { matchHash, type RouteMatch } from './routes';
 
 function subscribe(onChange: () => void): () => void {
   globalThis.addEventListener('hashchange', onChange);
@@ -35,8 +35,16 @@ function currentHash(): string {
   return globalThis.location.hash;
 }
 
-/** The route the address bar currently selects. Re-renders when it changes. */
-export function useRoute(): RouteDefinition {
+/**
+ * The route the address bar currently selects, and what its parameter captured.
+ * Re-renders when either changes.
+ *
+ * Returns a {@link RouteMatch} rather than a bare route since #50: the activity
+ * detail view needs the id out of `#/activities/<id>`, and a hook that returned
+ * only the route would push a second `location.hash` read into the component —
+ * which is the "wrong time" read this hook's own note exists to avoid.
+ */
+export function useRoute(): RouteMatch {
   const hash = useSyncExternalStore(subscribe, currentHash, currentHash);
-  return routeForHash(hash);
+  return matchHash(hash);
 }

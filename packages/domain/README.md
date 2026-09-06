@@ -260,6 +260,23 @@ Every function in this file returns through a constructor rather than casting, s
 `metresPerSecondToKilometresPerHour(metresPerSecond(Number.MAX_VALUE))` throws `UnitError` instead
 of handing back `Infinity` labelled `KilometresPerHour` (#103).
 
+## Geodesy — `geodesy.ts`
+
+`distanceBetween(a, b)` is the great-circle distance between two positions, in metres. It is not a
+conversion, and it is here for the reason signing and the recording engine are: **it must give the
+same answer on the device and on an instance.** The number decides whether a track point falls
+inside a privacy zone ([ADR 0004](../../docs/adr/0004-privacy-and-location.md) decision B), and that
+judgement is made in both places — the client strips before upload *and* the instance enforces in
+its response bodies, which decision C calls "two layers, not one". Two implementations of a distance
+are two places for those layers to disagree about whether a point is inside a disc, and a
+disagreement there publishes a front door.
+
+Haversine on a sphere of the IUGG mean radius, 6 371 008.8 m, which is within about 0.5% of the WGS
+84 geodesic anywhere on the globe — at most 10 m over the 250 m–2 km radii a zone uses, and inside
+the GNSS error the radius is chosen against. `geodesy.ts` records why the spherical law of cosines
+and Vincenty's inverse formula were both rejected, and why the clamp before `asin` is load-bearing
+rather than defensive.
+
 ## Not decided here
 
 **The vertical datum of an altitude.** Whether `AltitudeMetres` is above the WGS 84 ellipsoid or
@@ -283,6 +300,7 @@ issue that first needs it.
 | `speed.ts` | m/s ↔ km/h, and the FTMS 0.01 km/h scaling |
 | `position.ts` | the FIT semicircle encoding |
 | `altitude.ts` | the FIT altitude scale and offset |
+| `geodesy.ts` | great-circle distance — the number a privacy-zone test rests on |
 | `time.ts` | the FIT epoch, and wrapping event-time counters |
 | `recording/channels.ts` | what the recorder merges and produces, generic over a channel map |
 | `recording/session.ts` | the recording session state machine and the stream merge (#45) |

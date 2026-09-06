@@ -72,6 +72,13 @@ export {
   metresPerSecondToKilometresPerHour,
 } from './speed';
 
+// --- Geodesy: distance on the earth's surface -------------------------------
+//
+// One implementation, because ADR 0004 decision C requires the device and a
+// Phase 3 instance to agree about whether a point is inside a privacy zone.
+
+export { distanceBetween, EARTH_MEAN_RADIUS_METRES } from './geodesy';
+
 // --- Position: the FIT semicircle encoding ----------------------------------
 
 export {

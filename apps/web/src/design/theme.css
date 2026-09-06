@@ -409,6 +409,96 @@ body {
   padding: 0;
 }
 
+/* --- The activity library (#62) and the ride detail view (#50) ------------- */
+
+/*
+ * The library table and the lap table. Separate from `.oyl-data-table`, which
+ * is the one `ChartSlot` renders beside a chart: this one carries a rider's
+ * whole history and wants to breathe, and that one sits under a drawing and
+ * wants to be compact. Both were unstyled until #50 noticed the class had no
+ * rules at all.
+ */
+.oyl-table {
+  border-collapse: collapse;
+  margin: var(--oyl-space-md) 0;
+  width: 100%;
+}
+
+.oyl-table caption {
+  color: var(--oyl-color-ink-muted);
+  padding-bottom: var(--oyl-space-xs);
+  text-align: left;
+}
+
+.oyl-table th,
+.oyl-table td {
+  border-bottom: 1px solid var(--oyl-color-border);
+  padding: var(--oyl-space-sm);
+  text-align: left;
+  vertical-align: top;
+}
+
+/* Sort controls, and the ride detail view's series toggles. */
+.oyl-library-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oyl-space-sm);
+  margin: var(--oyl-space-md) 0;
+}
+
+/*
+ * The summary panel: a description list laid out as cards.
+ *
+ * `dl` rather than a table because it is a set of name/value pairs and not a
+ * grid — a screen reader announces "Distance, 42.2 kilometres" from this and
+ * has to be told a table's column headers to say the same thing.
+ */
+.oyl-ride-summary {
+  display: grid;
+  gap: var(--oyl-space-md);
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  margin: var(--oyl-space-lg) 0;
+}
+
+.oyl-ride-summary dt {
+  color: var(--oyl-color-ink-muted);
+  font-size: var(--oyl-font-size-sm);
+}
+
+.oyl-ride-summary dd {
+  font-size: var(--oyl-font-size-lg);
+  margin: 0;
+}
+
+/*
+ * A trace.
+ *
+ * The height is fixed and the width fills its container; `preserveAspectRatio`
+ * is `none` on the element, so the drawing stretches horizontally and keeps its
+ * vertical scale. That is right for a time series and wrong for a map, which is
+ * one more reason #63's track is not drawn with this.
+ */
+.oyl-trace {
+  background: var(--oyl-color-surface);
+  border: 1px solid var(--oyl-color-border);
+  border-radius: var(--oyl-radius);
+  display: block;
+  height: 10rem;
+  margin-top: var(--oyl-space-sm);
+  width: 100%;
+}
+
+/*
+ * `vector-effect` so the line keeps its width under the horizontal stretch
+ * above. Without it a 2-unit stroke is drawn several pixels thick sideways and
+ * hairline vertically, which reads as a smeared chart rather than a line.
+ */
+.oyl-trace__line {
+  stroke: var(--oyl-color-accent);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
 /*
  * Motion is opt-in. Nothing in the shell animates today; the block is here so
  * that the first thing that does inherits the preference rather than being

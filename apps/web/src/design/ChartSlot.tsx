@@ -86,6 +86,25 @@ export interface ChartSlotProps {
    * boundary ever ran. Recorded here rather than discovered there (#143).
    */
   readonly chart?: ReactNode;
+  /**
+   * Where the table goes when there **is** a chart.
+   *
+   * `'fallback'` — the default, and every caller before #50 — renders the chart
+   * alone and keeps the table for the failure. `'beside'` renders both: the
+   * chart for a reader who is looking at it, the table underneath for one who
+   * is not. #50's sixth acceptance criterion asks for that non-visual
+   * equivalent to be present rather than merely available after a crash.
+   *
+   * Additive rather than a change of default, deliberately: `'fallback'` is
+   * what `ChartSlot.test.tsx` pins ("a chart replaces the table"), and turning
+   * that assertion into a tautology would cost the test that proves the
+   * boundary swaps one for the other at all.
+   *
+   * Under `'beside'` a failing chart still leaves exactly one table — the
+   * boundary wraps both, so the fallback replaces the pair rather than joining
+   * a second copy to it.
+   */
+  readonly tablePosition?: 'fallback' | 'beside';
 }
 
 /** The table half, which is also the fallback half. */
@@ -157,6 +176,7 @@ export function ChartSlot({
   rows,
   emptyMessage,
   chart,
+  tablePosition = 'fallback',
   onChartError,
 }: ChartSlotProps & {
   readonly onChartError?: (error: Error, info: ErrorInfo) => void;
@@ -169,7 +189,14 @@ export function ChartSlot({
   }
   return (
     <RenderBoundary fallback={table} onError={onChartError}>
-      {chart}
+      {tablePosition === 'beside' ? (
+        <>
+          {chart}
+          {table}
+        </>
+      ) : (
+        chart
+      )}
     </RenderBoundary>
   );
 }
