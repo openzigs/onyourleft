@@ -193,3 +193,67 @@ describe('decoding a key row that is not what it claims', () => {
     ).toThrow(StoreDecodeError);
   });
 });
+
+describe('signingKeyFor — the stored halves have to belong together (#161)', () => {
+  it('refuses to sign when the advertised public key is not the private handle’s', async () => {
+    const mine = await generateDeviceKey(OWNER, unixSeconds(1));
+    const stranger = await generateDeviceKey(OWNER, unixSeconds(2));
+    // The shape a hand-edited `deviceKeys` row has: this device's private
+    // handle, with somebody else's public half beside it.
+    const tampered: DeviceKeyRecord = { ...mine, publicKey: stranger.publicKey };
+
+    await expect(signingKeyFor(tampered).sign(new Uint8Array([1, 2, 3]))).rejects.toThrow(
+      StoreValidationError,
+    );
+  });
+
+  it('is not caught by comparing the row with itself, which is why the probe exists', async () => {
+    // `putActivityRecord`'s key-binding guard compares `row.record.publicKey`
+    // against `deviceKey.publicKey`. On a tampered row both are the *same*
+    // altered value, so that comparison agrees with itself and passes. This
+    // asserts the harm it misses: a signature the private half produced does
+    // not verify against the key the row advertises, so every record signed
+    // this way is permanently unverifiable.
+    const mine = await generateDeviceKey(OWNER, unixSeconds(1));
+    const stranger = await generateDeviceKey(OWNER, unixSeconds(2));
+    const tampered: DeviceKeyRecord = { ...mine, publicKey: stranger.publicKey };
+
+    expect(tampered.publicKey).toBe(stranger.publicKey);
+    const signature = await signingKeyFor(mine).sign(new Uint8Array([9]));
+    await expect(
+      webCryptoVerifier.verify({
+        publicKey: signingKeyFor(tampered).publicKey,
+        message: new Uint8Array([9]),
+        signature,
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it('stays refused on a second attempt rather than retrying into a pass', async () => {
+    // The probe is memoised so it runs once per key. A memoisation that cached
+    // only success — or that re-ran and could be raced — would let the second
+    // call through, which is worse than never checking because the first
+    // refusal would read as a transient error.
+    const mine = await generateDeviceKey(OWNER, unixSeconds(1));
+    const stranger = await generateDeviceKey(OWNER, unixSeconds(2));
+    const key = signingKeyFor({ ...mine, publicKey: stranger.publicKey });
+
+    await expect(key.sign(new Uint8Array([1]))).rejects.toThrow(StoreValidationError);
+    await expect(key.sign(new Uint8Array([2]))).rejects.toThrow(StoreValidationError);
+  });
+
+  it('signs, and verifies against what it advertises, when the halves do match', async () => {
+    // The other direction: the probe must not stand between a real key and a
+    // signature. Without this, deleting the whole check would leave the three
+    // assertions above passing for the wrong reason.
+    const record = await generateDeviceKey(OWNER, unixSeconds(1));
+    const key = signingKeyFor(record);
+    const message = new Uint8Array([4, 5, 6]);
+    const signature = await key.sign(message);
+
+    expect(toHex(key.publicKey)).toBe(record.publicKey);
+    await expect(
+      webCryptoVerifier.verify({ publicKey: key.publicKey, message, signature }),
+    ).resolves.toBe(true);
+  });
+});

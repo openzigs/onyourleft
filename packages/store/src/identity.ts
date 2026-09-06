@@ -28,8 +28,20 @@
  * `persisted.ts` says why: the row was written by an earlier build, or
  * hand-edited in a devtools pane. A signed record has a stronger reason still —
  * it may have arrived from somebody else's device — so it is re-parsed through
- * `parseSignedActivityRecord`, the same untrusted-input boundary a record
- * arriving over a network would cross.
+ * `parseSignedActivityRecord` before any caller sees it.
+ *
+ * ⚠️ **Parsing is not verifying, and this file does neither on the way out**
+ * (#161). `parseSignedActivityRecord` establishes *shape*: the fields are
+ * present, the types are right, the record can be reasoned about. It says
+ * nothing about whether the signature is good, and neither `getActivityRecord`
+ * nor `putActivityRecord` checks one. So a `StoredActivityRecord` that came
+ * back from this store looks authentic and may not be, and every consumer that
+ * needs authenticity has to call `verifyRecordSignature` itself.
+ *
+ * That is deliberate rather than missing — ADR 0014 puts verification at #37's
+ * import, where a record actually crosses a trust boundary — but it is worth
+ * stating plainly here, because "re-parsed through the untrusted-input
+ * boundary" reads like a stronger promise than parsing can make.
  */
 
 import {
@@ -120,6 +132,16 @@ export function fromPersistedDeviceKey(row: PersistedDeviceKey): DeviceKeyRecord
   // structured clone algorithm is a real `CryptoKey`, but a hand-edited row is
   // whatever somebody typed, and the failure has to be a stated decode error
   // rather than a `TypeError` from inside `crypto.subtle.sign` later.
+  //
+  // ⚠️ `extractable === false` is deliberately **not** checked here (#161).
+  // Non-extractability is guaranteed by `generateDeviceKey`, the only factory
+  // production code has, and enforcing it at this boundary too would break the
+  // test that proves the stronger property: `identity-safety.test.ts` stores a
+  // real *extractable* key precisely so it can grep every serialised shape,
+  // every log line and every error stack for the private bytes — which it can
+  // only do for a key whose bytes it can compute. A guard here would reject
+  // that row on the way back out of `fullExport`, and the property it protects
+  // is narrower than the one that test establishes. See `README.md` §Identity.
   const privateKey = row.privateKey as { type?: unknown } | undefined;
   if (privateKey === undefined || privateKey === null || privateKey.type !== 'private') {
     throw new StoreDecodeError('deviceKey.privateKey must be a private CryptoKey');
