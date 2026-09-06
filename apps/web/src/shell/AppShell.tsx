@@ -40,6 +40,7 @@ import { useEffect, useRef, type JSX, type MouseEvent } from 'react';
 
 import { AboutView } from '../views/AboutView';
 import { ActivitiesView } from '../views/ActivitiesView';
+import { ActivityDetailView } from '../views/ActivityDetailView';
 import { DevicesView } from '../views/DevicesView';
 import { NotFoundView } from '../views/NotFoundView';
 import { RideView } from '../views/RideView';
@@ -47,10 +48,11 @@ import { RideSession } from '../ride/RideSession';
 import type { RideController } from '../ride/controller';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { TransferView } from '../transfer/TransferView';
+import type { DetailPort } from '../detail/store-port';
 import type { LibraryPort } from '../library/store-port';
 import type { TransferPort } from '../transfer/store-port';
 
-import { hrefFor, ROUTES, type RouteDefinition } from './routes';
+import { hrefFor, ROUTES, type RouteMatch } from './routes';
 import { useRoute } from './useRoute';
 
 /** The id `main` carries, and the only place it is written. */
@@ -101,24 +103,43 @@ export interface AppShellProps {
    * would tell the rider they have no rides.
    */
   readonly library?: LibraryPort | undefined;
+  /**
+   * The activity detail view's store (#50).
+   *
+   * Passed in for the reason the others are. It is a **separate** port from
+   * {@link AppShellProps.library} rather than a widening of it: the library's
+   * two methods are all a list row may reach for, and a shared port would let a
+   * later edit call `getStreamChannel` from a list — the read #62's budget and
+   * #50's fourth criterion both forbid. `main.tsx` builds both from the one
+   * database connection.
+   */
+  readonly detail?: DetailPort | undefined;
 }
 
-function viewFor(
-  route: RouteDefinition,
-  capabilities: CapabilityProbe,
-  rideController: RideController | undefined,
-  transfer: TransferPort | undefined,
-  library: LibraryPort | undefined,
-): JSX.Element {
-  switch (route.id) {
+/**
+ * The view a match selects.
+ *
+ * One object parameter rather than a growing positional list: #50 made this the
+ * sixth thing the shell has to hand down, and six positional arguments of which
+ * four are `X | undefined` is a signature where a transposition typechecks.
+ *
+ * No `default` case, deliberately. The switch is exhaustive over `RouteId` and
+ * TypeScript proves it: a route added to the table with no case here fails the
+ * build with "function lacks ending return statement", which is how this
+ * function stays in step with `routes.ts` without anyone remembering.
+ */
+function viewFor(match: RouteMatch, props: AppShellProps): JSX.Element {
+  switch (match.route.id) {
     case 'ride':
-      return <RideView controller={rideController} />;
+      return <RideView controller={props.rideController} />;
     case 'activities':
-      return <ActivitiesView library={library} />;
+      return <ActivitiesView library={props.library} />;
+    case 'activity-detail':
+      return <ActivityDetailView port={props.detail} activityId={match.parameter} />;
     case 'devices':
-      return <DevicesView capabilities={capabilities} />;
+      return <DevicesView capabilities={props.capabilities} />;
     case 'transfer':
-      return <TransferView port={transfer} />;
+      return <TransferView port={props.transfer} />;
     case 'about':
       return <AboutView />;
     case 'not-found':
@@ -126,13 +147,9 @@ function viewFor(
   }
 }
 
-export function AppShell({
-  capabilities,
-  rideController,
-  transfer,
-  library,
-}: AppShellProps): JSX.Element {
-  const route = useRoute();
+export function AppShell(props: AppShellProps): JSX.Element {
+  const match = useRoute();
+  const route = match.route;
   const mainRef = useRef<HTMLElement>(null);
   const previousRouteId = useRef<string | null>(null);
 
@@ -164,7 +181,9 @@ export function AppShell({
         unload guard, which stops the recorder checkpointing and lets the tab
         close without asking. It renders nothing. See `ride/RideSession.tsx`.
       */}
-      {rideController === undefined ? null : <RideSession controller={rideController} />}
+      {props.rideController === undefined ? null : (
+        <RideSession controller={props.rideController} />
+      )}
 
       <a className="oyl-skip-link" href={`#${MAIN_ID}`} onClick={skipToContent}>
         Skip to main content
@@ -201,7 +220,7 @@ export function AppShell({
       >
         <h1 id={VIEW_TITLE_ID}>{route.title}</h1>
         <p className="oyl-muted">{route.summary}</p>
-        {viewFor(route, capabilities, rideController, transfer, library)}
+        {viewFor(match, props)}
       </main>
 
       <footer className="oyl-footer">

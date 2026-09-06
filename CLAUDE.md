@@ -31,6 +31,10 @@ apps/                 AGPL-3.0-or-later, without exception
   web/                browser client — the Phase 1 product (#48-#51)
     src/a11y/           the accessibility gate: rules, routes, contrast (#48) — see §4e
     src/design/         design tokens, theme.css and the primitives (#48)
+    src/detail/         the ride detail view's data layer (#50) — the read budget, the
+                        gap-preserving downsampler, the SVG trace and the
+                        privacy-zone trim that says what a shared copy contains
+    src/library/        the activity library's row model, its port and its stub (#62)
     src/recording/      the recorder: engine + durable checkpoints + recovery (#46)
     src/ride/           the live ride screen: its state machine, panels and trainer wiring (#49)
     src/shell/          the hash route table, the router hook and AppShell (#48)
@@ -1038,5 +1042,8 @@ top of an issue **supersedes its body**.
 | What the live ride screen may claim about a trainer, and why a stale metric shows no number | `apps/web/src/ride/controller.ts`, `apps/web/src/ride/metrics.ts`, `apps/web/src/ride/TrainerPanel.tsx` |
 | How a bulk import reports a file it cannot read, and what bounds the memory an imported file can ask for | `apps/web/src/transfer/import-batch.ts`, `apps/web/src/transfer/read-activity-file.ts` §`MAXIMUM_IMPORTED_SAMPLES` |
 | What the import screen may say about another platform, word for word | [ADR 0009](docs/adr/0009-clean-room-posture.md) R3, `apps/web/src/transfer/TransferView.tsx`, and the assertions in `TransferView.test.tsx` |
+| Why the ride detail view reads a stream summary before it reads a sample, and what bounds the points a chart is handed | `apps/web/src/detail/load.ts`, `apps/web/src/detail/series.ts` §`CHART_POINTS` |
+| Why a gap in a trace is a break in the line rather than a straight line across it | `apps/web/src/detail/series.ts` §`traceSegments`, `apps/web/src/detail/TraceChart.tsx` |
+| What a *shared* copy of a ride contains, and why the rider's own view is not trimmed | [ADR 0004](docs/adr/0004-privacy-and-location.md) decisions B, C and E, `apps/web/src/detail/privacy.ts`, `apps/web/src/transfer/export-activity.ts` |
 
 <!-- Last updated: 2026-09-06 by delivery:code-issue resolving #51 (the manual file import and export UI) -->

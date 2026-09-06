@@ -72,6 +72,10 @@ apps/                 AGPL-3.0-or-later, without exception
   web/                browser client — the Phase 1 product
     src/a11y/           the accessibility gate: rules, per-route audit, contrast (#48)
     src/design/         design tokens, theme.css and the primitives (#48)
+    src/detail/         the ride detail view's data layer (#50): the read budget, the
+                        gap-preserving downsampler, the SVG trace, and the
+                        privacy-zone trim behind the shared view
+    src/library/        the activity library's row model and its port (#62)
     src/recording/      the composition root: engine + checkpoints + recovery (#46)
     src/ride/           the live ride screen's state machine and its panels (#49)
     src/shell/          the hash route table, the router hook and AppShell (#48)

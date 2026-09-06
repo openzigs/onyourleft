@@ -10,14 +10,14 @@ import { VisuallyHidden } from '../design/VisuallyHidden';
 import { DISTANCE_UNIT, POWER_UNIT } from '../format';
 import { orderedRows, PAGE_SIZE, type LibraryRow } from '../library/rows';
 import type { LibraryPort } from '../library/store-port';
-import { hrefFor, routeById } from '../shell/routes';
+import { hrefFor, hrefForActivity, routeById } from '../shell/routes';
 
 /**
  * The ride history: every activity stored on this device (#62).
  *
- * The screen the v0.1 milestone needs to be demonstrable. #49 records a ride
- * and #50 will show one; without this there is no way to get from "I finished a
- * ride" to "show me Tuesday's" except a URL the rider would have had to keep.
+ * The screen the v0.1 milestone needs to be demonstrable. #49 records a ride and
+ * #50 shows one; without this there is no way to get from "I finished a ride" to
+ * "show me Tuesday's" except a URL the rider would have had to keep.
  *
  * ## Local, and provably so
  *
@@ -38,13 +38,18 @@ import { hrefFor, routeById } from '../shell/routes';
  * here, which #62 asks for and this gets structurally rather than by care: the
  * projection the list reads has no field that says where a ride came from.
  *
- * ## Rows are not links yet
+ * ## A row opens the ride
  *
- * #62 describes a row as opening the activity detail view, and that view is
- * #50, which does not exist. A row therefore renders as a row. Linking each one
- * at a route the router would answer with "not found" would be worse than
- * waiting, and the two issues list each other as blockers — this one goes
- * first, because a detail view nothing reaches is not demonstrable either.
+ * Since #50 the ride's name is a link to `#/activities/<id>`. A plain `<a>`
+ * with an `href`, not a click handler on the row: `shell/routes.ts` records
+ * that the browser's own activation is what gives Enter, middle-click and
+ * "open in new tab" for free, and a whole row made clickable would be a control
+ * with no name, no role and no keyboard path — which is what #48's first
+ * criterion rejects.
+ *
+ * The link is on the name rather than on the row for the same reason the Delete
+ * button carries the ride's name in visually hidden text: a screen-reader user
+ * moving by link hears "Tuesday morning", not "row 4".
  */
 export interface ActivitiesViewProps {
   /**
@@ -179,7 +184,7 @@ export function ActivitiesView({ library }: ActivitiesViewProps): JSX.Element {
             state.rows.map((row) => (
               <tr key={row.id}>
                 <th scope="row">
-                  {row.name}
+                  <a href={hrefForActivity(row.id)}>{row.name}</a>
                   {/*
                     In words, not a colour or an icon. #48's criterion is that
                     anything meaning-bearing has a non-visual equivalent, and an

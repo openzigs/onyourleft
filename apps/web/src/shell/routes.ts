@@ -32,11 +32,18 @@
  */
 
 /** The identity of a view. Stable; the path is not. */
-export type RouteId = 'ride' | 'activities' | 'devices' | 'transfer' | 'about' | 'not-found';
+export type RouteId =
+  'ride' | 'activities' | 'activity-detail' | 'devices' | 'transfer' | 'about' | 'not-found';
 
 export interface RouteDefinition {
   readonly id: RouteId;
-  /** The part after the `#`, always starting with `/`. */
+  /**
+   * The part after the `#`, always starting with `/`.
+   *
+   * A segment beginning with `:` is a **parameter**: `/activities/:activity`
+   * matches `/activities/ride-7` and captures `ride-7`. Exactly one route uses
+   * one today. See {@link matchHash}.
+   */
   readonly path: string;
   /** The link text in the header. Short. */
   readonly navLabel: string;
@@ -91,6 +98,31 @@ export const ROUTES: readonly RouteDefinition[] = [
 ];
 
 /**
+ * One stored ride, in full (#50).
+ *
+ * **Not in {@link ROUTES}**, for the reason {@link NOT_FOUND_ROUTE} is not:
+ * there is no such thing as "the" activity, so there is nothing for a
+ * navigation entry to point at. It is reached from a row of the activities
+ * table, which is where the id comes from.
+ *
+ * The `:activity` segment is the first route parameter in this shell. The
+ * comment at the top of this file said there were none and that a query string
+ * would therefore be dropped; that is still true of query strings, and a path
+ * segment is now matched instead — see {@link matchHash}.
+ */
+export const ACTIVITY_DETAIL_ROUTE: RouteDefinition = {
+  id: 'activity-detail',
+  path: '/activities/:activity',
+  navLabel: 'Ride details',
+  // The `h1` the shell renders, and therefore the same for every ride. The
+  // ride's own name is an `h2` inside the view, which keeps the heading order
+  // honest and keeps `routes.a11y.test.tsx`'s "the h1 is the route title"
+  // assertion true of a route whose subject is only known at run time.
+  title: 'Ride details',
+  summary: 'Everything this device holds about one ride.',
+};
+
+/**
  * Where an unrecognised fragment lands.
  *
  * Not in {@link ROUTES}, because it is not navigable *to* — it has no
@@ -109,7 +141,93 @@ export const NOT_FOUND_ROUTE: RouteDefinition = {
 };
 
 /** Every route the audit must cover, navigable or not. */
-export const ALL_ROUTES: readonly RouteDefinition[] = [...ROUTES, NOT_FOUND_ROUTE];
+export const ALL_ROUTES: readonly RouteDefinition[] = [
+  ...ROUTES,
+  ACTIVITY_DETAIL_ROUTE,
+  NOT_FOUND_ROUTE,
+];
+
+/**
+ * The routes {@link matchHash} tries, in order.
+ *
+ * Derived from {@link ALL_ROUTES} by removing the one route nothing navigates
+ * *to* — a fragment reading `/not-found` should land on the not-found page
+ * because it matches nothing, not because it matched an entry. Subtracting it
+ * rather than restating the list is what stops a route added above from being
+ * navigable in the audit and unreachable in the browser.
+ */
+const MATCHABLE_ROUTES: readonly RouteDefinition[] = ALL_ROUTES.filter(
+  (route) => route.id !== 'not-found',
+);
+
+/**
+ * A route, and whatever its parameter segment captured.
+ *
+ * A separate type from {@link RouteDefinition} because the definition is a
+ * constant and the capture is not: the route is the same object for every
+ * ride, and the id is the part that differs. Merging them would mean a route
+ * table whose entries are rebuilt per navigation.
+ */
+export interface RouteMatch {
+  readonly route: RouteDefinition;
+  /**
+   * The value of the route's single `:` segment, already percent-decoded.
+   *
+   * `undefined` for every route that has no parameter — which is all of them
+   * but {@link ACTIVITY_DETAIL_ROUTE}. Never the empty string: `#/activities/`
+   * normalises to `/activities`, so the list route matches and this one does
+   * not, rather than opening a detail view for a ride with no id.
+   */
+  readonly parameter?: string;
+}
+
+/**
+ * The route a `location.hash` selects, and what its parameter captured.
+ *
+ * Total, for {@link routeForHash}'s reason. A parameter segment matches any
+ * single segment, so a percent-encoded id containing a slash round-trips: the
+ * encoding is applied by {@link hrefFor} and undone here, and neither half is
+ * spelled out anywhere else.
+ *
+ * ⚠️ **An undecodable parameter is not a match.** `decodeURIComponent` throws
+ * on a lone `%` — reachable by typing in the address bar — and a router that
+ * let that escape would replace the whole app with an unhandled exception. It
+ * falls through to the not-found page instead, which is a page with a heading
+ * and a way out.
+ */
+export function matchHash(hash: string): RouteMatch {
+  const segments = normaliseHash(hash).split('/');
+  for (const route of MATCHABLE_ROUTES) {
+    const pattern = route.path.split('/');
+    if (pattern.length !== segments.length) {
+      continue;
+    }
+    let parameter: string | undefined;
+    let matched = true;
+    for (const [index, expected] of pattern.entries()) {
+      const actual = segments[index] ?? '';
+      if (expected.startsWith(':')) {
+        if (actual === '') {
+          matched = false;
+          break;
+        }
+        try {
+          parameter = decodeURIComponent(actual);
+        } catch {
+          matched = false;
+          break;
+        }
+      } else if (expected !== actual) {
+        matched = false;
+        break;
+      }
+    }
+    if (matched) {
+      return parameter === undefined ? { route } : { route, parameter };
+    }
+  }
+  return { route: NOT_FOUND_ROUTE };
+}
 
 /**
  * The route a `location.hash` selects.
@@ -120,16 +238,16 @@ export const ALL_ROUTES: readonly RouteDefinition[] = [...ROUTES, NOT_FOUND_ROUT
  * a blank page on a typo.
  */
 export function routeForHash(hash: string): RouteDefinition {
-  const path = normaliseHash(hash);
-  return ROUTES.find((route) => route.path === path) ?? NOT_FOUND_ROUTE;
+  return matchHash(hash).route;
 }
 
 /**
  * `'#/activities?x=1'` → `'/activities'`, `''` → `'/'`.
  *
- * The query and any nested fragment are dropped: this shell has no route
- * parameters yet, and silently matching `'/activities?x=1'` against nothing
- * would send a perfectly good deep link to the not-found page.
+ * The query and any nested fragment are dropped: this shell has no query
+ * parameters, and silently matching `'/activities?x=1'` against nothing would
+ * send a perfectly good deep link to the not-found page. A **path** parameter
+ * is a different thing and is matched — see {@link matchHash}.
  */
 export function normaliseHash(hash: string): string {
   const withoutHash = hash.startsWith('#') ? hash.slice(1) : hash;
@@ -152,7 +270,28 @@ export function routeById(id: RouteId): RouteDefinition {
   return ALL_ROUTES.find((route) => route.id === id) ?? NOT_FOUND_ROUTE;
 }
 
-/** The `href` for a route. Always relative, always a fragment. */
-export function hrefFor(route: RouteDefinition): string {
-  return `#${route.path}`;
+/**
+ * The `href` for a route. Always relative, always a fragment.
+ *
+ * @param parameter the value for the route's `:` segment, percent-encoded here
+ * so that an id containing a slash, a `#` or a space produces a link that
+ * {@link matchHash} reads back unchanged. Ignored by a route with no parameter,
+ * and a parameterised route asked for a link without one keeps its placeholder
+ * — which is what {@link ALL_ROUTES}'s accessibility audit navigates to, and is
+ * a page rather than a crash.
+ */
+export function hrefFor(route: RouteDefinition, parameter?: string): string {
+  if (parameter === undefined) {
+    return `#${route.path}`;
+  }
+  const path = route.path
+    .split('/')
+    .map((segment) => (segment.startsWith(':') ? encodeURIComponent(parameter) : segment))
+    .join('/');
+  return `#${path}`;
+}
+
+/** The link to one ride's detail view. The only caller that needs a parameter. */
+export function hrefForActivity(id: string): string {
+  return hrefFor(ACTIVITY_DETAIL_ROUTE, id);
 }

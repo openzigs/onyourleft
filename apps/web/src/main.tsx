@@ -19,6 +19,7 @@ import { openWebBluetoothTrainer } from './ride/trainer';
 import { AppShell } from './shell/AppShell';
 import { probeBrowser, type CapabilityProbe } from './support/bluetooth-support';
 import { saveWithAnchor, webCryptoDigest } from './transfer/browser';
+import type { DetailPort } from './detail/store-port';
 import type { LibraryPort } from './library/store-port';
 import type { TransferPort } from './transfer/store-port';
 
@@ -120,21 +121,6 @@ function buildRideController(probe: CapabilityProbe): RideController | undefined
 }
 
 /**
- * Build the import and export screen's port, or nothing.
- *
- * `undefined` where `crypto.subtle` is absent, which is every non-secure
- * context — a bundle opened from the disk as `file://`, or served over plain
- * `http://` on anything but localhost. Deduplication is a SHA-256 of the file's
- * bytes and there is no import worth offering without it, so #48's first
- * criterion applies: no control at all, and the page says why.
- *
- * ⚠️ The zone is this **browser's**, and #26 requires one per ride. That is the
- * right answer for a ride recorded here and a fallback for a ride imported from
- * somewhere else — none of the three formats carries an IANA identifier, so
- * there is nothing better to read. `import-batch.ts`'s `timeZone` records what
- * that costs and why `UTC` is not an improvement on it.
- */
-/**
  * The activity library's port (#62).
  *
  * Unconditional, unlike `buildTransferPort` above: listing rides needs no
@@ -150,6 +136,35 @@ function buildLibraryPort(): LibraryPort {
   return { store: localStore(), athleteId: LOCAL_ATHLETE };
 }
 
+/**
+ * The activity detail view's port (#50).
+ *
+ * A second port over the **same** connection rather than a widening of the
+ * library's: `LibraryStore` deliberately offers no way to read a stream, and
+ * `DetailStore` deliberately offers no way to read a whole stream *set*. Each
+ * screen can reach exactly the reads its own budget allows, and `ActivityStore`
+ * satisfies both structurally — so this is one object literal rather than an
+ * adapter.
+ */
+function buildDetailPort(): DetailPort {
+  return { store: localStore(), athleteId: LOCAL_ATHLETE };
+}
+
+/**
+ * Build the import and export screen's port, or nothing.
+ *
+ * `undefined` where `crypto.subtle` is absent, which is every non-secure
+ * context — a bundle opened from the disk as `file://`, or served over plain
+ * `http://` on anything but localhost. Deduplication is a SHA-256 of the file's
+ * bytes and there is no import worth offering without it, so #48's first
+ * criterion applies: no control at all, and the page says why.
+ *
+ * ⚠️ The zone is this **browser's**, and #26 requires one per ride. That is the
+ * right answer for a ride recorded here and a fallback for a ride imported from
+ * somewhere else — none of the three formats carries an IANA identifier, so
+ * there is nothing better to read. `import-batch.ts`'s `timeZone` records what
+ * that costs and why `UTC` is not an improvement on it.
+ */
 function buildTransferPort(): TransferPort | undefined {
   if (globalThis.crypto?.subtle === undefined) {
     return undefined;
@@ -172,6 +187,7 @@ createRoot(container).render(
       rideController={buildRideController(capabilities)}
       transfer={buildTransferPort()}
       library={buildLibraryPort()}
+      detail={buildDetailPort()}
     />
   </StrictMode>,
 );
