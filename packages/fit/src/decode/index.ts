@@ -89,11 +89,11 @@ export {
   SPORT_CYCLING,
 } from './profile';
 
-export {
-  decodeActivity,
-  decodeFitActivityFromBytes,
-  MAXIMUM_RETAINED_BYTES_PER_INPUT_BYTE,
-} from './activity';
+// `decodeFitActivityFromBytes` is deliberately absent: `decodeFitActivity`
+// below is the public entry point and the only one, so a consumer cannot pick
+// the wrong one. #154's review found this package recommending both — `README`
+// §2 one, `activity.ts` the other — with #51 about to become the first caller.
+export { decodeActivity, MAXIMUM_RETAINED_BYTES_PER_INPUT_BYTE } from './activity';
 export { decodeFitString, decodeUtf8, REPLACEMENT_CHARACTER } from './utf8';
 
 /**

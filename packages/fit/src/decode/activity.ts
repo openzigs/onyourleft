@@ -773,8 +773,15 @@ function createActivityAssembler(
  * Takes every message at once, so its peak retention is the caller's array plus
  * the activity. `container.test.ts` and the fuzz harness use it because they
  * want the messages themselves; **an importer handed an untrusted file should
- * call {@link decodeFitActivityFromBytes} instead**, which is the same decode
- * without the array — see #127 and the note on `streamFitContainer`.
+ * call `decodeFitActivity` instead** — the package's one public entry point,
+ * which is the same decode without the array. See #127 and the note on
+ * `streamFitContainer`.
+ *
+ * `decodeFitActivityFromBytes` is the implementation `decodeFitActivity` calls
+ * and is deliberately **not** exported from the package: two public names for
+ * one decode is a choice #51 would have had to make and could get wrong, and
+ * the #154 review found this file and `README.md` §2 already recommending
+ * different ones.
  */
 export function decodeActivity(container: FitContainer): FitDecodeResult {
   const collector = createDescriptionCollector();

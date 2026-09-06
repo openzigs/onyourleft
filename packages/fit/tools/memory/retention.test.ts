@@ -81,9 +81,30 @@ const SOURCE = Uint8Array.from(readFileSync(join(CORPUS_DIRECTORY, SOURCE_FIXTUR
 
 interface Attempt {
   readonly aborted: boolean;
+  /**
+   * The child died because V8 could not grow the heap — not merely that it
+   * failed.
+   *
+   * `aborted` is `report === undefined`, which is true for a bad module
+   * specifier, a missing fixture, a `spawnSync` timeout and any throw in the
+   * child. That is harmless for the streaming arm, which asserts `false`: those
+   * failures make it red, which is correct. It is **not** harmless for the
+   * vacuity arm, whose whole job is to fail — there, every one of those is a
+   * silent pass, and the assertion that the bound is not vacuous would itself
+   * be vacuous.
+   *
+   * Measured, same machine:
+   *
+   *   heap exhaustion  status null  signal SIGABRT  stderr: FATAL ERROR ... heap
+   *   ordinary throw   status 1     signal null     stderr: no heap wording
+   */
+  readonly heapExhausted: boolean;
   readonly report: DecodeReport | undefined;
   readonly detail: string;
 }
+
+/** V8's own wording when it gives up on the heap, across the forms it takes. */
+const HEAP_EXHAUSTION = /JavaScript heap out of memory|Reached heap limit|FATAL ERROR/i;
 
 /**
  * Decode in a child process whose old space is capped, and say what happened.
@@ -116,10 +137,42 @@ function decodeUnderCap(mode: DecodeMode, capBytes: number): Attempt {
     // and as a non-zero status elsewhere. Either is "it did not fit"; what
     // would not be is a clean exit with no output, so `report` is checked too.
     aborted: report === undefined,
+    heapExhausted: child.signal === 'SIGABRT' || HEAP_EXHAUSTION.test(child.stderr),
     report,
     detail: `status ${String(child.status)} signal ${String(child.signal)}\n${child.stderr.slice(-800)}`,
   };
 }
+
+describe('the harness that measures it', () => {
+  it('does not call an ordinary failure a heap exhaustion', () => {
+    // The distinction the vacuity arm depends on. Before `heapExhausted`
+    // existed, `aborted` was `report === undefined` — true for a bad module
+    // specifier, a missing fixture, a `spawnSync` timeout and any throw — so
+    // the arm asserting "this must fail" passed on all of them, and the test
+    // proving the bound is not vacuous was itself vacuous.
+    //
+    // A child that throws immediately, under a heap large enough that nothing
+    // is short of memory.
+    const child = spawnSync(process.execPath, ['-e', 'throw new Error("not a heap problem")'], {
+      encoding: 'utf8',
+    });
+    expect(child.status).toBe(1);
+    expect(child.signal).toBeNull();
+    expect(HEAP_EXHAUSTION.test(child.stderr)).toBe(false);
+  });
+
+  it('recognises a real one', () => {
+    // The other direction, so the matcher is not merely strict. This is V8
+    // being asked to grow past a 20 MiB old space, which is the same mechanism
+    // the array arm relies on and none of this file's own cap arithmetic.
+    const child = spawnSync(
+      process.execPath,
+      ['--max-old-space-size=20', '-e', 'const a=[];for(;;){a.push(new Array(1e6).fill(0));}'],
+      { encoding: 'utf8' },
+    );
+    expect(child.signal === 'SIGABRT' || HEAP_EXHAUSTION.test(child.stderr)).toBe(true);
+  });
+});
 
 describe('decoding a large FIT file', () => {
   const bytes = repeatFitDataSection(SOURCE, COPIES);
@@ -154,6 +207,13 @@ describe('decoding a large FIT file', () => {
         attempt.aborted,
         `materialising ${String(SOURCE_RECORD_COUNT * COPIES)} messages fitted inside ` +
           `${String(Math.ceil(cap / MIB))} MiB, which it must not: ${attempt.detail}`,
+      ).toBe(true);
+      // And it must have died of the heap, not of anything else. Without this
+      // the arm passes on a typo in the child's path — which is the same shape
+      // as the bound it exists to disprove.
+      expect(
+        attempt.heapExhausted,
+        `the array decode failed, but not by exhausting the heap: ${attempt.detail}`,
       ).toBe(true);
     },
   );
