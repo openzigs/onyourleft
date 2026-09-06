@@ -333,7 +333,7 @@ import { createWebCryptoKeystore, webCryptoVerifier } from '@onyourleft/store';
 const key = await ensureSigningKey(createWebCryptoKeystore(store, athlete));
 ```
 
-Four things to know before you touch it:
+Six things to know before you touch it:
 
 - **`deviceKeys` has no secondary index, on purpose.** Its primary key is `athleteId`, so the only
   lookup it admits is already scoped. An index by public key would be a query that finds a key
@@ -344,7 +344,24 @@ Four things to know before you touch it:
   #61's first acceptance criterion is about.
 - **The private key is a handle, never bytes.** `extractable: false`, so `crypto.subtle.exportKey`
   on it rejects. Do not "simplify" it to a stored byte array: the non-extractability *is* "the
-  private key never leaves the device".
+  private key never leaves the device". ⚠️ That flag is set by `generateDeviceKey` and **is not
+  re-checked when a row is read or written** (#161). It is a property of the only factory
+  production code has, not of the store, and that is a decision rather than an oversight: a guard
+  at the store boundary would reject the extractable key `identity-safety.test.ts` deliberately
+  stores, and that test proves the stronger property — that the private bytes appear in no
+  serialised shape, no log line and no error stack — which it can only do with a key whose bytes it
+  can compute.
+- **A read is not a verification** (#161). `getActivityRecord` re-parses through
+  `parseSignedActivityRecord`, which establishes *shape* and nothing more; neither it nor
+  `putActivityRecord` checks a signature. A `StoredActivityRecord` this store hands back looks
+  authentic and may not be, so a consumer that needs authenticity calls `verifyRecordSignature`
+  itself. ADR 0014 puts verification at #37's import, where a record crosses a trust boundary.
+- **The two halves of a stored key are checked against each other before it signs** (#161).
+  `signingKeyFor` signs a fixed probe with the private handle and verifies it against the public
+  half the row advertises, once per key. Without it, a `deviceKeys` row whose `publicKey` was
+  altered would sign with one half and advertise the other, and every record the device produced
+  would be permanently unverifiable with nothing raising an error. `putActivityRecord`'s
+  key-binding guard cannot see that: it compares the row with itself.
 - **A round trip over a record ends in a verification, not a comparison.** Use
   `assertSignedRecordRoundTrip`. `roundedClaimStoreFactory` is a store that rounds one claim on its
   way in; the record comes back complete, well-formed and parseable, and only the signature check

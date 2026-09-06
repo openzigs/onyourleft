@@ -56,6 +56,20 @@ import type { DeviceKeyRecord } from './identity';
 /** The algorithm identifier both `subtle.sign` and `subtle.generateKey` take. */
 const ED25519 = { name: SIGNATURE_ALGORITHM } as const;
 
+/**
+ * The message signed to prove a stored key's two halves belong together.
+ *
+ * Its content does not matter and it is not a secret — what matters is that
+ * the same bytes are signed and verified, so the round trip can only succeed
+ * when the public half really is the private handle's. Written as literal
+ * bytes rather than through a `TextEncoder` so that the probe cannot change
+ * with a locale, an encoding, or a future edit to a shared helper.
+ */
+const KEY_BINDING_PROBE = new Uint8Array([
+  0x6f, 0x6e, 0x79, 0x6f, 0x75, 0x72, 0x6c, 0x65, 0x66, 0x74, 0x3a, 0x6b, 0x65, 0x79, 0x2d, 0x62,
+  0x69, 0x6e, 0x64, 0x69, 0x6e, 0x67,
+]);
+
 /** SHA-256 over bytes, for an activity file's content hash. */
 export const webCryptoSha256: Sha256 = async (bytes) =>
   new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as BufferSource));
@@ -190,11 +204,56 @@ export async function generateDeviceKey(
  */
 export function signingKeyFor(record: DeviceKeyRecord): SigningKey {
   const publicKey = fromHex(record.publicKey, 'the stored public key', PUBLIC_KEY_BYTES);
+
+  // #161. Nothing else binds these two halves to each other. A `deviceKeys`
+  // row whose `publicKey` was altered — in devtools, or by any future writer
+  // with a bug — yields a key that signs with one half and advertises the
+  // other, so every record the device then signs is permanently unverifiable
+  // and nothing raises an error at any point.
+  //
+  // `putActivityRecord`'s key-binding guard does not catch it: that compares
+  // `row.record.publicKey` against `deviceKey.publicKey`, and on a tampered
+  // row both sides are read from the same altered value, so it agrees with
+  // itself. The only way to know is to ask the private half.
+  //
+  // Done once per key rather than per signature, and lazily, so that
+  // `signingKeyFor` stays synchronous and its callers are unchanged. A
+  // rejected probe stays rejected: every later `sign` awaits the same promise
+  // and fails the same way, rather than retrying a check that cannot start
+  // passing.
+  let binding: Promise<void> | undefined;
+  const proveBinding = async (): Promise<void> => {
+    // `publicKey as BufferSource` matches `webCryptoVerifier` above: it comes
+    // from `fromHex` as a `Uint8Array<ArrayBufferLike>`, which this overload
+    // does not accept without the widening. `KEY_BINDING_PROBE` needs no cast —
+    // a literal `Uint8Array` already satisfies it, and the linter rejects the
+    // assertion as unnecessary if you add one anyway.
+    const probe = await crypto.subtle.sign(ED25519, record.privateKey, KEY_BINDING_PROBE);
+    const advertised = await crypto.subtle.importKey(
+      'raw',
+      publicKey as BufferSource,
+      ED25519,
+      false,
+      ['verify'],
+    );
+    if (!(await crypto.subtle.verify(ED25519, advertised, probe, KEY_BINDING_PROBE))) {
+      throw new StoreValidationError(
+        'deviceKey.publicKey is not the public half of the stored private key: every signature ' +
+          'this device made would be unverifiable by the key it advertises',
+      );
+    }
+  };
+
   return {
     algorithm: record.algorithm,
     publicKey,
-    sign: async (message) =>
-      new Uint8Array(await crypto.subtle.sign(ED25519, record.privateKey, message as BufferSource)),
+    sign: async (message) => {
+      binding ??= proveBinding();
+      await binding;
+      return new Uint8Array(
+        await crypto.subtle.sign(ED25519, record.privateKey, message as BufferSource),
+      );
+    },
   };
 }
 
