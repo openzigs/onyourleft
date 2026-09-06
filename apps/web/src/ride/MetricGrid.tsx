@@ -23,9 +23,10 @@
 
 import type { JSX } from 'react';
 
-import { metresPerSecondToKilometresPerHour, type MetresPerSecond } from '@onyourleft/domain';
+import type { MetresPerSecond } from '@onyourleft/domain';
 
 import { VisuallyHidden } from '../design/VisuallyHidden';
+import { formatSpeedValue, SPEED_UNIT } from '../format';
 
 import type { RideMetric } from './controller';
 import type { MetricState, RideMetricId } from './metrics';
@@ -52,11 +53,21 @@ const PRESENTATION: Readonly<Record<RideMetricId, MetricPresentation>> = {
   heartRate: { label: 'Heart rate', unit: 'bpm', format: (value) => String(Math.round(value)) },
   speed: {
     label: 'Speed',
-    unit: 'km/h',
-    // Through `@onyourleft/domain`, because every conversion in this program
-    // does: the canonical unit is metres per second and a `* 3.6` here would be
-    // a second place for the device and a Phase 3 instance to disagree.
-    format: (value) => metresPerSecondToKilometresPerHour(value as MetresPerSecond).toFixed(1),
+    unit: SPEED_UNIT,
+    // Through `../format`, which goes through `@onyourleft/domain`, because
+    // every conversion in this program does: the canonical unit is metres per
+    // second and a `* 3.6` here would be a second place for the device and a
+    // Phase 3 instance to disagree. The decimal count and the unit label lived
+    // here as well as in `format.ts` until #143 gave that module its caller;
+    // two places deciding how precise a speed is, is the same disagreement one
+    // level up.
+    //
+    // The cast is the honest edge of the branded type rather than a hole in it:
+    // `MetricState`'s `live` variant carries a plain `number` because all four
+    // channels share it, and this is the single place a speed re-enters the
+    // typed world. The value came off `metricStateFor`, which copies it from a
+    // reading the transport already validated.
+    format: (value) => formatSpeedValue(value as MetresPerSecond),
   },
 };
 

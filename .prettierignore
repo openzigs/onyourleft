@@ -4,6 +4,13 @@ dist/
 coverage/
 pnpm-lock.yaml
 
+# Not this checkout's code. `.claude/worktrees/` holds git worktrees of OTHER
+# branches, created by the delivery workflows, so `prettier --check .` reports
+# another branch's formatting against paths under `.claude/`. Measured on #148:
+# two planted files there fail `format:check` on a tree whose own sources are
+# clean. CI is unaffected — a runner has no worktrees.
+.claude/
+
 # Prose and legal text. CLAUDE.md section 7: "do not reformat files you did not
 # come to change". Prettier's Markdown printer rewraps every paragraph in the
 # repository, which would bury every real diff in this project's documentation,

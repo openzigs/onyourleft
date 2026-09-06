@@ -26,16 +26,24 @@
  * `profile.ts`.
  */
 
-export type {
-  BluetoothDevicePort,
-  BluetoothPort,
-  BluetoothScanFilterPort,
-  GattCharacteristicPort,
-  GattServerPort,
-  GattServicePort,
-  GattUuid,
-  RequestDevicePortOptions,
-} from './gatt';
+/**
+ * Two, where there were eight (#132, F8).
+ *
+ * `BluetoothPort` is what a consumer holds — it is `navigator.bluetooth`, and
+ * `apps/web` passes one to `createWebBluetoothTransport` and to
+ * `readAvailability`. `GattUuid` is a service or characteristic identifier and
+ * appears in `GattProfile`, which #41–#43 implement.
+ *
+ * The other six — `BluetoothDevicePort`, `BluetoothScanFilterPort`,
+ * `GattCharacteristicPort`, `GattServerPort`, `GattServicePort` and
+ * `RequestDevicePortOptions` — are the seam an *adapter* is written against,
+ * one level below anything an application should be reaching for. They are
+ * still exported from `./gatt` for this directory's own use and from
+ * `./testing` where the fake stack needs them; what changed is that they are no
+ * longer part of the package's app-facing contract. An entry point is far
+ * easier to widen later than to narrow, and re-exporting one costs a line.
+ */
+export type { BluetoothPort, GattUuid } from './gatt';
 
 export type { GattProfile, MeasurementSink, MeasurementValueFor } from './profile';
 

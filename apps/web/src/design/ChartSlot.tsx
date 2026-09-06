@@ -23,7 +23,7 @@
  * So the table is not a degraded mode. It is the base case, and the chart is
  * the enhancement — which is also why {@link ChartSlot} renders the table
  * directly when no chart is supplied, as every view in this shell does today.
- * #51 supplies the charts.
+ * #50's activity detail view supplies the first chart.
  */
 
 import { Component, type ErrorInfo, type JSX, type ReactNode } from 'react';
@@ -72,9 +72,18 @@ export interface ChartSlotProps {
   /**
    * The chart, when there is one.
    *
-   * Left undefined by every view in this shell: #51 owns the charts, and a slot
+   * Left undefined by every view in this shell: #50 owns the first chart, and a slot
    * that renders its table until then is the same component doing its job
    * rather than a placeholder to be replaced.
+   *
+   * ⚠️ **This prop has no production caller yet, so the boundary below is
+   * exercised only by `degradation.a11y.test.tsx`.** #48's seventh criterion —
+   * the shell renders with charts absent — is genuinely met without it, but the
+   * *lazy* half of that criterion is not this file's to meet: it depends on #50
+   * loading each chart through `React.lazy`, and a `lazy` component that fails
+   * to load throws during render, which is what {@link RenderBoundary} catches.
+   * A chart imported eagerly by #50 would take the page down before this
+   * boundary ever ran. Recorded here rather than discovered there (#143).
    */
   readonly chart?: ReactNode;
 }
@@ -108,10 +117,24 @@ function DataTable({
         </tr>
       </thead>
       <tbody>
-        {rows.map((row) => (
-          <tr key={row.join('')}>
-            {row.map((cell, index) => (
-              <td key={`${columns[index] ?? String(index)}:${cell}`}>{cell}</td>
+        {/*
+          Keyed by POSITION, not by content. The row key was the row's own
+          cells joined on U+001F, which made two rows carrying the SAME values
+          share a key -- and a ride's table has every reason to repeat a row,
+          two laps at the same split for instance. React treats duplicate keys
+          as one child, so the second row is dropped from the rendered table
+          and the athlete reads a table that is quietly short. The cell key had
+          the same shape on `column:cell` and the same hole.
+
+          Position is the honest key here: `rows` is ordered data with no
+          identity of its own, and it is replaced wholesale rather than
+          reordered in place. It also gets an invisible C0 control character
+          out of a source file. #143.
+        */}
+        {rows.map((row, rowIndex) => (
+          <tr key={rowIndex}>
+            {row.map((cell, cellIndex) => (
+              <td key={cellIndex}>{cell}</td>
             ))}
           </tr>
         ))}

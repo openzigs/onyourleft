@@ -9,8 +9,9 @@
  * Two halves, and both are here because either alone would be misleading:
  *
  * 1. **With no chart at all**, every route renders its data and every
- *    navigation link works. That is the shell as it ships today — #51 supplies
- *    the charts — so it is the literal reading of "charts absent".
+ *    navigation link works. That is the shell as it ships today — #50's
+ *    activity detail view supplies the first chart — so it is the literal
+ *    reading of "charts absent".
  * 2. **With a chart that fails**, the failure is contained: the table replaces
  *    it, the surrounding page is still there, and the navigation beside it is
  *    still focusable and still works. Without a boundary the whole React tree

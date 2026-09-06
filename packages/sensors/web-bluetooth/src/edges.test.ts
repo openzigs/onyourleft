@@ -131,7 +131,13 @@ describe('a notification the adapter cannot use', () => {
       onProtocolError: (error) => failures.push(error),
     });
     // Cadence only. The profile decodes power first and speed last on every
-    // frame, and neither was asked for.
+    // frame, and neither was subscribed to.
+    //
+    // ⚠️ **Since #131 the device *declares* all three.** Asking for cadence
+    // grants the service that supplies it, and a granted service is resolved
+    // whole — so power and speed are declared, sourced and simply unsubscribed.
+    // The assertion below is unchanged and still the right one: a field nobody
+    // is listening for costs one dropped value and **no** protocol error.
     const device = await transport.discover({ capabilities: ['cadence'] });
     await transport.connect(device.identity.id);
     const seen: string[] = [];

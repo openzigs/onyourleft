@@ -7,3 +7,11 @@ build/
 *.log
 .DS_Store
 coverage/
+
+# Git worktrees of other branches, created by the delivery workflows. Git
+# already declines to stage a nested worktree — it sees the `.git` file and
+# stops — so `git add -A` was safe without this line. It is here so the intent
+# is written down rather than resting on a git behaviour nobody stated, and so
+# that a `git add` of a path inside it has to be forced. Never force it: that
+# commits another branch's whole tree (#148).
+.claude/

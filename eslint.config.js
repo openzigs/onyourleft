@@ -205,6 +205,13 @@ export default tseslint.config(
       '**/coverage/**',
       // Not source: a checked-in template of variable names.
       '.env.example',
+      // Not this checkout's code. `.claude/worktrees/` holds git worktrees of
+      // OTHER branches, created by the delivery workflows, so `eslint .` walking
+      // into it reports another branch's errors against paths under `.claude/`
+      // with nothing in the output saying they are not yours. CI never sees it —
+      // a runner has no worktrees — which is what made the local gate disagree
+      // with CI in the direction that trains people to disbelieve it (#148).
+      '.claude/**',
     ],
   },
 
