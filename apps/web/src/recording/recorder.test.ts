@@ -34,7 +34,12 @@ import {
   type UnixSeconds,
   type Watts,
 } from '@onyourleft/domain';
-import { decodeFitActivity, encodeFitActivity, type FitRecord } from '@onyourleft/fit';
+import {
+  decodeFitActivity,
+  encodeFitActivity,
+  FILE_TYPE_ACTIVITY,
+  type FitRecord,
+} from '@onyourleft/fit';
 import { deviceId, WEB_BLUETOOTH, type SensorMeasurement } from '@onyourleft/sensors';
 import { athleteId, recordingSessionId, type RecordingSessionId } from '@onyourleft/store';
 import {
@@ -274,7 +279,19 @@ describe('gap versus zero, from the recorder to the bytes of a FIT file', () => 
       });
     }
 
-    const encoded = encodeFitActivity({ records });
+    // A `file_id`, because a ride exported without one is a file no strict
+    // reader will take: the encoder reports `missing-file-id` and the empty
+    // fault list asserted below is what would have hidden it.
+    const encoded = encodeFitActivity({
+      fileId: {
+        type: FILE_TYPE_ACTIVITY,
+        manufacturer: 255,
+        product: 1,
+        serialNumber: 1,
+        timeCreated: { kind: 'instant', instant: at(0) },
+      },
+      records,
+    });
     const decoded = decodeFitActivity(encoded.bytes);
     expect(encoded.faults).toEqual([]);
     expect(decoded.faults).toEqual([]);

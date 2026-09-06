@@ -191,11 +191,14 @@ written to make it pass. Every collection is optional, so a ride recorded on a t
 `{ records, laps, sessions, summary }` and nothing else.
 
 `faults` is every field of the input that could not be carried into the bytes, each naming the global
-message number and field number it came from. A caller that ignores them still gets a valid file.
+message number and field number it came from. A caller that ignores them still gets its bytes —
+`missing-file-id` is the one fault that is about the file rather than about a field in it, and it is
+the one a caller that ignores faults ships a non-conformant file on.
 
 | Fault | When |
 |---|---|
 | `nothing-to-encode` | the activity carries no messages at all, so the file is a header and a checksum |
+| `missing-file-id` | the activity carries no `file_id`, so the file has no file type in it. The protocol requires a `file_id` and requires it **first** — it is what a reader dispatching on file type reads before anything else. The rest of the file is written all the same, and a lenient reader will take it; a strict one is entitled not to |
 | `value-not-representable` | a value no base type in this profile subset can hold, or one `@onyourleft/domain` rejects. **The one value is written as a gap; the channel is kept** |
 | `instant-not-representable` | an instant before the 1989 epoch or past `uint32`. Dropped, never wrapped |
 | `instant-reads-back-as-system-time` | an instant whose FIT `date_time` falls in the range reserved for "seconds since the device powered on" — before 1998-07-03T21:24:15Z. Written anyway, because the format offers no alternative, and reported |

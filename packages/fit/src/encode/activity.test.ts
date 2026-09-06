@@ -27,10 +27,10 @@ import {
 } from '@onyourleft/domain';
 import { describe, expect, it } from 'vitest';
 
-import type { FitRecord } from '../decode/activity';
+import type { FitFileId, FitRecord } from '../decode/activity';
 import { decodeActivity } from '../decode/activity';
 import { readFitContainer } from '../decode/container';
-import { FIELD, GLOBAL_MESSAGE } from '../decode/profile';
+import { FIELD, FILE_TYPE_ACTIVITY, GLOBAL_MESSAGE } from '../decode/profile';
 import type { FitEncodeInput } from './activity';
 import { encodeActivity } from './activity';
 
@@ -50,6 +50,22 @@ const EMPTY_RECORD: FitRecord = {
 function record(overrides: Partial<FitRecord>): FitRecord {
   return { ...EMPTY_RECORD, ...overrides };
 }
+
+/**
+ * A `file_id`, because the protocol requires one in every FIT file.
+ *
+ * Every case below except the two that are *about* the `file_id` supplies it:
+ * an encode without one raises `missing-file-id`, and a test about a dropped
+ * altitude that also reported a missing `file_id` would be asserting two things
+ * at once. The manufacturer is 255, the development id the #29 corpus writes.
+ */
+const FILE_ID: FitFileId = {
+  type: FILE_TYPE_ACTIVITY,
+  manufacturer: 255,
+  product: 1,
+  serialNumber: 0x00c0ffee,
+  timeCreated: instant(0),
+};
 
 function roundTrip(input: FitEncodeInput) {
   const { bytes, faults } = encodeActivity(input);
@@ -80,6 +96,7 @@ describe('a position exactly on the largest semicircle a sint32 can hold', () =>
   );
 
   const { faults, decoded } = roundTrip({
+    fileId: FILE_ID,
     records: [
       record({ timestamp: instant(0), position: ordinary }),
       record({ timestamp: instant(1), position: onTheMarker }),
@@ -114,6 +131,7 @@ describe('an instant with no FIT representation', () => {
     // reappears as a date around 2126 — plausible enough to store and
     // impossible to detect afterwards.
     const { faults, decoded } = roundTrip({
+      fileId: FILE_ID,
       records: [record({ timestamp: { kind: 'instant', instant: unixSeconds(315_532_800) } })],
     });
     expect(faults.map((fault) => fault.code)).toEqual(['instant-not-representable']);
@@ -128,6 +146,7 @@ describe('an instant inside the range FIT reserves for system time', () => {
     // — this decoder included — reads it back as seconds since a device
     // powered on rather than as an instant.
     const { faults, decoded } = roundTrip({
+      fileId: FILE_ID,
       records: [record({ timestamp: { kind: 'instant', instant: unixSeconds(788_918_400) } })],
     });
     expect(faults.map((fault) => fault.code)).toEqual(['instant-reads-back-as-system-time']);
@@ -136,7 +155,7 @@ describe('an instant inside the range FIT reserves for system time', () => {
   });
 
   it('says nothing about an ordinary modern instant', () => {
-    const { faults } = roundTrip({ records: [record({ timestamp: instant(0) })] });
+    const { faults } = roundTrip({ fileId: FILE_ID, records: [record({ timestamp: instant(0) })] });
     expect(faults).toEqual([]);
   });
 });
@@ -147,6 +166,7 @@ describe('a quantity @onyourleft/domain cannot encode', () => {
     // plausible 12 606.8 m into a file that then round-trips cleanly for ever.
     const tooHigh = 20_000 as unknown as AltitudeMetres;
     const { faults, decoded } = roundTrip({
+      fileId: FILE_ID,
       records: [
         record({ timestamp: instant(0), altitude: altitudeMetres(120) }),
         record({ timestamp: instant(1), altitude: tooHigh }),
@@ -163,21 +183,67 @@ describe('a quantity @onyourleft/domain cannot encode', () => {
     // it runs the same conversions. A caller reading two copies of every fault
     // would reasonably conclude the field was dropped twice.
     const tooHigh = 20_000 as unknown as AltitudeMetres;
-    const { faults } = roundTrip({ records: [record({ altitude: tooHigh })] });
+    const { faults } = roundTrip({ fileId: FILE_ID, records: [record({ altitude: tooHigh })] });
     expect(faults).toHaveLength(1);
   });
 });
 
 describe('an activity with nothing in it', () => {
   it('produces a header and a checksum, and says so', () => {
+    // Two faults, because two different things are wrong with the file and a
+    // caller shown only one of them would fix that one: it holds no messages,
+    // and it holds no `file_id` either.
     const { faults, bytes } = roundTrip({});
-    expect(faults.map((fault) => fault.code)).toEqual(['nothing-to-encode']);
+    expect(faults.map((fault) => fault.code)).toEqual(['missing-file-id', 'nothing-to-encode']);
     expect(bytes).toHaveLength(16);
   });
 
   it('says nothing when there is a single message to write', () => {
-    const { faults } = roundTrip({ records: [record({ power: watts(210) })] });
+    const { faults } = roundTrip({ fileId: FILE_ID, records: [record({ power: watts(210) })] });
     expect(faults).toEqual([]);
+  });
+});
+
+describe('an activity with no file_id', () => {
+  /**
+   * The protocol requires a `file_id` in every FIT file and requires it first:
+   * it is where the file type lives, and a reader that dispatches on the file
+   * type before reading anything else has nothing to dispatch on. Lenient
+   * readers accept the file anyway — `fit-file-parser`, the independent reader
+   * `tools/fixture-corpus/third-party-acceptance.test.ts` runs the output
+   * through, reads the records back happily — so the encoder has to hold the
+   * opinion itself.
+   */
+  it('is written all the same, and reported', () => {
+    const { faults, decoded } = roundTrip({ records: [record({ power: watts(210) })] });
+
+    expect(faults.map((fault) => fault.code)).toEqual(['missing-file-id']);
+    expect(faults[0]?.globalMessageNumber).toBe(GLOBAL_MESSAGE.fileId);
+    // The bytes are still a file: a caller that ignores faults gets its export,
+    // which is the contract every other fault here keeps too.
+    expect(decoded.faults).toEqual([]);
+    expect(decoded.activity.records.map((item) => item.power)).toEqual([210]);
+    expect(decoded.activity.fileId).toBeUndefined();
+  });
+
+  it('says nothing when the file_id is there, and writes it first', () => {
+    const { faults, bytes, decoded } = roundTrip({
+      fileId: FILE_ID,
+      records: [record({ timestamp: instant(0), power: watts(210) })],
+    });
+
+    expect(faults).toEqual([]);
+    // Read back through the container walk rather than trusted from the input:
+    // `messages` is every data message in the order the file holds them, so the
+    // first one is what a reader dispatching on file type sees first.
+    const container = readFitContainer(bytes);
+    expect(container.faults).toEqual([]);
+    expect(container.messages[0]?.globalMessageNumber).toBe(GLOBAL_MESSAGE.fileId);
+    expect(
+      container.messages[0]?.fields.find((field) => field.number === FIELD.fileId.type)?.numeric,
+    ).toBe(FILE_TYPE_ACTIVITY);
+    // And the file_id survived the round trip rather than merely being present.
+    expect(decoded.activity.fileId).toEqual(FILE_ID);
   });
 });
 
@@ -203,6 +269,7 @@ describe('a message that omits a field wider than one element', () => {
   it('still writes the sixteen bytes an absent application id declared', () => {
     const applicationId = Uint8Array.from({ length: 16 }, (_byte, index) => index + 1);
     const { faults, decoded } = roundTrip({
+      fileId: FILE_ID,
       developerApplications: [
         { developerDataIndex: 0, applicationId, manufacturerId: 255, applicationVersion: 1 },
         // The second application carries no id at all, so the field it shares
@@ -241,6 +308,7 @@ describe('a message that omits a field wider than one element', () => {
         bytes: carried,
       };
       const { faults, decoded } = roundTrip({
+        fileId: FILE_ID,
         records: [
           record({ timestamp: instant(0), power: watts(200), developerFields: [developerField] }),
           // The middle record does not carry it. The definition still declares

@@ -37,7 +37,13 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import type { FitActivity } from '../../src/decode';
-import { decodeFitActivity, FIELD, GLOBAL_MESSAGE, readFitContainer } from '../../src/decode';
+import {
+  decodeFitActivity,
+  FIELD,
+  FILE_TYPE_ACTIVITY,
+  GLOBAL_MESSAGE,
+  readFitContainer,
+} from '../../src/decode';
 import { encodeFitActivity } from '../../src/encode';
 import { CORPUS_DIRECTORY } from './corpus-files';
 import { fitCrc16 as generatorCrc16 } from './fit-crc';
@@ -103,6 +109,15 @@ describe.each(ROUND_TRIP_FIXTURES)('%s', (name) => {
     const bytes = encoded.bytes;
     const declared = new DataView(bytes.buffer, bytes.byteOffset).getUint32(4, true);
     expect(declared).toBe(bytes.length - 14 - 2);
+  });
+
+  it('writes the file_id first, which is where the protocol requires it', () => {
+    // `messages` is the file's data messages in the order they appear, so the
+    // first of them is what a reader dispatching on file type reads first. Every
+    // fixture here carries a file_id — the fault list asserted above is empty —
+    // so this fails on the ordering rather than on the file_id being absent.
+    const container = readFitContainer(encoded.bytes);
+    expect(container.messages[0]?.globalMessageNumber).toBe(GLOBAL_MESSAGE.fileId);
   });
 
   it('writes every definition before the first data message that uses it', () => {
@@ -207,6 +222,7 @@ describe('a value that collides with its base type’s invalid marker', () => {
   it('widens the whole channel so the value survives', () => {
     // 255 bpm in a uint8 is 0xFF, which every reader treats as "not recorded".
     const { bytes, faults } = encodeFitActivity({
+      fileId: FILE_ID,
       records: [
         { ...EMPTY_RECORD, heartRate: 255 as never },
         { ...EMPTY_RECORD, heartRate: 120 as never },
@@ -214,13 +230,28 @@ describe('a value that collides with its base type’s invalid marker', () => {
     });
     expect(faults).toEqual([]);
     const container = readFitContainer(bytes);
-    const heartRate = container.messages[0]?.fields.find(
-      (field) => field.number === FIELD.record.heartRate,
-    );
+    const heartRate = container.messages
+      .find((message) => message.globalMessageNumber === GLOBAL_MESSAGE.record)
+      ?.fields.find((field) => field.number === FIELD.record.heartRate);
     expect(heartRate?.size).toBe(2);
     expect(decodeFitActivity(bytes).activity.records[0]?.heartRate).toBe(255);
   });
 });
+
+/**
+ * A `file_id`, because the encoder reports `missing-file-id` without one.
+ *
+ * The hand-built inputs above are about a channel's base type rather than about
+ * the `file_id`, so they carry one: a test asserting an empty fault list is a
+ * clearer test than one asserting a fault it did not come to look at.
+ */
+const FILE_ID = {
+  type: FILE_TYPE_ACTIVITY,
+  manufacturer: 255,
+  product: 1,
+  serialNumber: 0x00c0ffee,
+  timeCreated: undefined,
+} as const;
 
 const EMPTY_RECORD = {
   timestamp: undefined,
@@ -239,7 +270,12 @@ describe('a structurally valid file with no messages in it', () => {
   it('encodes to a header and a checksum, and says so rather than pretending', () => {
     const original = decodeFitActivity(fixture('header-only.fit'));
     const { bytes, faults } = encodeFitActivity(original.activity);
-    expect(faults.map((fault) => fault.code)).toEqual(['nothing-to-encode']);
+    // Two faults rather than one, and both are true of this fixture: it holds
+    // no messages at all, and so it holds no `file_id` either — `decode-corpus`
+    // asserts its `fileId` comes back undefined. Supplying one here would be
+    // encoding a different activity than the one the file decoded to, which is
+    // exactly what a round-trip test must not do.
+    expect(faults.map((fault) => fault.code)).toEqual(['missing-file-id', 'nothing-to-encode']);
     expect(bytes).toHaveLength(16);
     expect(decodeFitActivity(bytes).activity.records).toEqual([]);
   });
