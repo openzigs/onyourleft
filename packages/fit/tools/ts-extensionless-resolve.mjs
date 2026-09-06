@@ -9,14 +9,22 @@
  * import inside `@onyourleft/domain` once the generator reaches it. Checked on
  * Node v24.20.0 and v22.22.3 on 2026-09-03; both fail.
  *
+ * Node also refuses a **directory** specifier outright, with
+ * `ERR_UNSUPPORTED_DIR_IMPORT` rather than `ERR_MODULE_NOT_FOUND`: `import … from
+ * '../../src'` is how every module in this package names the package entry
+ * point, and CommonJS-style directory resolution is not something ESM does. So
+ * both candidates are tried — `./y.ts` and `./y/index.ts` — which between them
+ * cover every spelling this workspace uses.
+ *
  * Rewriting the whole workspace to explicit `.ts` specifiers would need
  * `allowImportingTsExtensions` and would change files in `packages/domain` that
  * this issue has no business touching. Adding a TypeScript runner would be a
- * new dependency and a licence question. Twenty lines using Node's own
+ * new dependency and a licence question. Thirty lines using Node's own
  * `module.registerHooks` is the smallest thing that works, and it is scoped to
- * the one command that needs it — `pnpm --filter @onyourleft/fit run
- * fixtures:generate`. Vitest resolves these specifiers itself and does not load
- * this file.
+ * the two commands that need it — `pnpm --filter @onyourleft/fit run
+ * fixtures:generate`, and the child process `tools/memory/retention.test.ts`
+ * spawns (#127). Vitest resolves these specifiers itself and does not load this
+ * file.
  *
  * It only ever *adds* a candidate: a specifier that already resolves is
  * untouched, and one that carries an explicit extension is never rewritten, so
@@ -35,11 +43,14 @@ registerHooks({
       if (HAS_EXTENSION.test(specifier)) {
         throw error;
       }
-      try {
-        return nextResolve(`${specifier}.ts`, context);
-      } catch {
-        throw error;
+      for (const candidate of [`${specifier}.ts`, `${specifier}/index.ts`]) {
+        try {
+          return nextResolve(candidate, context);
+        } catch {
+          // Try the next spelling; the original error is what gets reported.
+        }
       }
+      throw error;
     }
   },
 });

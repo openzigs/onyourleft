@@ -210,6 +210,29 @@ describe('the cases the issue requires', () => {
     expect(text.length).toBeLessThan(1024);
   });
 
+  it('carries a structural nest in both deep-nesting fixtures', () => {
+    // The class of attack a fuzz of this corpus cannot invent for itself: its
+    // cases are byte substitutions and truncations, and neither produces three
+    // hundred levels of nesting. #149.
+    for (const [name, element] of [
+      ['deep-nesting.gpx', 'deep'],
+      ['deep-nesting.tcx', 'Deep'],
+    ] as const) {
+      const text = new TextDecoder().decode(committedBytes(name));
+      const opens = text.split(`<${element}>`).length - 1;
+      const closes = text.split(`</${element}>`).length - 1;
+      expect(opens, name).toBe(closes);
+      // Deeper than `src/xml/parse.ts`'s `MAXIMUM_DEPTH`, which is 256. Checked
+      // against the number rather than the constant, so that raising the
+      // constant without regenerating the corpus is a red test rather than a
+      // fixture that quietly stops attacking anything.
+      expect(opens, name).toBeGreaterThan(256);
+      // And it is nesting rather than a flat run of siblings.
+      expect(text, name).toContain(`<${element}><${element}>`);
+      expect(text, name).toContain(`</${element}></${element}>`);
+    }
+  });
+
   it('has a truncated GPX that really is cut off mid-element', () => {
     const text = new TextDecoder().decode(committedBytes('truncated-mid-trackpoint.gpx'));
     expect(text).not.toContain('</gpx>');

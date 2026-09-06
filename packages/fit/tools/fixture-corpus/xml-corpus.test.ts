@@ -30,6 +30,7 @@ import {
   encodeGpx,
   encodeTcx,
   GPX_TRACK_POINT_EXTENSION_V1,
+  MAXIMUM_DEPTH,
   parseXml,
   trackPointsOf,
 } from '../../src/xml';
@@ -109,6 +110,42 @@ describe('a nested entity expansion', () => {
 
     expect(error.code).toBe('doctype-forbidden');
     expect(elapsed).toBeLessThan(10);
+  });
+});
+
+describe('a document nested deeper than the parser will go', () => {
+  it.each([
+    ['deep-nesting.gpx', decodeGpx],
+    ['deep-nesting.tcx', decodeTcx],
+  ] as const)('is refused in %s, without building the stack it asked for', (name, read) => {
+    const text = fixture(name);
+    // The fixture really does nest past the limit, so the refusal below is not
+    // a refusal of something else that happens to be wrong with the file.
+    const opens = text.match(/<(?:deep|Deep)>/g)?.length ?? 0;
+    expect(opens, name).toBeGreaterThan(MAXIMUM_DEPTH);
+
+    const error = thrownBy(() => read(text));
+    expect(error.code).toBe('depth-limit-exceeded');
+    // The character offset is the tag that would have been the 257th, so it is
+    // inside the nest rather than at the end of the document. A refusal
+    // reported at the very end would mean the whole thing had been read first.
+    expect(error.characterOffset).toBeLessThan(text.length);
+  });
+
+  it('is refused by the parser itself, not only by the two importers', () => {
+    // Same reason the XXE case says so: the defence is one place, and an
+    // importer-level check is a place the third format would have to remember.
+    for (const name of ['deep-nesting.gpx', 'deep-nesting.tcx']) {
+      expect(thrownBy(() => parseXml(fixture(name), {})).code, name).toBe('depth-limit-exceeded');
+    }
+  });
+
+  it('says nothing about the document in its message', () => {
+    // ADR 0004 decision D applies to a structural refusal too. The message may
+    // name the limit; it may not quote the file.
+    const error = thrownBy(() => decodeGpx(fixture('deep-nesting.gpx')));
+    expect(error.message).not.toContain('<deep>');
+    expect(error.message).toContain(String(MAXIMUM_DEPTH));
   });
 });
 

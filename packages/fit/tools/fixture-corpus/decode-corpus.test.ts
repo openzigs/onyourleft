@@ -23,7 +23,7 @@
  * it exercises has no such dependency; the harness around it does.
  */
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -44,6 +44,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { FitDateTime, FitRecord } from '../../src/decode';
 import {
+  decodeActivity,
   decodeFitActivity,
   EVENT_TIMER,
   EVENT_TYPE_START,
@@ -52,6 +53,7 @@ import {
   FILE_TYPE_ACTIVITY,
   fitCrc16,
   GLOBAL_MESSAGE,
+  readFitContainer,
   SPORT_CYCLING,
 } from '../../src/decode';
 import { CORPUS_DIRECTORY } from './corpus-files';
@@ -696,3 +698,52 @@ describe('the exported profile enumerations name what the committed corpus holds
     ]);
   });
 });
+
+describe('streaming the decode changes what it costs and not what it says — #127', () => {
+  // `decodeFitActivity` stopped building the `FitMessage[]` in #127. Everything
+  // else about it has to be untouched, and the honest way to say that is to run
+  // both spellings over every committed fixture and require the results to be
+  // indistinguishable -- rather than to run the new one and check the answers
+  // still look right, which is a test of the assertions rather than of the
+  // change.
+  //
+  // The corpus is enumerated off disk rather than listed here, so a fixture
+  // added later is covered without anyone remembering to add it.
+  const names = readdirSync(CORPUS_DIRECTORY)
+    .filter((name) => name.endsWith('.fit'))
+    .sort();
+
+  it('covers every committed FIT fixture', () => {
+    expect(names.length).toBeGreaterThanOrEqual(13);
+  });
+
+  it.each(names)('decodes %s identically both ways', (name) => {
+    const bytes = fixture(name);
+    const streamed = attempt(() => decodeFitActivity(bytes));
+    const materialised = attempt(() => decodeActivity(readFitContainer(bytes)));
+    // Faults included, and in order: the streaming path seeds its fault list
+    // from a *first* walk and assembles on a *second*, so an ordering that
+    // drifted between the two walks would show up here and nowhere else.
+    expect(streamed).toEqual(materialised);
+  });
+
+  it('really is exercising the fault path and the developer-field path', () => {
+    // Otherwise the equality above could hold across two clean decodes and say
+    // nothing about the interesting halves. `truncated-mid-record.fit` carries
+    // collected faults; `developer-fields.fit` is the only fixture whose decode
+    // depends on the description pass finishing before the record pass.
+    expect(decodeFitActivity(fixture('truncated-mid-record.fit')).faults.length).toBeGreaterThan(0);
+    const developer = decodeFitActivity(fixture('developer-fields.fit')).activity;
+    expect(developer.developerFieldDescriptions.length).toBeGreaterThan(0);
+    expect(developer.records[0]?.developerFields[0]?.name).toBeDefined();
+  });
+});
+
+/** A call's outcome as a value, so two spellings of it can be compared. */
+function attempt<T>(call: () => T): T | Error {
+  try {
+    return call();
+  } catch (error) {
+    return error as Error;
+  }
+}

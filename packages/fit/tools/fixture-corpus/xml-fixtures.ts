@@ -18,6 +18,7 @@
 
 import type { GeographicPosition } from '@onyourleft/domain';
 
+import { MAXIMUM_DEPTH } from '../../src/xml';
 import type { TrackSpecification } from './ride';
 import { positionAt, RIDE_START_UNIX_SECONDS } from './ride';
 import { decimal, degrees, document, isoInstant, xmlText } from './xml-builder';
@@ -221,6 +222,95 @@ export function billionLaughsGpx(): XmlFixture {
     '    <trkseg/>',
     '  </trk>',
     '</gpx>',
+  ];
+  return { text: document(lines), positions: [] };
+}
+
+/**
+ * How deep the two deep-nesting fixtures nest — #149.
+ *
+ * Derived from the parser's own limit rather than typed out, so the fixture
+ * cannot drift past it: raise `MAXIMUM_DEPTH` and these files get deeper with
+ * it, and the corpus test that compares the committed bytes against the
+ * generator is what makes that visible. The `+ 64` is margin, and it is there
+ * to say that what is being tested is *a document deeper than the parser will
+ * go*, not the exact off-by-one at the boundary — `parse.test.ts` owns that.
+ */
+const NESTING_DEPTH = MAXIMUM_DEPTH + 64;
+
+/**
+ * `<deep>` nested {@link NESTING_DEPTH} times, on one line — #149.
+ *
+ * One line because the whitespace between tags would otherwise be two thirds of
+ * the file, and the corpus has a byte budget. The nesting is the payload; the
+ * indentation would be noise.
+ */
+function nestedElements(name: string): string {
+  return `${`<${name}>`.repeat(NESTING_DEPTH)}${`</${name}>`.repeat(NESTING_DEPTH)}`;
+}
+
+/**
+ * A GPX nested deeper than the parser will go — #149.
+ *
+ * The third structural attack on an XML reader, after entity resolution and
+ * entity expansion, and the one the corpus was missing. It is the attack a
+ * *fuzzer cannot reach on its own*, which is the whole reason it has to be a
+ * committed fixture: the fuzz cases are byte substitutions and truncations of
+ * these files, and no sequence of single-byte edits to a 10 KiB GPX produces
+ * three hundred levels of nesting. #149:
+ *
+ * > The corpus cannot produce a structural attack. … A byte flip will not
+ * > produce 256-deep nesting or an entity-expansion bomb, so a guard against
+ * > either can be deleted without a single case noticing.
+ *
+ * The defence is `MAXIMUM_DEPTH` in `src/xml/parse.ts`, and it is a real one
+ * rather than a formality: the parser is iterative, so without a limit ten
+ * megabytes of `<a>` would build a ten-million-deep stack — an allocation the
+ * document chose the size of, which is the shape `SECURITY.md` calls resource
+ * exhaustion on a parsed file.
+ *
+ * The document is otherwise a well-formed GPX and carries no coordinates at
+ * all, so it exercises the nesting limit and nothing else.
+ */
+export function deepNestingGpx(): XmlFixture {
+  const lines = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    `<gpx version="1.1" creator="${CREATOR}" xmlns="${GPX_NAMESPACE}">`,
+    '  <trk>',
+    `    <name>${TRACK_NAME}</name>`,
+    '    <extensions>',
+    `      ${nestedElements('deep')}`,
+    '    </extensions>',
+    '    <trkseg/>',
+    '  </trk>',
+    '</gpx>',
+  ];
+  return { text: document(lines), positions: [] };
+}
+
+/**
+ * The TCX counterpart, for the reason the XXE pair gives.
+ *
+ * *"Both formats are carried because a parser is usually configured per format
+ * and hardening one is not hardening the other."* Here they genuinely share one
+ * parser — but the **fuzz** does not: `decode-fuzz.test.ts` seeds its `.gpx` arm
+ * from `.gpx` files and its `.tcx` arm from `.tcx` files, so a fixture in one
+ * format leaves the other arm with nothing structural to mutate and its depth
+ * invariant unproven.
+ */
+export function deepNestingTcx(): XmlFixture {
+  const lines = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    `<TrainingCenterDatabase xmlns="${TCX_NAMESPACE}">`,
+    '  <Activities>',
+    '    <Activity Sport="Biking">',
+    `      <Id>${isoInstant(RIDE_START_UNIX_SECONDS)}</Id>`,
+    '      <Extensions>',
+    `        ${nestedElements('Deep')}`,
+    '      </Extensions>',
+    '    </Activity>',
+    '  </Activities>',
+    '</TrainingCenterDatabase>',
   ];
   return { text: document(lines), positions: [] };
 }

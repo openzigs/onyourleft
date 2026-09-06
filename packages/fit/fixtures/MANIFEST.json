@@ -1,7 +1,7 @@
 {
   "generatedBy": "pnpm --filter @onyourleft/fit run fixtures:generate",
   "budgetBytes": 262144,
-  "totalBytes": 80024,
+  "totalBytes": 88934,
   "totalPositionCount": 632,
   "fixtures": [
     {
@@ -141,6 +141,14 @@
       "purpose": "A well-formed GPX whose DOCTYPE declares six levels of nested entities, so its track name expands to a million copies of a three-character string — three megabytes out of a document under a kilobyte. The XXE fixtures cover entity *resolution*; this covers entity *expansion*, which is the same class and needs the same defence, and carrying both is what proves the defence was not written against one example."
     },
     {
+      "name": "deep-nesting.gpx",
+      "format": "gpx",
+      "bytes": 4432,
+      "sha256": "91c01f2cf081929b54160e5480841a5fd9f69b0e2838c040fb3782d87e1d6863",
+      "positionCount": 0,
+      "purpose": "A well-formed GPX whose track extensions nest an element deeper than the parser will go. The third structural attack after entity resolution and entity expansion, and the one the fuzz cannot invent for itself: its cases are byte substitutions and truncations of these files, and no run of single-byte edits produces three hundred levels of nesting. Without a depth limit the parser would build a stack whose size the document chose."
+    },
+    {
       "name": "truncated-mid-trackpoint.gpx",
       "format": "gpx",
       "bytes": 4098,
@@ -171,6 +179,14 @@
       "sha256": "790c7d8983aa2e2731800fc0a9856c8abd7d502962550e07d6f537c98d72324d",
       "positionCount": 10,
       "purpose": "The TCX counterpart of the hostile GPX: an external general entity referenced from the activity Id. Both formats are carried because a parser is usually configured per format and hardening one is not hardening the other."
+    },
+    {
+      "name": "deep-nesting.tcx",
+      "format": "tcx",
+      "bytes": 4478,
+      "sha256": "fb609ea11afe35ff9ebc0be4d8d647146604c5042f364ad39520f53d9a4dedca",
+      "positionCount": 0,
+      "purpose": "The TCX counterpart of deep-nesting.gpx. Both formats are carried for the reason the XXE pair is — but here the sharper reason is the fuzz rather than the parser: its .gpx and .tcx arms seed from their own extensions, so a fixture in one format leaves the other arm with nothing structural to mutate and its depth invariant unproven."
     }
   ]
 }

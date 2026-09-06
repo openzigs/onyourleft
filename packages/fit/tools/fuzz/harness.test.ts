@@ -21,16 +21,36 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import type { FitContainer, FitDecodeResult, FitMessage } from '../../src';
-import { ActivityXmlError, decodeFitActivity, FitDecodeError, readFitContainer } from '../../src';
+import type {
+  FitContainer,
+  FitDecodeResult,
+  FitMessage,
+  TrackDecodeResult,
+  TrackLap,
+  TrackPoint,
+} from '../../src';
+import {
+  ActivityXmlError,
+  decodeFitActivity,
+  decodeGpx,
+  FitDecodeError,
+  MAXIMUM_DEPTH,
+  parseXml,
+  readFitContainer,
+  trackPointsOf,
+} from '../../src';
 import { CORPUS_DIRECTORY } from '../fixture-corpus/corpus-files';
 import type { FuzzBudget } from './cases';
 import { describeCase, fuzzCases, repairFitChecksums } from './cases';
 import {
+  assertDoctypeRefusedBeforeItsContents,
   assertMessagesInsideTheDataSection,
+  assertNestingWithinTheParsersLimit,
   assertOutputBoundedByInput,
   assertTypedFailure,
+  assertXmlOutputBoundedByInput,
   FuzzFailure,
+  readXmlShape,
 } from './invariants';
 import { createFuzzRandom } from './random';
 
@@ -360,3 +380,247 @@ describe('assertOutputBoundedByInput', () => {
     }).toThrow(FuzzFailure);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The GPX and TCX arm's three — #149. Same treatment, for the same reason: the
+// XML arm shipped with one invariant and nothing proving the others existed,
+// and two real parser guards could be removed with the suite at 8 of 8.
+// ---------------------------------------------------------------------------
+
+const reproduction = 'seed 0x1 case 0';
+
+function xmlFixture(name: string): string {
+  return readFileSync(join(CORPUS_DIRECTORY, name), 'utf8');
+}
+
+describe('readXmlShape', () => {
+  it('counts what the parser saw, on the committed nominal document', () => {
+    const shape = readXmlShape(xmlFixture('nominal-ride.gpx'), reproduction);
+    // 30 track points, each with an ele, a time and a five-element extensions
+    // subtree, inside a gpx/metadata/trk/trkseg frame. The exact number matters
+    // less than that it is neither zero nor the document's length: a counter
+    // wired to nothing would report the first, and one counting characters the
+    // second.
+    expect(shape.elements).toBeGreaterThan(200);
+    expect(shape.maximumDepth).toBe(7);
+    expect(shape.textCharacters).toBeGreaterThan(0);
+  });
+
+  it('sees the committed deep-nesting fixtures as deeper than the parser will go', () => {
+    // Read with `parseXml` rather than through an importer, because the whole
+    // point of these two files is that the importer never gets to see them. If
+    // this stops being true the fixtures have stopped being fixtures, and the
+    // depth invariant below is asserting about nothing.
+    for (const name of ['deep-nesting.gpx', 'deep-nesting.tcx']) {
+      const error = (() => {
+        try {
+          parseXml(xmlFixture(name), {});
+          return undefined;
+        } catch (cause) {
+          return cause as ActivityXmlError;
+        }
+      })();
+      expect(error?.code, name).toBe('depth-limit-exceeded');
+    }
+  });
+
+  it('turns a parse the importer accepted and the parser refused into a FuzzFailure', () => {
+    // Cannot happen — they are the same parser on the same text — so this is
+    // the assertion that says so rather than letting an `ActivityXmlError`
+    // escape the fuzz loop as an untyped failure.
+    expect(() => readXmlShape('<gpx>', reproduction)).toThrow(FuzzFailure);
+  });
+});
+
+describe('assertDoctypeRefusedBeforeItsContents', () => {
+  const hostile = xmlFixture('xxe-external-entity.gpx');
+  const declaration = hostile.indexOf('<!DOCTYPE');
+
+  it('accepts the real refusal, which happens at the declaration', () => {
+    // Not a constructed error: the one the committed fixture actually produces.
+    let thrown: unknown;
+    try {
+      decodeGpx(hostile);
+    } catch (error) {
+      thrown = error;
+    }
+    expect((thrown as ActivityXmlError).code).toBe('doctype-forbidden');
+    expect(() => {
+      assertDoctypeRefusedBeforeItsContents(hostile, thrown, reproduction);
+    }).not.toThrow();
+  });
+
+  it('rejects a refusal that happened after the declaration', () => {
+    // What a parser that *skipped* the DOCTYPE looks like from outside: it
+    // still throws, and it still throws an `ActivityXmlError`, so
+    // `assertTypedFailure` is content. It throws at `&xxe;`, which is what this
+    // one sees.
+    const atTheEntity = new ActivityXmlError(
+      'unknown-entity',
+      hostile.indexOf('&xxe;'),
+      'a fixture',
+    );
+    expect(atTheEntity.characterOffset).toBeGreaterThan(declaration);
+    expect(() => {
+      assertDoctypeRefusedBeforeItsContents(hostile, atTheEntity, reproduction);
+    }).toThrow(FuzzFailure);
+  });
+
+  it('says nothing about a document that declares no DOCTYPE', () => {
+    const nominal = xmlFixture('nominal-ride.gpx');
+    expect(nominal).not.toContain('<!DOCTYPE');
+    expect(() => {
+      assertDoctypeRefusedBeforeItsContents(
+        nominal,
+        new ActivityXmlError('unexpected-end', nominal.length, 'a fixture'),
+        reproduction,
+      );
+    }).not.toThrow();
+  });
+
+  it('leaves a failure that is not an ActivityXmlError to assertTypedFailure', () => {
+    // Two invariants reporting the same case would bury the one that named the
+    // wrong error type, which is the more serious finding of the two.
+    expect(() => {
+      assertDoctypeRefusedBeforeItsContents(hostile, new RangeError('nope'), reproduction);
+    }).not.toThrow();
+  });
+
+  it('accepts the lower-case spelling the parser also acts on', () => {
+    const lowered = hostile.replace('<!DOCTYPE', '<!doctype');
+    expect(lowered).toContain('<!doctype');
+    expect(thrownCodeOf(lowered)).toBe('doctype-forbidden');
+    expect(() => {
+      assertDoctypeRefusedBeforeItsContents(
+        lowered,
+        new ActivityXmlError('unknown-entity', lowered.indexOf('&xxe;'), 'a fixture'),
+        reproduction,
+      );
+    }).toThrow(FuzzFailure);
+  });
+});
+
+describe('assertNestingWithinTheParsersLimit', () => {
+  it('passes on a document inside the limit', () => {
+    const shape = readXmlShape(xmlFixture('nominal-ride.gpx'), reproduction);
+    expect(() => {
+      assertNestingWithinTheParsersLimit(shape, reproduction);
+    }).not.toThrow();
+  });
+
+  it('fails on a document that was accepted while nested past it', () => {
+    // The shape a parser with its depth check removed would report on
+    // `deep-nesting.gpx`, which is a document it would accept. Nothing throws
+    // in that world, so this is the only thing that can notice.
+    expect(() => {
+      assertNestingWithinTheParsersLimit(
+        { maximumDepth: MAXIMUM_DEPTH + 1, elements: 10, textCharacters: 0 },
+        reproduction,
+      );
+    }).toThrow(FuzzFailure);
+  });
+
+  it('accepts a document exactly at the limit', () => {
+    // The parser admits `MAXIMUM_DEPTH` elements and refuses the next, so an
+    // invariant that failed here would be red on a document the parser is right
+    // to accept.
+    expect(() => {
+      assertNestingWithinTheParsersLimit(
+        { maximumDepth: MAXIMUM_DEPTH, elements: 10, textCharacters: 0 },
+        reproduction,
+      );
+    }).not.toThrow();
+  });
+});
+
+describe('assertXmlOutputBoundedByInput', () => {
+  const nominal = xmlFixture('nominal-ride.gpx');
+  const decoded = decodeGpx(nominal);
+  const shape = readXmlShape(nominal, reproduction);
+
+  it('passes on the committed corpus, which is the control', () => {
+    expect(() => {
+      assertXmlOutputBoundedByInput(shape, nominal, decoded, reproduction);
+    }).not.toThrow();
+  });
+
+  it('fails when more track points are reported than the document has characters', () => {
+    const point = trackPointsOf(decoded.activity)[0];
+    expect(point).toBeDefined();
+    const inflated: TrackDecodeResult = {
+      ...decoded,
+      activity: {
+        ...decoded.activity,
+        laps: [
+          {
+            ...(decoded.activity.laps[0] as TrackLap),
+            points: new Array<TrackPoint>(nominal.length + 1).fill(point as TrackPoint),
+          },
+        ],
+      },
+    };
+    expect(() => {
+      assertXmlOutputBoundedByInput(shape, nominal, inflated, reproduction);
+    }).toThrow(FuzzFailure);
+  });
+
+  it('fails when more faults are reported than the document has characters', () => {
+    const noisy: TrackDecodeResult = {
+      ...decoded,
+      faults: new Array<ActivityXmlError>(nominal.length + 1).fill(
+        new ActivityXmlError('invalid-value', 0, 'a fixture'),
+      ),
+    };
+    expect(() => {
+      assertXmlOutputBoundedByInput(shape, nominal, noisy, reproduction);
+    }).toThrow(FuzzFailure);
+  });
+
+  it('fails when more elements are reported than the document has characters', () => {
+    expect(() => {
+      assertXmlOutputBoundedByInput(
+        { ...shape, elements: nominal.length + 1 },
+        nominal,
+        decoded,
+        reproduction,
+      );
+    }).toThrow(FuzzFailure);
+  });
+
+  it('fails when more character data comes out than went in', () => {
+    // The entity-expansion clause, and the one that is not bookkeeping. A
+    // reader that resolved `&lol6;` would emit three megabytes of text from a
+    // 753-byte document; every escape this parser *does* resolve contracts, so
+    // the bound holds with room to spare on every real file.
+    expect(() => {
+      assertXmlOutputBoundedByInput(
+        { ...shape, textCharacters: nominal.length + 1 },
+        nominal,
+        decoded,
+        reproduction,
+      );
+    }).toThrow(FuzzFailure);
+  });
+
+  it('is nowhere near its bound on a document that resolves every escape it can', () => {
+    // The control for the clause above: `&amp;` is five characters in and one
+    // out, so a document full of them ends up far under rather than near the
+    // line. A bound that a legitimate document sat against would be a flake.
+    const escaped = '<gpx xmlns="http://www.topografix.com/GPX/1/1"><trk><name>'
+      .concat('&amp;'.repeat(200))
+      .concat('</name><trkseg/></trk></gpx>');
+    const escapedShape = readXmlShape(escaped, reproduction);
+    expect(escapedShape.textCharacters).toBe(200);
+    expect(escapedShape.textCharacters * 5).toBeLessThan(escaped.length);
+  });
+});
+
+/** The fault code a document is refused with, or `undefined` if it is accepted. */
+function thrownCodeOf(text: string): string | undefined {
+  try {
+    decodeGpx(text);
+    return undefined;
+  } catch (error) {
+    return (error as ActivityXmlError).code;
+  }
+}

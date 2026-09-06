@@ -157,6 +157,20 @@ export interface FitContainer {
   readonly faults: readonly FitDecodeError[];
 }
 
+/**
+ * What a container walk knows once it is over, minus the messages themselves.
+ *
+ * The whole of {@link FitContainer} except the one field whose size grows with
+ * the file. {@link streamFitContainer} returns this and hands each message to a
+ * callback instead, so a caller that does not need to see every message at once
+ * never makes the array — see the retention note on
+ * {@link streamFitContainer}.
+ */
+export interface FitContainerSummary {
+  readonly header: FitFileHeader;
+  readonly faults: readonly FitDecodeError[];
+}
+
 function readHeader(bytes: Uint8Array, view: DataView): FitFileHeader {
   if (bytes.length < FIT_LEGACY_HEADER_SIZE) {
     throw new FitDecodeError(
@@ -271,13 +285,45 @@ export function expandCompressedTimestamp(previous: number, timeOffset: number):
 }
 
 /**
- * Read a whole FIT container.
+ * Read a whole FIT container, handing each message to `visit` as it is read.
+ *
+ * The record walk, with the one line that retains a message replaced by a call.
+ * {@link readFitContainer} is this function with a `push`, and every other
+ * caller in this package streams — see the retention note below.
+ *
+ * ## Why this shape exists — #127
+ *
+ * A 4.55 MiB FIT file decoded through `readFitContainer` retained **394.7 MiB**
+ * of `FitMessage` objects, 86.7 bytes of heap for every byte of file, measured
+ * on Node 24 with a forced collection. That is not an attacker-declared count —
+ * the loop below is `while (offset < end)` with `end` clamped to
+ * `bytes.length`, so every record consumed advances the offset and the total is
+ * linear in real file bytes. It is per-record object overhead, and it is
+ * enough: a four-hour ride is 10–20 MiB and Phase 1 runs in a browser tab
+ * (ADR 0003), so 100x of that is the tab.
+ *
+ * The array was never the product. `decodeActivity` reads each message once,
+ * maps it onto the activity and never looks at it again, so the intermediate
+ * `FitMessage[]` is pure peak: every message alive at once because the shape of
+ * the function said so, not because anything needed it. Handing the message to
+ * a callback deletes that peak without changing a single decoding decision —
+ * the walk, the faults and the messages are what they were. Two tests say so
+ * rather than one: `decode-corpus.test.ts` runs both spellings over **every**
+ * committed fixture and requires the results to be indistinguishable, faults
+ * and their order included, and `decode-fuzz.test.ts`'s *"pins the public entry
+ * point"* case does the same on mutated files, where the fault path is.
+ *
+ * `visit` **must not retain the message it is given** beyond what it needs, or
+ * the caller has simply moved the array somewhere else.
  *
  * @throws {FitDecodeError} when the header or a checksum makes the bytes
  * unbelievable — `file-too-short`, `bad-header-size`, `bad-signature`,
  * `bad-header-crc`, `bad-file-crc`. Everything else is a collected fault.
  */
-export function readFitContainer(bytes: Uint8Array): FitContainer {
+export function streamFitContainer(
+  bytes: Uint8Array,
+  visit: (message: FitMessage) => void,
+): FitContainerSummary {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const header = readHeader(bytes, view);
   const faults: FitDecodeError[] = [];
@@ -318,7 +364,6 @@ export function readFitContainer(bytes: Uint8Array): FitContainer {
   }
 
   const definitions = new Map<number, FitMessageDefinition>();
-  const messages: FitMessage[] = [];
   let lastFullTimestamp: number | undefined;
   let offset = header.headerSize;
 
@@ -358,7 +403,7 @@ export function readFitContainer(bytes: Uint8Array): FitContainer {
         faults,
       );
       if (!read) break;
-      messages.push(read.message);
+      visit(read.message);
       offset = read.next;
       continue;
     }
@@ -406,10 +451,33 @@ export function readFitContainer(bytes: Uint8Array): FitContainer {
       (field) => field.number === FIELD_TIMESTAMP,
     )?.numeric;
     if (timestamp !== undefined) lastFullTimestamp = timestamp;
-    messages.push(read.message);
+    visit(read.message);
     offset = read.next;
   }
 
+  return { header, faults };
+}
+
+/**
+ * Read a whole FIT container into memory, messages and all.
+ *
+ * {@link streamFitContainer} with the callback that keeps everything. It is the
+ * shape a test wants — the whole file as one value it can index and count — and
+ * it is what `container.test.ts` and the fuzz harness assert against.
+ *
+ * ⚠️ **It is not the shape a large file wants**, and `decodeFitActivity` no
+ * longer uses it: the array it builds is the ~87 bytes of heap per byte of file
+ * that #127 measured. A new caller handed an untrusted file should stream and
+ * keep what it needs; this exists for the callers that genuinely want every
+ * message at once and know the file is small.
+ *
+ * @throws {FitDecodeError} exactly as {@link streamFitContainer} does.
+ */
+export function readFitContainer(bytes: Uint8Array): FitContainer {
+  const messages: FitMessage[] = [];
+  const { header, faults } = streamFitContainer(bytes, (message) => {
+    messages.push(message);
+  });
   return { header, messages, faults };
 }
 
