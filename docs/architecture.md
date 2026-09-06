@@ -183,7 +183,9 @@ referential behaviour IndexedDB cannot declare, and the migration `up`/`down` co
 [#27](https://github.com/openzigs/onyourleft/issues/27), which adds per-second streams as schema
 version 2 and decides their shape in [ADR 0011](adr/0011-stream-storage.md), and of
 [#46](https://github.com/openzigs/onyourleft/issues/46), which adds **recording checkpoints** as
-schema version 3. The entity model:
+schema version 3, and of [#61](https://github.com/openzigs/onyourleft/issues/61), which adds the
+**device keypair and the signed activity record** as schema version 4 and decides their shape in
+[ADR 0014](adr/0014-portable-identity.md). The entity model:
 
 ```mermaid
 erDiagram
@@ -290,8 +292,106 @@ otherwise assume:
   what lets #85's native shell reuse it unchanged and what makes every timing case testable without
   fake timers.
 
+- **The athlete's identity is a keypair, and the ride's authenticity is a signed record.** Schema
+  version 4 adds `deviceKeys` — one row per athlete, holding a **non-extractable** Ed25519
+  `CryptoKey` that can sign and cannot be exported — and `activityRecords`, one row per ride holding
+  the publishable artefact. The record format is specified below; the decision is
+  [ADR 0014](adr/0014-portable-identity.md).
+
 The indexes, the query each one serves, and the reasoning for every field are in
 [`packages/store/README.md`](../packages/store/README.md).
+
+### The signed activity record
+
+Decided in [ADR 0014](adr/0014-portable-identity.md) (#61). **This section is the specification.**
+It is written so that somebody with no access to this repository can write a verifier from it, which
+is the point of the whole exercise — `packages/store/src/identity-verifier.test.ts` contains one
+written this way, and it verifies records the app produced.
+
+**Scheme, library and version, with the date read**, because a signature format is effectively
+permanent once records exist:
+
+| | |
+|---|---|
+| Signature scheme | **Ed25519**, RFC 8032. 32-byte public key, 64-byte signature |
+| Digest | **SHA-256**, FIPS 180-4 |
+| Canonicalisation | **RFC 8785**, the JSON Canonicalization Scheme (Informational, June 2020) |
+| Implementation | **the platform's `crypto.subtle`. There is no third-party cryptography dependency** |
+| Availability, **read 2026-09-06** | WebKit — Safari 17.0; Gecko — Firefox 129 (August 2024); Blink — Chrome 137 (May 2025); Node — verified on 24.20.0 |
+| Record format version | **1**, and provisional until [#56](https://github.com/openzigs/onyourleft/issues/56) |
+
+A record is a JSON object with exactly **seven** members and no others:
+
+```json
+{
+  "algorithm": "Ed25519",
+  "claims": {
+    "activityId": "activity-1",
+    "distance": 120000,
+    "elapsedTime": 14400,
+    "hasPosition": false,
+    "movingTime": 14200,
+    "name": "Zwift Watopia",
+    "startedAt": 1700100000,
+    "startedAtTimeZone": "Europe/London"
+  },
+  "contentHash": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+  "format": "onyourleft.activity-record",
+  "publicKey": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+  "signature": "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b",
+  "version": 1
+}
+```
+
+**To verify one:**
+
+1. Check `format` is `onyourleft.activity-record`, `version` is `1` and `algorithm` is `Ed25519`.
+   A version or algorithm you do not know is **unsupported**, which is not the same answer as a bad
+   signature — see below.
+2. Remove the `signature` member. Serialise what remains with **RFC 8785**, and **UTF-8 encode** it.
+   That byte string is the signing input; nothing else is hashed, prefixed or wrapped.
+3. Decode `publicKey` from lowercase hex into 32 raw bytes, and `signature` into 64.
+4. Ed25519-verify the signature over the signing input with that key.
+5. Independently, SHA-256 the activity file's bytes and check that `contentHash` equals `sha256:`
+   followed by the lowercase hex of that digest.
+
+**The rules a record must satisfy**, which are narrowings of RFC 8785 and are what an implementation
+has to match:
+
+- Member names are sorted by **UTF-16 code unit** — a plain byte/code-unit sort, never a locale one.
+- Numbers use the **ECMAScript `Number::toString`** algorithm (shortest representation that
+  round-trips), and negative zero serialises as `0`.
+- Strings escape only `"`, `\`, the five short control forms (`\b \t \n \f \r`) and `\u00xx` in
+  **lowercase** hex for the remaining characters below U+0020. Everything else is literal UTF-8.
+- **`null` never appears.** "No value" is spelled by the member being **absent**. `averagePower` is
+  the only optional claim.
+- **Unpaired surrogates are invalid** (RFC 8785 §3.2.3). A canonicalisation that substitutes U+FFFD
+  is not injective and would give two different records the same signing input.
+- **Any member not listed above makes the record invalid**, at both levels. A verifier must reject
+  rather than ignore: ignoring would mean re-canonicalising bytes that are not the bytes that were
+  signed, and the record would then read as a forgery instead of as malformed. It is also what
+  guarantees a record cannot smuggle a coordinate.
+
+**The claims carry no location.** The ride's shape is in the activity file, referenced by content
+hash; `hasPosition` is one bit and is not a coordinate. That is
+[ADR 0004](adr/0004-privacy-and-location.md) applied to a document designed to be published — see
+ADR 0014 D-5.
+
+**A failed verification has five answers, not two**, and the difference matters to whoever reads it:
+`verified`; `content-mismatch` (the record is authentic and the *file* is not the one it vouches
+for — the signature is still valid); `signature-mismatch` (altered after signing, or a different
+key); `unsupported` (a version or scheme this build does not know — **not** a forgery); and
+`malformed`. ⚠️ **`content-mismatch` is only reachable after step 4 has passed**, which is why step 4
+comes before step 5 above. It is an *authenticated* answer — it says the record is genuine — so a
+verifier that compared the content hash first would hand it, and the `expected` string inside it, to
+a record nobody signed.
+
+**Key rotation and key loss** are documented behaviours with stated consequences, in
+[ADR 0014](adr/0014-portable-identity.md) §Consequences and in
+[`packages/store/README.md`](../packages/store/README.md) §"Identity". The short version: records
+already signed verify forever; a lost key cannot be recovered, cannot be backed up — it is
+non-extractable by design — and the answer is a new identity and a history with two provable eras.
+There is no rotation in Phase 1 and replacing a key is refused.
 
 ### `apps/web`: the shell, the design system and the accessibility baseline
 
@@ -456,6 +556,7 @@ share one.
 | [0010](adr/0010-map-tiles-and-routing.md) | Map tiles, routing and elevation — providers, licences and cost | #60 |
 | [0011](adr/0011-stream-storage.md) | Activity stream storage — per-channel packed binary in IndexedDB | #27 |
 | [0013](adr/0013-adr-amendments.md) | Amending an accepted ADR — a dated, append-only `## Amendments` section | #147 |
+| [0014](adr/0014-portable-identity.md) | Portable identity — an Ed25519 device keypair and signed, content-addressed activity records | #61 |
 
 **0012 is deliberately absent from that list and is not free** — see the row for it below.
 
@@ -493,6 +594,7 @@ still a proposal.
 | 0011 | #27 — stream storage | [Written](adr/0011-stream-storage.md). Renumbered from 0006, which #58 holds. Records the measured cost: **22.2 KiB per recorded hour** for a 1 Hz eight-channel ride. |
 | 0012 | **#64 — the data licence: whether OSM-derived segment geometry inherits ODbL** | **Reserved, not written.** [ADR 0001](adr/0001-licence.md)'s *Data* section defers this question and names "ADR 0007" as its destination — but 0007 is the [patent posture](adr/0007-patent-posture.md) (#59) and says nothing about ODbL, so the pointer resolved to the wrong document and this table reserved nothing for it (#119). It does now. **Reserving is not deciding**: the ODbL question is #64's, [ADR 0010](adr/0010-map-tiles-and-routing.md) deliberately does not touch it, and ADR 0001's constraint stands as written — OSM attribution on any instance serving OSM-derived tiles or routes, and the question answered before segment geometry is persisted anywhere. #64 and #73 stay blocked on it. ADR 0001 carries an amendment recording the wrong number. |
 | 0013 | #147 — amending an accepted ADR | [Written](adr/0013-adr-amendments.md). Took 0013 rather than 0012 **on purpose**: 0012 is reserved one row up, and consuming it in the same pull request that reserved it would have moved #119's dangling pointer down a row instead of repairing it. |
+| 0014 | #61 — portable identity | [Written](adr/0014-portable-identity.md). Took 0014 rather than 0012, which is reserved one row up. **The next free number is 0015.** |
 
 Three issues carry an acceptance criterion naming their old number — #19 (0002), #60 (0008) and #27
 (0006). **The number here wins**; each issue has been commented with its new one. Renumbering a

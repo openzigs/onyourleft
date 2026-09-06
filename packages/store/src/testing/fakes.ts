@@ -7,12 +7,12 @@
  * observing the test go red. A harness that passes against a no-op write is
  * worthless, and this is the only way to know it does not."*
  *
- * There are **four** fakes here, and there are four on purpose: a harness that
+ * There are **five** fakes here, and there are five on purpose: a harness that
  * catches one failure shape is calibrated to that shape. They stand for the
  * causes CLAUDE.md section 5 names, and they fail for different reasons at
- * different points in the read. The fourth arrived with #46's write path, which
- * is the rule this file exists to enforce: a new write path may not ship
- * without a fake proving the harness catches its failure.
+ * different points in the read. The fourth arrived with #46's write path and the
+ * fifth with #61's, which is the rule this file exists to enforce: a new write
+ * path may not ship without a fake proving the harness catches its failure.
  *
  * | Fake | Cause it stands for | How the round trip notices |
  * |---|---|---|
@@ -20,6 +20,7 @@
  * | `misroutedBlobStoreFactory` | *wrong storage* — the right store, a key prefix the reader does not use | the set is there and claims eight channels whose bytes are gone |
  * | `gapFillingStoreFactory` | *wrong layer* — a layer above the store rewrote the data on its way in | the set comes back whole, and a gap has become a zero |
  * | `droppedFlushStoreFactory` | *wrong layer* — a flush acknowledged at the edge that never reached the database | the recording comes back short, at the first missing flush |
+ * | `roundedClaimStoreFactory` | *wrong layer* — a layer above tidied a signed claim on its way in | the record comes back whole and **no longer verifies** |
  *
  * The second and third are the ones a naive harness misses. Both write to the
  * **real** IndexedDB, inside a **real** transaction that **really commits**, and
@@ -35,6 +36,7 @@ import Dexie from 'dexie';
 
 import { openActivityStore, deleteActivityStore, type ActivityStore } from '../activity-store';
 import type { ActivityId } from '../ids';
+import type { DeviceKeyRecord, StoredActivityRecord } from '../identity';
 import { SCHEMA_VERSIONS, TABLE } from '../schema';
 import type { NewRecordingChunk, NewRecordingSession } from '../recording';
 import type { PersistedStreamBlob } from '../stream-persisted';
@@ -91,6 +93,10 @@ function bindStore(real: ActivityStore): PersistentStore {
     recoverRecording: async (owner, id) => real.recoverRecording(owner, id),
     getRecordingFootprint: async (owner, id) => real.getRecordingFootprint(owner, id),
     deleteRecordingSession: async (owner, id) => real.deleteRecordingSession(owner, id),
+    putDeviceKey: async (record) => real.putDeviceKey(record),
+    getDeviceKey: async (owner) => real.getDeviceKey(owner),
+    putActivityRecord: async (row) => real.putActivityRecord(row),
+    getActivityRecord: async (owner, id) => real.getActivityRecord(owner, id),
   };
 }
 
@@ -140,6 +146,14 @@ export function memoryWriteStoreFactory(): StoreFactory {
         appendRecordingChunk: (chunk: NewRecordingChunk) => {
           memory.set(`chunk:${chunk.sessionId}:${String(chunk.seq)}`, chunk);
           return Promise.resolve(chunk.seq);
+        },
+        putDeviceKey: (record: DeviceKeyRecord) => {
+          memory.set(`key:${record.athleteId}`, record);
+          return Promise.resolve(record.athleteId);
+        },
+        putActivityRecord: (row: StoredActivityRecord) => {
+          memory.set(`record:${row.activityId}`, row);
+          return Promise.resolve(row.activityId);
         },
       };
     },
@@ -273,6 +287,45 @@ export function droppedFlushStoreFactory(): StoreFactory {
           }
           return real.appendRecordingChunk(chunk);
         },
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository that **tidies a record's claims on the way in**.
+ *
+ * The fifth failure shape, and #61's: CLAUDE.md section 5's *wrong layer*. A
+ * layer above the store rounds the ride's distance to a whole metre — a change
+ * so plausible that it survives review, and one that a naive round trip cannot
+ * see. The write succeeds. The row is real, in a real transaction that really
+ * commits. A fresh connection reads back a complete, well-formed, parseable
+ * signed record with every member present.
+ *
+ * And its signature no longer verifies, because the claims are no longer the
+ * bytes that were signed. **That is the only thing that can detect it**, which
+ * is why `assertSignedRecordRoundTrip` verifies rather than compares: a round
+ * trip that asked only whether a record came back would pass against this fake,
+ * and a record that came back and cannot be verified is worse than one that did
+ * not come back at all — it looks like evidence and is not.
+ */
+export function roundedClaimStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        putActivityRecord: async (row: StoredActivityRecord): Promise<ActivityId> =>
+          real.putActivityRecord({
+            ...row,
+            record: {
+              ...row.record,
+              claims: { ...row.record.claims, distance: Math.round(row.record.claims.distance) },
+            },
+          }),
       };
     },
     destroy: async (name) => {
