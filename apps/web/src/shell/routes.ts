@@ -32,7 +32,7 @@
  */
 
 /** The identity of a view. Stable; the path is not. */
-export type RouteId = 'ride' | 'activities' | 'devices' | 'about' | 'not-found';
+export type RouteId = 'ride' | 'activities' | 'devices' | 'transfer' | 'about' | 'not-found';
 
 export interface RouteDefinition {
   readonly id: RouteId;
@@ -69,6 +69,17 @@ export const ROUTES: readonly RouteDefinition[] = [
     navLabel: 'Devices',
     title: 'Devices',
     summary: 'Heart rate straps, power meters, cadence sensors and smart trainers, over Bluetooth.',
+  },
+  {
+    id: 'transfer',
+    path: '/transfer',
+    // "Files", not "Import", because the page is both directions and because
+    // ADR 0009 R3 forbids naming one of our features after somebody else's
+    // mark — "Strava import" is not a label this product may carry.
+    navLabel: 'Files',
+    title: 'Import and export',
+    summary:
+      'Bring rides in from a FIT, GPX or TCX file, and take your own rides out in any of the three.',
   },
   {
     id: 'about',
