@@ -46,6 +46,8 @@ import { RideView } from '../views/RideView';
 import { RideSession } from '../ride/RideSession';
 import type { RideController } from '../ride/controller';
 import type { CapabilityProbe } from '../support/bluetooth-support';
+import { TransferView } from '../transfer/TransferView';
+import type { TransferPort } from '../transfer/store-port';
 
 import { hrefFor, ROUTES, type RouteDefinition } from './routes';
 import { useRoute } from './useRoute';
@@ -77,12 +79,24 @@ export interface AppShellProps {
    * cannot-pair-here screen, which is also what Safari and Firefox get.
    */
   readonly rideController?: RideController | undefined;
+  /**
+   * The import and export screen's store, clock and file handling (#51).
+   *
+   * Passed in for the same reason as the two above, and with one extra: this
+   * one performs a **download**, and a component that reached for
+   * `URL.createObjectURL` itself could not be rendered by the accessibility
+   * suite. `undefined` renders the honest explanation — which is also what a
+   * page opened from the disk gets, because fingerprinting a file needs
+   * `crypto.subtle` and that needs a secure context.
+   */
+  readonly transfer?: TransferPort | undefined;
 }
 
 function viewFor(
   route: RouteDefinition,
   capabilities: CapabilityProbe,
   rideController: RideController | undefined,
+  transfer: TransferPort | undefined,
 ): JSX.Element {
   switch (route.id) {
     case 'ride':
@@ -91,6 +105,8 @@ function viewFor(
       return <ActivitiesView />;
     case 'devices':
       return <DevicesView capabilities={capabilities} />;
+    case 'transfer':
+      return <TransferView port={transfer} />;
     case 'about':
       return <AboutView />;
     case 'not-found':
@@ -98,7 +114,7 @@ function viewFor(
   }
 }
 
-export function AppShell({ capabilities, rideController }: AppShellProps): JSX.Element {
+export function AppShell({ capabilities, rideController, transfer }: AppShellProps): JSX.Element {
   const route = useRoute();
   const mainRef = useRef<HTMLElement>(null);
   const previousRouteId = useRef<string | null>(null);
@@ -168,7 +184,7 @@ export function AppShell({ capabilities, rideController }: AppShellProps): JSX.E
       >
         <h1 id={VIEW_TITLE_ID}>{route.title}</h1>
         <p className="oyl-muted">{route.summary}</p>
-        {viewFor(route, capabilities, rideController)}
+        {viewFor(route, capabilities, rideController, transfer)}
       </main>
 
       <footer className="oyl-footer">

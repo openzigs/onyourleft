@@ -10,14 +10,16 @@ import {
   heartRateProfile,
 } from '@onyourleft/sensors/protocol';
 import { createWebBluetoothTransport } from '@onyourleft/sensors/web-bluetooth';
-import { metres } from '@onyourleft/domain';
-import { athleteId, openActivityStore, recordingSessionId } from '@onyourleft/store';
+import { metres, unixSeconds } from '@onyourleft/domain';
+import { activityId, athleteId, openActivityStore, recordingSessionId } from '@onyourleft/store';
 
 import './design/theme.css';
 import { browserClock, createRideController, type RideController } from './ride/controller';
 import { openWebBluetoothTrainer } from './ride/trainer';
 import { AppShell } from './shell/AppShell';
 import { probeBrowser, type CapabilityProbe } from './support/bluetooth-support';
+import { saveWithAnchor, webCryptoDigest } from './transfer/browser';
+import type { TransferPort } from './transfer/store-port';
 
 const container = document.getElementById('root');
 if (container === null) {
@@ -61,6 +63,25 @@ const LOCAL_ATHLETE = athleteId('local');
 const DEFAULT_WHEEL_CIRCUMFERENCE = metres(2.105);
 
 /**
+ * The tab's one connection to the local database.
+ *
+ * Lazy and memoised, and both halves matter. **One** because `openActivityStore`
+ * opens a Dexie handle on `onyourleft`, and two handles in one tab are two
+ * IndexedDB connections that must both be closed before a schema upgrade can
+ * run — a `versionchange` a live handle blocks is how a migration hangs a tab
+ * rather than failing it. **Lazy** because neither caller reaches this line in a
+ * browser that cannot use it, and a module-scope `openActivityStore()` would
+ * open a database on Safari, on Firefox and on a page opened from the disk, for
+ * two features that render an explanation instead of a control there.
+ */
+let sharedStore: ReturnType<typeof openActivityStore> | undefined;
+
+function localStore(): ReturnType<typeof openActivityStore> {
+  sharedStore ??= openActivityStore();
+  return sharedStore;
+}
+
+/**
  * Build the ride screen's state machine, or nothing.
  *
  * `undefined` in a browser with no Web Bluetooth — Safari, Firefox, plain HTTP
@@ -87,7 +108,7 @@ function buildRideController(probe: CapabilityProbe): RideController | undefined
   });
   return createRideController({
     transport,
-    store: openActivityStore(),
+    store: localStore(),
     athleteId: LOCAL_ATHLETE,
     // `crypto.randomUUID()` rather than a counter: two tabs recording at once
     // must not collide on a session id, and a counter in a module is per tab.
@@ -97,8 +118,42 @@ function buildRideController(probe: CapabilityProbe): RideController | undefined
   });
 }
 
+/**
+ * Build the import and export screen's port, or nothing.
+ *
+ * `undefined` where `crypto.subtle` is absent, which is every non-secure
+ * context — a bundle opened from the disk as `file://`, or served over plain
+ * `http://` on anything but localhost. Deduplication is a SHA-256 of the file's
+ * bytes and there is no import worth offering without it, so #48's first
+ * criterion applies: no control at all, and the page says why.
+ *
+ * ⚠️ The zone is this **browser's**, and #26 requires one per ride. That is the
+ * right answer for a ride recorded here and a fallback for a ride imported from
+ * somewhere else — none of the three formats carries an IANA identifier, so
+ * there is nothing better to read. `import-batch.ts`'s `timeZone` records what
+ * that costs and why `UTC` is not an improvement on it.
+ */
+function buildTransferPort(): TransferPort | undefined {
+  if (globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  return {
+    store: localStore(),
+    athleteId: LOCAL_ATHLETE,
+    newActivityId: () => activityId(globalThis.crypto.randomUUID()),
+    now: () => unixSeconds(Math.floor(Date.now() / 1000)),
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    digest: webCryptoDigest,
+    save: saveWithAnchor,
+  };
+}
+
 createRoot(container).render(
   <StrictMode>
-    <AppShell capabilities={capabilities} rideController={buildRideController(capabilities)} />
+    <AppShell
+      capabilities={capabilities}
+      rideController={buildRideController(capabilities)}
+      transfer={buildTransferPort()}
+    />
   </StrictMode>,
 );

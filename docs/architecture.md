@@ -76,6 +76,8 @@ apps/                 AGPL-3.0-or-later, without exception
     src/ride/           the live ride screen's state machine and its panels (#49)
     src/shell/          the hash route table, the router hook and AppShell (#48)
     src/support/        browser-capability detection and its notice (#48)
+    src/transfer/       file import and export: the batch importer, the codec's
+                        first production caller, and the export writer (#51)
     src/views/          one component per route (#48)
   mobile/             Capacitor shell wrapping the same web build (Phase 3)
 
@@ -111,7 +113,7 @@ checkable.
 
 | Component | Licence | Owns | Must not depend on | Issues |
 |---|---|---|---|---|
-| `apps/web` | AGPL-3.0-or-later | Routing, screens, design system, accessibility baseline, the live ride screen | — | #48–#51 |
+| `apps/web` | AGPL-3.0-or-later | Routing, screens, design system, accessibility baseline, the live ride screen, file import and export | — | #48–#51 |
 | `apps/mobile` | AGPL-3.0-or-later | Capacitor shell, native permissions, foreground service | — | #85, #87 |
 | `packages/domain` | Apache-2.0 | Canonical units and types; every conversion in the program; signing/verification; analysis computations | **Any platform API at all** — no DOM, no Node globals, no I/O, no network types | #25, #61, #66, #75–#78 |
 | `packages/fit` | Apache-2.0 | FIT / GPX / TCX decode and encode | Anything server-specific; anything under `apps/`; **anything carrying the Garmin FIT Protocol License — see [ADR 0006](adr/0006-fit-codec-licensing.md)** | #29–#32 |
@@ -426,6 +428,34 @@ and the adapter is unusable, and a page served over plain HTTP, where the object
 browser gets the blame. Where the browser cannot pair, **no pairing control is rendered at all** —
 a disabled one is out of the tab order and announces no reason, which is the silent failure the
 issue exists to prevent.
+
+### `apps/web/src/transfer`: import and export, and the sample grid nobody else owns
+
+Added by [#51](https://github.com/openzigs/onyourleft/issues/51), and it is `packages/fit`'s **first
+production caller**. Everything about the three file formats stays in the codec; what lives here is
+the part the codec deliberately does not know about — the 1 Hz sample grid
+[ADR 0011](adr/0011-stream-storage.md) stores a ride on, and the store writes either side of it.
+
+Three things about it are load-bearing rather than incidental:
+
+- **The batch is per file.** `import-batch.ts` gives every file its own outcome, named by filename,
+  and a failure is an outcome rather than an exception. A bulk export from another platform contains
+  files this project cannot read — a summary spreadsheet, a compressed ride, whatever else — and an
+  importer that stops at the first one turns a decade of history into "import failed".
+- **The resource bound on an import is this component's, not the codec's.** A file's *timestamps*
+  decide how long the sample arrays are, and two well-formed records a decade apart ask for 315
+  million slots per channel. `MAXIMUM_IMPORTED_SAMPLES` is checked before anything is allocated. The
+  codec's own bound (#127) covers what it retains while decoding and cannot cover this, because the
+  codec has no sample grid.
+- **An export carries the athlete's real track.** [ADR 0004](adr/0004-privacy-and-location.md)'s
+  privacy zones exist for what gets *published*, and Phase 1 publishes nothing (owner decision D6).
+  There is no zone lookup in `export-activity.ts` and there must not be one; a share or publish path
+  is a different function, and it arrives with [#7](https://github.com/openzigs/onyourleft/issues/7).
+
+What the screen may say about another platform is [ADR 0009](adr/0009-clean-room-posture.md) R3's
+template, used verbatim, and `TransferView.test.tsx` asserts both approved strings and the absence of
+every unapproved one. There is no "connect an account" control because there is nothing to connect
+to.
 
 **Dependencies point one way: `apps/` → `packages/`, never the reverse.** Combined with the licence
 rule that is not a coincidence — Apache-2.0 code may be combined into an AGPL-3.0 work, but not the

@@ -47,6 +47,9 @@ importers:
       '@onyourleft/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@onyourleft/fit':
+        specifier: workspace:*
+        version: link:../../packages/fit
       '@onyourleft/sensors':
         specifier: workspace:*
         version: link:../../packages/sensors
@@ -60,9 +63,6 @@ importers:
         specifier: 19.2.8
         version: 19.2.8(react@19.2.8)
     devDependencies:
-      '@onyourleft/fit':
-        specifier: workspace:*
-        version: link:../../packages/fit
       '@types/node':
         specifier: 24.13.3
         version: 24.13.3
@@ -78,6 +78,9 @@ importers:
       fake-indexeddb:
         specifier: 6.2.5
         version: 6.2.5
+      fit-file-parser:
+        specifier: 5.0.2
+        version: 5.0.2
       jsdom:
         specifier: 30.0.1
         version: 30.0.1

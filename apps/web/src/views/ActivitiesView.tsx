@@ -28,6 +28,14 @@ export function ActivitiesView(): JSX.Element {
       </p>
       <p>
         <a href={hrefFor(routeById('ride'))}>Start a ride</a>
+        {' · '}
+        {/*
+          The sentence above has told riders to export since #48 and there was
+          nowhere to do it until #51. A link rather than a second explanation:
+          the Files page is also where an arriving rider brings a history in,
+          which is the other thing an empty list is the moment to offer.
+        */}
+        <a href={hrefFor(routeById('transfer'))}>Import or export files</a>
       </p>
     </>
   );

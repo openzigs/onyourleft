@@ -371,6 +371,35 @@ body {
   width: 8rem;
 }
 
+/*
+ * A control on the transfer screen names a file or a ride, and 8rem is not
+ * enough for either. Nothing else about `.oyl-input` changes, so the two stay
+ * one control with one focus ring and one border.
+ */
+.oyl-input--wide,
+.oyl-input--file {
+  width: auto;
+  max-width: 100%;
+}
+
+.oyl-input--file {
+  font-size: var(--oyl-font-size-md);
+}
+
+/*
+ * The same row layout as the trainer's form, and deliberately a second class
+ * rather than a shared one: these two screens have no relationship, and a
+ * `.oyl-form-row` would be a promise that a change for one is right for the
+ * other.
+ */
+.oyl-transfer__form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oyl-space-sm);
+  align-items: center;
+  margin-block-end: var(--oyl-space-md);
+}
+
 .oyl-sensor-list,
 .oyl-pairing-steps {
   display: flex;
