@@ -370,6 +370,82 @@ describe('importActivityFiles — a store that refuses the write', () => {
     });
     expect(retry.imported).toBe(1);
   });
+
+  // --- #166: the arm where the compensating delete fails too ---------------
+
+  it('reports the original failure, not the cleanup’s, when the cleanup also fails', async () => {
+    const open = await openSeeded();
+    const bytes = syntheticRide(42);
+
+    const failing = await open.write((store) => {
+      const streams = vi
+        .spyOn(store, 'putStreamSet')
+        .mockRejectedValueOnce(new Error('QuotaExceededError: the device is full'));
+      // The compensation cannot run either, which is the case #166 is about.
+      const cleanup = vi
+        .spyOn(store, 'deleteActivity')
+        .mockRejectedValueOnce(new Error('InvalidStateError: the connection is closing'));
+      return Promise.resolve({ store, streams, cleanup });
+    });
+
+    const report = await run(open, [bytesSource('ride.gpx', bytes)], { store: failing.store });
+
+    // The rider is told what actually went wrong. Reporting the cleanup's
+    // error instead would name the connection when the cause was the disk, and
+    // reporting success would be worse than either.
+    const outcome = named(report.outcomes, 'ride.gpx');
+    expect(outcome.kind).toBe('failed');
+    expect(outcome.code).toBe('not-stored');
+    expect(outcome.reason).toContain('QuotaExceededError');
+    expect(report.imported).toBe(0);
+    failing.streams.mockRestore();
+    failing.cleanup.mockRestore();
+
+    // And the residue is real: the row is still there, carrying the hash.
+    expect(await open.read(async (store) => store.listActivitySummaries(ATHLETE_A))).toHaveLength(
+      1,
+    );
+  });
+
+  it('lets the rider retry a file whose half-written row could not be cleaned up', async () => {
+    const open = await openSeeded();
+    const bytes = syntheticRide(43);
+
+    const failing = await open.write((store) => {
+      const streams = vi
+        .spyOn(store, 'putStreamSet')
+        .mockRejectedValueOnce(new Error('QuotaExceededError: the device is full'));
+      const cleanup = vi
+        .spyOn(store, 'deleteActivity')
+        .mockRejectedValueOnce(new Error('InvalidStateError: the connection is closing'));
+      return Promise.resolve({ store, streams, cleanup });
+    });
+    await run(open, [bytesSource('ride.gpx', bytes)], { store: failing.store });
+    failing.streams.mockRestore();
+    failing.cleanup.mockRestore();
+
+    // ⚠️ The defect (#166). The orphan row carries the file's SHA-256, so
+    // before this fix the retry below was reported as a duplicate — of a ride
+    // with no data — and stayed that way however many times the rider tried,
+    // because the row being matched is the broken one. There is no way back
+    // from that short of clearing site data.
+    const retry = await run(open, [bytesSource('ride.gpx', bytes)], {
+      newActivityId: sequentialActivityIds('retry'),
+    });
+    expect(named(retry.outcomes, 'ride.gpx').kind).toBe('imported');
+    expect(retry.imported).toBe(1);
+    expect(retry.duplicates).toBe(0);
+
+    // Read back on a fresh connection: one ride, and the data is behind it.
+    // Asserting the count alone would pass against an importer that left the
+    // orphan and added a second row with the same hash.
+    const summaries = await open.read(async (store) => store.listActivitySummaries(ATHLETE_A));
+    expect(summaries).toHaveLength(1);
+    const streams = await open.read(async (store) =>
+      store.getStreamSet(ATHLETE_A, summaries[0]!.id),
+    );
+    expect(streams?.sampleCount).toBeGreaterThan(0);
+  });
 });
 
 /** A distinct GPX document per index. @see syntheticGpx */

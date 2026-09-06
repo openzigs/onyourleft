@@ -230,14 +230,36 @@ async function importOne(
   try {
     const existing = await options.store.findActivityByOriginalFileHash(options.athleteId, sha256);
     if (existing !== undefined) {
-      return {
-        fileName: source.fileName,
-        kind: 'duplicate',
-        activityId: existing.id,
-        reason: `already imported as “${existing.name}”; nothing was written`,
-        code: undefined,
-        faults: [],
-      };
+      // A row carrying this hash is a duplicate only if the ride behind it is
+      // actually there. `storeRide` writes the activity first and compensates
+      // by deleting it if the streams do not land — but that compensating
+      // delete can itself fail, and #166 is what happens then: the row
+      // survives carrying the file's hash, every later retry of that file is
+      // reported as a duplicate of a ride with no data, and no amount of
+      // retrying fixes it because the thing being matched *is* the broken row.
+      //
+      // Checking for the streams closes that at the read side, so a retry
+      // works whether or not the compensation succeeded. The inference is
+      // sound rather than a guess: `originalFile` is written by this importer
+      // and nothing else, so a row with this hash and no stream set can only
+      // be a half-written import from this path.
+      const stored = await options.store.getStreamSet(options.athleteId, existing.id);
+      if (stored !== undefined) {
+        return {
+          fileName: source.fileName,
+          kind: 'duplicate',
+          activityId: existing.id,
+          reason: `already imported as “${existing.name}”; nothing was written`,
+          code: undefined,
+          faults: [],
+        };
+      }
+      // Not swallowed here, unlike the compensating delete in `storeRide`.
+      // There the original failure is the one the rider needs and a cleanup
+      // error would mask it; here there is no earlier error to protect, and a
+      // delete that fails means the import below would leave a second row with
+      // the same hash — so it is reported as `not-stored` by the catch beneath.
+      await options.store.deleteActivity(options.athleteId, existing.id);
     }
     const activityId = await storeRide(options, source, ride, sha256);
     return {
@@ -266,6 +288,11 @@ async function importOne(
  * reported as a duplicate — of a ride with no data in it, which the rider can
  * now never import. Deleting the half-written activity is what makes a retry
  * work.
+ *
+ * That delete is best-effort, and #166 is the arm where it fails too. The
+ * durable half of the fix is not here but in the duplicate check, which
+ * requires a stream set behind a matching row before it calls a file already
+ * imported — so a retry works even when this compensation did not.
  */
 async function storeRide(
   options: ImportBatchOptions,
@@ -311,6 +338,13 @@ async function storeRide(
       channels: ride.channels,
     });
   } catch (error: unknown) {
+    // Swallowed deliberately, and safe to swallow since #166. The rider needs
+    // the original failure — a full disk, an aborted transaction — and letting
+    // a cleanup error replace it would report the wrong cause. What used to
+    // make the swallow dangerous was the residue: a delete that failed left a
+    // hash-bearing row that made every later retry a "duplicate" of an empty
+    // ride. The duplicate check now requires a stream set behind the row, so
+    // that residue no longer blocks anything and this can stay quiet.
     await options.store.deleteActivity(options.athleteId, id).catch(() => false);
     throw error;
   }
