@@ -36,8 +36,8 @@ the answer to all of that, and they come later.
 ### Bringing your history in, and taking it out
 
 The **Files** page imports FIT, GPX and TCX files and exports any ride on this device in the same
-three formats. Choose as many files at once as you like — a whole platform export is the case it is
-built for.
+three formats. Choose as many files at once as you like, or point it at a **whole folder** and it
+reads everything inside — an unzipped platform export is the case it is built for.
 
 What to expect from a bulk import:
 

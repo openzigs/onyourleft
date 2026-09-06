@@ -63,6 +63,25 @@ const LOCAL_ATHLETE = athleteId('local');
 const DEFAULT_WHEEL_CIRCUMFERENCE = metres(2.105);
 
 /**
+ * The tab's one connection to the local database.
+ *
+ * Lazy and memoised, and both halves matter. **One** because `openActivityStore`
+ * opens a Dexie handle on `onyourleft`, and two handles in one tab are two
+ * IndexedDB connections that must both be closed before a schema upgrade can
+ * run — a `versionchange` a live handle blocks is how a migration hangs a tab
+ * rather than failing it. **Lazy** because neither caller reaches this line in a
+ * browser that cannot use it, and a module-scope `openActivityStore()` would
+ * open a database on Safari, on Firefox and on a page opened from the disk, for
+ * two features that render an explanation instead of a control there.
+ */
+let sharedStore: ReturnType<typeof openActivityStore> | undefined;
+
+function localStore(): ReturnType<typeof openActivityStore> {
+  sharedStore ??= openActivityStore();
+  return sharedStore;
+}
+
+/**
  * Build the ride screen's state machine, or nothing.
  *
  * `undefined` in a browser with no Web Bluetooth — Safari, Firefox, plain HTTP
@@ -89,7 +108,7 @@ function buildRideController(probe: CapabilityProbe): RideController | undefined
   });
   return createRideController({
     transport,
-    store: openActivityStore(),
+    store: localStore(),
     athleteId: LOCAL_ATHLETE,
     // `crypto.randomUUID()` rather than a counter: two tabs recording at once
     // must not collide on a session id, and a counter in a module is per tab.
@@ -108,17 +127,18 @@ function buildRideController(probe: CapabilityProbe): RideController | undefined
  * bytes and there is no import worth offering without it, so #48's first
  * criterion applies: no control at all, and the page says why.
  *
- * The zone is read from the browser rather than assumed, and it is written into
- * every imported ride: #26 stores an IANA identifier beside the absolute
- * instant precisely so that a ride re-rendered in July does not shift by an
- * hour.
+ * ⚠️ The zone is this **browser's**, and #26 requires one per ride. That is the
+ * right answer for a ride recorded here and a fallback for a ride imported from
+ * somewhere else — none of the three formats carries an IANA identifier, so
+ * there is nothing better to read. `import-batch.ts`'s `timeZone` records what
+ * that costs and why `UTC` is not an improvement on it.
  */
 function buildTransferPort(): TransferPort | undefined {
   if (globalThis.crypto?.subtle === undefined) {
     return undefined;
   }
   return {
-    store: openActivityStore(),
+    store: localStore(),
     athleteId: LOCAL_ATHLETE,
     newActivityId: () => activityId(globalThis.crypto.randomUUID()),
     now: () => unixSeconds(Math.floor(Date.now() / 1000)),

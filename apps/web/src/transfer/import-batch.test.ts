@@ -184,6 +184,27 @@ describe('importActivityFiles — a bulk archive', () => {
     expect(named(report.outcomes, 'removed-drive/ride.fit').code).toBe('unreadable');
     expect(named(report.outcomes, 'fine.gpx').kind).toBe('imported');
   });
+
+  it('records the archive’s filename as the original-file key, not the ride’s name', async () => {
+    const open = await openSeeded();
+    // A GPX whose `<name>` is “Ride 9” inside a file called something else.
+    // The two are different strings, which is the whole point: a key taken from
+    // the ride's name is a key that does not name a file, and #26's
+    // `originalFile.key` is the reference back to the archive.
+    const source = bytesSource('activities/2019-01-10_1234567.gpx', syntheticRide(9));
+
+    const report = await run(open, [source]);
+
+    const outcome = named(report.outcomes, source.fileName);
+    expect(outcome.kind).toBe('imported');
+    const stored = await open.read(async (store) =>
+      outcome.activityId === undefined
+        ? undefined
+        : store.getActivity(ATHLETE_A, outcome.activityId),
+    );
+    expect(stored?.name).toBe('Ride 9');
+    expect(stored?.originalFile?.key).toBe('activities/2019-01-10_1234567.gpx');
+  });
 });
 
 describe('importActivityFiles — deduplication against the local store', () => {

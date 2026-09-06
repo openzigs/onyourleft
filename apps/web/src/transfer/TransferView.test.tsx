@@ -91,14 +91,19 @@ function fileOf(path: string, contents: string): File {
   return file;
 }
 
-async function choose(files: readonly File[]): Promise<void> {
-  const input = document.querySelector<HTMLInputElement>('#oyl-import-files');
+async function choose(files: readonly File[], selector = '#oyl-import-files'): Promise<void> {
+  const input = document.querySelector<HTMLInputElement>(selector);
   if (input === null) {
-    throw new Error('the import file input is not on the page');
+    throw new Error(`the import input ${selector} is not on the page`);
   }
   Object.defineProperty(input, 'files', { value: fileListOf(files), configurable: true });
   input.dispatchEvent(new Event('change', { bubbles: true }));
   await settle();
+}
+
+/** The same, through the folder picker — the one that reports archive paths. */
+async function chooseFolder(files: readonly File[]): Promise<void> {
+  await choose(files, '#oyl-import-folder');
 }
 
 function buttonNamed(text: string): HTMLButtonElement {
@@ -164,11 +169,14 @@ describe('TransferView — without a port', () => {
 });
 
 describe('TransferView — importing', () => {
-  it('imports the chosen files and lists every one of them by name', async () => {
+  it('imports a chosen folder and lists every one of its files by archive path', async () => {
     const port = await openPort();
     mounted = await mount(<TransferView port={port} />);
 
-    await choose([
+    // Through the folder input, which is the control that reports a file under
+    // its path inside the archive. The plain file picker beside it has its own
+    // test below; the two differ only in what `sourcesOf` reads the name from.
+    await chooseFolder([
       fileOf('activities/first.gpx', syntheticGpx(1)),
       fileOf('activities/notes.txt', 'this is not a ride'),
       fileOf('activities/second.gpx', syntheticGpx(2)),
@@ -187,6 +195,53 @@ describe('TransferView — importing', () => {
       store.listActivitySummaries(ATHLETE_A),
     );
     expect(stored).toHaveLength(2);
+  });
+
+  it('names a file from the plain picker by its bare name, with no relative path', async () => {
+    const port = await openPort();
+    mounted = await mount(<TransferView port={port} />);
+
+    // ⚠️ A bare `new File`, with `webkitRelativePath` left alone rather than
+    // defined — which is what the plain picker produces, and also what jsdom
+    // produces, because it does not implement that non-standard attribute at
+    // all. `lib.dom.d.ts` types it as a `string`, so a `=== ''` comparison
+    // typechecks, is `false` for `undefined`, and imports the ride under the
+    // filename `undefined` — reported to the rider under that name and written
+    // into `originalFile.key` under it too.
+    await choose([new File([syntheticGpx(12)], 'good.gpx')]);
+    await activateWithKeyboard(buttonNamed('Import 1 file'));
+    await runToCompletion(finished, 'the batch to finish');
+
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('good.gpx');
+    expect(text).not.toContain('undefined');
+
+    const stored = await (harness ?? never()).read(async (store) => {
+      const summaries = await store.listActivitySummaries(ATHLETE_A);
+      const first = summaries[0];
+      return first === undefined ? undefined : store.getActivity(ATHLETE_A, first.id);
+    });
+    expect(stored?.originalFile?.key).toBe('good.gpx');
+  });
+
+  it('offers a folder picker, and filters nothing out of what a rider selects', async () => {
+    const port = await openPort();
+    mounted = await mount(<TransferView port={port} />);
+
+    // The attribute that makes `webkitRelativePath` non-empty, and therefore
+    // the one that makes the archive-path branch in `sourcesOf` reachable at
+    // all. Without it that branch is code no rider can execute, and the test
+    // above would be asserting on a `File` shape the shipped UI never produces.
+    const folder = document.querySelector<HTMLInputElement>('#oyl-import-folder');
+    expect(folder?.hasAttribute('webkitdirectory')).toBe(true);
+    expect(folder?.multiple).toBe(true);
+
+    // And neither input filters by extension. #51's second criterion is that a
+    // file this client cannot decode is *reported*, by name — which needs the
+    // rider to be able to select it in the first place.
+    for (const selector of ['#oyl-import-files', '#oyl-import-folder']) {
+      expect(document.querySelector(selector)?.hasAttribute('accept')).toBe(false);
+    }
   });
 
   it('announces progress in a live region as the batch runs and when it finishes', async () => {
@@ -254,6 +309,56 @@ describe('TransferView — importing', () => {
     expect(stored.length).toBeLessThan(3);
     // And the control is gone again, because nothing is running.
     expect(() => buttonNamed('Cancel import')).toThrow();
+  });
+});
+
+/**
+ * The sibling-refresh case: one screen that both writes and reads the same
+ * store.
+ *
+ * Every other export test here seeds its ride **before** mounting, and that is
+ * the one ordering under which a stale read is invisible. This one performs the
+ * write through the UI and then asserts on the *other* panel, which is where
+ * CLAUDE.md §5's defect shape shows up a layer above the store: the ride is on
+ * disk, `getActivity` would return it, and the page still says there is nothing
+ * to export. Anything added here that writes and reads the same store wants a
+ * test of this shape.
+ */
+describe('TransferView — the two panels over one store', () => {
+  it('offers a freshly imported ride for export, without a reload', async () => {
+    const port = await openPort();
+    mounted = await mount(<TransferView port={port} />);
+
+    // Nothing on disk, so there is no chooser and the page says why.
+    expect(document.querySelector('#oyl-export-ride')).toBeNull();
+    expect(document.body.textContent).toContain('There are no rides on this device yet');
+
+    await choose([fileOf('activities/brought-across.gpx', syntheticGpx(11))]);
+    await activateWithKeyboard(buttonNamed('Import 1 file'));
+    await runToCompletion(finished, 'the batch to finish');
+
+    await runToCompletion(
+      () => document.querySelector('#oyl-export-ride') !== null,
+      'the export chooser to notice the imported ride',
+    );
+    // The page no longer contradicts itself.
+    expect(document.body.textContent).not.toContain('There are no rides on this device yet');
+    const chooser = document.querySelector<HTMLSelectElement>('#oyl-export-ride');
+    expect(queryAll<HTMLOptionElement>(chooser ?? document.body, 'option')).toHaveLength(1);
+    expect(chooser?.textContent).toContain('Ride 11');
+
+    // And it is selectable and exportable in the same visit, which is the whole
+    // point of noticing: an import followed by an export is one session.
+    await activateWithKeyboard(buttonNamed('Export'));
+    await runToCompletion(() => saved.length > 0, 'the export to reach the browser');
+    expect(saved[0]?.fileName).toBe('Ride 11.fit');
+
+    // Read back on a connection this component never wrote through, last,
+    // because `read()` closes the handle the port is holding.
+    const stored = await (harness ?? never()).read(async (store) =>
+      store.listActivitySummaries(ATHLETE_A),
+    );
+    expect(stored).toHaveLength(1);
   });
 });
 

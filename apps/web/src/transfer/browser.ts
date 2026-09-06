@@ -38,17 +38,33 @@ export async function webCryptoDigest(bytes: Uint8Array): Promise<string> {
 }
 
 /**
+ * How long a blob URL outlives the click that started its download.
+ *
+ * ⚠️ **Not zero, and this is the point of the constant.** Clicking a `download`
+ * anchor *queues* a navigation; the browser fetches the blob URL afterwards, on
+ * its own schedule. Revoking in the same turn as the click therefore races the
+ * fetch, and the loser is the rider: outside Chromium the download silently
+ * does not happen, with no error anywhere for the page to report. A whole task
+ * (`setTimeout(…, 0)`) is not obviously enough either, because nothing in the
+ * specification ties the fetch to the next macrotask.
+ *
+ * A minute is long enough that no fetch this page started is still waiting for
+ * it, and it is a bound rather than a leak: the blob is released without the
+ * document being closed, so the megabytes a four-hour ride's FIT export costs
+ * come back. A `setTimeout` rather than an `unload` handler because a tab left
+ * open all day is exactly the case that matters.
+ */
+const OBJECT_URL_LIFETIME_MS = 60_000;
+
+/**
  * Save a file, through the only mechanism a page has: an anchor with a
  * `download` attribute, clicked.
- *
- * The object URL is revoked immediately afterwards. It has already been read by
- * then — the click starts the download synchronously — and leaving it alive
- * pins the whole file in memory for the life of the document, which on a
- * four-hour ride's FIT export is megabytes per download.
  *
  * `showSaveFilePicker` would be nicer and is Chromium-only, which for a feature
  * whose entire purpose is getting a rider's data *out* would be the wrong place
  * to depend on a browser. The anchor works everywhere.
+ *
+ * @see OBJECT_URL_LIFETIME_MS for why the revoke is not on the next line.
  */
 export function saveWithAnchor(file: DownloadableFile): void {
   // A fresh `ArrayBuffer` copy, because `bytes` may be a view onto a larger
@@ -61,5 +77,7 @@ export function saveWithAnchor(file: DownloadableFile): void {
   document.body.append(anchor);
   anchor.click();
   anchor.remove();
-  URL.revokeObjectURL(url);
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, OBJECT_URL_LIFETIME_MS);
 }

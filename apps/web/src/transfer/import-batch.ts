@@ -127,7 +127,19 @@ export interface ImportBatchOptions {
   newActivityId(): ActivityId;
   now(): UnixSeconds;
   digest(bytes: Uint8Array): Promise<string>;
-  /** The IANA zone written into every imported ride's `startedAtTimeZone`. */
+  /**
+   * The IANA zone written into every imported ride's `startedAtTimeZone`.
+   *
+   * ⚠️ **It is the importing device's zone, which for a ride recorded
+   * elsewhere is a fallback and not a fact.** GPX and TCX carry UTC instants
+   * and no zone at all; FIT's profile subset decoded here carries none either,
+   * and the offset derivable from a local timestamp is an offset rather than an
+   * IANA identifier. `startedAtTimeZone` is not optional (#26), so a ride
+   * brought across from a holiday abroad renders in the zone of the machine
+   * that imported it until a rider can correct it — which is its own issue.
+   * The importer's zone is at least true of something and is the closest guess
+   * available; `UTC` would assert a place the ride was not.
+   */
   readonly timeZone: string;
   /** Aborting stops the loop between files. Nothing already written is undone. */
   readonly signal?: AbortSignal | undefined;
@@ -227,7 +239,7 @@ async function importOne(
         faults: [],
       };
     }
-    const activityId = await storeRide(options, ride, sha256);
+    const activityId = await storeRide(options, source, ride, sha256);
     return {
       fileName: source.fileName,
       kind: 'imported',
@@ -257,6 +269,7 @@ async function importOne(
  */
 async function storeRide(
   options: ImportBatchOptions,
+  source: ImportSource,
   ride: ImportedRide,
   sha256: string,
 ): Promise<ActivityId> {
@@ -272,12 +285,16 @@ async function storeRide(
     distance: ride.distance,
     hasPosition: ride.hasPosition,
     ...(ride.averagePower === undefined ? {} : { averagePower: ride.averagePower }),
-    // The key names the file this ride came from; the hash is what #26's
-    // `[athleteId+originalFileSha256]` index deduplicates on. Phase 1 keeps the
-    // reference and not the bytes — there is no original-file object store yet
-    // — so re-exporting produces a file this client wrote rather than the one
-    // the rider imported.
-    originalFile: { key: ride.name, sha256 },
+    // The key names the file this ride came from — `source.fileName`, the name
+    // in the rider's archive, and **not** `ride.name`, which for GPX and TCX is
+    // the `<name>` written inside the document and for FIT is derived from the
+    // filename anyway. Those two differ for every XML file with a track name,
+    // so the key that claimed to name a file was naming a ride. The hash is
+    // what #26's `[athleteId+originalFileSha256]` index deduplicates on. Phase 1
+    // keeps the reference and not the bytes — there is no original-file object
+    // store yet — so re-exporting produces a file this client wrote rather than
+    // the one the rider imported.
+    originalFile: { key: source.fileName, sha256 },
     createdAt: options.now(),
   };
   // `visibility` is left unset deliberately: `putActivity` applies ADR 0004's

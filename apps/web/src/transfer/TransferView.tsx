@@ -59,6 +59,14 @@ const FORMATS: readonly { readonly value: ActivityFileFormat; readonly label: st
   { value: 'tcx', label: 'TCX v2' },
 ];
 
+/**
+ * What turns a file input into a directory input.
+ *
+ * @see the second input in {@link ImportPanel} for why it is spread rather
+ * than written inline.
+ */
+const DIRECTORY_PICKER: Readonly<Record<string, string>> = { webkitdirectory: '' };
+
 const OUTCOME_WORD: Readonly<Record<ImportOutcome['kind'], string>> = {
   imported: 'Imported',
   duplicate: 'Already here',
@@ -72,6 +80,25 @@ export interface TransferViewProps {
 }
 
 export function TransferView({ port }: TransferViewProps): JSX.Element {
+  /**
+   * Bumped whenever the import panel has written to the store.
+   *
+   * The two panels are siblings over one database — one writes it, the other
+   * reads it — and a sibling's state change is not a re-render. Without this
+   * counter the export panel's `useEffect` has nothing to depend on that
+   * changes, so a rider who imports a ride is told, on the same screen, that
+   * there is nothing on this device to export. That is CLAUDE.md §5's "a write
+   * that reports success while the read cannot see it", one layer above the
+   * store: the ride is on disk and the panel next to it is describing the
+   * device as empty.
+   *
+   * A counter rather than passing the imported rides down: the export panel
+   * lists what the *store* holds, and it must keep doing so after a #50 ride
+   * list or a recording writes one too. What the import batch happens to
+   * return is not the same question.
+   */
+  const [storeRevision, setStoreRevision] = useState(0);
+
   return (
     <>
       <h2>Import</h2>
@@ -84,7 +111,12 @@ export function TransferView({ port }: TransferViewProps): JSX.Element {
           work.
         </StatusMessage>
       ) : (
-        <ImportPanel port={port} />
+        <ImportPanel
+          port={port}
+          onStoreChanged={() => {
+            setStoreRevision((previous) => previous + 1);
+          }}
+        />
       )}
 
       <h2>Export</h2>
@@ -93,7 +125,7 @@ export function TransferView({ port }: TransferViewProps): JSX.Element {
           Exporting needs the same local store the import above does, so it is unavailable here too.
         </p>
       ) : (
-        <ExportPanel port={port} />
+        <ExportPanel port={port} storeRevision={storeRevision} />
       )}
 
       <h2>Why this is a file and not a connection</h2>
@@ -112,7 +144,14 @@ export function TransferView({ port }: TransferViewProps): JSX.Element {
 }
 
 /** The file picker, the run, the progress and the report. */
-function ImportPanel({ port }: { readonly port: TransferPort }): JSX.Element {
+function ImportPanel({
+  port,
+  onStoreChanged,
+}: {
+  readonly port: TransferPort;
+  /** Called once a run has written at least one ride. @see TransferView */
+  readonly onStoreChanged: () => void;
+}): JSX.Element {
   const [chosen, setChosen] = useState<readonly ImportSource[]>([]);
   const [progress, setProgress] = useState<ImportProgress | undefined>(undefined);
   const [outcomes, setOutcomes] = useState<readonly ImportOutcome[]>([]);
@@ -137,6 +176,11 @@ function ImportPanel({ port }: { readonly port: TransferPort }): JSX.Element {
     setRunning(true);
     setOutcomes([]);
     setProgress(undefined);
+    // Recorded as the batch runs rather than read off the report at the end,
+    // so that a cancelled run — and a run that throws for a reason that is
+    // about this client rather than about a file — still tells the rest of the
+    // page about the rides that did land. Cancelling is not rolling back.
+    let wrote = false;
     try {
       const report = await importActivityFiles({
         sources: chosen,
@@ -147,12 +191,21 @@ function ImportPanel({ port }: { readonly port: TransferPort }): JSX.Element {
         digest: async (bytes) => port.digest(bytes),
         timeZone: port.timeZone,
         signal: controller.signal,
-        onProgress: setProgress,
+        onProgress: (update) => {
+          wrote ||= update.outcome.kind === 'imported';
+          setProgress(update);
+        },
       });
       setOutcomes(report.outcomes);
     } finally {
       setRunning(false);
       cancellation.current = undefined;
+      // Once, after the run, rather than per file: a three-hundred-file archive
+      // would otherwise re-query and re-render the ride chooser three hundred
+      // times while the import it is competing with is still going.
+      if (wrote) {
+        onStoreChanged();
+      }
     }
   }
 
@@ -166,12 +219,44 @@ function ImportPanel({ port }: { readonly port: TransferPort }): JSX.Element {
       </p>
       <div className="oyl-transfer__form">
         <label htmlFor="oyl-import-files">Activity files</label>
+        {/*
+          ⚠️ **No `accept` attribute, deliberately.** `accept=".fit,.gpx,.tcx"`
+          hides from the picker exactly the files #51's second criterion is
+          about: a bulk export is full of things this client cannot decode, and
+          a rider who selects the whole archive and is told per file what
+          happened to each is the behaviour asked for. A filter that quietly
+          drops them before the batch sees them reports on nothing.
+        */}
         <input
           id="oyl-import-files"
           className="oyl-input oyl-input--file"
           type="file"
           multiple
-          accept=".fit,.gpx,.tcx"
+          onChange={choose}
+        />
+
+        <label htmlFor="oyl-import-folder">Or a whole folder</label>
+        {/*
+          The unzipped archive, in one gesture — hundreds of files across the
+          directories the export was written with, which is #51's sixth
+          criterion as a rider actually performs it. `webkitdirectory` is the
+          only way a page gets a directory. It is non-standard and MDN records
+          it as Baseline "newly available" since August 2025 (read 2026-09-06),
+          which is all four engines; a browser without it shows an ordinary file
+          picker, so the worst case is the input beside it. It is also what
+          fills in `webkitRelativePath` — the archive-relative name `sourcesOf`
+          reports each file under.
+
+          Spread rather than written as a JSX attribute because `@types/react`
+          19 does not declare it; React passes an unknown lowercase attribute
+          through to the DOM unchanged.
+        */}
+        <input
+          {...DIRECTORY_PICKER}
+          id="oyl-import-folder"
+          className="oyl-input oyl-input--file"
+          type="file"
+          multiple
           onChange={choose}
         />
       </div>
@@ -242,17 +327,28 @@ function progressSentence(
 }
 
 /** Choose a ride, choose a format, get a file. */
-function ExportPanel({ port }: { readonly port: TransferPort }): JSX.Element {
+function ExportPanel({
+  port,
+  storeRevision,
+}: {
+  readonly port: TransferPort;
+  /** Changes when something else on this page has written a ride. @see TransferView */
+  readonly storeRevision: number;
+}): JSX.Element {
   const [rides, setRides] = useState<readonly ActivitySummary[]>([]);
   const [selected, setSelected] = useState<string>('');
   const [format, setFormat] = useState<ActivityFileFormat>('fit');
   const [message, setMessage] = useState<{ tone: StatusTone; text: string } | undefined>(undefined);
 
+  // ⚠️ `storeRevision` is a dependency and not an unused prop: `port` is built
+  // once in `main.tsx` and never changes, so it alone would pin this list to
+  // whatever was on disk when the page was opened. Removing it from here is the
+  // mutation `TransferView.test.tsx`'s two-panel test goes red on.
   const load = useCallback(async (): Promise<void> => {
     const found = await port.store.listActivitySummaries(port.athleteId);
     setRides(found);
     setSelected((current) => (current === '' ? (found[0]?.id ?? '') : current));
-  }, [port]);
+  }, [port, storeRevision]);
 
   useEffect(() => {
     void load();
@@ -383,10 +479,19 @@ function sourcesOf(files: FileList | null): readonly ImportSource[] {
     return [];
   }
   return [...files].map((file) => ({
-    // `webkitRelativePath` is what a directory picker fills in, and it is the
-    // name the rider recognises from their archive. Empty for a plain file
-    // picker, in which case the bare name is the whole of it.
-    fileName: file.webkitRelativePath === '' ? file.name : file.webkitRelativePath,
+    // `webkitRelativePath` is what the folder input above fills in, and it is
+    // the name the rider recognises from their archive —
+    // `activities/2019-01-10_1234567.gpx` rather than a bare filename that a
+    // deep archive repeats. Empty for the plain file picker beside it, in which
+    // case the bare name is the whole of it.
+    //
+    // ⚠️ **Tested for truthiness, not against `''`.** `lib.dom.d.ts` types
+    // `webkitRelativePath` as a `string`, but it is a non-standard attribute
+    // and jsdom does not implement it at all — so `=== ''` is `false` for
+    // `undefined`, and every `File` a test constructs would be imported under
+    // the filename `undefined`, typed as a `string` the whole way down into
+    // `originalFile.key`. The store's own validation is what caught it.
+    fileName: file.webkitRelativePath || file.name,
     bytes: async () => new Uint8Array(await file.arrayBuffer()),
   }));
 }

@@ -89,7 +89,34 @@ describe('saveWithAnchor', () => {
     // document — Chrome ignores a click on an anchor that is not in the tree.
     expect(clicks[0]).toBe('Sunday loop.fit|blob:test/1|true');
     expect(urls.created[0]?.type).toBe('application/vnd.ant.fit');
-    expect(urls.revoked).toEqual(['blob:test/1']);
     expect(document.querySelector('a')).toBeNull();
+  });
+
+  it('leaves the blob URL alive past the click, and does not leave it alive for ever', () => {
+    vi.useFakeTimers();
+    try {
+      const urls = stubObjectUrls();
+      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+
+      saveWithAnchor({
+        fileName: 'Sunday loop.fit',
+        bytes: new Uint8Array([1, 2, 3]),
+        mediaType: 'application/vnd.ant.fit',
+      });
+
+      // ⚠️ The half a "revoke was called" assertion cannot see. A click on a
+      // download anchor queues a navigation the browser services afterwards, so
+      // a URL revoked in the same turn is a download that outside Chromium
+      // silently never happens — and no test that only counts the revoke can
+      // tell that apart from a working save.
+      expect(urls.revoked).toEqual([]);
+
+      // And the other half: it is a deferral, not an abandonment. The bytes are
+      // released without the tab having to be closed.
+      vi.runAllTimers();
+      expect(urls.revoked).toEqual(['blob:test/1']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

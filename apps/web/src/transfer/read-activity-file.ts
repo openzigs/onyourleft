@@ -357,20 +357,31 @@ function rideOf(input: RideInput): ImportedRide {
     hasPosition ||= point.position !== undefined;
   }
 
-  const elapsedTime = input.statedElapsedTime ?? seconds(last - first);
+  /**
+   * The wall clock, and the only number here the file cannot inflate: the last
+   * sample's timestamp minus the first.
+   *
+   * ⚠️ **Both stated totals are bounded by this and not by each other.** The
+   * clamp below used to compare the stated moving time against the stated
+   * *elapsed* time, which is one number a file wrote checked against another
+   * number the same file wrote — so `paused-laps.fit` re-encoded with
+   * `totalElapsedTime = totalTimerTime = 86_400` read back as a 24-hour ride
+   * with 419 samples spanning 418 seconds, and passed the guard whose comment
+   * says it prevents exactly that. A device whose clock is corrected mid-ride
+   * writes a summary that disagrees with its own records; storing it would put
+   * a ride in #11's analysis with an elapsed and a moving time it never had.
+   */
+  const observedSpan = seconds(last - first);
+  const elapsedTime = boundedBy(input.statedElapsedTime, observedSpan);
   const distance = input.statedDistance ?? metres(furthest ?? 0);
   return {
     format: input.format,
     name: input.name ?? nameFromFileName(input.fileName),
     startedAt: unixSeconds(first),
     elapsedTime,
-    // Never longer than the wall clock: a file that states a timer time longer
-    // than its own span is stating something impossible, and storing it would
-    // put a ride in #11's analysis with a moving time it never had.
-    movingTime:
-      input.statedMovingTime !== undefined && input.statedMovingTime <= elapsedTime
-        ? input.statedMovingTime
-        : elapsedTime,
+    // And the moving time is bounded by the elapsed time in turn, which is now
+    // itself bounded by the span — so a moving time can never exceed either.
+    movingTime: boundedBy(input.statedMovingTime, elapsedTime),
     distance,
     hasPosition,
     averagePower: powerSamples === 0 ? undefined : watts(Math.round(powerTotal / powerSamples)),
@@ -383,6 +394,18 @@ function rideOf(input: RideInput): ImportedRide {
     channels: Object.fromEntries(built),
     faults: input.faults,
   };
+}
+
+/**
+ * A total a file states, if it is not longer than what the file's own samples
+ * support — and the supported value otherwise.
+ *
+ * Absent is the same answer as impossible on purpose: in both cases the number
+ * the file offered is not usable, and the derived one is what a reader that had
+ * never looked at the summary would show.
+ */
+function boundedBy(stated: Seconds | undefined, bound: Seconds): Seconds {
+  return stated !== undefined && stated <= bound ? stated : bound;
 }
 
 /**

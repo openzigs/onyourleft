@@ -208,6 +208,33 @@ describe('readActivityFile', () => {
     expect(clamped.movingTime).toBeLessThan(86_400);
   });
 
+  it('bounds both stated totals by the samples’ own span, not by each other', () => {
+    const honest = decodeFitActivity(corpusBytes('paused-laps.fit')).activity;
+    const session = honest.sessions[0];
+    if (session === undefined) {
+      throw new Error('the paused-laps fixture is expected to carry a session');
+    }
+    // ⚠️ The case the clamp above does **not** cover, and the one a corrected
+    // clock actually produces: the session overstates *both* totals, so they
+    // agree with each other and disagree with every record in the file. A guard
+    // that checks one number a file wrote against another number the same file
+    // wrote passes this, and the ride lands in #11's analysis as a full day.
+    const overstated = encodeFitActivity({
+      ...honest,
+      sessions: [
+        { ...session, totalElapsedTime: seconds(86_400), totalTimerTime: seconds(86_400) },
+      ],
+    }).bytes;
+
+    const clamped = readActivityFile('overstated-both.fit', overstated);
+
+    // 419 samples one second apart: the span is 418 seconds and nothing the
+    // file says about itself can make it longer.
+    expect(clamped.sampleCount).toBe(419);
+    expect(clamped.elapsedTime).toBe(418);
+    expect(clamped.movingTime).toBe(418);
+  });
+
   it('refuses a header-only FIT file, which decodes cleanly and is not a ride', () => {
     const refusal = refusalOf(() =>
       readActivityFile('header-only.fit', corpusBytes('header-only.fit')),
