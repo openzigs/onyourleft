@@ -19,9 +19,11 @@
  *    being true.
  */
 
+import { athleteId } from '@onyourleft/store';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { ChartSlot } from '../design/ChartSlot';
+import { stubLibrary } from '../library/testing';
 import { AppShell } from '../shell/AppShell';
 import { hrefFor, ROUTES, routeById } from '../shell/routes';
 import type { CapabilityProbe } from '../support/bluetooth-support';
@@ -30,6 +32,18 @@ import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mo
 import { auditAccessibility, formatViolations, tabbableElements } from './audit';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
+
+/**
+ * An empty local store for the activities route.
+ *
+ * Passed since #62, which made `ActivitiesView` say "this browser has no local
+ * store" when it has no port rather than render an empty table — an empty table
+ * would tell a rider they have no rides when the truth is that we could not
+ * look. This test is about the chart-free *table*, so it supplies the store the
+ * table needs; the no-store state has its own coverage in
+ * `views/ActivitiesView.test.tsx`.
+ */
+const EMPTY_LIBRARY = stubLibrary(athleteId('athlete-a'), []);
 
 let mounted: Mounted | undefined;
 
@@ -62,7 +76,7 @@ describe('with no charts at all — the shell as it ships', () => {
 
   it('shows the ride and activity data as tables, which is the chart-free base case', async () => {
     globalThis.location.hash = '#/activities';
-    mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} />);
+    mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} library={EMPTY_LIBRARY} />);
     await settle();
     expect(document.body.textContent).toContain('Rides on this device');
     expect(document.body.textContent).toContain('Nothing recorded yet');

@@ -19,6 +19,7 @@ import { openWebBluetoothTrainer } from './ride/trainer';
 import { AppShell } from './shell/AppShell';
 import { probeBrowser, type CapabilityProbe } from './support/bluetooth-support';
 import { saveWithAnchor, webCryptoDigest } from './transfer/browser';
+import type { LibraryPort } from './library/store-port';
 import type { TransferPort } from './transfer/store-port';
 
 const container = document.getElementById('root');
@@ -133,6 +134,22 @@ function buildRideController(probe: CapabilityProbe): RideController | undefined
  * there is nothing better to read. `import-batch.ts`'s `timeZone` records what
  * that costs and why `UTC` is not an improvement on it.
  */
+/**
+ * The activity library's port (#62).
+ *
+ * Unconditional, unlike `buildTransferPort` above: listing rides needs no
+ * `crypto.subtle` — that check is there because fingerprinting a file for
+ * deduplication does, and it needs a secure context. Reading summaries is a
+ * plain IndexedDB read, so a page opened from the disk can still show a rider
+ * their history even where importing a file is unavailable.
+ *
+ * `localStore()` is lazy and memoised, so this shares the one connection with
+ * the transfer port and the recorder rather than opening a second.
+ */
+function buildLibraryPort(): LibraryPort {
+  return { store: localStore(), athleteId: LOCAL_ATHLETE };
+}
+
 function buildTransferPort(): TransferPort | undefined {
   if (globalThis.crypto?.subtle === undefined) {
     return undefined;
@@ -154,6 +171,7 @@ createRoot(container).render(
       capabilities={capabilities}
       rideController={buildRideController(capabilities)}
       transfer={buildTransferPort()}
+      library={buildLibraryPort()}
     />
   </StrictMode>,
 );

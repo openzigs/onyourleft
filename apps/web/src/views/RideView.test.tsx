@@ -30,7 +30,8 @@ import {
   type Mounted,
 } from '../testing/mount';
 
-import { RideView, formatDuration } from './RideView';
+import { formatDuration } from '../format';
+import { RideView } from './RideView';
 
 let mounted: Mounted | undefined;
 
