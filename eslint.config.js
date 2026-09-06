@@ -73,6 +73,23 @@ const spdxHeader = (content) => ({
  * than for `domain` alone. It exempts nothing that is not already governed by
  * `boundaries/dependencies`, which is what decides which workspace package may
  * import which.
+ *
+ * ⚠️ **The same collision reaches RELATIVE imports, and #88 hit it.** A file
+ * named `constants.ts` — or `util.ts`, `stream.ts`, `path.ts`, `crypto.ts`,
+ * `assert.ts`, `events.ts`, `url.ts`, `os.ts`, and about forty more — cannot be
+ * imported as `./constants` from a platform-isolated package, because that
+ * specifier's last segment is a builtin's name and a slashless pattern matches
+ * any segment. `packages/physics` (#88) is where it surfaced: `./constants`
+ * holds `g` and the ISO 2533 atmosphere, and it was reported as importing a Node
+ * builtin. The two negations below fix it for every package at once rather than
+ * renaming one file and leaving the trap for whoever writes the next `util.ts`.
+ *
+ * They exempt nothing that was ever a violation: **a Node builtin is always a
+ * bare specifier**, never a relative one, so `./x` and `../x` cannot be a
+ * builtin under any resolution. A bare `import 'constants'` is still an error,
+ * and so is `node:constants` through the group above — checked with a probe
+ * file, both spellings, which is the rule CLAUDE.md §4d states for anything
+ * touching these gates.
  */
 const NODE_BUILTIN_SPECIFIERS = [
   ...new Set(
@@ -81,6 +98,8 @@ const NODE_BUILTIN_SPECIFIERS = [
       .flatMap((name) => [name, `${name}/*`]),
   ),
   '!@onyourleft/*',
+  '!./*',
+  '!../*',
 ];
 
 /**
@@ -417,6 +436,55 @@ export default tseslint.config(
           message:
             'The Web Bluetooth adapter is allowed `navigator` and nothing else — it is the transport boundary, not a second platform layer (docs/architecture.md).',
         })),
+      ],
+    },
+  },
+
+  // --- packages/physics is pure computation, and pure means deterministic -----
+  // #88's package is a model, not a service: docs/architecture.md gives it
+  // "Power → speed, as separately testable terms" and forbids it any rendering,
+  // BLE or platform API. `packages/physics/tsconfig.json` narrows `lib` and
+  // empties `types` exactly as packages/domain's does, and `platformIsolation`
+  // is the same fast duplicate of that narrowing it is everywhere else.
+  //
+  // ⚠️ **The two rules below are NOT a duplicate of anything.** `Date` and
+  // `Math.random` are ECMAScript built-ins, so they are in `lib: ["ES2024"]` and
+  // survive the narrowing — the same way `DataView` survives it in
+  // packages/sensors, which that package's tsconfig warns about at length. No
+  // typechecker in this repository can see either of them.
+  //
+  // They matter here more than they would elsewhere because #88 makes
+  // determinism and time-step independence acceptance criteria: "a physics model
+  // coupled to frame rate corrupts silently when the renderer stalls". A model
+  // that reads a wall clock instead of taking the elapsed time as a parameter is
+  // exactly that coupling, and it is invisible in a green test suite — the
+  // numbers still look like numbers. Time arrives as a `Seconds`, the same way
+  // it arrives in packages/domain's recording engine and for the same reason.
+  {
+    files: ['packages/physics/**/*.{ts,tsx}'],
+    rules: {
+      ...platformIsolation(),
+      'no-restricted-globals': [
+        'error',
+        ...PLATFORM_GLOBALS.map((name) => ({
+          name,
+          message:
+            'This package depends on no platform API at all (ADR 0005 decision D, docs/architecture.md).',
+        })),
+        {
+          name: 'Date',
+          message:
+            'packages/physics is deterministic: elapsed time arrives as a Seconds parameter. A model that reads a clock is coupled to the frame rate, which #88 makes an acceptance criterion against.',
+        },
+      ],
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'Math',
+          property: 'random',
+          message:
+            'packages/physics is deterministic: the same inputs give the same ride, which is what makes a replay a replay and a mutation test meaningful.',
+        },
       ],
     },
   },

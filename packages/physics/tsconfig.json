@@ -1,0 +1,31 @@
+{
+  // `lib` is ES2024 and nothing else, and `types` is empty — copied from
+  // packages/domain, for a reason this package states one notch more strongly.
+  //
+  // docs/architecture.md requires packages/physics to depend on no rendering,
+  // BLE or platform API: it is pure computation, and the same model has to
+  // produce the same metre on a phone, in a browser and on a Phase 3 instance.
+  // Without the DOM lib `document`, `window` and `requestAnimationFrame` are
+  // compile errors here; with `types: []`, so are `process` and `Buffer`, even
+  // though @types/node is installed at the workspace root and would otherwise
+  // be found by the default `@types` lookup.
+  //
+  // ⚠️ **`Date` and `Math.random` survive this narrowing**, because both are
+  // ECMAScript built-ins and are in `lib: ["ES2024"]` — exactly as `DataView`
+  // survives it in packages/sensors. A physics tick that reads a clock is not
+  // deterministic and is not time-step independent, which is a whole acceptance
+  // criterion of #88, so the ban on those two is enforced in eslint.config.js
+  // (`no-restricted-globals` for `Date`, `no-restricted-properties` for
+  // `Math.random`) and NOT here. Do not read this file as covering them.
+  //
+  // The closure is conditional on nothing in this program pulling a
+  // `/// <reference types="node" />` back in through a `.d.ts` — which is why
+  // `vitest.config.ts`, which is in the program, imports nothing. Its own
+  // header records why at length (CLAUDE.md §4d).
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "types": []
+  },
+  "include": ["src/**/*.ts", "vitest.config.ts"]
+}

@@ -6,17 +6,17 @@ that produced them.
 The reasoning lives in the ADRs — this file describes **what** the structure is and **where** each
 line falls. [`docs/adr/0005-tech-stack.md`](adr/0005-tech-stack.md) says why.
 
-> **Status: `apps/web`, `packages/domain`, `packages/sensors`, `packages/fit` and `packages/store`
-> exist.** The first two were created by [#23](https://github.com/openzigs/onyourleft/issues/23)
+> **Status: `apps/web`, `packages/domain`, `packages/sensors`, `packages/fit`, `packages/store`
+> and `packages/physics` exist.** The first two were created by [#23](https://github.com/openzigs/onyourleft/issues/23)
 > with the pnpm workspace, the toolchain, a committed lockfile and the lint-enforced boundaries;
 > `packages/sensors` by [#39](https://github.com/openzigs/onyourleft/issues/39) and
 > [#40](https://github.com/openzigs/onyourleft/issues/40)–[#44](https://github.com/openzigs/onyourleft/issues/44),
 > `packages/fit` by [#107](https://github.com/openzigs/onyourleft/issues/107) and
 > [#30](https://github.com/openzigs/onyourleft/issues/30)–[#32](https://github.com/openzigs/onyourleft/issues/32),
 > and `packages/store` by [#26](https://github.com/openzigs/onyourleft/issues/26)–[#28](https://github.com/openzigs/onyourleft/issues/28)
-> and [#46](https://github.com/openzigs/onyourleft/issues/46). **`packages/physics`
-> ([#88](https://github.com/openzigs/onyourleft/issues/88)) and `apps/mobile`
-> ([#85](https://github.com/openzigs/onyourleft/issues/85)) do not exist yet**; each is created by
+> and [#46](https://github.com/openzigs/onyourleft/issues/46), and `packages/physics` by
+> [#88](https://github.com/openzigs/onyourleft/issues/88). **`apps/mobile`
+> ([#85](https://github.com/openzigs/onyourleft/issues/85)) does not exist yet**; it is created by
 > the issue that owns its content, using `packages/domain` as the template.
 > The layout is fixed here because roughly thirty sub-issues reference it by name, and moving it
 > later means touching most of them. The workspace globs (`apps/*`, `packages/*`) and every rule
@@ -89,7 +89,7 @@ packages/             Apache-2.0, without exception
     src/                the transport-agnostic abstraction; no platform API at all
     protocol/           the GATT profile clients (#41, #42, #43); no platform API either
     web-bluetooth/      the browser transport (#40); the one place a BluetoothDevice exists
-  physics/            cycling power/speed model
+  physics/            cycling power/speed model — Martin et al. 1998, as separate terms
   store/              local activity, stream and recording-checkpoint store
 
 docs/
@@ -154,6 +154,30 @@ runtime — including for XML, which it parses with its own reader rather than a
 a `<!DOCTYPE` can be refused by the grammar rather than disabled by a setting. Its one
 devDependency of note is `fit-file-parser` (MIT), a test-time-only independent FIT reader adopted
 under #31's ruling; `packages/fit/README.md` §1 records why that is consistent with ADR 0006.
+
+`packages/physics` is filled in as of [#88](https://github.com/openzigs/onyourleft/issues/88): the
+**Martin et al. 1998** road-cycling power model, with a separately exported function for each term
+of the force balance — aerodynamic drag at the air velocity, rolling resistance, the along-slope
+component of gravity, wheel-bearing friction, the rotating mass of the wheels and the drivetrain
+loss — plus the forward model (`powerRequired`, Equations 13 and 15), its steady-state inverse
+(`steadyStateSpeedMetresPerSecond`) and the deterministic, time-step-independent tick (`advance`).
+Every constant records the sentence of the paper it came from, and the ones that do not — the split
+of the drag area into a coefficient and an area, and a chain efficiency the paper states twice with
+two values — are flagged as such in [`packages/physics/README.md`](../packages/physics/README.md)
+§2, the way `packages/fit/README.md` §3 flags a protocol number resting on weaker evidence.
+
+It is platform-free through one `tsconfig.json` rather than two, because unlike `packages/fit` and
+`packages/sensors` it has no directory that needs a platform at all. Two names escape that closure
+and are handled in `eslint.config.js` instead: **`Date` and `Math.random` are ECMAScript built-ins**
+and survive `lib: ["ES2024"]` exactly as `DataView` does in `packages/sensors`. They matter here
+because #88 makes determinism and time-step independence acceptance criteria, and a model that reads
+a wall clock is precisely the frame-rate coupling those exist against. Elapsed time arrives as a
+`Seconds`.
+
+⚠️ **Nothing consumes it yet.** #88 is scoped to the package and #51 was running in parallel, so no
+screen renders a speed from this model; [#90](https://github.com/openzigs/onyourleft/issues/90),
+[#91](https://github.com/openzigs/onyourleft/issues/91) and
+[#94](https://github.com/openzigs/onyourleft/issues/94) are the issues that will.
 
 `packages/store` is filled in as of [#26](https://github.com/openzigs/onyourleft/issues/26) — the
 athlete, activity, lap and privacy-zone object stores, the indexes each read goes through, the
