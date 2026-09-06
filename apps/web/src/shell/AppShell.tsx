@@ -47,6 +47,7 @@ import { RideSession } from '../ride/RideSession';
 import type { RideController } from '../ride/controller';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { TransferView } from '../transfer/TransferView';
+import type { LibraryPort } from '../library/store-port';
 import type { TransferPort } from '../transfer/store-port';
 
 import { hrefFor, ROUTES, type RouteDefinition } from './routes';
@@ -90,6 +91,16 @@ export interface AppShellProps {
    * `crypto.subtle` and that needs a secure context.
    */
   readonly transfer?: TransferPort | undefined;
+  /**
+   * The local activity library's store (#62).
+   *
+   * Passed in for the reason the three above are: `ActivitiesView` is rendered
+   * by the accessibility suite, which has no IndexedDB worth the name, and a
+   * view that opened a database itself could not be audited. `undefined`
+   * renders the honest no-local-store screen rather than an empty list, which
+   * would tell the rider they have no rides.
+   */
+  readonly library?: LibraryPort | undefined;
 }
 
 function viewFor(
@@ -97,12 +108,13 @@ function viewFor(
   capabilities: CapabilityProbe,
   rideController: RideController | undefined,
   transfer: TransferPort | undefined,
+  library: LibraryPort | undefined,
 ): JSX.Element {
   switch (route.id) {
     case 'ride':
       return <RideView controller={rideController} />;
     case 'activities':
-      return <ActivitiesView />;
+      return <ActivitiesView library={library} />;
     case 'devices':
       return <DevicesView capabilities={capabilities} />;
     case 'transfer':
@@ -114,7 +126,12 @@ function viewFor(
   }
 }
 
-export function AppShell({ capabilities, rideController, transfer }: AppShellProps): JSX.Element {
+export function AppShell({
+  capabilities,
+  rideController,
+  transfer,
+  library,
+}: AppShellProps): JSX.Element {
   const route = useRoute();
   const mainRef = useRef<HTMLElement>(null);
   const previousRouteId = useRef<string | null>(null);
@@ -184,7 +201,7 @@ export function AppShell({ capabilities, rideController, transfer }: AppShellPro
       >
         <h1 id={VIEW_TITLE_ID}>{route.title}</h1>
         <p className="oyl-muted">{route.summary}</p>
-        {viewFor(route, capabilities, rideController, transfer)}
+        {viewFor(route, capabilities, rideController, transfer, library)}
       </main>
 
       <footer className="oyl-footer">

@@ -47,6 +47,7 @@ import type { JSX } from 'react';
 import type { Watts } from '@onyourleft/domain';
 
 import { Button } from '../design/Button';
+import { formatDuration } from '../format';
 import { StatusMessage } from '../design/StatusMessage';
 import { MetricGrid } from '../ride/MetricGrid';
 import { TrainerPanel } from '../ride/TrainerPanel';
@@ -333,16 +334,4 @@ function connectionWords(state: string): string {
     default:
       return 'disconnected — reconnecting needs a tap, this browser cannot do it silently';
   }
-}
-
-/** `3725` → `1:02:05`. Hours only when there are some. */
-export function formatDuration(totalSeconds: number): string {
-  const whole = Math.max(0, Math.floor(totalSeconds));
-  const hours = Math.floor(whole / 3600);
-  const minutes = Math.floor((whole % 3600) / 60);
-  const secs = whole % 60;
-  const pad = (value: number): string => String(value).padStart(2, '0');
-  return hours > 0
-    ? `${String(hours)}:${pad(minutes)}:${pad(secs)}`
-    : `${String(minutes)}:${pad(secs)}`;
 }
