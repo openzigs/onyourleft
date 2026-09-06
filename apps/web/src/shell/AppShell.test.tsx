@@ -79,7 +79,7 @@ describe('the header', () => {
   it('links to every navigable route and to none of the others', async () => {
     await open('/');
     const hrefs = [...document.querySelectorAll('nav a')].map((a) => a.getAttribute('href'));
-    expect(hrefs).toEqual(['#/', '#/activities', '#/devices', '#/about']);
+    expect(hrefs).toEqual(['#/', '#/activities', '#/devices', '#/transfer', '#/about']);
   });
 });
 

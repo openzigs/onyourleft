@@ -10,14 +10,16 @@ import {
   heartRateProfile,
 } from '@onyourleft/sensors/protocol';
 import { createWebBluetoothTransport } from '@onyourleft/sensors/web-bluetooth';
-import { metres } from '@onyourleft/domain';
-import { athleteId, openActivityStore, recordingSessionId } from '@onyourleft/store';
+import { metres, unixSeconds } from '@onyourleft/domain';
+import { activityId, athleteId, openActivityStore, recordingSessionId } from '@onyourleft/store';
 
 import './design/theme.css';
 import { browserClock, createRideController, type RideController } from './ride/controller';
 import { openWebBluetoothTrainer } from './ride/trainer';
 import { AppShell } from './shell/AppShell';
 import { probeBrowser, type CapabilityProbe } from './support/bluetooth-support';
+import { saveWithAnchor, webCryptoDigest } from './transfer/browser';
+import type { TransferPort } from './transfer/store-port';
 
 const container = document.getElementById('root');
 if (container === null) {
@@ -97,8 +99,41 @@ function buildRideController(probe: CapabilityProbe): RideController | undefined
   });
 }
 
+/**
+ * Build the import and export screen's port, or nothing.
+ *
+ * `undefined` where `crypto.subtle` is absent, which is every non-secure
+ * context — a bundle opened from the disk as `file://`, or served over plain
+ * `http://` on anything but localhost. Deduplication is a SHA-256 of the file's
+ * bytes and there is no import worth offering without it, so #48's first
+ * criterion applies: no control at all, and the page says why.
+ *
+ * The zone is read from the browser rather than assumed, and it is written into
+ * every imported ride: #26 stores an IANA identifier beside the absolute
+ * instant precisely so that a ride re-rendered in July does not shift by an
+ * hour.
+ */
+function buildTransferPort(): TransferPort | undefined {
+  if (globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  return {
+    store: openActivityStore(),
+    athleteId: LOCAL_ATHLETE,
+    newActivityId: () => activityId(globalThis.crypto.randomUUID()),
+    now: () => unixSeconds(Math.floor(Date.now() / 1000)),
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    digest: webCryptoDigest,
+    save: saveWithAnchor,
+  };
+}
+
 createRoot(container).render(
   <StrictMode>
-    <AppShell capabilities={capabilities} rideController={buildRideController(capabilities)} />
+    <AppShell
+      capabilities={capabilities}
+      rideController={buildRideController(capabilities)}
+      transfer={buildTransferPort()}
+    />
   </StrictMode>,
 );

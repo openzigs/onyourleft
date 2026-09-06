@@ -33,6 +33,30 @@ an iPhone**, and Chrome on Linux needs `chrome://flags/#enable-experimental-web-
 No browser can record in the background, so the tab has to stay open. Mobile and desktop clients are
 the answer to all of that, and they come later.
 
+### Bringing your history in, and taking it out
+
+The **Files** page imports FIT, GPX and TCX files and exports any ride on this device in the same
+three formats. Choose as many files at once as you like — a whole platform export is the case it is
+built for.
+
+What to expect from a bulk import:
+
+- **Every file is reported by name**, as imported, already here, or not imported with the reason.
+  One file that cannot be read never stops the rest of the batch.
+- **An archive contains things that are not rides** — a summary spreadsheet, compressed copies,
+  media — and each of those is listed as not imported rather than silently skipped. Compressed
+  rides (`.fit.gz`) are not read; unpack them first.
+- **The same file imported twice does not become two rides.** A ride is recognised by the SHA-256 of
+  the file's bytes, so re-importing an archive you have already brought in is safe.
+- **Cancelling stops the import; it does not undo it.** Whatever had already been imported stays.
+- Importing needs `crypto.subtle`, which browsers only provide over `https` or on `localhost`. Open
+  the app from a file and the page will say so rather than offering a control that cannot work.
+
+An **exported file contains your real track**, coordinate for coordinate. Privacy zones are for what
+gets published, and nothing here is published — this is your own copy of your own data. FIT carries
+everything this app stores; GPX and TCX each drop something, and the page says which before you
+choose.
+
 ### If the tab closes mid-ride
 
 A tab that has to stay open for four hours will sometimes be closed by accident, discarded by the

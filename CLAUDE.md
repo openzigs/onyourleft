@@ -35,6 +35,8 @@ apps/                 AGPL-3.0-or-later, without exception
     src/ride/           the live ride screen: its state machine, panels and trainer wiring (#49)
     src/shell/          the hash route table, the router hook and AppShell (#48)
     src/support/        browser-capability detection and its notice (#48)
+    src/transfer/       file import and export (#51) — the batch importer, the
+                        1 Hz sample grid, and the export writer
     src/views/          one component per route (#48)
   mobile/             Capacitor shell wrapping the same web build (#85; Phase 3)
 
@@ -453,10 +455,19 @@ React 19, React DOM, Vite, — since #26 — `dexie` 4.4.5 and `fake-indexeddb` 
 Apache-2.0, both zero-dependency, both under `packages/store`) and — since #40 —
 `@types/web-bluetooth` 0.0.21 (MIT, zero-dependency, types only, a devDependency of
 `packages/sensors`) and — since #31 — `fit-file-parser` 5.0.2 (MIT, a devDependency of
-`packages/fit`, whose closure is `buffer` MIT → `base64-js` MIT and `ieee754` BSD-3-Clause) are
+`packages/fit` **and, since #51, of `apps/web` too**, whose closure is `buffer` MIT → `base64-js`
+MIT and `ieee754` BSD-3-Clause) are
 installed; **nothing else from ADR 0005's runtime list is**, `react-router` included. Add each in
 the issue that first needs it, after checking its licence against the
 directory it lands in (CONTRIBUTING.md).
+
+⚠️ **`@onyourleft/fit` moved from `apps/web`'s `devDependencies` to its `dependencies` in #51**,
+because the import and export screen is the codec's first *production* caller rather than a test's.
+The second entry for `fit-file-parser` is there for #51's third-party-acceptance assertion, and it
+needs its **own** ambient declaration at `apps/web/src/transfer/fit-file-parser.d.ts`: TypeScript
+resolves a `declare module` inside the program that includes the file, and `apps/web`'s program does
+not include `packages/fit/tools`. Two declarations of one untyped devDependency is the cost of not
+making a client's typecheck depend on another package's authoring-time directory layout.
 
 ### 4c. What CI runs, and what it deliberately does not
 
@@ -974,5 +985,7 @@ top of an issue **supersedes its body**.
 | Which GPX/TCX schema versions are targeted, what each format loses, and how XXE is refused | [`packages/fit/README.md`](packages/fit/README.md) §7 |
 | How a ride is recorded, checkpointed and recovered, and the stated data-loss bound | [`packages/store/README.md`](packages/store/README.md) §"Recording checkpoints", `apps/web/src/recording/recorder.ts`, `README.md` §"If the tab closes mid-ride" |
 | What the live ride screen may claim about a trainer, and why a stale metric shows no number | `apps/web/src/ride/controller.ts`, `apps/web/src/ride/metrics.ts`, `apps/web/src/ride/TrainerPanel.tsx` |
+| How a bulk import reports a file it cannot read, and what bounds the memory an imported file can ask for | `apps/web/src/transfer/import-batch.ts`, `apps/web/src/transfer/read-activity-file.ts` §`MAXIMUM_IMPORTED_SAMPLES` |
+| What the import screen may say about another platform, word for word | [ADR 0009](docs/adr/0009-clean-room-posture.md) R3, `apps/web/src/transfer/TransferView.tsx`, and the assertions in `TransferView.test.tsx` |
 
-<!-- Last updated: 2026-09-05 by delivery:code-issue resolving #49 (the live ride screen, and the production FTMS control channel) -->
+<!-- Last updated: 2026-09-06 by delivery:code-issue resolving #51 (the manual file import and export UI) -->
