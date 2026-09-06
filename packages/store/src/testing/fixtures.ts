@@ -40,6 +40,15 @@
  */
 
 import {
+  contentHashOf,
+  signActivityRecord,
+  SIGNATURE_ALGORITHM,
+  toHex,
+  type ActivityClaims,
+  type SigningKey,
+} from '@onyourleft/domain';
+
+import {
   altitudeMetres,
   beatsPerMinute,
   degreesCelsius,
@@ -72,9 +81,11 @@ import {
   type LapId,
   type RecordingSessionId,
 } from '../ids';
+import type { DeviceKeyRecord, StoredActivityRecord } from '../identity';
 import type { AthleteRecord, NewActivity, NewLap } from '../records';
 import type { NewRecordingChunk, NewRecordingSession } from '../recording';
 import { STREAM_CHANNELS, type NewStreamSet, type Samples, type StreamChannel } from '../streams';
+import { signingKeyFor, webCryptoSha256 } from '../web-crypto';
 
 import type { StoreHarness } from './harness';
 
@@ -376,3 +387,88 @@ export const CHANNELS_WITHOUT_POSITION: readonly StreamChannel[] = STREAM_CHANNE
 );
 
 export type { ActivityId, AthleteId, LapId, RecordingSessionId };
+
+// --- Identity and signed records (#61) --------------------------------------
+
+/**
+ * The bytes a fixture record vouches for, standing in for an activity file.
+ *
+ * Deliberately not a real FIT file: what a signed record references is a
+ * SHA-256 of some bytes, and the format of those bytes is `packages/fit`'s
+ * business and not this record's. Using a short array keeps the tampering case
+ * — flip one byte, watch the content hash stop matching — legible.
+ */
+export const FIXTURE_FILE_BYTES = new Uint8Array([0x2e, 0x46, 0x49, 0x54, 0x01, 0x02, 0x03, 0x04]);
+
+/**
+ * The claims a record makes about a ride.
+ *
+ * A projection of the activity, and a **narrowing** one: it carries the summary
+ * fields and nothing that could locate the ride. `ActivityClaims` has no
+ * coordinate member, so this function could not add one if it tried.
+ */
+export function claimsFor(ride: NewActivity): ActivityClaims {
+  return {
+    activityId: ride.id,
+    name: ride.name,
+    startedAt: ride.startedAt,
+    startedAtTimeZone: ride.startedAtTimeZone,
+    elapsedTime: ride.elapsedTime,
+    movingTime: ride.movingTime,
+    distance: ride.distance,
+    hasPosition: ride.hasPosition,
+    ...(ride.averagePower === undefined ? {} : { averagePower: ride.averagePower }),
+  };
+}
+
+/** A signed record for a ride, ready to hand to `putActivityRecord`. */
+export async function signedRecordFor(
+  ride: NewActivity,
+  key: SigningKey,
+  fileBytes: Uint8Array = FIXTURE_FILE_BYTES,
+): Promise<StoredActivityRecord> {
+  return {
+    athleteId: ride.athleteId,
+    activityId: ride.id,
+    record: await signActivityRecord(
+      { claims: claimsFor(ride), contentHash: await contentHashOf(fileBytes, webCryptoSha256) },
+      key,
+    ),
+  };
+}
+
+/**
+ * A keypair whose private half **can** be exported, and its bytes.
+ *
+ * ⚠️ **Test-only, and the production keystore cannot produce one.**
+ * `generateDeviceKey` passes `extractable: false` and takes no option that
+ * would change it; this function calls `generateKey` itself.
+ *
+ * It exists for one test — the grep #61's second acceptance criterion asks for.
+ * "No exported file, log line or error report contains the private key" is only
+ * a checkable statement if the private key has bytes to search for, and the
+ * production key deliberately has none. So the grep runs against a key whose
+ * bytes are known, through the same store rows, the same serialisation and the
+ * same error paths. `identity-safety.test.ts` asserts the *stronger* property
+ * separately, on a real production key: that exporting it rejects at all.
+ */
+export async function extractableDeviceKey(owner: AthleteId): Promise<{
+  readonly record: DeviceKeyRecord;
+  readonly key: SigningKey;
+  readonly privateKeyHex: string;
+}> {
+  const pair = await crypto.subtle.generateKey({ name: SIGNATURE_ALGORITHM }, true, [
+    'sign',
+    'verify',
+  ]);
+  const publicKey = new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey));
+  const privateKey = new Uint8Array(await crypto.subtle.exportKey('pkcs8', pair.privateKey));
+  const record: DeviceKeyRecord = {
+    athleteId: owner,
+    algorithm: SIGNATURE_ALGORITHM,
+    publicKey: toHex(publicKey),
+    privateKey: pair.privateKey,
+    createdAt: FIXTURE_EPOCH,
+  };
+  return { record, key: signingKeyFor(record), privateKeyHex: toHex(privateKey) };
+}

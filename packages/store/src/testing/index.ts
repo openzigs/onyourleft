@@ -28,6 +28,7 @@ export {
   assertRecordingRecovers,
   assertSameSamples,
   assertSameStreamSet,
+  assertSignedRecordRoundTrip,
   assertStreamSetRoundTrip,
   RoundTripFailure,
 } from './round-trip';
@@ -41,8 +42,11 @@ export {
   athleteRecord,
   CHANNELS_WITHOUT_POSITION,
   chunksOf,
+  claimsFor,
   DROPPED_STRAP,
+  extractableDeviceKey,
   FIXTURE_EPOCH,
+  FIXTURE_FILE_BYTES,
   FOUR_HOUR_SAMPLE_COUNT,
   lapFor,
   resetFixtureIds,
@@ -51,6 +55,7 @@ export {
   seedAthletes,
   seedRecording,
   seedRide,
+  signedRecordFor,
   streamSetFor,
 } from './fixtures';
 export type { StreamFixtureOptions, StreamGap } from './fixtures';
@@ -60,4 +65,5 @@ export {
   gapFillingStoreFactory,
   memoryWriteStoreFactory,
   misroutedBlobStoreFactory,
+  roundedClaimStoreFactory,
 } from './fakes';

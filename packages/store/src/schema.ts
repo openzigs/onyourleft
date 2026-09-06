@@ -33,8 +33,9 @@
 /**
  * The current schema version.
  *
- * **3** since #46. Version 2 added `streamSets` and `streamBlobs`; version 3
- * adds `recordingSessions` and `recordingChunks`. Both are purely additive and
+ * **4** since #61. Version 2 added `streamSets` and `streamBlobs`; version 3
+ * added `recordingSessions` and `recordingChunks`; version 4 adds `deviceKeys`
+ * and `activityRecords`. All three are purely additive and
  * change **no existing record's shape**. That is why `SCHEMA_MIGRATIONS` in
  * `migrations.ts` is still empty: the registry holds *record* migrations, and
  * there is no record to transform. The version bumps themselves are real and
@@ -45,7 +46,7 @@
  * Bumping this for a change that *does* alter a record's shape means adding a
  * migration pair.
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 /**
  * Dexie stores its schema version in IndexedDB multiplied by ten, leaving room
@@ -74,6 +75,10 @@ export const TABLE = {
   recordingSessions: 'recordingSessions',
   /** #46: one append-only row per flush, holding that window's packed bytes. */
   recordingChunks: 'recordingChunks',
+  /** #61: one row per athlete — the device's Ed25519 keypair. Write-once. */
+  deviceKeys: 'deviceKeys',
+  /** #61: one row per activity — the signed, content-addressed record. */
+  activityRecords: 'activityRecords',
 } as const;
 
 /**
@@ -137,6 +142,16 @@ export const INDEX = {
   recordingChunkBySession: 'sessionId',
   /** `deleteAthlete`'s cascade over chunks. */
   recordingChunkByAthlete: 'athleteId',
+  /**
+   * `getActivityRecord` — the athlete-scoped point lookup for a signed record.
+   *
+   * `deviceKeys` gets no entry here on purpose: its **primary key** is
+   * `athleteId`, so the only lookup it admits is already scoped and there is no
+   * index that could answer "the key with this id" without being told whose.
+   */
+  activityRecordByAthleteAndActivity: '[athleteId+activityId]',
+  /** `deleteAthlete`'s cascade over signed records. */
+  activityRecordByAthlete: 'athleteId',
 } as const;
 
 /**
@@ -250,8 +265,41 @@ export const STORES_V3: Readonly<Record<string, string>> = {
  * what keeps `SCHEMA_VERSION` and the declarations from drifting apart;
  * `migrations.test.ts` asserts they agree.
  */
+/**
+ * Version 4 — #61's device key and signed activity records, added beside the
+ * six stores that already exist.
+ *
+ * `deviceKeys` is keyed on `athleteId` and has **no secondary index**, which is
+ * the strongest statement this schema can make about it: the row *is* the
+ * athlete's identity, there is at most one, and every access is a point lookup
+ * on the scoping column. A secondary index — by `publicKey`, say — would create
+ * a query that finds a key without being told whose it is, and that is exactly
+ * the shape CLAUDE.md section 6 names.
+ *
+ * `activityRecords` is keyed on `activityId`, for `streamSets`' reason: a ride
+ * has at most one current record, so re-signing replaces the row rather than
+ * accumulating a second one. Its indexes lead with `athleteId` like every other
+ * index in this file.
+ *
+ * ⚠️ **`deviceKeys` holds a `CryptoKey`, not bytes.** It is created with
+ * `extractable: false` (see `web-crypto.ts`), so it survives the structured
+ * clone algorithm into IndexedDB and comes back able to sign and unable to be
+ * exported. Do not "simplify" it to a stored byte array: the non-extractability
+ * is the whole of #61's "the private key never leaves the device".
+ */
+export const STORES_V4: Readonly<Record<string, string>> = {
+  // The six stores of versions 1 to 3 are inherited unchanged.
+  [TABLE.deviceKeys]: 'athleteId',
+  [TABLE.activityRecords]: [
+    'activityId',
+    INDEX.activityRecordByAthlete,
+    INDEX.activityRecordByAthleteAndActivity,
+  ].join(', '),
+};
+
 export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V1,
   STORES_V2,
   STORES_V3,
+  STORES_V4,
 ];

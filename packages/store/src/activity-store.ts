@@ -64,6 +64,16 @@ import {
 } from './errors';
 import type { ActivityId, AthleteId, LapId, PrivacyZoneId, RecordingSessionId } from './ids';
 import {
+  fromPersistedActivityRecord,
+  fromPersistedDeviceKey,
+  toPersistedActivityRecord,
+  toPersistedDeviceKey,
+  type DeviceKeyRecord,
+  type PersistedActivityRecord,
+  type PersistedDeviceKey,
+  type StoredActivityRecord,
+} from './identity';
+import {
   fromPersistedActivity,
   fromPersistedAthlete,
   fromPersistedLap,
@@ -287,6 +297,14 @@ export class ActivityStore {
     return this.#db.table<PersistedRecordingChunk, [string, number]>(TABLE.recordingChunks);
   }
 
+  get #deviceKeys(): Table<PersistedDeviceKey, string> {
+    return this.#db.table<PersistedDeviceKey, string>(TABLE.deviceKeys);
+  }
+
+  get #activityRecords(): Table<PersistedActivityRecord, string> {
+    return this.#db.table<PersistedActivityRecord, string>(TABLE.activityRecords);
+  }
+
   // --- Athletes -------------------------------------------------------------
 
   async putAthlete(record: AthleteRecord): Promise<AthleteId> {
@@ -319,8 +337,17 @@ export class ActivityStore {
         this.#streamBlobs,
         this.#recordingSessions,
         this.#recordingChunks,
+        this.#deviceKeys,
+        this.#activityRecords,
       ],
       async () => {
+        // The signed records and the device key go with the athlete. The key is
+        // the point: erasure that left it behind would leave the private half
+        // of the athlete's identity on the device after they asked for
+        // everything about them to be removed — and it is the one value here
+        // that can still *act* on their behalf.
+        await this.#activityRecords.where(INDEX.activityRecordByAthlete).equals(id).delete();
+        await this.#deviceKeys.delete(id);
         await this.#streamBlobs.where(INDEX.streamBlobByAthlete).equals(id).delete();
         const streamSets = await this.#streamSets
           .where(INDEX.streamSetByAthlete)
@@ -472,7 +499,7 @@ export class ActivityStore {
   async deleteActivity(owner: AthleteId, id: ActivityId): Promise<boolean> {
     return this.#db.transaction(
       'rw',
-      [this.#activities, this.#laps, this.#streamSets, this.#streamBlobs],
+      [this.#activities, this.#laps, this.#streamSets, this.#streamBlobs, this.#activityRecords],
       async () => {
         const existing = await this.#activities
           .where(INDEX.activityByAthleteAndId)
@@ -482,6 +509,12 @@ export class ActivityStore {
           return false;
         }
         await this.#laps.where(INDEX.lapByActivity).equals(id).delete();
+        // The signed record goes with the ride it vouches for. Left behind it
+        // would be a row no scoped read can reach — every read of it is scoped
+        // to an activity that no longer exists — and it carries the ride's
+        // distance, duration and start time, which is a summary of a deleted
+        // activity sitting on the device after the athlete deleted it.
+        await this.#activityRecords.delete(id);
         // The streams go with the activity, for the reason the laps do: every
         // read of them is scoped to an activity that no longer exists, so
         // leaving them behind holds a GPS trace on the device that nothing can
@@ -982,6 +1015,114 @@ export class ActivityStore {
         return true;
       },
     );
+  }
+
+  // --- Identity and signed records (#61) ------------------------------------
+
+  /**
+   * Stores this device's keypair for an athlete. **Write-once.**
+   *
+   * A second key for the same athlete is refused unless it is the same public
+   * key, in which case the write is idempotent. That refusal is the store half
+   * of #61's first acceptance criterion: an identity replaced silently splits
+   * the athlete's history in two, and every record signed before the
+   * replacement becomes unverifiable against the key that signs everything
+   * after it. `createWebCryptoKeystore` in `web-crypto.ts` is written against
+   * this refusal — on losing the race it re-reads and adopts the winner.
+   *
+   * The check and the write are in **one transaction**, for `putActivity`'s
+   * reason: read-then-write outside one lets a concurrent creator land in
+   * between, which is precisely the two-tab case this is guarding.
+   *
+   * @throws {StoreReferentialError} if `record.athleteId` names no athlete.
+   * @throws {StoreValidationError} if a different key is already stored.
+   */
+  async putDeviceKey(record: DeviceKeyRecord): Promise<AthleteId> {
+    const row = toPersistedDeviceKey(record);
+    await this.#db.transaction('rw', [this.#athletes, this.#deviceKeys], async () => {
+      await this.#requireAthlete(record.athleteId);
+      const existing = await this.#deviceKeys.get(record.athleteId);
+      if (existing !== undefined && existing.publicKey !== record.publicKey) {
+        // The message names neither key. The public half would be harmless and
+        // the private half is not in scope here at all, but a message that
+        // prints one invites the next author to print the other.
+        throw new StoreValidationError(
+          `athlete ${record.athleteId} already has a device key; an identity is write-once, ` +
+            `because replacing one splits the athlete's signed history in two`,
+        );
+      }
+      await this.#deviceKeys.put(row);
+    });
+    return record.athleteId;
+  }
+
+  /**
+   * This device's keypair for an athlete.
+   *
+   * Scoped by construction: `athleteId` is the primary key, so there is no
+   * accessor here that finds a key without being told whose it is.
+   */
+  async getDeviceKey(owner: AthleteId): Promise<DeviceKeyRecord | undefined> {
+    const row = await this.#deviceKeys.get(owner);
+    return row === undefined ? undefined : fromPersistedDeviceKey(row);
+  }
+
+  /**
+   * Files a signed record against the ride it vouches for.
+   *
+   * Three refusals, all inside one transaction:
+   *
+   * 1. the activity must exist **and belong to this athlete** — a record filed
+   *    against somebody else's ride is the cross-athlete shape;
+   * 2. the record's own `claims.activityId` must be the ride it is being filed
+   *    against. Without this a valid, correctly signed record for ride A could
+   *    be stored as the record for ride B and would verify perfectly, which is
+   *    a forgery this store would have performed itself.
+   *
+   * There is deliberately **no** `#requireNotOwnedByAnother` here, unlike on
+   * every other write path. It would be unreachable: an activity id belongs to
+   * exactly one athlete — `putActivity` enforces that with its own copy of the
+   * guard — so the scoped activity lookup above has already established that
+   * this athlete owns the ride, and a record row exists only for a ride that
+   * does. An unreachable branch cannot be mutation-tested and reads as though
+   * it were guarding something.
+   *
+   * @throws {StoreReferentialError}
+   * @throws {StoreValidationError}
+   */
+  async putActivityRecord(row: StoredActivityRecord): Promise<ActivityId> {
+    if (row.record.claims.activityId !== row.activityId) {
+      throw new StoreValidationError(
+        `the record claims activity ${row.record.claims.activityId} and is being filed ` +
+          `against ${row.activityId}`,
+      );
+    }
+    const persisted = toPersistedActivityRecord(row);
+    await this.#db.transaction('rw', [this.#activities, this.#activityRecords], async () => {
+      const activity = await this.#activities
+        .where(INDEX.activityByAthleteAndId)
+        .equals([row.athleteId, row.activityId])
+        .first();
+      if (activity === undefined) {
+        throw new StoreReferentialError(
+          `no activity ${row.activityId} belongs to athlete ${row.athleteId}`,
+        );
+      }
+      await this.#activityRecords.put(persisted);
+    });
+    return row.activityId;
+  }
+
+  /** The athlete-scoped point lookup. There is deliberately no unscoped one. */
+  async getActivityRecord(
+    owner: AthleteId,
+    id: ActivityId,
+  ): Promise<StoredActivityRecord | undefined> {
+    const row = await this.#activityRecords
+      .where(INDEX.activityRecordByAthleteAndActivity)
+      .equals([owner, id])
+      .first();
+    return row === undefined ? undefined : fromPersistedActivityRecord(row);
   }
 
   // --- Internal -------------------------------------------------------------

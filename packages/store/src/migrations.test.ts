@@ -25,7 +25,14 @@
  * disk rather than what is in the connection.
  */
 
-import { seconds, unixSeconds, watts } from '@onyourleft/domain';
+import {
+  contentHashOf,
+  seconds,
+  signActivityRecord,
+  unixSeconds,
+  verifyRecordSignature,
+  watts,
+} from '@onyourleft/domain';
 import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -39,7 +46,8 @@ import {
   upgradeWith,
   type RecordMigration,
 } from './migrations';
-import { SCHEMA_VERSION, SCHEMA_VERSIONS, STORES_V1, STORES_V2, TABLE } from './schema';
+import { SCHEMA_VERSION, SCHEMA_VERSIONS, STORES_V1, STORES_V2, STORES_V3, TABLE } from './schema';
+import { ensureDeviceSigningKey, webCryptoSha256, webCryptoVerifier } from './web-crypto';
 
 /**
  * A fixture migration. Not a production one — see `SCHEMA_MIGRATIONS`.
@@ -222,11 +230,13 @@ describe('the same pair, applied to a database that contains rows', () => {
 
 describe('the production registry', () => {
   it('is empty of record migrations, because no version has changed a record’s shape', () => {
-    // Version 2 (#27) **adds** `streamSets` and `streamBlobs` and rewrites
-    // nothing, so there is no record to transform and no `down` to write.
+    // Version 2 (#27) **adds** `streamSets` and `streamBlobs`, version 3 (#46)
+    // adds the recording stores and version 4 (#61) adds `deviceKeys` and
+    // `activityRecords`. All three rewrite nothing, so there is no record to
+    // transform and no `down` to write.
     // Asserted rather than left implicit: the day a version does change a
     // record's shape, this test is what says the registry must gain an entry.
-    expect(SCHEMA_VERSION).toBe(3);
+    expect(SCHEMA_VERSION).toBe(4);
     expect(SCHEMA_MIGRATIONS).toEqual([]);
   });
 
@@ -360,6 +370,91 @@ describe('version 2 to version 3 — the same claim, for #46’s recording check
     expect(stillThere?.name).toBe('recorded before the upgrade');
     expect(recovered?.sampleCount).toBe(2);
     expect(recovered?.channels.power).toEqual([200, 210]);
+    expect(beforeVersion).toBeLessThan(SCHEMA_VERSION * 10);
+  });
+});
+
+describe('version 3 to version 4 — the same claim, for #61’s identity and signed records', () => {
+  /**
+   * #61 bumps the schema to add `deviceKeys` and `activityRecords`. No record
+   * changes shape, so once again there is no `up`/`down` pair to test — and
+   * once again "no migration needed" is a claim about an athlete's existing
+   * data, which is only honest if rows written by the older build are opened by
+   * this one and found intact.
+   *
+   * The rollback half of this schema change is **not** here, because on this
+   * engine it is not a schema operation at all: `identity-rollback.test.ts`
+   * runs it as export → downgrade → re-import, which is the path ADR 0005
+   * section F names and the one the signed records themselves exist to make
+   * safe.
+   */
+  it('keeps every version-3 record and makes the identity stores usable', async () => {
+    // A database at version 3 exactly as the previous build left it.
+    const v3 = new Dexie(databaseName);
+    v3.version(1).stores(STORES_V1);
+    v3.version(2).stores(STORES_V2);
+    v3.version(3).stores(STORES_V3);
+    await v3.table(TABLE.athletes).put({ id: 'athlete-a', displayName: 'A', createdAt: 1 });
+    await v3.table(TABLE.activities).put({
+      id: 'ride-1',
+      athleteId: 'athlete-a',
+      name: 'ridden before there were signatures',
+      startedAt: 1_700_000_000,
+      startedAtTimeZone: 'UTC',
+      elapsedTime: 60,
+      movingTime: 60,
+      distance: 1_000,
+      visibility: 'private',
+      hasPosition: false,
+      createdAt: 1_700_000_000,
+    });
+    const beforeVersion = v3.backendDB().version;
+    v3.close();
+
+    const store = openActivityStore(databaseName);
+    const owner = athleteId('athlete-a');
+    const ride = activityId('ride-1');
+    const key = await ensureDeviceSigningKey(store, owner, {
+      now: () => unixSeconds(1_700_000_100),
+    });
+    const activity = await store.getActivity(owner, ride);
+    await store.putActivityRecord({
+      athleteId: owner,
+      activityId: ride,
+      record: await signActivityRecord(
+        {
+          claims: {
+            activityId: ride,
+            name: activity?.name ?? '',
+            startedAt: 1_700_000_000,
+            startedAtTimeZone: 'UTC',
+            elapsedTime: 60,
+            movingTime: 60,
+            distance: 1_000,
+            hasPosition: false,
+          },
+          contentHash: await contentHashOf(new Uint8Array([1, 2, 3]), webCryptoSha256),
+        },
+        key,
+      ),
+    });
+    store.close();
+
+    // A third connection, so the assertion reads what is on disk rather than
+    // what the connection that ran the upgrade is holding.
+    const reopened = openActivityStore(databaseName);
+    const stillThere = await reopened.getActivity(owner, ride);
+    const signed = await reopened.getActivityRecord(owner, ride);
+    const storedKey = await reopened.getDeviceKey(owner);
+    reopened.close();
+
+    expect(stillThere?.name).toBe('ridden before there were signatures');
+    expect(storedKey?.createdAt).toBe(1_700_000_100);
+    expect(
+      signed === undefined
+        ? undefined
+        : await verifyRecordSignature(signed.record, webCryptoVerifier),
+    ).toEqual({ status: 'verified', record: signed?.record });
     expect(beforeVersion).toBeLessThan(SCHEMA_VERSION * 10);
   });
 });
