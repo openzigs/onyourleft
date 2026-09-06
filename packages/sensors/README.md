@@ -413,7 +413,7 @@ UI that hides any of them promises the athlete something the browser will not do
 | **Chrome on Linux is `unsupported`, even though the object is there** | WebBluetoothCG's own status file: *"Linux is partially implemented and not supported"*. The adapter requires both `requestDevice` and `getAvailability` to be callable and treats a `getAvailability` that throws as `unsupported`, so `'bluetooth' in navigator` is **not** the check. |
 | **About three concurrent connections, not seven** | `traits.maxConcurrentConnections` is `MAX_RECOMMENDED_CONCURRENT_CONNECTIONS`. The budget is OS-wide and shared with the athlete's earbuds and watch. Use `planCapabilitySources`. |
 | **A capability set is a claim until the first connect, and an observation after it** | Web Bluetooth cannot reveal a device's services before a link exists, so `discover` declares what you asked for — nothing, if you opened the chooser wide. Every successful `connect` then replaces that with what the device's **own services** supply, in place, so the `SensorDevice` you hold, its session and every subscription survive the change. The set therefore widens past the request (ask a trainer for power and it reports cadence and speed too) and narrows below it (a multi-mode trainer that reconnects serving less no longer claims what it no longer serves). A subscription to a capability that vanished stays held, delivers nothing, and re-arms itself if a later reconnect brings the service back. A disconnect changes nothing: the last observation stands. See `applyResolved` in `web-bluetooth/src/transport.ts` (#131). |
-| **The origin is granted only the services the request needs** | `optionalServices` carries the services that supply the requested capabilities, and no others — so pairing a heart rate strap does not hand this origin a grant to a **Fitness Machine Control Point**, which sets physical resistance on a machine someone is pedalling. Chrome does not show `optionalServices` in the chooser, so the athlete is never told about a wider one; that is why it is minimal. The grant bounds the resolution above it, and it accumulates across discoveries: choosing the same device again for a second capability widens what the next link can read. A chooser opened **wide** still grants everything this program can read, because that is what the athlete was shown and chose from (#132). |
+| **The origin is granted only the services the request needs** | `optionalServices` carries the services that supply the requested capabilities, and no others — so pairing a heart rate strap does not hand this origin a grant to a **Fitness Machine Control Point**, which sets physical resistance on a machine someone is pedalling. Chrome does not show `optionalServices` in the chooser, so the athlete is never told about a wider one; that is why it is minimal. The grant bounds the resolution above it, and it accumulates across discoveries: choosing the same device again for a second capability widens what the next link can read. A chooser opened **wide** still grants everything this program can read, because that is what the athlete was shown and chose from (#132). Since #156 a **control** capability maps to a service too: `discover({ capabilities: ['trainer-control'] })` resolves to the Fitness Machine Service and grants it and nothing else, so an ERG trainer alongside a separate power meter can be asked for — and trainer control no longer reaches the grant only because the same request happened to want power. Declaring `controls` does not make control *reachable*: `Link.controllable` still comes from the control point answering, and the control point is still refused outside the grant. |
 
 ### One global GATT queue, across every device
 
@@ -431,7 +431,8 @@ spinner for ever. `DEFAULT_GATT_OPERATION_TIMEOUT` is 30 seconds; `operationTime
 ### Profiles come from `protocol/`
 
 This directory contains no service UUID and decodes no payload. A `GattProfile` is a service, a
-characteristic, the capabilities it supplies and a `decode(value, sink, at)`, and
+characteristic, the capabilities it supplies, an optional `controls` list of what the service lets
+the program **do** rather than report, and a `decode(value, sink, at)`, and
 [`protocol/`](#the-protocol-clients) supplies them — Heart Rate, Cycling Speed and Cadence and
 Cycling Power today (#41, #42), FTMS with #43. Three things the seam guarantees, so a decoder cannot
 get them wrong:
@@ -738,7 +739,9 @@ product choice: a rider whose ERG target has not moved in five seconds has alrea
   deliberately did not go on to read a Feature bitfield per profile, because that is a round trip
   per connect for a refinement no consumer asks for yet. The one characteristic it does resolve
   eagerly is the **Fitness Machine Control Point**, and only inside the grant — presence is what
-  `trainer-control` means, and claiming it from the request instead was the safety defect.
+  `trainer-control` means, and claiming it from the request instead was the safety defect. #156's
+  `controls` field changed none of that: it names the service that *carries* control, so a request
+  can ask for it, while presence on the link still decides the claim.
 - **Scaling a left-only power meter's doubled figure.** The device's number is passed through
   unscaled and the pedal power balance and its reference are surfaced beside it. There is no field
   that distinguishes a meter that doubles from one that does not, so guessing would halve the power

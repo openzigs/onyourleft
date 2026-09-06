@@ -53,6 +53,7 @@ import {
   type ConnectionState,
   type DeviceId,
   type MeasurementCapability,
+  type SensorCapability,
   type SensorDevice,
   type SensorMeasurement,
   type SensorTransport,
@@ -104,18 +105,27 @@ export const RIDE_METRIC_IDS: readonly RideMetricId[] = ['power', 'cadence', 'he
  * The trainer entry asks for power, cadence *and* speed in one request, which
  * is the revision block's instruction to *"prefer taking power and cadence from
  * the trainer's own FTMS stream over pairing separate sensors"* — one
- * connection out of about three, rather than three.
+ * connection out of about three, rather than three. Since #156 it also asks for
+ * `trainer-control`, which is a capability a request may name in its own right
+ * rather than something the three measurements happen to drag in behind them.
  */
 export type PairingRole = 'trainer' | 'heart-rate' | 'power-meter' | 'speed-cadence';
 
-export const PAIRING_ROLE_CAPABILITIES: Readonly<
-  Record<PairingRole, readonly MeasurementCapability[]>
-> = {
-  trainer: ['power', 'cadence', 'speed'],
-  'heart-rate': ['heart-rate'],
-  'power-meter': ['power'],
-  'speed-cadence': ['speed', 'cadence'],
-};
+export const PAIRING_ROLE_CAPABILITIES: Readonly<Record<PairingRole, readonly SensorCapability[]>> =
+  {
+    // ⚠️ `trainer-control` is **named**, not arrived at (#156). FTMS supplies
+    // power, cadence and speed, so before it the Fitness Machine Service landed
+    // in the origin's grant as a side effect of this list wanting the
+    // measurements — and narrowing the list would have removed the ability to
+    // control the trainer, surfacing as `capability-unsupported` on a device the
+    // athlete deliberately paired as a trainer. It is the grant that makes
+    // `openFitnessMachine` reachable at all (#152 refuses an ungranted control
+    // point), so it is stated rather than inherited.
+    trainer: ['power', 'cadence', 'speed', 'trainer-control'],
+    'heart-rate': ['heart-rate'],
+    'power-meter': ['power'],
+    'speed-cadence': ['speed', 'cadence'],
+  };
 
 /** One paired device, as the screen lists it. */
 export interface PairedSensor {

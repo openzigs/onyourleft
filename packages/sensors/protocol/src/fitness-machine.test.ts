@@ -37,6 +37,7 @@ import {
   INDOOR_BIKE_DATA_FLAG,
   MAX_PLAUSIBLE_TARGET_POWER_WATTS,
 } from './fitness-machine';
+import type { FitnessMachineFeatures } from './fitness-machine';
 import type { MeasurementSink } from './profile';
 import { canonicalUuid } from './uuid';
 import { createPayloadWriter, flagsOf } from './testing';
@@ -416,21 +417,46 @@ describe('the Indoor Bike Data profile, as a transport registers it', () => {
     ]);
   });
 
-  it('narrows its capability set to what the Feature characteristic claims, when given one', () => {
-    // A capability the profile does not declare is one the adapter will never
-    // subscribe to, so a transport that has not read the Feature characteristic
-    // (#134) must get the wide set rather than an empty one.
-    const features = decodeFitnessMachineFeature(
+  /** A machine whose Feature characteristic claims power and speed, not cadence. */
+  const powerAndSpeedFeatures = (): FitnessMachineFeatures =>
+    decodeFitnessMachineFeature(
       createPayloadWriter()
         .u32(1 << 14)
         .u32(0)
         .view(),
     );
 
-    expect([...createIndoorBikeDataProfile({ features }).capabilities].sort()).toStrictEqual([
-      'power',
-      'speed',
-    ]);
+  it('narrows its capability set to what the Feature characteristic claims, when given one', () => {
+    // A capability the profile does not declare is one the adapter will never
+    // subscribe to, so a transport that has not read the Feature characteristic
+    // (#134) must get the wide set rather than an empty one.
+    expect(
+      [...createIndoorBikeDataProfile({ features: powerAndSpeedFeatures() }).capabilities].sort(),
+    ).toStrictEqual(['power', 'speed']);
+  });
+
+  it('declares trainer-control as a control, not as a measurement', () => {
+    // #156's option 2, as a pair of assertions rather than a paragraph: a
+    // measurement capability has a `MeasurementSink` method and a
+    // `MeasurementValueFor` entry, and trainer control has neither — so it goes
+    // in its own field. Without this field a request naming only
+    // `trainer-control` maps to no service at all.
+    const profile = createIndoorBikeDataProfile();
+
+    expect(profile.controls).toStrictEqual(['trainer-control']);
+    expect(profile.capabilities).not.toContain('trainer-control');
+  });
+
+  it('keeps declaring the control when the Feature characteristic narrows the measurements', () => {
+    // Whether *this* machine will accept a setpoint is answered on the link, by
+    // the control point responding. `controls` answers a different question —
+    // which service carries control — and it is asked before a link exists,
+    // because the chooser needs a service filter. Gating it on a bitfield
+    // nobody has read yet would make control unrequestable again.
+    const profile = createIndoorBikeDataProfile({ features: powerAndSpeedFeatures() });
+
+    expect(profile.controls).toStrictEqual(['trainer-control']);
+    expect([...profile.capabilities].sort()).toStrictEqual(['power', 'speed']);
   });
 
   it('pushes nothing for a field the frame does not carry', () => {

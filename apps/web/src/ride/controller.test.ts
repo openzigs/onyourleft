@@ -49,7 +49,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_AUTO_PAUSE_AFTER_SECONDS } from '../recording/channels';
 import type { RecordingCheckpointStore } from '../recording/recorder';
 
-import { createRideController, type RideController } from './controller';
+import { createRideController, PAIRING_ROLE_CAPABILITIES, type RideController } from './controller';
 import { METRIC_STALE_AFTER_SECONDS } from './metrics';
 import type { OpenTrainer, TrainerConnection } from './trainer';
 
@@ -270,6 +270,42 @@ const metric = (rig: Bench, id: 'power' | 'heartRate' | 'cadence' | 'speed') => 
 };
 
 // --- Pairing and live metrics ------------------------------------------------
+
+describe('what the trainer role asks the chooser for', () => {
+  it('names trainer-control rather than arriving at it through the measurements', async () => {
+    // #156. The Web Bluetooth adapter grants this origin exactly the services
+    // that supply what was requested (#132), and `openFitnessMachine` refuses a
+    // control point outside that grant (#152). So before this list named
+    // `trainer-control`, the Fitness Machine Service reached the grant only
+    // because FTMS happens to supply power, cadence and speed — and narrowing
+    // this list would have removed the ability to control the trainer with no
+    // diagnosis beyond `capability-unsupported` on a device the athlete
+    // deliberately paired as a trainer.
+    expect(PAIRING_ROLE_CAPABILITIES.trainer).toContain('trainer-control');
+    // And only the trainer role: pairing a strap must not hand this origin a
+    // grant to a characteristic that applies physical resistance to a rider.
+    expect(PAIRING_ROLE_CAPABILITIES['heart-rate']).not.toContain('trainer-control');
+    expect(PAIRING_ROLE_CAPABILITIES['power-meter']).not.toContain('trainer-control');
+    expect(PAIRING_ROLE_CAPABILITIES['speed-cadence']).not.toContain('trainer-control');
+
+    // ⚠️ The *grant* is asserted on the declaration, deliberately. This suite
+    // drives the #44 simulator, which matches a request against the device's own
+    // capability set and holds no grant at all — so a ride here would stay
+    // controllable whatever this list says, and a behavioural assertion could
+    // not tell the accident from the fix. The grant is the browser adapter's,
+    // and `web-bluetooth/src/capabilities.test.ts` is where it is exercised.
+    //
+    // What a ride here *does* prove is the other half: a request widened by a
+    // capability still has to match the trainer the athlete is choosing.
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await ride(rig, 2);
+
+    expect(rig.controller.getSnapshot().sensors.map((sensor) => sensor.role)).toEqual(['trainer']);
+    expect(metric(rig, 'power').kind).toBe('live');
+    rig.controller.dispose();
+  });
+});
 
 describe('pairing and the live numbers', () => {
   it('shows a channel as unpaired until something that supplies it is connected', async () => {

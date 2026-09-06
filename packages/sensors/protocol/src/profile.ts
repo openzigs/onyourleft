@@ -51,7 +51,7 @@ import type {
   Watts,
 } from '@onyourleft/domain';
 
-import type { MeasurementCapability } from '../../src/capability';
+import type { ControlCapability, MeasurementCapability } from '../../src/capability';
 
 import type { GattUuid } from './uuid';
 
@@ -110,6 +110,35 @@ export interface GattProfile {
    * characteristic that will carry it, not on whichever one turns out to.
    */
   readonly capabilities: readonly MeasurementCapability[];
+  /**
+   * What this service lets the program **do**, as opposed to report.
+   *
+   * Kept separate from `capabilities` rather than merged into it, because a
+   * `MeasurementCapability` is a quantity with a `MeasurementSink` method and a
+   * `MeasurementValueFor` entry, and `trainer-control` has neither — merging
+   * them would make `MeasurementSink`, a mapped type over that union, demand a
+   * method for something that carries no value.
+   *
+   * It exists so a request naming **only** a control capability still resolves
+   * to a service (#156). Until then it could not: a request was mapped onto
+   * services through `capabilities` alone, so
+   * `discover({ capabilities: ['trainer-control'] })` threw
+   * `capability-unsupported` against a trainer whose control point was right
+   * there, and trainer control reached the grant only because `apps/web`'s
+   * trainer role incidentally asked for power. A safety-relevant grant that
+   * depends on a *measurement* being wanted is an accident — narrowing the role
+   * would have removed the ability to control the trainer with no diagnosis
+   * beyond `capability-unsupported` on a device the athlete deliberately paired
+   * as a trainer.
+   *
+   * ⚠️ **Declaring it does not make control reachable.** It widens what a
+   * *request* may name, and therefore which service lands in `optionalServices`
+   * and in the grant. Whether the device is actually controllable is still
+   * observed on the link, from the Fitness Machine Control Point answering
+   * (`Link.controllable` in `web-bluetooth/src/transport.ts`), and the control
+   * point is still refused outside the grant (#152).
+   */
+  readonly controls?: readonly ControlCapability[] | undefined;
   /**
    * Turn one notification into zero or more measurements.
    *

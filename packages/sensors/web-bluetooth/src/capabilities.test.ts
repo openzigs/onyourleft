@@ -352,6 +352,47 @@ describe('trainer-control, which is a safety claim and not a request', () => {
     expect(device.capabilities.has('trainer-control')).toBe(true);
   });
 
+  it('is a capability a request may name on its own, and grants the service that carries it', async () => {
+    // #156. `GattProfile.capabilities` is measurement-only, so a request naming
+    // only a control capability matched no profile, mapped to no service, and
+    // threw `capability-unsupported` — against a trainer whose control point is
+    // right there. An ERG trainer alongside a separate power meter is an
+    // ordinary configuration and could not be expressed at all.
+    const { transport, bench } = ftmsFixture(trainerWithControl());
+
+    const device = await transport.discover({ capabilities: ['trainer-control'] });
+
+    // Read out of the fake's own per-device allowance rather than out of
+    // anything this adapter reports about itself. The Heart Rate Service is
+    // registered in this fixture and is deliberately not in it: naming a
+    // control capability must not open the chooser wide.
+    expect(bench.device('ftms-trainer').allowedServices).toEqual([FITNESS_MACHINE_SERVICE]);
+    expect(device.capabilities.has('trainer-control')).toBe(true);
+  });
+
+  it('opens the control point on a request that named no measurement at all', async () => {
+    // The half that makes #152's guard stop being an accident. Until #156 the
+    // Fitness Machine Service reached the grant only because `apps/web`'s
+    // trainer role asks for power, cadence and speed and FTMS supplies them —
+    // so narrowing that role would have taken trainer control away with no
+    // diagnosis beyond `capability-unsupported` on a device the athlete paired
+    // as a trainer. No power, no cadence, no speed here.
+    const { transport, bench } = ftmsFixture(trainerWithControl());
+    const device = await transport.discover({ capabilities: ['trainer-control'] });
+
+    await transport.connect(device.identity.id);
+    const machine = await transport.openFitnessMachine(device.identity.id);
+
+    expect(machine.channel).toBeDefined();
+    // And read back through what the link observed rather than out of the
+    // request: a device reports what its own services supply (#131), which for
+    // FTMS is the three measurements as well as the control that was asked for.
+    expect(new Set(device.capabilities)).toEqual(
+      new Set(['power', 'cadence', 'speed', 'trainer-control']),
+    );
+    expect(bench.device('ftms-trainer').allowedServices).toEqual([FITNESS_MACHINE_SERVICE]);
+  });
+
   it('is not claimed by a machine that serves no control point, however it was asked for', async () => {
     const { transport } = ftmsFixture(trainerWithoutControl());
     // Asked for explicitly, which used to be enough on its own: `register` put
@@ -379,7 +420,16 @@ describe('trainer-control, which is a safety claim and not a request', () => {
       ],
     };
     const { transport, bench } = ftmsFixture(strap);
-    const device = await transport.discover({ capabilities: ['heart-rate', 'trainer-control'] });
+    // ⚠️ **Heart rate alone, and it used to say `['heart-rate',
+    // 'trainer-control']`.** That request contradicted the sentence below it:
+    // an athlete who chose this device *for heart rate* did not ask to control
+    // it. It was harmless only because `trainer-control` mapped to no service
+    // at all — the #156 defect — so the absence of the grant here was as much
+    // an accident as its presence on a trainer was. Since #156 a request that
+    // names a control capability does grant the service that carries it, which
+    // is the point of the issue; the property #132 owns, and the one this test
+    // states, is that a request that does **not** name it gets no such grant.
+    const device = await transport.discover({ capabilities: ['heart-rate'] });
 
     await transport.connect(device.identity.id);
 

@@ -20,7 +20,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { MeasurementCapability } from '../../src/capability';
 
-import type { MeasurementSink, MeasurementValueFor } from './profile';
+import type { GattProfile, MeasurementSink, MeasurementValueFor } from './profile';
 import { canonicalUuid } from './profile';
 import { createWebBluetoothTransport } from './transport';
 import { createFakeBluetooth } from './testing/fake-bluetooth';
@@ -135,6 +135,28 @@ describe('the transport surface', () => {
         // @ts-expect-error a power measurement carries no heart rate
         void measurement.heartRate;
       });
+    };
+    expect(check).toBeTypeOf('function');
+  });
+});
+
+describe("a profile's control list", () => {
+  it('will not take a measurement capability where a control capability belongs', () => {
+    const check = (): void => {
+      const profile: GattProfile = {
+        service: canonicalUuid(0x1826),
+        characteristic: canonicalUuid(0x2ad2),
+        capabilities: ['power'],
+        // The separation #156 chose, made unwritable rather than merely
+        // documented: `controls` is `ControlCapability[]`, so a quantity cannot
+        // be smuggled in as something the device lets you *do* — which would
+        // put a capability with no `MeasurementSink` method into the
+        // request→service map and out of `applyResolved`'s reach.
+        // @ts-expect-error power is a measurement, not a control
+        controls: ['power'],
+        decode: () => undefined,
+      };
+      void profile;
     };
     expect(check).toBeTypeOf('function');
   });
