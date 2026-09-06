@@ -636,11 +636,19 @@ export function decodeSupportedResistanceLevelRange(
  * the strap the athlete did choose. It is on {@link IndoorBikeDataReading} for
  * a caller who wants it explicitly.
  *
+ * It also declares FTMS's **control** capability, in `controls` rather than in
+ * `capabilities` — see {@link GattProfile.controls}. That is what lets a
+ * request name `trainer-control` on its own and still resolve to this service
+ * (#156); before it, control reached the grant only as a side effect of the
+ * same request wanting power.
+ *
  * @param options.features narrows the declared capability set to what the
  * machine's Feature characteristic claims. Omitted, the profile declares all
  * three — which is what a transport that has not read the Feature
  * characteristic (#134) must assume, because a capability the profile does not
- * declare is one the adapter will never subscribe to.
+ * declare is one the adapter will never subscribe to. It narrows the
+ * **measurements only**: `controls` names the service that carries control, and
+ * is answered before any link exists.
  */
 export function createIndoorBikeDataProfile(options?: {
   readonly features?: FitnessMachineFeatures | undefined;
@@ -654,6 +662,16 @@ export function createIndoorBikeDataProfile(options?: {
     service: FITNESS_MACHINE_SERVICE,
     characteristic: INDOOR_BIKE_DATA,
     capabilities,
+    // ⚠️ Unconditional, and deliberately **not** narrowed by the Feature
+    // characteristic the way `capabilities` above is. This answers "which
+    // service carries trainer control", which is asked before any link exists:
+    // the chooser needs a service filter to open at all. Whether *this* machine
+    // will accept a setpoint is a different question, answered on the link by
+    // the control point responding and refined by the supported ranges. Gating
+    // the declaration on a bitfield nobody has read yet would put an athlete
+    // with an ERG trainer back where #156 found them — unable to ask for
+    // control without also asking for a measurement.
+    controls: ['trainer-control'],
     // Two parameters, not three. `GattProfile.decode` passes the receive
     // instant as a third, and a profile that does not need it stays assignable
     // without declaring it — this one differences nothing, because Indoor Bike

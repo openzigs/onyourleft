@@ -112,9 +112,14 @@ export interface FitEncodeResult {
   /**
    * Fields that could not be written, each naming its message and field number.
    *
-   * Never merged into the bytes: a caller that ignores this array gets a valid
-   * file, and a caller that reads it can tell a rider which channel did not
-   * survive the export. Empty for a clean encode.
+   * Never merged into the bytes: a caller that ignores this array still gets
+   * its bytes, and a caller that reads it can tell a rider which channel did
+   * not survive the export. Empty for a clean encode.
+   *
+   * `missing-file-id` is the exception to "a field could not be written": it is
+   * about the file rather than about a field in it, and the bytes it describes
+   * are ones a strict reader may reject outright. A caller that ignores the
+   * array does not get told.
    */
   readonly faults: readonly FitEncodeError[];
 }
@@ -723,6 +728,11 @@ function capacityHint(input: FitEncodeInput): number {
  * arrives in an unusual order is a file whose first reader to complain will be
  * somebody else's.
  *
+ * The protocol *does* require the `file_id`, and requires it first: it is where
+ * the file type lives. An input with no `file_id` is written without one — the
+ * caller still gets its bytes, which is the existing contract — and a
+ * `missing-file-id` fault says the file is not one a strict reader will accept.
+ *
  * @throws {FitEncodeError} `too-many-message-types` if the activity needs more
  * than sixteen concurrently-bound message shapes. Nothing this profile subset
  * can produce does; the guard is in `encode/container.ts` and it is real
@@ -731,6 +741,18 @@ function capacityHint(input: FitEncodeInput): number {
 export function encodeActivity(input: FitEncodeInput): FitEncodeResult {
   const faults: FitEncodeError[] = [];
   const writer = new FitContainerWriter(capacityHint(input));
+
+  if (!input.fileId) {
+    faults.push(
+      new FitEncodeError(
+        'missing-file-id',
+        'the activity carries no file_id, so the file is written without one; the protocol ' +
+          'requires a file_id as the first message, and a reader that dispatches on the file ' +
+          'type has nothing to dispatch on',
+        { globalMessageNumber: GLOBAL_MESSAGE.fileId },
+      ),
+    );
+  }
 
   writeMessages(
     writer,

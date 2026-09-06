@@ -31,6 +31,15 @@
 export type FitEncodeFaultCode =
   /** There is nothing to write: no records, no laps, no sessions, no summary. */
   | 'nothing-to-encode'
+  /**
+   * The activity carried no `file_id`, so the file has no file type in it. The
+   * protocol requires a `file_id` and requires it first: it is where the file
+   * type lives, and a reader that dispatches on file type before reading
+   * anything else has nothing to dispatch on. The rest of the file is written
+   * all the same — a caller that ignores faults still gets its bytes — but a
+   * strict reader is entitled to reject it. Collected.
+   */
+  | 'missing-file-id'
   /** More distinct message shapes than a FIT file has local message types. Thrown. */
   | 'too-many-message-types'
   /**

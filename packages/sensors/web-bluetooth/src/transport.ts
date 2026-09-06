@@ -175,6 +175,27 @@ interface ProfileEntry {
 }
 
 /**
+ * Whether a profile supplies a capability — what it reports **or** what it lets
+ * you do.
+ *
+ * The union is #156. `GattProfile.capabilities` is measurements only, so before
+ * it a request naming `trainer-control` matched no profile, mapped to no
+ * service, and threw `capability-unsupported` against a trainer serving the
+ * control point. Trainer control reached the grant only as a side effect of the
+ * same request wanting power, which made #152's guard depend on an accident.
+ *
+ * ⚠️ **Used by `requestOptionsFor` and by nothing else.** `resolveLink` keeps
+ * reading `profile.capabilities` directly: its `sources` map is keyed by
+ * `MeasurementCapability` and a control capability has no stream to subscribe
+ * to. Widening the request→service map is what makes control *requestable*;
+ * widening the resolution would make it *reachable*, which is the half #152
+ * guards and this must not touch.
+ */
+const profileSupplies = (profile: GattProfile, capability: SensorCapability): boolean =>
+  profile.capabilities.some((supplied) => supplied === capability) ||
+  (profile.controls?.some((supplied) => supplied === capability) ?? false);
+
+/**
  * One characteristic, live on the current link.
  *
  * Everything the notification path touches hangs off this object and is built
@@ -981,6 +1002,13 @@ export function createWebBluetoothTransport(
    * - **The wide chooser still grants everything**, because there the athlete
    *   was shown every device this program can use and consented to that. The
    *   difference is that it is now a *request* for it rather than the default.
+   * - **A control capability maps to a service too (#156).** The mapping is the
+   *   union of what a profile reports and what it *controls*, so
+   *   `discover({ capabilities: ['trainer-control'] })` resolves to the Fitness
+   *   Machine Service and grants it — an ERG trainer alongside a separate power
+   *   meter, a configuration that could not be expressed at all before. It
+   *   narrows as readily as it widens: control alone grants FTMS and nothing
+   *   else, so the Heart Rate Service stays out of reach.
    */
   const requestOptionsFor = (
     request: DiscoveryRequest,
@@ -989,9 +1017,7 @@ export function createWebBluetoothTransport(
       ...new Set(
         entries
           .filter((entry) =>
-            request.capabilities.some((capability) =>
-              entry.profile.capabilities.some((supplied) => supplied === capability),
-            ),
+            request.capabilities.some((capability) => profileSupplies(entry.profile, capability)),
           )
           .map((entry) => entry.service),
       ),
