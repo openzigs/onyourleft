@@ -287,6 +287,12 @@ issue that first needs it.
 | `recording/channels.ts` | what the recorder merges and produces, generic over a channel map |
 | `recording/session.ts` | the recording session state machine and the stream merge (#45) |
 | `recording/errors.ts` | `RecordingError` and its codes |
+| `identity/canonical.ts` | RFC 8785 canonical JSON — **what exactly is signed** (#61) |
+| `identity/record.ts` | the signed activity record: the format, signing, and the five verification answers |
+| `identity/seam.ts` | `SigningKey`, `SignatureVerifier`, `Sha256`, `Keystore`, and `ensureSigningKey` |
+| `identity/hex.ts`, `identity/utf8.ts` | lowercase hex and UTF-8, written out because both are platform APIs here |
+| `identity/errors.ts` | `IdentityError`, and the rule that no message names the material it rejected |
+| `identity/testing.ts` | a **non-cryptographic** stand-in, for this package's own tests. Not exported |
 | `index.ts` | the public surface; consumers import from here and never from a file inside |
 
 `recording/` is the one part of this package that is not a unit or a conversion, and it is here for
@@ -305,6 +311,26 @@ knowing before you extend it:
   instantiates it. A reading is still typed per channel — `ChannelReading` is a discriminated union
   over the map, so a heart rate in the power channel is a compile error, and
   `recording/recording-safety.test.ts` pins that with `@ts-expect-error`.
+
+`identity/` is here for the reason `recording/` is, and it meets the constraint head-on: signing and
+verification "must run identically on the device and on an instance", and **there is no WebCrypto in
+this package** — `crypto.subtle` is `TS2304: Cannot find name 'crypto'` under the `lib` narrowing.
+So the seam is explicit. This package owns *what is signed* (the canonicalisation), *the record
+format*, *the verification logic* and *the identity lifecycle*; the caller injects a `SigningKey`, a
+`SignatureVerifier` and a `Sha256`. `packages/store/src/web-crypto.ts` supplies them from
+`crypto.subtle` and #7's instance will supply them from Node, and **the two must agree byte for
+byte** — which is why the message handed across the seam is bytes: the canonicalisation happens once,
+here, and neither implementation gets a chance to serialise anything.
+
+Two things about it that are decisions rather than details, both argued in
+[ADR 0014](../../docs/adr/0014-portable-identity.md):
+
+- **The record carries no location and cannot be made to.** `ActivityClaims` has no coordinate
+  member, and the parser rejects any member it does not know, so a record arriving from another
+  device cannot smuggle one in either.
+- **The scheme is Ed25519 and there is no cryptography dependency**, because `crypto.subtle`
+  implements it in every engine this project supports. A dependency under `packages/` is a licence
+  question before it is anything else, and the one that is never added never has to clear it.
 
 Tests sit beside their module and import from `./index`, so a function that exists but is not
 exported from the barrel — which is a function no consumer can call — fails its own test.

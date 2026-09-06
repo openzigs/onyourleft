@@ -31,6 +31,12 @@
  *    the edge and never reaching the database. It arrived with that write path,
  *    which is the rule: a new write path may not ship without a fake proving
  *    the harness catches its failure.
+ * 5. **`roundedClaimStoreFactory`** — #61's signed-record write, with one claim
+ *    tidied on its way in. The record comes back complete and parseable and no
+ *    longer verifies. Its red-and-green pair is in
+ *    **`identity-store.test.ts`** rather than here, because it needs WebCrypto
+ *    and this file deliberately imports no platform primitive; the rule is
+ *    still discharged, in the file that owns the write path.
  */
 
 import { beatsPerMinute, seconds, unixSeconds, watts } from '@onyourleft/domain';
