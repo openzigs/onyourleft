@@ -25,6 +25,16 @@
  * both environments.
  */
 
+// ⚠️ This file names Node builtins and lives under `src/`, so it is inside
+// `apps/web`'s production tsconfig program and inside the coverage glob, even
+// though only test files import it (#167). That is deliberate, and it follows
+// `testing.ts` beside it, which is the same shape for the same reason: keeping
+// test-support code next to the code it supports beats a parallel tree.
+//
+// What it costs, so the next reader knows: a stray *production* import of this
+// module would fail at bundle time rather than at lint or typecheck, because
+// Vite never reaches it today. `pnpm run build` is what catches that, which is
+// why CLAUDE.md §4a says a green typecheck is not a green build.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 

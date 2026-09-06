@@ -218,14 +218,20 @@ export function steadyStateSpeedMetresPerSecond(input: SteadyStateInput): number
   // is zero and the lower end of the bracket is below any positive target.
   let low = 0;
   let high = 1;
+  // #164: the doubling is clamped to the ceiling rather than allowed to step
+  // past it. It used to go 1, 2, 4 … 128, 256 and throw once `high` exceeded
+  // 200 — so the real bracket top was 128 and the message named a limit the
+  // search never reached. Clamping makes the sentence it throws true: the
+  // ceiling is tried before the refusal, so "no speed below 200 m/s" is a
+  // statement about a speed that was actually costed.
   while (costAt(high) < input.powerWatts) {
-    high *= 2;
-    if (high > SEARCH_CEILING_METRES_PER_SECOND) {
+    if (high >= SEARCH_CEILING_METRES_PER_SECOND) {
       throw new PhysicsError(
         `no speed below ${String(SEARCH_CEILING_METRES_PER_SECOND)} m/s costs ` +
           `${String(input.powerWatts)} W on this road`,
       );
     }
+    high = Math.min(high * 2, SEARCH_CEILING_METRES_PER_SECOND);
   }
 
   for (let step = 0; step < BISECTION_STEPS; step += 1) {

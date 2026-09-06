@@ -91,6 +91,34 @@ describe('inputs that are individually valid and jointly impossible', () => {
     ).toBe(false);
   });
 
+  it('names the field and the constraint in that refusal, and never the altitude', () => {
+    // ADR 0004 decision D, which CLAUDE.md §6 says binds *every* layer that
+    // formats a coordinate into a string — not only the two files that
+    // implement it today. Altitude is a coordinate when it is reported beside
+    // one, and this is the one throw site in this package.
+    //
+    // The message was already right; nothing pinned it (#167). Without this,
+    // the obvious "improve the diagnostic" edit — interpolating the offending
+    // value — passes the whole suite. `packages/domain` has
+    // `coordinate-message.test.ts` for exactly this shape.
+    const offending = 47_123.5;
+    let message = '';
+    try {
+      standardAtmospherePressurePascals(altitudeMetres(offending));
+    } catch (error: unknown) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+
+    expect(message).toContain('altitude');
+    expect(message).toContain(String(TROPOSPHERE_CEILING_METRES));
+    // Every spelling the value could reach a message by, including the ones a
+    // template literal or a rounding would produce.
+    expect(message).not.toContain('47123');
+    expect(message).not.toContain('47,123');
+    expect(message).not.toContain('47123.5');
+    expect(message).not.toContain(String(offending));
+  });
+
   it('refuses absolute zero rather than dividing by it', () => {
     // `degreesCelsius` admits exactly −273.15, because that is a temperature.
     // The ideal gas law does not.

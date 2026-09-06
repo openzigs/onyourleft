@@ -122,7 +122,18 @@ export async function exportActivity(options: ExportOptions): Promise<Downloadab
   const points = pointsOf(streams);
   const bytes =
     format === 'fit'
-      ? encodeFitActivity(fitInputOf(activity, streams, points)).bytes
+      ? // ⚠️ `.bytes` only: the encoder's `faults` are dropped here (#162). It
+        // reports which channel it could not carry — a dropped altitude, an
+        // instant with no FIT representation — and this is the codec's one
+        // production caller, so nothing tells a rider their file is lossy.
+        //
+        // Recorded rather than fixed: surfacing it is a UI change (where the
+        // warning appears, what it says, how it reads beside a bulk export),
+        // not a line here. #162 holds that work. Note this cannot be tested
+        // from `export-activity.test.ts` as things stand — `exportActivity`
+        // returns a file and nothing else, so there is no fault for a test to
+        // observe until the return type carries one.
+        encodeFitActivity(fitInputOf(activity, streams, points)).bytes
       : new TextEncoder().encode(
           format === 'gpx'
             ? encodeGpx(trackActivityOf(activity, points))
