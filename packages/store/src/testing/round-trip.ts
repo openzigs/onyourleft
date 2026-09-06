@@ -30,6 +30,9 @@
  * (the comparison is against what came back).
  */
 
+import { verifyRecordSignature, type SignatureVerifier } from '@onyourleft/domain';
+
+import type { StoredActivityRecord } from '../identity';
 import type { RecoveredRecording } from '../recording';
 import type { StreamChannel, StreamChannels, StreamSet } from '../streams';
 import { STREAM_CHANNELS, type NewStreamSet } from '../streams';
@@ -238,6 +241,56 @@ export async function assertRecordingRecovers(
       throw new RoundTripFailure(`channel ${channel} was recorded and did not come back at all`);
     }
     assertSameSamples(channel, before, after);
+  }
+  return read;
+}
+
+/**
+ * Writes a signed record through the public path, discards every connection,
+ * reads it back through the public path, and **verifies the signature on what
+ * came back** using only the public key inside it.
+ *
+ * The verification, not a comparison, is the assertion — #61's third acceptance
+ * criterion asks for exactly that, and `roundedClaimStoreFactory` in `fakes.ts`
+ * is why. A layer above the store that tidies one claim on its way in produces
+ * a record that comes back complete, well-formed and parseable, and a round
+ * trip that only compared what it wrote against what it read would have to be
+ * given the untidied original to notice. Verifying needs nothing but the row: a
+ * record that cannot be verified is worse than one that did not come back,
+ * because it looks like evidence.
+ *
+ * Nothing here uses the writer's `SigningKey`, or any key at all. That is the
+ * other half of the criterion: the check runs on the public key **in the
+ * record**, which is what a stranger would have.
+ *
+ * @returns what came back, so a caller can make further assertions about it.
+ * @throws {RoundTripFailure}
+ */
+export async function assertSignedRecordRoundTrip(
+  harness: StoreHarness,
+  row: StoredActivityRecord,
+  verifier: SignatureVerifier,
+): Promise<StoredActivityRecord> {
+  const read = await harness.roundTrip(
+    async (store) => store.putActivityRecord(row),
+    async (store) => store.getActivityRecord(row.athleteId, row.activityId),
+  );
+
+  if (read === undefined) {
+    throw new RoundTripFailure(
+      `the signed record for activity ${row.activityId} was written and reported success, and a ` +
+        `fresh connection cannot see it`,
+    );
+  }
+  requireEqual('athleteId', row.athleteId, read.athleteId);
+  requireEqual('activityId', row.activityId, read.activityId);
+
+  const outcome = await verifyRecordSignature(read.record, verifier);
+  if (outcome.status !== 'verified') {
+    throw new RoundTripFailure(
+      `the signed record for activity ${row.activityId} came back and did not verify: ` +
+        `${outcome.status}`,
+    );
   }
   return read;
 }

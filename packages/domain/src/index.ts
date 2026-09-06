@@ -174,3 +174,61 @@ export {
   DEFAULT_MAX_SAMPLE_COUNT,
   restoreRecordingSession,
 } from './recording/session';
+
+// --- Identity: the device keypair and the signed activity record (#61) ------
+//
+// The *algorithm*, the canonical byte encoding and the verification logic are
+// here; the *key material and the primitive* are injected, because this package
+// cannot name `crypto` (see `identity/seam.ts`). `packages/store` carries the
+// WebCrypto implementation and #7's instance will carry the Node one, and the
+// two have to agree byte for byte — which is why the message handed across the
+// seam is bytes and neither side gets to serialise anything.
+//
+// `identity/testing.ts` is deliberately NOT exported: it is a non-cryptographic
+// stand-in for this package's own tests and must never reach a caller.
+
+export { IdentityError } from './identity/errors';
+
+export type { CanonicalArray, CanonicalObject, CanonicalValue } from './identity/canonical';
+export { canonicalBytes, canonicalJson } from './identity/canonical';
+
+export { bytesEqual, fromHex, isHexOfLength, toHex } from './identity/hex';
+export { utf8Encode } from './identity/utf8';
+
+export type {
+  Keystore,
+  SignatureAlgorithm,
+  SignatureVerifier,
+  Sha256,
+  SigningKey,
+} from './identity/seam';
+export {
+  DIGEST_BYTES,
+  ensureSigningKey,
+  PUBLIC_KEY_BYTES,
+  SIGNATURE_ALGORITHM,
+  SIGNATURE_BYTES,
+} from './identity/seam';
+
+export type {
+  ActivityClaims,
+  ActivityRecordPayload,
+  RecordParse,
+  RecordVerification,
+  SignedActivityRecord,
+} from './identity/record';
+export {
+  canonicalPayload,
+  contentHashOf,
+  formatContentHash,
+  isVerified,
+  parseContentHash,
+  parseSignedActivityRecord,
+  recordPayload,
+  RECORD_FORMAT,
+  RECORD_VERSION,
+  signActivityRecord,
+  signingInput,
+  verifyActivityRecord,
+  verifyRecordSignature,
+} from './identity/record';

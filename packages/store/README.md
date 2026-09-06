@@ -21,6 +21,8 @@ erDiagram
     STREAM_SET ||--o{ STREAM_BLOB : "one row per channel"
     ATHLETE ||--o{ RECORDING_SESSION : "is recording"
     RECORDING_SESSION ||--o{ RECORDING_CHUNK : "one row per flush"
+    ATHLETE ||--o| DEVICE_KEY : "has exactly one, write-once"
+    ACTIVITY ||--o| ACTIVITY_RECORD : "has at most one signed record"
 
     ATHLETE {
         string  id           PK "opaque; #61 keys it to the device keypair"
@@ -99,12 +101,24 @@ erDiagram
         number  sampleCount
         string  channels        "packed bytes per channel; NOT compressed"
     }
+    DEVICE_KEY {
+        string  athleteId    PK "one row per athlete; write-once"
+        string  algorithm       "Ed25519"
+        string  publicKey       "32 bytes, lowercase hex"
+        string  privateKey      "a NON-EXTRACTABLE CryptoKey, never bytes"
+        number  createdAt       "UnixSeconds"
+    }
+    ACTIVITY_RECORD {
+        string  activityId   PK
+        string  athleteId    FK "the scoping column"
+        string  record          "the signed, publishable JSON document"
+    }
 ```
 
 Version 1 (#26) is the first four object stores. **Version 2 (#27) adds `streamSets` and
-`streamBlobs`**, and **version 3 (#46) adds `recordingSessions` and `recordingChunks`**. Neither
-later version changes an existing record's shape, which is why `SCHEMA_MIGRATIONS` is still empty —
-see *Migrations* below.
+`streamBlobs`**, **version 3 (#46) adds `recordingSessions` and `recordingChunks`**, and
+**version 4 (#61) adds `deviceKeys` and `activityRecords`**. No later version changes an existing
+record's shape, which is why `SCHEMA_MIGRATIONS` is still empty — see *Migrations* below.
 
 `FK` in that diagram is a description, not a mechanism: **IndexedDB has no foreign keys**. Both
 edges are enforced by code in `activity-store.ts`, and both are tested.
@@ -126,6 +140,8 @@ quantity, and a UTC offset cannot be `Seconds`, which is non-negative by constru
 | `[athleteId+distance]` | `listActivitySummaries` by distance (#62's second sort) |
 | `[athleteId+originalFileSha256]` | `findActivityByOriginalFileHash` (#37's dedup lookup) |
 | `athleteId` on `activities` | `deleteAthlete`'s cascade |
+| `[athleteId+activityId]` on `activityRecords` | `getActivityRecord` — the athlete-scoped point lookup for a signed record |
+| `athleteId` on `activityRecords` | `deleteAthlete`'s cascade over signed records |
 | `[athleteId+activityId+ordinal]` | `listLaps` |
 | `activityId`, `athleteId` on `laps` | the two cascades |
 | `athleteId` on `privacyZones` | `listPrivacyZones` |
@@ -282,16 +298,90 @@ await assertStreamSetRoundTrip(harness, streamSetFor(ride));
 await harness.destroy();
 ```
 
-It is **proved by deliberately breaking persistence**: `fakes.ts` holds four broken repositories —
+It is **proved by deliberately breaking persistence**: `fakes.ts` holds five broken repositories —
 one that writes to memory, one that commits to the real database under a key the reader does not
-use, one that fills every gap with a zero, and one whose every second flush is acknowledged and
-never written — and `harness.test.ts` runs the *same* assertion body against each and requires it to
-go red. Adding a write path to `ActivityStore` fails to compile until `fakes.ts` accounts for it,
-which is how the fourth fake arrived with #46's checkpoint write.
+use, one that fills every gap with a zero, one whose every second flush is acknowledged and never
+written, and one that tidies a signed claim on its way in — and the *same* assertion body is run
+against each and required to go red. Adding a write path to `ActivityStore` fails to compile until
+`fakes.ts` accounts for it, which is how the fourth fake arrived with #46's checkpoint write and the
+fifth with #61's signed record. The fifth one's red/green pair is in `identity-store.test.ts` rather
+than `harness.test.ts`, because it needs WebCrypto and that file imports no platform primitive.
 
 `CLAUDE.md` section 5 documents it for the issues that will consume it.
+
+## Identity — #61, decided in [ADR 0014](../../docs/adr/0014-portable-identity.md)
+
+Schema version 4 adds two stores and no field to any existing one.
+
+| Store | Row | Leaves the device |
+|---|---|---|
+| `deviceKeys` | one per athlete: the Ed25519 keypair, private half as a **non-extractable `CryptoKey`**, public half as lowercase hex | never, in any form |
+| `activityRecords` | one per ride: the signed, content-addressed record | that is what it is *for* |
+
+The record format itself is specified in
+[`docs/architecture.md`](../../docs/architecture.md) §"The signed activity record", written so a
+verifier can be built from the prose. The *algorithm* — the canonical byte encoding, the record
+shape and the verification logic — lives in `@onyourleft/domain`, which cannot name `crypto`; this
+package supplies the primitive, in `web-crypto.ts`, and nothing else in the program calls
+`crypto.subtle` for a signature.
+
+```ts
+import { ensureSigningKey } from '@onyourleft/domain';
+import { createWebCryptoKeystore, webCryptoVerifier } from '@onyourleft/store';
+
+// Generated on first run; every launch after that reuses it.
+const key = await ensureSigningKey(createWebCryptoKeystore(store, athlete));
+```
+
+Four things to know before you touch it:
+
+- **`deviceKeys` has no secondary index, on purpose.** Its primary key is `athleteId`, so the only
+  lookup it admits is already scoped. An index by public key would be a query that finds a key
+  without being told whose it is, which is the shape CLAUDE.md §6 names.
+- **An identity is write-once.** `putDeviceKey` refuses to replace an existing key with a different
+  one. Two tabs racing to create one both end up with the winner's — the alternative outcomes are
+  "one tab cannot sign" and "the athlete's history splits in two", and the second is the failure
+  #61's first acceptance criterion is about.
+- **The private key is a handle, never bytes.** `extractable: false`, so `crypto.subtle.exportKey`
+  on it rejects. Do not "simplify" it to a stored byte array: the non-extractability *is* "the
+  private key never leaves the device".
+- **A round trip over a record ends in a verification, not a comparison.** Use
+  `assertSignedRecordRoundTrip`. `roundedClaimStoreFactory` is a store that rounds one claim on its
+  way in; the record comes back complete, well-formed and parseable, and only the signature check
+  notices.
+
+### Key loss and key rotation, and what happens to records already signed
+
+Stated here because #61 asks for them to be documented behaviours with a stated consequence rather
+than silent ones. The full reasoning is
+[ADR 0014](../../docs/adr/0014-portable-identity.md) §Consequences.
+
+**Key loss.** The key cannot be exported, so it cannot be backed up, and IndexedDB is deletable by
+the athlete, by "clear browsing data", and by the browser under storage pressure.
+
+| | After key loss |
+|---|---|
+| Records already signed | **still verify, forever** — each carries its own public key |
+| The activity files | untouched; they are not encrypted |
+| Signing a **new** record as the same identity | **impossible** |
+| Riding, recording and exporting | unaffected |
+
+The recovery is a **new identity**. The athlete's history then has two eras, both valid and provably
+by different keys. Nothing is silently re-signed — that would be the device asserting something it
+did not witness.
+
+**Key rotation.** There is none in Phase 1, and replacing a key is refused rather than merely
+undocumented. If rotation is added it must be **additive**: a new key, a transition record signed by
+the *old* one, and old records left alone. Silent replacement would make every previously signed
+record unverifiable against the athlete's current identity.
+
+**Downgrading a device** is export → downgrade → re-import (ADR 0005 §F), and
+`identity-rollback.test.ts` executes it: every record comes back and still verifies. The key does
+not come back, for the same reason it cannot be backed up.
 
 ## Not in this package
 
 - **Devices and gear.** Additive object stores in a later schema version.
 - **Anything server-shaped.** There is no server in Phase 1.
+- **The record format.** It is `@onyourleft/domain`'s, so that the same code verifies on a device
+  and on an instance. This package stores records and supplies the primitive.

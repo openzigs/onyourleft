@@ -42,6 +42,7 @@ apps/                 AGPL-3.0-or-later, without exception
 
 packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis (#25)
+    identity/           the record format, the canonical bytes, verification (#61)
     recording/          the recording session state machine and stream merge (#45)
   fit/                FIT / GPX / TCX codec (#29-#32)
   sensors/            sensor abstraction and BLE transport (#39-#44) — BLE only
@@ -49,8 +50,8 @@ packages/             Apache-2.0, without exception
     protocol/           the GATT profile clients (#41, #42) — service UUIDs, payload decoding
     web-bluetooth/      the browser transport (#40) — the one place a BluetoothDevice exists
   physics/            cycling power/speed model, Martin et al. 1998 (#88)
-  store/              local activity, stream and recording-checkpoint store, and the
-                      round-trip harness (#26-#28, #46)
+  store/              local activity, stream, recording-checkpoint and signed-record
+                      store, and the round-trip harness (#26-#28, #46, #61)
 
 docs/
   architecture.md     layout, component boundaries, ADR index
@@ -81,7 +82,7 @@ cover the paths, so a package arrives inside the rules rather than beside them.
 | `packages/fit` | FIT / GPX / TCX decode and encode | Anything server-specific; anything under `apps/` |
 | `packages/sensors` | BLE sensor and trainer abstraction (`src/`), and the Web Bluetooth transport (`web-bluetooth/`) | `src/`: **any platform API at all**, and any BLE library. `web-bluetooth/`: every platform global except `navigator`. Web Bluetooth types must not escape above the transport boundary |
 | `packages/physics` | Power → speed. Pure computation. | Any rendering, BLE or platform API |
-| `packages/store` | Local activity, stream and **recording-checkpoint** persistence, and its migrations | Anything under `apps/` |
+| `packages/store` | Local activity, stream, **recording-checkpoint** and **signed-record** persistence, the device keypair, and its migrations | Anything under `apps/` |
 
 ---
 
@@ -447,7 +448,16 @@ three editing this list on its own branch and conflicting with the other two.
     at the first hole; `packages/store/README.md` §"Recording checkpoints" records why) and the
     **round-trip persistence harness**
     ([#28](https://github.com/openzigs/onyourleft/issues/28)) at `@onyourleft/store/testing` — see
-    §5. Devices and gear are still additive object stores in a later schema version. ⚠️ It is
+    §5, and — since [#61](https://github.com/openzigs/onyourleft/issues/61) — the **device keypair
+    and the signed activity record** at schema version 4, decided in
+    [ADR 0011](docs/adr/0011-stream-storage.md)'s sibling
+    [ADR 0014](docs/adr/0014-portable-identity.md). ⚠️ The private key is a **non-extractable
+    `CryptoKey`**, stored as a handle: `crypto.subtle.exportKey` on it rejects, which is what makes
+    "the private key never leaves the device" a property of the platform rather than a promise about
+    our code. Do not replace it with a stored byte array. `packages/store/src/web-crypto.ts` is the
+    only file in the program that calls `crypto.subtle` for a signature; the record format, the
+    canonical bytes and the verification logic are in `packages/domain`, which cannot name `crypto`
+    at all. Devices and gear are still additive object stores in a later schema version. ⚠️ It is
     **not** platform-isolated the way `packages/domain` is — it uses `indexedDB` and
     `CompressionStream`, so its `tsconfig.json` includes the DOM lib, and `eslint.config.js`'s
     `no-restricted-globals` block stays scoped to `packages/domain`.
@@ -763,14 +773,20 @@ Four things to know before you use it:
 - **The assertions throw `RoundTripFailure`; they are not `expect` calls.** That is what lets the
   same assertion body run green against the real store and red against a fake, which is the only
   honest proof that a harness works.
-- **`fakes.ts` holds four deliberately broken stores** — one that writes to memory, one that
+- **`fakes.ts` holds five deliberately broken stores** — one that writes to memory, one that
   commits to the real database under a key the reader does not use, one that fills every gap
-  with a zero, and one whose every second flush is acknowledged and never written.
-  `harness.test.ts` runs the same round trip against each and requires it to go red. **If you add a
-  write path to `packages/store`, the `PersistentStore` type fails to compile until the fakes
-  account for it.** That is deliberate: it is what stops a write path shipping with nothing proving
-  the harness catches its failure — and it is how the fourth fake arrived, with #46's checkpoint
-  write.
+  with a zero, one whose every second flush is acknowledged and never written, and one that
+  **tidies a signed claim on its way in**. The same round trip is run against each and required to
+  go red. **If you add a write path to `packages/store`, the `PersistentStore` type fails to compile
+  until the fakes account for it.** That is deliberate: it is what stops a write path shipping with
+  nothing proving the harness catches its failure — and it is how the fourth fake arrived, with
+  #46's checkpoint write, and the fifth with #61's signed record. The fifth one's red/green pair is
+  in `identity-store.test.ts` rather than `harness.test.ts`, because it needs WebCrypto and that
+  file imports no platform primitive.
+- **A round trip over a *signed* artefact ends in a verification, not a comparison.**
+  `assertSignedRecordRoundTrip` verifies the signature on what came back, using only the public key
+  inside the record. The rounding fake is why: the record comes back complete, well-formed and
+  parseable, and only the signature check notices.
 
 ### Migrations
 
@@ -888,7 +904,9 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   **and which are claimed by open issues** before you pick one. ⚠️ **`0012` is reserved and not
   free** — it belongs to [#64](https://github.com/openzigs/onyourleft/issues/64)'s data-licence
   decision, which is the destination ADR 0001's *Data* deferral had no number for
-  ([#119](https://github.com/openzigs/onyourleft/issues/119)). The next free number is **0014**.
+  ([#119](https://github.com/openzigs/onyourleft/issues/119)). **0014** is
+  [#61](https://github.com/openzigs/onyourleft/issues/61)'s portable identity. The next free number
+  is **0015**.
 - **Changelog**: there is **no `CHANGELOG.md` and no changelog convention** in this repository. Do
   not add one as a drive-by; if a release needs one, that is its own issue.
 - **Versions**: do not bump any version unless the issue asks for it.
@@ -1008,6 +1026,8 @@ top of an issue **supersedes its body**.
 | Which lint rule enforces which boundary | [`eslint.config.js`](eslint.config.js) and §4d |
 | Why a package's tsconfig narrows `lib` and `types` | `packages/domain/tsconfig.json` and §4d |
 | The canonical unit for a quantity, and the conversion into it | [`packages/domain/README.md`](packages/domain/README.md) |
+| The signed activity record's format, so a stranger can write a verifier | [`docs/architecture.md`](docs/architecture.md) §"The signed activity record", [ADR 0014](docs/adr/0014-portable-identity.md) |
+| What happens to signed records after key loss, and why there is no rotation | [ADR 0014](docs/adr/0014-portable-identity.md) §Consequences, [`packages/store/README.md`](packages/store/README.md) §Identity |
 | Where a physics constant came from, and why the tick splits drive from resistance | [`packages/physics/README.md`](packages/physics/README.md) §2, §4 |
 | What an error message may say about a coordinate, and what it may not | [`packages/domain/README.md`](packages/domain/README.md) §"A coordinate message names the field and the constraint, never the value", [ADR 0004](docs/adr/0004-privacy-and-location.md) decision D |
 | Where a FIT profile number came from, and what the decoder does with a bad file | [`packages/fit/README.md`](packages/fit/README.md) §1–§5 |

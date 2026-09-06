@@ -74,6 +74,7 @@ export {
   STORES_V1,
   STORES_V2,
   STORES_V3,
+  STORES_V4,
   TABLE,
 } from './schema';
 export type { AnyRecordMigration, RecordMigration } from './migrations';
@@ -150,3 +151,29 @@ export {
   toPersistedLap,
   toPersistedPrivacyZone,
 } from './persisted';
+
+// --- Identity: the device keypair and signed activity records (#61) ---------
+//
+// The record format, the canonical bytes and the verification logic are in
+// `@onyourleft/domain`, which cannot name `crypto`. What is here is the
+// persistence and the WebCrypto primitive — see `web-crypto.ts` for the seam,
+// and `docs/architecture.md` for the record format a stranger's verifier reads.
+
+export type { DeviceKeyRecord, StoredActivityRecord } from './identity';
+export type { PersistedActivityRecord, PersistedDeviceKey } from './identity';
+export {
+  fromPersistedActivityRecord,
+  fromPersistedDeviceKey,
+  toPersistedActivityRecord,
+  toPersistedDeviceKey,
+} from './identity';
+
+export type { DeviceKeyStorage, WebCryptoKeystoreOptions } from './web-crypto';
+export {
+  createWebCryptoKeystore,
+  ensureDeviceSigningKey,
+  generateDeviceKey,
+  signingKeyFor,
+  webCryptoSha256,
+  webCryptoVerifier,
+} from './web-crypto';
