@@ -60,13 +60,15 @@ scripts/              dependency-free repository checks; run on a bare clone
   workflows/rules.yml runs those checks on every pull request — see §4c
 ```
 
-**`apps/web`, `packages/domain`, `packages/sensors`, `packages/fit` and `packages/store` exist.**
+**`apps/web`, `packages/domain`, `packages/sensors`, `packages/fit`, `packages/store` and
+`packages/physics` exist.**
 The first two were created by [#23](https://github.com/openzigs/onyourleft/issues/23) along with the
 workspace, the toolchain and the lockfile, `packages/sensors` by
 [#39](https://github.com/openzigs/onyourleft/issues/39), `packages/store` by
-[#26](https://github.com/openzigs/onyourleft/issues/26) and `packages/fit` by
-[#107](https://github.com/openzigs/onyourleft/issues/107). **`packages/physics` and `apps/mobile` do
-not** — each is created by the issue that owns its content (§4b), from `packages/domain` as the
+[#26](https://github.com/openzigs/onyourleft/issues/26), `packages/fit` by
+[#107](https://github.com/openzigs/onyourleft/issues/107) and `packages/physics` by
+[#88](https://github.com/openzigs/onyourleft/issues/88). **`apps/mobile` does
+not** — it is created by the issue that owns its content (§4b), from `packages/domain` as the
 template. The layout is fixed here
 because ~30 sub-issues reference it by name, and the workspace globs and lint boundaries already
 cover the paths, so a package arrives inside the rules rather than beside them.
@@ -247,6 +249,7 @@ pnpm --filter @onyourleft/domain run test
 pnpm --filter @onyourleft/fit run test
 pnpm --filter @onyourleft/sensors run test
 pnpm --filter @onyourleft/store run test
+pnpm --filter @onyourleft/physics run test
 pnpm --filter @onyourleft/web run test
 
 # Regenerate the #29 synthetic FIT fixture corpus from its generator. It is
@@ -337,12 +340,11 @@ not.
 > lands. The ⛔ stops at "What exists, and what each is **not** yet" — everything under that heading
 > is in the tree, and its commands are in §4a.
 
-- **`apps/mobile` and `packages/physics` do not exist.** The workspace globs (`apps/*`,
-  `packages/*`) will pick each up the moment it appears, and the boundary and header rules already
-  apply to its path. They are created by the issues that own their content:
-  [#85](https://github.com/openzigs/onyourleft/issues/85) and
-  [#88](https://github.com/openzigs/onyourleft/issues/88). Copy `packages/domain` as the template: a
-  manifest, a `LICENSE`, a `tsconfig.json`, a `vitest.config.ts` and a test.
+- **`apps/mobile` does not exist.** The workspace globs (`apps/*`, `packages/*`) will pick it up the
+  moment it appears, and the boundary and header rules already apply to its path. It is created by
+  the issue that owns its content, [#85](https://github.com/openzigs/onyourleft/issues/85). Copy
+  `packages/domain` as the template: a manifest, a `LICENSE`, a `tsconfig.json`, a
+  `vitest.config.ts` and a test.
 - **A per-package dependency-licence gate.** Nothing yet checks that a dependency's *own* licence is
   permitted under the path it lands in — only that the manifests and headers declare the right
   thing. `pnpm licenses list --json` exists and is unused. Second half of
@@ -447,6 +449,21 @@ three editing this list on its own branch and conflicting with the other two.
     **not** platform-isolated the way `packages/domain` is — it uses `indexedDB` and
     `CompressionStream`, so its `tsconfig.json` includes the DOM lib, and `eslint.config.js`'s
     `no-restricted-globals` block stays scoped to `packages/domain`.
+  - **`packages/physics`** ([#88](https://github.com/openzigs/onyourleft/issues/88)) holds the
+    **Martin et al. 1998** power/speed model: the six force terms one exported function at a time
+    (`terms.ts`), the forward model and its steady-state inverse (`power.ts`), the deterministic
+    tick (`simulate.ts`) and an ISO 2533 air-density model (`air.ts`). It is platform-free the way
+    `packages/domain` is, through one `tsconfig.json` rather than two, and it has **no runtime
+    dependency but `@onyourleft/domain`**. Provenance for every constant, and the two that rest on
+    weaker evidence, is [`packages/physics/README.md`](packages/physics/README.md) §2. ⚠️ **It has
+    no production consumer** — #51 was running in parallel and nothing renders a speed from it yet;
+    #90, #91 and #94 are the issues that will. ⚠️ Its determinism is enforced in
+    `eslint.config.js`, **not** by the typechecker: `Date` and `Math.random` are ECMAScript
+    built-ins and survive `lib: ["ES2024"]`, exactly as `DataView` does in `packages/sensors`.
+    ⚠️ Do not "simplify" the tick's integrator. It splits the drive (integrated in energy) from
+    the resistance (integrated in force) because the two have singular points in different places;
+    the naive single-form version froze a coasting rider at 0.00027 m/s and never let a stationary
+    one roll down a hill, and both failures are now tests.
 
 **And the dependencies that exist.** The toolchain,
 React 19, React DOM, Vite, — since #26 — `dexie` 4.4.5 and `fake-indexeddb` 6.2.5 (both
@@ -502,8 +519,8 @@ would otherwise be documented and unenforced, which is the gap this project keep
 |---|---|
 | `headers/header-format` | a `.ts`/`.tsx` file whose first line is not the SPDX identifier its directory requires. Duplicates `LIC001`/`LIC002` on purpose: the script covers file types ESLint never parses and runs with no toolchain, the lint rule runs in the editor |
 | `boundaries/dependencies` | an import from `packages/*` into `apps/*`, in either the relative (`../../../apps/web/src/...`) or the workspace (`@onyourleft/web`) spelling. Dependencies point one way |
-| `@typescript-eslint/no-restricted-imports` in `packages/domain`, `packages/sensors/src`, `packages/sensors/protocol` and `packages/sensors/web-bluetooth` | naming **any** Node builtin — the list is derived from `builtinModules`, not typed out, so `events`, `util` and `stream/promises` fail exactly as `node:fs` does — or `react`, `react-dom`, `vite` or `dexie`, or a BLE library |
-| `no-restricted-globals` in `packages/domain`, `packages/sensors/src` and `packages/sensors/protocol` | naming a DOM global (`window`, `document`, `navigator`, `location`, `history`, `localStorage`, `sessionStorage`, `indexedDB`, `caches`), a Node global (`process`, `Buffer`, `__dirname`, `__filename`, `global`, `require`) or a network global (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Request`, `Response`, `Headers`). This one **is** a named list; the closure is the typechecker below |
+| `@typescript-eslint/no-restricted-imports` in `packages/domain`, `packages/physics`, `packages/sensors/src`, `packages/sensors/protocol` and `packages/sensors/web-bluetooth` | naming **any** Node builtin — the list is derived from `builtinModules`, not typed out, so `events`, `util` and `stream/promises` fail exactly as `node:fs` does — or `react`, `react-dom`, `vite` or `dexie`, or a BLE library |
+| `no-restricted-globals` in `packages/domain`, `packages/physics`, `packages/sensors/src` and `packages/sensors/protocol` | naming a DOM global (`window`, `document`, `navigator`, `location`, `history`, `localStorage`, `sessionStorage`, `indexedDB`, `caches`), a Node global (`process`, `Buffer`, `__dirname`, `__filename`, `global`, `require`) or a network global (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Request`, `Response`, `Headers`). This one **is** a named list; the closure is the typechecker below |
 | `no-restricted-globals` in `packages/sensors/web-bluetooth` | naming any of the same list **except `navigator`** — the adapter is the transport boundary and `navigator.bluetooth` is the one platform API it exists to reach. The exception is derived by subtracting one name from the list above rather than restating it, so the two cannot drift |
 
 `packages/domain/tsconfig.json` narrows `lib` to `ES2024` and sets `types: []`. That is the closure
@@ -554,6 +571,17 @@ would be missed.
 > import the units package** until #39 added a `'!@onyourleft/*'` exemption to that group.
 > `packages/domain` never hit it because it does not import itself. The same collision waits for any
 > future `@onyourleft/<builtin-name>`.
+>
+> ⚠️ **It reaches relative imports too, and #88 hit it.** A file named `constants.ts` — or
+> `util.ts`, `stream.ts`, `path.ts`, `crypto.ts`, `assert.ts`, `events.ts`, `url.ts`, `os.ts`, and
+> about forty more — could not be imported as `./constants` from a platform-isolated package,
+> because that specifier's last segment is a builtin's name. `packages/physics/src/constants.ts`
+> holds `g` and the ISO 2533 atmosphere and was reported as importing a Node builtin. #88 added
+> `'!./*'` and `'!../*'` to the same group, which fixes it for every package at once rather than
+> renaming one file and leaving the trap for whoever writes the next `util.ts`. **It exempts nothing
+> that was ever a violation** — a Node builtin is always a bare specifier, never a relative one — and
+> a bare `import 'constants'` and a `node:constants` are both still errors, checked with a probe
+> file.
 
 #40's Web Bluetooth adapter needed the DOM, so it arrived in its own directory
 (`packages/sensors/web-bluetooth`) with its own entry in `eslint.config.js`, and
@@ -969,6 +997,7 @@ top of an issue **supersedes its body**.
 | Which lint rule enforces which boundary | [`eslint.config.js`](eslint.config.js) and §4d |
 | Why a package's tsconfig narrows `lib` and `types` | `packages/domain/tsconfig.json` and §4d |
 | The canonical unit for a quantity, and the conversion into it | [`packages/domain/README.md`](packages/domain/README.md) |
+| Where a physics constant came from, and why the tick splits drive from resistance | [`packages/physics/README.md`](packages/physics/README.md) §2, §4 |
 | What an error message may say about a coordinate, and what it may not | [`packages/domain/README.md`](packages/domain/README.md) §"A coordinate message names the field and the constraint, never the value", [ADR 0004](docs/adr/0004-privacy-and-location.md) decision D |
 | Where a FIT profile number came from, and what the decoder does with a bad file | [`packages/fit/README.md`](packages/fit/README.md) §1–§5 |
 | Which GPX/TCX schema versions are targeted, what each format loses, and how XXE is refused | [`packages/fit/README.md`](packages/fit/README.md) §7 |
