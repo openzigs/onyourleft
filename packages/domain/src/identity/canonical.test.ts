@@ -50,8 +50,13 @@ describe('canonicalJson — RFC 8785, restricted', () => {
   it('escapes only what RFC 8785 escapes, and leaves non-ASCII literal', () => {
     expect(canonicalJson({ s: 'a"b\\c' })).toBe('{"s":"a\\"b\\\\c"}');
     expect(canonicalJson({ s: '\b\t\n\f\r' })).toBe('{"s":"\\b\\t\\n\\f\\r"}');
-    // U+0001 has no short form, so it is \u0001 in lowercase hex.
-    expect(canonicalJson({ s: '\u0001' })).toBe('{"s":"\\u0001"}');
+    // U+001F has no short form, so it is \u001f — and the hex digits are
+    // **lowercase**. Chosen over U+0001 deliberately: `0001` has no letters in
+    // it, so a canonicaliser that emitted uppercase escapes would produce the
+    // identical string and the assertion could not fail. A mutation run found
+    // exactly that.
+    expect(canonicalJson({ s: '\u001f' })).toBe('{"s":"\\u001f"}');
+    expect(canonicalJson({ s: '\u001f' })).not.toContain('\\u001F');
     // Not escaped: a canonical document is UTF-8 and carries these literally.
     expect(canonicalJson({ s: 'Grüße — 日本' })).toBe('{"s":"Grüße — 日本"}');
   });
