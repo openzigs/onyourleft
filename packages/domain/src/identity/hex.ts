@@ -90,7 +90,13 @@ export function isHexOfLength(value: string, expectedBytes: number): boolean {
 /**
  * Constant-time-ish equality over two byte arrays.
  *
- * Used for the content-hash comparison. A digest comparison is not a secret
+ * ⚠️ **Not** used for the content-hash comparison, despite what this comment
+ * said until #167: `verifyActivityRecord` compares content hashes as strings
+ * (`actual !== record.contentHash`), and the only non-test consumer is the stub
+ * verifier in `identity/testing.ts`. Which of the two the comparison should go
+ * through is a real question — a constant-time compare over bytes and a `!==`
+ * over hex strings are not the same operation — and it is left open here rather
+ * than answered by a comment. A digest comparison is not a secret
  * comparison — both sides are public — so this is not load-bearing against a
  * timing attack; it is here because a plain `every` short-circuits and the
  * habit of short-circuiting on a comparison of cryptographic material is the

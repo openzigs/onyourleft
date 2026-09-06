@@ -344,6 +344,23 @@ export async function verifyActivityRecord(
   value: unknown,
   options: { readonly verifier: SignatureVerifier; readonly fileDigest: Uint8Array },
 ): Promise<RecordVerification> {
+  // Checked **first** (#167), before the record is even parsed. The length is a
+  // fact about the caller's argument and not about the record, so asking it
+  // here leaks nothing and leaves the signature-first ordering defended below
+  // untouched for everything that *is* record-derived.
+  //
+  // It used to be reached only through `formatContentHash`, after
+  // `checkSignature` had already returned `verified`. That made the `@throws`
+  // above conditional: a forged record with a wrong-length digest came back
+  // `signature-mismatch`, so the caller's own bug was reported as somebody's
+  // ride failing to verify — the exact outcome the clause says a throw exists
+  // to prevent.
+  if (options.fileDigest.length !== DIGEST_BYTES) {
+    throw new IdentityError(
+      `a SHA-256 digest is ${String(DIGEST_BYTES)} bytes, and this one is ${String(options.fileDigest.length)}`,
+    );
+  }
+
   const parsed = parseSignedActivityRecord(value);
   if (!parsed.ok) {
     return parsed.outcome;

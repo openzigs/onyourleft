@@ -31,7 +31,7 @@ export default defineConfig({
       // the denominator of `packages/fit`'s percentage, mixing a generator's
       // coverage into a codec's. #107 observed this report listing `apps/web`
       // alone at 125 statements — that predated the `packages/*/*/src/**`
-      // pattern and is no longer true; all five packages appear.
+      // pattern and is no longer true; all six packages appear (physics since #88).
       include: ['packages/*/src/**', 'packages/*/*/src/**', 'apps/*/src/**'],
       // No thresholds, deliberately. ADR 0005 decision C: the gate is the
       // mutation list in the pull request body, not a percentage. Coverage is

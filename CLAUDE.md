@@ -455,7 +455,9 @@ three editing this list on its own branch and conflicting with the other two.
     `CryptoKey`**, stored as a handle: `crypto.subtle.exportKey` on it rejects, which is what makes
     "the private key never leaves the device" a property of the platform rather than a promise about
     our code. Do not replace it with a stored byte array. `packages/store/src/web-crypto.ts` is the
-    only file in the program that calls `crypto.subtle` for a signature; the record format, the
+    only file in **non-test** code that calls `crypto.subtle` for a signature — `identity-verifier.test.ts`
+calls `crypto.subtle.verify` directly and deliberately, because it is the independent spec verifier
+and routing it through `web-crypto.ts` would destroy the independence it exists for; the record format, the
     canonical bytes and the verification logic are in `packages/domain`, which cannot name `crypto`
     at all. Devices and gear are still additive object stores in a later schema version. ⚠️ It is
     **not** platform-isolated the way `packages/domain` is — it uses `indexedDB` and
@@ -692,7 +694,7 @@ generator, authoring-time code that produces a committed artefact and ships in n
 run — `packages/fit/vitest.config.ts` includes `tools/**/*.test.ts` — and the corpus tests assert
 its output; including it in the report would only mix a generator's coverage into a codec's
 denominator. #107's observation that the report listed `apps/web` alone at 125 statements predated
-the second pattern and is no longer true: all five packages appear.
+the second pattern and is no longer true: all six packages appear (`packages/physics` since #88).
 
 ### Verifying a *compile-time* guarantee
 

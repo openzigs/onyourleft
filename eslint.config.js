@@ -90,6 +90,15 @@ const spdxHeader = (content) => ({
  * and so is `node:constants` through the group above — checked with a probe
  * file, both spellings, which is the rule CLAUDE.md §4d states for anything
  * touching these gates.
+ *
+ * ⚠️ The slashless negations alone were **one axis short** (#163): gitignore
+ * semantics stop a `*` at a slash, so `'!./*'` exempted `./constants` and left
+ * `./sub/constants` reported — the same trap, one directory deeper, waiting for
+ * whoever wrote the first nested `util.ts`. The `'!./**'` and `'!../**'` forms
+ * below close it at every depth. `packages/physics/src/boundary-probe.test.ts`
+ * is the fixture that keeps them honest: it imports across a directory
+ * boundary into a file named `constants.ts`, so removing either deep form
+ * fails `pnpm run lint` rather than waiting to surprise someone.
  */
 const NODE_BUILTIN_SPECIFIERS = [
   ...new Set(
@@ -100,6 +109,14 @@ const NODE_BUILTIN_SPECIFIERS = [
   '!@onyourleft/*',
   '!./*',
   '!../*',
+  // #163. The two above are slashless, and a slashless pattern does not cross
+  // a slash either — so they exempt `./constants` and left `./sub/constants`
+  // still reported. The deep forms cover every depth, which is what #88's
+  // comment above already claimed. Verified with a probe: before these,
+  // `packages/physics/src/boundary-probe.test.ts`'s import of
+  // `./boundary-probe/constants` was an error.
+  '!./**',
+  '!../**',
 ];
 
 /**
@@ -328,7 +345,13 @@ export default tseslint.config(
   // gap nobody notices at the moment it starts to matter.
   {
     files: ['packages/domain/**/*.{ts,tsx}'],
-    rules: platformIsolation(),
+    // #163: the BLE denylist applies here too. A library is not a global and
+    // not a builtin, so neither the `lib` narrowing nor the globals list can
+    // see one — and #88's criterion names BLE explicitly for every
+    // platform-isolated package, not only for the one that talks to devices.
+    // Passing it everywhere costs nothing and removes the question of why
+    // packages/sensors was special.
+    rules: platformIsolation(BLE_LIBRARY_IMPORT_PATTERNS),
   },
 
   // --- packages/sensors/src depends on no platform API either ----------------
@@ -463,7 +486,8 @@ export default tseslint.config(
   {
     files: ['packages/physics/**/*.{ts,tsx}'],
     rules: {
-      ...platformIsolation(),
+      // #163: BLE denylist here too — see the note on the domain block above.
+      ...platformIsolation(BLE_LIBRARY_IMPORT_PATTERNS),
       'no-restricted-globals': [
         'error',
         ...PLATFORM_GLOBALS.map((name) => ({

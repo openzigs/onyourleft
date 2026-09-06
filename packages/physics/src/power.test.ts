@@ -92,6 +92,19 @@ describe('steadyStateSpeedMetresPerSecond', () => {
     expect(() => steadyStateSpeedMetresPerSecond({ ...road, powerWatts: 1e12 })).toThrow(
       PhysicsError,
     );
+
+    // #164: and the ceiling it names is the one it actually tried. The bracket
+    // used to double 1, 2, 4 … 128, 256 and refuse once `high` passed 200, so
+    // the real limit was 128 while the message said 200. A target that needs a
+    // speed between those two therefore threw a sentence that was not true of
+    // it. Both halves are asserted, because correcting only the message would
+    // have satisfied the first and left the search short.
+    const beyondTheOldLimit = steadyStateSpeedMetresPerSecond({ ...road, powerWatts: 600_000 });
+    expect(beyondTheOldLimit).toBeGreaterThan(128);
+    expect(beyondTheOldLimit).toBeLessThan(200);
+    expect(() => steadyStateSpeedMetresPerSecond({ ...road, powerWatts: 1e12 })).toThrow(
+      /no speed below 200 m\/s/,
+    );
   });
 
   it('solves a power that sits exactly on the first bracket, without doubling', () => {

@@ -279,6 +279,42 @@ describe('verifyActivityRecord — the five answers', () => {
     ).rejects.toThrow(IdentityError);
   });
 
+  it('throws for that digest even when the record is forged, not only when it verifies', async () => {
+    // ⚠️ The gap (#167). The length was reached through `formatContentHash`,
+    // which sits *after* `checkSignature` returns `verified` — so this same
+    // caller bug came back as `signature-mismatch` for a forged record, and the
+    // clause above held for only half its inputs. A caller whose digest is the
+    // wrong length would then read "somebody's ride failed to verify" and fix
+    // the wrong thing, which is the exact outcome that clause exists to prevent.
+    const forged = {
+      ...(await sign()),
+      publicKey: 'ab'.repeat(32),
+      signature: 'ff'.repeat(64),
+    };
+
+    await expect(
+      verifyActivityRecord(forged, { verifier: stubVerifier, fileDigest: new Uint8Array(16) }),
+    ).rejects.toThrow(IdentityError);
+  });
+
+  it('still answers signature-mismatch for that forged record when the digest is well formed', async () => {
+    // The check is ordered in front of the signature and must not swallow the
+    // answer it was placed before: with a correct digest the signature-first
+    // ordering `docs/architecture.md` publishes is unchanged.
+    const forged = {
+      ...(await sign()),
+      publicKey: 'ab'.repeat(32),
+      signature: 'ff'.repeat(64),
+    };
+
+    const outcome = await verifyActivityRecord(forged, {
+      verifier: stubVerifier,
+      fileDigest: await stubSha256(FILE_BYTES),
+    });
+
+    expect(outcome.status).toBe('signature-mismatch');
+  });
+
   it('reports signature-mismatch when a claim is edited after signing', async () => {
     const record = await sign();
     const tampered = { ...record, claims: { ...record.claims, distance: 1 } };
