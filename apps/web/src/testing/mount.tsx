@@ -60,6 +60,17 @@ export interface Mounted {
    * trains everyone reading it to ignore stack traces.
    */
   readonly caughtErrors: readonly Error[];
+  /**
+   * Render again into the same root, with different props.
+   *
+   * A *re-render*, not a second mount: the tree keeps its state, its refs and
+   * its effects, and only the changed dependencies re-run. That distinction is
+   * the thing under test wherever a component is supposed to update something
+   * in place rather than rebuild it — `map/MapPanel.test.tsx` uses it to prove
+   * a changed track does not tear the map down, which a fresh `mount` could not
+   * tell apart from a rebuild.
+   */
+  rerender(element: ReactElement): Promise<void>;
   unmount(): void;
 }
 
@@ -114,6 +125,11 @@ export async function mount(element: ReactElement): Promise<Mounted> {
   return {
     container,
     caughtErrors,
+    async rerender(next: ReactElement): Promise<void> {
+      await inAct(() => {
+        root.render(next);
+      });
+    },
     unmount() {
       root.unmount();
       container.remove();

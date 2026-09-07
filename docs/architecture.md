@@ -76,6 +76,9 @@ apps/                 AGPL-3.0-or-later, without exception
                         gap-preserving downsampler, the SVG trace, and the
                         privacy-zone trim behind the shared view
     src/library/        the activity library's row model and its port (#62)
+    src/map/            the ride map (#63): the basemap configuration and its
+                        origin proof, the GeoJSON conversion, the once-per-app
+                        protocol registration, and the MapLibre adapter
     src/recording/      the composition root: engine + checkpoints + recovery (#46)
     src/ride/           the live ride screen's state machine and its panels (#49)
     src/shell/          the hash route table, the router hook and AppShell (#48)
@@ -563,11 +566,31 @@ alternatives are there.
 | Test runner | Vitest 4.1.11 |
 | Coverage gate | **no percentage** — every new code path covered by a test proven to fail without the change |
 | Linter / formatter | ESLint 10 + typescript-eslint + Prettier 3 |
+| Map rendering | **MapLibre GL JS 6.7.0** + **`pmtiles` 4.5.0**, both BSD-3-Clause — installed by #63, in `apps/web` (ADR 0010 D-1) |
+| Basemap | Protomaps basemap as a PMTiles archive on storage this project controls. **Not published yet — #53** |
 | Real-time transport | deferred to [#16](https://github.com/openzigs/onyourleft/issues/16) |
 
 Installed as of #23: the toolchain above, React 19.2.8, React DOM 19.2.8 and Vite 8.2.2. Everything
 else in the table is a decision that no `package.json` has acted on yet. `CLAUDE.md` section 4b
 keeps that list; the commands are in section 4a.
+
+### The map dependencies, recorded because #63's definition of done asks for it
+
+| Package | Version installed | Licence, verified from the installed tree on 2026-09-07 |
+|---|---|---|
+| `maplibre-gl` | **6.7.0** | BSD-3-Clause |
+| `pmtiles` | **4.5.0** | BSD-3-Clause |
+
+Both land in `apps/web`, which is AGPL-3.0-or-later; BSD-3 is admissible there and under `packages/`
+alike, and what keeps them in `apps/` is the DOM rather than the licence (ADR 0010 D-1 says so in as
+many words). `pnpm why maplibre-gl --recursive` lists `@onyourleft/web` and nothing else, so neither
+reaches `packages/*` — unlike the devDependencies that arrive there through Vitest, which `CLAUDE.md`
+§3 records as the trap.
+
+Their closure adds BSD-2-Clause, ISC, MIT and one `(MIT OR Apache-2.0)` and no GPL, no AGPL and
+nothing non-OSI. `maplibre-gl` is **977 kB minified**, which is why `apps/web/src/map/maplibre.ts` is
+reached through a dynamic `import()` and lands in its own chunk: a rider who only opens indoor rides
+never downloads it.
 
 ## Decision record index
 

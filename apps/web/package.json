@@ -17,6 +17,8 @@
     "@onyourleft/fit": "workspace:*",
     "@onyourleft/sensors": "workspace:*",
     "@onyourleft/store": "workspace:*",
+    "maplibre-gl": "6.7.0",
+    "pmtiles": "4.5.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },

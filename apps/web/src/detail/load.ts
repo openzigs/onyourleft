@@ -145,6 +145,49 @@ export async function loadSharedTrack(
   port: DetailPort,
   id: ActivityId,
 ): Promise<SharedTrack | undefined> {
+  return loadTrack(port, id, true);
+}
+
+/**
+ * The rider's **own** track: every stored fix, split only where the stream has
+ * a gap.
+ *
+ * The same function as the shared preview, called with no zones — which is the
+ * whole point rather than a shortcut. ADR 0004 decision E and #51's export path
+ * both say the athlete's own data is not obfuscated for the athlete, so this
+ * trims nothing; and running it through {@link sharedTrack} anyway means the
+ * two paths cannot disagree about **where a gap is**. A separate "just split
+ * the stream" implementation is how one of them would later learn to join
+ * across a hole and the other would not.
+ *
+ * ⚠️ **Not decimated.** A four-hour ride hands the map 14 400 positions. That
+ * is well within what a vector renderer draws without complaint, and it is left
+ * alone deliberately: simplifying a path is a cartographic decision with a hard
+ * ordering constraint attached — **trim, then simplify, never the reverse** —
+ * because a simplifier run first can leave a retained vertex inside a zone the
+ * trim would have removed. Whoever adds one reads this line first.
+ */
+export async function loadOwnTrack(
+  port: DetailPort,
+  id: ActivityId,
+): Promise<SharedTrack | undefined> {
+  return loadTrack(port, id, false);
+}
+
+/**
+ * The two position channels, segmented — with the athlete's zones applied or
+ * not.
+ *
+ * `applyZones` decides whether this is the published copy or the rider's own,
+ * and it is the *only* difference between them. The zone read is skipped
+ * entirely when it is false, so opening a ride costs two channel reads and no
+ * privacy-zone query.
+ */
+async function loadTrack(
+  port: DetailPort,
+  id: ActivityId,
+  applyZones: boolean,
+): Promise<SharedTrack | undefined> {
   const latitude: Samples<'latitude'> | undefined = await port.store.getStreamChannel(
     port.athleteId,
     id,
@@ -158,6 +201,6 @@ export async function loadSharedTrack(
   if (latitude === undefined && longitude === undefined) {
     return undefined;
   }
-  const zones = await port.store.listPrivacyZones(port.athleteId);
+  const zones = applyZones ? await port.store.listPrivacyZones(port.athleteId) : [];
   return sharedTrack({ activityId: id, latitude, longitude, zones });
 }

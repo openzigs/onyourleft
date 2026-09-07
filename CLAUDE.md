@@ -35,6 +35,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         gap-preserving downsampler, the SVG trace and the
                         privacy-zone trim that says what a shared copy contains
     src/library/        the activity library's row model, its port and its stub (#62)
+    src/map/            the ride map (#63) — the basemap configuration and the proof
+                        it reaches no other origin, the GeoJSON conversion, the
+                        once-per-application protocol registration, and the one
+                        file that names MapLibre
     src/recording/      the recorder: engine + durable checkpoints + recovery (#46)
     src/ride/           the live ride screen: its state machine, panels and trainer wiring (#49)
     src/shell/          the hash route table, the router hook and AppShell (#48)
@@ -489,7 +493,9 @@ Apache-2.0, both zero-dependency, both under `packages/store`) and — since #40
 `@types/web-bluetooth` 0.0.21 (MIT, zero-dependency, types only, a devDependency of
 `packages/sensors`) and — since #31 — `fit-file-parser` 5.0.2 (MIT, a devDependency of
 `packages/fit` **and, since #51, of `apps/web` too**, whose closure is `buffer` MIT → `base64-js`
-MIT and `ieee754` BSD-3-Clause) are
+MIT and `ieee754` BSD-3-Clause) and — since #63 — `maplibre-gl` 6.7.0 and `pmtiles` 4.5.0 (both
+BSD-3-Clause, both runtime dependencies of `apps/web`, whose closure adds BSD-2-Clause, ISC, MIT and
+one `(MIT OR Apache-2.0)` and no GPL, AGPL or non-OSI licence) are
 installed; **nothing else from ADR 0005's runtime list is**, `react-router` included. Add each in
 the issue that first needs it, after checking its licence against the
 directory it lands in (CONTRIBUTING.md).
@@ -1045,5 +1051,8 @@ top of an issue **supersedes its body**.
 | Why the ride detail view reads a stream summary before it reads a sample, and what bounds the points a chart is handed | `apps/web/src/detail/load.ts`, `apps/web/src/detail/series.ts` §`CHART_POINTS` |
 | Why a gap in a trace is a break in the line rather than a straight line across it | `apps/web/src/detail/series.ts` §`traceSegments`, `apps/web/src/detail/TraceChart.tsx` |
 | What a *shared* copy of a ride contains, and why the rider's own view is not trimmed | [ADR 0004](docs/adr/0004-privacy-and-location.md) decisions B, C and E, `apps/web/src/detail/privacy.ts`, `apps/web/src/transfer/export-activity.ts` |
+| Which origins the map is allowed to reach, and why the style is built rather than fetched | `apps/web/src/map/basemap.ts` §`styleOrigins`, [ADR 0010](docs/adr/0010-map-tiles-and-routing.md) D-1 |
+| Why MapLibre is behind a seam, and what that seam does not prove | `apps/web/src/map/port.ts` |
+| Where the basemap URL is configured, and why nothing is configured today | `.env.example` §`VITE_BASEMAP_PMTILES_URL`, [#53](https://github.com/openzigs/onyourleft/issues/53) |
 
 <!-- Last updated: 2026-09-06 by delivery:code-issue resolving #51 (the manual file import and export UI) -->

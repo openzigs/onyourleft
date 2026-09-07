@@ -20,6 +20,8 @@ import { AppShell } from './shell/AppShell';
 import { probeBrowser, type CapabilityProbe } from './support/bluetooth-support';
 import { saveWithAnchor, webCryptoDigest } from './transfer/browser';
 import type { DetailPort } from './detail/store-port';
+import { browserBasemapConfig } from './map/basemap';
+import type { MapPort } from './map/port';
 import type { LibraryPort } from './library/store-port';
 import type { TransferPort } from './transfer/store-port';
 
@@ -165,6 +167,18 @@ function buildDetailPort(): DetailPort {
  * there is nothing better to read. `import-batch.ts`'s `timeZone` records what
  * that costs and why `UTC` is not an improvement on it.
  */
+/**
+ * The map engine (#63), fetched on first use.
+ *
+ * A dynamic `import()` rather than a static one, so `maplibre-gl` lands in its
+ * own chunk: a rider who only ever opens indoor rides — most rides, in this
+ * milestone — never downloads it. `map/maplibre.ts` records the reasoning and
+ * `pnpm run build` shows the split.
+ */
+async function loadMapPort(): Promise<MapPort> {
+  return (await import('./map/maplibre')).mapLibrePort;
+}
+
 function buildTransferPort(): TransferPort | undefined {
   if (globalThis.crypto?.subtle === undefined) {
     return undefined;
@@ -188,6 +202,8 @@ createRoot(container).render(
       transfer={buildTransferPort()}
       library={buildLibraryPort()}
       detail={buildDetailPort()}
+      map={loadMapPort}
+      basemap={browserBasemapConfig()}
     />
   </StrictMode>,
 );

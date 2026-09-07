@@ -15,6 +15,7 @@ import {
   beatsPerMinute,
   degreesLatitude,
   degreesLongitude,
+  distanceBetween,
   geographicPosition,
   metres,
   revolutionsPerMinute,
@@ -31,8 +32,17 @@ import {
 } from '@onyourleft/store';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { trimRadius } from '../detail/privacy';
 import { stubActivity, stubDetail, stubLap, type StubDetail } from '../detail/testing';
 import { CHART_POINTS } from '../detail/series';
+import { OSM_ATTRIBUTION, type BasemapConfig } from '../map/basemap';
+import type { MapPort } from '../map/port';
+import {
+  coordinatesNowOn,
+  everyCoordinateHandedTo,
+  stubMapPort,
+  type StubMapPort,
+} from '../map/testing';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
 
 import { ActivityDetailView } from './ActivityDetailView';
@@ -40,6 +50,10 @@ import { ActivityDetailView } from './ActivityDetailView';
 const ATHLETE = athleteId('athlete-a');
 const RIDE = activityId('ride-1');
 const HOME = geographicPosition(degreesLatitude(51.5074), degreesLongitude(-0.1278));
+const BASEMAP: BasemapConfig = {
+  archiveUrl: 'https://tiles.example.org/basemap.pmtiles',
+  attribution: OSM_ATTRIBUTION,
+};
 
 let mounted: Mounted | undefined;
 
@@ -57,8 +71,29 @@ afterEach(() => {
  * and the render it unblocks. One settle leaves every `<svg>` assertion reading
  * the pre-chart render, which looks exactly like a chart that does not work.
  */
-async function open(port: StubDetail | undefined, id: string = RIDE): Promise<Mounted> {
-  const result = await mount(<ActivityDetailView port={port} activityId={id} />);
+interface MapOptions {
+  /** The engine the view is given, or `undefined` for none. */
+  readonly map?: StubMapPort | undefined;
+  readonly basemap?: BasemapConfig | undefined;
+  /** Called each time the view asks for the engine, so a test can count. */
+  readonly onLoad?: () => void;
+}
+
+async function open(
+  port: StubDetail | undefined,
+  id: string = RIDE,
+  options: MapOptions = {},
+): Promise<Mounted> {
+  const loader: (() => Promise<MapPort>) | undefined =
+    options.map === undefined
+      ? undefined
+      : () => {
+          options.onLoad?.();
+          return Promise.resolve(options.map as MapPort);
+        };
+  const result = await mount(
+    <ActivityDetailView port={port} activityId={id} map={loader} basemap={options.basemap} />,
+  );
   await settle();
   await settle();
   mounted = result;
@@ -298,13 +333,100 @@ describe('criterion 5 — the shared view is trimmed in the data, not in the dra
     expect(document.body.textContent).toContain('You have no privacy zones');
   });
 
-  it('reads no position channel until the shared view is asked for', async () => {
-    // The rider's own view is the true track and needs no trimming, so the
-    // preview's reads are the rider's decision rather than a cost of opening
-    // the page.
+  it('reads no privacy zone until the shared view is asked for', async () => {
+    // ⚠️ This assertion moved with #63 and the move is the point. It used to
+    // say no *position channel* was read until the preview was opened, which
+    // was true only because nothing drew the track. A map draws it, so the
+    // positions are now read on open — see the map tests below.
+    //
+    // What is still true, and is the thing that actually separates the owner's
+    // view from the published one, is that **no zone is consulted**: the
+    // rider's own track is not trimmed (ADR 0004 decision E), so the zone query
+    // is the preview's cost rather than the page's.
     const port = outdoorRide([homeZone()]);
     mounted = await open(port);
+    expect(port.zoneReads).toEqual([]);
+  });
+});
+
+describe('#63 — the map on the detail screen', () => {
+  it('draws the ride’s own whole track, and consults no zone to do it', async () => {
+    const port = outdoorRide([homeZone()]);
+    const map = stubMapPort();
+    mounted = await open(port, RIDE, { map, basemap: BASEMAP });
+
+    expect(map.created).toHaveLength(1);
+    expect(port.zoneReads).toEqual([]);
+    // Every stored fix reaches the map, including the ones inside the zone:
+    // this is the rider looking at their own ride.
+    const drawn = everyCoordinateHandedTo(map.created[0] as never);
+    expect(drawn.length).toBe(300);
+  });
+
+  it('loads no map engine at all for an indoor ride', async () => {
+    // #63's first criterion, as a read rather than as a rendering decision: a
+    // ride with no GPS costs no `maplibre-gl` download and no position decode.
+    // The loader is never called, so the 900 KB chunk is never fetched.
+    let loads = 0;
+    const port = indoorRide();
+    mounted = await open(port, RIDE, {
+      map: stubMapPort(),
+      basemap: BASEMAP,
+      onLoad: () => {
+        loads += 1;
+      },
+    });
+    expect(loads).toBe(0);
     expect(port.channelReads).not.toContain('latitude');
+    expect(document.querySelector('.oyl-map')).toBeNull();
+  });
+
+  it('hands the map the trimmed track when the shared view is open — criterion 6', async () => {
+    // The strongest form of the criterion at this layer: the untrimmed
+    // coordinates are not in the map's props, its recorded history or the DOM.
+    const port = outdoorRide([homeZone()]);
+    const map = stubMapPort();
+    mounted = await open(port, RIDE, { map, basemap: BASEMAP });
+
+    const reveal = queryAll<HTMLButtonElement>(document, 'button').find((button) =>
+      button.textContent?.includes('Show what a shared copy would contain'),
+    );
+    await activateWithKeyboard(reveal as HTMLButtonElement);
+    await settle();
+    await settle();
+
+    // What the map is showing *now*, not everything it has ever been given:
+    // the owner's own whole track was on it a moment ago and correctly so.
+    // The same map object, because swapping the line does not rebuild it.
+    expect(map.created).toHaveLength(1);
+    const drawn = coordinatesNowOn(map.created[0] as never);
+    expect(drawn.length).toBeGreaterThan(0);
+    expect(drawn.length).toBeLessThan(300);
+    const radius = trimRadius(metres(500), RIDE, 'home');
+    for (const [longitude, latitude] of drawn) {
+      expect(
+        distanceBetween(
+          geographicPosition(degreesLatitude(latitude), degreesLongitude(longitude)),
+          HOME,
+        ),
+      ).toBeGreaterThan(radius);
+    }
+  });
+
+  it('says no basemap is configured rather than drawing an empty grid', async () => {
+    // The state of every build today: #53 has not published an archive.
+    const port = outdoorRide([]);
+    mounted = await open(port, RIDE, { map: stubMapPort(), basemap: undefined });
+    expect(document.body.textContent).toContain('No basemap is configured');
+    expect(document.querySelector('.oyl-map')).toBeNull();
+  });
+
+  it('renders the OpenStreetMap credit whenever it renders a map', async () => {
+    const port = outdoorRide([]);
+    mounted = await open(port, RIDE, { map: stubMapPort(), basemap: BASEMAP });
+    expect(document.querySelector('.oyl-map__attribution')?.textContent).toBe(
+      '© OpenStreetMap contributors',
+    );
   });
 });
 

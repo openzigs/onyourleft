@@ -49,6 +49,8 @@ import type { RideController } from '../ride/controller';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { TransferView } from '../transfer/TransferView';
 import type { DetailPort } from '../detail/store-port';
+import type { BasemapConfig } from '../map/basemap';
+import type { MapPort } from '../map/port';
 import type { LibraryPort } from '../library/store-port';
 import type { TransferPort } from '../transfer/store-port';
 
@@ -114,6 +116,16 @@ export interface AppShellProps {
    * database connection.
    */
   readonly detail?: DetailPort | undefined;
+  /**
+   * How to get a map engine (#63), or `undefined` where there is none.
+   *
+   * A loader rather than a port: `maplibre-gl` is the largest dependency in
+   * this client and is fetched only when a ride with GPS is opened. The
+   * accessibility suite passes a resolved stub, or nothing at all.
+   */
+  readonly map?: (() => Promise<MapPort>) | undefined;
+  /** Where the basemap archive is, or `undefined` until #53 publishes one. */
+  readonly basemap?: BasemapConfig | undefined;
 }
 
 /**
@@ -135,7 +147,14 @@ function viewFor(match: RouteMatch, props: AppShellProps): JSX.Element {
     case 'activities':
       return <ActivitiesView library={props.library} />;
     case 'activity-detail':
-      return <ActivityDetailView port={props.detail} activityId={match.parameter} />;
+      return (
+        <ActivityDetailView
+          port={props.detail}
+          activityId={match.parameter}
+          map={props.map}
+          basemap={props.basemap}
+        />
+      );
     case 'devices':
       return <DevicesView capabilities={props.capabilities} />;
     case 'transfer':

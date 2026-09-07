@@ -50,6 +50,14 @@ export interface StubDetail extends DetailPort {
   readonly channelReads: StreamChannel[];
   /** Every `getStreamSetSummary` call. One per view open, never per series. */
   readonly summaryReads: number[];
+  /**
+   * How many times the athlete's privacy zones were read.
+   *
+   * Counted since #63: the rider's own map is drawn from the untrimmed track
+   * and reads no zones at all, so "did this render consult the zones" is the
+   * observable that separates the owner's view from the shared preview.
+   */
+  readonly zoneReads: number[];
 }
 
 /**
@@ -105,6 +113,7 @@ export function stubDetail(
 ): StubDetail {
   const channelReads: StreamChannel[] = [];
   const summaryReads: number[] = [];
+  const zoneReads: number[] = [];
   const present = Object.keys(ride.channels) as StreamChannel[];
   const sampleCount = Math.max(0, ...present.map((channel) => ride.channels[channel]?.length ?? 0));
 
@@ -144,8 +153,11 @@ export function stubDetail(
     },
     listLaps: (_owner: AthleteId, id: ActivityId) =>
       Promise.resolve(id === ride.activity.id ? [...ride.laps] : []),
-    listPrivacyZones: () => Promise.resolve([...zones]),
+    listPrivacyZones: () => {
+      zoneReads.push(zoneReads.length);
+      return Promise.resolve([...zones]);
+    },
   };
 
-  return { athleteId: owner, store, channelReads, summaryReads };
+  return { athleteId: owner, store, channelReads, summaryReads, zoneReads };
 }
