@@ -33,6 +33,9 @@ apps/                 AGPL-3.0-or-later, without exception
                         a harness page driving the map adapter, and its Playwright
                         spec. See §4a and §4f
     src/a11y/           the accessibility gate: rules, routes, contrast (#48) — see §4e
+    src/analysis/       zones and duration personal bests (#78) — the port, the one
+                        place a threshold default is substituted, the bounded
+                        library read, and the wording
     src/design/         design tokens, theme.css and the primitives (#48)
     src/detail/         the ride detail view's data layer (#50) — the read budget, the
                         gap-preserving downsampler, the SVG trace and the
@@ -53,7 +56,8 @@ apps/                 AGPL-3.0-or-later, without exception
 
 packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis (#25)
-    analysis/           the power-duration curve and the critical-power fit (#75)
+    analysis/           the power-duration curve and the critical-power fit (#75),
+                        and the training zones (#78)
     identity/           the record format, the canonical bytes, verification (#61)
     recording/          the recording session state machine and stream merge (#45)
   fit/                FIT / GPX / TCX codec (#29-#32)
@@ -1267,6 +1271,11 @@ top of an issue **supersedes its body**.
 | What an export tells a rider it could not carry, and why altitude can never be the answer | `apps/web/src/transfer/export-activity.ts` §`EXPORT_FAULT_TEXT`, and the finding in `export-activity.test.ts` §"what the file could not carry" |
 | What the import screen may say about another platform, word for word | [ADR 0009](docs/adr/0009-clean-room-posture.md) R3, `apps/web/src/transfer/TransferView.tsx`, and the assertions in `TransferView.test.tsx` |
 | Why the ride detail view reads a stream summary before it reads a sample, and what bounds the points a chart is handed | `apps/web/src/detail/load.ts`, `apps/web/src/detail/series.ts` §`CHART_POINTS` |
+| Which zone a reading exactly on a boundary lands in, and why a gap is not zone one | `packages/domain/src/analysis/zones.ts` §"Rule 1", §"Rule 2" |
+| Why time in zone does not always sum to a ride's moving time, and what it does sum to | `packages/domain/src/analysis/zones.ts` §"What time in zone sums to", `apps/web/src/analysis/present.ts` §`coverageNote` |
+| Where the one threshold default is substituted, and why the store does not substitute it | `apps/web/src/analysis/thresholds.ts`, [`packages/store/README.md`](packages/store/README.md) §"An optional field is not a migration" |
+| How many rides a personal-best read decodes, and what happens to the history beyond that | `apps/web/src/analysis/load.ts` §`BESTS_ACTIVITY_LIMIT` |
+| Why the analysis screen encodes nothing in colour, and how duration bests are told apart from segment bests | `apps/web/src/views/AnalysisView.tsx` |
 | Why a gap in a trace is a break in the line rather than a straight line across it | `apps/web/src/detail/series.ts` §`traceSegments`, `apps/web/src/detail/TraceChart.tsx` |
 | What a *shared* copy of a ride contains, and why the rider's own view is not trimmed | [ADR 0004](docs/adr/0004-privacy-and-location.md) decisions B, C and E, `apps/web/src/detail/privacy.ts`, `apps/web/src/transfer/export-activity.ts` |
 | Which origins the map is allowed to reach, and why the style is built rather than fetched | `apps/web/src/map/basemap.ts` §`styleOrigins`, [ADR 0010](docs/adr/0010-map-tiles-and-routing.md) D-1 |

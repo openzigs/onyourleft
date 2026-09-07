@@ -19,6 +19,7 @@ import { openWebBluetoothTrainer } from './ride/trainer';
 import { AppShell } from './shell/AppShell';
 import { probeBrowser, type CapabilityProbe } from './support/bluetooth-support';
 import { saveWithAnchor, webCryptoDigest } from './transfer/browser';
+import type { AnalysisPort } from './analysis/store-port';
 import type { DetailPort } from './detail/store-port';
 import { browserBasemapConfig } from './map/basemap';
 import type { MapPort } from './map/port';
@@ -153,6 +154,20 @@ function buildDetailPort(): DetailPort {
 }
 
 /**
+ * The analysis screen's port (#78).
+ *
+ * Unconditional, like the library's: reading an athlete record, a stream
+ * summary and a channel needs no `crypto.subtle` and no secure context. It is a
+ * separate port from the detail view's for the reason that one is separate from
+ * the library's — `DetailStore` deliberately offers no way to read the athlete
+ * record, and `AnalysisStore` deliberately offers no way to read laps or
+ * privacy zones. `ActivityStore` satisfies both structurally.
+ */
+function buildAnalysisPort(): AnalysisPort {
+  return { store: localStore(), athleteId: LOCAL_ATHLETE };
+}
+
+/**
  * Build the import and export screen's port, or nothing.
  *
  * `undefined` where `crypto.subtle` is absent, which is every non-secure
@@ -202,6 +217,7 @@ createRoot(container).render(
       transfer={buildTransferPort()}
       library={buildLibraryPort()}
       detail={buildDetailPort()}
+      analysis={buildAnalysisPort()}
       map={loadMapPort}
       basemap={browserBasemapConfig()}
     />

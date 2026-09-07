@@ -271,3 +271,25 @@ export {
   fitCriticalPower,
   predictedPower,
 } from './analysis/critical-power';
+
+// --- Training zones (#78) ----------------------------------------------------
+//
+// Here rather than in `apps/web` for the reason above, and one more: the
+// boundary rule is a *decision* — inclusive below, exclusive above — and a
+// second implementation of it somewhere else is how time-in-zone stops summing
+// to covered time. `analysis/zones.ts` states the rule before it computes
+// anything.
+
+export type { TimeInZones, Zone, ZoneBasis } from './analysis/zones';
+export {
+  DEFAULT_THRESHOLD_HEART_RATE,
+  DEFAULT_THRESHOLD_POWER,
+  HEART_RATE_ZONE_LOWER_FRACTIONS,
+  HEART_RATE_ZONE_NAMES,
+  heartRateZones,
+  POWER_ZONE_LOWER_FRACTIONS,
+  POWER_ZONE_NAMES,
+  powerZones,
+  timeInZones,
+  zoneOf,
+} from './analysis/zones';

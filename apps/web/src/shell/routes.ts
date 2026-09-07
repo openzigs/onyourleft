@@ -33,7 +33,14 @@
 
 /** The identity of a view. Stable; the path is not. */
 export type RouteId =
-  'ride' | 'activities' | 'activity-detail' | 'devices' | 'transfer' | 'about' | 'not-found';
+  | 'ride'
+  | 'activities'
+  | 'activity-detail'
+  | 'analysis'
+  | 'devices'
+  | 'transfer'
+  | 'about'
+  | 'not-found';
 
 export interface RouteDefinition {
   readonly id: RouteId;
@@ -69,6 +76,14 @@ export const ROUTES: readonly RouteDefinition[] = [
     navLabel: 'Activities',
     title: 'Activities',
     summary: 'Rides recorded on this device, newest first.',
+  },
+  {
+    id: 'analysis',
+    path: '/analysis',
+    navLabel: 'Analysis',
+    title: 'Analysis',
+    summary:
+      'Time in zone for a ride, and the best average power you have held for each length of time.',
   },
   {
     id: 'devices',

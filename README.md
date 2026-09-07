@@ -84,6 +84,28 @@ Two things the recovered ride keeps that a naive one would not: a sensor dropout
 that happens to look like one. If the device runs out of storage mid-ride the recording does not
 stop — it keeps going in memory, keeps everything already written, and says so.
 
+### What the numbers on the Analysis page mean
+
+The **Analysis** page shows two things, and they are honest about what they are not.
+
+**Time in zone** splits one ride's power and heart rate into training zones derived from a single
+threshold. Every zone is a labelled row carrying its name, its range, the time spent in it and its
+share, so nothing on the page is carried by colour alone. Two rules are stated on the page rather
+than assumed: a reading exactly on a boundary belongs to the zone that *starts* there, and a second
+the sensor never reported is in **no zone at all** rather than in the bottom one — a dead strap is
+not an hour of recovery riding. The shares are of the time the sensor actually reported, and where
+that is less than the ride's moving time the page says so and by how much.
+
+Until you set your own threshold the page uses an assumed one, and it says the word "assumed" every
+time. Zones from a guessed threshold are the right shape and the wrong numbers.
+
+**Duration personal bests** are the best average power you have held for each length of time,
+anywhere in any ride on this device. A window is never bridged across a gap in the recording and
+never spans two rides, so a best is always something you actually rode in one go — a ride with a
+dropout in the middle contributes no long efforts rather than a made-up one. These are **not
+segment bests**: "my best 20 minutes" and "my best on Box Hill" are different objects, and this
+device does not hold the second kind yet.
+
 Which platform, in which phase, with which capabilities — and which of those gaps are **permanent**
 rather than pending: [`docs/adr/0003-platform-support-matrix.md`](docs/adr/0003-platform-support-matrix.md).
 

@@ -545,3 +545,32 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/*
+ * The zone bar (#78).
+ *
+ * A length, and nothing else. It carries no colour meaning: which zone a row
+ * is, what range it covers, how long was spent in it and what share that is are
+ * all words in the same row, and the bar repeats the share. It is `aria-hidden`
+ * in the markup for that reason — see `views/AnalysisView.tsx`.
+ *
+ * `inline-block` with a fixed width rather than a table-cell fill, so the
+ * percentage text stays readable beside it at every column width.
+ */
+.oyl-zone-bar {
+  background: var(--oyl-color-surface);
+  border: 1px solid var(--oyl-color-border);
+  border-radius: var(--oyl-radius);
+  display: inline-block;
+  height: 0.6rem;
+  margin-left: var(--oyl-space-sm);
+  overflow: hidden;
+  vertical-align: middle;
+  width: 6rem;
+}
+
+.oyl-zone-bar__fill {
+  background: var(--oyl-color-accent);
+  display: block;
+  height: 100%;
+}
