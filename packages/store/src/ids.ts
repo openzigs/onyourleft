@@ -57,6 +57,18 @@ export type PrivacyZoneId = EntityId<'privacy zone'>;
  */
 export type RecordingSessionId = EntityId<'recording session'>;
 
+/**
+ * Identifies one segment (#64).
+ *
+ * Distinct from `ActivityId` for a reason worth stating, because the two are
+ * created together: a segment is **not** a view of the activity it was cut
+ * from. Its geometry is a copy, it outlives the activity's deletion, and it
+ * holds no reference back — see `SegmentRecord`. Sharing a brand would make the
+ * two interchangeable in exactly the signature where that independence has to
+ * hold.
+ */
+export type SegmentId = EntityId<'segment'>;
+
 function assertUsableId(value: string, what: string): void {
   if (value.length === 0) {
     throw new StoreValidationError(`${what} must not be empty`);
@@ -97,4 +109,10 @@ export function privacyZoneId(value: string): PrivacyZoneId {
 export function recordingSessionId(value: string): RecordingSessionId {
   assertUsableId(value, 'recording session id');
   return value as RecordingSessionId;
+}
+
+/** @throws {StoreValidationError} if empty or blank. */
+export function segmentId(value: string): SegmentId {
+  assertUsableId(value, 'segment id');
+  return value as SegmentId;
 }

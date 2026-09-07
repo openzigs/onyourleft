@@ -51,6 +51,7 @@ import {
 import {
   altitudeMetres,
   beatsPerMinute,
+  createSegment,
   degreesCelsius,
   degreesLatitude,
   degreesLatitudeToSemicircles,
@@ -66,8 +67,11 @@ import {
   seconds,
   semicirclesToDegreesLatitude,
   semicirclesToDegreesLongitude,
+  geographicPosition,
   unixSeconds,
   watts,
+  type ElevationSource,
+  type SegmentVisibility,
   type UnixSeconds,
 } from '@onyourleft/domain';
 
@@ -76,13 +80,14 @@ import {
   athleteId,
   lapId,
   recordingSessionId,
+  segmentId,
   type ActivityId,
   type AthleteId,
   type LapId,
   type RecordingSessionId,
 } from '../ids';
 import type { DeviceKeyRecord, StoredActivityRecord } from '../identity';
-import type { AthleteRecord, NewActivity, NewLap } from '../records';
+import type { AthleteRecord, NewActivity, NewLap, SegmentRecord } from '../records';
 import type { NewRecordingChunk, NewRecordingSession } from '../recording';
 import { STREAM_CHANNELS, type NewStreamSet, type Samples, type StreamChannel } from '../streams';
 import { signingKeyFor, webCryptoSha256 } from '../web-crypto';
@@ -136,6 +141,7 @@ let rideCounter = 0;
 export function resetFixtureIds(): void {
   rideCounter = 0;
   recordingCounter = 0;
+  segmentCounter = 0;
 }
 
 /**
@@ -471,4 +477,69 @@ export async function extractableDeviceKey(owner: AthleteId): Promise<{
     createdAt: FIXTURE_EPOCH,
   };
   return { record, key: signingKeyFor(record), privateKeyHex: toHex(privateKey) };
+}
+
+// --- Segments (#64) ----------------------------------------------------------
+
+let segmentCounter = 0;
+
+/**
+ * Metres per degree of latitude on the sphere `@onyourleft/domain` uses, so a
+ * fixture can say "50 m apart" without a magic number.
+ */
+const METRES_PER_DEGREE_LATITUDE = 111_194.9;
+
+/**
+ * A due-north segment of `positions` points, `spacingMetres` apart.
+ *
+ * The default is 21 points 50 m apart — about a kilometre, comfortably over
+ * `MINIMUM_SEGMENT_LENGTH_METRES`, and enough points that
+ * `thinnedGeometryStoreFactory` produces a visibly different path.
+ *
+ * Built through `createSegment`, never by hand, so a fixture cannot carry an
+ * endpoint or a distance that disagrees with its own geometry — which is the
+ * one way a round-trip test could pass while the model was wrong.
+ */
+export function segmentFor(
+  owner: AthleteId,
+  overrides: {
+    readonly positions?: number;
+    readonly spacingMetres?: number;
+    readonly altitudes?: readonly number[];
+    readonly elevationSource?: ElevationSource;
+    readonly elevationResolutionMetres?: number;
+    readonly visibility?: SegmentVisibility;
+    readonly name?: string;
+    readonly originLatitude?: number;
+  } = {},
+): SegmentRecord {
+  segmentCounter += 1;
+  const positions = overrides.positions ?? 21;
+  const spacing = (overrides.spacingMetres ?? 50) / METRES_PER_DEGREE_LATITUDE;
+  const originLatitude = overrides.originLatitude ?? 51.5;
+  const geometry = Array.from({ length: positions }, (_unused, index) =>
+    geographicPosition(degreesLatitude(originLatitude + index * spacing), degreesLongitude(-0.12)),
+  );
+
+  const built = createSegment({
+    id: `segment-${String(segmentCounter)}`,
+    createdBy: owner,
+    name: overrides.name ?? `Segment ${String(segmentCounter)}`,
+    sport: 'ride',
+    geometry,
+    ...(overrides.altitudes === undefined ? {} : { altitudes: overrides.altitudes }),
+    elevationSource: overrides.elevationSource ?? 'none',
+    ...(overrides.elevationResolutionMetres === undefined
+      ? {}
+      : { elevationResolutionMetres: overrides.elevationResolutionMetres }),
+    visibility: overrides.visibility ?? 'private',
+    createdAt: FIXTURE_EPOCH,
+  });
+
+  // `createSegment` returns the domain shape, whose `id` and `createdBy` are
+  // plain strings — this package cannot ask it for its brands, because the
+  // dependency points the other way. Re-entering them through the id
+  // constructors is where the brand is applied, and it validates at the same
+  // time.
+  return { ...built, id: segmentId(built.id), createdBy: athleteId(built.createdBy) };
 }

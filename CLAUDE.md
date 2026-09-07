@@ -1160,13 +1160,13 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   inside an ADR table cell.
 - **ADRs**: `docs/adr/NNNN-kebab-case.md`, with **Status, Context, Decision, Consequences**. Numbers
   are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. ⚠️ **`0012` is reserved and not
-  free** — it belongs to [#64](https://github.com/openzigs/onyourleft/issues/64)'s data-licence
-  decision, which is the destination ADR 0001's *Data* deferral had no number for
-  ([#119](https://github.com/openzigs/onyourleft/issues/119)). **0014** is
-  [#61](https://github.com/openzigs/onyourleft/issues/61)'s portable identity, and **0015** is
-  [#24](https://github.com/openzigs/onyourleft/issues/24)'s dependency-licence ruling. The next free
-  number is **0016**.
+  **and which are claimed by open issues** before you pick one. **Every number from 0001 to 0015 is
+  now written and the next free number is 0016** — there is no live reservation. ⚠️ `0012` **was**
+  reserved and is no longer: [#64](https://github.com/openzigs/onyourleft/issues/64) consumed it
+  with [ADR 0012](docs/adr/0012-data-licence.md), the data licence, which is the destination
+  ADR 0001's *Data* deferral had no number for
+  ([#119](https://github.com/openzigs/onyourleft/issues/119)). A reviewer who remembers this
+  paragraph telling them to skip 0012 is reading the old one.
 - **Changelog**: there is **no `CHANGELOG.md` and no changelog convention** in this repository. Do
   not add one as a drive-by; if a release needs one, that is its own issue.
 - **Versions**: do not bump any version unless the issue asks for it.

@@ -28,6 +28,7 @@ export {
   assertRecordingRecovers,
   assertSameSamples,
   assertSameStreamSet,
+  assertSegmentRoundTrip,
   assertSignedRecordRoundTrip,
   assertStreamSetRoundTrip,
   RoundTripFailure,
@@ -55,6 +56,7 @@ export {
   seedAthletes,
   seedRecording,
   seedRide,
+  segmentFor,
   signedRecordFor,
   streamSetFor,
 } from './fixtures';
@@ -66,4 +68,5 @@ export {
   memoryWriteStoreFactory,
   misroutedBlobStoreFactory,
   roundedClaimStoreFactory,
+  thinnedGeometryStoreFactory,
 } from './fakes';

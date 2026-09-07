@@ -28,6 +28,7 @@ export { UnitError } from './unit-error';
 export type {
   AltitudeMetres,
   BeatsPerMinute,
+  DegreesBearing,
   DegreesCelsius,
   DegreesLatitude,
   DegreesLongitude,
@@ -49,6 +50,7 @@ export {
   ABSOLUTE_ZERO_DEGREES_CELSIUS,
   altitudeMetres,
   beatsPerMinute,
+  degreesBearing,
   degreesCelsius,
   degreesLatitude,
   degreesLongitude,
@@ -79,7 +81,12 @@ export {
 // One implementation, because ADR 0004 decision C requires the device and a
 // Phase 3 instance to agree about whether a point is inside a privacy zone.
 
-export { distanceBetween, EARTH_MEAN_RADIUS_METRES } from './geodesy';
+export {
+  bearingDifference,
+  distanceBetween,
+  EARTH_MEAN_RADIUS_METRES,
+  initialBearing,
+} from './geodesy';
 
 // --- Position: the FIT semicircle encoding ----------------------------------
 
@@ -337,3 +344,36 @@ export {
   localDay,
   seriesSpan,
 } from './analysis/fitness';
+
+// --- Segments (#64) ----------------------------------------------------------
+//
+// The model, and the geometry that decides whether a ride went along a segment.
+// Two rules bind it before any of the maths does, and `segment/segment.ts`
+// states both at the top: **no oriented virtual start line** (ADR 0007 D-2.1) —
+// the endpoint test is proximity plus direction agreement, never a crossing —
+// and **no OSM geometry or identifier on a segment** (ADR 0012 D-1), which is
+// what keeps the corpus from inheriting ODbL share-alike.
+
+export type {
+  ElevationSource,
+  Segment,
+  SegmentDraft,
+  SegmentEndpoint,
+  SegmentSport,
+  SegmentVisibility,
+} from './segment/segment';
+export {
+  createSegment,
+  DEFAULT_BEARING_TOLERANCE_DEGREES,
+  DEFAULT_ENDPOINT_RADIUS_METRES,
+  endBearing,
+  endpointReached,
+  MINIMUM_SEGMENT_LENGTH_METRES,
+  MINIMUM_SEGMENT_POSITIONS,
+  NEAR_DUPLICATE_OVERLAP,
+  overlapFraction,
+  OVERLAP_TOLERANCE_METRES,
+  pathLength,
+  sampleHeading,
+  startBearing,
+} from './segment/segment';

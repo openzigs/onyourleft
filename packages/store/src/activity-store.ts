@@ -63,7 +63,14 @@ import {
   StoreValidationError,
   StoreVersionError,
 } from './errors';
-import type { ActivityId, AthleteId, LapId, PrivacyZoneId, RecordingSessionId } from './ids';
+import type {
+  ActivityId,
+  AthleteId,
+  LapId,
+  PrivacyZoneId,
+  RecordingSessionId,
+  SegmentId,
+} from './ids';
 import {
   fromPersistedActivityRecord,
   fromPersistedDeviceKey,
@@ -83,10 +90,13 @@ import {
   toPersistedAthlete,
   toPersistedLap,
   toPersistedPrivacyZone,
+  fromPersistedSegment,
+  toPersistedSegment,
   type PersistedActivity,
   type PersistedAthlete,
   type PersistedLap,
   type PersistedPrivacyZone,
+  type PersistedSegment,
 } from './persisted';
 import type {
   ActivityRecord,
@@ -96,6 +106,7 @@ import type {
   NewActivity,
   NewLap,
   PrivacyZoneRecord,
+  SegmentRecord,
 } from './records';
 import type {
   NewRecordingChunk,
@@ -170,6 +181,18 @@ export interface AthleteDeletionCounts {
   readonly activities: number;
   readonly laps: number;
   readonly privacyZones: number;
+  /**
+   * Segments removed (#64).
+   *
+   * ⚠️ **Erasing an athlete DOES remove their segments, and deleting one of
+   * their activities does not.** Those two are not in tension and the
+   * difference is the point: #64's second criterion protects a segment from a
+   * rider tidying one ride, while erasure is the athlete asking for everything
+   * about them to be gone — and a segment is a stretch of road they chose,
+   * named, and recorded from their own trace, which is as much theirs as the
+   * ride it came from.
+   */
+  readonly segments: number;
   /**
    * Stream sets removed. One per activity that had streams, not one per
    * channel: the blob rows go with their set and counting them would report a
@@ -304,6 +327,10 @@ export class ActivityStore {
 
   get #activityRecords(): Table<PersistedActivityRecord, string> {
     return this.#db.table<PersistedActivityRecord, string>(TABLE.activityRecords);
+  }
+
+  get #segments(): Table<PersistedSegment, string> {
+    return this.#db.table<PersistedSegment, string>(TABLE.segments);
   }
 
   // --- Athletes -------------------------------------------------------------
@@ -476,6 +503,7 @@ export class ActivityStore {
         this.#recordingChunks,
         this.#deviceKeys,
         this.#activityRecords,
+        this.#segments,
       ],
       async () => {
         // The signed records and the device key go with the athlete. The key is
@@ -508,8 +536,9 @@ export class ActivityStore {
           .where(INDEX.privacyZoneByAthlete)
           .equals(id)
           .delete();
+        const segments = await this.#segments.where(INDEX.segmentByCreator).equals(id).delete();
         await this.#athletes.delete(id);
-        return { activities, laps, privacyZones, streamSets, recordings };
+        return { activities, laps, privacyZones, streamSets, recordings, segments };
       },
     );
   }
@@ -730,6 +759,98 @@ export class ActivityStore {
   async listPrivacyZones(owner: AthleteId): Promise<PrivacyZoneRecord[]> {
     const rows = await this.#privacyZones.where(INDEX.privacyZoneByAthlete).equals(owner).toArray();
     return rows.map(fromPersistedPrivacyZone);
+  }
+
+  // --- Segments (#64) -------------------------------------------------------
+
+  /**
+   * Inserts or replaces a segment.
+   *
+   * **Refuses a segment whose creating athlete does not exist**, and refuses to
+   * overwrite one that belongs to somebody else — both inside the same
+   * transaction as the write, for the reason `putActivity` states: a check
+   * outside the transaction lets a concurrent `deleteAthlete` produce exactly
+   * the orphan it exists to prevent.
+   *
+   * ⚠️ **The overwrite guard is not decoration.** A segment id that arrives
+   * from outside — a shared segment in Phase 4 (#7), an imported one — reaching
+   * a `put` with no guard would let one athlete replace another's segment, and
+   * every athlete-scoped read afterwards would return the replacement while
+   * still reporting the original owner.
+   *
+   * @throws {StoreReferentialError} if `record.createdBy` names no athlete, or
+   * if a segment with this id already exists under a different athlete.
+   */
+  async putSegment(record: SegmentRecord): Promise<SegmentId> {
+    await this.#db.transaction('rw', [this.#athletes, this.#segments], async () => {
+      await this.#requireAthlete(record.createdBy);
+      const existing = await this.#segments.get(record.id);
+      if (existing !== undefined && existing.createdBy !== record.createdBy) {
+        throw new StoreReferentialError(
+          `cannot overwrite segment ${record.id}: it belongs to a different athlete`,
+        );
+      }
+      await this.#segments.put(toPersistedSegment(record));
+    });
+    return record.id;
+  }
+
+  /**
+   * One of this athlete's segments.
+   *
+   * Both arguments, always. There is no `getSegment(id)` and there is no index
+   * that would answer one — see `schema.ts`, and CLAUDE.md section 6 for what a
+   * lookup on an entity id alone costs.
+   */
+  async getSegment(owner: AthleteId, id: SegmentId): Promise<SegmentRecord | undefined> {
+    const row = await this.#segments.where(INDEX.segmentByCreatorAndId).equals([owner, id]).first();
+    return row === undefined ? undefined : fromPersistedSegment(row);
+  }
+
+  /**
+   * This athlete's segments, **newest first**.
+   *
+   * Newest first because the caller that matters is #64's duplicate detection,
+   * which compares a candidate against what the athlete already has, and a
+   * rider's recent segments are the ones a new one is most likely to duplicate.
+   *
+   * ⚠️ **Bounded by `limit`, and the bound is the caller's** — an athlete with
+   * a decade of segments would otherwise decode every one of them, geometry
+   * included, to check one candidate. `apps/web` states its own budget in one
+   * named constant rather than leaving it implicit here.
+   */
+  async listSegments(owner: AthleteId, limit?: number): Promise<SegmentRecord[]> {
+    let query = this.#segments
+      .where(INDEX.segmentByCreatorAndCreatedAt)
+      .between([owner, Dexie.minKey], [owner, Dexie.maxKey], true, true)
+      .reverse();
+    if (limit !== undefined) {
+      query = query.limit(limit);
+    }
+    const rows = await query.toArray();
+    return rows.map(fromPersistedSegment);
+  }
+
+  /**
+   * Deletes one of this athlete's segments.
+   *
+   * @returns whether a segment was removed. `false` for one that does not exist
+   * **and** for one that belongs to somebody else, which are deliberately
+   * indistinguishable: reporting them differently would answer "does athlete B
+   * have a segment with this id" to athlete A.
+   */
+  async deleteSegment(owner: AthleteId, id: SegmentId): Promise<boolean> {
+    return this.#db.transaction('rw', [this.#segments], async () => {
+      const existing = await this.#segments
+        .where(INDEX.segmentByCreatorAndId)
+        .equals([owner, id])
+        .first();
+      if (existing === undefined) {
+        return false;
+      }
+      await this.#segments.delete(id);
+      return true;
+    });
   }
 
   // --- Streams (#27) --------------------------------------------------------

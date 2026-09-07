@@ -277,6 +277,55 @@ export function resistanceLevel(value: number): ResistanceLevel {
   return value as ResistanceLevel;
 }
 
+// --- Bearing ----------------------------------------------------------------
+
+/**
+ * A compass bearing in degrees clockwise from true north, in `[0, 360)`.
+ *
+ * Its own type rather than a bare number, and deliberately not a
+ * {@link DegreesLatitude} or a {@link GradePercent}, because all three are
+ * "degrees" and only one of them is an azimuth. #64's segment endpoints carry
+ * one each, and a latitude written into a bearing field would place the
+ * endpoint's direction of travel somewhere between north and slightly east of
+ * north for every point in the northern hemisphere — plausible, never out of
+ * range, and wrong.
+ *
+ * **True north, not magnetic.** Magnetic north moves several kilometres a year
+ * and the declination between them is a function of position and date, so a
+ * stored magnetic bearing decays. Every bearing in this program is computed
+ * from two WGS 84 positions and is therefore true by construction; nothing here
+ * reads a magnetometer.
+ *
+ * **Half-open at 360.** 360° and 0° are the same direction, and admitting both
+ * would make two equal bearings compare unequal — so {@link degreesBearing}
+ * normalises rather than rejecting, and 360 becomes 0. Comparing two of these
+ * for direction agreement is `bearingDifference`, never subtraction: the
+ * shortest angle between 359° and 1° is two degrees and the subtraction says
+ * 358.
+ */
+export type DegreesBearing = Quantity<'degree of bearing'>;
+
+/**
+ * Normalise any finite angle in degrees into `[0, 360)`.
+ *
+ * Normalises rather than throwing, because every arithmetic path that produces
+ * a bearing — `atan2`, or adding 180 to reverse one — naturally lands outside
+ * the range, and a constructor that rejected those would push a modulo to every
+ * call site. The one thing it will not accept is a non-finite value, which is
+ * what a bearing between two identical points would be if it were computed
+ * carelessly.
+ *
+ * @throws {UnitError} if not a finite number.
+ */
+export function degreesBearing(value: number): DegreesBearing {
+  assertFinite(value, 'bearing in degrees');
+  // Two steps, because `%` in JavaScript keeps the sign of the dividend: a raw
+  // `-90 % 360` is `-90`, not `270`. Adding a turn before the second modulo is
+  // what makes the result non-negative for every input, and the second modulo
+  // is what stops `-0.0 + 360` landing on 360 exactly.
+  return (((value % 360) + 360) % 360) as DegreesBearing;
+}
+
 // --- Geographic position ----------------------------------------------------
 //
 // ADR 0004 decision D binds the two constructors below and the two in

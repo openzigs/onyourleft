@@ -29,14 +29,18 @@
  * anything at the scale this is called at, and both would be a decision to
  * revisit if a segment matcher (#12) ever needs metre-accurate long baselines.
  *
- * ⚠️ **This is a distance, not a bearing and not a projection.** Nothing here
- * is suitable for drawing a map: a chart or a tile renderer needs a projection,
- * which is #63's problem and a different piece of mathematics.
+ * ⚠️ **This is a distance and a bearing, not a projection.** Nothing here is
+ * suitable for drawing a map: a chart or a tile renderer needs a projection,
+ * which is #63's problem and a different piece of mathematics. The bearing half
+ * arrived with #64, whose segment endpoints are stored as a position plus a
+ * direction of travel — see {@link initialBearing}.
  */
 
 import { assertFinite } from './unit-error';
 
-import type { GeographicPosition, Metres } from './quantities';
+import { degreesBearing } from './quantities';
+
+import type { DegreesBearing, GeographicPosition, Metres } from './quantities';
 
 /**
  * The IUGG mean radius R₁ = (2a + b) / 3 for WGS 84, in metres.
@@ -102,4 +106,77 @@ export function distanceBetween(from: GeographicPosition, to: GeographicPosition
   // guards above cannot see — it is produced by this arithmetic, not supplied.
   const angle = 2 * Math.asin(Math.min(1, Math.sqrt(halfChordSquared)));
   return (angle * EARTH_MEAN_RADIUS_METRES) as Metres;
+}
+
+/**
+ * The **initial** bearing of the great circle from one position to another.
+ *
+ * Also called the forward azimuth. On a sphere a great-circle track's bearing
+ * changes along the path, so this is the direction you set off in, not the
+ * direction you arrive on — and over the distances #64 measures it across
+ * (tens of metres between consecutive ride samples) the two are the same to
+ * far more precision than a consumer GNSS receiver offers.
+ *
+ * ⚠️ **Not `atan2(Δlat, Δlon)`.** That is the answer on a flat plane and it is
+ * wrong by the cosine of the latitude: at 51° N a degree of longitude is 63% of
+ * a degree of latitude, so the naive formula reports a bearing rotated by up to
+ * tens of degrees. This project's endpoint test agrees directions to within a
+ * tolerance measured in tens of degrees, so that error is not a rounding
+ * detail — it is the difference between accepting and rejecting an effort.
+ *
+ * **Two identical positions have no bearing**, and there is no defensible value
+ * to return: 0 would be a claim of "due north" that a caller cannot tell from a
+ * real one. `Math.atan2(0, 0)` is 0 in IEEE 754 rather than `NaN`, so the
+ * degenerate case has to be caught rather than trusted to propagate.
+ *
+ * @returns the bearing in `[0, 360)`, or `undefined` for two identical
+ * positions.
+ */
+export function initialBearing(
+  from: GeographicPosition,
+  to: GeographicPosition,
+): DegreesBearing | undefined {
+  assertFinite(from.latitude, 'latitude in degrees');
+  assertFinite(from.longitude, 'longitude in degrees');
+  assertFinite(to.latitude, 'latitude in degrees');
+  assertFinite(to.longitude, 'longitude in degrees');
+
+  if (from.latitude === to.latitude && from.longitude === to.longitude) {
+    return undefined;
+  }
+
+  const fromLatitude = from.latitude * RADIANS_PER_DEGREE;
+  const toLatitude = to.latitude * RADIANS_PER_DEGREE;
+  const deltaLongitude = (to.longitude - from.longitude) * RADIANS_PER_DEGREE;
+
+  const y = Math.sin(deltaLongitude) * Math.cos(toLatitude);
+  const x =
+    Math.cos(fromLatitude) * Math.sin(toLatitude) -
+    Math.sin(fromLatitude) * Math.cos(toLatitude) * Math.cos(deltaLongitude);
+
+  // `degreesBearing` normalises into [0, 360); `atan2` returns (-180, 180].
+  return degreesBearing((Math.atan2(y, x) * 180) / Math.PI);
+}
+
+/**
+ * The smallest angle between two bearings, in degrees, in `[0, 180]`.
+ *
+ * ⚠️ **Subtraction is the wrong tool and it fails at the seam.** The difference
+ * between 359° and 1° is two degrees; `359 - 1` is 358. A direction-agreement
+ * test written as `Math.abs(a - b) <= tolerance` therefore rejects every effort
+ * that happens to run within a couple of degrees of due north, and passes every
+ * other test in the suite. This function is the reason that bug is not
+ * reachable from #64's endpoint test.
+ *
+ * Symmetric, and 180 for exactly opposite directions — which is the value that
+ * makes it usable as the "wrong way down the road" rejection.
+ */
+export function bearingDifference(a: DegreesBearing, b: DegreesBearing): number {
+  assertFinite(a, 'bearing in degrees');
+  assertFinite(b, 'bearing in degrees');
+  // Both arguments are already in [0, 360), so the raw difference is in
+  // (-360, 360) and its absolute value in [0, 360). Folding anything above 180
+  // back around the circle is what makes the result the SHORT way round.
+  const difference = Math.abs(a - b) % 360;
+  return difference > 180 ? 360 - difference : difference;
 }

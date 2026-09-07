@@ -24,6 +24,8 @@
 
 import {
   beatsPerMinute,
+  degreesBearing,
+  gradePercent,
   metres,
   seconds,
   unixSeconds,
@@ -34,14 +36,18 @@ import {
   UnitError,
 } from '@onyourleft/domain';
 
+import type { GeographicPosition } from '@onyourleft/domain';
+
 import { StoreDecodeError } from './errors';
-import { activityId, athleteId, lapId, privacyZoneId } from './ids';
+import { activityId, athleteId, lapId, privacyZoneId, segmentId } from './ids';
 import type {
   ActivityRecord,
   AthleteRecord,
   LapRecord,
   PrivacyZoneRecord,
   OriginalFileReference,
+  SegmentEndpointRecord,
+  SegmentRecord,
 } from './records';
 import { parseVisibility } from './visibility';
 
@@ -91,6 +97,48 @@ export interface PersistedLap {
   movingTime: number;
   distance: number;
   averagePower?: number;
+}
+
+/**
+ * @see SegmentRecord
+ *
+ * The geometry is stored as **two parallel number arrays** rather than an array
+ * of `{latitude, longitude}` objects. A thousand-point segment is a thousand
+ * small objects under the structured clone algorithm and two typed-shaped
+ * arrays otherwise; the arrays clone faster, store smaller, and — the reason
+ * that actually decided it — make a partial write visible, because a geometry
+ * whose two arrays differ in length is detectably corrupt where a truncated
+ * array of pairs is merely short.
+ *
+ * ⚠️ **`latitudes` and `longitudes`, in that order, and never one interleaved
+ * array.** An interleaved `[lat, lon, lat, lon, …]` is one off-by-one away from
+ * transposing every coordinate in the segment, which is the exact bug
+ * `geographicPosition`'s branded parameters exist to prevent one layer up.
+ */
+export interface PersistedSegment {
+  id: string;
+  createdBy: string;
+  name: string;
+  sport: string;
+  latitudes: number[];
+  longitudes: number[];
+  startLatitude: number;
+  startLongitude: number;
+  startBearing: number;
+  startRadius: number;
+  endLatitude: number;
+  endLongitude: number;
+  endBearing: number;
+  endRadius: number;
+  bearingToleranceDegrees: number;
+  distance: number;
+  elevationGain?: number;
+  averageGrade?: number;
+  maximumGrade?: number;
+  elevationSource: string;
+  elevationResolutionMetres?: number;
+  visibility: string;
+  createdAt: number;
 }
 
 /** @see PrivacyZoneRecord */
@@ -448,5 +496,191 @@ export function fromPersistedPrivacyZone(row: PersistedPrivacyZone): PrivacyZone
       decodedNumber('privacyZone.createdAt', row.createdAt),
       unixSeconds,
     ),
+  };
+}
+
+// --- Segments (#64) ---------------------------------------------------------
+
+/** Every value {@link ElevationSource} admits, so a typo on disk is rejected. */
+const ELEVATION_SOURCES: readonly string[] = ['device', 'dem', 'none'];
+
+/** Every value {@link SegmentSport} admits. @see ELEVATION_SOURCES */
+const SEGMENT_SPORTS: readonly string[] = ['ride', 'run'];
+
+function decodedMember<T extends string>(
+  field: string,
+  value: unknown,
+  allowed: readonly string[],
+): T {
+  const text = decodedString(field, value);
+  if (!allowed.includes(text)) {
+    throw new StoreDecodeError(`${field}: expected one of ${allowed.join(', ')}, found ${text}`);
+  }
+  return text as T;
+}
+
+export function toPersistedSegment(record: SegmentRecord): PersistedSegment {
+  return {
+    id: record.id,
+    createdBy: record.createdBy,
+    name: record.name,
+    sport: record.sport,
+    latitudes: record.geometry.map((point) => point.latitude),
+    longitudes: record.geometry.map((point) => point.longitude),
+    startLatitude: record.start.position.latitude,
+    startLongitude: record.start.position.longitude,
+    startBearing: record.start.bearing,
+    startRadius: record.start.radius,
+    endLatitude: record.end.position.latitude,
+    endLongitude: record.end.position.longitude,
+    endBearing: record.end.bearing,
+    endRadius: record.end.radius,
+    bearingToleranceDegrees: record.bearingToleranceDegrees,
+    distance: record.distance,
+    ...(record.elevationGain === undefined ? {} : { elevationGain: record.elevationGain }),
+    ...(record.averageGrade === undefined ? {} : { averageGrade: record.averageGrade }),
+    ...(record.maximumGrade === undefined ? {} : { maximumGrade: record.maximumGrade }),
+    elevationSource: record.elevationSource,
+    ...(record.elevationResolutionMetres === undefined
+      ? {}
+      : { elevationResolutionMetres: record.elevationResolutionMetres }),
+    visibility: record.visibility,
+    createdAt: record.createdAt,
+  };
+}
+
+/**
+ * @throws {StoreDecodeError} naming the field, for anything on disk this
+ * package cannot turn back into a segment — including the two geometry arrays
+ * disagreeing in length, which is what a partial write looks like.
+ *
+ * ⚠️ **No message here names a coordinate value**, per ADR 0004 decision D.
+ * `decoded` rewrites a `UnitError` and `@onyourleft/domain` already redacts the
+ * value for a latitude or a longitude; the length mismatch below names two
+ * lengths, which are counts rather than positions.
+ */
+export function fromPersistedSegment(row: PersistedSegment): SegmentRecord {
+  const latitudes = decodedNumberArray('segment.latitudes', row.latitudes);
+  const longitudes = decodedNumberArray('segment.longitudes', row.longitudes);
+  if (latitudes.length !== longitudes.length) {
+    throw new StoreDecodeError(
+      `segment.geometry: ${String(latitudes.length)} latitudes for ` +
+        `${String(longitudes.length)} longitudes`,
+    );
+  }
+
+  const geometry = latitudes.map((latitude, index) =>
+    positionAt('segment.geometry', latitude, longitudes[index] ?? Number.NaN),
+  );
+
+  return {
+    id: segmentId(decodedString('segment.id', row.id)),
+    createdBy: athleteId(decodedString('segment.createdBy', row.createdBy)),
+    name: decodedString('segment.name', row.name),
+    sport: decodedMember('segment.sport', row.sport, SEGMENT_SPORTS),
+    geometry,
+    start: endpointOf(
+      'segment.start',
+      row.startLatitude,
+      row.startLongitude,
+      row.startBearing,
+      row.startRadius,
+    ),
+    end: endpointOf(
+      'segment.end',
+      row.endLatitude,
+      row.endLongitude,
+      row.endBearing,
+      row.endRadius,
+    ),
+    bearingToleranceDegrees: decodedNumber(
+      'segment.bearingToleranceDegrees',
+      row.bearingToleranceDegrees,
+    ),
+    distance: decoded('segment.distance', decodedNumber('segment.distance', row.distance), metres),
+    ...(row.elevationGain === undefined
+      ? {}
+      : {
+          elevationGain: decoded(
+            'segment.elevationGain',
+            decodedNumber('segment.elevationGain', row.elevationGain),
+            metres,
+          ),
+        }),
+    ...(row.averageGrade === undefined
+      ? {}
+      : {
+          averageGrade: decoded(
+            'segment.averageGrade',
+            decodedNumber('segment.averageGrade', row.averageGrade),
+            gradePercent,
+          ),
+        }),
+    ...(row.maximumGrade === undefined
+      ? {}
+      : {
+          maximumGrade: decoded(
+            'segment.maximumGrade',
+            decodedNumber('segment.maximumGrade', row.maximumGrade),
+            gradePercent,
+          ),
+        }),
+    elevationSource: decodedMember(
+      'segment.elevationSource',
+      row.elevationSource,
+      ELEVATION_SOURCES,
+    ),
+    ...(row.elevationResolutionMetres === undefined
+      ? {}
+      : {
+          elevationResolutionMetres: decodedNumber(
+            'segment.elevationResolutionMetres',
+            row.elevationResolutionMetres,
+          ),
+        }),
+    visibility: parseVisibility(row.visibility),
+    createdAt: decoded(
+      'segment.createdAt',
+      decodedNumber('segment.createdAt', row.createdAt),
+      unixSeconds,
+    ),
+  };
+}
+
+function decodedNumberArray(field: string, value: unknown): number[] {
+  if (!Array.isArray(value)) {
+    throw new StoreDecodeError(`${field}: expected an array, found ${typeof value}`);
+  }
+  return (value as unknown[]).map((entry, index) =>
+    decodedNumber(`${field}[${String(index)}]`, entry),
+  );
+}
+
+function positionAt(field: string, latitude: number, longitude: number): GeographicPosition {
+  return geographicPosition(
+    decoded(`${field}.latitude`, latitude, degreesLatitude),
+    decoded(`${field}.longitude`, longitude, degreesLongitude),
+  );
+}
+
+function endpointOf(
+  field: string,
+  latitude: unknown,
+  longitude: unknown,
+  bearing: unknown,
+  radius: unknown,
+): SegmentEndpointRecord {
+  return {
+    position: positionAt(
+      field,
+      decodedNumber(`${field}.latitude`, latitude),
+      decodedNumber(`${field}.longitude`, longitude),
+    ),
+    bearing: decoded(
+      `${field}.bearing`,
+      decodedNumber(`${field}.bearing`, bearing),
+      degreesBearing,
+    ),
+    radius: decoded(`${field}.radius`, decodedNumber(`${field}.radius`, radius), metres),
   };
 }
