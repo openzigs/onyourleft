@@ -100,6 +100,28 @@ export function watts(value: number): Watts {
   return value as Watts;
 }
 
+/**
+ * Mechanical work, in joules.
+ *
+ * Added by #75 for the critical-power model's second parameter, W′ — the
+ * finite quantity of work available above critical power, which is an energy
+ * rather than a rate and so cannot honestly be a {@link Watts}.
+ *
+ * Non-negative for the same reason {@link Watts} is: it is an accumulation of
+ * non-negative power over time, and a negative value means the fit produced
+ * something unphysical rather than that the rider recovered energy. Joules
+ * rather than kilojoules because the SI unit is the one every formula in the
+ * literature is written in, and a `× 1000` at a display boundary is cheaper
+ * than a unit mismatch inside one.
+ */
+export type Joules = Quantity<'joule'>;
+
+/** @throws {UnitError} if not a finite, non-negative number. */
+export function joules(value: number): Joules {
+  assertNotNegative(value, 'work in joules');
+  return value as Joules;
+}
+
 // --- Cadence ----------------------------------------------------------------
 
 /** Crank cadence in revolutions per minute. */
