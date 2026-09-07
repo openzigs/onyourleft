@@ -21,6 +21,7 @@ import { probeBrowser, type CapabilityProbe } from './support/bluetooth-support'
 import { saveWithAnchor, webCryptoDigest } from './transfer/browser';
 import { ensureLocalAthlete, LOCAL_ATHLETE, renderAfterAthlete } from './local-athlete';
 import type { AnalysisPort } from './analysis/store-port';
+import type { SegmentPort } from './segments/store-port';
 import type { DetailPort } from './detail/store-port';
 import { browserBasemapConfig } from './map/basemap';
 import type { MapPort } from './map/port';
@@ -164,6 +165,24 @@ function buildAnalysisPort(): AnalysisPort {
 }
 
 /**
+ * The segments screen's port (#64).
+ *
+ * Unconditional, like the library's and the analysis screen's: cutting a
+ * segment out of a stored ride needs no `crypto.subtle` and no secure context.
+ * `crypto.randomUUID` — which `SegmentsView` uses for the new segment's id — is
+ * available outside a secure context, unlike `crypto.subtle`, so this screen
+ * works from a `file://` bundle where the import screen deliberately does not.
+ *
+ * A fifth port over the **same** connection, and separate for the reason the
+ * other four are: `SegmentStore` offers no way to read a whole stream set, no
+ * way to read the athlete record and no way to delete an activity, and
+ * `ActivityStore` satisfies every one of them structurally.
+ */
+function buildSegmentPort(): SegmentPort {
+  return { store: localStore(), athleteId: LOCAL_ATHLETE };
+}
+
+/**
  * Build the import and export screen's port, or nothing.
  *
  * `undefined` where `crypto.subtle` is absent, which is every non-secure
@@ -215,6 +234,7 @@ function render(): void {
         library={buildLibraryPort()}
         detail={buildDetailPort()}
         analysis={buildAnalysisPort()}
+        segments={buildSegmentPort()}
         map={loadMapPort}
         basemap={browserBasemapConfig()}
       />

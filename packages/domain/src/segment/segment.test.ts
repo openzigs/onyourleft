@@ -417,6 +417,31 @@ describe('creating a segment', () => {
     expect(withGap.maximumGrade ?? 0).toBeLessThan(48);
   });
 
+  it('reports no grade across a pair the rider did not move over', () => {
+    // A stopped rider produces two identical samples, so the run is zero. The
+    // altimeter still drifts, so the rise is not — and `rise / 0` is Infinity,
+    // which would be stored as the maximum grade of a segment that merely
+    // paused at a traffic light.
+    //
+    // Found by mutation: relaxing the guard from `run > 0` to `run >= 0` left
+    // the whole suite green, because no fixture had a repeated position. This
+    // test is that fixture.
+    const geometry = [
+      at(51.5, -0.12),
+      at(51.5 + 250 / METRES_PER_DEGREE_LATITUDE, -0.12),
+      at(51.5 + 250 / METRES_PER_DEGREE_LATITUDE, -0.12),
+      at(51.5 + 500 / METRES_PER_DEGREE_LATITUDE, -0.12),
+    ];
+    const segment = createSegment(
+      draftOf({ geometry, altitudes: [100, 105, 108, 113], elevationSource: 'device' }),
+    );
+    expect(Number.isFinite(segment.maximumGrade ?? 0)).toBe(true);
+    // 5 m over 250 m is 2%, and the stationary pair contributes nothing to the
+    // grade — while still contributing its 3 m to the gain, which is real.
+    expect(segment.maximumGrade).toBeCloseTo(2, 3);
+    expect(segment.elevationGain).toBeCloseTo(13, 6);
+  });
+
   it('carries the elevation source and resolution so two segments can be compared', () => {
     const segment = createSegment(
       draftOf({
