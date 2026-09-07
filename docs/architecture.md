@@ -612,6 +612,7 @@ share one.
 | [0009](adr/0009-clean-room-posture.md) | Clean-room posture toward Strava and Zwift | #19 |
 | [0010](adr/0010-map-tiles-and-routing.md) | Map tiles, routing and elevation — providers, licences and cost | #60 |
 | [0011](adr/0011-stream-storage.md) | Activity stream storage — per-channel packed binary in IndexedDB | #27 |
+| [0012](adr/0012-data-licence.md) | The data licence — when a stored segment inherits ODbL, and the shape chosen so it does not | #64 |
 | [0013](adr/0013-adr-amendments.md) | Amending an accepted ADR — a dated, append-only `## Amendments` section | #147 |
 | [0014](adr/0014-portable-identity.md) | Portable identity — an Ed25519 device keypair and signed, content-addressed activity records | #61 |
 | [0015](adr/0015-dependency-licences.md) | Dependency licences — two closures, and a ruling on the six that were deferred | #24 |
@@ -650,9 +651,12 @@ still a proposal.
 | 0009 | #19 — clean-room posture | [Written](adr/0009-clean-room-posture.md). Renumbered from 0002, which #57 holds. |
 | 0010 | #60 — map tiles and routing | [Written](adr/0010-map-tiles-and-routing.md). Renumbered from 0008, which #86 holds. |
 | 0011 | #27 — stream storage | [Written](adr/0011-stream-storage.md). Renumbered from 0006, which #58 holds. Records the measured cost: **22.2 KiB per recorded hour** for a 1 Hz eight-channel ride. |
-| 0012 | **#64 — the data licence: whether OSM-derived segment geometry inherits ODbL** | **Reserved, not written.** [ADR 0001](adr/0001-licence.md)'s *Data* section defers this question and names "ADR 0007" as its destination — but 0007 is the [patent posture](adr/0007-patent-posture.md) (#59) and says nothing about ODbL, so the pointer resolved to the wrong document and this table reserved nothing for it (#119). It does now. **Reserving is not deciding**: the ODbL question is #64's, [ADR 0010](adr/0010-map-tiles-and-routing.md) deliberately does not touch it, and ADR 0001's constraint stands as written — OSM attribution on any instance serving OSM-derived tiles or routes, and the question answered before segment geometry is persisted anywhere. #64 and #73 stay blocked on it. ADR 0001 carries an amendment recording the wrong number. |
-| 0013 | #147 — amending an accepted ADR | [Written](adr/0013-adr-amendments.md). Took 0013 rather than 0012 **on purpose**: 0012 is reserved one row up, and consuming it in the same pull request that reserved it would have moved #119's dangling pointer down a row instead of repairing it. |
-| 0014 | #61 — portable identity | [Written](adr/0014-portable-identity.md). Took 0014 rather than 0012, which is reserved one row up. **The next free number is 0015.** |
+| 0012 | #64 — the data licence, and the ODbL question for stored segment geometry | [Written](adr/0012-data-licence.md). The reservation this table made for it (#119) is now consumed. [ADR 0001](adr/0001-licence.md)'s *Data* section deferred the question and named "ADR 0007" as its destination — but 0007 is the [patent posture](adr/0007-patent-posture.md) (#59) and says nothing about ODbL, so the pointer resolved to the wrong document; ADR 0001 carries an amendment recording that, and this row is where it now lands. **ADR 0012 discharges the deferral rather than restating it**: a stored segment's geometry is the athlete's own recorded trace and carries no OSM Contents (D-1), so the segment corpus is not a Derivative Database and §4.4 is not engaged (D-2). The rule that binds later work is **D-3** — a matcher that needs OSM way identifiers stores them in a *separate* store which is then ODbL, never as fields on `SegmentRecord`. **#64 and #73 are unblocked.** ADR 0001's attribution constraint is untouched (D-5). |
+| 0013 | #147 — amending an accepted ADR | [Written](adr/0013-adr-amendments.md). Took 0013 rather than 0012 **on purpose**: 0012 was reserved one row up and still unwritten, and consuming it in the same pull request that reserved it would have moved #119's dangling pointer down a row instead of repairing it. |
+| 0014 | #61 — portable identity | [Written](adr/0014-portable-identity.md). Took 0014 rather than 0012, which was reserved one row up and unwritten at the time. |
+| 0015 | #24 — dependency licences | [Written](adr/0015-dependency-licences.md). Classifies every dependency licence by **closure** rather than by path alone, and rules on the six that `CLAUDE.md` §3 had carried as deferred. Enforced by `DEP001`. |
+
+**The next free number is 0016.** Every number from 0001 to 0015 is now written; 0012 was the last reservation and #64 consumed it.
 
 Three issues carry an acceptance criterion naming their old number — #19 (0002), #60 (0008) and #27
 (0006). **The number here wins**; each issue has been commented with its new one. Renumbering a

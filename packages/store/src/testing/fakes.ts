@@ -7,12 +7,13 @@
  * observing the test go red. A harness that passes against a no-op write is
  * worthless, and this is the only way to know it does not."*
  *
- * There are **five** fakes here, and there are five on purpose: a harness that
+ * There are **six** fakes here, and there are six on purpose: a harness that
  * catches one failure shape is calibrated to that shape. They stand for the
  * causes CLAUDE.md section 5 names, and they fail for different reasons at
- * different points in the read. The fourth arrived with #46's write path and the
- * fifth with #61's, which is the rule this file exists to enforce: a new write
- * path may not ship without a fake proving the harness catches its failure.
+ * different points in the read. The fourth arrived with #46's write path, the
+ * fifth with #61's and the sixth with #64's, which is the rule this file exists
+ * to enforce: a new write path may not ship without a fake proving the harness
+ * catches its failure.
  *
  * | Fake | Cause it stands for | How the round trip notices |
  * |---|---|---|
@@ -21,6 +22,7 @@
  * | `gapFillingStoreFactory` | *wrong layer* — a layer above the store rewrote the data on its way in | the set comes back whole, and a gap has become a zero |
  * | `droppedFlushStoreFactory` | *wrong layer* — a flush acknowledged at the edge that never reached the database | the recording comes back short, at the first missing flush |
  * | `roundedClaimStoreFactory` | *wrong layer* — a layer above tidied a signed claim on its way in | the record comes back whole and **no longer verifies** |
+ * | `thinnedGeometryStoreFactory` | *wrong layer* — a downsampler above the store thinned a segment's geometry on its way in | the segment comes back complete, with the right name, distance and endpoints, and **a shorter path** |
  *
  * The second and third are the ones a naive harness misses. Both write to the
  * **real** IndexedDB, inside a **real** transaction that **really commits**, and
@@ -35,10 +37,11 @@
 import Dexie from 'dexie';
 
 import { openActivityStore, deleteActivityStore, type ActivityStore } from '../activity-store';
-import type { ActivityId } from '../ids';
+import type { ActivityId, SegmentId } from '../ids';
 import type { DeviceKeyRecord, StoredActivityRecord } from '../identity';
 import { SCHEMA_VERSIONS, TABLE } from '../schema';
 import type { NewRecordingChunk, NewRecordingSession } from '../recording';
+import type { SegmentRecord } from '../records';
 import type { PersistedStreamBlob } from '../stream-persisted';
 import {
   STREAM_CHANNELS,
@@ -101,6 +104,10 @@ function bindStore(real: ActivityStore): PersistentStore {
     getDeviceKey: async (owner) => real.getDeviceKey(owner),
     putActivityRecord: async (row) => real.putActivityRecord(row),
     getActivityRecord: async (owner, id) => real.getActivityRecord(owner, id),
+    putSegment: async (record) => real.putSegment(record),
+    getSegment: async (owner, id) => real.getSegment(owner, id),
+    listSegments: async (owner, limit) => real.listSegments(owner, limit),
+    deleteSegment: async (owner, id) => real.deleteSegment(owner, id),
   };
 }
 
@@ -176,6 +183,10 @@ export function memoryWriteStoreFactory(): StoreFactory {
         putDeviceKey: (record: DeviceKeyRecord) => {
           memory.set(`key:${record.athleteId}`, record);
           return Promise.resolve(record.athleteId);
+        },
+        putSegment: (record: SegmentRecord) => {
+          memory.set(`segment:${record.id}`, record);
+          return Promise.resolve(record.id);
         },
         putActivityRecord: (row: StoredActivityRecord) => {
           memory.set(`record:${row.activityId}`, row);
@@ -351,6 +362,55 @@ export function roundedClaimStoreFactory(): StoreFactory {
               ...row.record,
               claims: { ...row.record.claims, distance: Math.round(row.record.claims.distance) },
             },
+          }),
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository that **thins a segment's geometry on its way in**, keeping every
+ * other position.
+ *
+ * The sixth fake, and #64's. It stands for *wrong layer*, like the third and
+ * the fifth: a downsampler sitting above the store — the sort of thing added to
+ * keep a chart's point count bounded, which `apps/web/src/detail/series.ts`
+ * legitimately does for a ride trace — applied to the write path instead of the
+ * read path.
+ *
+ * ⚠️ **Everything a summary comparison would look at survives it.** The write
+ * succeeds. The row is real, in a real transaction that really commits. A fresh
+ * connection reads back a segment with the right id, the right owner, the right
+ * name, the right sport, the right visibility, the right `createdAt`, the right
+ * `distance` — because the distance is a stored field and is not recomputed —
+ * and the right start and end endpoints, because those are stored separately
+ * from the geometry and the first and last positions survive any every-other-one
+ * thinning.
+ *
+ * The only thing wrong with it is the shape of the road, and #64's eighth
+ * criterion names exactly that risk: a round trip must assert equality
+ * *"including the geometry, which is the field most likely to survive as a
+ * stale in-memory object"*. A round trip that compared the summary fields would
+ * pass against this fake and certify a corpus of segments whose paths no longer
+ * follow the roads they were cut from.
+ */
+export function thinnedGeometryStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        putSegment: async (record: SegmentRecord): Promise<SegmentId> =>
+          real.putSegment({
+            ...record,
+            // Keeps the first and the last, so both endpoints still agree with
+            // the geometry and nothing structural looks wrong.
+            geometry: record.geometry.filter(
+              (_position, index) => index % 2 === 0 || index === record.geometry.length - 1,
+            ),
           }),
       };
     },

@@ -37,6 +37,7 @@ export type RouteId =
   | 'activities'
   | 'activity-detail'
   | 'analysis'
+  | 'segments'
   | 'devices'
   | 'transfer'
   | 'about'
@@ -84,6 +85,15 @@ export const ROUTES: readonly RouteDefinition[] = [
     title: 'Analysis',
     summary:
       'Time in zone for a ride, and the best average power you have held for each length of time.',
+  },
+  {
+    id: 'segments',
+    path: '/segments',
+    navLabel: 'Segments',
+    title: 'Segments',
+    summary:
+      'Stretches of road you have named, cut from your own rides. A climb and its descent are ' +
+      'two different segments.',
   },
   {
     id: 'devices',

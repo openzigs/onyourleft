@@ -231,12 +231,12 @@ describe('the same pair, applied to a database that contains rows', () => {
 describe('the production registry', () => {
   it('is empty of record migrations, because no version has changed a record’s shape', () => {
     // Version 2 (#27) **adds** `streamSets` and `streamBlobs`, version 3 (#46)
-    // adds the recording stores and version 4 (#61) adds `deviceKeys` and
-    // `activityRecords`. All three rewrite nothing, so there is no record to
-    // transform and no `down` to write.
+    // adds the recording stores, version 4 (#61) adds `deviceKeys` and
+    // `activityRecords`, and version 5 (#64) adds `segments`. All four rewrite
+    // nothing, so there is no record to transform and no `down` to write.
     // Asserted rather than left implicit: the day a version does change a
     // record's shape, this test is what says the registry must gain an entry.
-    expect(SCHEMA_VERSION).toBe(4);
+    expect(SCHEMA_VERSION).toBe(5);
     expect(SCHEMA_MIGRATIONS).toEqual([]);
   });
 

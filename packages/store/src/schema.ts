@@ -33,10 +33,10 @@
 /**
  * The current schema version.
  *
- * **4** since #61. Version 2 added `streamSets` and `streamBlobs`; version 3
- * added `recordingSessions` and `recordingChunks`; version 4 adds `deviceKeys`
- * and `activityRecords`. All three are purely additive and
- * change **no existing record's shape**. That is why `SCHEMA_MIGRATIONS` in
+ * **5** since #64. Version 2 added `streamSets` and `streamBlobs`; version 3
+ * added `recordingSessions` and `recordingChunks`; version 4 added `deviceKeys`
+ * and `activityRecords`; version 5 adds `segments`. All four are purely additive
+ * and change **no existing record's shape**. That is why `SCHEMA_MIGRATIONS` in
  * `migrations.ts` is still empty: the registry holds *record* migrations, and
  * there is no record to transform. The version bumps themselves are real and
  * are tested — `migrations.test.ts` opens a version-1 database, writes rows
@@ -46,7 +46,7 @@
  * Bumping this for a change that *does* alter a record's shape means adding a
  * migration pair.
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 /**
  * Dexie stores its schema version in IndexedDB multiplied by ten, leaving room
@@ -79,6 +79,8 @@ export const TABLE = {
   deviceKeys: 'deviceKeys',
   /** #61: one row per activity — the signed, content-addressed record. */
   activityRecords: 'activityRecords',
+  /** #64: one row per segment — a named stretch of road with a direction. */
+  segments: 'segments',
 } as const;
 
 /**
@@ -152,6 +154,18 @@ export const INDEX = {
   activityRecordByAthleteAndActivity: '[athleteId+activityId]',
   /** `deleteAthlete`'s cascade over signed records. */
   activityRecordByAthlete: 'athleteId',
+  /**
+   * `getSegment` — the athlete-scoped point lookup.
+   *
+   * ⚠️ **`createdBy`, not `athleteId`**, because that is what the record calls
+   * its owning column and an index names a key path literally. It is the same
+   * scoping column under a different name, and it leads every segment index for
+   * the reason every other index in this file leads with the owner.
+   */
+  segmentByCreatorAndId: '[createdBy+id]',
+  /** `listSegments`, newest first — and `deleteAthlete`'s cascade. */
+  segmentByCreatorAndCreatedAt: '[createdBy+createdAt]',
+  segmentByCreator: 'createdBy',
 } as const;
 
 /**
@@ -297,9 +311,41 @@ export const STORES_V4: Readonly<Record<string, string>> = {
   ].join(', '),
 };
 
+/**
+ * Version 5 — #64's segments, added beside the eight stores that already exist.
+ *
+ * Keyed on `id`, with every index leading with `createdBy` — the owning
+ * athlete, under the name #64's field table gives it. There is no index that
+ * answers "the segment with this id" without also being told whose it is, which
+ * is the shape CLAUDE.md section 6 asks for and the reason every other index in
+ * this file has it.
+ *
+ * ⚠️ **There is deliberately no index on a source activity, because there is no
+ * such column.** #64's second criterion is that deleting the source activity
+ * leaves the segment intact, and `records.ts` explains why the reference is
+ * absent rather than present-and-not-cascaded: `deleteActivity` already
+ * cascades laps, streams and signed records, and a foreign key sitting there is
+ * an invitation to add a fourth cascade that would delete the athlete's
+ * segments when they tidied their history.
+ *
+ * ⚠️ **And no index on anything OSM-derived, because no such field exists**
+ * (ADR 0012 D-1). A `wayId` column here would convert the segment corpus into
+ * an ODbL Derivative Database; D-3 puts that data in its own store instead.
+ */
+export const STORES_V5: Readonly<Record<string, string>> = {
+  // The eight stores of versions 1 to 4 are inherited unchanged.
+  [TABLE.segments]: [
+    'id',
+    INDEX.segmentByCreator,
+    INDEX.segmentByCreatorAndId,
+    INDEX.segmentByCreatorAndCreatedAt,
+  ].join(', '),
+};
+
 export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V1,
   STORES_V2,
   STORES_V3,
   STORES_V4,
+  STORES_V5,
 ];

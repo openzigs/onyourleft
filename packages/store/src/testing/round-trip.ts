@@ -37,6 +37,7 @@ import type { RecoveredRecording } from '../recording';
 import type { StreamChannel, StreamChannels, StreamSet } from '../streams';
 import { STREAM_CHANNELS, type NewStreamSet } from '../streams';
 
+import type { SegmentEndpointRecord, SegmentRecord } from '../records';
 import type { StoreHarness } from './harness';
 
 /**
@@ -293,4 +294,98 @@ export async function assertSignedRecordRoundTrip(
     );
   }
   return read;
+}
+
+/**
+ * Writes a segment through the public path, discards every connection, reads it
+ * back through the public path, and asserts it is the same segment —
+ * **including every position of its geometry**.
+ *
+ * The athlete must already exist; `seedAthletes` in `fixtures.ts` puts three
+ * there.
+ *
+ * ⚠️ **The geometry comparison is the assertion, and the rest is scaffolding.**
+ * #64's eighth criterion says so in terms: the round trip asserts equality
+ * *"including the geometry, which is the field most likely to survive as a
+ * stale in-memory object"*. `thinnedGeometryStoreFactory` in `fakes.ts` is a
+ * store that gets every other field right and thins the path, and it exists so
+ * that deleting the loop below turns a test red rather than leaving the suite
+ * green.
+ *
+ * @returns what came back, so a caller can make further assertions about it.
+ * @throws {RoundTripFailure}
+ */
+export async function assertSegmentRoundTrip(
+  harness: StoreHarness,
+  segment: SegmentRecord,
+): Promise<SegmentRecord> {
+  const read = await harness.roundTrip(
+    async (store) => store.putSegment(segment),
+    async (store) => store.getSegment(segment.createdBy, segment.id),
+  );
+
+  if (read === undefined) {
+    throw new RoundTripFailure(
+      `segment ${segment.id} was written and reported success, and a fresh connection cannot ` +
+        `see it`,
+    );
+  }
+
+  requireEqual('segment.id', segment.id, read.id);
+  requireEqual('segment.createdBy', segment.createdBy, read.createdBy);
+  requireEqual('segment.name', segment.name, read.name);
+  requireEqual('segment.sport', segment.sport, read.sport);
+  requireEqual('segment.distance', segment.distance, read.distance);
+  requireEqual('segment.visibility', segment.visibility, read.visibility);
+  requireEqual('segment.createdAt', segment.createdAt, read.createdAt);
+  requireEqual('segment.elevationSource', segment.elevationSource, read.elevationSource);
+  requireEqual('segment.elevationGain', segment.elevationGain, read.elevationGain);
+  requireEqual('segment.averageGrade', segment.averageGrade, read.averageGrade);
+  requireEqual('segment.maximumGrade', segment.maximumGrade, read.maximumGrade);
+  requireEqual(
+    'segment.elevationResolutionMetres',
+    segment.elevationResolutionMetres,
+    read.elevationResolutionMetres,
+  );
+  requireEqual(
+    'segment.bearingToleranceDegrees',
+    segment.bearingToleranceDegrees,
+    read.bearingToleranceDegrees,
+  );
+  requireSameEndpoint('segment.start', segment.start, read.start);
+  requireSameEndpoint('segment.end', segment.end, read.end);
+
+  // The count first, so a thinned path fails with a message that says what
+  // happened rather than with a coordinate mismatch at position 1.
+  requireEqual('segment.geometry.length', segment.geometry.length, read.geometry.length);
+  for (const [index, expected] of segment.geometry.entries()) {
+    const actual = read.geometry[index];
+    if (actual === undefined) {
+      throw new RoundTripFailure(`segment.geometry[${String(index)}]: nothing came back`);
+    }
+    // ⚠️ The message names the INDEX and never the coordinate, per ADR 0004
+    // decision D — a round-trip failure is exactly the message that ends up
+    // pasted into a bug report.
+    if (expected.latitude !== actual.latitude || expected.longitude !== actual.longitude) {
+      throw new RoundTripFailure(
+        `segment.geometry[${String(index)}]: the position that came back is not the one written`,
+      );
+    }
+  }
+  return read;
+}
+
+function requireSameEndpoint(
+  field: string,
+  expected: SegmentEndpointRecord,
+  actual: SegmentEndpointRecord,
+): void {
+  requireEqual(`${field}.bearing`, expected.bearing, actual.bearing);
+  requireEqual(`${field}.radius`, expected.radius, actual.radius);
+  if (
+    expected.position.latitude !== actual.position.latitude ||
+    expected.position.longitude !== actual.position.longitude
+  ) {
+    throw new RoundTripFailure(`${field}.position: what came back is not what was written`);
+  }
 }

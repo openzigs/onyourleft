@@ -83,6 +83,7 @@ describe('the header', () => {
       '#/',
       '#/activities',
       '#/analysis',
+      '#/segments',
       '#/devices',
       '#/transfer',
       '#/about',

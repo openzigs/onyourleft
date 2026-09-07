@@ -26,15 +26,41 @@
 
 import type {
   BeatsPerMinute,
+  DegreesBearing,
+  ElevationSource,
+  GradePercent,
   Metres,
   Seconds,
+  SegmentSport,
+  SegmentVisibility,
   UnixSeconds,
   Watts,
   GeographicPosition,
 } from '@onyourleft/domain';
 
-import type { ActivityId, AthleteId, LapId, PrivacyZoneId } from './ids';
+import type { ActivityId, AthleteId, LapId, PrivacyZoneId, SegmentId } from './ids';
 import type { Visibility } from './visibility';
+
+/**
+ * A compile-time assertion that this package's {@link Visibility} and
+ * `@onyourleft/domain`'s `SegmentVisibility` are **the same three values**.
+ *
+ * Two visibility vocabularies in one program is how a `followers` segment ends
+ * up rendered by a check written for a two-state enum. The domain package
+ * cannot import this one — the dependency points the other way — so the two
+ * unions are declared twice and this is what stops them drifting. Widening
+ * either without the other makes the line below a type error.
+ *
+ * ⚠️ **The assignment must be in BOTH directions.** One direction only proves
+ * containment, and a `SegmentVisibility` that had dropped a value would still
+ * satisfy it.
+ */
+type VisibilitiesAgree = [
+  SegmentVisibility extends Visibility ? true : never,
+  Visibility extends SegmentVisibility ? true : never,
+];
+const visibilitiesAgree: VisibilitiesAgree = [true, true];
+void visibilitiesAgree;
 
 /**
  * The owner of the data on this device.
@@ -201,6 +227,106 @@ export interface OriginalFileReference {
   readonly key: string;
   /** SHA-256 of the file's bytes, lowercase hex, 64 characters. */
   readonly sha256: string;
+}
+
+/**
+ * One segment (#64) — a named stretch of road with a direction, against which
+ * efforts are timed.
+ *
+ * The shape is `@onyourleft/domain`'s `Segment` with this package's branded
+ * ids substituted. The geometry, the endpoint model, the minimum length and the
+ * two constraints that bind them are all stated there, in
+ * `segment/segment.ts`; this type is where they are persisted.
+ *
+ * ⚠️ **There is no reference to the activity a segment was created from, and
+ * that absence is #64's second acceptance criterion.** The criterion reads:
+ * *"The created segment's geometry is a **copy**, not a reference into the
+ * source activity: deleting the source activity leaves the segment intact …
+ * The failure prevented is a leaderboard that evaporates when one rider tidies
+ * their history."*
+ *
+ * A stored `sourceActivityId` would satisfy the letter of that and invite the
+ * breach: the next contributor to write a cascade sees a foreign key and
+ * cascades it, and `deleteActivity` already cascades laps, streams and signed
+ * records for good reasons. A reference that must never be followed is worse
+ * than no reference, so there is none, and `activity-store.test.ts` asserts
+ * that deleting an activity leaves its segments untouched. Provenance is
+ * carried by {@link createdBy}, which is what #64's field table asks for —
+ * "Ownership, and moderation".
+ *
+ * ⚠️ **No OSM identifier belongs on this record** — no way id, no node id, no
+ * edge id — per [ADR 0012](../../../docs/adr/0012-data-licence.md) D-1. Adding
+ * one converts the whole segment corpus into an ODbL Derivative Database, and
+ * it would arrive looking like a matcher optimisation. D-3 says where such data
+ * goes instead: its own object store, licensed ODbL, beside a segment record
+ * that keeps its own-trace geometry.
+ */
+export interface SegmentRecord {
+  readonly id: SegmentId;
+  /** The athlete who created it. Every read of this record filters on it. */
+  readonly createdBy: AthleteId;
+  readonly name: string;
+  readonly sport: SegmentSport;
+
+  /**
+   * The path, in the direction of travel — a copy of a span of the creator's
+   * own recorded activity, never a reference into it.
+   */
+  readonly geometry: readonly GeographicPosition[];
+
+  readonly start: SegmentEndpointRecord;
+  readonly end: SegmentEndpointRecord;
+
+  /** Travels with the segment, so retuning the default cannot re-decide it. */
+  readonly bearingToleranceDegrees: number;
+
+  /** Length along {@link geometry}, not the straight line end to end. */
+  readonly distance: Metres;
+
+  /** Absent when the source carried no altitude. **Not zero** — see below. */
+  readonly elevationGain?: Metres;
+  readonly averageGrade?: GradePercent;
+  readonly maximumGrade?: GradePercent;
+
+  /**
+   * Where the elevation numbers came from, and at what resolution.
+   *
+   * #64: "Two segments compared with different DEMs are not comparable." Both
+   * are stored so a reader can see that before comparing, and
+   * `elevationSource: 'none'` is why the three fields above are optional: an
+   * unmeasured climb must not read as a flat road.
+   */
+  readonly elevationSource: ElevationSource;
+  readonly elevationResolutionMetres?: number;
+
+  /**
+   * ADR 0004's default is `private`, and #64's fourth criterion makes one case
+   * unconditional: a segment whose endpoints fall inside a privacy zone cannot
+   * be created `public`, because a public segment start is a published address.
+   * This package does not enforce that — it has no view of what a "start" means
+   * to a rider — and `apps/web/src/segments/create.ts` does, before it calls
+   * `putSegment`.
+   */
+  readonly visibility: SegmentVisibility;
+
+  /**
+   * When the segment was created.
+   *
+   * #64: "Efforts before a segment existed must be excludable from
+   * rolling-window rankings. Backfilling them silently changes what a '90-day'
+   * board means." Stored so that exclusion is expressible; #68 decides whether
+   * to apply it.
+   */
+  readonly createdAt: UnixSeconds;
+}
+
+/** One end of a segment. @see SegmentRecord */
+export interface SegmentEndpointRecord {
+  readonly position: GeographicPosition;
+  /** The direction of travel through this endpoint, true rather than magnetic. */
+  readonly bearing: DegreesBearing;
+  /** How close a sample must be to count as having reached it. */
+  readonly radius: Metres;
 }
 
 /** One lap within an activity. */

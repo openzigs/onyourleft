@@ -34,6 +34,8 @@ export type {
   NewLap,
   OriginalFileReference,
   PrivacyZoneRecord,
+  SegmentEndpointRecord,
+  SegmentRecord,
 } from './records';
 export { DEFAULT_PRIVACY_ZONE_RADIUS_METRES } from './records';
 
@@ -46,8 +48,9 @@ export type {
   LapId,
   PrivacyZoneId,
   RecordingSessionId,
+  SegmentId,
 } from './ids';
-export { activityId, athleteId, lapId, privacyZoneId, recordingSessionId } from './ids';
+export { activityId, athleteId, lapId, privacyZoneId, recordingSessionId, segmentId } from './ids';
 
 // --- Visibility (ADR 0004 decision A) ---------------------------------------
 
@@ -127,6 +130,7 @@ export type {
   PersistedAthlete,
   PersistedLap,
   PersistedPrivacyZone,
+  PersistedSegment,
 } from './persisted';
 export type {
   PersistedRecordingChannel,
@@ -150,6 +154,8 @@ export {
   toPersistedAthlete,
   toPersistedLap,
   toPersistedPrivacyZone,
+  fromPersistedSegment,
+  toPersistedSegment,
 } from './persisted';
 
 // --- Identity: the device keypair and signed activity records (#61) ---------
