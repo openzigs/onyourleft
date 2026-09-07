@@ -70,6 +70,8 @@ function bindStore(real: ActivityStore): PersistentStore {
     putAthlete: async (record) => real.putAthlete(record),
     ensureAthlete: async (record) => real.ensureAthlete(record),
     setAthleteThresholds: async (id, thresholds) => real.setAthleteThresholds(id, thresholds),
+    setActivityLoadSummary: async (owner, activity, summary) =>
+      real.setActivityLoadSummary(owner, activity, summary),
     getAthlete: async (id) => real.getAthlete(id),
     deleteAthlete: async (id) => real.deleteAthlete(id),
     putActivity: async (record) => real.putActivity(record),
@@ -139,6 +141,13 @@ export function memoryWriteStoreFactory(): StoreFactory {
         setAthleteThresholds: (id, thresholds) => {
           memory.set(`athlete:${id}`, thresholds);
           return Promise.resolve(undefined);
+        },
+        // Diverted like the rest. It answers `true`, so a backfill reports
+        // every ride computed and the next read finds none of them written —
+        // which is what makes the read-back the only thing that notices.
+        setActivityLoadSummary: (_owner, activity, summary) => {
+          memory.set(`load:${activity}`, summary);
+          return Promise.resolve(true);
         },
         putActivity: (record) => {
           memory.set(`activity:${record.id}`, record);

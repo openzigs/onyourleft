@@ -69,6 +69,10 @@ export interface PersistedActivity {
   visibility: string;
   hasPosition: boolean;
   averagePower?: number;
+  /** @see ActivityRecord.effortWeightedPower — the load summary #77 reads. */
+  effortWeightedPower?: number;
+  effortWeightedHeartRate?: number;
+  loadCoveredTime?: number;
   /** Flattened from `ActivityRecord.originalFile` — see the note above. */
   originalFileKey?: string;
   /** Flattened, and indexed: #37 deduplicates on it. */
@@ -247,6 +251,20 @@ export function toPersistedActivity(record: ActivityRecord): PersistedActivity {
   if (record.averagePower !== undefined) {
     row.averagePower = record.averagePower;
   }
+  // The load summary (#77), each written conditionally for the same reason.
+  // ⚠️ At most one basis is ever set — `records.ts` states why — and this
+  // function does not enforce it: a record that carried both would be written
+  // as it stands. The invariant belongs where the value is produced, and
+  // `loadSummaryOf` in `apps/web/src/analysis/summary.ts` is the one producer.
+  if (record.effortWeightedPower !== undefined) {
+    row.effortWeightedPower = record.effortWeightedPower;
+  }
+  if (record.effortWeightedHeartRate !== undefined) {
+    row.effortWeightedHeartRate = record.effortWeightedHeartRate;
+  }
+  if (record.loadCoveredTime !== undefined) {
+    row.loadCoveredTime = record.loadCoveredTime;
+  }
   if (record.originalFile !== undefined) {
     row.originalFileKey = record.originalFile.key;
     row.originalFileSha256 = record.originalFile.sha256;
@@ -296,6 +314,37 @@ export function fromPersistedActivity(row: PersistedActivity): ActivityRecord {
     ...(averagePower === undefined
       ? {}
       : { averagePower: decoded('activity.averagePower', averagePower, watts) }),
+    // Absent stays absent, on `fromPersistedAthlete`'s reasoning: a row written
+    // before #77 genuinely has no load summary, and a reader that invented one
+    // would be lying about the disk. `apps/web` offers to compute the missing
+    // ones rather than pretending they are there.
+    ...(row.effortWeightedPower === undefined
+      ? {}
+      : {
+          effortWeightedPower: decoded(
+            'activity.effortWeightedPower',
+            decodedNumber('activity.effortWeightedPower', row.effortWeightedPower),
+            watts,
+          ),
+        }),
+    ...(row.effortWeightedHeartRate === undefined
+      ? {}
+      : {
+          effortWeightedHeartRate: decoded(
+            'activity.effortWeightedHeartRate',
+            decodedNumber('activity.effortWeightedHeartRate', row.effortWeightedHeartRate),
+            beatsPerMinute,
+          ),
+        }),
+    ...(row.loadCoveredTime === undefined
+      ? {}
+      : {
+          loadCoveredTime: decoded(
+            'activity.loadCoveredTime',
+            decodedNumber('activity.loadCoveredTime', row.loadCoveredTime),
+            seconds,
+          ),
+        }),
     ...(originalFile === undefined ? {} : { originalFile }),
   };
   return record;

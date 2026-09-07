@@ -50,6 +50,7 @@ import {
   type ImportFaultCode,
   type ImportedRide,
 } from './read-activity-file';
+import { loadSummaryOf } from '../analysis/summary';
 import type { TransferStore } from './store-port';
 
 /**
@@ -312,6 +313,16 @@ async function storeRide(
     distance: ride.distance,
     hasPosition: ride.hasPosition,
     ...(ride.averagePower === undefined ? {} : { averagePower: ride.averagePower }),
+    // The threshold-independent half of this ride's load (#77), computed here
+    // because the samples are already in hand — the importer has just decoded
+    // them and is about to write them. Doing it later would mean decoding the
+    // same channels a second time, which is the read the fitness chart's own
+    // criterion forbids. `analysis/summary.ts` records why the load itself is
+    // not stored: it depends on a threshold the rider can change.
+    ...(loadSummaryOf(
+      { power: ride.channels.power, heartRate: ride.channels.heartRate },
+      ride.sampleInterval,
+    ) ?? {}),
     // The key names the file this ride came from — `source.fileName`, the name
     // in the rider's archive, and **not** `ride.name`, which for GPX and TCX is
     // the `<name>` written inside the document and for FIT is derived from the

@@ -23,7 +23,7 @@
  * setting**. One reader is how that stays true.
  */
 
-import type { BeatsPerMinute, Watts } from '@onyourleft/domain';
+import type { BeatsPerMinute, Seconds, Watts } from '@onyourleft/domain';
 import type {
   ActivityId,
   ActivityRecord,
@@ -54,6 +54,21 @@ export interface AnalysisStore {
       readonly thresholdHeartRate?: BeatsPerMinute | undefined;
     },
   ): Promise<AthleteRecord | undefined>;
+  /**
+   * Write one ride's load summary (#77) — the backfill's only write.
+   *
+   * Athlete-scoped and narrow, so a derived number cannot destroy a ride's
+   * name or its visibility. `packages/store` records why that is its job.
+   */
+  setActivityLoadSummary(
+    owner: AthleteId,
+    id: ActivityId,
+    summary: {
+      readonly effortWeightedPower?: Watts | undefined;
+      readonly effortWeightedHeartRate?: BeatsPerMinute | undefined;
+      readonly loadCoveredTime: Seconds;
+    },
+  ): Promise<boolean>;
   getActivity(owner: AthleteId, id: ActivityId): Promise<ActivityRecord | undefined>;
   listActivitySummaries(
     owner: AthleteId,
