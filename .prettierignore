@@ -9,6 +9,15 @@ pnpm-lock.yaml
 # another branch's formatting against paths under `.claude/`. Measured on #148:
 # two planted files there fail `format:check` on a tree whose own sources are
 # clean. CI is unaffected — a runner has no worktrees.
+#
+# ⚠️ REDUNDANT TODAY, and kept deliberately rather than by oversight (#155).
+# Prettier 3 reads `.gitignore` as well as this file, and `.gitignore` already
+# ignores `.claude/` — measured by deleting this line and planting an
+# unformatted file under `.claude/worktrees/`, which `format:check` still does
+# not report. It becomes load-bearing again the moment `.gitignore` stops
+# covering the whole directory, which committing anything under `.claude/`
+# (a skill, a settings file) would do. Insurance against a one-line change
+# elsewhere, and that is a measured claim rather than an assumed one.
 .claude/
 
 # Prose and legal text. CLAUDE.md section 7: "do not reformat files you did not

@@ -154,6 +154,45 @@ run_check
 assert_red 'the renamed directory is still watched'
 assert_says 'and names the unconventional file' 'apps/web/src/accessibility/newrule.test.ts'
 
+# --- The gate selects something that is not an accessibility test ------------
+#
+# Rule 2, and the case #155 found it was missing. The issue reported this rule
+# as unable to fire, on the evidence that reverting `test:a11y` to the old
+# directory-substring filter left it green. That observation is correct and the
+# conclusion drawn from it was not: with every file conventionally named, a
+# directory filter selects exactly the right set, so passing was the right
+# answer rather than a vacuous one.
+#
+# What rule 2 uniquely catches is a filter broadened the OTHER way — past the
+# convention, pulling in tests that are not accessibility tests. Rule 3 cannot
+# see this: `foo.test.ts` is outside any accessibility directory, so the rule
+# that polices those directories has no opinion on it. Deleting rule 2 leaves
+# this case green, which is the mutation #155 asked for.
+new_fixture
+touch_test apps/web/src/a11y/routes.a11y.test.tsx
+touch_test apps/web/src/ride/metrics.test.ts
+selection apps/web/src/a11y/routes.a11y.test.tsx apps/web/src/ride/metrics.test.ts
+run_check
+assert_red 'a selected file that is not an accessibility test fails'
+assert_says 'and names it' 'apps/web/src/ride/metrics.test.ts'
+assert_says 'and says the filter was broadened' 'not an accessibility test'
+
+# --- ...and rule 3, separately, is what catches #142's own regression --------
+#
+# The pair matters: this is the case the issue believed rule 2 covered. The
+# directory is renamed, every selected file still carries the convention (the
+# old filter matches the FILENAME too), and the non-conventional test left
+# behind is silently outside the gate. Rule 2 stays quiet here — correctly,
+# because nothing selected is wrong — and rule 3 is what goes red.
+new_fixture
+touch_test apps/web/src/accessibility/routes.a11y.test.tsx
+touch_test apps/web/src/accessibility/audit.test.ts
+selection apps/web/src/accessibility/routes.a11y.test.tsx
+run_check
+assert_red "#142's regression is caught, by the accessibility-directory rule"
+assert_says 'and names the dropped file' 'apps/web/src/accessibility/audit.test.ts'
+assert_says 'and attributes it to the directory rule' 'is a test in an accessibility directory'
+
 # --- A conventionally named test outside any a11y directory ------------------
 # The convention is what the gate selects on, so a file carrying it anywhere
 # under apps/ must be in the gate.
