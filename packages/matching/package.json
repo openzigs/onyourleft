@@ -1,0 +1,25 @@
+{
+  "name": "@onyourleft/matching",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "SPIKE (#65): a throwaway segment-matching prototype and its measurement harness. Not production code — #66 hardens or deletes it. See docs/spikes/0001-segment-matching.md.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit --project tsconfig.json && tsc --noEmit --project tsconfig.platform-free.json",
+    "test": "vitest run",
+    "spike:measure": "node --import ./tools/ts-extensionless-resolve.mjs tools/measure.ts"
+  },
+  "dependencies": {
+    "@onyourleft/domain": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3",
+    "vitest": "4.1.11"
+  }
+}
