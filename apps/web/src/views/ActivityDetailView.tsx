@@ -56,6 +56,7 @@ import {
 } from '../format';
 import {
   loadOverview,
+  loadOwnTrack,
   loadSharedTrack,
   loadTrace,
   type RideOverview,
@@ -71,6 +72,10 @@ import {
   type TraceChannel,
 } from '../detail/series';
 import type { DetailPort } from '../detail/store-port';
+import type { BasemapConfig } from '../map/basemap';
+import { MapPanel } from '../map/MapPanel';
+import type { MapPort } from '../map/port';
+import { trackGeometry, type TrackGeometry } from '../map/track';
 import { hrefFor, routeById } from '../shell/routes';
 
 /**
@@ -97,6 +102,17 @@ export interface ActivityDetailViewProps {
   readonly port?: DetailPort | undefined;
   /** The id from the route's `:activity` segment. */
   readonly activityId?: string | undefined;
+  /**
+   * How to get a map engine, or `undefined` where there is none.
+   *
+   * A **loader** rather than a port, so `maplibre-gl` is fetched only when a
+   * ride with GPS is actually opened — `map/maplibre.ts` records why that split
+   * matters for a product whose first milestone is mostly indoor rides. The
+   * accessibility suite and the view's own tests pass a resolved stub.
+   */
+  readonly map?: (() => Promise<MapPort>) | undefined;
+  /** Where the basemap is, or `undefined` until #53 publishes an archive. */
+  readonly basemap?: BasemapConfig | undefined;
 }
 
 type OverviewState =
@@ -120,12 +136,19 @@ function WayOut(): JSX.Element {
   );
 }
 
-export function ActivityDetailView({ port, activityId }: ActivityDetailViewProps): JSX.Element {
+export function ActivityDetailView({
+  port,
+  activityId,
+  map,
+  basemap,
+}: ActivityDetailViewProps): JSX.Element {
   const [state, setState] = useState<OverviewState>({ kind: 'loading' });
   const [enabled, setEnabled] = useState<readonly TraceChannel[]>(DEFAULT_SERIES);
   const [traces, setTraces] = useState<ReadonlyMap<TraceChannel, Trace>>(new Map());
   const [shared, setShared] = useState<SharedTrack | undefined>(undefined);
   const [showShared, setShowShared] = useState(false);
+  const [mapPort, setMapPort] = useState<MapPort | undefined>(undefined);
+  const [ownTrack, setOwnTrack] = useState<TrackGeometry | undefined>(undefined);
 
   const id: ActivityId | undefined =
     activityId === undefined || activityId === '' ? undefined : toActivityId(activityId);
@@ -184,6 +207,36 @@ export function ActivityDetailView({ port, activityId }: ActivityDetailViewProps
       live = false;
     };
   }, [port, id, state, enabled, traces]);
+
+  /**
+   * Load the map engine and the rider's own track, for a ride that has one.
+   *
+   * Both are conditional on `hasPosition`, so an indoor ride — most rides in
+   * this milestone — pays for neither: no `maplibre-gl` download and no
+   * position decode. #63's first criterion is that such a ride renders no map,
+   * and this is where that stops being a rendering decision and becomes a read
+   * that never happens.
+   */
+  useEffect(() => {
+    if (port === undefined || id === undefined || state.kind !== 'ready') {
+      return;
+    }
+    if (!state.overview.activity.hasPosition || map === undefined) {
+      return;
+    }
+    let live = true;
+    void (async () => {
+      const [engine, track] = await Promise.all([map(), loadOwnTrack(port, id)]);
+      if (!live) {
+        return;
+      }
+      setMapPort(engine);
+      setOwnTrack(track === undefined ? undefined : trackGeometry(track.segments));
+    })();
+    return () => {
+      live = false;
+    };
+  }, [port, id, state, map]);
 
   const toggle = useCallback((channel: TraceChannel): void => {
     setEnabled((current) =>
@@ -425,6 +478,20 @@ export function ActivityDetailView({ port, activityId }: ActivityDetailViewProps
 
       {activity.hasPosition ? (
         <>
+          <h3>Route</h3>
+          {/*
+            The geometry the map is handed is chosen here, and it is the whole
+            of #63's sixth criterion: with the shared view open the map receives
+            the **trimmed** segments, and the untrimmed ones are not in its
+            props, its state or the DOM. ADR 0004 decision C — obfuscation is
+            applied in the payload, never by the renderer.
+          */}
+          <MapPanel
+            port={mapPort}
+            basemap={basemap}
+            track={showShared && shared !== undefined ? trackGeometry(shared.segments) : ownTrack}
+          />
+
           <h3>What a shared copy would contain</h3>
           {showShared ? (
             <SharedSummary track={shared} own={activity.distance} />

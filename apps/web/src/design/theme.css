@@ -500,6 +500,37 @@ body {
 }
 
 /*
+ * The ride map (#63).
+ *
+ * A fixed height and a full-width block, because the map has no intrinsic size:
+ * a WebGL canvas in a container with no height renders zero pixels and looks
+ * exactly like a map that failed to load.
+ */
+.oyl-map {
+  background: var(--oyl-color-surface);
+  border: 1px solid var(--oyl-color-border);
+  border-radius: var(--oyl-radius);
+  display: block;
+  height: 20rem;
+  margin-top: var(--oyl-space-sm);
+  width: 100%;
+}
+
+/*
+ * The OpenStreetMap credit.
+ *
+ * Muted but not hidden, and deliberately not smaller than the body text: ODbL
+ * §4.3 and the OSMF Attribution Guidelines require it to be no less prominent
+ * than any of our own credit, and shrinking it is the easiest way to stop
+ * meeting that without noticing. #63's fourth criterion asserts it is in the
+ * DOM; this is the half a test cannot see, so it is stated here.
+ */
+.oyl-map__attribution {
+  color: var(--oyl-color-ink-muted);
+  margin-top: var(--oyl-space-xs);
+}
+
+/*
  * Motion is opt-in. Nothing in the shell animates today; the block is here so
  * that the first thing that does inherits the preference rather than being
  * retrofitted with it.
