@@ -64,6 +64,7 @@ import {
   ATHLETE_B,
   ATHLETE_C,
   ATHLETES,
+  athleteRecord,
   DROPPED_STRAP,
   resetFixtureIds,
   rideFor,
@@ -198,6 +199,39 @@ describe('deliberately breaking persistence — the criterion that makes #28 wor
     const written = await harness.write(async (store) => store.putStreamSet(set));
 
     expect(written).toBe(ride.id);
+  });
+
+  it('an ensureAthlete that never reaches disk is caught by reading back (#184)', async () => {
+    // The fifth write path's own red/green pair. `ensureAthlete` answers with
+    // the record it was handed, so a caller that trusts the return value sees a
+    // plausible athlete whether or not anything was written — which is CLAUDE.md
+    // §5's *wrong harness* cause, and the reason this asserts on a fresh read.
+    const harness = harnessWith(memoryWriteStoreFactory());
+
+    const returned = await harness.write(async (store) =>
+      store.ensureAthlete(athleteRecord(ATHLETE_A)),
+    );
+    const onDisk = await harness.read(async (store) => store.getAthlete(ATHLETE_A));
+
+    // It reported success — so a test that stopped at the return value passes.
+    expect(returned.id).toBe(ATHLETE_A);
+    // And the row is not there, which is the only assertion that notices.
+    expect(onDisk).toBeUndefined();
+  });
+
+  it('the real store passes that same read-back, so the case above is about the fake', async () => {
+    const harness = createStoreHarness();
+    try {
+      const returned = await harness.write(async (store) =>
+        store.ensureAthlete(athleteRecord(ATHLETE_A)),
+      );
+      const onDisk = await harness.read(async (store) => store.getAthlete(ATHLETE_A));
+
+      expect(returned.id).toBe(ATHLETE_A);
+      expect(onDisk?.id).toBe(ATHLETE_A);
+    } finally {
+      await harness.destroy();
+    }
   });
 
   it('a write that commits to the real database under a key the reader does not use fails the round trip', async () => {

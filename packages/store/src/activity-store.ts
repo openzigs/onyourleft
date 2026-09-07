@@ -318,6 +318,43 @@ export class ActivityStore {
   }
 
   /**
+   * The athlete with this id, creating them **only if there is none**.
+   *
+   * Returns whatever is on disk afterwards, which is the *existing* row when
+   * one was already there — never `record`. That is the whole difference from
+   * {@link putAthlete} and the reason this method exists rather than a caller
+   * writing the two-line version (#184).
+   *
+   * ⚠️ **`putAthlete` is a `put`.** A client calling it at start-up to make
+   * sure its athlete exists would overwrite `displayName`, `createdAt` and —
+   * since #78 — `thresholdPower` and `thresholdHeartRate` on **every page
+   * load**, silently discarding a threshold the rider had set. That is not a
+   * hypothetical: `apps/web` names one fixed local athlete and has to
+   * establish the row before its first write, so this is exactly the call it
+   * needs to make, and `putAthlete` is exactly the wrong one.
+   *
+   * ⚠️ **The read and the write are in one transaction**, for the reason
+   * {@link putActivity} states for its own: a read-then-write outside one lets
+   * a concurrent write land in between. Two tabs of this client open at the
+   * same moment would both see the row absent, and the loser of a
+   * `getAthlete`-then-`putAthlete` race would erase the winner's row. Inside a
+   * Dexie `rw` transaction the second one sees the first's insert.
+   *
+   * Idempotent, so a caller retrying after a crash — or simply reloading the
+   * page — is not told the retry failed.
+   */
+  async ensureAthlete(record: AthleteRecord): Promise<AthleteRecord> {
+    return this.#db.transaction('rw', [this.#athletes], async () => {
+      const existing = await this.#athletes.get(record.id);
+      if (existing !== undefined) {
+        return fromPersistedAthlete(existing);
+      }
+      await this.#athletes.put(toPersistedAthlete(record));
+      return record;
+    });
+  }
+
+  /**
    * Deletes an athlete and everything that belongs to them. See the cascade
    * note at the top of this file.
    *

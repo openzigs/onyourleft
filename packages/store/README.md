@@ -190,6 +190,26 @@ version-1 database, opens it at version 2, and checks every record survived and 
 The `up`/`down` machinery is tested end to end through a real Dexie version bump, so the first
 record-shape change is an entry in an array.
 
+### `ensureAthlete`, and why `putAthlete` is the wrong call at start-up
+
+Every write path that carries an owner — `putActivity`, `putRecordingSession`, `putPrivacyZone`,
+`putDeviceKey` — calls `#requireAthlete` and throws `StoreReferentialError` when there is no such
+row. That is what stops an orphaned ride, and it means **a client has to establish its athlete
+before its first write**.
+
+⚠️ **`putAthlete` is a `put`.** A client calling it on every start-up to make sure the row exists
+would rewrite it on every page load, discarding `displayName`, `createdAt` and — since #78 —
+`thresholdPower` and `thresholdHeartRate`. `ensureAthlete(record)` inserts **only if absent**, in one
+transaction, and returns whatever is on disk afterwards — the *existing* row when there was one,
+never the record it was handed. Idempotent, so a reload is not an error, and transactional, so two
+tabs opening at the same moment cannot both decide the row is missing and have the loser erase the
+winner.
+
+`apps/web` never made either call until [#184](https://github.com/openzigs/onyourleft/issues/184),
+so on a browser nobody had seeded by hand every import failed and every recording checkpoint failed
+— the second one silently, because the recorder catches its own write failure and carries on in
+memory. `apps/web/src/local-athlete.ts` is the fix and the seam that had no test.
+
 ### An optional field is not a migration, and that is why #78's thresholds are optional
 
 `AthleteRecord.thresholdPower` and `thresholdHeartRate` (#78) are **optional**, and that is a

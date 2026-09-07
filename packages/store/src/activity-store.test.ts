@@ -173,6 +173,97 @@ describe('persistence — the write must be visible to a reader that was not the
     }
   });
 
+  it('ensureAthlete creates the row when there is none, so a first write has an owner (#184)', async () => {
+    // The composition-root case. `apps/web` names one fixed athlete and nothing
+    // seeds it, so every write path that calls `#requireAthlete` threw
+    // `StoreReferentialError` on a browser that had never been seeded by hand.
+    const harness = createStoreHarness();
+    try {
+      const created = await harness.roundTrip(
+        async (fresh) => fresh.ensureAthlete(athlete()),
+        async (fresh) => fresh.getAthlete(ATHLETE_A),
+      );
+
+      expect(created?.id).toBe(ATHLETE_A);
+    } finally {
+      await harness.destroy();
+    }
+  });
+
+  it('ensureAthlete leaves an existing athlete completely alone', async () => {
+    // ⚠️ The whole reason this is not `putAthlete`. A client calling `put` at
+    // start-up to make sure its row exists would overwrite the display name,
+    // the creation instant and — since #78 — both thresholds, on every page
+    // load. Read back on a fresh handle, because "did the write reach disk" is
+    // the question and the in-memory return value cannot answer it.
+    const harness = createStoreHarness();
+    try {
+      const configured: AthleteRecord = {
+        ...athlete(),
+        displayName: 'Set by the rider',
+        createdAt: unixSeconds(1_600_000_000),
+        thresholdPower: watts(301),
+        thresholdHeartRate: beatsPerMinute(178),
+      };
+      await harness.write(async (fresh) => fresh.putAthlete(configured));
+
+      const returned = await harness.read(async (fresh) =>
+        fresh.ensureAthlete({
+          ...athlete(),
+          displayName: 'A default nobody chose',
+          createdAt: unixSeconds(1_770_000_000),
+        }),
+      );
+      const onDisk = await harness.read(async (fresh) => fresh.getAthlete(ATHLETE_A));
+
+      // What it returned is what was already there, not what it was handed.
+      expect(returned.displayName).toBe('Set by the rider');
+      expect(returned.thresholdPower).toBe(301);
+      // And disk agrees, which is the assertion the return value cannot make.
+      expect(onDisk?.displayName).toBe('Set by the rider');
+      expect(onDisk?.createdAt).toBe(1_600_000_000);
+      expect(onDisk?.thresholdPower).toBe(301);
+      expect(onDisk?.thresholdHeartRate).toBe(178);
+    } finally {
+      await harness.destroy();
+    }
+  });
+
+  it('ensureAthlete is idempotent, so a reload is not an error', async () => {
+    const harness = createStoreHarness();
+    try {
+      await harness.write(async (fresh) => fresh.ensureAthlete(athlete()));
+      await harness.write(async (fresh) => fresh.ensureAthlete(athlete()));
+
+      // One row, not two, and the second call did not throw.
+      const rows = await harness.read(async (fresh) => fresh.getAthlete(ATHLETE_A));
+      expect(rows?.id).toBe(ATHLETE_A);
+    } finally {
+      await harness.destroy();
+    }
+  });
+
+  it('an athlete ensured by one connection owns a ride written by another', async () => {
+    // The end-to-end shape of #184, through the public path both halves use.
+    // Nothing seeds this database: the store is the one that has to establish
+    // the owner, and the ride is written on a connection that never saw it
+    // happen.
+    const harness = createStoreHarness();
+    try {
+      await harness.write(async (fresh) => fresh.ensureAthlete(athlete()));
+
+      const ride = indoorRide();
+      const read = await harness.roundTrip(
+        async (fresh) => fresh.putActivity(ride),
+        async (fresh) => fresh.getActivity(ATHLETE_A, ride.id),
+      );
+
+      expect(read?.id).toBe(ride.id);
+    } finally {
+      await harness.destroy();
+    }
+  });
+
   it('moving time and elapsed time survive the round trip as distinct values', async () => {
     await store.putAthlete(athlete());
     const ride = indoorRide({ elapsedTime: seconds(7_384), movingTime: seconds(6_011) });
