@@ -19,6 +19,7 @@ already speak SI; the rest are conversions *out*.
 | Distance | metre | `Metres` | `metres()` | non-finite, negative |
 | Speed | metre per second | `MetresPerSecond` | `metresPerSecond()` | non-finite, negative |
 | Power | watt | `Watts` | `watts()` | non-finite, negative |
+| Work | joule | `Joules` | `joules()` | non-finite, negative |
 | Cadence | revolution per minute | `RevolutionsPerMinute` | `revolutionsPerMinute()` | non-finite, negative |
 | Heart rate | beat per minute | `BeatsPerMinute` | `beatsPerMinute()` | non-finite, negative |
 | Altitude | metre, **signed** | `AltitudeMetres` | `altitudeMetres()` | non-finite |

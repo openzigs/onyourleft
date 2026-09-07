@@ -41,6 +41,7 @@ export type {
   RevolutionsPerMinute,
   Seconds,
   UnixSeconds,
+  Joules,
   Watts,
 } from './quantities';
 
@@ -61,6 +62,7 @@ export {
   revolutionsPerMinute,
   seconds,
   unixSeconds,
+  joules,
   watts,
 } from './quantities';
 
@@ -239,3 +241,33 @@ export {
   verifyActivityRecord,
   verifyRecordSignature,
 } from './identity/record';
+
+// --- Analysis (#75) ---------------------------------------------------------
+//
+// The power-duration curve and the critical-power model fitted to it. Pure
+// computation over a stream the store already holds, which is why it is here
+// and not in `apps/web`: #57's local-first promise is that this needs no
+// server, and an instance computing the same numbers later must get the same
+// answers from the same code.
+
+export type { BestEffort, PowerDurationCurve, PowerSeries } from './analysis/power-duration';
+export {
+  bestMeanPower,
+  CURVE_DURATIONS,
+  effortAt,
+  mergeCurves,
+  powerDurationCurve,
+} from './analysis/power-duration';
+
+export type {
+  CriticalPowerFit,
+  CriticalPowerRefusal,
+  CriticalPowerResult,
+} from './analysis/critical-power';
+export {
+  CRITICAL_POWER_MAXIMUM_SECONDS,
+  CRITICAL_POWER_MINIMUM_EFFORTS,
+  CRITICAL_POWER_MINIMUM_SECONDS,
+  fitCriticalPower,
+  predictedPower,
+} from './analysis/critical-power';

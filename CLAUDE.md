@@ -53,6 +53,7 @@ apps/                 AGPL-3.0-or-later, without exception
 
 packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis (#25)
+    analysis/           the power-duration curve and the critical-power fit (#75)
     identity/           the record format, the canonical bytes, verification (#61)
     recording/          the recording session state machine and stream merge (#45)
   fit/                FIT / GPX / TCX codec (#29-#32)
@@ -1255,6 +1256,8 @@ top of an issue **supersedes its body**.
 | The signed activity record's format, so a stranger can write a verifier | [`docs/architecture.md`](docs/architecture.md) §"The signed activity record", [ADR 0014](docs/adr/0014-portable-identity.md) |
 | What happens to signed records after key loss, and why there is no rotation | [ADR 0014](docs/adr/0014-portable-identity.md) §Consequences, [`packages/store/README.md`](packages/store/README.md) §Identity |
 | Where a physics constant came from, and why the tick splits drive from resistance | [`packages/physics/README.md`](packages/physics/README.md) §2, §4 |
+| Why a gap in a ride yields no best effort rather than a weak one, and why the library curve is a pointwise maximum | `packages/domain/src/analysis/power-duration.ts` |
+| Where the critical-power model comes from, and when it refuses to report a number | `packages/domain/src/analysis/critical-power.ts` |
 | What an error message may say about a coordinate, and what it may not | [`packages/domain/README.md`](packages/domain/README.md) §"A coordinate message names the field and the constraint, never the value", [ADR 0004](docs/adr/0004-privacy-and-location.md) decision D |
 | Where a FIT profile number came from, and what the decoder does with a bad file | [`packages/fit/README.md`](packages/fit/README.md) §1–§5 |
 | Which GPX/TCX schema versions are targeted, what each format loses, and how XXE is refused | [`packages/fit/README.md`](packages/fit/README.md) §7 |
