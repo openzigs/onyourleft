@@ -6,8 +6,8 @@ that produced them.
 The reasoning lives in the ADRs — this file describes **what** the structure is and **where** each
 line falls. [`docs/adr/0005-tech-stack.md`](adr/0005-tech-stack.md) says why.
 
-> **Status: `apps/web`, `packages/domain`, `packages/sensors`, `packages/fit`, `packages/store`
-> and `packages/physics` exist.** The first two were created by [#23](https://github.com/openzigs/onyourleft/issues/23)
+> **Status: `apps/web`, `packages/domain`, `packages/sensors`, `packages/fit`, `packages/store`,
+> `packages/physics` and `packages/matching` exist.** The first two were created by [#23](https://github.com/openzigs/onyourleft/issues/23)
 > with the pnpm workspace, the toolchain, a committed lockfile and the lint-enforced boundaries;
 > `packages/sensors` by [#39](https://github.com/openzigs/onyourleft/issues/39) and
 > [#40](https://github.com/openzigs/onyourleft/issues/40)–[#44](https://github.com/openzigs/onyourleft/issues/44),
@@ -15,7 +15,11 @@ line falls. [`docs/adr/0005-tech-stack.md`](adr/0005-tech-stack.md) says why.
 > [#30](https://github.com/openzigs/onyourleft/issues/30)–[#32](https://github.com/openzigs/onyourleft/issues/32),
 > and `packages/store` by [#26](https://github.com/openzigs/onyourleft/issues/26)–[#28](https://github.com/openzigs/onyourleft/issues/28)
 > and [#46](https://github.com/openzigs/onyourleft/issues/46), and `packages/physics` by
-> [#88](https://github.com/openzigs/onyourleft/issues/88). **`apps/mobile`
+> [#88](https://github.com/openzigs/onyourleft/issues/88), and `packages/matching` by
+> [#65](https://github.com/openzigs/onyourleft/issues/65) — **a spike, and the one package in the
+> tree that is expected not to survive**: nothing imports it, and
+> [#66](https://github.com/openzigs/onyourleft/issues/66) either hardens it or deletes it.
+> **`apps/mobile`
 > ([#85](https://github.com/openzigs/onyourleft/issues/85)) does not exist yet**; it is created by
 > the issue that owns its content, using `packages/domain` as the template.
 > The layout is fixed here because roughly thirty sub-issues reference it by name, and moving it
@@ -96,12 +100,16 @@ packages/             Apache-2.0, without exception
     src/                the transport-agnostic abstraction; no platform API at all
     protocol/           the GATT profile clients (#41, #42, #43); no platform API either
     web-bluetooth/      the browser transport (#40); the one place a BluetoothDevice exists
+  matching/           SPIKE (#65) — a throwaway segment-matching prototype and its harness
+    src/                the geometric pipeline; no platform API at all
+    tools/              the measurement harness and its seeded synthetic corpus; Node
   physics/            cycling power/speed model — Martin et al. 1998, as separate terms
   store/              local activity, stream and recording-checkpoint store
 
 docs/
   architecture.md     this file
   adr/                numbered architecture decision records
+  spikes/             numbered spike write-ups — a dated measurement, not a decision
 
 scripts/              dependency-free repository checks; run on a bare clone
 
@@ -128,6 +136,7 @@ checkable.
 | `packages/sensors/protocol` | Apache-2.0 | The GATT profile clients: Heart Rate, Cycling Speed and Cadence and Cycling Power — service and characteristic UUIDs, bounds-checked payload decoding, and the `GattProfile` seam itself | **Any platform API at all**, as `packages/sensors/src` — it is compiled by the same platform-free program, because the same decoders serve the browser adapter and the native stacks | #41, #42 |
 | `packages/sensors/web-bluetooth` | Apache-2.0 | The browser transport: the `DeviceId → device/server/service/characteristic` map, the global GATT operation queue, the profile registry `packages/sensors/protocol` fills, and — since #49 — the **production `FitnessMachineChannel`**, which is the only place in the program that writes to a GATT characteristic | Anything server-specific; every platform global except `navigator`. **Web Bluetooth types must not escape above the transport boundary** | #40, #49 |
 | `packages/physics` | Apache-2.0 | Power → speed, as separately testable terms | Any rendering, BLE or platform API | #88 |
+| `packages/matching` | Apache-2.0 | **The #65 spike**: a throwaway segment-matching prototype (`src/`) and the measurement harness and synthetic corpus that produced its numbers (`tools/`) | `src/`: **any platform API at all**, as `packages/domain`. Nothing may depend on **it** either — it is evidence for a write-up, not a library | #65, #66 |
 | `packages/store` | Apache-2.0 | Local activity and stream persistence, its migrations, and the round-trip test harness | Anything under `apps/` | #26, #27, #28 |
 
 `packages/domain` is filled in as of [#25](https://github.com/openzigs/onyourleft/issues/25): the
@@ -493,7 +502,7 @@ A boundary maintained by review discipline will not survive a program this size.
 |---|---|
 | `boundaries/dependencies` | anything under `packages/*` imports anything under `apps/*`, in either the relative or the `@onyourleft/…` workspace spelling |
 | `@typescript-eslint/no-restricted-imports` | `packages/domain` names **any** Node builtin — the pattern list is derived from `builtinModules` rather than typed out, so `events`, `util` and `stream/promises` fail exactly as `node:fs` does — or `react`, `react-dom`, `vite` or `dexie` |
-| `no-restricted-globals` | `packages/domain`, `packages/sensors/src` or `packages/sensors/protocol` names a DOM global (`window`, `document`, `navigator`, `location`, `history`, `localStorage`, `sessionStorage`, `indexedDB`, `caches`), a Node global (`process`, `Buffer`, `__dirname`, `__filename`, `global`, `require`) or a network global (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Request`, `Response`, `Headers`). A named list, not a closure — the closure is the typechecker |
+| `no-restricted-globals` | `packages/domain`, `packages/physics`, `packages/matching/src`, `packages/sensors/src` or `packages/sensors/protocol` names a DOM global (`window`, `document`, `navigator`, `location`, `history`, `localStorage`, `sessionStorage`, `indexedDB`, `caches`), a Node global (`process`, `Buffer`, `__dirname`, `__filename`, `global`, `require`) or a network global (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Request`, `Response`, `Headers`). A named list, not a closure — the closure is the typechecker |
 | `no-restricted-globals`, again | `packages/sensors/web-bluetooth` names any of the same list **except `navigator`**, which is the one platform API the transport boundary is allowed. The exception is derived by subtraction from that list rather than written out, so the two cannot drift |
 | `headers/header-format` | a `.ts`/`.tsx` file's first line is not the SPDX identifier its directory requires |
 
@@ -510,6 +519,14 @@ pulled Vite's declarations, and through them `@types/node`, into the same TypeSc
 imports nothing. **Any import added to a file in this package's program can reopen it**, which is why
 the ESLint rules above are not redundant with the tsconfig, and why a row in this table is checked by
 writing the file it forbids and running both gates — never by reading the row.
+
+`packages/matching` carries it in two programs as well, and for the plainest version of the reason:
+`tools/` is a measurement harness that times things with `performance.now()` and prints with
+`console`, so the wide `tsconfig.json` admits `@types/node` — and **`tsconfig.platform-free.json`
+compiles `src/` alone**, where a `performance` is a compile error. That a spike is throwaway is a
+reason to isolate it, not an excuse: the question it answers is whether the approach could become
+production code, and a `src/` that had reached for a platform API would be answering about
+something #66 could not ship.
 
 `packages/sensors` carries the same closure in two programs, for the reason `packages/fit` does.
 `tsconfig.json` covers the whole package and admits the DOM, because ESLint's project service
@@ -591,6 +608,17 @@ Their closure adds BSD-2-Clause, ISC, MIT and one `(MIT OR Apache-2.0)` and no G
 nothing non-OSI. `maplibre-gl` is **977 kB minified**, which is why `apps/web/src/map/maplibre.ts` is
 reached through a dynamic `import()` and lands in its own chunk: a rider who only opens indoor rides
 never downloads it.
+
+## Spike write-ups
+
+A spike is **not a decision**. It is a dated measurement that a decision may rest on, and it ages the
+way a measurement does — nobody amends one, and a later run that contradicts it is a second
+write-up. They live in `docs/spikes/NNNN-kebab-case.md`, and the `ADR00*` rules are scoped to
+`docs/adr/` and do not apply to them.
+
+| Spike | Question | Answer | Evidence |
+|---|---|---|---|
+| [0001](spikes/0001-segment-matching.md) | Which of two segment-matching approaches should #66 build? ([#65](https://github.com/openzigs/onyourleft/issues/65)) | Geometric matching against the athlete's own trace — but two of #64's endpoint parameters have to change first, and the road-graph approach is deferred rather than rejected | `packages/matching`, measured 2026-09-07 |
 
 ## Decision record index
 

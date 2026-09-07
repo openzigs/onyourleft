@@ -513,6 +513,26 @@ export default tseslint.config(
     },
   },
 
+  // --- packages/matching/src is the spike, and still inside the boundary ------
+  // #65's prototype is throwaway, which is a reason to isolate it rather than an
+  // excuse not to: the whole point of the spike is to say whether the approach
+  // could become production code, and an answer measured against a `src/` that
+  // reached for `performance` or `fetch` would be measuring something #66 could
+  // not ship.
+  //
+  // ⚠️ **`files` is `src/` and this package's Vitest config, not the whole
+  // package** — the same shape as `packages/sensors/src` above and for the same
+  // reason. `tools/` is the measurement harness: it times things with
+  // `performance.now()` and prints with `console`, both legitimately, and
+  // `packages/matching/tsconfig.json` admits `@types/node` so that it compiles.
+  // `tsconfig.platform-free.json` is the program that enforces, over `src/`
+  // alone — and these rules are the half that does not depend on that narrowing
+  // surviving a stray reference directive.
+  {
+    files: ['packages/matching/src/**/*.{ts,tsx}', 'packages/matching/vitest.config.ts'],
+    rules: platformIsolation(BLE_LIBRARY_IMPORT_PATTERNS),
+  },
+
   // --- Repository tooling ----------------------------------------------------
   // `scripts/` is not a package: it sits outside both licence trees, it ships in
   // no artefact, and it genuinely runs on Node. Without this block `eslint .`

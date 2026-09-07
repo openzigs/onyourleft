@@ -47,6 +47,8 @@ apps/                 AGPL-3.0-or-later, without exception
                         file that names MapLibre
     src/recording/      the recorder: engine + durable checkpoints + recovery (#46)
     src/ride/           the live ride screen: its state machine, panels and trainer wiring (#49)
+    src/segments/       the segment store port, the create form's pure core, and its
+                        stub (#64)
     src/shell/          the hash route table, the router hook and AppShell (#48)
     src/support/        browser-capability detection and its notice (#48)
     src/transfer/       file import and export (#51) — the batch importer, the
@@ -62,7 +64,10 @@ packages/             Apache-2.0, without exception
                         NAMES are a trademark question, see §6
     identity/           the record format, the canonical bytes, verification (#61)
     recording/          the recording session state machine and stream merge (#45)
+    segment/            the segment model: endpoints, bearings, overlap (#64)
   fit/                FIT / GPX / TCX codec (#29-#32)
+  matching/           SPIKE (#65) — a throwaway segment-matching prototype and its
+                      measurement harness. Nothing imports it; #66 hardens or deletes it
   sensors/            sensor abstraction and BLE transport (#39-#44) — BLE only
     src/                the transport-agnostic abstraction; no platform API at all
     protocol/           the GATT profile clients (#41, #42) — service UUIDs, payload decoding
@@ -74,6 +79,7 @@ packages/             Apache-2.0, without exception
 docs/
   architecture.md     layout, component boundaries, ADR index
   adr/                numbered architecture decision records
+  spikes/             numbered spike write-ups — a dated measurement, not a decision
 
 scripts/              dependency-free repository checks; run on a bare clone
 
@@ -81,14 +87,17 @@ scripts/              dependency-free repository checks; run on a bare clone
   workflows/rules.yml runs those checks on every pull request — see §4c
 ```
 
-**`apps/web`, `packages/domain`, `packages/sensors`, `packages/fit`, `packages/store` and
-`packages/physics` exist.**
+**`apps/web`, `packages/domain`, `packages/sensors`, `packages/fit`, `packages/store`,
+`packages/physics` and `packages/matching` exist.**
 The first two were created by [#23](https://github.com/openzigs/onyourleft/issues/23) along with the
 workspace, the toolchain and the lockfile, `packages/sensors` by
 [#39](https://github.com/openzigs/onyourleft/issues/39), `packages/store` by
 [#26](https://github.com/openzigs/onyourleft/issues/26), `packages/fit` by
-[#107](https://github.com/openzigs/onyourleft/issues/107) and `packages/physics` by
-[#88](https://github.com/openzigs/onyourleft/issues/88). **`apps/mobile` does
+[#107](https://github.com/openzigs/onyourleft/issues/107), `packages/physics` by
+[#88](https://github.com/openzigs/onyourleft/issues/88) and `packages/matching` by
+[#65](https://github.com/openzigs/onyourleft/issues/65) — which is a **spike**, and is expected to
+be hardened or deleted by [#66](https://github.com/openzigs/onyourleft/issues/66) rather than to
+stay. **`apps/mobile` does
 not** — it is created by the issue that owns its content (§4b), from `packages/domain` as the
 template. The layout is fixed here
 because ~30 sub-issues reference it by name, and the workspace globs and lint boundaries already
@@ -100,6 +109,7 @@ cover the paths, so a package arrives inside the rules rather than beside them.
 | `packages/fit` | FIT / GPX / TCX decode and encode | Anything server-specific; anything under `apps/` |
 | `packages/sensors` | BLE sensor and trainer abstraction (`src/`), and the Web Bluetooth transport (`web-bluetooth/`) | `src/`: **any platform API at all**, and any BLE library. `web-bluetooth/`: every platform global except `navigator`. Web Bluetooth types must not escape above the transport boundary |
 | `packages/physics` | Power → speed. Pure computation. | Any rendering, BLE or platform API |
+| `packages/matching` | **The #65 spike.** A throwaway segment-matching prototype and its measurement harness; nothing imports it | `src/`: **any platform API at all**. `tools/` may use Node, and is outside the coverage report |
 | `packages/store` | Local activity, stream, **recording-checkpoint** and **signed-record** persistence, the device keypair, and its migrations | Anything under `apps/` |
 
 ---
@@ -296,7 +306,15 @@ pnpm --filter @onyourleft/fit run test
 pnpm --filter @onyourleft/sensors run test
 pnpm --filter @onyourleft/store run test
 pnpm --filter @onyourleft/physics run test
+pnpm --filter @onyourleft/matching run test
 pnpm --filter @onyourleft/web run test
+
+# The #65 spike's full measurement run: a 100 000-segment synthetic corpus and a
+# four-hour ride, printing the tables docs/spikes/0001-segment-matching.md
+# transcribes. About a minute. It PRINTS and never asserts, it is in no gate,
+# and it must not become one — `tools/measure.test.ts` is the part that runs on
+# every save, pinning the SHAPE of each finding rather than its numbers.
+pnpm --filter @onyourleft/matching run spike:measure
 
 # Regenerate the #29 synthetic FIT fixture corpus from its generator. It is
 # DETERMINISTIC: running it on a clean tree leaves `git status` clean, which is
@@ -534,6 +552,24 @@ and routing it through `web-crypto.ts` would destroy the independence it exists 
     the resistance (integrated in force) because the two have singular points in different places;
     the naive single-form version froze a coasting rider at 0.00027 m/s and never let a stationary
     one roll down a hill, and both failures are now tests.
+  - **`packages/matching`** ([#65](https://github.com/openzigs/onyourleft/issues/65)) is a
+    **spike**, and the only package in the tree that is throwaway on purpose. `src/` holds the
+    three-stage geometric pipeline the spike recommends — a 0.01° cell prefilter (`grid.ts`), the
+    endpoint gate and the discrete Fréchet similarity (`frechet.ts`, `pipeline.ts`) — and
+    `edge-sequence.ts`, the algorithmic half of the road-graph candidate it defers. `tools/` is the
+    measurement harness and the seeded synthetic corpus that produced the numbers. ⚠️ **Nothing
+    imports it, and nothing should**: the durable deliverable is
+    [`docs/spikes/0001-segment-matching.md`](docs/spikes/0001-segment-matching.md) and
+    [#66](https://github.com/openzigs/onyourleft/issues/66) hardens this or deletes it. ⚠️ It
+    narrows through a **second** tsconfig for the reason `packages/fit` does — `tools/` needs
+    `@types/node` for `performance.now()`, so `tsconfig.platform-free.json` is the program that
+    enforces, over `src/` alone. ⚠️ **`spike:measure` is in no gate and must not become one**: it
+    prints and never asserts, and `tools/measure.test.ts` is the part that runs on every save,
+    pinning the *shape* of each finding rather than its numbers. ⚠️ Two of those findings are
+    about #64's model rather than about this prototype — at any recording interval above 1 s the
+    15 m endpoint radius detects **nothing**, and widening it does not help because the radius and
+    the similarity threshold are coupled. #66 has to break that tension rather than tune between
+    the two.
 
 **And the dependencies that exist.** The toolchain,
 React 19, React DOM, Vite, — since #26 — `dexie` 4.4.5 and `fake-indexeddb` 6.2.5 (both
@@ -643,8 +679,8 @@ would otherwise be documented and unenforced, which is the gap this project keep
 |---|---|
 | `headers/header-format` | a `.ts`/`.tsx` file whose first line is not the SPDX identifier its directory requires. Duplicates `LIC001`/`LIC002` on purpose: the script covers file types ESLint never parses and runs with no toolchain, the lint rule runs in the editor |
 | `boundaries/dependencies` | an import from `packages/*` into `apps/*`, in either the relative (`../../../apps/web/src/...`) or the workspace (`@onyourleft/web`) spelling. Dependencies point one way |
-| `@typescript-eslint/no-restricted-imports` in `packages/domain`, `packages/physics`, `packages/sensors/src`, `packages/sensors/protocol` and `packages/sensors/web-bluetooth` | naming **any** Node builtin — the list is derived from `builtinModules`, not typed out, so `events`, `util` and `stream/promises` fail exactly as `node:fs` does — or `react`, `react-dom`, `vite` or `dexie`, or a BLE library |
-| `no-restricted-globals` in `packages/domain`, `packages/physics`, `packages/sensors/src` and `packages/sensors/protocol` | naming a DOM global (`window`, `document`, `navigator`, `location`, `history`, `localStorage`, `sessionStorage`, `indexedDB`, `caches`), a Node global (`process`, `Buffer`, `__dirname`, `__filename`, `global`, `require`) or a network global (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Request`, `Response`, `Headers`). This one **is** a named list; the closure is the typechecker below |
+| `@typescript-eslint/no-restricted-imports` in `packages/domain`, `packages/physics`, `packages/matching/src`, `packages/sensors/src`, `packages/sensors/protocol` and `packages/sensors/web-bluetooth` | naming **any** Node builtin — the list is derived from `builtinModules`, not typed out, so `events`, `util` and `stream/promises` fail exactly as `node:fs` does — or `react`, `react-dom`, `vite` or `dexie`, or a BLE library |
+| `no-restricted-globals` in `packages/domain`, `packages/physics`, `packages/matching/src`, `packages/sensors/src` and `packages/sensors/protocol` | naming a DOM global (`window`, `document`, `navigator`, `location`, `history`, `localStorage`, `sessionStorage`, `indexedDB`, `caches`), a Node global (`process`, `Buffer`, `__dirname`, `__filename`, `global`, `require`) or a network global (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Request`, `Response`, `Headers`). This one **is** a named list; the closure is the typechecker below |
 | `no-restricted-globals` in `packages/sensors/web-bluetooth` | naming any of the same list **except `navigator`** — the adapter is the transport boundary and `navigator.bluetooth` is the one platform API it exists to reach. The exception is derived by subtracting one name from the list above rather than restating it, so the two cannot drift |
 
 `packages/domain/tsconfig.json` narrows `lib` to `ES2024` and sets `types: []`. That is the closure
@@ -663,6 +699,13 @@ survives the paragraph below.
 > exports a plain object, and says so at the top. **Any import added to a file inside
 > `packages/domain`'s tsconfig program can reopen this**, which is why the ESLint rules are not
 > redundant with it: check both gates with a probe file, never one.
+
+`packages/matching` narrows through a second tsconfig on exactly the `packages/fit` pattern below:
+`tsconfig.json` is the wide program, because it has to cover `tools/` — the measurement harness,
+which times things with `performance.now()` and legitimately needs `@types/node` — and
+**`tsconfig.platform-free.json` compiles `src/` alone** with `lib: ["ES2024"]` and `types: []`.
+`pnpm --filter @onyourleft/matching run typecheck` runs both, and reading only the first is how the
+boundary would be believed absent.
 
 `packages/fit` narrows through a second tsconfig for the same reason and with the same shape:
 `tsconfig.json` is the wide program, because it has to cover `tools/` — the fixture generator, which
@@ -1167,6 +1210,11 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   ADR 0001's *Data* deferral had no number for
   ([#119](https://github.com/openzigs/onyourleft/issues/119)). A reviewer who remembers this
   paragraph telling them to skip 0012 is reading the old one.
+- **Spikes**: `docs/spikes/NNNN-kebab-case.md`. A spike write-up is **not an ADR and does not
+  decide anything** — it is a dated measurement that an ADR or an issue may then rest on, and it
+  ages the way a measurement does. `scripts/check-repo-rules.sh`'s `ADR00*` rules are scoped to
+  `docs/adr/` and do not apply. Do not renumber one, and do not edit a finding out of one: if a
+  later run contradicts it, that is a second write-up.
 - **Changelog**: there is **no `CHANGELOG.md` and no changelog convention** in this repository. Do
   not add one as a drive-by; if a release needs one, that is its own issue.
 - **Versions**: do not bump any version unless the issue asks for it.
@@ -1320,5 +1368,8 @@ top of an issue **supersedes its body**.
 | What a real browser checks that jsdom cannot, and why it shares one CI job | §4f, `apps/web/browser/`, `.github/workflows/rules.yml` |
 | Whether a dependency's licence is allowed where it lands, and which licences are ruled on | §4g, [ADR 0015](docs/adr/0015-dependency-licences.md), `scripts/check-dependency-licences.mjs` §`POLICY` |
 | Where the basemap URL is configured, and why nothing is configured today | `.env.example` §`VITE_BASEMAP_PMTILES_URL`, [#53](https://github.com/openzigs/onyourleft/issues/53) |
+| Which segment-matching approach was chosen, what it measured, and the two findings that were not in the plan | [`docs/spikes/0001-segment-matching.md`](docs/spikes/0001-segment-matching.md), [`packages/matching/README.md`](packages/matching/README.md) |
+| Why the endpoint radius cannot simply be widened to survive a coarse recording interval | `docs/spikes/0001-segment-matching.md` §1, `packages/matching/tools/measure.test.ts` |
+| What a segment matcher may not do, and the prior art the design-around cites | [ADR 0007](docs/adr/0007-patent-posture.md) D-2 and D-6, `docs/spikes/0001-segment-matching.md` §7 |
 
 <!-- Last updated: 2026-09-06 by delivery:code-issue resolving #51 (the manual file import and export UI) -->

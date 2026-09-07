@@ -1,0 +1,17 @@
+{
+  // `src/` alone, with no platform surface at all — `packages/fit`'s shape and
+  // `packages/domain`'s rule.
+  //
+  // The prototype is a pure function of a ride, a corpus and a set of
+  // thresholds. It reads no clock, opens no file and reports no progress: every
+  // one of those belongs to the harness in `tools/`, which is the half allowed
+  // to know what time it is. That split is what makes the measurement
+  // reproducible — a prototype that timed itself would be measuring its own
+  // instrumentation.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "types": []
+  },
+  "include": ["src/**/*.ts"]
+}
