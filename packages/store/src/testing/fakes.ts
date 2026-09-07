@@ -68,6 +68,7 @@ function bindStore(real: ActivityStore): PersistentStore {
       real.close();
     },
     putAthlete: async (record) => real.putAthlete(record),
+    ensureAthlete: async (record) => real.ensureAthlete(record),
     getAthlete: async (id) => real.getAthlete(id),
     deleteAthlete: async (id) => real.deleteAthlete(id),
     putActivity: async (record) => real.putActivity(record),
@@ -122,6 +123,14 @@ export function memoryWriteStoreFactory(): StoreFactory {
         putAthlete: (record) => {
           memory.set(`athlete:${record.id}`, record);
           return Promise.resolve(record.id);
+        },
+        // Diverted like every other write path, and it is the one whose
+        // failure is quietest: `ensureAthlete` answers with the record it was
+        // handed, so a caller that never re-reads sees a plausible athlete and
+        // every later write fails referentially instead (#184).
+        ensureAthlete: (record) => {
+          memory.set(`athlete:${record.id}`, record);
+          return Promise.resolve(record);
         },
         putActivity: (record) => {
           memory.set(`activity:${record.id}`, record);

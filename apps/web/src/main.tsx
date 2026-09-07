@@ -11,7 +11,7 @@ import {
 } from '@onyourleft/sensors/protocol';
 import { createWebBluetoothTransport } from '@onyourleft/sensors/web-bluetooth';
 import { metres, unixSeconds } from '@onyourleft/domain';
-import { activityId, athleteId, openActivityStore, recordingSessionId } from '@onyourleft/store';
+import { activityId, openActivityStore, recordingSessionId } from '@onyourleft/store';
 
 import './design/theme.css';
 import { browserClock, createRideController, type RideController } from './ride/controller';
@@ -19,6 +19,7 @@ import { openWebBluetoothTrainer } from './ride/trainer';
 import { AppShell } from './shell/AppShell';
 import { probeBrowser, type CapabilityProbe } from './support/bluetooth-support';
 import { saveWithAnchor, webCryptoDigest } from './transfer/browser';
+import { ensureLocalAthlete, LOCAL_ATHLETE, renderAfterAthlete } from './local-athlete';
 import type { AnalysisPort } from './analysis/store-port';
 import type { DetailPort } from './detail/store-port';
 import { browserBasemapConfig } from './map/basemap';
@@ -26,10 +27,18 @@ import type { MapPort } from './map/port';
 import type { LibraryPort } from './library/store-port';
 import type { TransferPort } from './transfer/store-port';
 
-const container = document.getElementById('root');
-if (container === null) {
+const found = document.getElementById('root');
+if (found === null) {
   throw new Error('index.html is missing the #root element the client mounts into');
 }
+/**
+ * The mount point, as a value rather than as a narrowing.
+ *
+ * `render` below is called from a closure, and TypeScript does not carry the
+ * null check above into one — so the element is bound once here instead of
+ * being asserted non-null at the call.
+ */
+const container: HTMLElement = found;
 
 /**
  * Probed once, here, and passed down.
@@ -41,19 +50,6 @@ if (container === null) {
  * test on a machine that is none of those.
  */
 const capabilities = probeBrowser();
-
-/**
- * The one athlete this device has, until accounts exist.
- *
- * There is no server and no sign-in in Phase 1 (owner decision D6), so every
- * ride belongs to a fixed local identity. It is a **constant rather than a
- * generated id** deliberately: a per-install random id would be written into
- * every activity row, and a cleared browser profile would then orphan every
- * ride already on disk from the athlete who recorded them. #33 introduces real
- * athletes; the store's queries are already scoped by this key, which is what
- * makes that a migration rather than a rewrite.
- */
-const LOCAL_ATHLETE = athleteId('local');
 
 /**
  * The wheel circumference a Cycling Speed and Cadence sensor's speed is derived
@@ -209,17 +205,35 @@ function buildTransferPort(): TransferPort | undefined {
   };
 }
 
-createRoot(container).render(
-  <StrictMode>
-    <AppShell
-      capabilities={capabilities}
-      rideController={buildRideController(capabilities)}
-      transfer={buildTransferPort()}
-      library={buildLibraryPort()}
-      detail={buildDetailPort()}
-      analysis={buildAnalysisPort()}
-      map={loadMapPort}
-      basemap={browserBasemapConfig()}
-    />
-  </StrictMode>,
+function render(): void {
+  createRoot(container).render(
+    <StrictMode>
+      <AppShell
+        capabilities={capabilities}
+        rideController={buildRideController(capabilities)}
+        transfer={buildTransferPort()}
+        library={buildLibraryPort()}
+        detail={buildDetailPort()}
+        analysis={buildAnalysisPort()}
+        map={loadMapPort}
+        basemap={browserBasemapConfig()}
+      />
+    </StrictMode>,
+  );
+}
+
+/**
+ * Establish this device's athlete row, then render (#184).
+ *
+ * The ordering, the swallowed failure and the reasons for both are in
+ * `local-athlete.ts` §{@link renderAfterAthlete}, which is where they can be
+ * tested — this file is the composition root and has no test, which is exactly
+ * how #184 survived four milestones.
+ *
+ * It awaits one read and at most one write on a connection `buildLibraryPort`
+ * opens anyway, so it adds no failure this start-up did not already have.
+ */
+void renderAfterAthlete(
+  async () => ensureLocalAthlete(localStore(), unixSeconds(Math.floor(Date.now() / 1000))),
+  render,
 );
