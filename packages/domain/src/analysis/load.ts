@@ -61,7 +61,14 @@
  * settled on, for the same reason.
  */
 
-import { seconds, watts, type BeatsPerMinute, type Seconds, type Watts } from '../quantities';
+import {
+  beatsPerMinute,
+  seconds,
+  watts,
+  type BeatsPerMinute,
+  type Seconds,
+  type Watts,
+} from '../quantities';
 
 /**
  * The rolling window, in seconds.
@@ -184,6 +191,44 @@ export function effortWeightedPower(
   sampleInterval: Seconds,
   windowSeconds: number = DEFAULT_SMOOTHING_WINDOW_SECONDS,
 ): EffortWeightedPower | undefined {
+  const weighted = effortWeightedMean(series, sampleInterval, windowSeconds);
+  return weighted === undefined
+    ? undefined
+    : { power: watts(weighted.value), windows: weighted.windows };
+}
+
+/**
+ * The same weighting over a heart-rate trace.
+ *
+ * Exported because a caller that wants to **store** the threshold-independent
+ * half of a load needs this number for a ride with no power meter, and the only
+ * alternative is inverting {@link heartRateLoad}'s own arithmetic back out of
+ * its answer — which works right up until that arithmetic changes, and then
+ * produces a plausible wrong number instead of a compile error.
+ */
+export function effortWeightedHeartRate(
+  series: readonly (BeatsPerMinute | undefined)[],
+  sampleInterval: Seconds,
+  windowSeconds: number = DEFAULT_SMOOTHING_WINDOW_SECONDS,
+): { readonly rate: BeatsPerMinute; readonly windows: number } | undefined {
+  const weighted = effortWeightedMean(series, sampleInterval, windowSeconds);
+  return weighted === undefined
+    ? undefined
+    : { rate: beatsPerMinute(weighted.value), windows: weighted.windows };
+}
+
+/**
+ * The weighting itself, unit-free.
+ *
+ * One implementation for both bases. It was two, copied, until #77 needed the
+ * heart-rate half as a value rather than only inside a load — and two copies of
+ * a weighting is two places for an exponent to drift.
+ */
+function effortWeightedMean(
+  series: readonly (number | undefined)[],
+  sampleInterval: Seconds,
+  windowSeconds: number,
+): { readonly value: number; readonly windows: number } | undefined {
   if (!(sampleInterval > 0) || !(windowSeconds > 0)) {
     return undefined;
   }
@@ -208,10 +253,7 @@ export function effortWeightedPower(
   if (windows === 0) {
     return undefined;
   }
-  return {
-    power: watts((total / windows) ** (1 / EFFORT_WEIGHTING_EXPONENT)),
-    windows,
-  };
+  return { value: (total / windows) ** (1 / EFFORT_WEIGHTING_EXPONENT), windows };
 }
 
 /**
@@ -321,34 +363,36 @@ export function heartRateLoad(
   threshold: BeatsPerMinute,
   windowSeconds: number = DEFAULT_SMOOTHING_WINDOW_SECONDS,
 ): RideLoad | undefined {
-  if (!(sampleInterval > 0) || !(threshold > 0) || !(windowSeconds > 0)) {
+  if (!(threshold > 0)) {
     return undefined;
   }
-  const windowSamples = Math.round(windowSeconds / sampleInterval);
-  if (windowSamples < 1) {
+  const weighted = effortWeightedHeartRate(series, sampleInterval, windowSeconds);
+  if (weighted === undefined) {
     return undefined;
   }
-  const means = rollingMeans(series, windowSamples);
-  let total = 0;
-  let windows = 0;
-  for (const mean of means) {
-    if (mean === undefined) {
-      continue;
-    }
-    total += mean ** EFFORT_WEIGHTING_EXPONENT;
-    windows += 1;
-  }
-  if (windows === 0) {
-    return undefined;
-  }
-  const weighted = (total / windows) ** (1 / EFFORT_WEIGHTING_EXPONENT);
-  const fraction = weighted / threshold;
+  const fraction = weighted.rate / threshold;
   const covered = presentSamples(series) * sampleInterval;
   return {
     load: (covered / SECONDS_PER_HOUR) * fraction ** 2 * LOAD_AT_THRESHOLD_FOR_ONE_HOUR,
     basis: 'heartRate',
     coveredSeconds: seconds(covered),
   };
+}
+
+/**
+ * How long the sensor actually reported, in seconds.
+ *
+ * Exported because it is the other half of a **threshold-independent** load
+ * summary (#77): a caller storing one needs the covered time and the weighted
+ * value, and neither depends on an athlete's threshold. Getting it out of
+ * {@link powerRideLoad} instead would mean supplying a threshold in order to
+ * compute something that does not use one.
+ */
+export function coveredTime(
+  series: readonly (number | undefined)[],
+  sampleInterval: Seconds,
+): Seconds {
+  return seconds(presentSamples(series) * sampleInterval);
 }
 
 /** How many samples the sensor actually reported. */

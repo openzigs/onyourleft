@@ -354,6 +354,80 @@ describe('persistence — the write must be visible to a reader that was not the
     }
   });
 
+  it('setActivityLoadSummary writes the summary and leaves the ride otherwise alone (#77)', async () => {
+    const harness = createStoreHarness();
+    try {
+      await harness.write(async (fresh) => fresh.putAthlete(athlete()));
+      const ride = indoorRide({ name: 'Tuesday morning' });
+      await harness.write(async (fresh) => fresh.putActivity(ride));
+
+      const read = await harness.roundTrip(
+        async (fresh) =>
+          fresh.setActivityLoadSummary(ATHLETE_A, ride.id, {
+            effortWeightedPower: watts(243),
+            loadCoveredTime: seconds(3_500),
+          }),
+        async (fresh) => fresh.getActivity(ATHLETE_A, ride.id),
+      );
+
+      expect(read?.effortWeightedPower).toBe(243);
+      expect(read?.loadCoveredTime).toBe(3_500);
+      expect(read?.effortWeightedHeartRate).toBeUndefined();
+      // The fields a derived write must not touch.
+      expect(read?.name).toBe('Tuesday morning');
+      expect(read?.movingTime).toBe(ride.movingTime);
+    } finally {
+      await harness.destroy();
+    }
+  });
+
+  it('setActivityLoadSummary refuses another athlete’s ride', async () => {
+    // ⚠️ CLAUDE.md §6's cross-athlete class: a query that matches on an entity
+    // id without also filtering on the owner passes every single-athlete test
+    // in the suite. This is the test that does not.
+    const harness = createStoreHarness();
+    try {
+      await harness.write(async (fresh) => {
+        await fresh.putAthlete(athlete());
+        await fresh.putAthlete({ ...athlete(), id: ATHLETE_B });
+      });
+      const ride = indoorRide();
+      await harness.write(async (fresh) => fresh.putActivity(ride));
+
+      const wrote = await harness.write(async (fresh) =>
+        fresh.setActivityLoadSummary(ATHLETE_B, ride.id, {
+          effortWeightedPower: watts(400),
+          loadCoveredTime: seconds(3_600),
+        }),
+      );
+      const read = await harness.read(async (fresh) => fresh.getActivity(ATHLETE_A, ride.id));
+
+      expect(wrote).toBe(false);
+      expect(read?.effortWeightedPower).toBeUndefined();
+    } finally {
+      await harness.destroy();
+    }
+  });
+
+  it('setActivityLoadSummary on a ride that is gone is not an error', async () => {
+    // A ride deleted while a backfill was running is an ordinary race, not
+    // something the rider needs to see.
+    const harness = createStoreHarness();
+    try {
+      await harness.write(async (fresh) => fresh.putAthlete(athlete()));
+
+      const wrote = await harness.write(async (fresh) =>
+        fresh.setActivityLoadSummary(ATHLETE_A, activityId('gone'), {
+          loadCoveredTime: seconds(60),
+        }),
+      );
+
+      expect(wrote).toBe(false);
+    } finally {
+      await harness.destroy();
+    }
+  });
+
   it('moving time and elapsed time survive the round trip as distinct values', async () => {
     await store.putAthlete(athlete());
     const ride = indoorRide({ elapsedTime: seconds(7_384), movingTime: seconds(6_011) });

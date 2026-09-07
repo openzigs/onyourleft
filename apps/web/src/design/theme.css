@@ -574,3 +574,37 @@ body {
   display: block;
   height: 100%;
 }
+
+/*
+ * The fitness chart (#77).
+ *
+ * Two lines that must be told apart without colour: they differ by dash
+ * pattern as well as tone, and each is named in the readings above the chart
+ * and in the table beside it. `vector-effect` keeps the stroke even under the
+ * horizontal stretch, for `.oyl-trace__line`'s reason.
+ */
+.oyl-fitness-chart {
+  background: var(--oyl-color-surface);
+  border: 1px solid var(--oyl-color-border);
+  border-radius: var(--oyl-radius);
+  display: block;
+  height: 12rem;
+  margin-top: var(--oyl-space-sm);
+  width: 100%;
+}
+
+.oyl-fitness-chart__base,
+.oyl-fitness-chart__recent {
+  fill: none;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-fitness-chart__base {
+  stroke: var(--oyl-color-accent);
+}
+
+.oyl-fitness-chart__recent {
+  stroke: var(--oyl-color-ink-muted);
+  stroke-dasharray: 6 4;
+}

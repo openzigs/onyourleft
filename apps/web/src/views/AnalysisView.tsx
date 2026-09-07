@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useCallback, useEffect, useState, type JSX } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState, type JSX } from 'react';
 
 import { LOAD_AT_THRESHOLD_FOR_ONE_HOUR, type RideLoad } from '@onyourleft/domain';
 import { activityId, type ActivityId, type ActivitySummary } from '@onyourleft/store';
@@ -21,6 +21,13 @@ import {
   ZONE_BOUNDARY_NOTE,
   zoneRows,
 } from '../analysis/present';
+import {
+  backfillLoadSummaries,
+  loadFitnessHistory,
+  type FitnessHistory,
+} from '../analysis/history';
+import { sampledPoints, trendReadings, trendSentence } from '../analysis/trend';
+import { ChartSlot } from '../design/ChartSlot';
 import type { AnalysisPort } from '../analysis/store-port';
 import { thresholdsToSave } from '../analysis/thresholds';
 import { Button } from '../design/Button';
@@ -74,6 +81,17 @@ export interface AnalysisViewProps {
   readonly port?: AnalysisPort | undefined;
 }
 
+/**
+ * The chart, fetched on first use.
+ *
+ * `React.lazy` rather than a static import, for the reason `design/ChartSlot.tsx`
+ * records: a chart imported eagerly throws during the page's own render, before
+ * the boundary that is supposed to replace it with its table can run. #48's
+ * seventh criterion is that a failing chart does not take the page with it, and
+ * this is the half of it that lives at the call site.
+ */
+const FitnessChart = lazy(async () => import('../analysis/FitnessChart'));
+
 type LoadState =
   | { readonly kind: 'loading' }
   | {
@@ -93,16 +111,26 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
   const [saved, setSaved] = useState<string | undefined>(undefined);
   /** Bumped on save, so the zones and the load reload against the new numbers. */
   const [thresholdVersion, setThresholdVersion] = useState(0);
+  const [history, setHistory] = useState<FitnessHistory | undefined>(undefined);
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillNote, setBackfillNote] = useState<string | undefined>(undefined);
 
   const load = useCallback(async (): Promise<void> => {
     if (port === undefined) {
       return;
     }
     setState({ kind: 'loading' });
+    // `thresholdVersion` is read so that saving a threshold redraws the history
+    // too — every point of it is derived from the number that just changed.
+    void thresholdVersion;
     try {
       const rides = await loadRideChoices(port);
       const bests = await loadLibraryBests(port);
       setState({ kind: 'ready', rides, bests });
+      // Separate from the ready state deliberately: the history is one list
+      // read and no decode, so it does not need to hold up the rest of the
+      // screen, and a failure to draw it must not empty the page.
+      setHistory(await loadFitnessHistory(port));
       // The newest ride, so the screen opens on something rather than on a
       // prompt to choose. A rider arriving here has just finished a ride far
       // more often than they have come to compare an old one.
@@ -113,7 +141,7 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
       // would act on.
       setState({ kind: 'failed', reason: error instanceof Error ? error.message : String(error) });
     }
-  }, [port]);
+  }, [port, thresholdVersion]);
 
   useEffect(() => {
     void load();
@@ -152,6 +180,26 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
         : String(Math.round(zones.thresholds.thresholdHeartRate)),
     );
   }, [zones]);
+
+  const runBackfill = useCallback(async (): Promise<void> => {
+    if (port === undefined) {
+      return;
+    }
+    setBackfilling(true);
+    try {
+      const outcome = await backfillLoadSummaries(port);
+      setBackfillNote(
+        `Measured ${String(outcome.computed)} more ${outcome.computed === 1 ? 'ride' : 'rides'}` +
+          (outcome.skipped === 0
+            ? ''
+            : `, and could not measure ${String(outcome.skipped)} — too short, or no usable trace`) +
+          (outcome.remaining === 0 ? '.' : `. ${String(outcome.remaining)} still to go.`),
+      );
+      setHistory(await loadFitnessHistory(port));
+    } finally {
+      setBackfilling(false);
+    }
+  }, [port]);
 
   const saveThresholds = useCallback(async (): Promise<void> => {
     if (port === undefined) {
@@ -260,6 +308,29 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
               />
             )}
           </>
+        )}
+      </section>
+
+      <section className="oyl-panel" aria-labelledby="oyl-fitness-heading">
+        <h2 id="oyl-fitness-heading">Fitness and fatigue</h2>
+        <p className="oyl-muted">
+          Your training load, smoothed two ways: <strong>fitness</strong> over about six weeks and{' '}
+          <strong>fatigue</strong> over about one. <strong>Freshness</strong> is the gap between
+          them. Rising fatigue is what training looks like, not a warning — this page reports what
+          moved and by how much, and does not tell you whether that is good.
+        </p>
+
+        {history === undefined ? (
+          <p className="oyl-muted">Reading your history…</p>
+        ) : (
+          <FitnessPanel
+            history={history}
+            backfilling={backfilling}
+            note={backfillNote}
+            onBackfill={() => {
+              void runBackfill();
+            }}
+          />
         )}
       </section>
 
@@ -482,5 +553,175 @@ function LoadPanel({ load }: { readonly load: RideLoad }): JSX.Element {
         </dd>
       </dl>
     </div>
+  );
+}
+
+interface FitnessPanelProps {
+  readonly history: FitnessHistory;
+  readonly backfilling: boolean;
+  readonly note: string | undefined;
+  readonly onBackfill: () => void;
+}
+
+/**
+ * The chart, its readings, what it rests on, and the offer to measure more.
+ *
+ * ⚠️ The **readings** are the non-visual equivalent #77's sixth criterion asks
+ * for — current values, direction and recent change, in sentences. Not the
+ * table: a decade of riding is 3 650 rows, and a table nobody can read is not
+ * an equivalent of a picture anybody can. The table beside the chart is
+ * sampled, and it is there for a reader who wants the numbers rather than for
+ * one who cannot see the drawing.
+ */
+function FitnessPanel({ history, backfilling, note, onBackfill }: FitnessPanelProps): JSX.Element {
+  const readings = trendReadings(history.points);
+  const sampled = sampledPoints(history.points);
+
+  if (history.points.length === 0) {
+    return (
+      <>
+        <p className="oyl-muted">
+          {history.ridesWithoutSummary === 0
+            ? 'Nothing to chart yet. This fills in as you record or import rides.'
+            : `None of the ${String(history.ridesWithoutSummary)} rides on this device has been measured for load yet.`}
+        </p>
+        {history.ridesWithoutSummary === 0 ? undefined : (
+          <BackfillControl
+            missing={history.ridesWithoutSummary}
+            backfilling={backfilling}
+            onBackfill={onBackfill}
+          />
+        )}
+        <BackfillNote note={note} />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <ul className="oyl-metric-grid">
+        {readings.map((reading) => (
+          <li className="oyl-metric" key={reading.label}>
+            <span className="oyl-metric__label">{reading.label}</span>
+            <span className="oyl-metric__value">{String(Math.round(reading.value))}</span>
+            <span className="oyl-metric__note">{trendSentence(reading)}</span>
+          </li>
+        ))}
+      </ul>
+
+      <ChartSlot
+        caption={`Fitness and fatigue across ${String(history.points.length)} days, from ${String(history.ridesCounted)} measured rides`}
+        columns={['Day', 'Load', 'Fitness', 'Fatigue', 'Freshness']}
+        rows={sampled.map((point) => [
+          point.day,
+          String(Math.round(point.load)),
+          String(Math.round(point.base)),
+          String(Math.round(point.recent)),
+          String(Math.round(point.freshness)),
+        ])}
+        emptyMessage="Nothing to chart yet."
+        chart={
+          // ⚠️ The boundary is not optional. Without it the suspending chunk
+          // suspends the *whole* tree, so the readings, the thresholds and the
+          // personal bests all stop rendering while a drawing loads — which is
+          // how this was found. `ActivityDetailView` wraps its trace the same
+          // way, and `null` is the right fallback: `ChartSlot`'s table is
+          // already beside it, so there is nothing missing to apologise for.
+          <Suspense fallback={null}>
+            <FitnessChart points={history.points} />
+          </Suspense>
+        }
+        tablePosition="beside"
+      />
+
+      {history.points[0]?.warmingUp === true && history.points.at(-1)?.warmingUp === true ? (
+        <StatusMessage tone="info">
+          Both averages start from zero on the day of your first ride, because this device has no
+          record of what you did before it. The first few weeks of this chart are therefore climbing
+          out of nothing rather than describing your training.
+        </StatusMessage>
+      ) : undefined}
+
+      <p className="oyl-muted">{basisNote(history)}</p>
+
+      {history.ridesWithoutSummary === 0 ? undefined : (
+        <BackfillControl
+          missing={history.ridesWithoutSummary}
+          backfilling={backfilling}
+          onBackfill={onBackfill}
+        />
+      )}
+      <BackfillNote note={note} />
+    </>
+  );
+}
+
+/**
+ * What the last measuring pass did, kept alive after the control it came from.
+ *
+ * `live`, so a screen-reader user hears the outcome of a button they pressed
+ * without having to go looking for it.
+ */
+function BackfillNote({ note }: { readonly note: string | undefined }): JSX.Element | undefined {
+  return note === undefined ? undefined : (
+    <StatusMessage tone="success" live>
+      {note}
+    </StatusMessage>
+  );
+}
+
+/**
+ * What the line is made of.
+ *
+ * #77's eighth criterion: the chart states the basis rather than silently
+ * blending power-derived and heart-rate-derived loads. "Mixed" is the honest
+ * answer for most real histories and is said plainly, because a rider comparing
+ * this year against last needs to know if the measurement changed underneath
+ * them.
+ */
+function basisNote(history: FitnessHistory): string {
+  const from = `Built from ${String(history.ridesCounted)} measured ${history.ridesCounted === 1 ? 'ride' : 'rides'}`;
+  if (history.bases.length === 0) {
+    return `${from}.`;
+  }
+  if (history.bases.length > 1) {
+    return `${from}, some measured from power and some from heart rate. The two share a scale without being the same measurement, so a stretch built from heart rate is a rougher estimate than one built from power.`;
+  }
+  return history.bases[0] === 'power'
+    ? `${from}, all measured from power.`
+    : `${from}, all measured from heart rate — a rougher estimate than power, because heart rate lags an effort and levels off near the top.`;
+}
+
+/** The offer to measure rides that carry no load summary yet. */
+/**
+ * The offer to measure rides that carry no load summary yet.
+ *
+ * ⚠️ It does **not** own the "what happened" message. This control disappears
+ * the moment the last ride is measured — which is exactly when the rider most
+ * needs to be told the work succeeded — so a note rendered inside it would
+ * vanish in the same frame it was written. Found by a test asserting the
+ * confirmation and getting a screen with no trace of it.
+ */
+function BackfillControl({
+  missing,
+  backfilling,
+  onBackfill,
+}: {
+  readonly missing: number;
+  readonly backfilling: boolean;
+  readonly onBackfill: () => void;
+}): JSX.Element {
+  return (
+    <>
+      <StatusMessage tone="info">
+        {String(missing)} {missing === 1 ? 'ride was' : 'rides were'} imported before this device
+        measured load, so {missing === 1 ? 'it is' : 'they are'} not in the chart. Measuring{' '}
+        {missing === 1 ? 'it' : 'them'} reads each ride&rsquo;s samples once and stores the result,
+        so it only has to happen once.
+      </StatusMessage>
+      <Button onClick={onBackfill} disabled={backfilling}>
+        {backfilling ? 'Measuring…' : `Measure ${String(missing)} more`}
+      </Button>
+    </>
   );
 }

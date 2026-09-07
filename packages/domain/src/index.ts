@@ -303,8 +303,10 @@ export {
 
 export type { EffortWeightedPower, LoadBasis, RideLoad } from './analysis/load';
 export {
+  coveredTime,
   DEFAULT_SMOOTHING_WINDOW_SECONDS,
   EFFORT_WEIGHTING_EXPONENT,
+  effortWeightedHeartRate,
   effortWeightedPower,
   heartRateLoad,
   LOAD_AT_THRESHOLD_FOR_ONE_HOUR,
@@ -312,3 +314,26 @@ export {
   rollingMeans,
   thresholdFraction,
 } from './analysis/load';
+
+// --- Fitness and fatigue over a history (#77) ---------------------------------
+//
+// ⚠️ `CTL`, `ATL` and `TSB` are reported registered trademarks — see CLAUDE.md §6
+// and the header of `analysis/fitness.ts`. These names are our own: `base` is
+// the slow average, `recent` the fast one, `freshness` the gap. Do not rename
+// them to the initialisms.
+
+export type {
+  CalendarDay,
+  DailyLoad,
+  FitnessOptions,
+  FitnessPoint,
+  LoadEntry,
+} from './analysis/fitness';
+export {
+  dailyLoads,
+  DEFAULT_BASE_DAYS,
+  DEFAULT_RECENT_DAYS,
+  fitnessSeries,
+  localDay,
+  seriesSpan,
+} from './analysis/fitness';

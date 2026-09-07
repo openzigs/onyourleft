@@ -47,6 +47,8 @@ export interface StubAnalysis extends AnalysisPort {
   readonly summaryReads: string[];
   /** Every `listActivitySummaries` call's options, so a limit can be asserted. */
   readonly listReads: ListActivitiesOptions[];
+  /** Every load-summary write, in order, so a backfill's work is countable. */
+  readonly summaryWrites: ActivityId[];
   /** Every threshold save, so a test can assert what the form sent. */
   readonly thresholdWrites: {
     readonly thresholdPower?: Watts;
@@ -68,13 +70,20 @@ export function stubAnalysis(
   const channelReads: string[] = [];
   const summaryReads: string[] = [];
   const listReads: ListActivitiesOptions[] = [];
+  const summaryWrites: ActivityId[] = [];
+  const overrides = new Map<ActivityId, ActivityRecord>();
   const thresholdWrites: {
     readonly thresholdPower?: Watts;
     readonly thresholdHeartRate?: BeatsPerMinute;
   }[] = [];
 
   function rideFor(id: ActivityId): StubAnalysisRide | undefined {
-    return rides.find((ride) => ride.activity.id === id);
+    const found = rides.find((ride) => ride.activity.id === id);
+    if (found === undefined) {
+      return undefined;
+    }
+    const written = overrides.get(id);
+    return written === undefined ? found : { ...found, activity: written };
   }
 
   function channelsOf(ride: StubAnalysisRide): StreamChannel[] {
@@ -117,6 +126,28 @@ export function stubAnalysis(
 
     getActivity: (_owner: AthleteId, id: ActivityId) => Promise.resolve(rideFor(id)?.activity),
 
+    setActivityLoadSummary: (_owner: AthleteId, id: ActivityId, summary) => {
+      const ride = rideFor(id);
+      if (ride === undefined) {
+        return Promise.resolve(false);
+      }
+      // Written onto the stub's own record, so the next `listActivitySummaries`
+      // sees it — a stub that accepted the write and answered the old record
+      // would make a backfill test assert nothing.
+      summaryWrites.push(id);
+      overrides.set(id, {
+        ...ride.activity,
+        ...(summary.effortWeightedPower === undefined
+          ? {}
+          : { effortWeightedPower: summary.effortWeightedPower }),
+        ...(summary.effortWeightedHeartRate === undefined
+          ? {}
+          : { effortWeightedHeartRate: summary.effortWeightedHeartRate }),
+        loadCoveredTime: summary.loadCoveredTime,
+      });
+      return Promise.resolve(true);
+    },
+
     listActivitySummaries: (_owner: AthleteId, options: ListActivitiesOptions = {}) => {
       listReads.push(options);
       // ⚠️ The ordering options are **honoured**, not ignored. A stub that
@@ -135,7 +166,9 @@ export function stubAnalysis(
       // structurally and no field is copied by hand. The stub rides carry no
       // `originalFile` anyway; a stub that did would hand the caller one extra
       // property, which nothing in this view reads.
-      const summaries: ActivitySummary[] = sorted.map(({ activity }) => activity);
+      const summaries: ActivitySummary[] = sorted.map(
+        ({ activity }) => overrides.get(activity.id) ?? activity,
+      );
       const { offset = 0, limit } = options;
       const from = summaries.slice(offset);
       return Promise.resolve(limit === undefined ? from : from.slice(0, limit));
@@ -182,5 +215,13 @@ export function stubAnalysis(
     },
   };
 
-  return { athleteId: owner, store, channelReads, summaryReads, listReads, thresholdWrites };
+  return {
+    athleteId: owner,
+    store,
+    channelReads,
+    summaryReads,
+    listReads,
+    summaryWrites,
+    thresholdWrites,
+  };
 }

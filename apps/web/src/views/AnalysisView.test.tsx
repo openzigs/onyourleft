@@ -24,6 +24,7 @@ import {
   type Watts,
 } from '@onyourleft/domain';
 import { activityId, athleteId as toAthleteId } from '@onyourleft/store';
+import { seconds } from '@onyourleft/domain';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { stubAnalysis, type StubAnalysisRide } from '../analysis/testing';
@@ -471,3 +472,158 @@ function buttonNamed(label: string): HTMLElement {
   }
   return button;
 }
+
+describe('AnalysisView — fitness and fatigue (#77)', () => {
+  const DAY = 86_400;
+  const START = 1_788_782_400;
+
+  /** A ride that already carries a load summary. */
+  function measured(id: string, offset: number): StubAnalysisRide {
+    return {
+      activity: stubActivity({
+        id: activityId(id),
+        startedAt: unixSeconds(START + offset * DAY),
+        startedAtTimeZone: 'UTC',
+        effortWeightedPower: watts(200),
+        loadCoveredTime: seconds(3600),
+      }),
+    };
+  }
+
+  it('reports the three readings in words, with a direction and a change', async () => {
+    // #77's sixth criterion. The non-visual equivalent is these sentences, not
+    // the table: a decade of riding is 3 650 rows, and a table nobody can read
+    // is not an equivalent of a picture anybody can.
+    const rides = Array.from({ length: 30 }, (_unused, index) =>
+      measured(`r${String(index)}`, index),
+    );
+    const port = stubAnalysis(OWNER, rides);
+
+    mounted = await mount(<AnalysisView port={port} />);
+    // Twice: the screen reaches `ready` on the first pass and the history — a
+    // second, deliberately separate read — lands on the next. That separation
+    // is the design, not a race: a failure to draw the chart must not empty
+    // the rest of the page.
+    await settle();
+    await settle();
+
+    expect(mounted.container.textContent).toContain('Fitness');
+    expect(mounted.container.textContent).toContain('Fatigue');
+    expect(mounted.container.textContent).toContain('Freshness');
+    expect(mounted.container.textContent).toMatch(/rising|falling|steady/);
+    expect(mounted.container.textContent).toContain('over the last week');
+  });
+
+  it('says the chart is built from power when every ride was', async () => {
+    // #77's eighth criterion.
+    const port = stubAnalysis(OWNER, [measured('r0', 0), measured('r1', 1)]);
+
+    mounted = await mount(<AnalysisView port={port} />);
+    // Twice: the screen reaches `ready` on the first pass and the history — a
+    // second, deliberately separate read — lands on the next. That separation
+    // is the design, not a race: a failure to draw the chart must not empty
+    // the rest of the page.
+    await settle();
+    await settle();
+
+    expect(mounted.container.textContent).toContain('all measured from power');
+  });
+
+  it('says so plainly when the history mixes the two bases', async () => {
+    const strapped: StubAnalysisRide = {
+      activity: stubActivity({
+        id: activityId('strap'),
+        startedAt: unixSeconds(START + DAY),
+        startedAtTimeZone: 'UTC',
+        effortWeightedHeartRate: beatsPerMinute(150),
+        loadCoveredTime: seconds(3600),
+      }),
+    };
+    const port = stubAnalysis(OWNER, [measured('r0', 0), strapped]);
+
+    mounted = await mount(<AnalysisView port={port} />);
+    // Twice: the screen reaches `ready` on the first pass and the history — a
+    // second, deliberately separate read — lands on the next. That separation
+    // is the design, not a race: a failure to draw the chart must not empty
+    // the rest of the page.
+    await settle();
+    await settle();
+
+    expect(mounted.container.textContent).toContain(
+      'some measured from power and some from heart rate',
+    );
+    expect(mounted.container.textContent).toContain('without being the same measurement');
+  });
+
+  it('warns that the start of a short history is climbing out of nothing', async () => {
+    // The seeding, said to the reader rather than buried in a comment.
+    const port = stubAnalysis(OWNER, [measured('r0', 0), measured('r1', 1)]);
+
+    mounted = await mount(<AnalysisView port={port} />);
+    // Twice: the screen reaches `ready` on the first pass and the history — a
+    // second, deliberately separate read — lands on the next. That separation
+    // is the design, not a race: a failure to draw the chart must not empty
+    // the rest of the page.
+    await settle();
+    await settle();
+
+    expect(mounted.container.textContent).toContain('start from zero');
+  });
+
+  it('never tells the rider whether their numbers are good or bad', async () => {
+    // Fatigue rises because the athlete trained. A chart that called that a
+    // warning on the strength of three numbers would be overreaching.
+    const rides = Array.from({ length: 40 }, (_unused, index) =>
+      measured(`r${String(index)}`, index),
+    );
+    const port = stubAnalysis(OWNER, rides);
+
+    mounted = await mount(<AnalysisView port={port} />);
+    // Twice: the screen reaches `ready` on the first pass and the history — a
+    // second, deliberately separate read — lands on the next. That separation
+    // is the design, not a race: a failure to draw the chart must not empty
+    // the rest of the page.
+    await settle();
+    await settle();
+
+    const panel = mounted.container.textContent ?? '';
+    expect(panel).not.toMatch(/overtrain|overreach|you should rest|too hard|at risk/i);
+  });
+
+  it('offers to measure rides imported before load was recorded, and does not do it unasked', async () => {
+    // The backfill is an explicit act. A read path that writes is a read path
+    // whose cost nobody can state.
+    const port = stubAnalysis(OWNER, [
+      {
+        activity: stubActivity({
+          id: activityId('old'),
+          startedAt: unixSeconds(START),
+          startedAtTimeZone: 'UTC',
+        }),
+        power: Array.from({ length: 600 }, () => watts(200)),
+      },
+    ]);
+
+    mounted = await mount(<AnalysisView port={port} />);
+    // Twice: the screen reaches `ready` on the first pass and the history — a
+    // second, deliberately separate read — lands on the next. That separation
+    // is the design, not a race: a failure to draw the chart must not empty
+    // the rest of the page.
+    await settle();
+    await settle();
+
+    expect(mounted.container.textContent).toContain('imported before this device');
+    // Nothing was written by rendering.
+    expect(port.summaryWrites).toEqual([]);
+
+    const measure = queryAll(mounted.container, 'button').find((button) =>
+      (button.textContent ?? '').startsWith('Measure'),
+    );
+    expect(measure).toBeDefined();
+    await activateWithKeyboard(measure as HTMLElement);
+    await settle();
+
+    expect(port.summaryWrites).toEqual(['old']);
+    expect(mounted.container.textContent).toContain('Measured 1 more ride');
+  });
+});

@@ -216,6 +216,12 @@ cannot destroy their display name. ⚠️ **It replaces both, and `undefined` me
 than "leave alone"** — with the other reading there would be no way to clear a threshold at all, and
 a rider who set one by mistake could never get back to the default.
 
+`setActivityLoadSummary(owner, id, summary)` (#77) is the same shape again, for a ride: it writes
+the threshold-independent half of a ride's load and touches nothing else, and it is **athlete-scoped**
+— a ride id alone must never be enough to modify a row (CLAUDE.md §6). ⚠️ The *load* is deliberately
+not stored: it depends on a threshold the rider can change, so a stored one would go silently stale
+across the whole history. `ActivityRecord.effortWeightedPower` records the split.
+
 ### An optional field is not a migration, and that is why #78's thresholds are optional
 
 `AthleteRecord.thresholdPower` and `thresholdHeartRate` (#78) are **optional**, and that is a

@@ -140,6 +140,50 @@ export interface ActivityRecord {
   readonly averagePower?: Watts;
 
   /**
+   * The **threshold-independent** half of this ride's load (#77).
+   *
+   * `packages/domain`'s `analysis/load.ts` computes a ride's load from two
+   * things: an effort-weighted power (or heart rate), which needs every sample
+   * and is expensive, and the athlete's current threshold, which is one
+   * division. These fields carry the expensive half, so a chart over a thousand
+   * rides can be drawn from `listActivitySummaries` alone — #77's seventh
+   * criterion forbids loading stream data to draw it, and decoding a thousand
+   * power channels is exactly what that criterion is about.
+   *
+   * ⚠️ **The load itself is deliberately NOT stored.** It depends on the
+   * threshold, and since #76 a rider can change theirs — so a stored load would
+   * be silently stale across the whole history the moment they did, and nothing
+   * would say so. Storing the part that does not move and deriving the part
+   * that does is what keeps the chart and the ride screen agreeing.
+   *
+   * ⚠️ **At most one of the two is set**, and which one says what basis was
+   * used: power where the ride has it, heart rate where it does not. That
+   * mirrors `apps/web/src/analysis/load.ts`'s `loadFrom`, where the ordering is
+   * a decision rather than a fallback chain's accident — heart rate lags an
+   * effort and saturates. One field per basis rather than one number plus a
+   * label is what stops a bpm being read as watts; `streams.ts` states the same
+   * rule for the same reason.
+   *
+   * Optional, so this is additive and needs no migration — see `README.md`
+   * §"An optional field is not a migration".
+   */
+  readonly effortWeightedPower?: Watts;
+
+  /** @see effortWeightedPower — set only when the ride has no power. */
+  readonly effortWeightedHeartRate?: BeatsPerMinute;
+
+  /**
+   * How long the basis channel actually reported, which is what a load is
+   * proportional to.
+   *
+   * Not `movingTime`. A ride that lost a third of its trace produces a load a
+   * third light, and `analysis/load.ts` records why that is reported rather
+   * than corrected: inventing the missing third is the fabrication the gap rule
+   * exists to prevent.
+   */
+  readonly loadCoveredTime?: Seconds;
+
+  /**
    * The immutable original file, if one exists — its local storage key and the
    * SHA-256 of its bytes, lowercase hex.
    *

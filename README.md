@@ -110,6 +110,17 @@ and the page says how much that was rather than quietly counting the silence as 
 them. Until you set one, the page uses an assumed default and says the word "assumed" every time.
 Clearing a box puts it back to the default. Neither number is sent anywhere.
 
+**Fitness and fatigue** smooth that load two ways — over about six weeks and over about one — and
+the gap between them is your **freshness**. The page says which way each is moving and by how much
+over the last week, in words as well as on the chart. It does **not** tell you whether that is good:
+fatigue rises because you trained, and three numbers are not enough to say more than that.
+
+Two things it is honest about. Both averages start from zero on the day of your first ride, because
+this device has no record of what you did before it — so the first few weeks are climbing out of
+nothing rather than describing your training, and the page says so while that is true. And a ride
+imported before this device measured load is not silently counted as a rest day: the page says how
+many there are and offers to measure them, once.
+
 **Duration personal bests** are the best average power you have held for each length of time,
 anywhere in any ride on this device. A window is never bridged across a gap in the recording and
 never spans two rides, so a best is always something you actually rode in one go — a ride with a

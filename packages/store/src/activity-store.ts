@@ -55,7 +55,7 @@
  */
 
 import Dexie, { type Table } from 'dexie';
-import type { BeatsPerMinute, Watts } from '@onyourleft/domain';
+import type { BeatsPerMinute, Seconds, Watts } from '@onyourleft/domain';
 
 import {
   StoreDecodeError,
@@ -403,6 +403,54 @@ export class ActivityStore {
       };
       await this.#athletes.put(toPersistedAthlete(updated));
       return updated;
+    });
+  }
+
+  /**
+   * Writes a ride's load summary, leaving every other field alone (#77).
+   *
+   * Narrow for `setAthleteThresholds`' reason: a caller saving a derived
+   * summary must not have to reconstruct the ride's name, its visibility or its
+   * original-file reference correctly, and `putActivity` would make that its
+   * problem. Read and write in one transaction, so a concurrent edit to the
+   * ride is not lost between them.
+   *
+   * ⚠️ **Athlete-scoped, like every other write.** A ride id alone must never
+   * be enough to modify a row — CLAUDE.md §6 names an unscoped match as the
+   * cross-athlete defect that passes every single-athlete test in the suite.
+   *
+   * @returns `false` when this athlete has no such ride, rather than throwing:
+   * a ride deleted while a backfill was running is an ordinary race, not an
+   * error the rider needs to see.
+   */
+  async setActivityLoadSummary(
+    owner: AthleteId,
+    activity: ActivityId,
+    summary: {
+      readonly effortWeightedPower?: Watts | undefined;
+      readonly effortWeightedHeartRate?: BeatsPerMinute | undefined;
+      readonly loadCoveredTime: Seconds;
+    },
+  ): Promise<boolean> {
+    return this.#db.transaction('rw', [this.#activities], async () => {
+      const row = await this.#activities.get(activity);
+      if (row === undefined || row.athleteId !== owner) {
+        return false;
+      }
+      const existing = fromPersistedActivity(row);
+      await this.#activities.put(
+        toPersistedActivity({
+          ...existing,
+          ...(summary.effortWeightedPower === undefined
+            ? {}
+            : { effortWeightedPower: summary.effortWeightedPower }),
+          ...(summary.effortWeightedHeartRate === undefined
+            ? {}
+            : { effortWeightedHeartRate: summary.effortWeightedHeartRate }),
+          loadCoveredTime: summary.loadCoveredTime,
+        }),
+      );
+      return true;
     });
   }
 
