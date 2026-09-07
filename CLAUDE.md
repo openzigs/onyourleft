@@ -29,6 +29,9 @@ ride, store it, view it. **No server, no account, no hosting bill.** A server ar
 ```
 apps/                 AGPL-3.0-or-later, without exception
   web/                browser client — the Phase 1 product (#48-#51)
+    browser/            the browser gate (#63) — the one place a real browser runs;
+                        a harness page driving the map adapter, and its Playwright
+                        spec. See §4a and §4f
     src/a11y/           the accessibility gate: rules, routes, contrast (#48) — see §4e
     src/design/         design tokens, theme.css and the primitives (#48)
     src/detail/         the ride detail view's data layer (#50) — the read budget, the
@@ -251,6 +254,28 @@ bash scripts/check-a11y-suite.test.sh
 # a green build: the bundler resolves imports the typechecker only reads types
 # from, so run this before claiming a change compiles.
 pnpm run build
+
+# The browser gate (#63). Builds `apps/web/browser/` and drives it in a real
+# headless Chromium through Playwright. This is the ONLY place in the
+# repository where a browser runs: jsdom implements no WebGL, so MapLibre
+# cannot be constructed in the Vitest suite at all, and three things are
+# checkable nowhere else — that MapLibre initialises against the style we
+# build, that `addProtocol` takes effect in a real engine, and **which hosts
+# the map actually contacts**. That last one is #63's third criterion in its
+# literal form and the assertion `styleOrigins` cannot make, because a request
+# a dependency issues on its own initiative is in no style at all.
+#
+# Needs the pinned browser present. In a container that already has one (
+# `PLAYWRIGHT_BROWSERS_PATH` set, revision matching) it runs as-is; on a bare
+# machine or a CI runner, install it first with the line below.
+pnpm run test:browser
+
+# Fetch the browser the lockfile pins. @playwright/test 1.56.0 ships Chromium
+# revision 1194 and this fetches exactly that, so the browser is as
+# reproducible as the toolchain. ~170 MB, and `--with-deps` uses sudo to add
+# the shared libraries a headless Chromium needs. Skip it where a matching
+# browser is already installed.
+pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
 
 # One package at a time, which is how you check a single package's harness.
 # `@onyourleft/sensors`' and `@onyourleft/fit`'s typechecks each run TWO
@@ -495,7 +520,10 @@ Apache-2.0, both zero-dependency, both under `packages/store`) and — since #40
 `packages/fit` **and, since #51, of `apps/web` too**, whose closure is `buffer` MIT → `base64-js`
 MIT and `ieee754` BSD-3-Clause) and — since #63 — `maplibre-gl` 6.7.0 and `pmtiles` 4.5.0 (both
 BSD-3-Clause, both runtime dependencies of `apps/web`, whose closure adds BSD-2-Clause, ISC, MIT and
-one `(MIT OR Apache-2.0)` and no GPL, AGPL or non-OSI licence) are
+one `(MIT OR Apache-2.0)` and no GPL, AGPL or non-OSI licence) and — also since #63 —
+`@playwright/test` 1.56.0 (Apache-2.0, with `playwright` and `playwright-core`, all three
+Apache-2.0; a devDependency of `apps/web`, and the only dependency in the workspace that pins a
+**browser** as well as a version — see §4f) are
 installed; **nothing else from ADR 0005's runtime list is**, `react-router` included. Add each in
 the issue that first needs it, after checking its licence against the
 directory it lands in (CONTRIBUTING.md).
@@ -514,7 +542,8 @@ making a client's typecheck depend on another package's authoring-time directory
 push to `main`. It runs **exactly** the §4a commands and nothing else: the six bare-clone script
 checks, `shellcheck scripts/*.sh`, then `pnpm install --frozen-lockfile`, `format:check`, `lint`,
 `typecheck`, `test:coverage`, `bash scripts/coverage-summary.test.sh`, `check:a11y-suite`,
-`test:a11y`, `bash scripts/check-a11y-suite.test.sh` and `build` — then
+`test:a11y`, `bash scripts/check-a11y-suite.test.sh`, `build`, `playwright install --with-deps
+chromium` and `test:browser` — then
 publishes the coverage table to the run summary and uploads the HTML report as an artefact.
 Those last two carry `if: always()` and cannot fail the job: the run where coverage moved
 unexpectedly is exactly the one whose table you want, and a reporting step that can fail a
@@ -527,6 +556,19 @@ that is how a contributor's local green becomes CI's red with no explanation.
 > reports, which makes every subsequent pull request unmergeable — including the one doing the
 > renaming. Extend the existing job; do not add a second job for a new gate, because a second job
 > reports under a different context and its failure would not block a merge.
+
+**The browser gate (#63) is in that same job, and it is the step that most looks like it wants its
+own.** It installs a ~170 MB Chromium and then runs for about three seconds, which is exactly the
+shape a separate job exists for — and it stays here anyway, because a second job reports under a
+different context and could not block a merge. A gate that cannot block is not a gate. The job's
+`timeout-minutes` moved from 10 to 15 to give the download room; that number is a stop on a hung
+job, not a budget.
+
+⚠️ **The browser is pinned by the lockfile, not by the install command.** `@playwright/test`
+**1.56.0** ships Chromium revision **1194**, and `playwright install chromium` fetches whatever the
+installed Playwright names. Bumping Playwright therefore changes the browser under the gate, which
+is a thing to do deliberately and to re-run the gate after — the same posture as the fixture-corpus
+generator in `packages/fit`.
 
 It runs on `ubuntu-latest`, holds `permissions: contents: read`, and pins `actions/checkout` and
 `actions/setup-node` to full commit SHAs with the `gh api` command that produced each in a comment.
@@ -671,6 +713,59 @@ make this checker wrong rather than make the control safe.
 supplies the missing event. Do not "fix" that by making the router set the hash itself in a click
 handler — that would be changing shipping behaviour to suit a test double, and it costs the
 browser's own middle-click and open-in-new-tab handling.
+
+### 4f. The browser gate
+
+Added by [#63](https://github.com/openzigs/onyourleft/issues/63). It lives in
+[`apps/web/browser/`](apps/web/browser/) and it is **the only place in this repository where a real
+browser runs**.
+
+| File | What it is |
+|---|---|
+| `index.html`, `harness.ts` | a page that builds a map through the **real** `map/maplibre.ts` and the **real** `basemapStyle`, and publishes what happened on `window.__oylHarness` |
+| `map.browser.spec.ts` | the Playwright spec that drives it |
+| `../playwright.config.ts` | Chromium only, no retries, and the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all |
+| `../vite.browser.config.ts` | the harness build. A second Vite config, so the harness cannot reach a shipped bundle |
+
+**Why it exists at all**, given that #48's suite already renders every route: **jsdom implements no
+WebGL**, so `new maplibregl.Map(...)` cannot be constructed in the Vitest suite. `src/map/port.ts`
+records the seam that follows from that, and it leaves exactly three questions open — whether
+MapLibre initialises against the style we build, whether `addProtocol` takes effect in a real
+engine, and **which hosts the map actually contacts.** The third is #63's criterion 3 in its literal
+wording (*"intercepts all network traffic during a map render"*), and it catches what `styleOrigins`
+cannot: a request a dependency issues on its own initiative is in no style at all.
+
+⚠️ **The browser gate does not subsume `styleOrigins`, and it is easy to assume it does.** Adding a
+third-party `glyphs` URL to `basemapStyle` turns the **jsdom** check red and leaves the **browser**
+gate green — glyphs are fetched lazily, only when a symbol layer draws text, and the minimal style
+has no symbol layers. So the static check catches a third-party URL that is *declared* and the
+browser catches a host that is *contacted* but declared nowhere. Neither is the other's superset and
+deleting either leaves a real hole. Found by mutation; recorded here so it is not rediscovered.
+
+⚠️ **It is NOT part of `pnpm run test`.** It needs a browser and a built harness, and a five-second
+browser run does not belong in the fast suite a contributor runs on every save. It is its own
+command and its own CI step.
+
+⚠️ **Do not reach for `networkidle`.** There is no published archive (#53), so the archive request
+404s and **MapLibre retries a failed source** — the network never goes idle. The first version of
+the spec waited on it and four of five tests burned sixty seconds each before failing. Wait on the
+event you mean (`waitForRequest`), which is both faster and stricter: it fails immediately when the
+request is never made, which is what a broken protocol registration looks like.
+
+⚠️ **`renderer.create` does not register the protocol.** `MapPanel.tsx` calls
+`protocol.ensure()` before it creates a map, and the harness has to do the same. Omitting it is
+silent: MapLibre meets a `pmtiles://` URL it has no handler for, never requests the archive, and
+every network assertion waits out its timeout rather than failing with a reason.
+
+⚠️ **The harness server is a *static file server*, not a single-page app.** `vite.browser.config.ts`
+sets `appType: 'mpa'` so a missing archive comes back `404` — Vite's default rewrites every unknown
+path to `index.html` and returns `200` with a page of HTML, which the "there is no archive yet"
+assertion reads as success. A real PMTiles archive sits on object storage behind a CDN (ADR 0010
+D-1), which 404s what it does not have.
+
+**What it does not prove: that tiles render.** There is no archive to render from. The spec asserts
+the 404 rather than tolerating it, so the day #53 lands that test goes red — which is the right
+moment for somebody to come back and replace it with one that asserts tiles actually drew.
 
 ---
 
@@ -1053,6 +1148,7 @@ top of an issue **supersedes its body**.
 | What a *shared* copy of a ride contains, and why the rider's own view is not trimmed | [ADR 0004](docs/adr/0004-privacy-and-location.md) decisions B, C and E, `apps/web/src/detail/privacy.ts`, `apps/web/src/transfer/export-activity.ts` |
 | Which origins the map is allowed to reach, and why the style is built rather than fetched | `apps/web/src/map/basemap.ts` §`styleOrigins`, [ADR 0010](docs/adr/0010-map-tiles-and-routing.md) D-1 |
 | Why MapLibre is behind a seam, and what that seam does not prove | `apps/web/src/map/port.ts` |
+| What a real browser checks that jsdom cannot, and why it shares one CI job | §4f, `apps/web/browser/`, `.github/workflows/rules.yml` |
 | Where the basemap URL is configured, and why nothing is configured today | `.env.example` §`VITE_BASEMAP_PMTILES_URL`, [#53](https://github.com/openzigs/onyourleft/issues/53) |
 
 <!-- Last updated: 2026-09-06 by delivery:code-issue resolving #51 (the manual file import and export UI) -->

@@ -8,5 +8,16 @@
     "types": ["vite/client", "node"],
     "jsx": "react-jsx"
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts", "vitest.config.ts"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    // The browser gate (#63). Typechecked with the rest of the client rather
+    // than left out: it imports the real map adapter, so a change that breaks
+    // the adapter's signature has to break here too.
+    "browser/**/*.ts",
+    "vite.config.ts",
+    "vite.browser.config.ts",
+    "playwright.config.ts",
+    "vitest.config.ts"
+  ]
 }

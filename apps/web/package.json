@@ -4,13 +4,14 @@
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-or-later",
-  "description": "Browser client — the Phase 1 product.",
+  "description": "Browser client \u2014 the Phase 1 product.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit --project tsconfig.json && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit --project tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:browser": "vite build --config vite.browser.config.ts && playwright test"
   },
   "dependencies": {
     "@onyourleft/domain": "workspace:*",
@@ -23,6 +24,7 @@
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@playwright/test": "1.56.0",
     "@types/node": "24.13.3",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",

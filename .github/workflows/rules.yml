@@ -14,6 +14,11 @@
 # "Repository rules", so a second job would report under a different context and
 # a toolchain failure would not block a merge.
 #
+# Since #63 the job also drives a real browser. That is the one thing the rest
+# of the suite cannot do: jsdom implements no WebGL, so MapLibre cannot be
+# constructed there at all, and "which hosts does the map engine actually
+# contact" is a question only a browser answers.
+#
 # Still not here, and owned by the second half of #24: the per-package
 # dependency-licence allowlist, and a coverage gate demonstrated to fail.
 name: Repository rules
@@ -54,9 +59,11 @@ jobs:
     # GitHub-hosted runners are free and unlimited -- CLAUDE.md section 8. It is
     # a one-word diff that produces an invoice and nothing in the log warns you.
     runs-on: ubuntu-latest
-    # These checks take seconds. The cap is a stop on a hung job rather than a
-    # budget; the platform default would let one run for six hours.
-    timeout-minutes: 10
+    # A stop on a hung job rather than a budget; the platform default would let
+    # one run for six hours. Raised from 10 with #63: the browser gate downloads
+    # a pinned Chromium (~170 MB), which is fast on a good day and is the one
+    # step here whose duration depends on somebody else's CDN.
+    timeout-minutes: 15
     steps:
       - name: Check out the repository
         # Pinned to a full commit SHA, not a tag: a tag is mutable, and a
@@ -253,3 +260,32 @@ jobs:
       # typechecker only reads types from.
       - name: Build
         run: pnpm run build
+
+      # --- The browser gate (#63) ----------------------------------------------
+
+      # Chromium only, and pinned by the lockfile: @playwright/test 1.56.0 ships
+      # Chromium revision 1194 and `playwright install` fetches exactly that, so
+      # the browser is as reproducible as the toolchain above.
+      #
+      # `--with-deps` installs the shared libraries a headless Chromium needs on
+      # a bare runner. It uses sudo, which ubuntu-latest grants passwordless.
+      #
+      # This is the slowest step in the job by a wide margin -- a ~170 MB
+      # download against a five-second test run. It buys the only assertions in
+      # the repository that a real engine makes: that MapLibre initialises
+      # against the style we build, that `addProtocol` takes effect, and that the
+      # map contacts no host but the configured basemap origin. `map/port.ts`
+      # records why everything else is behind a seam.
+      #
+      # Why not a job of its own, when a slow step in a fast job is exactly what
+      # a separate job is for: `main` requires a status check whose context is
+      # exactly "Repository rules", and a second job reports under a different
+      # one and could not block a merge (CLAUDE.md section 4c). A gate that
+      # cannot block is not a gate.
+      - name: Install the pinned browser
+        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+
+      # Builds the harness and drives it. CLAUDE.md section 4a documents both
+      # halves as one command.
+      - name: Browser gate
+        run: pnpm run test:browser
