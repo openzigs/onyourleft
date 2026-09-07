@@ -614,6 +614,7 @@ share one.
 | [0011](adr/0011-stream-storage.md) | Activity stream storage — per-channel packed binary in IndexedDB | #27 |
 | [0013](adr/0013-adr-amendments.md) | Amending an accepted ADR — a dated, append-only `## Amendments` section | #147 |
 | [0014](adr/0014-portable-identity.md) | Portable identity — an Ed25519 device keypair and signed, content-addressed activity records | #61 |
+| [0015](adr/0015-dependency-licences.md) | Dependency licences — two closures, and a ruling on the six that were deferred | #24 |
 
 **0012 is deliberately absent from that list and is not free** — see the row for it below.
 

@@ -117,17 +117,20 @@ What this means in practice:
 - A **GPL or AGPL dependency anywhere under `packages/`** fails CI. If a package needs one, the code
   moves to `apps/` or the dependency is replaced. There is no third option and no exemption.
 - **Permissive** dependencies (MIT, BSD-2/3, Apache-2.0, ISC) are fine anywhere.
-- **Weak, file-level copyleft (MPL-2.0, EPL) and permissive licences this list does not name** —
-  `BlueOak-1.0.0`, `CC0-1.0`, `MIT-0`, `0BSD` — are **not ruled on yet**, and six are already in the
-  tree as build-time devDependencies. Read on 2026-09-05 from `pnpm licenses list --json`:
-  `lightningcss` and `lightningcss-darwin-arm64` (MPL-2.0), `lru-cache` and `minimatch`
-  (BlueOak-1.0.0), `mdn-data` (CC0-1.0), and `@csstools/color-helpers` and
-  `@csstools/css-syntax-patches-for-csstree` (MIT-0). Nothing is violated — none is GPL or AGPL, and
-  none is linked into a distributed artefact. **All of them reach `packages/*` through Vitest**, not
-  only `apps/web`: an allowlist written against "the MPL one is under `apps/`" would scope itself to
-  the wrong tree and pass vacuously. The per-package dependency-licence allowlist in
-  [#24](https://github.com/openzigs/onyourleft/issues/24) decides these explicitly. Verify with
-  `pnpm licenses list --json` rather than from this paragraph, which ages.
+- **Weak, file-level copyleft (MPL-2.0) and permissive licences the list above does not name** —
+  `BlueOak-1.0.0`, `CC0-1.0`, `MIT-0`, `0BSD` — **are now ruled on, by
+  [ADR 0015](docs/adr/0015-dependency-licences.md) D-2**, which discharges the deferral this bullet
+  used to carry. They are admitted **in the build-time-only closure under either path**, and in a
+  distributed closure **under `apps/` only** — an Apache-2.0 leaf package exists to be droppable
+  into someone else's project, and a shipped MPL-2.0 file carries obligations its own `LICENSE`
+  does not describe. Six such packages are in the tree as build-time devDependencies. Read on
+  2026-09-05 from `pnpm licenses list --json`: `lightningcss` and `lightningcss-darwin-arm64`
+  (MPL-2.0), `lru-cache` and `minimatch` (BlueOak-1.0.0), `mdn-data` (CC0-1.0), and
+  `@csstools/color-helpers` and `@csstools/css-syntax-patches-for-csstree` (MIT-0). **All of them
+  reach `packages/*` through Vitest**, not only `apps/web`: an allowlist written against "the MPL
+  one is under `apps/`" would scope itself to the wrong tree and pass vacuously — which is exactly
+  why ADR 0015 splits on the closure rather than the path alone. Enforced by `DEP001`; verify with
+  `pnpm run check:licences` rather than from this paragraph, which ages.
 - ⚠️ **An "it lands under `apps/`" argument is checked with `pnpm why <pkg> --recursive`, and a
   clean `require.resolve` probe is not evidence of anything.** This trap has now caught two
   dependencies — `lightningcss` and, in #141, `jsdom` — so #143 recorded how to check it.
@@ -295,6 +298,18 @@ pnpm --filter @onyourleft/web run test
 # inside. Run it after changing the generator, never to "fix" a failing test.
 pnpm --filter @onyourleft/fit run fixtures:generate
 
+# The dependency-licence gate (#24 part 2). Every dependency's OWN licence,
+# checked against the path its package lands in -- the other half of the
+# boundary check-repo-rules.sh performs on the code we write. Reads pnpm's own
+# resolution of its own lockfile, so it needs an install and is NOT part of
+# `check:repo`. About eight seconds. ADR 0015 classifies the licences; see
+# also section 4g.
+pnpm run check:licences
+
+# Its own suite. Fixture-driven; 45 cases, every policy branch with a case that
+# FAILS as well as one that passes. Needs Node, so also not in `check:repo`.
+bash scripts/check-dependency-licences.test.sh
+
 # All six bare-clone script checks in one command.
 pnpm run check:repo
 
@@ -350,6 +365,13 @@ reading paths:
 |---|---|
 | `ENV001` | a source file under `apps/` or `packages/` reads an environment variable `.env.example` does not list, **or** `.env.example` is missing |
 
+`scripts/check-dependency-licences.mjs` enforces one more, separately because it reads the installed
+dependency graph rather than the repository:
+
+| Rule | Fails when |
+|---|---|
+| `DEP001` | a dependency's own licence is not permitted in the closure and path where it was found — including a licence in none of [ADR 0015](docs/adr/0015-dependency-licences.md)'s tables, which fails closed |
+
 The stack the workspace is built on is decided in ADR 0005 and is not open:
 
 | Concern | Decision |
@@ -381,10 +403,6 @@ not.
   the issue that owns its content, [#85](https://github.com/openzigs/onyourleft/issues/85). Copy
   `packages/domain` as the template: a manifest, a `LICENSE`, a `tsconfig.json`, a
   `vitest.config.ts` and a test.
-- **A per-package dependency-licence gate.** Nothing yet checks that a dependency's *own* licence is
-  permitted under the path it lands in — only that the manifests and headers declare the right
-  thing. `pnpm licenses list --json` exists and is unused. Second half of
-  [#24](https://github.com/openzigs/onyourleft/issues/24).
 - **A coverage gate demonstrated to fail.** Coverage is reported and nothing enforces it, which is
   §5's deliberate design; what #24 still owes is the demonstration that the report is real.
 - **`react-router` and the rest of the runtime dependency list in ADR 0005.** See the dependency
@@ -543,7 +561,7 @@ push to `main`. It runs **exactly** the §4a commands and nothing else: the six 
 checks, `shellcheck scripts/*.sh`, then `pnpm install --frozen-lockfile`, `format:check`, `lint`,
 `typecheck`, `test:coverage`, `bash scripts/coverage-summary.test.sh`, `check:a11y-suite`,
 `test:a11y`, `bash scripts/check-a11y-suite.test.sh`, `build`, `playwright install --with-deps
-chromium` and `test:browser` — then
+chromium`, `test:browser`, `bash scripts/check-dependency-licences.test.sh` and `check:licences` — then
 publishes the coverage table to the run summary and uploads the HTML report as an artefact.
 Those last two carry `if: always()` and cannot fail the job: the run where coverage moved
 unexpectedly is exactly the one whose table you want, and a reporting step that can fail a
@@ -577,9 +595,13 @@ All of that is §8 rules rather than preference. Node comes from `.nvmrc` and pn
 **no dependency cache**: it would mean another action to pin and a writable cache in every job's
 dependency path, to save seconds on a workspace this size.
 
-**Still absent from CI**, and owned by the second half of
-[#24](https://github.com/openzigs/onyourleft/issues/24): the per-package dependency-licence
-allowlist, and a coverage gate demonstrated to fail.
+**Still absent from CI**, and the remainder of
+[#24](https://github.com/openzigs/onyourleft/issues/24): the demonstration that CI goes red on a
+lint error, a type error and a failing test. The per-package dependency-licence allowlist landed
+with #24 part 2 — see §4g. ⚠️ #24's remaining criterion is worded *"the coverage gate is enforced
+and demonstrated to fail below threshold"*, and that wording **predates §5 and does not govern**:
+§5 forbids a percentage floor outright, so what is owed is a demonstration that the coverage
+**report** is real, never a threshold. Read §5, not that criterion.
 
 Repository-level security scanning — CodeQL default setup, secret scanning with push protection, and
 Dependabot alerts and security updates — is **already enabled on the repository** and needs no
@@ -782,6 +804,51 @@ that machine has.
 **What it does not prove: that tiles render.** There is no archive to render from. The spec asserts
 the 404 rather than tolerating it, so the day #53 lands that test goes red — which is the right
 moment for somebody to come back and replace it with one that asserts tiles actually drew.
+
+### 4g. The dependency-licence gate
+
+Added by [#24](https://github.com/openzigs/onyourleft/issues/24) part 2 and classified by
+[ADR 0015](docs/adr/0015-dependency-licences.md). `scripts/check-repo-rules.sh` checks the licence
+of the code **we write** — the header, the manifest, the `LICENSE` file. This checks the licence of
+the code **we pull in**, which is the direction §3's HARD RULE actually protects against: a GPL
+dependency inside an Apache-2.0 leaf package is a licensing incident and it arrives looking like a
+version bump.
+
+**Two closures, judged by different tables**, because a licence's obligations attach to what is
+distributed:
+
+| | `packages/*` (Apache-2.0) | `apps/*` (AGPL-3.0-or-later) |
+|---|---|---|
+| **Distributed** (`--prod`) | permissive only | permissive + weak + GPL/LGPL/AGPL |
+| **Build-time only** | permissive + weak | permissive + weak + GPL/LGPL/AGPL |
+
+where *weak* is ADR 0015 D-2's set — `MPL-2.0`, `BlueOak-1.0.0`, `CC0-1.0`, `MIT-0`, `0BSD`.
+
+⚠️ **GPL and AGPL stay forbidden under `packages/` in BOTH closures.** The distributed-artefact
+argument alone would permit a GPL build-time tool there; ADR 0015 D-3 deliberately does not go
+there, because §3 states the rule with no exemption and reversing it is an owner's decision rather
+than a side effect of writing a checker.
+
+⚠️ **It fails closed.** A licence in none of the tables is a violation, not a pass — the gate exists
+for the licence nobody has considered yet. A perfectly fine but unnamed licence (`Unlicense`,
+`Zlib`) will stop the build until someone adds it to ADR 0015 **and** to `POLICY` in the script.
+Those two tables can drift and nothing prevents it; the script says so where `POLICY` is defined and
+the failure message names the ADR.
+
+⚠️ **`pnpm licenses list --filter` does NOT follow workspace links, and that was measured.**
+`apps/web` declares `@onyourleft/store`, which declares `dexie`, yet `dexie` does not appear in
+web's closure — it appears in `store`'s, which is where the licence question belongs. So **the union
+over every workspace package is what makes the check complete**, the package list is *discovered*
+rather than written down, and a discovery returning nothing is a failure rather than a clean run.
+
+⚠️ **It cannot see a licence the package declares wrongly.** It reads the `license` field each
+package publishes. A package that declares MIT and vendors GPL inside itself passes, and no check at
+this layer would catch that — which is why `packages/fit`'s clean-room posture (ADR 0006) exists
+separately rather than being subsumed here.
+
+**Not part of `pnpm run check:repo`**: it needs an install, the same reason `check:a11y-suite` is
+not. Its own suite is `bash scripts/check-dependency-licences.test.sh` — 45 cases, and every policy
+branch has a case that goes **red** as well as one that passes.
 
 ---
 
@@ -1028,8 +1095,9 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   free** — it belongs to [#64](https://github.com/openzigs/onyourleft/issues/64)'s data-licence
   decision, which is the destination ADR 0001's *Data* deferral had no number for
   ([#119](https://github.com/openzigs/onyourleft/issues/119)). **0014** is
-  [#61](https://github.com/openzigs/onyourleft/issues/61)'s portable identity. The next free number
-  is **0015**.
+  [#61](https://github.com/openzigs/onyourleft/issues/61)'s portable identity, and **0015** is
+  [#24](https://github.com/openzigs/onyourleft/issues/24)'s dependency-licence ruling. The next free
+  number is **0016**.
 - **Changelog**: there is **no `CHANGELOG.md` and no changelog convention** in this repository. Do
   not add one as a drive-by; if a release needs one, that is its own issue.
 - **Versions**: do not bump any version unless the issue asks for it.
@@ -1165,6 +1233,7 @@ top of an issue **supersedes its body**.
 | Which origins the map is allowed to reach, and why the style is built rather than fetched | `apps/web/src/map/basemap.ts` §`styleOrigins`, [ADR 0010](docs/adr/0010-map-tiles-and-routing.md) D-1 |
 | Why MapLibre is behind a seam, and what that seam does not prove | `apps/web/src/map/port.ts` |
 | What a real browser checks that jsdom cannot, and why it shares one CI job | §4f, `apps/web/browser/`, `.github/workflows/rules.yml` |
+| Whether a dependency's licence is allowed where it lands, and which licences are ruled on | §4g, [ADR 0015](docs/adr/0015-dependency-licences.md), `scripts/check-dependency-licences.mjs` §`POLICY` |
 | Where the basemap URL is configured, and why nothing is configured today | `.env.example` §`VITE_BASEMAP_PMTILES_URL`, [#53](https://github.com/openzigs/onyourleft/issues/53) |
 
 <!-- Last updated: 2026-09-06 by delivery:code-issue resolving #51 (the manual file import and export UI) -->

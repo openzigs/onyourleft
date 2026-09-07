@@ -289,3 +289,15 @@ jobs:
       # halves as one command.
       - name: Browser gate
         run: pnpm run test:browser
+
+      # DEP001. The other half of the licence boundary: check-repo-rules.sh
+      # checks the headers and manifests of the code we write, this checks the
+      # licence of the code we pull in. It reads pnpm's own resolution of its
+      # own lockfile, so it needs the install above -- which is why it is here
+      # and not in check:repo, the bare-clone set. ADR 0015 classifies the
+      # licences; CLAUDE.md section 4g says what it does and does not cover.
+      - name: Dependency licence checker tests
+        run: bash scripts/check-dependency-licences.test.sh
+
+      - name: Dependency licences
+        run: pnpm run check:licences
