@@ -28,8 +28,14 @@
  * So this script asserts the selected set against the disk:
  *
  * 1. Every `*.a11y.test.{ts,tsx}` under `apps/*` is selected by the gate.
- * 2. Everything the gate selects carries that convention — a filter widened
- *    back to a directory substring fails here rather than passing quietly.
+ * 2. Everything the gate selects carries that convention, so a filter widened
+ *    to pull in tests that are not accessibility tests at all fails here.
+ *    ⚠️ This is NOT the rule that catches #142's regression — rule 3 is, and
+ *    an earlier version of this comment credited rule 2 with it (#155). The
+ *    two catch different things: rule 3 covers a non-conventional test INSIDE
+ *    an accessibility directory, and rule 2 covers a selected file OUTSIDE
+ *    one, which rule 3 cannot see. Both are reachable; the suite has a case
+ *    for each.
  * 3. Every `*.test.{ts,tsx}` inside a directory named `a11y` or `accessibility`
  *    carries the convention, so a new accessibility test that forgets it fails
  *    the build instead of being skipped. This is the criterion the naming
@@ -163,8 +169,10 @@ export function problems(selected, testFiles) {
     if (!expectedSet.has(path)) {
       found.push(
         `${path} is selected by the accessibility gate but does not carry the ` +
-          '`*.a11y.test.*` convention. A filter that matches a directory instead of a ' +
-          'filename is the one #142 removed: it passes vacuously when the directory is renamed.',
+          '`*.a11y.test.*` convention, so the gate is running something that is not an ' +
+          'accessibility test — a filter broadened past the convention, rather than ' +
+          "narrowed. (#142's own regression is caught by the accessibility-directory " +
+          'rule below, not by this one; #155 corrected that attribution.)',
       );
     }
   }

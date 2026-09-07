@@ -719,6 +719,21 @@ rather than sitting silently outside the gate. It takes the selector out of `pac
 cannot parse is a failure, not a pass. Run it with `pnpm run check:a11y-suite`, and its own suite
 with `bash scripts/check-a11y-suite.test.sh`.
 
+⚠️ **Two of its four rules look like each other and are not**, which #155 raised as a rule that
+could not fire. **It can** — the two catch different things and the suite now isolates each:
+
+- *A test inside an `a11y`/`accessibility` directory that lacks the convention* is **rule 3**, and
+  it is what catches #142's own regression. Renaming the directory leaves the old filter matching
+  the *filename*, so the conventional files stay selected and only the non-conventional one is
+  silently dropped — rule 3 is the one that notices.
+- *A selected file that lacks the convention* is **rule 2**, and it catches a filter broadened the
+  other way, past the convention, pulling in tests that are not accessibility tests at all. Rule 3
+  cannot see that, because the file is outside any accessibility directory.
+
+The confusion was reasonable: the pre-existing fixture for rule 2 put its file *inside* `src/a11y/`,
+where rule 3 also fires, so deleting rule 2 left the case red anyway and the rule looked redundant.
+A fixture outside such a directory isolates it, and deleting rule 2 now turns that case green.
+
 **There is no `axe-core` and adding one is a decision, not a tidy-up.** It is MPL-2.0, which §3
 records as *not ruled on yet* and [#24](https://github.com/openzigs/onyourleft/issues/24)'s to
 decide; and its highest-value rule — colour contrast — is inert under a headless DOM, because jsdom
