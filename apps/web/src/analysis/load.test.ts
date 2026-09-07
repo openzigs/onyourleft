@@ -168,6 +168,93 @@ describe('loadRideZones — the threshold reaches the boundaries', () => {
   });
 });
 
+describe('loadRideZones — the ride load, and which channel it came from', () => {
+  it('derives the load from power when the ride has it', async () => {
+    // An hour at exactly the default threshold: 100 by construction, so this
+    // asserts the wiring rather than re-deriving the formula, which
+    // `packages/domain`'s own suite pins.
+    const port = stubAnalysis(OWNER, [ride('ride-1', { power: steadyPower(200, 3600) })]);
+
+    const result = await loadRideZones(port, activityId('ride-1'));
+
+    expect(result?.load?.basis).toBe('power');
+    expect(result?.load?.load).toBeCloseTo(100, 6);
+    expect(result?.load?.coveredSeconds).toBe(3600);
+  });
+
+  it('falls back to heart rate for a ride recorded without a power meter', async () => {
+    const port = stubAnalysis(OWNER, [ride('ride-1', { heartRate: steadyHeartRate(160, 3600) })]);
+
+    const result = await loadRideZones(port, activityId('ride-1'));
+
+    expect(result?.load?.basis).toBe('heartRate');
+    expect(result?.load?.load).toBeCloseTo(100, 6);
+  });
+
+  it('prefers power on a ride that carries both', async () => {
+    // The ordering is a decision, not a fallback chain's accident: heart rate
+    // lags and saturates, so where both exist the power number is the better
+    // measurement of the same idea.
+    const port = stubAnalysis(OWNER, [
+      ride('ride-1', { power: steadyPower(400, 3600), heartRate: steadyHeartRate(160, 3600) }),
+    ]);
+
+    const result = await loadRideZones(port, activityId('ride-1'));
+
+    expect(result?.load?.basis).toBe('power');
+    // 400 W against a 200 W default threshold is four times the load of an
+    // hour at threshold, and nothing like the heart-rate answer of 100.
+    expect(result?.load?.load).toBeCloseTo(400, 6);
+  });
+
+  it('costs no extra channel read', async () => {
+    // The load is computed where the zone read already decoded the samples.
+    // A second `getStreamChannel` here would double the cost of opening the
+    // screen, and this is what would notice.
+    const port = stubAnalysis(OWNER, [
+      ride('ride-1', { power: steadyPower(200, 3600), heartRate: steadyHeartRate(160, 3600) }),
+    ]);
+
+    await loadRideZones(port, activityId('ride-1'));
+
+    expect(port.channelReads).toEqual(['ride-1:power', 'ride-1:heartRate']);
+  });
+
+  it('has no load for a ride with neither channel', async () => {
+    const port = stubAnalysis(OWNER, [ride('ride-1')]);
+
+    expect((await loadRideZones(port, activityId('ride-1')))?.load).toBeUndefined();
+  });
+
+  it('has no load for a ride shorter than the smoothing window', async () => {
+    // Ten seconds of power cannot fill a thirty-second window, and the domain
+    // returns the absence of a number rather than a NaN.
+    const port = stubAnalysis(OWNER, [ride('ride-1', { power: steadyPower(200, 10) })]);
+
+    expect((await loadRideZones(port, activityId('ride-1')))?.load).toBeUndefined();
+  });
+
+  it('moves with the athlete’s threshold', async () => {
+    // #76's sixth criterion at this layer: a fixed ride, two thresholds, and
+    // the dependent number changes.
+    const rides = [ride('ride-1', { power: steadyPower(200, 3600) })];
+    const assumed = await loadRideZones(stubAnalysis(OWNER, rides), activityId('ride-1'));
+    const configured = await loadRideZones(
+      stubAnalysis(OWNER, rides, {
+        id: OWNER,
+        displayName: 'A',
+        createdAt: stubActivity().createdAt,
+        thresholdPower: watts(400),
+      }),
+      activityId('ride-1'),
+    );
+
+    expect(assumed?.load?.load).toBeCloseTo(100, 6);
+    // Half the threshold fraction is a quarter of the load.
+    expect(configured?.load?.load).toBeCloseTo(25, 6);
+  });
+});
+
 describe('loadLibraryBests', () => {
   it('takes the best of each duration across the library', async () => {
     const port = stubAnalysis(OWNER, [

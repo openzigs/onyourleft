@@ -55,6 +55,7 @@
  */
 
 import Dexie, { type Table } from 'dexie';
+import type { BeatsPerMinute, Watts } from '@onyourleft/domain';
 
 import {
   StoreDecodeError,
@@ -351,6 +352,57 @@ export class ActivityStore {
       }
       await this.#athletes.put(toPersistedAthlete(record));
       return record;
+    });
+  }
+
+  /**
+   * Replaces the athlete's thresholds, leaving every other field alone.
+   *
+   * The write half of #78's setting. `putAthlete` cannot do this job for the
+   * reason {@link ensureAthlete} exists (#184): it is a `put`, so a caller
+   * saving a threshold would have to reconstruct `displayName` and `createdAt`
+   * correctly or silently destroy them.
+   *
+   * ⚠️ **It replaces both, and `undefined` means "not set" rather than "leave
+   * alone".** That is the only unambiguous reading of a partial pair, and the
+   * ambiguity is worth closing here rather than in each caller: with
+   * "leave alone" semantics there would be no way to clear a threshold at all,
+   * and a rider who set one by mistake could never get back to the default. A
+   * caller changing one of the two passes the other back unchanged, which it
+   * has already read in order to render the form.
+   *
+   * Read and write in one transaction, for {@link ensureAthlete}'s reason.
+   *
+   * @returns the stored record, or `undefined` if there is no such athlete —
+   * which is not an error: a device whose athlete row has not been created yet
+   * has no thresholds to set, and {@link ensureAthlete} is what creates it.
+   */
+  async setAthleteThresholds(
+    id: AthleteId,
+    thresholds: {
+      readonly thresholdPower?: Watts | undefined;
+      readonly thresholdHeartRate?: BeatsPerMinute | undefined;
+    },
+  ): Promise<AthleteRecord | undefined> {
+    return this.#db.transaction('rw', [this.#athletes], async () => {
+      const row = await this.#athletes.get(id);
+      if (row === undefined) {
+        return undefined;
+      }
+      const existing = fromPersistedAthlete(row);
+      const updated: AthleteRecord = {
+        id: existing.id,
+        displayName: existing.displayName,
+        createdAt: existing.createdAt,
+        ...(thresholds.thresholdPower === undefined
+          ? {}
+          : { thresholdPower: thresholds.thresholdPower }),
+        ...(thresholds.thresholdHeartRate === undefined
+          ? {}
+          : { thresholdHeartRate: thresholds.thresholdHeartRate }),
+      };
+      await this.#athletes.put(toPersistedAthlete(updated));
+      return updated;
     });
   }
 

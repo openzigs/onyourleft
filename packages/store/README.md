@@ -210,6 +210,12 @@ so on a browser nobody had seeded by hand every import failed and every recordin
 — the second one silently, because the recorder catches its own write failure and carries on in
 memory. `apps/web/src/local-athlete.ts` is the fix and the seam that had no test.
 
+`setAthleteThresholds(id, thresholds)` is the write half, added by #76, and it is narrow for the
+same reason: it replaces the two thresholds and touches nothing else, so a rider saving a number
+cannot destroy their display name. ⚠️ **It replaces both, and `undefined` means "not set" rather
+than "leave alone"** — with the other reading there would be no way to clear a threshold at all, and
+a rider who set one by mistake could never get back to the default.
+
 ### An optional field is not a migration, and that is why #78's thresholds are optional
 
 `AthleteRecord.thresholdPower` and `thresholdHeartRate` (#78) are **optional**, and that is a

@@ -293,3 +293,22 @@ export {
   timeInZones,
   zoneOf,
 } from './analysis/zones';
+
+// --- Per-ride load metrics (#76) ---------------------------------------------
+//
+// ⚠️ The familiar names for these three are registered trademarks — see the
+// header of `analysis/load.ts`, which records the check #76 asked for and what
+// it found. These names are our own and deliberately plain; do not "fix" them
+// to the ones you recognise.
+
+export type { EffortWeightedPower, LoadBasis, RideLoad } from './analysis/load';
+export {
+  DEFAULT_SMOOTHING_WINDOW_SECONDS,
+  EFFORT_WEIGHTING_EXPONENT,
+  effortWeightedPower,
+  heartRateLoad,
+  LOAD_AT_THRESHOLD_FOR_ONE_HOUR,
+  powerRideLoad,
+  rollingMeans,
+  thresholdFraction,
+} from './analysis/load';

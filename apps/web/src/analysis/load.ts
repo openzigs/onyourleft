@@ -38,14 +38,19 @@
  */
 
 import {
+  heartRateLoad,
   heartRateZones,
   mergeCurves,
+  powerRideLoad,
   powerDurationCurve,
   powerZones,
   timeInZones,
+  type BeatsPerMinute,
   type PowerDurationCurve,
+  type RideLoad,
   type Seconds,
   type TimeInZones,
+  type Watts,
   type Zone,
   type ZoneBasis,
 } from '@onyourleft/domain';
@@ -106,6 +111,14 @@ export interface ZoneBreakdown {
   /** The threshold they were derived from — displayed, so the numbers are checkable. */
   readonly threshold: number;
   readonly time: TimeInZones;
+  /**
+   * This basis's load for the ride (#76), computed where the samples are.
+   *
+   * Per basis rather than once, so {@link loadFrom} can prefer power without
+   * either function holding a sample. `undefined` when the trace is shorter
+   * than the smoothing window, or when the threshold is unusable.
+   */
+  readonly load: RideLoad | undefined;
 }
 
 /** What the zone panel shows for one ride. */
@@ -124,6 +137,18 @@ export interface RideZoneAnalysis {
   readonly power: ZoneBreakdown | undefined;
   /** Absent when the ride has no heart-rate channel. */
   readonly heartRate: ZoneBreakdown | undefined;
+  /**
+   * How hard the ride was, in one number, and **which channel it came from**.
+   *
+   * Power when the ride has it, heart rate when it does not, and `undefined`
+   * when it has neither. #76's fifth criterion is that the screen show the
+   * basis rather than blend the two silently, and `RideLoad` carries it on the
+   * value so a renderer cannot lose track of which it was handed.
+   *
+   * Computed from the samples the zone read already decoded, so it costs **no
+   * extra read** — which is why it lives here rather than in a second loader.
+   */
+  readonly load: RideLoad | undefined;
   readonly thresholds: AthleteThresholds;
 }
 
@@ -151,13 +176,40 @@ export async function loadRideZones(
   // strap" cost nothing at all.
   const streams = await port.store.getStreamSetSummary(port.athleteId, id);
 
+  const power = await breakdownFor(port, id, streams, 'power', thresholds);
+  const heartRate = await breakdownFor(port, id, streams, 'heartRate', thresholds);
+
   return {
     activityId: id,
     movingTime: activity.movingTime,
-    power: await breakdownFor(port, id, streams, 'power', thresholds),
-    heartRate: await breakdownFor(port, id, streams, 'heartRate', thresholds),
+    power,
+    heartRate,
+    load: loadFrom(power, heartRate),
     thresholds,
   };
+}
+
+/**
+ * The ride's load, from power if it has any and from heart rate if not.
+ *
+ * **Power wins whenever it exists**, and that ordering is a decision rather
+ * than a fallback chain's accident: heart rate lags an effort by tens of
+ * seconds and saturates, so on a ride carrying both, the power-derived number
+ * is the better measurement of the same idea. `packages/domain`'s
+ * `analysis/load.ts` records why, and it is the same reasoning that gives heart
+ * rate five zones and power seven in `zones.ts`.
+ *
+ * ⚠️ It picks between two numbers that {@link breakdownFor} already computed,
+ * rather than taking the samples. That is not a detail: this file's header
+ * states that a ride's samples exist inside these functions and nowhere above
+ * them, and hanging a 14 400-sample array off {@link ZoneBreakdown} so that
+ * this function could reach it would break exactly that.
+ */
+function loadFrom(
+  power: ZoneBreakdown | undefined,
+  heartRate: ZoneBreakdown | undefined,
+): RideLoad | undefined {
+  return power?.load ?? heartRate?.load;
 }
 
 /**
@@ -195,6 +247,21 @@ async function breakdownFor(
     // written at another rate reports real durations rather than sample counts
     // wearing the word "seconds".
     time: timeInZones(zones, samples, streams.sampleInterval),
+    // Computed here, where the samples are local, and returned as one number.
+    // Reading this channel a second time to derive it would double the cost of
+    // opening this screen for nothing.
+    load:
+      basis === 'power'
+        ? powerRideLoad(
+            samples as readonly (Watts | undefined)[],
+            streams.sampleInterval,
+            thresholds.thresholdPower,
+          )
+        : heartRateLoad(
+            samples as readonly (BeatsPerMinute | undefined)[],
+            streams.sampleInterval,
+            thresholds.thresholdHeartRate,
+          ),
   };
 }
 

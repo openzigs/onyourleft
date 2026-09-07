@@ -30,7 +30,7 @@
  * coverage is stated separately, in {@link coverageNote}.
  */
 
-import type { TimeInZones, Zone } from '@onyourleft/domain';
+import type { LoadBasis, TimeInZones, Zone } from '@onyourleft/domain';
 
 import { formatDuration } from '../format';
 
@@ -142,4 +142,32 @@ export function zoneRows(
       width: barWidth(total, time.covered),
     };
   });
+}
+
+/**
+ * What each load basis means, in a sentence a rider can act on.
+ *
+ * ⚠️ #76's fifth criterion is that the screen say **which** basis it used, and
+ * saying "heart rate" is not enough on its own: the two numbers are on the same
+ * scale and are not the same measurement, so a rider comparing Tuesday's
+ * power-derived 82 with Thursday's heart-rate-derived 79 needs to be told they
+ * are not directly comparable. That is what these sentences are for.
+ */
+export const LOAD_BASIS_TEXT: Readonly<Record<LoadBasis, string>> = {
+  power:
+    'from your power trace, against your threshold power — the more direct of the two measurements.',
+  heartRate:
+    'from your heart-rate trace, against your threshold heart rate, because this ride has no power ' +
+    'data. Heart rate lags an effort and levels off near the top, so this is a rougher estimate ' +
+    'than a power-derived one and the two are not directly comparable.',
+};
+
+/**
+ * A ride's load as a whole number.
+ *
+ * No decimal: the number is an estimate built on a threshold the rider typed in
+ * from memory, and a tenth of a point implies a precision nothing about it has.
+ */
+export function formatLoad(load: number): string {
+  return String(Math.round(load));
 }

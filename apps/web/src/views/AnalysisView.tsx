@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type JSX } from 'react';
 
+import { LOAD_AT_THRESHOLD_FOR_ONE_HOUR, type RideLoad } from '@onyourleft/domain';
 import { activityId, type ActivityId, type ActivitySummary } from '@onyourleft/store';
 
 import {
@@ -12,8 +13,17 @@ import {
   type RideZoneAnalysis,
   type ZoneBreakdown,
 } from '../analysis/load';
-import { coverageNote, durationLabel, ZONE_BOUNDARY_NOTE, zoneRows } from '../analysis/present';
+import {
+  coverageNote,
+  durationLabel,
+  formatLoad,
+  LOAD_BASIS_TEXT,
+  ZONE_BOUNDARY_NOTE,
+  zoneRows,
+} from '../analysis/present';
 import type { AnalysisPort } from '../analysis/store-port';
+import { thresholdsToSave } from '../analysis/thresholds';
+import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';
 import { formatDuration, formatPowerValue, formatStartedAt, POWER_UNIT } from '../format';
@@ -77,6 +87,12 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   const [selected, setSelected] = useState<ActivityId | undefined>(undefined);
   const [zones, setZones] = useState<RideZoneAnalysis | undefined>(undefined);
+  /** What the threshold form holds, as typed. Empty means "not set". */
+  const [powerField, setPowerField] = useState('');
+  const [heartRateField, setHeartRateField] = useState('');
+  const [saved, setSaved] = useState<string | undefined>(undefined);
+  /** Bumped on save, so the zones and the load reload against the new numbers. */
+  const [thresholdVersion, setThresholdVersion] = useState(0);
 
   const load = useCallback(async (): Promise<void> => {
     if (port === undefined) {
@@ -118,7 +134,41 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
     return () => {
       live = false;
     };
-  }, [port, selected]);
+  }, [port, selected, thresholdVersion]);
+
+  // The form is seeded from what is stored, and only from what is *stored*: an
+  // assumed default must not be typed into the box, or a rider who never set a
+  // threshold would save 200 W as though they had chosen it.
+  useEffect(() => {
+    if (zones === undefined) {
+      return;
+    }
+    setPowerField(
+      zones.thresholds.assumed.power ? '' : String(Math.round(zones.thresholds.thresholdPower)),
+    );
+    setHeartRateField(
+      zones.thresholds.assumed.heartRate
+        ? ''
+        : String(Math.round(zones.thresholds.thresholdHeartRate)),
+    );
+  }, [zones]);
+
+  const saveThresholds = useCallback(async (): Promise<void> => {
+    if (port === undefined) {
+      return;
+    }
+    const decision = thresholdsToSave(powerField, heartRateField);
+    if (decision.kind === 'refused') {
+      setSaved(decision.reason);
+      return;
+    }
+    await port.store.setAthleteThresholds(port.athleteId, {
+      thresholdPower: decision.thresholdPower,
+      thresholdHeartRate: decision.thresholdHeartRate,
+    });
+    setSaved('Saved. Every zone and every load on this page now uses these numbers.');
+    setThresholdVersion((version) => version + 1);
+  }, [port, powerField, heartRateField]);
 
   if (port === undefined) {
     return (
@@ -171,6 +221,8 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
           </select>
         </p>
 
+        {zones?.load === undefined ? undefined : <LoadPanel load={zones.load} />}
+
         {zones === undefined ? (
           <p className="oyl-muted">
             {state.kind === 'ready' && state.rides.length === 0
@@ -208,6 +260,59 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
               />
             )}
           </>
+        )}
+      </section>
+
+      <section className="oyl-panel" aria-labelledby="oyl-thresholds-heading">
+        <h2 id="oyl-thresholds-heading">Your thresholds</h2>
+        <p className="oyl-muted">
+          Every zone boundary and every load on this page is derived from these two numbers. Leave
+          one blank to go back to the assumed default. Nothing is sent anywhere — they are stored on
+          this device with your rides.
+        </p>
+
+        <div className="oyl-trainer__form">
+          <p>
+            <label htmlFor="oyl-threshold-power">Threshold power ({POWER_UNIT})</label>{' '}
+            <input
+              className="oyl-input"
+              id="oyl-threshold-power"
+              inputMode="numeric"
+              value={powerField}
+              placeholder="not set"
+              onChange={(event) => {
+                setPowerField(event.target.value);
+                setSaved(undefined);
+              }}
+            />
+          </p>
+          <p>
+            <label htmlFor="oyl-threshold-heart-rate">Threshold heart rate (bpm)</label>{' '}
+            <input
+              className="oyl-input"
+              id="oyl-threshold-heart-rate"
+              inputMode="numeric"
+              value={heartRateField}
+              placeholder="not set"
+              onChange={(event) => {
+                setHeartRateField(event.target.value);
+                setSaved(undefined);
+              }}
+            />
+          </p>
+          <Button
+            onClick={() => {
+              void saveThresholds();
+            }}
+          >
+            Save thresholds
+          </Button>
+        </div>
+
+        {saved === undefined ? undefined : (
+          <StatusMessage tone={saved.startsWith('Saved') ? 'success' : 'warning'} live>
+            {saved}
+          </StatusMessage>
         )}
       </section>
 
@@ -350,5 +455,32 @@ function BestsTable({ bests }: { readonly bests: LibraryBests }): JSX.Element {
         </StatusMessage>
       ) : undefined}
     </>
+  );
+}
+
+/**
+ * One ride's load, and — the part #76's fifth criterion is actually about —
+ * which channel it came from.
+ *
+ * The basis is a sentence rather than a badge. "Heart rate" alone would tell a
+ * rider which trace was used and not that the two numbers are on the same scale
+ * without being the same measurement, which is the thing that would let them
+ * compare Tuesday against Thursday and draw a wrong conclusion.
+ */
+function LoadPanel({ load }: { readonly load: RideLoad }): JSX.Element {
+  return (
+    <div className="oyl-ride-summary">
+      <dl className="oyl-metric">
+        <dt className="oyl-metric__label">Ride load</dt>
+        <dd className="oyl-metric__value">{formatLoad(load.load)}</dd>
+        <dd className="oyl-metric__note">
+          An hour at your threshold is {String(LOAD_AT_THRESHOLD_FOR_ONE_HOUR)}. This one is{' '}
+          {LOAD_BASIS_TEXT[load.basis]}
+        </dd>
+        <dd className="oyl-metric__note">
+          Measured over the {formatDuration(load.coveredSeconds)} the sensor actually reported.
+        </dd>
+      </dl>
+    </div>
   );
 }
