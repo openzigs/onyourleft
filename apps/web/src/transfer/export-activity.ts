@@ -40,6 +40,8 @@ import {
   SPORT_CYCLING,
   TCX_LOSSY_CHANNELS,
   type FitDateTime,
+  type FitEncodeError,
+  type FitEncodeFaultCode,
   type FitEncodeInput,
   type FitRecord,
   type TrackActivity,
@@ -92,6 +94,53 @@ export interface ExportOptions {
 }
 
 /**
+ * What this particular file could not carry, in words a rider can act on.
+ *
+ * Distinct from {@link LOSSY_CHANNELS}, and the distinction is the whole point:
+ * that constant is what a *format* always costs and is known before the export
+ * runs, so the screen shows it while the rider is still choosing. This is what
+ * *this ride* cost, and it is knowable only after encoding — a value outside
+ * what FIT can hold, an instant with no FIT representation. One is a property
+ * of the choice; the other is a property of the data.
+ *
+ * ⚠️ **No value is ever interpolated into these strings.** ADR 0004 decision D
+ * binds every layer that formats a coordinate, and the encoder already honours
+ * it — `packages/fit/src/encode/errors.ts` says a fault message "never carries
+ * the value that caused it". Mapping on the fault's `code` rather than
+ * forwarding its `message` keeps that true here by construction rather than by
+ * inheritance, and keeps codec prose out of a rider's screen.
+ */
+export const EXPORT_FAULT_TEXT: Readonly<Record<FitEncodeFaultCode, string>> = {
+  'nothing-to-encode': 'there was nothing to write',
+  // Thrown by the encoder rather than collected, so it cannot reach `faults`
+  // and this line should be unreachable. It is here because the record is
+  // keyed by the codec's whole union deliberately — that is what makes a new
+  // fault code in `packages/fit` a compile error here instead of a silent
+  // omission — and buying that guarantee for the price of one unreachable
+  // string is the right trade. If it ever does surface, it says something
+  // true rather than `undefined`.
+  'too-many-message-types': 'the ride needed more kinds of record than the format allows',
+  'missing-file-id': 'the file is missing its file-type record, so a strict reader may reject it',
+  'value-not-representable': 'a value this format cannot hold was left out',
+  'instant-not-representable': 'a timestamp this format cannot hold was left out',
+  'instant-reads-back-as-system-time': 'a timestamp some readers will misread as a device uptime',
+};
+
+/** A file, and what it cost to write it. */
+export interface ExportedActivity {
+  readonly file: DownloadableFile;
+  /**
+   * One entry per distinct thing that could not be carried, deduplicated by
+   * fault code and ordered as the encoder reported them.
+   *
+   * **Empty for a clean export**, which is what stops this being an always-on
+   * warning a rider learns to ignore. Deduplicated because a ride with four
+   * hundred unrepresentable altitudes has one problem, not four hundred.
+   */
+  readonly lost: readonly string[];
+}
+
+/**
  * Read a ride back out of the store and write it as a file.
  *
  * Both reads are athlete-scoped by the store's own signatures, so another
@@ -102,7 +151,7 @@ export interface ExportOptions {
  * has no samples. Both are honest refusals: a zero-sample FIT file is a file
  * every reader accepts and no rider wants.
  */
-export async function exportActivity(options: ExportOptions): Promise<DownloadableFile> {
+export async function exportActivity(options: ExportOptions): Promise<ExportedActivity> {
   const { store, athleteId, activityId, format } = options;
   const activity = await store.getActivity(athleteId, activityId);
   if (activity === undefined) {
@@ -120,27 +169,55 @@ export async function exportActivity(options: ExportOptions): Promise<Downloadab
   }
 
   const points = pointsOf(streams);
-  const bytes =
-    format === 'fit'
-      ? // ⚠️ `.bytes` only: the encoder's `faults` are dropped here (#162). It
-        // reports which channel it could not carry — a dropped altitude, an
-        // instant with no FIT representation — and this is the codec's one
-        // production caller, so nothing tells a rider their file is lossy.
-        //
-        // Recorded rather than fixed: surfacing it is a UI change (where the
-        // warning appears, what it says, how it reads beside a bulk export),
-        // not a line here. #162 holds that work. Note this cannot be tested
-        // from `export-activity.test.ts` as things stand — `exportActivity`
-        // returns a file and nothing else, so there is no fault for a test to
-        // observe until the return type carries one.
-        encodeFitActivity(fitInputOf(activity, streams, points)).bytes
-      : new TextEncoder().encode(
-          format === 'gpx'
-            ? encodeGpx(trackActivityOf(activity, points))
-            : encodeTcx(trackActivityOf(activity, points)),
-        );
 
-  return { fileName: `${fileStemOf(activity)}.${format}`, bytes, mediaType: MEDIA_TYPE[format] };
+  // #162. The encoder's contract is deliberately *bytes plus faults*: the file
+  // is still produced, and a caller that reads the faults can tell the rider
+  // what did not survive. This is the codec's one production caller, and it
+  // used to take `.bytes` and drop the rest — so a ride whose altitude channel
+  // could not be written came out as a silently incomplete file.
+  //
+  // Only FIT reports per-file faults. GPX and TCX lose channels the format has
+  // no element for at all, which is a property of the format rather than of the
+  // ride, and is `LOSSY_CHANNELS` above.
+  let bytes: Uint8Array;
+  let faults: readonly FitEncodeError[] = [];
+  if (format === 'fit') {
+    const encoded = encodeFitActivity(fitInputOf(activity, streams, points));
+    bytes = encoded.bytes;
+    faults = encoded.faults;
+  } else {
+    bytes = new TextEncoder().encode(
+      format === 'gpx'
+        ? encodeGpx(trackActivityOf(activity, points))
+        : encodeTcx(trackActivityOf(activity, points)),
+    );
+  }
+
+  return {
+    file: { fileName: `${fileStemOf(activity)}.${format}`, bytes, mediaType: MEDIA_TYPE[format] },
+    lost: lostFrom(faults),
+  };
+}
+
+/**
+ * Fault objects to rider-facing lines, deduplicated by code.
+ *
+ * Order follows the encoder's, so the first thing that went wrong is the first
+ * thing read. A code with no entry in {@link EXPORT_FAULT_TEXT} cannot occur —
+ * the record is keyed by the codec's own union, so adding a fault code to
+ * `packages/fit` fails this file's typecheck until it has words here. That is
+ * the point: a new way for an export to be lossy should not be able to ship
+ * silently.
+ */
+function lostFrom(faults: readonly FitEncodeError[]): readonly string[] {
+  const seen = new Set<FitEncodeFaultCode>();
+  const lost: string[] = [];
+  for (const fault of faults) {
+    if (seen.has(fault.code)) continue;
+    seen.add(fault.code);
+    lost.push(EXPORT_FAULT_TEXT[fault.code]);
+  }
+  return lost;
 }
 
 /**

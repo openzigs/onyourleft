@@ -388,6 +388,36 @@ describe('TransferView — exporting', () => {
     expect(document.body.textContent).toContain('Saved Sunday loop.fit');
   });
 
+  it('tells the rider when the file could not carry everything (#162)', async () => {
+    const port = await openPort();
+    // 1970, so no instant in the ride has a FIT representation. The encoder
+    // writes the file and reports what it dropped; before #162 this screen
+    // took the bytes and threw the report away, so a rider was told "Saved"
+    // and nothing else.
+    const startedAt = unixSeconds(0);
+    const ride = { ...rideFor(ATHLETE_A, { name: 'Dead clock', hasPosition: true }), startedAt };
+    await (harness ?? never()).write(async (store) => {
+      await store.putActivity(ride);
+      await store.putStreamSet(streamSetFor(ride, { sampleCount: 60, startedAt }));
+    });
+
+    mounted = await mount(<TransferView port={port} />);
+    await runToCompletion(
+      () => document.querySelector('#oyl-export-format') !== null,
+      'the ride list to load',
+    );
+    await activateWithKeyboard(buttonNamed('Export'));
+    await runToCompletion(() => saved.length > 0, 'the export to reach the browser');
+
+    // The file still saved. A lossy file is still the file the rider asked for.
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.fileName).toBe('Dead clock.fit');
+    // And they are told, in the same place they are told it worked.
+    expect(document.body.textContent).toContain('Saved Dead clock.fit');
+    expect(document.body.textContent).toContain('not everything fitted in the file');
+    expect(document.body.textContent).toContain('a timestamp this format cannot hold');
+  });
+
   it('says what a format cannot carry, from the codec’s own list', async () => {
     const port = await openPort();
     const ride = rideFor(ATHLETE_A, { name: 'Turbo' });
