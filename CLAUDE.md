@@ -57,7 +57,8 @@ apps/                 AGPL-3.0-or-later, without exception
 packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis (#25)
     analysis/           the power-duration curve and the critical-power fit (#75),
-                        and the training zones (#78)
+                        the training zones (#78) and the per-ride load metrics
+                        (#76) — whose NAMES are a trademark question, see §6
     identity/           the record format, the canonical bytes, verification (#61)
     recording/          the recording session state machine and stream merge (#45)
   fit/                FIT / GPX / TCX codec (#29-#32)
@@ -1059,6 +1060,32 @@ be undone by a later commit.
 decision gets recorded. Quoting the *SDK source* is not. See
 [#58](https://github.com/openzigs/onyourleft/issues/58).
 
+### The names of the load metrics are registered trademarks — ours are our own
+
+Checked for [#76](https://github.com/openzigs/onyourleft/issues/76), which flagged the question and
+recorded that it had **not** been verified. It has been now:
+
+- **NORMALIZED POWER** — USPTO registration **4450848**, serial **85913880**, owner
+  TRAININGPEAKS, LLC, filed 2013-04-24, registered 2013-12-17.
+- **"Training Stress Score"** and **"Intensity Factor"** are reported registered to the same owner
+  (Peaksware / TrainingPeaks), and all of them passed to **Garmin** with its acquisition of
+  TrainingPeaks on 2026-07-22.
+- ⚠️ **`CTL`, `ATL` and `TSB` are reported registered too**, which #76 did not flag. That lands on
+  [#77](https://github.com/openzigs/onyourleft/issues/77)'s chart rather than on #76's metrics, and
+  it is recorded here so #77 does not rediscover it.
+- **"Functional Threshold Power" / "FTP" could not be established either way.** `packages/store`
+  calls the setting `thresholdPower`, which is plainly descriptive, so nothing turns on it.
+
+⚠️ **The primary registers could not be reached from this environment** — `tmsearch.uspto.gov`,
+`trademarks.justia.com`, `trademarkia.com` and `trainingpeaks.com` are all blocked by the egress
+proxy — so the registration numbers above come from search-result summaries rather than from a
+record read directly. Re-verify before relying on them for anything beyond "pick a different name".
+
+**So this project uses its own plainly descriptive names**, which is the trivially avoidable path:
+`effortWeightedPower`, `thresholdFraction`, `rideLoad`. **Do not rename them to the familiar ones**
+in code, in a UI label, in a metric key or in a column header. The *formulae* are unaffected — they
+are published (Allen & Coggan, 2006) and a trademark protects a name, not arithmetic.
+
 ### Reading prior art is fine. Copying from it binds this project's licence.
 
 **Every mature prior-art project in this space except `incyclist/devices` (MIT) is GPL-2.0, GPL-3.0
@@ -1277,6 +1304,9 @@ top of an issue **supersedes its body**.
 | Where the one threshold default is substituted, and why the store does not substitute it | `apps/web/src/analysis/thresholds.ts`, [`packages/store/README.md`](packages/store/README.md) §"An optional field is not a migration" |
 | How many rides a personal-best read decodes, and what happens to the history beyond that | `apps/web/src/analysis/load.ts` §`BESTS_ACTIVITY_LIMIT` |
 | Why the analysis screen encodes nothing in colour, and how duration bests are told apart from segment bests | `apps/web/src/views/AnalysisView.tsx` |
+| Why the load metrics are not called by the names you know, and what the trademark check found | `packages/domain/src/analysis/load.ts` §"The names are somebody's trademarks" |
+| What a ride's load is derived from, why power wins over heart rate, and why a gap is never scored as zero | `packages/domain/src/analysis/load.ts`, `apps/web/src/analysis/load.ts` §`loadFrom` |
+| How a rider sets a threshold, why a blank box clears it, and why the refusal is a pure function | `apps/web/src/analysis/thresholds.ts` §`thresholdsToSave`, [`packages/store/README.md`](packages/store/README.md) §"`ensureAthlete`" |
 | Why a gap in a trace is a break in the line rather than a straight line across it | `apps/web/src/detail/series.ts` §`traceSegments`, `apps/web/src/detail/TraceChart.tsx` |
 | What a *shared* copy of a ride contains, and why the rider's own view is not trimmed | [ADR 0004](docs/adr/0004-privacy-and-location.md) decisions B, C and E, `apps/web/src/detail/privacy.ts`, `apps/web/src/transfer/export-activity.ts` |
 | Which origins the map is allowed to reach, and why the style is built rather than fetched | `apps/web/src/map/basemap.ts` §`styleOrigins`, [ADR 0010](docs/adr/0010-map-tiles-and-routing.md) D-1 |

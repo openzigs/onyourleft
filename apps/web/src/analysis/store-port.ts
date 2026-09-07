@@ -23,6 +23,7 @@
  * setting**. One reader is how that stays true.
  */
 
+import type { BeatsPerMinute, Watts } from '@onyourleft/domain';
 import type {
   ActivityId,
   ActivityRecord,
@@ -37,6 +38,22 @@ import type {
 
 export interface AnalysisStore {
   getAthlete(id: AthleteId): Promise<AthleteRecord | undefined>;
+  /**
+   * The one write this screen performs (#76).
+   *
+   * Narrow on purpose: it replaces the two thresholds and nothing else, so a
+   * saved setting cannot destroy the display name or the creation instant the
+   * way a `putAthlete` from here would. `packages/store` records why that is
+   * the store's job rather than this screen's — the read and the write are in
+   * one transaction, so two tabs cannot race.
+   */
+  setAthleteThresholds(
+    id: AthleteId,
+    thresholds: {
+      readonly thresholdPower?: Watts | undefined;
+      readonly thresholdHeartRate?: BeatsPerMinute | undefined;
+    },
+  ): Promise<AthleteRecord | undefined>;
   getActivity(owner: AthleteId, id: ActivityId): Promise<ActivityRecord | undefined>;
   listActivitySummaries(
     owner: AthleteId,

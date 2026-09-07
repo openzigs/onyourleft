@@ -28,7 +28,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { stubAnalysis, type StubAnalysisRide } from '../analysis/testing';
 import { stubActivity } from '../detail/testing';
-import { mount, queryAll, settle, type Mounted } from '../testing/mount';
+import {
+  activateWithKeyboard,
+  mount,
+  queryAll,
+  settle,
+  typeInto,
+  type Mounted,
+} from '../testing/mount';
 
 import { AnalysisView } from './AnalysisView';
 
@@ -324,3 +331,143 @@ describe('AnalysisView — duration personal bests', () => {
     expect(mounted.container.textContent).not.toContain('most recent rides on this device');
   });
 });
+
+describe('AnalysisView — ride load (#76)', () => {
+  it('shows the load and says which channel it came from', async () => {
+    const port = stubAnalysis(OWNER, [ride('ride-1', { power: steadyPower(200, 3600) })]);
+
+    mounted = await mount(<AnalysisView port={port} />);
+    await settle();
+
+    expect(mounted.container.textContent).toContain('Ride load');
+    // An hour at the default threshold is 100 by construction.
+    expect(mounted.container.textContent).toContain('100');
+    expect(mounted.container.textContent).toContain('from your power trace');
+  });
+
+  it('warns that a heart-rate load is not comparable with a power one', async () => {
+    // #76's fifth criterion is not satisfied by naming the channel: the two
+    // numbers share a scale without being the same measurement, and a rider
+    // comparing Tuesday with Thursday needs to be told so.
+    const port = stubAnalysis(OWNER, [ride('ride-1', { heartRate: steadyHeartRate(160, 3600) })]);
+
+    mounted = await mount(<AnalysisView port={port} />);
+    await settle();
+
+    expect(mounted.container.textContent).toContain('from your heart-rate trace');
+    expect(mounted.container.textContent).toContain('not directly comparable');
+  });
+
+  it('shows no load panel for a ride with neither channel', async () => {
+    const port = stubAnalysis(OWNER, [ride('ride-1')]);
+
+    mounted = await mount(<AnalysisView port={port} />);
+    await settle();
+
+    expect(mounted.container.textContent).not.toContain('Ride load');
+  });
+});
+
+describe('AnalysisView — the threshold editor (#76 criterion 6, and #78\u2019s gap)', () => {
+  const athlete = {
+    id: OWNER,
+    displayName: 'A',
+    createdAt: unixSeconds(1_700_000_000),
+    thresholdPower: watts(250),
+  };
+
+  function fieldNamed(label: string): HTMLInputElement {
+    const input = queryAll<HTMLInputElement>(mounted?.container ?? document.body, 'input').find(
+      (candidate) =>
+        (candidate.labels?.[0]?.textContent ?? '').toLowerCase().includes(label.toLowerCase()),
+    );
+    if (input === undefined) {
+      throw new Error(`no input labelled ${label}`);
+    }
+    return input;
+  }
+
+  it('seeds the form from what is stored', async () => {
+    const port = stubAnalysis(OWNER, [ride('ride-1', { power: steadyPower(200, 600) })], athlete);
+
+    mounted = await mount(<AnalysisView port={port} />);
+    await settle();
+
+    expect(fieldNamed('Threshold power').value).toBe('250');
+  });
+
+  it('leaves the box blank when the threshold is only assumed', async () => {
+    // ⚠️ The default must not be typed into the box. A rider who never set a
+    // threshold would otherwise save 200 W as though they had chosen it, and
+    // the screen would stop saying the number is assumed.
+    const port = stubAnalysis(OWNER, [ride('ride-1', { power: steadyPower(200, 600) })]);
+
+    mounted = await mount(<AnalysisView port={port} />);
+    await settle();
+
+    expect(fieldNamed('Threshold power').value).toBe('');
+    expect(mounted.container.textContent).toContain('assumed threshold power');
+  });
+
+  it('saves a threshold and re-derives every zone and the load from it', async () => {
+    // #76's sixth criterion in its literal form: change the setting, and every
+    // dependent number for a fixed ride changes.
+    const port = stubAnalysis(OWNER, [ride('ride-1', { power: steadyPower(200, 3600) })], athlete);
+
+    mounted = await mount(<AnalysisView port={port} />);
+    await settle();
+
+    // At a 250 W threshold, 200 W is 0.8 — zone 3.
+    expect(rowsOf(mounted.container, 'Power zones')[2]?.[3]).toBe('100%');
+
+    await typeInto(fieldNamed('Threshold power'), '400');
+    await activateWithKeyboard(buttonNamed('Save thresholds'));
+
+    expect(port.thresholdWrites.at(-1)?.thresholdPower).toBe(400);
+    // 200 W is now half of threshold — zone 1 — and the load falls with it.
+    expect(rowsOf(mounted.container, 'Power zones')[0]?.[3]).toBe('100%');
+    expect(mounted.container.textContent).toContain('threshold power 400 W');
+    expect(mounted.container.textContent).toContain('Saved.');
+  });
+
+  it('clears a threshold when the box is emptied, so a mistake can be undone', async () => {
+    // The store replaces both and treats blank as "not set". Without that
+    // there would be no way back to the default at all.
+    const port = stubAnalysis(OWNER, [ride('ride-1', { power: steadyPower(200, 600) })], athlete);
+
+    mounted = await mount(<AnalysisView port={port} />);
+    await settle();
+
+    await typeInto(fieldNamed('Threshold power'), '');
+    await activateWithKeyboard(buttonNamed('Save thresholds'));
+
+    expect(port.thresholdWrites.at(-1)?.thresholdPower).toBeUndefined();
+    expect(mounted.container.textContent).toContain('assumed threshold power');
+  });
+
+  it('refuses a value that is not a positive number, and keeps what was typed', async () => {
+    const port = stubAnalysis(OWNER, [ride('ride-1', { power: steadyPower(200, 600) })], athlete);
+
+    mounted = await mount(<AnalysisView port={port} />);
+    await settle();
+
+    await typeInto(fieldNamed('Threshold power'), '-40');
+    await activateWithKeyboard(buttonNamed('Save thresholds'));
+
+    expect(port.thresholdWrites).toHaveLength(0);
+    expect(mounted.container.textContent).toContain('must be a positive number');
+    // The rider does not lose what they typed while being told it is wrong.
+    expect(fieldNamed('Threshold power').value).toBe('-40');
+  });
+});
+
+/** A button by its visible label. */
+function buttonNamed(label: string): HTMLElement {
+  const button = queryAll(mounted?.container ?? document.body, 'button').find((candidate) =>
+    (candidate.textContent ?? '').includes(label),
+  );
+  if (button === undefined) {
+    throw new Error(`no button labelled ${label}`);
+  }
+  return button;
+}

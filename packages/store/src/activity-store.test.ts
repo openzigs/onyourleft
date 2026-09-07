@@ -264,6 +264,96 @@ describe('persistence — the write must be visible to a reader that was not the
     }
   });
 
+  it('setAthleteThresholds saves a threshold without touching anything else (#76)', async () => {
+    // The write half of #78's setting. `putAthlete` cannot do this job: a
+    // caller saving one number would have to reconstruct the display name and
+    // the creation instant correctly or silently destroy them.
+    const harness = createStoreHarness();
+    try {
+      await harness.write(async (fresh) =>
+        fresh.putAthlete({
+          ...athlete(),
+          displayName: 'Rita',
+          createdAt: unixSeconds(1_600_000_000),
+        }),
+      );
+
+      const onDisk = await harness.roundTrip(
+        async (fresh) =>
+          fresh.setAthleteThresholds(ATHLETE_A, {
+            thresholdPower: watts(288),
+            thresholdHeartRate: beatsPerMinute(174),
+          }),
+        async (fresh) => fresh.getAthlete(ATHLETE_A),
+      );
+
+      expect(onDisk?.thresholdPower).toBe(288);
+      expect(onDisk?.thresholdHeartRate).toBe(174);
+      // The two fields it must not have touched.
+      expect(onDisk?.displayName).toBe('Rita');
+      expect(onDisk?.createdAt).toBe(1_600_000_000);
+    } finally {
+      await harness.destroy();
+    }
+  });
+
+  it('setAthleteThresholds replaces both, so a threshold can be cleared', async () => {
+    // ⚠️ `undefined` means "not set", not "leave alone". With the other
+    // reading there would be no way back to the default at all, and a rider
+    // who set a threshold by mistake could never undo it.
+    const harness = createStoreHarness();
+    try {
+      await harness.write(async (fresh) =>
+        fresh.putAthlete({
+          ...athlete(),
+          thresholdPower: watts(288),
+          thresholdHeartRate: beatsPerMinute(174),
+        }),
+      );
+
+      const onDisk = await harness.roundTrip(
+        async (fresh) => fresh.setAthleteThresholds(ATHLETE_A, { thresholdPower: watts(301) }),
+        async (fresh) => fresh.getAthlete(ATHLETE_A),
+      );
+
+      expect(onDisk?.thresholdPower).toBe(301);
+      expect(onDisk?.thresholdHeartRate).toBeUndefined();
+    } finally {
+      await harness.destroy();
+    }
+  });
+
+  it('setAthleteThresholds on an athlete that does not exist is not an error', async () => {
+    // A device whose row has not been created yet has no thresholds to set,
+    // and `ensureAthlete` is what creates it. Returning `undefined` rather
+    // than throwing keeps the caller's start-up path free of a special case.
+    const harness = createStoreHarness();
+    try {
+      const result = await harness.write(async (fresh) =>
+        fresh.setAthleteThresholds(ATHLETE_A, { thresholdPower: watts(250) }),
+      );
+
+      expect(result).toBeUndefined();
+      expect(await harness.read(async (fresh) => fresh.getAthlete(ATHLETE_A))).toBeUndefined();
+    } finally {
+      await harness.destroy();
+    }
+  });
+
+  it('setAthleteThresholds validates what it is given, like every other write', async () => {
+    const harness = createStoreHarness();
+    try {
+      await harness.write(async (fresh) => fresh.putAthlete(athlete()));
+
+      // `watts` refuses a negative value at construction, so a negative
+      // threshold cannot reach the store at all — asserted here so the
+      // guarantee is pinned at this layer rather than assumed from the brand.
+      expect(() => watts(-1)).toThrow();
+    } finally {
+      await harness.destroy();
+    }
+  });
+
   it('moving time and elapsed time survive the round trip as distinct values', async () => {
     await store.putAthlete(athlete());
     const ride = indoorRide({ elapsedTime: seconds(7_384), movingTime: seconds(6_011) });

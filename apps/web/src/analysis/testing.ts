@@ -47,6 +47,11 @@ export interface StubAnalysis extends AnalysisPort {
   readonly summaryReads: string[];
   /** Every `listActivitySummaries` call's options, so a limit can be asserted. */
   readonly listReads: ListActivitiesOptions[];
+  /** Every threshold save, so a test can assert what the form sent. */
+  readonly thresholdWrites: {
+    readonly thresholdPower?: Watts;
+    readonly thresholdHeartRate?: BeatsPerMinute;
+  }[];
 }
 
 /**
@@ -63,6 +68,10 @@ export function stubAnalysis(
   const channelReads: string[] = [];
   const summaryReads: string[] = [];
   const listReads: ListActivitiesOptions[] = [];
+  const thresholdWrites: {
+    readonly thresholdPower?: Watts;
+    readonly thresholdHeartRate?: BeatsPerMinute;
+  }[] = [];
 
   function rideFor(id: ActivityId): StubAnalysisRide | undefined {
     return rides.find((ride) => ride.activity.id === id);
@@ -79,9 +88,32 @@ export function stubAnalysis(
     return present;
   }
 
+  // Mutable, because the threshold editor's whole point is that a save is
+  // visible on the next read. A stub whose athlete never changed would make
+  // "the boundaries moved" an assertion about the component's own state.
+  let stored = athlete;
+
   const store: AnalysisStore = {
     getAthlete: (id: AthleteId) =>
-      Promise.resolve(athlete !== undefined && athlete.id === id ? athlete : undefined),
+      Promise.resolve(stored !== undefined && stored.id === id ? stored : undefined),
+
+    setAthleteThresholds: (id: AthleteId, next) => {
+      if (stored === undefined || stored.id !== id) {
+        return Promise.resolve(undefined);
+      }
+      // Replaces both, like the real store: `undefined` means "not set".
+      stored = {
+        id: stored.id,
+        displayName: stored.displayName,
+        createdAt: stored.createdAt,
+        ...(next.thresholdPower === undefined ? {} : { thresholdPower: next.thresholdPower }),
+        ...(next.thresholdHeartRate === undefined
+          ? {}
+          : { thresholdHeartRate: next.thresholdHeartRate }),
+      };
+      thresholdWrites.push(next);
+      return Promise.resolve(stored);
+    },
 
     getActivity: (_owner: AthleteId, id: ActivityId) => Promise.resolve(rideFor(id)?.activity),
 
@@ -150,5 +182,5 @@ export function stubAnalysis(
     },
   };
 
-  return { athleteId: owner, store, channelReads, summaryReads, listReads };
+  return { athleteId: owner, store, channelReads, summaryReads, listReads, thresholdWrites };
 }

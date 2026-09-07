@@ -99,6 +99,17 @@ that is less than the ride's moving time the page says so and by how much.
 Until you set your own threshold the page uses an assumed one, and it says the word "assumed" every
 time. Zones from a guessed threshold are the right shape and the wrong numbers.
 
+**Ride load** is one number for how hard a ride was: an hour at your threshold is 100, two hours at
+threshold is 200, and an easy hour is much less than half of a hard one. It comes from your power
+trace where you have one and from your heart rate where you do not, and the page says **which** —
+the two share a scale without being the same measurement, so a power-derived 82 and a heart-rate-derived
+79 are not directly comparable. A ride that lost part of its trace is scored on the part it kept,
+and the page says how much that was rather than quietly counting the silence as zero watts.
+
+**Your thresholds** are two numbers you can set on that page, and everything above is derived from
+them. Until you set one, the page uses an assumed default and says the word "assumed" every time.
+Clearing a box puts it back to the default. Neither number is sent anywhere.
+
 **Duration personal bests** are the best average power you have held for each length of time,
 anywhere in any ride on this device. A window is never bridged across a gap in the recording and
 never spans two rides, so a best is always something you actually rode in one go — a ride with a

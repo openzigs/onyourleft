@@ -69,6 +69,7 @@ function bindStore(real: ActivityStore): PersistentStore {
     },
     putAthlete: async (record) => real.putAthlete(record),
     ensureAthlete: async (record) => real.ensureAthlete(record),
+    setAthleteThresholds: async (id, thresholds) => real.setAthleteThresholds(id, thresholds),
     getAthlete: async (id) => real.getAthlete(id),
     deleteAthlete: async (id) => real.deleteAthlete(id),
     putActivity: async (record) => real.putActivity(record),
@@ -131,6 +132,13 @@ export function memoryWriteStoreFactory(): StoreFactory {
         ensureAthlete: (record) => {
           memory.set(`athlete:${record.id}`, record);
           return Promise.resolve(record);
+        },
+        // Diverted like the rest. This one answers with a plausible record
+        // built from what it was handed, so a caller that trusts the return
+        // value sees its threshold "saved" and the next read has the old one.
+        setAthleteThresholds: (id, thresholds) => {
+          memory.set(`athlete:${id}`, thresholds);
+          return Promise.resolve(undefined);
         },
         putActivity: (record) => {
           memory.set(`activity:${record.id}`, record);

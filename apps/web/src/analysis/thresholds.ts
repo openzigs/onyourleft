@@ -26,8 +26,10 @@
  */
 
 import {
+  beatsPerMinute,
   DEFAULT_THRESHOLD_HEART_RATE,
   DEFAULT_THRESHOLD_POWER,
+  watts,
   type BeatsPerMinute,
   type Watts,
 } from '@onyourleft/domain';
@@ -63,4 +65,64 @@ export function thresholdsFor(athlete: AthleteRecord | undefined): AthleteThresh
     thresholdHeartRate: heartRate ?? DEFAULT_THRESHOLD_HEART_RATE,
     assumed: { power: power === undefined, heartRate: heartRate === undefined },
   };
+}
+
+/** What a typed threshold form should do. @see thresholdsToSave */
+export type ThresholdSave =
+  | { readonly kind: 'refused'; readonly reason: string }
+  | {
+      readonly kind: 'save';
+      readonly thresholdPower: Watts | undefined;
+      readonly thresholdHeartRate: BeatsPerMinute | undefined;
+    };
+
+/** Said when a box holds something that is not a threshold. */
+export const THRESHOLD_REFUSAL =
+  'Thresholds must be a positive number of watts and beats per minute, or blank.';
+
+/**
+ * Turn what the rider typed into either a write or a refusal.
+ *
+ * ⚠️ **A pure function rather than a branch inside the click handler, and that
+ * is the point.** In the handler the guard was untestable: a mutation deleting
+ * its `return` left the suite green, because the fall-through hit `watts()`,
+ * which throws on a non-number, so the write never happened *anyway* and the
+ * only outward tell was an unhandled rejection. The guard was load-bearing and
+ * nothing proved it. Here the refusal is a value, and a test can hold it.
+ *
+ * **Blank is a save, not a refusal.** It clears the setting and returns the
+ * screen to the assumed default, which is the only way a rider who typed a
+ * threshold by mistake can undo it — `packages/store`'s `setAthleteThresholds`
+ * replaces both fields for the same reason.
+ */
+export function thresholdsToSave(powerText: string, heartRateText: string): ThresholdSave {
+  const power = parseThreshold(powerText);
+  const heartRate = parseThreshold(heartRateText);
+  if (power === 'invalid' || heartRate === 'invalid') {
+    return { kind: 'refused', reason: THRESHOLD_REFUSAL };
+  }
+  return {
+    kind: 'save',
+    thresholdPower: power === undefined ? undefined : watts(power),
+    thresholdHeartRate: heartRate === undefined ? undefined : beatsPerMinute(heartRate),
+  };
+}
+
+/**
+ * A typed threshold: a positive number, nothing at all, or a refusal.
+ *
+ * Blank is a real answer, so it cannot share a return value with "that is not a
+ * number" — which is why this is a three-way result rather than
+ * `number | undefined`.
+ */
+function parseThreshold(text: string): number | undefined | 'invalid' {
+  const trimmed = text.trim();
+  if (trimmed === '') {
+    return undefined;
+  }
+  const value = Number(trimmed);
+  if (!Number.isFinite(value) || value <= 0) {
+    return 'invalid';
+  }
+  return value;
 }
