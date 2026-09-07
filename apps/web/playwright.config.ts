@@ -59,8 +59,11 @@ const PORT = 4319;
  * answers, and the run dies with `Timed out waiting 60000ms from
  * config.webServer` — which names the symptom and not one word of the cause.
  *
- * That is exactly what happened on the first CI run of this gate: green in a
- * container with no IPv6 at all, red on the runner. So the address is stated
+ * That is the explanation for the first CI run of this gate — green in a
+ * container with no IPv6 at all, red on the runner — and it is an explanation
+ * rather than an observation: what the run established is that nothing
+ * answered on `127.0.0.1`, and the line naming the address the server did bind
+ * to is the very one that was missing. So the address is stated
  * rather than resolved, and the server's bind and the URL the poller asks for
  * are built from **this one constant** — they cannot drift, and neither
  * depends on what `localhost` happens to mean on the machine.

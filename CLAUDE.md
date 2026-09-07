@@ -767,9 +767,13 @@ D-1), which 404s what it does not have.
 defaults to `localhost`, which is **not** a synonym for `127.0.0.1`: Debian and Ubuntu map
 `localhost` to both `127.0.0.1` and `::1`, Node resolves it verbatim in whatever order
 `getaddrinfo` returns, and a server handed `::1` listens on IPv6 loopback alone while Playwright
-polls the IPv4 one. This gate's first CI run died exactly there — green in a container with no IPv6
+polls the IPv4 one. This gate's first CI run died on that URL — green in a container with no IPv6
 at all, red on the runner, with `Timed out waiting 60000ms from config.webServer` and **no other
-output**, because Playwright ignores a web server's stdout by default. `playwright.config.ts` now
+output**, because Playwright ignores a web server's stdout by default. ⚠️ The IPv6 split is the
+**explanation, not an observation**: what that run established is that nothing answered on
+`127.0.0.1`, and the one line that would have named the address the server *did* bind to is exactly
+the line that was missing. Binding explicitly turned it green; `stdout: 'pipe'` is what would settle
+it outright next time. `playwright.config.ts` now
 builds the bind address and the polled URL from one `HOST` constant so they cannot drift, and sets
 `stdout: 'pipe'` so Vite's own "bound to …" line is in the log the next time something of this
 shape happens. A green browser gate on a developer's machine says nothing about which addresses
