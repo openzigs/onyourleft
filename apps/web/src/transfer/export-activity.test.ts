@@ -72,7 +72,26 @@ async function seedOutdoorRide(
   return { open, ride };
 }
 
+/**
+ * The file alone, for the assertions that are about the file.
+ *
+ * `exportActivity` returns the file **and** what writing it cost (#162), and
+ * most of this suite is about the bytes. Unwrapping here keeps those
+ * assertions saying exactly what they said before the return type changed —
+ * a widened helper would have quietly changed the meaning of thirty
+ * assertions in a commit that was not about them. `exportWithFaults` below is
+ * for the tests that are about the other half.
+ */
 async function exportFrom(
+  open: StoreHarness,
+  id: ActivityId,
+  format: ActivityFileFormat,
+  owner = ATHLETE_A,
+): Promise<Awaited<ReturnType<typeof exportActivity>>['file']> {
+  return (await exportWithFaults(open, id, format, owner)).file;
+}
+
+async function exportWithFaults(
   open: StoreHarness,
   id: ActivityId,
   format: ActivityFileFormat,
@@ -354,5 +373,85 @@ describe('fileStemOf', () => {
     // them.
     expect(fileStemOf({ ...ride, name: 'a/b', visibility: 'private' })).toBe('a-b');
     expect(fileStemOf({ ...ride, name: 'a*b?c', visibility: 'private' })).toBe('a-b-c');
+  });
+});
+
+describe('exportActivity — what the file could not carry (#162)', () => {
+  /**
+   * A ride whose instants have no FIT representation.
+   *
+   * ⚠️ **Finding the reachable fault took a wrong turn worth recording.** The
+   * obvious lossy case is an altitude FIT cannot hold — it is what
+   * `packages/fit`'s own encoder suite uses — and it is **not reachable from
+   * stored data at all**. `packages/store`'s stream codec for that channel is
+   * literally named `uint16-fit-altitude` and packs through
+   * `metresToFitAltitude` (ADR 0011), so an out-of-range altitude is refused
+   * at `putStreamSet` with a `StoreValidationError` and never reaches an
+   * export. The store stores altitude in FIT's own representation, which makes
+   * `value-not-representable` structurally impossible for that channel.
+   *
+   * `startedAt` is not packed that way and is not range-checked, so this is the
+   * fault a real ride can actually carry. It is not contrived: a device with a
+   * dead clock records 1970, and so does an import of a file whose timestamps
+   * are seconds since boot.
+   */
+  async function seedRideBeforeTheFitEpoch(): Promise<{
+    open: StoreHarness;
+    id: ActivityId;
+  }> {
+    const open = createStoreHarness();
+    harness = open;
+    // The FIT epoch is 1989-12-31, so no instant in this ride has one.
+    const startedAt = unixSeconds(0);
+    const ride = { ...rideFor(ATHLETE_A), startedAt };
+    await open.write(async (store) => {
+      await seedAthletes(open);
+      await store.putActivity(ride);
+      await store.putStreamSet(streamSetFor(ride, { sampleCount: 8, startedAt }));
+    });
+    return { open, id: ride.id };
+  }
+
+  it('says so when a value cannot be written, rather than saving in silence', async () => {
+    const { open, id } = await seedRideBeforeTheFitEpoch();
+
+    const { file, lost } = await exportWithFaults(open, id, 'fit');
+
+    // The file is still produced — the encoder's contract is bytes AND faults,
+    // and a rider who asked for a file gets one.
+    expect(file.bytes.byteLength).toBeGreaterThan(0);
+    // What changes is that the loss is reported at all. This is the assertion
+    // that was impossible before the return type carried it.
+    expect(lost).toEqual(['a timestamp this format cannot hold was left out']);
+  });
+
+  it('reports nothing for a clean export, so the signal is not always on', async () => {
+    const { open, ride } = await seedOutdoorRide();
+
+    const { lost } = await exportWithFaults(open, ride.id, 'fit');
+
+    // The half that stops this becoming a caveat every rider learns to skip.
+    expect(lost).toEqual([]);
+  });
+
+  it('reports one line per problem, not one per sample', async () => {
+    const { open, id } = await seedRideBeforeTheFitEpoch();
+
+    const { lost } = await exportWithFaults(open, id, 'fit');
+
+    // Eight samples, every one of them unrepresentable, one line. A rider
+    // handed eight identical lines learns to ignore the whole message.
+    expect(lost).toHaveLength(1);
+  });
+
+  it('reports nothing for GPX and TCX, whose losses are the format not the ride', async () => {
+    const { open, id } = await seedRideBeforeTheFitEpoch();
+
+    // `LOSSY_CHANNELS` is what these formats always cost, and the screen shows
+    // it before the export runs. Per-file faults are a FIT concept, so an
+    // empty list here is correct rather than an oversight — and GPX and TCX
+    // write an ISO-8601 timestamp, which 1970 fits into perfectly well.
+    expect((await exportWithFaults(open, id, 'gpx')).lost).toEqual([]);
+    expect((await exportWithFaults(open, id, 'tcx')).lost).toEqual([]);
   });
 });

@@ -359,14 +359,30 @@ function ExportPanel({
       return;
     }
     try {
-      const file = await exportActivity({
+      const { file, lost } = await exportActivity({
         store: port.store,
         athleteId: port.athleteId,
         activityId: selected as ActivityId,
         format,
       });
       port.save(file);
-      setMessage({ tone: 'success', text: `Saved ${file.fileName}.` });
+      // #162. The file saved either way — the encoder's contract is bytes plus
+      // faults, and a lossy file is still a file the rider asked for. What
+      // changes is that they are told, in the same place they are told it
+      // worked, rather than finding out from a reader months later.
+      //
+      // `warning` rather than `success` when something was lost, because a
+      // rider skimming for the green line is exactly the person who needs to
+      // notice. `lost` is empty on a clean export, so this is not an
+      // always-on caveat.
+      setMessage(
+        lost.length === 0
+          ? { tone: 'success', text: `Saved ${file.fileName}.` }
+          : {
+              tone: 'warning',
+              text: `Saved ${file.fileName}, but not everything fitted in the file — ${lost.join('; ')}.`,
+            },
+      );
     } catch (error: unknown) {
       setMessage({
         tone: 'warning',
