@@ -403,8 +403,6 @@ not.
   the issue that owns its content, [#85](https://github.com/openzigs/onyourleft/issues/85). Copy
   `packages/domain` as the template: a manifest, a `LICENSE`, a `tsconfig.json`, a
   `vitest.config.ts` and a test.
-- **A coverage gate demonstrated to fail.** Coverage is reported and nothing enforces it, which is
-  §5's deliberate design; what #24 still owes is the demonstration that the report is real.
 - **`react-router` and the rest of the runtime dependency list in ADR 0005.** See the dependency
   paragraph below the next heading for what *is* installed.
 - **`apps/api`, or anything else server-shaped.** Not "not yet" — not in Phase 1 at all. Owner
@@ -595,13 +593,35 @@ All of that is §8 rules rather than preference. Node comes from `.nvmrc` and pn
 **no dependency cache**: it would mean another action to pin and a writable cache in every job's
 dependency path, to save seconds on a workspace this size.
 
-**Still absent from CI**, and the remainder of
-[#24](https://github.com/openzigs/onyourleft/issues/24): the demonstration that CI goes red on a
-lint error, a type error and a failing test. The per-package dependency-licence allowlist landed
-with #24 part 2 — see §4g. ⚠️ #24's remaining criterion is worded *"the coverage gate is enforced
-and demonstrated to fail below threshold"*, and that wording **predates §5 and does not govern**:
-§5 forbids a percentage floor outright, so what is owed is a demonstration that the coverage
-**report** is real, never a threshold. Read §5, not that criterion.
+**This pipeline has been proved to go red**, which is the whole of what
+[#24](https://github.com/openzigs/onyourleft/issues/24) was for. #100 did it for the bare-clone
+script rules; the toolchain steps were demonstrated on 2026-09-07 in a throwaway pull request
+(#180, closed unmerged) carrying one defect per commit, each chosen to pass every earlier step so
+the failure lands on the step under test:
+
+| Defect | Failed at | Run |
+|---|---|---|
+| a floating promise (`tsc` allows it, `@typescript-eslint/no-floating-promises` does not) | **Lint** | [34116473625](https://github.com/openzigs/onyourleft/actions/runs/34116473625) |
+| a `string` assigned to a `number` (type-aware ESLint passes it — assignment compatibility is `tsc`'s job) | **Typecheck** | [34116588471](https://github.com/openzigs/onyourleft/actions/runs/34116588471) |
+| an assertion that is simply false | **Tests and coverage report** | [34116723271](https://github.com/openzigs/onyourleft/actions/runs/34116723271) |
+
+Two things that demonstration settled beyond the criterion. The coverage steps **ran anyway** in
+the two failing runs, reported the missing report, and did **not** fail the job — §4c's `if:
+always()` design, observed rather than asserted. And a defect that trips an *earlier* step proves
+nothing about a later one, which is why each was verified locally against every preceding step
+before being pushed.
+
+**The coverage report is real, and that is a separate claim from any threshold.** Measured the
+same day on `main`: the suite reports 6408/6616 statements (96.85%); removing
+`apps/web/src/transfer/export-activity.test.ts` and re-running moves that file from 54/54 to
+50/54 and the total to 6404/6616 (96.79%). It drops by four rather than to zero because
+`TransferView.test.tsx` exercises the same code — which is the more useful half of the result:
+coverage is attributed to what actually executes, not to a filename that looks related.
+
+⚠️ **#24's own wording for this asks for something §5 forbids.** The criterion reads *"the
+coverage gate is enforced and demonstrated to fail below threshold"*, and it **predates §5 and
+does not govern**: §5 bans a percentage floor outright, and §4b reframes what is owed as the
+demonstration above. Read §5, not that criterion.
 
 Repository-level security scanning — CodeQL default setup, secret scanning with push protection, and
 Dependabot alerts and security updates — is **already enabled on the repository** and needs no
