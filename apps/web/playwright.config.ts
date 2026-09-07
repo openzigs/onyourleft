@@ -47,7 +47,26 @@ import { defineConfig, devices } from '@playwright/test';
  * assertion below true of an empty page.
  */
 const PORT = 4319;
-export const HARNESS_ORIGIN = `http://127.0.0.1:${String(PORT)}`;
+
+/**
+ * The bind address, written down once.
+ *
+ * ⚠️ **`vite preview` defaults to `localhost`, and that is not the same thing
+ * as `127.0.0.1`.** Debian and Ubuntu ship an `/etc/hosts` that maps
+ * `localhost` to **both** `127.0.0.1` and `::1`, Node resolves it verbatim in
+ * whatever order `getaddrinfo` returns, and a server handed `::1` listens on
+ * IPv6 loopback alone. Playwright then polls `http://127.0.0.1:4319`, nothing
+ * answers, and the run dies with `Timed out waiting 60000ms from
+ * config.webServer` — which names the symptom and not one word of the cause.
+ *
+ * That is exactly what happened on the first CI run of this gate: green in a
+ * container with no IPv6 at all, red on the runner. So the address is stated
+ * rather than resolved, and the server's bind and the URL the poller asks for
+ * are built from **this one constant** — they cannot drift, and neither
+ * depends on what `localhost` happens to mean on the machine.
+ */
+const HOST = '127.0.0.1';
+export const HARNESS_ORIGIN = `http://${HOST}:${String(PORT)}`;
 
 export default defineConfig({
   testDir: './browser',
@@ -82,10 +101,16 @@ export default defineConfig({
     // `vite preview` over the harness build. The build is a separate step in
     // `test:browser`, so a failure to compile is reported as a build failure
     // rather than as a server that would not start.
-    command: `pnpm exec vite preview --config vite.browser.config.ts --port ${String(PORT)} --strictPort`,
+    command: `pnpm exec vite preview --config vite.browser.config.ts --host ${HOST} --port ${String(PORT)} --strictPort`,
     url: HARNESS_ORIGIN,
     reuseExistingServer: false,
     timeout: 60_000,
+    // Playwright ignores a web server's stdout by default, so a server that
+    // starts and is simply not where the poller is looking produces a timeout
+    // with no output at all — the whole of what the first CI run told us. Vite
+    // prints the address it bound to; pipe it, so the next failure of this
+    // shape arrives with its own diagnosis attached.
+    stdout: 'pipe',
   },
   projects: [{ name: 'chromium', use: devices['Desktop Chrome'] }],
 });

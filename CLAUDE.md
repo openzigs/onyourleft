@@ -763,6 +763,18 @@ path to `index.html` and returns `200` with a page of HTML, which the "there is 
 assertion reads as success. A real PMTiles archive sits on object storage behind a CDN (ADR 0010
 D-1), which 404s what it does not have.
 
+⚠️ **The harness server binds `127.0.0.1` explicitly, and that is load-bearing.** `vite preview`
+defaults to `localhost`, which is **not** a synonym for `127.0.0.1`: Debian and Ubuntu map
+`localhost` to both `127.0.0.1` and `::1`, Node resolves it verbatim in whatever order
+`getaddrinfo` returns, and a server handed `::1` listens on IPv6 loopback alone while Playwright
+polls the IPv4 one. This gate's first CI run died exactly there — green in a container with no IPv6
+at all, red on the runner, with `Timed out waiting 60000ms from config.webServer` and **no other
+output**, because Playwright ignores a web server's stdout by default. `playwright.config.ts` now
+builds the bind address and the polled URL from one `HOST` constant so they cannot drift, and sets
+`stdout: 'pipe'` so Vite's own "bound to …" line is in the log the next time something of this
+shape happens. A green browser gate on a developer's machine says nothing about which addresses
+that machine has.
+
 **What it does not prove: that tiles render.** There is no archive to render from. The spec asserts
 the 404 rather than tolerating it, so the day #53 lands that test goes red — which is the right
 moment for somebody to come back and replace it with one that asserts tiles actually drew.
