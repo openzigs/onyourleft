@@ -2,6 +2,7 @@
 
 import Dexie from 'dexie';
 import {
+  beatsPerMinute,
   metres,
   seconds,
   unixSeconds,
@@ -119,6 +120,54 @@ describe('persistence — the write must be visible to a reader that was not the
       expect(read?.hasPosition).toBe(false);
       expect(read?.name).toBe('Zwift Watopia');
       expect(read?.distance).toBe(40_000);
+    } finally {
+      await harness.destroy();
+    }
+  });
+
+  it('an athlete’s thresholds survive a close and reopen (#78)', async () => {
+    // The setting every zone boundary is derived from. Read back through a
+    // fresh handle rather than from the object just written, per §5: the
+    // defect shape here is a write that reports success while the read cannot
+    // see it.
+    const harness = createStoreHarness();
+    try {
+      const configured = {
+        ...athlete(),
+        thresholdPower: watts(275),
+        thresholdHeartRate: beatsPerMinute(172),
+      };
+
+      const read = await harness.roundTrip(
+        async (fresh) => fresh.putAthlete(configured),
+        async (fresh) => fresh.getAthlete(ATHLETE_A),
+      );
+
+      expect(read?.thresholdPower).toBe(275);
+      expect(read?.thresholdHeartRate).toBe(172);
+      // Asserted as different numbers, so writing one over the other cannot
+      // satisfy both assertions above.
+      expect(read?.thresholdPower).not.toBe(read?.thresholdHeartRate);
+    } finally {
+      await harness.destroy();
+    }
+  });
+
+  it('an athlete written without thresholds reads back without them', async () => {
+    // The compatibility case that makes this an additive change rather than a
+    // migration: a row written before #78 has no setting, and reads back with
+    // none rather than with a zero. The default is applied in exactly one
+    // place above this layer, so the record stays a faithful account of disk.
+    const harness = createStoreHarness();
+    try {
+      const read = await harness.roundTrip(
+        async (fresh) => fresh.putAthlete(athlete()),
+        async (fresh) => fresh.getAthlete(ATHLETE_A),
+      );
+
+      expect(read).toBeDefined();
+      expect(read?.thresholdPower).toBeUndefined();
+      expect(read?.thresholdHeartRate).toBeUndefined();
     } finally {
       await harness.destroy();
     }

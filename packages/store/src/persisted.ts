@@ -23,6 +23,7 @@
  */
 
 import {
+  beatsPerMinute,
   metres,
   seconds,
   unixSeconds,
@@ -51,6 +52,8 @@ export interface PersistedAthlete {
   id: string;
   displayName: string;
   createdAt: number;
+  thresholdPower?: number;
+  thresholdHeartRate?: number;
 }
 
 /** @see ActivityRecord */
@@ -166,16 +169,28 @@ function originalFileOf(row: PersistedActivity): OriginalFileReference | undefin
 // --- Athlete ----------------------------------------------------------------
 
 export function toPersistedAthlete(record: AthleteRecord): PersistedAthlete {
-  return {
+  const row: PersistedAthlete = {
     id: record.id,
     displayName: record.displayName,
     createdAt: record.createdAt,
   };
+  // Written conditionally, for the reason `toPersistedActivity` gives for
+  // `averagePower`: an explicit `undefined` property is a stored key with no
+  // value, and absent must mean absent.
+  if (record.thresholdPower !== undefined) {
+    row.thresholdPower = record.thresholdPower;
+  }
+  if (record.thresholdHeartRate !== undefined) {
+    row.thresholdHeartRate = record.thresholdHeartRate;
+  }
+  return row;
 }
 
 /** @throws {StoreDecodeError} */
 export function fromPersistedAthlete(row: PersistedAthlete): AthleteRecord {
-  return {
+  const record: {
+    -readonly [K in keyof AthleteRecord]: AthleteRecord[K];
+  } = {
     id: athleteId(decodedString('athlete.id', row.id)),
     displayName: decodedString('athlete.displayName', row.displayName),
     createdAt: decoded(
@@ -184,6 +199,30 @@ export function fromPersistedAthlete(row: PersistedAthlete): AthleteRecord {
       unixSeconds,
     ),
   };
+  // Absent stays absent rather than becoming a default here: this function's
+  // job is to say faithfully what is on disk, and a row written before #78
+  // genuinely has no setting. Exactly one place substitutes the default, so
+  // "a single athlete threshold setting" stays true — see
+  // `apps/web/src/analysis/`.
+  //
+  // Present is still validated, on the same terms as every other field: a
+  // negative threshold on disk is a `StoreDecodeError` rather than a zone
+  // table with a negative boundary.
+  if (row.thresholdPower !== undefined) {
+    record.thresholdPower = decoded(
+      'athlete.thresholdPower',
+      decodedNumber('athlete.thresholdPower', row.thresholdPower),
+      watts,
+    );
+  }
+  if (row.thresholdHeartRate !== undefined) {
+    record.thresholdHeartRate = decoded(
+      'athlete.thresholdHeartRate',
+      decodedNumber('athlete.thresholdHeartRate', row.thresholdHeartRate),
+      beatsPerMinute,
+    );
+  }
+  return record;
 }
 
 // --- Activity ---------------------------------------------------------------

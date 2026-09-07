@@ -41,6 +41,7 @@ import { useEffect, useRef, type JSX, type MouseEvent } from 'react';
 import { AboutView } from '../views/AboutView';
 import { ActivitiesView } from '../views/ActivitiesView';
 import { ActivityDetailView } from '../views/ActivityDetailView';
+import { AnalysisView } from '../views/AnalysisView';
 import { DevicesView } from '../views/DevicesView';
 import { NotFoundView } from '../views/NotFoundView';
 import { RideView } from '../views/RideView';
@@ -48,6 +49,7 @@ import { RideSession } from '../ride/RideSession';
 import type { RideController } from '../ride/controller';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { TransferView } from '../transfer/TransferView';
+import type { AnalysisPort } from '../analysis/store-port';
 import type { DetailPort } from '../detail/store-port';
 import type { BasemapConfig } from '../map/basemap';
 import type { MapPort } from '../map/port';
@@ -117,6 +119,17 @@ export interface AppShellProps {
    */
   readonly detail?: DetailPort | undefined;
   /**
+   * The analysis screen's store (#78).
+   *
+   * A fifth port over the same connection, and the only one that may read the
+   * athlete record — the thresholds every zone boundary is derived from live
+   * there, and #78's first criterion is that there is a *single* threshold
+   * setting. It is also the only port that reads a channel across many rides,
+   * which is why `analysis/load.ts` states a bound and `load.test.ts` counts
+   * the decodes.
+   */
+  readonly analysis?: AnalysisPort | undefined;
+  /**
    * How to get a map engine (#63), or `undefined` where there is none.
    *
    * A loader rather than a port: `maplibre-gl` is the largest dependency in
@@ -155,6 +168,8 @@ function viewFor(match: RouteMatch, props: AppShellProps): JSX.Element {
           basemap={props.basemap}
         />
       );
+    case 'analysis':
+      return <AnalysisView port={props.analysis} />;
     case 'devices':
       return <DevicesView capabilities={props.capabilities} />;
     case 'transfer':

@@ -24,7 +24,14 @@
  *   a later schema version and nothing here forecloses them.
  */
 
-import type { Metres, Seconds, UnixSeconds, Watts, GeographicPosition } from '@onyourleft/domain';
+import type {
+  BeatsPerMinute,
+  Metres,
+  Seconds,
+  UnixSeconds,
+  Watts,
+  GeographicPosition,
+} from '@onyourleft/domain';
 
 import type { ActivityId, AthleteId, LapId, PrivacyZoneId } from './ids';
 import type { Visibility } from './visibility';
@@ -43,6 +50,31 @@ export interface AthleteRecord {
   readonly id: AthleteId;
   readonly displayName: string;
   readonly createdAt: UnixSeconds;
+
+  /**
+   * The athlete's threshold power, from which every power zone is derived
+   * (#78) and on which #76's load metrics will rest.
+   *
+   * ⚠️ **Optional, and that is what keeps this off the migration path.** An
+   * absent field reads back as `undefined` from a row written before it
+   * existed, and the reader substitutes `DEFAULT_THRESHOLD_POWER` — so an
+   * existing database needs no data transform, no schema version and no
+   * `.upgrade()` hook. That is the same reason versions 1-4 needed no record
+   * migrations: every change so far has been additive.
+   *
+   * A **required** field here would have been different, and worth knowing
+   * before someone tries it: it would need the first entry in
+   * `SCHEMA_MIGRATIONS` — which is empty — *and* the Dexie `.upgrade()`
+   * wiring, which does not exist. `upgradeWith` in `migrations.ts` is written
+   * and is never called from `ActivityStore`. Making a field required is
+   * therefore a change to the store's core with real risk to real databases,
+   * and it should be its own piece of work rather than a side effect of a
+   * feature that only needs a number.
+   */
+  readonly thresholdPower?: Watts;
+
+  /** The athlete's threshold heart rate. Optional for the reason above. */
+  readonly thresholdHeartRate?: BeatsPerMinute;
 }
 
 /** One recorded or imported ride. */

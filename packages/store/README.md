@@ -25,9 +25,11 @@ erDiagram
     ACTIVITY ||--o| ACTIVITY_RECORD : "has at most one signed record"
 
     ATHLETE {
-        string  id           PK "opaque; #61 keys it to the device keypair"
+        string  id                  PK "opaque; #61 keys it to the device keypair"
         string  displayName
-        number  createdAt        "UnixSeconds"
+        number  createdAt              "UnixSeconds"
+        number  thresholdPower         "Watts, optional — #78's zone basis"
+        number  thresholdHeartRate     "BeatsPerMinute, optional — #78's zone basis"
     }
     ACTIVITY {
         string  id                 PK
@@ -187,6 +189,27 @@ athlete's existing data, so it is tested rather than asserted: `migrations.test.
 version-1 database, opens it at version 2, and checks every record survived and the new stores work.
 The `up`/`down` machinery is tested end to end through a real Dexie version bump, so the first
 record-shape change is an entry in an array.
+
+### An optional field is not a migration, and that is why #78's thresholds are optional
+
+`AthleteRecord.thresholdPower` and `thresholdHeartRate` (#78) are **optional**, and that is a
+deliberate choice about the migration path rather than about the domain. An absent field reads back
+as `undefined` from a row written before it existed, so an athlete's existing database needs no data
+transform, no schema version and no `.upgrade()` hook — the same reason versions 1–4 needed no
+record migrations at all.
+
+A **required** field would have been a different piece of work: it would need the first entry in
+`SCHEMA_MIGRATIONS`, **and** the Dexie `.upgrade()` wiring, which does not exist yet. `upgradeWith`
+in `migrations.ts` is written and is tested and is never called from `ActivityStore`. Making a field
+required is therefore a change to this store's core with real risk to real databases, and it belongs
+to whoever needs it rather than to a feature that only needs a number.
+
+`fromPersistedAthlete` reads the field **faithfully** — absent stays absent — because a decoder that
+substituted a default would be lying about what is on disk. Exactly one place in the program
+substitutes one, `apps/web/src/analysis/thresholds.ts`, which is what makes #78's "a single athlete
+threshold setting" a fact rather than a hope. A value that *is* present is validated on the way out
+like every other field: a negative threshold on disk is a `StoreDecodeError`, not a zone table with
+a negative boundary.
 
 **There is no in-place rollback**, and this package guards the case where someone tries. IndexedDB
 raises `VersionError` for a downgrade; Dexie 4.4.5 does not pass that on, and opens the newer
