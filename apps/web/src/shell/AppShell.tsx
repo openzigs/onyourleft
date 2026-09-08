@@ -45,6 +45,7 @@ import { AnalysisView } from '../views/AnalysisView';
 import { DevicesView } from '../views/DevicesView';
 import { NotFoundView } from '../views/NotFoundView';
 import { RideView } from '../views/RideView';
+import { SegmentDetailView } from '../views/SegmentDetailView';
 import { SegmentsView } from '../views/SegmentsView';
 import { RideSession } from '../ride/RideSession';
 import type { RideController } from '../ride/controller';
@@ -56,6 +57,7 @@ import type { BasemapConfig } from '../map/basemap';
 import type { MapPort } from '../map/port';
 import type { LibraryPort } from '../library/store-port';
 import type { TransferPort } from '../transfer/store-port';
+import type { EffortPort } from '../efforts/store-port';
 import type { SegmentPort } from '../segments/store-port';
 
 import { hrefFor, ROUTES, type RouteMatch } from './routes';
@@ -143,6 +145,14 @@ export interface AppShellProps {
   readonly basemap?: BasemapConfig | undefined;
   /** Segments (#64), or `undefined` where this browser has no local store. */
   readonly segments?: SegmentPort | undefined;
+  /**
+   * The effort-history screen's reads (#67).
+   *
+   * Optional like every other port here: the accessibility suite renders every
+   * route with none of them, and a view handed `undefined` says so in a
+   * sentence rather than crashing the audit.
+   */
+  readonly efforts?: EffortPort | undefined;
 }
 
 /**
@@ -176,6 +186,8 @@ function viewFor(match: RouteMatch, props: AppShellProps): JSX.Element {
       return <AnalysisView port={props.analysis} />;
     case 'segments':
       return <SegmentsView port={props.segments} />;
+    case 'segment-detail':
+      return <SegmentDetailView port={props.efforts} segment={match.parameter} />;
     case 'devices':
       return <DevicesView capabilities={props.capabilities} />;
     case 'transfer':

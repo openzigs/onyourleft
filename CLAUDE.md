@@ -37,6 +37,8 @@ apps/                 AGPL-3.0-or-later, without exception
                         place a threshold default is substituted, the bounded
                         library read, and the wording
     src/design/         design tokens, theme.css and the primitives (#48)
+    src/efforts/        the effort-history screen's reads and its stub (#67) — the
+                        read budget, and where a sample index comes from
     src/detail/         the ride detail view's data layer (#50) — the read budget, the
                         gap-preserving downsampler, the SVG trace and the
                         privacy-zone trim that says what a shared copy contains
@@ -64,9 +66,10 @@ packages/             Apache-2.0, without exception
                         NAMES are a trademark question, see §6
     identity/           the record format, the canonical bytes, verification (#61)
     recording/          the recording session state machine and stream merge (#45)
-    segment/            the segment model (#64) and the matcher (#66) — endpoints
-                        and bearings, the cell prefilter, discrete Fréchet, and
-                        the effort with its three-state visibility
+    segment/            the segment model (#64), the matcher (#66) and the effort
+                        comparison (#67) — endpoints and bearings, the cell
+                        prefilter, discrete Fréchet, the effort with its
+                        three-state visibility, and where the time went
   fit/                FIT / GPX / TCX codec (#29-#32)
   sensors/            sensor abstraction and BLE transport (#39-#44) — BLE only
     src/                the transport-agnostic abstraction; no platform API at all
@@ -1341,5 +1344,8 @@ top of an issue **supersedes its body**.
 | What actually makes re-matching idempotent, and what the derived effort id buys instead | `packages/store/src/schema.ts` §`STORES_V6`, `packages/store/src/testing/fakes.ts` §`appendingEffortStoreFactory` |
 | How a backfill resumes, and why it is a cursor rather than an offset | `apps/web/src/segments/backfill.ts`, `packages/store/src/activity-store.ts` §`startedAfter` |
 | What a segment matcher may not do, and the prior art the design-around cites | [ADR 0007](docs/adr/0007-patent-posture.md) D-2 and D-6, `docs/spikes/0001-segment-matching.md` §7 |
+| Which time basis a segment board ranks by, and why moving time is not it | `packages/domain/src/segment/effort.ts` §`RANKING_BASIS` |
+| How two efforts recorded at different rates are compared without truncating either | `packages/domain/src/segment/comparison.ts`, §`overlayEfforts` |
+| Why an effort stores no sample indices, and where they come from instead | `apps/web/src/efforts/load.ts` §`sampleIndexAt` |
 
 <!-- Last updated: 2026-09-06 by delivery:code-issue resolving #51 (the manual file import and export UI) -->

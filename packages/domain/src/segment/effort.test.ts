@@ -25,9 +25,16 @@ import {
   createEffort,
   effortId,
   effortVisibility,
+  personalBest,
+  RANKING_BASIS,
+  RANKING_BASIS_LABEL,
+  rankEfforts,
+  rankOrder,
   touchesPrivacyZone,
   type EffortContext,
+  type EffortVisibility,
   type FrozenAttributes,
+  type SegmentEffort,
 } from './effort';
 
 import type { GeographicPosition } from '../quantities';
@@ -196,5 +203,125 @@ describe('the privacy test itself', () => {
 
   it('does not fall over on an index outside the ride', () => {
     expect(touchesPrivacyZone([HOME], 0, 99, [{ centre: HOME, radius: metres(1) }])).toBe(true);
+  });
+});
+
+// --- Ranking (#67) -----------------------------------------------------------
+
+/** An effort with just the fields ranking reads. */
+function effort(
+  id: string,
+  elapsedSeconds: number,
+  startedAtSeconds: number,
+  visibility: EffortVisibility = 'public',
+): SegmentEffort {
+  return {
+    id,
+    segmentId: 'segment-1',
+    activityId: `activity-${id}`,
+    athleteId: 'athlete-a',
+    startedAt: unixSeconds(startedAtSeconds),
+    elapsed: seconds(elapsedSeconds),
+    deviation: metres(5),
+    visibility,
+    attributes: {},
+  };
+}
+
+describe('the ranking basis is stated, and it is elapsed time', () => {
+  it('names one basis, and the words the screen uses', () => {
+    // #67's fourth criterion: pick one, name it in the UI, never mix bases.
+    // Asserted so that changing the basis without changing the label — or the
+    // reverse — fails rather than shipping a screen that lies about what it
+    // ranked by.
+    expect(RANKING_BASIS).toBe('elapsed');
+    expect(RANKING_BASIS_LABEL).toContain('elapsed');
+  });
+
+  it('orders by elapsed time ascending, fastest first', () => {
+    const ranked = rankEfforts([effort('c', 120, 300), effort('a', 90, 100), effort('b', 95, 200)]);
+    expect(ranked.map((one) => one.id)).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('the tie-break is deterministic and documented — #67’s fifth criterion', () => {
+  it('breaks an equal time by the EARLIEST start', () => {
+    const ranked = rankEfforts([effort('later', 90, 500), effort('earlier', 90, 100)]);
+    expect(ranked.map((one) => one.id)).toEqual(['earlier', 'later']);
+  });
+
+  it('breaks an equal time AND an equal start by the effort id', () => {
+    // Reached only when one ride was imported twice under two ids. Without it
+    // the order of those two depends on the store's return order, which is not
+    // part of any contract.
+    const ranked = rankEfforts([effort('zzz', 90, 100), effort('aaa', 90, 100)]);
+    expect(ranked.map((one) => one.id)).toEqual(['aaa', 'zzz']);
+  });
+
+  it('orders the same way on every render, whatever order it is handed', () => {
+    // ⚠️ The criterion in its literal form: "a test asserts stability across
+    // two runs". Reversing the input is the stronger version — a comparator
+    // that stopped at elapsed time would rely on sort stability and therefore
+    // on the INPUT order, so it passes a re-run and fails this.
+    const all = [effort('c', 90, 300), effort('a', 90, 100), effort('b', 90, 200)];
+    const forwards = rankEfforts(all).map((one) => one.id);
+    const backwards = rankEfforts([...all].reverse()).map((one) => one.id);
+
+    expect(forwards).toEqual(['a', 'b', 'c']);
+    expect(backwards).toEqual(forwards);
+  });
+
+  it('the comparator itself is antisymmetric on every pair', () => {
+    const pairs: readonly [SegmentEffort, SegmentEffort][] = [
+      [effort('a', 90, 100), effort('b', 95, 100)],
+      [effort('a', 90, 100), effort('b', 90, 200)],
+      [effort('a', 90, 100), effort('b', 90, 100)],
+    ];
+    for (const [first, second] of pairs) {
+      expect(Math.sign(rankOrder(first, second))).toBe(-Math.sign(rankOrder(second, first)));
+    }
+  });
+});
+
+describe('what ranking includes, and what it does not — #67’s first and sixth criteria', () => {
+  it('includes a private-match effort, because it is the athlete’s own data', () => {
+    const ranked = rankEfforts([
+      effort('public', 95, 100),
+      effort('hidden', 90, 200, 'private-match'),
+    ]);
+    expect(ranked.map((one) => one.id)).toEqual(['hidden', 'public']);
+  });
+
+  it('lets a private-match effort BE the personal best', () => {
+    // The sharper version of the case above: not merely listed, but winning.
+    // A reader who "simplified" the filter to `visibility === 'public'` would
+    // silently delete the rider's best time on every segment near their home.
+    const best = personalBest([
+      effort('slower', 95, 100),
+      effort('hidden', 90, 200, 'private-match'),
+    ]);
+    expect(best?.id).toBe('hidden');
+  });
+
+  it('drops an excluded effort, which is not a personal best at any time', () => {
+    const ranked = rankEfforts([
+      effort('real', 95, 100),
+      effort('impossible', 12, 200, 'excluded'),
+    ]);
+    expect(ranked.map((one) => one.id)).toEqual(['real']);
+  });
+
+  it('has no personal best when the athlete has no efforts', () => {
+    expect(personalBest([])).toBeUndefined();
+    expect(personalBest([effort('only', 90, 100, 'excluded')])).toBeUndefined();
+  });
+
+  it('does not mutate the array it was handed', () => {
+    // `sort` is in place, so ranking a store read would reorder the caller's
+    // array under it — which is the kind of thing that only shows up as a
+    // second render disagreeing with the first.
+    const all = [effort('c', 120, 300), effort('a', 90, 100)];
+    rankEfforts(all);
+    expect(all.map((one) => one.id)).toEqual(['c', 'a']);
   });
 });
