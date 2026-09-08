@@ -242,9 +242,17 @@ describe('the production registry', () => {
     // A **required** field would be the first entry in this registry, and
     // `records.ts` says what that would cost.
     //
+    // ⚠️ Version 8 adds a store too — #14's saved workouts — and is the same
+    // case as 6 and 7 for the same reason: a new store has no rows to migrate,
+    // so no existing record's shape changes. What is worth reading is that a
+    // workout's blocks are stored as written and expanded on the way out
+    // (`records.ts` says why), so a later change to the *timeline* is not a
+    // migration either; a change to a BLOCK would be, and would be the first
+    // entry here.
+    //
     // Asserted rather than left implicit: the day a version does change a
     // record's shape, this test is what says the registry must gain an entry.
-    expect(SCHEMA_VERSION).toBe(7);
+    expect(SCHEMA_VERSION).toBe(8);
     expect(SCHEMA_MIGRATIONS).toEqual([]);
   });
 

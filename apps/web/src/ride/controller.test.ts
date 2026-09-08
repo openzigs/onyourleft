@@ -18,7 +18,15 @@
  * share an arithmetic mistake cancel it out invisibly.
  */
 
-import { seconds, watts, type Watts } from '@onyourleft/domain';
+import {
+  revolutionsPerMinute,
+  seconds,
+  thresholdShare,
+  unixSeconds,
+  watts,
+  type Watts,
+  type WorkoutBlock,
+} from '@onyourleft/domain';
 import { deviceId } from '@onyourleft/sensors';
 import {
   createTrainerControl,
@@ -37,7 +45,12 @@ import {
   type FtmsControlResponse,
   type SimulatorBench,
 } from '@onyourleft/sensors/simulator';
-import { recordingSessionId, type RecordingSessionId } from '@onyourleft/store';
+import {
+  recordingSessionId,
+  workoutId,
+  type RecordingSessionId,
+  type WorkoutRecord,
+} from '@onyourleft/store';
 import {
   ATHLETE_A,
   createStoreHarness,
@@ -644,6 +657,336 @@ describe('criterion 1 — a setpoint is requested until the trainer confirms it'
     // client: the simulator's trainer tops out at 2000 W, and a message quoting
     // any other number would mean the bound came from somewhere else.
     expect(trainer.refusal).toMatch(/9000 W is above the 2000 W/);
+    rig.controller.dispose();
+  });
+});
+
+describe('#14 — riding a saved workout on this screen', () => {
+  const THRESHOLD = watts(250);
+
+  const savedWorkout = (blocks: readonly WorkoutBlock[], name = 'Test'): WorkoutRecord => ({
+    id: workoutId('w1'),
+    createdBy: ATHLETE_A,
+    name,
+    workout: { name, blocks },
+    createdAt: unixSeconds(1),
+    updatedAt: unixSeconds(1),
+  });
+
+  const twoIntervals = (): WorkoutRecord =>
+    savedWorkout([
+      { kind: 'steady', seconds: seconds(6), target: thresholdShare(0.6) },
+      { kind: 'steady', seconds: seconds(6), target: thresholdShare(1.0) },
+    ]);
+
+  it('refuses to start until the trainer has granted control', async () => {
+    // ⚠️ #14's revision block names this as the silent failure: a trainer that
+    // has not granted control answers every setpoint 0x05 Control Not
+    // Permitted, so a workout started here would run its clock and control
+    // nothing. The refusal is a return value the screen can act on.
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+
+    expect(rig.controller.startWorkout(twoIntervals(), THRESHOLD)).toBe(false);
+    expect(rig.controller.getSnapshot().workout).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('refuses to start with no controllable trainer at all', async () => {
+    const rig = benchWith({ withTrainerControl: false });
+    await rig.controller.pair('trainer');
+    expect(rig.controller.startWorkout(twoIntervals(), THRESHOLD)).toBe(false);
+    rig.controller.dispose();
+  });
+
+  it('starts the workout clock at zero, not at the last tick', async () => {
+    // ⚠️ The defect this test was written to find. `clock` only moves on a
+    // tick, and a backgrounded tab stops ticking while the real clock does not
+    // — so anchoring the workout on `clock` started it already seconds old,
+    // and the rider was that far into their first interval before they began.
+    // `startWorkout` reads `now()`.
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+
+    // ⚠️ Time passes with no tick, which is what a backgrounded tab is: the
+    // interval stops firing and `clock` stops moving while the real clock does
+    // not. Anchoring on `clock` here starts the workout five seconds old.
+    rig.bench.advance(seconds(5));
+
+    rig.controller.startWorkout(
+      savedWorkout([{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.6) }]),
+      THRESHOLD,
+    );
+    await ride(rig, 1);
+    expect(rig.controller.getSnapshot().workout?.elapsedSeconds).toBe(1);
+    rig.controller.dispose();
+  });
+
+  it('lets the trainer go when one workout replaces another', async () => {
+    // ⚠️ Not tidiness. The outgoing session holds an ERG writer with a target
+    // possibly still in flight; ending it releases the trainer and closes that
+    // writer, so a stale target cannot land on top of the workout that
+    // replaced it.
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    rig.controller.startWorkout(twoIntervals(), THRESHOLD);
+    await ride(rig, 2);
+    await flushMicrotasks();
+    expect(rig.targetOnTheTrainer()).toBe(150);
+
+    rig.controller.startWorkout(
+      savedWorkout(
+        [{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.8) }],
+        'Second',
+      ),
+      THRESHOLD,
+    );
+    await flushMicrotasks();
+
+    // Released, and not yet written to: the replacement has not ticked.
+    expect(rig.targetOnTheTrainer()).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('eases the target when the rider’s cadence collapses under it', async () => {
+    // ⚠️ #14's first criterion, through the wiring rather than through the
+    // rule. `erg-safety.ts` decides and `session.test.ts` proves the decision;
+    // what is proved here is that this screen actually feeds it the cadence
+    // stream, which is a different claim and the one a missing line breaks.
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    rig.controller.startWorkout(
+      savedWorkout([{ kind: 'steady', seconds: seconds(600), target: thresholdShare(1.0) }]),
+      THRESHOLD,
+    );
+
+    await ride(rig, 2);
+    await flushMicrotasks();
+    expect(rig.targetOnTheTrainer()).toBe(250);
+
+    // The rider loses the fight: cadence falls away under the target.
+    for (const rpm of [88, 80, 72, 64, 56, 50, 46]) {
+      rig.bench.rider.set({ cadence: revolutionsPerMinute(rpm) });
+      await ride(rig, 1);
+      await flushMicrotasks();
+    }
+
+    const held = rig.targetOnTheTrainer();
+    expect(held).toBeDefined();
+    expect(held).toBeLessThan(250);
+    rig.controller.dispose();
+  });
+
+  it('holds the first interval on the trainer itself', async () => {
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+
+    expect(rig.controller.startWorkout(twoIntervals(), THRESHOLD)).toBe(true);
+    await ride(rig, 2);
+    await flushMicrotasks();
+
+    // Read off the simulator's own state, not off what the controller believes.
+    expect(rig.targetOnTheTrainer()).toBe(150);
+    expect(rig.controller.getSnapshot().workout?.status).toBe('running');
+    rig.controller.dispose();
+  });
+
+  it('moves to the second interval as the workout clock passes the boundary', async () => {
+    // ⚠️ Ridden until the workout's own clock says it has crossed, rather than
+    // for a fixed number of `ride` steps. Every control-point write in this rig
+    // advances the simulated clock a second of its own — that is the bridge
+    // modelling an indication arriving on the next tick — so a workout writing
+    // at 1 Hz runs the bench roughly twice as fast as the loop counter, and a
+    // fixed count would sail past the end of the workout instead.
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    rig.controller.startWorkout(
+      savedWorkout([
+        { kind: 'steady', seconds: seconds(30), target: thresholdShare(0.6) },
+        { kind: 'steady', seconds: seconds(600), target: thresholdShare(1.0) },
+      ]),
+      THRESHOLD,
+    );
+
+    while ((rig.controller.getSnapshot().workout?.elapsedSeconds ?? 0) < 32) {
+      await ride(rig, 1);
+      await flushMicrotasks();
+    }
+
+    expect(rig.controller.getSnapshot().workout?.status).toBe('running');
+    expect(rig.targetOnTheTrainer()).toBe(250);
+    rig.controller.dispose();
+  });
+
+  it('runs the workout clock off the ride clock, not a second one', async () => {
+    // ⚠️ The join this wiring exists to make, asserted as the claim rather than
+    // as a number: over the same stretch the workout's elapsed time and the
+    // ride's advance by the SAME amount. Two clocks drift, and an hour in they
+    // disagree about which interval a sample belongs to. Written as a delta
+    // because the rig's own clock jumps a second per control-point write, so
+    // an absolute figure would be asserting the harness rather than the join.
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    rig.controller.startWorkout(
+      savedWorkout([{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.6) }]),
+      THRESHOLD,
+    );
+    await ride(rig, 2);
+    await flushMicrotasks();
+
+    const rideBefore = rig.controller.getSnapshot().elapsedSeconds;
+    const workoutBefore = rig.controller.getSnapshot().workout?.elapsedSeconds ?? -1;
+
+    await ride(rig, 5);
+    await flushMicrotasks();
+
+    const rideAfter = rig.controller.getSnapshot().elapsedSeconds;
+    const workoutAfter = rig.controller.getSnapshot().workout?.elapsedSeconds ?? -1;
+
+    expect(rideAfter - rideBefore).toBeGreaterThan(0);
+    expect(workoutAfter - workoutBefore).toBe(rideAfter - rideBefore);
+    rig.controller.dispose();
+  });
+
+  it('pauses the workout when the ride pauses, and resumes it with the ride', async () => {
+    // ⚠️ The other join. A rider who paused has stopped riding the workout
+    // too, and a workout whose clock ran through the break would put them
+    // further into an interval than they are. Driven through the explicit
+    // pause rather than the automatic one because a paired trainer streams
+    // speed at 1 Hz — so the engine never sees the stillness that would
+    // auto-pause it, which is `channels.ts` working rather than a gap.
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    rig.controller.startWorkout(
+      savedWorkout([{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.6) }]),
+      THRESHOLD,
+    );
+
+    await ride(rig, 3);
+    await rig.controller.pause();
+    // One tick to carry the pause into the workout, then the reading that the
+    // twenty seconds after it are measured against.
+    await ride(rig, 1);
+    const whenPaused = rig.controller.getSnapshot().workout?.elapsedSeconds ?? -1;
+
+    await ride(rig, 20);
+
+    expect(rig.controller.getSnapshot().phase).toBe('paused');
+    expect(rig.controller.getSnapshot().workout?.status).toBe('paused');
+    // Held exactly where it was, rather than running through twenty seconds of
+    // standing still.
+    expect(rig.controller.getSnapshot().workout?.elapsedSeconds).toBe(whenPaused);
+
+    await rig.controller.resume();
+    await ride(rig, 2);
+    expect(rig.controller.getSnapshot().workout?.status).toBe('running');
+    expect(rig.controller.getSnapshot().workout?.elapsedSeconds).toBeGreaterThan(whenPaused);
+    rig.controller.dispose();
+  });
+
+  it('pauses the workout and keeps it when control is lost', async () => {
+    // #14: a disconnect PAUSES and PRESERVES. Not ended — control lost is a
+    // thing a rider takes back, and ending here would make a momentary dropout
+    // into a session they restart from the beginning.
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    rig.controller.startWorkout(twoIntervals(), THRESHOLD);
+    await ride(rig, 3);
+
+    rig.bench.device(TRAINER).script({ kind: 'control-permission-lost' });
+    rig.bench.advance(seconds(1));
+
+    const workout = rig.controller.getSnapshot().workout;
+    expect(workout).toBeDefined();
+    expect(workout?.status).toBe('paused');
+    expect(workout?.elapsedSeconds).toBeGreaterThan(0);
+    rig.controller.dispose();
+  });
+
+  it('names the block being ridden in the words the library uses', async () => {
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    rig.controller.startWorkout(twoIntervals(), THRESHOLD);
+    await ride(rig, 2);
+
+    expect(rig.controller.getSnapshot().workout?.nowRiding).toBe('6 s at 60%');
+    rig.controller.dispose();
+  });
+
+  it('ends the workout before it releases the trainer on Stop', async () => {
+    // ⚠️ The order. A workout still running would write a target back onto a
+    // machine `stopTrainer` had just released.
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    rig.controller.startWorkout(twoIntervals(), THRESHOLD);
+    await ride(rig, 2);
+    await flushMicrotasks();
+    expect(rig.targetOnTheTrainer()).toBe(150);
+
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    await flushMicrotasks();
+
+    expect(rig.controller.getSnapshot().workout).toBeUndefined();
+    expect(rig.targetOnTheTrainer()).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('ends on request and leaves the recording running', async () => {
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    rig.controller.startWorkout(twoIntervals(), THRESHOLD);
+    await ride(rig, 2);
+
+    rig.controller.endWorkout();
+
+    expect(rig.controller.getSnapshot().workout).toBeUndefined();
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    rig.controller.dispose();
+  });
+
+  it('replaces a running workout rather than stacking two', async () => {
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    rig.controller.startWorkout(twoIntervals(), THRESHOLD);
+    await ride(rig, 2);
+
+    rig.controller.startWorkout(
+      savedWorkout(
+        [{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.8) }],
+        'Second',
+      ),
+      THRESHOLD,
+    );
+
+    const workout = rig.controller.getSnapshot().workout;
+    expect(workout?.name).toBe('Second');
+    // A fresh clock, not the first workout's: this is a different session.
+    expect(workout?.elapsedSeconds).toBe(0);
     rig.controller.dispose();
   });
 });

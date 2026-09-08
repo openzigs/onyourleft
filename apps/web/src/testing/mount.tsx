@@ -226,6 +226,27 @@ export async function typeInto(input: HTMLInputElement, value: string): Promise<
   });
 }
 
+/**
+ * Choose an option in a `<select>`, the way a rider would.
+ *
+ * The same native-setter trick {@link typeInto} uses and for the same reason:
+ * React installs its own `value` descriptor on the element, so assigning
+ * through it looks like a no-op and the `change` handler never runs. Without
+ * this the component keeps its previous state and the test reads the *default*
+ * selection back — which on the workouts screen would silently assert against a
+ * steady block while claiming to build an intervals one.
+ */
+export async function chooseOption(select: HTMLSelectElement, value: string): Promise<void> {
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+  if (descriptor?.set === undefined) {
+    throw new Error('this DOM implementation has no HTMLSelectElement value setter');
+  }
+  await inAct(() => {
+    descriptor.set?.call(select, value);
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
+
 /** Every element matching a selector, as an array, typed. */
 export function queryAll<T extends Element = HTMLElement>(root: ParentNode, selector: string): T[] {
   return [...root.querySelectorAll<T>(selector)];

@@ -33,6 +33,8 @@ export interface RecordedCalls {
   readonly pair: string[];
   readonly unpair: string[];
   readonly setTargetPower: number[];
+  /** The workouts the screen asked to ride, by name. */
+  readonly startWorkout: string[];
   /** Counts, because the interesting question is "how many times", not "with what". */
   start: number;
   pause: number;
@@ -42,6 +44,7 @@ export interface RecordedCalls {
   confirmStop: number;
   requestControl: number;
   clearTarget: number;
+  endWorkout: number;
   tick: number;
 }
 
@@ -62,6 +65,7 @@ export function idleSnapshot(): RideSnapshot {
     sampleCount: 0,
     metrics: RIDE_METRIC_IDS.map((id) => ({ id, state: { kind: 'unpaired' } })),
     sensors: [],
+    workout: undefined,
     trainer: {
       paired: false,
       controllable: false,
@@ -128,6 +132,7 @@ export function stubRideController(initial: RideSnapshot = idleSnapshot()): Stub
     pair: [],
     unpair: [],
     setTargetPower: [],
+    startWorkout: [],
     start: 0,
     pause: 0,
     resume: 0,
@@ -136,6 +141,7 @@ export function stubRideController(initial: RideSnapshot = idleSnapshot()): Stub
     confirmStop: 0,
     requestControl: 0,
     clearTarget: 0,
+    endWorkout: 0,
     tick: 0,
   };
 
@@ -194,6 +200,17 @@ export function stubRideController(initial: RideSnapshot = idleSnapshot()): Stub
     clearTargetPower: async () => {
       calls.clearTarget += 1;
       return Promise.resolve();
+    },
+    startWorkout: (record) => {
+      calls.startWorkout.push(record.name);
+      // ⚠️ Answers `true` unconditionally, and a test that needs the refusal
+      // path drives the real controller instead. A stub that guessed at the
+      // control state would be a second implementation of the rule
+      // `startWorkout` exists to enforce.
+      return true;
+    },
+    endWorkout: () => {
+      calls.endWorkout += 1;
     },
     tick: async () => {
       calls.tick += 1;

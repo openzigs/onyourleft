@@ -48,7 +48,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         once-per-application protocol registration, and the one
                         file that names MapLibre
     src/recording/      the recorder: engine + durable checkpoints + recovery (#46)
-    src/ride/           the live ride screen: its state machine, panels and trainer wiring (#49)
+    src/ride/           the live ride screen: its state machine, panels and trainer
+                        wiring (#49), and since #14 the workout lifecycle — one
+                        clock for the ride and the workout, and the panel that
+                        will not offer a control the trainer would refuse
     src/routes/         saved routes (#73) — the store port and its read budget,
                         the edit decision and its concurrency token, what a
                         shared copy of a route contains, and the export a rider
@@ -60,6 +63,12 @@ apps/                 AGPL-3.0-or-later, without exception
     src/transfer/       file import and export (#51) — the batch importer, the
                         1 Hz sample grid, and the export writer
     src/views/          one component per route (#48)
+    src/workout/        the workout control loop (#14) — the one place the
+                        player's decisions meet a trainer's control point,
+                        driven end to end against the #44 simulator
+    src/workouts/       the workout library and builder (#14) — the read
+                        budget, the row model that quotes no watts, and the
+                        one place a typed percentage becomes a share
   mobile/             Capacitor shell wrapping the same web build (#85, #87)
     android/            the generated Android project, plus the connectedDevice
                         foreground service and its plugin bridge — MIT template
@@ -85,6 +94,11 @@ packages/             Apache-2.0, without exception
     trainer/            the gradient setpoint driver (#90) — where the rider is
                         on the route, the grade there, and whether it is worth
                         a write yet
+    workout/            structured workouts (#14) — the model, the timeline a
+                        player looks up rather than replays, the ERG
+                        spiral-of-death rule, and the player itself, which
+                        emits an intent and writes nothing. NO file format;
+                        see §6
     segment/            the segment model (#64), the matcher (#66) and the effort
                         comparison (#67) — endpoints and bearings, the cell
                         prefilter, discrete Fréchet, the effort with its
@@ -97,7 +111,9 @@ packages/             Apache-2.0, without exception
     src/                the transport-agnostic abstraction; no platform API at all
     protocol/           the GATT profile clients (#41, #42) — service UUIDs, payload
                         decoding, and since #90 the simulation writer and the
-                        choice of control point on a machine offering two
+                        choice of control point on a machine offering two, and
+                        since #14 the ERG writer, which cannot send a Reset
+                        because the method is not on the type it holds
     web-bluetooth/      the browser transport (#40) — the one place a BluetoothDevice exists
   physics/            cycling power/speed model, Martin et al. 1998 (#88), and
                       the synthetic rider that composes #92's rule with it
@@ -1234,6 +1250,31 @@ rename them to the familiar ones**
 in code, in a UI label, in a metric key or in a column header. The *formulae* are unaffected — they
 are published (Allen & Coggan, 2006) and a trademark protects a name, not arithmetic.
 
+### A workout file format is an ADR 0009 question, not a parser to write
+
+[#14](https://github.com/openzigs/onyourleft/issues/14)'s scope section says *"the ZWO format is the
+de facto standard … Adopting it buys an enormous free library"*. **That predates
+[ADR 0009](docs/adr/0009-clean-room-posture.md) and is not settled.** Three things collide, and any
+one of them is enough to stop:
+
+- **L1** greps every diff for `zwift`, case-insensitively, and permits a hit only in prose or in an
+  exact R3 template instance. A format named after a product is at best an argument about whether a
+  file extension is a mark.
+- **R1** permits taking facts and forbids taking *somebody's compilation* of them as a table — and
+  **every open implementation of that format is GPL-2.0, GPL-3.0 or AGPL-3.0**, which §3 makes fatal
+  anywhere under `packages/`. Reading one to learn the element names is the exact act R1 draws a
+  line through.
+- **ADR 0006 R2's provenance requirement has no answer here.** The FIT decoder records where every
+  profile number came from. There is no published specification for the format in question to record
+  against, so an implementation would be written from memory — and #14's own criterion, that *"at
+  least 50 workouts from the existing open ZWO corpus parse"*, needs a corpus this project has no
+  lawful, offline route to.
+
+**So `packages/domain/src/workout/` defines the model and no format.** Every format that ever lands
+maps onto it, and the decision — adopt one under a written ADR, or specify this project's own — is
+the owner's. It is not blocked work: the model, the timeline and the ERG rule are the part that does
+not depend on the answer, and they are the part #14 says carries the risk.
+
 ### Reading prior art is fine. Copying from it binds this project's licence.
 
 **Every mature prior-art project in this space except `incyclist/devices` (MIT) is GPL-2.0, GPL-3.0
@@ -1495,6 +1536,9 @@ top of an issue **supersedes its body**.
 | Why an exported route carries an OSM notice even when nothing establishes it came from OSM | `packages/fit/src/route/course.ts` §Attribution, [ADR 0012](docs/adr/0012-data-licence.md) |
 | Why a long route is warned about rather than simplified, and where the warning belongs | `packages/fit/src/route/course.ts`, `apps/web/src/routes/export.ts` §`LONG_ROUTE_SAMPLES` |
 | Why a TCX course carries a time of zero rather than an estimate | `packages/fit/src/route/tcx-course.ts` |
+| Why a saved workout stores its blocks where a route stores its computed profile | `packages/store/src/records.ts` §`WorkoutRecord`, [`packages/store/README.md`](packages/store/README.md) §"Workouts" |
+| Why the store re-validates a workout on the way out, and what a decoder that trusted the row would hand a trainer | `packages/store/src/persisted.ts` §`fromPersistedWorkout` |
+| Why a target is range-checked twice, and why the brand is not the check | `packages/domain/src/workout/workout.ts` §`assertShare` |
 | Why the gradient driver is in `packages/domain` and not beside the control point | `packages/domain/src/trainer/simulation.ts`, [`packages/sensors/README.md`](packages/sensors/README.md) §"Driving simulation mode from a route" |
 | Why a stalled trainer drops gradients instead of queueing them, and why the newest survives | `packages/sensors/protocol/src/simulation-writer.ts` |
 | Which control point a trainer with two of them is driven through, and what happens when only the proprietary one is there | `packages/sensors/protocol/src/trainer-control-choice.ts` |
@@ -1504,5 +1548,24 @@ top of an issue **supersedes its body**.
 | Why the bot's power is a fraction of a flat figure and never a recorded one, and what enforces that | `packages/domain/src/pacer/pacing.ts` §`SyntheticInput`, [ADR 0007](docs/adr/0007-patent-posture.md) D4 |
 | What makes "the bot and the rider go through the same physics" a fact about the call graph rather than a comment | `packages/physics/src/pacer.ts` §`advanceBot` |
 | Why a bot a full lap ahead reads as a lap ahead rather than as level with you | `packages/domain/src/pacer/gap.ts` |
+| Why a workout target is branded, and which two numbers it stops being confused | `packages/domain/src/workout/workout.ts` §`ThresholdShare` |
+| Why a workout is expanded into a timeline instead of walked with a cursor | `packages/domain/src/workout/timeline.ts` |
+| How the ERG spiral of death is told apart from a rider grinding on purpose | `packages/domain/src/workout/erg-safety.ts` §`assessErgCadence` |
+| Why the workout clock keeps running while a target is unacknowledged, and what waits instead | `packages/domain/src/workout/player.ts` §"An interval has not begun until its target is acknowledged" |
+| Why a quantised acknowledgement is not a change, and the busy loop that follows from reading it as one | `packages/domain/src/workout/player.ts` §`acknowledge` |
+| Which single place rebases the workout offset after a pause, and why the other two do not | `packages/domain/src/workout/player.ts` §`resume` |
+| Why a workout player cannot send an FTMS Reset even by mistake | `packages/sensors/protocol/src/erg-writer.ts` §`ErgSink` |
+| Why a workout release is `stop()` and never a target of zero, and which object may reach for it | `apps/web/src/workout/session.ts` §`release`, §`WorkoutTrainer` |
+| Why a lost trainer link does not close the ERG writer, and what closing it cost | `apps/web/src/workout/session.ts` §`linkLost` |
+| Why the session assumes the trainer is already holding something when a workout starts | `apps/web/src/workout/session.ts` §`released` |
+| What the #44 simulator proves about the control loop that neither package can prove alone | `apps/web/src/workout/session.test.ts` |
+| Why the workout's clock is the ride's clock, and what a second one would drift into | `apps/web/src/ride/controller.ts` §`rideSeconds` |
+| Why a workout is anchored on `now()` rather than on the last tick | `apps/web/src/ride/controller.ts` §`startWorkout` |
+| Why the ERG trend is judged at the caller's clock and not at elapsed time | `packages/domain/src/workout/player.ts` §"Judged at `now`" |
+| Why the ride screen will not start a workout before the trainer grants control | `apps/web/src/ride/WorkoutPanel.tsx`, `apps/web/src/ride/controller.ts` §`startWorkout` |
+| Where a typed percentage becomes a share of threshold, and why that has exactly one home | `apps/web/src/workouts/build.ts` §`percentToShare` |
+| Why a workout row quotes no watts, no load and no score | `apps/web/src/workouts/library.ts` §`WorkoutRow` |
+| Why a workout's shape is a sentence rather than a chart | `apps/web/src/workouts/library.ts` §`WorkoutRow.shape` |
+| Why this project has no workout file format yet, and what would settle it | §6 "A workout file format is an ADR 0009 question", [#14](https://github.com/openzigs/onyourleft/issues/14) |
 
 <!-- Last updated: 2026-09-06 by delivery:code-issue resolving #51 (the manual file import and export UI) -->

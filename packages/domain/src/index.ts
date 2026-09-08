@@ -525,3 +525,11 @@ export {
   sampleHeading,
   startBearing,
 } from './segment/segment';
+
+// --- Structured workouts (#14) ----------------------------------------------
+//
+// The model, the timeline a player looks up, and the ERG spiral-of-death rule.
+// ⚠️ No file format: #14's scope proposes ZWO and that is an ADR 0009 question
+// rather than a parser to write — see `src/workout/workout.ts`.
+
+export * from './workout';

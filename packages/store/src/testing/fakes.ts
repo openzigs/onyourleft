@@ -27,6 +27,7 @@
  * | `appendingEffortStoreFactory` | *wrong layer* — the write inserted where it should have replaced | one match is right; the second one doubles every board |
  * | `openedLoopStoreFactory` | *wrong layer* — one boolean lost in a mapping on the way in | the route comes back with every metre and every gradient correct, and **no longer wraps** |
  * | `publishedRouteStoreFactory` | *wrong layer* — a default applied on the way in, in the unsafe direction | the route comes back complete and correct, and **shared with everybody** |
+ * | `truncatedWorkoutStoreFactory` | *wrong layer* — a layer above dropped the last block on its way in | the workout comes back with the right name and a valid shape, **ending early** |
  *
  * The second and third are the ones a naive harness misses. Both write to the
  * **real** IndexedDB, inside a **real** transaction that **really commits**, and
@@ -46,12 +47,13 @@ import {
   type ActivityId,
   type AthleteId,
   type RouteId,
+  type WorkoutId,
   type SegmentId,
 } from '../ids';
 import type { DeviceKeyRecord, StoredActivityRecord } from '../identity';
 import { SCHEMA_VERSIONS, TABLE } from '../schema';
 import type { NewRecordingChunk, NewRecordingSession } from '../recording';
-import type { RouteRecord, SegmentEffortRecord, SegmentRecord } from '../records';
+import type { RouteRecord, SegmentEffortRecord, SegmentRecord, WorkoutRecord } from '../records';
 import type { PersistedStreamBlob } from '../stream-persisted';
 import {
   STREAM_CHANNELS,
@@ -131,6 +133,10 @@ function bindStore(real: ActivityStore): PersistentStore {
     getRoute: async (owner, id) => real.getRoute(owner, id),
     listRoutes: async (owner, limit) => real.listRoutes(owner, limit),
     deleteRoute: async (owner, id) => real.deleteRoute(owner, id),
+    putWorkout: async (record) => real.putWorkout(record),
+    getWorkout: async (owner, id) => real.getWorkout(owner, id),
+    listWorkouts: async (owner, limit) => real.listWorkouts(owner, limit),
+    deleteWorkout: async (owner, id) => real.deleteWorkout(owner, id),
   };
 }
 
@@ -209,6 +215,10 @@ export function memoryWriteStoreFactory(): StoreFactory {
         },
         putSegment: (record: SegmentRecord) => {
           memory.set(`segment:${record.id}`, record);
+          return Promise.resolve(record.id);
+        },
+        putWorkout: (record: WorkoutRecord) => {
+          memory.set(`workout:${record.id}`, record);
           return Promise.resolve(record.id);
         },
         putRoute: (record: RouteRecord) => {
@@ -577,6 +587,59 @@ export function publishedRouteStoreFactory(): StoreFactory {
         ...bindStore(real),
         putRoute: async (record: RouteRecord): Promise<RouteId> =>
           real.putRoute({ ...record, visibility: 'public' }),
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository that **drops a workout's last block on its way in**.
+ *
+ * The shape this one models is the same as `thinnedGeometryStoreFactory`'s and
+ * the reason it is a separate fake is that nothing about a workout is
+ * geometry: what is lost is a *block*, and a workout is short enough that
+ * losing one is not a rounding error. It survives every check a careless round
+ * trip makes. The record decodes — a workout missing its last block is still a
+ * valid workout, so `validateWorkout` passes it. The name, the id, the owner
+ * and the timestamps are all correct. The list renders. A rider opens their
+ * hour-long session and it is fifty-three minutes long.
+ *
+ * ⚠️ **The failure it stands in for is the reason `PersistedWorkout` stores
+ * blocks rather than a timeline.** A store that persisted an expansion would
+ * have exactly this bug available to it in a form nothing could see: a
+ * timeline that lost a segment is still a timeline, and there is no second
+ * copy to disagree with. Blocks in the row and expansion on the way out means
+ * the round trip compares what was written.
+ *
+ * `assertWorkoutRoundTrip` compares the block count on its own line for that
+ * reason, and deleting that line turns a test red rather than leaving the
+ * suite green.
+ */
+export function truncatedWorkoutStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        putWorkout: async (record: WorkoutRecord): Promise<WorkoutId> =>
+          real.putWorkout({
+            ...record,
+            workout: {
+              ...record.workout,
+              // `slice(0, -1)` on a one-block workout would leave an empty one,
+              // which `validateWorkout` refuses — so the fake would be caught by
+              // the decoder rather than by the comparison, which is a weaker
+              // proof. Keeping at least one block means it is the assertion that
+              // has to notice.
+              blocks:
+                record.workout.blocks.length > 1
+                  ? record.workout.blocks.slice(0, -1)
+                  : record.workout.blocks,
+            },
+          }),
       };
     },
     destroy: async (name) => {

@@ -36,12 +36,14 @@ import {
   geographicPosition,
   altitudeMetres,
   UnitError,
+  validateWorkout,
+  WorkoutError,
 } from '@onyourleft/domain';
 
-import type { GeographicPosition, RouteProfile } from '@onyourleft/domain';
+import type { GeographicPosition, RouteProfile, Workout, WorkoutBlock } from '@onyourleft/domain';
 
 import { StoreDecodeError } from './errors';
-import { activityId, athleteId, lapId, privacyZoneId, routeId, segmentId } from './ids';
+import { activityId, athleteId, lapId, privacyZoneId, routeId, segmentId, workoutId } from './ids';
 import type {
   ActivityRecord,
   AthleteRecord,
@@ -51,6 +53,7 @@ import type {
   SegmentEndpointRecord,
   SegmentRecord,
   RouteRecord,
+  WorkoutRecord,
 } from './records';
 import { DEFAULT_VISIBILITY, parseVisibility } from './visibility';
 
@@ -148,6 +151,33 @@ export interface PersistedRoute {
   elevations: number[];
   grades: number[];
   visibility: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * A saved workout as it sits on disk.
+ *
+ * ⚠️ **`blocks` is stored as structured-clone data rather than flattened into
+ * parallel arrays**, which is the opposite call from `PersistedRoute` two
+ * declarations up, and the reason is the shape rather than a preference. A
+ * route's profile is four arrays of the same length; a workout is a short
+ * heterogeneous list where an interval block carries five fields a steady one
+ * does not. Flattening that means a column per field of every block kind, all
+ * of them optional, and a reader that has to guess which are meaningful — which
+ * is exactly the "one store with every column optional" mistake `STORES_V7`
+ * warns about between segments and routes.
+ *
+ * ⚠️ **Typed `unknown[]`, deliberately.** IndexedDB will hand back whatever was
+ * written, including a row a different build wrote or a hand-edited one, and
+ * declaring it `WorkoutBlock[]` here would be this package asserting a shape it
+ * has not checked. {@link fromPersistedWorkout} is where the check happens.
+ */
+export interface PersistedWorkout {
+  id: string;
+  createdBy: string;
+  name: string;
+  blocks: unknown[];
   createdAt: number;
   updatedAt: number;
 }
@@ -732,6 +762,77 @@ function endpointOf(
 }
 
 // --- Routes (#89) ------------------------------------------------------------
+
+export function toPersistedWorkout(record: WorkoutRecord): PersistedWorkout {
+  return {
+    id: record.id,
+    createdBy: record.createdBy,
+    name: record.name,
+    // Spread each block so the row holds plain data rather than whatever object
+    // the caller happened to build. A branded number is a number at runtime, so
+    // nothing is lost — and structured clone would reject anything that was not
+    // plain anyway, at write time, where the failure is unattributable.
+    blocks: record.workout.blocks.map((block) => ({ ...block })),
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  };
+}
+
+/**
+ * @throws {StoreDecodeError} naming the field, for anything on disk this
+ * package cannot turn back into a workout.
+ *
+ * ⚠️ **The decoded workout goes back through `validateWorkout`, and that is the
+ * load-bearing line in this function.** Every other decoder in this file
+ * reconstructs a record that will be *displayed*; this one reconstructs the
+ * blocks that become `setTargetPower` writes against a machine applying
+ * resistance to somebody pedalling. A row with `target: 88` where `0.88` was
+ * meant is a plausible-looking number that asks a trainer for 88 times
+ * threshold, and only the constructor's own guard tells the two apart. A
+ * decoder that trusted the row would move that guard from "always" to "only on
+ * the way in", which is the one direction it must not move.
+ *
+ * A `WorkoutError` from that validation is rewritten as a `StoreDecodeError`,
+ * because from a caller's point of view this is a bad row and not a bad
+ * argument — and its message is carried through, since a workout's numbers are
+ * durations and fractions rather than coordinates, so ADR 0004 decision D does
+ * not bite.
+ */
+export function fromPersistedWorkout(row: PersistedWorkout): WorkoutRecord {
+  const blocks = row.blocks;
+  if (!Array.isArray(blocks)) {
+    throw new StoreDecodeError('workout.blocks: expected an array');
+  }
+  const name = decodedString('workout.name', row.name);
+  const workout: Workout = { name, blocks: blocks as WorkoutBlock[] };
+  try {
+    validateWorkout(workout);
+  } catch (error) {
+    if (error instanceof WorkoutError) {
+      throw new StoreDecodeError(`workout.blocks: ${error.message}`);
+    }
+    throw error;
+  }
+
+  return {
+    id: workoutId(decodedString('workout.id', row.id)),
+    createdBy: athleteId(decodedString('workout.createdBy', row.createdBy)),
+    name,
+    workout,
+    createdAt: decoded(
+      'workout.createdAt',
+      decodedNumber('workout.createdAt', row.createdAt),
+      unixSeconds,
+    ),
+    // Absent on a row written before the field existed, exactly as a route's
+    // is: a workout nobody has edited was last written when it was created.
+    updatedAt: decoded(
+      'workout.updatedAt',
+      decodedNumber('workout.updatedAt', row.updatedAt ?? row.createdAt),
+      unixSeconds,
+    ),
+  };
+}
 
 export function toPersistedRoute(record: RouteRecord): PersistedRoute {
   const { profile } = record;

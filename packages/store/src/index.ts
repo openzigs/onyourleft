@@ -40,6 +40,7 @@ export type {
   RouteRecord,
   SegmentEffortRecord,
   SegmentRecord,
+  WorkoutRecord,
 } from './records';
 export { DEFAULT_PRIVACY_ZONE_RADIUS_METRES } from './records';
 
@@ -55,6 +56,7 @@ export type {
   RouteId,
   SegmentEffortId,
   SegmentId,
+  WorkoutId,
 } from './ids';
 export {
   activityId,
@@ -65,6 +67,7 @@ export {
   routeId,
   segmentEffortId,
   segmentId,
+  workoutId,
 } from './ids';
 
 // --- Visibility (ADR 0004 decision A) ---------------------------------------

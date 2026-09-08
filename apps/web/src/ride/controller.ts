@@ -47,7 +47,16 @@
  * down deterministically.
  */
 
-import { seconds, unixSeconds, type UnixSeconds, type Watts } from '@onyourleft/domain';
+import {
+  expandWorkout,
+  seconds,
+  unixSeconds,
+  type PlayerStatus,
+  type Seconds,
+  type UnixSeconds,
+  type Watts,
+  type WorkoutBlock,
+} from '@onyourleft/domain';
 import {
   isSensorError,
   type ConnectionState,
@@ -65,7 +74,7 @@ import type {
   TargetPower,
   TrainerControl,
 } from '@onyourleft/sensors/protocol';
-import type { AthleteId, RecordingSessionId } from '@onyourleft/store';
+import type { AthleteId, RecordingSessionId, WorkoutRecord } from '@onyourleft/store';
 
 import {
   createRecorder,
@@ -82,6 +91,8 @@ import {
   type RideMetricId,
 } from './metrics';
 import type { OpenTrainer, TrainerConnection } from './trainer';
+import { createWorkoutSession, type WorkoutSession } from '../workout/session';
+import { blockText } from '../workouts/library';
 
 /** Which channel each metric on the screen reads from. */
 const METRIC_CAPABILITY: Readonly<Record<RideMetricId, MeasurementCapability>> = {
@@ -169,6 +180,26 @@ export interface RideMetric {
 
 export type RidePhase = 'idle' | 'recording' | 'paused' | 'stopped';
 
+/**
+ * A structured workout being ridden, as the screen reads it (#14).
+ *
+ * `undefined` on {@link RideSnapshot} when no workout is loaded, which is the
+ * ordinary case: a ride is a ride.
+ */
+export interface RideWorkoutSnapshot {
+  readonly name: string;
+  readonly status: PlayerStatus;
+  /** How far into the workout, excluding paused time. */
+  readonly elapsedSeconds: number;
+  readonly totalSeconds: number;
+  /** What the trainer last confirmed it holds, after quantisation. */
+  readonly holdingWatts: number | undefined;
+  /** The block being ridden, in the words `library.ts` writes. */
+  readonly nowRiding: string | undefined;
+  /** Why the last workout write could not be made, if any. */
+  readonly fault: string | undefined;
+}
+
 /** Everything the view renders, and nothing it has to derive. */
 export interface RideSnapshot {
   readonly phase: RidePhase;
@@ -180,6 +211,8 @@ export interface RideSnapshot {
   readonly metrics: readonly RideMetric[];
   readonly sensors: readonly PairedSensor[];
   readonly trainer: TrainerSnapshot;
+  /** The workout being ridden, or `undefined` — see {@link RideWorkoutSnapshot}. */
+  readonly workout: RideWorkoutSnapshot | undefined;
   readonly storage: RecorderStorageState;
   /** The last pairing attempt's failure, in words a rider can act on. */
   readonly pairingError: string | undefined;
@@ -225,6 +258,21 @@ export interface RideController {
   /** Second press. Stops the recording and checkpoints it. */
   confirmStop(): Promise<void>;
 
+  /**
+   * Ride a saved workout against the paired trainer (#14).
+   *
+   * ⚠️ **Requires control to have been granted already.** `requestControl` is
+   * a thing the rider does, and a workout that took control on its own would
+   * be the screen deciding to apply resistance to somebody — which the note at
+   * the top of this file rules out for the manual setpoint and rules out here
+   * for the same reason.
+   *
+   * @returns whether the workout started. `false` when there is no controllable
+   * trainer or control has not been granted; the screen says which.
+   */
+  startWorkout(workout: WorkoutRecord, thresholdPower: Watts): boolean;
+  /** End the workout and release the trainer. The recording is untouched. */
+  endWorkout(): void;
   requestTrainerControl(): Promise<void>;
   setTargetPower(target: Watts): Promise<void>;
   /** End ERG. The deliberate way to stop the trainer holding a target. */
@@ -266,6 +314,7 @@ export function createRideController(options: RideControllerOptions): RideContro
   let pairingError: string | undefined;
   let requested: Watts | undefined;
   let controlLost: ControlLossReason | undefined;
+  let workout: WorkoutInProgress | undefined;
   let refusal: string | undefined;
   let clock: UnixSeconds = now();
   let snapshot: RideSnapshot | undefined;
@@ -327,6 +376,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         ),
         state: entry.state,
       })),
+      workout: workoutSnapshot(),
       trainer: {
         paired: [...sensors.values()].some((entry) => entry.role === 'trainer'),
         controllable: connection !== undefined,
@@ -389,6 +439,17 @@ export function createRideController(options: RideControllerOptions): RideContro
     // a screen that showed a reading the recorder never saw would be the
     // "wrong layer" defect in its most visible form.
     recorder?.observe(measurement);
+    // And into the workout, which needs cadence and nothing else: the ERG
+    // spiral rule is a trend over cadence while a target is held. Fed from the
+    // same call as the recorder for that call's reason — a workout that eased
+    // a target off a reading the recorder never saw would be deciding from a
+    // stream nothing else can audit.
+    if (measurement.capability === 'cadence') {
+      workout?.session.observeCadence({
+        at: seconds(measurement.at),
+        cadence: measurement.cadence,
+      });
+    }
     // The reading is what wakes an automatic pause, so the phase moves with it
     // rather than on the next tick: for that second the screen would otherwise
     // offer a Resume the controller refuses.
@@ -459,6 +520,14 @@ export function createRideController(options: RideControllerOptions): RideContro
         entry.release.push(
           connection.control.onControlLost((reason) => {
             controlLost = reason;
+            // ⚠️ The workout pauses and keeps everything, which is #14's
+            // "a disconnect preserves rather than loses the session". It is
+            // NOT ended: control lost is a thing a rider takes back, and a
+            // workout that ended here would make a momentary dropout into a
+            // session they have to restart from the beginning.
+            // `now()` for `startWorkout`'s reason: a control-loss indication
+            // arrives between ticks, so the cached clock is behind it.
+            workout?.session.linkLost(rideSeconds(now()));
             // The requested setpoint is dropped rather than left pending: the
             // procedure it belonged to has been rejected, and a screen still
             // saying "requested 250 W" would be waiting for an answer that
@@ -486,6 +555,79 @@ export function createRideController(options: RideControllerOptions): RideContro
       throw new Error('no recording is in progress');
     }
     return recorder;
+  };
+
+  // --- The workout (#14) ----------------------------------------------------
+
+  interface WorkoutInProgress {
+    readonly record: WorkoutRecord;
+    readonly session: WorkoutSession;
+  }
+
+  /**
+   * ⚠️ **The workout's clock is the ride's clock**, and that is the join this
+   * file exists to make.
+   *
+   * `createWorkoutPlayer` anchors on whatever instant `start` is given and
+   * measures everything from it, so handing it the ride's own `UnixSeconds`
+   * makes the workout's elapsed time and the ride's advance from one source.
+   * A second clock — a `setInterval` of the workout's own, say — would drift
+   * against the one stamping samples, and an hour in the two would disagree
+   * about which interval a sample belongs to.
+   *
+   * The brand is re-entered rather than cast: `Seconds` and `UnixSeconds` are
+   * deliberately different types, and what is being said here is "treat this
+   * instant as a monotonic reading", which is true and is worth writing down.
+   */
+  const rideSeconds = (at: UnixSeconds): Seconds => seconds(at);
+
+  /**
+   * What a segment points at when the record and the timeline disagree.
+   *
+   * Unreachable: `expandWorkout` numbers every segment from the block it came
+   * from, so the index is always in range. It exists because reading it as
+   * `undefined` and rendering nothing would hide a real inconsistency behind an
+   * empty line, and a free ride is the block that claims the least.
+   */
+  const EMPTY_BLOCK: WorkoutBlock = { kind: 'free-ride', seconds: seconds(1) };
+
+  /** What the screen reads about the workout, or `undefined` when none is loaded. */
+  const workoutSnapshot = (): RideWorkoutSnapshot | undefined => {
+    if (workout === undefined) {
+      return undefined;
+    }
+    const state = workout.session.state();
+    const segment = state.player.segment;
+    return {
+      name: workout.record.name,
+      status: state.player.status,
+      elapsedSeconds: state.player.elapsed,
+      totalSeconds: expandWorkout(workout.record.workout).totalSeconds,
+      holdingWatts: state.holding,
+      // The block a rider is in, phrased by the module that phrases them
+      // everywhere else — a second wording here would be the ride screen and
+      // the library disagreeing about the same block.
+      nowRiding:
+        segment === undefined
+          ? undefined
+          : blockText(workout.record.workout.blocks[segment.block] ?? EMPTY_BLOCK),
+      fault: state.lastFault,
+    };
+  };
+
+  const workoutTick = (at: UnixSeconds): void => {
+    if (workout === undefined) {
+      return;
+    }
+    workout.session.tick(rideSeconds(at));
+  };
+
+  const endWorkoutSession = (): void => {
+    if (workout === undefined) {
+      return;
+    }
+    workout.session.stop();
+    workout = undefined;
   };
 
   const controller: RideController = {
@@ -599,11 +741,56 @@ export function createRideController(options: RideControllerOptions): RideContro
       stopArmed = false;
       phase = 'stopped';
       const at = now();
-      // The trainer first. Ending the recording while the machine is still
-      // holding an ERG target leaves a rider pedalling against a resistance
-      // that nothing on screen is showing any more.
+      // The workout first, then the trainer, then the recording.
+      //
+      // The trainer before the recording IS observable and is asserted:
+      // ending a recording while the machine still holds an ERG target leaves
+      // a rider pedalling against a resistance nothing on screen is showing
+      // any more.
+      //
+      // ⚠️ The workout before the trainer is **not** observable, and this note
+      // is here rather than a contrived test. Both orders end with the machine
+      // released — `endWorkoutSession` releases it too — and nothing ticks
+      // during the `await`, so no workout write can land in between. It is
+      // written this way because the invariant is "no session is running when
+      // the trainer is released", and the reverse order holds only as long as
+      // that await stays uninterrupted. Mutation-tested: swapping the two
+      // leaves the suite green.
+      endWorkoutSession();
       await stopTrainer();
       await recording().stop(at);
+      changed();
+    },
+
+    startWorkout(record: WorkoutRecord, thresholdPower: Watts): boolean {
+      const client = control();
+      // ⚠️ Both halves. A trainer that is paired but has not granted control
+      // answers every setpoint `0x05 Control Not Permitted`, so starting here
+      // would produce a workout that runs its clock and controls nothing —
+      // which is the silent failure #14's revision block names.
+      if (client === undefined || !client.hasControl()) {
+        return false;
+      }
+      endWorkoutSession();
+      const session = createWorkoutSession({
+        timeline: expandWorkout(record.workout),
+        thresholdPower,
+        control: client,
+        onChange: changed,
+      });
+      workout = { record, session };
+      // ⚠️ `now()`, NOT the cached `clock`. `clock` only moves on a tick, and
+      // pairing and requesting control both advance the real clock without one
+      // — so anchoring there started every workout already seconds old, and the
+      // rider was that far into their first interval before they began. Found
+      // by the test that asserts the workout clock is the ride clock.
+      session.start(rideSeconds(now()));
+      changed();
+      return true;
+    },
+
+    endWorkout(): void {
+      endWorkoutSession();
       changed();
     },
 
@@ -666,6 +853,20 @@ export function createRideController(options: RideControllerOptions): RideContro
         // saying "recording". @see syncPhaseWithEngine for why this is not a
         // one-way copy.
         syncPhaseWithEngine();
+      }
+      // ⚠️ After `syncPhaseWithEngine`, so the workout sees the phase the
+      // recorder has just settled on rather than the one before it. A rider
+      // who stopped pedalling long enough to auto-pause the recording has
+      // stopped riding the workout too, and a workout whose clock ran through
+      // that break would put them a minute further into an interval than they
+      // are.
+      if (phase === 'paused') {
+        workout?.session.pause(rideSeconds(at));
+      } else if (phase === 'recording') {
+        if (workout?.session.state().player.status === 'paused') {
+          workout.session.resume(rideSeconds(at));
+        }
+        workoutTick(at);
       }
       // Unconditionally: staleness is a function of the clock, so a channel
       // goes quiet on the tick whether or not anything is recording.

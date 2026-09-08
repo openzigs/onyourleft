@@ -30,7 +30,13 @@
  * recorder consumes. A client that reported an applied setpoint while the
  * machine held something else fails here and cannot fail against a fake.
  *
- * **Not exported from `index.ts`.** A test fixture, like `testing.ts`.
+ * **Not exported from `index.ts`.** A test fixture — but it IS reachable, as
+ * `@onyourleft/sensors/protocol/testing`, the way `web-bluetooth/testing`
+ * already is. #14's control loop is composed in `apps/web` (the player may not
+ * name a characteristic, the writer may not name a workout), so the one place
+ * the loop can be driven against a trainer with its own state is a test over
+ * there. A second bridge written in `apps/web` would be exactly the second
+ * encoder of one wire format this module exists to prevent.
  */
 
 import {

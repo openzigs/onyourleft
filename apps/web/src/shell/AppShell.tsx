@@ -47,6 +47,7 @@ import { NotFoundView } from '../views/NotFoundView';
 import { RideView } from '../views/RideView';
 import { SegmentDetailView } from '../views/SegmentDetailView';
 import { RoutesView } from '../views/RoutesView';
+import { WorkoutsView } from '../views/WorkoutsView';
 import { SegmentsView } from '../views/SegmentsView';
 import { RideSession } from '../ride/RideSession';
 import type { RideController } from '../ride/controller';
@@ -61,6 +62,7 @@ import type { TransferPort } from '../transfer/store-port';
 import type { EffortPort } from '../efforts/store-port';
 import type { SegmentPort } from '../segments/store-port';
 import type { RoutePort } from '../routes/store-port';
+import type { WorkoutPort } from '../workouts/store-port';
 
 import { hrefFor, ROUTES, type RouteMatch } from './routes';
 import { useRoute } from './useRoute';
@@ -149,6 +151,8 @@ export interface AppShellProps {
   readonly segments?: SegmentPort | undefined;
   /** Saved routes (#73), or `undefined` where this browser has no local store. */
   readonly routes?: RoutePort | undefined;
+  /** Saved workouts (#14), or `undefined` where this browser has no local store. */
+  readonly workouts?: WorkoutPort | undefined;
   /**
    * The effort-history screen's reads (#67).
    *
@@ -174,7 +178,13 @@ export interface AppShellProps {
 function viewFor(match: RouteMatch, props: AppShellProps): JSX.Element {
   switch (match.route.id) {
     case 'ride':
-      return <RideView controller={props.rideController} />;
+      return (
+        <RideView
+          controller={props.rideController}
+          workouts={props.workouts}
+          analysis={props.analysis}
+        />
+      );
     case 'activities':
       return <ActivitiesView library={props.library} />;
     case 'activity-detail':
@@ -192,6 +202,8 @@ function viewFor(match: RouteMatch, props: AppShellProps): JSX.Element {
       return <SegmentsView port={props.segments} />;
     case 'routes':
       return <RoutesView port={props.routes} save={props.transfer?.save} />;
+    case 'workouts':
+      return <WorkoutsView port={props.workouts} />;
     case 'segment-detail':
       return <SegmentDetailView port={props.efforts} segment={match.parameter} />;
     case 'devices':
