@@ -117,8 +117,8 @@ scripts/              dependency-free repository checks; run on a bare clone
   workflows/rules.yml runs those checks on every pull request — see §4c
 ```
 
-**`apps/web`, `packages/domain`, `packages/sensors`, `packages/fit`, `packages/store` and
-`packages/physics` exist.**
+**`apps/web`, `apps/mobile`, `packages/domain`, `packages/sensors`, `packages/fit`,
+`packages/store` and `packages/physics` exist.**
 The first two were created by [#23](https://github.com/openzigs/onyourleft/issues/23) along with the
 workspace, the toolchain and the lockfile, `packages/sensors` by
 [#39](https://github.com/openzigs/onyourleft/issues/39), `packages/store` by
@@ -128,9 +128,12 @@ workspace, the toolchain and the lockfile, `packages/sensors` by
 between #65 and #66 and does not any more** — it was the #65 spike, and #66 hardened its algorithm
 into `packages/domain/src/segment/` and deleted it, which is the fate
 [`docs/spikes/0001-segment-matching.md`](docs/spikes/0001-segment-matching.md) gave it. A reviewer
-who remembers this paragraph naming it is reading the old one. **`apps/mobile` does
-not** — it is created by the issue that owns its content (§4b), from `packages/domain` as the
-template. The layout is fixed here
+who remembers this paragraph naming it is reading the old one. ⚠️ **`apps/mobile` now DOES
+exist**, and this sentence used to say it did not:
+[#87](https://github.com/openzigs/onyourleft/issues/87) created it ahead of
+[#85](https://github.com/openzigs/onyourleft/issues/85), because #87's criteria are about the
+Android shell and there was nothing to put them in. §4b is where what it has and has **not** proved
+is recorded. The layout is fixed here
 because ~30 sub-issues reference it by name, and the workspace globs and lint boundaries already
 cover the paths, so a package arrives inside the rules rather than beside them.
 
