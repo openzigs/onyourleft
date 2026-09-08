@@ -84,6 +84,8 @@ apps/                 AGPL-3.0-or-later, without exception
                         origin proof, the GeoJSON conversion, the once-per-app
                         protocol registration, and the MapLibre adapter
     src/recording/      the composition root: engine + checkpoints + recovery (#46)
+    src/routes/         saved routes (#73): the store port, the edit decision and
+                        its concurrency token, and the shared-route payload
     src/ride/           the live ride screen's state machine and its panels (#49)
     src/shell/          the hash route table, the router hook and AppShell (#48)
     src/support/        browser-capability detection and its notice (#48)
@@ -98,6 +100,8 @@ packages/             Apache-2.0, without exception
     route/              the route profile (#89): elevation and gradient as a
                         function of distance, the three windows it is built
                         from, and the loop wrap
+    trainer/            the gradient setpoint driver (#90): the grade at the
+                        rider's position, and whether it is worth a write
   fit/                FIT / GPX / TCX codec
     src/route/          route import (#89): the #32 decoder composed with the
                         profile, and the refusals a rider can act on
@@ -669,6 +673,35 @@ two-sample features along with them.
 between two flat stretches reads a few percent. That is the deliberate trade and the alternative is
 worse: a shorter baseline makes a 2 m elevation error worth 10 % of gradient, and #90 writes this
 number to a device that applies physical resistance to a person who is pedalling.
+
+### The route profile's first consumers, and how the trainer half is split
+
+[#89](https://github.com/openzigs/onyourleft/issues/89) landed the profile with no consumer, exactly
+as `packages/physics` did. It has two now, and they are split across packages for the reason the
+recording engine is:
+
+- **`packages/domain/src/trainer/`** ([#90](https://github.com/openzigs/onyourleft/issues/90))
+  decides *what* gradient and *when* — the grade at the rider's position, the 1 Hz rate limit, the
+  deadband. Written on the recording-engine pattern: **time arrives as a parameter**, nothing reads
+  a clock, which is what makes *"at a +6 % section the trainer is told +6 %"* an assertion rather
+  than a stopwatch exercise.
+- **`packages/sensors/protocol/`** decides how to get it onto a control point that runs one
+  procedure at a time. It **coalesces** rather than throttling: at most one write in flight, at most
+  one waiting, and the waiting slot holds the *newest* offer. Refusing new offers would also bound
+  the queue and would leave the trainer simulating the oldest hill in the backlog until it drained.
+- **`apps/web/src/routes/`** ([#73](https://github.com/openzigs/onyourleft/issues/73)) is the other
+  consumer: a rider imports a GPX route, names it and saves it, and the profile is what gets stored.
+
+⚠️ **A route is not a ride, and the sharing rules differ because of it.** ADR 0004's privacy zones
+trim a ride's track and leave a shareable ride. A route's endpoints are usually the athlete's front
+door and *are the point of the route*, so `apps/web/src/routes/share.ts` **refuses** to publish one
+whose start or end a zone would remove rather than publishing a truncated line that begins somewhere
+the rider never starts. There is no "hide the first 200 m" that leaves a usable route.
+
+⚠️ **Editing a route updates in place and is guarded by `RouteRecord.updatedAt`.** With no server
+there is no lock to take, so an editor keeps the `updatedAt` it read and hands it back; a mismatch
+is refused. The comparison is on the value read rather than on which timestamp is newer, because two
+saves inside one second is exactly what a second tab produces.
 
 ## Spike write-ups
 

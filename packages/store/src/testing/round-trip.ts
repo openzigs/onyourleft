@@ -425,10 +425,18 @@ export async function assertRouteRoundTrip(
   }
 
   requireEqual('route.loop', route.profile.loop, read.profile.loop);
+  // Second, and on its own line for the same reason as the first. A route's
+  // endpoints are usually the athlete's front door (#73), so a visibility that
+  // came back wider than it was written is the most consequential thing a
+  // route round trip can fail to notice. `publishedRouteStoreFactory` in
+  // `fakes.ts` is the store that gets everything else right and does exactly
+  // that.
+  requireEqual('route.visibility', route.visibility, read.visibility);
   requireEqual('route.id', route.id, read.id);
   requireEqual('route.createdBy', route.createdBy, read.createdBy);
   requireEqual('route.name', route.name, read.name);
   requireEqual('route.createdAt', route.createdAt, read.createdAt);
+  requireEqual('route.updatedAt', route.updatedAt, read.updatedAt);
   requireEqual('route.resolution', route.profile.resolution, read.profile.resolution);
   requireEqual('route.totalDistance', route.profile.totalDistance, read.profile.totalDistance);
   requireEqual('route.totalAscent', route.profile.totalAscent, read.profile.totalAscent);

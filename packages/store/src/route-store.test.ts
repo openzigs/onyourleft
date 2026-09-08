@@ -23,6 +23,7 @@ import {
   createStoreHarness,
   memoryWriteStoreFactory,
   openedLoopStoreFactory,
+  publishedRouteStoreFactory,
   resetFixtureIds,
   RoundTripFailure,
   rideFor,
@@ -32,7 +33,7 @@ import {
   type StoreHarness,
 } from './testing';
 import { deleteActivityStore, openActivityStore } from './activity-store';
-import { StoreDecodeError, StoreReferentialError } from './errors';
+import { StoreDecodeError, StoreReferentialError, StoreValidationError } from './errors';
 import { routeId } from './ids';
 import { fromPersistedRoute, toPersistedRoute } from './persisted';
 import { SCHEMA_VERSIONS, STORES_V6, TABLE } from './schema';
@@ -114,6 +115,75 @@ describe('the round trip — #89 criterion 6', () => {
     } finally {
       await fake.destroy();
     }
+  });
+});
+
+describe('visibility — #73 criterion 4', () => {
+  it('is private on a route nobody chose a visibility for', async () => {
+    // "Defaults are the setting almost everyone keeps." ADR 0004 decision A,
+    // and it bites harder here than for a ride: a route's start is usually the
+    // athlete's front door and there is no trimming that leaves it a route.
+    await seedAthletes(harness);
+    const read = await assertRouteRoundTrip(harness, routeFor(ATHLETE_A));
+    expect(read.visibility).toBe('private');
+  });
+
+  it('round trips a route the rider deliberately made public', async () => {
+    await seedAthletes(harness);
+    const read = await assertRouteRoundTrip(harness, routeFor(ATHLETE_A, { visibility: 'public' }));
+    expect(read.visibility).toBe('public');
+  });
+
+  it('goes red against a store that publishes a private route', async () => {
+    // The ninth fake. Three characters different, everything else exact.
+    const fake = createStoreHarness({ factory: publishedRouteStoreFactory() });
+    try {
+      await seedAthletes(fake);
+      await expect(assertRouteRoundTrip(fake, routeFor(ATHLETE_A))).rejects.toThrow(
+        RoundTripFailure,
+      );
+    } finally {
+      await fake.destroy();
+    }
+  });
+
+  it('the publishing fake gets everything BUT the visibility right', async () => {
+    const fake = createStoreHarness({ factory: publishedRouteStoreFactory() });
+    try {
+      await seedAthletes(fake);
+      const route = routeFor(ATHLETE_A);
+      const read = await fake.roundTrip(
+        async (store) => store.putRoute(route),
+        async (store) => store.getRoute(ATHLETE_A, route.id),
+      );
+      expect(read?.name).toBe(route.name);
+      expect(read?.profile.loop).toBe(route.profile.loop);
+      expect(read?.profile.positions).toEqual(route.profile.positions);
+      expect(read?.profile.grades).toEqual(route.profile.grades);
+      // And the three characters that are not.
+      expect(read?.visibility).toBe('public');
+    } finally {
+      await fake.destroy();
+    }
+  });
+
+  it('reads a row written before the field existed as private, not as undefined', () => {
+    // #89 shipped the routes store; #73 added this field one release later. A
+    // row written by that build has no concept of sharing, and the only honest
+    // reading of it is the closed one.
+    const row = toPersistedRoute(routeFor(ATHLETE_A, { visibility: 'public' }));
+    const beforeTheField: Record<string, unknown> = { ...row };
+    delete beforeTheField['visibility'];
+    expect(fromPersistedRoute(beforeTheField as unknown as typeof row).visibility).toBe('private');
+  });
+
+  it('still refuses a value that is present and unrecognised', () => {
+    // Absence is a pre-field row. A bad value is corruption, and coercing it
+    // would hide the bad write that produced it.
+    const row = toPersistedRoute(routeFor(ATHLETE_A));
+    expect(() => fromPersistedRoute({ ...row, visibility: 'everyone' })).toThrow(
+      StoreValidationError,
+    );
   });
 });
 
@@ -216,6 +286,29 @@ describe('a row on disk this build cannot read', () => {
       grades: row.grades.slice(0, 1),
     };
     expect(() => fromPersistedRoute(single)).toThrow(/at least two samples/);
+  });
+
+  it('keeps an edited route’s updatedAt distinct from its createdAt', () => {
+    // ⚠️ Added because a mutation came back GREEN: deleting the `updatedAt`
+    // comparison from `assertRouteRoundTrip` left the whole suite passing, so
+    // that line was proving nothing. The fixture's default has the two equal,
+    // which is exactly the value a decoder that dropped the field would produce
+    // — so nothing could tell the difference. This pins an edited route, where
+    // they differ, and the fallback in `fromPersistedRoute` is the code it
+    // guards.
+    const edited = routeFor(ATHLETE_A, { updatedAt: 1_700_000_900 });
+    const back = fromPersistedRoute(toPersistedRoute(edited));
+    expect(back.updatedAt).toBe(edited.updatedAt);
+    expect(back.updatedAt).not.toBe(back.createdAt);
+  });
+
+  it('reads a row written before updatedAt existed as its createdAt', () => {
+    const row = toPersistedRoute(routeFor(ATHLETE_A, { updatedAt: 1_700_000_900 }));
+    const beforeTheField: Record<string, unknown> = { ...row };
+    delete beforeTheField['updatedAt'];
+    const back = fromPersistedRoute(beforeTheField as unknown as typeof row);
+    // A route nobody has edited was last written when it was created.
+    expect(back.updatedAt).toBe(back.createdAt);
   });
 
   it('round trips through the persisted shape and back unchanged', () => {

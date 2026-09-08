@@ -74,5 +74,6 @@ export {
   roundedClaimStoreFactory,
   appendingEffortStoreFactory,
   openedLoopStoreFactory,
+  publishedRouteStoreFactory,
   thinnedGeometryStoreFactory,
 } from './fakes';

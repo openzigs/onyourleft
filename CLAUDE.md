@@ -49,6 +49,9 @@ apps/                 AGPL-3.0-or-later, without exception
                         file that names MapLibre
     src/recording/      the recorder: engine + durable checkpoints + recovery (#46)
     src/ride/           the live ride screen: its state machine, panels and trainer wiring (#49)
+    src/routes/         saved routes (#73) — the store port and its read budget,
+                        the edit decision and its concurrency token, and what a
+                        shared copy of a route contains
     src/segments/       the segment store port and the create form's pure core (#64),
                         and the resumable matcher sweep over the library (#66)
     src/shell/          the hash route table, the router hook and AppShell (#48)
@@ -69,6 +72,9 @@ packages/             Apache-2.0, without exception
     route/              the route profile (#89) — elevation and gradient as a
                         function of distance, the three windows it is built
                         from, and the loop wrap
+    trainer/            the gradient setpoint driver (#90) — where the rider is
+                        on the route, the grade there, and whether it is worth
+                        a write yet
     segment/            the segment model (#64), the matcher (#66) and the effort
                         comparison (#67) — endpoints and bearings, the cell
                         prefilter, discrete Fréchet, the effort with its
@@ -78,7 +84,9 @@ packages/             Apache-2.0, without exception
                         profile, and the refusals a rider can act on
   sensors/            sensor abstraction and BLE transport (#39-#44) — BLE only
     src/                the transport-agnostic abstraction; no platform API at all
-    protocol/           the GATT profile clients (#41, #42) — service UUIDs, payload decoding
+    protocol/           the GATT profile clients (#41, #42) — service UUIDs, payload
+                        decoding, and since #90 the simulation writer and the
+                        choice of control point on a machine offering two
     web-bluetooth/      the browser transport (#40) — the one place a BluetoothDevice exists
   physics/            cycling power/speed model, Martin et al. 1998 (#88)
   store/              local activity, stream, recording-checkpoint, signed-record,
@@ -1371,5 +1379,11 @@ top of an issue **supersedes its body**.
 | What happens when a rider passes the end of a loop, and when a route is refused as one | `packages/domain/src/route/profile.ts` §`distanceOnRoute`, §`LOOP_CLOSURE_METRES` |
 | Which GPX element a planned route is read from, and which one wins when a file has both | `packages/fit/src/xml/gpx.ts` §`decodeGpx`, `packages/fit/src/route/gpx-route.ts` |
 | Why a saved route stores its whole profile where a ride stores half a load | `packages/store/src/records.ts` §`RouteRecord` |
+| Why the gradient driver is in `packages/domain` and not beside the control point | `packages/domain/src/trainer/simulation.ts`, [`packages/sensors/README.md`](packages/sensors/README.md) §"Driving simulation mode from a route" |
+| Why a stalled trainer drops gradients instead of queueing them, and why the newest survives | `packages/sensors/protocol/src/simulation-writer.ts` |
+| Which control point a trainer with two of them is driven through, and what happens when only the proprietary one is there | `packages/sensors/protocol/src/trainer-control-choice.ts` |
+| Whether editing a route versions it or overwrites it, and what stops a second tab winning silently | `apps/web/src/routes/save.ts` §`editRoute`, `packages/store/src/records.ts` §`RouteRecord.updatedAt` |
+| Why a route that starts inside a privacy zone cannot be shared at all, where a ride can | `apps/web/src/routes/share.ts` §`RouteShare.usable`, §`PUBLIC_ROUTE_WARNING` |
+| Where a route's visibility default is applied, and the one place an absent field is substituted | `apps/web/src/routes/save.ts` §`routeFromGpx`, `packages/store/src/persisted.ts` §`fromPersistedRoute` |
 
 <!-- Last updated: 2026-09-06 by delivery:code-issue resolving #51 (the manual file import and export UI) -->
