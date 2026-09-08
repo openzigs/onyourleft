@@ -580,4 +580,21 @@ export interface RouteRecord {
    */
   readonly visibility: Visibility;
   readonly createdAt: UnixSeconds;
+  /**
+   * When this route was last written. The optimistic-concurrency token.
+   *
+   * #73's second criterion asks that editing a route not silently overwrite one
+   * *"that is currently open elsewhere"*. With no server there is no lock to
+   * take, so the check is this: an editor reads a route, keeps the `updatedAt`
+   * it read, and hands it back on save. A value that no longer matches means
+   * somebody else wrote in between — a second tab, or the same rider on the
+   * other side of a sync — and the save is refused rather than applied over
+   * the top.
+   *
+   * ⚠️ **`packages/store` deliberately does not enforce it.** The refusal is a
+   * product decision — what to tell the rider, whether to offer a merge — and
+   * it lives in `apps/web/src/routes/save.ts`. This field is the fact the
+   * decision rests on, which is the same division `visibility` has.
+   */
+  readonly updatedAt: UnixSeconds;
 }

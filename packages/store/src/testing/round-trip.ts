@@ -436,6 +436,7 @@ export async function assertRouteRoundTrip(
   requireEqual('route.createdBy', route.createdBy, read.createdBy);
   requireEqual('route.name', route.name, read.name);
   requireEqual('route.createdAt', route.createdAt, read.createdAt);
+  requireEqual('route.updatedAt', route.updatedAt, read.updatedAt);
   requireEqual('route.resolution', route.profile.resolution, read.profile.resolution);
   requireEqual('route.totalDistance', route.profile.totalDistance, read.profile.totalDistance);
   requireEqual('route.totalAscent', route.profile.totalAscent, read.profile.totalAscent);

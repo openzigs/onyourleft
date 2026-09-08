@@ -149,6 +149,7 @@ export interface PersistedRoute {
   grades: number[];
   visibility: string;
   createdAt: number;
+  updatedAt: number;
 }
 
 export interface PersistedSegment {
@@ -749,6 +750,7 @@ export function toPersistedRoute(record: RouteRecord): PersistedRoute {
     grades: [...profile.grades],
     visibility: record.visibility,
     createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
   };
 }
 
@@ -827,6 +829,14 @@ export function fromPersistedRoute(row: PersistedRoute): RouteRecord {
     createdAt: decoded(
       'route.createdAt',
       decodedNumber('route.createdAt', row.createdAt),
+      unixSeconds,
+    ),
+    // Absent on a row written before the field existed, exactly as `visibility`
+    // is, and falling back to `createdAt` is the honest reading: a route nobody
+    // has edited was last written when it was created.
+    updatedAt: decoded(
+      'route.updatedAt',
+      decodedNumber('route.updatedAt', row.updatedAt ?? row.createdAt),
       unixSeconds,
     ),
   };

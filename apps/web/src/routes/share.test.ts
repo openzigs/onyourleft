@@ -74,6 +74,7 @@ function northRoute(
     profile: routeProfile(flat),
     visibility: 'private',
     createdAt: unixSeconds(1),
+    updatedAt: unixSeconds(1),
   };
 }
 
@@ -137,6 +138,7 @@ describe('the asymmetry #73 names — a route is not a ride', () => {
       profile: routeProfile(points),
       visibility: 'private',
       createdAt: unixSeconds(1),
+      updatedAt: unixSeconds(1),
     };
     const share = routeShare(homeward, [zone()]);
     expect(share.usable).toBe(false);
@@ -173,6 +175,7 @@ describe('the asymmetry #73 names — a route is not a ride', () => {
       profile: routeProfile(points),
       visibility: 'private',
       createdAt: unixSeconds(1),
+      updatedAt: unixSeconds(1),
     };
     const share = routeShare(outAndBack, [zone()]);
     expect(share.usable).toBe(false);

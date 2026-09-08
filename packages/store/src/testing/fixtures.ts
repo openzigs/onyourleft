@@ -619,6 +619,7 @@ export function routeFor(
     readonly loop?: boolean;
     readonly name?: string;
     readonly visibility?: Visibility;
+    readonly updatedAt?: number;
     readonly sideMetres?: number;
     readonly spacingMetres?: number;
     readonly originLatitude?: number;
@@ -674,6 +675,7 @@ export function routeFor(
     // `publishedRouteStoreFactory` indistinguishable from a correct store.
     visibility: overrides.visibility ?? DEFAULT_VISIBILITY,
     createdAt: unixSeconds(FIXTURE_EPOCH),
+    updatedAt: unixSeconds(overrides.updatedAt ?? FIXTURE_EPOCH),
   };
 }
 
