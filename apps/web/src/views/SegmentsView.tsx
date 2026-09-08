@@ -14,6 +14,7 @@ import {
   type SegmentOverlap,
 } from '../segments/create';
 import type { SegmentPort } from '../segments/store-port';
+import { hrefForSegment } from '../shell/routes';
 
 /**
  * One text field of a submitted form.
@@ -294,7 +295,14 @@ export function SegmentsView({ port }: SegmentsViewProps): JSX.Element {
             <tbody>
               {segments.map((segment) => (
                 <tr key={segment.id}>
-                  <td>{segment.name}</td>
+                  <td>
+                    {/* The link is the row's only affordance, and a plain
+                        anchor on purpose: the shell's hash routing means the
+                        browser's own middle-click, open-in-new-tab and every
+                        assistive technology's link handling work with no key
+                        handler of ours in the path (`shell/routes.ts`). */}
+                    <a href={hrefForSegment(segment.id)}>{segment.name}</a>
+                  </td>
                   <td>{segmentLength(segment.distance)}</td>
                   {/*
                     "Not measured", never "0 m". An unmeasured climb and a flat

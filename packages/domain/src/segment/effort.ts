@@ -233,3 +233,104 @@ export function countsTowardPersonalBest(effort: SegmentEffort): boolean {
 export function countsOnSharedBoard(effort: SegmentEffort): boolean {
   return effort.visibility === 'public';
 }
+
+// --- Ranking (#67) -----------------------------------------------------------
+
+/**
+ * **Efforts are ranked by ELAPSED time**, and this constant is where that is
+ * decided rather than assumed.
+ *
+ * #67's fourth criterion asks for a single stated basis and says plainly that
+ * this is *"an open question, not a copyable fact"* — the incumbent documents
+ * elapsed time for run and hike segments and does not state it for rides. So
+ * this is ours to pick, and the argument is not a preference:
+ *
+ * **Moving time is not comparable across devices.** It is elapsed time minus
+ * whatever the auto-pause model judged to be stopped, and that model depends on
+ * which channels the ride carried. `apps/web/src/recording/channels.ts` records
+ * the consequence: a recorder fed **only power** auto-pauses, because an ERG
+ * trainer holds a target while the rider is off the bike. So the same effort,
+ * ridden identically, produces a different moving time on a rider with a speed
+ * sensor than on a rider without one — and a board ranked that way is ranking
+ * sensor configurations rather than riders.
+ *
+ * **Elapsed time is a difference of two recorded timestamps** and needs no
+ * further judgement. It is what {@link SegmentEffort.elapsed} already holds.
+ *
+ * ⚠️ **The UI must name it**, which is #67's criterion in full: *"Pick one,
+ * name it in the UI, and never mix bases in one list."* {@link RANKING_BASIS_LABEL}
+ * is the words, kept here beside the reasoning so the screen and the rule
+ * cannot drift.
+ */
+export const RANKING_BASIS = 'elapsed' as const;
+
+/** What the screen says, so the rider knows what they are being ranked by. */
+export const RANKING_BASIS_LABEL = 'Ranked by elapsed time';
+
+/**
+ * Every effort on one segment, **fastest first**, with ties broken
+ * deterministically.
+ *
+ * ## The tie-break, which #67 requires to be documented
+ *
+ * *"No published tie-break rule exists to copy."* Ours is, in order:
+ *
+ * 1. **Elapsed time**, ascending — the ranking basis above.
+ * 2. **Earliest start**, ascending. It credits whoever did it first, and it is
+ *    a property of the effort rather than of the sort.
+ * 3. **The effort id**, lexicographically. Not expected to be reached — two
+ *    efforts sharing an elapsed time *and* a start instant means one ride
+ *    imported twice under two ids — but without it the order of those two
+ *    depends on the input order, which is exactly the instability the criterion
+ *    is about.
+ *
+ * ⚠️ **A comparator that stops at (1) is not stable enough**, even though
+ * `Array.prototype.sort` has been required to be stable since ES2019. Stability
+ * preserves *input* order, and the input here is whatever order the store
+ * returned — which is an index scan whose order is not part of its contract.
+ * "Two efforts with identical times must order the same way on every render" is
+ * a property of the comparator or it is not a property at all.
+ *
+ * ⚠️ **Excluded efforts are dropped, `private-match` efforts are kept.** This
+ * is the athlete's own history: #67's first criterion says a `private-match`
+ * effort *"appears here — it is the athlete's own data"*. A shared board is a
+ * different read (`countsOnSharedBoard`).
+ */
+export function rankEfforts(efforts: readonly SegmentEffort[]): SegmentEffort[] {
+  return efforts
+    .filter((effort) => countsTowardPersonalBest(effort))
+    .slice()
+    .sort(rankOrder);
+}
+
+/**
+ * The comparator {@link rankEfforts} uses. Exported so a test can pin it directly.
+ *
+ * Named for the order it produces rather than `compareEfforts`, because
+ * `comparison.ts` has an {@link overlayEfforts} that also "compares two
+ * efforts" and means something else entirely — one is a sort key, the other is
+ * where the time went.
+ */
+export function rankOrder(first: SegmentEffort, second: SegmentEffort): number {
+  if (first.elapsed !== second.elapsed) {
+    return first.elapsed - second.elapsed;
+  }
+  if (first.startedAt !== second.startedAt) {
+    return first.startedAt - second.startedAt;
+  }
+  return first.id < second.id ? -1 : first.id > second.id ? 1 : 0;
+}
+
+/**
+ * The athlete's best effort on a segment, or `undefined` when they have none.
+ *
+ * ⚠️ **A `private-match` effort can be the personal best**, and #67's sixth
+ * criterion is the neighbouring case: a personal best *"must not be a hostage
+ * to a visibility toggle"*. Nothing here reads an activity's visibility, and
+ * that is deliberate — an effort's own three-state visibility is about privacy
+ * *zones*, and making a ride private is not a statement about whether the rider
+ * rode it.
+ */
+export function personalBest(efforts: readonly SegmentEffort[]): SegmentEffort | undefined {
+  return rankEfforts(efforts)[0];
+}

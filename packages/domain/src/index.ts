@@ -396,8 +396,25 @@ export {
   createEffort,
   effortId,
   effortVisibility,
+  personalBest,
+  RANKING_BASIS,
+  RANKING_BASIS_LABEL,
+  rankEfforts,
+  rankOrder,
   touchesPrivacyZone,
 } from './segment/effort';
+// Where the time went, rather than how much of it there was (#67). Two efforts
+// on one segment do not share a sample rate, so each keeps its own series and
+// the comparison is taken at checkpoints along the road — see `comparison.ts`
+// for the truncation that shape exists to avoid.
+export type {
+  Checkpoint,
+  CheckpointReading,
+  EffortComparison,
+  EffortProgress,
+  ProgressPoint,
+} from './segment/comparison';
+export { COMPARISON_CHECKPOINTS, overlayEfforts, progressOf } from './segment/comparison';
 export {
   COMPARISON_STEP_METRES,
   densify,

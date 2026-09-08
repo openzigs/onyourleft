@@ -127,7 +127,7 @@ checkable.
 |---|---|---|---|---|
 | `apps/web` | AGPL-3.0-or-later | Routing, screens, design system, accessibility baseline, the live ride screen, file import and export | — | #48–#51 |
 | `apps/mobile` | AGPL-3.0-or-later | Capacitor shell, native permissions, foreground service | — | #85, #87 |
-| `packages/domain` | Apache-2.0 | Canonical units and types; every conversion in the program; signing/verification; analysis computations; **the segment matcher and the effort it produces** (#66) | **Any platform API at all** — no DOM, no Node globals, no I/O, no network types | #25, #61, #66, #75–#78 |
+| `packages/domain` | Apache-2.0 | Canonical units and types; every conversion in the program; signing/verification; analysis computations; **the segment matcher, the effort it produces and the comparison of two of them** (#66, #67) | **Any platform API at all** — no DOM, no Node globals, no I/O, no network types | #25, #61, #66, #75–#78 |
 | `packages/fit` | Apache-2.0 | FIT / GPX / TCX decode and encode | Anything server-specific; anything under `apps/`; **anything carrying the Garmin FIT Protocol License — see [ADR 0006](adr/0006-fit-codec-licensing.md)** | #29–#32 |
 | `packages/sensors/src` | Apache-2.0 | BLE sensor and trainer abstraction, and the simulator | **Any platform API at all**, as `packages/domain` — plus any BLE library, because an abstraction that names one has chosen it for all three stacks | #39, #44 |
 | `packages/sensors/protocol` | Apache-2.0 | The GATT profile clients: Heart Rate, Cycling Speed and Cadence and Cycling Power — service and characteristic UUIDs, bounds-checked payload decoding, and the `GattProfile` seam itself | **Any platform API at all**, as `packages/sensors/src` — it is compiled by the same platform-free program, because the same decoders serve the browser adapter and the native stacks | #41, #42 |
@@ -617,6 +617,8 @@ check.
 | `COMPARISON_STEP_METRES` | **10 m** | Both compared paths are resampled to this step before the curve comparison. Discrete Fréchet couples *vertices*, so its value otherwise carries a floor of half the coarser path's spacing — about 42 m for a ride recorded every 10 s, against a 25 m threshold. At a 10 m step the floor is ~5 m |
 | `CELL_DEGREES` | **0.01°** (~1.1 km) | The prefilter cell. Much smaller and a 400 m segment's cover spans several cells for no gain; much larger and a city's whole corpus lands in one cell and the prefilter stops filtering |
 | `MINIMUM_SEGMENT_LENGTH_METRES` | **400 m** | #64's, derived there: ~30 m of combined endpoint uncertainty held to about 7.5% of the segment |
+| `COMPARISON_CHECKPOINTS` | **21** (every 5%) | A display budget for #67's overlay, not a resolution claim: twenty-one rows is a table a person can read, and neither effort has finer resolution anyway — a ride recorded every 10 s has one sample per 83 m |
+| `EFFORT_LIMIT` | **200 efforts** | What one segment screen decodes. Each row costs one activity lookup, and the store returns efforts fastest first, so the truncated tail is the slow end — the personal best is never the part that is cut |
 | `SWEEP_PAGE_SIZE` | **25 activities** | A latency budget rather than a throughput one. The sweep yields to the caller between pages so the tab keeps painting; raising it makes the sweep marginally faster and the page perceptibly worse |
 
 ⚠️ **Do not tune any of these to improve a miss rate without re-running the false-positive cases.**

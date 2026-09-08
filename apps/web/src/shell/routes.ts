@@ -38,6 +38,7 @@ export type RouteId =
   | 'activity-detail'
   | 'analysis'
   | 'segments'
+  | 'segment-detail'
   | 'devices'
   | 'transfer'
   | 'about'
@@ -148,6 +149,33 @@ export const ACTIVITY_DETAIL_ROUTE: RouteDefinition = {
 };
 
 /**
+ * One segment, its effort history and the overlay (#67).
+ *
+ * Not in {@link ROUTES}, for {@link ACTIVITY_DETAIL_ROUTE}'s reason: there is
+ * no such thing as "the" segment, so there is nothing for a navigation entry to
+ * point at. It is reached from a row of the segments list, which is where the
+ * id comes from.
+ *
+ * ⚠️ Its path has the same **shape** as the activity route — three segments,
+ * one of them a parameter — and they are told apart by the literal in the
+ * middle. {@link matchHash} compares literals before it captures, so the order
+ * of the two in {@link ALL_ROUTES} does not matter; that is worth knowing
+ * before somebody adds a third and assumes it does.
+ */
+export const SEGMENT_DETAIL_ROUTE: RouteDefinition = {
+  id: 'segment-detail',
+  path: '/segments/:segment',
+  navLabel: 'Segment',
+  // The shell's `h1`, and therefore the same for every segment — the segment's
+  // own name is an `h2` inside the view. Same reasoning as the activity route:
+  // it keeps the heading order honest and keeps `routes.a11y.test.tsx`'s "the
+  // h1 is the route title" assertion true of a route whose subject is only
+  // known at run time.
+  title: 'Segment',
+  summary: 'Every time you have ridden this stretch of road, and how two of those efforts compare.',
+};
+
+/**
  * Where an unrecognised fragment lands.
  *
  * Not in {@link ROUTES}, because it is not navigable *to* — it has no
@@ -169,6 +197,7 @@ export const NOT_FOUND_ROUTE: RouteDefinition = {
 export const ALL_ROUTES: readonly RouteDefinition[] = [
   ...ROUTES,
   ACTIVITY_DETAIL_ROUTE,
+  SEGMENT_DETAIL_ROUTE,
   NOT_FOUND_ROUTE,
 ];
 
@@ -316,7 +345,12 @@ export function hrefFor(route: RouteDefinition, parameter?: string): string {
   return `#${path}`;
 }
 
-/** The link to one ride's detail view. The only caller that needs a parameter. */
+/** The link to one ride's detail view. */
 export function hrefForActivity(id: string): string {
   return hrefFor(ACTIVITY_DETAIL_ROUTE, id);
+}
+
+/** The link to one segment's effort history (#67). */
+export function hrefForSegment(id: string): string {
+  return hrefFor(SEGMENT_DETAIL_ROUTE, id);
 }

@@ -21,6 +21,7 @@ import { probeBrowser, type CapabilityProbe } from './support/bluetooth-support'
 import { saveWithAnchor, webCryptoDigest } from './transfer/browser';
 import { ensureLocalAthlete, LOCAL_ATHLETE, renderAfterAthlete } from './local-athlete';
 import type { AnalysisPort } from './analysis/store-port';
+import type { EffortPort } from './efforts/store-port';
 import type { SegmentPort } from './segments/store-port';
 import type { DetailPort } from './detail/store-port';
 import { browserBasemapConfig } from './map/basemap';
@@ -183,6 +184,18 @@ function buildSegmentPort(): SegmentPort {
 }
 
 /**
+ * The effort-history screen's port (#67).
+ *
+ * The same store behind a narrower interface: `EffortStore` names five reads
+ * and no writes, so the screen that shows a rider their own history cannot
+ * alter it. Structural typing is what lets one object satisfy both this and
+ * `SegmentStore` without either widening.
+ */
+function buildEffortPort(): EffortPort {
+  return { store: localStore(), athleteId: LOCAL_ATHLETE };
+}
+
+/**
  * Build the import and export screen's port, or nothing.
  *
  * `undefined` where `crypto.subtle` is absent, which is every non-secure
@@ -235,6 +248,7 @@ function render(): void {
         detail={buildDetailPort()}
         analysis={buildAnalysisPort()}
         segments={buildSegmentPort()}
+        efforts={buildEffortPort()}
         map={loadMapPort}
         basemap={browserBasemapConfig()}
       />
