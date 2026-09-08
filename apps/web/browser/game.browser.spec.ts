@@ -24,11 +24,6 @@ import { expect, test } from '@playwright/test';
 
 import { HARNESS_ORIGIN } from '../playwright.config';
 
-declare global {
-  interface Window {
-    __oylGameHarness?: unknown;
-  }
-}
 
 /** What `game-harness.ts` publishes. Mirrored rather than imported — see below. */
 interface GameHarnessResult {
