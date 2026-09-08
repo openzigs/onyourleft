@@ -155,7 +155,8 @@ What this means in practice:
   moves to `apps/` or the dependency is replaced. There is no third option and no exemption.
 - **Permissive** dependencies (MIT, BSD-2/3, Apache-2.0, ISC) are fine anywhere.
 - **Weak, file-level copyleft (MPL-2.0) and permissive licences the list above does not name** —
-  `BlueOak-1.0.0`, `CC0-1.0`, `MIT-0`, `0BSD` — **are now ruled on, by
+  `BlueOak-1.0.0`, `CC0-1.0`, `MIT-0`, `0BSD` and, since
+  [ADR 0016](docs/adr/0016-unlicense.md), `Unlicense` — **are now ruled on, by
   [ADR 0015](docs/adr/0015-dependency-licences.md) D-2**, which discharges the deferral this bullet
   used to carry. They are admitted **in the build-time-only closure under either path**, and in a
   distributed closure **under `apps/` only** — an Apache-2.0 leaf package exists to be droppable
@@ -163,7 +164,10 @@ What this means in practice:
   does not describe. Six such packages are in the tree as build-time devDependencies. Read on
   2026-09-05 from `pnpm licenses list --json`: `lightningcss` and `lightningcss-darwin-arm64`
   (MPL-2.0), `lru-cache` and `minimatch` (BlueOak-1.0.0), `mdn-data` (CC0-1.0), and
-  `@csstools/color-helpers` and `@csstools/css-syntax-patches-for-csstree` (MIT-0). **All of them
+  `@csstools/color-helpers` and `@csstools/css-syntax-patches-for-csstree` (MIT-0). Two more
+  arrived with #87's Capacitor install and are the reason ADR 0016 exists: `bplist-parser` and
+  `bplist-creator` (`Unlicense`), reached from `@capacitor/cli` through `xcode` and `simple-plist`,
+  build-time under `apps/mobile` and in no distributed closure at all. **All of the first six
   reach `packages/*` through Vitest**, not only `apps/web`: an allowlist written against "the MPL
   one is under `apps/`" would scope itself to the wrong tree and pass vacuously — which is exactly
   why ADR 0015 splits on the closure rather than the path alone. Enforced by `DEP001`; verify with
@@ -343,7 +347,7 @@ pnpm --filter @onyourleft/fit run fixtures:generate
 # also section 4g.
 pnpm run check:licences
 
-# Its own suite. Fixture-driven; 45 cases, every policy branch with a case that
+# Its own suite. Fixture-driven; 49 cases, every policy branch with a case that
 # FAILS as well as one that passes. Needs Node, so also not in `check:repo`.
 bash scripts/check-dependency-licences.test.sh
 
@@ -905,7 +909,10 @@ distributed:
 | **Distributed** (`--prod`) | permissive only | permissive + weak + GPL/LGPL/AGPL |
 | **Build-time only** | permissive + weak | permissive + weak + GPL/LGPL/AGPL |
 
-where *weak* is ADR 0015 D-2's set — `MPL-2.0`, `BlueOak-1.0.0`, `CC0-1.0`, `MIT-0`, `0BSD`.
+where *weak* is ADR 0015 D-2's set — `MPL-2.0`, `BlueOak-1.0.0`, `CC0-1.0`, `MIT-0`, `0BSD` — plus
+`Unlicense`, added to that set by [ADR 0016](docs/adr/0016-unlicense.md) D-1. `Unlicense` grants
+more than MIT does and still sits in *weak* rather than *permissive*, because the permissive row is
+§3's quotable list verbatim and stays that way; ADR 0016 D-1 gives the reasoning.
 
 ⚠️ **GPL and AGPL stay forbidden under `packages/` in BOTH closures.** The distributed-artefact
 argument alone would permit a GPL build-time tool there; ADR 0015 D-3 deliberately does not go
@@ -913,10 +920,17 @@ there, because §3 states the rule with no exemption and reversing it is an owne
 than a side effect of writing a checker.
 
 ⚠️ **It fails closed.** A licence in none of the tables is a violation, not a pass — the gate exists
-for the licence nobody has considered yet. A perfectly fine but unnamed licence (`Unlicense`,
-`Zlib`) will stop the build until someone adds it to ADR 0015 **and** to `POLICY` in the script.
-Those two tables can drift and nothing prevents it; the script says so where `POLICY` is defined and
-the failure message names the ADR.
+for the licence nobody has considered yet. A perfectly fine but unnamed licence (`Zlib`, say) will
+stop the build until someone adds it to ADR 0015 **and** to `POLICY` in the script. Those two tables
+can drift and nothing prevents it; the script says so where `POLICY` is defined and the failure
+message names the ADR.
+
+⚠️ **That is not hypothetical — it has now happened once, and `Unlicense` is no longer the example.**
+#87's `@capacitor/cli` install reached `bplist-parser` and `bplist-creator` (`Unlicense`) and
+`DEP001` stopped the build. [ADR 0016](docs/adr/0016-unlicense.md) ruled on it and `POLICY.weak`
+carries it, in the same pull request, which is the shape ADR 0015's §Consequences asks for. `Zlib`
+was deliberately **not** ruled on at the same time: nothing in the tree needs it, and a licence
+nobody has a dependency for is a licence nobody has read.
 
 ⚠️ **`pnpm licenses list --filter` does NOT follow workspace links, and that was measured.**
 `apps/web` declares `@onyourleft/store`, which declares `dexie`, yet `dexie` does not appear in
@@ -930,7 +944,7 @@ this layer would catch that — which is why `packages/fit`'s clean-room posture
 separately rather than being subsumed here.
 
 **Not part of `pnpm run check:repo`**: it needs an install, the same reason `check:a11y-suite` is
-not. Its own suite is `bash scripts/check-dependency-licences.test.sh` — 45 cases, and every policy
+not. Its own suite is `bash scripts/check-dependency-licences.test.sh` — 49 cases, and every policy
 branch has a case that goes **red** as well as one that passes.
 
 ---
@@ -1201,8 +1215,8 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   inside an ADR table cell.
 - **ADRs**: `docs/adr/NNNN-kebab-case.md`, with **Status, Context, Decision, Consequences**. Numbers
   are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. **Every number from 0001 to 0015 is
-  now written and the next free number is 0016** — there is no live reservation. ⚠️ `0012` **was**
+  **and which are claimed by open issues** before you pick one. **Every number from 0001 to 0016 is
+  now written and the next free number is 0017** — there is no live reservation. ⚠️ `0012` **was**
   reserved and is no longer: [#64](https://github.com/openzigs/onyourleft/issues/64) consumed it
   with [ADR 0012](docs/adr/0012-data-licence.md), the data licence, which is the destination
   ADR 0001's *Data* deferral had no number for

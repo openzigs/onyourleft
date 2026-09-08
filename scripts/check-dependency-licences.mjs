@@ -101,10 +101,12 @@ const POLICY = {
   permissive: ['MIT', 'BSD-2-Clause', 'BSD-3-Clause', 'Apache-2.0', 'ISC'],
 
   /**
-   * Ruled on by ADR 0015 D-2, and the reason this checker exists rather than a
-   * simple denylist. Weak file-level copyleft and permissive licences the list
-   * above does not name. All six are in the tree today and all six arrive
-   * through Vitest.
+   * Ruled on by ADR 0015 D-2, extended by ADR 0016 D-1, and the reason this
+   * checker exists rather than a simple denylist. Weak file-level copyleft and
+   * permissive licences the list above does not name. Every one of them but
+   * `0BSD` is in the tree today, and every one of those arrives through a
+   * build-time tool — Vitest for ADR 0015's five, `@capacitor/cli` for
+   * `Unlicense`.
    *
    * Permitted in the build-time-only closure anywhere, and in a distributed
    * closure under `apps/` — where the artefact is AGPL and a file-level
@@ -112,8 +114,12 @@ const POLICY = {
    * `packages/`**: an Apache-2.0 leaf package is meant to be droppable into
    * anything, and a shipped MPL file carries obligations that the package's
    * own LICENSE does not describe.
+   *
+   * ⚠️ `Unlicense` is here rather than in `permissive` above although it grants
+   * more than MIT does. `permissive` is CLAUDE.md §3's quotable list verbatim
+   * and stays that way; ADR 0016 D-1 explains the choice.
    */
-  weak: ['MPL-2.0', 'BlueOak-1.0.0', 'CC0-1.0', 'MIT-0', '0BSD'],
+  weak: ['MPL-2.0', 'BlueOak-1.0.0', 'CC0-1.0', 'MIT-0', '0BSD', 'Unlicense'],
 
   /**
    * Strong copyleft. Permitted under `apps/` only — the application is

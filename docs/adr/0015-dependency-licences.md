@@ -205,3 +205,20 @@ This ADR is an engineering decision recorded by an engineer. It is not legal adv
 lawyer would genuinely add value here is D-2's treatment of `MPL-2.0` in a distributed Apache-2.0
 package — the conservative reading is taken (forbidden), so the risk of being wrong is friction
 rather than exposure.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-09-08** — **§Consequences' example is now half history.** It says a new licence "will happen
+  the first time a dependency arrives carrying `Unlicense` or `Zlib`, both of which are perfectly
+  fine and neither of which is in a table." It happened on 2026-09-08, in
+  [#87](https://github.com/openzigs/onyourleft/issues/87)'s Capacitor install: `@capacitor/cli`
+  reaches `bplist-parser` and `bplist-creator` through `xcode` and `simple-plist`, both declaring
+  `Unlicense`, and `DEP001` stopped the build exactly as D-4 intends.
+  [ADR 0016](0016-unlicense.md) rules on it and **adds `Unlicense` to D-2's set** — build-time
+  anywhere, distributed under `apps/` only — so the sentence's "neither of which is in a table" is
+  no longer true of `Unlicense`. It remains true of `Zlib`, which ADR 0016 deliberately does not
+  rule on: a licence nobody has a dependency for is a licence nobody has read.
+  **Every decision above still stands as written**; ADR 0016 extends D-2's list and changes nothing
+  else, which is why it is an extension rather than a superseding ADR.

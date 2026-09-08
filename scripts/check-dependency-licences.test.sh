@@ -127,8 +127,15 @@ assert_clean "AGPL in the AGPL application is permitted" \
   "$(closures "$(one_dep apps/web distributed AGPL-3.0-or-later)")"
 
 # --- The set ADR 0015 D-2 rules on: build-time yes, shipped-from-a-leaf no ---
+#
+# `Unlicense` is in this loop rather than in the permissive one above because
+# ADR 0016 D-1 put it in `POLICY.weak`, and it is judged by that table wherever
+# it sits. Its red case is the one that matters: the licence arrived as a
+# build-time dependency of `apps/mobile`, which is the position that PASSES, so
+# without the shipped-from-a-leaf case the entry would have only ever been seen
+# to go green.
 
-for licence in MPL-2.0 BlueOak-1.0.0 CC0-1.0 MIT-0 0BSD; do
+for licence in MPL-2.0 BlueOak-1.0.0 CC0-1.0 MIT-0 0BSD Unlicense; do
   assert_clean "${licence} at build time in an Apache-2.0 package is permitted" \
     "$(closures "$(one_dep packages/domain build "${licence}")")"
   assert_violation "${licence} SHIPPED from an Apache-2.0 package is a violation" \
@@ -138,6 +145,16 @@ done
 
 assert_clean "MPL-2.0 shipped in the AGPL application is permitted" \
   "$(closures "$(one_dep apps/web distributed MPL-2.0)")"
+
+assert_clean "Unlicense shipped in the AGPL application is permitted" \
+  "$(closures "$(one_dep apps/web distributed Unlicense)")"
+
+# The position `Unlicense` actually occupies in the tree today: `@capacitor/cli`
+# reaches `bplist-parser` and `bplist-creator` through `xcode`, at build time,
+# under `apps/mobile`. This is the case that has to pass for #87 to install at
+# all, so it is asserted rather than inferred from the loop above.
+assert_clean "Unlicense at build time in the AGPL application is permitted" \
+  "$(closures "$(one_dep apps/mobile build Unlicense)")"
 
 # --- Non-OSI fails in every closure and under every path ---------------------
 
