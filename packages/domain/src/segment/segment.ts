@@ -442,6 +442,123 @@ export function endpointReached(
   return bearingDifference(endpoint.bearing, heading) <= bearingToleranceDegrees;
 }
 
+/**
+ * How far a sample may be from an endpoint and still be *considered*, once the
+ * ride's own sample spacing is taken into account: `endpoint.radius` widened by
+ * **half the spacing**.
+ *
+ * ## Why this exists at all — the spike's first finding
+ *
+ * `docs/spikes/0001-segment-matching.md` §1 measured what a fixed radius does at
+ * a coarse recording interval, and the answer is **nothing at all**. At 30 km/h
+ * a 2 s interval puts samples 16.7 m apart against a 15 m radius, so a rider can
+ * ride straight through a segment's start without ever recording a sample inside
+ * it. Matched-of-100 went 100 → 0 between a 1 s interval and a 2 s one. Not a
+ * degradation — a cliff, and one no similarity threshold can rescue, because the
+ * gate is what decides whether the curve comparison runs at all.
+ *
+ * ## The derivation
+ *
+ * A rider who passes **exactly** through the endpoint records a sample no
+ * further from it than half the spacing — that is the worst case, when the
+ * endpoint falls midway between two samples. So detecting everyone who genuinely
+ * came within `radius` of the endpoint requires a gate of `radius + spacing / 2`,
+ * and nothing wider buys anything: at that width the gate admits exactly the
+ * riders the radius was meant to admit, and the spacing term is the price of
+ * sampling rather than a loosened tolerance.
+ *
+ * It is therefore **derived per ride, not configured**. A 1 Hz ride is gated at
+ * 15 + 4.2 ≈ 19 m and a 10 s ride at 15 + 41.7 ≈ 57 m, and the difference is a
+ * property of the two recordings rather than a knob anyone chose.
+ *
+ * ⚠️ **This would have been unsafe before the trimming below existed.** The
+ * spike's second finding was that widening the radius *raised* the Fréchet
+ * distance of a perfect traversal, because the span opened at the first sample
+ * inside the radius and so swallowed up to `radius` metres of approach that was
+ * not part of the segment: at a 50 m radius, none of 50 known-good traversals
+ * matched. Widening the gate is only sound because {@link nearestEndpointSample}
+ * then picks the *closest* sample rather than the first, so the compared span
+ * does not grow with the gate. The two changes are one change; making this one
+ * alone reintroduces the coupling the spike measured.
+ */
+export function endpointReachRadius(endpoint: SegmentEndpoint, spacingMetres: number): Metres {
+  if (!Number.isFinite(spacingMetres) || spacingMetres < 0) {
+    throw new UnitError('sample spacing must be a non-negative, finite number of metres');
+  }
+  return metres(endpoint.radius + spacingMetres / 2);
+}
+
+/**
+ * Which sample in `[from, to)` lies closest to `endpoint`, or `undefined` when
+ * none of them reaches it.
+ *
+ * ## This is the half that makes a wide gate safe
+ *
+ * The obvious matcher opens a span at the **first** sample that reaches the
+ * start endpoint. That is wrong in a way that only shows up as a threshold
+ * interaction: the first sample inside a radius can be nearly a full radius
+ * short of the endpoint, so the span carries approach road the segment does not
+ * contain, and the curve comparison is charged for it. The spike measured a
+ * *noise-free, perfect* traversal scoring 0 m at a 15 m radius and 40 m at a
+ * 50 m one — the ride never changed.
+ *
+ * Taking the **nearest** sample instead removes the dependence: the chosen point
+ * is the best estimate of the endpoint that the recording contains, whatever
+ * width admitted it. That is also the more accurate answer for timing, and it is
+ * what the incumbent documents doing — *"we choose the GPS points from your file
+ * that fall closest to the segment's start and end"* (#65's body quotes it).
+ *
+ * ⚠️ **Nearest RECORDED sample, and nothing synthesised** (ADR 0007 D-2.2). The
+ * return value is an index into the ride, never a fractional position between
+ * two samples: `packages/domain` has no function that interpolates a crossing
+ * and must not acquire one. The cost is real and is stated in
+ * {@link MINIMUM_SEGMENT_LENGTH_METRES}; it is accepted rather than engineered
+ * around.
+ *
+ * ⚠️ **Direction still gates every candidate.** A sample that is near the
+ * endpoint but travelling the other way is not a candidate at all, so a
+ * descending rider cannot win the nearest-sample contest at a climb's start.
+ *
+ * @param headings the direction of travel at each sample, parallel to
+ * `positions`. `undefined` at an index means the direction could not be
+ * established there, and {@link endpointReached} rejects it.
+ */
+export function nearestEndpointSample(
+  endpoint: SegmentEndpoint,
+  positions: readonly GeographicPosition[],
+  headings: readonly (DegreesBearing | undefined)[],
+  bearingToleranceDegrees: number,
+  radius: Metres,
+  from = 0,
+  to = positions.length,
+): number | undefined {
+  const widened: SegmentEndpoint = { ...endpoint, radius };
+  let best: number | undefined;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  const start = Math.max(0, from);
+  const stop = Math.min(positions.length, to);
+  for (let index = start; index < stop; index += 1) {
+    const position = positions[index];
+    if (position === undefined) {
+      continue;
+    }
+    if (!endpointReached(widened, position, headings[index], bearingToleranceDegrees)) {
+      continue;
+    }
+    const distance = distanceBetween(endpoint.position, position);
+    // Strictly closer, so a tie keeps the EARLIER sample. On a start endpoint
+    // that is the conservative choice — it cannot shorten the effort — and on
+    // an end endpoint it stops a rider who lingered from being credited with
+    // the extra seconds.
+    if (distance < bestDistance) {
+      best = index;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
 // --- Overlap, for #64's duplicate detection ---------------------------------
 
 /**

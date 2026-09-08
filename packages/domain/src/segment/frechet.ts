@@ -4,7 +4,7 @@
  * Stage 3 of the pipeline: **discrete Fréchet distance**, on the survivors.
  *
  * ## Why Fréchet and not Hausdorff — #65 says this in one line and it is the
- * single most consequential line in the spike
+ * single most consequential line in the spike (#65)
  *
  * > *"discrete Fréchet is order-preserving and is the usual right answer for a
  * > directed path; Hausdorff is direction-blind and will happily match a
@@ -38,7 +38,10 @@
  * user-selected point, and decides no crossing. ADR 0007 D-2.1.
  */
 
-import { distanceBetween, type GeographicPosition } from '@onyourleft/domain';
+import { distanceBetween } from '../geodesy';
+import { degreesLatitude, degreesLongitude, geographicPosition } from '../quantities';
+
+import type { GeographicPosition } from '../quantities';
 
 /**
  * The discrete Fréchet distance between two paths, in metres.
@@ -47,8 +50,9 @@ import { distanceBetween, type GeographicPosition } from '@onyourleft/domain';
  * stage 1.** A four-hour ride is ~14 400 samples; against a 40-sample segment
  * that is over half a million distance calls, so running it against a corpus
  * of 100 000 segments unfiltered is not an option — it is what the prefilter
- * and the endpoint gate exist to prevent, and `tools/measure.ts` reports how
- * many survivors actually reach here.
+ * and the endpoint gate exist to prevent;
+ * `docs/spikes/0001-segment-matching.md` §3 reports how many survivors
+ * actually reach here.
  *
  * The space bound is the one worth having: the textbook version allocates the
  * whole n×m table, which for the numbers above is a 576 MB `Float64Array`. Only
@@ -93,6 +97,86 @@ export function discreteFrechet(
   }
 
   return previous[second.length - 1] ?? Number.POSITIVE_INFINITY;
+}
+
+/**
+ * The step a path is resampled to before two paths are compared: **10 metres**.
+ *
+ * Well under {@link SIMILARITY_METRES}, deliberately — see {@link densify} for
+ * why the two numbers are related at all.
+ */
+export const COMPARISON_STEP_METRES = 10;
+
+/**
+ * Insert points along a path so that no step exceeds `maxStepMetres`.
+ *
+ * ## Why this is necessary, and it is not an optimisation
+ *
+ * Discrete Fréchet couples *vertices*, so its value carries a floor set by the
+ * **coarser path's sample spacing**: every vertex of one path must be paired
+ * with some vertex of the other, and a vertex falling midway between two of
+ * them is half a spacing away however perfectly the two paths coincide. That is
+ * `docs/spikes/0001-segment-matching.md` §1's third finding, and it is what
+ * makes the raw comparison unusable at a coarse recording interval: a ride
+ * sampled every 10 s at 30 km/h steps 83 m, so a *flawless* traversal of the
+ * segment's own road scores about 42 m against a 25 m threshold. The rider is
+ * on the road and the matcher says they were not.
+ *
+ * Resampling both paths to a common step removes it: at a 10 m step the floor
+ * is about 5 m, which leaves the threshold measuring what it is supposed to
+ * measure — how far the rider strayed — rather than how often their device
+ * wrote a sample.
+ *
+ * ## ⚠️ What this assumes, stated rather than buried
+ *
+ * **That the rider travelled in a straight line between two recorded samples.**
+ * They may not have. At an 83 m spacing on a curving road, that assumption is
+ * worth tens of metres, and it makes a false positive *more* likely at coarse
+ * intervals than at 1 Hz. That is the honest position: at a 10 s interval the
+ * recording does not contain the information, and the choice is between an
+ * assumption stated here and refusing to match those rides at all.
+ *
+ * ## ⚠️ Why this is not the extrapolation ADR 0007 D-2.2 forbids
+ *
+ * D-2.2 forbids **synthesising a point in order to decide a crossing**. No
+ * point produced here decides anything: the endpoint gate has already run, on
+ * recorded samples only, and produced the span's two indices. These points are
+ * interpolated *between two recorded positions of the same path*, exist only
+ * inside the distance computation, and are never stored, timed or reported —
+ * the same standing `cells.ts` gives the interpolation in its cover, and for
+ * the same reason. An effort's `startedAt` and `elapsed` still come from two
+ * recorded timestamps and cannot come from anywhere else.
+ *
+ * @returns the path unchanged when `maxStepMetres` is not a positive finite
+ * number, which keeps a caller's bad argument from silently emptying a
+ * comparison.
+ */
+export function densify(
+  path: readonly GeographicPosition[],
+  maxStepMetres: number,
+): readonly GeographicPosition[] {
+  if (!Number.isFinite(maxStepMetres) || maxStepMetres <= 0 || path.length < 2) {
+    return path;
+  }
+  const dense: GeographicPosition[] = [];
+  for (const [index, position] of path.entries()) {
+    dense.push(position);
+    const next = path[index + 1];
+    if (next === undefined) {
+      continue;
+    }
+    const steps = Math.ceil(distanceBetween(position, next) / maxStepMetres);
+    for (let step = 1; step < steps; step += 1) {
+      const fraction = step / steps;
+      dense.push(
+        geographicPosition(
+          degreesLatitude(position.latitude + (next.latitude - position.latitude) * fraction),
+          degreesLongitude(position.longitude + (next.longitude - position.longitude) * fraction),
+        ),
+      );
+    }
+  }
+  return dense;
 }
 
 /**

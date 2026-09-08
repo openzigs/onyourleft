@@ -33,9 +33,10 @@
 /**
  * The current schema version.
  *
- * **5** since #64. Version 2 added `streamSets` and `streamBlobs`; version 3
+ * **6** since #66. Version 2 added `streamSets` and `streamBlobs`; version 3
  * added `recordingSessions` and `recordingChunks`; version 4 added `deviceKeys`
- * and `activityRecords`; version 5 adds `segments`. All four are purely additive
+ * and `activityRecords`; version 5 added `segments`; version 6 adds
+ * `segmentEfforts` and `matchCheckpoints`. All five are purely additive
  * and change **no existing record's shape**. That is why `SCHEMA_MIGRATIONS` in
  * `migrations.ts` is still empty: the registry holds *record* migrations, and
  * there is no record to transform. The version bumps themselves are real and
@@ -46,7 +47,7 @@
  * Bumping this for a change that *does* alter a record's shape means adding a
  * migration pair.
  */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 /**
  * Dexie stores its schema version in IndexedDB multiplied by ten, leaving room
@@ -81,6 +82,10 @@ export const TABLE = {
   activityRecords: 'activityRecords',
   /** #64: one row per segment — a named stretch of road with a direction. */
   segments: 'segments',
+  /** #66: one row per timed traversal, keyed so a re-match rewrites rather than adds. */
+  segmentEfforts: 'segmentEfforts',
+  /** #66: one row per backfill in progress — how far it got, so it can resume. */
+  matchCheckpoints: 'matchCheckpoints',
 } as const;
 
 /**
@@ -166,6 +171,18 @@ export const INDEX = {
   /** `listSegments`, newest first — and `deleteAthlete`'s cascade. */
   segmentByCreatorAndCreatedAt: '[createdBy+createdAt]',
   segmentByCreator: 'createdBy',
+  /** #66: `listEfforts` — the athlete's efforts on one segment, fastest first. */
+  effortByAthleteAndSegment: '[athleteId+segmentId+elapsed]',
+  /** #66: the athlete-scoped point lookup, and the shared-board read. */
+  effortByAthleteAndSegmentAndVisibility: '[athleteId+segmentId+visibility]',
+  /** #66: re-matching one activity, and `deleteActivity`'s cascade. */
+  effortByAthleteAndActivity: '[athleteId+activityId]',
+  effortByActivity: 'activityId',
+  /** #66: `deleteAthlete`'s cascade, and `deleteSegment`'s. */
+  effortByAthlete: 'athleteId',
+  effortBySegment: 'segmentId',
+  /** #66: a backfill's own row, scoped to the athlete who started it. */
+  checkpointByAthlete: 'athleteId',
 } as const;
 
 /**
@@ -342,10 +359,74 @@ export const STORES_V5: Readonly<Record<string, string>> = {
   ].join(', '),
 };
 
+/**
+ * Version 6 — #66's efforts, and the checkpoint that makes a backfill resumable.
+ *
+ * ## `segmentEfforts` is keyed on a DERIVED id — and that is not what makes
+ * re-matching idempotent
+ *
+ * #66's sixth criterion is that re-running the matcher over an already-matched
+ * activity is idempotent — *"without this, every app restart inflates every
+ * leaderboard"*. **What delivers that is `putActivityEfforts` replacing the
+ * activity's whole effort set**, deleting the ones the matcher no longer finds.
+ * The derived id (`segmentId::activityId::startedAt`, from
+ * `@onyourleft/domain`'s `effortId`) buys something else: an effort keeps the
+ * same identity across a re-match, so anything holding a reference to one —
+ * a link the rider shared, a Phase 4 signed record — still points at it.
+ *
+ * ⚠️ **This paragraph said the opposite first, and the fake proved it wrong.**
+ * `testing/fakes.ts` originally modelled a store that minted a fresh id per
+ * write, on the theory that the id was the mechanism; it stayed **green**,
+ * because replacing the set absorbs a changed id. The fake that goes red is one
+ * that *appends*. Two properties, two mechanisms, two tests — recorded here
+ * because the plausible-sounding version is the wrong one.
+ *
+ * Every index leads with `athleteId`, like every other index in this file:
+ * there is no query that finds an effort without being told whose it is, which
+ * is the cross-athlete shape CLAUDE.md section 6 names. `effortByActivity` and
+ * `effortBySegment` are the two exceptions and exist **only** for the delete
+ * cascades, which are already inside an athlete-scoped call.
+ *
+ * `[athleteId+segmentId+elapsed]` puts a personal best one index lookup away —
+ * Dexie orders a compound index by its last component, so "the athlete's
+ * fastest time on this segment" is the first row rather than a sort of all of
+ * them.
+ *
+ * ## `matchCheckpoints` is keyed on the athlete, one row
+ *
+ * A backfill is a background job over the whole library (#66: the incumbent
+ * warns its own users this "may take several hours"), and killing the tab
+ * mid-run must not double-count. One row per athlete holds how far the sweep
+ * got; a resumed run starts from there. It is deliberately *not* keyed on the
+ * segment being backfilled: two concurrent backfills over one library would
+ * both be walking the same activities, and the honest model is one sweep at a
+ * time per athlete.
+ *
+ * ⚠️ **The checkpoint is an optimisation, not the correctness mechanism.** The
+ * derived effort id is what makes a resumed run produce the same count as a
+ * clean one; the checkpoint only stops it redoing work. A checkpoint that was
+ * lost costs time and cannot corrupt anything, which is the property to keep if
+ * anyone changes this.
+ */
+export const STORES_V6: Readonly<Record<string, string>> = {
+  // The nine stores of versions 1 to 5 are inherited unchanged.
+  [TABLE.segmentEfforts]: [
+    'id',
+    INDEX.effortByAthlete,
+    INDEX.effortByActivity,
+    INDEX.effortBySegment,
+    INDEX.effortByAthleteAndActivity,
+    INDEX.effortByAthleteAndSegment,
+    INDEX.effortByAthleteAndSegmentAndVisibility,
+  ].join(', '),
+  [TABLE.matchCheckpoints]: 'athleteId',
+};
+
 export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V1,
   STORES_V2,
   STORES_V3,
   STORES_V4,
   STORES_V5,
+  STORES_V6,
 ];

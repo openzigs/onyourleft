@@ -35,6 +35,9 @@ export type {
   OriginalFileReference,
   PrivacyZoneRecord,
   SegmentEndpointRecord,
+  FrozenEffortAttributes,
+  MatchCheckpointRecord,
+  SegmentEffortRecord,
   SegmentRecord,
 } from './records';
 export { DEFAULT_PRIVACY_ZONE_RADIUS_METRES } from './records';
@@ -48,9 +51,18 @@ export type {
   LapId,
   PrivacyZoneId,
   RecordingSessionId,
+  SegmentEffortId,
   SegmentId,
 } from './ids';
-export { activityId, athleteId, lapId, privacyZoneId, recordingSessionId, segmentId } from './ids';
+export {
+  activityId,
+  athleteId,
+  lapId,
+  privacyZoneId,
+  recordingSessionId,
+  segmentEffortId,
+  segmentId,
+} from './ids';
 
 // --- Visibility (ADR 0004 decision A) ---------------------------------------
 

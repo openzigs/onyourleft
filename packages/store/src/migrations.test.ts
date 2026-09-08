@@ -232,11 +232,19 @@ describe('the production registry', () => {
   it('is empty of record migrations, because no version has changed a record’s shape', () => {
     // Version 2 (#27) **adds** `streamSets` and `streamBlobs`, version 3 (#46)
     // adds the recording stores, version 4 (#61) adds `deviceKeys` and
-    // `activityRecords`, and version 5 (#64) adds `segments`. All four rewrite
-    // nothing, so there is no record to transform and no `down` to write.
+    // `activityRecords`, version 5 (#64) adds `segments`, and version 6 (#66)
+    // adds `segmentEfforts` and `matchCheckpoints`. All five rewrite nothing,
+    // so there is no record to transform and no `down` to write.
+    //
+    // ⚠️ Version 6 also adds an OPTIONAL field to an existing record —
+    // `AthleteRecord.mass` — and that is still not a record migration. An
+    // absent field reads back as `undefined`, exactly as `thresholdPower` does.
+    // A **required** field would be the first entry in this registry, and
+    // `records.ts` says what that would cost.
+    //
     // Asserted rather than left implicit: the day a version does change a
     // record's shape, this test is what says the registry must gain an entry.
-    expect(SCHEMA_VERSION).toBe(5);
+    expect(SCHEMA_VERSION).toBe(6);
     expect(SCHEMA_MIGRATIONS).toEqual([]);
   });
 

@@ -55,7 +55,7 @@
  */
 
 import Dexie, { type Table } from 'dexie';
-import type { BeatsPerMinute, Seconds, Watts } from '@onyourleft/domain';
+import type { BeatsPerMinute, Seconds, UnixSeconds, Watts } from '@onyourleft/domain';
 
 import {
   StoreDecodeError,
@@ -105,7 +105,9 @@ import type {
   LapRecord,
   NewActivity,
   NewLap,
+  MatchCheckpointRecord,
   PrivacyZoneRecord,
+  SegmentEffortRecord,
   SegmentRecord,
 } from './records';
 import type {
@@ -174,6 +176,18 @@ export interface ListActivitiesOptions {
   readonly offset?: number;
   /** How many to return. Default: all of them. */
   readonly limit?: number;
+  /**
+   * Only activities that started strictly after this instant (#66).
+   *
+   * ⚠️ **A cursor, and it exists because `offset` is not one.** A backfill
+   * sweep resumes where it stopped, and an offset shifts under it the moment
+   * an older ride is imported mid-sweep — which silently *skips* an activity
+   * rather than repeating one. Repeating is harmless here (the write replaces),
+   * and skipping leaves a ride with no efforts and nothing to say so.
+   *
+   * Only meaningful with `orderBy: 'startedAt'`; it is a bound on that index.
+   */
+  readonly startedAfter?: UnixSeconds;
 }
 
 /** What `deleteAthlete` removed, so a caller can report it. */
@@ -193,6 +207,15 @@ export interface AthleteDeletionCounts {
    * ride it came from.
    */
   readonly segments: number;
+  /**
+   * Segment efforts removed (#66).
+   *
+   * Counted separately from `segments` because the two answer different
+   * questions for #62's confirmation dialogue: how many stretches of road the
+   * athlete named, and how many timed traversals of any segment they leave
+   * behind. A rider with three segments and four hundred efforts is told both.
+   */
+  readonly efforts: number;
   /**
    * Stream sets removed. One per activity that had streams, not one per
    * channel: the blob rows go with their set and counting them would report a
@@ -331,6 +354,14 @@ export class ActivityStore {
 
   get #segments(): Table<PersistedSegment, string> {
     return this.#db.table<PersistedSegment, string>(TABLE.segments);
+  }
+
+  get #segmentEfforts(): Table<SegmentEffortRecord, string> {
+    return this.#db.table<SegmentEffortRecord, string>(TABLE.segmentEfforts);
+  }
+
+  get #matchCheckpoints(): Table<MatchCheckpointRecord, string> {
+    return this.#db.table<MatchCheckpointRecord, string>(TABLE.matchCheckpoints);
   }
 
   // --- Athletes -------------------------------------------------------------
@@ -504,6 +535,8 @@ export class ActivityStore {
         this.#deviceKeys,
         this.#activityRecords,
         this.#segments,
+        this.#segmentEfforts,
+        this.#matchCheckpoints,
       ],
       async () => {
         // The signed records and the device key go with the athlete. The key is
@@ -537,8 +570,15 @@ export class ActivityStore {
           .equals(id)
           .delete();
         const segments = await this.#segments.where(INDEX.segmentByCreator).equals(id).delete();
+        // Efforts go with the athlete for the reason everything else does: an
+        // effort names a segment, an activity and an instant, and left behind
+        // it is a row about a person who asked to be erased that no scoped read
+        // can reach. The checkpoint is a cursor into a library that no longer
+        // exists.
+        const efforts = await this.#segmentEfforts.where(INDEX.effortByAthlete).equals(id).delete();
+        await this.#matchCheckpoints.delete(id);
         await this.#athletes.delete(id);
-        return { activities, laps, privacyZones, streamSets, recordings, segments };
+        return { activities, laps, privacyZones, streamSets, recordings, segments, efforts };
       },
     );
   }
@@ -607,7 +647,13 @@ export class ActivityStore {
     owner: AthleteId,
     options: ListActivitiesOptions = {},
   ): Promise<ActivitySummary[]> {
-    const { orderBy = 'startedAt', direction = 'descending', offset = 0, limit } = options;
+    const {
+      orderBy = 'startedAt',
+      direction = 'descending',
+      offset = 0,
+      limit,
+      startedAfter,
+    } = options;
     const index = ORDER_INDEX.get(orderBy);
     if (index === undefined) {
       throw new StoreValidationError(
@@ -621,9 +667,19 @@ export class ActivityStore {
       throw new StoreValidationError(`limit must be a non-negative integer, received ${limit}`);
     }
 
+    if (startedAfter !== undefined && orderBy !== 'startedAt') {
+      throw new StoreValidationError(
+        `startedAfter is a bound on the startedAt index and cannot be combined with orderBy ${orderBy}`,
+      );
+    }
+
+    // `false` on the lower bound is what makes the cursor *strictly* after: a
+    // resumed sweep must not re-read the activity it stopped on as though it
+    // were the next one, or a library whose last page is one ride never ends.
+    const lower = startedAfter === undefined ? Dexie.minKey : startedAfter;
     let collection = this.#activities
       .where(index)
-      .between([owner, Dexie.minKey], [owner, Dexie.maxKey], true, true);
+      .between([owner, lower], [owner, Dexie.maxKey], startedAfter === undefined, true);
     if (direction === 'descending') {
       collection = collection.reverse();
     }
@@ -665,7 +721,14 @@ export class ActivityStore {
   async deleteActivity(owner: AthleteId, id: ActivityId): Promise<boolean> {
     return this.#db.transaction(
       'rw',
-      [this.#activities, this.#laps, this.#streamSets, this.#streamBlobs, this.#activityRecords],
+      [
+        this.#activities,
+        this.#laps,
+        this.#streamSets,
+        this.#streamBlobs,
+        this.#activityRecords,
+        this.#segmentEfforts,
+      ],
       async () => {
         const existing = await this.#activities
           .where(INDEX.activityByAthleteAndId)
@@ -688,6 +751,15 @@ export class ActivityStore {
         // the largest thing this store ever orphans.
         await this.#streamBlobs.where(INDEX.streamBlobByActivity).equals(id).delete();
         await this.#streamSets.delete(id);
+        // The efforts go with the ride they were found in. An effort is two
+        // indices' worth of information *about* an activity, so one whose
+        // activity is gone can no longer be explained, re-derived or shown a
+        // trace for — and it would still be ranking on a board.
+        //
+        // ⚠️ This is deliberately unlike #64's segments, which survive their
+        // source activity by design (`records.ts` says why). A segment is a
+        // copy that stands alone; an effort is a claim about a specific ride.
+        await this.#segmentEfforts.where(INDEX.effortByActivity).equals(id).delete();
         await this.#activities.delete(id);
         return true;
       },
@@ -851,6 +923,169 @@ export class ActivityStore {
       await this.#segments.delete(id);
       return true;
     });
+  }
+
+  // --- Segment efforts (#66) ------------------------------------------------
+
+  /**
+   * Replaces every effort this activity has on record with the ones given.
+   *
+   * ## Why "replace what this activity has", and not "insert these"
+   *
+   * #66's sixth criterion is that re-running the matcher over an already-
+   * matched activity is idempotent — *"without this, every app restart inflates
+   * every leaderboard"*. Two mechanisms together give that, and both are
+   * needed:
+   *
+   * 1. **The ids are derived** (`@onyourleft/domain`'s `effortId`), so the same
+   *    traversal computes the same key and `bulkPut` rewrites its row.
+   * 2. **Efforts this activity no longer produces are deleted**, so a re-match
+   *    after the tolerances changed — or after a segment was deleted — leaves
+   *    no effort behind that the matcher would no longer find. Without this
+   *    half, (1) alone makes re-matching *additive*: the count never goes down,
+   *    and a stale effort on a deleted segment keeps ranking.
+   *
+   * Both inside one transaction, so a failure leaves the activity's efforts as
+   * they were rather than half-replaced.
+   *
+   * ⚠️ **Scoped to one activity, never to one segment.** Replacing "this
+   * segment's efforts" would delete every other activity's efforts on it the
+   * moment one ride was re-matched, which is the shape a backfill would take if
+   * it were written the obvious way round.
+   *
+   * @throws {StoreReferentialError} if `owner` names no athlete, or if any
+   * effort names a different athlete than the one sweeping — an effort filed
+   * under the wrong athlete is the cross-athlete exposure CLAUDE.md section 6
+   * names, arriving through a write rather than a read.
+   */
+  async putActivityEfforts(
+    owner: AthleteId,
+    activityId: ActivityId,
+    efforts: readonly SegmentEffortRecord[],
+  ): Promise<number> {
+    return this.#db.transaction(
+      'rw',
+      [this.#athletes, this.#activities, this.#segmentEfforts],
+      async () => {
+        await this.#requireAthlete(owner);
+        for (const effort of efforts) {
+          if (effort.athleteId !== owner) {
+            throw new StoreReferentialError(
+              `cannot file effort ${effort.id} under athlete ${owner}: it names a different athlete`,
+            );
+          }
+          if (effort.activityId !== activityId) {
+            throw new StoreReferentialError(
+              `cannot file effort ${effort.id} under activity ${activityId}: it names a different activity`,
+            );
+          }
+        }
+        const keep = new Set(efforts.map((effort) => effort.id));
+        const existing = await this.#segmentEfforts
+          .where(INDEX.effortByAthleteAndActivity)
+          .equals([owner, activityId])
+          .toArray();
+        const stale = existing.filter((row) => !keep.has(row.id)).map((row) => row.id);
+        if (stale.length > 0) {
+          await this.#segmentEfforts.bulkDelete(stale);
+        }
+        if (efforts.length > 0) {
+          await this.#segmentEfforts.bulkPut([...efforts]);
+        }
+        return efforts.length;
+      },
+    );
+  }
+
+  /**
+   * This athlete's efforts on one segment, **fastest first**.
+   *
+   * Fastest first because the caller that matters is a personal best, and
+   * `[athleteId+segmentId+elapsed]` orders by its last component — so the best
+   * time is the first row of an index lookup rather than a sort of every
+   * traversal the athlete has ever made.
+   *
+   * ⚠️ **Returns `private-match` efforts.** That is the athlete's own history
+   * and #66's seventh criterion requires it; {@link listSharedEfforts} is the
+   * read that does not. An `excluded` effort is returned by neither.
+   */
+  async listEfforts(
+    owner: AthleteId,
+    segment: SegmentId,
+    limit?: number,
+  ): Promise<SegmentEffortRecord[]> {
+    let query = this.#segmentEfforts
+      .where(INDEX.effortByAthleteAndSegment)
+      .between([owner, segment, Dexie.minKey], [owner, segment, Dexie.maxKey], true, true);
+    if (limit !== undefined) {
+      query = query.limit(limit);
+    }
+    const rows = await query.toArray();
+    return rows.filter((row) => row.visibility !== 'excluded');
+  }
+
+  /**
+   * The efforts on one segment that may be shown to **somebody else**.
+   *
+   * `public` only. A `private-match` effort has an endpoint inside one of the
+   * athlete's privacy zones, and publishing it publishes an address — which is
+   * the failure ADR 0004 exists to prevent and the reason the visibility field
+   * has three values rather than two.
+   *
+   * ⚠️ **Still athlete-scoped, even though it is the "shared" read.** Phase 1
+   * has no server (owner decision D6), so the only caller is the athlete
+   * looking at what *would* be shared. When #68 serves a real cross-athlete
+   * board it will fan this out per athlete rather than dropping the scope, and
+   * a query here that matched on `segmentId` alone is exactly the shape
+   * CLAUDE.md section 6 names.
+   */
+  async listSharedEfforts(
+    owner: AthleteId,
+    segment: SegmentId,
+    limit?: number,
+  ): Promise<SegmentEffortRecord[]> {
+    const rows = await this.#segmentEfforts
+      .where(INDEX.effortByAthleteAndSegmentAndVisibility)
+      .equals([owner, segment, 'public'])
+      .toArray();
+    rows.sort((a, b) => a.elapsed - b.elapsed);
+    return limit === undefined ? rows : rows.slice(0, limit);
+  }
+
+  /** Every effort this athlete has in one activity. What a re-match compares against. */
+  async listActivityEfforts(
+    owner: AthleteId,
+    activityId: ActivityId,
+  ): Promise<SegmentEffortRecord[]> {
+    return this.#segmentEfforts
+      .where(INDEX.effortByAthleteAndActivity)
+      .equals([owner, activityId])
+      .toArray();
+  }
+
+  /** How far this athlete's backfill sweep has got, if one is in progress. */
+  async getMatchCheckpoint(owner: AthleteId): Promise<MatchCheckpointRecord | undefined> {
+    return this.#matchCheckpoints.get(owner);
+  }
+
+  /**
+   * Records how far a backfill sweep has got.
+   *
+   * ⚠️ **Not the correctness mechanism** — the derived effort id is. This only
+   * stops a resumed sweep redoing work it has already done. A lost checkpoint
+   * costs time and cannot corrupt anything, and `records.ts` asks whoever
+   * changes this to keep that property.
+   */
+  async putMatchCheckpoint(record: MatchCheckpointRecord): Promise<void> {
+    await this.#db.transaction('rw', [this.#athletes, this.#matchCheckpoints], async () => {
+      await this.#requireAthlete(record.athleteId);
+      await this.#matchCheckpoints.put(record);
+    });
+  }
+
+  /** Clears the sweep cursor, which is what finishing one looks like. */
+  async clearMatchCheckpoint(owner: AthleteId): Promise<void> {
+    await this.#matchCheckpoints.delete(owner);
   }
 
   // --- Streams (#27) --------------------------------------------------------

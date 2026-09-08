@@ -56,6 +56,7 @@ export {
   seedAthletes,
   seedRecording,
   seedRide,
+  effortFor,
   segmentFor,
   signedRecordFor,
   streamSetFor,
@@ -68,5 +69,6 @@ export {
   memoryWriteStoreFactory,
   misroutedBlobStoreFactory,
   roundedClaimStoreFactory,
+  appendingEffortStoreFactory,
   thinnedGeometryStoreFactory,
 } from './fakes';

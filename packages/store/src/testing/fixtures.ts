@@ -57,7 +57,9 @@ import {
   degreesLatitudeToSemicircles,
   degreesLongitude,
   degreesLongitudeToSemicircles,
+  effortId,
   fitAltitudeToMetres,
+  kilograms,
   latitudeSemicircles,
   longitudeSemicircles,
   metres,
@@ -70,6 +72,7 @@ import {
   geographicPosition,
   unixSeconds,
   watts,
+  type EffortVisibility,
   type ElevationSource,
   type SegmentVisibility,
   type UnixSeconds,
@@ -80,14 +83,22 @@ import {
   athleteId,
   lapId,
   recordingSessionId,
+  segmentEffortId,
   segmentId,
   type ActivityId,
   type AthleteId,
   type LapId,
   type RecordingSessionId,
+  type SegmentId,
 } from '../ids';
 import type { DeviceKeyRecord, StoredActivityRecord } from '../identity';
-import type { AthleteRecord, NewActivity, NewLap, SegmentRecord } from '../records';
+import type {
+  AthleteRecord,
+  NewActivity,
+  NewLap,
+  SegmentEffortRecord,
+  SegmentRecord,
+} from '../records';
 import type { NewRecordingChunk, NewRecordingSession } from '../recording';
 import { STREAM_CHANNELS, type NewStreamSet, type Samples, type StreamChannel } from '../streams';
 import { signingKeyFor, webCryptoSha256 } from '../web-crypto';
@@ -542,4 +553,40 @@ export function segmentFor(
   // constructors is where the brand is applied, and it validates at the same
   // time.
   return { ...built, id: segmentId(built.id), createdBy: athleteId(built.createdBy) };
+}
+
+/**
+ * An effort fixture whose id is **derived**, exactly as the matcher derives it.
+ *
+ * ⚠️ Built through `@onyourleft/domain`'s `effortId` rather than by writing the
+ * three parts here, so that a fixture cannot disagree with the production key
+ * — which is the one field whose shape #66's idempotence criterion rests on.
+ */
+export function effortFor(
+  owner: AthleteId,
+  segment: SegmentId,
+  activity: ActivityId,
+  overrides: {
+    readonly startedAt?: UnixSeconds;
+    readonly elapsedSeconds?: number;
+    readonly deviationMetres?: number;
+    readonly visibility?: EffortVisibility;
+    readonly riderMassKilograms?: number;
+  } = {},
+): SegmentEffortRecord {
+  const startedAt = overrides.startedAt ?? FIXTURE_EPOCH;
+  return {
+    id: segmentEffortId(effortId(segment, activity, startedAt)),
+    athleteId: owner,
+    segmentId: segment,
+    activityId: activity,
+    startedAt,
+    elapsed: seconds(overrides.elapsedSeconds ?? 90),
+    deviation: metres(overrides.deviationMetres ?? 6),
+    visibility: overrides.visibility ?? 'public',
+    attributes:
+      overrides.riderMassKilograms === undefined
+        ? {}
+        : { riderMass: kilograms(overrides.riderMassKilograms) },
+  };
 }

@@ -69,6 +69,18 @@ export type RecordingSessionId = EntityId<'recording session'>;
  */
 export type SegmentId = EntityId<'segment'>;
 
+/**
+ * Identifies one segment effort (#66).
+ *
+ * ⚠️ **Derived, not minted.** `@onyourleft/domain`'s `effortId` builds it from
+ * the segment, the activity and the traversal's start instant, so re-running
+ * the matcher over a ride computes the *same* id and rewrites the row instead
+ * of adding a second. #66's sixth criterion — *"without this, every app restart
+ * inflates every leaderboard"* — is that property, and it lives in the key.
+ * Anything here that generates a fresh id per call breaks it silently.
+ */
+export type SegmentEffortId = EntityId<'segment effort'>;
+
 function assertUsableId(value: string, what: string): void {
   if (value.length === 0) {
     throw new StoreValidationError(`${what} must not be empty`);
@@ -115,4 +127,10 @@ export function recordingSessionId(value: string): RecordingSessionId {
 export function segmentId(value: string): SegmentId {
   assertUsableId(value, 'segment id');
   return value as SegmentId;
+}
+
+/** @throws {StoreValidationError} if empty or blank. */
+export function segmentEffortId(value: string): SegmentEffortId {
+  assertUsableId(value, 'segment effort id');
+  return value as SegmentEffortId;
 }

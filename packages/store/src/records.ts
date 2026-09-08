@@ -27,8 +27,10 @@
 import type {
   BeatsPerMinute,
   DegreesBearing,
+  EffortVisibility,
   ElevationSource,
   GradePercent,
+  Kilograms,
   Metres,
   Seconds,
   SegmentSport,
@@ -38,7 +40,14 @@ import type {
   GeographicPosition,
 } from '@onyourleft/domain';
 
-import type { ActivityId, AthleteId, LapId, PrivacyZoneId, SegmentId } from './ids';
+import type {
+  ActivityId,
+  AthleteId,
+  LapId,
+  PrivacyZoneId,
+  SegmentEffortId,
+  SegmentId,
+} from './ids';
 import type { Visibility } from './visibility';
 
 /**
@@ -101,6 +110,20 @@ export interface AthleteRecord {
 
   /** The athlete's threshold heart rate. Optional for the reason above. */
   readonly thresholdHeartRate?: BeatsPerMinute;
+
+  /**
+   * The athlete's recorded mass — what a weight-bucketed ranking would use.
+   *
+   * Optional, so it stays off the migration path for the reason above.
+   *
+   * ⚠️ **A ranking must not read this.** It is the *current* value, and #66's
+   * eighth criterion is that an effort's bucket is fixed when the effort is
+   * made: a rider who loses six kilograms this year did not thereby ride last
+   * year's climb in a different weight class. The value a board reads lives on
+   * `SegmentEffortRecord.attributes`, copied at creation. This field is only
+   * ever the *source* of that copy.
+   */
+  readonly mass?: Kilograms;
 }
 
 /** One recorded or imported ride. */
@@ -404,3 +427,98 @@ export type NewLap = Omit<LapRecord, 'athleteId'>;
  * path must already have a shape that cannot carry them.
  */
 export type ActivitySummary = Omit<ActivityRecord, 'originalFile'>;
+
+// --- #66: efforts, and the sweep that finds them ----------------------------
+
+/**
+ * One timed traversal of one segment, found in one activity.
+ *
+ * ⚠️ **The id is derived, not minted** — `@onyourleft/domain`'s `effortId`
+ * builds it from `segmentId`, `activityId` and `startedAt`, so an effort keeps
+ * the same identity when the ride is matched again. Anything holding a
+ * reference to one depends on that.
+ *
+ * ⚠️ **It is NOT what makes re-matching idempotent**, which is the plausible
+ * and wrong reading. That comes from `putActivityEfforts` replacing the
+ * activity's whole set; a store with random ids passes the three-runs test
+ * anyway, which `testing/fakes.ts` found by staying green. `schema.ts` has the
+ * long version.
+ *
+ * ⚠️ **No reference to a stream, and no geometry.** An effort is two indices'
+ * worth of information about an activity that is already stored; copying the
+ * traversed coordinates here would double the storage and give a shared board
+ * a second place to leak a position from.
+ */
+export interface SegmentEffortRecord {
+  readonly id: SegmentEffortId;
+  /** The owning athlete. Every read of this record filters on it. */
+  readonly athleteId: AthleteId;
+  readonly segmentId: SegmentId;
+  /** The activity it was found in. Cascades when that activity is deleted. */
+  readonly activityId: ActivityId;
+
+  readonly startedAt: UnixSeconds;
+  /**
+   * The traversal time, from two **recorded** timestamps.
+   *
+   * Indexed as the last component of `[athleteId+segmentId+elapsed]`, so a
+   * personal best is the first row of an index lookup rather than a sort.
+   */
+  readonly elapsed: Seconds;
+  /** How far the ride strayed from the segment. Kept so a match is auditable. */
+  readonly deviation: Metres;
+
+  /**
+   * ⚠️ **Three states, never a boolean.** `private-match` is an effort the
+   * athlete should see and a leaderboard row that would publish their home
+   * address; a two-state field forces a choice between losing their history and
+   * publishing where they live. `@onyourleft/domain`'s `countsTowardPersonalBest`
+   * and `countsOnSharedBoard` are the two readers, and they disagree about
+   * exactly this value.
+   */
+  readonly visibility: EffortVisibility;
+
+  /**
+   * What the athlete looked like **when the effort was made**.
+   *
+   * ⚠️ Copied at creation and never retro-migrated (#66). Nothing may replace a
+   * value here with a lookup against `AthleteRecord` — that produces a board
+   * which looks right and quietly rewrites history whenever somebody edits
+   * their profile, and no test of a single ranking catches it.
+   */
+  readonly attributes: FrozenEffortAttributes;
+}
+
+/** The frozen copy. Mirrors `@onyourleft/domain`'s `FrozenAttributes`. */
+export interface FrozenEffortAttributes {
+  readonly riderMass?: Kilograms;
+}
+
+/**
+ * How far a backfill sweep has got, so killing it mid-run does not start over.
+ *
+ * #66's fifth criterion: backfilling a new segment across a thousand stored
+ * activities is a background job with progress, not a request, and it must be
+ * resumable.
+ *
+ * ⚠️ **This is an optimisation, not the correctness mechanism.** What makes a
+ * resumed run produce the same effort count as a clean one is the derived
+ * effort id, not this row. A lost checkpoint costs time and cannot corrupt
+ * anything — keep that property if you change this.
+ */
+export interface MatchCheckpointRecord {
+  /** One sweep at a time per athlete, which is why this is the key. */
+  readonly athleteId: AthleteId;
+  /**
+   * The `startedAt` of the last activity swept, exclusive of nothing.
+   *
+   * Activities are swept in `startedAt` order, so this plus `lastActivityId`
+   * says exactly where to resume. Storing the *instant* rather than an offset
+   * means an activity imported mid-sweep does not shift the cursor under it.
+   */
+  readonly lastStartedAt: UnixSeconds;
+  readonly lastActivityId: ActivityId;
+  /** How many activities the sweep has covered. For the progress the issue asks for. */
+  readonly swept: number;
+  readonly updatedAt: UnixSeconds;
+}
