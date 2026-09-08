@@ -26,6 +26,8 @@
 #   ADR002  every ADR filename is NNNN-kebab-case.md
 #   ADR003  an ADR's "## Amendments" section is single, last, dated, and in
 #           date order -- and no unclosed fence hides it
+#   REL001  no signing key material is committed anywhere (#95)
+#   REL002  the Android build targets at least API 36 (#95)
 #
 # Usage: scripts/check-repo-rules.sh [ROOT]   (ROOT defaults to the repo root)
 # Exit:  0 clean, 1 if any rule is violated.
@@ -455,6 +457,88 @@ check_adr_amendments() {
 if [ -d "${ROOT}/docs/adr" ]; then
   check_adr_amendments
 fi
+
+# --- REL001: no signing key material, anywhere ---------------------------------
+# #95's first acceptance criterion: *"signing keys are in CI secrets and NEVER in
+# the repo -- a test or scan asserts no keystore or key material is committed"*.
+#
+# ⚠️ This is the one rule in this file whose violation cannot be undone by fixing
+# it. A pushed commit is permanent regardless of what a later commit deletes, and
+# an Android upload key that leaks is not rotatable: Play identifies the app by
+# the key, so a compromised one is a compromised app identity. Secret scanning
+# with push protection is on for this repository and would catch some of these,
+# but it runs server-side after a push is attempted -- this runs on a bare clone,
+# before, and with no toolchain.
+#
+# Matched by NAME rather than by content, deliberately. A keystore is a binary
+# blob with no reliable magic this can grep for, and a rule that tried to read
+# them would fail open on the one that was encrypted or renamed. Names are what a
+# build tool requires, so a key that is actually usable by Gradle has one of
+# them.
+KEY_MATERIAL_NAMES='.*\.(jks|keystore|p12|pfx|key)$|^keystore\.properties$|^(release|upload)-key\.'
+
+check_no_key_material() {
+  while IFS= read -r file; do
+    [ -n "${file}" ] || continue
+    base="$(basename "${file}")"
+    relative="${file#"${ROOT}"/}"
+    if printf '%s' "${base}" | grep -qE "${KEY_MATERIAL_NAMES}"; then
+      report REL001 "${relative}: looks like signing key material; keys belong in CI secrets and never in the repository (#95)"
+    fi
+  done < <(find "${ROOT}" -type f \
+    -not -path '*/node_modules/*' \
+    -not -path '*/.git/*' \
+    -not -path '*/dist/*' \
+    -not -path '*/build/*' \
+    -not -path '*/fixtures/*' | sort)
+
+  # A PEM private key carries its own banner, so this one IS checkable by
+  # content -- and it is the case a name rule misses, because a private key
+  # pasted into a config file has whatever name that file had.
+  while IFS= read -r hit; do
+    [ -n "${hit}" ] || continue
+    relative="${hit%%:*}"
+    relative="${relative#"${ROOT}"/}"
+    # This script and its own suite name the banner in order to look for it.
+    case "${relative}" in
+      scripts/check-repo-rules.sh | scripts/check-repo-rules.test.sh) continue ;;
+    esac
+    report REL001 "${relative}: contains a PRIVATE KEY block (#95)"
+  done < <(grep -rlE -- '-----BEGIN [A-Z ]*PRIVATE KEY-----' "${ROOT}" \
+    --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=build \
+    2>/dev/null | sed 's/$/:/' | sort)
+}
+
+check_no_key_material
+
+# --- REL002: the Android build targets a current API level --------------------
+# #95: *"The app targets API 36 and the build fails if the target level regresses
+# below it."* Google requires new apps and updates to target Android 16 (API 36);
+# #95 records that sources disagree on the exact enforcement date and that Play
+# Console is authoritative for the account.
+#
+# ⚠️ Checked here rather than in Gradle, and that is the point of the criterion.
+# A Gradle assertion fails for whoever runs a build -- and nobody in this
+# environment can run one, because there is no Android SDK and dl.google.com is
+# refused by the egress proxy (apps/mobile/README.md section 4). A rule that only
+# fires inside a build nobody can run is a rule that never fires. This one runs
+# on a bare clone, in the same CI step as every other repository rule.
+MINIMUM_TARGET_SDK=36
+
+check_android_target_sdk() {
+  variables="${ROOT}/apps/mobile/android/variables.gradle"
+  [ -f "${variables}" ] || return 0
+  target="$(grep -oE 'targetSdkVersion[[:space:]]*=[[:space:]]*[0-9]+' "${variables}" | grep -oE '[0-9]+$' | head -1)"
+  if [ -z "${target}" ]; then
+    report REL002 "apps/mobile/android/variables.gradle: declares no targetSdkVersion (#95)"
+    return 0
+  fi
+  if [ "${target}" -lt "${MINIMUM_TARGET_SDK}" ]; then
+    report REL002 "apps/mobile/android/variables.gradle: targetSdkVersion ${target} is below the required ${MINIMUM_TARGET_SDK} (#95)"
+  fi
+}
+
+check_android_target_sdk
 
 # --- Result -------------------------------------------------------------------
 

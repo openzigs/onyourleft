@@ -1064,6 +1064,89 @@ printf '<?xml version="1.0"?>\n<widget />\n' \
   > "${fixture_root}/apps/mobile/android/app/src/main/res/xml/config.xml"
 assert_clean "the generated res/xml/config.xml is not scanned"
 
+# --- REL001: signing key material must never be committed (#95) --------------
+#
+# The one rule here whose violation cannot be undone by fixing it: a pushed
+# commit is permanent regardless of what a later commit deletes, and an Android
+# upload key is not rotatable — Play identifies the app by the key.
+
+new_fixture
+mkdir -p "${fixture_root}/apps/mobile/android/app"
+printf 'not really a keystore\n' > "${fixture_root}/apps/mobile/android/app/release.jks"
+assert_violation "a committed .jks keystore is rejected" REL001 "release.jks"
+
+new_fixture
+mkdir -p "${fixture_root}/apps/mobile/android"
+printf 'storePassword=hunter2\n' > "${fixture_root}/apps/mobile/android/keystore.properties"
+assert_violation "a committed keystore.properties is rejected" REL001 "keystore.properties"
+
+new_fixture
+mkdir -p "${fixture_root}/apps/mobile"
+printf 'binary\n' > "${fixture_root}/apps/mobile/upload.keystore"
+assert_violation "a committed .keystore is rejected" REL001 "upload.keystore"
+
+new_fixture
+mkdir -p "${fixture_root}/apps/mobile"
+printf 'binary\n' > "${fixture_root}/apps/mobile/service-account.p12"
+assert_violation "a committed .p12 is rejected" REL001 "service-account.p12"
+
+# The case a name rule cannot catch: a private key pasted into a file whose name
+# says nothing. This is why REL001 has a content half as well as a name half.
+new_fixture
+mkdir -p "${fixture_root}/apps/mobile"
+printf 'signing:\n  pem: |\n    -----BEGIN RSA PRIVATE KEY-----\n    AAAA\n    -----END RSA PRIVATE KEY-----\n' \
+  > "${fixture_root}/apps/mobile/config.yml"
+assert_violation "a PRIVATE KEY block in an innocently-named file is rejected" REL001 \
+  "config.yml"
+
+# And the false positive that would make the rule unusable: ordinary files whose
+# names merely resemble the pattern, and a PUBLIC key, which is not a secret.
+new_fixture
+mkdir -p "${fixture_root}/packages/domain/src"
+printf '// SPDX-License-Identifier: Apache-2.0\nexport const monkey = 1;\n' \
+  > "${fixture_root}/packages/domain/src/monkey.ts"
+printf '# Apache\n' > "${fixture_root}/packages/domain/LICENSE"
+printf '{"license":"Apache-2.0"}\n' > "${fixture_root}/packages/domain/package.json"
+printf -- '-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n' \
+  > "${fixture_root}/packages/domain/device.pub"
+assert_clean "a public key and a file named monkey.ts are not key material"
+
+# --- REL002: the Android build targets a current API level (#95) -------------
+#
+# Checked here rather than in Gradle because nobody in this environment can run
+# a Gradle build — no Android SDK, and dl.google.com is refused by the egress
+# proxy. A rule that only fires inside a build nobody can run never fires.
+
+new_fixture
+mkdir -p "${fixture_root}/apps/mobile/android"
+printf 'ext {\n    minSdkVersion = 24\n    targetSdkVersion = 34\n}\n' \
+  > "${fixture_root}/apps/mobile/android/variables.gradle"
+assert_violation "a targetSdkVersion below 36 is rejected" REL002 "targetSdkVersion 34"
+
+new_fixture
+mkdir -p "${fixture_root}/apps/mobile/android"
+printf 'ext {\n    minSdkVersion = 24\n}\n' \
+  > "${fixture_root}/apps/mobile/android/variables.gradle"
+assert_violation "a variables.gradle with no targetSdkVersion is rejected" REL002 \
+  "declares no targetSdkVersion"
+
+new_fixture
+mkdir -p "${fixture_root}/apps/mobile/android"
+printf '// SPDX-License-Identifier: AGPL-3.0-or-later\next {\n    minSdkVersion = 24\n    targetSdkVersion = 36\n}\n' \
+  > "${fixture_root}/apps/mobile/android/variables.gradle"
+assert_clean "targetSdkVersion 36 passes"
+
+new_fixture
+mkdir -p "${fixture_root}/apps/mobile/android"
+printf '// SPDX-License-Identifier: AGPL-3.0-or-later\next {\n    targetSdkVersion = 37\n}\n' \
+  > "${fixture_root}/apps/mobile/android/variables.gradle"
+assert_clean "a targetSdkVersion above the floor passes, rather than being pinned"
+
+# A repository with no Android project at all must stay clean: this rule is
+# about apps/mobile and must not fail every other clone.
+new_fixture
+assert_clean "a tree with no android/ directory is not a REL002 violation"
+
 # --- The real repository must pass -------------------------------------------
 
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"

@@ -24,7 +24,6 @@ import { expect, test } from '@playwright/test';
 
 import { HARNESS_ORIGIN } from '../playwright.config';
 
-
 /** What `game-harness.ts` publishes. Mirrored rather than imported — see below. */
 interface GameHarnessResult {
   readonly created: boolean;

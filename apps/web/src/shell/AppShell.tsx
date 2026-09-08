@@ -38,6 +38,7 @@
 
 import { useEffect, useRef, type JSX, type MouseEvent } from 'react';
 
+import { GameView } from '../game/GameView';
 import { AboutView } from '../views/AboutView';
 import { ActivitiesView } from '../views/ActivitiesView';
 import { ActivityDetailView } from '../views/ActivityDetailView';
@@ -94,6 +95,18 @@ export interface AppShellProps {
    * cannot-pair-here screen, which is also what Safari and Firefox get.
    */
   readonly rideController?: RideController | undefined;
+  /**
+   * The trainer game's store reads and sensor sampling (#85).
+   *
+   * Passed in for exactly the reason the two above are, plus one more: the
+   * renderer needs WebGL, which jsdom does not implement at all, so the
+   * accessibility suite renders this route with `gameRenderer` absent and gets
+   * the route picker. `game/port.ts` records that a view with no context is an
+   * ordinary state rather than an error.
+   */
+  readonly game?: import('../game/GameView').GamePort | undefined;
+  readonly gameRenderer?: (() => Promise<import('../game/port').GameRenderer>) | undefined;
+  readonly screenLock?: import('../game/hud/wake-lock').ScreenLockSource | undefined;
   /**
    * The import and export screen's store, clock and file handling (#51).
    *
@@ -204,6 +217,10 @@ function viewFor(match: RouteMatch, props: AppShellProps): JSX.Element {
       return <RoutesView port={props.routes} save={props.transfer?.save} />;
     case 'workouts':
       return <WorkoutsView port={props.workouts} />;
+    case 'game':
+      return (
+        <GameView port={props.game} renderer={props.gameRenderer} screenLock={props.screenLock} />
+      );
     case 'segment-detail':
       return <SegmentDetailView port={props.efforts} segment={match.parameter} />;
     case 'devices':
