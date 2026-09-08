@@ -92,6 +92,16 @@ export type SegmentEffortId = EntityId<'segment effort'>;
  */
 export type RouteId = EntityId<'route'>;
 
+/**
+ * A saved workout (#14).
+ *
+ * Distinct from `RouteId` for the reason that one is distinct from
+ * `ActivityId`: a route is *where* and a workout is *how hard*, they are
+ * ridden together and independently, and a shared brand would make one
+ * substitutable for the other in `startWorkout(routeId)` — which compiles.
+ */
+export type WorkoutId = EntityId<'workout'>;
+
 function assertUsableId(value: string, what: string): void {
   if (value.length === 0) {
     throw new StoreValidationError(`${what} must not be empty`);
@@ -150,4 +160,10 @@ export function segmentEffortId(value: string): SegmentEffortId {
 export function routeId(value: string): RouteId {
   assertUsableId(value, 'route id');
   return value as RouteId;
+}
+
+/** @throws {StoreValidationError} if empty or blank. */
+export function workoutId(value: string): WorkoutId {
+  assertUsableId(value, 'workout id');
+  return value as WorkoutId;
 }

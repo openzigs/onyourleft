@@ -37,7 +37,7 @@ import type { RecoveredRecording } from '../recording';
 import type { StreamChannel, StreamChannels, StreamSet } from '../streams';
 import { STREAM_CHANNELS, type NewStreamSet } from '../streams';
 
-import type { RouteRecord, SegmentEndpointRecord, SegmentRecord } from '../records';
+import type { RouteRecord, SegmentEndpointRecord, SegmentRecord, WorkoutRecord } from '../records';
 import type { StoreHarness } from './harness';
 
 /**
@@ -473,6 +473,74 @@ export async function assertRouteRoundTrip(
     if (expected.latitude !== actual.latitude || expected.longitude !== actual.longitude) {
       throw new RoundTripFailure(
         `route.positions[${String(index)}]: the position that came back is not the one written`,
+      );
+    }
+  }
+  return read;
+}
+
+/**
+ * Write a workout, close every connection, read it back through a fresh one,
+ * and compare block by block.
+ *
+ * ⚠️ **The block count is compared on its own line, before any block is
+ * looked at.** A workout that lost its last block is a valid workout with the
+ * right name and the right first blocks, and a comparison that walked the
+ * written blocks against the read ones would find every one it looked at
+ * correct and never notice the missing one.
+ * `truncatedWorkoutStoreFactory` in `fakes.ts` is the store that does exactly
+ * that, and it is caught here and nowhere else.
+ *
+ * @throws {RoundTripFailure}
+ */
+export async function assertWorkoutRoundTrip(
+  harness: StoreHarness,
+  workout: WorkoutRecord,
+): Promise<WorkoutRecord> {
+  const read = await harness.roundTrip(
+    async (store) => store.putWorkout(workout),
+    async (store) => store.getWorkout(workout.createdBy, workout.id),
+  );
+
+  if (read === undefined) {
+    throw new RoundTripFailure(
+      `workout ${workout.id} was written and reported success, and a fresh connection cannot see it`,
+    );
+  }
+
+  requireEqual('workout.blocks.length', workout.workout.blocks.length, read.workout.blocks.length);
+  requireEqual('workout.id', workout.id, read.id);
+  requireEqual('workout.createdBy', workout.createdBy, read.createdBy);
+  requireEqual('workout.name', workout.name, read.name);
+  requireEqual('workout.workout.name', workout.workout.name, read.workout.name);
+  requireEqual('workout.createdAt', workout.createdAt, read.createdAt);
+  requireEqual('workout.updatedAt', workout.updatedAt, read.updatedAt);
+
+  for (const [index, expected] of workout.workout.blocks.entries()) {
+    const actual = read.workout.blocks[index];
+    if (actual === undefined) {
+      throw new RoundTripFailure(`workout.blocks[${String(index)}]: missing after the round trip`);
+    }
+    const at = `workout.blocks[${String(index)}]`;
+    requireEqual(`${at}.kind`, expected.kind, actual.kind);
+    // ⚠️ Field by field over what the WRITTEN block declares, and deliberately
+    // not over the key sets of both.
+    //
+    // A key-set comparison stood here and was removed: the only thing it caught
+    // that this loop does not is a block that came back with an *extra*
+    // property, and mutation-testing found that nothing in the suite could tell
+    // its presence from its absence. It also would not matter — the player and
+    // the timeline both switch on `kind` and read named fields, so a stray
+    // property on a stored block is inert, where a *missing* or a *changed* one
+    // is the whole game and is caught below.
+    //
+    // Still a structural walk rather than a deep-equality helper, so a failure
+    // names the block and the field rather than printing two objects.
+    for (const key of Object.keys(expected)) {
+      requireEqual(
+        `${at}.${key}`,
+        (expected as unknown as Record<string, unknown>)[key],
+        (actual as unknown as Record<string, unknown>)[key],
       );
     }
   }

@@ -39,6 +39,7 @@ import type {
   UnixSeconds,
   Watts,
   GeographicPosition,
+  Workout,
 } from '@onyourleft/domain';
 
 import type {
@@ -49,6 +50,7 @@ import type {
   SegmentEffortId,
   SegmentId,
   RouteId,
+  WorkoutId,
 } from './ids';
 import type { Visibility } from './visibility';
 
@@ -553,6 +555,44 @@ export interface MatchCheckpointRecord {
  * optimisation. A route imported from a file carries the file's geometry and
  * nothing about the road network it was planned on.
  */
+/**
+ * A saved structured workout — #14.
+ *
+ * ⚠️ **This is the only record in the store whose contents become a command to
+ * a trainer.** A ride's samples are a report of something that happened; a
+ * route is a line to look at. A workout's blocks are turned into
+ * `setTargetPower` writes against a machine applying physical resistance to
+ * somebody pedalling, which CLAUDE.md section 6 puts in the safety class. That
+ * is why the read path in `persisted.ts` puts a decoded workout back through
+ * `validateWorkout` rather than trusting the row: a corrupted or hand-edited
+ * IndexedDB entry must produce a `StoreDecodeError`, not a setpoint.
+ *
+ * ⚠️ **The blocks are stored, not the timeline.** `expandWorkout` is cheap and
+ * deterministic, and a stored expansion would be the second copy that goes
+ * stale — `records.ts`'s own argument for why a ride stores half a load rather
+ * than a whole one. It is also the opposite call from `RouteRecord`, which
+ * stores its whole computed profile; the difference is that a profile is
+ * derived from source data the store does not keep, and a timeline is derived
+ * from the blocks in the row beside it.
+ */
+export interface WorkoutRecord {
+  readonly id: WorkoutId;
+  /** The athlete who saved it. Every read of this record filters on it. */
+  readonly createdBy: AthleteId;
+  /** What the rider calls it. The workout's own `name` is the same string. */
+  readonly name: string;
+  /** The blocks, exactly as `validateWorkout` accepts them. */
+  readonly workout: Workout;
+  readonly createdAt: UnixSeconds;
+  /**
+   * When this workout was last written. The optimistic-concurrency token, and
+   * it means here exactly what `RouteRecord.updatedAt` means — including that
+   * `packages/store` does not enforce it, because what to tell the rider is a
+   * product decision.
+   */
+  readonly updatedAt: UnixSeconds;
+}
+
 export interface RouteRecord {
   readonly id: RouteId;
   /** The athlete who saved it. Every read of this record filters on it. */

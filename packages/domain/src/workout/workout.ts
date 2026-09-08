@@ -87,14 +87,25 @@ export const MAXIMUM_REPEATS = 100;
  */
 export function thresholdShare(value: number): ThresholdShare {
   if (!Number.isFinite(value) || value < MINIMUM_SHARE || value > MAXIMUM_SHARE) {
-    throw new WorkoutError(
-      'target-out-of-range',
-      `a power target must be a share of threshold between ${String(MINIMUM_SHARE)} and ` +
-        `${String(MAXIMUM_SHARE)}; received ${String(value)}. A target of 0.88 is 88% of ` +
-        'threshold — if you meant 88, that is 88 times threshold.',
-    );
+    throw new WorkoutError('target-out-of-range', shareRefusal(value));
   }
   return value as ThresholdShare;
+}
+
+/**
+ * The one wording for an out-of-range target, spelled once.
+ *
+ * Shared by the constructor and by `assertShare` below rather than written
+ * twice, so the two cannot drift — a rider who meets it through a bad file and
+ * a developer who meets it through a bad literal are looking at the same
+ * mistake and should be told the same thing.
+ */
+function shareRefusal(value: number, where = 'a power target'): string {
+  return (
+    `${where} must be a share of threshold between ${String(MINIMUM_SHARE)} and ` +
+    `${String(MAXIMUM_SHARE)}; received ${String(value)}. A target of 0.88 is 88% of ` +
+    'threshold — if you meant 88, that is 88 times threshold.'
+  );
 }
 
 /**
@@ -195,15 +206,22 @@ function validateBlock(block: WorkoutBlock, index: number): void {
   const where = `block ${String(index + 1)}`;
   switch (block.kind) {
     case 'steady':
+      assertDuration(block.seconds, where);
+      assertShare(block.target, `${where}'s target`);
+      return;
     case 'free-ride':
       assertDuration(block.seconds, where);
       return;
     case 'ramp':
       assertDuration(block.seconds, where);
+      assertShare(block.from, `${where} starts at a target that`);
+      assertShare(block.to, `${where} ends at a target that`);
       return;
     case 'intervals':
       assertDuration(block.hardSeconds, `${where}'s hard interval`);
       assertDuration(block.easySeconds, `${where}'s easy interval`);
+      assertShare(block.hardTarget, `${where}'s hard target`);
+      assertShare(block.easyTarget, `${where}'s easy target`);
       if (
         !Number.isInteger(block.repeats) ||
         block.repeats < 1 ||
@@ -231,6 +249,30 @@ function validateBlock(block: WorkoutBlock, index: number): void {
           `${JSON.stringify(unhandled)}`,
       );
     }
+  }
+}
+
+/**
+ * Re-check a target that is already typed as a {@link ThresholdShare}.
+ *
+ * ⚠️ **This is not belt and braces, it is the only brace that survives the
+ * one situation that matters.** `thresholdShare()` is a *constructor* guard: it
+ * runs when a workout is built in TypeScript. A workout that arrives as data —
+ * decoded from a store row, from a file once #202 gives us a format, from
+ * anything that reached the brand past a cast — never went through it, and the
+ * brand is a compile-time fiction at that point. `assertDuration` below exists
+ * for exactly that reason and this is its sibling; a workout whose duration is
+ * checked and whose target is not is checked in the half where a wrong number
+ * is merely a short interval, and unchecked in the half where it is a trainer
+ * asked for 88 times threshold.
+ *
+ * The message is the constructor's, word for word, because a rider meeting it
+ * through a bad file and a developer meeting it through a bad literal are
+ * looking at the same mistake.
+ */
+function assertShare(value: ThresholdShare, where: string): void {
+  if (!Number.isFinite(value) || value < MINIMUM_SHARE || value > MAXIMUM_SHARE) {
+    throw new WorkoutError('target-out-of-range', shareRefusal(value, where));
   }
 }
 

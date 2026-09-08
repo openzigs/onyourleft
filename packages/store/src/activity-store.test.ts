@@ -618,6 +618,7 @@ describe('on-delete behaviour — cascade, chosen explicitly', () => {
       segments: 0,
       efforts: 0,
       routes: 0,
+      workouts: 0,
     });
 
     // Re-create the athlete before reading. If the cascade had left the rows
@@ -671,6 +672,7 @@ describe('on-delete behaviour — cascade, chosen explicitly', () => {
       segments: 0,
       efforts: 0,
       routes: 0,
+      workouts: 0,
       streamSets: 0,
       recordings: 0,
     });

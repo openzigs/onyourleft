@@ -71,6 +71,7 @@ import {
   semicirclesToDegreesLatitude,
   semicirclesToDegreesLongitude,
   geographicPosition,
+  thresholdShare,
   unixSeconds,
   watts,
   type EffortVisibility,
@@ -78,6 +79,7 @@ import {
   type RoutePoint,
   type SegmentVisibility,
   type UnixSeconds,
+  type WorkoutBlock,
 } from '@onyourleft/domain';
 
 import {
@@ -88,6 +90,7 @@ import {
   routeId,
   segmentEffortId,
   segmentId,
+  workoutId,
   type ActivityId,
   type AthleteId,
   type LapId,
@@ -102,6 +105,7 @@ import type {
   RouteRecord,
   SegmentEffortRecord,
   SegmentRecord,
+  WorkoutRecord,
 } from '../records';
 import type { NewRecordingChunk, NewRecordingSession } from '../recording';
 import { STREAM_CHANNELS, type NewStreamSet, type Samples, type StreamChannel } from '../streams';
@@ -159,6 +163,7 @@ export function resetFixtureIds(): void {
   recordingCounter = 0;
   segmentCounter = 0;
   routeCounter = 0;
+  workoutCounter = 0;
 }
 
 /**
@@ -597,6 +602,7 @@ export function effortFor(
   };
 }
 
+let workoutCounter = 0;
 let routeCounter = 0;
 
 /**
@@ -677,6 +683,60 @@ export function routeFor(
     createdAt: unixSeconds(FIXTURE_EPOCH),
     updatedAt: unixSeconds(overrides.updatedAt ?? FIXTURE_EPOCH),
   };
+}
+
+/**
+ * A saved workout with **every block kind in it**, which is the point.
+ *
+ * A fixture of three steady blocks would round-trip through a store that
+ * forgot how to persist a ramp's two endpoints or an intervals block's
+ * repeats, and say nothing. This one carries a steady, a ramp, an intervals
+ * block and a free ride, so the round trip covers the whole discriminated
+ * union rather than its easiest member.
+ */
+export function workoutFor(
+  owner: AthleteId,
+  overrides: {
+    readonly name?: string;
+    readonly updatedAt?: number;
+    readonly blocks?: readonly WorkoutBlock[];
+  } = {},
+): WorkoutRecord {
+  workoutCounter += 1;
+  const name = overrides.name ?? `Workout ${String(workoutCounter)}`;
+  const blocks: readonly WorkoutBlock[] = overrides.blocks ?? [
+    { kind: 'steady', seconds: seconds(600), target: thresholdShare(0.6), label: 'Warm up' },
+    { kind: 'ramp', seconds: seconds(300), from: thresholdShare(0.6), to: thresholdShare(1.05) },
+    {
+      kind: 'intervals',
+      repeats: 4,
+      hardSeconds: seconds(180),
+      hardTarget: thresholdShare(1.1),
+      easySeconds: seconds(120),
+      easyTarget: thresholdShare(0.5),
+      label: '4 × 3',
+    },
+    { kind: 'free-ride', seconds: seconds(420), label: 'Spin down' },
+  ];
+  return {
+    id: workoutId(`workout-${String(workoutCounter)}`),
+    createdBy: owner,
+    name,
+    workout: { name, blocks },
+    createdAt: unixSeconds(FIXTURE_EPOCH),
+    updatedAt: unixSeconds(overrides.updatedAt ?? FIXTURE_EPOCH),
+  };
+}
+
+/** Writes a workout for `owner` and returns it. The athlete must already exist. */
+export async function seedWorkout(
+  harness: StoreHarness,
+  owner: AthleteId,
+  overrides: Parameters<typeof workoutFor>[1] = {},
+): Promise<WorkoutRecord> {
+  const workout = workoutFor(owner, overrides);
+  await harness.write(async (store) => store.putWorkout(workout));
+  return workout;
 }
 
 /** Writes a route for `owner` and returns it. The athlete must already exist. */

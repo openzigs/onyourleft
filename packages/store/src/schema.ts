@@ -47,7 +47,7 @@
  * Bumping this for a change that *does* alter a record's shape means adding a
  * migration pair.
  */
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 /**
  * Dexie stores its schema version in IndexedDB multiplied by ten, leaving room
@@ -88,6 +88,8 @@ export const TABLE = {
   matchCheckpoints: 'matchCheckpoints',
   /** #89: one row per saved route — a line to ride, and the profile built from it. */
   routes: 'routes',
+  /** #14: one row per saved workout — the blocks, not a rendering of them. */
+  workouts: 'workouts',
 } as const;
 
 /**
@@ -196,6 +198,20 @@ export const INDEX = {
   /** #89: `listRoutes`, newest first — and `deleteAthlete`'s cascade. */
   routeByOwnerAndCreatedAt: '[createdBy+createdAt]',
   routeByOwner: 'createdBy',
+  /**
+   * #14: `getWorkout` — the athlete-scoped point lookup.
+   *
+   * ⚠️ The three workout indexes are **string-identical** to the three route
+   * ones and are still named separately. Dexie resolves an index by its key
+   * path per table, so sharing the constant would work today and would read as
+   * a claim that the two stores are the same shape — which is how a query
+   * against the wrong table gets written. `segments` and `routes` are already
+   * separate for the same reason; this is the third.
+   */
+  workoutByOwnerAndId: '[createdBy+id]',
+  /** #14: `listWorkouts`, newest first — and `deleteAthlete`'s cascade. */
+  workoutByOwnerAndCreatedAt: '[createdBy+createdAt]',
+  workoutByOwner: 'createdBy',
 } as const;
 
 /**
@@ -464,6 +480,32 @@ export const STORES_V7: Readonly<Record<string, string>> = {
   ].join(', '),
 };
 
+/**
+ * Version 8 — #14's saved workouts, added beside the twelve stores that exist.
+ *
+ * The same shape as `routes`, and for the same reason: keyed on `id`, with
+ * every index leading with `createdBy`, so no index answers "the workout with
+ * this id" without also being told whose it is.
+ *
+ * ⚠️ **No `visibility` column, and that is a decision rather than an
+ * omission.** ADR 0004's default exists because a route or a ride carries
+ * *coordinates* — a route's endpoints are usually the athlete's front door. A
+ * workout carries none: it is durations and fractions of a threshold, and the
+ * threshold itself is not stored on it. So the privacy machinery would be
+ * ceremony around a record with nothing private in it. If a later issue shares
+ * workouts between athletes it adds the column and the migration; adding it now
+ * would be a field every read has to interpret and no read can act on.
+ */
+export const STORES_V8: Readonly<Record<string, string>> = {
+  // The twelve stores of versions 1 to 7 are inherited unchanged.
+  [TABLE.workouts]: [
+    'id',
+    INDEX.workoutByOwner,
+    INDEX.workoutByOwnerAndId,
+    INDEX.workoutByOwnerAndCreatedAt,
+  ].join(', '),
+};
+
 export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V1,
   STORES_V2,
@@ -472,4 +514,5 @@ export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V5,
   STORES_V6,
   STORES_V7,
+  STORES_V8,
 ];

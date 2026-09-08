@@ -12,6 +12,7 @@ import {
   thresholdShare,
   validateWorkout,
   type SteadyBlock,
+  type ThresholdShare,
   type Workout,
   type WorkoutBlock,
 } from './workout';
@@ -140,5 +141,86 @@ describe('validation refuses a workout rather than clamping it', () => {
       ),
     );
     expect(error.message).toContain('easy interval');
+  });
+});
+
+describe('a target that reached the brand past a cast is still refused', () => {
+  // ⚠️ These casts are the point. `thresholdShare()` is a CONSTRUCTOR guard, so
+  // it never ran for a workout that arrived as data — a store row, or a file
+  // once #202 gives us a format. The brand is a compile-time fiction at that
+  // point, and `validateWorkout` is the only thing standing between a bad
+  // number and a trainer. Every case below is a workout that typechecks.
+  const forged = (value: number) => value as unknown as ThresholdShare;
+
+  it('refuses a percentage in a steady block', () => {
+    const error = refusal(() =>
+      validateWorkout(workout([{ kind: 'steady', seconds: seconds(60), target: forged(88) }])),
+    );
+    expect(error.code).toBe('target-out-of-range');
+    expect(error.message).toContain('88 times threshold');
+  });
+
+  it('names which end of a ramp is wrong', () => {
+    expect(
+      refusal(() =>
+        validateWorkout(
+          workout([
+            {
+              kind: 'ramp',
+              seconds: seconds(60),
+              from: thresholdShare(0.6),
+              to: forged(250),
+            },
+          ]),
+        ),
+      ).message,
+    ).toContain('ends at a target');
+  });
+
+  it('checks both targets of an intervals block', () => {
+    const bad = (overrides: { hard?: number; easy?: number }) =>
+      refusal(() =>
+        validateWorkout(
+          workout([
+            {
+              kind: 'intervals',
+              repeats: 3,
+              hardSeconds: seconds(60),
+              hardTarget: forged(overrides.hard ?? 1.1),
+              easySeconds: seconds(60),
+              easyTarget: forged(overrides.easy ?? 0.5),
+            },
+          ]),
+        ),
+      );
+    expect(bad({ hard: 40 }).message).toContain('hard target');
+    expect(bad({ easy: 0 }).message).toContain('easy target');
+  });
+
+  it('refuses a NaN target, which no comparison alone would catch', () => {
+    // `NaN < MINIMUM_SHARE` and `NaN > MAXIMUM_SHARE` are both false, so a
+    // range check without the finiteness test lets it through — and a trainer
+    // asked for NaN watts is a write nobody can predict.
+    expect(
+      refusal(() =>
+        validateWorkout(workout([{ kind: 'steady', seconds: seconds(60), target: forged(NaN) }])),
+      ).code,
+    ).toBe('target-out-of-range');
+  });
+
+  it('says the same thing the constructor says', () => {
+    // One wording, spelled once. A rider meeting this through a bad file and a
+    // developer meeting it through a bad literal are looking at one mistake.
+    const fromConstructor = refusal(() => thresholdShare(88)).message;
+    const fromValidation = refusal(() =>
+      validateWorkout(workout([{ kind: 'steady', seconds: seconds(60), target: forged(88) }])),
+    ).message;
+    expect(fromValidation).toContain(fromConstructor.slice(fromConstructor.indexOf('must be')));
+  });
+
+  it('leaves a free ride alone, because it has no target to check', () => {
+    expect(() =>
+      validateWorkout(workout([{ kind: 'free-ride', seconds: seconds(60) }])),
+    ).not.toThrow();
   });
 });

@@ -70,6 +70,7 @@ import type {
   PrivacyZoneId,
   RecordingSessionId,
   RouteId,
+  WorkoutId,
   SegmentId,
 } from './ids';
 import {
@@ -94,12 +95,15 @@ import {
   fromPersistedSegment,
   toPersistedSegment,
   fromPersistedRoute,
+  fromPersistedWorkout,
   toPersistedRoute,
+  toPersistedWorkout,
   type PersistedActivity,
   type PersistedAthlete,
   type PersistedLap,
   type PersistedPrivacyZone,
   type PersistedRoute,
+  type PersistedWorkout,
   type PersistedSegment,
 } from './persisted';
 import type {
@@ -114,6 +118,7 @@ import type {
   SegmentEffortRecord,
   SegmentRecord,
   RouteRecord,
+  WorkoutRecord,
 } from './records';
 import type {
   NewRecordingChunk,
@@ -209,6 +214,13 @@ export interface AthleteDeletionCounts {
    * scoped read can reach.
    */
   readonly routes: number;
+  /**
+   * Workouts removed (#14).
+   *
+   * Counted like the rest, though nothing about a workout is sensitive — see
+   * the note beside the delete for why it cascades regardless.
+   */
+  readonly workouts: number;
   /**
    * Segments removed (#64).
    *
@@ -380,6 +392,10 @@ export class ActivityStore {
 
   get #routes(): Table<PersistedRoute, string> {
     return this.#db.table<PersistedRoute, string>(TABLE.routes);
+  }
+
+  get #workouts(): Table<PersistedWorkout, string> {
+    return this.#db.table<PersistedWorkout, string>(TABLE.workouts);
   }
 
   // --- Athletes -------------------------------------------------------------
@@ -556,6 +572,7 @@ export class ActivityStore {
         this.#segmentEfforts,
         this.#matchCheckpoints,
         this.#routes,
+        this.#workouts,
       ],
       async () => {
         // The signed records and the device key go with the athlete. The key is
@@ -597,6 +614,12 @@ export class ActivityStore {
         const efforts = await this.#segmentEfforts.where(INDEX.effortByAthlete).equals(id).delete();
         await this.#matchCheckpoints.delete(id);
         const routes = await this.#routes.where(INDEX.routeByOwner).equals(id).delete();
+        // A workout carries no coordinates and no measurements, so the privacy
+        // argument the rest of this cascade rests on does not apply to it. It
+        // goes anyway: an erasure that left rows behind under an athlete id
+        // that no longer exists is an erasure that did not happen, and the next
+        // athlete to be created with a recycled id would inherit them.
+        const workouts = await this.#workouts.where(INDEX.workoutByOwner).equals(id).delete();
         await this.#athletes.delete(id);
         return {
           activities,
@@ -607,6 +630,7 @@ export class ActivityStore {
           segments,
           efforts,
           routes,
+          workouts,
         };
       },
     );
@@ -1034,6 +1058,84 @@ export class ActivityStore {
         return false;
       }
       await this.#routes.delete(id);
+      return true;
+    });
+  }
+
+  // --- Workouts (#14) -------------------------------------------------------
+
+  /**
+   * Inserts or replaces a saved workout.
+   *
+   * **Refuses a workout whose athlete does not exist**, and refuses to
+   * overwrite one belonging to somebody else — both inside the same transaction
+   * as the write, for `putRoute`'s reason.
+   *
+   * @throws {StoreReferentialError} if `record.createdBy` names no athlete, or
+   * if a workout with this id already belongs to a different athlete.
+   */
+  async putWorkout(record: WorkoutRecord): Promise<WorkoutId> {
+    await this.#db.transaction('rw', [this.#athletes, this.#workouts], async () => {
+      await this.#requireAthlete(record.createdBy);
+      const existing = await this.#workouts.get(record.id);
+      if (existing !== undefined && existing.createdBy !== record.createdBy) {
+        throw new StoreReferentialError(
+          `cannot overwrite workout ${record.id}: it belongs to a different athlete`,
+        );
+      }
+      await this.#workouts.put(toPersistedWorkout(record));
+    });
+    return record.id;
+  }
+
+  /**
+   * One of this athlete's workouts.
+   *
+   * Both arguments, always, for `getRoute`'s reason and CLAUDE.md section 6's.
+   */
+  async getWorkout(owner: AthleteId, id: WorkoutId): Promise<WorkoutRecord | undefined> {
+    const row = await this.#workouts.where(INDEX.workoutByOwnerAndId).equals([owner, id]).first();
+    return row === undefined ? undefined : fromPersistedWorkout(row);
+  }
+
+  /**
+   * This athlete's workouts, **newest first**.
+   *
+   * ⚠️ Bounded by `limit`, the caller's, as every list in this class is — but
+   * the pressure is far lower than `listRoutes`': a workout row is a handful of
+   * blocks, not a profile grid. The bound is here for consistency and because
+   * "the list is small today" is the assumption every unbounded read started
+   * from.
+   */
+  async listWorkouts(owner: AthleteId, limit?: number): Promise<WorkoutRecord[]> {
+    let query = this.#workouts
+      .where(INDEX.workoutByOwnerAndCreatedAt)
+      .between([owner, Dexie.minKey], [owner, Dexie.maxKey], true, true)
+      .reverse();
+    if (limit !== undefined) {
+      query = query.limit(limit);
+    }
+    const rows = await query.toArray();
+    return rows.map(fromPersistedWorkout);
+  }
+
+  /**
+   * Deletes one of this athlete's workouts.
+   *
+   * @returns whether one was removed. `false` for one that does not exist
+   * **and** for one that belongs to somebody else, deliberately
+   * indistinguishable — see `deleteRoute`.
+   */
+  async deleteWorkout(owner: AthleteId, id: WorkoutId): Promise<boolean> {
+    return this.#db.transaction('rw', [this.#workouts], async () => {
+      const existing = await this.#workouts
+        .where(INDEX.workoutByOwnerAndId)
+        .equals([owner, id])
+        .first();
+      if (existing === undefined) {
+        return false;
+      }
+      await this.#workouts.delete(id);
       return true;
     });
   }

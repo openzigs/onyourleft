@@ -32,6 +32,7 @@ export {
   assertSegmentRoundTrip,
   assertSignedRecordRoundTrip,
   assertStreamSetRoundTrip,
+  assertWorkoutRoundTrip,
   RoundTripFailure,
 } from './round-trip';
 export type { ExpectedRecording } from './round-trip';
@@ -55,6 +56,8 @@ export {
   recordingFor,
   routeFor,
   seedRoute,
+  workoutFor,
+  seedWorkout,
   rideFor,
   seedAthletes,
   seedRecording,
@@ -76,4 +79,5 @@ export {
   openedLoopStoreFactory,
   publishedRouteStoreFactory,
   thinnedGeometryStoreFactory,
+  truncatedWorkoutStoreFactory,
 } from './fakes';

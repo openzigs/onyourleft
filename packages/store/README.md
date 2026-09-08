@@ -24,6 +24,7 @@ erDiagram
     ATHLETE ||--o| DEVICE_KEY : "has exactly one, write-once"
     ACTIVITY ||--o| ACTIVITY_RECORD : "has at most one signed record"
     ATHLETE ||--o{ ROUTE : "saves"
+    ATHLETE ||--o{ WORKOUT : "saves"
 
     ATHLETE {
         string  id                  PK "opaque; #61 keys it to the device keypair"
@@ -483,6 +484,57 @@ every coordinate, elevation and gradient right to the last bit. Nothing about th
 corrupt and nothing structural notices — the ride simply stops accumulating at the end of the first
 lap. `assertRouteRoundTrip` checks `loop` first and on its own line for that reason, and deleting
 that line turns a test red rather than leaving the suite green.
+
+## Workouts — #14
+
+Schema version 8 adds one store, `workouts`, the same shape as `routes`: keyed on `id`, every index
+leading with `createdBy`. A workout is a named list of blocks — steady, ramp, intervals, free ride —
+each carrying a duration and, except for a free ride, a target expressed as a share of the rider's
+threshold.
+
+⚠️ **This is the only record in this package whose contents become a command to a trainer**, and
+every decision below follows from that one sentence. A ride's samples are a report of something that
+already happened; a route is a line to look at. A workout's blocks are turned into `setTargetPower`
+writes against a machine applying physical resistance to somebody pedalling, which CLAUDE.md §6 puts
+in the safety class.
+
+**So the read path re-validates.** `fromPersistedWorkout` puts the decoded blocks back through
+`validateWorkout` and rewrites a `WorkoutError` as a `StoreDecodeError`. Every other decoder here
+reconstructs a record that will be *displayed*, and trusting the row costs a wrong number on a
+screen. Here a row reading `target: 88` where `0.88` was meant is a plausible-looking number that
+asks a trainer for 88 times threshold, and the only thing that tells the two apart is the
+constructor's own guard — which never ran, because the row came off a disk rather than out of
+TypeScript.
+
+⚠️ **That guard did not cover targets until #14's store slice, and the gap was found by writing this
+test.** `validateWorkout` checked every duration and every repeat count and took the `ThresholdShare`
+brand at face value. A brand is a compile-time fiction for a value that arrived as data, so
+`assertShare` now sits beside `assertDuration` in `packages/domain/src/workout/workout.ts` and both
+are checked on the way in. The two guards exist for one reason and neither is redundant with the
+constructor.
+
+**Blocks are stored, not the timeline.** `expandWorkout` is cheap and deterministic, so a stored
+expansion is the second copy that goes stale — the same argument `ActivityRecord` makes for storing
+half a load. It is the opposite call from `RouteRecord`, which stores its whole computed profile, and
+the difference is what the derivation reads: a profile is derived from a file the store does not
+keep, and a timeline is derived from the blocks in the row beside it.
+
+⚠️ **No `visibility` column, deliberately.** ADR 0004's default exists because a route or a ride
+carries coordinates — a route's endpoints are usually the athlete's front door. A workout carries
+none: durations and fractions, and not even the threshold they are fractions of. The privacy
+machinery would be ceremony around a record with nothing private in it. A later issue that shares
+workouts adds the column and the migration.
+
+**The tenth fake loses a block.** `truncatedWorkoutStoreFactory` drops the last one on its way in,
+and it survives every check a careless round trip makes: a workout missing its last block is still a
+valid workout, so the re-validation passes it; the name, the id, the owner and the timestamps are
+right; the list renders. A rider opens their hour-long session and it is fifty-three minutes long.
+`assertWorkoutRoundTrip` compares the block count first and on its own line for that reason.
+
+⚠️ **Erasing an athlete deletes their workouts too, and the reason is not privacy.** Nothing about a
+workout is sensitive. It cascades because an erasure that leaves rows behind under an athlete id
+that no longer exists is an erasure that did not happen — and the next athlete created with a
+recycled id would inherit them.
 
 ## Not in this package
 

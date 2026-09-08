@@ -1496,6 +1496,9 @@ top of an issue **supersedes its body**.
 | What happens when a rider passes the end of a loop, and when a route is refused as one | `packages/domain/src/route/profile.ts` §`distanceOnRoute`, §`LOOP_CLOSURE_METRES` |
 | Which GPX element a planned route is read from, and which one wins when a file has both | `packages/fit/src/xml/gpx.ts` §`decodeGpx`, `packages/fit/src/route/gpx-route.ts` |
 | Why a saved route stores its whole profile where a ride stores half a load | `packages/store/src/records.ts` §`RouteRecord` |
+| Why a saved workout stores its blocks where a route stores its computed profile | `packages/store/src/records.ts` §`WorkoutRecord`, [`packages/store/README.md`](packages/store/README.md) §"Workouts" |
+| Why the store re-validates a workout on the way out, and what a decoder that trusted the row would hand a trainer | `packages/store/src/persisted.ts` §`fromPersistedWorkout` |
+| Why a target is range-checked twice, and why the brand is not the check | `packages/domain/src/workout/workout.ts` §`assertShare` |
 | Why the gradient driver is in `packages/domain` and not beside the control point | `packages/domain/src/trainer/simulation.ts`, [`packages/sensors/README.md`](packages/sensors/README.md) §"Driving simulation mode from a route" |
 | Why a stalled trainer drops gradients instead of queueing them, and why the newest survives | `packages/sensors/protocol/src/simulation-writer.ts` |
 | Which control point a trainer with two of them is driven through, and what happens when only the proprietary one is there | `packages/sensors/protocol/src/trainer-control-choice.ts` |
