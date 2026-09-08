@@ -7,14 +7,20 @@
  * observing the test go red. A harness that passes against a no-op write is
  * worthless, and this is the only way to know it does not."*
  *
- * There are **nine** fakes here, and there are nine on purpose: a harness that
- * catches one failure shape is calibrated to that shape. They stand for the
+ * There are **eleven** fakes here, and there are eleven on purpose: a harness
+ * that catches one failure shape is calibrated to that shape. They stand for the
  * causes CLAUDE.md section 5 names, and they fail for different reasons at
  * different points in the read. The fourth arrived with #46's write path, the
- * fifth with #61's, the sixth with #64's, the seventh with #66's and the eighth
- * with #89's and the ninth with #73's, which is the rule this file exists to
- * enforce: a new write path may not ship without a fake proving the harness
- * catches its failure.
+ * fifth with #61's, the sixth with #64's, the seventh with #66's, the eighth
+ * with #89's, the ninth with #73's, the tenth with #14's and the eleventh with
+ * #93's, which is the rule this file exists to enforce: a new path may not ship
+ * without a fake proving the harness catches its failure.
+ *
+ * ⚠️ **The eleventh breaks a *read*, and every one before it breaks a write.**
+ * That is not a category error, it is #93's fifth acceptance criterion: a ghost
+ * lookup that matches on route and forgets the rider returns another athlete's
+ * ride, having written everything perfectly. No write-path fake can catch that,
+ * because nothing about the write is wrong.
  *
  * | Fake | Cause it stands for | How the round trip notices |
  * |---|---|---|
@@ -28,6 +34,7 @@
  * | `openedLoopStoreFactory` | *wrong layer* — one boolean lost in a mapping on the way in | the route comes back with every metre and every gradient correct, and **no longer wraps** |
  * | `publishedRouteStoreFactory` | *wrong layer* — a default applied on the way in, in the unsafe direction | the route comes back complete and correct, and **shared with everybody** |
  * | `truncatedWorkoutStoreFactory` | *wrong layer* — a layer above dropped the last block on its way in | the workout comes back with the right name and a valid shape, **ending early** |
+ * | `unscopedAttemptStoreFactory` | *cross-athlete exposure* — a **read** that matched on route and forgot the rider | every ride is written and read back correctly, and the ghost list contains a stranger's ride |
  *
  * The second and third are the ones a naive harness misses. Both write to the
  * **real** IndexedDB, inside a **real** transaction that **really commits**, and
@@ -53,7 +60,14 @@ import {
 import type { DeviceKeyRecord, StoredActivityRecord } from '../identity';
 import { SCHEMA_VERSIONS, TABLE } from '../schema';
 import type { NewRecordingChunk, NewRecordingSession } from '../recording';
-import type { RouteRecord, SegmentEffortRecord, SegmentRecord, WorkoutRecord } from '../records';
+import type {
+  ActivityRecord,
+  RouteRecord,
+  SegmentEffortRecord,
+  SegmentRecord,
+  WorkoutRecord,
+} from '../records';
+import { fromPersistedActivity, type PersistedActivity } from '../persisted';
 import type { PersistedStreamBlob } from '../stream-persisted';
 import {
   STREAM_CHANNELS,
@@ -94,6 +108,7 @@ function bindStore(real: ActivityStore): PersistentStore {
     listActivitySummaries: async (owner, options) => real.listActivitySummaries(owner, options),
     findActivityByOriginalFileHash: async (owner, sha256) =>
       real.findActivityByOriginalFileHash(owner, sha256),
+    listRouteAttempts: async (owner, route, limit) => real.listRouteAttempts(owner, route, limit),
     deleteActivity: async (owner, id) => real.deleteActivity(owner, id),
     putLap: async (record) => real.putLap(record),
     listLaps: async (owner, activity) => real.listLaps(owner, activity),
@@ -640,6 +655,74 @@ export function truncatedWorkoutStoreFactory(): StoreFactory {
                   : record.workout.blocks,
             },
           }),
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository whose **ghost lookup matches on the route and ignores the
+ * rider**.
+ *
+ * The eleventh fake, and the first that breaks a *read*. Every write path is the
+ * real one, every row lands in the real database, every round trip over a ride,
+ * a stream or a route passes — because nothing about the write is wrong. What is
+ * wrong is one missing component in one query, and the only thing that can see
+ * it is an assertion that puts a **second athlete's** ride on the same route and
+ * checks it is absent.
+ *
+ * #93's fifth acceptance criterion states the failure this stands for:
+ *
+ * > *"a lookup matching on route alone would happily return someone else's ride,
+ * > and it would pass every single-rider test in the suite."*
+ *
+ * That last clause is why this fake exists rather than a comment. With one
+ * athlete in the fixture the correct query and this one return identical
+ * results, so a suite that seeds one athlete certifies the bug. The harness
+ * fixtures carry three athletes for exactly this shape of reason — see
+ * CLAUDE.md section 5 — and `activity-store.ghost-scope.test.ts` is where the
+ * red/green pair lives.
+ *
+ * ⚠️ It reproduces the bug by **filtering the real result less**, not by
+ * fabricating rows: it asks the real store for each athlete's attempts and
+ * concatenates them, which is what an index on `routeId` alone would have
+ * returned. A fake that invented a row would prove the assertion can see an
+ * invented row, which is not the claim.
+ */
+export function unscopedAttemptStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      const raw = new Dexie(name);
+      SCHEMA_VERSIONS.forEach((stores, index) => {
+        raw.version(index + 1).stores(stores);
+      });
+      const activities = raw.table<PersistedActivity, string>(TABLE.activities);
+      return {
+        ...bindStore(real),
+        close: () => {
+          real.close();
+          raw.close();
+        },
+        listRouteAttempts: async (
+          _owner: AthleteId,
+          route: RouteId,
+          limit: number = 10,
+        ): Promise<readonly ActivityRecord[]> => {
+          // The bug, written out: `routeId` and no athlete. This is what the
+          // shipping query would do if `INDEX.activityByAthleteAndRoute` were
+          // declared as `'routeId'` and `.equals([owner, route])` became
+          // `.equals(route)` — a two-character change in `activity-store.ts`.
+          const rows = await activities
+            .filter((row) => row.routeId === route)
+            .reverse()
+            .limit(limit)
+            .toArray();
+          return rows.map(fromPersistedActivity);
+        },
       };
     },
     destroy: async (name) => {

@@ -80,4 +80,5 @@ export {
   publishedRouteStoreFactory,
   thinnedGeometryStoreFactory,
   truncatedWorkoutStoreFactory,
+  unscopedAttemptStoreFactory,
 } from './fakes';

@@ -267,6 +267,19 @@ export interface AthleteDeletionCounts {
  * keys, and `get` on an unknown key is `undefined`, which the check below turns
  * into a stated error.
  */
+/**
+ * How many previous attempts on a route `listRouteAttempts` returns by default.
+ *
+ * #93 offers "the rider's previous attempt", singular, so one would serve the
+ * shipping screen. It reads a few because the caller picks which attempt to
+ * race — the most recent is the obvious default and the *fastest* is the one a
+ * rider usually wants — and because a bound that is exactly one is the kind that
+ * gets raised to a hundred by a later screen with no thought about the read
+ * budget. Every row is a summary, not a stream: #93's ghost is built from the
+ * chosen attempt's stream, read once, after the rider has chosen.
+ */
+const ROUTE_ATTEMPT_LIMIT = 10;
+
 const ORDER_INDEX: ReadonlyMap<ActivityOrder, string> = new Map([
   ['startedAt', INDEX.activityByAthleteAndStartedAt],
   ['distance', INDEX.activityByAthleteAndDistance],
@@ -763,6 +776,45 @@ export class ActivityStore {
       .equals([owner, sha256])
       .first();
     return row === undefined ? undefined : fromPersistedActivity(row);
+  }
+
+  /**
+   * This athlete's completed rides on one saved route, newest first — #93's
+   * ghost candidates.
+   *
+   * ⚠️ **The `owner` parameter is the whole point of this method, not
+   * boilerplate.** The query it replaces — "rides on route R" — is one index
+   * component shorter, returns every athlete's rides, and passes every test in
+   * a suite with one athlete in it. #93's fifth acceptance criterion names that
+   * failure specifically, and `activity-store.ghost-scope.test.ts` is the test
+   * that would catch it: it seeds a second athlete's ride on the *same* route
+   * and asserts it is absent. Deleting `owner` from the `.equals([...])` below
+   * turns that test red and nothing else.
+   *
+   * Ordered by `startedAt` descending by walking the index in reverse rather
+   * than sorting in memory, because "the previous attempt" is almost always the
+   * first row and a rider with a hundred laps of a loop should not pay for the
+   * other ninety-nine. `limit` bounds it regardless.
+   *
+   * A route id that no longer resolves — the route was deleted — is not an
+   * error here: it simply matches no rows. `records.ts` §`routeId` records why
+   * nothing cascades.
+   */
+  async listRouteAttempts(
+    owner: AthleteId,
+    route: RouteId,
+    limit: number = ROUTE_ATTEMPT_LIMIT,
+  ): Promise<readonly ActivityRecord[]> {
+    if (!Number.isInteger(limit) || limit < 1) {
+      throw new StoreValidationError(`limit must be a positive integer, received ${limit}`);
+    }
+    const rows = await this.#activities
+      .where(INDEX.activityByAthleteAndRoute)
+      .equals([owner, route])
+      .reverse()
+      .limit(limit)
+      .toArray();
+    return rows.map(fromPersistedActivity);
   }
 
   /**

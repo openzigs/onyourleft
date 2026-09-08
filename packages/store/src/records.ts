@@ -190,6 +190,33 @@ export interface ActivityRecord {
    */
   readonly hasPosition: boolean;
 
+  /**
+   * The saved route (#89) this ride was ridden on, when it was ridden on one.
+   *
+   * Optional, and absent for every ride recorded before #93 as well as for every
+   * free ride — so this is additive and needs no record migration, per
+   * `README.md` §"An optional field is not a migration". What version 9 *does*
+   * add is the `[athleteId+routeId]` index over it, because the one query that
+   * reads this field must not be able to run without an athlete: see
+   * `schema.ts` §`activityByAthleteAndRoute`.
+   *
+   * ⚠️ **This is a link, not a copy, and the asymmetry is deliberate.**
+   * `RouteRecord` stores its whole computed profile because a route's profile is
+   * the route (see §`RouteRecord`). A ride stores only the id, because the two
+   * answer different questions: the route says what the road is, the ride says
+   * what happened on it. If the route is later edited, this ride\'s ghost would
+   * be a replay over a road that changed — which is why
+   * `domain/ghost/replay.ts` replays **recorded distance against recorded
+   * time** and never re-derives a position from the route\'s geometry. The link
+   * is for finding the attempt, not for reconstructing it.
+   *
+   * ⚠️ Nothing cascades from here. Deleting a route does **not** delete or
+   * rewrite the rides ridden on it: the ride happened, and a dangling id simply
+   * means no ghost is offered. `deleteRoute` is unchanged, and a ghost lookup
+   * that finds a route id it cannot resolve returns no attempts rather than
+   * throwing.
+   */
+  readonly routeId?: RouteId;
   readonly averagePower?: Watts;
 
   /**

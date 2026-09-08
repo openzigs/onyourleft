@@ -81,6 +81,8 @@ export interface PersistedActivity {
   distance: number;
   visibility: string;
   hasPosition: boolean;
+  /** @see ActivityRecord.routeId — the link #93's ghost lookup indexes on. */
+  routeId?: string;
   averagePower?: number;
   /** @see ActivityRecord.effortWeightedPower — the load summary #77 reads. */
   effortWeightedPower?: number;
@@ -369,6 +371,15 @@ export function toPersistedActivity(record: ActivityRecord): PersistedActivity {
     hasPosition: record.hasPosition,
     createdAt: record.createdAt,
   };
+  // ⚠️ Conditional for a sharper reason than `averagePower` below: `routeId` is
+  // the second component of the `[athleteId+routeId]` index. Dexie omits a row
+  // from a compound index when any component is missing, so an explicit
+  // `undefined` and an absent key behave identically *in the index* — but not on
+  // the way back out, where `'routeId' in row` would start reporting true for
+  // every free ride ever recorded.
+  if (record.routeId !== undefined) {
+    row.routeId = record.routeId;
+  }
   // Written conditionally rather than as `averagePower: record.averagePower`:
   // an explicit `undefined` property is a stored key with no value, and Dexie
   // will index it. Absent means absent.
@@ -400,6 +411,12 @@ export function toPersistedActivity(record: ActivityRecord): PersistedActivity {
 export function fromPersistedActivity(row: PersistedActivity): ActivityRecord {
   const averagePower = decodedOptionalPower('activity.averagePower', row.averagePower);
   const originalFile = originalFileOf(row);
+  // Re-branded on the way out rather than cast, for the reason
+  // `fromPersistedWorkout` gives: a row is untyped until something checks it,
+  // and an id that reached the database as the wrong kind of string is exactly
+  // what a ghost lookup would then query with.
+  const linkedRoute =
+    row.routeId === undefined ? undefined : routeId(decodedString('activity.routeId', row.routeId));
   const record: ActivityRecord = {
     id: activityId(decodedString('activity.id', row.id)),
     athleteId: athleteId(decodedString('activity.athleteId', row.athleteId)),
@@ -435,6 +452,7 @@ export function fromPersistedActivity(row: PersistedActivity): ActivityRecord {
       decodedNumber('activity.createdAt', row.createdAt),
       unixSeconds,
     ),
+    ...(linkedRoute === undefined ? {} : { routeId: linkedRoute }),
     ...(averagePower === undefined
       ? {}
       : { averagePower: decoded('activity.averagePower', averagePower, watts) }),
