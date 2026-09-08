@@ -46,6 +46,7 @@ import { DevicesView } from '../views/DevicesView';
 import { NotFoundView } from '../views/NotFoundView';
 import { RideView } from '../views/RideView';
 import { SegmentDetailView } from '../views/SegmentDetailView';
+import { RoutesView } from '../views/RoutesView';
 import { SegmentsView } from '../views/SegmentsView';
 import { RideSession } from '../ride/RideSession';
 import type { RideController } from '../ride/controller';
@@ -59,6 +60,7 @@ import type { LibraryPort } from '../library/store-port';
 import type { TransferPort } from '../transfer/store-port';
 import type { EffortPort } from '../efforts/store-port';
 import type { SegmentPort } from '../segments/store-port';
+import type { RoutePort } from '../routes/store-port';
 
 import { hrefFor, ROUTES, type RouteMatch } from './routes';
 import { useRoute } from './useRoute';
@@ -145,6 +147,8 @@ export interface AppShellProps {
   readonly basemap?: BasemapConfig | undefined;
   /** Segments (#64), or `undefined` where this browser has no local store. */
   readonly segments?: SegmentPort | undefined;
+  /** Saved routes (#73), or `undefined` where this browser has no local store. */
+  readonly routes?: RoutePort | undefined;
   /**
    * The effort-history screen's reads (#67).
    *
@@ -186,6 +190,8 @@ function viewFor(match: RouteMatch, props: AppShellProps): JSX.Element {
       return <AnalysisView port={props.analysis} />;
     case 'segments':
       return <SegmentsView port={props.segments} />;
+    case 'routes':
+      return <RoutesView port={props.routes} />;
     case 'segment-detail':
       return <SegmentDetailView port={props.efforts} segment={match.parameter} />;
     case 'devices':

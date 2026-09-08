@@ -23,6 +23,7 @@ import { ensureLocalAthlete, LOCAL_ATHLETE, renderAfterAthlete } from './local-a
 import type { AnalysisPort } from './analysis/store-port';
 import type { EffortPort } from './efforts/store-port';
 import type { SegmentPort } from './segments/store-port';
+import type { RoutePort } from './routes/store-port';
 import type { DetailPort } from './detail/store-port';
 import { browserBasemapConfig } from './map/basemap';
 import type { MapPort } from './map/port';
@@ -184,6 +185,24 @@ function buildSegmentPort(): SegmentPort {
 }
 
 /**
+ * The routes screen's port (#73).
+ *
+ * Unconditional, like the segments screen's and for the same reasons: importing
+ * a GPX route needs no `crypto.subtle` and no secure context — the file is read
+ * with `File.text()` and parsed by `packages/fit`, which opens nothing — so
+ * this screen works from a `file://` bundle where the import screen (#51)
+ * deliberately does not.
+ *
+ * `RouteStore` names four route methods and one zone read and nothing else, so
+ * a screen that lets a rider publish a route cannot reach a ride, a stream or
+ * another athlete's anything. `ActivityStore` satisfies it structurally, like
+ * the five ports above.
+ */
+function buildRoutePort(): RoutePort {
+  return { store: localStore(), athleteId: LOCAL_ATHLETE };
+}
+
+/**
  * The effort-history screen's port (#67).
  *
  * The same store behind a narrower interface: `EffortStore` names five reads
@@ -248,6 +267,7 @@ function render(): void {
         detail={buildDetailPort()}
         analysis={buildAnalysisPort()}
         segments={buildSegmentPort()}
+        routes={buildRoutePort()}
         efforts={buildEffortPort()}
         map={loadMapPort}
         basemap={browserBasemapConfig()}

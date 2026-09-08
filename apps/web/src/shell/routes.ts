@@ -39,6 +39,7 @@ export type RouteId =
   | 'analysis'
   | 'segments'
   | 'segment-detail'
+  | 'routes'
   | 'devices'
   | 'transfer'
   | 'about'
@@ -95,6 +96,15 @@ export const ROUTES: readonly RouteDefinition[] = [
     summary:
       'Stretches of road you have named, cut from your own rides. A climb and its descent are ' +
       'two different segments.',
+  },
+  {
+    id: 'routes',
+    path: '/routes',
+    navLabel: 'Routes',
+    title: 'Routes',
+    summary:
+      'Rides you plan to do, imported from a GPX file. A route is private until you say ' +
+      'otherwise, and one that starts inside a privacy zone cannot be shared at all.',
   },
   {
     id: 'devices',
