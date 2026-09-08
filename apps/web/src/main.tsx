@@ -24,6 +24,7 @@ import type { AnalysisPort } from './analysis/store-port';
 import type { EffortPort } from './efforts/store-port';
 import type { SegmentPort } from './segments/store-port';
 import type { RoutePort } from './routes/store-port';
+import type { WorkoutPort } from './workouts/store-port';
 import type { DetailPort } from './detail/store-port';
 import { browserBasemapConfig } from './map/basemap';
 import type { MapPort } from './map/port';
@@ -203,6 +204,21 @@ function buildRoutePort(): RoutePort {
 }
 
 /**
+ * The workouts screen's port (#14).
+ *
+ * Unconditional, like the routes screen's and for the same reason: building a
+ * workout needs no `crypto.subtle` and no secure context — nothing is read from
+ * a file and nothing is signed — so this screen works from a `file://` bundle.
+ *
+ * `WorkoutStore` names four workout methods and nothing else, so the screen
+ * that builds a session a trainer will ride cannot reach a ride, a stream or
+ * another athlete's anything.
+ */
+function buildWorkoutPort(): WorkoutPort {
+  return { store: localStore(), athleteId: LOCAL_ATHLETE };
+}
+
+/**
  * The effort-history screen's port (#67).
  *
  * The same store behind a narrower interface: `EffortStore` names five reads
@@ -268,6 +284,7 @@ function render(): void {
         analysis={buildAnalysisPort()}
         segments={buildSegmentPort()}
         routes={buildRoutePort()}
+        workouts={buildWorkoutPort()}
         efforts={buildEffortPort()}
         map={loadMapPort}
         basemap={browserBasemapConfig()}

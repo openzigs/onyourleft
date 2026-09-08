@@ -40,6 +40,7 @@ export type RouteId =
   | 'segments'
   | 'segment-detail'
   | 'routes'
+  | 'workouts'
   | 'devices'
   | 'transfer'
   | 'about'
@@ -105,6 +106,15 @@ export const ROUTES: readonly RouteDefinition[] = [
     summary:
       'Rides you plan to do, imported from a GPX file. A route is private until you say ' +
       'otherwise, and one that starts inside a privacy zone cannot be shared at all.',
+  },
+  {
+    id: 'workouts',
+    path: '/workouts',
+    navLabel: 'Workouts',
+    title: 'Workouts',
+    summary:
+      'Structured sessions built from blocks. Targets are a share of your own threshold, so the ' +
+      'same workout works whatever shape you are in.',
   },
   {
     id: 'devices',
