@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <application
         android:allowBackup="true"
@@ -34,9 +36,74 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+
+        <!--
+          The connectedDevice foreground service (#87). Mandatory since Android
+          14 (API 34) for a service that holds a BLE link: omitting the type
+          throws MissingForegroundServiceTypeException and omitting the matching
+          permission throws SecurityException. Neither Capacitor nor the BLE
+          plugin ships one -- capacitor-community/bluetooth-le has no service and
+          Capacitor issue #643 is open -- so this is hand-written.
+
+          exported="false" because nothing outside this application has any
+          business starting it, and an exported service holding a live sensor
+          link is an attack surface for no benefit.
+        -->
+        <service
+            android:name=".RecordingService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
     </application>
 
-    <!-- Permissions -->
+    <!--
+      Permissions (#87).
+
+      ⚠️ THE OVERRIDES ARE THE POINT, not the declarations. This application's
+      own manifest is not what ships: `@capacitor-community/bluetooth-le` 8.3.0
+      contributes its own, and it declares ACCESS_FINE_LOCATION and
+      ACCESS_COARSE_LOCATION with NO maxSdkVersion and BLUETOOTH_SCAN WITHOUT
+      neverForLocation. Merge those in unconstrained and the shipped app asks
+      every rider for their location on every Android version -- which drags the
+      release into Google Play's location-policy review and makes the Data Safety
+      form's "no location collected" answer untrue, both for nothing, because a
+      cycling app derives power and heart rate from scan results and never
+      position.
+
+      `tools:replace` is what makes the merger take this file's value rather than
+      report a conflict or silently keep the library's. It is used rather than
+      relied upon: the merger's behaviour when a library omits an attribute the
+      app declares is not something to reproduce from memory, and tools:replace
+      is unambiguous under every reading of it.
+
+      ⚠️ ACCESS_COARSE_LOCATION is constrained here although #87's own list does
+      not mention it. The issue names the two the plugin gets wrong; the plugin
+      declares three. Leaving the third unconstrained would defeat the whole
+      point of constraining the other two, so it is bounded the same way and the
+      deviation is recorded rather than silently taken.
+    -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"
+        tools:replace="android:usesPermissionFlags"
+        tools:targetApi="s" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_CONNECT"
+        tools:targetApi="s" />
+
+    <!-- Needed to scan at all below API 31, and requested on nothing above it. -->
+    <uses-permission
+        android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:maxSdkVersion="30"
+        tools:replace="android:maxSdkVersion" />
+    <uses-permission
+        android:name="android.permission.ACCESS_COARSE_LOCATION"
+        android:maxSdkVersion="30"
+        tools:replace="android:maxSdkVersion" />
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>

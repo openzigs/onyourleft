@@ -60,9 +60,13 @@ apps/                 AGPL-3.0-or-later, without exception
                         1 Hz sample grid, and the export writer
     src/views/          one component per route (#48)
   mobile/             Capacitor shell wrapping the same web build (#85, #87)
-    android/            the generated Android project — MIT template output, whose
-                        provenance and licence obligation are apps/mobile/README.md
-                        §2 and whose exemptions are .spdx-exempt
+    android/            the generated Android project, plus the connectedDevice
+                        foreground service and its plugin bridge — MIT template
+                        output, whose provenance and licence obligation are
+                        apps/mobile/README.md §2 and whose exemptions are .spdx-exempt
+    src/android/        reading a manifest as a document — NOT merging one (#87)
+    src/ble/            the Capacitor transport against #39's interface, unchanged
+    src/permission/     what a rider is told when Bluetooth will not work (#87)
 
 packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis (#25)

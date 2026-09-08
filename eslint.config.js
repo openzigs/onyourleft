@@ -248,6 +248,16 @@ export default tseslint.config(
       // a runner has no worktrees — which is what made the local gate disagree
       // with CI in the direction that trains people to disbelieve it (#148).
       '.claude/**',
+      // The Capacitor trees `cap sync` regenerates (#87). Capacitor's own
+      // nested `apps/mobile/android/.gitignore` keeps all three out of the
+      // repository; ESLint reads neither that nor the root `.gitignore`, so
+      // without these it lints the copied web bundle -- ~700 errors from
+      // minified vendor code, on any machine where a sync has run and never in
+      // CI. `.prettierignore` and `scripts/check-repo-rules.sh` carry the same
+      // paths for the same reason.
+      'apps/mobile/android/app/src/main/assets/public/**',
+      'apps/mobile/android/app/src/main/res/xml/config.xml',
+      'apps/mobile/android/capacitor-cordova-android-plugins/**',
     ],
   },
 

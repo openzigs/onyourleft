@@ -99,7 +99,41 @@ Two things follow, and neither is done yet:
 This is the same posture `CLAUDE.md` §8 takes toward pinning an action to a commit SHA rather than a
 tag, applied to the one binary in this repository that arrived without one.
 
-## 4. What could not be verified in the environment this was written in
+## 4. What is here
+
+| Path | What it is |
+|---|---|
+| `src/ble/plugin-port.ts` | the nine `@capacitor-community/bluetooth-le` calls the transport makes, as an interface — so the transport can be tested without a phone |
+| `src/ble/transport.ts` | `@onyourleft/sensors`' `SensorTransport`, over that port. `packages/sensors` is **untouched**, which is #87's seventh criterion |
+| `src/ble/testing.ts` | a scripted stack. It records call **order**, because the Android workaround is entirely a claim about order |
+| `src/permission/notice.ts` | criterion 8 — what a rider is told when Bluetooth will not work, as a pure function so the wording is testable |
+| `src/android/manifest.ts` | reads `uses-permission` and `service` out of a manifest **as a document**. It does not merge one; see §5 |
+| `android/app/src/main/java/…/RecordingService.java` | the `connectedDevice` foreground service |
+| `android/app/src/main/java/…/RecordingServicePlugin.java` | two methods, start and stop, bridging it to the web client |
+
+⚠️ **Java, not Kotlin, and that is a deviation from #87's revision block** — it budgets the service
+as "hand-written Kotlin". Kotlin would mean adding the Kotlin Gradle plugin and the stdlib to a build
+config that **cannot be resolved here at all** (§5), so the deviation buys one thing: the build
+configuration that was never added is the one that cannot be wrong. `MainActivity.java` is already
+Java, so nothing is mixed. Converting is a follow-up for whoever first runs Gradle.
+
+### Two defects the transport shipped with, and how they were found
+
+Both were found by **mutation**, both on the same seam, and neither by review — recorded because the
+seam will be touched again:
+
+1. **A shared characteristic stopped for everyone when one subscriber left.** One characteristic can
+   serve several capabilities (FTMS Indoor Bike Data carries power, cadence and speed), so two
+   subscriptions legitimately share one started notification. A screen dropping its speed readout
+   silently killed its own power readout.
+2. **A shared characteristic only ever fed its FIRST subscriber.** The fix for (1) as a reference
+   count still left one registered callback closed over one sink, so the second subscription received
+   nothing at all.
+
+`notifying` is now a **set of sinks per characteristic**, which fixes both and makes an unsubscribe
+idempotent without a flag.
+
+## 5. What could not be verified in the environment this was written in
 
 Stated plainly because #87's acceptance criteria mostly ask for things a device or an SDK answers,
 and a criterion reported as met when nothing checked it is worse than one reported as open:
@@ -113,6 +147,22 @@ and a criterion reported as met when nothing checked it is worse than one report
 | An emulator or a device | **no** |
 | A real BLE peripheral | **no** |
 
-So nothing in `android/` has been compiled, and no permission flow has been exercised. What *is*
-checked here is everything that does not need the SDK: the TypeScript adapter against
-`packages/sensors`' interfaces, the manifest's own contents as a document, and the repository rules.
+So nothing in `android/` has been compiled, and no permission flow has been exercised.
+
+**Where each of #87's eight acceptance criteria stands.** Six cannot be discharged here and are
+reported as open rather than argued around:
+
+| # | Criterion | Status |
+|---|---|---|
+| 1 | the permissions, asserted **in the merged manifest** | ⚠️ **partly.** The merge is `:app:processDebugManifest` and needs the SDK. What IS asserted: the plugin still declares the problem (read from `node_modules`), the app declares the override with `tools:replace`, and **every** permission the plugin gets unconstrained is covered — derived from the plugin's manifest, not from a list typed out, so a permission it adds later fails the suite. Asserting the app's own manifest and calling this met is the exact false pass the criterion exists to prevent |
+| 2 | a `connectedDevice` service with a "Recording ride" notification | written, **never run** |
+| 3 | a 60-minute backgrounded session, verified with `adb` | **open** — needs a device |
+| 4 | killing the renderer does not stop recording | ⚠️ **not satisfiable as specified.** In a Capacitor shell the recorder is `packages/domain`'s state machine running as JavaScript in the WebView, so the renderer *is* the recorder. Meeting this means porting the engine to native and giving up #85's "the same web build", which is an ADR, not a quiet half-implementation. `RecordingService`'s header says so where somebody will read it |
+| 5 | two overlapping writes both complete | **open.** The plugin's internal `queue()` was read rather than assumed, as the revision block asks, but reading is not exercising |
+| 6 | 40 connect/disconnect cycles, connection 40 still succeeds | **open** — needs a device |
+| 7 | #39's interface satisfied **unchanged** | ✅ **met.** `git diff` shows no change under `packages/sensors`, and `createCapacitorTransport` is annotated `SensorTransport`, so a widened parameter is a compile error here |
+| 8 | denying a permission produces an explanatory screen | ✅ **met** for the decision. `permissionNotice` is total over `TransportAvailability` with a distinct message per outcome, and `mayShowDeviceList` is the direct expression of "not an empty device list". The rendering is the shell's |
+
+Also open, from the Definition of Done: **tested on at least two OEMs**, and the `adb` commands
+documented "so the next person can repeat the measurement" — they are quoted in criterion 3 above and
+have been run by nobody.
