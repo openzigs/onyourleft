@@ -430,6 +430,29 @@ export {
 export type { GapInput, PacerGap } from './pacer/gap';
 export { botIsAhead, gapMagnitudeSeconds, pacerGap } from './pacer/gap';
 
+// --- Racing your own previous attempt (#93) ----------------------------------
+//
+// A ghost is YOUR OWN earlier ride on the same route, replayed as a private,
+// unranked pacing aid. ⚠️ It is not a ghost of another rider, and it is not a
+// board — #59 and ADR 0007 D-2 draw that line, and `ghost/replay.ts`'s header
+// records why it is the difference between this feature and the one Echelon and
+// iFIT removed under settlement.
+//
+// The scoping that keeps it your own ride is NOT here: nothing in this module
+// takes an athlete id, so the guard is `ActivityStore.listRouteAttempts`, whose
+// index cannot be queried without one. This half is the arithmetic, and it
+// replays recorded distance against recorded time rather than re-simulating a
+// stored power series — see the header for what re-simulating would get wrong.
+//
+// There is deliberately no gap function here: a ghost is a third odometer, and
+// `pacerGap` above already compares two without wrapping.
+
+export type { GhostErrorCode } from './ghost/errors';
+export { GhostError } from './ghost/errors';
+
+export type { GhostSamples, GhostTrack } from './ghost/replay';
+export { buildGhostTrack, ghostDistanceAt, ghostElapsedAt, ghostHasFinished } from './ghost/replay';
+
 // --- Segments (#64) ----------------------------------------------------------
 //
 // The model, and the geometry that decides whether a ride went along a segment.
