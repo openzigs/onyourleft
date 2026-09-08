@@ -54,7 +54,7 @@ import { decimal, degrees, integer, XmlWriter } from './write';
 export const TCX_NAMESPACE = 'http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2';
 
 /** The XML Schema instance namespace, for the `Creator` element's `xsi:type`. */
-const XSI_NAMESPACE = 'http://www.w3.org/2001/XMLSchema-instance';
+export const XSI_NAMESPACE = 'http://www.w3.org/2001/XMLSchema-instance';
 
 /** The `Creator` name this package writes when the activity names none. */
 export const TCX_CREATOR = 'On Your Left';

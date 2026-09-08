@@ -622,3 +622,53 @@ that is not a number, a timestamp with no zone, a heart rate `@onyourleft/domain
 A message never carries the value that caused it (ADR 0004 decision D). That matters more here than
 in the FIT decoder: an XML parse error naturally wants to quote the offending text, and the offending
 text in a GPX file is very often a coordinate.
+
+## 8. Route export — #74, and the four questions it asks
+
+`src/route/` holds both directions now: `decodeGpxRoute` (#89) reads a planner's file into a
+profile, and `encodeGpxRoute` / `encodeTcxRoute` (#74) write a profile back out as a file a head
+unit can load. #74 asks four things to be **stated rather than assumed**, and this is where they are
+stated.
+
+### What is exported is the profile grid, not the imported file
+
+A `RouteRecord` stores a `RouteProfile` and nothing else, so by the time a route can be exported the
+original sampling is gone. What goes out is the ~10 m grid with **despiked** elevations. A
+200-point planner file comes back as a 500-point line following the same ground more evenly, and a
+file with one bad elevation reading comes back without it. It is not a copy of the input.
+
+### GPX gets a `<trk>`, not a `<rte>`
+
+`<rte>` is *"an ordered list of waypoints leading to a destination"* — turn cues, which a device may
+route between however it likes. A route here is several hundred to several thousand grid points;
+handed those as `<rtept>`, a head unit that re-routes gives the rider **a different ride under the
+name of the one they loaded**. `<trk>` is the least interpretable thing the format offers, which is
+what you want when you cannot test the device.
+
+⚠️ **Whether a given head unit prefers `<rte>` is unverified.** See the next heading.
+
+### FIT course export is NOT delivered, and that is #74's own open question
+
+> *"Can this project write a FIT Course file? … Treat FIT course export as unproven."*
+
+**GPX and TCX are the delivered formats.** FIT course is not attempted, for two reasons that stack:
+
+1. **ADR 0006 and [#58](https://github.com/openzigs/onyourleft/issues/58).** Every FIT number in
+   this package is recorded with its provenance under ADR 0006 R2, read from published protocol
+   documentation. The course message set has not been read that way, and adding it by inference
+   from a third-party library would be exactly the shortcut ADR 0006 exists to forbid.
+2. **It was not checked whether `fit-file-parser` 5.0.2 supports course files**, which is #74's own
+   observation and is still true. That check is the first step for whoever picks this up, and it
+   settles nothing about (1).
+
+### What is undischarged, and what would settle it
+
+| #74 criterion | Status |
+|---|---|
+| loads on a real head unit, with device, firmware and date recorded | ⚠️ **undischarged.** No device here, and the vendors' documentation was not reachable from this environment. Somebody with an Edge or an ELEMNT loads a file and records what happened. This is also what settles `<trk>` versus `<rte>` |
+| round trip within a stated tolerance | ✅ derived from the write precision and measured — `course.test.ts` §`TOLERANCE` |
+| a real serialiser, hostile names intact | ✅ the same `XmlWriter` `encodeGpx` uses, which has **no "known safe" path** |
+| a freehand leg exports without claiming it is a road | ⚠️ **it does not survive, and neither format has a field for it.** GPX and TCX both describe a line and nothing about how it was chosen. This program has no such flag either: [#71](https://github.com/openzigs/onyourleft/issues/71)'s drawing canvas does not exist, so no route here currently *has* a freehand leg to lose. When it does, the distinction is a `RouteProfile` field and an extension element, and it is a decision, not a mapping |
+| works entirely offline | ✅ by construction — nothing in this path can name a network global |
+| a long route exports without exhausting memory | ✅ **302 km, 30 226 grid samples, GPX 2.58 MB and TCX 7.57 MB, both written in about 360 ms** (2026-09-08, Node 24). TCX is roughly three times the size for the same route. **It does not simplify** — see `course.ts`, and `courseSampleCount` is what a caller warns from |
+| ODbL attribution in the file's own metadata | ✅ GPX `<metadata><copyright>` with the licence URL; TCX has no metadata element, so it goes in the Course's `Notes`, the only free-text field the format has. ⚠️ **On by default, which over-attributes on purpose** — a `RouteProfile` records no provenance, and crediting a project that did not contribute is a smaller harm than breaching a share-alike licence. The fix is a provenance field, and [#70](https://github.com/openzigs/onyourleft/issues/70) is the issue that should add it |

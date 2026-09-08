@@ -376,14 +376,29 @@ function trackActivityOf(activity: ActivityRecord, points: readonly TrackPoint[]
  * to come out as a name and not as a path.
  */
 export function fileStemOf(activity: ActivityRecord): string {
-  const safe = [...activity.name]
+  return safeFileStem(activity.name, `activity-${activity.id}`);
+}
+
+/**
+ * The same rule, for anything else a rider downloads.
+ *
+ * Extracted by #74 so the route exporter shares it rather than growing a second
+ * filename sanitiser — the same objection #74 makes to a second XML writer, and
+ * a worse one here: a divergent copy would be a second place where a stored
+ * name reaches a filesystem API, and only one of them would have been read.
+ *
+ * @param fallback used verbatim when the name sanitises to nothing. It is the
+ * caller's, because only the caller knows what kind of thing this is.
+ */
+export function safeFileStem(name: string, fallback: string): string {
+  const safe = [...name]
     .map((character) => (isUnsafeInAFileName(character) ? '-' : character))
     .join('')
     // A leading dot hides the file on every Unix-like system, and a name of
     // `..` is a path segment rather than a name.
     .replace(/^\.+/, '')
     .trim();
-  return safe === '' ? `activity-${activity.id}` : safe.slice(0, 120);
+  return safe === '' ? fallback : safe.slice(0, 120);
 }
 
 /**
