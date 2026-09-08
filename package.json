@@ -22,7 +22,7 @@
     "check:a11y-suite": "node scripts/check-a11y-suite.mjs",
     "check:licences": "node scripts/check-dependency-licences.mjs",
     "build": "pnpm --recursive run build",
-    "check:repo": "bash scripts/check-repo-rules.sh && bash scripts/check-repo-rules.test.sh && bash scripts/check-licence-hashes.sh && bash scripts/check-licence-hashes.test.sh && bash scripts/check-env-example.sh && bash scripts/check-env-example.test.sh"
+    "check:repo": "bash scripts/check-repo-rules.sh && bash scripts/check-repo-rules.test.sh && bash scripts/check-licence-hashes.sh && bash scripts/check-licence-hashes.test.sh && bash scripts/check-env-example.sh && bash scripts/check-env-example.test.sh && bash scripts/check-doc-links.sh && bash scripts/check-doc-links.test.sh"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

@@ -37,6 +37,7 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { routeStub, stubRouteId, type RouteStub } from '../routes/testing';
+import type { DownloadableFile } from '../transfer/store-port';
 import { PUBLIC_ROUTE_WARNING } from '../routes/share';
 import {
   activateWithKeyboard,
@@ -101,6 +102,25 @@ async function render(stub: RouteStub): Promise<Mounted> {
   mounted = await mount(<RoutesView port={stub} now={() => 1_700_000_500} />);
   await settle();
   return mounted;
+}
+
+/** Renders with a download collector, so #74's export column is reachable. */
+async function renderWithSave(stub: RouteStub): Promise<{
+  root: Mounted;
+  saved: DownloadableFile[];
+}> {
+  const saved: DownloadableFile[] = [];
+  mounted = await mount(
+    <RoutesView
+      port={stub}
+      now={() => 1_700_000_500}
+      save={(file) => {
+        saved.push(file);
+      }}
+    />,
+  );
+  await settle();
+  return { root: mounted, saved };
 }
 
 function buttonSaying(root: ParentNode, text: string): HTMLElement | undefined {
@@ -236,5 +256,60 @@ describe('the warning before publishing — #73 criterion 5', () => {
     expect(text).toContain(PUBLIC_ROUTE_WARNING);
     // The half a generic notice would omit.
     expect(text).toContain('Most routes start at home');
+  });
+});
+
+describe('sending a route to a head unit (#74)', () => {
+  it('offers both formats, named, for each route', async () => {
+    const { root } = await renderWithSave(routeStub(ATHLETE, [route()]));
+    // The format is in the label rather than in an icon: #48's audit counts an
+    // unnamed control as a violation, and "which file am I getting" is the
+    // whole question the control answers.
+    expect(buttonSaying(root.container, 'Download GPX — Box Hill loop')).toBeDefined();
+    expect(buttonSaying(root.container, 'Download TCX — Box Hill loop')).toBeDefined();
+  });
+
+  it('hands the rider a named file when they press it', async () => {
+    const { root, saved } = await renderWithSave(routeStub(ATHLETE, [route()]));
+    buttonSaying(root.container, 'Download GPX')?.click();
+    await settle();
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.fileName).toBe('Box Hill loop.gpx');
+    expect(saved[0]?.mediaType).toBe('application/gpx+xml');
+    expect(new TextDecoder().decode(saved[0]?.bytes)).toContain('<trkpt');
+  });
+
+  it('says what the file could not carry, in the same breath as saying it is ready', async () => {
+    const { root } = await renderWithSave(routeStub(ATHLETE, [route()]));
+    buttonSaying(root.container, 'Download TCX')?.click();
+    await settle();
+    const text = root.container.textContent ?? '';
+    expect(text).toContain('Box Hill loop.tcx is ready');
+    expect(text).toContain('Gradient is not written');
+    expect(text).toContain('course time of zero');
+  });
+
+  it('renders no download control at all when the browser cannot save', async () => {
+    // Rather than a button that does nothing. `save` is absent exactly when
+    // `main.tsx` could not build a transfer port, which is the same condition
+    // the transfer screen already refuses under.
+    const stub = routeStub(ATHLETE, [route()]);
+    mounted = await mount(<RoutesView port={stub} now={() => 1_700_000_500} />);
+    await settle();
+    expect(buttonSaying(mounted.container, 'Download GPX')).toBeUndefined();
+    expect(mounted.container.textContent).toContain('Downloading is not available');
+  });
+
+  it('exports without reading the store again', async () => {
+    // The list read already decoded the whole profile — that is what
+    // ROUTE_LIST_LIMIT budgets for — so a second read would decode the same
+    // megabytes to produce the same bytes. Asserted by making a further read
+    // fail: if the export path took one, this would throw rather than download.
+    const stub = routeStub(ATHLETE, [route()]);
+    const { root, saved } = await renderWithSave(stub);
+    stub.failNextList();
+    buttonSaying(root.container, 'Download GPX')?.click();
+    await settle();
+    expect(saved).toHaveLength(1);
   });
 });

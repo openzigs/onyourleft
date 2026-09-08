@@ -53,8 +53,9 @@ apps/                 AGPL-3.0-or-later, without exception
                         clock for the ride and the workout, and the panel that
                         will not offer a control the trainer would refuse
     src/routes/         saved routes (#73) — the store port and its read budget,
-                        the edit decision and its concurrency token, and what a
-                        shared copy of a route contains
+                        the edit decision and its concurrency token, what a
+                        shared copy of a route contains, and the export a rider
+                        copies to a head unit (#74)
     src/segments/       the segment store port and the create form's pure core (#64),
                         and the resumable matcher sweep over the library (#66)
     src/shell/          the hash route table, the router hook and AppShell (#48)
@@ -103,8 +104,9 @@ packages/             Apache-2.0, without exception
                         prefilter, discrete Fréchet, the effort with its
                         three-state visibility, and where the time went
   fit/                FIT / GPX / TCX codec (#29-#32)
-    src/route/          route import (#89) — the #32 decoder composed with the
-                        profile, and the refusals a rider can act on
+    src/route/          route import (#89) and export (#74) — the #32 decoder
+                        composed with the profile, the refusals a rider can act
+                        on, and the GPX and TCX course writers
   sensors/            sensor abstraction and BLE transport (#39-#44) — BLE only
     src/                the transport-agnostic abstraction; no platform API at all
     protocol/           the GATT profile clients (#41, #42) — service UUIDs, payload
@@ -131,6 +133,13 @@ scripts/              dependency-free repository checks; run on a bare clone
 
 .github/
   workflows/rules.yml runs those checks on every pull request — see §4c
+  dependabot.yml      weekly version updates, so DEP001 sees a bump before a
+                      human does — and the minimumReleaseAge collision it causes
+  pull_request_template.md
+                      the closing keyword and the mutation list, because §7 and
+                      §5 are the two rules a template can actually enforce
+  ISSUE_TEMPLATE/     bug and feature, both routing a security report away from
+                      a public issue
 ```
 
 **`apps/web`, `apps/mobile`, `packages/domain`, `packages/sensors`, `packages/fit`,
@@ -300,6 +309,15 @@ bash scripts/check-env-example.sh
 # Test that checker. Fixture-driven; 21 cases.
 bash scripts/check-env-example.test.sh
 
+# Every relative link in the documentation points at something. RELATIVE ONLY —
+# an https:// target is not checked and must not be, because that needs the
+# network and would turn a bare-clone gate into one that fails on an aeroplane.
+# A dead external link is a real problem and is not this script's.
+bash scripts/check-doc-links.sh
+
+# Test that checker. Fixture-driven; 28 cases.
+bash scripts/check-doc-links.test.sh
+
 # The same two digests, printed for reading by eye.
 shasum -a 256 LICENSE LICENSES/Apache-2.0.txt
 ```
@@ -419,7 +437,7 @@ pnpm run check:licences
 # FAILS as well as one that passes. Needs Node, so also not in `check:repo`.
 bash scripts/check-dependency-licences.test.sh
 
-# All six bare-clone script checks in one command.
+# All eight bare-clone script checks in one command.
 pnpm run check:repo
 
 # Render coverage per package as Markdown. Reads coverage/coverage-summary.json,
@@ -474,6 +492,14 @@ reading paths:
 | Rule | Fails when |
 |---|---|
 | `ENV001` | a source file under `apps/` or `packages/` reads an environment variable `.env.example` does not list, **or** `.env.example` is missing |
+
+`scripts/check-doc-links.sh` enforces two more, separately because it reads **prose** and then
+resolves paths out of it:
+
+| Rule | Fails when |
+|---|---|
+| `DOC001` | a relative link in a `.md` file points at nothing. Absolute URLs, `mailto:` and bare `#anchor` targets are skipped; a `#fragment` is stripped before the path is resolved, and a link inside a code fence is an example rather than a link |
+| `DOC002` | a code fence is never closed. Without it the fence state machine sticks and every link after the fence is skipped **while the file reports clean** — the "rule that cannot fire" shape this repository has now shipped five separate times |
 
 `scripts/check-dependency-licences.mjs` enforces one more, separately because it reads the installed
 dependency graph rather than the repository:
@@ -687,8 +713,9 @@ making a client's typecheck depend on another package's authoring-time directory
 ### 4c. What CI runs, and what it deliberately does not
 
 [`.github/workflows/rules.yml`](.github/workflows/rules.yml) runs on every pull request and on every
-push to `main`. It runs **exactly** the §4a commands and nothing else: the six bare-clone script
-checks, `shellcheck scripts/*.sh`, then `pnpm install --frozen-lockfile`, `format:check`, `lint`,
+push to `main`. It runs **exactly** the §4a commands and nothing else: the eight bare-clone script
+checks (`check-repo-rules`, `check-licence-hashes`, `check-env-example` and `check-doc-links`, each
+with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --frozen-lockfile`, `format:check`, `lint`,
 `typecheck`, `test:coverage`, `bash scripts/coverage-summary.test.sh`, `check:a11y-suite`,
 `test:a11y`, `bash scripts/check-a11y-suite.test.sh`, `build`, `playwright install --with-deps
 chromium`, `test:browser`, `bash scripts/check-dependency-licences.test.sh` and `check:licences` — then
@@ -1448,6 +1475,9 @@ top of an issue **supersedes its body**.
 | Sign-off, SPDX, adding a dependency | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 | What CI runs on every pull request | [`.github/workflows/rules.yml`](.github/workflows/rules.yml) and §4c |
 | What counts as a vulnerability, and how to report it | `SECURITY.md` (added by [#96](https://github.com/openzigs/onyourleft/pull/96)) |
+| What is expected of contributors, and why this is not the Contributor Covenant | [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) |
+| Why Dependabot is configured at all, and the one failure it will cause | [`.github/dependabot.yml`](.github/dependabot.yml) |
+| Why a link inside a code fence is not a broken link, and what an unclosed fence does | `scripts/check-doc-links.sh` |
 | Which lint rule enforces which boundary | [`eslint.config.js`](eslint.config.js) and §4d |
 | Why a package's tsconfig narrows `lib` and `types` | `packages/domain/tsconfig.json` and §4d |
 | The canonical unit for a quantity, and the conversion into it | [`packages/domain/README.md`](packages/domain/README.md) |
@@ -1502,6 +1532,10 @@ top of an issue **supersedes its body**.
 | What happens when a rider passes the end of a loop, and when a route is refused as one | `packages/domain/src/route/profile.ts` §`distanceOnRoute`, §`LOOP_CLOSURE_METRES` |
 | Which GPX element a planned route is read from, and which one wins when a file has both | `packages/fit/src/xml/gpx.ts` §`decodeGpx`, `packages/fit/src/route/gpx-route.ts` |
 | Why a saved route stores its whole profile where a ride stores half a load | `packages/store/src/records.ts` §`RouteRecord` |
+| Why a route exports as a `<trk>` rather than a `<rte>`, and what a head unit has never been asked | [`packages/fit/README.md`](packages/fit/README.md) §8, `packages/fit/src/route/gpx-course.ts` |
+| Why an exported route carries an OSM notice even when nothing establishes it came from OSM | `packages/fit/src/route/course.ts` §Attribution, [ADR 0012](docs/adr/0012-data-licence.md) |
+| Why a long route is warned about rather than simplified, and where the warning belongs | `packages/fit/src/route/course.ts`, `apps/web/src/routes/export.ts` §`LONG_ROUTE_SAMPLES` |
+| Why a TCX course carries a time of zero rather than an estimate | `packages/fit/src/route/tcx-course.ts` |
 | Why a saved workout stores its blocks where a route stores its computed profile | `packages/store/src/records.ts` §`WorkoutRecord`, [`packages/store/README.md`](packages/store/README.md) §"Workouts" |
 | Why the store re-validates a workout on the way out, and what a decoder that trusted the row would hand a trainer | `packages/store/src/persisted.ts` §`fromPersistedWorkout` |
 | Why a target is range-checked twice, and why the brand is not the check | `packages/domain/src/workout/workout.ts` §`assertShare` |

@@ -82,7 +82,7 @@ jobs:
       # CLAUDE.md section 4a. Every command below is one that file documents;
       # CI accumulating private knowledge is how a contributor's local green
       # becomes CI's red with no explanation.
-      - name: Repository rules (LIC001-4, SCOPE001, WF001, ADR001-3)
+      - name: Repository rules (LIC001-4, LIC006, SCOPE001, WF001, ADR001-3)
         run: bash scripts/check-repo-rules.sh
 
       - name: Repository rule checker tests
@@ -101,6 +101,15 @@ jobs:
 
       - name: Environment template checker tests
         run: bash scripts/check-env-example.test.sh
+
+      # DOC001/DOC002. Relative links only — an external URL is not checked,
+      # because that would need the network and turn a bare-clone gate into one
+      # that fails on an aeroplane. See CLAUDE.md §4a.
+      - name: Documentation links (DOC001, DOC002)
+        run: bash scripts/check-doc-links.sh
+
+      - name: Documentation link checker tests
+        run: bash scripts/check-doc-links.test.sh
 
       # shellcheck is preinstalled on the standard Ubuntu runner image
       # (0.9.0 on ubuntu-24.04, which `ubuntu-latest` currently resolves to), so

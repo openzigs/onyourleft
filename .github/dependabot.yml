@@ -1,0 +1,91 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Dependabot version updates.
+#
+# ⚠️ Repository-level Dependabot **security** updates and alerts are already on
+# and are not configured here — CLAUDE.md §4c records that, and adding a
+# security-only config would duplicate it. This file is the other half: the
+# routine version bump.
+#
+# ## Why this repository wants it more than most
+#
+# §3's HARD RULE protects against a direction that is invisible in a diff: a
+# dependency's LICENCE changing under a version number. #24 records two live
+# examples — `webbluetooth` publishes licence-variant majors (3.x MIT, 4.x
+# BSD-3, 5.x GPL-3.0, 6.x BUSL-1.1) and `flutter_blue_plus` relicensed from
+# BSD-3 to a proprietary licence between versions. `pnpm run check:licences`
+# (DEP001) is the gate that catches that, and a gate only fires when something
+# proposes the bump. Nothing did, until this file.
+#
+# So the point of these pull requests is not being current. It is that every
+# proposed version passes through the licence gate before anybody merges it.
+#
+# ## The one that will bite, and what to do about it
+#
+# ⚠️ **pnpm 11 refuses a lockfile entry published in the last 24 hours**
+# (`minimumReleaseAge`, CLAUDE.md §8). Dependabot proposes a release as soon as
+# it appears, so a pull request opened against a same-day release fails
+# `pnpm install --frozen-lockfile` on the runner with
+# `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`.
+#
+# **The fix is to close and let Dependabot reopen it, or to rebase it a day
+# later — never to add a `minimumReleaseAgeExclude`**, which turns the
+# protection off for that package permanently. §8 says so and it is worth
+# repeating here, because this file is where somebody will meet the failure.
+#
+# A weekly schedule rather than daily is the cheap mitigation: most of what it
+# proposes on a Monday was published the week before.
+#
+# ⚠️ Dependabot has options this file deliberately does not use — a cooldown
+# setting among them — because the options reference could not be reached from
+# the environment this was written in, and an unrecognised key makes Dependabot
+# reject the whole config rather than ignore the line. Every key below is one
+# this repository can vouch for. Whoever can read the docs should check whether
+# a cooldown makes the paragraph above unnecessary.
+
+version: 2
+
+updates:
+  # The pnpm workspace. One ecosystem entry covers every package: Dependabot
+  # reads `pnpm-workspace.yaml` and proposes against the root lockfile, which is
+  # the only lockfile there is.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # Enough to be worth reviewing, few enough that they get reviewed. An
+    # unbounded queue of dependency pull requests is one nobody reads, which is
+    # the same failure as having none.
+    open-pull-requests-limit: 5
+    labels:
+      - infra
+    groups:
+      # Grouped so a toolchain bump is one review with one licence check rather
+      # than eight. They move together in practice anyway.
+      toolchain:
+        patterns:
+          - '@typescript-eslint/*'
+          - 'typescript-eslint'
+          - 'eslint*'
+          - 'prettier'
+          - 'typescript'
+          - 'vitest'
+          - '@vitest/*'
+      react:
+        patterns:
+          - 'react'
+          - 'react-dom'
+          - '@types/react*'
+
+  # The pinned actions in `.github/workflows/`. ⚠️ §8 requires a full commit
+  # SHA rather than a tag, and Dependabot understands that: it rewrites the SHA
+  # and puts the tag in a comment, which is the form the workflow already uses.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - infra
