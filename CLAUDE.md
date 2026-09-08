@@ -59,6 +59,9 @@ apps/                 AGPL-3.0-or-later, without exception
     src/transfer/       file import and export (#51) — the batch importer, the
                         1 Hz sample grid, and the export writer
     src/views/          one component per route (#48)
+    src/workout/        the workout control loop (#14) — the one place the
+                        player's decisions meet a trainer's control point,
+                        driven end to end against the #44 simulator
   mobile/             Capacitor shell wrapping the same web build (#85, #87)
     android/            the generated Android project, plus the connectedDevice
                         foreground service and its plugin bridge — MIT template
@@ -1509,6 +1512,10 @@ top of an issue **supersedes its body**.
 | Why a quantised acknowledgement is not a change, and the busy loop that follows from reading it as one | `packages/domain/src/workout/player.ts` §`acknowledge` |
 | Which single place rebases the workout offset after a pause, and why the other two do not | `packages/domain/src/workout/player.ts` §`resume` |
 | Why a workout player cannot send an FTMS Reset even by mistake | `packages/sensors/protocol/src/erg-writer.ts` §`ErgSink` |
+| Why a workout release is `stop()` and never a target of zero, and which object may reach for it | `apps/web/src/workout/session.ts` §`release`, §`WorkoutTrainer` |
+| Why a lost trainer link does not close the ERG writer, and what closing it cost | `apps/web/src/workout/session.ts` §`linkLost` |
+| Why the session assumes the trainer is already holding something when a workout starts | `apps/web/src/workout/session.ts` §`released` |
+| What the #44 simulator proves about the control loop that neither package can prove alone | `apps/web/src/workout/session.test.ts` |
 | Why this project has no workout file format yet, and what would settle it | §6 "A workout file format is an ADR 0009 question", [#14](https://github.com/openzigs/onyourleft/issues/14) |
 
 <!-- Last updated: 2026-09-06 by delivery:code-issue resolving #51 (the manual file import and export UI) -->

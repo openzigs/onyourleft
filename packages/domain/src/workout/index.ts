@@ -35,3 +35,13 @@ export {
   STOPPED_CADENCE,
   TREND_WINDOW,
 } from './erg-safety';
+
+export type {
+  PlayerIntent,
+  PlayerOptions,
+  PlayerState,
+  PlayerStatus,
+  RiderSample,
+  WorkoutPlayer,
+} from './player';
+export { createWorkoutPlayer, REFRESH_SECONDS } from './player';
