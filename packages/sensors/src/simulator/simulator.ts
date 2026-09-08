@@ -259,7 +259,15 @@ export function createSimulator(options: SimulatorOptions): Simulator {
    */
   function buildRecord(spec: SimulatedDeviceSpec, id: DeviceId): DeviceRecord {
     const identity: DeviceIdentity = { transport: SIMULATED, id };
-    const device: SensorDevice = { identity, name: spec.name, capabilities: capabilitiesOf(spec) };
+    // A simulated device is built from its own spec, so it cannot disagree
+    // with itself the way a real one can (#134) — the set is empty and stays
+    // empty, and that is a property of the simulator rather than a stub.
+    const device: SensorDevice = {
+      identity,
+      name: spec.name,
+      capabilities: capabilitiesOf(spec),
+      undeclared: new Set(),
+    };
     const session = createDeviceSession(device);
     const envelope = (at: UnixSeconds) => ({ device: identity, at });
 

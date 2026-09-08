@@ -271,6 +271,8 @@ interface DeviceRecord {
    * the caller holds. `applyResolved` is the only writer.
    */
   readonly capabilities: Set<SensorCapability>;
+  /** The set behind `device.undeclared` (#134). Mutable here, read-only there. */
+  readonly undeclared: Set<SensorCapability>;
   /**
    * The services this origin may reach on this device: what `requestDevice` was
    * given, unioned across every discovery that returned this device.
@@ -486,10 +488,56 @@ export function createWebBluetoothTransport(
     record: DeviceRecord,
     live: LiveCharacteristic,
     capability: MeasurementCapability,
-  ): boolean =>
-    record.session.state === 'connected' &&
-    record.native.gatt?.connected === true &&
-    record.link?.sources.get(capability) === live;
+  ): boolean => {
+    const ours = record.link?.sources.get(capability) === live;
+    if (!ours) {
+      noteUndeclared(record, live, capability);
+    }
+    return record.session.state === 'connected' && record.native.gatt?.connected === true && ours;
+  };
+
+  /**
+   * Record a capability this device **delivered without declaring** (#134).
+   *
+   * ## Which rejections are a disagreement, and which are ordinary
+   *
+   * `accepts` says no for three different reasons and only one of them is a
+   * device contradicting itself:
+   *
+   * - **Another characteristic owns the capability.** A modern trainer serves
+   *    power from FTMS and from Cycling Power, and exactly one of them is the
+   *    source. Nothing is wrong; the other one's frames are meant to be dropped.
+   * - **This profile could never supply it.** A decoder cannot push a
+   *    capability its profile does not declare, so this branch is unreachable
+   *    today — it is checked anyway, because a profile whose `capabilities`
+   *    and `decode` disagree is our bug and should not be filed against the
+   *    device.
+   * - **The device declared it could not, and then did.** That is the
+   *    disagreement, and the only case that lands in the set.
+   *
+   * ⚠️ **Recorded, never acted on.** The frame stays dropped. Trusting it would
+   * put back exactly the ambiguity the Feature read removes — a device that
+   * reports crank data only while the crank turns would become indistinguishable
+   * from one that declared it properly, and "no cadence" would again be the same
+   * observation as "cadence dropped out".
+   *
+   * ⚠️ **Never cleared on reconnect.** A device that misdeclared itself once
+   * has misdeclared itself; a link that comes back up does not unsay it, and
+   * clearing would make the record depend on when it happened to be read.
+   */
+  const noteUndeclared = (
+    record: DeviceRecord,
+    live: LiveCharacteristic,
+    capability: MeasurementCapability,
+  ): void => {
+    if (record.link === undefined || record.link.sources.has(capability)) {
+      return;
+    }
+    if (!live.entry.profile.capabilities.includes(capability)) {
+      return;
+    }
+    record.undeclared.add(capability);
+  };
 
   const buildLive = (
     record: DeviceRecord,
@@ -652,19 +700,27 @@ export function createWebBluetoothTransport(
       if (!record.granted.has(entry.service)) {
         continue;
       }
-      const wanted = entry.profile.capabilities.filter((capability) => !sources.has(capability));
-      if (wanted.length === 0) {
-        continue;
-      }
       let characteristic: GattCharacteristicPort;
+      let service: GattServicePort;
       try {
-        const service = await serviceFor(entry.service);
+        service = await serviceFor(entry.service);
         characteristic = await service.getCharacteristic(entry.characteristic);
       } catch {
         // Not on this device. Every capability this profile would have supplied
         // stays unassigned, and a later profile may supply it.
         continue;
       }
+
+      // #134: ask the device what it can actually report, before deciding what
+      // this profile supplies. Without this the profile's static list wins and
+      // a single-sided crank meter has `cadence` claimed on its behalf because
+      // the Measurement characteristic exists.
+      const supplies = await declaredBy(entry.profile, service);
+      const wanted = supplies.filter((capability) => !sources.has(capability));
+      if (wanted.length === 0) {
+        continue;
+      }
+
       const live = buildLive(record, entry, characteristic);
       characteristic.addEventListener('characteristicvaluechanged', live.handler);
       characteristics.set(`${entry.service}/${entry.characteristic}`, live);
@@ -693,6 +749,49 @@ export function createWebBluetoothTransport(
     }
 
     return { characteristics, sources, control: undefined, controllable };
+  };
+
+  /**
+   * What this device declares it can report, for a profile that asks (#134).
+   *
+   * ## Three outcomes, and the two that are not "narrow it"
+   *
+   * 1. **The profile has no `describe`** — its full capability list stands.
+   *    Three of the four profiles predate #134 and narrowing them on the
+   *    strength of a characteristic they do not serve would remove capabilities
+   *    that work today.
+   * 2. **The read fails** — the characteristic is missing, or the device
+   *    refuses it, or the decoder throws on the bytes. The full list stands
+   *    again. A device serving Measurement and not Feature is out of
+   *    specification and common, and refusing it every capability would be a
+   *    worse answer than trusting the profile.
+   * 3. **The read succeeds** — the declared set is **intersected** with the
+   *    profile's, never substituted for it. A decoder cannot widen a profile
+   *    past what it declared it could decode, so a Feature characteristic
+   *    claiming a field this program has no decoder for is ignored rather than
+   *    producing a capability nothing can supply.
+   *
+   * ⚠️ **One read per link, on connect**, inside the same queue as every other
+   * GATT operation — `queue.ts` bounds it, so a device that accepts the read
+   * and never answers cannot hang the connect. #40 records that Web Bluetooth
+   * specifies no timeout for any operation.
+   */
+  const declaredBy = async (
+    profile: GattProfile,
+    service: GattServicePort,
+  ): Promise<readonly MeasurementCapability[]> => {
+    const describe = profile.describe;
+    if (describe === undefined) {
+      return profile.capabilities;
+    }
+    try {
+      const characteristic = await service.getCharacteristic(describe.characteristic);
+      const value = await characteristic.readValue();
+      const declared = new Set(describe.declared(value));
+      return profile.capabilities.filter((capability) => declared.has(capability));
+    } catch {
+      return profile.capabilities;
+    }
   };
 
   /**
@@ -942,15 +1041,21 @@ export function createWebBluetoothTransport(
     // Built once and held by the record, because it is what `session.report`
     // reads on every measurement and what `applyResolved` writes.
     const declared = new Set(capabilities);
+    // #134. Mutated in place like `declared` and for the same reason: it hangs
+    // off the `SensorDevice` the session and every subscription captured, so
+    // reassigning it would mean a new device and the loss of every hold.
+    const undeclared = new Set<SensorCapability>();
     const device: SensorDevice = {
       identity,
       ...(native.name === undefined ? {} : { name: native.name }),
       capabilities: declared,
+      undeclared,
     };
     const record: DeviceRecord = {
       native,
       device,
       capabilities: declared,
+      undeclared,
       granted: new Set(granted),
       identity,
       session: createDeviceSession(device),

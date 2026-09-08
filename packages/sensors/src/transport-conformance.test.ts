@@ -231,12 +231,14 @@ const trainer: SensorDevice = {
   identity: { transport: MEMORY, id: deviceId('trainer') },
   name: 'KICKR CORE 1F2A',
   capabilities: new Set(['power', 'cadence', 'speed', 'trainer-control']),
+  undeclared: new Set(),
 };
 
 const strap: SensorDevice = {
   identity: { transport: MEMORY, id: deviceId('strap') },
   name: 'HRM-Dual 0C3F',
   capabilities: new Set(['heart-rate']),
+  undeclared: new Set(),
 };
 
 const power = (value: number, at: number): SensorMeasurement => ({

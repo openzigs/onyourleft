@@ -1343,6 +1343,7 @@ top of an issue **supersedes its body**.
 | Why an effort's visibility has three values and never two | `packages/domain/src/segment/effort.ts`, `packages/store/src/records.ts` §`SegmentEffortRecord` |
 | What actually makes re-matching idempotent, and what the derived effort id buys instead | `packages/store/src/schema.ts` §`STORES_V6`, `packages/store/src/testing/fakes.ts` §`appendingEffortStoreFactory` |
 | How a backfill resumes, and why it is a cursor rather than an offset | `apps/web/src/segments/backfill.ts`, `packages/store/src/activity-store.ts` §`startedAfter` |
+| Where a device's capability set comes from, and what happens when a device contradicts itself | [`packages/sensors/README.md`](packages/sensors/README.md) §"What a device says it can do", `packages/sensors/web-bluetooth/src/transport.ts` §`declaredBy`, §`noteUndeclared` |
 | What a segment matcher may not do, and the prior art the design-around cites | [ADR 0007](docs/adr/0007-patent-posture.md) D-2 and D-6, `docs/spikes/0001-segment-matching.md` §7 |
 | Which time basis a segment board ranks by, and why moving time is not it | `packages/domain/src/segment/effort.ts` §`RANKING_BASIS` |
 | How two efforts recorded at different rates are compared without truncating either | `packages/domain/src/segment/comparison.ts`, §`overlayEfforts` |

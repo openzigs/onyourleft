@@ -25,6 +25,7 @@ function device(id: string, capabilities: readonly SensorCapability[]): SensorDe
     identity: { transport: WEB_BLUETOOTH, id: deviceId(id) },
     name: id,
     capabilities: new Set(capabilities),
+    undeclared: new Set(),
   };
 }
 
