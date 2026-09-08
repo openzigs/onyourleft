@@ -16,6 +16,7 @@
   "dependencies": {
     "@onyourleft/domain": "workspace:*",
     "@onyourleft/fit": "workspace:*",
+    "@onyourleft/physics": "workspace:*",
     "@onyourleft/sensors": "workspace:*",
     "@onyourleft/store": "workspace:*",
     "maplibre-gl": "6.7.0",
