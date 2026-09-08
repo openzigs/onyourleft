@@ -565,5 +565,19 @@ export interface RouteRecord {
    */
   readonly name: string;
   readonly profile: RouteProfile;
+  /**
+   * ADR 0004 decision A's default applies here too, and it matters more.
+   *
+   * #73 puts it plainly: *"An activity trace can be truncated at both ends
+   * after the fact. A route is a plan, and its endpoints are usually the
+   * athlete's front door — that is the entire point of a route. There is no
+   * 'hide the first 200 m' that leaves a usable route."* A ride that starts at
+   * home can be trimmed and still be a ride; a route that starts at home and is
+   * trimmed is no longer the route.
+   *
+   * So this reuses `visibility.ts` rather than declaring a second enum: same
+   * three values, same default, same refusal to coerce an unrecognised one.
+   */
+  readonly visibility: Visibility;
   readonly createdAt: UnixSeconds;
 }

@@ -108,6 +108,7 @@ import { STREAM_CHANNELS, type NewStreamSet, type Samples, type StreamChannel } 
 import { signingKeyFor, webCryptoSha256 } from '../web-crypto';
 
 import type { StoreHarness } from './harness';
+import { DEFAULT_VISIBILITY, type Visibility } from '../visibility';
 
 /** The three athletes every fixture has. See the note at the top of this file. */
 export const ATHLETE_A: AthleteId = athleteId('athlete-a');
@@ -617,6 +618,7 @@ export function routeFor(
   overrides: {
     readonly loop?: boolean;
     readonly name?: string;
+    readonly visibility?: Visibility;
     readonly sideMetres?: number;
     readonly spacingMetres?: number;
     readonly originLatitude?: number;
@@ -667,6 +669,10 @@ export function routeFor(
     createdBy: owner,
     name: overrides.name ?? `Route ${String(routeCounter)}`,
     profile: routeProfile(points, { loop }),
+    // ⚠️ Private unless a test says otherwise, which is the fixture equivalent
+    // of ADR 0004 decision A. A fixture defaulting to `public` would make
+    // `publishedRouteStoreFactory` indistinguishable from a correct store.
+    visibility: overrides.visibility ?? DEFAULT_VISIBILITY,
     createdAt: unixSeconds(FIXTURE_EPOCH),
   };
 }

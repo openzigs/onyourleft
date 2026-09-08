@@ -52,7 +52,7 @@ import type {
   SegmentRecord,
   RouteRecord,
 } from './records';
-import { parseVisibility } from './visibility';
+import { DEFAULT_VISIBILITY, parseVisibility } from './visibility';
 
 // --- On-disk shapes ---------------------------------------------------------
 
@@ -147,6 +147,7 @@ export interface PersistedRoute {
   longitudes: number[];
   elevations: number[];
   grades: number[];
+  visibility: string;
   createdAt: number;
 }
 
@@ -746,6 +747,7 @@ export function toPersistedRoute(record: RouteRecord): PersistedRoute {
     longitudes: profile.positions.map((point) => point.longitude),
     elevations: [...profile.elevations],
     grades: [...profile.grades],
+    visibility: record.visibility,
     createdAt: record.createdAt,
   };
 }
@@ -807,6 +809,21 @@ export function fromPersistedRoute(row: PersistedRoute): RouteRecord {
     createdBy: athleteId(decodedString('route.createdBy', row.createdBy)),
     name: decodedString('route.name', row.name),
     profile,
+    // ⚠️ The one place in this package where an ABSENT field is substituted
+    // rather than read faithfully, and the exception is narrow on purpose.
+    //
+    // README §"An optional field is not a migration" says a decoder that
+    // supplies a default is lying about what is on disk, and for a threshold
+    // that is right — substituting one hides the athlete's own choice. Here the
+    // substitution runs the other way: `visibility` arrived one release after
+    // the routes store itself (#89, then #73), so a row without it was written
+    // by a build that had no concept of sharing, and the only honest reading of
+    // "this route predates the sharing feature" is the closed one.
+    //
+    // Absence only. A value that is PRESENT and unrecognised is corruption and
+    // still throws, because `parseVisibility` refuses to coerce — which is the
+    // half that would hide a bad write.
+    visibility: row.visibility === undefined ? DEFAULT_VISIBILITY : parseVisibility(row.visibility),
     createdAt: decoded(
       'route.createdAt',
       decodedNumber('route.createdAt', row.createdAt),

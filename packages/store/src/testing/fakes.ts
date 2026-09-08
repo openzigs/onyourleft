@@ -7,13 +7,14 @@
  * observing the test go red. A harness that passes against a no-op write is
  * worthless, and this is the only way to know it does not."*
  *
- * There are **eight** fakes here, and there are eight on purpose: a harness that
+ * There are **nine** fakes here, and there are nine on purpose: a harness that
  * catches one failure shape is calibrated to that shape. They stand for the
  * causes CLAUDE.md section 5 names, and they fail for different reasons at
  * different points in the read. The fourth arrived with #46's write path, the
  * fifth with #61's, the sixth with #64's, the seventh with #66's and the eighth
- * with #89's, which is the rule this file exists to enforce: a new write path
- * may not ship without a fake proving the harness catches its failure.
+ * with #89's and the ninth with #73's, which is the rule this file exists to
+ * enforce: a new write path may not ship without a fake proving the harness
+ * catches its failure.
  *
  * | Fake | Cause it stands for | How the round trip notices |
  * |---|---|---|
@@ -25,6 +26,7 @@
  * | `thinnedGeometryStoreFactory` | *wrong layer* — a downsampler above the store thinned a segment's geometry on its way in | the segment comes back complete, with the right name, distance and endpoints, and **a shorter path** |
  * | `appendingEffortStoreFactory` | *wrong layer* — the write inserted where it should have replaced | one match is right; the second one doubles every board |
  * | `openedLoopStoreFactory` | *wrong layer* — one boolean lost in a mapping on the way in | the route comes back with every metre and every gradient correct, and **no longer wraps** |
+ * | `publishedRouteStoreFactory` | *wrong layer* — a default applied on the way in, in the unsafe direction | the route comes back complete and correct, and **shared with everybody** |
  *
  * The second and third are the ones a naive harness misses. Both write to the
  * **real** IndexedDB, inside a **real** transaction that **really commits**, and
@@ -540,6 +542,41 @@ export function openedLoopStoreFactory(): StoreFactory {
         ...bindStore(real),
         putRoute: async (record: RouteRecord): Promise<RouteId> =>
           real.putRoute({ ...record, profile: { ...record.profile, loop: false } }),
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository that **widens a route's visibility to `public`** on its way in.
+ *
+ * ⚠️ This is the fake for #73's fourth criterion, and it is the most dangerous
+ * of the nine because it is the least visible. It is the shape of a real bug:
+ * a mapping layer that fills in a field it thinks is missing, and picks the
+ * open value because that is the one that makes the feature look like it works.
+ *
+ * Everything else is right. The name, the profile, the loop flag, every
+ * coordinate and every gradient come back exactly as written; the record
+ * decodes without a complaint; the list renders. The only difference is a
+ * three-character string, and what it means is that a route whose start is the
+ * athlete's front door is readable by anyone — which #73 says is not
+ * recoverable the way an over-shared activity is, because a route cannot be
+ * truncated at the ends and remain a route.
+ *
+ * `assertRouteRoundTrip` compares `visibility` on its own line for that reason,
+ * and deleting that line turns a test red rather than leaving the suite green.
+ */
+export function publishedRouteStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        putRoute: async (record: RouteRecord): Promise<RouteId> =>
+          real.putRoute({ ...record, visibility: 'public' }),
       };
     },
     destroy: async (name) => {
