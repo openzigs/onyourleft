@@ -392,6 +392,44 @@ export {
   SIMULATION_SETPOINT_INTERVAL_SECONDS,
 } from './trainer/simulation';
 
+// --- The bot pacer's pacing rule and the gap to it (#92) ---------------------
+//
+// A bot pacer is a SYNTHETIC rider: computed from a target w/kg and a pacing
+// rule, riding the same route through the same physics model as the rider
+// (`@onyourleft/physics` §`advanceBot`). ⚠️ It replays NO recorded ride, from
+// this rider or from anyone else, and that is a design constraint rather than a
+// current state of affairs — ADR 0007 D4 is why, and `pacer/pacing.ts`'s header
+// records the three places it is checked rather than assumed. There is no
+// leaderboard, ranking or comparison against another person anywhere in it.
+//
+// The rule is here rather than in `packages/physics` because the dependency
+// direction leaves no choice: physics depends on this package, so the half that
+// needs the route profile lives here and the half that needs the tick lives
+// there.
+
+export type { PacerErrorCode } from './pacer/errors';
+export { PacerError } from './pacer/errors';
+
+export type { BotPacerPlan, BotPacerPlanIsSynthetic } from './pacer/pacing';
+export {
+  BOT_MASS_KILOGRAMS,
+  botPacerPlan,
+  flatPowerWatts,
+  MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM,
+  MINIMUM_INTENSITY_WATTS_PER_KILOGRAM,
+  PACING_CLIMB_REFERENCE_GRADE_PERCENT,
+  PACING_DESCENT_REFERENCE_GRADE_PERCENT,
+  PACING_FACTOR_CEILING,
+  PACING_FACTOR_FLOOR,
+  PACING_MAXIMUM_EASING,
+  PACING_MAXIMUM_UPLIFT,
+  pacedPowerWatts,
+  pacingFactor,
+} from './pacer/pacing';
+
+export type { GapInput, PacerGap } from './pacer/gap';
+export { botIsAhead, gapMagnitudeSeconds, pacerGap } from './pacer/gap';
+
 // --- Segments (#64) ----------------------------------------------------------
 //
 // The model, and the geometry that decides whether a ride went along a segment.
