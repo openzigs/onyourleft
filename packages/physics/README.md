@@ -156,6 +156,39 @@ one at the midpoint speed, drive for the remaining half), which is second-order 
 With the naive ordering the 1 Hz and 60 Hz runs disagreed by 4.6 mm and the tick settled 1.7 × 10⁻⁴
 m/s away from the closed-form answer; both are now two orders of magnitude inside tolerance.
 
+## 4a. The bot pacer's rider (#92)
+
+`pacer.ts` is the tick's first consumer with a purpose: **a synthetic rider ahead of you on the
+route, riding a chosen w/kg, that will not wait for you.** It is four steps — wrap the bot's odometer
+onto the route, read the gradient there, ask `@onyourleft/domain`'s pacing rule for a power, and hand
+that to `advance` — and the fourth is an acceptance criterion rather than an implementation detail.
+
+**#92 requires a test that the bot and the rider go through the same code path**, because a bot on
+separate maths agrees with the physics on the flat (where the two would be fitted to each other) and
+diverges on every gradient, which is precisely where a rider would notice. So `pacer.test.ts` asserts
+it three ways, and the third is the one that cannot be faked:
+
+| Assertion | What it would miss on its own |
+|---|---|
+| the bot's tick equals a rider's `advance` with the same inputs | a second model that happened to agree at the point tested |
+| the real `advance` is observed being called, with the bot's 75 kg | a bot that called it and then ignored the answer |
+| **`advance` replaced by a sentinel changes the bot's answer** | nothing — this is the one that distinguishes "calls it" from "is moved by it" |
+
+That third assertion is why this is the only file in the package that mocks a module. Everything else
+here compares numbers, and a number cannot say which function produced it.
+
+⚠️ **Nothing in the bot's inputs is a recorded ride, and that is a design constraint** rather than a
+present-tense fact about the code — see ADR 0007 D4, and `packages/domain/README.md` §`pacer/` for
+the three places it is checked. There is also **no rider** in any of `advanceBot`'s or
+`createBotPacer`'s parameters, so "the bot completes the route without the rider present" is a
+property of the signatures before it is a test.
+
+⚠️ **There is no pedal-assist burst on joining**, which #92's Context names as a documented Zwift
+mechanic. It is not one of #92's acceptance criteria, and it could not be one of this file's: a
+joining burst is a response to *the rider joining*, so implementing it here would put rider state
+into bot behaviour, which #92's sixth criterion forbids. It belongs to whichever screen knows a rider
+has just joined.
+
 ### What it deliberately does not model
 
 - **Reverse.** Speed is clamped at zero, so a rider who runs out of power on a climb stops rather
@@ -250,13 +283,15 @@ pnpm --filter @onyourleft/physics run typecheck
 | `air.test.ts` | The ISO 2533 table: 1.225 kg/m³ at sea level, 1.0066 at 2 000 m |
 | `simulate.test.ts` | Determinism, the three tick rates, inertia wired in, and the cases that would put a `NaN` into a ride |
 | `ride.test.ts` | A whole ride through the public entry point — the package's first consumer |
+| `pacer.test.ts` | The bot: the same code path as the rider, the pacing envelope through the physics, a route completed with no rider present, and the driver's clock rules |
 
 **Published worked examples beat round-tripping your own arithmetic**, which is why
 `martin-1998.test.ts` exists and why it is first in that list: an implementation that is
 self-consistently wrong round-trips perfectly and satisfies every other file here.
 
-⚠️ **This package ships with no production consumer.** #88 scopes itself to `packages/physics` and
-`apps/web` (#51) was running in parallel, so nothing renders a speed from it yet. `ride.test.ts` is
-the closest thing to a first consumer and it establishes that the exported surface is sufficient to
-run a ride; it cannot establish that the shape suits the screen. #90, #91 and #94 are the issues that
-will find out.
+⚠️ **This package still ships with no production consumer.** #88 scoped itself to
+`packages/physics`, `apps/web` (#51) was running in parallel, and nothing renders a speed from it
+yet. `ride.test.ts` and — since #92 — `pacer.test.ts` are the closest things to first consumers:
+between them they establish that the exported surface is sufficient to run a ride and to pace a bot
+along a route, and neither can establish that the shape suits a screen. #91 and #94 are the issues
+that will find out, and #94 is where the bot's gap finally gets drawn.

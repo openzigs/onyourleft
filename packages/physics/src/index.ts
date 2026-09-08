@@ -101,3 +101,14 @@ export {
   MAXIMUM_SUB_STEPS_PER_TICK,
   START_OF_RIDE,
 } from './simulate';
+
+// --- The bot pacer's rider (#92) --------------------------------------------
+//
+// The synthetic rider `@onyourleft/domain`'s pacing rule paces. It computes no
+// speed of its own: it calls `advance` above, which is what makes "the bot goes
+// through the same physics model as the rider" a fact about the call graph
+// rather than a claim in a comment. Nothing in its inputs is a recorded ride —
+// see `pacer.ts`'s header and ADR 0007 D4.
+
+export type { BotCourse, BotPacerDriver, BotTick } from './pacer';
+export { advanceBot, BOT_AT_START_LINE, botDemand, createBotPacer } from './pacer';
