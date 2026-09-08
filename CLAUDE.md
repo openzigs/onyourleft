@@ -400,8 +400,8 @@ pnpm run build
 # machine or a CI runner, install it first with the line below.
 pnpm run test:browser
 
-# Fetch the browser the lockfile pins. @playwright/test 1.56.0 ships Chromium
-# revision 1194 and this fetches exactly that, so the browser is as
+# Fetch the browser the lockfile pins. @playwright/test 1.63.0 ships Chromium
+# revision 1243 and this fetches exactly that, so the browser is as
 # reproducible as the toolchain. ~170 MB, and `--with-deps` uses sudo to add
 # the shared libraries a headless Chromium needs. Skip it where a matching
 # browser is already installed.
@@ -695,7 +695,7 @@ Apache-2.0, both zero-dependency, both under `packages/store`) and — since #40
 MIT and `ieee754` BSD-3-Clause) and — since #63 — `maplibre-gl` 6.7.0 and `pmtiles` 4.5.0 (both
 BSD-3-Clause, both runtime dependencies of `apps/web`, whose closure adds BSD-2-Clause, ISC, MIT and
 one `(MIT OR Apache-2.0)` and no GPL, AGPL or non-OSI licence) and — also since #63 —
-`@playwright/test` 1.56.0 (Apache-2.0, with `playwright` and `playwright-core`, all three
+`@playwright/test` 1.63.0 (Apache-2.0, with `playwright` and `playwright-core`, all three
 Apache-2.0; a devDependency of `apps/web`, and the only dependency in the workspace that pins a
 **browser** as well as a version — see §4f) are
 installed; **nothing else from ADR 0005's runtime list is**, `react-router` included. Add each in
@@ -740,10 +740,15 @@ different context and could not block a merge. A gate that cannot block is not a
 job, not a budget.
 
 ⚠️ **The browser is pinned by the lockfile, not by the install command.** `@playwright/test`
-**1.56.0** ships Chromium revision **1194**, and `playwright install chromium` fetches whatever the
+**1.63.0** ships Chromium revision **1243**, and `playwright install chromium` fetches whatever the
 installed Playwright names. Bumping Playwright therefore changes the browser under the gate, which
 is a thing to do deliberately and to re-run the gate after — the same posture as the fixture-corpus
-generator in `packages/fit`.
+generator in `packages/fit`. ⚠️ **These two numbers move together and are the reason this bump is
+not a routine one.** #206 took 1.56.0 → 1.63.0, which took Chromium **1194 (141.0.7390.37) → 1243
+(153.0.8010.12)** — twelve major browser versions in one version bump, read from each release's own
+`browsers.json` rather than from the changelog. The gate was re-run on the new browser before that
+merge and stayed green. A future bump updates this paragraph in the same pull request; a Dependabot
+bump that leaves it saying 1.56.0 is the drift §4c forbids.
 
 It runs on `ubuntu-latest`, holds `permissions: contents: read`, and pins `actions/checkout` and
 `actions/setup-node` to full commit SHAs with the `gh api` command that produced each in a comment.
