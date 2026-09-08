@@ -288,6 +288,29 @@ describe('a row on disk this build cannot read', () => {
     expect(() => fromPersistedRoute(single)).toThrow(/at least two samples/);
   });
 
+  it('keeps an edited route’s updatedAt distinct from its createdAt', () => {
+    // ⚠️ Added because a mutation came back GREEN: deleting the `updatedAt`
+    // comparison from `assertRouteRoundTrip` left the whole suite passing, so
+    // that line was proving nothing. The fixture's default has the two equal,
+    // which is exactly the value a decoder that dropped the field would produce
+    // — so nothing could tell the difference. This pins an edited route, where
+    // they differ, and the fallback in `fromPersistedRoute` is the code it
+    // guards.
+    const edited = routeFor(ATHLETE_A, { updatedAt: 1_700_000_900 });
+    const back = fromPersistedRoute(toPersistedRoute(edited));
+    expect(back.updatedAt).toBe(edited.updatedAt);
+    expect(back.updatedAt).not.toBe(back.createdAt);
+  });
+
+  it('reads a row written before updatedAt existed as its createdAt', () => {
+    const row = toPersistedRoute(routeFor(ATHLETE_A, { updatedAt: 1_700_000_900 }));
+    const beforeTheField: Record<string, unknown> = { ...row };
+    delete beforeTheField['updatedAt'];
+    const back = fromPersistedRoute(beforeTheField as unknown as typeof row);
+    // A route nobody has edited was last written when it was created.
+    expect(back.updatedAt).toBe(back.createdAt);
+  });
+
   it('round trips through the persisted shape and back unchanged', () => {
     const route = routeFor(ATHLETE_A);
     const back = fromPersistedRoute(toPersistedRoute(route));
