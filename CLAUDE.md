@@ -72,6 +72,8 @@ packages/             Apache-2.0, without exception
     route/              the route profile (#89) — elevation and gradient as a
                         function of distance, the three windows it is built
                         from, and the loop wrap
+    pacer/              the bot pacer (#92) — the pacing rule at a fixed 75 kg,
+                        and the gap to the rider as two unwrapped odometers
     trainer/            the gradient setpoint driver (#90) — where the rider is
                         on the route, the grade there, and whether it is worth
                         a write yet
@@ -88,7 +90,8 @@ packages/             Apache-2.0, without exception
                         decoding, and since #90 the simulation writer and the
                         choice of control point on a machine offering two
     web-bluetooth/      the browser transport (#40) — the one place a BluetoothDevice exists
-  physics/            cycling power/speed model, Martin et al. 1998 (#88)
+  physics/            cycling power/speed model, Martin et al. 1998 (#88), and
+                      the synthetic rider that composes #92's rule with it
   store/              local activity, stream, recording-checkpoint, signed-record,
                       segment, effort and route store, and the round-trip harness
                       (#26-#28, #46, #61, #64, #66, #89)
@@ -564,8 +567,9 @@ and routing it through `web-crypto.ts` would destroy the independence it exists 
     `packages/domain` is, through one `tsconfig.json` rather than two, and it has **no runtime
     dependency but `@onyourleft/domain`**. Provenance for every constant, and the two that rest on
     weaker evidence, is [`packages/physics/README.md`](packages/physics/README.md) §2. ⚠️ **It has
-    no production consumer** — #51 was running in parallel and nothing renders a speed from it yet;
-    #90, #91 and #94 are the issues that will. ⚠️ Its determinism is enforced in
+    no production consumer, and since #92 it has a caller** — `src/pacer.ts` composes the pacing
+    rule with `advance`, so a bot and a rider go through the same tick. Nothing *renders* a speed
+    from it yet; #91 and #94 are the issues that will, and both need `apps/mobile`. ⚠️ Its determinism is enforced in
     `eslint.config.js`, **not** by the typechecker: `Date` and `Math.random` are ECMAScript
     built-ins and survive `lib: ["ES2024"]`, exactly as `DataView` does in `packages/sensors`.
     ⚠️ Do not "simplify" the tick's integrator. It splits the drive (integrated in energy) from
@@ -1385,5 +1389,8 @@ top of an issue **supersedes its body**.
 | Whether editing a route versions it or overwrites it, and what stops a second tab winning silently | `apps/web/src/routes/save.ts` §`editRoute`, `packages/store/src/records.ts` §`RouteRecord.updatedAt` |
 | Why a route that starts inside a privacy zone cannot be shared at all, where a ride can | `apps/web/src/routes/share.ts` §`RouteShare.usable`, §`PUBLIC_ROUTE_WARNING` |
 | Where a route's visibility default is applied, and the one place an absent field is substituted | `apps/web/src/routes/save.ts` §`routeFromGpx`, `packages/store/src/persisted.ts` §`fromPersistedRoute` |
+| Why the bot's power is a fraction of a flat figure and never a recorded one, and what enforces that | `packages/domain/src/pacer/pacing.ts` §`SyntheticInput`, [ADR 0007](docs/adr/0007-patent-posture.md) D4 |
+| What makes "the bot and the rider go through the same physics" a fact about the call graph rather than a comment | `packages/physics/src/pacer.ts` §`advanceBot` |
+| Why a bot a full lap ahead reads as a lap ahead rather than as level with you | `packages/domain/src/pacer/gap.ts` |
 
 <!-- Last updated: 2026-09-06 by delivery:code-issue resolving #51 (the manual file import and export UI) -->
