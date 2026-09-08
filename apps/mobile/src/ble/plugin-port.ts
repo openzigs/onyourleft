@@ -47,7 +47,7 @@ export interface PluginDeviceRequest {
 }
 
 /**
- * The nine plugin calls this adapter makes.
+ * The eleven plugin calls this adapter makes.
  *
  * Every one returns a promise, including the ones the plugin documents as
  * fire-and-forget, because `SensorTransport`'s contract is that nothing throws
@@ -91,4 +91,42 @@ export interface CapacitorBlePort {
   ): Promise<void>;
 
   stopNotifications(deviceId: string, service: string, characteristic: string): Promise<void>;
+
+  /**
+   * One **acknowledged** characteristic write — the plugin's `write`.
+   *
+   * ⚠️ This is the one that drives a trainer's control point, and the
+   * acknowledgement is the whole point.
+   * `packages/sensors/protocol`'s `FitnessMachineChannel.writeControlPoint`
+   * states the rule for every platform: *"an implementation must use an
+   * acknowledged write — `writeValueWithResponse()` on Web Bluetooth, `write`
+   * rather than `writeWithoutResponse` on a native stack"*, because an
+   * unacknowledged write *"compiles, satisfies every test in this file, and
+   * reintroduces exactly the fire-and-forget failure the client exists to
+   * prevent"*.
+   */
+  write(deviceId: string, service: string, characteristic: string, value: DataView): Promise<void>;
+
+  /**
+   * The unacknowledged sibling. **Declared, implemented, and never called.**
+   *
+   * ⚠️ It is here on purpose and it is not dead weight. `packages/sensors/
+   * web-bluetooth/src/gatt.ts` does exactly this for the same reason, and
+   * CLAUDE.md §4b records why: with the unsafe call *absent* from the port,
+   * swapping the safe write for it would be a one-word edit that no test could
+   * see, because the port would have to grow the method in the same commit and
+   * a reviewer would read that as ordinary. With it present and provably
+   * unused, the swap is a **red test** —
+   * `fitness-machine-channel.test.ts` asserts the control point write goes
+   * through `write` and that `writeWithoutResponse` is never called at all.
+   *
+   * Nothing in this repository calls it. If something ever needs to, that is a
+   * decision to take in an issue rather than at a call site.
+   */
+  writeWithoutResponse(
+    deviceId: string,
+    service: string,
+    characteristic: string,
+    value: DataView,
+  ): Promise<void>;
 }

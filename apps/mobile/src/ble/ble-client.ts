@@ -99,5 +99,27 @@ export function capacitorBlePort(): CapacitorBlePort {
     ): Promise<void> => {
       await BleClient.stopNotifications(deviceId, service, characteristic);
     },
+
+    write: async (
+      deviceId: string,
+      service: string,
+      characteristic: string,
+      value: DataView,
+    ): Promise<void> => {
+      // `write`, not `writeWithoutResponse`. See `plugin-port.ts` for why the
+      // difference matters and why the wrong one is still declared below.
+      await BleClient.write(deviceId, service, characteristic, value);
+    },
+
+    writeWithoutResponse: async (
+      deviceId: string,
+      service: string,
+      characteristic: string,
+      value: DataView,
+    ): Promise<void> => {
+      // Implemented so the port is honestly satisfied, and called by nothing.
+      // `plugin-port.ts` records why it exists at all.
+      await BleClient.writeWithoutResponse(deviceId, service, characteristic, value);
+    },
   };
 }
