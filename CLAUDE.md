@@ -84,6 +84,9 @@ packages/             Apache-2.0, without exception
     trainer/            the gradient setpoint driver (#90) — where the rider is
                         on the route, the grade there, and whether it is worth
                         a write yet
+    workout/            structured workouts (#14) — the model, the timeline a
+                        player looks up rather than replays, and the ERG
+                        spiral-of-death rule. NO file format; see §6
     segment/            the segment model (#64), the matcher (#66) and the effort
                         comparison (#67) — endpoints and bearings, the cell
                         prefilter, discrete Fréchet, the effort with its
@@ -1207,6 +1210,31 @@ rename them to the familiar ones**
 in code, in a UI label, in a metric key or in a column header. The *formulae* are unaffected — they
 are published (Allen & Coggan, 2006) and a trademark protects a name, not arithmetic.
 
+### A workout file format is an ADR 0009 question, not a parser to write
+
+[#14](https://github.com/openzigs/onyourleft/issues/14)'s scope section says *"the ZWO format is the
+de facto standard … Adopting it buys an enormous free library"*. **That predates
+[ADR 0009](docs/adr/0009-clean-room-posture.md) and is not settled.** Three things collide, and any
+one of them is enough to stop:
+
+- **L1** greps every diff for `zwift`, case-insensitively, and permits a hit only in prose or in an
+  exact R3 template instance. A format named after a product is at best an argument about whether a
+  file extension is a mark.
+- **R1** permits taking facts and forbids taking *somebody's compilation* of them as a table — and
+  **every open implementation of that format is GPL-2.0, GPL-3.0 or AGPL-3.0**, which §3 makes fatal
+  anywhere under `packages/`. Reading one to learn the element names is the exact act R1 draws a
+  line through.
+- **ADR 0006 R2's provenance requirement has no answer here.** The FIT decoder records where every
+  profile number came from. There is no published specification for the format in question to record
+  against, so an implementation would be written from memory — and #14's own criterion, that *"at
+  least 50 workouts from the existing open ZWO corpus parse"*, needs a corpus this project has no
+  lawful, offline route to.
+
+**So `packages/domain/src/workout/` defines the model and no format.** Every format that ever lands
+maps onto it, and the decision — adopt one under a written ADR, or specify this project's own — is
+the owner's. It is not blocked work: the model, the timeline and the ERG rule are the part that does
+not depend on the answer, and they are the part #14 says carries the risk.
+
 ### Reading prior art is fine. Copying from it binds this project's licence.
 
 **Every mature prior-art project in this space except `incyclist/devices` (MIT) is GPL-2.0, GPL-3.0
@@ -1470,5 +1498,9 @@ top of an issue **supersedes its body**.
 | Why the bot's power is a fraction of a flat figure and never a recorded one, and what enforces that | `packages/domain/src/pacer/pacing.ts` §`SyntheticInput`, [ADR 0007](docs/adr/0007-patent-posture.md) D4 |
 | What makes "the bot and the rider go through the same physics" a fact about the call graph rather than a comment | `packages/physics/src/pacer.ts` §`advanceBot` |
 | Why a bot a full lap ahead reads as a lap ahead rather than as level with you | `packages/domain/src/pacer/gap.ts` |
+| Why a workout target is branded, and which two numbers it stops being confused | `packages/domain/src/workout/workout.ts` §`ThresholdShare` |
+| Why a workout is expanded into a timeline instead of walked with a cursor | `packages/domain/src/workout/timeline.ts` |
+| How the ERG spiral of death is told apart from a rider grinding on purpose | `packages/domain/src/workout/erg-safety.ts` §`assessErgCadence` |
+| Why this project has no workout file format yet, and what would settle it | §6 "A workout file format is an ADR 0009 question", [#14](https://github.com/openzigs/onyourleft/issues/14) |
 
 <!-- Last updated: 2026-09-06 by delivery:code-issue resolving #51 (the manual file import and export UI) -->
