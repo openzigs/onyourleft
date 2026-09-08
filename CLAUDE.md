@@ -93,7 +93,9 @@ apps/                 AGPL-3.0-or-later, without exception
     src/index.ts        what the shell offers the client that runs inside it —
                         the reason this package is no longer an island (§4h)
     src/ble/            the Capacitor transport against #39's interface,
-                        unchanged, and the one file that names BleClient
+                        unchanged, the one file that names BleClient, and the
+                        Android side of the FTMS control point — the write
+                        that is acknowledged, and the sibling that is not
     src/permission/     what a rider is told when Bluetooth will not work (#87)
 
 packages/             Apache-2.0, without exception
@@ -1146,12 +1148,27 @@ user agent, because a Capacitor WebView *is* Chrome and reports itself as Chrome
 `@onyourleft/mobile` and builds the Capacitor transport; in a browser it never downloads a line of
 it. `pnpm run build` shows the split, and `grep -c BleClient` over the entry chunk returns 0.
 
-⚠️ **Trainer *control* is still absent on Android, and the screen says so rather than pretending.**
-`openTrainer` is omitted for the Capacitor transport because `openWebBluetoothTrainer` needs
-`openFitnessMachine`, which is on `WebBluetoothTransport` and not on `SensorTransport`. Driving an
-FTMS control point through the Capacitor plugin is real work #87 did not do either. A rider on a
-phone can pair, read power, cadence and heart rate, and record; they cannot yet have resistance
-driven for them.
+⚠️ **Trainer control now works on Android too, and this paragraph used to say it did not** — a
+reviewer who remembers "a rider on a phone cannot yet have resistance driven for them" is reading
+the old file. `openCapacitorTrainer` in `apps/web/src/ride/trainer.ts` is the Android counterpart of
+`openWebBluetoothTrainer`, and `apps/mobile/src/ble/fitness-machine-channel.ts` implements
+`packages/sensors/protocol`'s `FitnessMachineChannel` over the plugin. Everything that decides *what
+may be written* — `createTrainerControl`, the bounding, the quantisation, the feature gating — is
+the same platform-free code on both, which is #39's promise being kept for the one operation that
+writes.
+
+⚠️ **The write is `port.write`, never `port.writeWithoutResponse`, and the wrong one is declared on
+the port so the swap is a red test.** `FitnessMachineChannel` warns that an unacknowledged write
+*"compiles, satisfies every test in this file, and reintroduces exactly the fire-and-forget failure
+the client exists to prevent"* — so `plugin-port.ts` declares the unsafe sibling, `ble-client.ts`
+implements it, nothing calls it, and `fitness-machine-channel.test.ts` asserts it stays uncalled.
+The same shape `web-bluetooth/src/gatt.ts` uses for `writeValueWithoutResponse`.
+
+⚠️ **`openCapacitorTrainer` hands this program's `DeviceId` straight to the plugin**, which is
+correct only because `transport.ts` mints the one from the other — and its own `Link.pluginId`
+comment warns they are "not necessarily" the same. `fitness-machine-channel.test.ts` pins that
+assumption, because if it ever breaks the symptom is a control point write addressed to a device the
+plugin has never heard of, on the one path that applies physical resistance to somebody.
 
 ---
 
@@ -1681,7 +1698,9 @@ top of an issue **supersedes its body**.
 | Why a rider with no heart rate strap is not told their strap has dropped | `apps/web/src/game/sensors.ts`, `apps/web/src/ride/metrics.ts` |
 | Which previous attempt a ghost races, and why it is the fastest rather than the latest | `apps/web/src/game/ghost-source.ts` §`fastestAttempt` |
 | Why a ghost's distance is integrated from speed, and what a long dropout does to it | `apps/web/src/game/ghost-source.ts` §`GHOST_GAP_TOLERANCE_SECONDS` |
-| Why trainer control works in a browser and not yet on Android | §4h, `apps/web/src/main.tsx` §`buildRideController` |
+| How trainer control reaches an FTMS control point on Android | `apps/mobile/src/ble/fitness-machine-channel.ts`, `apps/web/src/ride/trainer.ts` §`openCapacitorTrainer` |
+| Why the unacknowledged write is declared on the plugin port and never called | `apps/mobile/src/ble/plugin-port.ts` §`writeWithoutResponse`, §4h |
+| What a trainer that reports no power range gets, and why | `apps/mobile/src/ble/fitness-machine.ts` |
 | What is enforced about Android signing keys, and what is merely written down | [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §1, `scripts/check-repo-rules.sh` §`REL001` |
 | Why ADR 0008's rendering gate was waived, and what that does not cancel | [ADR 0008](docs/adr/0008-mobile-client-architecture.md) §Amendments, 2026-09-08 |
 

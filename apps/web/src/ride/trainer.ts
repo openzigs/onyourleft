@@ -33,6 +33,9 @@ import {
   createTrainerControl,
   type SupportedPowerRange,
   type TrainerControl,
+  type FitnessMachineChannel,
+  type FitnessMachineFeatures,
+  type SupportedResistanceLevelRange,
 } from '@onyourleft/sensors/protocol';
 import type { WebBluetoothTransport } from '@onyourleft/sensors/web-bluetooth';
 
@@ -98,6 +101,71 @@ export function openWebBluetoothTrainer(
     }
     return {
       control: createTrainerControl(machine.channel, {
+        powerRange,
+        deviceId: id,
+        scheduleTimeout,
+        ...(machine.resistanceRange === undefined
+          ? {}
+          : { resistanceRange: machine.resistanceRange }),
+        ...(machine.features === undefined ? {} : { features: machine.features }),
+      }),
+      canSetPower: machine.features?.targetSetting.powerTarget ?? true,
+      canSimulate: machine.features?.targetSetting.indoorBikeSimulationParameters ?? true,
+      powerRange,
+    };
+  };
+}
+
+/** What {@link openCapacitorTrainer} needs from the Android shell. */
+export interface CapacitorTrainerPorts {
+  /** Reads the three characteristics that say what may be written. */
+  readMachine(deviceId: string): Promise<{
+    readonly powerRange: SupportedPowerRange | undefined;
+    readonly resistanceRange: SupportedResistanceLevelRange | undefined;
+    readonly features: FitnessMachineFeatures | undefined;
+  }>;
+  /** Builds a control point channel over the plugin. */
+  openChannel(deviceId: string): FitnessMachineChannel;
+}
+
+/**
+ * {@link OpenTrainer}, over the Capacitor transport.
+ *
+ * ⚠️ **The body below is deliberately the same shape as
+ * {@link openWebBluetoothTrainer}'s, and the duplication is the honest option.**
+ * Everything that decides *what may be written to a trainer* —
+ * `createTrainerControl`, the bounding, the quantisation, the feature gating —
+ * is shared, platform-free code in `packages/sensors/protocol` and is called
+ * identically from both. What differs is only how the three characteristics are
+ * reached, which is exactly the platform difference #39's interface exists to
+ * absorb. Folding the two into one function parameterised over a transport would
+ * mean inventing a fourth interface whose only implementations are these two.
+ *
+ * ⚠️ The `powerRange === undefined` guard is not defensive tidiness. It is the
+ * one thing standing between a rider and an unbounded setpoint on a machine
+ * whose limits are unknown, and `apps/mobile/src/ble/fitness-machine.ts` records
+ * why the read returns `undefined` rather than a default.
+ */
+export function openCapacitorTrainer(
+  ports: CapacitorTrainerPorts,
+  options: WebBluetoothTrainerOptions = {},
+): OpenTrainer {
+  const scheduleTimeout = options.scheduleTimeout ?? browserTimeouts;
+  return async (id) => {
+    let machine;
+    try {
+      machine = await ports.readMachine(id);
+    } catch {
+      // Not a fitness machine, or not reachable. Every heart rate strap takes
+      // this path, so it is the ordinary case rather than an error to show.
+      return undefined;
+    }
+    const powerRange = machine.powerRange;
+    if (powerRange === undefined) {
+      return undefined;
+    }
+    return {
+      control: createTrainerControl(ports.openChannel(id), {
         powerRange,
         deviceId: id,
         scheduleTimeout,

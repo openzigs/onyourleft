@@ -36,12 +36,22 @@ export interface ScriptedPort extends CapacitorBlePort {
   notify(service: string, characteristic: string, value: DataView): void;
   /** Fire the plugin's disconnect callback, as a device going out of range does. */
   dropLink(): void;
+  /** Every characteristic write, in order — used to assert what reached the trainer. */
+  readonly writes: readonly ScriptedWrite[];
+}
+
+/** One recorded write. @see ScriptedPort.writes */
+export interface ScriptedWrite {
+  readonly service: string;
+  readonly characteristic: string;
+  readonly value: DataView;
 }
 
 const DEFAULT_DEVICE: PluginDevice = { deviceId: 'AA:BB:CC:DD:EE:FF', name: 'Scripted Trainer' };
 
 export function scriptedPort(stack: ScriptedStack = {}): ScriptedPort {
   const calls: string[] = [];
+  const writes: ScriptedWrite[] = [];
   const listeners = new Map<string, (value: DataView) => void>();
   let onDisconnect: ((deviceId: string) => void) | undefined;
   let lastRequest: PluginDeviceRequest | undefined;
@@ -138,6 +148,24 @@ export function scriptedPort(stack: ScriptedStack = {}): ScriptedPort {
       });
     },
 
+    write(_deviceId, service, characteristic, value) {
+      calls.push(`write:${service}|${characteristic}`);
+      writes.push({ service, characteristic, value });
+      return Promise.resolve();
+    },
+
+    /**
+     * ⚠️ Recorded and never expected. `plugin-port.ts` records why this method
+     * exists on the port at all; the double implements it so that a test can
+     * assert it was **not** called, which is the assertion that makes swapping
+     * the acknowledged write for it a red test rather than a silent change.
+     */
+    writeWithoutResponse(_deviceId, service, characteristic, value) {
+      calls.push(`writeWithoutResponse:${service}|${characteristic}`);
+      writes.push({ service, characteristic, value });
+      return Promise.resolve();
+    },
+
     notify(service, characteristic, value) {
       const listener = listeners.get(`${service}|${characteristic}`);
       if (listener === undefined) {
@@ -148,6 +176,10 @@ export function scriptedPort(stack: ScriptedStack = {}): ScriptedPort {
 
     dropLink() {
       onDisconnect?.(DEFAULT_DEVICE.deviceId);
+    },
+
+    get writes() {
+      return writes;
     },
   };
 }

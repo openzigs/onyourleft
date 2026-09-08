@@ -16,7 +16,7 @@ import { activityId, openActivityStore, recordingSessionId, routeId } from '@ony
 
 import './design/theme.css';
 import { browserClock, createRideController, type RideController } from './ride/controller';
-import { openWebBluetoothTrainer } from './ride/trainer';
+import { openCapacitorTrainer, openWebBluetoothTrainer } from './ride/trainer';
 import { gameSensors } from './game/sensors';
 import { fastestAttempt, ghostFromSpeed } from './game/ghost-source';
 import { isNativeShell, platformCapacitor } from './support/capacitor';
@@ -157,12 +157,22 @@ async function buildRideController(probe: CapabilityProbe): Promise<RideControll
 
   if (isNativeShell(platformCapacitor())) {
     const mobile = await import('@onyourleft/mobile');
+    const plugin = mobile.capacitorBlePort();
     return createRideController({
       ...shared,
       transport: mobile.createCapacitorTransport({
-        plugin: mobile.capacitorBlePort(),
+        plugin,
         profiles: rideProfiles(),
         now: browserClock,
+      }),
+      // ⚠️ The **same** `plugin` object the transport holds, deliberately.
+      // Building a second one would give the trainer control path its own
+      // subscriptions and its own view of which links are up, and the first
+      // symptom would be a setpoint written to a device the transport had
+      // already seen disconnect.
+      openTrainer: openCapacitorTrainer({
+        readMachine: async (deviceId) => mobile.readCapacitorFitnessMachine(plugin, deviceId),
+        openChannel: (deviceId) => mobile.createCapacitorFitnessMachineChannel(plugin, deviceId),
       }),
     });
   }

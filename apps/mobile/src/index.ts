@@ -27,6 +27,9 @@
 export { createCapacitorTransport, systemClock } from './ble/transport';
 export type { CapacitorTransportOptions } from './ble/transport';
 export { capacitorBlePort } from './ble/ble-client';
+export { createCapacitorFitnessMachineChannel } from './ble/fitness-machine-channel';
+export { readCapacitorFitnessMachine } from './ble/fitness-machine';
+export type { CapacitorFitnessMachine } from './ble/fitness-machine';
 export type { CapacitorBlePort, PluginDevice, PluginDeviceRequest } from './ble/plugin-port';
 export { mayShowDeviceList, permissionNotice } from './permission/notice';
 export type { PermissionAction, PermissionNotice } from './permission/notice';
