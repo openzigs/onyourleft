@@ -66,6 +66,7 @@ import {
   metresPerSecond,
   metresToFitAltitude,
   revolutionsPerMinute,
+  routeProfile,
   seconds,
   semicirclesToDegreesLatitude,
   semicirclesToDegreesLongitude,
@@ -74,6 +75,7 @@ import {
   watts,
   type EffortVisibility,
   type ElevationSource,
+  type RoutePoint,
   type SegmentVisibility,
   type UnixSeconds,
 } from '@onyourleft/domain';
@@ -83,6 +85,7 @@ import {
   athleteId,
   lapId,
   recordingSessionId,
+  routeId,
   segmentEffortId,
   segmentId,
   type ActivityId,
@@ -96,6 +99,7 @@ import type {
   AthleteRecord,
   NewActivity,
   NewLap,
+  RouteRecord,
   SegmentEffortRecord,
   SegmentRecord,
 } from '../records';
@@ -153,6 +157,7 @@ export function resetFixtureIds(): void {
   rideCounter = 0;
   recordingCounter = 0;
   segmentCounter = 0;
+  routeCounter = 0;
 }
 
 /**
@@ -589,4 +594,90 @@ export function effortFor(
         ? {}
         : { riderMass: kilograms(overrides.riderMassKilograms) },
   };
+}
+
+let routeCounter = 0;
+
+/**
+ * A saved route: a closed square loop, climbing over the first half and
+ * descending over the second so its two ends agree in height as well as place.
+ *
+ * A **loop by default**, which is the opposite of how one would pick a default
+ * for convenience and is deliberate: `loop` is the one-bit field with no
+ * structural redundancy behind it, `openedLoopStoreFactory` is the fake that
+ * loses it, and a fixture that defaulted to `false` would make that fake
+ * indistinguishable from a correct store.
+ *
+ * Built through `routeProfile`, never by hand, so a fixture cannot carry a
+ * distance, an ascent or a gradient that disagrees with its own geometry —
+ * which is the one way a round-trip test could pass while the model was wrong.
+ */
+export function routeFor(
+  owner: AthleteId,
+  overrides: {
+    readonly loop?: boolean;
+    readonly name?: string;
+    readonly sideMetres?: number;
+    readonly spacingMetres?: number;
+    readonly originLatitude?: number;
+  } = {},
+): RouteRecord {
+  routeCounter += 1;
+  const loop = overrides.loop ?? true;
+  const side = overrides.sideMetres ?? 400;
+  const spacing = overrides.spacingMetres ?? 20;
+  const originLatitude = overrides.originLatitude ?? 51.5;
+  const perDegreeLongitude =
+    METRES_PER_DEGREE_LATITUDE * Math.cos((originLatitude * Math.PI) / 180);
+
+  const corners: [number, number][] = [
+    [0, 0],
+    [0, side],
+    [side, side],
+    [side, 0],
+  ];
+  const points: RoutePoint[] = [];
+  const legs = loop ? corners.length : corners.length - 1;
+  for (let leg = 0; leg < legs; leg += 1) {
+    const from = corners[leg] as [number, number];
+    const to = corners[(leg + 1) % corners.length] as [number, number];
+    const steps = Math.max(1, Math.round(side / spacing));
+    for (let step = 0; step < steps; step += 1) {
+      const north = from[0] + ((to[0] - from[0]) * step) / steps;
+      const east = from[1] + ((to[1] - from[1]) * step) / steps;
+      points.push({
+        position: geographicPosition(
+          degreesLatitude(originLatitude + north / METRES_PER_DEGREE_LATITUDE),
+          degreesLongitude(-0.12 + east / perDegreeLongitude),
+        ),
+        elevation: altitudeMetres(
+          40 + 20 * Math.sin((2 * Math.PI * (leg * steps + step)) / (legs * steps)),
+        ),
+      });
+    }
+  }
+  if (loop) {
+    // The closing point IS the first, so the loop closes to the last bit rather
+    // than to a tolerance.
+    points.push(points[0] as RoutePoint);
+  }
+
+  return {
+    id: routeId(`route-${String(routeCounter)}`),
+    createdBy: owner,
+    name: overrides.name ?? `Route ${String(routeCounter)}`,
+    profile: routeProfile(points, { loop }),
+    createdAt: unixSeconds(FIXTURE_EPOCH),
+  };
+}
+
+/** Writes a route for `owner` and returns it. The athlete must already exist. */
+export async function seedRoute(
+  harness: StoreHarness,
+  owner: AthleteId,
+  overrides: Parameters<typeof routeFor>[1] = {},
+): Promise<RouteRecord> {
+  const route = routeFor(owner, overrides);
+  await harness.write(async (store) => store.putRoute(route));
+  return route;
 }

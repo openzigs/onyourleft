@@ -90,7 +90,7 @@ function emptyPoint(): PartialPoint {
 }
 
 /**
- * The position a `<trkpt>`'s attributes denote.
+ * The position a `<trkpt>`'s or `<rtept>`'s attributes denote.
  *
  * `lat` and `lon` are labelled at the attribute read, where a reviewer can see
  * which is which — the same rule `packages/domain` states for the FIT decoder
@@ -101,6 +101,7 @@ function positionOf(
   element: XmlStartElement,
   faults: ActivityXmlError[],
 ): GeographicPosition | undefined {
+  const named = element.local === 'rtept' ? 'rtept' : 'trkpt';
   const latitude = element.attributes.find((attribute) => attribute.local === 'lat')?.value;
   const longitude = element.attributes.find((attribute) => attribute.local === 'lon')?.value;
   if (latitude === undefined && longitude === undefined) return undefined;
@@ -109,14 +110,14 @@ function positionOf(
       new ActivityXmlError(
         'invalid-value',
         element.characterOffset,
-        'a trkpt carries one half of a position: a lat with no lon beside it, or the reverse. A ' +
-          'position needs both, so it is dropped rather than paired with a zero',
+        `a ${named} carries one half of a position: a lat with no lon beside it, or the ` +
+          'reverse. A position needs both, so it is dropped rather than paired with a zero',
       ),
     );
     return undefined;
   }
-  const parsedLatitude = finiteNumber(latitude, 'trkpt@lat', element.characterOffset, faults);
-  const parsedLongitude = finiteNumber(longitude, 'trkpt@lon', element.characterOffset, faults);
+  const parsedLatitude = finiteNumber(latitude, `${named}@lat`, element.characterOffset, faults);
+  const parsedLongitude = finiteNumber(longitude, `${named}@lon`, element.characterOffset, faults);
   if (parsedLatitude === undefined || parsedLongitude === undefined) return undefined;
   try {
     return geographicPosition(degreesLatitude(parsedLatitude), degreesLongitude(parsedLongitude));
@@ -126,7 +127,7 @@ function positionOf(
       new ActivityXmlError(
         'invalid-value',
         element.characterOffset,
-        'a trkpt position is outside the range a latitude and longitude pair can take; the ' +
+        `a ${named} position is outside the range a latitude and longitude pair can take; the ` +
           'position is dropped',
       ),
     );
@@ -137,6 +138,20 @@ function positionOf(
 /**
  * Read a GPX 1.1 document.
  *
+ * ## `<trk>` and `<rte>`, and which one wins
+ *
+ * GPX has two ways to carry an ordered list of places: `<trk>`, which is where
+ * a device writes a ride it recorded, and `<rte>`, which is where a planner
+ * writes a ride somebody intends to do. They differ in what they may carry —
+ * an `<rtept>` has no time and no sensor extensions — and not in shape, so both
+ * are read here and both become laps.
+ *
+ * ⚠️ **A `<trk>` wins outright: `<rte>` points are used only when the document
+ * has no track at all.** Route planners routinely export both, describing the
+ * same line twice at different densities, and concatenating them would double
+ * the ride. This is the rule #89 relies on to import a planned route from a
+ * file whose other half is a coarse summary of it.
+ *
  * @throws {ActivityXmlError} for a document that is not well-formed, that
  * carries a DOCTYPE, that ends mid-element, or whose root is not `<gpx>`.
  * Everything else — an unreadable coordinate, a timestamp that is not an
@@ -145,6 +160,9 @@ function positionOf(
 export function decodeGpx(text: string): TrackDecodeResult {
   const faults: ActivityXmlError[] = [];
   const laps: TrackLap[] = [];
+  // <rte> is collected separately from <trk> and used only when there is no
+  // track — see the precedence note in this function's doc comment.
+  const routeLaps: TrackLap[] = [];
 
   // A plain stack, popped in place. `path.slice(0, -1)` would allocate a new
   // array on every end tag — about six per track point, so ninety thousand
@@ -152,6 +170,7 @@ export function decodeGpx(text: string): TrackDecodeResult {
   const path: string[] = [];
   let characters = '';
   let point: PartialPoint | undefined;
+  let pointElement: 'trkpt' | 'rtept' = 'trkpt';
   let pointOffset = 0;
   let segment: TrackPoint[] | undefined;
   let name: string | undefined;
@@ -178,9 +197,10 @@ export function decodeGpx(text: string): TrackDecodeResult {
       path.push(element.local);
       characters = '';
 
-      if (element.local === 'trkseg') segment = [];
-      if (element.local === 'trkpt') {
+      if (element.local === 'trkseg' || element.local === 'rte') segment = [];
+      if (element.local === 'trkpt' || element.local === 'rtept') {
         point = emptyPoint();
+        pointElement = element.local;
         pointOffset = element.characterOffset;
         point.position = positionOf(element, faults);
       }
@@ -197,17 +217,17 @@ export function decodeGpx(text: string): TrackDecodeResult {
       path.pop();
 
       if (point) {
-        if (readPointChild(point, local, value, path, pointOffset, faults)) return;
-        if (local === 'trkpt') {
+        if (readPointChild(point, local, value, path, pointElement, pointOffset, faults)) return;
+        if (local === 'trkpt' || local === 'rtept') {
           segment?.push({ ...point });
           point = undefined;
         }
         return;
       }
 
-      if (local === 'trkseg') {
+      if (local === 'trkseg' || local === 'rte') {
         // A lap per segment; the totals GPX cannot carry stay undefined.
-        laps.push({
+        (local === 'rte' ? routeLaps : laps).push({
           startTime: segment?.[0]?.timestamp,
           totalElapsedTime: undefined,
           totalDistance: undefined,
@@ -216,21 +236,26 @@ export function decodeGpx(text: string): TrackDecodeResult {
         segment = undefined;
         return;
       }
-      if (local === 'name' && inside('trk') && name === undefined) name = value.trim();
-      if (local === 'type' && inside('trk') && sport === undefined) sport = value.trim();
+      if (local === 'name' && (inside('trk') || inside('rte')) && name === undefined) {
+        name = value.trim();
+      }
+      if (local === 'type' && (inside('trk') || inside('rte')) && sport === undefined) {
+        sport = value.trim();
+      }
       if (local === 'time' && inside('metadata') && startTime === undefined) {
         startTime = readInstant(value, 'metadata/time', 0, faults);
       }
     },
   });
 
+  const decoded = laps.length > 0 ? laps : routeLaps;
   return {
     activity: {
-      startTime: startTime ?? laps[0]?.points[0]?.timestamp,
+      startTime: startTime ?? decoded[0]?.points[0]?.timestamp,
       name: name === '' ? undefined : name,
       sport: sport === '' ? undefined : sport,
       creator: creator === '' ? undefined : creator,
-      laps,
+      laps: decoded,
     },
     faults,
   };
@@ -242,15 +267,16 @@ function readPointChild(
   local: string,
   value: string,
   path: readonly string[],
+  element: 'trkpt' | 'rtept',
   offset: number,
   faults: ActivityXmlError[],
 ): boolean {
   if (local === 'ele') {
-    point.altitude = quantity(value, altitudeMetres, 'trkpt/ele', offset, faults);
+    point.altitude = quantity(value, altitudeMetres, `${element}/ele`, offset, faults);
     return true;
   }
   if (local === 'time') {
-    point.timestamp = readInstant(value, 'trkpt/time', offset, faults);
+    point.timestamp = readInstant(value, `${element}/time`, offset, faults);
     return true;
   }
 

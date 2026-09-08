@@ -41,3 +41,11 @@ export * from './encode';
 // --- GPX 1.1 and TCX v2 (#32) -----------------------------------------------
 
 export * from './xml';
+
+// --- Route import (#89) -----------------------------------------------------
+//
+// One function, and it is a composition rather than a codec: the #32 decoder,
+// then `@onyourleft/domain`'s route profile. It is here because this is the
+// only package that may depend on both.
+
+export * from './route';

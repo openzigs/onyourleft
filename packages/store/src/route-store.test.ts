@@ -1,0 +1,299 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Route persistence (#89 criterion 6) — the round trip, the athlete scope, the
+ * independence from any activity, and the executed rollback.
+ *
+ * > Profiles are stored locally and survive an app restart — the test writes
+ * > through the public API, discards the session, and reads back through the
+ * > same path a rider would.
+ *
+ * "Discards the session" is the harness's own primitive and not a paraphrase:
+ * `roundTrip`'s read closes every open handle before it opens another, so a
+ * value still in memory cannot serve it.
+ */
+
+import Dexie from 'dexie';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import {
+  ATHLETE_A,
+  ATHLETE_B,
+  assertRouteRoundTrip,
+  createStoreHarness,
+  memoryWriteStoreFactory,
+  openedLoopStoreFactory,
+  resetFixtureIds,
+  RoundTripFailure,
+  rideFor,
+  routeFor,
+  seedAthletes,
+  seedRoute,
+  type StoreHarness,
+} from './testing';
+import { deleteActivityStore, openActivityStore } from './activity-store';
+import { StoreDecodeError, StoreReferentialError } from './errors';
+import { routeId } from './ids';
+import { fromPersistedRoute, toPersistedRoute } from './persisted';
+import { SCHEMA_VERSIONS, STORES_V6, TABLE } from './schema';
+
+let harness: StoreHarness;
+
+beforeEach(() => {
+  resetFixtureIds();
+  harness = createStoreHarness();
+});
+
+afterEach(async () => {
+  await harness.destroy();
+});
+
+describe('the round trip — #89 criterion 6', () => {
+  it('writes a route, discards every connection, and reads back the same one', async () => {
+    await seedAthletes(harness);
+    const route = routeFor(ATHLETE_A);
+    const read = await assertRouteRoundTrip(harness, route);
+    expect(read.profile.loop).toBe(true);
+    expect(read.profile.elevations).toHaveLength(route.profile.elevations.length);
+    expect(read.profile.totalDistance).toBeGreaterThan(1500);
+  });
+
+  it('keeps a point-to-point route point-to-point', async () => {
+    await seedAthletes(harness);
+    const read = await assertRouteRoundTrip(harness, routeFor(ATHLETE_A, { loop: false }));
+    expect(read.profile.loop).toBe(false);
+  });
+
+  it('goes red against a store that writes to memory', async () => {
+    const fake = createStoreHarness({ factory: memoryWriteStoreFactory() });
+    try {
+      await seedAthletes(fake);
+      await expect(assertRouteRoundTrip(fake, routeFor(ATHLETE_A))).rejects.toThrow(
+        RoundTripFailure,
+      );
+    } finally {
+      await fake.destroy();
+    }
+  });
+
+  it('goes red against a store that loses the loop flag on its way in', async () => {
+    // The eighth fake, and #89's. Every array is right to the last bit and the
+    // route no longer wraps — which is the whole of criterion 5 gone, silently.
+    const fake = createStoreHarness({ factory: openedLoopStoreFactory() });
+    try {
+      await seedAthletes(fake);
+      await expect(assertRouteRoundTrip(fake, routeFor(ATHLETE_A))).rejects.toThrow(
+        RoundTripFailure,
+      );
+    } finally {
+      await fake.destroy();
+    }
+  });
+
+  it('the loop-losing fake gets everything BUT the loop right', async () => {
+    // Stated as its own assertion so the fake is known to be subtle rather than
+    // merely broken. A fake that also mangled the path would prove nothing
+    // about the one-bit comparison.
+    const fake = createStoreHarness({ factory: openedLoopStoreFactory() });
+    try {
+      await seedAthletes(fake);
+      const route = routeFor(ATHLETE_A);
+      const read = await fake.roundTrip(
+        async (store) => store.putRoute(route),
+        async (store) => store.getRoute(ATHLETE_A, route.id),
+      );
+      expect(read?.id).toBe(route.id);
+      expect(read?.name).toBe(route.name);
+      expect(read?.profile.totalDistance).toBe(route.profile.totalDistance);
+      expect(read?.profile.totalAscent).toBe(route.profile.totalAscent);
+      expect(read?.profile.elevations).toEqual(route.profile.elevations);
+      expect(read?.profile.grades).toEqual(route.profile.grades);
+      expect(read?.profile.positions).toEqual(route.profile.positions);
+      // And the one bit that is wrong.
+      expect(read?.profile.loop).toBe(false);
+    } finally {
+      await fake.destroy();
+    }
+  });
+});
+
+describe('the athlete scope', () => {
+  it('does not answer another athlete’s route id', async () => {
+    // CLAUDE.md section 6: a query matching an entity id without also filtering
+    // on the owner "passes every single-athlete test in the suite".
+    await seedAthletes(harness);
+    const route = await seedRoute(harness, ATHLETE_A);
+    expect(
+      await harness.read(async (store) => store.getRoute(ATHLETE_B, route.id)),
+    ).toBeUndefined();
+    expect(await harness.read(async (store) => store.getRoute(ATHLETE_A, route.id))).toBeDefined();
+  });
+
+  it('refuses to let one athlete overwrite another’s route', async () => {
+    await seedAthletes(harness);
+    const route = await seedRoute(harness, ATHLETE_A);
+    await expect(
+      harness.write(async (store) => store.putRoute({ ...route, createdBy: ATHLETE_B })),
+    ).rejects.toThrow(StoreReferentialError);
+  });
+
+  it('refuses a route whose athlete does not exist', async () => {
+    await expect(
+      harness.write(async (store) => store.putRoute(routeFor(ATHLETE_A))),
+    ).rejects.toThrow(StoreReferentialError);
+  });
+
+  it('reports a delete of somebody else’s route exactly as a delete of no route', async () => {
+    // Reporting them differently would answer "does athlete A have a route with
+    // this id" to athlete B.
+    await seedAthletes(harness);
+    const route = await seedRoute(harness, ATHLETE_A);
+    expect(await harness.write(async (store) => store.deleteRoute(ATHLETE_B, route.id))).toBe(
+      false,
+    );
+    expect(
+      await harness.write(async (store) => store.deleteRoute(ATHLETE_B, routeId('never-existed'))),
+    ).toBe(false);
+    expect(await harness.write(async (store) => store.deleteRoute(ATHLETE_A, route.id))).toBe(true);
+  });
+
+  it('lists only this athlete’s routes, newest first, within the caller’s limit', async () => {
+    await seedAthletes(harness);
+    await seedRoute(harness, ATHLETE_A, { name: 'First' });
+    await seedRoute(harness, ATHLETE_B, { name: 'Not yours' });
+    await seedRoute(harness, ATHLETE_A, { name: 'Second' });
+    const mine = await harness.read(async (store) => store.listRoutes(ATHLETE_A));
+    expect(mine.map((route) => route.name)).toEqual(['Second', 'First']);
+    const bounded = await harness.read(async (store) => store.listRoutes(ATHLETE_A, 1));
+    expect(bounded).toHaveLength(1);
+  });
+});
+
+describe('what a route outlives', () => {
+  it('survives the deletion of every activity the athlete has', async () => {
+    // A route holds no reference to an activity — it was imported from a file,
+    // not cut from a ride — so tidying a library cannot remove one.
+    await seedAthletes(harness);
+    const ride = rideFor(ATHLETE_A);
+    await harness.write(async (store) => store.putActivity(ride));
+    const route = await seedRoute(harness, ATHLETE_A);
+    await harness.write(async (store) => store.deleteActivity(ATHLETE_A, ride.id));
+    expect(await harness.read(async (store) => store.getRoute(ATHLETE_A, route.id))).toBeDefined();
+  });
+
+  it('does NOT survive the erasure of the athlete, and is counted', async () => {
+    // A saved route is a line through the places somebody rides, which is
+    // location data about them in ADR 0004's sense.
+    await seedAthletes(harness);
+    await seedRoute(harness, ATHLETE_A);
+    await seedRoute(harness, ATHLETE_A);
+    const survivor = await seedRoute(harness, ATHLETE_B);
+    const counts = await harness.write(async (store) => store.deleteAthlete(ATHLETE_A));
+    expect(counts.routes).toBe(2);
+    expect(await harness.read(async (store) => store.listRoutes(ATHLETE_A))).toEqual([]);
+    // And the erasure was scoped: athlete B still has theirs.
+    expect(
+      await harness.read(async (store) => store.getRoute(ATHLETE_B, survivor.id)),
+    ).toBeDefined();
+  });
+});
+
+describe('a row on disk this build cannot read', () => {
+  it('names the four lengths rather than failing at sample 1', () => {
+    const row = toPersistedRoute(routeFor(ATHLETE_A));
+    const truncated = { ...row, grades: row.grades.slice(0, -1) };
+    expect(() => fromPersistedRoute(truncated)).toThrow(StoreDecodeError);
+    expect(() => fromPersistedRoute(truncated)).toThrow(/disagree in length/);
+  });
+
+  it('refuses a profile of fewer than two samples', () => {
+    const row = toPersistedRoute(routeFor(ATHLETE_A));
+    const single = {
+      ...row,
+      latitudes: row.latitudes.slice(0, 1),
+      longitudes: row.longitudes.slice(0, 1),
+      elevations: row.elevations.slice(0, 1),
+      grades: row.grades.slice(0, 1),
+    };
+    expect(() => fromPersistedRoute(single)).toThrow(/at least two samples/);
+  });
+
+  it('round trips through the persisted shape and back unchanged', () => {
+    const route = routeFor(ATHLETE_A);
+    const back = fromPersistedRoute(toPersistedRoute(route));
+    expect(back).toEqual(route);
+  });
+});
+
+describe('the version 7 → 6 rollback', () => {
+  let priorName: string;
+
+  beforeEach(() => {
+    priorName = `oyl-route-rollback-${String(Date.now())}-${String(Math.random()).slice(2)}`;
+  });
+
+  afterEach(async () => {
+    await deleteActivityStore(priorName);
+  });
+
+  it('the prior schema opens at version 6 with no routes table', async () => {
+    const prior = new Dexie(priorName);
+    SCHEMA_VERSIONS.slice(0, 6).forEach((stores, index) => {
+      prior.version(index + 1).stores(stores);
+    });
+    await prior.open();
+    try {
+      expect(prior.verno).toBe(6);
+      const names = prior.tables.map((table) => table.name).sort();
+      expect(names).not.toContain(TABLE.routes);
+      for (const declared of Object.keys(STORES_V6)) {
+        expect(names).toContain(declared);
+      }
+      // Derived from the declarations rather than written as a literal, so the
+      // count cannot go stale the next time a version adds a store.
+      const priorStores = new Set(
+        SCHEMA_VERSIONS.slice(0, 6).flatMap((stores) => Object.keys(stores)),
+      );
+      expect(names).toHaveLength(priorStores.size);
+    } finally {
+      prior.close();
+    }
+  });
+
+  it('export → downgrade → re-import keeps every version-6 record and drops the routes', async () => {
+    const current = openActivityStore(priorName);
+    await current.open();
+    const ride = rideFor(ATHLETE_A);
+    await current.putAthlete({ id: ATHLETE_A, displayName: 'A', createdAt: ride.createdAt });
+    await current.putActivity(ride);
+    await current.putRoute(routeFor(ATHLETE_A));
+    await current.putRoute(routeFor(ATHLETE_A));
+    expect(await current.listRoutes(ATHLETE_A)).toHaveLength(2);
+
+    const exportedAthlete = await current.getAthlete(ATHLETE_A);
+    const exportedRide = await current.getActivity(ATHLETE_A, ride.id);
+    current.close();
+
+    // Downgrade: erase and reopen at the prior schema. IndexedDB has no
+    // downgrade event, so this is the runtime path — export, downgrade,
+    // re-import — and not a shortcut around one.
+    await deleteActivityStore(priorName);
+    const prior = new Dexie(priorName);
+    SCHEMA_VERSIONS.slice(0, 6).forEach((stores, index) => {
+      prior.version(index + 1).stores(stores);
+    });
+    await prior.open();
+    try {
+      expect(prior.tables.map((table) => table.name)).not.toContain(TABLE.routes);
+      await prior.table(TABLE.athletes).put({
+        id: exportedAthlete?.id,
+        displayName: exportedAthlete?.displayName,
+        createdAt: exportedAthlete?.createdAt,
+      });
+      expect(await prior.table(TABLE.athletes).get(ATHLETE_A)).toBeDefined();
+      expect(exportedRide?.id).toBe(ride.id);
+    } finally {
+      prior.close();
+    }
+  });
+});

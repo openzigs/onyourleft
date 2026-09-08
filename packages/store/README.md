@@ -23,6 +23,7 @@ erDiagram
     RECORDING_SESSION ||--o{ RECORDING_CHUNK : "one row per flush"
     ATHLETE ||--o| DEVICE_KEY : "has exactly one, write-once"
     ACTIVITY ||--o| ACTIVITY_RECORD : "has at most one signed record"
+    ATHLETE ||--o{ ROUTE : "saves"
 
     ATHLETE {
         string  id                  PK "opaque; #61 keys it to the device keypair"
@@ -450,6 +451,38 @@ record unverifiable against the athlete's current identity.
 **Downgrading a device** is export → downgrade → re-import (ADR 0005 §F), and
 `identity-rollback.test.ts` executes it: every record comes back and still verifies. The key does
 not come back, for the same reason it cannot be backed up.
+
+## Routes — #89
+
+Schema version 7 adds one store, `routes`, keyed on `id` with every index leading with `createdBy`.
+A route is a line somebody intends to ride — imported from a file, named by the rider — together
+with the profile `@onyourleft/domain` built from it: elevation and gradient on a fixed 10 m grid,
+the path at the same grid points, and a `loop` flag.
+
+**Why the whole computed profile is stored, when `ActivityRecord` deliberately stores only half a
+load.** The rule is the same in both places and it is about *staleness*, not about size: a ride's
+load depends on the athlete's threshold, so storing the finished number would leave last year's
+rides quoting a threshold the rider has since changed. A route's profile depends on **nothing but
+the file it came from**. There is no setting behind it to go stale, so the expensive half is stored
+and #90 reads a gradient from it at 1 Hz without recomputing a median filter between "the rider
+pressed start" and "the trainer felt right".
+
+⚠️ **A route holds no reference to an activity and no OSM identifier.** The first because it was
+imported rather than cut from a ride, so `deleteActivity` has nothing to cascade — asserted, so that
+nobody adds a cascade to a foreign key that is not there. The second per
+[ADR 0012](../../docs/adr/0012-data-licence.md) D-1, for `SegmentRecord`'s reason: a way id would
+convert the route corpus into an ODbL Derivative Database and would arrive looking like a rendering
+optimisation.
+
+⚠️ **Erasing an athlete DOES delete their routes**, and the count is reported. A saved route is a
+line through the places somebody rides, which is location data about them in exactly ADR 0004's
+sense; leaving it behind would leave their roads on the device under a row no scoped read can reach.
+
+**The eighth fake is a one-bit failure.** `openedLoopStoreFactory` writes `loop: false` and gets
+every coordinate, elevation and gradient right to the last bit. Nothing about the stored route is
+corrupt and nothing structural notices — the ride simply stops accumulating at the end of the first
+lap. `assertRouteRoundTrip` checks `loop` first and on its own line for that reason, and deleting
+that line turns a test red rather than leaving the suite green.
 
 ## Not in this package
 

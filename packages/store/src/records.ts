@@ -28,6 +28,7 @@ import type {
   BeatsPerMinute,
   DegreesBearing,
   EffortVisibility,
+  RouteProfile,
   ElevationSource,
   GradePercent,
   Kilograms,
@@ -47,6 +48,7 @@ import type {
   PrivacyZoneId,
   SegmentEffortId,
   SegmentId,
+  RouteId,
 } from './ids';
 import type { Visibility } from './visibility';
 
@@ -521,4 +523,47 @@ export interface MatchCheckpointRecord {
   /** How many activities the sweep has covered. For the progress the issue asks for. */
   readonly swept: number;
   readonly updatedAt: UnixSeconds;
+}
+
+// --- Routes (#89) ------------------------------------------------------------
+
+/**
+ * A saved route: a line somebody intends to ride, and its profile.
+ *
+ * ## Why the whole profile is stored, and not just the points it was built from
+ *
+ * The profile is the expensive half — a resample, a median filter and a
+ * least-squares slope per grid point — and #90 reads a gradient from it at 1 Hz
+ * while #91 draws the same grid. Recomputing that on every open would put the
+ * work between "the rider pressed start" and "the trainer felt right".
+ *
+ * The reason it is *safe* to store, which is the more interesting half: **the
+ * profile depends on nothing but the file it came from.** Compare
+ * `ActivityRecord.effortWeightedPower`, which deliberately stores *half* a load
+ * because the other half depends on the athlete's threshold and would go stale
+ * the day they changed it. Nothing about a route depends on an athlete setting,
+ * so there is no staleness to design around. The one thing that can change a
+ * stored profile's numbers is this program's own smoothing windows, and that is
+ * a deliberate act with a migration attached rather than a value drifting.
+ *
+ * ⚠️ **No OSM identifier belongs on this record**, per
+ * [ADR 0012](../../../docs/adr/0012-data-licence.md) D-1 and for the reason
+ * `SegmentRecord` states: a way id would convert the route corpus into an ODbL
+ * Derivative Database, and it would arrive looking like a rendering
+ * optimisation. A route imported from a file carries the file's geometry and
+ * nothing about the road network it was planned on.
+ */
+export interface RouteRecord {
+  readonly id: RouteId;
+  /** The athlete who saved it. Every read of this record filters on it. */
+  readonly createdBy: AthleteId;
+  /**
+   * What the rider calls it.
+   *
+   * Required here where the GPX importer's is optional: a file may carry no
+   * name, and choosing what to call it is the rider's, not the codec's.
+   */
+  readonly name: string;
+  readonly profile: RouteProfile;
+  readonly createdAt: UnixSeconds;
 }

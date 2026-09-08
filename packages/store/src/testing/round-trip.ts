@@ -37,7 +37,7 @@ import type { RecoveredRecording } from '../recording';
 import type { StreamChannel, StreamChannels, StreamSet } from '../streams';
 import { STREAM_CHANNELS, type NewStreamSet } from '../streams';
 
-import type { SegmentEndpointRecord, SegmentRecord } from '../records';
+import type { RouteRecord, SegmentEndpointRecord, SegmentRecord } from '../records';
 import type { StoreHarness } from './harness';
 
 /**
@@ -388,4 +388,85 @@ function requireSameEndpoint(
   ) {
     throw new RoundTripFailure(`${field}.position: what came back is not what was written`);
   }
+}
+
+/**
+ * Writes a route through the public path, discards every connection, reads it
+ * back through the public path, and asserts it is the same route — **including
+ * its `loop` flag, every position, every elevation and every gradient**.
+ *
+ * The athlete must already exist; `seedAthletes` in `fixtures.ts` puts three
+ * there.
+ *
+ * ⚠️ **`loop` is checked first and on its own line**, which looks like fussiness
+ * and is not. It is one bit, it is the field with no structural redundancy
+ * behind it, and it is the one that decides what happens when the rider reaches
+ * the end — #89's fifth criterion. `openedLoopStoreFactory` in `fakes.ts` is a
+ * store that gets all four arrays right to the last bit and writes `false`
+ * there, and it exists so that deleting this line turns a test red rather than
+ * leaving the suite green.
+ *
+ * @returns what came back, so a caller can make further assertions about it.
+ * @throws {RoundTripFailure}
+ */
+export async function assertRouteRoundTrip(
+  harness: StoreHarness,
+  route: RouteRecord,
+): Promise<RouteRecord> {
+  const read = await harness.roundTrip(
+    async (store) => store.putRoute(route),
+    async (store) => store.getRoute(route.createdBy, route.id),
+  );
+
+  if (read === undefined) {
+    throw new RoundTripFailure(
+      `route ${route.id} was written and reported success, and a fresh connection cannot see it`,
+    );
+  }
+
+  requireEqual('route.loop', route.profile.loop, read.profile.loop);
+  requireEqual('route.id', route.id, read.id);
+  requireEqual('route.createdBy', route.createdBy, read.createdBy);
+  requireEqual('route.name', route.name, read.name);
+  requireEqual('route.createdAt', route.createdAt, read.createdAt);
+  requireEqual('route.resolution', route.profile.resolution, read.profile.resolution);
+  requireEqual('route.totalDistance', route.profile.totalDistance, read.profile.totalDistance);
+  requireEqual('route.totalAscent', route.profile.totalAscent, read.profile.totalAscent);
+  requireEqual('route.totalDescent', route.profile.totalDescent, read.profile.totalDescent);
+
+  // Counts first, so a truncated profile fails with a message that says what
+  // happened rather than with a mismatch at sample 1.
+  requireEqual(
+    'route.elevations.length',
+    route.profile.elevations.length,
+    read.profile.elevations.length,
+  );
+  requireEqual('route.grades.length', route.profile.grades.length, read.profile.grades.length);
+  requireEqual(
+    'route.positions.length',
+    route.profile.positions.length,
+    read.profile.positions.length,
+  );
+
+  for (const [index, expected] of route.profile.elevations.entries()) {
+    requireEqual(`route.elevations[${String(index)}]`, expected, read.profile.elevations[index]);
+  }
+  for (const [index, expected] of route.profile.grades.entries()) {
+    requireEqual(`route.grades[${String(index)}]`, expected, read.profile.grades[index]);
+  }
+  for (const [index, expected] of route.profile.positions.entries()) {
+    const actual = read.profile.positions[index];
+    if (actual === undefined) {
+      throw new RoundTripFailure(`route.positions[${String(index)}]: nothing came back`);
+    }
+    // ⚠️ The message names the INDEX and never the coordinate, per ADR 0004
+    // decision D — a round-trip failure is exactly the message that ends up
+    // pasted into a bug report.
+    if (expected.latitude !== actual.latitude || expected.longitude !== actual.longitude) {
+      throw new RoundTripFailure(
+        `route.positions[${String(index)}]: the position that came back is not the one written`,
+      );
+    }
+  }
+  return read;
 }

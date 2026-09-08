@@ -244,7 +244,7 @@ describe('the production registry', () => {
     //
     // Asserted rather than left implicit: the day a version does change a
     // record's shape, this test is what says the registry must gain an entry.
-    expect(SCHEMA_VERSION).toBe(6);
+    expect(SCHEMA_VERSION).toBe(7);
     expect(SCHEMA_MIGRATIONS).toEqual([]);
   });
 

@@ -33,6 +33,7 @@ import {
   truncatedMidRecordRide,
   zeroLengthFile,
 } from './fit-fixtures';
+import { loopRouteGpx } from './route-fixtures';
 import {
   billionLaughsGpx,
   deepNestingGpx,
@@ -255,6 +256,16 @@ export function buildCorpus(): readonly CorpusEntry[] {
         'these files, and no run of single-byte edits produces three hundred levels of nesting. ' +
         'Without a depth limit the parser would build a stack whose size the document chose.',
       deepNestingGpx(),
+    ),
+    xml(
+      'planned-loop-route.gpx',
+      'gpx',
+      'A PLANNED ROUTE rather than a recorded ride: one <rte> of 341 <rtept>, no <trk>, no time ' +
+        'anywhere and no sensor channel. A closed 5 km loop with one 60 m hill, its points ' +
+        'irregularly spaced the way a planner’s export is. #89 imports this; nothing else in the ' +
+        'corpus exercises the route element at all, and a decoder written only against <trk> ' +
+        'reads this file as an empty ride and says nothing.',
+      loopRouteGpx(),
     ),
     xml(
       'truncated-mid-trackpoint.gpx',

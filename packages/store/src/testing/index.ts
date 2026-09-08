@@ -28,6 +28,7 @@ export {
   assertRecordingRecovers,
   assertSameSamples,
   assertSameStreamSet,
+  assertRouteRoundTrip,
   assertSegmentRoundTrip,
   assertSignedRecordRoundTrip,
   assertStreamSetRoundTrip,
@@ -52,6 +53,8 @@ export {
   lapFor,
   resetFixtureIds,
   recordingFor,
+  routeFor,
+  seedRoute,
   rideFor,
   seedAthletes,
   seedRecording,
@@ -70,5 +73,6 @@ export {
   misroutedBlobStoreFactory,
   roundedClaimStoreFactory,
   appendingEffortStoreFactory,
+  openedLoopStoreFactory,
   thinnedGeometryStoreFactory,
 } from './fakes';

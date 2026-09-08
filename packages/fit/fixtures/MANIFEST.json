@@ -1,8 +1,8 @@
 {
   "generatedBy": "pnpm --filter @onyourleft/fit run fixtures:generate",
   "budgetBytes": 262144,
-  "totalBytes": 88934,
-  "totalPositionCount": 632,
+  "totalBytes": 116181,
+  "totalPositionCount": 973,
   "fixtures": [
     {
       "name": "nominal-outdoor-ride.fit",
@@ -147,6 +147,14 @@
       "sha256": "91c01f2cf081929b54160e5480841a5fd9f69b0e2838c040fb3782d87e1d6863",
       "positionCount": 0,
       "purpose": "A well-formed GPX whose track extensions nest an element deeper than the parser will go. The third structural attack after entity resolution and entity expansion, and the one the fuzz cannot invent for itself: its cases are byte substitutions and truncations of these files, and no run of single-byte edits produces three hundred levels of nesting. Without a depth limit the parser would build a stack whose size the document chose."
+    },
+    {
+      "name": "planned-loop-route.gpx",
+      "format": "gpx",
+      "bytes": 27247,
+      "sha256": "975bd97efcb54d11cfa0ed2fe46b30c5cb3ffccd8fa03ac5d746f98de33d0e9c",
+      "positionCount": 341,
+      "purpose": "A PLANNED ROUTE rather than a recorded ride: one <rte> of 341 <rtept>, no <trk>, no time anywhere and no sensor channel. A closed 5 km loop with one 60 m hill, its points irregularly spaced the way a planner’s export is. #89 imports this; nothing else in the corpus exercises the route element at all, and a decoder written only against <trk> reads this file as an empty ride and says nothing."
     },
     {
       "name": "truncated-mid-trackpoint.gpx",

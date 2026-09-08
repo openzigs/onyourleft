@@ -3,7 +3,8 @@
 The FIT / GPX / TCX codec. It holds the **FIT activity file decoder**
 ([#30](https://github.com/openzigs/onyourleft/issues/30)), the **FIT activity file encoder**
 ([#31](https://github.com/openzigs/onyourleft/issues/31)), **GPX 1.1 and TCX v2 import and export**
-([#32](https://github.com/openzigs/onyourleft/issues/32)), and the synthetic fixture corpus and
+([#32](https://github.com/openzigs/onyourleft/issues/32)), **route import**
+([#89](https://github.com/openzigs/onyourleft/issues/89)), and the synthetic fixture corpus and
 generator ([#29](https://github.com/openzigs/onyourleft/issues/29)).
 
 Apache-2.0, like everything under `packages/`.
@@ -471,6 +472,26 @@ pnpm --filter @onyourleft/fit run fixtures:generate
 ---
 
 ## 7. GPX and TCX — #32
+
+### `<trk>` and `<rte>`, and which one wins — #89
+
+GPX has two ways to carry an ordered list of places. `<trk>`/`<trkseg>`/`<trkpt>` is where a device
+writes a ride it recorded; `<rte>`/`<rtept>` is where a planner writes a ride somebody intends to
+do. They differ in what they may carry — an `<rtept>` has no time and no sensor extensions — and not
+in shape, so `decodeGpx` reads both and both become laps.
+
+⚠️ **A `<trk>` wins outright: `<rte>` points are used only when the document has no track at all.**
+Route planners routinely export both, describing the same line twice at different densities, and
+concatenating them would double the ride and put a teleport in the middle of it. `src/route/` relies
+on this rule to import a planned route from a file whose other half is a coarse summary of it.
+
+`src/route/gpx-route.ts` is the composition — this decoder, then `@onyourleft/domain`'s
+`routeProfile` — and it is deliberately the only new reader #89 added. #89's own words: *"reuse it,
+do not write a second parser"*, and the reason is more than duplication: `src/xml/parse.ts` is where
+this program refuses a `<!DOCTYPE`, and a route importer with its own reader would be a second front
+door with no lock on it. `src/route/gpx-route.test.ts` asserts the DOCTYPE refusal through the route
+entry point for exactly that reason.
+
 
 ### The schema versions this package targets
 

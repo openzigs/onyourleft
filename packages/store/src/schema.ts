@@ -33,11 +33,11 @@
 /**
  * The current schema version.
  *
- * **6** since #66. Version 2 added `streamSets` and `streamBlobs`; version 3
+ * **7** since #89. Version 2 added `streamSets` and `streamBlobs`; version 3
  * added `recordingSessions` and `recordingChunks`; version 4 added `deviceKeys`
- * and `activityRecords`; version 5 added `segments`; version 6 adds
- * `segmentEfforts` and `matchCheckpoints`. All five are purely additive
- * and change **no existing record's shape**. That is why `SCHEMA_MIGRATIONS` in
+ * and `activityRecords`; version 5 added `segments`; version 6 added
+ * `segmentEfforts` and `matchCheckpoints`; version 7 adds `routes`. All six are
+ * purely additive and change **no existing record's shape**. That is why `SCHEMA_MIGRATIONS` in
  * `migrations.ts` is still empty: the registry holds *record* migrations, and
  * there is no record to transform. The version bumps themselves are real and
  * are tested — `migrations.test.ts` opens a version-1 database, writes rows
@@ -47,7 +47,7 @@
  * Bumping this for a change that *does* alter a record's shape means adding a
  * migration pair.
  */
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 /**
  * Dexie stores its schema version in IndexedDB multiplied by ten, leaving room
@@ -86,6 +86,8 @@ export const TABLE = {
   segmentEfforts: 'segmentEfforts',
   /** #66: one row per backfill in progress — how far it got, so it can resume. */
   matchCheckpoints: 'matchCheckpoints',
+  /** #89: one row per saved route — a line to ride, and the profile built from it. */
+  routes: 'routes',
 } as const;
 
 /**
@@ -183,6 +185,17 @@ export const INDEX = {
   effortBySegment: 'segmentId',
   /** #66: a backfill's own row, scoped to the athlete who started it. */
   checkpointByAthlete: 'athleteId',
+  /**
+   * #89: `getRoute` — the athlete-scoped point lookup.
+   *
+   * ⚠️ **`createdBy`, not `athleteId`**, for `segmentByCreatorAndId`'s reason:
+   * an index names a key path literally and that is what the record calls its
+   * owning column. Same scoping column, different name.
+   */
+  routeByOwnerAndId: '[createdBy+id]',
+  /** #89: `listRoutes`, newest first — and `deleteAthlete`'s cascade. */
+  routeByOwnerAndCreatedAt: '[createdBy+createdAt]',
+  routeByOwner: 'createdBy',
 } as const;
 
 /**
@@ -422,6 +435,35 @@ export const STORES_V6: Readonly<Record<string, string>> = {
   [TABLE.matchCheckpoints]: 'athleteId',
 };
 
+/**
+ * Version 7 — #89's saved routes, added beside the eleven stores that exist.
+ *
+ * Keyed on `id`, with every index leading with `createdBy`, so there is no
+ * index that answers "the route with this id" without also being told whose it
+ * is. That is the shape CLAUDE.md section 6 asks for and the reason every other
+ * index in this file has it.
+ *
+ * ⚠️ **The index strings are the same three as `segments`, and the two stores
+ * are deliberately separate rather than one "saved line" store.** A segment is
+ * a stretch a rider is *ranked* on and carries endpoints, bearings and a
+ * visibility; a route is a line they intend to *ride* and carries a profile. A
+ * shared store would need every one of those columns to be optional, and the
+ * first query to forget which kind of row it was reading would rank a route.
+ *
+ * ⚠️ **No index on anything OSM-derived, because no such field exists**
+ * (ADR 0012 D-1) — `records.ts` says why a way id on a route would be an ODbL
+ * problem rather than a rendering optimisation.
+ */
+export const STORES_V7: Readonly<Record<string, string>> = {
+  // The eleven stores of versions 1 to 6 are inherited unchanged.
+  [TABLE.routes]: [
+    'id',
+    INDEX.routeByOwner,
+    INDEX.routeByOwnerAndId,
+    INDEX.routeByOwnerAndCreatedAt,
+  ].join(', '),
+};
+
 export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V1,
   STORES_V2,
@@ -429,4 +471,5 @@ export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V4,
   STORES_V5,
   STORES_V6,
+  STORES_V7,
 ];
