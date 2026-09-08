@@ -146,6 +146,7 @@ export type {
 } from './fitness-machine-control';
 
 export {
+  CONTROL_NOT_PERMITTED_GUIDANCE,
   CONTROL_POINT_PROCEDURE_TIMEOUT_SECONDS,
   createTrainerControl,
   decodeControlResponse,
@@ -157,6 +158,26 @@ export {
   MAX_ENCODABLE_RESISTANCE_LEVEL,
   MAX_PLAUSIBLE_GRADE_PERCENT,
 } from './fitness-machine-control';
+
+// --- Driving simulation mode from a route (#90) ------------------------------
+//
+// Two halves, and neither is the gradient itself: `@onyourleft/domain`
+// §`createSimulationDriver` decides *what* gradient and *when*, which is
+// arithmetic; this decides how to get it onto a control point that runs one
+// procedure at a time without a backlog forming. The choice of control point,
+// where a machine offers more than one, is the third.
+
+export type {
+  SimulationSink,
+  SimulationWriter,
+  SimulationWriterOptions,
+} from './simulation-writer';
+
+export { createSimulationWriter } from './simulation-writer';
+
+export type { TrainerControlChoice } from './trainer-control-choice';
+
+export { chooseTrainerControl, WAHOO_TRAINER_CONTROL_POINT } from './trainer-control-choice';
 
 // --- Cycling Power Service (0x1818) -----------------------------------------
 

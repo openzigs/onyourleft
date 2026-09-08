@@ -35,11 +35,22 @@ export {
   capabilitiesOf,
   cpsPowerMeter,
   cscsSensor,
+  dualControlTrainer,
   ftmsTrainer,
   hrsStrap,
   modernTrainer,
   SERVICE_CAPABILITIES,
+  vendorOnlyTrainer,
 } from './devices';
+
+// --- A vendor's own control point (#90) --------------------------------------
+//
+// Modelled as a presence, not a protocol: enough for a device to serve it
+// alongside FTMS so that "FTMS is used" is observed rather than claimed.
+
+export type { VendorControlPoint, VendorControlRequest } from './vendor-control';
+
+export { createVendorControlPoint } from './vendor-control';
 
 // --- The rider --------------------------------------------------------------
 

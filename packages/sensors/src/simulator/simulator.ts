@@ -96,6 +96,7 @@ import {
 } from './profiles';
 import { DEFAULT_RIDER, type RiderProfile } from './rider';
 import type { Scenario } from './scenario';
+import { createVendorControlPoint, type VendorControlPoint } from './vendor-control';
 
 /**
  * The client-half shapes the simulator differences its own frames against.
@@ -148,6 +149,15 @@ export interface SimulatedDevice {
   readonly device: SensorDevice;
   /** Present when the device serves FTMS. */
   readonly controlPoint: FtmsControlPoint | undefined;
+  /**
+   * The manufacturer's own control point, on a machine that serves one.
+   *
+   * Present so that #90's precedence rule can be observed rather than asserted:
+   * on a device serving both, everything this program writes lands on
+   * {@link controlPoint} and `vendorControlPoint.writes()` stays empty. See
+   * `vendor-control.ts`.
+   */
+  readonly vendorControlPoint: VendorControlPoint | undefined;
   /**
    * What this machine's two supported-range characteristics would report.
    * Present when the device serves FTMS.
@@ -211,6 +221,8 @@ interface DeviceRecord {
   readonly device: SensorDevice;
   readonly session: DeviceSession;
   readonly ftms: FtmsMachine | undefined;
+  /** The vendor's own control point, on a device that serves one. */
+  readonly vendorControl: VendorControlPoint | undefined;
   readonly cps: CyclingPowerService | undefined;
   readonly cscs: CscService | undefined;
   readonly hrs: HeartRateService | undefined;
@@ -272,6 +284,7 @@ export function createSimulator(options: SimulatorOptions): Simulator {
     const envelope = (at: UnixSeconds) => ({ device: identity, at });
 
     let ftms: FtmsMachine | undefined;
+    let vendorControl: VendorControlPoint | undefined;
     let cps: CyclingPowerService | undefined;
     let cscs: CscService | undefined;
     let hrs: HeartRateService | undefined;
@@ -350,6 +363,15 @@ export function createSimulator(options: SimulatorOptions): Simulator {
           register('cadence', (at) => crankCadence('cscs', sensor.frame().crank, at));
           break;
         }
+        case 'wahoo': {
+          // No reader: a proprietary control point sets resistance and reports
+          // nothing. The device's `trainer-control` capability comes from
+          // `SERVICE_CAPABILITIES`, so a machine serving this and nothing
+          // standard still declares itself controllable — which is the case
+          // #90's precedence rule has to answer honestly.
+          vendorControl = createVendorControlPoint('Wahoo');
+          break;
+        }
         case 'hrs': {
           const strap = createHeartRateService();
           hrs = strap;
@@ -367,6 +389,7 @@ export function createSimulator(options: SimulatorOptions): Simulator {
       device,
       session,
       ftms,
+      vendorControl,
       cps,
       cscs,
       hrs,
@@ -509,6 +532,7 @@ export function createSimulator(options: SimulatorOptions): Simulator {
     record.handle ??= {
       device: record.device,
       controlPoint: record.ftms?.controlPoint,
+      vendorControlPoint: record.vendorControl,
       supportedRanges: record.ftms?.supportedRanges(),
 
       script(scenario) {

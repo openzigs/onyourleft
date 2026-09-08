@@ -557,6 +557,30 @@ export type ScheduleTimeout = (afterSeconds: Seconds, run: () => void) => () => 
  */
 export const CONTROL_POINT_PROCEDURE_TIMEOUT_SECONDS = 5 as Seconds;
 
+/**
+ * What a rider is told when the machine answers `0x05` Control Not Permitted.
+ *
+ * `0x05` already has its own code — `control-not-held`, distinct from the
+ * `control-rejected` every other refusal becomes — but a code is not an
+ * instruction, and `apps/web`'s ride controller renders a `SensorError`'s
+ * **message**. So the message has to be the actionable half, and #90's fifth
+ * criterion asks for exactly that: it must *name the likely cause*.
+ *
+ * The likely cause is not a fault. FTMS §4.16.2 grants control to one client at
+ * a time, and on a phone the other client is very often the rider's own second
+ * cycling app, left running in the background, or the trainer manufacturer's
+ * app, or a head unit that paired itself on the way past. "The trainer refused
+ * the command" sends that rider to a support page about their trainer; this
+ * sends them to the app switcher.
+ *
+ * ⚠️ **No device name, no address, and no other client's identity** — there is
+ * nothing in the protocol that says who holds control, and SECURITY.md treats
+ * naming a nearby device as in scope. The sentence is a list of the usual
+ * suspects, not a claim about this one.
+ */
+export const CONTROL_NOT_PERMITTED_GUIDANCE =
+  "another app is controlling this trainer, so it is ignoring this one. That is usually a second cycling app still running on this device, the trainer maker's own app, or a head unit that connected to it. Close or disconnect the other one, then reconnect here.";
+
 export interface TrainerControlOptions {
   /**
    * The device's own Supported Power Range, **read from the device**. Required:
@@ -827,9 +851,15 @@ export function createTrainerControl(
       // arrives; the machine simply says no. A client that kept believing it
       // had control would write into the void for the rest of the ride.
       loseControl('permission-lost');
+      // ⚠️ NOT folded into the `control-rejected` branch below. `0x05` is the
+      // one result code that says something a rider can act on, and swallowing
+      // it into the generic "the machine refused op code 0x11" is how a
+      // recoverable clash between two apps becomes a trainer that looks broken.
       throw fail(
         'control-not-held',
-        `the machine refused op code 0x${expectedOpCode.toString(16)}: control not permitted`,
+        `the machine refused op code 0x${expectedOpCode.toString(
+          16,
+        )} with Control Not Permitted: ${CONTROL_NOT_PERMITTED_GUIDANCE}`,
       );
     }
     if (response.result !== 'success') {
