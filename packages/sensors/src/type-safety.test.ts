@@ -143,6 +143,7 @@ describe('trainer control is not a measurement stream', () => {
     const trainer: SensorDevice = {
       identity,
       capabilities: new Set(['power', 'cadence', 'trainer-control']),
+      undeclared: new Set(),
     };
     expect(trainer.capabilities.has('trainer-control')).toBe(true);
   });

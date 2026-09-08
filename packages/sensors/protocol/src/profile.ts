@@ -140,6 +140,55 @@ export interface GattProfile {
    */
   readonly controls?: readonly ControlCapability[] | undefined;
   /**
+   * A characteristic read **once when the link comes up**, whose value narrows
+   * {@link capabilities} to what this particular device says it can report.
+   *
+   * ## Why the static list is not enough — #134, and #42's sixth criterion
+   *
+   * {@link capabilities} is a property of the *profile*: every Cycling Power
+   * meter can in principle report cadence, so the profile declares it. Whether
+   * *this* meter can is a property of the device, and until #134 nothing asked
+   * it — a single-sided crank meter with no wheel magnet had `cadence` and
+   * `speed` claimed on its behalf because the Measurement characteristic
+   * existed.
+   *
+   * The consequence is the one #134 names: with only per-frame flags to go on,
+   * **"this trainer has no cadence" and "cadence dropped out" are the same
+   * observation.** A device that reports crank revolutions only while the crank
+   * turns looks identical to one that cannot report them at all, so a screen
+   * either shows a control that will never produce a number or hides one that
+   * would.
+   *
+   * ⚠️ **Optional, and absent is not "declares nothing".** A profile without a
+   * `describe` keeps its full {@link capabilities}, because that is what the
+   * three profiles predating this did and narrowing them on the strength of a
+   * characteristic they do not serve would remove capabilities that work today.
+   * Heart Rate has no equivalent characteristic to read; FTMS has one and
+   * reaches it another way (`transport.openFitnessMachine`).
+   *
+   * ⚠️ **A failed read is not an empty declaration either.** The adapter keeps
+   * the full list when the characteristic is missing or unreadable — a device
+   * that serves Measurement and not Feature is out of spec but common, and
+   * refusing it every capability would be worse than trusting the profile.
+   */
+  readonly describe?:
+    | {
+        readonly characteristic: GattUuid;
+        /**
+         * What this device declares it can report.
+         *
+         * @param value the characteristic's own `DataView`, read once.
+         * @returns a subset of {@link capabilities}. The adapter intersects the
+         * two rather than trusting this outright, so a decoder cannot widen a
+         * profile past what it declared it could decode.
+         * @throws anything. The adapter treats a throw as "unreadable" and
+         * keeps the full list, for the reason above.
+         */
+        declared(value: DataView): readonly MeasurementCapability[];
+      }
+    | undefined;
+
+  /**
    * Turn one notification into zero or more measurements.
    *
    * @param value the characteristic's own `DataView`. **Not a copy** — copying

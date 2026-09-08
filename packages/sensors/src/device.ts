@@ -143,6 +143,29 @@ export interface SensorDevice {
    * ordered into a priority.
    */
   readonly capabilities: ReadonlySet<SensorCapability>;
+  /**
+   * Capabilities this device **delivered without declaring** (#134).
+   *
+   * A device that answers its Feature characteristic with "no crank data" and
+   * then sends crank data in a measurement frame is in disagreement with
+   * itself. The transport believes the declaration — it is the only statement
+   * about the device that is not also a statement about this second — so those
+   * frames are dropped, and this set is what says so rather than letting the
+   * measurement vanish silently.
+   *
+   * ⚠️ **The disagreement is recorded, not resolved.** #134's third checkbox is
+   * that a disagreement is *"recorded rather than silently resolved"*, and both
+   * halves matter: trusting the frames would put back the ambiguity the Feature
+   * read exists to remove ("no cadence" versus "cadence dropped out"), and
+   * saying nothing would make a device whose declaration is wrong look like one
+   * that is merely quiet.
+   *
+   * Empty for every device that agrees with itself, which is almost all of
+   * them. Non-empty is worth surfacing to whoever is holding the device, and is
+   * the evidence a hardware bug report would rest on — #134 part 2 asks for
+   * exactly this kind of deviation to be documented beside a fixture.
+   */
+  readonly undeclared: ReadonlySet<SensorCapability>;
 }
 
 /**

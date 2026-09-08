@@ -128,6 +128,56 @@ a `forceDisconnect` option — would have failed, because every other transport 
 parameter describing one vendor's firmware bug. `connect()` is documented as idempotent from the
 caller's side; making that true is the adapter's job.
 
+## What a device says it can do, and what it then does (#134)
+
+A device's capability set comes from **three** sources, in this order, and the
+order is the design:
+
+1. **Which services it serves.** Resolved on connect, bounded by the grant
+   (#131, #132). Before any connect the set is what the caller asked for, which
+   is empty for a wide chooser — Web Bluetooth cannot reveal a device's services
+   before a link exists.
+2. **What its own declaration characteristic says**, where a profile has one.
+   Cycling Power's is the Feature characteristic (`0x2A65`), read **once when
+   the link comes up**. `GattProfile.describe` is the seam.
+3. **Nothing from the measurement frames.** They are a statement about this
+   second, not about the device.
+
+⚠️ **Why (2) exists at all.** Until #134 the Feature characteristic was defined,
+exported and never read, so (1) was the whole answer — and any meter serving
+Cycling Power Measurement had `cadence` claimed on its behalf, including a
+single-sided crank meter that cannot report it and never will. With only the
+per-frame flags to fall back on, **"this meter has no cadence" and "cadence
+dropped out" are the same observation**: a meter that reports crank revolutions
+only while the crank turns looks exactly like one that cannot report them.
+
+⚠️ **A declaration narrows; it never widens.** The declared set is *intersected*
+with what the profile says it can decode, so a Feature value naming a field this
+program has no decoder for is ignored rather than producing a capability nothing
+can supply. That guard is otherwise unreachable with the four shipped profiles —
+`web-bluetooth/src/feature-read.test.ts` carries a deliberately over-claiming
+profile to make it load-bearing, and says why.
+
+⚠️ **A device that will not answer keeps its full list.** A missing Feature
+characteristic, a refused read, or bytes the decoder throws on all leave the
+profile's capabilities intact. Serving Measurement and not Feature is out of
+specification and common, and refusing such a device every capability would be a
+worse answer than trusting the profile.
+
+### When the device contradicts itself
+
+A meter that declares no crank data and then sends crank data is in disagreement
+with itself. The transport **believes the declaration** — it is the only
+statement about the device that is not also a statement about this second — so
+those frames are dropped, and `SensorDevice.undeclared` records that it happened.
+
+Recorded, not resolved. Trusting the frame would put back exactly the ambiguity
+the read removes; saying nothing would make a device whose declaration is wrong
+look like one that is merely quiet. The set is empty for almost every device,
+which is what makes a non-empty one worth surfacing — and it is the evidence a
+hardware bug report would rest on, which is what #134 part 2 asks for beside a
+fixture.
+
 ## One device, several capabilities
 
 A modern smart trainer is simultaneously an FTMS machine, a power meter and a speed/cadence sensor.

@@ -100,6 +100,7 @@ describe('one physical device carries several capabilities', () => {
     identity: { transport: WEB_BLUETOOTH, id: deviceId('trainer') },
     name: 'KICKR CORE 1F2A',
     capabilities: new Set(['power', 'cadence', 'speed', 'trainer-control']),
+    undeclared: new Set(),
   };
 
   it('is one device with four capabilities, not four devices', () => {

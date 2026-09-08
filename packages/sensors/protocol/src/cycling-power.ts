@@ -484,6 +484,21 @@ export function createCyclingPowerProfile(options?: {
     service: CYCLING_POWER_SERVICE,
     characteristic: CYCLING_POWER_MEASUREMENT,
     capabilities,
+    // #134: the Feature characteristic was defined here and never read, so a
+    // meter's declared abilities were the profile's rather than its own. This
+    // is the read — one per link, on connect — and `cyclingPowerCapabilities`
+    // is the mapping that already existed and had no value to map.
+    //
+    // ⚠️ The wheel circumference is closed over, not read again. `speed` needs
+    // both a device that reports wheel revolutions **and** a circumference to
+    // turn them into a speed, so a meter that declares wheel data still supplies
+    // no speed when the rider has not told us their wheel — which is the same
+    // rule `capabilities` above applies, applied to the device's own answer.
+    describe: {
+      characteristic: CYCLING_POWER_FEATURE,
+      declared: (value: DataView): readonly MeasurementCapability[] =>
+        cyclingPowerCapabilities(decodeCyclingPowerFeature(value), { wheelCircumference }),
+    },
     decode(value: DataView, sink: MeasurementSink, at: UnixSeconds): void {
       // Decoded in full before anything is reported: a frame whose crank data
       // is truncated must not put its power on the ride screen, because the

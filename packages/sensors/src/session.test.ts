@@ -34,6 +34,7 @@ const trainer: SensorDevice = {
   identity: trainerIdentity,
   name: 'KICKR CORE 1F2A',
   capabilities: new Set(['power', 'cadence', 'speed', 'trainer-control']),
+  undeclared: new Set(),
 };
 
 function powerAt(secondsSinceEpoch: number, value: number): SensorMeasurement {
