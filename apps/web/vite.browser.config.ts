@@ -34,6 +34,16 @@ export default defineConfig({
     // a minified bundle with no SPDX header.
     outDir: 'dist',
     emptyOutDir: true,
+    // ⚠️ Both pages have to be named. Vite's multi-page mode discovers only
+    // `index.html` by default, so adding `game.html` without this line builds a
+    // harness the spec then cannot load — and the failure is a 404 during the
+    // run rather than a build error, which reads like a server problem.
+    rollupOptions: {
+      input: {
+        map: 'browser/index.html',
+        game: 'browser/game.html',
+      },
+    },
     // Sourcemaps so a failure in CI names a line of ours rather than a column
     // in a minified chunk. This bundle ships to nobody, so there is nothing to
     // weigh the cost against.
