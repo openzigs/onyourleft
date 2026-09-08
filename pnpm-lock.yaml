@@ -78,6 +78,9 @@ importers:
       '@onyourleft/fit':
         specifier: workspace:*
         version: link:../../packages/fit
+      '@onyourleft/mobile':
+        specifier: workspace:*
+        version: link:../mobile
       '@onyourleft/physics':
         specifier: workspace:*
         version: link:../../packages/physics

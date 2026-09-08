@@ -8,17 +8,22 @@ import {
   createCyclingPowerProfile,
   createCyclingSpeedCadenceProfile,
   heartRateProfile,
+  type GattProfile,
 } from '@onyourleft/sensors/protocol';
 import { createWebBluetoothTransport } from '@onyourleft/sensors/web-bluetooth';
-import { metres, unixSeconds, watts } from '@onyourleft/domain';
-import { activityId, openActivityStore, recordingSessionId } from '@onyourleft/store';
+import { metres, unixSeconds } from '@onyourleft/domain';
+import { activityId, openActivityStore, recordingSessionId, routeId } from '@onyourleft/store';
 
 import './design/theme.css';
 import { browserClock, createRideController, type RideController } from './ride/controller';
 import { openWebBluetoothTrainer } from './ride/trainer';
+import { gameSensors } from './game/sensors';
+import { fastestAttempt, ghostFromSpeed } from './game/ghost-source';
+import { isNativeShell, platformCapacitor } from './support/capacitor';
 import { AppShell } from './shell/AppShell';
 import { browserScreenLockSource, platformWakeLock } from './game/hud/wake-lock';
 import type { GamePort, RidableRoute } from './game/GameView';
+import type { GhostTrack } from '@onyourleft/domain';
 import type { GameRenderer } from './game/port';
 import { probeBrowser, type CapabilityProbe } from './support/bluetooth-support';
 import { saveWithAnchor, webCryptoDigest } from './transfer/browser';
@@ -97,31 +102,81 @@ function localStore(): ReturnType<typeof openActivityStore> {
  * first criterion rejects a silently non-functional pairing control, and the
  * `RideView` says so in words instead.
  */
-function buildRideController(probe: CapabilityProbe): RideController | undefined {
-  if (probe.bluetooth === undefined || !probe.secureContext) {
-    return undefined;
-  }
-  const transport = createWebBluetoothTransport({
-    // In preference order, and FTMS first: on a modern trainer it supplies
-    // power, cadence and speed from one connection, and `resolveLink` fixes the
-    // source per capability at the earliest profile that carries it. Pairing a
-    // trainer is then one of about three connections rather than three.
-    profiles: [
-      createIndoorBikeDataProfile(),
-      createCyclingPowerProfile(),
-      createCyclingSpeedCadenceProfile({ wheelCircumference: DEFAULT_WHEEL_CIRCUMFERENCE }),
-      heartRateProfile,
-    ],
-    bluetooth: probe.bluetooth,
-  });
-  return createRideController({
-    transport,
+/**
+ * The profiles, in preference order, shared by both transports.
+ *
+ * FTMS first: on a modern trainer it supplies power, cadence and speed from one
+ * connection, and `resolveLink` fixes the source per capability at the earliest
+ * profile that carries it. Pairing a trainer is then one of about three
+ * connections rather than three.
+ *
+ * ⚠️ Hoisted out of `buildRideController` so the browser and the Android shell
+ * pair against **the same list**. #39's promise is that one interface is
+ * satisfied unchanged by both platforms; two profile lists would make that true
+ * of the types and false of the behaviour, and the divergence would show up as
+ * "my trainer pairs on the web and not on the phone".
+ */
+function rideProfiles(): GattProfile[] {
+  return [
+    createIndoorBikeDataProfile(),
+    createCyclingPowerProfile(),
+    createCyclingSpeedCadenceProfile({ wheelCircumference: DEFAULT_WHEEL_CIRCUMFERENCE }),
+    heartRateProfile,
+  ];
+}
+
+/**
+ * The live ride screen's state machine, on whichever platform this is.
+ *
+ * ⚠️ **Asynchronous because the Android transport is loaded lazily**, and that
+ * is the whole reason `apps/mobile` is no longer dead code. `capacitor.config.ts`
+ * points the shell at `apps/web/dist`, so this bundle is what runs on the phone —
+ * and until now it had no way to reach the native BLE adapter #87 wrote, so the
+ * app could not pair with anything on Android. The `import()` is behind
+ * `isNativeShell` so a browser never downloads a line of Capacitor.
+ *
+ * ⚠️ **Trainer control is deliberately absent on Android, and the screen says
+ * so rather than pretending.** `openTrainer` is omitted for the Capacitor
+ * transport because `openWebBluetoothTrainer` needs `openFitnessMachine`, which
+ * is on `WebBluetoothTransport` and not on `SensorTransport` — driving an FTMS
+ * control point through the Capacitor plugin is real work that #87 did not do
+ * either. So on a phone a rider can pair, read power, cadence and heart rate,
+ * and record; they cannot yet have the trainer's resistance driven for them.
+ * `controller.ts` documents that omitting `openTrainer` makes the screen report
+ * no controllable trainer, which is the honest state rather than a silent one.
+ */
+async function buildRideController(probe: CapabilityProbe): Promise<RideController | undefined> {
+  const shared = {
     store: localStore(),
     athleteId: LOCAL_ATHLETE,
     // `crypto.randomUUID()` rather than a counter: two tabs recording at once
     // must not collide on a session id, and a counter in a module is per tab.
     newSessionId: () => recordingSessionId(globalThis.crypto.randomUUID()),
     now: browserClock,
+  };
+
+  if (isNativeShell(platformCapacitor())) {
+    const mobile = await import('@onyourleft/mobile');
+    return createRideController({
+      ...shared,
+      transport: mobile.createCapacitorTransport({
+        plugin: mobile.capacitorBlePort(),
+        profiles: rideProfiles(),
+        now: browserClock,
+      }),
+    });
+  }
+
+  if (probe.bluetooth === undefined || !probe.secureContext) {
+    return undefined;
+  }
+  const transport = createWebBluetoothTransport({
+    profiles: rideProfiles(),
+    bluetooth: probe.bluetooth,
+  });
+  return createRideController({
+    ...shared,
+    transport,
     openTrainer: openWebBluetoothTrainer(transport),
   });
 }
@@ -285,7 +340,7 @@ async function loadGameRenderer(): Promise<GameRenderer> {
  * `activity-store.ghost-scope.test.ts` is the test that guards the patent line
  * rather than anything in the replay code.
  */
-function buildGamePort(): GamePort {
+function buildGamePort(rideController: RideController | undefined): GamePort {
   const store = localStore();
   return {
     listRoutes: async (): Promise<readonly RidableRoute[]> => {
@@ -302,26 +357,53 @@ function buildGamePort(): GamePort {
       }
       return rows;
     },
-    loadGhost: () => {
-      // ⚠️ Deliberately not implemented yet, and returning `undefined` rather
-      // than throwing. Building a ghost needs the chosen attempt's DISTANCE
-      // STREAM, and `getStreamChannel` gives it — but choosing *which* attempt
-      // (most recent, or fastest?) is a product question #93 leaves open, and
-      // guessing it here would put an answer in the one place nobody would look
-      // for it. The picker already offers the option only where an attempt
-      // exists; what is missing is the read behind it.
-      return Promise.resolve(undefined);
+    loadGhost: async (route: string): Promise<GhostTrack | undefined> => {
+      // ⚠️ The athlete is what makes this the rider's OWN attempt, and it is not
+      // optional: `listRouteAttempts`' index is `[athleteId+routeId]` and cannot
+      // be queried without one. Nothing in `packages/domain/src/ghost/` takes an
+      // athlete id at all — the scoping lives here, which is why
+      // `activity-store.ghost-scope.test.ts` is the test that guards #59's
+      // patent line rather than anything in the replay code.
+      const attempts = await store.listRouteAttempts(LOCAL_ATHLETE, routeId(route));
+      const best = fastestAttempt(
+        attempts.map((ride) => ({ id: ride.id, movingSeconds: ride.movingTime })),
+      );
+      if (best === undefined) {
+        return undefined;
+      }
+      const chosen = activityId(best.id);
+      const summary = await store.getStreamSetSummary(LOCAL_ATHLETE, chosen);
+      if (summary === undefined) {
+        return undefined;
+      }
+      const speed = await store.getStreamChannel(LOCAL_ATHLETE, chosen, 'speed');
+      if (speed === undefined) {
+        // A ride with no speed channel — an indoor session recorded from power
+        // alone, for instance. There is no distance channel to fall back on
+        // (`ghost-source.ts` says why), so there is no ghost, and offering none
+        // is better than offering one that stands still.
+        return undefined;
+      }
+      try {
+        return ghostFromSpeed({
+          sampleIntervalSeconds: summary.sampleInterval,
+          speed,
+        });
+      } catch {
+        // `ghost-unusable`: too short, or holed beyond what can honestly be
+        // bridged. The rider gets no ghost rather than one built on a guess.
+        return undefined;
+      }
     },
-    readSensors: () => ({
-      // Wiring these to #39's live session is the remaining integration — see
-      // the pull request. Until then the screen runs, the simulation advances
-      // and the HUD honestly reports that nothing is connected, which is what
-      // `fields.ts` renders as a dash rather than as a zero.
-      power: watts(0),
-      live: false,
-      cadence: { value: undefined, live: false },
-      heartRate: { value: undefined, live: false },
-    }),
+
+    // ⚠️ Reads the SAME controller the ride screen reads, rather than opening a
+    // second transport. Two transports would mean two pairing flows, two
+    // connection budgets against an OS-wide limit of about three, and a rider
+    // pairing their trainer twice to use two screens. `gameSensors` is the one
+    // translation from the controller's four metric states to the three things
+    // the HUD renders — `sensors.ts` records which is which and why the
+    // difference matters.
+    readSensors: () => gameSensors(rideController?.getSnapshot()),
   };
 }
 
@@ -340,12 +422,13 @@ function buildTransferPort(): TransferPort | undefined {
   };
 }
 
-function render(): void {
+async function render(): Promise<void> {
+  const rideController = await buildRideController(capabilities);
   createRoot(container).render(
     <StrictMode>
       <AppShell
         capabilities={capabilities}
-        rideController={buildRideController(capabilities)}
+        rideController={rideController}
         transfer={buildTransferPort()}
         library={buildLibraryPort()}
         detail={buildDetailPort()}
@@ -354,7 +437,7 @@ function render(): void {
         routes={buildRoutePort()}
         workouts={buildWorkoutPort()}
         efforts={buildEffortPort()}
-        game={buildGamePort()}
+        game={buildGamePort(rideController)}
         gameRenderer={loadGameRenderer}
         screenLock={browserScreenLockSource(platformWakeLock())}
         map={loadMapPort}

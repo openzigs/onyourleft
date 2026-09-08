@@ -33,9 +33,10 @@ import { HudPanel } from './hud/HudPanel';
 import { NO_SCREEN_LOCK, type ScreenLock, type ScreenLockSource } from './hud/wake-lock';
 import { INITIAL_QUALITY, nextQuality, qualitySettings, type QualityState } from './quality';
 import { sceneFrame } from './scene';
-import { GameSimulation, atStartLine, type GameState, type RiderInput } from './simulation';
+import { GameSimulation, atStartLine, type GameState } from './simulation';
 import { corridorOrigin } from './terrain';
 import type { GameRenderer, GameView as RendererView } from './port';
+import { NO_SENSORS, type GameSensors } from './sensors';
 import {
   altitudeMetres,
   degreesCelsius,
@@ -76,11 +77,14 @@ export interface GamePort {
    * not in the replay code.
    */
   loadGhost(routeId: string): Promise<GhostTrack | undefined>;
-  /** The rider's live sensor readings, sampled per frame. */
-  readSensors(): RiderInput & {
-    readonly cadence: { value: number | undefined; live: boolean };
-    readonly heartRate: { value: number | undefined; live: boolean };
-  };
+  /**
+   * The rider's live sensor readings, sampled per frame.
+   *
+   * Returns `GameSensors` rather than a bag of numbers so the three-state
+   * distinction survives the trip — `sensors.ts` explains why "nobody paired a
+   * strap" and "the strap dropped" must not render alike.
+   */
+  readSensors(): GameSensors;
 }
 
 export interface GameViewProps {
@@ -200,7 +204,7 @@ export function GameView(props: GameViewProps): JSX.Element {
         return;
       }
       const at = clock();
-      simulation.advanceTo(at, port.readSensors());
+      simulation.advanceTo(at, port.readSensors().rider);
       setState(simulation.state);
 
       const origin = corridorOrigin(chosen.profile);
@@ -241,7 +245,7 @@ export function GameView(props: GameViewProps): JSX.Element {
     );
   }
 
-  const sensors = port?.readSensors();
+  const sensors = port?.readSensors() ?? NO_SENSORS;
   return (
     <section className="oyl-game" aria-label="Trainer game">
       <canvas
@@ -255,8 +259,8 @@ export function GameView(props: GameViewProps): JSX.Element {
       <HudPanel
         profile={chosen.profile}
         state={state}
-        cadence={sensors?.cadence ?? { value: undefined, live: false }}
-        heartRate={sensors?.heartRate ?? { value: undefined, live: false }}
+        cadence={sensors.cadence}
+        heartRate={sensors.heartRate}
         paused={phase === 'paused'}
         onPause={() => {
           setPhase((current) => (current === 'paused' ? 'riding' : 'paused'));

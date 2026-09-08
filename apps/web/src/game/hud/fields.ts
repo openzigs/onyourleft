@@ -45,8 +45,24 @@ export const NO_READING = '—';
 /** One sensor's current reading. */
 export interface SensorReading {
   readonly value: number | undefined;
-  /** Whether the link is up. @see fields.ts header */
+  /** Whether the link is up and reporting. @see fields.ts header */
   readonly live: boolean;
+  /**
+   * Whether any paired sensor supplies this channel **at all**.
+   *
+   * ⚠️ **The third state, and leaving it out is a false alarm on every ride.**
+   * `ride/metrics.ts` puts it plainly: *"a channel nobody is paired for is not
+   * 'unavailable' — it was never available, and telling a rider with no heart
+   * rate strap that their heart rate has been lost is a false alarm on every
+   * ride."* This field was added when the HUD was wired to the real controller
+   * and its `MetricState` turned out to carry three states where this carried
+   * two: `unpaired` and `stale` both arrive as "not live", and rendering them
+   * the same way says a strap the rider does not own has dropped.
+   *
+   * Defaults to `true` where a caller omits it, so the common case — a paired
+   * sensor that went quiet — reads as the alarm it is.
+   */
+  readonly paired?: boolean | undefined;
 }
 
 /** A field on the HUD. */
@@ -86,9 +102,25 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
   const { state } = input;
   const remaining = Math.max(0, (input.profile.totalDistance as number) - state.ride.distance);
   return [
-    reading('power', 'Power', state.input.power, 'W', state.input.live, 0),
-    reading('cadence', 'Cadence', input.cadence.value, 'rpm', input.cadence.live, 0),
-    reading('heartRate', 'Heart rate', input.heartRate.value, 'bpm', input.heartRate.live, 0),
+    reading('power', 'Power', state.input.power, 'W', state.input.live, 0, state.input.paired),
+    reading(
+      'cadence',
+      'Cadence',
+      input.cadence.value,
+      'rpm',
+      input.cadence.live,
+      0,
+      input.cadence.paired,
+    ),
+    reading(
+      'heartRate',
+      'Heart rate',
+      input.heartRate.value,
+      'bpm',
+      input.heartRate.live,
+      0,
+      input.heartRate.paired,
+    ),
     // Speed, gradient and distance come from the simulation, which cannot drop
     // out: it is computation, not a sensor. They are never stale.
     reading('speed', 'Speed', (state.ride.speed as number) * 3.6, 'km/h', true, 1),
@@ -132,9 +164,13 @@ function reading(
   unit: string,
   live: boolean,
   decimals: number,
+  paired = true,
 ): HudReading {
   if (!live || value === undefined || !Number.isFinite(value)) {
-    return { key, label, value: NO_READING, unit, stale: !live };
+    // ⚠️ `stale` requires BOTH: not live **and** something paired to have gone
+    // quiet. A channel with nothing paired shows a dash and says nothing — see
+    // `SensorReading.paired`.
+    return { key, label, value: NO_READING, unit, stale: paired && !live };
   }
   return { key, label, value: value.toFixed(decimals), unit, stale: false };
 }

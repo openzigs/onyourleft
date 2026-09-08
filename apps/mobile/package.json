@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-or-later",
-  "description": "Android shell — the connectedDevice foreground service, the BLE permission flow, and the Capacitor transport (#87).",
+  "description": "Android shell \u2014 the connectedDevice foreground service, the BLE permission flow, and the Capacitor transport (#87).",
   "scripts": {
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "test": "vitest run"
@@ -20,5 +20,9 @@
     "@capacitor/cli": "8.5.1",
     "typescript": "6.0.3",
     "vitest": "4.1.11"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/ble/testing.ts"
   }
 }
