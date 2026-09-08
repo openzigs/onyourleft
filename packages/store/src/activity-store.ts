@@ -69,6 +69,7 @@ import type {
   LapId,
   PrivacyZoneId,
   RecordingSessionId,
+  RouteId,
   SegmentId,
 } from './ids';
 import {
@@ -92,10 +93,13 @@ import {
   toPersistedPrivacyZone,
   fromPersistedSegment,
   toPersistedSegment,
+  fromPersistedRoute,
+  toPersistedRoute,
   type PersistedActivity,
   type PersistedAthlete,
   type PersistedLap,
   type PersistedPrivacyZone,
+  type PersistedRoute,
   type PersistedSegment,
 } from './persisted';
 import type {
@@ -109,6 +113,7 @@ import type {
   PrivacyZoneRecord,
   SegmentEffortRecord,
   SegmentRecord,
+  RouteRecord,
 } from './records';
 import type {
   NewRecordingChunk,
@@ -195,6 +200,15 @@ export interface AthleteDeletionCounts {
   readonly activities: number;
   readonly laps: number;
   readonly privacyZones: number;
+  /**
+   * Routes removed (#89).
+   *
+   * A saved route is a line through the places an athlete rides, so it is
+   * location data about them in exactly the sense ADR 0004 means, and erasure
+   * that left it behind would leave their roads on the device under a row no
+   * scoped read can reach.
+   */
+  readonly routes: number;
   /**
    * Segments removed (#64).
    *
@@ -362,6 +376,10 @@ export class ActivityStore {
 
   get #matchCheckpoints(): Table<MatchCheckpointRecord, string> {
     return this.#db.table<MatchCheckpointRecord, string>(TABLE.matchCheckpoints);
+  }
+
+  get #routes(): Table<PersistedRoute, string> {
+    return this.#db.table<PersistedRoute, string>(TABLE.routes);
   }
 
   // --- Athletes -------------------------------------------------------------
@@ -537,6 +555,7 @@ export class ActivityStore {
         this.#segments,
         this.#segmentEfforts,
         this.#matchCheckpoints,
+        this.#routes,
       ],
       async () => {
         // The signed records and the device key go with the athlete. The key is
@@ -577,8 +596,18 @@ export class ActivityStore {
         // exists.
         const efforts = await this.#segmentEfforts.where(INDEX.effortByAthlete).equals(id).delete();
         await this.#matchCheckpoints.delete(id);
+        const routes = await this.#routes.where(INDEX.routeByOwner).equals(id).delete();
         await this.#athletes.delete(id);
-        return { activities, laps, privacyZones, streamSets, recordings, segments, efforts };
+        return {
+          activities,
+          laps,
+          privacyZones,
+          streamSets,
+          recordings,
+          segments,
+          efforts,
+          routes,
+        };
       },
     );
   }
@@ -921,6 +950,90 @@ export class ActivityStore {
         return false;
       }
       await this.#segments.delete(id);
+      return true;
+    });
+  }
+
+  // --- Routes (#89) ---------------------------------------------------------
+
+  /**
+   * Inserts or replaces a saved route.
+   *
+   * **Refuses a route whose athlete does not exist**, and refuses to overwrite
+   * one belonging to somebody else — both inside the same transaction as the
+   * write, for `putActivity`'s reason: checked outside it, a concurrent
+   * `deleteAthlete` between the check and the write produces exactly the orphan
+   * the check exists to prevent.
+   *
+   * @throws {StoreReferentialError} if `record.createdBy` names no athlete, or
+   * if a route with this id already belongs to a different athlete.
+   */
+  async putRoute(record: RouteRecord): Promise<RouteId> {
+    await this.#db.transaction('rw', [this.#athletes, this.#routes], async () => {
+      await this.#requireAthlete(record.createdBy);
+      const existing = await this.#routes.get(record.id);
+      if (existing !== undefined && existing.createdBy !== record.createdBy) {
+        throw new StoreReferentialError(
+          `cannot overwrite route ${record.id}: it belongs to a different athlete`,
+        );
+      }
+      await this.#routes.put(toPersistedRoute(record));
+    });
+    return record.id;
+  }
+
+  /**
+   * One of this athlete's routes.
+   *
+   * Both arguments, always. There is no `getRoute(id)` and there is no index
+   * that would answer one — see `schema.ts`, and CLAUDE.md section 6 for what a
+   * lookup on an entity id alone costs.
+   */
+  async getRoute(owner: AthleteId, id: RouteId): Promise<RouteRecord | undefined> {
+    const row = await this.#routes.where(INDEX.routeByOwnerAndId).equals([owner, id]).first();
+    return row === undefined ? undefined : fromPersistedRoute(row);
+  }
+
+  /**
+   * This athlete's routes, **newest first**.
+   *
+   * ⚠️ **Bounded by `limit`, and the bound is the caller's**, for
+   * `listSegments`' reason and more sharply: a route row carries its whole
+   * profile — four numbers per ten metres — so a rider with fifty saved routes
+   * decodes several megabytes to render a list of names. A caller that only
+   * wants the names states its own budget in one named constant rather than
+   * leaving it implicit here.
+   */
+  async listRoutes(owner: AthleteId, limit?: number): Promise<RouteRecord[]> {
+    let query = this.#routes
+      .where(INDEX.routeByOwnerAndCreatedAt)
+      .between([owner, Dexie.minKey], [owner, Dexie.maxKey], true, true)
+      .reverse();
+    if (limit !== undefined) {
+      query = query.limit(limit);
+    }
+    const rows = await query.toArray();
+    return rows.map(fromPersistedRoute);
+  }
+
+  /**
+   * Deletes one of this athlete's routes.
+   *
+   * @returns whether a route was removed. `false` for one that does not exist
+   * **and** for one that belongs to somebody else, which are deliberately
+   * indistinguishable: reporting them differently would answer "does athlete B
+   * have a route with this id" to athlete A.
+   */
+  async deleteRoute(owner: AthleteId, id: RouteId): Promise<boolean> {
+    return this.#db.transaction('rw', [this.#routes], async () => {
+      const existing = await this.#routes
+        .where(INDEX.routeByOwnerAndId)
+        .equals([owner, id])
+        .first();
+      if (existing === undefined) {
+        return false;
+      }
+      await this.#routes.delete(id);
       return true;
     });
   }

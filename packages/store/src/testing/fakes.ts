@@ -7,13 +7,13 @@
  * observing the test go red. A harness that passes against a no-op write is
  * worthless, and this is the only way to know it does not."*
  *
- * There are **six** fakes here, and there are six on purpose: a harness that
+ * There are **eight** fakes here, and there are eight on purpose: a harness that
  * catches one failure shape is calibrated to that shape. They stand for the
  * causes CLAUDE.md section 5 names, and they fail for different reasons at
  * different points in the read. The fourth arrived with #46's write path, the
- * fifth with #61's and the sixth with #64's, which is the rule this file exists
- * to enforce: a new write path may not ship without a fake proving the harness
- * catches its failure.
+ * fifth with #61's, the sixth with #64's, the seventh with #66's and the eighth
+ * with #89's, which is the rule this file exists to enforce: a new write path
+ * may not ship without a fake proving the harness catches its failure.
  *
  * | Fake | Cause it stands for | How the round trip notices |
  * |---|---|---|
@@ -23,6 +23,8 @@
  * | `droppedFlushStoreFactory` | *wrong layer* — a flush acknowledged at the edge that never reached the database | the recording comes back short, at the first missing flush |
  * | `roundedClaimStoreFactory` | *wrong layer* — a layer above tidied a signed claim on its way in | the record comes back whole and **no longer verifies** |
  * | `thinnedGeometryStoreFactory` | *wrong layer* — a downsampler above the store thinned a segment's geometry on its way in | the segment comes back complete, with the right name, distance and endpoints, and **a shorter path** |
+ * | `appendingEffortStoreFactory` | *wrong layer* — the write inserted where it should have replaced | one match is right; the second one doubles every board |
+ * | `openedLoopStoreFactory` | *wrong layer* — one boolean lost in a mapping on the way in | the route comes back with every metre and every gradient correct, and **no longer wraps** |
  *
  * The second and third are the ones a naive harness misses. Both write to the
  * **real** IndexedDB, inside a **real** transaction that **really commits**, and
@@ -37,11 +39,17 @@
 import Dexie from 'dexie';
 
 import { openActivityStore, deleteActivityStore, type ActivityStore } from '../activity-store';
-import { segmentEffortId, type ActivityId, type AthleteId, type SegmentId } from '../ids';
+import {
+  segmentEffortId,
+  type ActivityId,
+  type AthleteId,
+  type RouteId,
+  type SegmentId,
+} from '../ids';
 import type { DeviceKeyRecord, StoredActivityRecord } from '../identity';
 import { SCHEMA_VERSIONS, TABLE } from '../schema';
 import type { NewRecordingChunk, NewRecordingSession } from '../recording';
-import type { SegmentEffortRecord, SegmentRecord } from '../records';
+import type { RouteRecord, SegmentEffortRecord, SegmentRecord } from '../records';
 import type { PersistedStreamBlob } from '../stream-persisted';
 import {
   STREAM_CHANNELS,
@@ -117,6 +125,10 @@ function bindStore(real: ActivityStore): PersistentStore {
     getMatchCheckpoint: async (owner) => real.getMatchCheckpoint(owner),
     putMatchCheckpoint: async (record) => real.putMatchCheckpoint(record),
     clearMatchCheckpoint: async (owner) => real.clearMatchCheckpoint(owner),
+    putRoute: async (record) => real.putRoute(record),
+    getRoute: async (owner, id) => real.getRoute(owner, id),
+    listRoutes: async (owner, limit) => real.listRoutes(owner, limit),
+    deleteRoute: async (owner, id) => real.deleteRoute(owner, id),
   };
 }
 
@@ -195,6 +207,10 @@ export function memoryWriteStoreFactory(): StoreFactory {
         },
         putSegment: (record: SegmentRecord) => {
           memory.set(`segment:${record.id}`, record);
+          return Promise.resolve(record.id);
+        },
+        putRoute: (record: RouteRecord) => {
+          memory.set(`route:${record.id}`, record);
           return Promise.resolve(record.id);
         },
         putActivityRecord: (row: StoredActivityRecord) => {
@@ -494,4 +510,40 @@ function withGapsFilled(channels: StreamChannels): StreamChannels {
     );
   }
   return filled;
+}
+
+/**
+ * A repository that **loses a route's `loop` flag** on its way in.
+ *
+ * ⚠️ This is the fake for #89's sixth criterion, and the failure it models is
+ * the least structural of the eight: one boolean, in a mapping between a record
+ * and a row, written as `false` instead of what the caller passed. Nothing
+ * about the stored route is corrupt. Every coordinate, every elevation and
+ * every gradient comes back to the last bit; the distance is right; the name is
+ * right; the record decodes without a complaint.
+ *
+ * What breaks is what the rider *does* with it. #89's fifth criterion is that
+ * riding past the end of a loop wraps to the start "rather than resetting or
+ * stopping" — and a profile whose `loop` is `false` clamps instead, so the ride
+ * simply stops accumulating at the end of the first lap with no error anywhere.
+ *
+ * It is here because a round trip that compared the *arrays* would pass against
+ * it: the point of the eighth fake is that a route's most important field is a
+ * one-bit one, and a harness calibrated to catch a mangled thousand-point path
+ * is not automatically calibrated to catch that.
+ */
+export function openedLoopStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        putRoute: async (record: RouteRecord): Promise<RouteId> =>
+          real.putRoute({ ...record, profile: { ...record.profile, loop: false } }),
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
 }

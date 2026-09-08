@@ -37,6 +37,7 @@ export type {
   SegmentEndpointRecord,
   FrozenEffortAttributes,
   MatchCheckpointRecord,
+  RouteRecord,
   SegmentEffortRecord,
   SegmentRecord,
 } from './records';
@@ -51,6 +52,7 @@ export type {
   LapId,
   PrivacyZoneId,
   RecordingSessionId,
+  RouteId,
   SegmentEffortId,
   SegmentId,
 } from './ids';
@@ -60,6 +62,7 @@ export {
   lapId,
   privacyZoneId,
   recordingSessionId,
+  routeId,
   segmentEffortId,
   segmentId,
 } from './ids';
@@ -142,6 +145,7 @@ export type {
   PersistedAthlete,
   PersistedLap,
   PersistedPrivacyZone,
+  PersistedRoute,
   PersistedSegment,
 } from './persisted';
 export type {
@@ -166,6 +170,8 @@ export {
   toPersistedAthlete,
   toPersistedLap,
   toPersistedPrivacyZone,
+  fromPersistedRoute,
+  toPersistedRoute,
   fromPersistedSegment,
   toPersistedSegment,
 } from './persisted';

@@ -345,6 +345,32 @@ export {
   seriesSpan,
 } from './analysis/fitness';
 
+// --- Routes (#89) ------------------------------------------------------------
+//
+// A route for indoor riding is a one-dimensional function of distance:
+// elevation, and therefore gradient, at every point along it. Here rather than
+// in a client for the reason the analysis is: #90 writes the gradient to a
+// trainer and #91 draws the same path, and the two must read the same numbers
+// from the same code. `route/profile.ts` states the three windows it is built
+// from and what each one costs.
+
+export type { RouteErrorCode } from './route/errors';
+export { RouteError } from './route/errors';
+
+export type { RouteProfile, RouteProfileOptions, RoutePoint } from './route/profile';
+export {
+  ASCENT_THRESHOLD_METRES,
+  DESPIKE_WINDOW_METRES,
+  distanceOnRoute,
+  elevationAt,
+  gradeAt,
+  GRADIENT_WINDOW_METRES,
+  LOOP_CLOSURE_METRES,
+  positionAt,
+  PROFILE_RESOLUTION_METRES,
+  routeProfile,
+} from './route/profile';
+
 // --- Segments (#64) ----------------------------------------------------------
 //
 // The model, and the geometry that decides whether a ride went along a segment.

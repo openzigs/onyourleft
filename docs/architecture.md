@@ -95,7 +95,12 @@ apps/                 AGPL-3.0-or-later, without exception
 packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis
     recording/          the recording session state machine and the stream merge (#45)
+    route/              the route profile (#89): elevation and gradient as a
+                        function of distance, the three windows it is built
+                        from, and the loop wrap
   fit/                FIT / GPX / TCX codec
+    src/route/          route import (#89): the #32 decoder composed with the
+                        profile, and the refusals a rider can act on
   sensors/            sensor abstraction and BLE transport — BLE only
     src/                the transport-agnostic abstraction; no platform API at all
     protocol/           the GATT profile clients (#41, #42, #43); no platform API either
@@ -127,7 +132,7 @@ checkable.
 |---|---|---|---|---|
 | `apps/web` | AGPL-3.0-or-later | Routing, screens, design system, accessibility baseline, the live ride screen, file import and export | — | #48–#51 |
 | `apps/mobile` | AGPL-3.0-or-later | Capacitor shell, native permissions, foreground service | — | #85, #87 |
-| `packages/domain` | Apache-2.0 | Canonical units and types; every conversion in the program; signing/verification; analysis computations; **the segment matcher, the effort it produces and the comparison of two of them** (#66, #67) | **Any platform API at all** — no DOM, no Node globals, no I/O, no network types | #25, #61, #66, #75–#78 |
+| `packages/domain` | Apache-2.0 | Canonical units and types; every conversion in the program; signing/verification; analysis computations; **the segment matcher, the effort it produces and the comparison of two of them** (#66, #67); **the route profile** (#89) | **Any platform API at all** — no DOM, no Node globals, no I/O, no network types | #25, #61, #66, #75–#78, #89 |
 | `packages/fit` | Apache-2.0 | FIT / GPX / TCX decode and encode | Anything server-specific; anything under `apps/`; **anything carrying the Garmin FIT Protocol License — see [ADR 0006](adr/0006-fit-codec-licensing.md)** | #29–#32 |
 | `packages/sensors/src` | Apache-2.0 | BLE sensor and trainer abstraction, and the simulator | **Any platform API at all**, as `packages/domain` — plus any BLE library, because an abstraction that names one has chosen it for all three stacks | #39, #44 |
 | `packages/sensors/protocol` | Apache-2.0 | The GATT profile clients: Heart Rate, Cycling Speed and Cadence and Cycling Power — service and characteristic UUIDs, bounds-checked payload decoding, and the `GattProfile` seam itself | **Any platform API at all**, as `packages/sensors/src` — it is compiled by the same platform-free program, because the same decoders serve the browser adapter and the native stacks | #41, #42 |
@@ -199,7 +204,13 @@ version 2 and decides their shape in [ADR 0011](adr/0011-stream-storage.md), and
 [#46](https://github.com/openzigs/onyourleft/issues/46), which adds **recording checkpoints** as
 schema version 3, and of [#61](https://github.com/openzigs/onyourleft/issues/61), which adds the
 **device keypair and the signed activity record** as schema version 4 and decides their shape in
-[ADR 0014](adr/0014-portable-identity.md). The entity model:
+[ADR 0014](adr/0014-portable-identity.md), and of
+[#64](https://github.com/openzigs/onyourleft/issues/64) and
+[#66](https://github.com/openzigs/onyourleft/issues/66), which add **segments** as schema version 5
+and **segment efforts and the match checkpoint** as schema version 6, and of
+[#89](https://github.com/openzigs/onyourleft/issues/89), which adds **saved routes** as schema
+version 7. All six later versions are purely additive and change no existing record's shape, which
+is why `SCHEMA_MIGRATIONS` is still empty. The entity model:
 
 ```mermaid
 erDiagram
@@ -633,6 +644,31 @@ of metres, and it makes a false positive *more* likely at a coarse interval than
 `packages/domain/src/segment/frechet.ts` states it where the code is, because the honest position
 is that at a 10 s interval the recording does not contain the information and the choice is between
 a stated assumption and refusing to match those rides at all.
+
+### The route profile: the three windows, and what each one costs
+
+[#89](https://github.com/openzigs/onyourleft/issues/89) asks for the smoothing window to be recorded
+with its rationale. There are three windows rather than one, and splitting them is what lets the
+issue's two named failure modes be avoided at the same time rather than traded against each other:
+*"too little and the trainer oscillates; too much and a real 12 % wall arrives as a gentle 6 %"*.
+
+| Tunable | Value | Why that number |
+|---|---|---|
+| `PROFILE_RESOLUTION_METRES` | **10 m** | The distance grid elevation is resampled onto. The same step `segment/frechet.ts` uses, and for a related reason: a rider at 25 km/h covers 7 m in a second, so a 1 Hz recording carries no detail below it and an SRTM elevation grid is coarser still. A **target** — the grid is stretched by up to half a metre so its last sample lands exactly on the route's end, which is what makes a loop's wrap exact |
+| `DESPIKE_WINDOW_METRES` | **30 m** (three samples) | A **median**, not an average. It removes an isolated bad elevation reading completely and leaves a real step exactly where it is, so it costs nothing in fidelity — which is what lets the slope window below stay narrow. Three is the smallest window a median can act on and enough: after resampling, a lone bad reading is a single sample |
+| `GRADIENT_WINDOW_METRES` | **100 m** | The baseline the least-squares slope is taken over. A 2 m elevation error is 2 % of gradient here and 20 % over a 10 m baseline; against that, a constant grade longer than the window reads at its true value in the middle, so a sustained 12 % is still 12 % |
+| `ASCENT_THRESHOLD_METRES` | **3 m** | Total ascent is accumulated by *run* rather than by step: a climb counts once it has risen more than this above the last turning point, and then at its **full** height. About the vertical accuracy of the sources a route arrives with, so below it a rise is not distinguishable from noise |
+| `LOOP_CLOSURE_METRES` | **25 m** | How near a route's two ends must be for `loop: true` to be honest. One recording sample at 90 km/h, and inside the width of a road junction. A route marked as a loop whose ends are further apart than this is **refused**, rather than wrapping a rider from a hilltop to a valley floor |
+
+⚠️ **The median removes ONE bad sample and not two adjacent ones**, and that boundary is asserted
+rather than assumed — `packages/domain/src/route/profile.test.ts` has the case both ways. Widening
+`DESPIKE_WINDOW_METRES` is the lever if a source ever needs it, at the cost of removing real
+two-sample features along with them.
+
+⚠️ **The 100 m slope window flattens a real feature shorter than about 100 m.** A 30 m ramp at 15 %
+between two flat stretches reads a few percent. That is the deliberate trade and the alternative is
+worse: a shorter baseline makes a 2 m elevation error worth 10 % of gradient, and #90 writes this
+number to a device that applies physical resistance to a person who is pedalling.
 
 ## Spike write-ups
 

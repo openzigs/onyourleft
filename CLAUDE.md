@@ -66,18 +66,24 @@ packages/             Apache-2.0, without exception
                         NAMES are a trademark question, see §6
     identity/           the record format, the canonical bytes, verification (#61)
     recording/          the recording session state machine and stream merge (#45)
+    route/              the route profile (#89) — elevation and gradient as a
+                        function of distance, the three windows it is built
+                        from, and the loop wrap
     segment/            the segment model (#64), the matcher (#66) and the effort
                         comparison (#67) — endpoints and bearings, the cell
                         prefilter, discrete Fréchet, the effort with its
                         three-state visibility, and where the time went
   fit/                FIT / GPX / TCX codec (#29-#32)
+    src/route/          route import (#89) — the #32 decoder composed with the
+                        profile, and the refusals a rider can act on
   sensors/            sensor abstraction and BLE transport (#39-#44) — BLE only
     src/                the transport-agnostic abstraction; no platform API at all
     protocol/           the GATT profile clients (#41, #42) — service UUIDs, payload decoding
     web-bluetooth/      the browser transport (#40) — the one place a BluetoothDevice exists
   physics/            cycling power/speed model, Martin et al. 1998 (#88)
-  store/              local activity, stream, recording-checkpoint and signed-record
-                      store, and the round-trip harness (#26-#28, #46, #61)
+  store/              local activity, stream, recording-checkpoint, signed-record,
+                      segment, effort and route store, and the round-trip harness
+                      (#26-#28, #46, #61, #64, #66, #89)
 
 docs/
   architecture.md     layout, component boundaries, ADR index
@@ -492,6 +498,13 @@ three editing this list on its own branch and conflicting with the other two.
     ADR 0006 R1. `packages/fit/README.md` §1 records the reconciliation; that README's declaration
     no longer claims the package depends on nothing named `fit-file-parser`, and a reviewer
     expecting the old sentence should read the new one.
+    ⚠️ **Since [#89](https://github.com/openzigs/onyourleft/issues/89) it also holds
+    `src/route/`**, `decodeGpxRoute` — the #32 decoder composed with
+    `@onyourleft/domain`'s route profile, and the only place the codec and the profile meet. That
+    issue also taught `decodeGpx` to read **`<rte>`/`<rtept>`**, which a route planner writes and
+    which nothing in this codec read before; ⚠️ a `<trk>` **wins outright** when a document carries
+    both, because planners export the same line twice at different densities and concatenating them
+    would double the ride.
     ⚠️ **`src/xml` refuses a `<!DOCTYPE` outright rather than configuring a parser to be safe.**
     That is not a setting to be revisited: a DTD is the only place an XML document can declare an
     entity, so refusing the declaration is what closes XXE and billion-laughs together, and the
@@ -520,7 +533,11 @@ three editing this list on its own branch and conflicting with the other two.
     §5, and — since [#61](https://github.com/openzigs/onyourleft/issues/61) — the **device keypair
     and the signed activity record** at schema version 4, decided in
     [ADR 0011](docs/adr/0011-stream-storage.md)'s sibling
-    [ADR 0014](docs/adr/0014-portable-identity.md). ⚠️ The private key is a **non-extractable
+    [ADR 0014](docs/adr/0014-portable-identity.md), and — since
+    [#89](https://github.com/openzigs/onyourleft/issues/89) — **saved routes** at schema version 7,
+    which is the only record in the store that holds a whole *computed* artefact rather than
+    measurements: `records.ts` says why that is safe here and is not for a ride's load.
+    ⚠️ The private key is a **non-extractable
     `CryptoKey`**, stored as a handle: `crypto.subtle.exportKey` on it rejects, which is what makes
     "the private key never leaves the device" a property of the platform rather than a promise about
     our code. Do not replace it with a stored byte array. `packages/store/src/web-crypto.ts` is the
@@ -1348,5 +1365,11 @@ top of an issue **supersedes its body**.
 | Which time basis a segment board ranks by, and why moving time is not it | `packages/domain/src/segment/effort.ts` §`RANKING_BASIS` |
 | How two efforts recorded at different rates are compared without truncating either | `packages/domain/src/segment/comparison.ts`, §`overlayEfforts` |
 | Why an effort stores no sample indices, and where they come from instead | `apps/web/src/efforts/load.ts` §`sampleIndexAt` |
+| Why a route's gradient is three windows rather than one smoothing pass, and what each costs | `packages/domain/src/route/profile.ts`, [`docs/architecture.md`](docs/architecture.md) §"The route profile" |
+| Why a lone bad elevation reading never reaches the trainer, and the case where two do | `packages/domain/src/route/profile.ts` §`DESPIKE_WINDOW_METRES`, `profile.test.ts` §"where the despike stage stops working" |
+| Why total ascent is accumulated by run rather than by step, and what a median cannot fix | `packages/domain/src/route/profile.ts` §`ASCENT_THRESHOLD_METRES` |
+| What happens when a rider passes the end of a loop, and when a route is refused as one | `packages/domain/src/route/profile.ts` §`distanceOnRoute`, §`LOOP_CLOSURE_METRES` |
+| Which GPX element a planned route is read from, and which one wins when a file has both | `packages/fit/src/xml/gpx.ts` §`decodeGpx`, `packages/fit/src/route/gpx-route.ts` |
+| Why a saved route stores its whole profile where a ride stores half a load | `packages/store/src/records.ts` §`RouteRecord` |
 
 <!-- Last updated: 2026-09-06 by delivery:code-issue resolving #51 (the manual file import and export UI) -->

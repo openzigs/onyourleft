@@ -81,6 +81,17 @@ export type SegmentId = EntityId<'segment'>;
  */
 export type SegmentEffortId = EntityId<'segment effort'>;
 
+/**
+ * Identifies one saved route (#89).
+ *
+ * Distinct from `ActivityId` and from `SegmentId` for the reason those two are
+ * distinct from each other: a route is a line somebody intends to ride, not one
+ * they did, and not a stretch they are ranked on. It has no efforts, no
+ * leaderboard and no source activity, and a shared brand would make it
+ * substitutable in exactly the signatures where that difference matters.
+ */
+export type RouteId = EntityId<'route'>;
+
 function assertUsableId(value: string, what: string): void {
   if (value.length === 0) {
     throw new StoreValidationError(`${what} must not be empty`);
@@ -133,4 +144,10 @@ export function segmentId(value: string): SegmentId {
 export function segmentEffortId(value: string): SegmentEffortId {
   assertUsableId(value, 'segment effort id');
   return value as SegmentEffortId;
+}
+
+/** @throws {StoreValidationError} if empty or blank. */
+export function routeId(value: string): RouteId {
+  assertUsableId(value, 'route id');
+  return value as RouteId;
 }

@@ -34,13 +34,14 @@ import {
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
+  altitudeMetres,
   UnitError,
 } from '@onyourleft/domain';
 
-import type { GeographicPosition } from '@onyourleft/domain';
+import type { GeographicPosition, RouteProfile } from '@onyourleft/domain';
 
 import { StoreDecodeError } from './errors';
-import { activityId, athleteId, lapId, privacyZoneId, segmentId } from './ids';
+import { activityId, athleteId, lapId, privacyZoneId, routeId, segmentId } from './ids';
 import type {
   ActivityRecord,
   AthleteRecord,
@@ -49,6 +50,7 @@ import type {
   OriginalFileReference,
   SegmentEndpointRecord,
   SegmentRecord,
+  RouteRecord,
 } from './records';
 import { parseVisibility } from './visibility';
 
@@ -117,6 +119,37 @@ export interface PersistedLap {
  * transposing every coordinate in the segment, which is the exact bug
  * `geographicPosition`'s branded parameters exist to prevent one layer up.
  */
+/**
+ * @see RouteRecord
+ *
+ * The profile is stored as **four parallel number arrays** — latitudes,
+ * longitudes, elevations and grades — for the reason `PersistedSegment` stores
+ * its geometry as two: they clone faster and store smaller than an array of
+ * objects, and a partial write is *detectable*, because four arrays of
+ * different lengths are visibly corrupt where a truncated array of records is
+ * merely short. {@link fromPersistedRoute} checks all four against each other
+ * and names the lengths it found.
+ *
+ * ⚠️ **The order is latitudes then longitudes, and never one interleaved
+ * array**, for the reason `PersistedSegment` gives: an interleaved array is one
+ * off-by-one from transposing every coordinate on the route.
+ */
+export interface PersistedRoute {
+  id: string;
+  createdBy: string;
+  name: string;
+  loop: boolean;
+  resolution: number;
+  distance: number;
+  ascent: number;
+  descent: number;
+  latitudes: number[];
+  longitudes: number[];
+  elevations: number[];
+  grades: number[];
+  createdAt: number;
+}
+
 export interface PersistedSegment {
   id: string;
   createdBy: string;
@@ -693,5 +726,91 @@ function endpointOf(
       degreesBearing,
     ),
     radius: decoded(`${field}.radius`, decodedNumber(`${field}.radius`, radius), metres),
+  };
+}
+
+// --- Routes (#89) ------------------------------------------------------------
+
+export function toPersistedRoute(record: RouteRecord): PersistedRoute {
+  const { profile } = record;
+  return {
+    id: record.id,
+    createdBy: record.createdBy,
+    name: record.name,
+    loop: profile.loop,
+    resolution: profile.resolution,
+    distance: profile.totalDistance,
+    ascent: profile.totalAscent,
+    descent: profile.totalDescent,
+    latitudes: profile.positions.map((point) => point.latitude),
+    longitudes: profile.positions.map((point) => point.longitude),
+    elevations: [...profile.elevations],
+    grades: [...profile.grades],
+    createdAt: record.createdAt,
+  };
+}
+
+/**
+ * @throws {StoreDecodeError} naming the field, for anything on disk this
+ * package cannot turn back into a route — including the four parallel arrays
+ * disagreeing in length, which is what a partial write looks like.
+ *
+ * ⚠️ **No message here names a coordinate value**, per ADR 0004 decision D:
+ * `decoded` rewrites a `UnitError` and `@onyourleft/domain` already redacts the
+ * value for a latitude or a longitude, and the mismatch below names four
+ * lengths, which are counts rather than positions.
+ */
+export function fromPersistedRoute(row: PersistedRoute): RouteRecord {
+  const latitudes = decodedNumberArray('route.latitudes', row.latitudes);
+  const longitudes = decodedNumberArray('route.longitudes', row.longitudes);
+  const elevations = decodedNumberArray('route.elevations', row.elevations);
+  const grades = decodedNumberArray('route.grades', row.grades);
+  const lengths = [latitudes.length, longitudes.length, elevations.length, grades.length];
+  if (new Set(lengths).size !== 1) {
+    throw new StoreDecodeError(
+      `route.profile: the four parallel arrays disagree in length — ` +
+        `${String(latitudes.length)} latitudes, ${String(longitudes.length)} longitudes, ` +
+        `${String(elevations.length)} elevations, ${String(grades.length)} grades`,
+    );
+  }
+  // Two samples is the fewest a grid can have and still span a distance; one
+  // would make every interpolation read past the end of the array.
+  if (latitudes.length < 2) {
+    throw new StoreDecodeError(
+      `route.profile: a profile needs at least two samples, found ${String(latitudes.length)}`,
+    );
+  }
+
+  const profile: RouteProfile = {
+    loop: decodedBoolean('route.loop', row.loop),
+    resolution: decoded(
+      'route.resolution',
+      decodedNumber('route.resolution', row.resolution),
+      metres,
+    ),
+    totalDistance: decoded('route.distance', decodedNumber('route.distance', row.distance), metres),
+    totalAscent: decoded('route.ascent', decodedNumber('route.ascent', row.ascent), metres),
+    totalDescent: decoded('route.descent', decodedNumber('route.descent', row.descent), metres),
+    elevations: elevations.map((value, index) =>
+      decoded(`route.elevations[${String(index)}]`, value, altitudeMetres),
+    ),
+    grades: grades.map((value, index) =>
+      decoded(`route.grades[${String(index)}]`, value, gradePercent),
+    ),
+    positions: latitudes.map((latitude, index) =>
+      positionAt('route.positions', latitude, longitudes[index] ?? Number.NaN),
+    ),
+  };
+
+  return {
+    id: routeId(decodedString('route.id', row.id)),
+    createdBy: athleteId(decodedString('route.createdBy', row.createdBy)),
+    name: decodedString('route.name', row.name),
+    profile,
+    createdAt: decoded(
+      'route.createdAt',
+      decodedNumber('route.createdAt', row.createdAt),
+      unixSeconds,
+    ),
   };
 }
