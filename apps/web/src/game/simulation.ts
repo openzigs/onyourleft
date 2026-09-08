@@ -126,6 +126,19 @@ export interface RiderInput {
    * failure that criterion names.
    */
   readonly live: boolean;
+  /**
+   * Whether a power sensor is paired at all.
+   *
+   * ⚠️ **The simulation never reads this** — it is carried on the input so the
+   * HUD can tell "no trainer paired" from "the trainer dropped", which
+   * `hud/fields.ts` §`SensorReading.paired` explains is the difference between
+   * a warning and a false alarm on every ride. It rides here rather than
+   * beside the state because #94's fourth criterion is that the HUD read from
+   * the simulation state and compute nothing of its own, and a second channel
+   * for one boolean is exactly the second source of truth that criterion is
+   * about.
+   */
+  readonly paired?: boolean | undefined;
 }
 
 /** Everything the simulation needs that does not change during a ride. */

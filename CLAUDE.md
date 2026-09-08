@@ -59,7 +59,9 @@ apps/                 AGPL-3.0-or-later, without exception
     src/segments/       the segment store port and the create form's pure core (#64),
                         and the resumable matcher sweep over the library (#66)
     src/shell/          the hash route table, the router hook and AppShell (#48)
-    src/support/        browser-capability detection and its notice (#48)
+    src/support/        browser-capability detection and its notice (#48), and
+                        since #85 the one question that decides which BLE
+                        transport this build uses (§4h)
     src/transfer/       file import and export (#51) — the batch importer, the
                         1 Hz sample grid, and the export writer
     src/views/          one component per route (#48)
@@ -77,13 +79,21 @@ apps/                 AGPL-3.0-or-later, without exception
                         capacitor.config.ts ships apps/web/dist — see §4h
     src/game/hud/       the ride HUD (#94) — the eight fields, the dropped
                         sensor that is not a zero, and the wake lock
+    src/game/sensors.ts the four metric states the ride controller reports,
+                        mapped to the three things a HUD renders
+    src/game/ghost-source.ts
+                        which attempt a rider races, and how a ghost's distance
+                        is integrated when no distance channel exists
   mobile/             Capacitor shell wrapping the same web build (#85, #87)
     android/            the generated Android project, plus the connectedDevice
                         foreground service and its plugin bridge — MIT template
                         output, whose provenance and licence obligation are
                         apps/mobile/README.md §2 and whose exemptions are .spdx-exempt
     src/android/        reading a manifest as a document — NOT merging one (#87)
-    src/ble/            the Capacitor transport against #39's interface, unchanged
+    src/index.ts        what the shell offers the client that runs inside it —
+                        the reason this package is no longer an island (§4h)
+    src/ble/            the Capacitor transport against #39's interface,
+                        unchanged, and the one file that names BleClient
     src/permission/     what a rider is told when Bluetooth will not work (#87)
 
 packages/             Apache-2.0, without exception
@@ -1121,10 +1131,27 @@ only what genuinely cannot be web — `PowerManager.getThermalHeadroom()` (API 3
 foreground-service wake lock — behind ports in `apps/web` with Capacitor implementations in
 `apps/mobile`, exactly as #39's sensor interface relates to #40's Web Bluetooth transport.
 
-⚠️ **`apps/mobile` currently has no importers at all.** Nothing in `apps/web` reaches for #87's
-Capacitor BLE transport, so the shell ships the web build and the web build never uses the native
-transport. That is a **pre-existing gap in #87**, not one this epic created, and closing it is its
-own change.
+⚠️ **`apps/mobile` had no importers at all until #85's wiring branch, and that sentence used to
+stand here unqualified — a reviewer who remembers it is reading the old file.** Nothing in
+`apps/web` reached for #87's Capacitor BLE transport, so the shell shipped a web build that could
+not pair with anything on Android. Three things were missing and all three are now there:
+`apps/mobile` declared no `exports` (so nothing *could* import it), nothing implemented
+`CapacitorBlePort` against the real `BleClient` (so there was nothing to hand the transport), and
+`main.tsx` had no way to tell a WebView from a browser.
+
+**How the choice is made now.** `support/capacitor.ts` asks `Capacitor.isNativePlatform()` — not the
+user agent, because a Capacitor WebView *is* Chrome and reports itself as Chrome, and not
+`'Capacitor' in window`, because Capacitor's web build defines that global too. `main.tsx`'s
+`buildRideController` is asynchronous for exactly this: inside the shell it `import()`s
+`@onyourleft/mobile` and builds the Capacitor transport; in a browser it never downloads a line of
+it. `pnpm run build` shows the split, and `grep -c BleClient` over the entry chunk returns 0.
+
+⚠️ **Trainer *control* is still absent on Android, and the screen says so rather than pretending.**
+`openTrainer` is omitted for the Capacitor transport because `openWebBluetoothTrainer` needs
+`openFitnessMachine`, which is on `WebBluetoothTransport` and not on `SensorTransport`. Driving an
+FTMS control point through the Capacitor plugin is real work #87 did not do either. A rider on a
+phone can pair, read power, cadence and heart rate, and record; they cannot yet have resistance
+driven for them.
 
 ---
 
@@ -1650,6 +1677,11 @@ top of an issue **supersedes its body**.
 | How a rider tells a dropped sensor from a genuine zero | `apps/web/src/game/hud/fields.ts` §`NO_READING`, `HudPanel.a11y.test.tsx` |
 | Why the wake lock's *release* is the half that is tested | `apps/web/src/game/hud/wake-lock.ts` |
 | Why the renderer and the HUD are in `apps/web` when their issues say `apps/mobile` | §4h, `apps/mobile/capacitor.config.ts` §`webDir` |
+| How the client decides whether it is in a browser or the Android shell | `apps/web/src/support/capacitor.ts`, §4h |
+| Why a rider with no heart rate strap is not told their strap has dropped | `apps/web/src/game/sensors.ts`, `apps/web/src/ride/metrics.ts` |
+| Which previous attempt a ghost races, and why it is the fastest rather than the latest | `apps/web/src/game/ghost-source.ts` §`fastestAttempt` |
+| Why a ghost's distance is integrated from speed, and what a long dropout does to it | `apps/web/src/game/ghost-source.ts` §`GHOST_GAP_TOLERANCE_SECONDS` |
+| Why trainer control works in a browser and not yet on Android | §4h, `apps/web/src/main.tsx` §`buildRideController` |
 | What is enforced about Android signing keys, and what is merely written down | [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §1, `scripts/check-repo-rules.sh` §`REL001` |
 | Why ADR 0008's rendering gate was waived, and what that does not cancel | [ADR 0008](docs/adr/0008-mobile-client-architecture.md) §Amendments, 2026-09-08 |
 
