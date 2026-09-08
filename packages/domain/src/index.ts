@@ -371,6 +371,27 @@ export {
   routeProfile,
 } from './route/profile';
 
+// --- Driving a trainer from a route (#90) ------------------------------------
+//
+// The gradient setpoint driver: where the rider is on the route, what the
+// gradient is there, and whether that is worth telling the trainer yet. Pure
+// arithmetic on the recording engine's terms — time arrives as a parameter and
+// nothing here reads a clock — so `@onyourleft/sensors/protocol` writes what
+// this decides and neither has to know the other's rules.
+
+export type {
+  RiderPosition,
+  SimulationDriver,
+  SimulationDriverOptions,
+  SimulationSetpoint,
+} from './trainer/simulation';
+export {
+  createSimulationDriver,
+  MAX_SIMULATED_GRADE_PERCENT,
+  SIMULATION_GRADE_DEADBAND_PERCENT,
+  SIMULATION_SETPOINT_INTERVAL_SECONDS,
+} from './trainer/simulation';
+
 // --- Segments (#64) ----------------------------------------------------------
 //
 // The model, and the geometry that decides whether a ride went along a segment.

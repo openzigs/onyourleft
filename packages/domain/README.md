@@ -312,6 +312,8 @@ issue that first needs it.
 | `identity/hex.ts`, `identity/utf8.ts` | lowercase hex and UTF-8, written out because both are platform APIs here |
 | `identity/errors.ts` | `IdentityError`, and the rule that no message names the material it rejected |
 | `identity/testing.ts` | a **non-cryptographic** stand-in, for this package's own tests. Not exported |
+| `route/profile.ts` | elevation and gradient as a function of distance (#89) |
+| `trainer/simulation.ts` | the gradient setpoint driver: what to tell a trainer, and when (#90) |
 | `index.ts` | the public surface; consumers import from here and never from a file inside |
 
 `recording/` is the one part of this package that is not a unit or a conversion, and it is here for
@@ -350,6 +352,17 @@ Two things about it that are decisions rather than details, both argued in
 - **The scheme is Ed25519 and there is no cryptography dependency**, because `crypto.subtle`
   implements it in every engine this project supports. A dependency under `packages/` is a licence
   question before it is anything else, and the one that is never added never has to clear it.
+
+`trainer/simulation.ts` is here for the same reason `recording/` is, and it is the clearest case of
+it. A trainer's gradient is decided from the route profile in `route/`, and the *renderer* draws its
+hill from the same numbers — `route/profile.ts` says #90 and #91 "must read the same numbers from
+the same code", and a second gradient lookup beside the FTMS control point would be a second source
+of truth for the hill under the rider. It obeys the recording engine's rule to the letter: **time
+arrives as a parameter**, so `sample({ at, distance })` is a pure function of what it was given and
+"at a +6 % section the trainer is told +6 %" is an assertion rather than a stopwatch exercise. It
+names no op code, no characteristic and no byte; `@onyourleft/sensors/protocol` writes what it
+decides, and `packages/sensors/README.md` §"Driving simulation mode from a route" describes the
+other half.
 
 Tests sit beside their module and import from `./index`, so a function that exists but is not
 exported from the barrel — which is a function no consumer can call — fails its own test.

@@ -89,6 +89,15 @@ function bench(): Bench {
               [SUPPORTED_RESISTANCE_LEVEL_RANGE]: RESISTANCE_RANGE_BYTES,
               [FITNESS_MACHINE_FEATURE]: FEATURE_BYTES,
             },
+            // FTMS 1.0 §3.4: the control point's properties are Write and
+            // **Indicate**; Indoor Bike Data and Fitness Machine Status are
+            // Notify. That difference is what decides the CCCD value the
+            // browser writes — see the indications test below.
+            properties: {
+              [FITNESS_MACHINE_CONTROL_POINT]: 'indicate',
+              [INDOOR_BIKE_DATA]: 'notify',
+              [FITNESS_MACHINE_STATUS]: 'notify',
+            },
           },
         ],
       },
@@ -436,3 +445,62 @@ function controlPointResolutions(fake: FakeBluetooth): number {
     (operation) => operation === `kickr:getCharacteristic:${FITNESS_MACHINE_CONTROL_POINT}`,
   ).length;
 }
+
+// --- #90 criterion 2: indications, not notifications -------------------------
+
+describe('the control point is subscribed with INDICATIONS', () => {
+  it('leaves the Client Characteristic Configuration at 0x0002, not 0x0001', async () => {
+    const { fake, channel } = await connectedTrainer();
+
+    await channel.enableControlPointIndications();
+    await settle();
+
+    const device = fake.bench.device('kickr');
+    expect(device.clientConfiguration(FITNESS_MACHINE_SERVICE, FITNESS_MACHINE_CONTROL_POINT)).toBe(
+      0x0002,
+    );
+    // The wrong one, spelled out, because it is the value a client that
+    // reached for a notification would leave behind — and a control point that
+    // is notifying accepts every write and answers none of them, which reads
+    // as a broken trainer rather than a broken client.
+    expect(
+      device.clientConfiguration(FITNESS_MACHINE_SERVICE, FITNESS_MACHINE_CONTROL_POINT),
+    ).not.toBe(0x0001);
+
+    // Fitness Machine Status is a Notify characteristic, so 0x0001 is right
+    // there. Asserting both is what stops this passing on a fake that answered
+    // 0x0002 for everything.
+    expect(device.clientConfiguration(FITNESS_MACHINE_SERVICE, FITNESS_MACHINE_STATUS)).toBe(
+      0x0001,
+    );
+  });
+
+  it('subscribes the control point again after a reconnection, because the CCCD is per-connection', async () => {
+    const { fake, transport, channel } = await connectedTrainer();
+    await channel.enableControlPointIndications();
+    await settle();
+
+    const subscriptions = (): number =>
+      fake.bench.operations.filter(
+        (operation) => operation === `kickr:startNotifications:${FITNESS_MACHINE_CONTROL_POINT}`,
+      ).length;
+    expect(subscriptions()).toBe(1);
+
+    fake.bench.device('kickr').drop();
+    await settle();
+    await transport.connect(TRAINER);
+    await channel.enableControlPointIndications();
+    await settle();
+
+    // A second subscribe on the new link — which is the browser writing the
+    // descriptor again. `startNotifications()` on a characteristic that is
+    // already notifying is specified to be a no-op, so this cannot be the
+    // first call being counted twice.
+    expect(subscriptions()).toBe(2);
+    expect(
+      fake.bench
+        .device('kickr')
+        .clientConfiguration(FITNESS_MACHINE_SERVICE, FITNESS_MACHINE_CONTROL_POINT),
+    ).toBe(0x0002);
+  });
+});
