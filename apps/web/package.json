@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-or-later",
-  "description": "Browser client \u2014 the Phase 1 product.",
+  "description": "Browser client — the Phase 1 product.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit --project tsconfig.json && vite build",
@@ -16,18 +16,21 @@
   "dependencies": {
     "@onyourleft/domain": "workspace:*",
     "@onyourleft/fit": "workspace:*",
+    "@onyourleft/physics": "workspace:*",
     "@onyourleft/sensors": "workspace:*",
     "@onyourleft/store": "workspace:*",
     "maplibre-gl": "6.7.0",
     "pmtiles": "4.5.0",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "three": "0.185.1"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
     "@types/node": "24.13.3",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.7",
+    "@types/three": "0.185.4",
     "@vitejs/plugin-react": "6.1.1",
     "fake-indexeddb": "6.2.5",
     "fit-file-parser": "5.0.2",

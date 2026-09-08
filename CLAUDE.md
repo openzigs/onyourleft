@@ -69,6 +69,14 @@ apps/                 AGPL-3.0-or-later, without exception
     src/workouts/       the workout library and builder (#14) — the read
                         budget, the row model that quotes no watts, and the
                         one place a typed percentage becomes a share
+    src/game/           the trainer game (#85) — the fixed-tick simulation the
+                        renderer cannot influence, the road corridor built from
+                        #89's profile, the quality ladder for a throttling
+                        phone, the scene, and the one file that names three.
+                        ⚠️ Here rather than in apps/mobile because
+                        capacitor.config.ts ships apps/web/dist — see §4h
+    src/game/hud/       the ride HUD (#94) — the eight fields, the dropped
+                        sensor that is not a zero, and the wake lock
   mobile/             Capacitor shell wrapping the same web build (#85, #87)
     android/            the generated Android project, plus the connectedDevice
                         foreground service and its plugin bridge — MIT template
@@ -94,6 +102,9 @@ packages/             Apache-2.0, without exception
     trainer/            the gradient setpoint driver (#90) — where the rider is
                         on the route, the grade there, and whether it is worth
                         a write yet
+    ghost/              racing your own previous attempt (#93) — a replay of
+                        recorded distance against recorded time, never a
+                        re-simulation, and no athlete id anywhere in it
     workout/            structured workouts (#14) — the model, the timeline a
                         player looks up rather than replays, the ERG
                         spiral-of-death rule, and the player itself, which
@@ -289,7 +300,7 @@ downstream issue's acceptance criteria depend on these.
 # Exits 0 clean; exits 1 listing each violation by rule id.
 bash scripts/check-repo-rules.sh
 
-# Test the checker itself. Fixture-driven; 77 cases.
+# Test the checker itself. Fixture-driven; 88 cases.
 bash scripts/check-repo-rules.test.sh
 
 # Verify the licence texts are byte-identical to the canonical ones, by
@@ -479,6 +490,8 @@ npm view typescript-eslint peerDependencies.typescript
 | `ADR001` | two ADRs share a number |
 | `ADR002` | an ADR filename is not `NNNN-kebab-case.md` |
 | `ADR003` | an ADR's `## Amendments` section is followed by **any** heading, or there are two of them, or an entry does not open with a bold ISO date, or an entry is dated **before the one above it**, or an **unclosed code fence** would hide any of those — see §7 and [ADR 0013](docs/adr/0013-adr-amendments.md) |
+| `REL001` | signing key material is committed anywhere — by name (`.jks`, `.keystore`, `.p12`, `.pfx`, `.key`, `keystore.properties`) **or** by content (a `PRIVATE KEY` block in a file with an innocent name). #95, and the one rule here whose violation cannot be undone by fixing it |
+| `REL002` | `apps/mobile/android/variables.gradle` targets below API **36**, or declares no `targetSdkVersion` at all. Checked here rather than in Gradle because nobody in this environment can run a Gradle build — a rule that only fires inside a build nobody runs never fires |
 
 `scripts/check-licence-hashes.sh` enforces one more, separately because it hashes files rather than
 reading paths:
@@ -697,8 +710,16 @@ BSD-3-Clause, both runtime dependencies of `apps/web`, whose closure adds BSD-2-
 one `(MIT OR Apache-2.0)` and no GPL, AGPL or non-OSI licence) and — also since #63 —
 `@playwright/test` 1.63.0 (Apache-2.0, with `playwright` and `playwright-core`, all three
 Apache-2.0; a devDependency of `apps/web`, and the only dependency in the workspace that pins a
-**browser** as well as a version — see §4f) are
-installed; **nothing else from ADR 0005's runtime list is**, `react-router` included. Add each in
+**browser** as well as a version — see §4f) and — since #91 — `three` **0.185.1** (MIT,
+**zero dependencies**, a runtime dependency of `apps/web`) with `@types/three` 0.185.4 (MIT, a
+devDependency, because `three` ships no types of its own) are
+installed;
+
+⚠️ **`three` is pinned at 0.185.1 rather than at the current 0.186.0 deliberately.** 0.186.0 was
+published on 2026-09-08, the same day it was wanted, and pnpm's `minimumReleaseAge` refuses a
+lockfile entry younger than 24 hours — §8 says to pin something older rather than add a
+`minimumReleaseAgeExclude`, which would turn the protection off for that package permanently.
+0.185.x is also the version ADR 0008's engine table names. **nothing else from ADR 0005's runtime list is**, `react-router` included. Add each in
 the issue that first needs it, after checking its licence against the
 directory it lands in (CONTRIBUTING.md).
 
@@ -945,6 +966,8 @@ browser runs**.
 |---|---|
 | `index.html`, `harness.ts` | a page that builds a map through the **real** `map/maplibre.ts` and the **real** `basemapStyle`, and publishes what happened on `window.__oylHarness` |
 | `map.browser.spec.ts` | the Playwright spec that drives it |
+| `game.html`, `game-harness.ts` | since #91, the same idea for the renderer: a page that builds a scene through the **real** `game/three-renderer.ts` and the **real** `terrain.ts` |
+| `game.browser.spec.ts` | its spec — the renderer constructs against a live context, the geometry is one a driver accepts, and a frame reaches the drawing buffer (read back with `readPixels`, because `render` not throwing is a weaker claim) |
 | `../playwright.config.ts` | Chromium only, no retries, and the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all |
 | `../vite.browser.config.ts` | the harness build. A second Vite config, so the harness cannot reach a shipped bundle |
 
@@ -966,6 +989,17 @@ deleting either leaves a real hole. Found by mutation; recorded here so it is no
 ⚠️ **It is NOT part of `pnpm run test`.** It needs a browser and a built harness, and a five-second
 browser run does not belong in the fast suite a contributor runs on every save. It is its own
 command and its own CI step.
+
+⚠️ **`vite.browser.config.ts` names both entries explicitly, and must.** Vite's multi-page mode
+discovers only `index.html`; a page added without a line in `build.rollupOptions.input` is simply
+not built, and the failure is a 404 while the spec runs rather than a build error — which reads
+like a server fault and sends the next person to `playwright.config.ts`.
+
+⚠️ **What the game half does NOT prove.** Not that the scene looks right — there is no reference
+image and ADR 0009 forbids deriving one from another product. And **not ADR 0008 D-2's spike**: no
+frame rate, no thermal behaviour, nothing measured on a phone. That gate was **waived** rather than
+passed (see the 2026-09-08 amendment on [ADR 0008](docs/adr/0008-mobile-client-architecture.md)),
+and #91's 60-minute measured run on the device floor is still outstanding.
 
 ⚠️ **Do not reach for `networkidle`.** There is no published archive (#53), so the archive request
 404s and **MapLibre retries a failed source** — the network never goes idle. The first version of
@@ -1058,6 +1092,39 @@ separately rather than being subsumed here.
 **Not part of `pnpm run check:repo`**: it needs an install, the same reason `check:a11y-suite` is
 not. Its own suite is `bash scripts/check-dependency-licences.test.sh` — 49 cases, and every policy
 branch has a case that goes **red** as well as one that passes.
+
+### 4h. Where the trainer game lives, and why it is not `apps/mobile`
+
+[#85](https://github.com/openzigs/onyourleft/issues/85)'s renderer (#91), ghost (#93) and HUD (#94)
+are in **`apps/web/src/game/`**. Every one of those issues says `Component: apps/mobile`, so this
+paragraph exists to stop that being read as a mistake.
+
+**`apps/mobile/capacitor.config.ts` sets `webDir: '../web/dist'`.** The Android shell wraps
+**apps/web's build** — that is #85's own premise, *"the mobile shell wraps the same web build, so
+there is exactly one client and a divergence between the two is impossible rather than merely
+discouraged"*. So a renderer under `apps/mobile/src` would typecheck, test green, and **never be
+copied into the APK**. It would be the false pass `apps/mobile/README.md` §4 warns about, arrived at
+from a new direction.
+
+Three things reinforce it. [ADR 0008](docs/adr/0008-mobile-client-architecture.md) D-1 chose
+Capacitor partly *for* web UI reuse. §2's layout already describes `apps/mobile` as the shell. And
+both gates that can verify this work — the accessibility gate (§4e) and the browser gate (§4f) —
+run against `apps/web` only; #94 has a WCAG AA contrast criterion, and putting the HUD in
+`apps/mobile` would place it outside the one gate built to check exactly that.
+
+⚠️ Those issue bodies **predate `apps/mobile` existing at all**. They were written 2026-09-03 and
+#87 created the directory afterwards, so `Component:` there is a planning-time guess rather than a
+decision — §8's "read the issue's revision block first" applies.
+
+**The split that does hold is by capability, not by folder.** Computation and UI in `apps/web`;
+only what genuinely cannot be web — `PowerManager.getThermalHeadroom()` (API 30+) and the
+foreground-service wake lock — behind ports in `apps/web` with Capacitor implementations in
+`apps/mobile`, exactly as #39's sensor interface relates to #40's Web Bluetooth transport.
+
+⚠️ **`apps/mobile` currently has no importers at all.** Nothing in `apps/web` reaches for #87's
+Capacitor BLE transport, so the shell ships the web build and the web build never uses the native
+transport. That is a **pre-existing gap in #87**, not one this epic created, and closing it is its
+own change.
 
 ---
 
@@ -1572,5 +1639,18 @@ top of an issue **supersedes its body**.
 | Why a workout row quotes no watts, no load and no score | `apps/web/src/workouts/library.ts` §`WorkoutRow` |
 | Why a workout's shape is a sentence rather than a chart | `apps/web/src/workouts/library.ts` §`WorkoutRow.shape` |
 | Why this project has no workout file format yet, and what would settle it | §6 "A workout file format is an ADR 0009 question", [#14](https://github.com/openzigs/onyourleft/issues/14) |
+| Why a ghost replays recorded distance rather than re-simulating recorded power | `packages/domain/src/ghost/replay.ts` |
+| What stops a ghost being somebody else's ride, and why it is not in the ghost code | `packages/store/src/activity-store.ts` §`listRouteAttempts`, `activity-store.ghost-scope.test.ts` |
+| Why the eleventh store fake breaks a read where the other ten break a write | `packages/store/src/testing/fakes.ts` §`unscopedAttemptStoreFactory` |
+| Why the simulation derives its step count from the origin rather than accumulating deltas | `apps/web/src/game/simulation.ts`, and the 0.23 m drift recorded in its header |
+| What happens to a ride when the phone is backgrounded for five minutes | `apps/web/src/game/simulation.ts` §`MAXIMUM_STEPS_PER_ADVANCE` |
+| Why the road is a corridor rather than a world, and where its vertices come from | `apps/web/src/game/terrain.ts`, [ADR 0008](docs/adr/0008-mobile-client-architecture.md) D-5 |
+| What the renderer gives up when the phone gets hot, and why recovery is not the same threshold | `apps/web/src/game/quality.ts` §`HEADROOM_RESTORE_BELOW` |
+| Why the HUD's panel is opaque, and why that is what makes its contrast checkable | `apps/web/src/design/tokens.ts` §`hudSurface` |
+| How a rider tells a dropped sensor from a genuine zero | `apps/web/src/game/hud/fields.ts` §`NO_READING`, `HudPanel.a11y.test.tsx` |
+| Why the wake lock's *release* is the half that is tested | `apps/web/src/game/hud/wake-lock.ts` |
+| Why the renderer and the HUD are in `apps/web` when their issues say `apps/mobile` | §4h, `apps/mobile/capacitor.config.ts` §`webDir` |
+| What is enforced about Android signing keys, and what is merely written down | [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §1, `scripts/check-repo-rules.sh` §`REL001` |
+| Why ADR 0008's rendering gate was waived, and what that does not cancel | [ADR 0008](docs/adr/0008-mobile-client-architecture.md) §Amendments, 2026-09-08 |
 
 <!-- Last updated: 2026-09-06 by delivery:code-issue resolving #51 (the manual file import and export UI) -->

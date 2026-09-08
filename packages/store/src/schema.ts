@@ -33,21 +33,34 @@
 /**
  * The current schema version.
  *
- * **7** since #89. Version 2 added `streamSets` and `streamBlobs`; version 3
+ * **9** since #93. Version 2 added `streamSets` and `streamBlobs`; version 3
  * added `recordingSessions` and `recordingChunks`; version 4 added `deviceKeys`
  * and `activityRecords`; version 5 added `segments`; version 6 added
- * `segmentEfforts` and `matchCheckpoints`; version 7 adds `routes`. All six are
- * purely additive and change **no existing record's shape**. That is why `SCHEMA_MIGRATIONS` in
- * `migrations.ts` is still empty: the registry holds *record* migrations, and
- * there is no record to transform. The version bumps themselves are real and
- * are tested — `migrations.test.ts` opens a version-1 database, writes rows
- * into it, reopens at the current version, and asserts every row came through
- * and the new stores are usable.
+ * `segmentEfforts` and `matchCheckpoints`; version 7 added `routes`; version 8
+ * added `workouts`. All of those are purely additive **new stores** and change
+ * no existing record's shape.
+ *
+ * ⚠️ **Version 9 is the first bump that re-declares an existing store.** It adds
+ * `[athleteId+routeId]` to `activities`, so #93's ghost lookup can ask "this
+ * athlete's rides on this route" as one index hit. It is still not a *record*
+ * migration: `ActivityRecord.routeId` is **optional**, so every row written
+ * before it is already valid after it and there is nothing to transform. Dexie
+ * rebuilds the index for existing rows on upgrade; a row with no `routeId` is
+ * simply absent from a compound index that names it, which is the behaviour the
+ * lookup wants anyway — a ride that was not ridden on a route is not a ghost
+ * candidate for one.
+ *
+ * That is why `SCHEMA_MIGRATIONS` in `migrations.ts` is still empty: the
+ * registry holds *record* migrations, and there is still no record to
+ * transform. The version bumps themselves are real and are tested —
+ * `migrations.test.ts` opens a version-1 database, writes rows into it, reopens
+ * at the current version, and asserts every row came through and the new stores
+ * are usable.
  *
  * Bumping this for a change that *does* alter a record's shape means adding a
  * migration pair.
  */
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 /**
  * Dexie stores its schema version in IndexedDB multiplied by ten, leaving room
@@ -111,6 +124,18 @@ export const INDEX = {
   activityByAthleteAndFileHash: '[athleteId+originalFileSha256]',
   /** `deleteAthlete`'s cascade, and any future athlete-wide sweep. */
   activityByAthlete: 'athleteId',
+  /**
+   * `listRouteAttempts` — #93's ghost lookup, and the reason it is a *compound*
+   * index rather than a plain `routeId` one.
+   *
+   * ⚠️ An index on `routeId` alone would serve the same screen and would return
+   * **every athlete's** rides on that route. #93's fifth acceptance criterion
+   * names exactly that failure, and notes that it passes every single-athlete
+   * test in the suite — because with one athlete in the fixture the two queries
+   * are indistinguishable. The athlete component is first so the index cannot be
+   * used without it.
+   */
+  activityByAthleteAndRoute: '[athleteId+routeId]',
   /** `listLaps` — athlete-scoped, ordered by position within the activity. */
   lapByAthleteAndActivityAndOrdinal: '[athleteId+activityId+ordinal]',
   /** `deleteActivity`'s and `deleteAthlete`'s cascades. */
@@ -506,6 +531,29 @@ export const STORES_V8: Readonly<Record<string, string>> = {
   ].join(', '),
 };
 
+/**
+ * #93 — the ghost lookup's index.
+ *
+ * ⚠️ Unlike every version above it, this one **re-declares an existing store**
+ * rather than adding a new one. Dexie's `version(n).stores({...})` replaces a
+ * named table's whole index declaration, so `activities` is restated in full
+ * here: dropping any line below would silently remove that index from the
+ * upgraded database, and the queries using it would fall back to a full scan
+ * that still returns correct answers. A performance regression with correct
+ * results is the kind that reaches production.
+ */
+export const STORES_V9: Readonly<Record<string, string>> = {
+  [TABLE.activities]: [
+    'id',
+    INDEX.activityByAthlete,
+    INDEX.activityByAthleteAndId,
+    INDEX.activityByAthleteAndStartedAt,
+    INDEX.activityByAthleteAndDistance,
+    INDEX.activityByAthleteAndFileHash,
+    INDEX.activityByAthleteAndRoute,
+  ].join(', '),
+};
+
 export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V1,
   STORES_V2,
@@ -515,4 +563,5 @@ export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V6,
   STORES_V7,
   STORES_V8,
+  STORES_V9,
 ];

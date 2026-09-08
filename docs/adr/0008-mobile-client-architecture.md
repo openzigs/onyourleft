@@ -446,3 +446,44 @@ figure that binds**, both because it is the owner's ruling and because it is the
 — a spike passing at a 3 GB floor has passed at a 2 GB one, and the reverse is not true. If the
 distinction ever matters, re-read the source page in a real browser rather than trusting either
 number here.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-09-08** — **D-2's gate was waived rather than passed, and #91 proceeded without it.** D-2
+  records the owner's ruling that *"#91 may not begin until a spike proves 30 fps sustained on the
+  device floor, in a WebView, with a live BLE connection"*, and adds that *"the gate is real and
+  must not be quietly dropped"*. **That spike has still not been run.** It was assigned to #87,
+  whose pull request merged with six of eight criteria unverified — there is no Android SDK in the
+  environment available to this project's contributors so far and `dl.google.com` is refused by the
+  egress proxy, so no Capacitor WebView has been built, let alone measured on floor hardware. This
+  ADR carried no result, and none of the four pass conditions in D-2's table has a number against
+  it. On **2026-09-08 the repository owner waived the gate explicitly** and directed that #91, #93,
+  #94 and #95 be built anyway. Recorded here rather than left implicit, because D-2's own words are
+  that the gate must not be dropped *quietly* — a waiver in the open is a different thing from a
+  gate that decayed, and this entry is what makes the difference visible to whoever reads D-2 next.
+  **Three consequences follow and none of them is cancelled by the waiver.** ⚠️ The renderer built
+  under it has **no measured frame rate on any device**: `apps/web/browser/game.browser.spec.ts`
+  establishes only that it constructs against a real GL context, accepts the geometry and draws a
+  frame, and says so at the top. ⚠️ #91's third acceptance criterion — a 60-minute run on the
+  device floor recording frame times and `getThermalHeadroom()`, committed to the repository — is
+  **outstanding**, which is why #91 is referenced rather than closed. ⚠️ **D-2's fallback still
+  stands**: if the spike is later run and fails, the recorded fallback is React Native, and what
+  would be rewritten is `apps/web/src/game/three-renderer.ts` and the HUD's markup — not the
+  simulation, the corridor geometry, the quality ladder or any leaf package, all of which are
+  plain TypeScript and survive the stack changing. That the waiver costs so little is a property
+  of D-1's reasoning, not a reason the gate did not matter.
+- **2026-09-08** — **D-5's fixed chase camera is now implemented, and its saving was taken.** The
+  camera lives in `apps/web/src/game/three-renderer.ts` and is configured by two constants; there
+  is no free-look and adding one is a change to D-5 rather than to that file. What the fixed camera
+  bought is visible in `apps/web/src/game/terrain.ts`, which builds a **corridor** of a few hundred
+  metres around the rider rather than a scene — so there is no culling stage, no level-of-detail
+  system and no visible-rider bound, exactly as #91 predicted. ⚠️ One thing this ADR did not
+  anticipate: the renderer and the HUD live under **`apps/web`**, not `apps/mobile`, even though
+  #91 and #94 both say `Component: apps/mobile`. `apps/mobile/capacitor.config.ts` sets
+  `webDir: '../web/dist'`, so the shell wraps apps/web's build and a renderer under `apps/mobile/src`
+  would compile, test green and never reach a device. Those issue bodies predate #87 creating
+  `apps/mobile` at all. The split this ADR's D-1 reasoning implies is preserved: computation and UI
+  in `apps/web`, and only genuinely native capability — the thermal-headroom reading and the
+  foreground-service wake lock — behind ports with Capacitor implementations in `apps/mobile`.

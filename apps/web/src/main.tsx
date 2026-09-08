@@ -10,13 +10,16 @@ import {
   heartRateProfile,
 } from '@onyourleft/sensors/protocol';
 import { createWebBluetoothTransport } from '@onyourleft/sensors/web-bluetooth';
-import { metres, unixSeconds } from '@onyourleft/domain';
+import { metres, unixSeconds, watts } from '@onyourleft/domain';
 import { activityId, openActivityStore, recordingSessionId } from '@onyourleft/store';
 
 import './design/theme.css';
 import { browserClock, createRideController, type RideController } from './ride/controller';
 import { openWebBluetoothTrainer } from './ride/trainer';
 import { AppShell } from './shell/AppShell';
+import { browserScreenLockSource, platformWakeLock } from './game/hud/wake-lock';
+import type { GamePort, RidableRoute } from './game/GameView';
+import type { GameRenderer } from './game/port';
 import { probeBrowser, type CapabilityProbe } from './support/bluetooth-support';
 import { saveWithAnchor, webCryptoDigest } from './transfer/browser';
 import { ensureLocalAthlete, LOCAL_ATHLETE, renderAfterAthlete } from './local-athlete';
@@ -257,6 +260,71 @@ async function loadMapPort(): Promise<MapPort> {
   return (await import('./map/maplibre')).mapLibrePort;
 }
 
+/**
+ * The trainer game's renderer (#91), lazily.
+ *
+ * The same split as `loadMapPort` and for the same reason: `three` is about
+ * 600 kB and every rider who never opens the game screen must never download
+ * it. `pnpm run build` shows it as its own chunk.
+ */
+async function loadGameRenderer(): Promise<GameRenderer> {
+  return (await import('./game/three-renderer')).threeGameRenderer;
+}
+
+/**
+ * The trainer game's reads (#85).
+ *
+ * Unconditional, like the routes and workouts ports: riding a saved route needs
+ * no `crypto.subtle` and no secure context, so the game works from a `file://`
+ * bundle exactly as the rest of the local milestone does.
+ *
+ * ⚠️ `loadGhost` is where #93's whole safety property lives, and it is one call:
+ * `listRouteAttempts` cannot be queried without an athlete, because its index is
+ * `[athleteId+routeId]`. Nothing in `packages/domain/src/ghost/` takes an athlete
+ * id at all — the scoping is here, in the read, which is why
+ * `activity-store.ghost-scope.test.ts` is the test that guards the patent line
+ * rather than anything in the replay code.
+ */
+function buildGamePort(): GamePort {
+  const store = localStore();
+  return {
+    listRoutes: async (): Promise<readonly RidableRoute[]> => {
+      const saved = await store.listRoutes(LOCAL_ATHLETE);
+      const rows: RidableRoute[] = [];
+      for (const route of saved) {
+        const attempts = await store.listRouteAttempts(LOCAL_ATHLETE, route.id);
+        rows.push({
+          id: route.id,
+          name: route.name,
+          profile: route.profile,
+          attempts: attempts.length,
+        });
+      }
+      return rows;
+    },
+    loadGhost: () => {
+      // ⚠️ Deliberately not implemented yet, and returning `undefined` rather
+      // than throwing. Building a ghost needs the chosen attempt's DISTANCE
+      // STREAM, and `getStreamChannel` gives it — but choosing *which* attempt
+      // (most recent, or fastest?) is a product question #93 leaves open, and
+      // guessing it here would put an answer in the one place nobody would look
+      // for it. The picker already offers the option only where an attempt
+      // exists; what is missing is the read behind it.
+      return Promise.resolve(undefined);
+    },
+    readSensors: () => ({
+      // Wiring these to #39's live session is the remaining integration — see
+      // the pull request. Until then the screen runs, the simulation advances
+      // and the HUD honestly reports that nothing is connected, which is what
+      // `fields.ts` renders as a dash rather than as a zero.
+      power: watts(0),
+      live: false,
+      cadence: { value: undefined, live: false },
+      heartRate: { value: undefined, live: false },
+    }),
+  };
+}
+
 function buildTransferPort(): TransferPort | undefined {
   if (globalThis.crypto?.subtle === undefined) {
     return undefined;
@@ -286,6 +354,9 @@ function render(): void {
         routes={buildRoutePort()}
         workouts={buildWorkoutPort()}
         efforts={buildEffortPort()}
+        game={buildGamePort()}
+        gameRenderer={loadGameRenderer}
+        screenLock={browserScreenLockSource(platformWakeLock())}
         map={loadMapPort}
         basemap={browserBasemapConfig()}
       />

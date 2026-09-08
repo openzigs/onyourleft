@@ -86,6 +86,40 @@ export const COLOUR_TOKENS = {
   dangerSurface: '#fbe8e8',
   dangerInk: '#7a1d1d',
   dangerBorder: '#a83232',
+
+  /*
+   * The ride HUD (#94), which is the one surface in this app that is drawn over
+   * something we do not control.
+   *
+   * ⚠️ **The HUD does not take its contrast from the world behind it, and that
+   * is what makes #94's contrast criterion dischargeable at all.** The criterion
+   * asks for AA *"against the rendered world behind it, in both a bright
+   * daytime scene and a dark one"* — and a translucent panel over a scene whose
+   * colours change every metre cannot be checked, because there is no second
+   * colour to check against. So `hudSurface` is **opaque**: whatever the world
+   * is doing, the text sits on this, and the pair below is a pair the contrast
+   * suite can actually walk.
+   *
+   * Dark rather than light because the HUD is a minority of the screen and a
+   * bright panel over a bright scene is what a rider reads at arm's length in
+   * sunlight with a bloom around it.
+   */
+  hudSurface: '#10161c',
+  /** The numbers a rider is pacing to. Large, and the highest contrast here. */
+  hudInk: '#f5f8fa',
+  /** Field labels, which are read once and then found by position. */
+  hudInkMuted: '#a8b6c2',
+  /** The edge of a HUD control, per WCAG 2.2 SC 1.4.11. */
+  hudBorder: '#7b8b99',
+  /**
+   * A reading that is **stale**, not zero.
+   *
+   * #94's second criterion: a rider must be able to tell "I stopped pedalling"
+   * from "the trainer disconnected" at a glance. This is one half of that; the
+   * other half is that the value is replaced by a dash rather than tinted, so
+   * the distinction survives for a rider who cannot see the tint at all.
+   */
+  hudStaleInk: '#f0b45f',
 } as const satisfies Record<string, string>;
 
 /** The name of a colour token. */
@@ -182,6 +216,30 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     background: 'accentHover',
     minimum: AA_TEXT,
     where: 'the label of a primary button under a pointer',
+  },
+  {
+    foreground: 'hudInk',
+    background: 'hudSurface',
+    minimum: AA_TEXT,
+    where: 'a metric on the ride HUD, over its own opaque panel (#94)',
+  },
+  {
+    foreground: 'hudInkMuted',
+    background: 'hudSurface',
+    minimum: AA_TEXT,
+    where: 'a field label on the ride HUD (#94)',
+  },
+  {
+    foreground: 'hudBorder',
+    background: 'hudSurface',
+    minimum: AA_LARGE_TEXT_OR_NON_TEXT,
+    where: 'the edge of a HUD control (WCAG 2.2 SC 1.4.11)',
+  },
+  {
+    foreground: 'hudStaleInk',
+    background: 'hudSurface',
+    minimum: AA_TEXT,
+    where: 'the mark on a HUD reading whose sensor has dropped (#94)',
   },
   { foreground: 'accent', background: 'canvas', minimum: AA_TEXT, where: 'link text' },
   {

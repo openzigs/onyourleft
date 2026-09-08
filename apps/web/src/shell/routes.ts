@@ -41,6 +41,7 @@ export type RouteId =
   | 'segment-detail'
   | 'routes'
   | 'workouts'
+  | 'game'
   | 'devices'
   | 'transfer'
   | 'about'
@@ -115,6 +116,15 @@ export const ROUTES: readonly RouteDefinition[] = [
     summary:
       'Structured sessions built from blocks. Targets are a share of your own threshold, so the ' +
       'same workout works whatever shape you are in.',
+  },
+  {
+    id: 'game',
+    path: '/game',
+    navLabel: 'Trainer game',
+    title: 'Trainer game',
+    summary:
+      'Ride a saved route against a pacer that will not wait for you, or against your own ' +
+      'previous attempt. Solo, offline, and no leaderboard of any kind.',
   },
   {
     id: 'devices',

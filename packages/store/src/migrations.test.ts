@@ -37,7 +37,7 @@ import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { openActivityStore } from './activity-store';
-import { activityId, athleteId, recordingSessionId } from './ids';
+import { activityId, athleteId, recordingSessionId, routeId } from './ids';
 
 import {
   migrateDown,
@@ -250,9 +250,19 @@ describe('the production registry', () => {
     // migration either; a change to a BLOCK would be, and would be the first
     // entry here.
     //
+    // ⚠️ Version 9 (#93) is the first that **re-declares an existing store**
+    // rather than adding a new one: it adds `[athleteId+routeId]` to
+    // `activities`. That is a schema change and still not a *record* migration,
+    // and the distinction is the one this registry turns on. `ActivityRecord.
+    // routeId` is optional, so every row written at version 8 is already a valid
+    // version-9 row and there is nothing to transform — Dexie builds the new
+    // index over the rows as they stand, and a row without a `routeId` is simply
+    // absent from a compound index naming it. An index is a way of *finding*
+    // records; a migration is a way of *changing* them.
+    //
     // Asserted rather than left implicit: the day a version does change a
     // record's shape, this test is what says the registry must gain an entry.
-    expect(SCHEMA_VERSION).toBe(8);
+    expect(SCHEMA_VERSION).toBe(9);
     expect(SCHEMA_MIGRATIONS).toEqual([]);
   });
 
@@ -471,6 +481,72 @@ describe('version 3 to version 4 — the same claim, for #61’s identity and si
         ? undefined
         : await verifyRecordSignature(signed.record, webCryptoVerifier),
     ).toEqual({ status: 'verified', record: signed?.record });
+    expect(beforeVersion).toBeLessThan(SCHEMA_VERSION * 10);
+  });
+});
+
+describe('version 8 to version 9 — the first bump that re-declares an existing store', () => {
+  /**
+   * #93 adds `[athleteId+routeId]` to `activities`. Every version before this
+   * one added a **new** store, where "no migration needed" is nearly self-
+   * evident: a store with no rows has nothing to migrate. This one changes the
+   * declaration of a store that already holds the athlete's whole history, so
+   * the claim is worth more and is proved the same way — write rows at version
+   * 8, reopen at 9, and read them back through the public path.
+   *
+   * ⚠️ The interesting row is the one written **before** `routeId` existed. It
+   * has no such field, it is valid at version 9 without being touched, and it
+   * must be absent from an index that names a field it does not have. A
+   * migration that "helpfully" defaulted it to something would put every legacy
+   * ride on some route.
+   */
+  it('keeps rows written before routeId existed, and indexes the ones that have it', async () => {
+    const v8 = new Dexie(databaseName);
+    SCHEMA_VERSIONS.slice(0, 8).forEach((stores, index) => {
+      v8.version(index + 1).stores(stores);
+    });
+    await v8.table(TABLE.athletes).put({ id: 'athlete-a', displayName: 'A', createdAt: 1 });
+    const legacy = {
+      athleteId: 'athlete-a',
+      startedAtTimeZone: 'UTC',
+      elapsedTime: 60,
+      movingTime: 60,
+      distance: 1_000,
+      visibility: 'private',
+      hasPosition: false,
+      createdAt: 1_700_000_000,
+    };
+    // No `routeId` at all — the shape every ride recorded before #93 has.
+    await v8.table(TABLE.activities).put({
+      ...legacy,
+      id: 'free-ride',
+      name: 'before routeId existed',
+      startedAt: 1_700_000_000,
+    });
+    // And one that would have carried the field, had it existed.
+    await v8.table(TABLE.activities).put({
+      ...legacy,
+      id: 'on-a-route',
+      name: 'ridden on the hill',
+      startedAt: 1_700_000_100,
+      routeId: 'the-hill',
+    });
+    const beforeVersion = v8.backendDB().version;
+    v8.close();
+
+    const store = openActivityStore(databaseName);
+    const legacyRide = await store.getActivity(athleteId('athlete-a'), activityId('free-ride'));
+    const routedRide = await store.getActivity(athleteId('athlete-a'), activityId('on-a-route'));
+    const attempts = await store.listRouteAttempts(athleteId('athlete-a'), routeId('the-hill'));
+    store.close();
+
+    // Both rides survive the upgrade untouched.
+    expect(legacyRide?.name).toBe('before routeId existed');
+    expect(routedRide?.name).toBe('ridden on the hill');
+    // The legacy ride reads back with no route, rather than a defaulted one.
+    expect(legacyRide?.routeId).toBeUndefined();
+    // And the new index answers over rows that predate it.
+    expect(attempts.map((ride) => ride.id)).toEqual(['on-a-route']);
     expect(beforeVersion).toBeLessThan(SCHEMA_VERSION * 10);
   });
 });

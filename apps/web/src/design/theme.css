@@ -26,6 +26,15 @@
   --oyl-color-accent-ink: #ffffff;
   --oyl-color-focus: #141b1a;
 
+  /* The ride HUD (#94). Opaque, so its contrast does not depend on the 3D
+     scene behind it — `tokens.ts` records why that is the only way #94's
+     contrast criterion is checkable. */
+  --oyl-color-hud-surface: #10161c;
+  --oyl-color-hud-ink: #f5f8fa;
+  --oyl-color-hud-ink-muted: #a8b6c2;
+  --oyl-color-hud-border: #7b8b99;
+  --oyl-color-hud-stale-ink: #f0b45f;
+
   --oyl-color-info-surface: #e3f0f4;
   --oyl-color-info-ink: #0e4a57;
   --oyl-color-info-border: #2c7288;
@@ -607,4 +616,122 @@ body {
 .oyl-fitness-chart__recent {
   stroke: var(--oyl-color-ink-muted);
   stroke-dasharray: 6 4;
+}
+
+/*
+ * The ride HUD (#94).
+ *
+ * Sized for a phone clamped to a handlebar and read at about 60 cm, by a rider
+ * who is out of breath and looking for roughly one second. Every rule below is
+ * that context rather than taste:
+ *
+ * - The values are very large and the labels are small, because the label is
+ *   read once on the first ride and the number is read a thousand times after.
+ * - The grid is fixed, so a field is found by POSITION. `hudReadings` returns a
+ *   fixed-length list in a fixed order for the same reason.
+ * - There is no `:hover` anywhere. There is no pointer on a handlebar.
+ * - The panel is OPAQUE. It is drawn over a 3D scene whose colours change every
+ *   metre, and `tokens.ts` records why that is the only way #94's contrast
+ *   criterion is checkable at all.
+ */
+
+.oyl-hud {
+  background: var(--oyl-color-hud-surface);
+  color: var(--oyl-color-hud-ink);
+  padding: var(--oyl-space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-hud__fields {
+  margin: 0;
+  display: grid;
+  /* Four across on a phone in landscape on the bars, two in portrait. `auto-fit`
+     rather than a media query so the breakpoint follows the actual width the
+     HUD is given rather than the width of the device. */
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-hud__field {
+  display: flex;
+  flex-direction: column;
+}
+
+.oyl-hud__label {
+  font-size: var(--oyl-font-size-sm);
+  color: var(--oyl-color-hud-ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.oyl-hud__value {
+  margin: 0;
+  /* Deliberately far larger than anything else in this app. */
+  font-size: 2.5rem;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+  color: var(--oyl-color-hud-ink);
+}
+
+.oyl-hud__unit {
+  font-size: var(--oyl-font-size-md);
+  color: var(--oyl-color-hud-ink-muted);
+}
+
+.oyl-hud__field--stale .oyl-hud__value {
+  color: var(--oyl-color-hud-stale-ink);
+}
+
+.oyl-hud__stale {
+  display: block;
+  font-size: var(--oyl-font-size-sm);
+  color: var(--oyl-color-hud-stale-ink);
+}
+
+.oyl-hud__profile-svg {
+  width: 100%;
+  height: 3rem;
+  display: block;
+}
+
+.oyl-hud__profile-line {
+  fill: none;
+  stroke: var(--oyl-color-hud-ink-muted);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-hud__profile-here {
+  stroke: var(--oyl-color-hud-ink);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-hud__profile-text {
+  margin: 0;
+  font-size: var(--oyl-font-size-sm);
+  color: var(--oyl-color-hud-ink-muted);
+}
+
+.oyl-hud__controls {
+  display: flex;
+  gap: var(--oyl-space-md);
+}
+
+.oyl-hud__control {
+  flex: 1;
+  background: var(--oyl-color-hud-surface);
+  color: var(--oyl-color-hud-ink);
+  border: 2px solid var(--oyl-color-hud-border);
+  border-radius: var(--oyl-radius);
+  font-size: var(--oyl-font-size-lg);
+  /* The minimum size is set inline from CONTROL_MINIMUM_PIXELS, so the number
+     the test asserts and the number the browser applies are the same one. */
+}
+
+.oyl-hud__control:focus-visible {
+  outline: 3px solid var(--oyl-color-hud-ink);
+  outline-offset: 2px;
 }
