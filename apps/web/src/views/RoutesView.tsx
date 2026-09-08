@@ -9,6 +9,8 @@ import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
 import { checkName, editRoute, routeFromGpx, type SaveRefusal } from '../routes/save';
 import { PUBLIC_ROUTE_WARNING } from '../routes/share';
+import { exportedFrom, ROUTE_FILE_FORMATS, type RouteFileFormat } from '../routes/export';
+import type { DownloadableFile } from '../transfer/store-port';
 import { ROUTE_LIST_LIMIT, type RoutePort } from '../routes/store-port';
 
 /**
@@ -73,14 +75,28 @@ export interface RoutesViewProps {
    * `main.tsx` passes the real clock; nothing else does.
    */
   readonly now?: () => number;
+  /**
+   * How a file reaches the rider's disk (#74).
+   *
+   * ⚠️ Injected for the same reason the transfer screen injects it, and it is
+   * not squeamishness: `saveWithAnchor` creates an object URL and clicks an
+   * anchor, which jsdom neither performs nor can be asked to. A screen that
+   * called it directly would be a screen the accessibility suite could not
+   * render. `main.tsx` passes the real one.
+   *
+   * Absent means export is unavailable and the buttons are not rendered — the
+   * same shape as an absent `port`, and better than a button that does nothing.
+   */
+  readonly save?: ((file: DownloadableFile) => void) | undefined;
 }
 
-export function RoutesView({ port, now }: RoutesViewProps): JSX.Element {
+export function RoutesView({ port, now, save }: RoutesViewProps): JSX.Element {
   const [routes, setRoutes] = useState<readonly RouteRecord[] | undefined>(undefined);
   const [loadFault, setLoadFault] = useState<string | undefined>(undefined);
   const [refusal, setRefusal] = useState<SaveRefusal | undefined>(undefined);
   const [saved, setSaved] = useState<string | undefined>(undefined);
   const [pendingDelete, setPendingDelete] = useState<RouteRecord | undefined>(undefined);
+  const [exported, setExported] = useState<string | undefined>(undefined);
 
   const clock = useCallback((): number => (now === undefined ? Date.now() / 1000 : now()), [now]);
 
@@ -108,6 +124,28 @@ export function RoutesView({ port, now }: RoutesViewProps): JSX.Element {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  /**
+   * Write one route to a file.
+   *
+   * ⚠️ **Synchronous, and it re-encodes from the row already in hand rather
+   * than reading the store again.** The list read already decoded the whole
+   * profile — that is what `ROUTE_LIST_LIMIT` budgets for — so a second read
+   * would decode the same megabytes to produce the same bytes. `exportRoute`
+   * exists for a caller that holds only an id; this screen never does.
+   *
+   * The `lost` sentences are shown whether or not there are any surprises in
+   * them, because there always is at least one: gradient is in no format.
+   */
+  const onExport = useCallback(
+    (route: RouteRecord, format: RouteFileFormat): void => {
+      if (save === undefined) return;
+      const { file, lost } = exportedFrom(route, format);
+      save(file);
+      setExported([`${file.fileName} is ready. Copy it to your head unit.`, ...lost].join(' '));
+    },
+    [save],
+  );
 
   const onImport = useCallback(
     async (event: FormEvent<HTMLFormElement>): Promise<void> => {
@@ -231,6 +269,12 @@ export function RoutesView({ port, now }: RoutesViewProps): JSX.Element {
       )}
       {loadFault !== undefined && <StatusMessage tone="warning">{loadFault}</StatusMessage>}
 
+      {exported !== undefined && (
+        <StatusMessage tone="success" live>
+          {exported}
+        </StatusMessage>
+      )}
+
       <h2>Saved routes</h2>
       {routes === undefined ? (
         <p>Reading your saved routes…</p>
@@ -246,6 +290,7 @@ export function RoutesView({ port, now }: RoutesViewProps): JSX.Element {
               <th scope="col">Climb</th>
               <th scope="col">Shape</th>
               <th scope="col">Who can see it</th>
+              <th scope="col">Send to a head unit</th>
               <th scope="col">Change</th>
             </tr>
           </thead>
@@ -257,6 +302,27 @@ export function RoutesView({ port, now }: RoutesViewProps): JSX.Element {
                 <td>{routeClimb(route.profile.totalAscent)}</td>
                 <td>{route.profile.loop ? 'Loop' : 'Point to point'}</td>
                 <td>{route.visibility}</td>
+                <td>
+                  {save === undefined ? (
+                    <span>Downloading is not available in this browser.</span>
+                  ) : (
+                    ROUTE_FILE_FORMATS.map((format) => (
+                      <Button
+                        key={format}
+                        type="button"
+                        onClick={() => {
+                          onExport(route, format);
+                        }}
+                      >
+                        {/* The format is in the label, not only in an icon or a
+                            title: #48's audit counts an unnamed control as a
+                            violation, and "which file am I getting" is the
+                            whole question this control answers. */}
+                        Download {format.toUpperCase()} — {route.name}
+                      </Button>
+                    ))
+                  )}
+                </td>
                 <td>
                   <form onSubmit={(event) => void onEdit(event, route)}>
                     <label htmlFor={`name-${route.id}`}>Name</label>

@@ -191,7 +191,7 @@ function viewFor(match: RouteMatch, props: AppShellProps): JSX.Element {
     case 'segments':
       return <SegmentsView port={props.segments} />;
     case 'routes':
-      return <RoutesView port={props.routes} />;
+      return <RoutesView port={props.routes} save={props.transfer?.save} />;
     case 'segment-detail':
       return <SegmentDetailView port={props.efforts} segment={match.parameter} />;
     case 'devices':

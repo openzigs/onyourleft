@@ -50,8 +50,9 @@ apps/                 AGPL-3.0-or-later, without exception
     src/recording/      the recorder: engine + durable checkpoints + recovery (#46)
     src/ride/           the live ride screen: its state machine, panels and trainer wiring (#49)
     src/routes/         saved routes (#73) — the store port and its read budget,
-                        the edit decision and its concurrency token, and what a
-                        shared copy of a route contains
+                        the edit decision and its concurrency token, what a
+                        shared copy of a route contains, and the export a rider
+                        copies to a head unit (#74)
     src/segments/       the segment store port and the create form's pure core (#64),
                         and the resumable matcher sweep over the library (#66)
     src/shell/          the hash route table, the router hook and AppShell (#48)
@@ -89,8 +90,9 @@ packages/             Apache-2.0, without exception
                         prefilter, discrete Fréchet, the effort with its
                         three-state visibility, and where the time went
   fit/                FIT / GPX / TCX codec (#29-#32)
-    src/route/          route import (#89) — the #32 decoder composed with the
-                        profile, and the refusals a rider can act on
+    src/route/          route import (#89) and export (#74) — the #32 decoder
+                        composed with the profile, the refusals a rider can act
+                        on, and the GPX and TCX course writers
   sensors/            sensor abstraction and BLE transport (#39-#44) — BLE only
     src/                the transport-agnostic abstraction; no platform API at all
     protocol/           the GATT profile clients (#41, #42) — service UUIDs, payload
@@ -1461,6 +1463,10 @@ top of an issue **supersedes its body**.
 | What happens when a rider passes the end of a loop, and when a route is refused as one | `packages/domain/src/route/profile.ts` §`distanceOnRoute`, §`LOOP_CLOSURE_METRES` |
 | Which GPX element a planned route is read from, and which one wins when a file has both | `packages/fit/src/xml/gpx.ts` §`decodeGpx`, `packages/fit/src/route/gpx-route.ts` |
 | Why a saved route stores its whole profile where a ride stores half a load | `packages/store/src/records.ts` §`RouteRecord` |
+| Why a route exports as a `<trk>` rather than a `<rte>`, and what a head unit has never been asked | [`packages/fit/README.md`](packages/fit/README.md) §8, `packages/fit/src/route/gpx-course.ts` |
+| Why an exported route carries an OSM notice even when nothing establishes it came from OSM | `packages/fit/src/route/course.ts` §Attribution, [ADR 0012](docs/adr/0012-data-licence.md) |
+| Why a long route is warned about rather than simplified, and where the warning belongs | `packages/fit/src/route/course.ts`, `apps/web/src/routes/export.ts` §`LONG_ROUTE_SAMPLES` |
+| Why a TCX course carries a time of zero rather than an estimate | `packages/fit/src/route/tcx-course.ts` |
 | Why the gradient driver is in `packages/domain` and not beside the control point | `packages/domain/src/trainer/simulation.ts`, [`packages/sensors/README.md`](packages/sensors/README.md) §"Driving simulation mode from a route" |
 | Why a stalled trainer drops gradients instead of queueing them, and why the newest survives | `packages/sensors/protocol/src/simulation-writer.ts` |
 | Which control point a trainer with two of them is driven through, and what happens when only the proprietary one is there | `packages/sensors/protocol/src/trainer-control-choice.ts` |

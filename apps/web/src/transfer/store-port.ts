@@ -70,6 +70,15 @@ export interface TransferPort {
   readonly timeZone: string;
   /** SHA-256 of a file's bytes, lowercase hex. @see webCryptoDigest */
   digest(bytes: Uint8Array): Promise<string>;
-  /** Hands a file to the browser to save. */
-  save(file: DownloadableFile): void;
+  /**
+   * Hands a file to the browser to save.
+   *
+   * ⚠️ Declared as a **property with a function type**, not as a method. Method
+   * syntax makes the parameter bivariant and makes the reference unbound, so
+   * `port.save` passed along to another component is an
+   * `@typescript-eslint/unbound-method` error — which is what #74 hit when the
+   * routes screen needed the same downloader. A property type is both stricter
+   * and passable.
+   */
+  readonly save: (file: DownloadableFile) => void;
 }
