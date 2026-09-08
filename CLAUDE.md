@@ -59,7 +59,10 @@ apps/                 AGPL-3.0-or-later, without exception
     src/transfer/       file import and export (#51) — the batch importer, the
                         1 Hz sample grid, and the export writer
     src/views/          one component per route (#48)
-  mobile/             Capacitor shell wrapping the same web build (#85; Phase 3)
+  mobile/             Capacitor shell wrapping the same web build (#85, #87)
+    android/            the generated Android project — MIT template output, whose
+                        provenance and licence obligation are apps/mobile/README.md
+                        §2 and whose exemptions are .spdx-exempt
 
 packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis (#25)
@@ -102,6 +105,9 @@ docs/
   spikes/             numbered spike write-ups — a dated measurement, not a decision
 
 scripts/              dependency-free repository checks; run on a bare clone
+
+.spdx-exempt          the files LIC001/LIC002 do not apply to, one exact path at a
+                      time — third-party generator output only, enforced by LIC006
 
 .github/
   workflows/rules.yml runs those checks on every pull request — see §4c
@@ -195,6 +201,45 @@ Every source file carries an SPDX identifier in its opening lines:
 // SPDX-License-Identifier: AGPL-3.0-or-later // anything under apps/
 ```
 
+`LIC001` and `LIC002` scan `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.css`, `.sh` and — since
+[#87](https://github.com/openzigs/onyourleft/issues/87) — `.kt`, `.kts`, `.java`, `.gradle` and
+`.xml`. The identifier may sit anywhere in the first **five** lines, not only the first, because a
+shebang and an XML declaration both legitimately precede it. An `AndroidManifest.xml` therefore
+carries `<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->` on line 2.
+
+### 3a. `.spdx-exempt` — the one way out, and why it cannot become a blanket
+
+Some files under `apps/` are **not ours**: `cap add android` writes about twenty of them from
+`@capacitor/cli`'s MIT template, launcher artwork included. Stamping `AGPL-3.0-or-later` on those
+would be a *worse* misdeclaration than leaving them bare — it claims authorship we do not have, and
+it displaces the notice MIT requires to travel with the work. So they are exempt, and the exemption
+is a file: [`.spdx-exempt`](.spdx-exempt) at the repository root, one repository-relative path per
+line.
+
+⚠️ **The list is the classic vacuous pass, so `LIC006` is what stops it being one.** An entry is
+rejected when it names a file that is not there, names a **directory**, is absolute or contains
+`..`, or uses **glob syntax**. Exact paths only. Three consequences, all of them the point:
+
+- A generator that writes a file under a **new** name lands *outside* the list and fails
+  `LIC001`/`LIC002` until somebody reads it. The list fails closed.
+- A **stale** entry — the file was deleted or renamed — is a violation rather than a line nobody
+  notices. An exemption that has stopped meaning something stops the build.
+- You cannot exempt a tree, or a file you have not written yet.
+
+**The one reason to be on that list is "verbatim output of a third-party generator, whose own
+licence notice we reproduce instead".** `apps/mobile/README.md` §2 reproduces Capacitor's. "The
+header is awkward here" is not a reason: a file this repository authors *or edits* carries the
+header, which is why four of the twenty `cap add` wrote are deliberately absent from the list.
+
+⚠️ Three Capacitor trees are **pruned rather than exempted** — the copied web build under
+`android/app/src/main/assets/public`, `android/app/src/main/res/xml/config.xml`, and
+`android/capacitor-cordova-android-plugins/`. `cap sync` regenerates all three and Capacitor's own
+nested `.gitignore` keeps them out of the repository, so they are absent from a clean clone and an
+`.spdx-exempt` entry naming one would be a `LIC006` violation. `.prettierignore` carries the same
+three plus two generated JSON assets, because **Prettier reads only the root `.gitignore`, not a
+nested one** — without it `format:check` reports a minified bundle on any machine where a sync has
+run, which is a local-only red with no fix a contributor can apply.
+
 ---
 
 ## 4. Commands
@@ -212,7 +257,7 @@ downstream issue's acceptance criteria depend on these.
 # Exits 0 clean; exits 1 listing each violation by rule id.
 bash scripts/check-repo-rules.sh
 
-# Test the checker itself. Fixture-driven; 59 cases.
+# Test the checker itself. Fixture-driven; 77 cases.
 bash scripts/check-repo-rules.test.sh
 
 # Verify the licence texts are byte-identical to the canonical ones, by
@@ -387,6 +432,7 @@ npm view typescript-eslint peerDependencies.typescript
 | `LIC002` | a source file under `apps/` is missing an SPDX header, **or** declares one other than `AGPL-3.0-or-later` |
 | `LIC003` | a package manifest declares a licence its path does not permit |
 | `LIC004` | a package under `packages/` **or `apps/`** has no `LICENSE` file of its own |
+| `LIC006` | an entry in `.spdx-exempt` names a file that is not there, a directory, an absolute or `..` path, or uses glob syntax — see §3a |
 | `SCOPE001` | ANT+ is referenced anywhere in a source tree (see §6) |
 | `WF001` | `pull_request_target` appears in a `.github/workflows/` file (see §8) |
 | `ADR001` | two ADRs share a number |
@@ -439,11 +485,11 @@ not.
 > lands. The ⛔ stops at "What exists, and what each is **not** yet" — everything under that heading
 > is in the tree, and its commands are in §4a.
 
-- **`apps/mobile` does not exist.** The workspace globs (`apps/*`, `packages/*`) will pick it up the
-  moment it appears, and the boundary and header rules already apply to its path. It is created by
-  the issue that owns its content, [#85](https://github.com/openzigs/onyourleft/issues/85). Copy
-  `packages/domain` as the template: a manifest, a `LICENSE`, a `tsconfig.json`, a
-  `vitest.config.ts` and a test.
+- ⚠️ **`apps/mobile` now DOES exist** — this bullet used to say it did not, and a reviewer who
+  remembers that is reading the old file. [#87](https://github.com/openzigs/onyourleft/issues/87)
+  created it, ahead of [#85](https://github.com/openzigs/onyourleft/issues/85), because #87's own
+  criteria are about the Android shell and there was nothing to put them in. See the heading below
+  for what it holds and, more usefully, what it has NOT been able to prove.
 - **`react-router` and the rest of the runtime dependency list in ADR 0005.** See the dependency
   paragraph below the next heading for what *is* installed.
 - **`apps/api`, or anything else server-shaped.** Not "not yet" — not in Phase 1 at all. Owner
@@ -457,6 +503,17 @@ Reconciled by [#110](https://github.com/openzigs/onyourleft/issues/110) once
 [#26](https://github.com/openzigs/onyourleft/issues/26) had all landed, rather than by each of the
 three editing this list on its own branch and conflicting with the other two.
 
+  - **`apps/mobile`** ([#87](https://github.com/openzigs/onyourleft/issues/87)) holds
+    `capacitor.config.ts`, the generated `android/` project, and the Capacitor BLE adapter. ⚠️ **Six
+    of #87's eight acceptance criteria cannot be verified in a container and were not.** There is no
+    Android SDK and `dl.google.com` is refused by the egress proxy, so nothing in `android/` has
+    been compiled, no emulator or device has run it, and — the one that matters most — **the merged
+    manifest has not been asserted**, because the merge is the SDK's and checking the app's *own*
+    manifest instead would be exactly the false pass #87 warns about.
+    [`apps/mobile/README.md`](apps/mobile/README.md) §4 is the table of what was and was not
+    available; read it before treating any Android claim here as checked. ⚠️ It also records that
+    `android/gradle/wrapper/gradle-wrapper.jar` is a **committed binary whose checksum could not be
+    verified** from this environment, and what would settle it.
   - **`packages/sensors/src`** ([#39](https://github.com/openzigs/onyourleft/issues/39)) holds the
     interfaces, `createDeviceSession`, `planCapabilitySources` and the simulator (#44).
     **`packages/sensors/web-bluetooth`** ([#40](https://github.com/openzigs/onyourleft/issues/40))

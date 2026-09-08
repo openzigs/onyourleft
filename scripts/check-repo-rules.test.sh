@@ -901,6 +901,169 @@ write_workflow rules.yml 'on:
 '
 assert_clean "a .yml under .github/ that is not a workflow is not scanned"
 
+# --- LIC001/LIC002 reach Kotlin, Java, Gradle and Android XML (#87) ----------
+#
+# `apps/mobile` is the first tree in this repository that is not TypeScript, and
+# until #87 the header rules could not see a single file in it. Each extension
+# gets its own case: a glob is one token and losing one token is silent.
+
+new_fixture
+write_good_app mobile
+printf 'class Probe\n' > "${fixture_root}/apps/mobile/Probe.kt"
+assert_violation "a .kt file without a header is rejected" LIC002 \
+  "apps/mobile/Probe.kt: no SPDX-License-Identifier"
+
+new_fixture
+write_good_app mobile
+printf '// SPDX-License-Identifier: Apache-2.0\nclass Probe\n' \
+  > "${fixture_root}/apps/mobile/Probe.kt"
+assert_violation "a .kt file carrying the WRONG identifier is rejected" LIC002 \
+  "apps/mobile/Probe.kt: SPDX header is Apache-2.0"
+
+new_fixture
+write_good_package sensors
+printf 'class Probe {}\n' > "${fixture_root}/packages/sensors/Probe.java"
+assert_violation "a .java file under packages/ without a header is rejected" LIC001 \
+  "packages/sensors/Probe.java: no SPDX-License-Identifier"
+
+new_fixture
+write_good_app mobile
+printf 'apply plugin: "com.android.application"\n' \
+  > "${fixture_root}/apps/mobile/probe.gradle"
+assert_violation "a .gradle file without a header is rejected" LIC002 \
+  "apps/mobile/probe.gradle: no SPDX-License-Identifier"
+
+new_fixture
+write_good_app mobile
+mkdir -p "${fixture_root}/apps/mobile/res"
+printf '<?xml version="1.0" encoding="utf-8"?>\n<manifest />\n' \
+  > "${fixture_root}/apps/mobile/res/probe.xml"
+assert_violation "an .xml file without a header is rejected" LIC002 \
+  "apps/mobile/res/probe.xml: no SPDX-License-Identifier"
+
+# The shape the Android files actually take: an XML declaration MUST be the
+# first thing in the document, so the header can only be on line 2. `spdx_of`
+# reads five lines, and this is the case that says so on purpose rather than by
+# luck -- a checker narrowed to line 1 would reject every conforming manifest in
+# `apps/mobile`.
+new_fixture
+write_good_app mobile
+mkdir -p "${fixture_root}/apps/mobile/res"
+printf '<?xml version="1.0" encoding="utf-8"?>\n<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->\n<manifest />\n' \
+  > "${fixture_root}/apps/mobile/res/probe.xml"
+assert_clean "an .xml header on line 2, after the XML declaration, is accepted"
+
+# --- LIC006: .spdx-exempt, and the ways it must not become a blanket ---------
+
+new_fixture
+write_good_app mobile
+printf '<?xml version="1.0"?>\n<vector />\n' > "${fixture_root}/apps/mobile/icon.xml"
+printf 'apps/mobile/icon.xml\n' > "${fixture_root}/.spdx-exempt"
+assert_clean "a file named in .spdx-exempt is not required to carry a header"
+
+# The case that says the list is an EXACT path match rather than a prefix or a
+# directory. Two generated-looking files side by side, one exempt: the other
+# must still fail. Without this, an entry naming a directory's first file would
+# quietly cover everything beside it.
+new_fixture
+write_good_app mobile
+printf '<?xml version="1.0"?>\n<vector />\n' > "${fixture_root}/apps/mobile/icon.xml"
+printf '<?xml version="1.0"?>\n<vector />\n' > "${fixture_root}/apps/mobile/icon2.xml"
+printf 'apps/mobile/icon.xml\n' > "${fixture_root}/.spdx-exempt"
+assert_violation "an exemption covers only the path it names" LIC002 \
+  "apps/mobile/icon2.xml: no SPDX-License-Identifier"
+
+new_fixture
+write_good_app mobile
+printf 'apps/mobile/gone.xml\n' > "${fixture_root}/.spdx-exempt"
+assert_violation "an exemption naming a file that is not there is rejected" LIC006 \
+  "apps/mobile/gone.xml: no such file"
+
+# A glob would defeat the whole mechanism in one line, so it is refused rather
+# than merely unsupported -- an unsupported glob matches nothing, which reads in
+# CI as a stale entry and in review as a working exemption.
+new_fixture
+write_good_app mobile
+printf '<?xml version="1.0"?>\n<vector />\n' > "${fixture_root}/apps/mobile/icon.xml"
+printf 'apps/mobile/*.xml\n' > "${fixture_root}/.spdx-exempt"
+assert_violation "a glob in .spdx-exempt is rejected" LIC006 \
+  "glob syntax is not accepted"
+
+# A directory entry. `[ -e ]` accepts one, so without this branch an entry
+# naming a tree passes LIC006 while exempting nothing under it -- a list that
+# reads in review as a blanket and behaves as a no-op is the worst of both.
+new_fixture
+write_good_app mobile
+mkdir -p "${fixture_root}/apps/mobile/res"
+printf '<?xml version="1.0"?>\n<vector />\n' > "${fixture_root}/apps/mobile/res/icon.xml"
+printf 'apps/mobile/res\n' > "${fixture_root}/.spdx-exempt"
+assert_violation "a directory in .spdx-exempt is rejected" LIC006 \
+  "names a directory; exempt each file"
+
+# The exact-match case that a DIRECTORY fixture cannot make, because a directory
+# entry is refused outright: two real files where one path is a prefix of the
+# other. `build.gradle` and `build.gradle.kts` are the pair a Gradle project
+# actually produces, so a prefix comparison would exempt the Kotlin build script
+# the moment somebody exempted the Groovy one.
+new_fixture
+write_good_app mobile
+printf 'ext {}\n' > "${fixture_root}/apps/mobile/probe.gradle"
+printf 'ext {}\n' > "${fixture_root}/apps/mobile/probe.gradle.kts"
+printf 'apps/mobile/probe.gradle\n' > "${fixture_root}/.spdx-exempt"
+assert_violation "an exemption does not extend to a path it is a prefix of" LIC002 \
+  "apps/mobile/probe.gradle.kts: no SPDX-License-Identifier"
+
+new_fixture
+write_good_app mobile
+printf '/etc/passwd\n' > "${fixture_root}/.spdx-exempt"
+assert_violation "an absolute path in .spdx-exempt is rejected" LIC006 \
+  "entries are repository-relative paths"
+
+new_fixture
+write_good_app mobile
+printf '../elsewhere/icon.xml\n' > "${fixture_root}/.spdx-exempt"
+assert_violation "a path escaping the repository is rejected" LIC006 \
+  "entries are repository-relative paths"
+
+# Comments and blank lines are not paths. Until this case existed, a `#` line
+# would have been reported as a missing file -- a checker whose own comment
+# syntax fails the build teaches people to delete the comments.
+new_fixture
+write_good_app mobile
+printf '<?xml version="1.0"?>\n<vector />\n' > "${fixture_root}/apps/mobile/icon.xml"
+printf '# why this file is exempt\n\n   \napps/mobile/icon.xml   # trailing note\n' \
+  > "${fixture_root}/.spdx-exempt"
+assert_clean "comments, blank lines and trailing notes in .spdx-exempt are not paths"
+
+# --- The Capacitor trees that `cap sync` regenerates are pruned, not exempted -
+#
+# All three are gitignored by Capacitor's own template, so they are absent from
+# a clean clone and an entry in .spdx-exempt naming one would be a LIC006
+# violation. Pruning is what keeps this checker's answer the same in CI and on
+# the machine of somebody who has just run a sync -- and the copied web build is
+# the one that matters, because it is a bundle full of `.js` and `.css`.
+
+new_fixture
+write_good_app mobile
+mkdir -p "${fixture_root}/apps/mobile/android/app/src/main/assets/public"
+printf 'console.log(1);\n' \
+  > "${fixture_root}/apps/mobile/android/app/src/main/assets/public/index-abc123.js"
+assert_clean "the copied web build under assets/public is not scanned"
+
+new_fixture
+write_good_app mobile
+mkdir -p "${fixture_root}/apps/mobile/android/capacitor-cordova-android-plugins/src"
+printf 'ext {}\n' \
+  > "${fixture_root}/apps/mobile/android/capacitor-cordova-android-plugins/cordova.variables.gradle"
+assert_clean "the generated Cordova plugin project is not scanned"
+
+new_fixture
+write_good_app mobile
+mkdir -p "${fixture_root}/apps/mobile/android/app/src/main/res/xml"
+printf '<?xml version="1.0"?>\n<widget />\n' \
+  > "${fixture_root}/apps/mobile/android/app/src/main/res/xml/config.xml"
+assert_clean "the generated res/xml/config.xml is not scanned"
+
 # --- The real repository must pass -------------------------------------------
 
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
