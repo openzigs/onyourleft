@@ -225,13 +225,32 @@ describe('how often it writes', () => {
 
 describe('what it refuses to be confused by', () => {
   it('writes nothing for a clock that goes backwards', () => {
-    const driver = trackingDriver();
+    // ⚠️ `minimumIntervalSeconds: 0` deliberately. At the default 1 Hz limit a
+    // backwards instant is refused by the RATE LIMIT — the difference is
+    // negative, which is under any positive interval — so a test at the
+    // default proves nothing about the ordering guard at all. Mutation-tested:
+    // deleting the guard leaves such a test green. This is the configuration a
+    // caller wanting every sample would use, and where the guard is the only
+    // thing between a rewound clock and a gradient from the past being held as
+    // the newest thing known.
+    const driver = createSimulationDriver({
+      profile: ramped,
+      minimumIntervalSeconds: 0,
+      gradeDeadbandPercent: 0,
+    });
     driver.sample({ at: unixSeconds(1_800_000_100), distance: metres(600) });
     expect(
-      driver.sample({ at: unixSeconds(1_800_000_090), distance: metres(700) }),
+      driver.sample({ at: unixSeconds(1_800_000_090), distance: metres(1000) }),
     ).toBeUndefined();
-    // And the driver still holds the newer of the two, not the older.
+    // The same instant twice is not "later" either.
+    expect(
+      driver.sample({ at: unixSeconds(1_800_000_100), distance: metres(1000) }),
+    ).toBeUndefined();
+    // The driver still holds what it wrote, for the position it wrote it for.
     expect(driver.last()?.at).toBe(1_800_000_100);
+    expect(driver.last()?.distanceOnRoute).toBe(600);
+    // Forward again works, so this is an ordering guard and not a stall.
+    expect(driver.sample({ at: unixSeconds(1_800_000_101), distance: metres(1000) })).toBeDefined();
   });
 
   it('writes nothing for an instant that is not a number', () => {
