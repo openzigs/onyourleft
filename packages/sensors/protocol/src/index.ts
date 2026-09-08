@@ -204,3 +204,13 @@ export {
   decodeCyclingPowerMeasurement,
   MAX_PLAUSIBLE_POWER_WATTS,
 } from './cycling-power';
+
+// --- The ERG target writer (#14) --------------------------------------------
+//
+// The sibling of the simulation writer. Same coalescing, plus an outcome per
+// offer so an interval boundary can be awaited — and an `ErgSink` that cannot
+// reach `reset`, which is FTMS §4.16.2.1's trap closed by the type.
+
+export type { ErgSink, ErgWriteOutcome, ErgWriter } from './erg-writer';
+
+export { createErgWriter } from './erg-writer';

@@ -85,8 +85,10 @@ packages/             Apache-2.0, without exception
                         on the route, the grade there, and whether it is worth
                         a write yet
     workout/            structured workouts (#14) — the model, the timeline a
-                        player looks up rather than replays, and the ERG
-                        spiral-of-death rule. NO file format; see §6
+                        player looks up rather than replays, the ERG
+                        spiral-of-death rule, and the player itself, which
+                        emits an intent and writes nothing. NO file format;
+                        see §6
     segment/            the segment model (#64), the matcher (#66) and the effort
                         comparison (#67) — endpoints and bearings, the cell
                         prefilter, discrete Fréchet, the effort with its
@@ -98,7 +100,9 @@ packages/             Apache-2.0, without exception
     src/                the transport-agnostic abstraction; no platform API at all
     protocol/           the GATT profile clients (#41, #42) — service UUIDs, payload
                         decoding, and since #90 the simulation writer and the
-                        choice of control point on a machine offering two
+                        choice of control point on a machine offering two, and
+                        since #14 the ERG writer, which cannot send a Reset
+                        because the method is not on the type it holds
     web-bluetooth/      the browser transport (#40) — the one place a BluetoothDevice exists
   physics/            cycling power/speed model, Martin et al. 1998 (#88), and
                       the synthetic rider that composes #92's rule with it
@@ -1501,6 +1505,10 @@ top of an issue **supersedes its body**.
 | Why a workout target is branded, and which two numbers it stops being confused | `packages/domain/src/workout/workout.ts` §`ThresholdShare` |
 | Why a workout is expanded into a timeline instead of walked with a cursor | `packages/domain/src/workout/timeline.ts` |
 | How the ERG spiral of death is told apart from a rider grinding on purpose | `packages/domain/src/workout/erg-safety.ts` §`assessErgCadence` |
+| Why the workout clock keeps running while a target is unacknowledged, and what waits instead | `packages/domain/src/workout/player.ts` §"An interval has not begun until its target is acknowledged" |
+| Why a quantised acknowledgement is not a change, and the busy loop that follows from reading it as one | `packages/domain/src/workout/player.ts` §`acknowledge` |
+| Which single place rebases the workout offset after a pause, and why the other two do not | `packages/domain/src/workout/player.ts` §`resume` |
+| Why a workout player cannot send an FTMS Reset even by mistake | `packages/sensors/protocol/src/erg-writer.ts` §`ErgSink` |
 | Why this project has no workout file format yet, and what would settle it | §6 "A workout file format is an ADR 0009 question", [#14](https://github.com/openzigs/onyourleft/issues/14) |
 
 <!-- Last updated: 2026-09-06 by delivery:code-issue resolving #51 (the manual file import and export UI) -->
