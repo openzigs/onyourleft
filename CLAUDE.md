@@ -59,7 +59,14 @@ apps/                 AGPL-3.0-or-later, without exception
     src/transfer/       file import and export (#51) — the batch importer, the
                         1 Hz sample grid, and the export writer
     src/views/          one component per route (#48)
-  mobile/             Capacitor shell wrapping the same web build (#85; Phase 3)
+  mobile/             Capacitor shell wrapping the same web build (#85, #87)
+    android/            the generated Android project, plus the connectedDevice
+                        foreground service and its plugin bridge — MIT template
+                        output, whose provenance and licence obligation are
+                        apps/mobile/README.md §2 and whose exemptions are .spdx-exempt
+    src/android/        reading a manifest as a document — NOT merging one (#87)
+    src/ble/            the Capacitor transport against #39's interface, unchanged
+    src/permission/     what a rider is told when Bluetooth will not work (#87)
 
 packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis (#25)
@@ -103,12 +110,15 @@ docs/
 
 scripts/              dependency-free repository checks; run on a bare clone
 
+.spdx-exempt          the files LIC001/LIC002 do not apply to, one exact path at a
+                      time — third-party generator output only, enforced by LIC006
+
 .github/
   workflows/rules.yml runs those checks on every pull request — see §4c
 ```
 
-**`apps/web`, `packages/domain`, `packages/sensors`, `packages/fit`, `packages/store` and
-`packages/physics` exist.**
+**`apps/web`, `apps/mobile`, `packages/domain`, `packages/sensors`, `packages/fit`,
+`packages/store` and `packages/physics` exist.**
 The first two were created by [#23](https://github.com/openzigs/onyourleft/issues/23) along with the
 workspace, the toolchain and the lockfile, `packages/sensors` by
 [#39](https://github.com/openzigs/onyourleft/issues/39), `packages/store` by
@@ -118,9 +128,12 @@ workspace, the toolchain and the lockfile, `packages/sensors` by
 between #65 and #66 and does not any more** — it was the #65 spike, and #66 hardened its algorithm
 into `packages/domain/src/segment/` and deleted it, which is the fate
 [`docs/spikes/0001-segment-matching.md`](docs/spikes/0001-segment-matching.md) gave it. A reviewer
-who remembers this paragraph naming it is reading the old one. **`apps/mobile` does
-not** — it is created by the issue that owns its content (§4b), from `packages/domain` as the
-template. The layout is fixed here
+who remembers this paragraph naming it is reading the old one. ⚠️ **`apps/mobile` now DOES
+exist**, and this sentence used to say it did not:
+[#87](https://github.com/openzigs/onyourleft/issues/87) created it ahead of
+[#85](https://github.com/openzigs/onyourleft/issues/85), because #87's criteria are about the
+Android shell and there was nothing to put them in. §4b is where what it has and has **not** proved
+is recorded. The layout is fixed here
 because ~30 sub-issues reference it by name, and the workspace globs and lint boundaries already
 cover the paths, so a package arrives inside the rules rather than beside them.
 
@@ -155,7 +168,8 @@ What this means in practice:
   moves to `apps/` or the dependency is replaced. There is no third option and no exemption.
 - **Permissive** dependencies (MIT, BSD-2/3, Apache-2.0, ISC) are fine anywhere.
 - **Weak, file-level copyleft (MPL-2.0) and permissive licences the list above does not name** —
-  `BlueOak-1.0.0`, `CC0-1.0`, `MIT-0`, `0BSD` — **are now ruled on, by
+  `BlueOak-1.0.0`, `CC0-1.0`, `MIT-0`, `0BSD` and, since
+  [ADR 0016](docs/adr/0016-unlicense.md), `Unlicense` — **are now ruled on, by
   [ADR 0015](docs/adr/0015-dependency-licences.md) D-2**, which discharges the deferral this bullet
   used to carry. They are admitted **in the build-time-only closure under either path**, and in a
   distributed closure **under `apps/` only** — an Apache-2.0 leaf package exists to be droppable
@@ -163,7 +177,10 @@ What this means in practice:
   does not describe. Six such packages are in the tree as build-time devDependencies. Read on
   2026-09-05 from `pnpm licenses list --json`: `lightningcss` and `lightningcss-darwin-arm64`
   (MPL-2.0), `lru-cache` and `minimatch` (BlueOak-1.0.0), `mdn-data` (CC0-1.0), and
-  `@csstools/color-helpers` and `@csstools/css-syntax-patches-for-csstree` (MIT-0). **All of them
+  `@csstools/color-helpers` and `@csstools/css-syntax-patches-for-csstree` (MIT-0). Two more
+  arrived with #87's Capacitor install and are the reason ADR 0016 exists: `bplist-parser` and
+  `bplist-creator` (`Unlicense`), reached from `@capacitor/cli` through `xcode` and `simple-plist`,
+  build-time under `apps/mobile` and in no distributed closure at all. **All of the first six
   reach `packages/*` through Vitest**, not only `apps/web`: an allowlist written against "the MPL
   one is under `apps/`" would scope itself to the wrong tree and pass vacuously — which is exactly
   why ADR 0015 splits on the closure rather than the path alone. Enforced by `DEP001`; verify with
@@ -191,6 +208,45 @@ Every source file carries an SPDX identifier in its opening lines:
 // SPDX-License-Identifier: AGPL-3.0-or-later // anything under apps/
 ```
 
+`LIC001` and `LIC002` scan `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.css`, `.sh` and — since
+[#87](https://github.com/openzigs/onyourleft/issues/87) — `.kt`, `.kts`, `.java`, `.gradle` and
+`.xml`. The identifier may sit anywhere in the first **five** lines, not only the first, because a
+shebang and an XML declaration both legitimately precede it. An `AndroidManifest.xml` therefore
+carries `<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->` on line 2.
+
+### 3a. `.spdx-exempt` — the one way out, and why it cannot become a blanket
+
+Some files under `apps/` are **not ours**: `cap add android` writes about twenty of them from
+`@capacitor/cli`'s MIT template, launcher artwork included. Stamping `AGPL-3.0-or-later` on those
+would be a *worse* misdeclaration than leaving them bare — it claims authorship we do not have, and
+it displaces the notice MIT requires to travel with the work. So they are exempt, and the exemption
+is a file: [`.spdx-exempt`](.spdx-exempt) at the repository root, one repository-relative path per
+line.
+
+⚠️ **The list is the classic vacuous pass, so `LIC006` is what stops it being one.** An entry is
+rejected when it names a file that is not there, names a **directory**, is absolute or contains
+`..`, or uses **glob syntax**. Exact paths only. Three consequences, all of them the point:
+
+- A generator that writes a file under a **new** name lands *outside* the list and fails
+  `LIC001`/`LIC002` until somebody reads it. The list fails closed.
+- A **stale** entry — the file was deleted or renamed — is a violation rather than a line nobody
+  notices. An exemption that has stopped meaning something stops the build.
+- You cannot exempt a tree, or a file you have not written yet.
+
+**The one reason to be on that list is "verbatim output of a third-party generator, whose own
+licence notice we reproduce instead".** `apps/mobile/README.md` §2 reproduces Capacitor's. "The
+header is awkward here" is not a reason: a file this repository authors *or edits* carries the
+header, which is why four of the twenty `cap add` wrote are deliberately absent from the list.
+
+⚠️ Three Capacitor trees are **pruned rather than exempted** — the copied web build under
+`android/app/src/main/assets/public`, `android/app/src/main/res/xml/config.xml`, and
+`android/capacitor-cordova-android-plugins/`. `cap sync` regenerates all three and Capacitor's own
+nested `.gitignore` keeps them out of the repository, so they are absent from a clean clone and an
+`.spdx-exempt` entry naming one would be a `LIC006` violation. `.prettierignore` carries the same
+three plus two generated JSON assets, because **Prettier reads only the root `.gitignore`, not a
+nested one** — without it `format:check` reports a minified bundle on any machine where a sync has
+run, which is a local-only red with no fix a contributor can apply.
+
 ---
 
 ## 4. Commands
@@ -208,7 +264,7 @@ downstream issue's acceptance criteria depend on these.
 # Exits 0 clean; exits 1 listing each violation by rule id.
 bash scripts/check-repo-rules.sh
 
-# Test the checker itself. Fixture-driven; 59 cases.
+# Test the checker itself. Fixture-driven; 77 cases.
 bash scripts/check-repo-rules.test.sh
 
 # Verify the licence texts are byte-identical to the canonical ones, by
@@ -343,7 +399,7 @@ pnpm --filter @onyourleft/fit run fixtures:generate
 # also section 4g.
 pnpm run check:licences
 
-# Its own suite. Fixture-driven; 45 cases, every policy branch with a case that
+# Its own suite. Fixture-driven; 49 cases, every policy branch with a case that
 # FAILS as well as one that passes. Needs Node, so also not in `check:repo`.
 bash scripts/check-dependency-licences.test.sh
 
@@ -383,6 +439,7 @@ npm view typescript-eslint peerDependencies.typescript
 | `LIC002` | a source file under `apps/` is missing an SPDX header, **or** declares one other than `AGPL-3.0-or-later` |
 | `LIC003` | a package manifest declares a licence its path does not permit |
 | `LIC004` | a package under `packages/` **or `apps/`** has no `LICENSE` file of its own |
+| `LIC006` | an entry in `.spdx-exempt` names a file that is not there, a directory, an absolute or `..` path, or uses glob syntax — see §3a |
 | `SCOPE001` | ANT+ is referenced anywhere in a source tree (see §6) |
 | `WF001` | `pull_request_target` appears in a `.github/workflows/` file (see §8) |
 | `ADR001` | two ADRs share a number |
@@ -435,11 +492,11 @@ not.
 > lands. The ⛔ stops at "What exists, and what each is **not** yet" — everything under that heading
 > is in the tree, and its commands are in §4a.
 
-- **`apps/mobile` does not exist.** The workspace globs (`apps/*`, `packages/*`) will pick it up the
-  moment it appears, and the boundary and header rules already apply to its path. It is created by
-  the issue that owns its content, [#85](https://github.com/openzigs/onyourleft/issues/85). Copy
-  `packages/domain` as the template: a manifest, a `LICENSE`, a `tsconfig.json`, a
-  `vitest.config.ts` and a test.
+- ⚠️ **`apps/mobile` now DOES exist** — this bullet used to say it did not, and a reviewer who
+  remembers that is reading the old file. [#87](https://github.com/openzigs/onyourleft/issues/87)
+  created it, ahead of [#85](https://github.com/openzigs/onyourleft/issues/85), because #87's own
+  criteria are about the Android shell and there was nothing to put them in. See the heading below
+  for what it holds and, more usefully, what it has NOT been able to prove.
 - **`react-router` and the rest of the runtime dependency list in ADR 0005.** See the dependency
   paragraph below the next heading for what *is* installed.
 - **`apps/api`, or anything else server-shaped.** Not "not yet" — not in Phase 1 at all. Owner
@@ -453,6 +510,17 @@ Reconciled by [#110](https://github.com/openzigs/onyourleft/issues/110) once
 [#26](https://github.com/openzigs/onyourleft/issues/26) had all landed, rather than by each of the
 three editing this list on its own branch and conflicting with the other two.
 
+  - **`apps/mobile`** ([#87](https://github.com/openzigs/onyourleft/issues/87)) holds
+    `capacitor.config.ts`, the generated `android/` project, and the Capacitor BLE adapter. ⚠️ **Six
+    of #87's eight acceptance criteria cannot be verified in a container and were not.** There is no
+    Android SDK and `dl.google.com` is refused by the egress proxy, so nothing in `android/` has
+    been compiled, no emulator or device has run it, and — the one that matters most — **the merged
+    manifest has not been asserted**, because the merge is the SDK's and checking the app's *own*
+    manifest instead would be exactly the false pass #87 warns about.
+    [`apps/mobile/README.md`](apps/mobile/README.md) §4 is the table of what was and was not
+    available; read it before treating any Android claim here as checked. ⚠️ It also records that
+    `android/gradle/wrapper/gradle-wrapper.jar` is a **committed binary whose checksum could not be
+    verified** from this environment, and what would settle it.
   - **`packages/sensors/src`** ([#39](https://github.com/openzigs/onyourleft/issues/39)) holds the
     interfaces, `createDeviceSession`, `planCapabilitySources` and the simulator (#44).
     **`packages/sensors/web-bluetooth`** ([#40](https://github.com/openzigs/onyourleft/issues/40))
@@ -905,7 +973,10 @@ distributed:
 | **Distributed** (`--prod`) | permissive only | permissive + weak + GPL/LGPL/AGPL |
 | **Build-time only** | permissive + weak | permissive + weak + GPL/LGPL/AGPL |
 
-where *weak* is ADR 0015 D-2's set — `MPL-2.0`, `BlueOak-1.0.0`, `CC0-1.0`, `MIT-0`, `0BSD`.
+where *weak* is ADR 0015 D-2's set — `MPL-2.0`, `BlueOak-1.0.0`, `CC0-1.0`, `MIT-0`, `0BSD` — plus
+`Unlicense`, added to that set by [ADR 0016](docs/adr/0016-unlicense.md) D-1. `Unlicense` grants
+more than MIT does and still sits in *weak* rather than *permissive*, because the permissive row is
+§3's quotable list verbatim and stays that way; ADR 0016 D-1 gives the reasoning.
 
 ⚠️ **GPL and AGPL stay forbidden under `packages/` in BOTH closures.** The distributed-artefact
 argument alone would permit a GPL build-time tool there; ADR 0015 D-3 deliberately does not go
@@ -913,10 +984,17 @@ there, because §3 states the rule with no exemption and reversing it is an owne
 than a side effect of writing a checker.
 
 ⚠️ **It fails closed.** A licence in none of the tables is a violation, not a pass — the gate exists
-for the licence nobody has considered yet. A perfectly fine but unnamed licence (`Unlicense`,
-`Zlib`) will stop the build until someone adds it to ADR 0015 **and** to `POLICY` in the script.
-Those two tables can drift and nothing prevents it; the script says so where `POLICY` is defined and
-the failure message names the ADR.
+for the licence nobody has considered yet. A perfectly fine but unnamed licence (`Zlib`, say) will
+stop the build until someone adds it to ADR 0015 **and** to `POLICY` in the script. Those two tables
+can drift and nothing prevents it; the script says so where `POLICY` is defined and the failure
+message names the ADR.
+
+⚠️ **That is not hypothetical — it has now happened once, and `Unlicense` is no longer the example.**
+#87's `@capacitor/cli` install reached `bplist-parser` and `bplist-creator` (`Unlicense`) and
+`DEP001` stopped the build. [ADR 0016](docs/adr/0016-unlicense.md) ruled on it and `POLICY.weak`
+carries it, in the same pull request, which is the shape ADR 0015's §Consequences asks for. `Zlib`
+was deliberately **not** ruled on at the same time: nothing in the tree needs it, and a licence
+nobody has a dependency for is a licence nobody has read.
 
 ⚠️ **`pnpm licenses list --filter` does NOT follow workspace links, and that was measured.**
 `apps/web` declares `@onyourleft/store`, which declares `dexie`, yet `dexie` does not appear in
@@ -930,7 +1008,7 @@ this layer would catch that — which is why `packages/fit`'s clean-room posture
 separately rather than being subsumed here.
 
 **Not part of `pnpm run check:repo`**: it needs an install, the same reason `check:a11y-suite` is
-not. Its own suite is `bash scripts/check-dependency-licences.test.sh` — 45 cases, and every policy
+not. Its own suite is `bash scripts/check-dependency-licences.test.sh` — 49 cases, and every policy
 branch has a case that goes **red** as well as one that passes.
 
 ---
@@ -1201,8 +1279,8 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   inside an ADR table cell.
 - **ADRs**: `docs/adr/NNNN-kebab-case.md`, with **Status, Context, Decision, Consequences**. Numbers
   are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. **Every number from 0001 to 0015 is
-  now written and the next free number is 0016** — there is no live reservation. ⚠️ `0012` **was**
+  **and which are claimed by open issues** before you pick one. **Every number from 0001 to 0016 is
+  now written and the next free number is 0017** — there is no live reservation. ⚠️ `0012` **was**
   reserved and is no longer: [#64](https://github.com/openzigs/onyourleft/issues/64) consumed it
   with [ADR 0012](docs/adr/0012-data-licence.md), the data licence, which is the destination
   ADR 0001's *Data* deferral had no number for

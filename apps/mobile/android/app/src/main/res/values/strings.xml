@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<resources>
+    <string name="app_name">On Your Left</string>
+    <string name="title_activity_main">On Your Left</string>
+    <string name="package_name">dev.openzigs.onyourleft</string>
+    <string name="custom_url_scheme">dev.openzigs.onyourleft</string>
+    <!-- The foreground service's notification and its channel (#87). -->
+    <string name="recording_channel_name">Ride recording</string>
+    <string name="recording_channel_description">Shown while a ride is being recorded, so Android keeps the sensor connections alive.</string>
+    <string name="recording_notification_title">Recording ride</string>
+    <string name="recording_notification_text">Sensors stay connected while this is showing.</string>
+</resources>

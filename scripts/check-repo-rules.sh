@@ -17,6 +17,7 @@
 # Rules:
 #   LIC001  every source file under packages/ declares SPDX Apache-2.0
 #   LIC002  every source file under apps/ declares SPDX AGPL-3.0-or-later
+#   LIC006  every path in .spdx-exempt exists, and none of them is a glob
 #   LIC003  every package manifest declares the licence its path requires
 #   LIC004  every leaf package under packages/ or apps/ carries its own LICENSE
 #   SCOPE001 no ANT+ reference in any source tree (owner decision D2)
@@ -41,13 +42,57 @@ report() {
 
 # Source files we expect to carry an SPDX header. Data and generated formats are
 # excluded because a header cannot be added to them without corrupting them.
+#
+# ⚠️ The Kotlin, Java, Gradle and Android XML extensions are here for #87's
+# Android shell. XML is the one that needed a decision rather than a line: an
+# `AndroidManifest.xml` we hand-edit is ours and carries the header, and a
+# launcher icon that `cap add android` wrote from `@capacitor/cli`'s MIT
+# template is not ours and must not claim to be. Those are named, one exact path
+# at a time, in `.spdx-exempt` -- see LIC006, which is what stops that list
+# growing into a blanket.
+#
+# The three prunes below are the Capacitor trees that `cap sync` regenerates and
+# that Capacitor's own `.gitignore` therefore keeps out of the repository. They
+# are pruned rather than exempted because they do not exist in a clean clone: an
+# entry in `.spdx-exempt` naming an absent file is a LIC006 violation, so the
+# copied web build -- which is full of bundled `.js` and `.css` -- would make
+# this checker green in CI and red for anyone who has run a sync.
 source_files() {
   local dir="$1"
   [ -d "${dir}" ] || return 0
   find "${dir}" \
-    \( -name node_modules -o -name dist -o -name build -o -name coverage -o -name .git \) -prune -o \
+    \( -name node_modules -o -name dist -o -name build -o -name coverage -o -name .git \
+       -o -name capacitor-cordova-android-plugins \
+       -o -path '*/main/assets/public' \
+       -o -path '*/main/res/xml/config.xml' \) -prune -o \
     -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' \
-               -o -name '*.mjs' -o -name '*.cjs' -o -name '*.css' -o -name '*.sh' \) -print
+               -o -name '*.mjs' -o -name '*.cjs' -o -name '*.css' -o -name '*.sh' \
+               -o -name '*.kt' -o -name '*.kts' -o -name '*.java' \
+               -o -name '*.gradle' -o -name '*.xml' \) -print
+}
+
+# --- .spdx-exempt: generated scaffolding, named one exact path at a time ------
+#
+# `cap add android` writes about twenty files from `@capacitor/cli`'s MIT
+# template. Stamping `AGPL-3.0-or-later` on them would be wrong twice over: they
+# are not our authorship, and MIT requires its notice to travel with a
+# substantial portion of the work, which an AGPL header replacing it does not do.
+# So they are exempt -- and the exemption is a list of exact paths, with no glob
+# syntax accepted, because a glob is how an exemption for twenty files silently
+# becomes an exemption for the twenty-first that somebody should have read.
+EXEMPT_FILE="${ROOT}/.spdx-exempt"
+
+exempt_paths() {
+  [ -f "${EXEMPT_FILE}" ] || return 0
+  sed -e 's/#.*//' -e 's/[[:space:]]*$//' "${EXEMPT_FILE}" | grep -v '^$'
+}
+
+is_exempt() {
+  local relative="$1" entry
+  while IFS= read -r entry; do
+    [ "${entry}" = "${relative}" ] && return 0
+  done < <(exempt_paths)
+  return 1
 }
 
 # The SPDX identifier must appear in the file's opening comment block. We allow
@@ -60,9 +105,11 @@ spdx_of() {
 # --- LIC001 / LIC002: SPDX header matches the directory ----------------------
 
 check_headers() {
-  local dir="$1" want="$2" rule="$3" file got
+  local dir="$1" want="$2" rule="$3" file got relative
   while IFS= read -r file; do
     [ -n "${file}" ] || continue
+    relative="${file#"${ROOT}"/}"
+    is_exempt "${relative}" && continue
     got="$(spdx_of "${file}")"
     if [ -z "${got}" ]; then
       report "${rule}" "${file#"${ROOT}"/}: no SPDX-License-Identifier in the first 5 lines (expected ${want})"
@@ -74,6 +121,45 @@ check_headers() {
 
 check_headers "${ROOT}/packages" "Apache-2.0" LIC001
 check_headers "${ROOT}/apps" "AGPL-3.0-or-later" LIC002
+
+# --- LIC006: every exemption names a file that is really there ---------------
+#
+# An exemption list is the classic vacuous pass: it costs nothing to add a line
+# and nothing ever tells you the line stopped meaning something. So a stale
+# entry is a violation. Two things follow, and both are the point. A file
+# regenerated under a new name lands OUTSIDE the list and fails LIC001/LIC002
+# until somebody rules on it, which is the fail-closed direction. And a
+# speculative entry -- exempting a path before the file exists -- cannot be
+# added at all.
+#
+# A directory is refused for the same reason a glob is, and separately, because
+# `[ -e ]` would happily accept one: an entry naming `apps/mobile/android` reads
+# in review as a blanket over the tree, and whether it behaves as one is then a
+# property of how `is_exempt` happens to compare strings. Refusing it makes the
+# list mean one thing.
+check_exemptions() {
+  local entry
+  while IFS= read -r entry; do
+    case "${entry}" in
+      *'*'* | *'?'* | *'['*)
+        report LIC006 ".spdx-exempt: ${entry}: glob syntax is not accepted; name each file"
+        continue
+        ;;
+      /* | *'..'*)
+        report LIC006 ".spdx-exempt: ${entry}: entries are repository-relative paths"
+        continue
+        ;;
+    esac
+    if [ -d "${ROOT}/${entry}" ]; then
+      report LIC006 ".spdx-exempt: ${entry}: names a directory; exempt each file"
+      continue
+    fi
+    [ -e "${ROOT}/${entry}" ] || \
+      report LIC006 ".spdx-exempt: ${entry}: no such file; a stale exemption is not an exemption"
+  done < <(exempt_paths)
+}
+
+check_exemptions
 
 # --- LIC003: manifest licence field matches the directory --------------------
 

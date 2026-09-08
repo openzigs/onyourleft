@@ -32,3 +32,18 @@ COPYRIGHT
 # The workflow is line-by-line commented with provenance for its pinned action
 # SHAs and its runner label. Reflowing it costs more in review than it buys.
 .github/
+
+# The Capacitor trees `cap sync` regenerates (#87). Capacitor's own
+# `apps/mobile/android/.gitignore` already keeps all three out of the
+# repository — but Prettier reads only the ROOT `.gitignore`, not a nested one,
+# so `format:check` reports the copied web bundle's own minified CSS and JS as
+# badly formatted on any machine where a sync has run. That is a local-only red
+# with no fix a contributor can apply, which is the shape that teaches people to
+# stop running the gate. `scripts/check-repo-rules.sh` prunes the same three
+# paths, for the same reason -- three of them, not five: the two JSON files below
+# carry no source header, so only Prettier ever looked at them.
+apps/mobile/android/app/src/main/assets/public/
+apps/mobile/android/app/src/main/assets/capacitor.config.json
+apps/mobile/android/app/src/main/assets/capacitor.plugins.json
+apps/mobile/android/app/src/main/res/xml/config.xml
+apps/mobile/android/capacitor-cordova-android-plugins/
