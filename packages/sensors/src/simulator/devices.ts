@@ -19,8 +19,15 @@
 import type { SensorCapability } from '../capability';
 import type { FtmsOptions } from './ftms';
 
-/** The profiles the simulator serves, by their usual abbreviations. */
-export type SimulatedService = 'ftms' | 'cps' | 'cscs' | 'hrs';
+/**
+ * The profiles the simulator serves, by their usual abbreviations.
+ *
+ * `wahoo` is the odd one out and is deliberately here: it is a **vendor's
+ * proprietary control point**, modelled as a presence rather than a protocol so
+ * that a device can serve it *and* FTMS and #90's precedence rule has something
+ * to be observed against. `vendor-control.ts` says what it is and is not.
+ */
+export type SimulatedService = 'ftms' | 'cps' | 'cscs' | 'hrs' | 'wahoo';
 
 /**
  * What each profile lets a device declare.
@@ -35,6 +42,9 @@ export const SERVICE_CAPABILITIES: Readonly<Record<SimulatedService, readonly Se
     cps: ['power', 'cadence'],
     cscs: ['cadence'],
     hrs: ['heart-rate'],
+    // A control capability and no measurement: the proprietary characteristic
+    // makes a machine controllable and reports nothing.
+    wahoo: ['trainer-control'],
   };
 
 export interface SimulatedDeviceSpec {
@@ -104,6 +114,38 @@ export function modernTrainer(options: DeviceOptions & FtmsOptions = {}): Simula
     name: options.name ?? 'KICKR CORE 1F2A',
     services: ['ftms', 'cps', 'cscs'],
     ftms: ftmsOptionsOf(options),
+  };
+}
+
+/**
+ * A trainer that serves **both** FTMS and its manufacturer's own control point.
+ *
+ * The device #90 criterion 7 is about: two ways to set resistance on one
+ * machine, and a client that has to pick the standard one. Every FTMS option
+ * applies, because the FTMS half is a full machine.
+ */
+export function dualControlTrainer(options: DeviceOptions & FtmsOptions = {}): SimulatedDeviceSpec {
+  return {
+    id: options.id ?? 'dual-control-trainer',
+    name: options.name ?? 'KICKR 5A6B',
+    services: ['ftms', 'wahoo', 'cps'],
+    ftms: ftmsOptionsOf(options),
+  };
+}
+
+/**
+ * A pre-FTMS trainer: the proprietary control point and nothing standard.
+ *
+ * The other side of the precedence rule. This program does not implement the
+ * vendor protocol, so the honest outcome here is that the machine is not
+ * controllable by it — which is a different answer from "no control point
+ * found" and a client has to be able to say so.
+ */
+export function vendorOnlyTrainer(options: DeviceOptions = {}): SimulatedDeviceSpec {
+  return {
+    id: options.id ?? 'vendor-only-trainer',
+    name: options.name ?? 'KICKR SNAP 9C8D',
+    services: ['wahoo', 'cps'],
   };
 }
 

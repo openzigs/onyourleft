@@ -11,7 +11,13 @@
  * modern-trainer fan-out, the connection budget, the `unavailable` state.
  */
 
-import { revolutionsPerMinute, seconds, unixSeconds, watts } from '@onyourleft/domain';
+import {
+  gradePercent,
+  revolutionsPerMinute,
+  seconds,
+  unixSeconds,
+  watts,
+} from '@onyourleft/domain';
 import { describe, expect, it } from 'vitest';
 
 import { deviceId, isSensorError, SIMULATED, type MeasurementFor } from '../index';
@@ -20,9 +26,11 @@ import {
   cpsPowerMeter,
   createSimulator,
   cscsSensor,
+  dualControlTrainer,
   ftmsTrainer,
   hrsStrap,
   modernTrainer,
+  vendorOnlyTrainer,
   type SimulatedDeviceSpec,
 } from './index';
 
@@ -406,5 +414,56 @@ describe('one device, several services — the modern trainer', () => {
     expect(frames.ftms?.instantaneousPower).toBe(200);
     expect(frames.cps?.instantaneousPower).toBe(200);
     expect(frames.cscs?.crank).toBeDefined();
+  });
+});
+
+// --- A machine with two ways to set resistance (#90) -------------------------
+
+describe('a trainer that serves a proprietary control point as well as FTMS', () => {
+  it('is ONE device with one capability set, and carries both control points', async () => {
+    const { transport, bench } = createSimulator({
+      devices: [dualControlTrainer({ id: 'kickr' })],
+    });
+    const devices = await transport.knownDevices();
+
+    expect(devices).toHaveLength(1);
+    expect([...(devices[0] as (typeof devices)[number]).capabilities].sort()).toEqual(
+      ['cadence', 'power', 'speed', 'trainer-control'].sort(),
+    );
+
+    const handle = bench.device(deviceId('kickr'));
+    expect(handle.controlPoint).toBeDefined();
+    expect(handle.vendorControlPoint?.vendor).toBe('Wahoo');
+  });
+
+  it('records what is written to the proprietary control point, so an empty list means something', () => {
+    const { bench } = createSimulator({ devices: [dualControlTrainer({ id: 'kickr' })] });
+    const vendor = bench.device(deviceId('kickr')).vendorControlPoint;
+
+    // ⚠️ The point of this test. `writes()` returning `[]` is the assertion
+    // #90 criterion 7 rests on, and an empty list is exactly what a control
+    // point that recorded nothing at all would also return. So something has
+    // to put a request in and see it come back out.
+    expect(vendor?.writes()).toStrictEqual([]);
+    vendor?.write({ opCode: 'set-simulation-parameters', grade: gradePercent(6) });
+    expect(vendor?.writes()).toStrictEqual([{ opCode: 'set-simulation-parameters', grade: 6 }]);
+  });
+
+  it('declares trainer-control on a machine that has ONLY the proprietary one', async () => {
+    // The device this program cannot drive. It still says it is controllable,
+    // because it is — just not by anything written here. Claiming otherwise
+    // would make "no control point found" and "a control point nobody
+    // implemented" the same sentence.
+    const { transport } = createSimulator({ devices: [vendorOnlyTrainer({ id: 'snap' })] });
+    const [device] = await transport.knownDevices();
+
+    expect(device?.capabilities.has('trainer-control')).toBe(true);
+    // And no FTMS, so nothing on the bench answers a standard control point.
+    expect(device?.capabilities.has('speed')).toBe(false);
+  });
+
+  it('has no proprietary control point on a plain FTMS trainer', () => {
+    const { bench } = createSimulator({ devices: [ftmsTrainer({ id: 'kickr' })] });
+    expect(bench.device(deviceId('kickr')).vendorControlPoint).toBeUndefined();
   });
 });

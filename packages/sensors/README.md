@@ -26,6 +26,7 @@ is `navigator`. It is the transport boundary (#40); nothing it declares escapes 
 | The Web Bluetooth adapter | #40 | `web-bluetooth/`, its own directory with its own place in `eslint.config.js` — [below](#the-web-bluetooth-adapter) |
 | Heart Rate, CSC and Cycling Power clients | #41, #42 | `protocol/`, its own directory on the same terms, exported as `@onyourleft/sensors/protocol` — [below](#the-protocol-clients) |
 | The FTMS client and trainer control | #43 | `protocol/`, split into `fitness-machine.ts` (reads) and `fitness-machine-control.ts` (writes) — [below](#trainer-control) |
+| Driving simulation mode from a route | #90 | `protocol/simulation-writer.ts` and `protocol/trainer-control-choice.ts` — [below](#driving-simulation-mode-from-a-route-90). The gradient itself is `@onyourleft/domain` |
 | The device simulator | #44 | `src/simulator/`, exported as `@onyourleft/sensors/simulator` — [below](#the-device-simulator) |
 | The transport conformance suite | #44 | `src/simulator/conformance.ts`, exported as `@onyourleft/sensors/conformance` |
 | CoreBluetooth and Android BLE | #15 | the Capacitor plugin, behind the same interface |
@@ -318,6 +319,8 @@ reproducible. `advance` takes a `Seconds`, not a number, and refuses a fraction.
 | `cscsSensor()` | Cycling Speed and Cadence | `cadence` | wheel (`uint32`) and crank (`uint16`) counters both modelled; **not** `speed`, because that needs the athlete's wheel circumference — `capability.ts` states the rule |
 | `ftmsTrainer()` | FTMS | `power`, `cadence`, `speed`, `trainer-control` | Indoor Bike Data fanned out with **one instant**; Control Point; Fitness Machine Status. Since #43 it also answers Set Target Resistance Level, Set Indoor Bike Simulation Parameters and Stop or Pause, and reports its supported ranges on the bench handle |
 | `modernTrainer()` | FTMS + Cycling Power + CSC | all four | **one `deviceId`**, one capability set; power arrives **once** per cycle although two services carry it |
+| `dualControlTrainer()` | FTMS + **a vendor's own control point** + Cycling Power | all four | #90's precedence case: two ways to set resistance on one machine. `bench.device(id).vendorControlPoint` is the proprietary one, and it staying empty is the assertion |
+| `vendorOnlyTrainer()` | the vendor's control point + Cycling Power | `power`, `cadence`, `trainer-control` | a pre-FTMS trainer. Declares itself controllable, because it is — just not by anything written here |
 
 The modern trainer is the case that matters most. It is #39's design decision — capabilities are a
 set on one device — made concrete enough to break an adapter that gets it wrong: a `SensorDevice`
@@ -632,6 +635,21 @@ matched the issue text.**
 | Fitness Machine Control Point | `0x2AD9` |
 | Fitness Machine Status | `0x2ADA` |
 
+#90 added one more, and it is the only UUID in this package that was **not** read
+from a primary source:
+
+| Name | UUID | Provenance |
+|---|---|---|
+| Wahoo trainer control point (inside Cycling Power `0x1818`) | `a026e005-0a7d-4ab3-97fa-f1500f9feb8b` | ⚠️ **secondary only** — community documentation and open-source implementations, read and never copied. Wahoo publishes no specification |
+
+⚠️ That is tolerable **for this value and for nothing else here**, because of
+where it is used: it is only ever *recognised*, never written to. The whole
+failure mode of a wrong transcription is that a proprietary control point goes
+unnoticed and `chooseTrainerControl` answers `none` instead of
+`vendor-not-implemented` — a less specific message for a rider, and nothing
+reaching a brake either way. `trainer-control-choice.ts` states the test that
+value has to pass.
+
 ⚠️ **#43's issue body names `0x2AD3` for Indoor Bike Data and is wrong** — `0x2AD3` is Training
 Status. Its own revision block corrects it. `protocol-registry.test.ts` pins both the correct value
 and the fact that it is *not* the wrong one, because a client subscribed to Training Status pairs,
@@ -796,6 +814,89 @@ product choice: a rider whose ERG target has not moved in five seconds has alrea
   unscaled and the pedal power balance and its reference are surfaced beside it. There is no field
   that distinguishes a meter that doubles from one that does not, so guessing would halve the power
   of the riders whose meter does not.
+
+## Driving simulation mode from a route (#90)
+
+A route's gradient, onto a trainer's brake, at about 1 Hz. It is **three pieces
+in two packages**, and the split is the design rather than an accident of where
+the files landed:
+
+| Piece | Where | What it decides |
+|---|---|---|
+| `createSimulationDriver` | **`@onyourleft/domain`** | *what* gradient and *when* — where the rider is on the route, the grade there, whether it has moved enough to be worth a write |
+| `createSimulationWriter` | `protocol/simulation-writer.ts` | how to get it onto a control point that runs one procedure at a time, without a backlog |
+| `chooseTrainerControl` | `protocol/trainer-control-choice.ts` | which control point, on a machine that offers more than one |
+
+```ts
+import { createSimulationDriver } from '@onyourleft/domain';
+import { createSimulationWriter } from '@onyourleft/sensors/protocol';
+
+const driver = createSimulationDriver({ profile });          // a RouteProfile, #89
+const writer = createSimulationWriter(trainer, { onError: report });
+
+await trainer.requestControl();                              // FIRST. Always.
+// ...once per position update, from the ride loop's own clock:
+const setpoint = driver.sample({ at, distance });             // time is a PARAMETER
+if (setpoint !== undefined) writer.offer({ grade: setpoint.grade });
+```
+
+**The gradient lives in `packages/domain` and not here**, for the reason
+`route/profile.ts` gives: #90's hill and #91's drawn hill are the same hill, and
+a second gradient lookup beside the control point would be a second source of
+truth for it. It also means the driver is written under the strictest rule in
+the program — no platform API at all, so **time arrives as a parameter** and
+nothing reads a clock — which is what makes "at a +6 % section the trainer is
+told +6 %" a test rather than a stopwatch exercise.
+
+### Rate limited in one place, bounded in another
+
+Two different problems, deliberately not solved by one mechanism:
+
+- **The driver rate-limits**, to one setpoint a second, with a 0.1 % deadband
+  under it. That is about not spending a control point procedure to command a
+  resistance nobody could feel. A long flat therefore produces **no writes at
+  all**, which is correct: FTMS simulation parameters persist on the machine
+  until they are changed. Anything that invalidates that — a reconnection, a
+  Reset, control taken and given back — needs `driver.restart()`.
+- **The writer coalesces**, keeping at most one write in flight and at most one
+  waiting. The waiting slot holds the **newest** offer and an arriving one
+  *replaces* its occupant.
+
+⚠️ **Coalesced, not throttled, and the direction matters.** Refusing new offers
+while one is in flight would also bound the queue — and it would leave the
+trainer simulating the *oldest* hill in the backlog until it drained. Keeping
+the newest leaves the machine at most one write behind the rider however slow it
+is, and a superseded gradient is one nobody needed: it described a metre of road
+the rider has already left. `simulation-writer.ts` states this where the slot is
+declared, and `simulation-writer.test.ts` offers a thousand gradients into a
+machine that never answers and watches the depth stay at two.
+
+### A standard control point wins outright
+
+`chooseTrainerControl` takes everything a link resolved — services and
+characteristics together — and answers one of three things:
+
+| Answer | Means |
+|---|---|
+| `fitness-machine` | drive `0x2AD9`. `vendorAlsoPresent` says whether a proprietary one was passed over |
+| `vendor-not-implemented` | there is a control point here and **this program will not use it** |
+| `none` | nothing controllable |
+
+The third arm is the one worth having. *"This trainer records fine but cannot be
+controlled"* is a far more useful sentence than *"no trainer control found"*,
+and it is honest: the reason is not that the characteristic is missing but that
+`fitness-machine-control.ts` §"What is deliberately not implemented" declines to
+write an unverifiable scaling to a brake.
+
+### What #90 leaves open
+
+- **Real hardware.** Everything above is asserted against the #44 simulator,
+  which is what #90 asks for, and nobody in the loop has a trainer. The
+  gradient-to-resistance *feel*, and the trainer's own smoothing of a stepped
+  gradient, are unverified.
+- **Backgrounding.** #90 hypothesises that a phone backgrounding the tab is what
+  kills a simulated ride. Web Bluetooth has no background operation at all
+  (CLAUDE.md §8), so there is nothing to test here until the native shell (#15).
 
 ## Running it
 

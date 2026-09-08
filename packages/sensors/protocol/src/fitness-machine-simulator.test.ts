@@ -13,14 +13,11 @@
  * requests**, not as octets — `src/simulator/README` and `../README.md` both
  * bar GATT payload from that directory, because the encoder for a
  * characteristic is the mirror of the decoder and belongs beside it. So
- * something has to turn one into the other, and that something is here.
- *
- * ⚠️ **It is written from the specification tables with literal offsets**, and
- * deliberately does not call {@link encodeControlRequest} or
- * {@link decodeIndoorBikeData} to do its half. Two implementations that share
- * an arithmetic mistake cancel it out invisibly, which is exactly the failure
- * `testing.ts` exists to avoid; a bridge that round-tripped through the client's
- * own codec would assert that the codec agrees with itself.
+ * something has to turn one into the other, and that something is
+ * `simulator-bridge.ts`, which moved out of this file in #90 when a second
+ * suite needed it. It is written from the specification tables with literal
+ * offsets and deliberately does not call this package's own codec; its header
+ * says why.
  *
  * ## What this proves that the scripted machine in
  * `fitness-machine-control.test.ts` cannot
@@ -33,227 +30,17 @@
  * trainer held something else fails here and cannot fail against a fake.
  */
 
-import {
-  gradePercent,
-  metresPerSecond,
-  resistanceLevel,
-  seconds,
-  watts,
-  type Watts,
-} from '@onyourleft/domain';
+import { gradePercent, resistanceLevel, seconds, watts } from '@onyourleft/domain';
 import { describe, expect, it } from 'vitest';
 
-import { deviceId, type MeasurementFor } from '../../src/index';
-import {
-  createSimulator,
-  ftmsTrainer,
-  FITNESS_MACHINE_STATUS_OP_CODE,
-  FTMS_CONTROL_OP_CODE,
-  FTMS_RESULT_CODE,
-  type FitnessMachineStatus,
-  type FtmsControlRequest,
-  type FtmsControlResponse,
-  type IndoorBikeDataFrame,
-  type SimulatorBench,
-} from '../../src/simulator/index';
-import type { Unsubscribe } from '../../src/subscription';
+import { deviceId } from '../../src/index';
+import type { FtmsControlResponse } from '../../src/simulator/index';
 
-import {
-  decodeIndoorBikeData,
-  decodeSupportedPowerRange,
-  decodeSupportedResistanceLevelRange,
-} from './fitness-machine';
-import {
-  createTrainerControl,
-  encodeControlRequest,
-  type FitnessMachineChannel,
-  type TrainerControl,
-} from './fitness-machine-control';
+import { decodeIndoorBikeData } from './fitness-machine';
+import { encodeControlRequest } from './fitness-machine-control';
+import { connectedTrainer, frameToOctets, requestFromOctets } from './simulator-bridge';
 
 const TRAINER = deviceId('kickr');
-
-// --- The bridge: the simulator's typed surface, as octets --------------------
-
-const viewOf = (bytes: readonly number[]): DataView => {
-  const array = Uint8Array.from(bytes);
-  return new DataView(array.buffer, array.byteOffset, array.byteLength);
-};
-
-const int16 = (raw: number): [number, number] => {
-  const unsigned = raw < 0 ? raw + 0x1_0000 : raw;
-  return [unsigned & 0xff, (unsigned >>> 8) & 0xff];
-};
-
-const readInt16 = (bytes: Uint8Array, at: number): number => {
-  const low = bytes[at] ?? 0;
-  const high = bytes[at + 1] ?? 0;
-  const unsigned = low | (high << 8);
-  return unsigned > 0x7fff ? unsigned - 0x1_0000 : unsigned;
-};
-
-/** Octets in, one of the simulator's typed requests out. FTMS Tables 4.15 and 4.20. */
-function requestFromOctets(bytes: Uint8Array): FtmsControlRequest {
-  switch (bytes[0]) {
-    case 0x00:
-      return { opCode: 'request-control' };
-    case 0x01:
-      return { opCode: 'reset' };
-    case 0x04:
-      return { opCode: 'set-target-resistance', level: resistanceLevel((bytes[1] ?? 0) / 10) };
-    case 0x05:
-      return { opCode: 'set-target-power', target: watts(readInt16(bytes, 1)) };
-    case 0x08:
-      return { opCode: 'stop-or-pause', stop: bytes[1] === 0x01 };
-    case 0x11:
-      return {
-        opCode: 'set-simulation-parameters',
-        parameters: {
-          windSpeed: metresPerSecond(readInt16(bytes, 1) / 1000),
-          grade: gradePercent(readInt16(bytes, 3) / 100),
-          rollingResistanceCoefficient: (bytes[5] ?? 0) / 10_000,
-          windResistanceCoefficient: (bytes[6] ?? 0) / 100,
-        },
-      };
-    default:
-      throw new Error(`the bridge does not encode op code ${String(bytes[0])}`);
-  }
-}
-
-/** FTMS Table 4.23: `0x80`, the request op code, the result code. */
-const responseToOctets = (response: FtmsControlResponse): DataView =>
-  viewOf([0x80, FTMS_CONTROL_OP_CODE[response.requestOpCode], FTMS_RESULT_CODE[response.result]]);
-
-/** FTMS Table 4.26. */
-function statusToOctets(status: FitnessMachineStatus): DataView {
-  const op = FITNESS_MACHINE_STATUS_OP_CODE[status.kind];
-  switch (status.kind) {
-    case 'target-power-changed':
-      return viewOf([op, ...int16(status.target)]);
-    case 'target-resistance-changed':
-      return viewOf([op, Math.round(status.level * 10)]);
-    default:
-      return viewOf([op]);
-  }
-}
-
-/**
- * GSS v9 §3.124, written out with literal offsets.
- *
- * ⚠️ Bit 0 is **More Data**: speed present means the bit is **clear**.
- */
-function frameToOctets(frame: IndoorBikeDataFrame): DataView {
-  const octets: number[] = [];
-  let flags = 0;
-  if (frame.instantaneousSpeed === undefined) {
-    flags |= 1 << 0;
-  } else {
-    octets.push(...int16(Math.round(frame.instantaneousSpeed * 3.6 * 100)));
-  }
-  if (frame.instantaneousCadence !== undefined) {
-    flags |= 1 << 2;
-    octets.push(...int16(Math.round(frame.instantaneousCadence * 2)));
-  }
-  if (frame.totalDistance !== undefined) {
-    flags |= 1 << 4;
-    const metres = Math.round(frame.totalDistance);
-    octets.push(metres & 0xff, (metres >>> 8) & 0xff, (metres >>> 16) & 0xff);
-  }
-  if (frame.instantaneousPower !== undefined) {
-    flags |= 1 << 6;
-    octets.push(...int16(Math.round(frame.instantaneousPower)));
-  }
-  return viewOf([...int16(flags), ...octets]);
-}
-
-interface Bench {
-  readonly bench: SimulatorBench;
-  readonly control: TrainerControl;
-  readonly powers: MeasurementFor<'power'>[];
-  /** A property rather than a method, so it survives being destructured. */
-  readonly targetPowerOnTheTrainer: () => Watts | undefined;
-}
-
-/**
- * A connected trainer, its control point bridged to octets, and a client built
- * from the ranges **the trainer itself reported**.
- *
- * `reacquireControl` defaults to `false` here so that the gap after a lost
- * permission is observable at all; the re-acquiring path has its own test that
- * turns it on.
- */
-
-async function connectedTrainer(
-  options: Parameters<typeof ftmsTrainer>[0] = {},
-  reacquireControl = false,
-): Promise<Bench> {
-  const { transport, bench } = createSimulator({
-    devices: [ftmsTrainer({ id: 'kickr', ...options })],
-  });
-  await transport.connect(TRAINER);
-  const powers: MeasurementFor<'power'>[] = [];
-  await transport.subscribe(TRAINER, 'power', (measurement) => powers.push(measurement));
-
-  const handle = bench.device(TRAINER);
-  const controlPoint = handle.controlPoint;
-  if (controlPoint === undefined) {
-    throw new Error('the trainer serves no control point');
-  }
-  const ranges = handle.supportedRanges;
-  if (ranges === undefined) {
-    throw new Error('the trainer reports no supported ranges');
-  }
-
-  // Read the two range characteristics the way a client does: as octets, through
-  // this package's own decoders. A range constructed in the test would be the
-  // hard-coded assumption #43's criterion forbids.
-  const powerRange = decodeSupportedPowerRange(
-    viewOf([
-      ...int16(ranges.minTargetPower),
-      ...int16(ranges.maxTargetPower),
-      ...int16(ranges.powerIncrement),
-    ]),
-  );
-  const resistanceRange = decodeSupportedResistanceLevelRange(
-    viewOf([
-      ...int16(Math.round(ranges.minResistanceLevel * 10)),
-      ...int16(Math.round(ranges.maxResistanceLevel * 10)),
-      ...int16(Math.round(ranges.resistanceIncrement * 10)),
-    ]),
-  );
-
-  const channel: FitnessMachineChannel = {
-    enableControlPointIndications: () => {
-      controlPoint.enableIndications();
-      return Promise.resolve();
-    },
-    onControlPointIndication(listener): Unsubscribe {
-      return controlPoint.onResponse((response) => listener(responseToOctets(response)));
-    },
-    onStatus(listener): Unsubscribe {
-      return controlPoint.onStatus((status) => listener(statusToOctets(status)));
-    },
-    writeControlPoint(value): Promise<void> {
-      const outcome = controlPoint.write(requestFromOctets(value));
-      if (outcome.kind === 'att-error') {
-        return Promise.reject(new Error(outcome.error));
-      }
-      // The simulator delivers the indication on its next tick, which is also
-      // the tick that notifies Indoor Bike Data. Advancing here rather than in
-      // the test is what makes the indication arrive *during* the write — the
-      // ordering a real stack is free to choose, and the one that catches a
-      // client subscribing after its write.
-      bench.advance(seconds(1));
-      return Promise.resolve();
-    },
-  };
-
-  return {
-    bench,
-    control: createTrainerControl(channel, { powerRange, resistanceRange, reacquireControl }),
-    powers,
-    targetPowerOnTheTrainer: () => bench.device(TRAINER).inspect().ftms?.targetPower,
-  };
-}
 
 // --- ERG, end to end ---------------------------------------------------------
 

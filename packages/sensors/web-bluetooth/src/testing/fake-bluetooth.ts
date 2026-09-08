@@ -91,6 +91,19 @@ export interface FakeServiceSpec {
    * descriptor-shaped characteristic is readable has to survive.
    */
   readonly readValues?: Readonly<Record<string, Uint8Array>>;
+  /**
+   * Which subscription property each characteristic advertises.
+   *
+   * Keyed like {@link readValues}, and defaulting to `notify` — which is what
+   * every measurement characteristic in this program has. The one that is not
+   * is the **Fitness Machine Control Point (`0x2AD9`)**, whose properties are
+   * Write and *Indicate* (FTMS 1.0 §3.4), and telling the two apart is the
+   * whole point of modelling this: `startNotifications()` is one call for both
+   * and the browser picks the descriptor value from the property, so a fake
+   * that did not model the property could not show which value was written.
+   * See {@link FakeDeviceHandle.clientConfiguration}.
+   */
+  readonly properties?: Readonly<Record<string, 'notify' | 'indicate'>>;
 }
 
 export interface FakeDeviceSpec {
@@ -146,6 +159,29 @@ export interface FakeDeviceHandle {
   /** How many `gattserverdisconnected` listeners are attached right now. */
   readonly disconnectListeners: number;
   notifying(service: GattUuid | number, characteristic: GattUuid | number): boolean;
+  /**
+   * The Client Characteristic Configuration value the browser wrote, or
+   * `undefined` if this characteristic was never subscribed.
+   *
+   * `0x0002` for indications, `0x0001` for notifications — Core Specification
+   * Supplement, Part B §1.1, and Web Bluetooth §`startNotifications`, which
+   * says the descriptor is written with the indicate bit when the
+   * characteristic has the Indicate property and the notify bit otherwise.
+   *
+   * ⚠️ **This is a model of the browser, not an observation of one.** Script
+   * cannot read or write a CCCD through Web Bluetooth — `getDescriptor` is
+   * specified to refuse `0x2902` outright — so the descriptor value is
+   * genuinely unobservable in a real browser, and the only way for a test to
+   * hold #90's second criterion is to model the rule the browser follows and
+   * assert on the characteristic that goes into it. What that catches is the
+   * failure that matters: a client that subscribes to the wrong characteristic,
+   * or that never subscribes the control point at all, which is how a trainer
+   * that accepts writes and never answers is produced.
+   */
+  clientConfiguration(
+    service: GattUuid | number,
+    characteristic: GattUuid | number,
+  ): number | undefined;
   /** Every payload written to a characteristic, in order, however it was written. */
   writes(service: GattUuid | number, characteristic: GattUuid | number): readonly Uint8Array[];
   /**
@@ -279,6 +315,15 @@ export function domError(name: string, message = name): Error {
   return error;
 }
 
+/**
+ * Client Characteristic Configuration bits — Core Specification Supplement,
+ * Part B §1.1. `0x0001` enables notifications, `0x0002` enables indications;
+ * an indication is acknowledged at the ATT layer and a notification is not,
+ * which is why the Fitness Machine Control Point uses the second.
+ */
+const CCCD_NOTIFICATIONS = 0x0001;
+const CCCD_INDICATIONS = 0x0002;
+
 interface CharacteristicState {
   readonly uuid: GattUuid;
   readonly listeners: Set<() => void>;
@@ -288,6 +333,10 @@ interface CharacteristicState {
   value: DataView | undefined;
   buffer: ArrayBuffer | undefined;
   notifying: boolean;
+  /** `indicate` or `notify`; decides the CCCD value the browser writes. */
+  readonly property: 'notify' | 'indicate';
+  /** The last CCCD value written, or `undefined` before the first subscribe. */
+  clientConfiguration: number | undefined;
 }
 
 interface DeviceState {
@@ -405,6 +454,10 @@ export function createFakeBluetooth(options: FakeBluetoothOptions): FakeBluetoot
       for (const [key, bytes] of Object.entries(service.readValues ?? {})) {
         readable.set(canonicalUuid(key), bytes);
       }
+      const properties = new Map<GattUuid, 'notify' | 'indicate'>();
+      for (const [key, property] of Object.entries(service.properties ?? {})) {
+        properties.set(canonicalUuid(key), property);
+      }
       for (const raw of service.characteristics) {
         const uuid = canonicalUuid(raw);
         const characteristic: CharacteristicState = {
@@ -414,6 +467,8 @@ export function createFakeBluetooth(options: FakeBluetoothOptions): FakeBluetoot
           value: undefined,
           buffer: undefined,
           notifying: false,
+          property: properties.get(uuid) ?? 'notify',
+          clientConfiguration: undefined,
           port: undefined as unknown as GattCharacteristicPort,
         };
         // The same port object for the life of the fake, across every
@@ -430,6 +485,13 @@ export function createFakeBluetooth(options: FakeBluetoothOptions): FakeBluetoot
               return perform(spec.id, 'startNotifications', uuid, () => {
                 requireLink(state);
                 characteristic.notifying = true;
+                // Web Bluetooth has no separate call for indications: the
+                // browser reads the characteristic's properties and writes the
+                // CCCD itself. Modelled here so that "the control point is
+                // subscribed with INDICATIONS" is an assertion rather than a
+                // comment — see `FakeDeviceHandle.clientConfiguration`.
+                characteristic.clientConfiguration =
+                  characteristic.property === 'indicate' ? CCCD_INDICATIONS : CCCD_NOTIFICATIONS;
               });
             },
             readValue() {
@@ -449,6 +511,9 @@ export function createFakeBluetooth(options: FakeBluetoothOptions): FakeBluetoot
               return perform(spec.id, 'stopNotifications', uuid, () => {
                 requireLink(state);
                 characteristic.notifying = false;
+                // The browser clears the descriptor. `undefined` rather than
+                // zero, so "never subscribed" and "unsubscribed" stay apart.
+                characteristic.clientConfiguration = undefined;
               });
             },
             writeValueWithResponse(value: BufferSource) {
@@ -793,6 +858,9 @@ export function createFakeBluetooth(options: FakeBluetoothOptions): FakeBluetoot
         },
         notifying(service, characteristic) {
           return characteristicState(state, service, characteristic).notifying;
+        },
+        clientConfiguration(service, characteristic) {
+          return characteristicState(state, service, characteristic).clientConfiguration;
         },
         writes(service, characteristic) {
           return characteristicState(state, service, characteristic).writes;
