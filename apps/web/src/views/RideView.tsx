@@ -42,7 +42,7 @@
  * component rendering the two buttons in the right order.
  */
 
-import type { JSX } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 
 import type { Watts } from '@onyourleft/domain';
 
@@ -51,6 +51,9 @@ import { formatDuration } from '../format';
 import { StatusMessage } from '../design/StatusMessage';
 import { MetricGrid } from '../ride/MetricGrid';
 import { TrainerPanel } from '../ride/TrainerPanel';
+import { WorkoutPanel } from '../ride/WorkoutPanel';
+import type { WorkoutPort } from '../workouts/store-port';
+import type { AnalysisPort } from '../analysis/store-port';
 import type { PairingRole, RideController, RideSnapshot } from '../ride/controller';
 import { useRideSnapshot } from '../ride/useRideController';
 import { hrefFor, routeById } from '../shell/routes';
@@ -64,6 +67,30 @@ export interface RideViewProps {
    * work, which is #48's first criterion applied to this route.
    */
   readonly controller: RideController | undefined;
+  /**
+   * The saved-workout library (#14), or `undefined` where this browser has no
+   * local store.
+   *
+   * Optional like every other port in this shell, and for the same reason: the
+   * accessibility suite renders every route with none of them.
+   */
+  readonly workouts?: WorkoutPort | undefined;
+  /**
+   * Where the rider's threshold power is read from (#14).
+   *
+   * ⚠️ **The analysis port, deliberately, and not a widened workout one.**
+   * `analysis/store-port.ts` says `getAthlete` is *"here and nowhere else in
+   * `apps/web`"*, and a `WorkoutStore` that grew an athlete read to serve this
+   * screen would be the second place — reachable from the screen that writes
+   * targets to a trainer, which is the last one that should be able to read an
+   * athlete row.
+   *
+   * ⚠️ And a threshold that is absent stays absent. A workout's targets are
+   * shares of it, so a substituted default would put a made-up number on a
+   * trainer; `analysis/thresholds.ts` is the single place in this program that
+   * supplies one, and this is not it.
+   */
+  readonly analysis?: AnalysisPort | undefined;
 }
 
 /** The pairing buttons, in the order the revision block asks for. */
@@ -74,7 +101,7 @@ const PAIRING_STEPS: readonly { readonly role: PairingRole; readonly label: stri
   { role: 'speed-cadence', label: 'Pair a speed or cadence sensor' },
 ];
 
-export function RideView({ controller }: RideViewProps): JSX.Element {
+export function RideView({ controller, workouts, analysis }: RideViewProps): JSX.Element {
   if (controller === undefined) {
     return (
       <>
@@ -87,11 +114,20 @@ export function RideView({ controller }: RideViewProps): JSX.Element {
       </>
     );
   }
-  return <LiveRide controller={controller} />;
+  return <LiveRide controller={controller} workouts={workouts} analysis={analysis} />;
 }
 
-function LiveRide({ controller }: { readonly controller: RideController }): JSX.Element {
+function LiveRide({
+  controller,
+  workouts,
+  analysis,
+}: {
+  readonly controller: RideController;
+  readonly workouts: WorkoutPort | undefined;
+  readonly analysis: AnalysisPort | undefined;
+}): JSX.Element {
   const snapshot = useRideSnapshot(controller);
+  const thresholdPower = useThresholdPower(analysis);
 
   return (
     <>
@@ -118,11 +154,63 @@ function LiveRide({ controller }: { readonly controller: RideController }): JSX.
           void controller.clearTargetPower();
         }}
       />
+      <WorkoutPanel
+        trainer={snapshot.trainer}
+        workout={snapshot.workout}
+        port={workouts}
+        thresholdPower={thresholdPower}
+        onStart={(record) => {
+          // ⚠️ Guarded rather than defaulted. The panel does not render a Start
+          // control without a threshold, so this is unreachable through the UI
+          // — and a `?? watts(0)` here would make every target in the workout
+          // zero watts, which is a silent wrong number reaching a trainer
+          // rather than a refusal a rider can see.
+          if (thresholdPower === undefined) {
+            return;
+          }
+          controller.startWorkout(record, thresholdPower);
+        }}
+        onEnd={() => {
+          controller.endWorkout();
+        }}
+      />
 
       <h2>Sensors</h2>
       <SensorList controller={controller} snapshot={snapshot} />
     </>
   );
+}
+
+/**
+ * Read the athlete's threshold once, for the workout panel.
+ *
+ * `undefined` while it is being read and `undefined` when it is not set, and
+ * the two are deliberately the same value: the panel's answer to both is the
+ * same sentence, and a screen that distinguished "loading" from "not set" would
+ * be offering a rider a state they cannot act on.
+ */
+function useThresholdPower(analysis: AnalysisPort | undefined): Watts | undefined {
+  const [threshold, setThreshold] = useState<Watts | undefined>(undefined);
+  useEffect(() => {
+    if (analysis === undefined) {
+      return;
+    }
+    let live = true;
+    void analysis.store
+      .getAthlete(analysis.athleteId)
+      .then((athlete) => {
+        if (live) setThreshold(athlete?.thresholdPower);
+      })
+      .catch(() => {
+        // A store that cannot be read leaves the threshold absent, which the
+        // panel already explains. There is nothing else this screen can say
+        // that a rider could act on.
+      });
+    return () => {
+      live = false;
+    };
+  }, [analysis]);
+  return threshold;
 }
 
 function RideControls({

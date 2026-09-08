@@ -48,7 +48,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         once-per-application protocol registration, and the one
                         file that names MapLibre
     src/recording/      the recorder: engine + durable checkpoints + recovery (#46)
-    src/ride/           the live ride screen: its state machine, panels and trainer wiring (#49)
+    src/ride/           the live ride screen: its state machine, panels and trainer
+                        wiring (#49), and since #14 the workout lifecycle — one
+                        clock for the ride and the workout, and the panel that
+                        will not offer a control the trainer would refuse
     src/routes/         saved routes (#73) — the store port and its read budget,
                         the edit decision and its concurrency token, and what a
                         shared copy of a route contains
@@ -1522,6 +1525,10 @@ top of an issue **supersedes its body**.
 | Why a lost trainer link does not close the ERG writer, and what closing it cost | `apps/web/src/workout/session.ts` §`linkLost` |
 | Why the session assumes the trainer is already holding something when a workout starts | `apps/web/src/workout/session.ts` §`released` |
 | What the #44 simulator proves about the control loop that neither package can prove alone | `apps/web/src/workout/session.test.ts` |
+| Why the workout's clock is the ride's clock, and what a second one would drift into | `apps/web/src/ride/controller.ts` §`rideSeconds` |
+| Why a workout is anchored on `now()` rather than on the last tick | `apps/web/src/ride/controller.ts` §`startWorkout` |
+| Why the ERG trend is judged at the caller's clock and not at elapsed time | `packages/domain/src/workout/player.ts` §"Judged at `now`" |
+| Why the ride screen will not start a workout before the trainer grants control | `apps/web/src/ride/WorkoutPanel.tsx`, `apps/web/src/ride/controller.ts` §`startWorkout` |
 | Where a typed percentage becomes a share of threshold, and why that has exactly one home | `apps/web/src/workouts/build.ts` §`percentToShare` |
 | Why a workout row quotes no watts, no load and no score | `apps/web/src/workouts/library.ts` §`WorkoutRow` |
 | Why a workout's shape is a sentence rather than a chart | `apps/web/src/workouts/library.ts` §`WorkoutRow.shape` |

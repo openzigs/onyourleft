@@ -226,10 +226,24 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
         return snapshot();
       }
 
+      // ⚠️ Judged at `now`, NOT at `elapsed`, and the difference is the whole
+      // of whether the spiral rule works for a caller whose clock does not
+      // start at zero.
+      //
+      // `assessErgCadence` filters its window against the instant it is given,
+      // and the readings are stamped by the CALLER — so they are on the
+      // caller's clock. `elapsed` is an offset from the workout's start, which
+      // is the same number only when the workout began at zero. A ride screen
+      // that stamps readings with a wall clock and a player judging at
+      // `elapsed` compare an epoch against a small offset: every reading fails
+      // `reading.at <= now`, the window is always empty, and the rule silently
+      // never fires. Found by wiring this into `apps/web/src/ride`, where the
+      // clock is the ride's; every test here started at zero and could not see
+      // it.
       const verdict =
         rider?.cadence === undefined
           ? ({ kind: 'holding' } as const)
-          : assessErgCadence(rider.cadence, seconds(elapsed));
+          : assessErgCadence(rider.cadence, now);
 
       if (verdict.kind === 'stalled') {
         pending = undefined;

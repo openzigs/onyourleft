@@ -178,7 +178,13 @@ export interface AppShellProps {
 function viewFor(match: RouteMatch, props: AppShellProps): JSX.Element {
   switch (match.route.id) {
     case 'ride':
-      return <RideView controller={props.rideController} />;
+      return (
+        <RideView
+          controller={props.rideController}
+          workouts={props.workouts}
+          analysis={props.analysis}
+        />
+      );
     case 'activities':
       return <ActivitiesView library={props.library} />;
     case 'activity-detail':

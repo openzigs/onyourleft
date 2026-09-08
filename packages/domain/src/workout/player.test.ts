@@ -264,6 +264,24 @@ describe('the ERG spiral is broken by easing the target, not by ending the inter
     expect(state.pending).toBeUndefined();
   });
 
+  it('reads the cadence history on the clock it was given, not on elapsed time', () => {
+    // ⚠️ The defect this test was written to find, and every other case in
+    // this file was blind to it: they all start at zero, where `now` and
+    // `elapsed` are the same number. A caller whose clock is a wall clock — the
+    // ride screen — stamps readings in the thousands while `elapsed` is in the
+    // tens, so a player judging at `elapsed` finds an empty window on every
+    // tick and the spiral rule never fires at all.
+    const subject = player();
+    const startedAt = 1_700_000_000;
+    subject.start(seconds(startedAt));
+    const collapsing: readonly CadenceReading[] = [
+      { at: seconds(startedAt + 4), cadence: revolutionsPerMinute(70) },
+      { at: seconds(startedAt + 10), cadence: revolutionsPerMinute(45) },
+    ];
+    const state = subject.tick(seconds(startedAt + 10), { cadence: collapsing });
+    expect(state.intent).toMatchObject({ eased: true });
+  });
+
   it('runs no spiral check at all when the trainer reports no cadence', () => {
     // A trainer with no cadence is a trainer, not a stalled rider. Treating
     // silence as a fault would ease every target on such a machine forever.
