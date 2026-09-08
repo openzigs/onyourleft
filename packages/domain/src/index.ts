@@ -362,15 +362,61 @@ export type {
   SegmentSport,
   SegmentVisibility,
 } from './segment/segment';
+// The matcher (#66), the effort it produces, and the two decisions #66 says
+// must not be got wrong: visibility is a THREE-state — an effort starting
+// inside a privacy zone is the athlete's own personal best and never a
+// leaderboard row — and the attributes a ranking buckets by freeze when the
+// effort is made, so editing a profile cannot rewrite last year's board.
+export type {
+  AbandonedReason,
+  AbandonedTraversal,
+  IndexedSegment,
+  MatchedEffort,
+  RideTrace,
+  SegmentMatch,
+  StageCounts,
+} from './segment/match';
+export {
+  GAP_SECONDS,
+  indexCorpus,
+  matchRide,
+  medianSampleSpacing,
+  SIMILARITY_METRES,
+} from './segment/match';
+export type {
+  EffortContext,
+  EffortVisibility,
+  FrozenAttributes,
+  PrivacyCircle,
+  SegmentEffort,
+} from './segment/effort';
+export {
+  countsOnSharedBoard,
+  countsTowardPersonalBest,
+  createEffort,
+  effortId,
+  effortVisibility,
+  touchesPrivacyZone,
+} from './segment/effort';
+export {
+  COMPARISON_STEP_METRES,
+  densify,
+  directedHausdorff,
+  discreteFrechet,
+} from './segment/frechet';
+export { CELL_DEGREES, cellCover, cellOf, coversIntersect, type CellId } from './segment/cells';
+
 export {
   createSegment,
   DEFAULT_BEARING_TOLERANCE_DEGREES,
   DEFAULT_ENDPOINT_RADIUS_METRES,
   endBearing,
+  endpointReachRadius,
   endpointReached,
   MINIMUM_SEGMENT_LENGTH_METRES,
   MINIMUM_SEGMENT_POSITIONS,
   NEAR_DUPLICATE_OVERLAP,
+  nearestEndpointSample,
   overlapFraction,
   OVERLAP_TOLERANCE_METRES,
   pathLength,

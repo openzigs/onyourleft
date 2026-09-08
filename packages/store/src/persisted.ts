@@ -24,6 +24,7 @@
 
 import {
   beatsPerMinute,
+  kilograms,
   degreesBearing,
   gradePercent,
   metres,
@@ -60,6 +61,7 @@ export interface PersistedAthlete {
   createdAt: number;
   thresholdPower?: number;
   thresholdHeartRate?: number;
+  mass?: number;
 }
 
 /** @see ActivityRecord */
@@ -235,6 +237,9 @@ export function toPersistedAthlete(record: AthleteRecord): PersistedAthlete {
   if (record.thresholdHeartRate !== undefined) {
     row.thresholdHeartRate = record.thresholdHeartRate;
   }
+  if (record.mass !== undefined) {
+    row.mass = record.mass;
+  }
   return row;
 }
 
@@ -273,6 +278,12 @@ export function fromPersistedAthlete(row: PersistedAthlete): AthleteRecord {
       decodedNumber('athlete.thresholdHeartRate', row.thresholdHeartRate),
       beatsPerMinute,
     );
+  }
+  // #66. Absent stays absent for the reason above, and a ranking must not read
+  // this field at all — an effort carries its own frozen copy, made when the
+  // effort was. This is only ever the source of that copy.
+  if (row.mass !== undefined) {
+    record.mass = decoded('athlete.mass', decodedNumber('athlete.mass', row.mass), kilograms);
   }
   return record;
 }

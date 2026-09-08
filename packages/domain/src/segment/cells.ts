@@ -1,34 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Stage 1 of the pipeline: a **cell-cover prefilter**, as an integer set
+ * Stage 1 of the matcher: a **cell-cover prefilter**, as an integer set
  * intersection.
  *
- * #65 names H3 v4.5.0 or S2 v0.14.0 (both Apache-2.0) as the production
- * choice, and the reason to reach for either is that a cell cover turns "is
- * this segment anywhere near this ride" into set membership on integers, which
- * shards trivially. **This spike implements a plain equirectangular grid
- * instead, and takes no dependency at all** — for two reasons:
+ * A cell cover turns "is this segment anywhere near this ride" into set
+ * membership on integers, which is what makes a corpus of a hundred thousand
+ * segments affordable at all. `docs/spikes/0001-segment-matching.md` §3
+ * measured the fan-out this produces: a corpus a hundred times larger put
+ * roughly twice as many candidates into stage 2, because **the survivor count
+ * is bounded by the ride's own footprint rather than by the corpus size**.
  *
- * 1. A throwaway prototype should not put a permanent lockfile entry in front
- *    of a decision nobody has made yet. CLAUDE.md's dependency rule is that a
- *    dependency arrives with the issue that first needs it; #66 is that issue,
- *    not this one.
- * 2. What the measurement has to establish is the **fan-out** — how many
- *    segments survive stage 1 — and that is a property of the cell size and the
- *    corpus, not of which library assigns the cell ids. A cheaper index would
- *    change the constant in front of stage 1's cost, not the number of
- *    survivors stage 2 has to look at.
+ * ⚠️ **A plain equirectangular grid, and no dependency.** #65 names H3 v4.5.0
+ * and S2 v0.14.0 (both Apache-2.0) as the production choices, and the spike's
+ * §10 says to take that dependency *deliberately*, with the issue that needs
+ * it. This is not yet that issue: what a cell library would change is the
+ * constant in front of stage 1, not the number of survivors stage 2 examines,
+ * and `packages/domain` takes no runtime dependency at all today. Swapping the
+ * index later is a change to this file and to nothing else — `cellOf` and
+ * `cellCover` are the whole surface.
  *
  * ⚠️ **This grid is not equal-area and H3 is.** Cells are `CELL_DEGREES` on a
  * side in latitude and longitude both, so a cell is a rectangle that narrows
- * towards the poles — at 60° N it is half as wide as at the equator. That
- * costs nothing at the fan-out this measures and would matter to a global
- * corpus, and it is exactly the kind of thing H3 exists to remove. Recorded
- * here so the measurement is not mistaken for a claim about a hex grid.
+ * towards the poles — at 60° N it is half as wide as at the equator. That is
+ * harmless here, because the prefilter only ever has to be *conservative*: a
+ * cell of the wrong shape admits more candidates to stage 2, never fewer. It
+ * is recorded so that nobody reads the fan-out as a claim about a hex grid.
  */
 
-import type { GeographicPosition } from '@onyourleft/domain';
+import type { GeographicPosition } from '../quantities';
 
 /**
  * The cell edge, in degrees: **0.01°**, about 1.1 km north–south.
@@ -45,8 +45,8 @@ import type { GeographicPosition } from '@onyourleft/domain';
  *   and the prefilter stops filtering — which is the failure mode the fan-out
  *   measurement exists to detect.
  *
- * `tools/measure.ts` reports the survivor count, so this number is checkable
- * rather than asserted.
+ * `docs/spikes/0001-segment-matching.md` §3 reports the survivor count this
+ * produces, so the number is measured rather than asserted.
  */
 export const CELL_DEGREES = 0.01;
 

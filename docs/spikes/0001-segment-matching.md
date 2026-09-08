@@ -14,6 +14,33 @@
 
 ---
 
+> ## ⚠️ 2026-09-08 — the prototype has been retired, and the shipped matcher differs
+>
+> **[#66](https://github.com/openzigs/onyourleft/issues/66) deleted
+> `packages/matching`**, which is the fate this write-up gave it. The matcher
+> now lives in `packages/domain/src/segment/` — `match.ts`, `cells.ts`,
+> `frechet.ts` — where it is pure computation under that package's platform-free
+> program, as #66's ninth criterion requires. Every path named below as
+> `src/…` or `tools/…` is gone; nothing else in this document has been changed.
+>
+> **Two of the numbers below no longer describe the shipped code**, and it
+> matters which:
+>
+> - §1's findings 1 and 2 are **fixed**, not carried forward. The endpoint gate
+>   widens by half the ride's own sample spacing, and a span is bounded by the
+>   *nearest* sample to each endpoint rather than the first one inside the
+>   radius. The tables below are what the unfixed prototype did.
+> - §5's miss rate was measured **before** two changes that raise it: both
+>   compared paths are resampled to a common 10 m step, and the segment is
+>   trimmed to the stretch the ride actually covers. Read it as the floor the
+>   recommendation rested on, not as a property of what ships.
+>
+> §1's third finding — that sample spacing consumes similarity budget — is what
+> those two changes address, and `packages/domain/src/segment/frechet.ts`
+> states the assumption they buy it with.
+
+---
+
 ## The recommendation, in one paragraph
 
 **Take the geometric point-to-polyline pipeline (candidate 1), and change the

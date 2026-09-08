@@ -37,11 +37,11 @@
 import Dexie from 'dexie';
 
 import { openActivityStore, deleteActivityStore, type ActivityStore } from '../activity-store';
-import type { ActivityId, SegmentId } from '../ids';
+import { segmentEffortId, type ActivityId, type AthleteId, type SegmentId } from '../ids';
 import type { DeviceKeyRecord, StoredActivityRecord } from '../identity';
 import { SCHEMA_VERSIONS, TABLE } from '../schema';
 import type { NewRecordingChunk, NewRecordingSession } from '../recording';
-import type { SegmentRecord } from '../records';
+import type { SegmentEffortRecord, SegmentRecord } from '../records';
 import type { PersistedStreamBlob } from '../stream-persisted';
 import {
   STREAM_CHANNELS,
@@ -108,6 +108,15 @@ function bindStore(real: ActivityStore): PersistentStore {
     getSegment: async (owner, id) => real.getSegment(owner, id),
     listSegments: async (owner, limit) => real.listSegments(owner, limit),
     deleteSegment: async (owner, id) => real.deleteSegment(owner, id),
+    putActivityEfforts: async (owner, activityId, efforts) =>
+      real.putActivityEfforts(owner, activityId, efforts),
+    listEfforts: async (owner, segment, limit) => real.listEfforts(owner, segment, limit),
+    listSharedEfforts: async (owner, segment, limit) =>
+      real.listSharedEfforts(owner, segment, limit),
+    listActivityEfforts: async (owner, activityId) => real.listActivityEfforts(owner, activityId),
+    getMatchCheckpoint: async (owner) => real.getMatchCheckpoint(owner),
+    putMatchCheckpoint: async (record) => real.putMatchCheckpoint(record),
+    clearMatchCheckpoint: async (owner) => real.clearMatchCheckpoint(owner),
   };
 }
 
@@ -412,6 +421,57 @@ export function thinnedGeometryStoreFactory(): StoreFactory {
               (_position, index) => index % 2 === 0 || index === record.geometry.length - 1,
             ),
           }),
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository that **appends efforts instead of replacing an activity's set**.
+ *
+ * ⚠️ This is the fake for #66's sixth criterion, and it models the failure the
+ * criterion names in its own words: *"without this, every app restart inflates
+ * every leaderboard"*. Everything else is correct — the efforts are stored,
+ * scoped to the right athlete, with the right segment, activity and time, and a
+ * round trip that read one effort back and compared its fields would pass.
+ * What breaks is only visible when the matcher runs **twice**.
+ *
+ * ⚠️ **It skips the stale-delete, not the id.** The first version of this fake
+ * minted a fresh id per write, on the theory that the derived id was what made
+ * re-matching idempotent — and it stayed **green**, because replacing the
+ * activity's whole effort set absorbs a changed id: the previous row is deleted
+ * for not being in the new set. That was worth finding. The derived id buys
+ * *stable identity* across a re-match, which is a different property with its
+ * own test; the replace is what buys idempotence. `records.ts` and `schema.ts`
+ * now say so, having said the other thing first.
+ */
+export function appendingEffortStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        putActivityEfforts: async (
+          owner: AthleteId,
+          activityId: ActivityId,
+          efforts: readonly SegmentEffortRecord[],
+        ): Promise<number> => {
+          // Keep what is already there, and add these beside it — which is what
+          // "insert the efforts we just found" looks like when written the
+          // obvious way round.
+          const existing = await real.listActivityEfforts(owner, activityId);
+          const merged = [
+            ...existing,
+            ...efforts.map((effort, index) => ({
+              ...effort,
+              id: segmentEffortId(`${effort.id}::again-${String(existing.length + index)}`),
+            })),
+          ];
+          return real.putActivityEfforts(owner, activityId, merged);
+        },
       };
     },
     destroy: async (name) => {

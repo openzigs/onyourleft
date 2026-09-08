@@ -6,8 +6,8 @@ that produced them.
 The reasoning lives in the ADRs — this file describes **what** the structure is and **where** each
 line falls. [`docs/adr/0005-tech-stack.md`](adr/0005-tech-stack.md) says why.
 
-> **Status: `apps/web`, `packages/domain`, `packages/sensors`, `packages/fit`, `packages/store`,
-> `packages/physics` and `packages/matching` exist.** The first two were created by [#23](https://github.com/openzigs/onyourleft/issues/23)
+> **Status: `apps/web`, `packages/domain`, `packages/sensors`, `packages/fit`, `packages/store`
+> and `packages/physics` exist.** The first two were created by [#23](https://github.com/openzigs/onyourleft/issues/23)
 > with the pnpm workspace, the toolchain, a committed lockfile and the lint-enforced boundaries;
 > `packages/sensors` by [#39](https://github.com/openzigs/onyourleft/issues/39) and
 > [#40](https://github.com/openzigs/onyourleft/issues/40)–[#44](https://github.com/openzigs/onyourleft/issues/44),
@@ -15,10 +15,10 @@ line falls. [`docs/adr/0005-tech-stack.md`](adr/0005-tech-stack.md) says why.
 > [#30](https://github.com/openzigs/onyourleft/issues/30)–[#32](https://github.com/openzigs/onyourleft/issues/32),
 > and `packages/store` by [#26](https://github.com/openzigs/onyourleft/issues/26)–[#28](https://github.com/openzigs/onyourleft/issues/28)
 > and [#46](https://github.com/openzigs/onyourleft/issues/46), and `packages/physics` by
-> [#88](https://github.com/openzigs/onyourleft/issues/88), and `packages/matching` by
-> [#65](https://github.com/openzigs/onyourleft/issues/65) — **a spike, and the one package in the
-> tree that is expected not to survive**: nothing imports it, and
-> [#66](https://github.com/openzigs/onyourleft/issues/66) either hardens it or deletes it.
+> [#88](https://github.com/openzigs/onyourleft/issues/88). ⚠️ **`packages/matching` existed
+> between [#65](https://github.com/openzigs/onyourleft/issues/65) and
+> [#66](https://github.com/openzigs/onyourleft/issues/66) and does not any more** — it was the #65
+> spike, and #66 hardened its algorithm into `packages/domain/src/segment/` and deleted it.
 > **`apps/mobile`
 > ([#85](https://github.com/openzigs/onyourleft/issues/85)) does not exist yet**; it is created by
 > the issue that owns its content, using `packages/domain` as the template.
@@ -100,9 +100,6 @@ packages/             Apache-2.0, without exception
     src/                the transport-agnostic abstraction; no platform API at all
     protocol/           the GATT profile clients (#41, #42, #43); no platform API either
     web-bluetooth/      the browser transport (#40); the one place a BluetoothDevice exists
-  matching/           SPIKE (#65) — a throwaway segment-matching prototype and its harness
-    src/                the geometric pipeline; no platform API at all
-    tools/              the measurement harness and its seeded synthetic corpus; Node
   physics/            cycling power/speed model — Martin et al. 1998, as separate terms
   store/              local activity, stream and recording-checkpoint store
 
@@ -130,13 +127,12 @@ checkable.
 |---|---|---|---|---|
 | `apps/web` | AGPL-3.0-or-later | Routing, screens, design system, accessibility baseline, the live ride screen, file import and export | — | #48–#51 |
 | `apps/mobile` | AGPL-3.0-or-later | Capacitor shell, native permissions, foreground service | — | #85, #87 |
-| `packages/domain` | Apache-2.0 | Canonical units and types; every conversion in the program; signing/verification; analysis computations | **Any platform API at all** — no DOM, no Node globals, no I/O, no network types | #25, #61, #66, #75–#78 |
+| `packages/domain` | Apache-2.0 | Canonical units and types; every conversion in the program; signing/verification; analysis computations; **the segment matcher and the effort it produces** (#66) | **Any platform API at all** — no DOM, no Node globals, no I/O, no network types | #25, #61, #66, #75–#78 |
 | `packages/fit` | Apache-2.0 | FIT / GPX / TCX decode and encode | Anything server-specific; anything under `apps/`; **anything carrying the Garmin FIT Protocol License — see [ADR 0006](adr/0006-fit-codec-licensing.md)** | #29–#32 |
 | `packages/sensors/src` | Apache-2.0 | BLE sensor and trainer abstraction, and the simulator | **Any platform API at all**, as `packages/domain` — plus any BLE library, because an abstraction that names one has chosen it for all three stacks | #39, #44 |
 | `packages/sensors/protocol` | Apache-2.0 | The GATT profile clients: Heart Rate, Cycling Speed and Cadence and Cycling Power — service and characteristic UUIDs, bounds-checked payload decoding, and the `GattProfile` seam itself | **Any platform API at all**, as `packages/sensors/src` — it is compiled by the same platform-free program, because the same decoders serve the browser adapter and the native stacks | #41, #42 |
 | `packages/sensors/web-bluetooth` | Apache-2.0 | The browser transport: the `DeviceId → device/server/service/characteristic` map, the global GATT operation queue, the profile registry `packages/sensors/protocol` fills, and — since #49 — the **production `FitnessMachineChannel`**, which is the only place in the program that writes to a GATT characteristic | Anything server-specific; every platform global except `navigator`. **Web Bluetooth types must not escape above the transport boundary** | #40, #49 |
 | `packages/physics` | Apache-2.0 | Power → speed, as separately testable terms | Any rendering, BLE or platform API | #88 |
-| `packages/matching` | Apache-2.0 | **The #65 spike**: a throwaway segment-matching prototype (`src/`) and the measurement harness and synthetic corpus that produced its numbers (`tools/`) | `src/`: **any platform API at all**, as `packages/domain`. Nothing may depend on **it** either — it is evidence for a write-up, not a library | #65, #66 |
 | `packages/store` | Apache-2.0 | Local activity and stream persistence, its migrations, and the round-trip test harness | Anything under `apps/` | #26, #27, #28 |
 
 `packages/domain` is filled in as of [#25](https://github.com/openzigs/onyourleft/issues/25): the
@@ -502,7 +498,7 @@ A boundary maintained by review discipline will not survive a program this size.
 |---|---|
 | `boundaries/dependencies` | anything under `packages/*` imports anything under `apps/*`, in either the relative or the `@onyourleft/…` workspace spelling |
 | `@typescript-eslint/no-restricted-imports` | `packages/domain` names **any** Node builtin — the pattern list is derived from `builtinModules` rather than typed out, so `events`, `util` and `stream/promises` fail exactly as `node:fs` does — or `react`, `react-dom`, `vite` or `dexie` |
-| `no-restricted-globals` | `packages/domain`, `packages/physics`, `packages/matching/src`, `packages/sensors/src` or `packages/sensors/protocol` names a DOM global (`window`, `document`, `navigator`, `location`, `history`, `localStorage`, `sessionStorage`, `indexedDB`, `caches`), a Node global (`process`, `Buffer`, `__dirname`, `__filename`, `global`, `require`) or a network global (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Request`, `Response`, `Headers`). A named list, not a closure — the closure is the typechecker |
+| `no-restricted-globals` | `packages/domain`, `packages/physics`, `packages/sensors/src` or `packages/sensors/protocol` names a DOM global (`window`, `document`, `navigator`, `location`, `history`, `localStorage`, `sessionStorage`, `indexedDB`, `caches`), a Node global (`process`, `Buffer`, `__dirname`, `__filename`, `global`, `require`) or a network global (`fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Request`, `Response`, `Headers`). A named list, not a closure — the closure is the typechecker |
 | `no-restricted-globals`, again | `packages/sensors/web-bluetooth` names any of the same list **except `navigator`**, which is the one platform API the transport boundary is allowed. The exception is derived by subtraction from that list rather than written out, so the two cannot drift |
 | `headers/header-format` | a `.ts`/`.tsx` file's first line is not the SPDX identifier its directory requires |
 
@@ -519,14 +515,6 @@ pulled Vite's declarations, and through them `@types/node`, into the same TypeSc
 imports nothing. **Any import added to a file in this package's program can reopen it**, which is why
 the ESLint rules above are not redundant with the tsconfig, and why a row in this table is checked by
 writing the file it forbids and running both gates — never by reading the row.
-
-`packages/matching` carries it in two programs as well, and for the plainest version of the reason:
-`tools/` is a measurement harness that times things with `performance.now()` and prints with
-`console`, so the wide `tsconfig.json` admits `@types/node` — and **`tsconfig.platform-free.json`
-compiles `src/` alone**, where a `performance` is a compile error. That a spike is throwaway is a
-reason to isolate it, not an excuse: the question it answers is whether the approach could become
-production code, and a `src/` that had reached for a platform API would be answering about
-something #66 could not ship.
 
 `packages/sensors` carries the same closure in two programs, for the reason `packages/fit` does.
 `tsconfig.json` covers the whole package and admits the DOM, because ESLint's project service
@@ -609,6 +597,41 @@ nothing non-OSI. `maplibre-gl` is **977 kB minified**, which is why `apps/web/sr
 reached through a dynamic `import()` and lands in its own chunk: a rider who only opens indoor rides
 never downloads it.
 
+### Segment matching: every tolerance, and that each is ours
+
+[#66](https://github.com/openzigs/onyourleft/issues/66)'s definition of done asks for the chosen
+tolerances to be recorded here **with their justification, labelled as our own tunables**. They are.
+
+⚠️ **None of these is parity with anything.** Strava's documentation names an endpoint proximity
+rule and a "Gap Threshold" and **publishes no number for either**; #65's body records that, and
+describing any figure below as matching another product would be inventing a comparison nobody can
+check.
+
+| Tunable | Value | Why that number |
+|---|---|---|
+| `DEFAULT_ENDPOINT_RADIUS_METRES` | **15 m** | Roughly three times the 3–5 m horizontal error commonly quoted for a consumer receiver under open sky. Admits an ordinary bad fix without admitting the next street over. Stored **per endpoint**, because the right value is a property of the road — a segment ending at a roundabout wants more slack than one on a straight |
+| Endpoint *reach* radius | `radius + spacing / 2`, **derived per ride** | Not configured. A rider who passes exactly through an endpoint records a sample no further than half the sample spacing from it, so detecting everyone who genuinely came within the radius requires exactly this and nothing wider. A 1 Hz ride gates at ~19 m and a 10 s ride at ~57 m, and the difference is a property of the two recordings |
+| `DEFAULT_BEARING_TOLERANCE_DEGREES` | **60°** | Deliberately loose. Its job is to reject travelling the *other way* — 180° off, nowhere near this — not to check that a rider held a line. The bearing is estimated from two GNSS samples metres apart, which is noisy at low speed, and that noise is why it is not 20° |
+| `SIMILARITY_METRES` | **25 m** | Two-sided. Not larger: a road and the cycleway beside it are commonly 15–25 m apart, and a false effort is the failure that destroys a board. Not smaller: an honest traversal through a built-up section misses at 10 m and the rider is told nothing |
+| `GAP_SECONDS` | **20 s** | Derived. A device recording every 10 s — the slowest smart-recording interval in common use — produces a legitimate 10 s spacing, so the threshold must sit above it or every such ride is one long gap. Twice that admits one dropped sample and refuses two |
+| `COMPARISON_STEP_METRES` | **10 m** | Both compared paths are resampled to this step before the curve comparison. Discrete Fréchet couples *vertices*, so its value otherwise carries a floor of half the coarser path's spacing — about 42 m for a ride recorded every 10 s, against a 25 m threshold. At a 10 m step the floor is ~5 m |
+| `CELL_DEGREES` | **0.01°** (~1.1 km) | The prefilter cell. Much smaller and a 400 m segment's cover spans several cells for no gain; much larger and a city's whole corpus lands in one cell and the prefilter stops filtering |
+| `MINIMUM_SEGMENT_LENGTH_METRES` | **400 m** | #64's, derived there: ~30 m of combined endpoint uncertainty held to about 7.5% of the segment |
+| `SWEEP_PAGE_SIZE` | **25 activities** | A latency budget rather than a throughput one. The sweep yields to the caller between pages so the tab keeps painting; raising it makes the sweep marginally faster and the page perceptibly worse |
+
+⚠️ **Do not tune any of these to improve a miss rate without re-running the false-positive cases.**
+That is the exercise #65 warns makes the failure worse rather than better, and both cases are
+written — a parallel road rejected at the endpoint gate, and a detour sharing both endpoints
+rejected by similarity. They fail at *different stages*, so one of them alone leaves the other
+threshold untested behind a passing test.
+
+⚠️ **`COMPARISON_STEP_METRES` buys its accuracy with an assumption**: that a rider travelled in a
+straight line between two recorded samples. At an 83 m spacing on a curving road that is worth tens
+of metres, and it makes a false positive *more* likely at a coarse interval than at 1 Hz.
+`packages/domain/src/segment/frechet.ts` states it where the code is, because the honest position
+is that at a 10 s interval the recording does not contain the information and the choice is between
+a stated assumption and refusing to match those rides at all.
+
 ## Spike write-ups
 
 A spike is **not a decision**. It is a dated measurement that a decision may rest on, and it ages the
@@ -618,7 +641,7 @@ write-up. They live in `docs/spikes/NNNN-kebab-case.md`, and the `ADR00*` rules 
 
 | Spike | Question | Answer | Evidence |
 |---|---|---|---|
-| [0001](spikes/0001-segment-matching.md) | Which of two segment-matching approaches should #66 build? ([#65](https://github.com/openzigs/onyourleft/issues/65)) | Geometric matching against the athlete's own trace — but two of #64's endpoint parameters have to change first, and the road-graph approach is deferred rather than rejected | `packages/matching`, measured 2026-09-07 |
+| [0001](spikes/0001-segment-matching.md) | Which of two segment-matching approaches should #66 build? ([#65](https://github.com/openzigs/onyourleft/issues/65)) | Geometric matching against the athlete's own trace — but two of #64's endpoint parameters have to change first, and the road-graph approach is deferred rather than rejected | `packages/matching`, measured 2026-09-07. ⚠️ **That package is gone**: #66 acted on the recommendation, hardened the algorithm into `packages/domain/src/segment/` and deleted the prototype. The write-up carries a dated note saying which of its numbers no longer describe the shipped code |
 
 ## Decision record index
 
