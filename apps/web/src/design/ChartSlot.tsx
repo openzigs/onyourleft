@@ -128,8 +128,19 @@ function DataTable({
       <caption>{caption}</caption>
       <thead>
         <tr>
-          {columns.map((column) => (
-            <th key={column} scope="col">
+          {columns.map((column, index) => (
+            // Keyed by POSITION, for the same reason the body rows below are,
+            // and fixed here in the same change rather than deferred. The PR
+            // that fixed the rows argued no failing case existed for the header;
+            // the #153 review found two, both in the orphaned-fiber shape:
+            // `['Watts','Lap','Lap']` reordered to `['Lap','Lap','Watts']`
+            // renders FOUR `<th>` for three columns, and `['Lap','Lap','Lap']`
+            // to `['Lap','Watts']` renders three for two.
+            //
+            // It was invisible because the existing test holds `columns`
+            // constant while reordering rows -- a duplicate key does no damage
+            // until React reconciles a CHANGED list against it.
+            <th key={index} scope="col">
               {column}
             </th>
           ))}
@@ -142,7 +153,11 @@ function DataTable({
           share a key -- and a ride's table has every reason to repeat a row,
           two laps at the same split for instance. React treats duplicate keys
           as one child, so the second row is dropped from the rendered table
-          and the athlete reads a table that is quietly short. The cell key had
+          and the athlete reads a table with a row missing -- or, when the list
+          changes rather than shrinks, an ORPHANED row that belongs to neither
+          state. Measured: an extra row, not a short one. The earlier wording
+          here said "quietly short", which is what the shape suggests and not
+          what it does. The cell key had
           the same shape on `column:cell` and the same hole.
 
           Position is the honest key here: `rows` is ordered data with no
