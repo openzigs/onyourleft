@@ -121,7 +121,8 @@ Route **(b)** of #202's three. Not (a), because R1 has no permitted route to the
 ADR 0006 R2 has no answer; not (c), because (c) is (b) plus a promise, and a deferral written into
 an ADR is a promise nobody owns.
 
-⚠️ **Importing the de facto format is filed as its own issue rather than deferred here.** That issue
+⚠️ **Importing the de facto format is filed as
+[#210](https://github.com/openzigs/onyourleft/issues/210) rather than deferred here.** That issue
 carries the licence question and the corpus question, and it is where somebody with a lawful route
 to a specification — or a rights-holder's permission — picks it up. This ADR does not decide against
 it for ever; it declines to adopt it *on the evidence available today*, and §"What would make this
@@ -231,7 +232,8 @@ arithmetic without building the array, the way `packages/domain/src/analysis/fit
 
 - **The free library is not bought.** This is the real loss and it is worth naming rather than
   glossing: a rider with a folder of workouts in the de facto format cannot open them here, and this
-  project starts with a corpus of zero. The follow-on issue is where that is addressed; until it is,
+  project starts with a corpus of zero.
+  [#210](https://github.com/openzigs/onyourleft/issues/210) is where that is addressed; until it is,
   the honest description of this feature is "save and share the workouts you build here".
 - **D-4 makes old builds strict.** A file written by a future version is refused wholesale by
   today's, rather than loading in part. That is the intended trade and not a rough edge.
@@ -245,7 +247,7 @@ arithmetic without building the array, the way `packages/domain/src/analysis/fit
 
 | Work | What binds |
 |---|---|
-| The follow-on import issue | R1 and ADR 0006 R2 must be answered **before** an element set is written down, not in review. A vendored corpus needs its licence named and reasoned by hand, since `DEP001` reads dependency manifests and not vendored data |
+| [#210](https://github.com/openzigs/onyourleft/issues/210) | R1 and ADR 0006 R2 must be answered **before** an element set is written down, not in review. A vendored corpus needs its licence named and reasoned by hand, since `DEP001` reads dependency manifests and not vendored data |
 | Any new `WorkoutBlock` kind | Is a format change. Bump `onYourLeftWorkout`, and remember D-4 means every older build refuses the new files |
 | Any consumer of `expandWorkout` | The bound in D-6 is in `validateWorkout`, which `expandWorkout` calls first. A caller that skips validation skips the bound |
 | `packages/fit` | Unchanged. This format is deliberately not filed there, and ADR 0006's declaration does not extend to it |

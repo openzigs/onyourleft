@@ -126,9 +126,29 @@ describe('what the decoder refuses, and what it calls each refusal', () => {
   });
 
   it('refuses JSON that is not an object', () => {
-    expect(refusedWith('[]')).toBe('not-a-workout-file');
     expect(refusedWith('42')).toBe('not-a-workout-file');
     expect(refusedWith('null')).toBe('not-a-workout-file');
+  });
+
+  it('tells somebody who saved a bare list of blocks what is wrong with it', () => {
+    // ⚠️ **Asserting the MESSAGE, and the code alone was not enough.** A
+    // mutation that let an array through this guard left the suite green: `[]`
+    // has no version key either, so it was refused a step later under the same
+    // `not-a-workout-file` code and the test could not tell the two routes
+    // apart. What the array check actually buys is the right sentence — a bare
+    // list is what somebody hands this function when they save the blocks
+    // without the document around them, and "it should be a JSON object" is
+    // useful where "it does not carry the onYourLeftWorkout key" is not.
+    const error = refusal(() => decodeWorkoutFile('[]'));
+    expect(error.code).toBe('not-a-workout-file');
+    expect(error.message).toContain('should be a JSON object');
+  });
+
+  it('tells somebody whose block is a list the same thing, about that block', () => {
+    const error = refusal(() => decodeWorkoutFile(reserialised({ ...documentOf(), blocks: [[]] })));
+    // Without the array guard this reads "block 1 is a \"undefined\" block",
+    // which sends a reader looking for a `kind` they never wrote.
+    expect(error.message).toContain('block 1 is not an On Your Left workout');
   });
 
   it('refuses a document with no version key, whatever else it holds', () => {

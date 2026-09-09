@@ -403,7 +403,7 @@ pnpm run test:a11y
 # Node and an install, so it is NOT part of `check:repo`.
 pnpm run check:a11y-suite
 
-# Its own suite. Fixture-driven; 21 cases. Needs Node, so also not in
+# Its own suite. Fixture-driven; 27 cases. Needs Node, so also not in
 # `check:repo`.
 bash scripts/check-a11y-suite.test.sh
 
@@ -1417,8 +1417,8 @@ one-for-one. Four things about it are decisions rather than details:
 folder of workouts in the de facto format cannot open them here, and this project starts with a
 corpus of zero. #14's fifth criterion — *"at least 50 workouts from the existing open ZWO corpus
 parse"* — **is not met and is not claimed to be**; ADR 0017 supersedes it. Importing that format is
-its own issue, with the licence and corpus questions attached, and §"What would make this ADR wrong"
-says what would reopen it.
+[#210](https://github.com/openzigs/onyourleft/issues/210), with the licence and corpus questions
+attached, and ADR 0017's §"What would make this ADR wrong" says what would reopen it.
 
 ### Reading prior art is fine. Copying from it binds this project's licence.
 
