@@ -25,9 +25,11 @@ import {
   mount,
   queryAll,
   settle,
+  submitForm,
   typeInto,
   type Mounted,
 } from '../testing/mount';
+import type { DownloadableFile } from '../transfer/store-port';
 import { WORKOUT_LIST_LIMIT } from '../workouts/store-port';
 import { workoutStub, type WorkoutStub } from '../workouts/testing';
 import { WorkoutsView } from './WorkoutsView';
@@ -61,6 +63,39 @@ async function render(stub: WorkoutStub | undefined, now = 1_700_000_500): Promi
   await settle();
   mounted = view;
   return view;
+}
+
+async function renderWithSave(
+  stub: WorkoutStub,
+  saved: DownloadableFile[],
+  now = 1_700_000_500,
+): Promise<Mounted> {
+  const view = await mount(
+    <WorkoutsView
+      port={stub}
+      now={() => now}
+      save={(file) => {
+        saved.push(file);
+      }}
+    />,
+  );
+  await settle();
+  mounted = view;
+  return view;
+}
+
+/**
+ * The form a field belongs to.
+ *
+ * ⚠️ `closest('form')` rather than `form:has(#id)` — jsdom's selector engine
+ * does not implement `:has()`, and it returns `null` for it rather than
+ * throwing, so the version using it failed at `dispatchEvent` with a message
+ * about `null` and said nothing about selectors.
+ */
+function formOf(input: HTMLElement): HTMLFormElement {
+  const form = input.closest('form');
+  if (form === null) throw new Error('that field is not in a form');
+  return form;
 }
 
 function buttonSaying(root: ParentNode, text: string): HTMLElement | undefined {
@@ -260,5 +295,32 @@ describe('what this screen does not claim', () => {
     const text = view.container.textContent ?? '';
     expect(text).not.toMatch(/\d\s?W\b/);
     expect(text.toLowerCase()).not.toContain('stress');
+  });
+});
+
+describe('a workout can leave as a file and come back — #202, ADR 0017', () => {
+  it('hands the browser a file named after the workout', async () => {
+    const saved: DownloadableFile[] = [];
+    const view = await renderWithSave(workoutStub(ATHLETE, [workout()]), saved);
+    const button = buttonSaying(view.container, 'Export Sweet spot');
+    expect(button).toBeDefined();
+    await activateWithKeyboard(button!);
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.fileName).toBe('Sweet spot.oylworkout.json');
+  });
+
+  it('does not offer an export this build cannot perform', async () => {
+    // Offered and inert is worse than absent: a rider presses it, nothing
+    // happens, and there is nothing on the screen that says why.
+    const view = await render(workoutStub(ATHLETE, [workout()]));
+    expect(buttonSaying(view.container, 'Export Sweet spot')).toBeUndefined();
+    expect(buttonSaying(view.container, 'Delete Sweet spot')).toBeDefined();
+  });
+
+  it('asks for a file rather than doing nothing when none was chosen', async () => {
+    const stub = workoutStub(ATHLETE);
+    const view = await render(stub);
+    await submitForm(formOf(field(view.container, 'workout-file')));
+    expect(view.container.textContent ?? '').toContain('Choose a workout file');
   });
 });

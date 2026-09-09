@@ -757,6 +757,7 @@ share one.
 | [0014](adr/0014-portable-identity.md) | Portable identity — an Ed25519 device keypair and signed, content-addressed activity records | #61 |
 | [0015](adr/0015-dependency-licences.md) | Dependency licences — two closures, and a ruling on the six that were deferred | #24 |
 | [0016](adr/0016-unlicense.md) | `Unlicense` — the first licence the fail-closed gate stopped, ruled on rather than waived | #87 |
+| [0017](adr/0017-workout-file-format.md) | A workout file format of this project's own, and why not the de facto one | #202 |
 
 **0012 is deliberately absent from that list and is not free** — see the row for it below.
 
@@ -797,8 +798,9 @@ still a proposal.
 | 0014 | #61 — portable identity | [Written](adr/0014-portable-identity.md). Took 0014 rather than 0012, which was reserved one row up and unwritten at the time. |
 | 0015 | #24 — dependency licences | [Written](adr/0015-dependency-licences.md). Classifies every dependency licence by **closure** rather than by path alone, and rules on the six that `CLAUDE.md` §3 had carried as deferred. Enforced by `DEP001`. |
 | 0016 | #87 — `Unlicense` | [Written](adr/0016-unlicense.md). The first time ADR 0015 D-4's fail-closed branch actually fired: #87's `@capacitor/cli` reaches `bplist-parser` and `bplist-creator` (`Unlicense`) through `xcode`, and `DEP001` stopped the build. **Extends D-2's set rather than superseding anything** — build-time under either path, distributed under `apps/` only. ADR 0015 carries an amendment saying its own §Consequences named this as the example that had not happened yet. `Zlib`, the other name in that sentence, is deliberately still unruled. |
+| 0017 | #202 — the workout file format | [Written](adr/0017-workout-file-format.md). #14's scope proposed adopting the de facto format; ADR 0009 R1 has no permitted route to its element set (no published specification, and every open implementation is GPL/AGPL, which §3 makes fatal under `packages/`) and ADR 0006 R2's provenance column would read "recalled". So the format is **ours** — JSON mirroring the model, one key that is both identity and version, and an unknown key refused rather than ignored because a silently dropped field would ride a different workout against a machine applying resistance to somebody. **Adopting the de facto format is filed separately rather than deferred inside the ADR.** The cost is stated plainly: the free library is not bought, and #14's corpus criterion is superseded rather than met. |
 
-**The next free number is 0017.** Every number from 0001 to 0016 is now written; 0012 was the last reservation and #64 consumed it.
+**The next free number is 0018.** Every number from 0001 to 0017 is now written; 0012 was the last reservation and #64 consumed it.
 
 Three issues carry an acceptance criterion naming their old number — #19 (0002), #60 (0008) and #27
 (0006). **The number here wins**; each issue has been commented with its new one. Renumbering a

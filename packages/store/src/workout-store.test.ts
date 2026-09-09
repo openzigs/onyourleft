@@ -287,3 +287,43 @@ describe('a block kind that gains a field is a compile error before it is a bug'
     await assertWorkoutRoundTrip(harness, workoutFor(ATHLETE_A, { blocks: labelled }));
   });
 });
+
+describe("a workout's description survives the disk, and its absence does too", () => {
+  it('brings the description back through a fresh handle', async () => {
+    // ⚠️ Not an assertion against the record that was written. This field was
+    // dropped on the way to disk for as long as it existed, and the reason
+    // nobody noticed is that every test asserting a workout round trip used a
+    // fixture with no description in it.
+    await seedAthletes(harness);
+    const saved = await seedWorkout(harness, ATHLETE_A, {
+      description: 'Three blocks of six, ninety seconds between.',
+    });
+    const read = await harness.read(async (store) => store.getWorkout(ATHLETE_A, saved.id));
+    expect(read?.workout.description).toBe('Three blocks of six, ninety seconds between.');
+  });
+
+  it('leaves a workout that has none without the key at all', async () => {
+    await seedAthletes(harness);
+    const saved = await seedWorkout(harness, ATHLETE_A);
+    const read = await harness.read(async (store) => store.getWorkout(ATHLETE_A, saved.id));
+    // Faithful, not defaulted: an absent description reads back absent rather
+    // than as an empty string, which is the rule an optional threshold follows.
+    expect(read && 'description' in read.workout).toBe(false);
+  });
+
+  it('reads a row written before the field existed', () => {
+    // The whole reason this needed no schema version: an old row simply has no
+    // key, and the decoder has to be fine with that.
+    const legacy: PersistedWorkout = toPersistedWorkout(workoutFor(ATHLETE_A));
+    expect('description' in legacy).toBe(false);
+    expect(fromPersistedWorkout(legacy).workout.description).toBeUndefined();
+  });
+
+  it('refuses a description on disk that is not text', () => {
+    const row = {
+      ...toPersistedWorkout(workoutFor(ATHLETE_A)),
+      description: 42,
+    } as unknown as PersistedWorkout;
+    expect(() => fromPersistedWorkout(row)).toThrow(StoreDecodeError);
+  });
+});

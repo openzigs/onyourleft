@@ -7,10 +7,12 @@ import { seconds, type Seconds } from '../quantities';
 import { WorkoutError } from './errors';
 import {
   MAXIMUM_REPEATS,
+  MAXIMUM_SEGMENTS,
   MAXIMUM_SHARE,
   MINIMUM_SHARE,
   thresholdShare,
   validateWorkout,
+  workoutSegmentCount,
   type SteadyBlock,
   type ThresholdShare,
   type Workout,
@@ -222,5 +224,72 @@ describe('a target that reached the brand past a cast is still refused', () => {
     expect(() =>
       validateWorkout(workout([{ kind: 'free-ride', seconds: seconds(60) }])),
     ).not.toThrow();
+  });
+});
+
+describe('the expansion is bounded, because a workout can arrive as data', () => {
+  const intervals = (repeats: number): WorkoutBlock => ({
+    kind: 'intervals',
+    repeats,
+    hardSeconds: seconds(30),
+    hardTarget: thresholdShare(1.05),
+    easySeconds: seconds(30),
+    easyTarget: thresholdShare(0.6),
+  });
+
+  it('counts one segment for each block that is not a repeat', () => {
+    expect(
+      workoutSegmentCount(
+        workout([
+          steady(60, 0.7),
+          {
+            kind: 'ramp',
+            seconds: seconds(60),
+            from: thresholdShare(0.6),
+            to: thresholdShare(0.9),
+          },
+          { kind: 'free-ride', seconds: seconds(60) },
+        ]),
+      ),
+    ).toBe(3);
+  });
+
+  it('counts a hard and an easy interval for every repeat, including the last', () => {
+    // `expandWorkout` pushes both every time, so counting one per repeat would
+    // under-report by half and the bound would admit twice what it says.
+    expect(workoutSegmentCount(workout([intervals(6)]))).toBe(12);
+  });
+
+  it('accepts a workout that lands exactly on the bound', () => {
+    const blocks = Array.from({ length: MAXIMUM_SEGMENTS / 2 }, () => intervals(1));
+    expect(workoutSegmentCount(workout(blocks))).toBe(MAXIMUM_SEGMENTS);
+    expect(() => validateWorkout(workout(blocks))).not.toThrow();
+  });
+
+  it('refuses one segment past it, and says what to look at', () => {
+    const blocks = [
+      ...Array.from({ length: MAXIMUM_SEGMENTS / 2 }, () => intervals(1)),
+      steady(60, 0.7),
+    ];
+    const error = refusal(() => validateWorkout(workout(blocks)));
+    expect(error.code).toBe('workout-too-long');
+    expect(error.message).toContain('repeat counts');
+  });
+
+  it('refuses the absurd case that motivated the bound', () => {
+    // Sixty blocks at the maximum repeat count is 12 000 segments; ten thousand
+    // such blocks is two million, which is what `expandWorkout` would have
+    // allocated before this existed.
+    const blocks = Array.from({ length: 60 }, () => intervals(MAXIMUM_REPEATS));
+    expect(refusal(() => validateWorkout(workout(blocks))).code).toBe('workout-too-long');
+  });
+
+  it('reports a bad repeat count as a bad repeat count, not as a long workout', () => {
+    // The count runs AFTER the per-block loop and has to: counting with a
+    // repeat count of NaN would mean deciding what NaN segments means, which is
+    // a worse question than one pass over an array already in memory.
+    expect(refusal(() => validateWorkout(workout([intervals(Number.NaN)]))).code).toBe(
+      'invalid-repeat',
+    );
   });
 });

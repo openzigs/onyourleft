@@ -698,6 +698,7 @@ export function workoutFor(
   owner: AthleteId,
   overrides: {
     readonly name?: string;
+    readonly description?: string;
     readonly updatedAt?: number;
     readonly blocks?: readonly WorkoutBlock[];
   } = {},
@@ -722,7 +723,14 @@ export function workoutFor(
     id: workoutId(`workout-${String(workoutCounter)}`),
     createdBy: owner,
     name,
-    workout: { name, blocks },
+    // ⚠️ No description by DEFAULT, deliberately: it is an optional field, so
+    // the default fixture is the "absent stays absent" case and every existing
+    // assertion goes on covering it. A test that wants the other case asks.
+    workout: {
+      name,
+      ...(overrides.description === undefined ? {} : { description: overrides.description }),
+      blocks,
+    },
     createdAt: unixSeconds(FIXTURE_EPOCH),
     updatedAt: unixSeconds(overrides.updatedAt ?? FIXTURE_EPOCH),
   };

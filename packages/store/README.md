@@ -519,6 +519,20 @@ half a load. It is the opposite call from `RouteRecord`, which stores its whole 
 the difference is what the derivation reads: a profile is derived from a file the store does not
 keep, and a timeline is derived from the blocks in the row beside it.
 
+⚠️ **`description` was dropped on the way to disk until #202, and nothing noticed.** `Workout`
+has carried an optional `description` since #201, `toPersistedWorkout` never wrote it and
+`fromPersistedWorkout` never read it, so an imported workout's text was lost on save. The reason it
+went unseen is worth more than the fix: every round-trip assertion in `workout-store.test.ts` used a
+fixture with **no description in it**, so the field that was silently discarded was also the field
+nothing looked at. `workoutFor` still defaults to having none — that is the absent-stays-absent case
+and every existing assertion goes on covering it — and the tests that want the other case ask for
+it.
+
+It needed **no schema version**: §"An optional field is not a migration" is the rule, and an absent
+key reads back as `undefined` from a row written before the field existed. The decode is faithful in
+both directions — a description that is not a string on disk is a `StoreDecodeError`, and one that
+is absent stays absent rather than becoming an empty string.
+
 ⚠️ **No `visibility` column, deliberately.** ADR 0004's default exists because a route or a ride
 carries coordinates — a route's endpoints are usually the athlete's front door. A workout carries
 none: durations and fractions, and not even the threshold they are fractions of. The privacy

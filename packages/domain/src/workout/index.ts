@@ -17,11 +17,23 @@ export type {
 
 export {
   MAXIMUM_REPEATS,
+  MAXIMUM_SEGMENTS,
   MAXIMUM_SHARE,
   MINIMUM_SHARE,
   thresholdShare,
   validateWorkout,
+  workoutSegmentCount,
 } from './workout';
+
+export type { WorkoutFile } from './format';
+export {
+  decodeWorkoutFile,
+  encodeWorkoutFile,
+  MAXIMUM_WORKOUT_FILE_CHARACTERS,
+  WORKOUT_FILE_EXTENSION,
+  WORKOUT_FILE_MEDIA_TYPE,
+  WORKOUT_FILE_VERSION,
+} from './format';
 
 export type { WorkoutSegment, WorkoutTimeline } from './timeline';
 export { expandWorkout, segmentAt, targetAt } from './timeline';

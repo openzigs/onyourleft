@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useState, type FormEvent, type JSX } from 'react';
 
 import type { WorkoutBlock } from '@onyourleft/domain';
-import type { WorkoutId } from '@onyourleft/store';
+import type { WorkoutId, WorkoutRecord } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
+import type { DownloadableFile } from '../transfer/store-port';
 import {
   blockFromDraft,
   EMPTY_DRAFT,
@@ -16,6 +17,7 @@ import {
 } from '../workouts/build';
 import { blockText, workoutRow, type WorkoutRow } from '../workouts/library';
 import { WORKOUT_LIST_LIMIT, type WorkoutPort } from '../workouts/store-port';
+import { exportedWorkout, workoutFromFile } from '../workouts/transfer';
 
 /**
  * Workouts (#14) — the ones this device holds, and building a new one.
@@ -73,22 +75,44 @@ export interface WorkoutsViewProps {
   readonly port?: WorkoutPort | undefined;
   /** Injected so the suite can assert what was written. `main.tsx` passes the real clock. */
   readonly now?: () => number;
+  /**
+   * Hands a file to the browser to download. `undefined` where this build has
+   * no way to save one, and the export control is then not offered at all
+   * rather than offered and inert — `RoutesView.tsx`'s rule.
+   */
+  readonly save?: ((file: DownloadableFile) => void) | undefined;
 }
 
-export function WorkoutsView({ port, now }: WorkoutsViewProps): JSX.Element {
-  const [rows, setRows] = useState<readonly WorkoutRow[] | undefined>(undefined);
+/**
+ * A listed workout, and the record it came from.
+ *
+ * ⚠️ **Both, rather than the row alone.** A `WorkoutRow` is a summary built for
+ * reading — a duration in words, a shape in a sentence — and nothing in it can
+ * be encoded back into a file. Keeping the record beside it means export
+ * re-encodes what the list already decoded instead of reading the store a
+ * second time, which is the call `RoutesView.tsx` makes for a much heavier row.
+ */
+interface WorkoutEntry {
+  readonly row: WorkoutRow;
+  readonly record: WorkoutRecord;
+}
+
+export function WorkoutsView({ port, now, save }: WorkoutsViewProps): JSX.Element {
+  const [entries, setEntries] = useState<readonly WorkoutEntry[] | undefined>(undefined);
   const [loadFault, setLoadFault] = useState<string | undefined>(undefined);
   const [refusal, setRefusal] = useState<BuildRefusal | undefined>(undefined);
   const [saved, setSaved] = useState<string | undefined>(undefined);
   const [draft, setDraft] = useState<BlockDraft>(EMPTY_DRAFT);
   const [blocks, setBlocks] = useState<readonly WorkoutBlock[]>([]);
   const [pendingDelete, setPendingDelete] = useState<WorkoutRow | undefined>(undefined);
+  const [fileFault, setFileFault] = useState<string | undefined>(undefined);
+  const [fileNote, setFileNote] = useState<string | undefined>(undefined);
 
   const clock = useCallback((): number => (now === undefined ? Date.now() / 1000 : now()), [now]);
 
   const reload = useCallback(async (): Promise<void> => {
     if (port === undefined) {
-      setRows([]);
+      setEntries([]);
       return;
     }
     try {
@@ -97,13 +121,13 @@ export function WorkoutsView({ port, now }: WorkoutsViewProps): JSX.Element {
       // A row that cannot be expanded is a row that could not be ridden, so the
       // list reports the failure rather than rendering a name a rider could
       // press.
-      setRows(list.map(workoutRow));
+      setEntries(list.map((record) => ({ row: workoutRow(record), record })));
       setLoadFault(undefined);
     } catch {
       // A store that throws is what "offline" looks like on this device: there
       // is no network to be offline from, and the screen says so rather than
       // rendering nothing.
-      setRows([]);
+      setEntries([]);
       setLoadFault(
         'Your saved workouts could not be read on this device. Everything here is stored ' +
           'locally, so this is not a connection problem — reload the page to try again.',
@@ -165,6 +189,60 @@ export function WorkoutsView({ port, now }: WorkoutsViewProps): JSX.Element {
       await reload();
     },
     [blocks, clock, port, reload],
+  );
+
+  /**
+   * ⚠️ **Re-encodes from the record already in hand.** The list read decoded it
+   * — that is what `WORKOUT_LIST_LIMIT` budgets for — so reading the store
+   * again would decode the same blocks to produce the same bytes.
+   */
+  const onExport = useCallback(
+    (record: WorkoutRecord): void => {
+      if (save === undefined) return;
+      const file = exportedWorkout(record);
+      save(file);
+      setFileFault(undefined);
+      setFileNote(`${file.fileName} is ready. It holds the workout, not any ride you did of it.`);
+    },
+    [save],
+  );
+
+  const onImport = useCallback(
+    async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+      event.preventDefault();
+      if (port === undefined) return;
+      const chosen = new FormData(event.currentTarget).get('file');
+      // ⚠️ `instanceof File` is NOT the test for "a file was chosen", and this
+      // is the HTML specification rather than a quirk: a file input with no
+      // selection still appends an entry, holding a `File` with an empty name,
+      // a type of `application/octet-stream` and no body. So the obvious guard
+      // passes, the empty body reaches the decoder, and a rider who pressed
+      // import without choosing anything is told their file is not valid JSON.
+      // The name is the discriminator — a chosen file always has one.
+      if (!(chosen instanceof File) || chosen.name === '') {
+        setFileNote(undefined);
+        setFileFault('Choose a workout file to import.');
+        return;
+      }
+      const outcome = workoutFromFile(await chosen.text(), {
+        id: `workout-${String(Math.round(clock() * 1000))}` as WorkoutId,
+        owner: port.athleteId,
+        now: clock(),
+      });
+      if (outcome.status === 'refused') {
+        // Shown and nothing written. The refusal is a value a pure function
+        // returned, which is what lets the test assert the sentence a rider
+        // sees rather than that some error happened.
+        setFileNote(undefined);
+        setFileFault(outcome.refusal.message);
+        return;
+      }
+      await port.store.putWorkout(outcome.record);
+      setFileFault(undefined);
+      setFileNote(`Imported \u201C${outcome.record.name}\u201D.`);
+      await reload();
+    },
+    [clock, port, reload],
   );
 
   const onDelete = useCallback(
@@ -349,11 +427,35 @@ export function WorkoutsView({ port, now }: WorkoutsViewProps): JSX.Element {
       )}
       {saved === undefined ? null : <StatusMessage tone="success">{saved}</StatusMessage>}
 
+      <h2>Import a workout</h2>
+      <p>
+        A workout file written by On Your Left. The file is read on this device and never sent
+        anywhere. Files from other training apps are not read yet.
+      </p>
+      <form onSubmit={(event) => void onImport(event)}>
+        <p>
+          <label htmlFor="workout-file">Workout file</label>
+          <input id="workout-file" name="file" type="file" accept=".json,application/json" />
+        </p>
+        <Button type="submit">Import workout</Button>
+      </form>
+
+      {fileFault === undefined ? null : (
+        <StatusMessage tone="warning" live>
+          {fileFault}
+        </StatusMessage>
+      )}
+      {fileNote === undefined ? null : (
+        <StatusMessage tone="success" live>
+          {fileNote}
+        </StatusMessage>
+      )}
+
       <h2>Saved workouts</h2>
       {loadFault === undefined ? null : <StatusMessage tone="warning">{loadFault}</StatusMessage>}
-      {rows === undefined ? (
+      {entries === undefined ? (
         <p>Reading your workouts…</p>
-      ) : rows.length === 0 ? (
+      ) : entries.length === 0 ? (
         <p>No workouts saved on this device yet.</p>
       ) : (
         <table>
@@ -368,7 +470,7 @@ export function WorkoutsView({ port, now }: WorkoutsViewProps): JSX.Element {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {entries.map(({ row, record }) => (
               <tr key={row.id}>
                 <th scope="row">{row.name}</th>
                 <td>{row.duration}</td>
@@ -379,6 +481,16 @@ export function WorkoutsView({ port, now }: WorkoutsViewProps): JSX.Element {
                 </td>
                 <td>{row.shape}</td>
                 <td>
+                  {save === undefined ? null : (
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        onExport(record);
+                      }}
+                    >
+                      Export {row.name}
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     onClick={() => {
