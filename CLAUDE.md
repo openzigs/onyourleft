@@ -57,6 +57,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         wiring (#49), and since #14 the workout lifecycle — one
                         clock for the ride and the workout, and the panel that
                         will not offer a control the trainer would refuse
+    src/privacy/        the boundaries where data leaves the athlete's control
+                        (#34) — the two directions a payload can face, the walk
+                        that finds a coordinate in a field nobody declared, and
+                        the registry checked against the files on disk
     src/routes/         saved routes (#73) — the store port and its read budget,
                         the edit decision and its concurrency token, what a
                         shared copy of a route contains, and the export a rider
@@ -1341,8 +1345,12 @@ await harness.destroy();                       // in afterEach
 Four things to know before you use it:
 
 - **The fixtures carry three athletes, not two.** Two cannot distinguish "scoped correctly" from
-  "returns everything the requester is connected to". The scoping *assertions* that need the third
-  belong with #34 in Phase 3; the fixture is there now because retrofitting it is a rewrite.
+  "returns everything the requester is connected to". ⚠️ **The scoping assertions that need the
+  third now exist, and this bullet used to say they were waiting for Phase 3** — a reviewer who
+  remembers that is reading the old file. `activity-store.scoping.test.ts` derives every
+  `owner`-taking member from `ActivityStore.prototype` and requires a probe for each, and
+  `activity-store.erasure.test.ts` derives the table list from `SCHEMA_VERSIONS`. Both fail closed,
+  and both use all three athletes.
 - **`seedRide` and `streamSetFor` take an owner**, so the write-path scoping case is as short to
   write as the read-path one. #26's review found that a two-athlete *read* fixture is blind to a
   write-path hole entirely.
@@ -1529,7 +1537,11 @@ Facts are not copyrightable: a physical constant or an equation from a published
   formats a coordinate into a string** — a log line, a toast, a crash report, a Phase 3 error body —
   not only those two files.
 - **Cross-athlete exposure.** Any query matching on an entity id **without also filtering on the
-  owning athlete**. This passes every single-athlete test in the suite.
+  owning athlete**. This passes every single-athlete test in the suite — which is why
+  `packages/store/src/activity-store.scoping.test.ts` exists and why its enumeration is *derived*
+  from the store rather than written down. Adding a read that takes `owner` and forgetting to
+  filter on it is a red test; adding one and forgetting the test is also a red test. The same file
+  header says what it cannot cover.
 - **Sensor data is untrusted input.** Malformed or hostile GATT payloads come from a device that may
   not be what it claims.
 - **Activity file parsing.** FIT/GPX/TCX come from user-supplied files. Malformed input must produce
@@ -1827,5 +1839,8 @@ top of an issue **supersedes its body**.
 | Which of #15's acceptance criteria can be checked without a phone, and what each of the others needs | [`docs/spikes/0002-background-recording.md`](docs/spikes/0002-background-recording.md) |
 | What proves the mobile shell cannot encode a FIT file of its own | `apps/web/src/transfer/cross-client-fixture.ts`, `apps/web/src/transfer/cross-client-fit.test.ts` |
 | Why an ANT+ dependency used to pass the rule that bans ANT+ | `scripts/check-repo-rules.sh` §`SCOPE001`, §6 |
+| What proves no store read crosses athletes, and how a new read is caught | `packages/store/src/activity-store.scoping.test.ts` |
+| What proves an erased athlete leaves no row behind, and why the table list is derived | `packages/store/src/activity-store.erasure.test.ts`, `packages/store/src/schema.ts` §`SCHEMA_VERSIONS` |
+| Which way a payload faces, and why an export is deliberately not trimmed | `apps/web/src/privacy/boundaries.ts`, [#35](https://github.com/openzigs/onyourleft/issues/35) |
 
-<!-- Last updated: 2026-09-09 by delivery:code-issue on #15 (ADR 0018, spike 0002, and the two criteria that were checkable) -->
+<!-- Last updated: 2026-09-09 by delivery:code-issue on #34 (the athlete-scoping audit, derived rather than written down) -->
