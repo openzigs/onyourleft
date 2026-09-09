@@ -82,6 +82,65 @@ export const MAXIMUM_SHARE = 3;
 export const MAXIMUM_REPEATS = 100;
 
 /**
+ * The largest number of segments a workout may expand into.
+ *
+ * ⚠️ **This is the bound that stops a workout exhausting memory, and until
+ * [ADR 0017](../../../../docs/adr/0017-workout-file-format.md) it did not
+ * exist.** `expandWorkout` builds one array entry per segment and had no limit
+ * on how many: ten thousand interval blocks at {@link MAXIMUM_REPEATS} is two
+ * million entries, and nothing refused it.
+ *
+ * That was unreachable while blocks could only be built by `workouts/build.ts`.
+ * It stopped being unreachable twice over — a **hand-edited IndexedDB row**
+ * reaches `validateWorkout` through `fromPersistedWorkout`, and since ADR 0017
+ * so does a **file**, which `CLAUDE.md` §6 classes as untrusted input whose
+ * malformed cases must produce an error rather than resource exhaustion.
+ *
+ * ⚠️ **So the check lives here rather than in the file decoder**, which is the
+ * whole point: one rule covering the row and the file, instead of two that can
+ * drift apart. ADR 0017 D-6 records that.
+ *
+ * Like {@link MAXIMUM_SHARE} this is a bound on absurdity and not a design
+ * limit. The longest workout anybody writes — five hours of thirty seconds on,
+ * thirty seconds off — is 1 200 segments, so this is roughly eight times the
+ * largest real thing and costs a rider nothing they can express another way.
+ *
+ * It does **not** bound the number of *blocks*, because counting segments needs
+ * a validated repeat count and so has to run after the per-block loop. What
+ * bounds the block count is the decoder's cap on the length of the text it will
+ * parse at all — see `format.ts`. The two halves are deliberate and neither
+ * substitutes for the other.
+ */
+export const MAXIMUM_SEGMENTS = 10_000;
+
+/**
+ * How many segments a block becomes, without building any of them.
+ *
+ * The counted-loop shape `analysis/fitness.ts` uses for `dayCount`: the size is
+ * arithmetic, so asking for it must not cost the allocation the question exists
+ * to avoid.
+ */
+function blockSegmentCount(block: WorkoutBlock): number {
+  // Hard and easy, once per repeat — `expandWorkout` pushes both every time,
+  // including the last, and the comment there says why.
+  return block.kind === 'intervals' ? block.repeats * 2 : 1;
+}
+
+/**
+ * How many segments {@link expandWorkout} would produce for this workout.
+ *
+ * Exported because it is the honest way to ask "is this too big" without
+ * finding out by running out of memory.
+ */
+export function workoutSegmentCount(workout: Workout): number {
+  let total = 0;
+  for (const block of workout.blocks) {
+    total += blockSegmentCount(block);
+  }
+  return total;
+}
+
+/**
  * @throws {WorkoutError} `target-out-of-range` outside
  * {@link MINIMUM_SHARE}..{@link MAXIMUM_SHARE}.
  */
@@ -198,6 +257,20 @@ export function validateWorkout(workout: Workout): Workout {
   }
   for (const [index, block] of workout.blocks.entries()) {
     validateBlock(block, index);
+  }
+  // ⚠️ AFTER the per-block loop, and it has to be: counting segments needs a
+  // repeat count that is already known to be a whole number in range, which is
+  // what `validateBlock` establishes. Counting first would mean counting with
+  // `NaN` and deciding what that means, which is a worse question than paying
+  // one pass over an array that is already in memory.
+  const segments = workoutSegmentCount(workout);
+  if (segments > MAXIMUM_SEGMENTS) {
+    throw new WorkoutError(
+      'workout-too-long',
+      `this workout expands to ${String(segments)} intervals, and the most this program will ` +
+        `ride is ${String(MAXIMUM_SEGMENTS)}. Check the repeat counts — a workout this long is ` +
+        'usually a repeat count that gained a digit.',
+    );
   }
   return workout;
 }

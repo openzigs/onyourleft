@@ -247,6 +247,31 @@ export async function chooseOption(select: HTMLSelectElement, value: string): Pr
   });
 }
 
+/**
+ * Submit a form the way pressing its submit button does.
+ *
+ * `form.submit()` deliberately does NOT fire a submit event — that is the
+ * specification, not a jsdom gap — so a test using it would exercise nothing.
+ *
+ * ⚠️ **There is no companion that attaches a file to a `<input type="file">`,
+ * and one was written and deleted rather than shipped.** jsdom implements no
+ * `DataTransfer`, refuses `input.files = anything-but-a-FileList`, and hands
+ * out a `FileList` that is a Proxy rejecting index writes — so no public API
+ * reaches it. The version that looked like it worked used
+ * `Object.defineProperty(input, 'files', …)`, which `FormData` ignores: the
+ * probe asserted `instanceof File` and passed against the **empty** file the
+ * HTML specification appends for an input with no selection. That is a false
+ * pass of exactly the shape this repository keeps closing, so the helper is
+ * absent on purpose. A screen's file *decoding* is asserted against its pure
+ * function; only the picker step is out of reach.
+ */
+export async function submitForm(form: HTMLFormElement): Promise<void> {
+  await inAct(() => {
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  });
+  await settle();
+}
+
 /** Every element matching a selector, as an array, typed. */
 export function queryAll<T extends Element = HTMLElement>(root: ParentNode, selector: string): T[] {
   return [...root.querySelectorAll<T>(selector)];

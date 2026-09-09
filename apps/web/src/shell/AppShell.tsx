@@ -216,7 +216,7 @@ function viewFor(match: RouteMatch, props: AppShellProps): JSX.Element {
     case 'routes':
       return <RoutesView port={props.routes} save={props.transfer?.save} />;
     case 'workouts':
-      return <WorkoutsView port={props.workouts} />;
+      return <WorkoutsView port={props.workouts} save={props.transfer?.save} />;
     case 'game':
       return (
         <GameView port={props.game} renderer={props.gameRenderer} screenLock={props.screenLock} />

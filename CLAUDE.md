@@ -69,8 +69,9 @@ apps/                 AGPL-3.0-or-later, without exception
                         player's decisions meet a trainer's control point,
                         driven end to end against the #44 simulator
     src/workouts/       the workout library and builder (#14) — the read
-                        budget, the row model that quotes no watts, and the
-                        one place a typed percentage becomes a share
+                        budget, the row model that quotes no watts, the one
+                        place a typed percentage becomes a share, and since
+                        #202 saving one to a file and reading one back
     src/game/           the trainer game (#85) — the fixed-tick simulation the
                         renderer cannot influence, the road corridor built from
                         #89's profile, the quality ladder for a throttling
@@ -119,9 +120,12 @@ packages/             Apache-2.0, without exception
                         re-simulation, and no athlete id anywhere in it
     workout/            structured workouts (#14) — the model, the timeline a
                         player looks up rather than replays, the ERG
-                        spiral-of-death rule, and the player itself, which
-                        emits an intent and writes nothing. NO file format;
-                        see §6
+                        spiral-of-death rule, the player itself, which emits an
+                        intent and writes nothing, and since #202 the file
+                        format: one key that is both identity and version, an
+                        unknown key refused rather than ignored, and the bound
+                        that stops an expansion allocating two million
+                        segments. ADR 0017, and §6
     segment/            the segment model (#64), the matcher (#66) and the effort
                         comparison (#67) — endpoints and bearings, the cell
                         prefilter, discrete Fréchet, the effort with its
@@ -399,7 +403,7 @@ pnpm run test:a11y
 # Node and an install, so it is NOT part of `check:repo`.
 pnpm run check:a11y-suite
 
-# Its own suite. Fixture-driven; 21 cases. Needs Node, so also not in
+# Its own suite. Fixture-driven; 27 cases. Needs Node, so also not in
 # `check:repo`.
 bash scripts/check-a11y-suite.test.sh
 
@@ -1366,30 +1370,55 @@ rename them to the familiar ones**
 in code, in a UI label, in a metric key or in a column header. The *formulae* are unaffected — they
 are published (Allen & Coggan, 2006) and a trademark protects a name, not arithmetic.
 
-### A workout file format is an ADR 0009 question, not a parser to write
+### The workout file format is this project's own — ADR 0017 answered it
 
-[#14](https://github.com/openzigs/onyourleft/issues/14)'s scope section says *"the ZWO format is the
-de facto standard … Adopting it buys an enormous free library"*. **That predates
-[ADR 0009](docs/adr/0009-clean-room-posture.md) and is not settled.** Three things collide, and any
-one of them is enough to stop:
+⚠️ **This section used to say the question was open and that
+`packages/domain/src/workout/` defined the model and no format. A reviewer who remembers that is
+reading the old file.** [#202](https://github.com/openzigs/onyourleft/issues/202) settled it and
+[ADR 0017](docs/adr/0017-workout-file-format.md) records the decision.
+
+**The de facto format is not adopted.** Its three obstacles were each answered rather than noted,
+and the answers are why the decision went the way it did:
 
 - **L1** greps every diff for `zwift`, case-insensitively, and permits a hit only in prose or in an
-  exact R3 template instance. A format named after a product is at best an argument about whether a
-  file extension is a mark.
-- **R1** permits taking facts and forbids taking *somebody's compilation* of them as a table — and
-  **every open implementation of that format is GPL-2.0, GPL-3.0 or AGPL-3.0**, which §3 makes fatal
-  anywhere under `packages/`. Reading one to learn the element names is the exact act R1 draws a
-  line through.
-- **ADR 0006 R2's provenance requirement has no answer here.** The FIT decoder records where every
-  profile number came from. There is no published specification for the format in question to record
-  against, so an implementation would be written from memory — and #14's own criterion, that *"at
-  least 50 workouts from the existing open ZWO corpus parse"*, needs a corpus this project has no
-  lawful, offline route to.
+  exact R3 template instance. An adopted extension would appear in a file picker's `accept` string,
+  in an exported filename and probably in a directory name. That is a hit L1 forbids outright, not
+  one it invites a defence of. **Under our own format the argument does not arise.**
+- **R1** permits taking facts and forbids taking *somebody's compilation* of them as a table, and an
+  element set is such a compilation. R1's escape hatch — re-derive from the specification — is
+  **closed here**, because there is no published specification and **every open implementation is
+  GPL-2.0, GPL-3.0 or AGPL-3.0**, which §3 makes fatal anywhere under `packages/`. That is the
+  material difference from FIT, where published documentation existed. **Under our own format R1 is
+  not engaged: nothing was consulted.**
+- **ADR 0006 R2's provenance** column would have read "recalled". **Under our own format it reads
+  `packages/domain/src/workout/workout.ts`, #201**, which is the strongest provenance any format in
+  this tree has.
 
-**So `packages/domain/src/workout/` defines the model and no format.** Every format that ever lands
-maps onto it, and the decision — adopt one under a written ADR, or specify this project's own — is
-the owner's. It is not blocked work: the model, the timeline and the ERG rule are the part that does
-not depend on the answer, and they are the part #14 says carries the risk.
+**So `packages/domain/src/workout/format.ts` is the format**, and it is JSON mirroring the model
+one-for-one. Four things about it are decisions rather than details:
+
+- **One key, `onYourLeftWorkout: 1`, is both the identity and the version** (D-3). A `format` string
+  beside a `version` number can disagree with itself; one key cannot. **The decoder never looks at
+  the filename.**
+- ⚠️ **An unrecognised key is refused, not ignored** (D-4) — the opposite of the usual convention.
+  A future field that changed what a workout *does* would otherwise be dropped silently and the
+  rider would ride something else against a machine applying resistance to them. Forward
+  compatibility comes from the version number instead. The cost is that an older build refuses a
+  newer file wholesale, and that is the intended trade.
+- ⚠️ **The format is in `packages/domain`, not `packages/fit`** (D-5). `packages/fit` is where
+  *other people's* formats live and its identity is ADR 0006's clean-room posture; a serialisation
+  of our own model has none of those questions to declare.
+- ⚠️ **`validateWorkout` now bounds the expansion**, and until #202 nothing did: `expandWorkout`
+  allocates one entry per segment, and ten thousand interval blocks at `MAXIMUM_REPEATS` is two
+  million. The bound is in `validateWorkout` rather than in the decoder **so that it covers a
+  hand-edited IndexedDB row as well as a file** — one rule instead of two that can drift.
+
+**What this costs, and it is worth saying plainly: the free library is not bought.** A rider with a
+folder of workouts in the de facto format cannot open them here, and this project starts with a
+corpus of zero. #14's fifth criterion — *"at least 50 workouts from the existing open ZWO corpus
+parse"* — **is not met and is not claimed to be**; ADR 0017 supersedes it. Importing that format is
+[#210](https://github.com/openzigs/onyourleft/issues/210), with the licence and corpus questions
+attached, and ADR 0017's §"What would make this ADR wrong" says what would reopen it.
 
 ### Reading prior art is fine. Copying from it binds this project's licence.
 
@@ -1463,8 +1492,8 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   inside an ADR table cell.
 - **ADRs**: `docs/adr/NNNN-kebab-case.md`, with **Status, Context, Decision, Consequences**. Numbers
   are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. **Every number from 0001 to 0016 is
-  now written and the next free number is 0017** — there is no live reservation. ⚠️ `0012` **was**
+  **and which are claimed by open issues** before you pick one. **Every number from 0001 to 0017 is
+  now written and the next free number is 0018** — there is no live reservation. ⚠️ `0012` **was**
   reserved and is no longer: [#64](https://github.com/openzigs/onyourleft/issues/64) consumed it
   with [ADR 0012](docs/adr/0012-data-licence.md), the data licence, which is the destination
   ADR 0001's *Data* deferral had no number for
@@ -1682,7 +1711,11 @@ top of an issue **supersedes its body**.
 | Where a typed percentage becomes a share of threshold, and why that has exactly one home | `apps/web/src/workouts/build.ts` §`percentToShare` |
 | Why a workout row quotes no watts, no load and no score | `apps/web/src/workouts/library.ts` §`WorkoutRow` |
 | Why a workout's shape is a sentence rather than a chart | `apps/web/src/workouts/library.ts` §`WorkoutRow.shape` |
-| Why this project has no workout file format yet, and what would settle it | §6 "A workout file format is an ADR 0009 question", [#14](https://github.com/openzigs/onyourleft/issues/14) |
+| Why the workout file format is ours rather than the de facto one, and what would reopen that | [ADR 0017](docs/adr/0017-workout-file-format.md), §6 "The workout file format is this project's own" |
+| What a workout file contains, and why an unknown key in one is refused rather than ignored | `packages/domain/src/workout/format.ts`, [ADR 0017](docs/adr/0017-workout-file-format.md) D-3, D-4 |
+| What stops a workout expanding into two million segments, and why the bound is not in the decoder | `packages/domain/src/workout/workout.ts` §`MAXIMUM_SEGMENTS`, [ADR 0017](docs/adr/0017-workout-file-format.md) D-6 |
+| Why a file input's `instanceof File` check does not mean a file was chosen | `apps/web/src/views/WorkoutsView.tsx` §`onImport` |
+| Why there is no test helper that attaches a file to a file input | `apps/web/src/testing/mount.tsx` §`submitForm` |
 | Why a ghost replays recorded distance rather than re-simulating recorded power | `packages/domain/src/ghost/replay.ts` |
 | What stops a ghost being somebody else's ride, and why it is not in the ghost code | `packages/store/src/activity-store.ts` §`listRouteAttempts`, `activity-store.ghost-scope.test.ts` |
 | Why the eleventh store fake breaks a read where the other ten break a write | `packages/store/src/testing/fakes.ts` §`unscopedAttemptStoreFactory` |

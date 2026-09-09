@@ -179,6 +179,20 @@ export interface PersistedWorkout {
   id: string;
   createdBy: string;
   name: string;
+  /**
+   * Free text from whoever wrote the workout, when there is any.
+   *
+   * ⚠️ **Optional, so it is not a migration** — this store's README §"An
+   * optional field is not a migration" is the rule, and an absent field reads
+   * back as `undefined` from a row written before it existed. No schema version
+   * moved for this.
+   *
+   * It arrived with ADR 0017's file format, and the reason is a defect rather
+   * than a feature: `Workout.description` has existed since #201 and this row
+   * dropped it, so importing a described workout and exporting it again lost
+   * the author's text with nothing saying so.
+   */
+  description?: string;
   blocks: unknown[];
   createdAt: number;
   updatedAt: number;
@@ -786,6 +800,14 @@ export function toPersistedWorkout(record: WorkoutRecord): PersistedWorkout {
     id: record.id,
     createdBy: record.createdBy,
     name: record.name,
+    // Absent rather than an empty string, so that a row written before this
+    // field existed and a workout that genuinely has no description read back
+    // identically. Writing `undefined` into the row instead would be a key
+    // holding nothing, which `fromPersistedWorkout` would then have to tell
+    // apart from a key that is not there.
+    ...(record.workout.description === undefined
+      ? {}
+      : { description: record.workout.description }),
     // Spread each block so the row holds plain data rather than whatever object
     // the caller happened to build. A branded number is a number at runtime, so
     // nothing is lost — and structured clone would reject anything that was not
@@ -822,7 +844,15 @@ export function fromPersistedWorkout(row: PersistedWorkout): WorkoutRecord {
     throw new StoreDecodeError('workout.blocks: expected an array');
   }
   const name = decodedString('workout.name', row.name);
-  const workout: Workout = { name, blocks: blocks as WorkoutBlock[] };
+  // Faithful: absent stays absent. A decoder that substituted an empty string
+  // would be lying about what is on disk, which is the rule
+  // `fromPersistedAthlete` follows for an optional threshold and this follows
+  // for the same reason.
+  const description =
+    row.description === undefined
+      ? {}
+      : { description: decodedString('workout.description', row.description) };
+  const workout: Workout = { name, ...description, blocks: blocks as WorkoutBlock[] };
   try {
     validateWorkout(workout);
   } catch (error) {
