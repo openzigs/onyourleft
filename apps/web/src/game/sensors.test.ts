@@ -52,6 +52,9 @@ function snapshotWith(states: Partial<Record<string, MetricState>>): RideSnapsho
     workout: undefined,
     storage: 'ok',
     pairingError: undefined,
+    saveState: 'unavailable',
+    saveError: undefined,
+    savedActivityId: undefined,
     connectionsRemaining: 3,
   };
 }

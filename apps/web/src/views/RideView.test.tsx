@@ -386,6 +386,50 @@ describe('the notice a stopped ride ends on', () => {
     expect(document.body.textContent).not.toContain('Closing the tab is safe now');
     expect(document.body.textContent).toContain('only in this tab');
   });
+
+  /**
+   * ⚠️ **These four were added because a mutation SURVIVED.** Deleting the
+   * failed-save branch left the suite green: the branches were written and
+   * nothing asserted any of them, so a rider whose ride never reached their
+   * activities would still have been told it was saved. That is precisely the
+   * defect the whole change exists to fix, reintroduced one layer up.
+   */
+  it('says the ride is in the activities once it actually is', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ phase: 'stopped', saveState: 'saved' });
+    await show(stub);
+    expect(document.body.textContent).toContain('saved to your activities');
+    expect(document.body.textContent).toContain('Closing the tab is safe now');
+  });
+
+  it('does not claim the activities have it while the save is still running', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ phase: 'stopped', saveState: 'saving' });
+    await show(stub);
+    expect(document.body.textContent).toContain('Adding it to your activities');
+    expect(document.body.textContent).not.toContain('Closing the tab is safe now');
+  });
+
+  it('leads with the ride being safe when the save failed, then says why', async () => {
+    // The ride is NOT lost — the checkpoint is deliberately kept — and leading
+    // with the failure would read as a lost ride.
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ phase: 'stopped', saveState: 'failed', saveError: 'the device is full' });
+    await show(stub);
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('every second of it is on this device');
+    expect(text).toContain('could not be added to your activities');
+    expect(text).toContain('the device is full');
+    expect(text).toContain('offered back');
+    expect(text).not.toContain('Closing the tab is safe now');
+  });
+
+  it('says nothing was recorded rather than claiming a save', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ phase: 'stopped', saveState: 'empty' });
+    await show(stub);
+    expect(document.body.textContent).toContain('Nothing was recorded');
+  });
 });
 
 describe('the ride clock', () => {

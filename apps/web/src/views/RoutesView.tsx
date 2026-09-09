@@ -153,7 +153,16 @@ export function RoutesView({ port, now, save }: RoutesViewProps): JSX.Element {
       if (port === undefined) return;
       const form = new FormData(event.currentTarget);
       const file = form.get('file');
-      if (!(file instanceof File)) {
+      // ⚠️ `instanceof File` is NOT the test for "a file was chosen", and this
+      // is the HTML specification rather than a quirk: a file input with no
+      // selection still appends an entry, holding a `File` with an empty name,
+      // a type of `application/octet-stream` and no body. So the obvious guard
+      // passes, the empty body reaches `routeFromGpx`, and a rider who pressed
+      // Import without choosing anything is told their file is not valid GPX.
+      // The name is the discriminator — a chosen file always has one.
+      //
+      // Found in #202's review of the identical guard on the workouts screen.
+      if (!(file instanceof File) || file.name === '') {
         setRefusal({ code: 'unreadable-file', message: 'Choose a GPX file to import.' });
         return;
       }

@@ -61,8 +61,15 @@ choose.
 
 A tab that has to stay open for four hours will sometimes be closed by accident, discarded by the
 browser under memory pressure, or lost to a sleeping laptop. So the ride is written to local storage
-**as it happens**, and the next time the client opens it offers the interrupted ride back to be
-continued or discarded.
+**as it happens**.
+
+> ⚠️ **The half that offers an interrupted ride back is not wired up yet.** The functions that find
+> and continue one are written and tested — `listRecoverableRecordings` and `recoverRecorder` — and
+> **nothing in the client calls them**, so a ride interrupted by a closed tab is on the device and
+> has no screen that offers it. This paragraph used to say the client offered it back; it did not.
+> Finishing a ride *normally* does now save it to your activities, which is a separate path and is
+> the one most rides take. Wiring the offer up is
+> [#212](https://github.com/openzigs/onyourleft/issues/212).
 
 > **At most eight seconds of a ride can be lost to a crash.**
 

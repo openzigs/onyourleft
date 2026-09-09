@@ -153,6 +153,18 @@ async function buildRideController(probe: CapabilityProbe): Promise<RideControll
     // must not collide on a session id, and a counter in a module is per tab.
     newSessionId: () => recordingSessionId(globalThis.crypto.randomUUID()),
     now: browserClock,
+    // ⚠️ Without this a recorded ride is checkpointed and then abandoned: it
+    // never becomes an activity, so it is absent from the library, the
+    // analysis screens, the matcher and export — which is what `finish.ts`
+    // records as the "store it" that was missing from §1's milestone.
+    rideSave: {
+      store: localStore(),
+      newActivityId: () => activityId(globalThis.crypto.randomUUID()),
+      // Read once, at construction, from the device the ride is ridden on.
+      // Stored on the activity so the fitness chart can aggregate to the day
+      // the rider actually rode rather than to the day the reader is in.
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    },
   };
 
   if (isNativeShell(platformCapacitor())) {

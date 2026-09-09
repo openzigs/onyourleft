@@ -47,7 +47,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         it reaches no other origin, the GeoJSON conversion, the
                         once-per-application protocol registration, and the one
                         file that names MapLibre
-    src/recording/      the recorder: engine + durable checkpoints + recovery (#46)
+    src/recording/      the recorder: engine + durable checkpoints + recovery (#46),
+                        and since #14's fourth criterion the step that turns a
+                        finished recording into an activity — the write order,
+                        and why the checkpoint is discarded last
     src/ride/           the live ride screen: its state machine, panels and trainer
                         wiring (#49), and since #14 the workout lifecycle — one
                         clock for the ride and the workout, and the panel that
@@ -1635,6 +1638,10 @@ top of an issue **supersedes its body**.
 | Where a FIT profile number came from, and what the decoder does with a bad file | [`packages/fit/README.md`](packages/fit/README.md) §1–§5 |
 | Which GPX/TCX schema versions are targeted, what each format loses, and how XXE is refused | [`packages/fit/README.md`](packages/fit/README.md) §7 |
 | Why a client must create its athlete row before its first write, and why `putAthlete` is the wrong call | `apps/web/src/local-athlete.ts`, [`packages/store/README.md`](packages/store/README.md) §"`ensureAthlete`", [#184](https://github.com/openzigs/onyourleft/issues/184) |
+| How a finished ride becomes an activity, and why the checkpoint is discarded only after it is durable | `apps/web/src/recording/finish.ts`, `apps/web/src/ride/controller.ts` §`saveTheRide` |
+| Why a recorded ride's distance is integrated from speed, and what a dropout does to it | `apps/web/src/recording/finish.ts` §`distanceOf` |
+| What a rider is told when a finished ride cannot be added to their activities | `apps/web/src/views/RideView.tsx`, and the four cases in `RideView.test.tsx` |
+| What proves an ERG workout's targets survive all the way into a FIT file | `apps/web/src/workout/erg-to-file.test.ts` |
 | How a ride is recorded, checkpointed and recovered, and the stated data-loss bound | [`packages/store/README.md`](packages/store/README.md) §"Recording checkpoints", `apps/web/src/recording/recorder.ts`, `README.md` §"If the tab closes mid-ride" |
 | What the live ride screen may claim about a trainer, and why a stale metric shows no number | `apps/web/src/ride/controller.ts`, `apps/web/src/ride/metrics.ts`, `apps/web/src/ride/TrainerPanel.tsx` |
 | How a bulk import reports a file it cannot read, and what bounds the memory an imported file can ask for | `apps/web/src/transfer/import-batch.ts`, `apps/web/src/transfer/read-activity-file.ts` §`MAXIMUM_IMPORTED_SAMPLES` |

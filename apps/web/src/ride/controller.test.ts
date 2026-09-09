@@ -46,6 +46,7 @@ import {
   type SimulatorBench,
 } from '@onyourleft/sensors/simulator';
 import {
+  activityId,
   recordingSessionId,
   workoutId,
   type RecordingSessionId,
@@ -62,7 +63,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_AUTO_PAUSE_AFTER_SECONDS } from '../recording/channels';
 import type { RecordingCheckpointStore } from '../recording/recorder';
 
-import { createRideController, PAIRING_ROLE_CAPABILITIES, type RideController } from './controller';
+import {
+  createRideController,
+  PAIRING_ROLE_CAPABILITIES,
+  type RideController,
+  type RideSavePort,
+} from './controller';
 import { METRIC_STALE_AFTER_SECONDS } from './metrics';
 import type { OpenTrainer, TrainerConnection } from './trainer';
 
@@ -163,6 +169,8 @@ interface BenchOptions {
   readonly withTrainerControl?: boolean;
   /** Never answer a control point write, so a procedure stays outstanding. */
   readonly silentTrainer?: boolean;
+  /** Give the controller somewhere to save a finished ride. See #14's fourth criterion. */
+  readonly rideSave?: RideSavePort | undefined;
 }
 
 function benchWith(options: BenchOptions = {}): Bench {
@@ -241,6 +249,7 @@ function benchWith(options: BenchOptions = {}): Bench {
     },
     now: () => bench.now,
     ...(options.withTrainerControl === false ? {} : { openTrainer }),
+    ...(options.rideSave === undefined ? {} : { rideSave: options.rideSave }),
   });
 
   return {
@@ -1264,6 +1273,90 @@ describe('the snapshot', () => {
     expect(rig.controller.getSnapshot().connectionsRemaining).toBe(3);
     await rig.controller.pair('trainer');
     expect(rig.controller.getSnapshot().connectionsRemaining).toBe(2);
+    rig.controller.dispose();
+  });
+});
+
+describe('a finished ride becomes an activity, and only then lets the checkpoint go', () => {
+  /**
+   * ⚠️ **The ordering here is the data-safety argument, not a detail.** Until
+   * the activity is on disk the checkpoint is the only copy of the ride — there
+   * is no server in this milestone — so a discard that ran first would turn a
+   * failed save into a lost ride.
+   */
+  function savePort(overrides: Partial<RideSavePort['store']> = {}): {
+    port: RideSavePort;
+    saved: string[];
+  } {
+    const saved: string[] = [];
+    return {
+      saved,
+      port: {
+        newActivityId: () => activityId('saved-ride'),
+        timeZone: 'Europe/London',
+        store: {
+          putActivity: (record) => {
+            saved.push(record.id);
+            return Promise.resolve(record.id);
+          },
+          putStreamSet: (set) => Promise.resolve(set.activityId),
+          deleteActivity: () => Promise.resolve(true),
+          ...overrides,
+        },
+      },
+    };
+  }
+
+  it('writes the activity and discards the checkpoint', async () => {
+    const { port, saved } = savePort();
+    const rig = benchWith({ rideSave: port });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 3);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+
+    expect(saved).toEqual(['saved-ride']);
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+    expect(rig.controller.getSnapshot().savedActivityId).toBe('saved-ride');
+    // The checkpoint is gone, which is what makes a completed ride stop being
+    // offered back as an interrupted one every time the client opens.
+    const remaining = await harness.read(async (store) => store.listRecordingSessions(ATHLETE_A));
+    expect(remaining).toEqual([]);
+    rig.controller.dispose();
+  });
+
+  it('KEEPS the checkpoint when the save fails, and says why', async () => {
+    const { port } = savePort({
+      putStreamSet: () => Promise.reject(new Error('the device is full')),
+    });
+    const rig = benchWith({ rideSave: port });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 3);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+
+    const snapshot = rig.controller.getSnapshot();
+    expect(snapshot.saveState).toBe('failed');
+    expect(snapshot.saveError).toBe('the device is full');
+    // ⚠️ Still there. The rider is offered the ride back on next open, which is
+    // the recovery path working rather than a duplicate to apologise for.
+    const remaining = await harness.read(async (store) => store.listRecordingSessions(ATHLETE_A));
+    expect(remaining.length).toBe(1);
+    rig.controller.dispose();
+  });
+
+  it('records and checkpoints exactly as before when this build cannot save', async () => {
+    // The accessibility suite's case, and every existing test's: no port, so
+    // the controller reports `unavailable` rather than pretending.
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 2);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().saveState).toBe('unavailable');
     rig.controller.dispose();
   });
 });
