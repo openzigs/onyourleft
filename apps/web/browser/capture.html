@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>On Your Left — sensor capture</title>
+    <style>
+      /* Deliberately plain. This page is run once, on a laptop propped on a
+         windowsill next to a turbo trainer, by somebody who is about to be out
+         of breath. Large targets, high contrast, no layout that reflows when a
+         log line arrives. */
+      :root {
+        color-scheme: light dark;
+        font-family: system-ui, sans-serif;
+      }
+      body {
+        margin: 0 auto;
+        max-width: 46rem;
+        padding: 1rem 1rem 6rem;
+        line-height: 1.5;
+      }
+      h1 {
+        font-size: 1.4rem;
+      }
+      fieldset {
+        border: 1px solid currentColor;
+        margin: 0 0 1rem;
+      }
+      button {
+        font: inherit;
+        min-height: 2.75rem;
+        padding: 0 0.75rem;
+        margin: 0.25rem 0.25rem 0.25rem 0;
+      }
+      input[type='text'],
+      input[type='number'] {
+        font: inherit;
+        min-height: 2.75rem;
+        padding: 0 0.5rem;
+      }
+      label {
+        display: block;
+        margin: 0.5rem 0 0.25rem;
+      }
+      #log {
+        font-family: ui-monospace, monospace;
+        font-size: 0.8rem;
+        white-space: pre-wrap;
+        max-height: 20rem;
+        overflow-y: auto;
+        border: 1px solid currentColor;
+        padding: 0.5rem;
+      }
+      .warning {
+        border-left: 4px solid currentColor;
+        padding-left: 0.75rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Sensor and trainer capture</h1>
+
+    <p class="warning">
+      <strong>Read the procedure first.</strong> This page writes to a trainer's control point,
+      which applies physical resistance to whoever is pedalling.
+      <code>docs/validation/0001-trainer-and-sensors.md</code> orders the steps so the dangerous one
+      is last. Nothing here is a substitute for reading it.
+    </p>
+
+    <p id="availability" role="status">Checking whether this browser has Bluetooth…</p>
+
+    <fieldset>
+      <legend>1 &middot; What the hardware is</legend>
+      <label for="hardware">Model and firmware, as you read them off the device or its app</label>
+      <input id="hardware" type="text" size="40" placeholder="Wahoo KICKR CORE, firmware 4.2.1" />
+      <p>
+        Typed rather than read over the air: the Device Information Service is optional and many
+        trainers omit it, and this is also the consent step — nothing about the hardware reaches the
+        file unless you put it there. The capture carries no device name.
+      </p>
+    </fieldset>
+
+    <fieldset>
+      <legend>2 &middot; Pair</legend>
+      <button id="pair-power" type="button">Pair a power source</button>
+      <button id="pair-cadence" type="button">Pair a speed/cadence sensor</button>
+      <button id="pair-heart-rate" type="button">Pair a heart rate strap</button>
+      <p id="devices" role="status">No device paired yet.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>3 &middot; Control the trainer</legend>
+      <button id="open-trainer" type="button">Open the fitness machine and take control</button>
+      <label for="target">Target power, watts</label>
+      <input id="target" type="number" min="0" max="2000" step="1" value="100" />
+      <button id="set-target" type="button">Set target</button>
+      <button id="stop-trainer" type="button">Release control (stop)</button>
+      <p id="trainer" role="status">No trainer opened.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>4 &middot; Save what happened</legend>
+      <button id="download" type="button">Download the capture</button>
+      <p id="counts" role="status">0 events captured.</p>
+    </fieldset>
+
+    <h2>Log</h2>
+    <div id="log" role="log" aria-live="polite"></div>
+
+    <script type="module" src="./capture-harness.ts"></script>
+  </body>
+</html>

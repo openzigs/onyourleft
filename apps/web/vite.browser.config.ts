@@ -34,14 +34,20 @@ export default defineConfig({
     // a minified bundle with no SPDX header.
     outDir: 'dist',
     emptyOutDir: true,
-    // ⚠️ Both pages have to be named. Vite's multi-page mode discovers only
-    // `index.html` by default, so adding `game.html` without this line builds a
+    // ⚠️ Every page has to be named. Vite's multi-page mode discovers only
+    // `index.html` by default, so adding a page without a line here builds a
     // harness the spec then cannot load — and the failure is a 404 during the
     // run rather than a build error, which reads like a server problem.
     rollupOptions: {
       input: {
         map: 'browser/index.html',
         game: 'browser/game.html',
+        // Not a gate the way the other two are: `capture.html` is the tool a
+        // person opens with a trainer in front of them (#111), and a headless
+        // runner has no Bluetooth adapter. It is built and loaded here so that
+        // the page cannot be discovered to be broken on the one afternoon
+        // somebody has the hardware — see `capture.browser.spec.ts`.
+        capture: 'browser/capture.html',
       },
     },
     // Sourcemaps so a failure in CI names a line of ours rather than a column
