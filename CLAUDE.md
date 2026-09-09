@@ -814,6 +814,20 @@ build is a percentage floor arriving by the back door, which §5 forbids. If CI 
 file is wrong and gets fixed in the same PR**; CI must not accumulate private knowledge, because
 that is how a contributor's local green becomes CI's red with no explanation.
 
+⚠️ **There is exactly one step that is not a §4a command, and this is it:
+`sudo rm -f /etc/apt/sources.list.d/google-chrome.*` immediately before the browser install.**
+It is recorded here rather than left as private CI knowledge, which is what the paragraph above
+forbids. `playwright install --with-deps` runs `apt-get update` across **every** source the runner
+image configures, and the image configures Google's own Chrome apt repository for the Chrome it
+ships. On 2026-09-09 that repository served a `Release` file regenerated at 17:16 UTC beside a
+`Packages.gz` last modified at 09:41; apt refused the mismatch (`Hash Sum mismatch`), the install
+exited 100, and it failed **byte-identically on a re-run** rather than settling. Nothing in this
+repository uses that source: the browser is the one the lockfile pins, fetched from Playwright's
+own CDN, and `--with-deps` takes its shared libraries from Ubuntu's archives. Removing it
+therefore makes CI trust **less** than it did, which is why it is a safe answer to an outage and
+not a workaround with a cost. It is a no-op the day Google's index is consistent again, and
+deleting the step is a one-line revert if the trade is ever judged wrong.
+
 > ⚠️ **The workflow's `name:` and its job's `name:` are both `Repository rules`, and `main` requires
 > a status check whose context is exactly that string.** Rename either and the required check never
 > reports, which makes every subsequent pull request unmergeable — including the one doing the

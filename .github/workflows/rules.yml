@@ -272,9 +272,43 @@ jobs:
 
       # --- The browser gate (#63) ----------------------------------------------
 
-      # Chromium only, and pinned by the lockfile: @playwright/test 1.56.0 ships
-      # Chromium revision 1194 and `playwright install` fetches exactly that, so
-      # the browser is as reproducible as the toolchain above.
+      # ⚠️ The runner image pre-configures Google's own Chrome apt repository for
+      # the Chrome it ships, and `--with-deps` runs `apt-get update` across EVERY
+      # configured source before it installs anything -- so one unrelated
+      # publisher having a bad afternoon fails this step. On 2026-09-09 that
+      # repository served a `Release` file regenerated at 17:16 UTC alongside a
+      # `Packages.gz` last modified at 09:41, and apt refused the mismatch:
+      #
+      #   Err https://dl.google.com/linux/chrome-stable/deb stable/main amd64 Packages
+      #     Hash Sum mismatch
+      #   E: Failed to fetch .../binary-amd64/Packages.gz  Hash Sum mismatch
+      #   Failed to install browsers
+      #   Error: Installation process exited with code: 100
+      #
+      # It failed byte-identically on a re-run, so it is not a mirror mid-sync
+      # that settles on its own, and it would fail the same way on `main`: the
+      # broken source is in the image, not in any diff.
+      #
+      # Nothing here uses that repository. The browser under the gate is the one
+      # `@playwright/test` pins, fetched from Playwright's own CDN by the step
+      # below, and every shared library `--with-deps` installs comes from
+      # Ubuntu's archives. So dropping the source removes a third-party
+      # publisher from the set this job trusts *as well as* unblocking it --
+      # after this step CI depends on strictly less than it did before.
+      #
+      # Both spellings, because the image names it `.list` today and apt's
+      # deb822 format would name it `.sources`; `rm -f` because a missing file
+      # is this step's desired outcome rather than an error.
+      - name: Drop the unrelated Chrome apt source
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
+                     /etc/apt/sources.list.d/google-chrome.sources
+
+      # Chromium only, and pinned by the lockfile: @playwright/test 1.63.0 ships
+      # Chromium revision 1243 and `playwright install` fetches exactly that, so
+      # the browser is as reproducible as the toolchain above. (#206 took this
+      # from 1.56.0/1194; CLAUDE.md section 4c requires these two numbers to move
+      # together and to be updated in the same pull request as the bump.)
       #
       # `--with-deps` installs the shared libraries a headless Chromium needs on
       # a bare runner. It uses sudo, which ubuntu-latest grants passwordless.
