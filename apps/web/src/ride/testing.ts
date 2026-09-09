@@ -79,6 +79,9 @@ export function idleSnapshot(): RideSnapshot {
     },
     storage: 'ok',
     pairingError: undefined,
+    saveState: 'unavailable',
+    saveError: undefined,
+    savedActivityId: undefined,
     connectionsRemaining: 3,
   };
 }
