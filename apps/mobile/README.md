@@ -18,9 +18,13 @@ pnpm --filter @onyourleft/web run build
 # Copy the build and the plugin list into android/.
 pnpm --filter @onyourleft/mobile exec cap sync android
 
-# Then Gradle, which needs an Android SDK -- see section 4.
+# Then Gradle, which needs an Android SDK — see section 5.
 cd apps/mobile/android && ./gradlew assembleDebug
 ```
+
+**This sequence has been run**, on 2026-09-09, and ends in
+`app/build/outputs/apk/debug/app-debug.apk`. It had never been run when the rest of this file
+was written; §5 records what that first run found.
 
 `cap sync` rewrites exactly two files in the tree, both of which say so on their first line:
 `android/capacitor.settings.gradle` and `android/app/capacitor.build.gradle`. It also rewrites three
@@ -141,36 +145,54 @@ seam will be touched again:
 `notifying` is now a **set of sinks per characteristic**, which fixes both and makes an unsubscribe
 idempotent without a flag.
 
-## 5. What could not be verified in the environment this was written in
+## 5. What could not be verified when this was written, and what has been since
 
-Stated plainly because #87's acceptance criteria mostly ask for things a device or an SDK answers,
-and a criterion reported as met when nothing checked it is worse than one reported as open:
+⚠️ **This section used to report that nothing in `android/` had been compiled and that six of
+#87's eight criteria were open. A reviewer who remembers that is reading the old file.** On
+2026-09-09 an Android SDK became available on a developer machine, the project was built for the
+first time, and two of those six moved. What follows separates the two dates rather than
+overwriting the first.
 
-| Needed for | Available here |
-|---|---|
-| JDK 21, Gradle | **yes** |
-| Android SDK / platform tools | **no** — `dl.google.com` is refused by the egress proxy, so `sdkmanager` cannot install one |
-| A Gradle build of `android/` | **no**, follows from the above |
-| A merged manifest (`:app:processDebugManifest` output) | **no** — the merge is the SDK's, and asserting against the app's *own* manifest instead would be a false pass |
-| An emulator or a device | **no** |
-| A real BLE peripheral | **no** |
+### ⚠️ The first build failed, and the reason is the point
 
-So nothing in `android/` has been compiled, and no permission flow has been exercised.
+`:app:processDebugMainManifest` failed with
+`ManifestMerger2$MergeFailureException: Error parsing … AndroidManifest.xml`. The manifest **was
+not well-formed XML**: three of its prose comments contained `--`, which XML forbids inside a
+comment, in the blocks explaining the `connectedDevice` service and the `tools:replace` overrides.
+`xmllint` rejected the file outright.
 
-**Where each of #87's eight acceptance criteria stands.** Six cannot be discharged here and are
-reported as open rather than argued around:
+So the manifest this package shipped had never been parsed by anything — the exact false pass this
+section was written to warn about, arriving in the one file whose *correctness under merge* is
+criterion 1. Why no gate caught it is worth stating: `LIC001`/`LIC002` scan `.xml` files, but only
+for an SPDX identifier in the first five lines. Nothing in `check:repo` parses XML. A
+well-formedness rule over the non-generated `.xml` files in this repository is the obvious guard
+and does not exist yet.
+
+The comments now use the em dash the rest of this repository's prose uses.
+
+### What each environment could do
+
+| Needed for | When #87 was written | On a developer machine, 2026-09-09 |
+|---|---|---|
+| JDK 21, Gradle | **yes** | yes (Temurin 21.0.10) |
+| Android SDK / platform tools | **no** — `dl.google.com` refused by the egress proxy | **yes** — cmdline-tools, platform-tools, `platforms;android-36`, `build-tools;36.0.0` |
+| A Gradle build of `android/` | **no** | **yes** — `assembleDebug` BUILD SUCCESSFUL, `app-debug.apk` 4.9 MB |
+| A merged manifest | **no** | **yes** — `:app:processDebugMainManifest` output, asserted below |
+| An emulator or a device | **no** | **still no** |
+| A real BLE peripheral | **no** | **still no** |
+
+### Where each of #87's eight acceptance criteria stands
 
 | # | Criterion | Status |
 |---|---|---|
-| 1 | the permissions, asserted **in the merged manifest** | ⚠️ **partly.** The merge is `:app:processDebugManifest` and needs the SDK. What IS asserted: the plugin still declares the problem (read from `node_modules`), the app declares the override with `tools:replace`, and **every** permission the plugin gets unconstrained is covered — derived from the plugin's manifest, not from a list typed out, so a permission it adds later fails the suite. Asserting the app's own manifest and calling this met is the exact false pass the criterion exists to prevent |
-| 2 | a `connectedDevice` service with a "Recording ride" notification | written, **never run** |
+| 1 | the permissions, asserted **in the merged manifest** | ✅ **met, 2026-09-09.** Read out of `app/build/intermediates/merged_manifest/debug/processDebugMainManifest/AndroidManifest.xml`: `ACCESS_FINE_LOCATION` and `ACCESS_COARSE_LOCATION` both carry `maxSdkVersion="30"`, and `BLUETOOTH_SCAN` carries `neverForLocation`. So `tools:replace` did beat the plugin's unconstrained declarations, which was an assumption until this build. `BLUETOOTH` and `BLUETOOTH_ADMIN` arrive from the plugin already bounded at 30. No location permission is requested on API 31+ |
+| 2 | a `connectedDevice` service with a "Recording ride" notification | ⚠️ **half.** The merged manifest declares `RecordingService` with `foregroundServiceType="connectedDevice"` and `exported="false"`, so the declaration is verified. The **notification has never been seen** — that needs a device |
 | 3 | a 60-minute backgrounded session, verified with `adb` | **open** — needs a device |
-| 4 | killing the renderer does not stop recording | ⚠️ **not satisfiable as specified.** In a Capacitor shell the recorder is `packages/domain`'s state machine running as JavaScript in the WebView, so the renderer *is* the recorder. Meeting this means porting the engine to native and giving up #85's "the same web build", which is an ADR, not a quiet half-implementation. `RecordingService`'s header says so where somebody will read it |
-| 5 | two overlapping writes both complete | **open.** The plugin's internal `queue()` was read rather than assumed, as the revision block asks, but reading is not exercising |
+| 4 | killing the renderer does not stop recording | ⚠️ **not satisfiable as specified**, unchanged. In a Capacitor shell the recorder is `packages/domain`'s state machine running as JavaScript in the WebView, so the renderer *is* the recorder. Meeting this means porting the engine to native and giving up #85's "the same web build", which is an ADR, not a quiet half-implementation |
+| 5 | two overlapping writes both complete | **open.** Reading the plugin's `queue()` is not exercising it |
 | 6 | 40 connect/disconnect cycles, connection 40 still succeeds | **open** — needs a device |
-| 7 | #39's interface satisfied **unchanged** | ✅ **met.** `git diff` shows no change under `packages/sensors`, and `createCapacitorTransport` is annotated `SensorTransport`, so a widened parameter is a compile error here |
-| 8 | denying a permission produces an explanatory screen | ✅ **met** for the decision. `permissionNotice` is total over `TransportAvailability` with a distinct message per outcome, and `mayShowDeviceList` is the direct expression of "not an empty device list". The rendering is the shell's |
+| 7 | #39's interface satisfied **unchanged** | ✅ **met.** `git diff` shows no change under `packages/sensors`, and `createCapacitorTransport` is annotated `SensorTransport` |
+| 8 | denying a permission produces an explanatory screen | ✅ **met** for the decision; the rendering is the shell's |
 
-Also open, from the Definition of Done: **tested on at least two OEMs**, and the `adb` commands
-documented "so the next person can repeat the measurement" — they are quoted in criterion 3 above and
-have been run by nobody.
+Still open from the Definition of Done: **tested on at least two OEMs**, and the `adb` commands run
+by somebody. ⚠️ **A build is not a run.** The APK exists and has been installed on nothing.
