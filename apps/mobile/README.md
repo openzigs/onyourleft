@@ -66,7 +66,11 @@ and are all ours to maintain from here.
 fails `LIC002`.** That is the intended direction: the build stops until somebody reads the new file
 and decides which side of the line it is on.
 
-## 3. The Gradle wrapper is a committed binary, and its checksum is unverified
+## 3. The Gradle wrapper is a committed binary, and its checksum is now verified
+
+⚠️ **This section used to say the checksum was unverified, and that both follow-ups were
+outstanding. A reviewer who remembers that is reading the old file.** Both were done on
+2026-09-09 from an unrestricted network; what follows is the result.
 
 `android/gradle/wrapper/gradle-wrapper.jar` is a 43 KiB JAR, committed, as every Android project
 commits it — Gradle's own documentation and `gradle init` both do this, and Android Studio will not
@@ -78,26 +82,30 @@ What it pins, from `gradle-wrapper.properties`:
 |---|---|
 | Distribution | `https://services.gradle.org/distributions/gradle-8.14.3-all.zip` |
 | `validateDistributionUrl` | `true` |
-| `distributionSha256Sum` | **absent** |
-| Local SHA-256 of the jar as committed | `7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172` |
+| `distributionSha256Sum` | `ed1a8d686605fd7c23bdf62c7fc7add1c5b23b2bbc3721e661934ef4a4911d7c` |
+| SHA-256 of the jar as committed | `7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172` |
 
-⚠️ **That digest has NOT been checked against Gradle's published one**, and the reason is worth
-recording rather than leaving as an unexplained gap: `services.gradle.org` answers a `301` to a host
-the egress proxy in this environment refuses with `403`, so `gradle-8.14.3-wrapper.jar.sha256` could
-not be fetched here at all. The digest above is therefore *what we are shipping*, not *what Gradle
-published* — useful for noticing a change, useless for establishing provenance.
+**The jar's digest matches the one Gradle publishes**, read on 2026-09-09 from
+`https://services.gradle.org/distributions/gradle-8.14.3-wrapper.jar.sha256`, byte for byte. The
+digest in the table is therefore *what Gradle published* as well as *what we ship*, which is what
+the previous wording could not claim. The environment that wrote #87 could not establish this: it
+reported `services.gradle.org` answering a `301` to a host its egress proxy refused with `403`, so
+the file could not be fetched there at all.
 
-Two things follow, and neither is done yet:
+`distributionSha256Sum` now carries the `-all.zip` digest, read the same day from
+`https://services.gradle.org/distributions/gradle-8.14.3-all.zip.sha256`. That is the setting that
+makes the **download** verified rather than merely the URL — `validateDistributionUrl: true` only
+checks that the URL looks like a Gradle one, which a compromised mirror at that address would also
+satisfy. It is the same posture `CLAUDE.md` §8 takes toward pinning an action to a commit SHA
+rather than a tag, applied to the one binary in this repository that arrived without one.
 
-- Somebody on an unrestricted network should compare the digest above against
-  `https://services.gradle.org/distributions/gradle-8.14.3-wrapper.jar.sha256` and record the result
-  here.
-- `distributionSha256Sum` should be added to `gradle-wrapper.properties` once the distribution's own
-  published digest can be read. It is the setting that makes the *download* verified rather than
-  merely the URL; `validateDistributionUrl: true` only checks that the URL looks like a Gradle one.
-
-This is the same posture `CLAUDE.md` §8 takes toward pinning an action to a commit SHA rather than a
-tag, applied to the one binary in this repository that arrived without one.
+⚠️ **Verification is not the same as execution.** No Gradle build has run against this wrapper from
+this repository. The digests say the wrapper and the distribution are the ones Gradle published;
+they say nothing about whether the project builds, which is
+[#87](https://github.com/openzigs/onyourleft/issues/87)'s remaining criteria and §4's table below.
+The first build to run will be the first to exercise `distributionSha256Sum`, and a mismatch there
+would fail the build rather than pass quietly — which is the point of adding it before that build
+rather than after.
 
 ## 4. What is here
 
