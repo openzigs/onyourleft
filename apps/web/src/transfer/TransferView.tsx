@@ -53,6 +53,16 @@ import {
   type AccountExportProgress,
   type AccountExportReport,
 } from './export-everything';
+import {
+  ERASE_CANNOT_REACH,
+  ERASE_CONFIRMATION,
+  ERASE_REFUSAL_TEXT,
+  ERASE_REMOVES,
+  eraseDecision,
+  eraseDevice,
+  eraseSentence,
+  type EraseRefusal,
+} from './erase-device';
 
 /** The ADR that explains why import is a file rather than a connection. */
 const CLEAN_ROOM_ADR =
@@ -141,6 +151,15 @@ export function TransferView({ port }: TransferViewProps): JSX.Element {
         </p>
       ) : (
         <TakeEverythingPanel port={port} storeRevision={storeRevision} />
+      )}
+
+      <h2>Erase this device</h2>
+      {port === undefined ? (
+        <p className="oyl-muted">
+          This needs the same local store the panels above do, so it is unavailable here too.
+        </p>
+      ) : (
+        <ErasePanel port={port} storeRevision={storeRevision} />
       )}
 
       <h2>Why this is a file and not a connection</h2>
@@ -617,6 +636,113 @@ export function everythingSentence(report: AccountExportReport): string {
     parts.push('there are more — run it again to continue');
   }
   return `${parts.join('; ')}.`;
+}
+
+/**
+ * The one irreversible control in the product.
+ *
+ * Placed **after** the export panel deliberately: the order on the page is the
+ * order a rider leaving should do it in, and a rider who reads this heading
+ * first has already scrolled past the way to keep their history.
+ *
+ * ⚠️ It states what erasing cannot reach **before** the button rather than
+ * after the result, and it names the signing-key consequence, which is the one
+ * nobody expects — see `erase-device.ts` and ADR 0014 D-7.
+ */
+function ErasePanel({
+  port,
+  storeRevision,
+}: {
+  readonly port: TransferPort;
+  readonly storeRevision: number;
+}): JSX.Element {
+  const [typed, setTyped] = useState('');
+  const [holds, setHolds] = useState(false);
+  const [done, setDone] = useState<string | undefined>(undefined);
+  const [refused, setRefused] = useState<EraseRefusal | undefined>(undefined);
+
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      const rides = await port.store.listActivitySummaries(port.athleteId, { limit: 1 });
+      if (live) {
+        setHolds(rides.length > 0);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [port, storeRevision]);
+
+  async function run(): Promise<void> {
+    const decision = eraseDecision(typed, holds);
+    if (!decision.ready) {
+      setRefused(decision.refusal);
+      return;
+    }
+    setRefused(undefined);
+    const outcome = await eraseDevice(port.store, port.athleteId);
+    setDone(eraseSentence(outcome));
+    setTyped('');
+    setHolds(false);
+  }
+
+  return (
+    <>
+      <p>
+        This removes everything this device holds about you. There is no server and nothing has been
+        uploaded, so there is nowhere else to ask &mdash; when this finishes, it is finished.
+      </p>
+      <p className="oyl-muted">What goes:</p>
+      <ul>
+        {ERASE_REMOVES.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+      <p className="oyl-muted">What this cannot reach:</p>
+      <ul>
+        {ERASE_CANNOT_REACH.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+      <p>
+        <strong>
+          Erasing the signing key cannot be undone, and it cannot be recreated. Rides you have
+          already exported go on verifying forever, but after this the device signs as a new
+          identity.
+        </strong>
+      </p>
+      <div className="oyl-transfer__form">
+        <label htmlFor="oyl-erase-confirm">{`Type “${ERASE_CONFIRMATION}” to confirm`}</label>
+        <input
+          id="oyl-erase-confirm"
+          className="oyl-input oyl-input--wide"
+          type="text"
+          value={typed}
+          onChange={(event) => {
+            setTyped(event.target.value);
+          }}
+        />
+        <Button
+          onClick={() => {
+            void run();
+          }}
+        >
+          Erase everything
+        </Button>
+      </div>
+      {refused === undefined ? null : (
+        <StatusMessage tone="warning" live>
+          {ERASE_REFUSAL_TEXT[refused]}
+        </StatusMessage>
+      )}
+      {done === undefined ? null : (
+        <StatusMessage tone="success" live>
+          {done}
+        </StatusMessage>
+      )}
+    </>
+  );
 }
 
 /**
