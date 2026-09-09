@@ -1168,6 +1168,188 @@ assert_clean "a targetSdkVersion above the floor passes, rather than being pinne
 new_fixture
 assert_clean "a tree with no android/ directory is not a REL002 violation"
 
+# --- XML001 / XML002: an XML comment a parser will accept (#225) -------------
+#
+# The defect these exist for is real and shipped: `AndroidManifest.xml` landed in
+# #87 as XML no parser accepts, and the first Gradle build ever run against this
+# repository — months later — failed on it. LIC002 already scanned that file, but
+# only for an SPDX identifier in the first five lines, so a manifest that could
+# not be parsed at all passed every gate in this repository.
+#
+# ⚠️ The regression fixture below is the shipped comment, near enough verbatim.
+# It is the case that motivated the rule, so it is the case that pins it; a
+# fixture invented afterwards would be a fixture written against the fix.
+
+# The header every XML file under apps/ needs, so that these cases exercise
+# XML001/XML002 rather than LIC002. Written as a function because the second
+# line of a manifest is the one place the two rules meet, and getting it wrong
+# in one fixture out of eight is how a case starts asserting the wrong rule.
+xml_header() {
+  printf '<?xml version="1.0" encoding="utf-8"?>\n'
+  printf '<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->\n'
+}
+
+manifest_path() {
+  mkdir -p "${fixture_root}/apps/mobile/android/app/src/main"
+  printf '%s' "${fixture_root}/apps/mobile/android/app/src/main/AndroidManifest.xml"
+}
+
+new_fixture
+target="$(manifest_path)"
+{ xml_header
+  printf '<manifest>\n'
+  printf '  <!-- a hand-written -- note -->\n'
+  printf '</manifest>\n'
+} > "${target}"
+assert_violation "a double hyphen inside an XML comment is rejected" XML001 \
+  "apps/mobile/android/app/src/main/AndroidManifest.xml:4"
+
+# THE REGRESSION. The comment as #87 shipped it: prose using "--" as a dash,
+# inside a multi-line comment, with the offending line four lines below the one
+# the comment opened on. Both numbers are asserted, because "names the file and
+# the line" is the acceptance criterion and a rule that reported the opening
+# line alone would send a reader to a line that is fine.
+new_fixture
+target="$(manifest_path)"
+{ xml_header
+  printf '<manifest>\n'
+  printf '  <!--\n'
+  printf '    The connectedDevice foreground service (#87). Mandatory since Android\n'
+  printf '    14 (API 34) for a service that holds a BLE link. Neither Capacitor nor\n'
+  printf '    the BLE plugin ships one -- capacitor-community/bluetooth-le has no\n'
+  printf '    service -- so this is hand-written.\n'
+  printf '  -->\n'
+  printf '  <service android:name=".RecordingService" />\n'
+  printf '</manifest>\n'
+} > "${target}"
+assert_violation_all "the AndroidManifest.xml comment as #87 shipped it is rejected" XML001 \
+  "apps/mobile/android/app/src/main/AndroidManifest.xml:7" \
+  "opened at line 4"
+
+# The same file with the em dash the rest of this repository's prose uses, which
+# is exactly the fix that made the Android shell build. Without this case the
+# rule above would be satisfied by a checker that rejects every comment.
+new_fixture
+target="$(manifest_path)"
+{ xml_header
+  printf '<manifest>\n'
+  printf '  <!--\n'
+  printf '    The connectedDevice foreground service (#87). Neither Capacitor nor\n'
+  printf '    the BLE plugin ships one — capacitor-community/bluetooth-le has no\n'
+  printf '    service — so this is hand-written.\n'
+  printf '  -->\n'
+  printf '  <service android:name=".RecordingService" />\n'
+  printf '</manifest>\n'
+} > "${target}"
+assert_clean "the same comment with em dashes passes"
+
+# "--->": the content ends on a hyphen abutting the terminator, which the XML
+# grammar forbids for the same reason and xmllint rejects with the same message.
+new_fixture
+target="$(manifest_path)"
+{ xml_header
+  printf '<manifest>\n'
+  printf '  <!-- a note ---></manifest>\n'
+} > "${target}"
+assert_violation "a comment closed with \"--->\" is rejected" XML001 \
+  "apps/mobile/android/app/src/main/AndroidManifest.xml:4"
+
+# --- XML002 ------------------------------------------------------------------
+#
+# The DOC002 failure mode, in XML. An unclosed comment does not merely hide the
+# rest of the file from a reader: it hides it from the PARSER, so every element
+# after it is silently absent from the document the merger sees. The rule reports
+# the line the comment OPENED on, because that is the line to go and fix.
+
+new_fixture
+target="$(manifest_path)"
+{ xml_header
+  printf '<manifest>\n'
+  printf '  <!-- the permissions below are deliberate\n'
+  printf '  <uses-permission android:name="android.permission.INTERNET" />\n'
+  printf '</manifest>\n'
+} > "${target}"
+assert_violation "an unclosed XML comment is rejected" XML002 \
+  "apps/mobile/android/app/src/main/AndroidManifest.xml:4"
+
+# Two comments on ONE line, and a comment spanning several. Both are the cases a
+# naive scanner gets wrong in opposite directions — one by never leaving the
+# comment state, the other by leaving it on the wrong line — and both are legal.
+new_fixture
+target="$(manifest_path)"
+{ xml_header
+  printf '<manifest>\n'
+  printf '  <!-- one --><!-- two -->\n'
+  printf '  <!-- a comment\n'
+  printf '       that spans\n'
+  printf '       three lines -->\n'
+  printf '</manifest>\n'
+} > "${target}"
+assert_clean "several comments, on one line and across many, pass"
+
+# The false positives that would make the rule unusable. A double hyphen is only
+# forbidden INSIDE a comment: in element text, in an attribute value, and in a
+# `<!--` that is text because it sits inside CDATA, it is ordinary content. The
+# CDATA case is the dangerous one — read as a comment it would open one that
+# never closes, and the rule would fail a well-formed file with XML002.
+new_fixture
+target="$(manifest_path)"
+{ xml_header
+  printf '<manifest>\n'
+  printf '  <string name="dash">a -- b</string>\n'
+  printf '  <string name="attr" value="x--y" />\n'
+  printf '  <string name="raw"><![CDATA[ <!-- not a comment -- at all ]]></string>\n'
+  printf '</manifest>\n'
+} > "${target}"
+assert_clean "a double hyphen outside a comment, and a <!-- inside CDATA, pass"
+
+# A hyphen ending one line and another opening the next is NOT a double hyphen:
+# the line break is a character between them, and libxml2 accepts it. Found by
+# running this rule against xmllint over four hundred generated documents — the
+# first version of the scanner carried a cross-line rule and this was its one
+# false positive.
+new_fixture
+target="$(manifest_path)"
+{ xml_header
+  printf '<manifest>\n'
+  printf '  <!-- a note ending on a hyphen -\n'
+  printf '%s\n' '- and continuing -->'
+  printf '</manifest>\n'
+} > "${target}"
+assert_clean "a hyphen at a line end and another at the next line start pass"
+
+# --- The generated trees are pruned, from the SAME list every other rule uses --
+#
+# `cap sync` and Gradle both write XML this repository does not author. It is
+# pruned rather than exempted because it is absent from a clean clone, so an
+# entry in `.spdx-exempt` naming it would itself be a LIC006 violation — the
+# reasoning `source_files` already carries, which is why XML001 shares its list
+# rather than retyping it.
+
+new_fixture
+mkdir -p "${fixture_root}/apps/mobile/android/app/src/main/res/xml"
+printf '<config><!-- generated -- by cap sync --></config>\n' \
+  > "${fixture_root}/apps/mobile/android/app/src/main/res/xml/config.xml"
+mkdir -p "${fixture_root}/apps/mobile/android/capacitor-cordova-android-plugins/src/main"
+printf '<manifest><!-- generated -- and unclosed\n' \
+  > "${fixture_root}/apps/mobile/android/capacitor-cordova-android-plugins/src/main/AndroidManifest.xml"
+mkdir -p "${fixture_root}/apps/mobile/android/app/build/intermediates"
+printf '<manifest><!-- merged -- output --></manifest>\n' \
+  > "${fixture_root}/apps/mobile/android/app/build/intermediates/AndroidManifest.xml"
+mkdir -p "${fixture_root}/node_modules/somedep"
+printf '<x><!-- vendored -- xml --></x>\n' > "${fixture_root}/node_modules/somedep/pom.xml"
+assert_clean "malformed XML in a generated or vendored tree is pruned"
+
+# And the complement, without which the case above would also pass against a
+# checker that pruned everything: the same content one directory up, where this
+# repository DOES author it, still fails.
+new_fixture
+mkdir -p "${fixture_root}/apps/mobile/android/app/src/main/res/xml"
+printf '<?xml version="1.0" encoding="utf-8"?>\n<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->\n<paths><!-- ours -- and wrong --></paths>\n' \
+  > "${fixture_root}/apps/mobile/android/app/src/main/res/xml/file_paths.xml"
+assert_violation "the same defect one file across from the pruned one still fails" XML001 \
+  "apps/mobile/android/app/src/main/res/xml/file_paths.xml:3"
+
 # --- The real repository must pass -------------------------------------------
 
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"

@@ -29,6 +29,8 @@
 #           date order -- and no unclosed fence hides it
 #   REL001  no signing key material is committed anywhere (#95)
 #   REL002  the Android build targets at least API 36 (#95)
+#   XML001  no "--" inside an XML comment (#225)
+#   XML002  no XML comment left unclosed (#225)
 #
 # Usage: scripts/check-repo-rules.sh [ROOT]   (ROOT defaults to the repo root)
 # Exit:  0 clean, 1 if any rule is violated.
@@ -43,6 +45,38 @@ report() {
   findings=$((findings + 1))
 }
 
+# --- The trees this repository does not author --------------------------------
+#
+# `find` arguments, in ONE place, because more than one rule needs them and a
+# second copy is a fourth list to keep in step. `.prettierignore` and
+# `eslint.config.js` already carry their own for reasons of their own -- Prettier
+# reads only the ROOT `.gitignore` and not Capacitor's nested one, and ESLint
+# needs Gradle's build output out of its project service -- and #225 asked for
+# XML001/XML002 to prune "the same list check-repo-rules.sh already applies
+# rather than retyping it". Retyping it here would have made a FOURTH copy that
+# could disagree with the other three; an array makes it one copy inside this
+# file, used by every walk in it.
+#
+# `dist`, `build` and `coverage` are build output. `node_modules` and `.git` are
+# not ours at all. The last three are the Capacitor trees that `cap sync`
+# regenerates and that Capacitor's own nested `.gitignore` therefore keeps out
+# of the repository: they are pruned rather than exempted because they do not
+# exist in a clean clone, and an entry in `.spdx-exempt` naming an absent file is
+# itself a LIC006 violation. The copied web build -- full of bundled `.js` and
+# `.css` -- would otherwise make this checker green in CI and red for anyone who
+# has run a sync.
+#
+# ⚠️ An indexed array rather than an associative one, and expanded with
+# `"${GENERATED[@]}"` rather than interpolated into a string: this script targets
+# the bash on a bare macOS clone, which is 3.2, and a `find` expression that went
+# through word splitting would break on the first path containing a space.
+GENERATED=(
+  -name node_modules -o -name dist -o -name build -o -name coverage -o -name .git
+  -o -name capacitor-cordova-android-plugins
+  -o -path '*/main/assets/public'
+  -o -path '*/main/res/xml/config.xml'
+)
+
 # Source files we expect to carry an SPDX header. Data and generated formats are
 # excluded because a header cannot be added to them without corrupting them.
 #
@@ -53,21 +87,11 @@ report() {
 # template is not ours and must not claim to be. Those are named, one exact path
 # at a time, in `.spdx-exempt` -- see LIC006, which is what stops that list
 # growing into a blanket.
-#
-# The three prunes below are the Capacitor trees that `cap sync` regenerates and
-# that Capacitor's own `.gitignore` therefore keeps out of the repository. They
-# are pruned rather than exempted because they do not exist in a clean clone: an
-# entry in `.spdx-exempt` naming an absent file is a LIC006 violation, so the
-# copied web build -- which is full of bundled `.js` and `.css` -- would make
-# this checker green in CI and red for anyone who has run a sync.
 source_files() {
   local dir="$1"
   [ -d "${dir}" ] || return 0
   find "${dir}" \
-    \( -name node_modules -o -name dist -o -name build -o -name coverage -o -name .git \
-       -o -name capacitor-cordova-android-plugins \
-       -o -path '*/main/assets/public' \
-       -o -path '*/main/res/xml/config.xml' \) -prune -o \
+    \( "${GENERATED[@]}" \) -prune -o \
     -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' \
                -o -name '*.mjs' -o -name '*.cjs' -o -name '*.css' -o -name '*.sh' \
                -o -name '*.kt' -o -name '*.kts' -o -name '*.java' \
@@ -564,6 +588,126 @@ check_android_target_sdk() {
 }
 
 check_android_target_sdk
+
+# --- XML001 / XML002: an XML comment a parser will accept ---------------------
+#
+# #225. `apps/mobile/android/app/src/main/AndroidManifest.xml` shipped in #87 as
+# XML that NO parser accepts: three of its prose comments contained `--`, which
+# XML 1.0 section 2.5 forbids inside a comment. The first Gradle build ever run
+# against this repository -- on 2026-09-09, months after the file landed --
+# failed on it with `ManifestMerger2$MergeFailureException: Error parsing`.
+#
+# ⚠️ Nothing here caught it, and the reason is the shape this repository keeps
+# shipping. LIC001/LIC002 DO scan `.xml` files -- but only for an SPDX
+# identifier in the first five lines. Nothing in `check:repo` parsed XML or
+# looked past line five, so a manifest no parser accepts passed every gate, and
+# the only thing that would have noticed is a build nobody in the original
+# environment could run (`apps/mobile/README.md` section 5). That is the one
+# file whose correctness under merge IS #87's first acceptance criterion.
+#
+# The precedent is DOC002, not a new idea. `check-doc-links.sh` already carries
+# a rule of exactly this shape -- a code fence that is never closed -- for
+# exactly this reason: without it the fence state machine STICKS, everything
+# after it is skipped, and the file reports clean. An unclosed XML comment does
+# the same thing to a manifest, and it does something worse to a parser: every
+# element after it disappears from the document. XML002 is that rule.
+#
+# ⚠️ **This is deliberately NOT full well-formedness validation, and the limit
+# is recorded here rather than discovered later.** A stray `<`, a mismatched tag,
+# an unquoted attribute and a bad character reference all still pass. Full
+# validation needs `xmllint`, which is a tool rather than coreutils, and this is
+# the bare-clone gate -- CLAUDE.md section 4a: *bash and coreutils only, no
+# install, no network*. A narrow rule that always runs is worth more than a
+# broad one that is skipped wherever the tool is missing. Whether to ALSO add
+# `xmllint` as a CI step, on the `shellcheck` precedent, is a follow-up and is
+# out of scope for #225.
+#
+# The scan is a character-stream state machine rather than a regular expression,
+# because a comment spans lines and `grep` sees one line at a time -- a per-line
+# match for `--` would fire on every `--` in a table separator, an SPDX header
+# comment's rule, or an Android `tools:` attribute, none of which are inside a
+# comment at all.
+#
+# ⚠️ CDATA is tracked for one reason: a `<!--` inside `<![CDATA[ ... ]]>` is
+# TEXT, not a comment. Without this, a well-formed file carrying one in a CDATA
+# section would open a comment that never closes and fail XML002 -- a gate going
+# red on a correct file, which is the failure mode that teaches people to stop
+# running the gate.
+xml_comment_findings() {
+  awk '
+    function flag(kind, line, opened) {
+      printf "%s\t%d\t%d\n", kind, line, opened
+    }
+    BEGIN { incomment = 0; incdata = 0; opened = 0 }
+    {
+      pos = 1
+      len = length($0)
+      while (pos <= len) {
+        rest = substr($0, pos)
+        if (incdata) {
+          j = index(rest, "]]>")
+          if (j == 0) break
+          incdata = 0
+          pos = pos + j + 2
+          continue
+        }
+        if (!incomment) {
+          c = index(rest, "<!--")
+          d = index(rest, "<![CDATA[")
+          if (c == 0 && d == 0) break
+          if (d != 0 && (c == 0 || d < c)) {
+            incdata = 1
+            pos = pos + d + 8
+            continue
+          }
+          incomment = 1
+          opened = NR
+          pos = pos + c + 3
+          continue
+        }
+        j = index(rest, "-->")
+        if (j == 0) { content = rest; closed = 0 } else { content = substr(rest, 1, j - 1); closed = 1 }
+        bad = 0
+        if (index(content, "--") > 0) bad = 1
+        # "--->": the content ends on a hyphen that abuts the terminator, which
+        # the XML grammar (Comment ::= *(Char - "-" | "-" (Char - "-")) "-->")
+        # forbids for the same reason.
+        if (closed && content != "" && substr(content, length(content), 1) == "-") bad = 1
+        if (bad) flag("XML001", NR, opened)
+        if (closed) {
+          incomment = 0
+          pos = pos + j + 2
+          continue
+        }
+        break
+      }
+    }
+    END { if (incomment) flag("XML002", opened, opened) }
+  ' "$1"
+}
+
+check_xml_comments() {
+  local file relative kind line opened tab
+  # A literal tab, built rather than typed: an editor that expands tabs would
+  # silently turn this field separator into spaces, and the failure would be a
+  # rule that reports nothing rather than a syntax error.
+  tab="$(printf '\t')"
+  while IFS= read -r file; do
+    [ -n "${file}" ] || continue
+    relative="${file#"${ROOT}"/}"
+    while IFS="${tab}" read -r kind line opened; do
+      [ -n "${kind}" ] || continue
+      case "${kind}" in
+        XML001)
+          report XML001 "${relative}:${line}: \"--\" inside the XML comment opened at line ${opened}; XML 1.0 section 2.5 forbids it and no parser will read this file (#225)" ;;
+        XML002)
+          report XML002 "${relative}:${line}: XML comment is never closed; everything after it is swallowed, so the file parses as something other than what it looks like -- or not at all (#225)" ;;
+      esac
+    done < <(xml_comment_findings "${file}")
+  done < <(find "${ROOT}" \( "${GENERATED[@]}" \) -prune -o -type f -name '*.xml' -print | sort)
+}
+
+check_xml_comments
 
 # --- Result -------------------------------------------------------------------
 
