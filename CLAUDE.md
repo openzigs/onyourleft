@@ -81,7 +81,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         1 Hz sample grid, the export writer, and since #15 the
                         one fixture both clients encode, which is how "the
                         mobile client's FIT output is byte-identical to the
-                        web's" is asserted without a phone (§4h)
+                        web's" is asserted without a phone (§4h); and since #35
+                        the account export — every ride plus the manifest of
+                        what an activity file cannot carry, the bound on one
+                        run, and the key half that is never written
     src/views/          one component per route (#48)
     src/workout/        the workout control loop (#14) — the one place the
                         player's decisions meet a trainer's control point,
@@ -1839,6 +1842,9 @@ top of an issue **supersedes its body**.
 | Which of #15's acceptance criteria can be checked without a phone, and what each of the others needs | [`docs/spikes/0002-background-recording.md`](docs/spikes/0002-background-recording.md) |
 | What proves the mobile shell cannot encode a FIT file of its own | `apps/web/src/transfer/cross-client-fixture.ts`, `apps/web/src/transfer/cross-client-fit.test.ts` |
 | Why an ANT+ dependency used to pass the rule that bans ANT+ | `scripts/check-repo-rules.sh` §`SCOPE001`, §6 |
+| What an athlete gets when they ask for everything, and what the manifest carries | `apps/web/src/transfer/export-everything.ts` §`accountManifest` |
+| Why the manifest names its fields instead of spreading the row | `apps/web/src/transfer/export-everything.ts` §`accountManifest` |
+| Why the account export's cursor is an instant, and the case it gets wrong | `apps/web/src/transfer/export-everything.ts` §`continueAfter` |
 | What proves no store read crosses athletes, and how a new read is caught | `packages/store/src/activity-store.scoping.test.ts` |
 | What proves an erased athlete leaves no row behind, and why the table list is derived | `packages/store/src/activity-store.erasure.test.ts`, `packages/store/src/schema.ts` §`SCHEMA_VERSIONS` |
 | Which way a payload faces, and why an export is deliberately not trimmed | `apps/web/src/privacy/boundaries.ts`, [#35](https://github.com/openzigs/onyourleft/issues/35) |

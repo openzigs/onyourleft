@@ -91,6 +91,16 @@ const BOUNDARIES: readonly Boundary[] = [
     direction: 'departing',
   },
   {
+    module: 'transfer/export-everything.ts',
+    what: 'every ride this athlete has, plus a manifest of everything else',
+    // ⚠️ This entry was written because the registry demanded it. The file was
+    // added in the same pull request as this test, and the "declares every
+    // boundary module that exists" case went red the moment it landed — which
+    // is the choke point doing its job on its own author, and worth recording
+    // as the first time it fired for real rather than under a mutation.
+    direction: 'retained',
+  },
+  {
     module: 'transfer/export-activity.ts',
     what: "the athlete's own ride, written to a file they asked for",
     // ⚠️ Not a mistake, and the one entry in this table worth reading twice.

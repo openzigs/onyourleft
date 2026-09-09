@@ -47,6 +47,12 @@ import {
   type ImportSource,
 } from './import-batch';
 import type { TransferPort } from './store-port';
+import {
+  MANIFEST_FILE_NAME,
+  exportEverything,
+  type AccountExportProgress,
+  type AccountExportReport,
+} from './export-everything';
 
 /** The ADR that explains why import is a file rather than a connection. */
 const CLEAN_ROOM_ADR =
@@ -126,6 +132,15 @@ export function TransferView({ port }: TransferViewProps): JSX.Element {
         </p>
       ) : (
         <ExportPanel port={port} storeRevision={storeRevision} />
+      )}
+
+      <h2>Take everything with you</h2>
+      {port === undefined ? (
+        <p className="oyl-muted">
+          This needs the same local store the panels above do, so it is unavailable here too.
+        </p>
+      ) : (
+        <TakeEverythingPanel port={port} storeRevision={storeRevision} />
       )}
 
       <h2>Why this is a file and not a connection</h2>
@@ -466,6 +481,142 @@ function ExportPanel({
       )}
     </>
   );
+}
+
+/**
+ * Every ride on this device, plus a manifest, in one press.
+ *
+ * #35: *"this project's pitch is that it is the free, open alternative that
+ * does not hold your data hostage. A migration path out is the credibility of
+ * that pitch. A user who cannot leave has not chosen to stay."* The panel above
+ * exports one ride; a rider leaving has a library.
+ *
+ * ⚠️ **It says what the archive contains before it is made, not after.** The
+ * files carry the true track and the manifest carries every privacy zone —
+ * correct for the athlete's own copy, and a concentration of exactly the data
+ * ADR 0004 exists to protect. A rider about to put that in a cloud folder is
+ * owed the sentence before they press the button, not a caveat underneath the
+ * result.
+ */
+function TakeEverythingPanel({
+  port,
+  storeRevision,
+}: {
+  readonly port: TransferPort;
+  readonly storeRevision: number;
+}): JSX.Element {
+  const [format, setFormat] = useState<ActivityFileFormat>('fit');
+  const [progress, setProgress] = useState<AccountExportProgress | undefined>(undefined);
+  const [report, setReport] = useState<AccountExportReport | undefined>(undefined);
+  const [running, setRunning] = useState(false);
+  const cancel = useRef<AbortController | undefined>(undefined);
+
+  // Reset when something else on the page writes a ride, so a report cannot
+  // outlive the library it describes — the same reason the panel above takes
+  // `storeRevision`.
+  useEffect(() => {
+    setReport(undefined);
+    setProgress(undefined);
+  }, [storeRevision]);
+
+  async function run(): Promise<void> {
+    const controller = new AbortController();
+    cancel.current = controller;
+    setRunning(true);
+    setReport(undefined);
+    try {
+      const finished = await exportEverything({
+        store: port.store,
+        athleteId: port.athleteId,
+        format,
+        signal: controller.signal,
+        onFile: (file) => {
+          port.save(file);
+        },
+        onProgress: setProgress,
+      });
+      setReport(finished);
+    } finally {
+      setRunning(false);
+      cancel.current = undefined;
+    }
+  }
+
+  return (
+    <>
+      <p className="oyl-muted">
+        One file per ride plus <code>{MANIFEST_FILE_NAME}</code>, which carries your thresholds,
+        privacy zones, routes, workouts and the public half of this device&rsquo;s signing key.
+      </p>
+      <p className="oyl-muted">
+        The archive holds your <strong>real</strong> tracks and the centres of your privacy zones.
+        That is what makes it a complete copy, and it is why it deserves the same care as the rides
+        themselves. Your private key is never written to any of it.
+      </p>
+      <div className="oyl-transfer__form">
+        <label htmlFor="oyl-everything-format">Format</label>
+        <select
+          id="oyl-everything-format"
+          className="oyl-input oyl-input--wide"
+          value={format}
+          disabled={running}
+          onChange={(event) => {
+            setFormat(event.target.value as ActivityFileFormat);
+          }}
+        >
+          {FORMATS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <Button
+          disabled={running}
+          onClick={() => {
+            void run();
+          }}
+        >
+          Export everything
+        </Button>
+        {running ? (
+          <Button
+            onClick={() => {
+              cancel.current?.abort();
+            }}
+          >
+            Stop
+          </Button>
+        ) : null}
+      </div>
+      {running && progress !== undefined ? (
+        <StatusMessage tone="info" live>
+          {`Exported ${String(progress.completed)} of ${String(progress.total)}.`}
+        </StatusMessage>
+      ) : null}
+      {report === undefined ? null : (
+        <StatusMessage tone={report.failed === 0 ? 'success' : 'warning'} live>
+          {everythingSentence(report)}
+        </StatusMessage>
+      )}
+    </>
+  );
+}
+
+/** What the finished export is told to a rider. One sentence, no jargon. */
+export function everythingSentence(report: AccountExportReport): string {
+  const parts = [`Saved ${String(report.exported)} ride${report.exported === 1 ? '' : 's'}`];
+  if (report.failed > 0) {
+    parts.push(`${String(report.failed)} could not be written`);
+  }
+  if (report.cancelled > 0) {
+    parts.push(`${String(report.cancelled)} were not reached because you stopped it`);
+  }
+  if (report.continueAfter !== undefined) {
+    // Said plainly rather than hidden: a rider who reads "saved 500 rides" and
+    // has 900 would otherwise believe they had left with all of them.
+    parts.push('there are more — run it again to continue');
+  }
+  return `${parts.join('; ')}.`;
 }
 
 /**
