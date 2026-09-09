@@ -2,6 +2,7 @@
 
 import { unixSeconds } from '@onyourleft/domain';
 import {
+  activityId as toActivityId,
   athleteId as toAthleteId,
   recordingSessionId,
   type RecordingSessionRecord,
@@ -19,8 +20,10 @@ function row(
   state: RecordingStoredState,
   startedAt: number,
   updatedAt: number,
+  savedAs?: string,
 ): RecordingSessionRecord {
   return {
+    ...(savedAs === undefined ? {} : { savedAs: toActivityId(savedAs) }),
     id: recordingSessionId(id),
     athleteId: ATHLETE,
     startedAt: unixSeconds(startedAt),
@@ -44,6 +47,19 @@ describe('the two kinds of leftover are offered different things', () => {
     expect(recoverableRides([row('a', 'paused', 100, 400)])[0]?.canContinue).toBe(true);
   });
 
+  it('marks a stopped ride that already became an activity, and offers no save', () => {
+    // ⚠️ **Found by review.** Without the stored link this row is
+    // indistinguishable from the one below, so the screen offered "save" — and
+    // pressing it wrote a SECOND copy of the same ride under a fresh activity
+    // id with nothing deduplicating it. The two causes of a surviving
+    // `stopped` row are a failed save and a failed tidy-up, and only one of
+    // them wants saving.
+    const [ride] = recoverableRides([row('a', 'stopped', 100, 400, 'ride-7')]);
+    expect(ride?.kind).toBe('already-saved');
+    expect(ride?.alreadySaved).toBe(true);
+    expect(ride?.canContinue).toBe(false);
+  });
+
   it('does NOT offer to continue a ride that was already stopped', () => {
     // ⚠️ A `stopped` row that is still on disk is a ride whose SAVE failed —
     // `finish.ts` keeps the checkpoint deliberately in that case. The rider
@@ -51,6 +67,7 @@ describe('the two kinds of leftover are offered different things', () => {
     const [ride] = recoverableRides([row('a', 'stopped', 100, 400)]);
     expect(ride?.kind).toBe('unsaved');
     expect(ride?.canContinue).toBe(false);
+    expect(ride?.alreadySaved).toBe(false);
   });
 });
 

@@ -16,7 +16,7 @@ import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { StoreDecodeError, StoreReferentialError, StoreValidationError } from './errors';
-import { recordingSessionId } from './ids';
+import { activityId, recordingSessionId } from './ids';
 import type { PersistedRecordingChunk } from './recording-persisted';
 import { SCHEMA_VERSIONS, TABLE } from './schema';
 import {
@@ -692,6 +692,44 @@ describe('listing what can be recovered', () => {
       { from: unixSeconds(1_700_000_600), to: unixSeconds(1_700_000_900), reason: 'manual' },
       { from: unixSeconds(1_700_001_200), reason: 'automatic' },
     ]);
+  });
+});
+
+describe('the link from a recording to the activity it became', () => {
+  it('round-trips through a fresh handle', async () => {
+    // ⚠️ #212's follow-up. A finished recording still on disk has two causes —
+    // the save failed, or the save worked and the *delete* afterwards did not
+    // — and from the header alone they are identical. The client offered the
+    // first one "save", which for the second wrote a duplicate ride under a
+    // fresh activity id with nothing deduplicating it. This field is the fact
+    // that tells them apart, so it has to survive the storage boundary.
+    await seedAthletes(harness);
+    const record = recordingFor(ATHLETE_A, {
+      state: 'stopped',
+      savedAs: activityId('ride-7'),
+    });
+    const read = await harness.roundTrip(
+      async (store) => {
+        await store.putRecordingSession(record);
+      },
+      async (store) => store.getRecordingSession(ATHLETE_A, record.id),
+    );
+    expect(read?.savedAs).toBe('ride-7');
+  });
+
+  it('reads a header written before the field existed as not known to be saved', async () => {
+    // ⚠️ Absent means "nobody recorded a link", never "it was saved" — and
+    // never the other way round either. Substituting either would re-hide the
+    // distinction the field exists to make.
+    await seedAthletes(harness);
+    const record = recordingFor(ATHLETE_A, { state: 'stopped' });
+    const read = await harness.roundTrip(
+      async (store) => {
+        await store.putRecordingSession(record);
+      },
+      async (store) => store.getRecordingSession(ATHLETE_A, record.id),
+    );
+    expect(read?.savedAs).toBeUndefined();
   });
 });
 

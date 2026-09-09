@@ -73,6 +73,7 @@ import {
 } from '@onyourleft/domain';
 import type { SensorMeasurement } from '@onyourleft/sensors';
 import type {
+  ActivityId,
   AthleteId,
   NewRecordingChunk,
   NewRecordingSession,
@@ -231,6 +232,22 @@ export interface Recorder {
    * "that did not work" rather than showing a list the row is still in.
    */
   discard(): Promise<boolean>;
+  /**
+   * Record that this recording became an activity, before the checkpoint goes.
+   *
+   * ⚠️ **This is what stops a rider being offered their own saved ride back to
+   * be saved again.** A finished recording still on disk has two causes — the
+   * save failed, or the save worked and the *discard* did not — and from the
+   * header alone they are identical. `recovery.ts` offers the first one "save",
+   * which for the second writes a duplicate ride under a fresh activity id with
+   * nothing deduplicating it. Found by review on the #212 work.
+   *
+   * **Never throws**, like every other write here: a failure sets
+   * {@link Recorder.storageState} and answers `false`. The caller then knows
+   * the link is not on disk and can say so rather than discarding anyway and
+   * leaving no trace of either.
+   */
+  markSaved(activity: ActivityId): Promise<boolean>;
 }
 
 /** Starts a new recording. Nothing is written until `start`. */
@@ -342,6 +359,8 @@ function recorderOver(
 
   let storageState: RecorderStorageState = 'ok';
   let storageError: Error | undefined;
+  /** Set by {@link Recorder.markSaved}, and written into every later header. */
+  let savedAs: ActivityId | undefined;
   let lastFlushAt: number | undefined;
 
   /** The header, rewritten on every checkpoint because state and pauses move. */
@@ -355,6 +374,7 @@ function recorderOver(
       state: storedState(),
       updatedAt: at,
       pauses: series.pauses,
+      ...(savedAs === undefined ? {} : { savedAs }),
     };
   }
 
@@ -533,6 +553,17 @@ function recorderOver(
 
     async discard(): Promise<boolean> {
       return attemptDelete();
+    },
+
+    async markSaved(activity: ActivityId): Promise<boolean> {
+      savedAs = activity;
+      const startedAt = session.startedAt;
+      if (startedAt === undefined) {
+        // Nothing was ever written, so there is no header to stamp — and an
+        // empty recording is discarded rather than saved anyway.
+        return false;
+      }
+      return attempt(async () => store.putRecordingSession(header(startedAt, session.timeline)));
     },
   };
 

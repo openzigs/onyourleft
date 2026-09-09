@@ -12,6 +12,8 @@ import {
 } from '@onyourleft/domain';
 import { describe, expect, it } from 'vitest';
 
+import { RoutingError } from '@onyourleft/domain';
+
 import { addWaypoint, emptyDraft, resolveDraft, type RouteDraft } from './draft';
 import {
   ELEVATION_INTERVAL_METRES,
@@ -96,6 +98,58 @@ describe('what the numbers came from is carried, not assumed', () => {
   });
 });
 
+describe('a height lands where the provider said it was', () => {
+  it('places each height by its own distance rather than by its position in the array', () => {
+    // ⚠️ `HeightSample.along` exists and was being thrown away. A provider that
+    // omits one sample used to shift every later height along the route; now
+    // the hole appears where the hole actually is.
+    const shape = line(300);
+    const missingMiddle: HeightProfile = {
+      source: GLO30,
+      samples: [0, 1, 2, 4, 5, 6, 7, 8, 9, 10].map((step) => ({
+        along: metres(step * ELEVATION_INTERVAL_METRES),
+        elevation: altitudeMetres(100),
+      })),
+    };
+    const planned = elevationFrom(shape, missingMiddle, INTERVAL);
+    expect(planned?.coverage.gaps).toStrictEqual([{ from: 90, to: 120 }]);
+  });
+
+  it('drops a sample that does not sit on the grid rather than snapping it', () => {
+    // Moving a height to a distance the source did not report it at is
+    // inventing terrain, on the series ascent is summed over. One on-grid
+    // height keeps this about the dropping rather than about the empty case
+    // below.
+    const shape = line(300);
+    const offGrid: HeightProfile = {
+      source: GLO30,
+      samples: [
+        { along: metres(0), elevation: altitudeMetres(100) },
+        { along: metres(17), elevation: altitudeMetres(100) },
+      ],
+    };
+    const planned = elevationFrom(shape, offGrid, INTERVAL);
+    // The 17 m sample landed nowhere, so everything past the start is a hole.
+    expect(planned?.coverage.gaps).toStrictEqual([{ from: 30, to: 300 }]);
+  });
+
+  it('refuses a route the dataset has no height for anywhere, in words', () => {
+    // ⚠️ Reachable rather than theoretical: ADR 0010 D-5 records that the DEM
+    // withholds some country tiles and has none over ocean. `routeProfile`
+    // raises `RouteError('no-elevation')` for it — correctly — and letting that
+    // escape put a domain error's wording in front of a rider.
+    const shape = line(300);
+    let thrown: unknown;
+    try {
+      elevationFrom(shape, profileOf(Array<undefined>(11).fill(undefined)), INTERVAL);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(RoutingError);
+    expect((thrown as RoutingError).message).toContain('no height anywhere along this route');
+  });
+});
+
 describe('a data void is a gap, not a smooth climb', () => {
   it('reports the profile incomplete and says how much is missing', () => {
     // ⚠️ #72: "a route crossing a data void or a withheld DEM tile renders the
@@ -108,6 +162,11 @@ describe('a data void is a gap, not a smooth climb', () => {
       INTERVAL,
     );
     expect(planned?.coverage.complete).toBe(false);
+    // ⚠️ **60 m, not 90.** Two missing samples span ONE interval on each side
+    // of the readings that bound them — N missing samples span N+1 intervals
+    // between known heights, and the old count of one interval per missing
+    // sample over-reported every hole and could claim more missing than the
+    // route is long, in the sentence a rider reads. The gap is `to - from`.
     expect(planned?.coverage.missing).toBe(60);
     expect(planned?.coverage.gaps).toStrictEqual([{ from: 90, to: 150 }]);
   });
@@ -130,6 +189,47 @@ describe('a data void is a gap, not a smooth climb', () => {
       INTERVAL,
     );
     expect(planned?.coverage.gaps).toStrictEqual([{ from: 240, to: 300 }]);
+    // ⚠️ **60, not 90.** A gap at the END is the one place the per-sample count
+    // and the gap sum disagree: three missing samples, but the last of them IS
+    // the route's end, so there are two intervals of route beyond the last
+    // known height and not three. This assertion is what makes the fix
+    // load-bearing — an interior-gap fixture agrees with the old arithmetic.
+    expect(planned?.coverage.missing).toBe(60);
+  });
+
+  it('never claims more missing than the route is long', () => {
+    // A 120 m route is five samples on this grid. With only the first height
+    // known, the unbacked ground runs 30 m → 120 m, so 90 — the reading at 0 m
+    // anchors the start. Counting one interval per missing sample gives 120,
+    // the whole route, for a route that has a measured height on it.
+    //
+    // ⚠️ The review's own example — *every* height missing, reporting 150 m on
+    // a 120 m route — is no longer reachable through this function at all: a
+    // route the dataset has nothing for now raises a `RoutingError` before any
+    // arithmetic, which the test above pins. The bound is asserted here anyway,
+    // because it is the property that must hold rather than the one path that
+    // once broke it.
+    const shape = line(120);
+    const planned = elevationFrom(
+      shape,
+      profileOf([10, undefined, undefined, undefined, undefined]),
+      INTERVAL,
+    );
+    expect(planned?.coverage.missing).toBe(90);
+    expect(planned?.coverage.missing).toBeLessThanOrEqual(planned?.profile.totalDistance ?? 0);
+  });
+
+  it('never reports more missing than the route is long', () => {
+    // The bound review's off-by-one broke: a 300 m route missing nine of its
+    // eleven heights used to report 270 m missing on a 300 m route, and a
+    // longer hole could exceed the route outright.
+    const shape = line(300);
+    const heights = [10, ...Array<undefined>(9).fill(undefined), 20];
+    const planned = elevationFrom(shape, profileOf(heights), INTERVAL);
+    // 270, not 300: the gap runs from the first sample with no height (30 m) to
+    // the first that has one again (300 m). `coverageOf` states the choice.
+    expect(planned?.coverage.missing).toBe(270);
+    expect(planned?.coverage.missing).toBeLessThanOrEqual(planned?.profile.totalDistance ?? 0);
   });
 
   it('is complete when every sample came back', () => {
@@ -252,6 +352,20 @@ describe('the shape a profile is built from', () => {
     const draft = await resolveDraft(drawn(3), [0, 1], provider, RIDING_DEFAULTS);
     await planElevation(draft, provider);
     expect(provider.heightCalls[0]?.interval).toBe(ELEVATION_INTERVAL_METRES);
+  });
+
+  it('hands the provider the resampled grid, not the raw geometry', async () => {
+    // ⚠️ **Found by review.** This used to send the raw shape while
+    // `elevationFrom` resampled independently and matched heights to positions
+    // by array index — so two resamplings that disagreed by one sample gave a
+    // silently shifted profile, and `resampleShape`'s own comment claiming the
+    // provider got the grid it answers on was simply untrue.
+    const provider = scriptedProvider();
+    const draft = await resolveDraft(drawn(3), [0, 1], provider, RIDING_DEFAULTS);
+    await planElevation(draft, provider);
+    const asked = provider.heightCalls[0]?.shape ?? [];
+    expect(asked).toStrictEqual(resampleShape(plannedShape(draft), INTERVAL));
+    expect(asked.length).not.toBe(plannedShape(draft).length);
   });
 });
 

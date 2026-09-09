@@ -60,6 +60,7 @@ function offered(kind: RecoverableRide['kind'], id = 'left-behind'): Recoverable
     // of a duration the rest of the ride screen writes differently.
     spanned: formatDuration(SPANNED_SECONDS),
     canContinue: kind === 'interrupted',
+    alreadySaved: kind === 'already-saved',
   };
 }
 
@@ -118,6 +119,23 @@ describe('what the offer says, and what it does not', () => {
     const text = view.container.textContent ?? '';
     expect(text).toContain('could not be saved');
     expect(text).not.toContain('Continue this ride');
+  });
+
+  it('offers no Save for a ride that is already in the activities', async () => {
+    // ⚠️ Added because a mutation survived. This is the duplicate the whole
+    // `savedAs` link exists to prevent, at the one place a rider can press it:
+    // a leftover working copy must be discardable and nothing else.
+    const view = await show([offered('already-saved')]);
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('already in your activities');
+    expect(text).not.toContain('Save this ride');
+    expect(text).not.toContain('Continue this ride');
+    expect(text).toContain('Discard this ride');
+  });
+
+  it('audits clean with a ride that is already in the activities', async () => {
+    await show([offered('already-saved')]);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 
   it('renders nothing at all when the device is holding nothing', async () => {

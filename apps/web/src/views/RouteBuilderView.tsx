@@ -184,7 +184,12 @@ export function RouteBuilderView({
     );
     if (stale.length === 0) return;
     void resolveDraft(draft, stale, provider, preferences).then((resolved) => {
-      setHistory((current) => settle(current, resolved));
+      // ⚠️ **The same guard `apply` uses, and it was missing here.** A rider
+      // who places a waypoint while the restore is still in flight would
+      // otherwise have their edit silently replaced by the pre-edit draft —
+      // and `history` would keep the edit, so undo and the screen would then
+      // disagree about what the route is. Found by review.
+      setHistory((current) => (current.present === draft ? settle(current, resolved) : current));
     });
   }, [draft, provider, preferences]);
 

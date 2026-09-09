@@ -15,7 +15,7 @@
 import { seconds, unixSeconds, type RecordedPause } from '@onyourleft/domain';
 
 import { StoreDecodeError } from './errors';
-import { athleteId, recordingSessionId } from './ids';
+import { activityId, athleteId, recordingSessionId } from './ids';
 import { decoded, decodedNumber, decodedString } from './persisted';
 import {
   RECORDING_STORED_STATES,
@@ -35,6 +35,15 @@ export interface PersistedRecordingSession {
   state: string;
   updatedAt: number;
   pauses: PersistedRecordingPause[];
+  /**
+   * The activity this recording became. Absent until it becomes one.
+   *
+   * ⚠️ Optional, so no schema version moved — and **never substituted on the
+   * way out**: absent means "this recording is not known to be an activity",
+   * which is precisely the distinction {@link RecordingSessionRecord.savedAs}
+   * exists to make. A default here would re-hide the duplicate it prevents.
+   */
+  savedAs?: string;
 }
 
 /** One pause interval. `to` absent while the pause is open. */
@@ -101,6 +110,7 @@ export function toPersistedRecordingSession(
       ...(pause.to === undefined ? {} : { to: pause.to }),
       reason: pause.reason,
     })),
+    ...(record.savedAs === undefined ? {} : { savedAs: record.savedAs }),
   };
 }
 
@@ -128,6 +138,10 @@ export function fromPersistedRecordingSession(
       unixSeconds,
     ),
     pauses: fromPersistedPauses(row.pauses),
+    savedAs:
+      row.savedAs === undefined
+        ? undefined
+        : activityId(decodedString('recordingSession.savedAs', row.savedAs)),
   };
 }
 

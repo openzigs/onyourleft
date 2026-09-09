@@ -52,6 +52,8 @@ import {
   geographicPosition,
   metres,
   routeProfile,
+  RoutingError,
+  type AltitudeMetres,
   type ElevationDataset,
   type GeographicPosition,
   type HeightProfile,
@@ -167,8 +169,19 @@ export async function planElevation(
   if (shape.length < 2) {
     return undefined;
   }
-  const heights = await provider.heights({ shape, interval });
-  return elevationFrom(shape, heights, interval);
+  // ⚠️ **The provider is handed the RESAMPLED grid, not the raw shape**, and
+  // that was the defect review found: this used to send the raw geometry while
+  // `elevationFrom` resampled it independently and then matched heights to
+  // positions by array index. Two resamplings that disagree by one sample
+  // produce a silently shifted profile, or a phantom DEM void at the end, with
+  // nothing detecting it — and `resampleShape`'s own comment claimed the
+  // provider got the grid it answers on, which is now true.
+  const grid = resampleShape(shape, interval);
+  if (grid.length < 2) {
+    return undefined;
+  }
+  const heights = await provider.heights({ shape: grid, interval });
+  return elevationFrom(grid, heights, interval, { resampled: true });
 }
 
 /**
@@ -181,14 +194,30 @@ export function elevationFrom(
   shape: readonly GeographicPosition[],
   heights: HeightProfile,
   interval: Metres,
+  options: { readonly resampled?: boolean } = {},
 ): PlannedElevation | undefined {
-  const positions = resampleShape(shape, interval);
+  const positions = options.resampled === true ? shape : resampleShape(shape, interval);
   if (positions.length < 2) {
     return undefined;
   }
+  const elevations = heightsAlong(heights, interval, positions.length);
+  // ⚠️ **A route the dataset has no height for ANYWHERE is its own case**, and
+  // it is reachable: ADR 0010 D-5 records that the chosen DEM withholds a
+  // subset of country tiles and has no tiles over ocean at all, and an adapter
+  // that answers entirely off-grid lands here too. `routeProfile` raises
+  // `RouteError('no-elevation')` for it — correctly, there is no profile — and
+  // letting that escape put a domain error's wording in front of a rider. This
+  // is the same fact as a gap, at the size of the whole route, so it is said
+  // the same way.
+  if (elevations.every((elevation) => elevation === undefined)) {
+    throw new RoutingError(
+      'malformed-response',
+      'The elevation dataset has no height anywhere along this route, so there is no profile to draw.',
+    );
+  }
   const points: RoutePoint[] = positions.map((position, index) => ({
     position,
-    elevation: heights.samples[index]?.elevation,
+    elevation: elevations[index],
   }));
   return {
     dataset: heights.source,
@@ -196,6 +225,35 @@ export function elevationFrom(
     profile: routeProfile(points),
     coverage: coverageOf(points, interval),
   };
+}
+
+/**
+ * Heights indexed by grid position, matched on `along` rather than on order.
+ *
+ * ⚠️ **The provider's own distances decide where each height lands**, which is
+ * the half of review's finding that survives even now the provider is handed
+ * the grid: `HeightSample.along` exists, and reading the array positionally
+ * threw it away. An adapter that returns one sample too few, or starts at the
+ * first whole interval rather than at zero, now produces holes at the places it
+ * actually left holes instead of shifting every height along the route.
+ *
+ * A sample that does not sit on the grid is dropped rather than snapped: the
+ * grid is what ascent is summed over, and moving a height to a distance the
+ * source did not report it at is inventing terrain.
+ */
+function heightsAlong(
+  heights: HeightProfile,
+  interval: Metres,
+  gridLength: number,
+): readonly (AltitudeMetres | undefined)[] {
+  const byIndex = new Map<number, AltitudeMetres | undefined>();
+  for (const sample of heights.samples) {
+    const index = sample.along / interval;
+    if (Number.isInteger(index) && index >= 0 && index < gridLength) {
+      byIndex.set(index, sample.elevation);
+    }
+  }
+  return Array.from({ length: gridLength }, (_, index) => byIndex.get(index));
 }
 
 /**
@@ -239,13 +297,11 @@ export function resampleShape(
 
 function coverageOf(points: readonly RoutePoint[], interval: Metres): ElevationCoverage {
   const gaps: ElevationGap[] = [];
-  let missing = 0;
   let openedAt: number | undefined;
   for (const [index, point] of points.entries()) {
     const along = index * interval;
     if (point.elevation === undefined) {
       openedAt ??= along;
-      missing += interval;
     } else if (openedAt !== undefined) {
       gaps.push({ from: metres(openedAt), to: metres(along) });
       openedAt = undefined;
@@ -254,6 +310,19 @@ function coverageOf(points: readonly RoutePoint[], interval: Metres): ElevationC
   if (openedAt !== undefined) {
     gaps.push({ from: metres(openedAt), to: metres((points.length - 1) * interval) });
   }
+  // ⚠️ **Summed from the gaps rather than counted per sample.** The two agree
+  // for a hole in the middle of a route — a run of n missing samples spans
+  // n × interval either way — and they differ in exactly one place: a hole
+  // that runs to **the end**. There the last sample is the route's end, so the
+  // gap stops there, where counting one interval per sample carries on past
+  // it. A 120 m route at this grid is five samples; with every height missing
+  // the per-sample count reports **150 m missing on a 120 m route**, in the
+  // sentence a rider reads. Found by review, and the mutation that catches it
+  // is the one with a gap at the end — an interior-gap fixture cannot.
+  //
+  // What `missing` measures, so nobody re-derives it: the first sample with no
+  // height, to the first sample that has one again (or to the route's end).
+  const missing = gaps.reduce((total, gap) => total + (gap.to - gap.from), 0);
   return { complete: gaps.length === 0, missing: metres(missing), gaps };
 }
 

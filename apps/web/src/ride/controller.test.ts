@@ -171,6 +171,8 @@ interface BenchOptions {
   readonly silentTrainer?: boolean;
   /** Give the controller somewhere to save a finished ride. See #14's fourth criterion. */
   readonly rideSave?: RideSavePort | undefined;
+  /** Break one checkpoint-store operation, for the failure paths review found. */
+  readonly checkpointStore?: Partial<RecordingCheckpointStore>;
 }
 
 function benchWith(options: BenchOptions = {}): Bench {
@@ -239,7 +241,7 @@ function benchWith(options: BenchOptions = {}): Bench {
 
   const controller = createRideController({
     transport,
-    store: harnessStore(),
+    store: { ...harnessStore(), ...options.checkpointStore },
     athleteId: ATHLETE_A,
     newSessionId: () => {
       sessionCounter += 1;
@@ -1305,6 +1307,170 @@ function savePort(overrides: Partial<RideSavePort['store']> = {}): {
     },
   };
 }
+
+/**
+ * A second controller over the same store — what a reload actually is.
+ *
+ * ⚠️ Needed because `refreshRecoverable` excludes the session **this tab is
+ * holding**, and a controller keeps its recorder after the ride stops. So a
+ * leftover row is invisible to the controller that made it and appears on the
+ * next open, which is exactly what the "it will be offered back next time"
+ * wording promises. A test that used the first controller would be asserting
+ * against a list that is empty for a reason unrelated to what it is testing.
+ */
+function reopened(
+  overrides: Partial<RecordingCheckpointStore> = {},
+  rideSave?: RideSavePort,
+): RideController {
+  return createRideController({
+    transport: createSimulator({ devices: [] }).transport,
+    store: { ...harnessStore(), ...overrides },
+    athleteId: ATHLETE_A,
+    newSessionId: () => recordingSessionId('after-reload'),
+    now: () => unixSeconds(1_800_000_000),
+    // ⚠️ **A reopened controller needs a save port for any assertion about
+    // saving to mean anything**, and leaving it out made the duplicate test
+    // pass for the wrong reason: `saveTheRide` returns early with no port, so
+    // "no second copy was written" was true because nothing *could* write one.
+    // Caught by a mutation that should have gone red and did not.
+    ...(rideSave === undefined ? {} : { rideSave }),
+  });
+}
+
+describe('a ride that saved but could not be tidied up is not offered back to be saved again', () => {
+  it('reports the ride saved AND says a working copy was left behind', async () => {
+    // ⚠️ **Found by review.** `discard()` answers `false` when the delete
+    // fails, and ignoring that left a ride which HAD saved sitting on disk as a
+    // `stopped` row — indistinguishable, from the header, from a ride whose
+    // save failed.
+    // ⚠️ **The fake REJECTS rather than answering `false`**, and the difference
+    // caught this test out first. The store's `false` means *there was no such
+    // row*, which is a recording that is genuinely gone — `Recorder.discard`
+    // documents exactly that. Only a delete that throws is a delete that
+    // failed. Modelling it the other way would have "proved" a bug in correct
+    // code.
+    const { port, saved } = savePort();
+    const rig = benchWith({
+      rideSave: port,
+      checkpointStore: {
+        deleteRecordingSession: () => Promise.reject(new Error('the device is unwell')),
+      },
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 3);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+
+    const snapshot = rig.controller.getSnapshot();
+    // The ride IS saved — that is the sentence that matters to a rider.
+    expect(saved).toEqual(['saved-ride']);
+    expect(snapshot.saveState).toBe('saved');
+    // And the part they would otherwise misread on the next visit.
+    expect(snapshot.leftover).toBe(true);
+    rig.controller.dispose();
+  });
+
+  it('offers the leftover discard only, never save', async () => {
+    const { port, saved } = savePort();
+    const rig = benchWith({
+      rideSave: port,
+      checkpointStore: {
+        deleteRecordingSession: () => Promise.reject(new Error('the device is unwell')),
+      },
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 3);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    rig.controller.dispose();
+
+    const after = reopened({}, port);
+    await after.refreshRecoverable();
+    const [offered] = after.getSnapshot().recoverable;
+    expect(offered?.kind).toBe('already-saved');
+    expect(offered?.alreadySaved).toBe(true);
+    expect(offered?.canContinue).toBe(false);
+
+    // ⚠️ The whole point: pressing Save on it must not write a SECOND copy of
+    // the same ride under a fresh activity id, which is what happened before
+    // the link was stored.
+    await after.saveRecovered(offered!.id);
+    expect(saved).toEqual(['saved-ride']);
+    after.dispose();
+  });
+});
+
+describe('a recording too corrupt to rebuild can still be thrown away', () => {
+  it('discards without decoding a single chunk', async () => {
+    // ⚠️ **Found by review.** `recoverRecording` throws on a corrupt chunk, and
+    // listing a recording reads only its header — so a corrupt one was listed,
+    // could not be continued, saved OR discarded, and sat in the offer for ever
+    // with no message. Discarding needs the two ids and nothing else.
+    const deleted: string[] = [];
+    const rig = benchWith({
+      checkpointStore: {
+        recoverRecording: () => Promise.reject(new Error('chunk 3 will not decode')),
+        deleteRecordingSession: (_owner, id) => {
+          deleted.push(id);
+          return Promise.resolve(true);
+        },
+      },
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 3);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    rig.controller.dispose();
+
+    const after = reopened({
+      recoverRecording: () => Promise.reject(new Error('chunk 3 will not decode')),
+      deleteRecordingSession: (_owner, id) => {
+        deleted.push(id);
+        return Promise.resolve(true);
+      },
+    });
+    await after.refreshRecoverable();
+    const [offered] = after.getSnapshot().recoverable;
+    expect(offered).toBeDefined();
+    expect(await after.discardRecovered(offered!.id)).toBe(true);
+    expect(deleted).toEqual([offered!.id]);
+    after.dispose();
+  });
+
+  it('answers rather than rejecting when it cannot be continued or saved', async () => {
+    // ⚠️ **No save port**, so the row is left `stopped` and *unsaved* — the
+    // case where a rider would reach for Save. With one, the row would be
+    // `already-saved` and `saveRecovered` would answer 'saved' before it ever
+    // tried to decode, which is a different behaviour tested above.
+    const rig = benchWith({
+      checkpointStore: {
+        recoverRecording: () => Promise.reject(new Error('chunk 3 will not decode')),
+      },
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 3);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    rig.controller.dispose();
+
+    const after = reopened({
+      recoverRecording: () => Promise.reject(new Error('chunk 3 will not decode')),
+    });
+    await after.refreshRecoverable();
+    const [offered] = after.getSnapshot().recoverable;
+    expect(offered).toBeDefined();
+    // Neither call may reject: the screen fires all three as bare `void`, so a
+    // rejection is an unhandled promise and a control that silently does
+    // nothing.
+    await expect(after.continueRecovered(offered!.id)).resolves.toBe(false);
+    await expect(after.saveRecovered(offered!.id)).resolves.toBe('failed');
+    after.dispose();
+  });
+});
 
 describe('a finished ride becomes an activity, and only then lets the checkpoint go', () => {
   it('writes the activity and discards the checkpoint', async () => {

@@ -87,6 +87,7 @@ export function idleSnapshot(): RideSnapshot {
     saveState: 'unavailable',
     saveError: undefined,
     savedActivityId: undefined,
+    leftover: false,
     recoverable: [],
     connectionsRemaining: 3,
   };
