@@ -35,7 +35,7 @@ import type { CapabilityProbe } from '../support/bluetooth-support';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
 
 import { webCryptoDigest } from './browser';
-import type { DownloadableFile, TransferPort, TransferStore } from './store-port';
+import type { AccountStore, DownloadableFile, TransferPort, TransferStore } from './store-port';
 import { syntheticGpx } from './testing';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
@@ -60,7 +60,7 @@ async function openBusyScreen(): Promise<void> {
     await store.putActivity(ride);
     await store.putStreamSet(streamSetFor(ride, { sampleCount: 30 }));
   });
-  const store: TransferStore = await open.write((handle) => Promise.resolve(handle));
+  const store: TransferStore & AccountStore = await open.write((handle) => Promise.resolve(handle));
   let next = 0;
   const saved: DownloadableFile[] = [];
   const port: TransferPort = {

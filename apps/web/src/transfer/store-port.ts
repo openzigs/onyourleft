@@ -19,11 +19,41 @@ import type {
   ActivityRecord,
   ActivitySummary,
   AthleteId,
+  AthleteRecord,
+  DeviceKeyRecord,
   ListActivitiesOptions,
   NewActivity,
   NewStreamSet,
+  PrivacyZoneRecord,
+  RouteRecord,
+  SegmentRecord,
   StreamSet,
+  WorkoutRecord,
 } from '@onyourleft/store';
+
+/**
+ * Everything an account export reads that a single ride's export does not.
+ *
+ * Separate from {@link TransferStore} rather than folded into it, so the
+ * importer and the one-ride exporter go on declaring the seven methods they
+ * actually use. A port that grows a method for every feature stops being the
+ * narrowing the file header argues for.
+ *
+ * ⚠️ `getDeviceKey` returns the whole {@link DeviceKeyRecord}, private handle
+ * and all. That is the store's shape and narrowing it here would be a false
+ * comfort — the handle cannot be exported by anyone, which is a property of the
+ * key rather than of this type. `accountManifest` is where the public half is
+ * selected, and `export-everything.test.ts` is what proves the private half
+ * reaches no file.
+ */
+export interface AccountStore {
+  getAthlete(id: AthleteId): Promise<AthleteRecord | undefined>;
+  listPrivacyZones(owner: AthleteId): Promise<PrivacyZoneRecord[]>;
+  listSegments(owner: AthleteId, limit?: number): Promise<SegmentRecord[]>;
+  listRoutes(owner: AthleteId, limit?: number): Promise<RouteRecord[]>;
+  listWorkouts(owner: AthleteId, limit?: number): Promise<WorkoutRecord[]>;
+  getDeviceKey(owner: AthleteId): Promise<DeviceKeyRecord | undefined>;
+}
 
 /** What import and export do to the store, and nothing else. */
 export interface TransferStore {
@@ -61,7 +91,7 @@ export interface DownloadableFile {
  * picker on that path at all.
  */
 export interface TransferPort {
-  readonly store: TransferStore;
+  readonly store: TransferStore & AccountStore;
   readonly athleteId: AthleteId;
   /** A fresh activity id per imported file. `crypto.randomUUID()` in production. */
   newActivityId(): ActivityId;

@@ -27,7 +27,7 @@ import {
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
 
 import { webCryptoDigest } from './browser';
-import type { DownloadableFile, TransferPort, TransferStore } from './store-port';
+import type { AccountStore, DownloadableFile, TransferPort, TransferStore } from './store-port';
 import { syntheticGpx } from './testing';
 import { TransferView } from './TransferView';
 
@@ -51,7 +51,7 @@ async function openPort(): Promise<TransferPort> {
   const open = createStoreHarness();
   harness = open;
   await seedAthletes(open);
-  const store: TransferStore = await open.write((handle) => Promise.resolve(handle));
+  const store: TransferStore & AccountStore = await open.write((handle) => Promise.resolve(handle));
   let next = 0;
   return {
     store,
@@ -470,6 +470,43 @@ describe('TransferView — exporting', () => {
 });
 
 describe('TransferView — what it may say about another platform', () => {
+  it('takes every ride and a manifest in one press', async () => {
+    const port = await openPort();
+    for (const name of ['One', 'Two', 'Three']) {
+      const ride = rideFor(ATHLETE_A, { name, hasPosition: true });
+      await (harness ?? never()).write(async (store) => {
+        await store.putActivity(ride);
+        await store.putStreamSet(streamSetFor(ride, { sampleCount: 30 }));
+      });
+    }
+
+    mounted = await mount(<TransferView port={port} />);
+    await runToCompletion(
+      () => document.querySelector('#oyl-everything-format') !== null,
+      'the export-everything panel to render',
+    );
+    await activateWithKeyboard(buttonNamed('Export everything'));
+    await runToCompletion(() => saved.length >= 4, 'the archive to reach the browser');
+
+    // Three rides and the manifest, and the manifest is last so it can name
+    // what was actually written.
+    expect(saved).toHaveLength(4);
+    expect(saved.at(-1)?.fileName).toBe('on-your-left-account.json');
+    expect(document.body.textContent).toContain('Saved 3 rides');
+  });
+
+  it('says what the archive contains before the rider presses anything', async () => {
+    const port = await openPort();
+    mounted = await mount(<TransferView port={port} />);
+    await settle();
+
+    // #34's revision block and ADR 0004: this archive is a concentration of
+    // exactly the data a privacy zone protects, and a rider about to put it in
+    // a cloud folder is owed the sentence beforehand.
+    expect(document.body.textContent).toContain('centres of your privacy zones');
+    expect(document.body.textContent).toContain('private key is never written');
+  });
+
   it('carries the approved nominative-use strings and the non-affiliation sentence', async () => {
     const port = await openPort();
     mounted = await mount(<TransferView port={port} />);
