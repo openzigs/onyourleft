@@ -24,7 +24,14 @@ import {
   type StoreHarness,
 } from '@onyourleft/store/testing';
 
-import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
+import {
+  activateWithKeyboard,
+  mount,
+  queryAll,
+  settle,
+  typeInto,
+  type Mounted,
+} from '../testing/mount';
 
 import { webCryptoDigest } from './browser';
 import type { AccountStore, DownloadableFile, TransferPort, TransferStore } from './store-port';
@@ -34,9 +41,12 @@ import { TransferView } from './TransferView';
 let mounted: Mounted | undefined;
 let harness: StoreHarness | undefined;
 let saved: DownloadableFile[] = [];
+/** What an erase forgot outside the store — the `localStorage` route draft. */
+let forgotten: string[] = [];
 
 beforeEach(() => {
   saved = [];
+  forgotten = [];
 });
 
 afterEach(async () => {
@@ -64,6 +74,8 @@ async function openPort(): Promise<TransferPort> {
     timeZone: 'Europe/London',
     digest: webCryptoDigest,
     save: (file) => saved.push(file),
+    drafts: { forget: () => forgotten.push('draft') },
+    athleteRow: { id: ATHLETE_A, displayName: 'You', createdAt: unixSeconds(1_760_000_000) },
   };
 }
 
@@ -505,6 +517,69 @@ describe('TransferView — what it may say about another platform', () => {
     // a cloud folder is owed the sentence beforehand.
     expect(document.body.textContent).toContain('centres of your privacy zones');
     expect(document.body.textContent).toContain('private key is never written');
+  });
+
+  it('will not erase without the typed phrase, and then does', async () => {
+    const port = await openPort();
+    const ride = rideFor(ATHLETE_A, { name: 'Last one', hasPosition: true });
+    await (harness ?? never()).write(async (store) => {
+      await store.putActivity(ride);
+      await store.putStreamSet(streamSetFor(ride, { sampleCount: 20 }));
+    });
+
+    mounted = await mount(<TransferView port={port} />);
+    await runToCompletion(
+      () => document.querySelector('#oyl-erase-confirm') !== null,
+      'the erase panel to render',
+    );
+
+    // Pressing it with an empty box does nothing but say why.
+    //
+    // ⚠️ No `harness.read` here, deliberately. That primitive **discards every
+    // open handle** before it opens a fresh one — which is what makes it an
+    // honest round trip, and which would close the handle this mounted
+    // component is still holding through `port.store`. The next store call from
+    // the page would then reject with `DatabaseClosedError`, and the test would
+    // be reporting a fault it caused. The fresh-connection read is at the end,
+    // after the component is finished with.
+    await activateWithKeyboard(buttonNamed('Erase everything'));
+    await settle();
+    expect(document.body.textContent).toContain('to confirm');
+
+    const box = document.querySelector<HTMLInputElement>('#oyl-erase-confirm');
+    if (box === null) {
+      throw new Error('the confirmation box is not on the page');
+    }
+    // `typeInto` rather than assigning `.value`: React tracks a controlled
+    // input through its own value setter, so a direct assignment updates the
+    // DOM and leaves the component's state behind.
+    await typeInto(box, 'erase everything');
+    await activateWithKeyboard(buttonNamed('Erase everything'));
+    await runToCompletion(
+      () => (document.body.textContent ?? '').includes('holds nothing about you'),
+      'the erase to finish',
+    );
+
+    // Now, and only now, read back through a connection nothing on the page
+    // is holding — the ride has to be gone from disk rather than from a
+    // component's state.
+    mounted.unmount();
+    mounted = undefined;
+    expect(
+      await (harness ?? never()).read(async (store) => store.listActivitySummaries(ATHLETE_A)),
+    ).toStrictEqual([]);
+  });
+
+  it('says what erasing cannot reach, and names the signing key, before the button', async () => {
+    const port = await openPort();
+    mounted = await mount(<TransferView port={port} />);
+    await settle();
+
+    // #35: a dialogue that implies more than the architecture can deliver is
+    // the worst outcome. These are the three sentences that stop it doing that.
+    expect(document.body.textContent).toContain('nowhere else to ask');
+    expect(document.body.textContent).toContain('already exported');
+    expect(document.body.textContent).toContain('signs as a new identity');
   });
 
   it('carries the approved nominative-use strings and the non-affiliation sentence', async () => {

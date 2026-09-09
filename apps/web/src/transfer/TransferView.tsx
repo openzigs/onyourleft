@@ -53,6 +53,16 @@ import {
   type AccountExportProgress,
   type AccountExportReport,
 } from './export-everything';
+import {
+  ERASE_CANNOT_REACH,
+  ERASE_CONFIRMATION,
+  ERASE_REFUSAL_TEXT,
+  ERASE_REMOVES,
+  eraseDecision,
+  eraseDevice,
+  eraseSentence,
+  type EraseRefusal,
+} from './erase-device';
 
 /** The ADR that explains why import is a file rather than a connection. */
 const CLEAN_ROOM_ADR =
@@ -141,6 +151,21 @@ export function TransferView({ port }: TransferViewProps): JSX.Element {
         </p>
       ) : (
         <TakeEverythingPanel port={port} storeRevision={storeRevision} />
+      )}
+
+      <h2>Erase this device</h2>
+      {port === undefined ? (
+        <p className="oyl-muted">
+          This needs the same local store the panels above do, so it is unavailable here too.
+        </p>
+      ) : (
+        <ErasePanel
+          port={port}
+          storeRevision={storeRevision}
+          onStoreChanged={() => {
+            setStoreRevision((previous) => previous + 1);
+          }}
+        />
       )}
 
       <h2>Why this is a file and not a connection</h2>
@@ -509,6 +534,7 @@ function TakeEverythingPanel({
   const [progress, setProgress] = useState<AccountExportProgress | undefined>(undefined);
   const [report, setReport] = useState<AccountExportReport | undefined>(undefined);
   const [running, setRunning] = useState(false);
+  const [failed, setFailed] = useState(false);
   const cancel = useRef<AbortController | undefined>(undefined);
 
   // Reset when something else on the page writes a ride, so a report cannot
@@ -524,6 +550,7 @@ function TakeEverythingPanel({
     cancel.current = controller;
     setRunning(true);
     setReport(undefined);
+    setFailed(false);
     try {
       const finished = await exportEverything({
         store: port.store,
@@ -536,6 +563,12 @@ function TakeEverythingPanel({
         onProgress: setProgress,
       });
       setReport(finished);
+    } catch {
+      // `exportEverything` swallows anything one ride did; reaching here means
+      // the run itself failed, and saying nothing would leave a rider watching
+      // a stopped progress line with no idea whether they have their data.
+      setReport(undefined);
+      setFailed(true);
     } finally {
       setRunning(false);
       cancel.current = undefined;
@@ -593,6 +626,12 @@ function TakeEverythingPanel({
           {`Exported ${String(progress.completed)} of ${String(progress.total)}.`}
         </StatusMessage>
       ) : null}
+      {failed ? (
+        <StatusMessage tone="warning" live>
+          The export stopped before it finished. Anything already saved is on your machine; run it
+          again to take the rest.
+        </StatusMessage>
+      ) : null}
       {report === undefined ? null : (
         <StatusMessage tone={report.failed === 0 ? 'success' : 'warning'} live>
           {everythingSentence(report)}
@@ -617,6 +656,146 @@ export function everythingSentence(report: AccountExportReport): string {
     parts.push('there are more — run it again to continue');
   }
   return `${parts.join('; ')}.`;
+}
+
+/**
+ * The one irreversible control in the product.
+ *
+ * Placed **after** the export panel deliberately: the order on the page is the
+ * order a rider leaving should do it in, and a rider who reads this heading
+ * first has already scrolled past the way to keep their history.
+ *
+ * ⚠️ It states what erasing cannot reach **before** the button rather than
+ * after the result, and it names the signing-key consequence, which is the one
+ * nobody expects — see `erase-device.ts` and ADR 0014 D-7.
+ */
+function ErasePanel({
+  port,
+  storeRevision,
+  onStoreChanged,
+}: {
+  readonly port: TransferPort;
+  readonly storeRevision: number;
+  readonly onStoreChanged: () => void;
+}): JSX.Element {
+  const [typed, setTyped] = useState('');
+  const [holds, setHolds] = useState(false);
+  const [done, setDone] = useState<string | undefined>(undefined);
+  const [refused, setRefused] = useState<EraseRefusal | undefined>(undefined);
+
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      // ⚠️ Not rides alone. A device with routes, workouts, privacy zones and
+      // a signing key but no rides yet would otherwise be refused with "there
+      // is nothing on this device to erase" — which is false, and false in the
+      // direction that leaves a home address on the disk.
+      const [rides, routes, workouts, zones, key] = await Promise.all([
+        port.store.listActivitySummaries(port.athleteId, { limit: 1 }),
+        port.store.listRoutes(port.athleteId, 1),
+        port.store.listWorkouts(port.athleteId, 1),
+        port.store.listPrivacyZones(port.athleteId),
+        port.store.getDeviceKey(port.athleteId),
+      ]);
+      if (live) {
+        setHolds(
+          rides.length > 0 ||
+            routes.length > 0 ||
+            workouts.length > 0 ||
+            zones.length > 0 ||
+            key !== undefined,
+        );
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [port, storeRevision]);
+
+  async function run(): Promise<void> {
+    const decision = eraseDecision(typed, holds);
+    if (!decision.ready) {
+      setRefused(decision.refusal);
+      return;
+    }
+    setRefused(undefined);
+    try {
+      const outcome = await eraseDevice(port.store, port.athleteId, {
+        drafts: port.drafts,
+        athlete: port.athleteRow,
+      });
+      setDone(eraseSentence(outcome));
+      setTyped('');
+      setHolds(false);
+      // The panels above list what the store holds. Without this they go on
+      // offering rides that are no longer there, and a rider who presses Export
+      // on one is told their own ride does not exist.
+      onStoreChanged();
+    } catch {
+      // An erase that failed must not read as one that worked. It is the one
+      // action here whose silent failure a rider would discover by finding
+      // their history still on a device they thought they had wiped.
+      setDone(undefined);
+      setRefused('failed');
+    }
+  }
+
+  return (
+    <>
+      <p>
+        This removes everything this device holds about you. There is no server and nothing has been
+        uploaded, so there is nowhere else to ask &mdash; when this finishes, it is finished.
+      </p>
+      <p className="oyl-muted">What goes:</p>
+      <ul>
+        {ERASE_REMOVES.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+      <p className="oyl-muted">What this cannot reach:</p>
+      <ul>
+        {ERASE_CANNOT_REACH.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+      <p>
+        <strong>
+          Erasing the signing key cannot be undone, and it cannot be recreated. Rides you have
+          already exported go on verifying forever, but after this the device signs as a new
+          identity.
+        </strong>
+      </p>
+      <div className="oyl-transfer__form">
+        <label htmlFor="oyl-erase-confirm">{`Type “${ERASE_CONFIRMATION}” to confirm`}</label>
+        <input
+          id="oyl-erase-confirm"
+          className="oyl-input oyl-input--wide"
+          type="text"
+          value={typed}
+          onChange={(event) => {
+            setTyped(event.target.value);
+          }}
+        />
+        <Button
+          onClick={() => {
+            void run();
+          }}
+        >
+          Erase everything
+        </Button>
+      </div>
+      {refused === undefined ? null : (
+        <StatusMessage tone="warning" live>
+          {ERASE_REFUSAL_TEXT[refused]}
+        </StatusMessage>
+      )}
+      {done === undefined ? null : (
+        <StatusMessage tone="success" live>
+          {done}
+        </StatusMessage>
+      )}
+    </>
+  );
 }
 
 /**

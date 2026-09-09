@@ -20,6 +20,7 @@ import type {
   ActivitySummary,
   AthleteId,
   AthleteRecord,
+  AthleteDeletionCounts,
   DeviceKeyRecord,
   ListActivitiesOptions,
   NewActivity,
@@ -48,6 +49,23 @@ import type {
  */
 export interface AccountStore {
   getAthlete(id: AthleteId): Promise<AthleteRecord | undefined>;
+  /**
+   * Removes the athlete and everything of theirs. #35's deletion half.
+   *
+   * The counts come back so the screen can say what happened without reading
+   * anything else — and they are counts rather than names, because a route is
+   * routinely called after a place and ADR 0004 decision D binds every layer
+   * that formats one into a string.
+   */
+  deleteAthlete(id: AthleteId): Promise<AthleteDeletionCounts>;
+  /**
+   * Puts the athlete row back after an erase.
+   *
+   * `ensureAthlete` and not `putAthlete` for the reason `local-athlete.ts`
+   * gives: a `put` at start-up would rewrite the row on every page load and
+   * discard the display name, the creation instant and the thresholds.
+   */
+  ensureAthlete(record: AthleteRecord): Promise<AthleteRecord>;
   listPrivacyZones(owner: AthleteId): Promise<PrivacyZoneRecord[]>;
   listSegments(owner: AthleteId, limit?: number): Promise<SegmentRecord[]>;
   listRoutes(owner: AthleteId, limit?: number): Promise<RouteRecord[]>;
@@ -111,4 +129,26 @@ export interface TransferPort {
    * and passable.
    */
   readonly save: (file: DownloadableFile) => void;
+  /**
+   * The half-drawn route in `localStorage`, so an erase can forget it.
+   *
+   * ⚠️ It is here rather than reached for directly because it is the one piece
+   * of athlete data on this device that `deleteAthlete` **cannot see** — a
+   * route draft's waypoints are raw coordinates, usually starting at the
+   * rider's front door. See `routing/draft-storage.ts`.
+   */
+  readonly drafts: DraftStore;
+  /**
+   * The row to recreate after an erase.
+   *
+   * Erasing removes the athlete row every write path checks, and
+   * `ensureLocalAthlete` runs once at start-up — so without this the tab
+   * survives the erase and every later write throws, which is #184 exactly.
+   */
+  readonly athleteRow: AthleteRecord;
+}
+
+/** What the erase needs of `routing/draft-storage.ts`. One method. */
+export interface DraftStore {
+  forget(): void;
 }

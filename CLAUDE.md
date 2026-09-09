@@ -84,7 +84,9 @@ apps/                 AGPL-3.0-or-later, without exception
                         web's" is asserted without a phone (§4h); and since #35
                         the account export — every ride plus the manifest of
                         what an activity file cannot carry, the bound on one
-                        run, and the key half that is never written
+                        run, and the key half that is never written; and the
+                        erase that is its pair, whose two lists say what goes
+                        and what it cannot reach
     src/views/          one component per route (#48)
     src/workout/        the workout control loop (#14) — the one place the
                         player's decisions meet a trainer's control point,
@@ -1845,8 +1847,10 @@ top of an issue **supersedes its body**.
 | What an athlete gets when they ask for everything, and what the manifest carries | `apps/web/src/transfer/export-everything.ts` §`accountManifest` |
 | Why the manifest names its fields instead of spreading the row | `apps/web/src/transfer/export-everything.ts` §`accountManifest` |
 | Why the account export's cursor is an instant, and the case it gets wrong | `apps/web/src/transfer/export-everything.ts` §`continueAfter` |
+| What a rider is told before erasing a device, and why the signing key is named | `apps/web/src/transfer/erase-device.ts` §`ERASE_CANNOT_REACH`, [ADR 0014](docs/adr/0014-portable-identity.md) D-7 |
+| Why erasing needs a typed phrase rather than a second button | `apps/web/src/transfer/erase-device.ts` §`eraseDecision` |
 | What proves no store read crosses athletes, and how a new read is caught | `packages/store/src/activity-store.scoping.test.ts` |
 | What proves an erased athlete leaves no row behind, and why the table list is derived | `packages/store/src/activity-store.erasure.test.ts`, `packages/store/src/schema.ts` §`SCHEMA_VERSIONS` |
 | Which way a payload faces, and why an export is deliberately not trimmed | `apps/web/src/privacy/boundaries.ts`, [#35](https://github.com/openzigs/onyourleft/issues/35) |
 
-<!-- Last updated: 2026-09-09 by delivery:code-issue on #34 (the athlete-scoping audit, derived rather than written down) -->
+<!-- Last updated: 2026-09-09 by delivery:code-issue on #35 (the account export, and the erase that is its pair) -->
