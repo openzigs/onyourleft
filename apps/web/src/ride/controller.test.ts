@@ -1277,36 +1277,36 @@ describe('the snapshot', () => {
   });
 });
 
-describe('a finished ride becomes an activity, and only then lets the checkpoint go', () => {
-  /**
-   * ⚠️ **The ordering here is the data-safety argument, not a detail.** Until
-   * the activity is on disk the checkpoint is the only copy of the ride — there
-   * is no server in this milestone — so a discard that ran first would turn a
-   * failed save into a lost ride.
-   */
-  function savePort(overrides: Partial<RideSavePort['store']> = {}): {
-    port: RideSavePort;
-    saved: string[];
-  } {
-    const saved: string[] = [];
-    return {
-      saved,
-      port: {
-        newActivityId: () => activityId('saved-ride'),
-        timeZone: 'Europe/London',
-        store: {
-          putActivity: (record) => {
-            saved.push(record.id);
-            return Promise.resolve(record.id);
-          },
-          putStreamSet: (set) => Promise.resolve(set.activityId),
-          deleteActivity: () => Promise.resolve(true),
-          ...overrides,
+/**
+ * ⚠️ **The ordering the save path keeps is the data-safety argument, not a
+ * detail.** Until the activity is on disk the checkpoint is the only copy of
+ * the ride — there is no server in this milestone — so a discard that ran first
+ * would turn a failed save into a lost ride.
+ */
+function savePort(overrides: Partial<RideSavePort['store']> = {}): {
+  port: RideSavePort;
+  saved: string[];
+} {
+  const saved: string[] = [];
+  return {
+    saved,
+    port: {
+      newActivityId: () => activityId('saved-ride'),
+      timeZone: 'Europe/London',
+      store: {
+        putActivity: (record) => {
+          saved.push(record.id);
+          return Promise.resolve(record.id);
         },
+        putStreamSet: (set) => Promise.resolve(set.activityId),
+        deleteActivity: () => Promise.resolve(true),
+        ...overrides,
       },
-    };
-  }
+    },
+  };
+}
 
+describe('a finished ride becomes an activity, and only then lets the checkpoint go', () => {
   it('writes the activity and discards the checkpoint', async () => {
     const { port, saved } = savePort();
     const rig = benchWith({ rideSave: port });
@@ -1357,6 +1357,95 @@ describe('a finished ride becomes an activity, and only then lets the checkpoint
     rig.controller.armStop();
     await rig.controller.confirmStop();
     expect(rig.controller.getSnapshot().saveState).toBe('unavailable');
+    rig.controller.dispose();
+  });
+});
+
+describe('a ride the tab died in the middle of is offered back — #212', () => {
+  /**
+   * Leave a checkpoint behind the way a closed tab does: record, then dispose
+   * without stopping. `dispose` documents that it "does not stop or discard a
+   * recording", which is exactly the state a killed tab leaves.
+   */
+  async function leaveAnInterruptedRide(): Promise<string> {
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 4);
+    rig.controller.dispose();
+    return rig.sessionIds[0] ?? '';
+  }
+
+  it('offers it to a controller that opens afterwards', async () => {
+    const id = await leaveAnInterruptedRide();
+    const next = benchWith();
+    await next.controller.refreshRecoverable();
+
+    const offered = next.controller.getSnapshot().recoverable;
+    expect(offered.map((entry) => entry.id)).toEqual([id]);
+    expect(offered[0]?.kind).toBe('interrupted');
+    expect(offered[0]?.canContinue).toBe(true);
+    next.controller.dispose();
+  });
+
+  it('never offers the recording this tab is making right now', async () => {
+    // ⚠️ The check that stops "Discard" deleting the ride in progress.
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 4);
+    await rig.controller.refreshRecoverable();
+    expect(rig.controller.getSnapshot().recoverable).toEqual([]);
+    rig.controller.dispose();
+  });
+
+  it('continues it, paused, so the dead time is not moving time', async () => {
+    const id = await leaveAnInterruptedRide();
+    const next = benchWith();
+    await next.controller.refreshRecoverable();
+    expect(await next.controller.continueRecovered(recordingSessionId(id))).toBe(true);
+
+    const snapshot = next.controller.getSnapshot();
+    expect(snapshot.phase).toBe('paused');
+    // The samples that survived are there to carry on from, not a fresh ride.
+    expect(snapshot.sampleCount).toBeGreaterThan(0);
+    // And the offer is gone, because it is no longer something to recover.
+    expect(snapshot.recoverable).toEqual([]);
+    next.controller.dispose();
+  });
+
+  it('saves what survived, through the same path a finished ride uses', async () => {
+    const id = await leaveAnInterruptedRide();
+    const { port, saved } = savePort();
+    const next = benchWith({ rideSave: port });
+    await next.controller.refreshRecoverable();
+
+    expect(await next.controller.saveRecovered(recordingSessionId(id))).toBe('saved');
+    expect(saved).toEqual(['saved-ride']);
+    // The checkpoint is gone once the activity is durable — the ordering
+    // `finish.ts` argues for, reached by the recovery path too.
+    expect(next.controller.getSnapshot().recoverable).toEqual([]);
+    next.controller.dispose();
+  });
+
+  it('discards it when the rider does not want it', async () => {
+    const id = await leaveAnInterruptedRide();
+    const next = benchWith();
+    await next.controller.refreshRecoverable();
+    expect(await next.controller.discardRecovered(recordingSessionId(id))).toBe(true);
+    expect(next.controller.getSnapshot().recoverable).toEqual([]);
+    next.controller.dispose();
+  });
+
+  it('offers nothing while a ride is in progress, whatever is on disk', async () => {
+    await leaveAnInterruptedRide();
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await rig.controller.refreshRecoverable();
+    // ⚠️ A rider mid-ride must not be shown a control that would adopt a
+    // different recording out from under the one they are riding.
+    expect(rig.controller.getSnapshot().recoverable).toEqual([]);
     rig.controller.dispose();
   });
 });

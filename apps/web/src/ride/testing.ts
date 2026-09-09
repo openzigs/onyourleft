@@ -35,6 +35,11 @@ export interface RecordedCalls {
   readonly setTargetPower: number[];
   /** The workouts the screen asked to ride, by name. */
   readonly startWorkout: string[];
+  /** #212's three, each recorded with the recording it was asked about. */
+  readonly continueRecovered: string[];
+  readonly saveRecovered: string[];
+  readonly discardRecovered: string[];
+  refreshRecoverable: number;
   /** Counts, because the interesting question is "how many times", not "with what". */
   start: number;
   pause: number;
@@ -82,6 +87,7 @@ export function idleSnapshot(): RideSnapshot {
     saveState: 'unavailable',
     saveError: undefined,
     savedActivityId: undefined,
+    recoverable: [],
     connectionsRemaining: 3,
   };
 }
@@ -136,6 +142,10 @@ export function stubRideController(initial: RideSnapshot = idleSnapshot()): Stub
     unpair: [],
     setTargetPower: [],
     startWorkout: [],
+    continueRecovered: [],
+    saveRecovered: [],
+    discardRecovered: [],
+    refreshRecoverable: 0,
     start: 0,
     pause: 0,
     resume: 0,
@@ -169,6 +179,22 @@ export function stubRideController(initial: RideSnapshot = idleSnapshot()): Stub
     unpair: async (id) => {
       calls.unpair.push(id);
       return Promise.resolve();
+    },
+    refreshRecoverable: () => {
+      calls.refreshRecoverable += 1;
+      return Promise.resolve();
+    },
+    continueRecovered: (id) => {
+      calls.continueRecovered.push(id);
+      return Promise.resolve(true);
+    },
+    saveRecovered: (id) => {
+      calls.saveRecovered.push(id);
+      return Promise.resolve('saved' as const);
+    },
+    discardRecovered: (id) => {
+      calls.discardRecovered.push(id);
+      return Promise.resolve(true);
     },
     start: async () => {
       calls.start += 1;
