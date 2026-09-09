@@ -40,6 +40,7 @@ export type RouteId =
   | 'segments'
   | 'segment-detail'
   | 'routes'
+  | 'route-builder'
   | 'workouts'
   | 'game'
   | 'devices'
@@ -154,6 +155,32 @@ export const ROUTES: readonly RouteDefinition[] = [
 ];
 
 /**
+ * The route drawing canvas (#71).
+ *
+ * **Not in {@link ROUTES}**, so it carries no navigation entry: drawing a route
+ * is reached from the routes screen, and a top-level link beside "Routes" reads
+ * as a second, different feature. It is in {@link ALL_ROUTES}, so the
+ * accessibility suite audits it without anyone editing a test — which is the
+ * property #48 built the table for, and the reason a route with no nav entry
+ * still needs a title and a summary.
+ *
+ * ⚠️ Its path is `/routes/new`, a **literal** third segment rather than a
+ * parameter. {@link matchHash} compares literals before it captures, so if a
+ * `/routes/:route` detail route is ever added this one still wins — worth
+ * knowing before somebody adds it and assumes the order in
+ * {@link MATCHABLE_ROUTES} decides.
+ */
+export const ROUTE_BUILDER_ROUTE: RouteDefinition = {
+  id: 'route-builder',
+  path: '/routes/new',
+  navLabel: 'Draw a route',
+  title: 'Draw a route',
+  summary:
+    'Place waypoints and have the roads between them worked out. Every control works from the ' +
+    'keyboard, and a half-drawn route survives closing the tab.',
+};
+
+/**
  * One stored ride, in full (#50).
  *
  * **Not in {@link ROUTES}**, for the reason {@link NOT_FOUND_ROUTE} is not:
@@ -226,6 +253,7 @@ export const NOT_FOUND_ROUTE: RouteDefinition = {
 /** Every route the audit must cover, navigable or not. */
 export const ALL_ROUTES: readonly RouteDefinition[] = [
   ...ROUTES,
+  ROUTE_BUILDER_ROUTE,
   ACTIVITY_DETAIL_ROUTE,
   SEGMENT_DETAIL_ROUTE,
   NOT_FOUND_ROUTE,

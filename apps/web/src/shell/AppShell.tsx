@@ -47,6 +47,9 @@ import { DevicesView } from '../views/DevicesView';
 import { NotFoundView } from '../views/NotFoundView';
 import { RideView } from '../views/RideView';
 import { SegmentDetailView } from '../views/SegmentDetailView';
+import type { RoutingProvider } from '@onyourleft/domain';
+
+import { RouteBuilderView } from '../views/RouteBuilderView';
 import { RoutesView } from '../views/RoutesView';
 import { WorkoutsView } from '../views/WorkoutsView';
 import { SegmentsView } from '../views/SegmentsView';
@@ -164,6 +167,15 @@ export interface AppShellProps {
   readonly segments?: SegmentPort | undefined;
   /** Saved routes (#73), or `undefined` where this browser has no local store. */
   readonly routes?: RoutePort | undefined;
+  /**
+   * The routing engine the drawing canvas asks for roads (#70, #71).
+   *
+   * ⚠️ `undefined` everywhere today, and not by oversight: ADR 0010 D-4 chose
+   * Valhalla and #53 has not stood one up, so there is nothing to pass. The
+   * builder screen places and moves waypoints without it and says why the roads
+   * between them are missing — see `views/RouteBuilderView.tsx`.
+   */
+  readonly routing?: RoutingProvider | undefined;
   /** Saved workouts (#14), or `undefined` where this browser has no local store. */
   readonly workouts?: WorkoutPort | undefined;
   /**
@@ -215,6 +227,8 @@ function viewFor(match: RouteMatch, props: AppShellProps): JSX.Element {
       return <SegmentsView port={props.segments} />;
     case 'routes':
       return <RoutesView port={props.routes} save={props.transfer?.save} />;
+    case 'route-builder':
+      return <RouteBuilderView provider={props.routing} />;
     case 'workouts':
       return <WorkoutsView port={props.workouts} save={props.transfer?.save} />;
     case 'game':
