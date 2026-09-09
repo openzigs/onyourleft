@@ -42,8 +42,8 @@
           14 (API 34) for a service that holds a BLE link: omitting the type
           throws MissingForegroundServiceTypeException and omitting the matching
           permission throws SecurityException. Neither Capacitor nor the BLE
-          plugin ships one -- capacitor-community/bluetooth-le has no service and
-          Capacitor issue #643 is open -- so this is hand-written.
+          plugin ships one — capacitor-community/bluetooth-le has no service and
+          Capacitor issue #643 is open — so this is hand-written.
 
           exported="false" because nothing outside this application has any
           business starting it, and an exported service holding a live sensor
@@ -63,7 +63,7 @@
       contributes its own, and it declares ACCESS_FINE_LOCATION and
       ACCESS_COARSE_LOCATION with NO maxSdkVersion and BLUETOOTH_SCAN WITHOUT
       neverForLocation. Merge those in unconstrained and the shipped app asks
-      every rider for their location on every Android version -- which drags the
+      every rider for their location on every Android version — which drags the
       release into Google Play's location-policy review and makes the Data Safety
       form's "no location collected" answer untrue, both for nothing, because a
       cycling app derives power and heart rate from scan results and never
