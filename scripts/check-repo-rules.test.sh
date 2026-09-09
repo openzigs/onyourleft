@@ -284,6 +284,27 @@ printf 'ANT+ is out of scope permanently; see ADR 0005.\n' \
   > "${fixture_root}/docs/adr/0003-platform-support.md"
 assert_clean "ANT+ named in docs/ to explain its exclusion is allowed"
 
+# ⚠️ **A dependency, which is the word #15's fifth criterion uses and the one
+# the rule did not cover.** `source_files` returns no `.json`, so this passed a
+# checker written to forbid exactly it. The other three words in that criterion
+# -- code, permission, string -- were already covered; this is the fourth.
+new_fixture
+mkdir -p "${fixture_root}/apps/mobile"
+printf 'AGPL\n' > "${fixture_root}/apps/mobile/LICENSE"
+printf '{"license":"AGPL-3.0-or-later","dependencies":{"ant-plus":"^1.0.0"}}\n' \
+  > "${fixture_root}/apps/mobile/package.json"
+assert_violation "an ANT+ dependency in a package manifest is rejected" SCOPE001 \
+  "apps/mobile/package.json"
+
+# The same anchoring the source loop needs: a manifest may legitimately depend
+# on something whose name merely ends in those letters.
+new_fixture
+mkdir -p "${fixture_root}/packages/physics"
+printf 'Apache\n' > "${fixture_root}/packages/physics/LICENSE"
+printf '{"license":"Apache-2.0","dependencies":{"quadrant-solver":"^2.0.0"}}\n' \
+  > "${fixture_root}/packages/physics/package.json"
+assert_clean "a dependency whose name merely contains 'ant' is not a violation"
+
 # --- ADR001: ADR numbers are unique ------------------------------------------
 
 new_fixture

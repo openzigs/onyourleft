@@ -74,7 +74,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         since #85 the one question that decides which BLE
                         transport this build uses (§4h)
     src/transfer/       file import and export (#51) — the batch importer, the
-                        1 Hz sample grid, and the export writer
+                        1 Hz sample grid, the export writer, and since #15 the
+                        one fixture both clients encode, which is how "the
+                        mobile client's FIT output is byte-identical to the
+                        web's" is asserted without a phone (§4h)
     src/views/          one component per route (#48)
     src/workout/        the workout control loop (#14) — the one place the
                         player's decisions meet a trainer's control point,
@@ -332,7 +335,7 @@ downstream issue's acceptance criteria depend on these.
 # Exits 0 clean; exits 1 listing each violation by rule id.
 bash scripts/check-repo-rules.sh
 
-# Test the checker itself. Fixture-driven; 88 cases.
+# Test the checker itself. Fixture-driven; 90 cases.
 bash scripts/check-repo-rules.test.sh
 
 # Verify the licence texts are byte-identical to the canonical ones, by
@@ -517,7 +520,7 @@ npm view typescript-eslint peerDependencies.typescript
 | `LIC003` | a package manifest declares a licence its path does not permit |
 | `LIC004` | a package under `packages/` **or `apps/`** has no `LICENSE` file of its own |
 | `LIC006` | an entry in `.spdx-exempt` names a file that is not there, a directory, an absolute or `..` path, or uses glob syntax — see §3a |
-| `SCOPE001` | ANT+ is referenced anywhere in a source tree (see §6) |
+| `SCOPE001` | ANT+ is referenced anywhere in a source tree, **or named as a dependency in a `package.json` under `packages/` or `apps/`** (see §6) |
 | `WF001` | `pull_request_target` appears in a `.github/workflows/` file (see §8) |
 | `ADR001` | two ADRs share a number |
 | `ADR002` | an ADR filename is not `NNNN-kebab-case.md` |
@@ -1391,6 +1394,16 @@ forbids redistributing source containing the network key.
 `scripts/check-repo-rules.sh` rule `SCOPE001` fails the build if ANT+ appears in a source tree.
 Documentation may name it **to explain why it is excluded**; source may not.
 
+⚠️ **It scans package manifests too, and until #15 it did not.** The rule walked the SPDX header
+extension list — `.ts .tsx .js .jsx .mjs .cjs .css .sh .kt .kts .java .gradle .xml` — which covers
+**code** by extension and **permission** through an `AndroidManifest.xml`, and left the third word
+of the sentence above unenforced: `ant-plus` or `@abandonware/ant-plus` in a `package.json`
+`dependencies` block was not a source file and passed a rule whose whole job is to stop the scope
+quietly returning. A second loop now scans every `package.json` under `packages/` and `apps/`,
+`node_modules` pruned. It is the same word-bounded pattern, so `antenna`, `Levenshtein` and
+`participant` still do not match; [spike 0002](docs/spikes/0002-background-recording.md) §"Criterion
+5" records the hole and how it was found.
+
 ### Never paste Garmin FIT SDK source into a public issue, PR or commit
 
 The Garmin FIT Protocol License Agreement **§4 declares the Licensed Technology to be Garmin
@@ -1551,8 +1564,11 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   inside an ADR table cell.
 - **ADRs**: `docs/adr/NNNN-kebab-case.md`, with **Status, Context, Decision, Consequences**. Numbers
   are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. **Every number from 0001 to 0017 is
-  now written and the next free number is 0018** — there is no live reservation. ⚠️ `0012` **was**
+  **and which are claimed by open issues** before you pick one. **Every number from 0001 to 0018 is
+  now written and the next free number is 0019** — there is no live reservation. ⚠️ **0018 is
+  [ADR 0018](docs/adr/0018-native-client-platform.md)**, taken by
+  [#15](https://github.com/openzigs/onyourleft/issues/15) for the native-client platform question;
+  a reviewer who remembers this paragraph offering 0018 is reading the old one. ⚠️ `0012` **was**
   reserved and is no longer: [#64](https://github.com/openzigs/onyourleft/issues/64) consumed it
   with [ADR 0012](docs/adr/0012-data-licence.md), the data licence, which is the destination
   ADR 0001's *Data* deferral had no number for
@@ -1807,5 +1823,9 @@ top of an issue **supersedes its body**.
 | What a trainer that reports no power range gets, and why | `apps/mobile/src/ble/fitness-machine.ts` |
 | What is enforced about Android signing keys, and what is merely written down | [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §1, `scripts/check-repo-rules.sh` §`REL001` |
 | Why ADR 0008's rendering gate was waived, and what that does not cancel | [ADR 0008](docs/adr/0008-mobile-client-architecture.md) §Amendments, 2026-09-08 |
+| Which platform the next client is built on, and why there is no desktop one | [ADR 0018](docs/adr/0018-native-client-platform.md) |
+| Which of #15's acceptance criteria can be checked without a phone, and what each of the others needs | [`docs/spikes/0002-background-recording.md`](docs/spikes/0002-background-recording.md) |
+| What proves the mobile shell cannot encode a FIT file of its own | `apps/web/src/transfer/cross-client-fixture.ts`, `apps/web/src/transfer/cross-client-fit.test.ts` |
+| Why an ANT+ dependency used to pass the rule that bans ANT+ | `scripts/check-repo-rules.sh` §`SCOPE001`, §6 |
 
-<!-- Last updated: 2026-09-06 by delivery:code-issue resolving #51 (the manual file import and export UI) -->
+<!-- Last updated: 2026-09-09 by delivery:code-issue on #15 (ADR 0018, spike 0002, and the two criteria that were checkable) -->
