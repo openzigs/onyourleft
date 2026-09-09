@@ -600,6 +600,7 @@ And these are enforced with no toolchain at all, by `scripts/check-repo-rules.sh
 | `WF001` | `pull_request_target` appears in a workflow — it receives secrets and bypasses the fork-approval gate |
 | `ADR001` / `ADR002` | two ADRs share a number, or a filename is not `NNNN-kebab-case.md` |
 | `ADR003` | an ADR's `## Amendments` section is not the last section, or there are two of them, or an entry does not open with a bold ISO date — see [ADR 0013](adr/0013-adr-amendments.md) |
+| `XML001` / `XML002` | a `--` inside an XML comment, or a comment that is never closed — the two ways an `.xml` file this repository authors can be something no parser accepts. #225; not full well-formedness validation, and `scripts/check-repo-rules.sh` says what it therefore misses |
 | `ENV001` | a source file reads an environment variable `.env.example` does not list, or `.env.example` is missing |
 
 **All of them run in CI**, on every pull request and every push to `main`, from
