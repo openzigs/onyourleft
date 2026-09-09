@@ -25,7 +25,7 @@
  * Usage: node scripts/coverage-summary.mjs [path/to/coverage-summary.json]
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 
 const METRICS = ['statements', 'branches', 'functions', 'lines'];
 
@@ -110,7 +110,26 @@ export function render(summary) {
   return lines.join('\n');
 }
 
-const isEntryPoint = import.meta.url === `file://${process.argv[1]}`;
+// Compared through `realpathSync`, and both simpler forms are wrong.
+//
+// `import.meta.url === `file://${process.argv[1]}`` fails on a space, because a
+// URL percent-encodes one and `argv[1]` does not. `import.meta.filename ===
+// process.argv[1]` fixes that and still fails through a symlink, because
+// `import.meta.filename` is resolved and `argv[1]` is as typed -- which is not
+// exotic: macOS `$TMPDIR` is `/var/folders/...` and `/var` is a symlink to
+// `/private/var`, so every fixture this repository's own suites build sits
+// behind one. Measured, all three predicates, same file:
+//
+//                                     url==   filename==  realpath==
+//   plain path, no symlink            true    true        true
+//   spaced path, no symlink           FALSE   true        true
+//   spaced path under $TMPDIR         FALSE   FALSE       true
+//
+// When the predicate is false this script does nothing and exits 0 -- a gate
+// reporting success because of a directory name. CI's path has neither a space
+// nor a symlink, so nothing there would ever have surfaced it.
+const entryPoint = process.argv[1];
+const isEntryPoint = entryPoint !== undefined && import.meta.filename === realpathSync(entryPoint);
 if (isEntryPoint) {
   const path = process.argv[2] ?? 'coverage/coverage-summary.json';
   let summary;

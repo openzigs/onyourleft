@@ -67,6 +67,40 @@ describe('with no chart supplied — how every view in the shell uses it today',
     );
   }
 
+  /**
+   * The header equivalent of `Reorderable`, and the reason the header hole
+   * survived the row fix: `Reorderable` holds `columns` constant, and a
+   * duplicate key does no damage until React reconciles a CHANGED list against
+   * it.
+   */
+  function ReorderableColumns({
+    before,
+    after,
+  }: {
+    readonly before: readonly string[];
+    readonly after: readonly string[];
+  }): JSX.Element {
+    const [reordered, setReordered] = useState(false);
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => {
+            setReordered(true);
+          }}
+        >
+          reorder
+        </button>
+        <ChartSlot
+          caption="Power"
+          columns={reordered ? after : before}
+          rows={[['1', '2', '3'].slice(0, (reordered ? after : before).length)]}
+          emptyMessage="No readings."
+        />
+      </>
+    );
+  }
+
   function renderedRows(container: HTMLElement): string[][] {
     return [...container.querySelectorAll('tbody tr')].map((row) =>
       [...row.querySelectorAll('td')].map((cell) => cell.textContent ?? ''),
@@ -111,6 +145,35 @@ describe('with no chart supplied — how every view in the shell uses it today',
     await settle();
 
     expect(renderedRows(mounted.container)).toEqual([['2', '1', '1']]);
+  });
+
+  it('renders one header cell per column when duplicate names are reordered', async () => {
+    // The first case the #153 review found: three columns become three, and the
+    // old content key rendered FOUR.
+    const mounted = await mount(
+      <ReorderableColumns before={['Watts', 'Lap', 'Lap']} after={['Lap', 'Lap', 'Watts']} />,
+    );
+    try {
+      mounted.container.querySelector('button')?.click();
+      await settle();
+      expect(mounted.container.querySelectorAll('th')).toHaveLength(3);
+    } finally {
+      mounted.unmount();
+    }
+  });
+
+  it('renders one header cell per column when a duplicated list shrinks', async () => {
+    // The second: three become two, and the old key rendered three.
+    const mounted = await mount(
+      <ReorderableColumns before={['Lap', 'Lap', 'Lap']} after={['Lap', 'Watts']} />,
+    );
+    try {
+      mounted.container.querySelector('button')?.click();
+      await settle();
+      expect(mounted.container.querySelectorAll('th')).toHaveLength(2);
+    } finally {
+      mounted.unmount();
+    }
   });
 
   it('renders the data as a table, not a placeholder', async () => {

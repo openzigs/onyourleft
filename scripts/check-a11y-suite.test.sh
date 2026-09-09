@@ -246,5 +246,37 @@ run_check
 assert_red 'a missing test:a11y script fails'
 assert_says 'and says which script is missing' 'no `test:a11y` script'
 
+# --- The entry-point guard, at a path containing a space --------------------
+# `import.meta.url` is a URL and percent-encodes a space; `process.argv[1]` does
+# not. A predicate comparing the two makes this script a silent no-op that exits
+# 0 -- a gate reporting success because of a directory name. CI never has a
+# space in its path, so nothing here would have caught it.
+#
+# The script is copied rather than symlinked: a symlink would resolve back to the
+# unspaced original and prove nothing.
+spaced_home="$(mktemp -d)/a directory with spaces"
+mkdir -p "${spaced_home}"
+cp "${CHECK}" "${spaced_home}/check-a11y-suite.mjs"
+
+new_fixture
+touch_test 'apps/web/src/a11y/rules.a11y.test.ts'
+touch_test 'apps/web/src/a11y/audit.test.ts'
+selection 'apps/web/src/a11y/rules.a11y.test.ts'
+spaced_out="$(node "${spaced_home}/check-a11y-suite.mjs" --root "${tmp}" --selected "${tmp}/selected.txt" 2>&1)"
+spaced_code=$?
+if [ "${spaced_code}" -ne 0 ]; then
+  pass=$((pass + 1))
+else
+  fail=$((fail + 1))
+  printf 'FAIL: the checker exits 0 from a path containing a space\n  output:\n%s\n' "${spaced_out}"
+fi
+if printf '%s' "${spaced_out}" | grep -qF 'audit.test.ts'; then
+  pass=$((pass + 1))
+else
+  fail=$((fail + 1))
+  printf 'FAIL: from a spaced path the checker did not name the unselected file\n  output:\n%s\n' "${spaced_out}"
+fi
+rm -rf "${spaced_home%/*}"
+
 printf '\n%d passed, %d failed\n' "${pass}" "${fail}"
 [ "${fail}" -eq 0 ] || exit 1
