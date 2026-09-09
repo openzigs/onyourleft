@@ -17,17 +17,20 @@ import {
   rideFor,
   routeFor,
   seedAthletes,
+  signedRecordFor,
   streamSetFor,
   workoutFor,
 } from '@onyourleft/store/testing';
 import type { PrivacyZoneRecord } from '@onyourleft/store';
-import { privacyZoneId } from '@onyourleft/store';
+import { privacyZoneId, webCryptoVerifier } from '@onyourleft/store';
 import {
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
+  isVerified,
   metres,
   unixSeconds,
+  verifyRecordSignature,
   watts,
 } from '@onyourleft/domain';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -37,8 +40,10 @@ import { coordinatesIn, insideZone } from '../privacy/boundaries';
 import {
   ACCOUNT_EXPORT_VERSION,
   MANIFEST_FILE_NAME,
+  SIGNED_RECORD_SUFFIX,
   accountManifest,
   exportEverything,
+  signedRecordFileName,
 } from './export-everything';
 import type { DownloadableFile } from './store-port';
 
@@ -69,7 +74,11 @@ function zoneFor(owner: typeof ATHLETE_A, latitude: number): PrivacyZoneRecord {
 /** Seeds a library and returns what was written, so a test can name any of it. */
 async function seedLibrary(rides = 3) {
   await seedAthletes(harness);
-  const { record: deviceKey, privateKeyHex } = await extractableDeviceKey(ATHLETE_A);
+  const {
+    record: deviceKey,
+    key: signingKey,
+    privateKeyHex,
+  } = await extractableDeviceKey(ATHLETE_A);
   const written: { ride: ReturnType<typeof rideFor>; streams: ReturnType<typeof streamSetFor> }[] =
     [];
   for (let index = 0; index < rides; index += 1) {
@@ -103,7 +112,7 @@ async function seedLibrary(rides = 3) {
     await store.putStreamSet(streamSetFor(theirs, { sampleCount: 20 }));
   });
 
-  return { written, route, workout, zone, privateKeyHex };
+  return { written, route, workout, zone, privateKeyHex, signingKey };
 }
 
 /** Runs an export, collecting the files it hands over. */
@@ -368,5 +377,252 @@ describe('the manifest names its fields rather than spreading the row', () => {
     expect(text.endsWith('\n')).toBe(true);
     expect(() => JSON.parse(text) as unknown).not.toThrow();
     expect(file.mediaType).toBe('application/json');
+  });
+});
+
+/**
+ * #221's first half: the signed record leaves with the ride.
+ *
+ * The assertion that matters is the verification one, and its whole value is
+ * where it reads from — **the exported bytes**, parsed as JSON, with the public
+ * key taken out of the record itself. Nothing in it touches the store, so it is
+ * the same thing a stranger holding the archive can do, and it would go red for
+ * an export that wrote a plausible-looking object with the signature dropped or
+ * a member renamed.
+ */
+describe('exporting the signed records (#221)', () => {
+  /** A library where the first `signed` rides carry a record. */
+  async function seedSignedLibrary(rides: number, signed: number) {
+    // ⚠️ Signed with the key `seedLibrary` already **stored**, not with a fresh
+    // one. `putActivityRecord` refuses a record signed by a key that is not
+    // this athlete's — the guard that stops one identity's rides being filed
+    // under another — and a second `extractableDeviceKey` call generates a
+    // second identity, which that guard correctly rejects.
+    const { written, privateKeyHex, signingKey } = await seedLibrary(rides);
+    await harness.write(async (store) => {
+      for (const { ride } of written.slice(0, signed)) {
+        await store.putActivityRecord(await signedRecordFor(ride, signingKey));
+      }
+    });
+    return { written, privateKeyHex };
+  }
+
+  it('writes one record file per ride that has one, beside its activity file', async () => {
+    const { written } = await seedSignedLibrary(3, 2);
+    const { files, report } = await runExport();
+
+    // Three rides, two records, one manifest.
+    expect(files).toHaveLength(6);
+    expect(report.signedRecords).toBe(2);
+    const names = files.map((each) => each.fileName);
+    const rideFile = report.outcomes[0]?.fileName ?? '';
+    expect(names).toContain(signedRecordFileName(rideFile));
+    // The one with no record produced no file and claimed none.
+    expect(report.outcomes[2]?.signedRecord).toBeUndefined();
+    expect(written).toHaveLength(3);
+  });
+
+  it('verifies from the exported bytes alone, with the key inside the record', async () => {
+    await seedSignedLibrary(1, 1);
+    const { files } = await runExport();
+
+    const file = files.find((each) => each.fileName.endsWith(SIGNED_RECORD_SUFFIX));
+    expect(file).toBeDefined();
+    // Everything below this line reads the archive and nothing else. No store,
+    // no fixture object, no key handed in from the side — #221's second
+    // criterion in as many words, and ADR 0019 D-4's `verifyRecordSignature`
+    // rather than `verifyActivityRecord`, because the activity file beside it
+    // is a re-encode and is not the bytes the record vouches for.
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(file?.bytes ?? new Uint8Array()));
+
+    const outcome = await verifyRecordSignature(parsed, webCryptoVerifier);
+
+    expect(outcome.status).toBe('verified');
+    expect(isVerified(outcome) && outcome.record.publicKey).toBeTruthy();
+  });
+
+  it('writes a record a tampered copy of which does not verify', async () => {
+    // The other half of the assertion above: a verification that cannot fail
+    // proves nothing about the bytes it was handed. One flipped claim, and the
+    // same code path answers `signature-mismatch`.
+    await seedSignedLibrary(1, 1);
+    const { files } = await runExport();
+    const file = files.find((each) => each.fileName.endsWith(SIGNED_RECORD_SUFFIX));
+    const record = JSON.parse(new TextDecoder().decode(file?.bytes ?? new Uint8Array())) as {
+      claims: { distance: number };
+    };
+    record.claims.distance += 1;
+
+    expect((await verifyRecordSignature(record, webCryptoVerifier)).status).toBe(
+      'signature-mismatch',
+    );
+  });
+
+  it('says in the manifest, per ride, whether a record went with it', async () => {
+    await seedSignedLibrary(2, 1);
+    const { files } = await runExport();
+    const listed = manifestOf(files)['activities'] as {
+      fileName: string;
+      signedRecord: string | null;
+    }[];
+
+    expect(listed).toHaveLength(2);
+    expect(listed[0]?.signedRecord).toBe(signedRecordFileName(listed[0]?.fileName ?? ''));
+    // ⚠️ `null`, not absent. An omitted member is exactly as unreadable as no
+    // member at all — "this ride never had a record" would be indistinguishable
+    // from "the export dropped it", which is the confusion the member exists to
+    // remove. `toBeNull` and not `toBeUndefined` is the whole assertion.
+    expect(listed[1]?.signedRecord).toBeNull();
+    // And the raw text, because `JSON.parse` cannot tell a written `null` from
+    // an absent member either way round for a reader that used `in`.
+    const text = new TextDecoder().decode(
+      files.find((each) => each.fileName === MANIFEST_FILE_NAME)?.bytes ?? new Uint8Array(),
+    );
+    expect(text).toContain('"signedRecord": null');
+  });
+
+  it('exports a library with no records at all, cleanly and as no failure', async () => {
+    await seedLibrary(2);
+    const { files, report } = await runExport();
+
+    // Not every ride has one: an imported ride never did. Two rides and a
+    // manifest, nothing reported as failed.
+    expect(report.exported).toBe(2);
+    expect(report.failed).toBe(0);
+    expect(report.signedRecords).toBe(0);
+    expect(files).toHaveLength(3);
+    expect(files.some((each) => each.fileName.endsWith(SIGNED_RECORD_SUFFIX))).toBe(false);
+  });
+
+  it('carries the record of a ride whose file could not be written', async () => {
+    await seedAthletes(harness);
+    const { record: deviceKey, key } = await extractableDeviceKey(ATHLETE_A);
+    // A ride with no streams: `exportActivity` refuses it. Its record is still
+    // the athlete's, is still destroyed by the erase, and can never be minted
+    // again — so dropping it here would be the exact loss #221 is about.
+    const bare = rideFor(ATHLETE_A, { startedAt: unixSeconds(1_700_000_000) });
+    await harness.write(async (store) => {
+      await store.putActivity(bare);
+      await store.putDeviceKey(deviceKey);
+      await store.putActivityRecord(await signedRecordFor(bare, key));
+    });
+
+    const { files, report } = await runExport();
+
+    expect(report.failed).toBe(1);
+    expect(report.signedRecords).toBe(1);
+    const listed = manifestOf(files)['activities'] as {
+      fileName: string;
+      written: boolean;
+      signedRecord: string | null;
+    }[];
+    expect(listed[0]?.written).toBe(false);
+    expect(listed[0]?.signedRecord).toBe(signedRecordFileName(listed[0]?.fileName ?? ''));
+    expect(files.filter((each) => each.fileName.endsWith(SIGNED_RECORD_SUFFIX))).toHaveLength(1);
+  });
+
+  it('writes no record for a ride the export was cancelled before reaching', async () => {
+    await seedSignedLibrary(3, 3);
+    const controller = new AbortController();
+    const files: DownloadableFile[] = [];
+    const report = await harness.read(async (store) =>
+      exportEverything({
+        store,
+        athleteId: ATHLETE_A,
+        format: 'gpx',
+        signal: controller.signal,
+        onFile: (file) => {
+          files.push(file);
+          controller.abort();
+        },
+      }),
+    );
+
+    // A cancelled ride is one no file was handed over for — the record is a
+    // file, so the same rule binds it.
+    expect(report.cancelled).toBe(2);
+    expect(report.signedRecords).toBe(1);
+    expect(files.filter((each) => each.fileName.endsWith(SIGNED_RECORD_SUFFIX))).toHaveLength(1);
+  });
+
+  it('gives two rides of the same name two record files, not one', async () => {
+    await seedAthletes(harness);
+    const { record: deviceKey, key } = await extractableDeviceKey(ATHLETE_A);
+    const rides = [0, 1].map((index) =>
+      rideFor(ATHLETE_A, {
+        name: 'Morning ride',
+        startedAt: unixSeconds(1_700_000_000 + index * 86_400),
+      }),
+    );
+    await harness.write(async (store) => {
+      await store.putDeviceKey(deviceKey);
+      for (const ride of rides) {
+        await store.putActivity(ride);
+        await store.putStreamSet(streamSetFor(ride, { sampleCount: 20 }));
+        await store.putActivityRecord(await signedRecordFor(ride, key));
+      }
+    });
+
+    const { files } = await runExport();
+    const names = files.filter((each) => each.fileName.endsWith(SIGNED_RECORD_SUFFIX));
+
+    // The record names are derived from the DE-DUPLICATED activity file names,
+    // so a collision there is the only way to get one here — and there is not
+    // one. Two files with one name is an archive that silently holds one.
+    expect(names).toHaveLength(2);
+    expect(new Set(names.map((each) => each.fileName)).size).toBe(2);
+  });
+
+  it('puts no trace of another athlete’s identity in this athlete’s archive', async () => {
+    // ⚠️ **What this does and does not pin, stated because the obvious reading
+    // is wrong.** It is *not* a test of `getActivityRecord`'s scoping argument:
+    // the loop only ever visits summaries `listActivitySummaries(athleteId)`
+    // returned, and an activity id belongs to exactly one athlete, so swapping
+    // the owner for the summary's own — or even dropping the owner from the
+    // store's index query — is behaviourally equivalent here. Both mutations
+    // were tried and both stayed green. The cross-athlete class is closed at
+    // the store, which exposes no unscoped record lookup at all.
+    //
+    // What it does pin is the outcome that would matter if any of that changed
+    // shape: **athlete B's public key appears in no byte of athlete A's
+    // archive.** A public key is the identity, so this is the greppable form of
+    // "whose records are in here" — and it is exactly the shape of the
+    // private-key assertion above, which is the one that has already caught a
+    // real leak once.
+    const { written } = await seedSignedLibrary(1, 1);
+    const { record: keyB, key } = await extractableDeviceKey(ATHLETE_B);
+    const theirs = rideFor(ATHLETE_B);
+    await harness.write(async (store) => {
+      await store.putActivity(theirs);
+      await store.putStreamSet(streamSetFor(theirs, { sampleCount: 20 }));
+      await store.putDeviceKey(keyB);
+      await store.putActivityRecord(await signedRecordFor(theirs, key));
+    });
+
+    const { files, report } = await runExport();
+
+    expect(written).toHaveLength(1);
+    expect(report.outcomes).toHaveLength(1);
+    expect(report.signedRecords).toBe(1);
+    expect(keyB.publicKey.length).toBe(64);
+    for (const file of files) {
+      expect(new TextDecoder().decode(file.bytes)).not.toContain(keyB.publicKey);
+    }
+  });
+});
+
+describe('signedRecordFileName', () => {
+  it('replaces the activity file’s extension rather than appending to it', () => {
+    expect(signedRecordFileName('Morning ride.gpx')).toBe('Morning ride.record.json');
+    expect(signedRecordFileName('Morning ride (2).fit')).toBe('Morning ride (2).record.json');
+    expect(signedRecordFileName('Ride.2026.03.14.tcx')).toBe('Ride.2026.03.14.record.json');
+  });
+
+  it('appends when there is no extension to replace', () => {
+    // Not reachable from `exportEverything`, which always appends a format —
+    // and it is here because a name that lost its leading dot is a filename a
+    // rider cannot see, which is worse than an ugly one.
+    expect(signedRecordFileName('ride')).toBe('ride.record.json');
+    expect(signedRecordFileName('.hidden')).toBe('.hidden.record.json');
   });
 });

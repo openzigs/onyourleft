@@ -1618,11 +1618,13 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   inside an ADR table cell.
 - **ADRs**: `docs/adr/NNNN-kebab-case.md`, with **Status, Context, Decision, Consequences**. Numbers
   are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. **Every number from 0001 to 0018 is
-  now written and the next free number is 0019** — there is no live reservation. ⚠️ **0018 is
-  [ADR 0018](docs/adr/0018-native-client-platform.md)**, taken by
-  [#15](https://github.com/openzigs/onyourleft/issues/15) for the native-client platform question;
-  a reviewer who remembers this paragraph offering 0018 is reading the old one. ⚠️ `0012` **was**
+  **and which are claimed by open issues** before you pick one. **Every number from 0001 to 0019 is
+  now written and the next free number is 0020** — there is no live reservation. ⚠️ **0019 is
+  [ADR 0019](docs/adr/0019-signed-records-in-an-export.md)**, taken by
+  [#221](https://github.com/openzigs/onyourleft/issues/221) for how a signed activity record travels
+  in an export; a reviewer who remembers this paragraph offering 0018 or 0019 is reading an old one.
+  **0018 is [ADR 0018](docs/adr/0018-native-client-platform.md)**, taken by
+  [#15](https://github.com/openzigs/onyourleft/issues/15) for the native-client platform question. ⚠️ `0012` **was**
   reserved and is no longer: [#64](https://github.com/openzigs/onyourleft/issues/64) consumed it
   with [ADR 0012](docs/adr/0012-data-licence.md), the data licence, which is the destination
   ADR 0001's *Data* deferral had no number for
@@ -1774,6 +1776,7 @@ top of an issue **supersedes its body**.
 | What the live ride screen may claim about a trainer, and why a stale metric shows no number | `apps/web/src/ride/controller.ts`, `apps/web/src/ride/metrics.ts`, `apps/web/src/ride/TrainerPanel.tsx` |
 | How a bulk import reports a file it cannot read, and what bounds the memory an imported file can ask for | `apps/web/src/transfer/import-batch.ts`, `apps/web/src/transfer/read-activity-file.ts` §`MAXIMUM_IMPORTED_SAMPLES` |
 | What an export tells a rider it could not carry, and why altitude can never be the answer | `apps/web/src/transfer/export-activity.ts` §`EXPORT_FAULT_TEXT`, and the finding in `export-activity.test.ts` §"what the file could not carry" |
+| How a signed activity record leaves the device, what the manifest says about a ride that has none, and which of the two verify functions applies to an archive | [ADR 0019](docs/adr/0019-signed-records-in-an-export.md), `apps/web/src/transfer/export-everything.ts` §`signedRecordFile`, [`docs/architecture.md`](docs/architecture.md) §"The signed activity record" |
 | What the import screen may say about another platform, word for word | [ADR 0009](docs/adr/0009-clean-room-posture.md) R3, `apps/web/src/transfer/TransferView.tsx`, and the assertions in `TransferView.test.tsx` |
 | Why the ride detail view reads a stream summary before it reads a sample, and what bounds the points a chart is handed | `apps/web/src/detail/load.ts`, `apps/web/src/detail/series.ts` §`CHART_POINTS` |
 | Which zone a reading exactly on a boundary lands in, and why a gap is not zone one | `packages/domain/src/analysis/zones.ts` §"Rule 1", §"Rule 2" |

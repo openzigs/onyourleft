@@ -36,7 +36,8 @@ import {
 import { webCryptoDigest } from './browser';
 import type { AccountStore, DownloadableFile, TransferPort, TransferStore } from './store-port';
 import { syntheticGpx } from './testing';
-import { TransferView } from './TransferView';
+import type { AccountExportReport } from './export-everything';
+import { everythingSentence, TransferView } from './TransferView';
 
 let mounted: Mounted | undefined;
 let harness: StoreHarness | undefined;
@@ -621,6 +622,58 @@ describe('TransferView — what it may say about another platform', () => {
       anchor.getAttribute('href')?.includes('0009-clean-room-posture'),
     );
     expect(adrLink).toBeDefined();
+  });
+});
+
+/**
+ * The sentence a rider reads when the account export finishes — #221.
+ *
+ * A pure function, so it is tested without a DOM: it is the one place the
+ * report's counts become words, and words are what a rider acts on. The
+ * signed-record clause exists because an archive that silently gained a second
+ * file per ride would leave a rider looking at a download folder they cannot
+ * explain.
+ */
+describe('everythingSentence', () => {
+  const clean: AccountExportReport = {
+    outcomes: [],
+    exported: 3,
+    failed: 0,
+    cancelled: 0,
+    signedRecords: 0,
+    continueAfter: undefined,
+  };
+
+  it('says nothing about signed records when there were none', () => {
+    // Most libraries have none — records are written by the recorder, and an
+    // imported ride never had one. A clause that was always there would be a
+    // caveat every rider learns to skip.
+    expect(everythingSentence(clean)).toBe('Saved 3 rides.');
+  });
+
+  it('counts the signed records that went with the rides', () => {
+    expect(everythingSentence({ ...clean, signedRecords: 2 })).toContain('2 signed records');
+  });
+
+  it('says one record in the singular', () => {
+    const sentence = everythingSentence({ ...clean, exported: 1, signedRecords: 1 });
+
+    expect(sentence).toContain('1 signed record');
+    expect(sentence).not.toContain('1 signed records');
+  });
+
+  it('still reports the failures and the cursor beside it', () => {
+    const sentence = everythingSentence({
+      ...clean,
+      failed: 1,
+      cancelled: 2,
+      signedRecords: 1,
+      continueAfter: unixSeconds(1_700_000_000),
+    });
+
+    expect(sentence).toContain('could not be written');
+    expect(sentence).toContain('you stopped it');
+    expect(sentence).toContain('run it again to continue');
   });
 });
 

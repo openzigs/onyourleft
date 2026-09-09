@@ -95,6 +95,17 @@ describe('what the rider is told before they press it', () => {
     expect(ERASE_REMOVES.join(' ')).toContain('per-second');
   });
 
+  it('names the signed records and the laps, the two the export used to leave', () => {
+    // #221's sixth criterion. Both go in `deleteAthlete`'s cascade, and until
+    // that issue neither came out in the export — so the rider who read this
+    // list, exported everything and then erased lost both without being told.
+    // The list is the last thing read before an irreversible action, so a line
+    // missing from it is a rider consenting to something they were not shown.
+    const text = ERASE_REMOVES.join(' ');
+    expect(text).toContain('signed record');
+    expect(text).toContain('laps');
+  });
+
   it('says an exported file is out of reach, and that a shared ride is a copy', () => {
     const text = ERASE_CANNOT_REACH.join(' ');
     expect(text).toContain('already exported');
