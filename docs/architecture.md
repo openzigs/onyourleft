@@ -127,6 +127,8 @@ docs/
   architecture.md     this file
   adr/                numbered architecture decision records
   spikes/             numbered spike write-ups — a dated measurement, not a decision
+  validation/         numbered hardware-validation procedures — a script for one
+                      afternoon, with its result tables empty until somebody runs it
 
 scripts/              dependency-free repository checks; run on a bare clone
 
@@ -769,6 +771,27 @@ write-up. They live in `docs/spikes/NNNN-kebab-case.md`, and the `ADR00*` rules 
 |---|---|---|---|
 | [0001](spikes/0001-segment-matching.md) | Which of two segment-matching approaches should #66 build? ([#65](https://github.com/openzigs/onyourleft/issues/65)) | Geometric matching against the athlete's own trace — but two of #64's endpoint parameters have to change first, and the road-graph approach is deferred rather than rejected | `packages/matching`, measured 2026-09-07. ⚠️ **That package is gone**: #66 acted on the recommendation, hardened the algorithm into `packages/domain/src/segment/` and deleted the prototype. The write-up carries a dated note saying which of its numbers no longer describe the shipped code |
 | [0002](spikes/0002-background-recording.md) | Which of #15's six acceptance criteria can be verified from this environment at all? ([#15](https://github.com/openzigs/onyourleft/issues/15)) | Two of six. Criteria 5 and 6 were checked and the checks committed; 2, 3 and 4 need a phone, a real trainer and — for 4 — a Mac and a paid Apple Developer membership, and 1 is true today but was not asserted | Read against the repository on 2026-09-09. Records the hole it found in `SCOPE001`: the rule never scanned `package.json`, so an ANT+ **dependency** — a word #15's fifth criterion names — passed a rule described as what stops the scope quietly returning |
+
+## Hardware validation procedures
+
+A third kind of document, and it is neither of the first two. An ADR decides; a spike measures; a
+**validation procedure** is a script somebody follows with hardware in front of them, and its
+result tables are **empty until they do**. It lives in `docs/validation/NNNN-kebab-case.md`, the
+`ADR00*` rules do not apply, and it is finished only when a dated result is written into it.
+
+They exist because three issues in this repository need bytes that came off a real device and files
+a real platform accepted, and no amount of test-writing substitutes. What *can* be prepared in
+advance is everything up to the moment somebody gets on a bike — the tool, the files, the order of
+the steps — and that is what these are.
+
+| Procedure | What it discharges | State |
+|---|---|---|
+| [0001](validation/0001-trainer-and-sensors.md) | [#134](https://github.com/openzigs/onyourleft/issues/134) part 2 (frames off a real power meter and a real speed/cadence sensor), [#137](https://github.com/openzigs/onyourleft/issues/137) in full (the FTMS control point against a real trainer), [#138](https://github.com/openzigs/onyourleft/issues/138) in full (encoded files against two real platforms) | **Written 2026-09-09, not run.** Its tooling is built and tested: `apps/web/browser/capture.html` records the traffic, `pnpm --filter @onyourleft/fit run uploads:generate` builds the six upload files |
+
+⚠️ **0001 reorders #137's five checks, and the reordering is the safety design.** *Disconnect
+mid-ERG* runs last, at the lowest target the trainer will hold, with the rider off the bike —
+because the honest answer to what a real trainer does then is that nobody knows, and it is the one
+step that leaves the machine in an unknown state.
 
 ## Decision record index
 

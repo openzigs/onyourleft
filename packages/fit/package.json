@@ -13,7 +13,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit --project tsconfig.json && tsc --noEmit --project tsconfig.platform-free.json",
     "test": "vitest run",
-    "fixtures:generate": "node --import ./tools/ts-extensionless-resolve.mjs tools/fixture-corpus/generate.ts"
+    "fixtures:generate": "node --import ./tools/ts-extensionless-resolve.mjs tools/fixture-corpus/generate.ts",
+    "uploads:generate": "node --import ./tools/ts-extensionless-resolve.mjs tools/uploads/generate.ts"
   },
   "dependencies": {
     "@onyourleft/domain": "workspace:*"

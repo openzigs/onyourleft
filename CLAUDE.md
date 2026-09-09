@@ -31,7 +31,10 @@ apps/                 AGPL-3.0-or-later, without exception
   web/                browser client — the Phase 1 product (#48-#51)
     browser/            the browser gate (#63) — the one place a real browser runs;
                         a harness page driving the map adapter, and its Playwright
-                        spec. See §4a and §4f
+                        spec. See §4a and §4f. Since #111 it also holds
+                        capture.html, which is NOT a gate: it is the tool a
+                        person opens with a trainer in front of them, built by
+                        the same second Vite config so it can never ship
     src/a11y/           the accessibility gate: rules, routes, contrast (#48) — see §4e
     src/analysis/       zones and duration personal bests (#78) — the port, the one
                         place a threshold default is substituted, the bounded
@@ -77,6 +80,9 @@ apps/                 AGPL-3.0-or-later, without exception
     src/support/        browser-capability detection and its notice (#48), and
                         since #85 the one question that decides which BLE
                         transport this build uses (§4h)
+    src/validation/     the recording BluetoothPort (#111) — the wrapper that turns
+                        an afternoon with real hardware into committable evidence,
+                        and the two things it deliberately does not write down
     src/transfer/       file import and export (#51) — the batch importer, the
                         1 Hz sample grid, the export writer, and since #15 the
                         one fixture both clients encode, which is how "the
@@ -159,6 +165,10 @@ packages/             Apache-2.0, without exception
                         prefilter, discrete Fréchet, the effort with its
                         three-state visibility, and where the time went
   fit/                FIT / GPX / TCX codec (#29-#32)
+    tools/uploads/      the six files #138 asks a person to upload (#111) — this
+                        package's own encoder output, built from the synthetic
+                        corpus, and the one of the six that is expected to be
+                        refused
     src/route/          route import (#89) and export (#74) — the #32 decoder
                         composed with the profile, the refusals a rider can act
                         on, and the GPX and TCX course writers
@@ -180,6 +190,9 @@ docs/
   architecture.md     layout, component boundaries, ADR index
   adr/                numbered architecture decision records
   spikes/             numbered spike write-ups — a dated measurement, not a decision
+  validation/         numbered hardware-validation procedures — a script for one
+                      afternoon, with its result tables empty until somebody runs
+                      it. Not an ADR and not a spike; it decides nothing
 
 scripts/              dependency-free repository checks; run on a bare clone
 
@@ -479,6 +492,16 @@ pnpm --filter @onyourleft/web run test
 # only under `packages/fit/fixtures/corpus`, and prints the byte budget it is
 # inside. Run it after changing the generator, never to "fix" a failing test.
 pnpm --filter @onyourleft/fit run fixtures:generate
+
+# Build the six files #138 asks a person to upload to Strava and to a second
+# platform: two synthetic rides — one outdoor, one indoor with no position at
+# all — each as FIT, GPX and TCX. They are DECODED from the #29 corpus and
+# RE-ENCODED by this package, because #138's criterion is about this package's
+# output rather than about a fixture. Written to packages/fit/dist, which is
+# gitignored: regenerate rather than commit. `docs/validation/0001-trainer-and-
+# sensors.md` part C is where the results go, and it says which of the six is
+# expected to be refused and why that is the finding rather than a bug.
+pnpm --filter @onyourleft/fit run uploads:generate
 
 # The dependency-licence gate (#24 part 2). Every dependency's OWN licence,
 # checked against the path its package lands in -- the other half of the
@@ -1841,6 +1864,9 @@ top of an issue **supersedes its body**.
 | What is enforced about Android signing keys, and what is merely written down | [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §1, `scripts/check-repo-rules.sh` §`REL001` |
 | Why ADR 0008's rendering gate was waived, and what that does not cancel | [ADR 0008](docs/adr/0008-mobile-client-architecture.md) §Amendments, 2026-09-08 |
 | Which platform the next client is built on, and why there is no desktop one | [ADR 0018](docs/adr/0018-native-client-platform.md) |
+| What a person does with a real trainer, in what order, and why the dangerous step is last | [`docs/validation/0001-trainer-and-sensors.md`](docs/validation/0001-trainer-and-sensors.md) |
+| What a capture records off real hardware, and the two things it deliberately does not | `apps/web/src/validation/capture.ts`, `apps/web/browser/capture.html` |
+| Why an indoor GPX has trackpoints with no coordinates, and what settles whether that is wrong | `packages/fit/src/xml/gpx.ts` §`writeTrackPoint`, `packages/fit/tools/uploads/uploads.test.ts` |
 | Which of #15's acceptance criteria can be checked without a phone, and what each of the others needs | [`docs/spikes/0002-background-recording.md`](docs/spikes/0002-background-recording.md) |
 | What proves the mobile shell cannot encode a FIT file of its own | `apps/web/src/transfer/cross-client-fixture.ts`, `apps/web/src/transfer/cross-client-fit.test.ts` |
 | Why an ANT+ dependency used to pass the rule that bans ANT+ | `scripts/check-repo-rules.sh` §`SCOPE001`, §6 |
