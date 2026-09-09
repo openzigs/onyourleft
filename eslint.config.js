@@ -258,6 +258,17 @@ export default tseslint.config(
       'apps/mobile/android/app/src/main/assets/public/**',
       'apps/mobile/android/app/src/main/res/xml/config.xml',
       'apps/mobile/android/capacitor-cordova-android-plugins/**',
+      // Gradle's own output, which is the SAME trap one directory over and was
+      // unreachable until the first Gradle build ran on 2026-09-09.
+      // `assembleDebug` copies the web bundle to
+      // `app/build/intermediates/assets/debug/mergeDebugAssets/public/`, and
+      // linting it is 935 errors from six minified files. Note that
+      // `.prettierignore` needs no equivalent: the root `.gitignore` line
+      // `build/` covers it and Prettier 3 reads the root `.gitignore`. ESLint
+      // reads NEITHER gitignore, which is why the two tools need different
+      // lists to reach the same answer -- and why `format:check` stayed green
+      // through the build that turned `lint` red.
+      'apps/mobile/android/**/build/**',
     ],
   },
 
