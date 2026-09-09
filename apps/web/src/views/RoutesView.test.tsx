@@ -44,6 +44,7 @@ import {
   mount,
   queryAll,
   settle,
+  submitForm,
   typeInto,
   type Mounted,
 } from '../testing/mount';
@@ -311,5 +312,30 @@ describe('sending a route to a head unit (#74)', () => {
     buttonSaying(root.container, 'Download GPX')?.click();
     await settle();
     expect(saved).toHaveLength(1);
+  });
+});
+
+describe('pressing Import with no file chosen', () => {
+  it('asks for a file rather than reporting bad GPX', async () => {
+    // ⚠️ The guard this covers is NOT `instanceof File`, and the reason is the
+    // HTML specification: a file input with no selection still appends an
+    // entry holding a `File` with an empty name and no body. So the obvious
+    // check passes, the empty body reaches `routeFromGpx`, and a rider who
+    // pressed the button by mistake is told their file is not valid GPX —
+    // which sends them looking at a file they never chose.
+    //
+    // Found in #202's review of the identical guard on the workouts screen,
+    // reported there and fixed here.
+    const stub = routeStub(ATHLETE);
+    const view = await render(stub);
+    const field = view.container.querySelector<HTMLInputElement>('#route-file');
+    if (field === null) throw new Error('no route-file field on this screen');
+    const form = field.closest('form');
+    if (form === null) throw new Error('that field is not in a form');
+
+    await submitForm(form);
+
+    expect(view.container.textContent ?? '').toContain('Choose a GPX file to import.');
+    expect(stub.rows()).toHaveLength(0);
   });
 });
