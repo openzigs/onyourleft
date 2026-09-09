@@ -37,6 +37,7 @@ export type {
   SegmentEndpointRecord,
   FrozenEffortAttributes,
   MatchCheckpointRecord,
+  RouteElevationRecord,
   RouteRecord,
   SegmentEffortRecord,
   SegmentRecord,

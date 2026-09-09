@@ -52,6 +52,7 @@ import type {
   OriginalFileReference,
   SegmentEndpointRecord,
   SegmentRecord,
+  RouteElevationRecord,
   RouteRecord,
   WorkoutRecord,
 } from './records';
@@ -152,6 +153,20 @@ export interface PersistedRoute {
   longitudes: number[];
   elevations: number[];
   grades: number[];
+  /**
+   * Where the heights came from, when this program asked a named dataset.
+   *
+   * ⚠️ **Optional and never substituted on the way out.** README §"An optional
+   * field is not a migration": a route written before this existed reads back
+   * with it absent, and absent means "nobody recorded a source" rather than
+   * "the default source". #72's whole reason for the field is that two routes
+   * from different DEMs must not be compared, and a default here would make
+   * that undetectable.
+   */
+  elevationDataset?: string;
+  elevationResolution?: number;
+  elevationInterval?: number;
+  elevationMissing?: number;
   visibility: string;
   createdAt: number;
   updatedAt: number;
@@ -882,6 +897,49 @@ export function fromPersistedWorkout(row: PersistedWorkout): WorkoutRecord {
   };
 }
 
+/**
+ * The elevation provenance, or `undefined` when the row carries none.
+ *
+ * ⚠️ **All four fields or none.** A row with a dataset name and no resolution
+ * is a partial write, and reading it as "GLO-30 at some unknown resolution"
+ * would be this decoder inventing the half that is missing — the same failure
+ * `fromPersistedRoute` refuses for the four parallel arrays one function down.
+ */
+function elevationRecordFrom(row: PersistedRoute): RouteElevationRecord | undefined {
+  const present = [
+    row.elevationDataset,
+    row.elevationResolution,
+    row.elevationInterval,
+    row.elevationMissing,
+  ].filter((field) => field !== undefined);
+  if (present.length === 0) {
+    return undefined;
+  }
+  if (present.length < 4) {
+    throw new StoreDecodeError(
+      `route.elevation: a partial elevation source — ${String(present.length)} of 4 fields present`,
+    );
+  }
+  return {
+    dataset: decodedString('route.elevationDataset', row.elevationDataset),
+    resolution: decoded(
+      'route.elevationResolution',
+      decodedNumber('route.elevationResolution', row.elevationResolution),
+      metres,
+    ),
+    interval: decoded(
+      'route.elevationInterval',
+      decodedNumber('route.elevationInterval', row.elevationInterval),
+      metres,
+    ),
+    missing: decoded(
+      'route.elevationMissing',
+      decodedNumber('route.elevationMissing', row.elevationMissing),
+      metres,
+    ),
+  };
+}
+
 export function toPersistedRoute(record: RouteRecord): PersistedRoute {
   const { profile } = record;
   return {
@@ -897,6 +955,14 @@ export function toPersistedRoute(record: RouteRecord): PersistedRoute {
     longitudes: profile.positions.map((point) => point.longitude),
     elevations: [...profile.elevations],
     grades: [...profile.grades],
+    ...(record.elevation === undefined
+      ? {}
+      : {
+          elevationDataset: record.elevation.dataset,
+          elevationResolution: record.elevation.resolution,
+          elevationInterval: record.elevation.interval,
+          elevationMissing: record.elevation.missing,
+        }),
     visibility: record.visibility,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
@@ -960,6 +1026,7 @@ export function fromPersistedRoute(row: PersistedRoute): RouteRecord {
     createdBy: athleteId(decodedString('route.createdBy', row.createdBy)),
     name: decodedString('route.name', row.name),
     profile,
+    elevation: elevationRecordFrom(row),
     // ⚠️ The one place in this package where an ABSENT field is substituted
     // rather than read faithfully, and the exception is narrow on purpose.
     //

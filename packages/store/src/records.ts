@@ -620,6 +620,23 @@ export interface WorkoutRecord {
   readonly updatedAt: UnixSeconds;
 }
 
+/** Where a route's heights came from. @see RouteRecord.elevation */
+export interface RouteElevationRecord {
+  /** As the operator names it, e.g. `'Copernicus DEM GLO-30'`. */
+  readonly dataset: string;
+  /** The dataset's own grid spacing — not the interval it was sampled at. */
+  readonly resolution: Metres;
+  /** The uniform spacing the profile was built from. #72 requires it stated. */
+  readonly interval: Metres;
+  /**
+   * How much of the route the dataset had no height for.
+   *
+   * Zero means the profile is a measurement all the way along; anything else
+   * means the ascent was computed across interpolated ground and is a floor.
+   */
+  readonly missing: Metres;
+}
+
 export interface RouteRecord {
   readonly id: RouteId;
   /** The athlete who saved it. Every read of this record filters on it. */
@@ -632,6 +649,29 @@ export interface RouteRecord {
    */
   readonly name: string;
   readonly profile: RouteProfile;
+  /**
+   * Which elevation dataset the profile's heights came from, when it is known.
+   *
+   * ⚠️ **Optional, so it is not a migration** — this store's README §"An
+   * optional field is not a migration" is the rule, and a route saved before
+   * this field existed reads back with it absent. No schema version moved.
+   *
+   * ⚠️ **And an absent value is NOT substituted with a default.** #72's first
+   * criterion is that *"two routes computed from different DEMs must never be
+   * compared as if they were comparable, and without the field nobody can
+   * tell"* — so "we do not know what this came from" has to stay tellable from
+   * "it came from GLO-30". Naming a plausible dataset here would destroy
+   * exactly the distinction the field exists to make. `visibility` above is
+   * substituted and this is not, and the difference is that a route predating
+   * sharing has one honest reading and a route predating this field does not.
+   *
+   * It is absent for a route imported from a GPX file, whose heights came from
+   * whatever wrote the file, and present for one planned in the builder, where
+   * this program asked a named dataset. ADR 0010 D-5 also makes it a licence
+   * matter: the Copernicus notice travels with adapted data, so the name has to
+   * survive as far as the export.
+   */
+  readonly elevation?: RouteElevationRecord | undefined;
   /**
    * ADR 0004 decision A's default applies here too, and it matters more.
    *
