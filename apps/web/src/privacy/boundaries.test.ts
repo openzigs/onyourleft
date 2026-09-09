@@ -25,6 +25,14 @@
  * convention that is checked is worth more than an analysis that is not — but
  * it is a convention, not a proof, and a reviewer adding a sharing path is the
  * remaining control.
+ *
+ * ⚠️ **And it has already been wrong once, in the pull request that introduced
+ * it.** The first walk matched `export-*` and not `export.ts`, so
+ * `routes/export.ts` — #74's head-unit export, in the tree since before any of
+ * this — was outside the registry while #218's body said the registry failed
+ * closed. The lesson is not "add the case"; it is that a *pattern* over file
+ * names is the part of this that can be silently narrow, so a new boundary
+ * whose name does not match is still a reviewer's job.
  */
 
 import { readdirSync, statSync } from 'node:fs';
@@ -91,6 +99,15 @@ const BOUNDARIES: readonly Boundary[] = [
     direction: 'departing',
   },
   {
+    module: 'routes/export.ts',
+    what: "a saved route written to a file for the rider's own head unit",
+    // Retained: it is the athlete's route going to the athlete's own Garmin.
+    // `routes/share.ts` is the departing sibling and does trim; these two
+    // being adjacent and opposite is exactly why the direction is declared
+    // rather than inferred from the folder.
+    direction: 'retained',
+  },
+  {
     module: 'transfer/export-everything.ts',
     what: 'every ride this athlete has, plus a manifest of everything else',
     // ⚠️ This entry was written because the registry demanded it. The file was
@@ -126,7 +143,18 @@ function boundaryModulesOnDisk(): readonly string[] {
       if (entry.endsWith('.test.ts') || entry.endsWith('.test.tsx')) {
         continue;
       }
-      if (entry === 'share.ts' || entry === 'privacy.ts' || entry.startsWith('export-')) {
+      // ⚠️ `export.ts` as well as `export-*`. The first version of this walk
+      // matched only the hyphenated form and silently missed
+      // `routes/export.ts` — #74's head-unit export, a real boundary module
+      // that had been in the tree the whole time. A registry that claims to
+      // fail closed and does not is worse than no registry, because #218's
+      // pull request said it did.
+      if (
+        entry === 'share.ts' ||
+        entry === 'privacy.ts' ||
+        entry === 'export.ts' ||
+        entry.startsWith('export-')
+      ) {
         found.push(`${prefix}${entry}`);
       }
     }

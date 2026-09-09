@@ -233,8 +233,19 @@ describe('exporting everything', () => {
     expect(files).toHaveLength(2);
     const failed = report.outcomes.find((each) => each.kind === 'failed');
     expect(failed?.reason).toBeTruthy();
-    // And the manifest lists only what was actually produced.
-    expect(manifestOf(files)['activities']).toHaveLength(1);
+
+    // The manifest lists BOTH rides, and says which one is not in the archive.
+    // An archive whose index simply omitted the failure would leave nothing
+    // saying that ride ever existed — and the rider who then erases the device
+    // has lost it without ever being told which one.
+    const listed = manifestOf(files)['activities'] as {
+      written: boolean;
+      reason?: string;
+    }[];
+    expect(listed).toHaveLength(2);
+    expect(listed.filter((each) => each.written)).toHaveLength(1);
+    const missing = listed.find((each) => !each.written);
+    expect(missing?.reason).toBeTruthy();
   });
 
   it('stops between rides when cancelled and keeps what it handed over', async () => {
@@ -260,6 +271,36 @@ describe('exporting everything', () => {
     // a file the caller already has.
     expect(files).toHaveLength(2);
     expect(manifestOf(files)['activities']).toHaveLength(1);
+  });
+
+  it('does not step the cursor past a ride a Stop skipped', async () => {
+    // The bug this replaces lost rides permanently: `continueAfter` was the
+    // last ride the run *looked at*, so resuming after a Stop began past
+    // everything the Stop had skipped — while the screen invited exactly that
+    // by offering Stop and then "run it again to continue".
+    const { written } = await seedLibrary(3);
+    const controller = new AbortController();
+    const files: DownloadableFile[] = [];
+    const report = await harness.read(async (store) =>
+      exportEverything({
+        store,
+        athleteId: ATHLETE_A,
+        format: 'gpx',
+        signal: controller.signal,
+        onFile: (file) => {
+          files.push(file);
+          controller.abort();
+        },
+      }),
+    );
+
+    expect(report.exported).toBe(1);
+    expect(report.cancelled).toBe(2);
+    // The first ride, not the third.
+    expect(report.continueAfter).toBe(written[0]?.ride.startedAt);
+
+    const rest = await runExport({ after: report.continueAfter });
+    expect(rest.report.exported).toBe(2);
   });
 
   it('reports where to continue when the library is longer than the limit', async () => {

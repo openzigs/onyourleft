@@ -41,9 +41,12 @@ import { TransferView } from './TransferView';
 let mounted: Mounted | undefined;
 let harness: StoreHarness | undefined;
 let saved: DownloadableFile[] = [];
+/** What an erase forgot outside the store — the `localStorage` route draft. */
+let forgotten: string[] = [];
 
 beforeEach(() => {
   saved = [];
+  forgotten = [];
 });
 
 afterEach(async () => {
@@ -71,6 +74,8 @@ async function openPort(): Promise<TransferPort> {
     timeZone: 'Europe/London',
     digest: webCryptoDigest,
     save: (file) => saved.push(file),
+    drafts: { forget: () => forgotten.push('draft') },
+    athleteRow: { id: ATHLETE_A, displayName: 'You', createdAt: unixSeconds(1_760_000_000) },
   };
 }
 

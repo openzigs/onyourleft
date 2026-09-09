@@ -27,7 +27,13 @@ import type { GhostTrack } from '@onyourleft/domain';
 import type { GameRenderer } from './game/port';
 import { probeBrowser, type CapabilityProbe } from './support/bluetooth-support';
 import { saveWithAnchor, webCryptoDigest } from './transfer/browser';
-import { ensureLocalAthlete, LOCAL_ATHLETE, renderAfterAthlete } from './local-athlete';
+import { browserDraftStorage } from './routing/draft-storage';
+import {
+  ensureLocalAthlete,
+  LOCAL_ATHLETE,
+  localAthleteRecord,
+  renderAfterAthlete,
+} from './local-athlete';
 import type { AnalysisPort } from './analysis/store-port';
 import type { EffortPort } from './efforts/store-port';
 import type { SegmentPort } from './segments/store-port';
@@ -441,6 +447,8 @@ function buildTransferPort(): TransferPort | undefined {
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     digest: webCryptoDigest,
     save: saveWithAnchor,
+    drafts: browserDraftStorage(typeof localStorage === 'undefined' ? undefined : localStorage),
+    athleteRow: localAthleteRecord(unixSeconds(Math.floor(Date.now() / 1000))),
   };
 }
 

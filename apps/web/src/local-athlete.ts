@@ -83,11 +83,29 @@ export async function ensureLocalAthlete(
   store: LocalAthleteStore,
   now: UnixSeconds,
 ): Promise<AthleteRecord> {
-  return store.ensureAthlete({
+  return store.ensureAthlete(localAthleteRecord(now));
+}
+
+/**
+ * The row this device's athlete has, as a value.
+ *
+ * Exported because {@link ensureLocalAthlete} is no longer its only caller:
+ * erasing the device removes the row every write path requires, and the erase
+ * has to put an equivalent one back before the tab does anything else — see
+ * `transfer/erase-device.ts`. Two places building that row by hand is how they
+ * come to disagree, so there is one.
+ *
+ * `createdAt` is `now` for a **new** row. After an erase that is correct rather
+ * than a lie: nothing of the old athlete survives, and ADR 0014 D-7 already
+ * frames what follows an identity ending as a second era rather than a
+ * continuation.
+ */
+export function localAthleteRecord(now: UnixSeconds): AthleteRecord {
+  return {
     id: LOCAL_ATHLETE,
     displayName: LOCAL_ATHLETE_DISPLAY_NAME,
     createdAt: now,
-  });
+  };
 }
 
 /**

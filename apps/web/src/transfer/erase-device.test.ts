@@ -21,6 +21,7 @@ import {
   streamSetFor,
   workoutFor,
 } from '@onyourleft/store/testing';
+import { unixSeconds } from '@onyourleft/domain';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -147,6 +148,83 @@ describe('erasing, against the real store', () => {
 
     const theirs = await harness.read(async (store) => store.listActivitySummaries(ATHLETE_B));
     expect(theirs).toHaveLength(2);
+  });
+
+  it('puts the athlete row back, so the next write does not fail', async () => {
+    // ⚠️ The regression this exists to stop is #184, exactly. `deleteAthlete`
+    // removes the row every write path checks, and `ensureLocalAthlete` runs
+    // once at start-up — so without the recreate, the tab survives the erase
+    // and the next ride fails its first checkpoint referentially. The recorder
+    // catches that and carries on in memory, so the ride runs normally right up
+    // to the moment the tab closes and takes the whole thing with it.
+    await seedAthletes(harness);
+    await seed(ATHLETE_A, 1);
+
+    await harness.write(async (store) =>
+      eraseDevice(store, ATHLETE_A, {
+        athlete: { id: ATHLETE_A, displayName: 'You', createdAt: unixSeconds(1_800_000_000) },
+      }),
+    );
+
+    // The write that would have thrown.
+    const after = rideFor(ATHLETE_A, { hasPosition: true });
+    await expect(harness.write(async (store) => store.putActivity(after))).resolves.toBeDefined();
+  });
+
+  it('leaves no row at all when no replacement was given', async () => {
+    // The other half, so the recreate is a decision the caller makes rather
+    // than something this function does unconditionally: a caller that wants
+    // the device genuinely empty — a test, or an uninstall path — gets that.
+    await seedAthletes(harness);
+    await seed(ATHLETE_A, 1);
+
+    await harness.write(async (store) => eraseDevice(store, ATHLETE_A));
+
+    await expect(
+      harness.read(async (store) => store.getAthlete(ATHLETE_A)),
+    ).resolves.toBeUndefined();
+  });
+
+  it('forgets the half-drawn route, which the store cannot see', async () => {
+    // A route draft lives in `localStorage`, and its waypoints are raw
+    // coordinates — usually starting at the rider's front door. `deleteAthlete`
+    // cannot reach it, so an erase that only called the store would leave it
+    // behind while saying this device holds nothing about you.
+    await seedAthletes(harness);
+    await seed(ATHLETE_A, 1);
+    const forgotten: string[] = [];
+
+    await harness.write(async (store) =>
+      eraseDevice(store, ATHLETE_A, {
+        drafts: {
+          forget: () => {
+            forgotten.push('draft');
+          },
+        },
+      }),
+    );
+
+    expect(forgotten).toStrictEqual(['draft']);
+  });
+
+  it('does not forget the draft when the cascade threw', async () => {
+    // Ordered so a failed delete does not lose a half-drawn route for nothing.
+    const forgotten: string[] = [];
+    const refusing = {
+      deleteAthlete: () => Promise.reject(new Error('refused')),
+      ensureAthlete: () => Promise.reject(new Error('unreachable')),
+    };
+
+    await expect(
+      eraseDevice(refusing, ATHLETE_A, {
+        drafts: {
+          forget: () => {
+            forgotten.push('draft');
+          },
+        },
+      }),
+    ).rejects.toThrow('refused');
+    expect(forgotten).toStrictEqual([]);
   });
 
   it('is idempotent — a second press is not an error', async () => {

@@ -63,6 +63,7 @@ async function openBusyScreen(): Promise<void> {
   const store: TransferStore & AccountStore = await open.write((handle) => Promise.resolve(handle));
   let next = 0;
   const saved: DownloadableFile[] = [];
+  const forgotten: string[] = [];
   const port: TransferPort = {
     store,
     athleteId: ATHLETE_A,
@@ -74,6 +75,8 @@ async function openBusyScreen(): Promise<void> {
     timeZone: 'Europe/London',
     digest: webCryptoDigest,
     save: (file) => saved.push(file),
+    drafts: { forget: () => forgotten.push('draft') },
+    athleteRow: { id: ATHLETE_A, displayName: 'You', createdAt: unixSeconds(1_760_000_000) },
   };
 
   globalThis.location.hash = '#/transfer';

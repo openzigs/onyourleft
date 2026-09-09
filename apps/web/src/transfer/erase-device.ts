@@ -55,7 +55,7 @@
  * DOM, the same shape `analysis/thresholds.ts` uses for its refusal.
  */
 
-import type { AthleteId } from '@onyourleft/store';
+import type { AthleteId, AthleteRecord } from '@onyourleft/store';
 
 /** What a rider types to confirm. Lower-cased and trimmed before comparison. */
 export const ERASE_CONFIRMATION = 'erase everything';
@@ -76,6 +76,13 @@ export const ERASE_REMOVES: readonly string[] = [
   'your segments and every effort on them',
   'your thresholds',
   "this device's signing key",
+  // ⚠️ Not a store row. `routing/draft-storage.ts` keeps a half-drawn route in
+  // `localStorage`, and its waypoints are raw coordinates — usually starting
+  // at the rider's front door. `deleteAthlete` cannot see it, so an erase that
+  // only called the store would leave it behind while saying this device holds
+  // nothing. It is listed here because it goes, and {@link eraseDevice} is
+  // what makes that true.
+  'a route you were part-way through drawing',
 ];
 
 /**
@@ -93,7 +100,7 @@ export const ERASE_CANNOT_REACH: readonly string[] = [
 ];
 
 /** The reason an erase is refused, or `undefined` when it is not. */
-export type EraseRefusal = 'not-confirmed' | 'nothing-to-erase';
+export type EraseRefusal = 'not-confirmed' | 'nothing-to-erase' | 'failed';
 
 /** Whether an erase may go ahead, and why not when it may not. */
 export interface EraseDecision {
@@ -123,9 +130,12 @@ export function eraseDecision(typed: string, holds: boolean): EraseDecision {
 export const ERASE_REFUSAL_TEXT: Readonly<Record<EraseRefusal, string>> = {
   'not-confirmed': `Type ${ERASE_CONFIRMATION} exactly, to confirm.`,
   'nothing-to-erase': 'There is nothing on this device to erase.',
+  failed:
+    'Nothing was erased — the device refused. Your data is still here, which is the safe way for ' +
+    'this to fail.',
 };
 
-/** The one store call an erase makes. Narrowed so a test needs no ActivityStore. */
+/** The store calls an erase makes. Narrowed so a test needs no ActivityStore. */
 export interface EraseStore {
   deleteAthlete(id: AthleteId): Promise<{
     readonly activities: number;
@@ -133,6 +143,27 @@ export interface EraseStore {
     readonly workouts: number;
     readonly segments: number;
   }>;
+  /**
+   * Puts the athlete row back.
+   *
+   * ⚠️ **Not optional, and not tidiness.** `deleteAthlete` removes the row
+   * every write path checks — `putActivity`, `putRecordingSession`,
+   * `putPrivacyZone` and `putDeviceKey` all call `#requireAthlete` — and
+   * `ensureLocalAthlete` runs **once, at start-up**. Without this the tab
+   * survives the erase and every subsequent write throws
+   * `StoreReferentialError`, which is #184 exactly: the recorder catches its
+   * own write failure and carries on in memory, so a ride runs normally right
+   * up to the moment the tab closes and takes the whole thing with it.
+   *
+   * The new row carries no history, so this is not a leak. It is the
+   * difference between "erased" and "broken".
+   */
+  ensureAthlete(record: AthleteRecord): Promise<AthleteRecord>;
+}
+
+/** What an erase has to forget outside the store. @see routing/draft-storage */
+export interface EraseSideStores {
+  forget(): void;
 }
 
 /** What an erase removed, for the sentence afterwards. */
@@ -144,14 +175,31 @@ export interface EraseOutcome {
 }
 
 /**
- * Erase this athlete.
+ * Erase this athlete, forget what lives outside the store, and put the row back.
  *
- * Thin on purpose: the cascade, its transaction and its exhaustiveness are
- * `packages/store`'s, and duplicating any of that here would be a second place
- * for the table list to be wrong. What this adds is the decision and the words.
+ * Thin on purpose where the store is concerned: the cascade, its transaction
+ * and its exhaustiveness are `packages/store`'s, and duplicating any of that
+ * here would be a second place for the table list to be wrong. What this adds
+ * is the decision, the words, the two things `deleteAthlete` cannot reach, and
+ * the row that has to exist afterwards.
+ *
+ * The order matters. The drafts are forgotten **after** the cascade, so a
+ * failed delete does not lose a half-drawn route for nothing; the row is
+ * recreated **last**, so it cannot be deleted by the cascade it precedes.
  */
-export async function eraseDevice(store: EraseStore, athleteId: AthleteId): Promise<EraseOutcome> {
+export async function eraseDevice(
+  store: EraseStore,
+  athleteId: AthleteId,
+  options: {
+    readonly drafts?: EraseSideStores | undefined;
+    readonly athlete?: AthleteRecord | undefined;
+  } = {},
+): Promise<EraseOutcome> {
   const counts = await store.deleteAthlete(athleteId);
+  options.drafts?.forget();
+  if (options.athlete !== undefined) {
+    await store.ensureAthlete(options.athlete);
+  }
   return {
     activities: counts.activities,
     routes: counts.routes,

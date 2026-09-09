@@ -52,9 +52,18 @@
  *
  * A library of five hundred four-hour rides is gigabytes. {@link exportEverything}
  * hands each file to `onFile` as it is produced and keeps only the outcome, so
- * peak memory is one ride rather than the library. That is a deliberate
- * asymmetry with {@link ExportedActivity}, which does return its bytes: one
- * ride fits in memory and a caller wants it there.
+ * *this function* holds one ride at a time rather than the library. That is a
+ * deliberate asymmetry with {@link ExportedActivity}, which does return its
+ * bytes: one ride fits in memory and a caller wants it there.
+ *
+ * ⚠️ **That is a claim about this function and not about the tab**, and the
+ * first version of this comment overreached by saying "peak memory is one
+ * ride". `main.tsx`'s `saveWithAnchor` creates an object URL per file and
+ * revokes it on a timer, so a bulk run holds every blob alive until those
+ * timers fire — and a browser's own guard on many downloads in quick
+ * succession is a separate problem for the same code. Both are the *sink*'s to
+ * fix, and neither is fixed here; what this function guarantees is that it does
+ * not itself accumulate.
  */
 
 import type { UnixSeconds } from '@onyourleft/domain';
@@ -63,6 +72,20 @@ import type { ActivityId, AthleteId } from '@onyourleft/store';
 import { ActivityExportError, exportActivity, fileStemOf } from './export-activity';
 import type { ActivityFileFormat } from './file-format';
 import type { AccountStore, DownloadableFile, TransferStore } from './store-port';
+
+/**
+ * One ride's line in the manifest.
+ *
+ * `written: false` is the important case: it names a ride the archive does
+ * **not** contain, so the index is a record of the athlete's library rather
+ * than only of this run's successes.
+ */
+export interface ManifestEntry {
+  readonly activityId: ActivityId;
+  readonly fileName: string;
+  readonly written: boolean;
+  readonly reason?: string;
+}
 
 /** The format version, and the identity, in one key — ADR 0017 D-3's shape. */
 export const ACCOUNT_EXPORT_VERSION = 1;
@@ -183,7 +206,7 @@ export function accountManifest(input: {
   readonly segments: readonly unknown[];
   readonly routes: readonly unknown[];
   readonly workouts: readonly unknown[];
-  readonly activities: readonly { readonly activityId: ActivityId; readonly fileName: string }[];
+  readonly activities: readonly ManifestEntry[];
   readonly exportedAt: number;
 }): DownloadableFile {
   const manifest = {
@@ -251,10 +274,23 @@ export async function exportEverything(
   const more = summaries.length > limit;
 
   const outcomes: AccountExportOutcome[] = [];
-  const listed: { readonly activityId: ActivityId; readonly fileName: string }[] = [];
+  const listed: ManifestEntry[] = [];
+
+  // ⚠️ **Stems are made unique here, and are not unique on their own.**
+  // `fileStemOf` is a ride's *name*, and a rider with two rides called
+  // "Morning ride" — which is what an unnamed import is called — gets two files
+  // with one name. In a single-ride export the browser suffixes the second and
+  // nobody minds; in an archive it makes the manifest's index ambiguous, which
+  // is the one thing the index exists not to be.
+  const used = new Map<string, number>();
+  const uniqueName = (stem: string): string => {
+    const seen = used.get(stem) ?? 0;
+    used.set(stem, seen + 1);
+    return seen === 0 ? `${stem}.${format}` : `${stem} (${String(seen + 1)}).${format}`;
+  };
 
   for (const summary of wanted) {
-    const fileName = `${fileStemOf(summary)}.${format}`;
+    const fileName = uniqueName(fileStemOf(summary));
     // Checked at the top, so a cancelled ride is one no file was handed over
     // for, rather than one handed over and then reported as cancelled.
     if (options.signal?.aborted === true) {
@@ -278,11 +314,14 @@ export async function exportEverything(
         activityId: summary.id,
         format,
       });
-      await onFile(exported.file);
-      listed.push({ activityId: summary.id, fileName: exported.file.fileName });
+      // The de-duplicated name, not `exported.file.fileName` — that is the
+      // single-ride name and is the one that collides.
+      const file = { ...exported.file, fileName };
+      await onFile(file);
+      listed.push({ activityId: summary.id, fileName, written: true });
       outcome = {
         activityId: summary.id,
-        fileName: exported.file.fileName,
+        fileName,
         kind: 'exported',
         lost: exported.lost,
         reason: undefined,
@@ -294,6 +333,12 @@ export async function exportEverything(
       if (!(error instanceof ActivityExportError)) {
         throw error;
       }
+      // ⚠️ Listed even though no file was written. An archive whose manifest
+      // simply omits a ride leaves nothing saying it ever existed — the rider
+      // who then erases the device has lost it without ever being told which
+      // one. `written: false` says "this ride is yours and this archive does
+      // not contain it", which is the honest record.
+      listed.push({ activityId: summary.id, fileName, written: false, reason: error.message });
       outcome = {
         activityId: summary.id,
         fileName,
@@ -329,12 +374,25 @@ export async function exportEverything(
     }),
   );
 
-  const last = wanted.at(-1);
+  const cancelled = outcomes.filter((each) => each.kind === 'cancelled').length;
+  // ⚠️ **The last ride this run actually finished with, not the last one it
+  // looked at.** Taking `wanted.at(-1)` pointed the cursor past every ride a
+  // Stop had skipped, so resuming from it lost them permanently — and the
+  // screen invites exactly that by offering Stop and then "run it again to
+  // continue". A cancelled ride is one that has not been exported, so the
+  // cursor must not have passed it.
+  const lastFinished = wanted.find(
+    (ride) => ride.id === outcomes.filter((each) => each.kind !== 'cancelled').at(-1)?.activityId,
+  );
   return {
     outcomes,
     exported: outcomes.filter((each) => each.kind === 'exported').length,
     failed: outcomes.filter((each) => each.kind === 'failed').length,
-    cancelled: outcomes.filter((each) => each.kind === 'cancelled').length,
-    continueAfter: more && last !== undefined ? last.startedAt : undefined,
+    cancelled,
+    // More to do when the library ran past the limit **or** when this run was
+    // stopped part-way. Both mean "there is more of your history than this
+    // archive holds", which is the only thing the sentence claims.
+    continueAfter:
+      (more || cancelled > 0) && lastFinished !== undefined ? lastFinished.startedAt : undefined,
   };
 }

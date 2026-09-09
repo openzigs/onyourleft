@@ -159,7 +159,13 @@ export function TransferView({ port }: TransferViewProps): JSX.Element {
           This needs the same local store the panels above do, so it is unavailable here too.
         </p>
       ) : (
-        <ErasePanel port={port} storeRevision={storeRevision} />
+        <ErasePanel
+          port={port}
+          storeRevision={storeRevision}
+          onStoreChanged={() => {
+            setStoreRevision((previous) => previous + 1);
+          }}
+        />
       )}
 
       <h2>Why this is a file and not a connection</h2>
@@ -528,6 +534,7 @@ function TakeEverythingPanel({
   const [progress, setProgress] = useState<AccountExportProgress | undefined>(undefined);
   const [report, setReport] = useState<AccountExportReport | undefined>(undefined);
   const [running, setRunning] = useState(false);
+  const [failed, setFailed] = useState(false);
   const cancel = useRef<AbortController | undefined>(undefined);
 
   // Reset when something else on the page writes a ride, so a report cannot
@@ -543,6 +550,7 @@ function TakeEverythingPanel({
     cancel.current = controller;
     setRunning(true);
     setReport(undefined);
+    setFailed(false);
     try {
       const finished = await exportEverything({
         store: port.store,
@@ -555,6 +563,12 @@ function TakeEverythingPanel({
         onProgress: setProgress,
       });
       setReport(finished);
+    } catch {
+      // `exportEverything` swallows anything one ride did; reaching here means
+      // the run itself failed, and saying nothing would leave a rider watching
+      // a stopped progress line with no idea whether they have their data.
+      setReport(undefined);
+      setFailed(true);
     } finally {
       setRunning(false);
       cancel.current = undefined;
@@ -612,6 +626,12 @@ function TakeEverythingPanel({
           {`Exported ${String(progress.completed)} of ${String(progress.total)}.`}
         </StatusMessage>
       ) : null}
+      {failed ? (
+        <StatusMessage tone="warning" live>
+          The export stopped before it finished. Anything already saved is on your machine; run it
+          again to take the rest.
+        </StatusMessage>
+      ) : null}
       {report === undefined ? null : (
         <StatusMessage tone={report.failed === 0 ? 'success' : 'warning'} live>
           {everythingSentence(report)}
@@ -652,9 +672,11 @@ export function everythingSentence(report: AccountExportReport): string {
 function ErasePanel({
   port,
   storeRevision,
+  onStoreChanged,
 }: {
   readonly port: TransferPort;
   readonly storeRevision: number;
+  readonly onStoreChanged: () => void;
 }): JSX.Element {
   const [typed, setTyped] = useState('');
   const [holds, setHolds] = useState(false);
@@ -664,9 +686,25 @@ function ErasePanel({
   useEffect(() => {
     let live = true;
     void (async () => {
-      const rides = await port.store.listActivitySummaries(port.athleteId, { limit: 1 });
+      // ⚠️ Not rides alone. A device with routes, workouts, privacy zones and
+      // a signing key but no rides yet would otherwise be refused with "there
+      // is nothing on this device to erase" — which is false, and false in the
+      // direction that leaves a home address on the disk.
+      const [rides, routes, workouts, zones, key] = await Promise.all([
+        port.store.listActivitySummaries(port.athleteId, { limit: 1 }),
+        port.store.listRoutes(port.athleteId, 1),
+        port.store.listWorkouts(port.athleteId, 1),
+        port.store.listPrivacyZones(port.athleteId),
+        port.store.getDeviceKey(port.athleteId),
+      ]);
       if (live) {
-        setHolds(rides.length > 0);
+        setHolds(
+          rides.length > 0 ||
+            routes.length > 0 ||
+            workouts.length > 0 ||
+            zones.length > 0 ||
+            key !== undefined,
+        );
       }
     })();
     return () => {
@@ -681,10 +719,25 @@ function ErasePanel({
       return;
     }
     setRefused(undefined);
-    const outcome = await eraseDevice(port.store, port.athleteId);
-    setDone(eraseSentence(outcome));
-    setTyped('');
-    setHolds(false);
+    try {
+      const outcome = await eraseDevice(port.store, port.athleteId, {
+        drafts: port.drafts,
+        athlete: port.athleteRow,
+      });
+      setDone(eraseSentence(outcome));
+      setTyped('');
+      setHolds(false);
+      // The panels above list what the store holds. Without this they go on
+      // offering rides that are no longer there, and a rider who presses Export
+      // on one is told their own ride does not exist.
+      onStoreChanged();
+    } catch {
+      // An erase that failed must not read as one that worked. It is the one
+      // action here whose silent failure a rider would discover by finding
+      // their history still on a device they thought they had wiped.
+      setDone(undefined);
+      setRefused('failed');
+    }
   }
 
   return (
