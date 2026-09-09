@@ -33,11 +33,10 @@ import {
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
-  metres,
   type GeographicPosition,
 } from '@onyourleft/domain';
 
-import type { DraftLeg, LegMode, RouteDraft } from './draft';
+import { legFor, type LegMode, type RouteDraft } from './draft';
 
 /** The key the draft is kept under. Namespaced, because the origin is shared. */
 export const DRAFT_STORAGE_KEY = 'oyl.route-draft.v1';
@@ -99,9 +98,17 @@ export function deserialiseDraft(text: string | null): RouteDraft | undefined {
   if (typeof nextId !== 'number' || !Number.isInteger(nextId) || nextId < 1) return undefined;
   return {
     waypoints,
-    // Every leg comes back unrouted, which is what makes dropping the geometry
-    // safe: the screen resolves them on mount exactly as it would a fresh edit.
-    legs: modes.map((mode) => restoredLeg(mode)),
+    // ⚠️ **A snapped leg comes back unrouted and a freehand one comes back
+    // whole**, and the difference is the bug review found: the screen's restore
+    // resolves only snapped legs, because a freehand leg never had an engine to
+    // ask. Marking both `pending` left a restored freehand leg reading "Being
+    // routed" for ever, excluded from the total distance, and — worst —
+    // truncating `plannedShape`, which stops at the first leg with no geometry,
+    // so the whole elevation profile ended at the reloaded freehand leg.
+    //
+    // `legFor` already draws that distinction, and using it here is what keeps
+    // the two paths from having separate opinions about what a freehand leg is.
+    legs: modes.map((mode, index) => legFor(mode, waypoints[index]!, waypoints[index + 1]!)),
     nextId,
   };
 }
@@ -136,17 +143,6 @@ export function browserDraftStorage(store: Storage | undefined): DraftStorage {
         // As above.
       }
     },
-  };
-}
-
-function restoredLeg(mode: LegMode): DraftLeg {
-  return {
-    mode,
-    state: 'pending',
-    shape: [],
-    distance: metres(0),
-    surface: 'unknown',
-    failure: undefined,
   };
 }
 

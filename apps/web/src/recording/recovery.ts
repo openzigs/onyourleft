@@ -21,13 +21,17 @@
  *
  * - **`interrupted`** (`recording` or `paused`) — the tab died mid-ride. The
  *   rider may **continue** it, save what there is, or throw it away.
- * - **`unsaved`** (`stopped`) — the ride was *finished*, and since #213 that
- *   means the checkpoint should have been discarded once the activity was
- *   durable. A `stopped` row still on disk is therefore a ride whose **save
- *   failed**, which is precisely the state `finish.ts` deliberately leaves
- *   behind rather than losing the ride. Offering "continue" here would be
- *   wrong: the rider already ended it. They are offered **save** and
- *   **discard**.
+ * - **`unsaved`** (`stopped`, no `savedAs`) — the ride was *finished* and the
+ *   save did not get it into the athlete's activities. Offering "continue"
+ *   here would be wrong: the rider already ended it. They are offered **save**
+ *   and **discard**.
+ * - **`already-saved`** (`stopped`, with `savedAs`) — the ride saved, and only
+ *   the checkpoint delete afterwards failed. ⚠️ **This kind exists because
+ *   review found that without it the row is indistinguishable from the one
+ *   above**, so the screen offered "save" and a second press wrote a duplicate
+ *   ride under a fresh activity id with nothing deduplicating it. It is
+ *   offered **discard alone**, and the wording says the ride is already
+ *   safe.
  *
  * ⚠️ **That second case only exists because the save path keeps its
  * checkpoint.** Before #213 nothing wrote a `stopped` row that outlived its
@@ -52,7 +56,7 @@ import type { RecordingSessionId, RecordingSessionRecord } from '@onyourleft/sto
 import { formatDuration } from '../format';
 
 /** Why this recording is still here. See this module's header. */
-export type RecoverableKind = 'interrupted' | 'unsaved';
+export type RecoverableKind = 'interrupted' | 'unsaved' | 'already-saved';
 
 /** One leftover recording, as a rider is offered it. */
 export interface RecoverableRide {
@@ -73,6 +77,15 @@ export interface RecoverableRide {
    * control that would restart a ride they ended.
    */
   readonly canContinue: boolean;
+  /**
+   * Whether this recording is already in the athlete's activities.
+   *
+   * ⚠️ **`true` means saving it again would duplicate it**, so the screen
+   * offers discard alone and `controller.saveRecovered` refuses. Derived from
+   * the stored link rather than from the state column, because the state
+   * column cannot tell a failed save from a failed tidy-up.
+   */
+  readonly alreadySaved: boolean;
 }
 
 /**
@@ -111,7 +124,9 @@ export function recoverableRides(
 }
 
 function rideOf(row: RecordingSessionRecord): RecoverableRide {
-  const kind: RecoverableKind = row.state === 'stopped' ? 'unsaved' : 'interrupted';
+  const alreadySaved = row.savedAs !== undefined;
+  const kind: RecoverableKind =
+    row.state === 'stopped' ? (alreadySaved ? 'already-saved' : 'unsaved') : 'interrupted';
   // ⚠️ Clamped at zero rather than trusted. `updatedAt` is a stored clock and
   // a device whose time stepped backwards mid-ride can write one that precedes
   // the start — the same clock regression `packages/domain`'s engine counts
@@ -126,5 +141,6 @@ function rideOf(row: RecordingSessionRecord): RecoverableRide {
     spannedSeconds,
     spanned: formatDuration(spannedSeconds),
     canContinue: kind === 'interrupted',
+    alreadySaved,
   };
 }

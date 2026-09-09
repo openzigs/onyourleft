@@ -55,6 +55,7 @@ function snapshotWith(states: Partial<Record<string, MetricState>>): RideSnapsho
     saveState: 'unavailable',
     saveError: undefined,
     savedActivityId: undefined,
+    leftover: false,
     recoverable: [],
     connectionsRemaining: 3,
   };

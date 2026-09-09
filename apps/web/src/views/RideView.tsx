@@ -54,6 +54,7 @@ import { TrainerPanel } from '../ride/TrainerPanel';
 import { WorkoutPanel } from '../ride/WorkoutPanel';
 import type { WorkoutPort } from '../workouts/store-port';
 import type { AnalysisPort } from '../analysis/store-port';
+import type { RecoverableRide } from '../recording/recovery';
 import type { PairingRole, RideController, RideSnapshot } from '../ride/controller';
 import { useRideSnapshot } from '../ride/useRideController';
 import { hrefFor, routeById } from '../shell/routes';
@@ -231,6 +232,25 @@ function useThresholdPower(analysis: AnalysisPort | undefined): Watts | undefine
  * The two kinds are offered different controls — `recording/recovery.ts` says
  * why a ride the rider already stopped is not offered "continue".
  */
+/**
+ * What one leftover recording is, in a sentence.
+ *
+ * ⚠️ **The third case is the one review found missing.** A finished ride whose
+ * checkpoint survived because the *delete* failed is already in the athlete's
+ * activities; calling it "could not be saved" and offering Save writes a
+ * duplicate. It is offered discard alone, and the wording says the ride is
+ * safe so a rider is not talked into rescuing something that needs no rescue.
+ */
+function offerText(ride: RecoverableRide): string {
+  if (ride.kind === 'interrupted') {
+    return `An interrupted ride, up to ${ride.spanned} long.`;
+  }
+  if (ride.kind === 'already-saved') {
+    return `A finished ride, up to ${ride.spanned} long. It is already in your activities — this is the working copy, and discarding it changes nothing about the ride.`;
+  }
+  return `A finished ride, up to ${ride.spanned} long, that could not be saved.`;
+}
+
 function RecoveryOffer({
   controller,
   snapshot,
@@ -251,11 +271,7 @@ function RecoveryOffer({
       <ul>
         {snapshot.recoverable.map((ride) => (
           <li key={ride.id}>
-            <p>
-              {ride.kind === 'interrupted'
-                ? `An interrupted ride, up to ${ride.spanned} long.`
-                : `A finished ride, up to ${ride.spanned} long, that could not be saved.`}
-            </p>
+            <p>{offerText(ride)}</p>
             {ride.canContinue ? (
               <Button
                 onClick={() => {
@@ -265,13 +281,15 @@ function RecoveryOffer({
                 Continue this ride
               </Button>
             ) : null}
-            <Button
-              onClick={() => {
-                void controller.saveRecovered(ride.id);
-              }}
-            >
-              Save this ride
-            </Button>
+            {ride.alreadySaved ? null : (
+              <Button
+                onClick={() => {
+                  void controller.saveRecovered(ride.id);
+                }}
+              >
+                Save this ride
+              </Button>
+            )}
             <Button
               onClick={() => {
                 void controller.discardRecovered(ride.id);
@@ -366,7 +384,17 @@ function RideControls({
       );
     }
     if (snapshot.saveState === 'saved') {
-      return (
+      // ⚠️ The leftover case is still a SUCCESS: the ride is in the athlete's
+      // activities and that is the sentence that matters. What it adds is the
+      // one thing a rider would otherwise misread — the working copy will be
+      // offered back on the next visit, and it is a copy rather than a rescue.
+      return snapshot.leftover ? (
+        <StatusMessage tone="warning" label="Saved, with a working copy left behind" live>
+          The ride is stopped and saved to your activities. The working copy on this device could
+          not be removed, so it will be offered back next time — discarding it changes nothing about
+          the saved ride.
+        </StatusMessage>
+      ) : (
         <StatusMessage tone="success" label="Saved" live>
           The ride is stopped and saved to your activities. Closing the tab is safe now.
         </StatusMessage>

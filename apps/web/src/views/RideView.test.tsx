@@ -394,6 +394,28 @@ describe('the notice a stopped ride ends on', () => {
    * activities would still have been told it was saved. That is precisely the
    * defect the whole change exists to fix, reintroduced one layer up.
    */
+  it('says a working copy was left behind when the checkpoint could not be removed', async () => {
+    // ⚠️ Added because a mutation survived: the branch was written and nothing
+    // asserted it. A rider who is not told will meet the leftover on the next
+    // visit, read it as a ride that failed to save, and press Save — writing a
+    // second copy of a ride that is already in their activities.
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ phase: 'stopped', saveState: 'saved', savedActivityId: undefined, leftover: true });
+    await show(stub);
+
+    // Still the good news first: the ride IS saved.
+    expect(document.body.textContent).toContain('saved to your activities');
+    expect(document.body.textContent).toContain('working copy');
+    expect(document.body.textContent).toContain('discarding it changes nothing');
+  });
+
+  it('says nothing about a working copy when there is not one', async () => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ phase: 'stopped', saveState: 'saved', leftover: false });
+    await show(stub);
+    expect(document.body.textContent).not.toContain('working copy');
+  });
+
   it('says the ride is in the activities once it actually is', async () => {
     const stub = stubRideController(ridingSnapshot());
     stub.set({ phase: 'stopped', saveState: 'saved' });

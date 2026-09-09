@@ -53,7 +53,7 @@
 
 import type { RecordedPause, Seconds, UnixSeconds } from '@onyourleft/domain';
 
-import type { AthleteId, RecordingSessionId } from './ids';
+import type { ActivityId, AthleteId, RecordingSessionId } from './ids';
 import type { StreamChannels } from './streams';
 
 /**
@@ -100,6 +100,27 @@ export interface RecordingSessionRecord {
    * boundaries — which could not distinguish a pause from a dropout anyway.
    */
   readonly pauses: readonly RecordedPause[];
+  /**
+   * The activity this recording became, once it has become one.
+   *
+   * ⚠️ **Optional, so it is not a migration** — this store's README rule, the
+   * same one `RouteRecord.elevation` follows. A header written before this
+   * field existed reads back with it absent.
+   *
+   * ⚠️ **It exists because a `stopped` row on disk has two causes and they are
+   * not the same offer.** A finished recording whose checkpoint survives is
+   * either a ride whose *save failed* — offer to save it — or a ride that
+   * saved and whose *checkpoint delete* failed afterwards, which is already in
+   * the athlete's activities. Without this field the two are indistinguishable
+   * from the header, and the second one gets offered "save" a second time,
+   * which writes a duplicate ride under a fresh activity id with nothing
+   * deduplicating it. Found by review on the #212 work rather than in the
+   * field.
+   *
+   * Written **before** the checkpoint is discarded, so the window in which a
+   * crash can lose the link is the same window that already loses the discard.
+   */
+  readonly savedAs?: ActivityId | undefined;
 }
 
 /** What `putRecordingSession` accepts. Identical; named for symmetry with `NewActivity`. */

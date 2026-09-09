@@ -261,6 +261,63 @@ describe('a half-drawn route survives a reload', () => {
     expect(provider.routeCalls).toHaveLength(1);
   });
 
+  it('does not let a slow restore overwrite an edit made while it was in flight', async () => {
+    // ⚠️ **Found by review, and it had no test at all.** The restore effect
+    // settles the draft it was started for; without the guard `apply` uses, an
+    // edit made in the meantime is silently replaced by the PRE-EDIT draft —
+    // and `history` keeps the edit, so undo and the screen then disagree about
+    // what the route is.
+    const held = { current: undefined as RouteDraft | undefined };
+    const storage: DraftStorage = {
+      read: () => held.current,
+      write: (draft) => {
+        held.current = draft;
+      },
+      forget: () => {
+        held.current = undefined;
+      },
+    };
+    held.current = addWaypoint(
+      addWaypoint(emptyDraft(), geographicPosition(degreesLatitude(51.5), degreesLongitude(-0.12)))
+        .draft,
+      geographicPosition(degreesLatitude(51.51), degreesLongitude(-0.12)),
+    ).draft;
+
+    // ⚠️ A provider that answers only when this test says so, **collecting one
+    // resolver per call**. A single `release` variable is not enough and was
+    // the first version's flaw: the edit below issues its own routing call,
+    // which overwrites the handle, so releasing it left the *restore's* promise
+    // pending for ever and the mutation this test exists for stayed green.
+    const releases: (() => void)[] = [];
+    const slow = scriptedProvider();
+    const provider: ScriptedProvider = {
+      ...slow,
+      route: async (request) =>
+        new Promise((resolve) => {
+          releases.push(() => {
+            resolve(slow.route(request));
+          });
+        }),
+    };
+
+    const view = await open({ provider, storage });
+    expect(releases).toHaveLength(1); // the restore is outstanding
+    // Draw a third waypoint on top of it.
+    await press('Add a waypoint');
+    expect(view.container.textContent).toContain('Waypoint 3');
+
+    // Release the RESTORE, which is the one carrying the pre-edit draft.
+    releases[0]?.();
+    await settle();
+    await settle();
+
+    // The edit survives, and the screen and the history still agree — undo
+    // takes the third waypoint away rather than doing nothing.
+    expect(view.container.textContent).toContain('Waypoint 3');
+    await press('Undo');
+    expect(view.container.textContent).not.toContain('Waypoint 3');
+  });
+
   it('forgets an emptied route rather than restoring an empty one forever', async () => {
     const held = { current: undefined as RouteDraft | undefined };
     const storage: DraftStorage = {

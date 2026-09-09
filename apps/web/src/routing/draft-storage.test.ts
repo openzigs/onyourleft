@@ -69,7 +69,23 @@ describe('a half-drawn route survives a reload', () => {
     ]);
   });
 
-  it('brings the legs back unrouted, so the screen asks the engine again', () => {
+  it('brings a freehand leg back WHOLE, because there is no engine to ask', () => {
+    // ⚠️ **Found by review.** Every restored leg used to come back `pending`,
+    // and the screen's restore resolves only `snapped` ones — so a reloaded
+    // freehand leg read "Being routed" for ever, was left out of the total
+    // distance, and truncated `plannedShape`, which stops at the first leg with
+    // no geometry. That last one is the expensive part: the whole elevation
+    // profile ended at the reloaded freehand leg.
+    const before = setLegMode(drawn(3), 0, 'freehand').draft;
+    const after = deserialiseDraft(serialiseDraft(before));
+    expect(after?.legs[0]?.state).toBe('routed');
+    expect(after?.legs[0]?.shape).toHaveLength(2);
+    expect(after?.legs[0]?.distance).toBeGreaterThan(0);
+    // And the snapped one beside it still needs an engine.
+    expect(after?.legs[1]?.state).toBe('pending');
+  });
+
+  it('brings a snapped leg back unrouted, so the screen asks the engine again', () => {
     // ⚠️ Geometry is dropped on purpose — it is the large part and the part an
     // engine hands back for free. What cannot be recovered by asking again is
     // where the pins are.

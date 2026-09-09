@@ -395,7 +395,16 @@ function failureFrom(error: unknown): LegFailure {
   return { message: 'The routing service could not be reached.', retryable: true };
 }
 
-function legFor(mode: LegMode, from: DraftWaypoint, to: DraftWaypoint): DraftLeg {
+/**
+ * The leg between two waypoints, in the state its mode implies.
+ *
+ * Exported because `draft-storage.ts` restores legs and must draw the same
+ * distinction: a snapped leg comes back `pending` and needs an engine, a
+ * freehand one comes back `routed` because there was never an engine to ask.
+ * Two implementations of that rule is exactly how a restored freehand leg ended
+ * up unroutable — see that file's `deserialiseDraft`.
+ */
+export function legFor(mode: LegMode, from: DraftWaypoint, to: DraftWaypoint): DraftLeg {
   if (mode === 'freehand') {
     // ⚠️ A freehand leg makes NO engine call — #71's fifth criterion — so it is
     // routed the moment it exists, and its distance is the geodesic between its

@@ -225,6 +225,16 @@ export interface RideSnapshot {
   /** The activity a finished ride became, so a screen can link to it. */
   readonly savedActivityId: ActivityId | undefined;
   /**
+   * The ride saved, and its checkpoint could **not** be removed afterwards.
+   *
+   * A rare pair — a successful multi-write save followed by a failed delete —
+   * and its consequence is visible rather than silent: the leftover is offered
+   * back on the next visit, and a rider who was not told would read it as a
+   * ride that failed to save and press Save again. It is a separate flag from
+   * `saveState` because the ride *is* saved; only the tidying is not done.
+   */
+  readonly leftover: boolean;
+  /**
    * Rides this device is still holding — #212.
    *
    * Empty while riding, and never includes the recording in progress. See
@@ -375,6 +385,8 @@ export function createRideController(options: RideControllerOptions): RideContro
   let saveState: RideSaveState = 'unavailable';
   let saveError: string | undefined;
   let savedActivityId: ActivityId | undefined;
+  /** Set when a ride saved but its checkpoint could not be removed. @see RideSnapshot.leftover */
+  let leftover = false;
   let recoverable: readonly RecoverableRide[] = [];
   let phase: RidePhase = 'idle';
   let stopArmed = false;
@@ -459,6 +471,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       saveState,
       saveError,
       savedActivityId,
+      leftover,
       recoverable,
       pairingError,
       connectionsRemaining: Math.max(
@@ -662,10 +675,24 @@ export function createRideController(options: RideControllerOptions): RideContro
     saveError = outcome.status === 'failed' ? outcome.error.message : undefined;
     savedActivityId = outcome.status === 'saved' ? outcome.id : undefined;
     if (outcome.status === 'saved' || outcome.status === 'empty') {
-      // Only now. An empty recording has nothing worth keeping either, and
-      // leaving its checkpoint would offer the rider back a ride with no
-      // samples in it every time they open the client.
-      await current.discard();
+      // ⚠️ **Stamp the link BEFORE the checkpoint goes, and read what the
+      // discard answered.** Found by review: `discard()` returns `false` when
+      // the delete fails, and ignoring it left a ride that HAD saved sitting on
+      // disk as a `stopped` row — which `recovery.ts` reads as "the save
+      // failed", offers "Save this ride", and thereby writes a second copy of
+      // the same ride under a fresh activity id with nothing deduplicating it.
+      // The link is what tells the two apart afterwards.
+      if (outcome.status === 'saved') {
+        await current.markSaved(outcome.id);
+      }
+      const gone = await current.discard();
+      if (!gone) {
+        // The ride IS saved — that is the sentence that matters to a rider, so
+        // `saveState` does not become `failed`. What they also need to know is
+        // that a leftover will be offered back, and that it is a copy rather
+        // than a rescue.
+        leftover = true;
+      }
     }
     changed();
   };
@@ -693,10 +720,23 @@ export function createRideController(options: RideControllerOptions): RideContro
     changed();
   };
 
-  /** Rebuild a recorder from disk, or `undefined` when there is no such recording. */
+  /**
+   * Rebuild a recorder from disk, or `undefined` when there is nothing usable.
+   *
+   * ⚠️ **Catches, and that is the whole point.** `recoverRecording` decodes
+   * every chunk and throws `StoreDecodeError` on a corrupt one — and a corrupt
+   * recording is still *listed*, because listing reads only the header. Letting
+   * the rejection out left such a row impossible to continue, save **or**
+   * discard, with no message: a permanent entry in the offer that nothing could
+   * clear. Found by review on the #212 work.
+   */
   const recoverOne = async (id: RecordingSessionId): Promise<Recorder | undefined> => {
-    const found = await recoverRecorder({ store, athleteId, sessionId: id });
-    return found?.recorder;
+    try {
+      const found = await recoverRecorder({ store, athleteId, sessionId: id });
+      return found?.recorder;
+    } catch {
+      return undefined;
+    }
   };
 
   // --- The recorder ---------------------------------------------------------
@@ -961,6 +1001,15 @@ export function createRideController(options: RideControllerOptions): RideContro
       if (phase !== 'idle') {
         return saveState;
       }
+      // ⚠️ **Refuses a recording that is already an activity**, which is the
+      // duplicate `savedAs` exists to prevent. `recoverableRides` marks such a
+      // row and the screen offers it discard only, so reaching this is a stale
+      // list rather than a control a rider can see — and a stale list is
+      // exactly what a second tab produces.
+      if (recoverable.find((ride) => ride.id === id)?.alreadySaved === true) {
+        await refreshRecoverable();
+        return 'saved';
+      }
       const found = await recoverOne(id);
       if (found === undefined) {
         await refreshRecoverable();
@@ -982,8 +1031,12 @@ export function createRideController(options: RideControllerOptions): RideContro
       if (phase !== 'idle') {
         return false;
       }
-      const found = await recoverOne(id);
-      const gone = found === undefined ? true : await found.discard();
+      // ⚠️ **Deletes the row directly rather than rebuilding a recorder for
+      // it.** Rebuilding decodes every chunk, so a recording corrupt enough to
+      // fail that decode could not be thrown away — which is the one thing a
+      // rider must always be able to do with it, and exactly the state they
+      // would want to clear. Deleting needs the two ids and nothing else.
+      const gone = await store.deleteRecordingSession(athleteId, id).catch(() => false);
       await refreshRecoverable();
       return gone;
     },
