@@ -70,6 +70,18 @@ export const ERASE_CONFIRMATION = 'erase everything';
  */
 export const ERASE_REMOVES: readonly string[] = [
   'every ride, with all of its per-second samples',
+  // #221. Both of these went in the cascade and, until that issue, came out in
+  // no export — so a rider who did the responsible thing lost them silently and
+  // this list did not warn them. They are named separately from the ride
+  // because they are separately recoverable: the export now carries the laps
+  // inside each activity file and the signed record in a `.record.json` beside
+  // it (ADR 0019), so a rider who reads this line has somewhere to go.
+  'the laps and splits of every ride',
+  // ⚠️ And this one is the irreversible half. ADR 0014 D-7: the signing key
+  // cannot be backed up, so a record destroyed here can never be minted again,
+  // by this device or any other. An exported record verifies forever; an
+  // unexported one is gone.
+  'the signed record of every ride this device recorded, which nothing can re-create afterwards',
   'every recording this device is still holding, finished or not',
   'your privacy zones',
   'your saved routes and workouts',

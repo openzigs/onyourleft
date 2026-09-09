@@ -48,6 +48,43 @@
  * output, using the same `extractableDeviceKey` fixture #61's second criterion
  * exists for.
  *
+ * ## The signed record travels beside the ride, not inside it
+ *
+ * [#221](https://github.com/openzigs/onyourleft/issues/221) found the pair of
+ * holes this file and `erase-device.ts` had between them: `activityRecords` and
+ * `laps` both went in the erase and neither came out in the export, so a rider
+ * who did the responsible thing — export everything, then erase — lost both,
+ * silently, and the manifest did not say so. ADR 0014 D-7 makes the record half
+ * permanent: the private key is non-extractable, so an erased identity can never
+ * sign again and a destroyed record can never be re-minted.
+ *
+ * [ADR 0019](../../../../docs/adr/0019-signed-records-in-an-export.md) decides
+ * how one travels: **its own `.record.json` beside the activity file**, not
+ * inline in this manifest and not inside the FIT file. The short version of why
+ * not the other two is worth having here, because both look tidier from a
+ * distance:
+ *
+ * - **Not inline**, because the manifest is the most sensitive file in the
+ *   archive — it carries the privacy zones, which are a home address stated
+ *   precisely — and a record is the *least* sensitive thing this project
+ *   produces. Welding them means an athlete cannot hand somebody one ride's
+ *   record without handing over the file with their home in it.
+ * - **Not a FIT developer field**, because it is circular: a record's
+ *   `contentHash` is the SHA-256 of the file it vouches for, and putting the
+ *   record inside that file changes the file's bytes.
+ *
+ * ⚠️ **Nothing here signs anything.** ADR 0014: *"re-signing an old ride with a
+ * new key would be the device asserting something it did not witness."* An
+ * export moves records. A ride with none exports cleanly and its manifest entry
+ * says `"signedRecord": null`.
+ *
+ * ⚠️ **And the record's `contentHash` will not match the file beside it**, in
+ * general — that file is a re-encode, and the same ride exported as GPX and as
+ * TCX is two files and one record. So the check that applies to an archive is
+ * `verifyRecordSignature` (authentic, and whose), not `verifyActivityRecord`
+ * (which also checks the file, and would correctly answer `content-mismatch`).
+ * ADR 0019 D-4.
+ *
  * ## The report never holds the bytes
  *
  * A library of five hundred four-hour rides is gigabytes. {@link exportEverything}
@@ -66,7 +103,7 @@
  * not itself accumulate.
  */
 
-import type { UnixSeconds } from '@onyourleft/domain';
+import type { SignedActivityRecord, UnixSeconds } from '@onyourleft/domain';
 import type { ActivityId, AthleteId } from '@onyourleft/store';
 
 import { ActivityExportError, exportActivity, fileStemOf } from './export-activity';
@@ -85,6 +122,18 @@ export interface ManifestEntry {
   readonly fileName: string;
   readonly written: boolean;
   readonly reason?: string;
+  /**
+   * The signed record's file name, or **`null`** when this ride has none —
+   * #221's fifth criterion, ADR 0019 D-2.
+   *
+   * ⚠️ **`null` and not `undefined`, and that is the whole point of the
+   * member.** `JSON.stringify` omits an `undefined`, and an omitted member puts
+   * a reader straight back where they started: unable to tell "this ride never
+   * had a record" from "the export dropped it". A record is destroyed by the
+   * erase and can never be re-minted (ADR 0014 D-7), so that distinction is the
+   * difference between a rider knowing what they lost and not.
+   */
+  readonly signedRecord: string | null;
 }
 
 /** The format version, and the identity, in one key — ADR 0017 D-3's shape. */
@@ -119,6 +168,16 @@ export interface AccountExportOutcome {
   readonly lost: readonly string[];
   /** Why it failed, in words a rider can act on. `undefined` when it did not. */
   readonly reason: string | undefined;
+  /**
+   * The signed record file written beside this ride, or `undefined` for a ride
+   * that has no record.
+   *
+   * `undefined` here rather than the manifest's `null` deliberately: this type
+   * is read in TypeScript, where an absent value is `undefined` and the
+   * compiler makes the case unmissable. The manifest is read as JSON by a
+   * stranger, where only an explicit `null` says anything at all.
+   */
+  readonly signedRecord: string | undefined;
 }
 
 /** Where the export has got to. Emitted after every ride. */
@@ -134,6 +193,14 @@ export interface AccountExportReport {
   readonly exported: number;
   readonly failed: number;
   readonly cancelled: number;
+  /**
+   * How many signed records went with the rides — #221.
+   *
+   * Not equal to `exported`, and it is not meant to be: most rides have no
+   * record. It is here so a screen can say "and 12 signed records" rather than
+   * leaving the extra files in the download folder unexplained.
+   */
+  readonly signedRecords: number;
   /**
    * The instant to pass as `after` to continue, or `undefined` when the library
    * ended inside this run.
@@ -174,6 +241,55 @@ export interface AccountExportOptions {
   /** Aborting stops the loop between rides. Files already handed over stand. */
   readonly signal?: AbortSignal | undefined;
   readonly onProgress?: ((progress: AccountExportProgress) => void) | undefined;
+}
+
+/**
+ * What a signed record's file is called: the activity file's name with its
+ * extension replaced. ADR 0019 D-1.
+ *
+ * Derived from the **de-duplicated** activity file name rather than from the
+ * ride's own stem, so uniqueness here is a consequence of uniqueness there
+ * instead of a second rule that could disagree with the first. Two rides both
+ * called "Morning ride" produce `Morning ride.gpx` / `Morning ride.record.json`
+ * and `Morning ride (2).gpx` / `Morning ride (2).record.json`.
+ *
+ * The extension is removed by looking for the last dot **after the last path
+ * separator would have been** — there are none, `fileStemOf` replaces them —
+ * and a name with no dot simply gains the suffix. A ride called `2026.03.14`
+ * therefore yields `2026.03.record.json` for its `.14`-looking tail only if the
+ * format made one, which it always does: every caller passes a name this
+ * function's own module produced, ending in `.fit`, `.gpx` or `.tcx`.
+ */
+export function signedRecordFileName(activityFileName: string): string {
+  const dot = activityFileName.lastIndexOf('.');
+  const stem = dot <= 0 ? activityFileName : activityFileName.slice(0, dot);
+  return `${stem}${SIGNED_RECORD_SUFFIX}`;
+}
+
+/** What a signed record file is called, after the ride's own stem. */
+export const SIGNED_RECORD_SUFFIX = '.record.json';
+
+/**
+ * A signed record as the file it travels in — ADR 0019 D-1.
+ *
+ * The record's own JSON object and nothing wrapping it: no envelope, no
+ * `exportedAt`, no copy of the ride's name. A wrapper would be a second format
+ * to specify and to keep in step with `docs/architecture.md`, and the whole
+ * value of the record is that somebody outside this project can verify it with
+ * a stock Ed25519 library and a stock RFC 8785 canonicaliser.
+ *
+ * ⚠️ **Pretty-printed, and that is safe** precisely because the signature is
+ * taken over the *canonical* serialisation rather than over these bytes: a
+ * verifier re-canonicalises the six payload members before it hashes anything,
+ * so whitespace and member order in this file cannot affect the answer. Writing
+ * it minified would buy nothing and cost a reader being able to read it.
+ */
+export function signedRecordFile(fileName: string, record: SignedActivityRecord): DownloadableFile {
+  return {
+    fileName,
+    bytes: new TextEncoder().encode(`${JSON.stringify(record, undefined, 2)}\n`),
+    mediaType: 'application/json',
+  };
 }
 
 /**
@@ -300,13 +416,24 @@ export async function exportEverything(
         kind: 'cancelled',
         lost: [],
         reason: 'cancelled before this ride was reached; no file was written for it',
+        signedRecord: undefined,
       };
       outcomes.push(outcome);
       options.onProgress?.({ completed: outcomes.length, total: wanted.length, outcome });
       continue;
     }
 
+    // #221, ADR 0019 D-1. Read **before** the file is written, and written
+    // whether or not the file was: the record is destroyed by the erase and
+    // cannot be re-minted afterwards (ADR 0014 D-7), so a ride whose streams
+    // will not encode must not take its record down with it. That is the whole
+    // complaint the issue makes about the pair of them.
+    const stored = await store.getActivityRecord(athleteId, summary.id);
+    const recordName = stored === undefined ? undefined : signedRecordFileName(fileName);
+
     let outcome: AccountExportOutcome;
+    let written: boolean;
+    let reason: string | undefined;
     try {
       const exported = await exportActivity({
         store,
@@ -318,13 +445,14 @@ export async function exportEverything(
       // single-ride name and is the one that collides.
       const file = { ...exported.file, fileName };
       await onFile(file);
-      listed.push({ activityId: summary.id, fileName, written: true });
+      written = true;
       outcome = {
         activityId: summary.id,
         fileName,
         kind: 'exported',
         lost: exported.lost,
         reason: undefined,
+        signedRecord: recordName,
       };
     } catch (error) {
       // Narrowed to the exporter's own error rather than catching everything:
@@ -333,20 +461,36 @@ export async function exportEverything(
       if (!(error instanceof ActivityExportError)) {
         throw error;
       }
-      // ⚠️ Listed even though no file was written. An archive whose manifest
-      // simply omits a ride leaves nothing saying it ever existed — the rider
-      // who then erases the device has lost it without ever being told which
-      // one. `written: false` says "this ride is yours and this archive does
-      // not contain it", which is the honest record.
-      listed.push({ activityId: summary.id, fileName, written: false, reason: error.message });
+      written = false;
+      reason = error.message;
       outcome = {
         activityId: summary.id,
         fileName,
         kind: 'failed',
         lost: [],
         reason: error.message,
+        signedRecord: recordName,
       };
     }
+    if (stored !== undefined && recordName !== undefined) {
+      // Not inside the `try`: a record is not what `ActivityExportError`
+      // describes, so a throw from here is a bug in this client and belongs
+      // uncaught, exactly as the narrowing above intends.
+      await onFile(signedRecordFile(recordName, stored.record));
+    }
+    // ⚠️ Listed even when no file was written. An archive whose manifest
+    // simply omits a ride leaves nothing saying it ever existed — the rider
+    // who then erases the device has lost it without ever being told which
+    // one. `written: false` says "this ride is yours and this archive does
+    // not contain it", which is the honest record.
+    listed.push({
+      activityId: summary.id,
+      fileName,
+      written,
+      ...(reason === undefined ? {} : { reason }),
+      // `null`, never omitted. See {@link ManifestEntry.signedRecord}.
+      signedRecord: recordName ?? null,
+    });
     outcomes.push(outcome);
     options.onProgress?.({ completed: outcomes.length, total: wanted.length, outcome });
   }
@@ -389,6 +533,7 @@ export async function exportEverything(
     exported: outcomes.filter((each) => each.kind === 'exported').length,
     failed: outcomes.filter((each) => each.kind === 'failed').length,
     cancelled,
+    signedRecords: outcomes.filter((each) => each.signedRecord !== undefined).length,
     // More to do when the library ran past the limit **or** when this run was
     // stopped part-way. Both mean "there is more of your history than this
     // archive holds", which is the only thing the sentence claims.

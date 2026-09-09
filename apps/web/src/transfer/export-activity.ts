@@ -30,7 +30,13 @@
  * format chooser, so the rider picks knowing the cost.
  */
 
-import { geographicPosition, unixSeconds, type UnixSeconds } from '@onyourleft/domain';
+import {
+  geographicPosition,
+  unixSeconds,
+  type Metres,
+  type Seconds,
+  type UnixSeconds,
+} from '@onyourleft/domain';
 import {
   encodeFitActivity,
   encodeGpx,
@@ -47,7 +53,13 @@ import {
   type TrackActivity,
   type TrackPoint,
 } from '@onyourleft/fit';
-import type { ActivityId, ActivityRecord, AthleteId, StreamSet } from '@onyourleft/store';
+import type {
+  ActivityId,
+  ActivityRecord,
+  AthleteId,
+  LapRecord,
+  StreamSet,
+} from '@onyourleft/store';
 
 import type { ActivityFileFormat } from './file-format';
 import type { DownloadableFile, TransferStore } from './store-port';
@@ -169,6 +181,18 @@ export async function exportActivity(options: ExportOptions): Promise<ExportedAc
   }
 
   const points = pointsOf(streams);
+  // #221. Read from the store rather than synthesised from the summary: a ride
+  // that was recorded with splits had them destroyed by the erase and never
+  // written to a file, so the responsible sequence — export everything, then
+  // erase — lost them. Scoped on `athleteId`, not on `activity.athleteId`: the
+  // ride is already known to be this athlete's, and reaching for the record's
+  // own owner would be the shape that reads somebody else's rows.
+  const laps = splitsOf(
+    await store.listLaps(athleteId, activityId),
+    points,
+    activity,
+    endOf(streams),
+  );
 
   // #162. The encoder's contract is deliberately *bytes plus faults*: the file
   // is still produced, and a caller that reads the faults can tell the rider
@@ -182,14 +206,14 @@ export async function exportActivity(options: ExportOptions): Promise<ExportedAc
   let bytes: Uint8Array;
   let faults: readonly FitEncodeError[] = [];
   if (format === 'fit') {
-    const encoded = encodeFitActivity(fitInputOf(activity, streams, points));
+    const encoded = encodeFitActivity(fitInputOf(activity, streams, laps));
     bytes = encoded.bytes;
     faults = encoded.faults;
   } else {
     bytes = new TextEncoder().encode(
       format === 'gpx'
-        ? encodeGpx(trackActivityOf(activity, points))
-        : encodeTcx(trackActivityOf(activity, points)),
+        ? encodeGpx(trackActivityOf(activity, laps))
+        : encodeTcx(trackActivityOf(activity, laps)),
     );
   }
 
@@ -278,16 +302,107 @@ function at(streams: StreamSet, index: number): UnixSeconds {
   return unixSeconds(streams.startedAt + index * streams.sampleInterval);
 }
 
+/** The instant of the last stored sample. The end every summary message uses. */
+function endOf(streams: StreamSet): UnixSeconds {
+  return at(streams, Math.max(streams.sampleCount - 1, 0));
+}
+
 function instant(value: UnixSeconds): FitDateTime {
   return { kind: 'instant', instant: value };
+}
+
+/**
+ * One split of the ride: its totals, and the samples that fall inside it.
+ *
+ * A shape of this file's own rather than `LapRecord` plus an array, because the
+ * whole-ride fallback is not a stored lap and never was — pretending it is one
+ * would mean inventing a `LapId` for a row that does not exist, which is the
+ * kind of fiction that later gets written back to disk by somebody.
+ */
+interface ExportLap {
+  readonly startedAt: UnixSeconds;
+  readonly endsAt: UnixSeconds;
+  readonly elapsedTime: Seconds;
+  readonly movingTime: Seconds;
+  readonly distance: Metres;
+  readonly points: readonly TrackPoint[];
+}
+
+/**
+ * The stored laps with the ride's samples dealt into them — #221, ADR 0019 D-5.
+ *
+ * **A partition, and that is the property to hold on to.** Every point lands in
+ * exactly one lap: the sweep walks the points in order and advances the lap
+ * whenever the *next* lap's start has been reached, so a sample before the
+ * first lap's start goes into the first lap and one after the last lap's end
+ * goes into the last. Neither is dropped. A boundary test written as
+ * "start ≤ t < start + elapsed" reads more naturally and silently loses every
+ * sample in a gap between two laps — which is a paused ride, and is common.
+ *
+ * ⚠️ **It does not sort.** `listLaps` returns `ordinal` order, which is the
+ * order the rider pressed the button in and the order every reader renders. A
+ * store row whose `startedAt` disagrees with its `ordinal` would make the
+ * sweep put more points in an earlier lap than a reader expects — and it still
+ * loses nothing, which is the invariant that matters. Re-ordering the splits to
+ * repair a bad row would hide it.
+ *
+ * With no stored laps, one lap spanning the ride: the shape this file has
+ * always written, and the shape a reader expects of a file with no splits in
+ * it.
+ */
+function splitsOf(
+  stored: readonly LapRecord[],
+  points: readonly TrackPoint[],
+  activity: ActivityRecord,
+  endsAt: UnixSeconds,
+): readonly ExportLap[] {
+  if (stored.length === 0) {
+    return [
+      {
+        startedAt: activity.startedAt,
+        endsAt,
+        elapsedTime: activity.elapsedTime,
+        movingTime: activity.movingTime,
+        distance: activity.distance,
+        points,
+      },
+    ];
+  }
+
+  const buckets: TrackPoint[][] = stored.map(() => []);
+  let index = 0;
+  for (const point of points) {
+    while (index + 1 < stored.length && reaches(point, stored[index + 1])) {
+      index += 1;
+    }
+    // Total by construction: `buckets` has one entry per stored lap and `index`
+    // is bounded by the loop above, so the `?? ` branch cannot be taken. It is
+    // here because a non-null assertion would be a stronger claim than this
+    // function needs to make.
+    (buckets[index] ?? buckets[0])?.push(point);
+  }
+
+  return stored.map((lap, ordinal) => ({
+    startedAt: lap.startedAt,
+    endsAt: unixSeconds(lap.startedAt + lap.elapsedTime),
+    elapsedTime: lap.elapsedTime,
+    movingTime: lap.movingTime,
+    distance: lap.distance,
+    points: buckets[ordinal] ?? [],
+  }));
+}
+
+/** Whether this point is at or past the given lap's start. */
+function reaches(point: TrackPoint, next: LapRecord | undefined): boolean {
+  return next !== undefined && point.timestamp !== undefined && point.timestamp >= next.startedAt;
 }
 
 function fitInputOf(
   activity: ActivityRecord,
   streams: StreamSet,
-  points: readonly TrackPoint[],
+  laps: readonly ExportLap[],
 ): FitEncodeInput {
-  const end = at(streams, Math.max(streams.sampleCount - 1, 0));
+  const end = endOf(streams);
   return {
     fileId: {
       type: FILE_TYPE_ACTIVITY,
@@ -296,27 +411,35 @@ function fitInputOf(
       serialNumber: undefined,
       timeCreated: instant(activity.createdAt),
     },
-    records: points.map(fitRecordOf),
-    laps: [
-      {
-        timestamp: instant(end),
-        messageIndex: 0,
-        startTime: instant(activity.startedAt),
-        totalElapsedTime: activity.elapsedTime,
-        totalTimerTime: activity.movingTime,
-        totalDistance: activity.distance,
-      },
-    ],
+    // Flattened from the laps rather than taken from `points` directly, so the
+    // records written and the records counted by the laps are the same list.
+    // The split preserves order, so this is the stored order sample for sample.
+    records: laps.flatMap((lap) => lap.points.map(fitRecordOf)),
+    laps: laps.map((lap, ordinal) => ({
+      timestamp: instant(lap.endsAt),
+      messageIndex: ordinal,
+      startTime: instant(lap.startedAt),
+      totalElapsedTime: lap.elapsedTime,
+      totalTimerTime: lap.movingTime,
+      totalDistance: lap.distance,
+    })),
     sessions: [
       {
         timestamp: instant(end),
         messageIndex: 0,
         startTime: instant(activity.startedAt),
         sport: SPORT_CYCLING,
+        // The ride's own totals, not the sum of the laps'. A lap's distance is
+        // what the head unit recorded for that split, and summing them to
+        // produce a session total would put a number in the athlete's file that
+        // no instrument ever measured.
         totalElapsedTime: activity.elapsedTime,
         totalTimerTime: activity.movingTime,
         totalDistance: activity.distance,
-        numLaps: 1,
+        // ⚠️ Counted, never hard-coded. A session declaring one lap beside a
+        // file carrying three is the shape a strict reader trusts and a rider
+        // then finds their splits missing from.
+        numLaps: laps.length,
       },
     ],
     summary: {
@@ -346,7 +469,7 @@ function fitRecordOf(point: TrackPoint): FitRecord {
   };
 }
 
-function trackActivityOf(activity: ActivityRecord, points: readonly TrackPoint[]): TrackActivity {
+function trackActivityOf(activity: ActivityRecord, laps: readonly ExportLap[]): TrackActivity {
   return {
     startTime: activity.startedAt,
     name: activity.name,
@@ -354,14 +477,17 @@ function trackActivityOf(activity: ActivityRecord, points: readonly TrackPoint[]
     // brand. TCX maps it onto its own three-value `Sport` attribute.
     sport: 'cycling',
     creator: undefined,
-    laps: [
-      {
-        startTime: activity.startedAt,
-        totalElapsedTime: activity.elapsedTime,
-        totalDistance: activity.distance,
-        points,
-      },
-    ],
+    // TCX has a `<Lap>` with its own totals; GPX has neither, and writes one
+    // `<trkseg>` per lap instead — `GPX_LOSSY_CHANNELS` already declares that
+    // `lap.totalElapsedTime` and `lap.totalDistance` have nowhere to go there.
+    // A rider exporting GPX keeps where each split started and stopped, which
+    // is the part that cannot be recomputed from anything else.
+    laps: laps.map((lap) => ({
+      startTime: lap.startedAt,
+      totalElapsedTime: lap.elapsedTime,
+      totalDistance: lap.distance,
+      points: lap.points,
+    })),
   };
 }
 

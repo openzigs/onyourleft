@@ -22,12 +22,14 @@ import type {
   AthleteRecord,
   AthleteDeletionCounts,
   DeviceKeyRecord,
+  LapRecord,
   ListActivitiesOptions,
   NewActivity,
   NewStreamSet,
   PrivacyZoneRecord,
   RouteRecord,
   SegmentRecord,
+  StoredActivityRecord,
   StreamSet,
   WorkoutRecord,
 } from '@onyourleft/store';
@@ -71,6 +73,21 @@ export interface AccountStore {
   listRoutes(owner: AthleteId, limit?: number): Promise<RouteRecord[]>;
   listWorkouts(owner: AthleteId, limit?: number): Promise<WorkoutRecord[]>;
   getDeviceKey(owner: AthleteId): Promise<DeviceKeyRecord | undefined>;
+  /**
+   * The signed record for one ride, or `undefined` — #221, ADR 0019.
+   *
+   * ⚠️ **`undefined` is the ordinary case, not a fault.** Records are written
+   * by the recorder, so an imported ride never had one and a ride recorded
+   * before #61 does not either. An export that treated the absence as a failure
+   * would report most libraries as broken.
+   *
+   * What comes back is **parsed and not verified** — `packages/store`'s
+   * `identity.ts` says so at the top, and ADR 0019 D-3 records why the export
+   * carries it anyway: a record that does not verify is still the evidence this
+   * device holds, and dropping it would destroy the only copy of the thing a
+   * rider needs in order to find out what happened.
+   */
+  getActivityRecord(owner: AthleteId, id: ActivityId): Promise<StoredActivityRecord | undefined>;
 }
 
 /** What import and export do to the store, and nothing else. */
@@ -84,6 +101,16 @@ export interface TransferStore {
   deleteActivity(owner: AthleteId, id: ActivityId): Promise<boolean>;
   getActivity(owner: AthleteId, id: ActivityId): Promise<ActivityRecord | undefined>;
   getStreamSet(owner: AthleteId, activity: ActivityId): Promise<StreamSet | undefined>;
+  /**
+   * The ride's splits, in `ordinal` order — #221.
+   *
+   * Athlete-scoped like every other read here, and that is the whole reason it
+   * is a two-argument call: a lap carries a denormalised `athleteId` precisely
+   * so that "the laps of this activity id" is never askable without saying
+   * whose. Passing the *ride's* own owner rather than the requesting athlete's
+   * would compile and would pass every single-athlete test in the suite.
+   */
+  listLaps(owner: AthleteId, activity: ActivityId): Promise<LapRecord[]>;
   listActivitySummaries(
     owner: AthleteId,
     options?: ListActivitiesOptions,

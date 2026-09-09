@@ -15,6 +15,7 @@ import {
   degreesLatitude,
   degreesLatitudeToSemicircles,
   metres,
+  seconds,
   SEMICIRCLE_ROUND_TRIP_TOLERANCE_DEGREES,
   unixSeconds,
   type DegreesLatitude,
@@ -31,6 +32,7 @@ import {
   ATHLETE_A,
   ATHLETE_B,
   createStoreHarness,
+  lapFor,
   rideFor,
   seedAthletes,
   streamSetFor,
@@ -453,5 +455,156 @@ describe('exportActivity — what the file could not carry (#162)', () => {
     // write an ISO-8601 timestamp, which 1970 fits into perfectly well.
     expect((await exportWithFaults(open, id, 'gpx')).lost).toEqual([]);
     expect((await exportWithFaults(open, id, 'tcx')).lost).toEqual([]);
+  });
+});
+
+/**
+ * #221's second half: the stored splits reach the file.
+ *
+ * The laps go in the erase and, until this, did not come out in the export — so
+ * a rider who exported and then erased lost every split silently.
+ * `exportActivity` read the streams and never `listLaps`, which made this a bug
+ * in the single-ride export as much as in the account one, and ADR 0019 D-5
+ * records that it needed no format decision to fix.
+ *
+ * The assertions read the **decoded file**, never the object handed to the
+ * encoder, because a lap array built and never written is exactly the shape a
+ * naive test cannot tell from one that was.
+ */
+describe('exportActivity — the ride’s own splits (#221)', () => {
+  /** Three forty-second laps across a 120-sample ride, written to disk. */
+  async function seedLapBearingRide(): Promise<{ open: StoreHarness; ride: NewActivity }> {
+    const { open, ride } = await seedOutdoorRide();
+    await open.write(async (store) => {
+      for (const ordinal of [0, 1, 2]) {
+        await store.putLap(
+          lapFor(ride, ordinal, {
+            startedAt: unixSeconds(ride.startedAt + ordinal * 40),
+            elapsedTime: seconds(40),
+            movingTime: seconds(38),
+            distance: metres(1_000 * (ordinal + 1)),
+          }),
+        );
+      }
+    });
+    return { open, ride };
+  }
+
+  it('writes every stored lap into a FIT file, with its own totals', async () => {
+    const { open, ride } = await seedLapBearingRide();
+
+    const file = await exportFrom(open, ride.id, 'fit');
+    const { laps, sessions } = decodeFitActivity(file.bytes).activity;
+
+    expect(laps).toHaveLength(3);
+    expect(laps.map((lap) => lap.startTime)).toEqual([
+      { kind: 'instant', instant: ride.startedAt },
+      { kind: 'instant', instant: ride.startedAt + 40 },
+      { kind: 'instant', instant: ride.startedAt + 80 },
+    ]);
+    expect(laps.map((lap) => lap.totalDistance)).toEqual([1_000, 2_000, 3_000]);
+    expect(laps.map((lap) => lap.totalElapsedTime)).toEqual([40, 40, 40]);
+    // The pauses, which are a different number from the wall clock and are the
+    // one a rider's split time actually is.
+    expect(laps.map((lap) => lap.totalTimerTime)).toEqual([38, 38, 38]);
+    // The session has to agree with the laps beside it, or a strict reader
+    // reads three laps and is told there is one.
+    expect(sessions[0]?.numLaps).toBe(3);
+  });
+
+  it('writes every stored lap into a TCX file, which carries them natively', async () => {
+    const { open, ride } = await seedLapBearingRide();
+
+    const file = await exportFrom(open, ride.id, 'tcx');
+    const { laps } = decodeTcx(textOf(file.bytes)).activity;
+
+    expect(laps).toHaveLength(3);
+    expect(laps.map((lap) => lap.totalDistance)).toEqual([1_000, 2_000, 3_000]);
+    expect(laps.map((lap) => lap.startTime)).toEqual([
+      ride.startedAt,
+      ride.startedAt + 40,
+      ride.startedAt + 80,
+    ]);
+  });
+
+  it('splits a GPX track into one segment per lap, which is all GPX can say', async () => {
+    const { open, ride } = await seedLapBearingRide();
+
+    const file = await exportFrom(open, ride.id, 'gpx');
+    const { laps } = decodeGpx(textOf(file.bytes)).activity;
+
+    // GPX has no lap element — `GPX_LOSSY_CHANNELS` already declares that the
+    // totals have nowhere to go — but the boundaries survive as `<trkseg>`s,
+    // which is the difference between a rider keeping their splits and not.
+    expect(laps).toHaveLength(3);
+    expect(laps.map((lap) => lap.points.length)).toEqual([40, 40, 40]);
+  });
+
+  it.each<ActivityFileFormat>(['fit', 'gpx', 'tcx'])(
+    'loses no sample to the lap split, in %s',
+    async (format) => {
+      const { open, ride } = await seedLapBearingRide();
+
+      const file = await exportFrom(open, ride.id, format);
+      const points =
+        format === 'fit'
+          ? decodeFitActivity(file.bytes).activity.records
+          : trackPointsOf(
+              (format === 'gpx' ? decodeGpx(textOf(file.bytes)) : decodeTcx(textOf(file.bytes)))
+                .activity,
+            );
+
+      // The partition is a partition: every sample lands in exactly one lap.
+      // A boundary comparison that dropped the sample on the edge would still
+      // produce three laps and would lose three seconds of the rider's ride.
+      expect(points).toHaveLength(SAMPLE_COUNT);
+    },
+  );
+
+  it('carries a sample outside every lap window rather than dropping it', async () => {
+    const { open, ride } = await seedOutdoorRide();
+    // One lap covering the middle minute only. The samples before and after it
+    // are still the rider's ride, and a file that omitted them would be lying.
+    await open.write(async (store) => {
+      await store.putLap(
+        lapFor(ride, 0, {
+          startedAt: unixSeconds(ride.startedAt + 30),
+          elapsedTime: seconds(60),
+        }),
+      );
+    });
+
+    const file = await exportFrom(open, ride.id, 'tcx');
+    const { laps } = decodeTcx(textOf(file.bytes)).activity;
+
+    expect(laps).toHaveLength(1);
+    expect(laps[0]?.points).toHaveLength(SAMPLE_COUNT);
+  });
+
+  it('still writes one lap spanning the ride when nothing stored any', async () => {
+    const { open, ride } = await seedOutdoorRide();
+
+    const { laps, sessions } = decodeFitActivity(
+      (await exportFrom(open, ride.id, 'fit')).bytes,
+    ).activity;
+
+    // ADR 0019 D-5: unchanged for a ride with no splits. Every reader expects a
+    // FIT activity to have at least one lap, and "fixing" this into zero laps
+    // would be a regression wearing a fix's clothes.
+    expect(laps).toHaveLength(1);
+    expect(laps[0]?.totalDistance).toBe(ride.distance);
+    expect(sessions[0]?.numLaps).toBe(1);
+  });
+
+  it('does not read another athlete’s laps for a ride it is exporting', async () => {
+    const { open, ride } = await seedLapBearingRide();
+
+    // The scoped read, asserted at the export rather than at the store. The
+    // store's `listLaps` takes an owner; a caller that passed the ride's own
+    // `athleteId` instead of the requesting athlete's would pass every
+    // single-athlete test in this file.
+    await expect(exportFrom(open, ride.id, 'fit', ATHLETE_B)).rejects.toBeInstanceOf(
+      ActivityExportError,
+    );
   });
 });

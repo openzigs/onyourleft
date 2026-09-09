@@ -435,6 +435,22 @@ already signed verify forever; a lost key cannot be recovered, cannot be backed 
 non-extractable by design — and the answer is a new identity and a history with two provable eras.
 There is no rotation in Phase 1 and replacing a key is refused.
 
+**How a record travels in an export** — [ADR 0019](adr/0019-signed-records-in-an-export.md), #221.
+It is **its own file**, `<the activity file's name>.record.json`, holding the seven-member object
+above and nothing wrapping it. Not inline in the account manifest (which carries the athlete's
+privacy zones and is therefore the most sensitive file in the archive, where a record is the least),
+and not inside the FIT file as a developer field (which is circular: `contentHash` is the SHA-256 of
+the file the record vouches for, and embedding the record changes those bytes). The account
+manifest's entry for each ride carries a `signedRecord` member naming that file, or an explicit
+`null` for a ride that has none — records are written by the recorder, so an imported ride never had
+one, and the absence must be readable rather than inferred.
+
+⚠️ **Step 5 above does not apply to a file taken out of an export.** The activity file in an archive
+is a *re-encode* of the stored ride, and the same ride exported as GPX and as TCX is two files and
+one record — so it is generally not the byte string `contentHash` names, and running step 5 against
+it returns `content-mismatch`, correctly. Steps 1–4 are the whole of what an archive supports, and
+they are what `verifyRecordSignature` performs; step 5 belongs to the file the record actually names.
+
 ### `apps/web`: the shell, the design system and the accessibility baseline
 
 Added by [#48](https://github.com/openzigs/onyourleft/issues/48), which also carries the design
@@ -491,6 +507,16 @@ Three things about it are load-bearing rather than incidental:
   privacy zones exist for what gets *published*, and Phase 1 publishes nothing (owner decision D6).
   There is no zone lookup in `export-activity.ts` and there must not be one; a share or publish path
   is a different function, and it arrives with [#7](https://github.com/openzigs/onyourleft/issues/7).
+- **What the erase destroys, the export has to carry** —
+  [#221](https://github.com/openzigs/onyourleft/issues/221). Two rows went in `deleteAthlete`'s
+  cascade and came out in no export: a ride's **laps**, and its **signed record**. The laps were a
+  plain omission in `export-activity.ts`, which read the streams and never `listLaps`, and losing
+  them cost a single-ride export as much as an account one. The record needed a decision, taken in
+  [ADR 0019](adr/0019-signed-records-in-an-export.md): it leaves as `<ride>.record.json` beside the
+  activity file, and the account manifest names it per ride or says `null`. **Nothing here signs
+  anything** — ADR 0014 forbids re-minting a record for a ride that has none, and the recorder is
+  the only thing that may make one. Whenever a row is added to the cascade, this bullet is the
+  question to ask about it.
 
 What the screen may say about another platform is [ADR 0009](adr/0009-clean-room-posture.md) R3's
 template, used verbatim, and `TransferView.test.tsx` asserts both approved strings and the absence of
@@ -862,8 +888,9 @@ still a proposal.
 | 0016 | #87 — `Unlicense` | [Written](adr/0016-unlicense.md). The first time ADR 0015 D-4's fail-closed branch actually fired: #87's `@capacitor/cli` reaches `bplist-parser` and `bplist-creator` (`Unlicense`) through `xcode`, and `DEP001` stopped the build. **Extends D-2's set rather than superseding anything** — build-time under either path, distributed under `apps/` only. ADR 0015 carries an amendment saying its own §Consequences named this as the example that had not happened yet. `Zlib`, the other name in that sentence, is deliberately still unruled. |
 | 0017 | #202 — the workout file format | [Written](adr/0017-workout-file-format.md). #14's scope proposed adopting the de facto format; ADR 0009 R1 has no permitted route to its element set (no published specification, and every open implementation is GPL/AGPL, which §3 makes fatal under `packages/`) and ADR 0006 R2's provenance column would read "recalled". So the format is **ours** — JSON mirroring the model, one key that is both identity and version, and an unknown key refused rather than ignored because a silently dropped field would ride a different workout against a machine applying resistance to somebody. **Adopting the de facto format is filed as #210 rather than deferred inside the ADR.** The cost is stated plainly: the free library is not bought, and #14's corpus criterion is superseded rather than met. |
 | 0018 | #15 — the native client platform | [Written](adr/0018-native-client-platform.md). #15 names this *"the decision this epic must make first"*. Extends [ADR 0008](adr/0008-mobile-client-architecture.md) D-1 to iOS rather than superseding it; strikes Flutter and Kotlin Multiplatform on #15's **first** criterion (a second sensor implementation in a second language is not an adapter addition) rather than on any licence, and defers a desktop client because `webbluetooth` ships licence-variant majors — 3.x MIT, 4.x BSD-3, **5.x GPL-3.0, 6.x BUSL-1.1**. **It does not claim background recording works**: that is [spike 0002](spikes/0002-background-recording.md)'s blocked column and D-4 is conditional on the measurement nobody here can take. |
+| 0019 | #221 — how a signed activity record travels in an export | [Written](adr/0019-signed-records-in-an-export.md). A record leaves as **its own `.record.json` beside the activity file**. Rules out inlining it in the account manifest (the manifest carries the privacy zones and is the most sensitive file in the archive; a record is the least, and welding them means an athlete cannot share one ride's record without sharing their home address) and rules out a FIT developer field on a **technical** ground rather than a licensing one — it is circular, because `contentHash` is the digest of the file the record is being put inside. **The ADR 0006 question #221 asks is answered rather than dodged**: a developer field is not forbidden, and it is not worth a provenance argument for a publishing decision with a free alternative. Also records the distinction that matters to a holder of an archive — `verifyRecordSignature` applies, `verifyActivityRecord` does not, because the file beside the record is a re-encode. |
 
-**The next free number is 0019.** Every number from 0001 to 0018 is now written; 0012 was the last reservation and #64 consumed it.
+**The next free number is 0020.** Every number from 0001 to 0019 is now written; 0012 was the last reservation and #64 consumed it.
 
 Three issues carry an acceptance criterion naming their old number — #19 (0002), #60 (0008) and #27
 (0006). **The number here wins**; each issue has been commented with its new one. Renumbering a

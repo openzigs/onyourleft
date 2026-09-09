@@ -644,6 +644,15 @@ function TakeEverythingPanel({
 /** What the finished export is told to a rider. One sentence, no jargon. */
 export function everythingSentence(report: AccountExportReport): string {
   const parts = [`Saved ${String(report.exported)} ride${report.exported === 1 ? '' : 's'}`];
+  if (report.signedRecords > 0) {
+    // #221. Said only when there are some: most libraries have none, and a
+    // clause that is always present is one a rider stops reading. When there
+    // are some it explains the second file per ride, which would otherwise be
+    // an unexplained thing in a download folder.
+    parts.push(
+      `${String(report.signedRecords)} signed record${report.signedRecords === 1 ? '' : 's'} went with them`,
+    );
+  }
   if (report.failed > 0) {
     parts.push(`${String(report.failed)} could not be written`);
   }
