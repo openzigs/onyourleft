@@ -20,7 +20,8 @@
 #   LIC006  every path in .spdx-exempt exists, and none of them is a glob
 #   LIC003  every package manifest declares the licence its path requires
 #   LIC004  every leaf package under packages/ or apps/ carries its own LICENSE
-#   SCOPE001 no ANT+ reference in any source tree (owner decision D2)
+#   SCOPE001 no ANT+ reference in any source tree OR package manifest
+#           (owner decision D2, and #15's fifth criterion)
 #   WF001   no pull_request_target trigger in .github/workflows/
 #   ADR001  no two ADRs share a number
 #   ADR002  every ADR filename is NNNN-kebab-case.md
@@ -230,6 +231,30 @@ for dir in "${ROOT}/packages" "${ROOT}/apps"; do
       report SCOPE001 "${file#"${ROOT}"/}: ANT+ is out of scope permanently (owner decision D2, ADR 0005 \"Scope exclusions\")"
     fi
   done < <(source_files "${dir}")
+done
+
+# ⚠️ **And the manifests, which `source_files` does not return.** #15's fifth
+# acceptance criterion is that "no ANT+ code, dependency, permission or string
+# appears anywhere in the client, asserted by grep in CI", and it calls that the
+# thing "that stops the scope quietly returning". Three of those four were
+# covered: code by the extension list, permission by `*.xml` reaching an
+# `AndroidManifest.xml` since #87, string by both. **A dependency was not** --
+# `source_files` returns no `.json` at all, so `"ant-plus": "^1.0.0"` in a
+# `package.json` passed a rule written to forbid exactly that.
+#
+# It is a separate loop rather than a `.json` entry in `source_files`, because
+# that function's other caller is the SPDX header check and a `package.json`
+# carries no header. Scoped to manifests rather than to every `.json` for the
+# same reason the loop above is scoped to source: a fixture or a lockfile may
+# legitimately mention a name it is not adopting.
+for dir in "${ROOT}/packages" "${ROOT}/apps"; do
+  [ -d "${dir}" ] || continue
+  while IFS= read -r file; do
+    [ -n "${file}" ] || continue
+    if grep -qiE "${ANTPLUS_RE}" "${file}" 2>/dev/null; then
+      report SCOPE001 "${file#"${ROOT}"/}: an ANT+ dependency is out of scope permanently (owner decision D2)"
+    fi
+  done < <(find "${dir}" -name node_modules -prune -o -type f -name package.json -print)
 done
 
 # --- WF001: pull_request_target is banned in workflows ------------------------

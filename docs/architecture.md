@@ -768,6 +768,7 @@ write-up. They live in `docs/spikes/NNNN-kebab-case.md`, and the `ADR00*` rules 
 | Spike | Question | Answer | Evidence |
 |---|---|---|---|
 | [0001](spikes/0001-segment-matching.md) | Which of two segment-matching approaches should #66 build? ([#65](https://github.com/openzigs/onyourleft/issues/65)) | Geometric matching against the athlete's own trace — but two of #64's endpoint parameters have to change first, and the road-graph approach is deferred rather than rejected | `packages/matching`, measured 2026-09-07. ⚠️ **That package is gone**: #66 acted on the recommendation, hardened the algorithm into `packages/domain/src/segment/` and deleted the prototype. The write-up carries a dated note saying which of its numbers no longer describe the shipped code |
+| [0002](spikes/0002-background-recording.md) | Which of #15's six acceptance criteria can be verified from this environment at all? ([#15](https://github.com/openzigs/onyourleft/issues/15)) | Two of six. Criteria 5 and 6 were checked and the checks committed; 2, 3 and 4 need a phone, a real trainer and — for 4 — a Mac and a paid Apple Developer membership, and 1 is true today but was not asserted | Read against the repository on 2026-09-09. Records the hole it found in `SCOPE001`: the rule never scanned `package.json`, so an ANT+ **dependency** — a word #15's fifth criterion names — passed a rule described as what stops the scope quietly returning |
 
 ## Decision record index
 
@@ -795,6 +796,7 @@ share one.
 | [0015](adr/0015-dependency-licences.md) | Dependency licences — two closures, and a ruling on the six that were deferred | #24 |
 | [0016](adr/0016-unlicense.md) | `Unlicense` — the first licence the fail-closed gate stopped, ruled on rather than waived | #87 |
 | [0017](adr/0017-workout-file-format.md) | A workout file format of this project's own, and why not the de facto one | #202 |
+| [0018](adr/0018-native-client-platform.md) | One client on more platforms — Capacitor for iOS, and no desktop client yet | #15 |
 
 **0012 is deliberately absent from that list and is not free** — see the row for it below.
 
@@ -836,8 +838,9 @@ still a proposal.
 | 0015 | #24 — dependency licences | [Written](adr/0015-dependency-licences.md). Classifies every dependency licence by **closure** rather than by path alone, and rules on the six that `CLAUDE.md` §3 had carried as deferred. Enforced by `DEP001`. |
 | 0016 | #87 — `Unlicense` | [Written](adr/0016-unlicense.md). The first time ADR 0015 D-4's fail-closed branch actually fired: #87's `@capacitor/cli` reaches `bplist-parser` and `bplist-creator` (`Unlicense`) through `xcode`, and `DEP001` stopped the build. **Extends D-2's set rather than superseding anything** — build-time under either path, distributed under `apps/` only. ADR 0015 carries an amendment saying its own §Consequences named this as the example that had not happened yet. `Zlib`, the other name in that sentence, is deliberately still unruled. |
 | 0017 | #202 — the workout file format | [Written](adr/0017-workout-file-format.md). #14's scope proposed adopting the de facto format; ADR 0009 R1 has no permitted route to its element set (no published specification, and every open implementation is GPL/AGPL, which §3 makes fatal under `packages/`) and ADR 0006 R2's provenance column would read "recalled". So the format is **ours** — JSON mirroring the model, one key that is both identity and version, and an unknown key refused rather than ignored because a silently dropped field would ride a different workout against a machine applying resistance to somebody. **Adopting the de facto format is filed as #210 rather than deferred inside the ADR.** The cost is stated plainly: the free library is not bought, and #14's corpus criterion is superseded rather than met. |
+| 0018 | #15 — the native client platform | [Written](adr/0018-native-client-platform.md). #15 names this *"the decision this epic must make first"*. Extends [ADR 0008](adr/0008-mobile-client-architecture.md) D-1 to iOS rather than superseding it; strikes Flutter and Kotlin Multiplatform on #15's **first** criterion (a second sensor implementation in a second language is not an adapter addition) rather than on any licence, and defers a desktop client because `webbluetooth` ships licence-variant majors — 3.x MIT, 4.x BSD-3, **5.x GPL-3.0, 6.x BUSL-1.1**. **It does not claim background recording works**: that is [spike 0002](spikes/0002-background-recording.md)'s blocked column and D-4 is conditional on the measurement nobody here can take. |
 
-**The next free number is 0018.** Every number from 0001 to 0017 is now written; 0012 was the last reservation and #64 consumed it.
+**The next free number is 0019.** Every number from 0001 to 0018 is now written; 0012 was the last reservation and #64 consumed it.
 
 Three issues carry an acceptance criterion naming their old number — #19 (0002), #60 (0008) and #27
 (0006). **The number here wins**; each issue has been commented with its new one. Renumbering a
