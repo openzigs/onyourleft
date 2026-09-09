@@ -154,6 +154,14 @@ export function unresolvedLegs(draft: RouteDraft): readonly number[] {
 export function draftDistance(draft: RouteDraft): Metres {
   let total = 0;
   for (const leg of draft.legs) {
+    // ⚠️ **The second of two guards, and it is the weaker one.** The first is
+    // that {@link resolveDraft} clears a failed leg's geometry — including its
+    // distance — so a leg that had a length and then lost its route reports
+    // zero here anyway. This check is what keeps that from being the only
+    // thing standing between a rider and a total that includes a stretch
+    // nobody can ride. Both halves are tests: a mutation of this line alone
+    // stays green *because* of the other, which is why the test names the
+    // invariant rather than only the sum.
     if (leg.state === 'routed') total += leg.distance;
   }
   return metres(total);

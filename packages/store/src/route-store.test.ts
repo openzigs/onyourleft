@@ -220,7 +220,11 @@ describe('visibility — #73 criterion 4', () => {
     });
     const partial: Record<string, unknown> = { ...row };
     delete partial['elevationResolution'];
-    expect(() => fromPersistedRoute(partial as unknown as typeof row)).toThrow(StoreDecodeError);
+    // The message names WHICH field is missing, which is what a partial write
+    // needs said about it.
+    expect(() => fromPersistedRoute(partial as unknown as typeof row)).toThrow(
+      /route\.elevationResolution/,
+    );
   });
 
   it('still refuses a value that is present and unrecognised', () => {

@@ -209,16 +209,27 @@ describe('a flat road reads flat', () => {
 });
 
 describe('the shape a profile is built from', () => {
-  it('stops at the first leg that has no geometry', async () => {
-    // ⚠️ Concatenating across a hole would draw a straight line over it and
-    // then measure it as ridden distance.
+  it('takes the routed legs from the start', async () => {
     const provider = scriptedProvider();
     let draft = drawn(4);
     draft = await resolveDraft(draft, [0, 1], provider, RIDING_DEFAULTS);
-    const shape = plannedShape(draft);
-    expect(shape.length).toBeGreaterThan(0);
     // Two legs of eight scripted vertices, meeting at a shared waypoint.
-    expect(shape).toHaveLength(15);
+    expect(plannedShape(draft)).toHaveLength(15);
+  });
+
+  it('stops at the first leg with no geometry rather than skipping it', async () => {
+    // ⚠️ **The case that makes the stop load-bearing**: a routed leg AFTER an
+    // unrouted one. Skipping the hole and carrying on would join two ends that
+    // are not connected — a straight line drawn across the gap, then measured
+    // as ridden distance and sampled for elevation as if it were road. A test
+    // that only left the LAST leg unrouted cannot tell `break` from `continue`,
+    // and this one was green under both until it was written this way.
+    const provider = scriptedProvider();
+    let draft = drawn(4);
+    draft = await resolveDraft(draft, [0, 2], provider, RIDING_DEFAULTS);
+    expect(draft.legs.map((leg) => leg.state)).toStrictEqual(['routed', 'pending', 'routed']);
+    // Leg 0 alone: eight vertices, and nothing from leg 2 across the hole.
+    expect(plannedShape(draft)).toHaveLength(8);
   });
 
   it('does not repeat the waypoint two legs meet at', async () => {

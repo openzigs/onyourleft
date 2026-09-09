@@ -42,12 +42,21 @@ export const GRADE_BANDS: readonly { readonly from: number; readonly name: strin
 ];
 
 export function bandFor(grade: number): string {
-  let name = GRADE_BANDS[0]!.name;
+  let name: string | undefined;
   for (const band of GRADE_BANDS) {
     if (grade >= band.from) name = band.name;
   }
-  return name;
+  // ⚠️ **Not a default, and the distinction was found by mutation.** The first
+  // band opens at negative infinity, so every *finite* grade matches at least
+  // one and a seeded starting value would be unreachable code — a line no test
+  // can turn red. What does not match any band is `NaN`, which is a bug
+  // upstream rather than a gradient, and the honest label for it is neither
+  // "Flat" nor "Descending".
+  return name ?? UNKNOWN_BAND;
 }
+
+/** What a gradient that is not a number is called. See {@link bandFor}. */
+export const UNKNOWN_BAND = 'Gradient unknown';
 
 export interface SurfaceSummary {
   readonly pavedMetres: number;

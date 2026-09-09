@@ -21,6 +21,7 @@ import {
   PROFILE_ROWS,
   profileRows,
   surfaceSummary,
+  UNKNOWN_BAND,
   unresolvedSentence,
 } from './present';
 import { GLO30, scriptedProvider } from './testing';
@@ -82,6 +83,15 @@ describe('the gradient scale is stated and named', () => {
     expect(bandFor(6)).toBe('Climb');
     expect(bandFor(9)).toBe('Steep climb');
     expect(bandFor(18)).toBe('Very steep climb');
+  });
+
+  it('does not call a gradient that is not a number flat', () => {
+    // ⚠️ Found by mutation: the loop's seed was unreachable, because the first
+    // band opens at negative infinity. What reaches the fallback is NaN, which
+    // is a bug upstream — labelling it "Flat" would hide it behind a plausible
+    // word on a row a rider reads.
+    expect(bandFor(Number.NaN)).toBe(UNKNOWN_BAND);
+    expect(UNKNOWN_BAND).not.toBe('Flat');
   });
 
   it('puts a boundary in the band that starts there', () => {

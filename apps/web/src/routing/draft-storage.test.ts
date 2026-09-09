@@ -112,9 +112,21 @@ describe('anything this build does not recognise is refused, not half-read', () 
   });
 
   it('refuses a coordinate that is not a position on Earth', () => {
-    const row = rowOf(drawn(2));
+    // ⚠️ **One waypoint, deliberately.** With two, dropping the bad one leaves
+    // a waypoint count the stored mode list no longer matches, so the LENGTH
+    // check refuses it and this test passes without the coordinate check
+    // existing at all — which is what it did until a mutation showed it. With
+    // one waypoint there are no modes either way, so nothing else can catch it.
+    const row = rowOf(drawn(1));
     const waypoints = row['waypoints'] as Record<string, unknown>[];
     waypoints[0]!['latitude'] = 91;
+    expect(deserialiseDraft(JSON.stringify(row))).toBeUndefined();
+  });
+
+  it('refuses a waypoint that is missing a coordinate outright', () => {
+    const row = rowOf(drawn(1));
+    const waypoints = row['waypoints'] as Record<string, unknown>[];
+    delete waypoints[0]!['longitude'];
     expect(deserialiseDraft(JSON.stringify(row))).toBeUndefined();
   });
 

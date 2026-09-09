@@ -290,6 +290,21 @@ describe('a leg that could not be routed', () => {
     expect(settled.legs[0]?.failure?.message).not.toContain('not an Error');
   });
 
+  it('drops the distance of a leg that had one and then lost its route', async () => {
+    // ⚠️ This is the invariant `draftDistance`'s state check leans on, and it
+    // is tested separately because mutating that check alone leaves the suite
+    // GREEN — a failed leg's distance is already zero, so the two guards cover
+    // each other and neither is load-bearing on its own. Together they are:
+    // remove this clearing and a rider's total silently includes a stretch
+    // nobody can ride.
+    const { draft, provider } = await routed(3);
+    expect(draft.legs[0]?.distance).toBe(1_000);
+    provider.failNextRoute(new RoutingError('no-route', 'no path', 0));
+    const settled = await resolveDraft(draft, [0], provider, RIDING_DEFAULTS);
+    expect(settled.legs[0]?.distance).toBe(0);
+    expect(settled.legs[0]?.shape).toStrictEqual([]);
+  });
+
   it('leaves a failed leg out of the total distance rather than guessing one', async () => {
     const { draft, provider } = await routed(3);
     provider.failNextRoute(new RoutingError('no-route', 'no path', 0));

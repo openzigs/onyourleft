@@ -900,25 +900,22 @@ export function fromPersistedWorkout(row: PersistedWorkout): WorkoutRecord {
 /**
  * The elevation provenance, or `undefined` when the row carries none.
  *
- * ⚠️ **All four fields or none.** A row with a dataset name and no resolution
- * is a partial write, and reading it as "GLO-30 at some unknown resolution"
- * would be this decoder inventing the half that is missing — the same failure
- * `fromPersistedRoute` refuses for the four parallel arrays one function down.
+ * ⚠️ **All four fields or none, and the refusal comes from the field decoders
+ * rather than from a count.** An arity check here was written first and a
+ * mutation showed it could not fail: every field goes through `decodedString`
+ * or `decodedNumber`, so a row missing any one of them already throws, naming
+ * *which* — which is the more actionable message anyway. A count that can
+ * never fire is a line no test can turn red, and this package has enough of
+ * those recorded elsewhere without adding one.
  */
 function elevationRecordFrom(row: PersistedRoute): RouteElevationRecord | undefined {
-  const present = [
-    row.elevationDataset,
-    row.elevationResolution,
-    row.elevationInterval,
-    row.elevationMissing,
-  ].filter((field) => field !== undefined);
-  if (present.length === 0) {
+  const carriesNone =
+    row.elevationDataset === undefined &&
+    row.elevationResolution === undefined &&
+    row.elevationInterval === undefined &&
+    row.elevationMissing === undefined;
+  if (carriesNone) {
     return undefined;
-  }
-  if (present.length < 4) {
-    throw new StoreDecodeError(
-      `route.elevation: a partial elevation source — ${String(present.length)} of 4 fields present`,
-    );
   }
   return {
     dataset: decodedString('route.elevationDataset', row.elevationDataset),
