@@ -33,6 +33,31 @@ an iPhone**, and Chrome on Linux needs `chrome://flags/#enable-experimental-web-
 No browser can record in the background, so the tab has to stay open. Mobile and desktop clients are
 the answer to all of that, and they come later.
 
+### Planning a route
+
+The **Routes** page imports a route from a GPX file, and **Draw a route** builds one here: place
+waypoints in order and the roads between them are worked out for you. A leg you would rather draw
+yourself stays a straight line, and the page says which legs are which — a freehand leg's distance
+is a lower bound and nothing knows what surface it is.
+
+Two things are worth knowing before you rely on the numbers:
+
+- **Climbing is a computed opinion, and the page says whose.** It names the elevation dataset and
+  its resolution, and the figure is summed over a stated, even sampling interval — a route summed
+  from unevenly spaced samples reads much steeper than the same road summed properly, which is most
+  of why two apps disagree about the same hill. Where the dataset has no height for part of the
+  route, the profile shows the gap and says the climbing figure is **at least** that much rather
+  than presenting it as a measurement.
+- **Every control works from the keyboard.** Waypoints are a list you can select, nudge in four
+  directions and delete, not only pins to drag. Clearing asks first, undo covers everything
+  including the clear, and a half-drawn route survives closing the tab.
+
+> ⚠️ **There is no routing service configured yet, so the roads between your waypoints cannot be
+> worked out on this build.** Everything above is built and tested against a stand-in; what is
+> missing is a running engine, which is
+> [#53](https://github.com/openzigs/onyourleft/issues/53). The page says so rather than looking
+> broken.
+
 ### Bringing your history in, and taking it out
 
 The **Files** page imports FIT, GPX and TCX files and exports any ride on this device in the same

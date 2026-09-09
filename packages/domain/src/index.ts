@@ -371,6 +371,43 @@ export {
   routeProfile,
 } from './route/profile';
 
+// --- Routing (#70) -----------------------------------------------------------
+//
+// The engine-agnostic routing interface, and the one place an engine's numbers
+// become this program's numbers. Here rather than in a client because
+// ADR 0010 D-4 says why: nothing is linked over HTTP today, but "the interface
+// outlives the transport", and an Apache-2.0 leaf is where a permissive engine
+// could one day be compiled in. The HTTP adapter is in `apps/web`, and
+// `boundaries/dependencies` is what stops an engine's type reaching back here.
+
+export type { RoutingErrorCode } from './routing/errors';
+export { RoutingError } from './routing/errors';
+
+export type {
+  BicycleKind,
+  ElevationDataset,
+  HeightProfile,
+  HeightRequest,
+  HeightSample,
+  HillPreference,
+  RidingPreferences,
+  RoutedLeg,
+  RouteRequest,
+  RoutingProvider,
+  SurfaceKind,
+  SurfaceTolerance,
+  Waypoint,
+} from './routing/provider';
+
+export type { RawHeight, RawLeg, RawPosition } from './routing/validate';
+export {
+  checkedHeights,
+  checkedLeg,
+  MAXIMUM_LEG_POINTS,
+  MINIMUM_LEG_POINTS,
+  surfaceFrom,
+} from './routing/validate';
+
 // --- Driving a trainer from a route (#90) ------------------------------------
 //
 // The gradient setpoint driver: where the rider is on the route, what the

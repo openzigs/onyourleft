@@ -86,6 +86,11 @@ apps/                 AGPL-3.0-or-later, without exception
     src/recording/      the composition root: engine + checkpoints + recovery (#46)
     src/routes/         saved routes (#73): the store port, the edit decision and
                         its concurrency token, and the shared-route payload
+    src/routing/        planning a route (#70, #71, #72): the draft and the legs
+                        an edit makes stale, undo over whole drafts, the draft
+                        kept across a reload, and the elevation profile. The
+                        INTERFACE is in packages/domain; there is no engine
+                        adapter — CLAUDE.md section 4i says why
     src/ride/           the live ride screen's state machine and its panels (#49)
     src/shell/          the hash route table, the router hook and AppShell (#48)
     src/support/        browser-capability detection and its notice (#48)
@@ -97,6 +102,10 @@ apps/                 AGPL-3.0-or-later, without exception
 packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis
     recording/          the recording session state machine and the stream merge (#45)
+    routing/            the engine-agnostic routing interface (#70): the named
+                        product options a rider chooses, and the one place an
+                        engine's numbers are checked before anything believes
+                        them
     route/              the route profile (#89): elevation and gradient as a
                         function of distance, the three windows it is built
                         from, and the loop wrap
@@ -675,6 +684,34 @@ two-sample features along with them.
 between two flat stretches reads a few percent. That is the deliberate trade and the alternative is
 worse: a shorter baseline makes a 2 m elevation error worth 10 % of gradient, and #90 writes this
 number to a device that applies physical resistance to a person who is pedalling.
+
+### Route planning: an interface, a draft, and no engine
+
+[#70](https://github.com/openzigs/onyourleft/issues/70), [#71](https://github.com/openzigs/onyourleft/issues/71)
+and [#72](https://github.com/openzigs/onyourleft/issues/72) split across the licence boundary the way
+#39 and #40 do, and for a reason [ADR 0010](adr/0010-map-tiles-and-routing.md) D-4 states rather than
+one invented here.
+
+| Piece | Where | Why there |
+| --- | --- | --- |
+| `RoutingProvider`, the named riding preferences, the response validation | `packages/domain/src/routing/` | D-4: *"the interface outlives the transport… a permissive engine can be compiled in and a GPL one cannot."* An Apache-2.0 leaf is where that stays possible. Validation is here rather than in an adapter so the second engine #70 requires does not get a second, weaker copy of the rule |
+| The draft, undo, the reload, the profile, the screen | `apps/web/src/routing/`, `apps/web/src/views/RouteBuilderView.tsx` | Product decisions and a DOM |
+| The HTTP adapter | **nowhere** | Nothing is running. #53 stands Valhalla up; until it does, an adapter would be code a reviewer reads as evidence an engine was talked to |
+
+**Two things about the profile are worth finding here rather than in a diff.** The ascent, the
+despiking and the least-squares gradient are `routeProfile` from `packages/domain`, unchanged — a
+route drawn in the builder and one imported from a GPX file must not disagree about the same road,
+which is #73's own criterion. What is *not* shared is the void handling, and the two differ on
+purpose: `routeProfile` interpolates across a missing height, because for an imported ride a ramp
+between two known heights beats moving the geometry; #72 requires a *planned* route to render the
+hole as a hole and report its ascent as incomplete. So the interpolation still happens — a chart
+needs numbers — and `ElevationCoverage` records where, so the screen can say the total is a floor.
+
+And the elevation source is stored **with the route** and never substituted when absent. #72's
+reason is comparability: two routes computed from different DEMs must not be read as comparable, and
+a decoder that supplied a plausible default would make that undetectable. ADR 0010 D-5 adds a second
+reason that is not about data quality at all — the Copernicus notice travels with adapted data, so a
+dataset name that stopped at the screen would never reach the export.
 
 ### The route profile's first consumers, and how the trainer half is split
 

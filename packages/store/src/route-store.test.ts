@@ -13,6 +13,7 @@
  * value still in memory cannot serve it.
  */
 
+import { metres } from '@onyourleft/domain';
 import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -36,6 +37,7 @@ import { deleteActivityStore, openActivityStore } from './activity-store';
 import { StoreDecodeError, StoreReferentialError, StoreValidationError } from './errors';
 import { routeId } from './ids';
 import { fromPersistedRoute, toPersistedRoute } from './persisted';
+import type { RouteRecord } from './records';
 import { SCHEMA_VERSIONS, STORES_V6, TABLE } from './schema';
 
 let harness: StoreHarness;
@@ -175,6 +177,54 @@ describe('visibility — #73 criterion 4', () => {
     const beforeTheField: Record<string, unknown> = { ...row };
     delete beforeTheField['visibility'];
     expect(fromPersistedRoute(beforeTheField as unknown as typeof row).visibility).toBe('private');
+  });
+
+  it('round-trips the elevation source through a fresh handle', async () => {
+    // ⚠️ #72's first criterion is about the STORE, not the screen: "both the
+    // source name and its resolution are stored with the route". A field the
+    // screen computes and the store drops would satisfy every assertion a
+    // builder test could make and lose the thing that makes two routes
+    // comparable.
+    await seedAthletes(harness);
+    const route: RouteRecord = {
+      ...routeFor(ATHLETE_A),
+      elevation: {
+        dataset: 'Copernicus DEM GLO-30',
+        resolution: metres(30),
+        interval: metres(30),
+        missing: metres(0),
+      },
+    };
+    const read = await assertRouteRoundTrip(harness, route);
+    expect(read.elevation).toStrictEqual(route.elevation);
+  });
+
+  it('reads a route saved before the field existed as having no known source', () => {
+    // ⚠️ Absent means "nobody recorded a source", NOT "the default source".
+    // Substituting a plausible dataset here would destroy exactly the
+    // distinction #72 needs the field for — and it is why this field is read
+    // faithfully where `visibility` two tests down is substituted.
+    const row = toPersistedRoute(routeFor(ATHLETE_A));
+    expect(fromPersistedRoute(row).elevation).toBeUndefined();
+  });
+
+  it('refuses a half-written elevation source rather than inventing the rest', () => {
+    const row = toPersistedRoute({
+      ...routeFor(ATHLETE_A),
+      elevation: {
+        dataset: 'Copernicus DEM GLO-30',
+        resolution: metres(30),
+        interval: metres(30),
+        missing: metres(0),
+      },
+    });
+    const partial: Record<string, unknown> = { ...row };
+    delete partial['elevationResolution'];
+    // The message names WHICH field is missing, which is what a partial write
+    // needs said about it.
+    expect(() => fromPersistedRoute(partial as unknown as typeof row)).toThrow(
+      /route\.elevationResolution/,
+    );
   });
 
   it('still refuses a value that is present and unrecognised', () => {

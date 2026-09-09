@@ -12,6 +12,7 @@ import { PUBLIC_ROUTE_WARNING } from '../routes/share';
 import { exportedFrom, ROUTE_FILE_FORMATS, type RouteFileFormat } from '../routes/export';
 import type { DownloadableFile } from '../transfer/store-port';
 import { ROUTE_LIST_LIMIT, type RoutePort } from '../routes/store-port';
+import { hrefFor, ROUTE_BUILDER_ROUTE } from '../shell/routes';
 
 /**
  * Routes (#73) — the ones this device holds, and importing one from a file.
@@ -39,10 +40,13 @@ import { ROUTE_LIST_LIMIT, type RoutePort } from '../routes/store-port';
  * **Colour carries nothing.** A route's visibility is a word in its own cell,
  * for `AnalysisView.tsx`'s reason.
  *
- * ⚠️ **There is no map and no drawing canvas here.** #71 owns the canvas and
- * #63's map needs a published tile archive (#53) that does not exist yet, so a
- * route is a name, a distance, a climb and a visibility. When those land this
- * screen is where they go.
+ * ⚠️ **There is no map here, and the drawing canvas is its own screen.** #71's
+ * canvas is `RouteBuilderView` at `/routes/new`, linked from the top of this
+ * one — it is a screenful of controls in its own right and folding it in would
+ * make this page two things. #63's map still needs a published tile archive
+ * (#53) that does not exist yet, so a saved route here is a name, a distance, a
+ * climb and a visibility. ⚠️ A reviewer who remembers this paragraph saying
+ * "no drawing canvas" is reading the old file.
  */
 
 /** One text field of a submitted form. See `SegmentsView.tsx` for why this narrows. */
@@ -254,6 +258,12 @@ export function RoutesView({ port, now, save }: RoutesViewProps): JSX.Element {
 
   return (
     <section>
+      <h2>Draw a route</h2>
+      <p>
+        <a href={hrefFor(ROUTE_BUILDER_ROUTE)}>Draw a route on this device</a> — place waypoints and
+        have the roads between them worked out. A half-drawn route survives closing the tab.
+      </p>
+
       <h2>Import a route</h2>
       <p>
         A GPX file from a route planner. The file is read on this device and never sent anywhere.
