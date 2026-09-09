@@ -81,7 +81,10 @@ import {
   type Recorder,
   type RecorderStorageState,
   type RecordingCheckpointStore,
+  listRecoverableRecordings,
+  recoverRecorder,
 } from '../recording/recorder';
+import { recoverableRides, type RecoverableRide } from '../recording/recovery';
 import { rideToSave, saveFinishedRide, type RideSaveStore } from '../recording/finish';
 
 import {
@@ -221,6 +224,14 @@ export interface RideSnapshot {
   readonly saveError: string | undefined;
   /** The activity a finished ride became, so a screen can link to it. */
   readonly savedActivityId: ActivityId | undefined;
+  /**
+   * Rides this device is still holding — #212.
+   *
+   * Empty while riding, and never includes the recording in progress. See
+   * `recording/recovery.ts` for why a `stopped` one is offered different
+   * controls from an interrupted one.
+   */
+  readonly recoverable: readonly RecoverableRide[];
   /** The last pairing attempt's failure, in words a rider can act on. */
   readonly pairingError: string | undefined;
   /** How many more devices this transport will connect. */
@@ -311,6 +322,18 @@ export interface RideController {
    * trainer or control has not been granted; the screen says which.
    */
   startWorkout(workout: WorkoutRecord, thresholdPower: Watts): boolean;
+
+  /**
+   * Re-read the rides this device is still holding — #212. Call it on mount
+   * and after anything that could change the list.
+   */
+  refreshRecoverable(): Promise<void>;
+  /** Adopt an interrupted recording, paused, ready to resume. `false` if it is gone. */
+  continueRecovered(id: RecordingSessionId): Promise<boolean>;
+  /** Save what survived of one, through the same path a finished ride uses. */
+  saveRecovered(id: RecordingSessionId): Promise<RideSaveState>;
+  /** Remove one from the device. `false` leaves it on screen rather than lying. */
+  discardRecovered(id: RecordingSessionId): Promise<boolean>;
   /** End the workout and release the trainer. The recording is untouched. */
   endWorkout(): void;
   requestTrainerControl(): Promise<void>;
@@ -352,6 +375,7 @@ export function createRideController(options: RideControllerOptions): RideContro
   let saveState: RideSaveState = 'unavailable';
   let saveError: string | undefined;
   let savedActivityId: ActivityId | undefined;
+  let recoverable: readonly RecoverableRide[] = [];
   let phase: RidePhase = 'idle';
   let stopArmed = false;
   let pairingError: string | undefined;
@@ -435,6 +459,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       saveState,
       saveError,
       savedActivityId,
+      recoverable,
       pairingError,
       connectionsRemaining: Math.max(
         0,
@@ -607,9 +632,11 @@ export function createRideController(options: RideControllerOptions): RideContro
    * ⚠️ **Never throws.** `confirmStop` awaits it, and a rejection there would
    * leave the ride stopped on screen with nothing saying why.
    */
-  const saveTheRide = async (workoutName: string | undefined): Promise<void> => {
+  const saveTheRide = async (
+    current: Recorder | undefined,
+    workoutName: string | undefined,
+  ): Promise<void> => {
     const port = options.rideSave;
-    const current = recorder;
     if (port === undefined || current === undefined) {
       return;
     }
@@ -641,6 +668,35 @@ export function createRideController(options: RideControllerOptions): RideContro
       await current.discard();
     }
     changed();
+  };
+
+  /**
+   * Re-read what this device is still holding — #212.
+   *
+   * ⚠️ **A no-op while riding.** The offer is only meaningful on an idle
+   * screen, and `recoverableRides` excludes the session in progress anyway;
+   * doing both means neither alone is load-bearing.
+   */
+  const refreshRecoverable = async (): Promise<void> => {
+    if (phase === 'recording' || phase === 'paused') {
+      return;
+    }
+    try {
+      const rows = await listRecoverableRecordings(store, athleteId);
+      recoverable = recoverableRides(rows, { excluding: recorder?.sessionId });
+    } catch {
+      // A store that cannot be read is what "offline" looks like on this
+      // device. Offering nothing is honest; throwing out of a refresh the
+      // screen calls on mount is not.
+      recoverable = [];
+    }
+    changed();
+  };
+
+  /** Rebuild a recorder from disk, or `undefined` when there is no such recording. */
+  const recoverOne = async (id: RecordingSessionId): Promise<Recorder | undefined> => {
+    const found = await recoverRecorder({ store, athleteId, sessionId: id });
+    return found?.recorder;
   };
 
   // --- The recorder ---------------------------------------------------------
@@ -859,7 +915,77 @@ export function createRideController(options: RideControllerOptions): RideContro
       await stopTrainer();
       await recording().stop(at);
       changed();
-      await saveTheRide(ridden);
+      await saveTheRide(recorder, ridden);
+    },
+
+    /** Re-read the rides this device is still holding — #212. */
+    refreshRecoverable,
+
+    /**
+     * Adopt an interrupted recording and carry on riding it.
+     *
+     * ⚠️ It comes back **paused**, with the dead time recorded as an automatic
+     * pause — the rider was not pedalling while the tab was gone, so that is
+     * not moving time. The screen's Resume control continues into the slots
+     * after the gap, and the gap stays a gap.
+     */
+    async continueRecovered(id: RecordingSessionId): Promise<boolean> {
+      if (phase !== 'idle') {
+        return false;
+      }
+      const found = await recoverOne(id);
+      if (found === undefined) {
+        await refreshRecoverable();
+        return false;
+      }
+      recorder = found;
+      phase = 'paused';
+      clock = now();
+      saveState = 'unavailable';
+      saveError = undefined;
+      savedActivityId = undefined;
+      recoverable = [];
+      changed();
+      return true;
+    },
+
+    /**
+     * Save what survived, without continuing.
+     *
+     * ⚠️ Goes through **the same `saveTheRide`** a normally finished ride does,
+     * which is the point: a recovered ride lands in the library with the same
+     * shape, and there are not two ways to save that can drift. It carries no
+     * workout name, because nothing on disk records which workout was ridden.
+     */
+    async saveRecovered(id: RecordingSessionId): Promise<RideSaveState> {
+      if (phase !== 'idle') {
+        return saveState;
+      }
+      const found = await recoverOne(id);
+      if (found === undefined) {
+        await refreshRecoverable();
+        return 'failed';
+      }
+      await saveTheRide(found, undefined);
+      await refreshRecoverable();
+      return saveState;
+    },
+
+    /**
+     * Throw one away.
+     *
+     * @returns whether it is gone. A `false` leaves the row on screen rather
+     * than showing a rider a list the ride is still in — `Recorder.discard`
+     * documents why that distinction is worth returning.
+     */
+    async discardRecovered(id: RecordingSessionId): Promise<boolean> {
+      if (phase !== 'idle') {
+        return false;
+      }
+      const found = await recoverOne(id);
+      const gone = found === undefined ? true : await found.discard();
+      await refreshRecoverable();
+      return gone;
     },
 
     startWorkout(record: WorkoutRecord, thresholdPower: Watts): boolean {

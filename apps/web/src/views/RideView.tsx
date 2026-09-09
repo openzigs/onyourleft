@@ -129,6 +129,12 @@ function LiveRide({
   const snapshot = useRideSnapshot(controller);
   const thresholdPower = useThresholdPower(analysis);
 
+  // ⚠️ On mount, because #212's whole point is that a rider who lost a tab is
+  // *told* — the recording was always on the device and nothing looked for it.
+  useEffect(() => {
+    void controller.refreshRecoverable();
+  }, [controller]);
+
   return (
     <>
       <h2>Live</h2>
@@ -140,6 +146,7 @@ function LiveRide({
 
       <RideControls controller={controller} snapshot={snapshot} />
       <StorageNotice snapshot={snapshot} />
+      <RecoveryOffer controller={controller} snapshot={snapshot} />
 
       <h2>Trainer</h2>
       <TrainerPanel
@@ -211,6 +218,72 @@ function useThresholdPower(analysis: AnalysisPort | undefined): Watts | undefine
     };
   }, [analysis]);
   return threshold;
+}
+
+/**
+ * The rides this device is still holding — #212.
+ *
+ * ⚠️ **Renders nothing when there is nothing**, which is the normal case and
+ * the reason this is a section rather than a permanent panel: a heading that
+ * says "no interrupted rides" on every visit trains a rider to stop reading the
+ * one place that will ever matter to them.
+ *
+ * The two kinds are offered different controls — `recording/recovery.ts` says
+ * why a ride the rider already stopped is not offered "continue".
+ */
+function RecoveryOffer({
+  controller,
+  snapshot,
+}: {
+  readonly controller: RideController;
+  readonly snapshot: RideSnapshot;
+}): JSX.Element | null {
+  if (snapshot.recoverable.length === 0) {
+    return null;
+  }
+  return (
+    <section>
+      <h3>Rides still on this device</h3>
+      <p>
+        A ride is written to this device as it happens, so a closed tab does not lose it. These are
+        the ones that were never added to your activities.
+      </p>
+      <ul>
+        {snapshot.recoverable.map((ride) => (
+          <li key={ride.id}>
+            <p>
+              {ride.kind === 'interrupted'
+                ? `An interrupted ride, up to ${ride.spanned} long.`
+                : `A finished ride, up to ${ride.spanned} long, that could not be saved.`}
+            </p>
+            {ride.canContinue ? (
+              <Button
+                onClick={() => {
+                  void controller.continueRecovered(ride.id);
+                }}
+              >
+                Continue this ride
+              </Button>
+            ) : null}
+            <Button
+              onClick={() => {
+                void controller.saveRecovered(ride.id);
+              }}
+            >
+              Save this ride
+            </Button>
+            <Button
+              onClick={() => {
+                void controller.discardRecovered(ride.id);
+              }}
+            >
+              Discard this ride
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
 function RideControls({
