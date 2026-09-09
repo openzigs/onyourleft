@@ -61,6 +61,12 @@ apps/                 AGPL-3.0-or-later, without exception
                         the edit decision and its concurrency token, what a
                         shared copy of a route contains, and the export a rider
                         copies to a head unit (#74)
+    src/routing/        planning a route (#70, #71, #72) — the draft and the
+                        legs an edit makes stale, undo over whole drafts, what
+                        a half-drawn route keeps across a reload, the elevation
+                        profile and where its numbers came from. ⚠️ The
+                        RoutingProvider INTERFACE is in packages/domain; there
+                        is no engine adapter here and §4i says why
     src/segments/       the segment store port and the create form's pure core (#64),
                         and the resumable matcher sweep over the library (#66)
     src/shell/          the hash route table, the router hook and AppShell (#48)
@@ -115,6 +121,11 @@ packages/             Apache-2.0, without exception
     route/              the route profile (#89) — elevation and gradient as a
                         function of distance, the three windows it is built
                         from, and the loop wrap
+    routing/            the engine-agnostic routing interface (#70) — the
+                        named product options a rider chooses, and the one
+                        place an engine's numbers are checked before anything
+                        believes them. Here rather than in a client because
+                        ADR 0010 D-4 says the interface outlives the transport
     pacer/              the bot pacer (#92) — the pacing rule at a fixed 75 kg,
                         and the gap to the rider as two unwrapped odometers
     trainer/            the gradient setpoint driver (#90) — where the rider is
@@ -1114,6 +1125,49 @@ separately rather than being subsumed here.
 not. Its own suite is `bash scripts/check-dependency-licences.test.sh` — 49 cases, and every policy
 branch has a case that goes **red** as well as one that passes.
 
+### 4i. Route planning has an interface and no engine, deliberately
+
+[#70](https://github.com/openzigs/onyourleft/issues/70)'s `RoutingProvider` is in
+**`packages/domain/src/routing/`** and there is **no HTTP adapter anywhere**. Both halves of that
+are decisions, and the second is the one that looks like an omission.
+
+**Why the interface is in the Apache-2.0 leaf.**
+[ADR 0010](docs/adr/0010-map-tiles-and-routing.md) D-4 chose Valhalla (MIT), self-hosted, reached
+**over HTTP as a separate process** — so nothing is linked and no engine's licence attaches to this
+codebase at all. What decides where the *interface* lives is D-4's other argument: *"the interface
+outlives the transport… the moment anyone wants an offline or in-browser route, a permissive engine
+can be compiled in and a GPL one cannot."* An Apache-2.0 leaf is where that door stays open.
+
+⚠️ **#70's "no engine-specific type appears above the interface, proved by a lint-enforced import
+boundary" is discharged by a rule that already existed.** `boundaries/dependencies` forbids any
+import from `packages/*` into `apps/*` in both spellings (§4d), so a Valhalla type reaching
+`packages/domain/src/routing/` is a lint error rather than a review note. `packages/domain`'s own
+`lib: ["ES2024"]` / `types: []` closure is the second half: that file could not name `fetch`,
+`Response` or `URL` even if somebody wanted it to.
+
+⚠️ **Why there is no adapter, and why writing one would be worse than not.** Nothing is running.
+Standing up Valhalla is [#53](https://github.com/openzigs/onyourleft/issues/53), and #70's own
+criteria — *"the same test suite passes against two different engines"* and *"repointed from a
+bootstrap endpoint to a self-hosted instance"* — cannot be met without one. An adapter written
+against an API nobody in the loop can call is §4a's *"a documented command nobody has run is the
+most expensive kind of wrong"* in a new place, and it is **worse than absent**: a reviewer reads
+request-shaping code as evidence the engine was talked to. `apps/web/src/routing/testing.ts` says
+this at the point somebody would go looking, and `routing/preferences.ts` carries the named-option
+→ costing mapping as a table so the adapter starts from ADR 0010's recorded read rather than a
+guess.
+
+**What is real, and what the tests therefore prove.** The interface; the validation every engine's
+numbers must pass; the draft, its undo and its stale-leg accounting; the elevation profile and its
+coverage; the screen. #71's two hardest criteria are about *how many times* an engine was asked and
+*which legs* — a real engine answering correctly proves neither, which is why the double counts its
+calls and a test reads the count.
+
+⚠️ **`packages/domain` now exports two things called an elevation source and they are not the same.**
+`segment/segment.ts`'s `ElevationSource` is a three-value category (`'device' | 'dem' | 'none'`);
+`routing/provider.ts`'s **`ElevationDataset`** is a named dataset and its grid resolution, which is
+what #72 requires a route to store. The second is not called `ElevationSource` because the first
+already is — a collision the typechecker caught rather than a naming preference.
+
 ### 4h. Where the trainer game lives, and why it is not `apps/mobile`
 
 [#85](https://github.com/openzigs/onyourleft/issues/85)'s renderer (#91), ghost (#93) and HUD (#94)
@@ -1688,6 +1742,12 @@ top of an issue **supersedes its body**.
 | What happens when a rider passes the end of a loop, and when a route is refused as one | `packages/domain/src/route/profile.ts` §`distanceOnRoute`, §`LOOP_CLOSURE_METRES` |
 | Which GPX element a planned route is read from, and which one wins when a file has both | `packages/fit/src/xml/gpx.ts` §`decodeGpx`, `packages/fit/src/route/gpx-route.ts` |
 | Why a saved route stores its whole profile where a ride stores half a load | `packages/store/src/records.ts` §`RouteRecord` |
+| Where a route's heights came from, and why an absent source is never substituted | `packages/store/src/records.ts` §`RouteRecord.elevation`, `apps/web/src/routing/elevation.ts` |
+| Why only two legs are re-routed when a waypoint moves, and what a change-detector gets wrong | `apps/web/src/routing/draft.ts` §`moveWaypoint`, §`insertWaypoint` |
+| Why undo stores whole drafts, and why an engine's answer is not a history step | `apps/web/src/routing/history.ts` §`record`, §`settle` |
+| Why a route being drawn is kept in `localStorage` and a recording is not | `apps/web/src/routing/draft-storage.ts` |
+| Why the drawing canvas is a list of controls before it is a map | `apps/web/src/views/RouteBuilderView.tsx`, §4i |
+| Why there is a routing interface and no routing engine | §4i, [ADR 0010](docs/adr/0010-map-tiles-and-routing.md) D-4, `apps/web/src/routing/testing.ts` |
 | Why a route exports as a `<trk>` rather than a `<rte>`, and what a head unit has never been asked | [`packages/fit/README.md`](packages/fit/README.md) §8, `packages/fit/src/route/gpx-course.ts` |
 | Why an exported route carries an OSM notice even when nothing establishes it came from OSM | `packages/fit/src/route/course.ts` §Attribution, [ADR 0012](docs/adr/0012-data-licence.md) |
 | Why a long route is warned about rather than simplified, and where the warning belongs | `packages/fit/src/route/course.ts`, `apps/web/src/routes/export.ts` §`LONG_ROUTE_SAMPLES` |
