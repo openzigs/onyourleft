@@ -20,8 +20,17 @@
  *
  * ⚠️ **`initialize()` is where a permission denial surfaces on Android**, not
  * `requestDevice()`. The plugin asks for the runtime permissions during
- * initialisation, so a rider who denies them gets a rejection here — which is
- * why `availability()` calls it rather than assuming it has run.
+ * initialisation, so a rider who denies them gets a rejection here.
+ *
+ * ⚠️ **It is also a hard precondition for every other method on this port**, and
+ * that used to be written down nowhere: the plugin's own `assertBluetoothAdapter`
+ * rejects each of them with `Bluetooth LE not initialized.` until the stack is
+ * up. This paragraph used to end *"which is why `availability()` calls it rather
+ * than assuming it has run"* — and `availability()` was the ONLY caller while
+ * nothing in `apps/web` called `availability()`, so on a device every pairing
+ * attempt reached `requestDevice()` with the stack down and no sensor could be
+ * paired at all (#230). `transport.ts`'s `ensureInitialized` is where it is
+ * called from now: once per transport, on every path that reaches the plugin.
  */
 
 /** A device as the plugin describes it. */

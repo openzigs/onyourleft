@@ -151,6 +151,51 @@ export function createCapacitorTransport(options: CapacitorTransportOptions): Se
   /** Plugin ids seen this session, so `knownDevices` has something to ask for. */
   const seen = new Set<string>();
 
+  /**
+   * The in-flight or settled `initialize()`, or `undefined` when it must be
+   * asked again. **Once per transport, not once per call** — #230.
+   */
+  let initializing: Promise<void> | undefined;
+
+  /**
+   * Bring the stack up, at most once, before anything that needs it.
+   *
+   * ⚠️ **#230: this used to exist only inside `availability()`, and nothing in
+   * `apps/web` calls `availability()`.** So `discover()` reached
+   * `requestDevice()` with the plugin uninitialised on every single pairing
+   * attempt, the plugin rejected with `Bluetooth LE not initialized.`, and no
+   * device could be paired on Android at all. Four gates were green over it:
+   * the scripted double allowed the out-of-order call, `initialize` was on the
+   * port and implemented, the build succeeded, and the browser gate never
+   * constructs this transport.
+   *
+   * **The chosen approach is once per transport, memoised on the promise**
+   * rather than a flag set afterwards, so two calls racing — a rider pressing
+   * Pair twice, or a screen pairing a strap while a trainer is being adopted —
+   * share one initialisation instead of running two. The plugin's own
+   * `initialize()` is idempotent, but a second one would re-ask the platform
+   * and there is no reason to find out how each Android version answers that
+   * while a link is up.
+   *
+   * ⚠️ **A FAILED initialisation is not memoised.** The commonest failure here
+   * is a permission the rider has not granted yet; caching the rejection would
+   * mean that granting it and pressing Pair again did nothing until the app was
+   * restarted, which is the "explanatory screen with a Try again that cannot
+   * work" #87 criterion 8 exists to prevent.
+   */
+  const ensureInitialized = async (): Promise<void> => {
+    initializing ??= plugin.initialize();
+    try {
+      await initializing;
+    } catch (error) {
+      initializing = undefined;
+      // Mapped HERE rather than at each call site, so the permission reading
+      // `availability()` has always done cannot be lost by a second caller
+      // forgetting it — #230's third criterion.
+      throw initializationError(error);
+    }
+  };
+
   const linkFor = (id: DeviceId): Link => {
     const link = links.get(id);
     if (link === undefined) {
@@ -227,12 +272,15 @@ export function createCapacitorTransport(options: CapacitorTransportOptions): Se
     async availability(): Promise<TransportAvailability> {
       try {
         // ⚠️ This is the call that prompts on Android, so a denial surfaces
-        // here and nowhere else. Asking `isEnabled()` first would report
+        // here — and, since #230, on the pairing path too, which is the one a
+        // rider actually reaches. Asking `isEnabled()` first would report
         // `adapter-unavailable` for a rider who had simply not been asked yet,
         // which is the wrong screen and the wrong advice.
-        await plugin.initialize();
+        await ensureInitialized();
       } catch (error) {
-        return { kind: deniedByPermission(error) ? 'not-permitted' : 'unsupported' };
+        // One classifier, two renderings. `ensureInitialized` has already
+        // decided what the failure was; this only says which screen it means.
+        return { kind: isSensorError(error, 'not-permitted') ? 'not-permitted' : 'unsupported' };
       }
       try {
         return (await plugin.isEnabled()) ? { kind: 'available' } : { kind: 'adapter-unavailable' };
@@ -242,6 +290,12 @@ export function createCapacitorTransport(options: CapacitorTransportOptions): Se
     },
 
     async discover(request: DiscoveryRequest): Promise<SensorDevice> {
+      // ⚠️ Its own `try`, and before the chooser. An initialisation failure is
+      // not a chooser outcome, and folding the two together is how a rider who
+      // had denied a permission was told they had cancelled a dialog that never
+      // opened.
+      await ensureInitialized();
+
       const services = servicesFor(request.capabilities);
       let found: PluginDevice;
       try {
@@ -254,11 +308,7 @@ export function createCapacitorTransport(options: CapacitorTransportOptions): Se
           ...(request.namePrefix === undefined ? {} : { namePrefix: request.namePrefix }),
         });
       } catch (error) {
-        // Cancelling the chooser is the ordinary outcome of pressing cancel and
-        // must not be rendered as a fault.
-        throw isSensorError(error)
-          ? error
-          : new SensorError('no-device-selected', 'no device was chosen', { cause: error });
+        throw discoveryError(error);
       }
       const device = adopt(found, request.capabilities);
       seen.add(found.deviceId);
@@ -272,8 +322,20 @@ export function createCapacitorTransport(options: CapacitorTransportOptions): Se
 
     async knownDevices(): Promise<readonly SensorDevice[]> {
       if (seen.size === 0) {
+        // Nothing to ask the plugin, so nothing to initialise for. The stack is
+        // brought up by the call that needs it and not by one that does not.
         return [];
       }
+      // ⚠️ No `ensureInitialized()` here, and that is a decision rather than an
+      // oversight. `seen` is filled by `discover` alone, which initialises
+      // before it fills it, so a guard on this line is unreachable — and an
+      // unreachable guard is a line no mutation can turn red, which CLAUDE.md
+      // §5 treats as worse than absent. **The day `seen` is seeded from
+      // storage** — which is what `canReconnectWithoutUserGesture` promises a
+      // rider after an app restart — this becomes the session's first plugin
+      // call and needs the guard, with a test that fails without it. #230 is
+      // precisely the bug of leaving that assumption implicit, so it is written
+      // down here instead.
       const found = await plugin.getDevices([...seen]);
       return found.map((one) => adopt(one, []));
     },
@@ -534,6 +596,79 @@ function deniedByPermission(error: unknown): boolean {
   }
   const message = error instanceof Error ? error.message.toLowerCase() : '';
   return message.includes('permission') || message.includes('denied');
+}
+
+/**
+ * Why `initialize()` failed, in this program's vocabulary.
+ *
+ * Two outcomes, and the split is `deniedByPermission`'s — the same predicate
+ * `availability()` has always used, called from one place so that the pairing
+ * path and the availability path cannot drift apart. `not-permitted` is the
+ * recoverable one and is what `permissionNotice` turns into an explanatory
+ * screen with a settings button; `transport-unsupported` is the one that offers
+ * no retry, and it is the conservative default for the same reason
+ * `deniedByPermission` documents.
+ *
+ * ⚠️ The messages are **ours**. `SensorError`'s own rule is that a platform
+ * message never reaches an athlete — a BLE error can name a device address or a
+ * neighbour's advertised device name — so the plugin's text stays on `cause`,
+ * where a bug report can reach it and a screen cannot.
+ */
+function initializationError(error: unknown): SensorError {
+  if (isSensorError(error)) {
+    return error;
+  }
+  return deniedByPermission(error)
+    ? new SensorError('not-permitted', 'Bluetooth permission has not been granted', {
+        cause: error,
+      })
+    : new SensorError('transport-unsupported', 'Bluetooth could not be started on this device', {
+        cause: error,
+      });
+}
+
+/**
+ * Why `requestDevice()` failed.
+ *
+ * ⚠️ **#230: this used to be one line that called everything
+ * `no-device-selected`.** A rider whose permission was denied, or whose stack
+ * was never initialised, was told *"no device was chosen"* — that they had
+ * declined a chooser which never appeared. The comment above that line was
+ * right about cancellation and the code implemented something else.
+ *
+ * | Plugin rejection | Meaning | Code |
+ * |---|---|---|
+ * | `requestDevice cancelled.` | the rider dismissed the chooser | `no-device-selected` |
+ * | `No device found.` | the scan ended with nothing | `no-device-selected` |
+ * | anything naming a permission or a denial | not asked, or refused | `not-permitted` |
+ * | anything else | reported as itself, retryable | `adapter-unavailable` |
+ *
+ * ⚠️ **Matched on the message, because the plugin's Android bridge rejects with
+ * a plain `Error` and no code** — the same weak test, and the same admission,
+ * as `deniedByPermission` above. The strings are the plugin's own
+ * (`DeviceScanner.kt`'s cancel handlers, `BluetoothLe.kt`'s empty-scan branch).
+ * What matters is the DIRECTION of the default: an unrecognised failure is now
+ * a fault the rider can retry rather than an accusation that they pressed
+ * cancel. If the plugin ever reworded its cancellation, the cost is a cancel
+ * reported as a retryable fault — annoying, and the opposite of the failure
+ * that hid a broken product for a whole release.
+ */
+function discoveryError(error: unknown): SensorError {
+  if (isSensorError(error)) {
+    return error;
+  }
+  const message = error instanceof Error ? error.message.toLowerCase() : '';
+  if (message.includes('cancel') || message.includes('no device found')) {
+    return new SensorError('no-device-selected', 'no device was chosen', { cause: error });
+  }
+  if (deniedByPermission(error)) {
+    return new SensorError('not-permitted', 'Bluetooth permission has not been granted', {
+      cause: error,
+    });
+  }
+  return new SensorError('adapter-unavailable', 'the device chooser could not be opened', {
+    cause: error,
+  });
 }
 
 /** The clock the shell uses. Separate so a test never has to stub a global. */

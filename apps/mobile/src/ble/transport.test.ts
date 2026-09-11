@@ -5,6 +5,7 @@ import {
   ANDROID_BLE,
   isSensorError,
   MAX_RECOMMENDED_CONCURRENT_CONNECTIONS,
+  SensorError,
   type MeasurementCapability,
   type SensorTransport,
 } from '@onyourleft/sensors';
@@ -18,9 +19,18 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import { createCapacitorTransport } from './transport';
-import { SCRIPTED_DEVICE, scriptedPort, type ScriptedStack } from './testing';
+import {
+  NOT_INITIALIZED_MESSAGE,
+  SCRIPTED_DEVICE,
+  scriptedPort,
+  type ScriptedPort,
+  type ScriptedStack,
+} from './testing';
 
 const AT = unixSeconds(1_757_000_000);
+
+/** A payload for the write guards below, whose bytes nothing reads. */
+const EMPTY_VALUE = new DataView(new ArrayBuffer(1));
 
 const POWER_SERVICE = canonicalUuid(0x1818);
 const POWER_CHARACTERISTIC = canonicalUuid(0x2a63);
@@ -142,7 +152,9 @@ describe('discovery', () => {
   });
 
   it('reports a cancelled chooser as no-device-selected, never as a fault', async () => {
-    const { transport } = build({ chooserRejectsWith: new Error('userCancelled') });
+    // The plugin's own wording, from `DeviceScanner.kt`'s two cancel handlers,
+    // rather than a paraphrase: this is the string the mapping actually meets.
+    const { transport } = build({ chooserRejectsWith: new Error('requestDevice cancelled.') });
     await expect(transport.discover({ capabilities: [] })).rejects.toMatchObject({
       code: 'no-device-selected',
     });
@@ -154,6 +166,236 @@ describe('discovery', () => {
     expect(device.identity.transport).toBe(ANDROID_BLE);
     expect(device.identity.id).toBe(SCRIPTED_DEVICE.deviceId);
     expect(device.name).toBe(SCRIPTED_DEVICE.name);
+  });
+});
+
+describe('the stack is brought up before the first call that needs it (#230)', () => {
+  // ⚠️ The bug this file could not see. `initialize()` lived in `availability()`
+  // alone and nothing in `apps/web` calls `availability()`, so on a real phone
+  // every `discover()` reached `requestDevice()` with the plugin uninitialised
+  // and no sensor could be paired at all. The suite stayed green because the
+  // double allowed the out-of-order call; `testing.ts` now refuses it, which is
+  // what turns the paragraphs below into assertions.
+
+  it('initialises BEFORE it opens the chooser, on the path pressing Pair takes', async () => {
+    const { plugin, transport } = build();
+    await transport.discover({ capabilities: [] });
+    expect(plugin.calls).toEqual(['initialize', 'requestDevice']);
+  });
+
+  it('does not initialise a second time when a second sensor is paired', async () => {
+    // The idempotency criterion: once per transport. A second initialise would
+    // re-ask the platform while a link is already up.
+    const { plugin, transport } = build();
+    await transport.discover({ capabilities: [] });
+    await transport.discover({ capabilities: [] });
+    expect(plugin.calls.filter((call) => call === 'initialize')).toHaveLength(1);
+  });
+
+  it('initialises once when two pairings race, because the PROMISE is what is kept', async () => {
+    // A flag set after the await would let two concurrent callers both find it
+    // false and both initialise. Memoising the promise is what makes this one.
+    const { plugin, transport } = build();
+    await Promise.all([
+      transport.discover({ capabilities: [] }),
+      transport.discover({ capabilities: [] }),
+    ]);
+    expect(plugin.calls.filter((call) => call === 'initialize')).toHaveLength(1);
+  });
+
+  it('initialises before it asks the plugin for remembered devices', async () => {
+    const { plugin, transport } = build();
+    await transport.discover({ capabilities: [] });
+    await transport.knownDevices();
+    expect(plugin.calls[0]).toBe('initialize');
+    expect(plugin.calls.filter((call) => call === 'initialize')).toHaveLength(1);
+  });
+
+  it('asks the plugin nothing at all when there is nothing to ask it for', async () => {
+    // `knownDevices` with an empty set brings no stack up: the call that needs
+    // the plugin initialises, and one that does not, does not.
+    const { plugin, transport } = build();
+    await expect(transport.knownDevices()).resolves.toEqual([]);
+    expect(plugin.calls).toEqual([]);
+  });
+
+  it('tries again after a failed initialisation, so a granted permission can be retried', async () => {
+    // ⚠️ A memoised REJECTION would mean that granting the permission and
+    // pressing Pair again did nothing until the app was restarted — which is
+    // the "Try again that cannot work" #87 criterion 8 exists to prevent.
+    const plugin = scriptedPort();
+    let denials = 1;
+    const denyingOnce = {
+      ...plugin,
+      initialize: async (): Promise<void> => {
+        if (denials > 0) {
+          denials -= 1;
+          return Promise.reject(new Error('Location permission was denied'));
+        }
+        return plugin.initialize();
+      },
+    };
+    const transport: SensorTransport = createCapacitorTransport({
+      plugin: denyingOnce,
+      profiles: [compositeProfile],
+      now: () => AT,
+    });
+
+    await expect(transport.discover({ capabilities: [] })).rejects.toMatchObject({
+      code: 'not-permitted',
+    });
+    await expect(transport.discover({ capabilities: [] })).resolves.toMatchObject({
+      identity: { id: SCRIPTED_DEVICE.deviceId },
+    });
+  });
+
+  it('reports a permission denial at PAIRING as not-permitted, not as a cancelled chooser', async () => {
+    // The rider-facing half of the bug: an initialisation failure was rendered
+    // as "no device was chosen", telling a rider they had declined a chooser
+    // that never appeared.
+    const { transport } = build({
+      initializeRejectsWith: new Error('Location permission was denied'),
+    });
+    await expect(transport.discover({ capabilities: [] })).rejects.toMatchObject({
+      code: 'not-permitted',
+    });
+  });
+
+  it('reports an unplaceable initialisation failure as transport-unsupported', async () => {
+    const { transport } = build({ initializeRejectsWith: new Error('BLE stack unavailable') });
+    await expect(transport.discover({ capabilities: [] })).rejects.toMatchObject({
+      code: 'transport-unsupported',
+    });
+  });
+
+  it('reads one initialisation failure the same way on both paths', async () => {
+    // #230 criterion 3: the permission mapping `availability()` has always done
+    // must not be lost by the pairing path having its own copy of it. One
+    // classifier, two renderings, asserted together.
+    const denial = { initializeRejectsWith: new Error('Location permission was denied') };
+    await expect(build(denial).transport.availability()).resolves.toEqual({
+      kind: 'not-permitted',
+    });
+    await expect(build(denial).transport.discover({ capabilities: [] })).rejects.toMatchObject({
+      code: 'not-permitted',
+    });
+  });
+
+  it('keeps the plugin’s own words out of what a rider is shown', async () => {
+    // SECURITY.md: a platform BLE message can name a device address or a
+    // neighbour's advertised name, and `pairingError` in `apps/web` renders the
+    // SensorError's message verbatim. The original stays on `cause`.
+    const platform = new Error('Location permission was denied for 64:32:A8:11:22:33');
+    const { transport } = build({ initializeRejectsWith: platform });
+    await expect(transport.discover({ capabilities: [] })).rejects.toMatchObject({
+      message: 'Bluetooth permission has not been granted',
+      cause: platform,
+    });
+  });
+});
+
+describe('the scripted plugin enforces the ordering the real one has (#230)', () => {
+  // The fixture change IS the fix here, not an incidental: with the double
+  // permitting a chooser before initialisation, every assertion above could be
+  // green against a product that cannot pair with anything.
+
+  it('refuses requestDevice before initialize, exactly as the device did', async () => {
+    const plugin = scriptedPort();
+    await expect(plugin.requestDevice({ services: [], optionalServices: [] })).rejects.toThrowError(
+      NOT_INITIALIZED_MESSAGE,
+    );
+  });
+
+  it('leaves the stack down when initialize itself was refused', async () => {
+    const plugin = scriptedPort({ initializeRejectsWith: new Error('denied') });
+    await expect(plugin.initialize()).rejects.toThrowError('denied');
+    await expect(plugin.isEnabled()).rejects.toThrowError(NOT_INITIALIZED_MESSAGE);
+  });
+
+  /**
+   * Every call the plugin guards, and how to make it.
+   *
+   * A table rather than one case for `requestDevice`, because the plugin's
+   * `assertBluetoothAdapter` guards all of them and a double that modelled the
+   * precondition on only the method somebody remembered is the same shape of
+   * permissiveness this issue is about — one layer down.
+   */
+  const guarded: readonly [string, (port: ScriptedPort) => Promise<unknown>][] = [
+    ['isEnabled', (port) => port.isEnabled()],
+    ['requestDevice', (port) => port.requestDevice({ services: [], optionalServices: [] })],
+    ['getDevices', (port) => port.getDevices(['AA:BB'])],
+    ['connect', (port) => port.connect('AA:BB', () => undefined)],
+    ['disconnect', (port) => port.disconnect('AA:BB')],
+    ['read', (port) => port.read('AA:BB', 'service', 'characteristic')],
+    [
+      'startNotifications',
+      (port) => port.startNotifications('AA:BB', 'service', 'characteristic', () => undefined),
+    ],
+    ['stopNotifications', (port) => port.stopNotifications('AA:BB', 'service', 'characteristic')],
+    ['write', (port) => port.write('AA:BB', 'service', 'characteristic', EMPTY_VALUE)],
+    [
+      'writeWithoutResponse',
+      (port) => port.writeWithoutResponse('AA:BB', 'service', 'characteristic', EMPTY_VALUE),
+    ],
+  ];
+
+  it.each(guarded)('refuses %s before initialize', async (_name, call) => {
+    await expect(call(scriptedPort())).rejects.toThrowError(NOT_INITIALIZED_MESSAGE);
+  });
+
+  it('covers every method the port has, so a new one cannot arrive unguarded', () => {
+    // Derived from the object rather than written down twice. A method added to
+    // `CapacitorBlePort` without a row above fails HERE, rather than sitting
+    // outside the constraint the way `requestDevice` did until #230.
+    const port = scriptedPort();
+    const testOnly = new Set(['notify', 'dropLink']);
+    const methods = Object.entries(port)
+      .filter(([name, value]) => typeof value === 'function' && !testOnly.has(name))
+      .map(([name]) => name)
+      .sort();
+    expect(methods).toEqual(['initialize', ...guarded.map(([name]) => name)].sort());
+  });
+
+  it('records the refused call, because the real plugin received it', async () => {
+    const plugin = scriptedPort();
+    await expect(plugin.connect('AA:BB', () => undefined)).rejects.toThrowError(
+      NOT_INITIALIZED_MESSAGE,
+    );
+    expect(plugin.calls).toEqual(['connect:AA:BB']);
+  });
+});
+
+describe('a failure at the chooser is reported as itself (#230)', () => {
+  it.each([
+    ['requestDevice cancelled.', 'no-device-selected'],
+    ['No device found.', 'no-device-selected'],
+    ['Location permission was denied', 'not-permitted'],
+    // ⚠️ The one the bug produced. Reported as a fault the rider can retry,
+    // never as an accusation that they pressed cancel.
+    [NOT_INITIALIZED_MESSAGE, 'adapter-unavailable'],
+    ['Already scanning. Stopping now.', 'adapter-unavailable'],
+  ])('%s becomes %s', async (message, code) => {
+    const { transport } = build({ chooserRejectsWith: new Error(message) });
+    await expect(transport.discover({ capabilities: [] })).rejects.toMatchObject({ code });
+  });
+
+  it('does not call an unrecognised chooser failure a cancellation', async () => {
+    // Stated separately from the table because it is the regression itself: the
+    // old catch answered `no-device-selected` for every one of these.
+    const { transport } = build({ chooserRejectsWith: new Error('gatt failure 133') });
+    await expect(transport.discover({ capabilities: [] })).rejects.not.toMatchObject({
+      code: 'no-device-selected',
+    });
+  });
+
+  it('keeps a SensorError the plugin layer already classified', async () => {
+    const { transport } = build({
+      chooserRejectsWith: new SensorError('not-permitted', 'already classified'),
+    });
+    await expect(transport.discover({ capabilities: [] })).rejects.toMatchObject({
+      code: 'not-permitted',
+      message: 'already classified',
+    });
   });
 });
 

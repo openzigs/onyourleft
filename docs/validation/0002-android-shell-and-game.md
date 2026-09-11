@@ -96,6 +96,17 @@ The merged manifest was asserted from the build on 2026-09-09 and is **not** re-
 | A3 | Grant, then pair a sensor | The device list populates |
 | A4 | ⚠️ Check **Settings → Apps → On Your Left → Permissions** | **Location must not be listed as requested** on API 31+. This is the rider-visible form of criterion 1, and the whole point of the `tools:replace` overrides |
 | A5 | Start a recording; pull down the notification shade | A **"Recording ride"** notification, from the `connectedDevice` foreground service. This is the half of criterion 2 a build cannot show |
+| A6 | ⚠️ **[#230](https://github.com/openzigs/onyourleft/issues/230).** With Bluetooth on and the permission **not yet granted**, press "Pair a heart rate strap" | The Android **permission prompt appears** — pairing is what asks for it, because `initialize()` now runs on this path. It must **not** report *"no device was chosen"*, which is what a rider was told when the stack was never initialised |
+| A7 | ⚠️ **[#230](https://github.com/openzigs/onyourleft/issues/230), the one that says it is fixed.** Grant the permission, press Pair again | The **native device chooser appears**. `adb shell dumpsys window \| grep mCurrentFocus` leaves `MainActivity`; `adb logcat` carries **no** `Bluetooth LE not initialized.` |
+| A8 | Cancel that chooser | On screen: *"no device was chosen"* — and only here. A cancellation is the one failure that may still say so |
+
+⚠️ **A6–A8 are #230's last acceptance criterion and nothing in CI can stand in for them.** The bug
+was found by installing the APK and pressing the button while four gates were green: the scripted
+plugin double allowed a chooser before `initialize()`, the typecheck saw an implemented method, the
+build succeeded, and the browser gate never constructs the Capacitor transport. The fixture now
+refuses the out-of-order call and the transport initialises on the pairing path — but *"a device
+reaches a chooser"* is a sentence only a device can write. Until A7 is filled in, the fix is
+**asserted and unobserved**.
 
 ### A results
 
@@ -106,6 +117,9 @@ The merged manifest was asserted from the build on 2026-09-09 and is **not** re-
 | A3 | | |
 | A4 | | |
 | A5 | | |
+| A6 | | |
+| A7 | | |
+| A8 | | |
 
 ---
 
