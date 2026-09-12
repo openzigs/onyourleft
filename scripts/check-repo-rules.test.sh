@@ -120,6 +120,43 @@ assert_violation_all() {
   cleanup_fixture
 }
 
+# assert_violations <name> <rule> <needle> [<rule> <needle>]...
+#
+# assert_violation with more than one (rule, needle) pair, each of which must be
+# satisfied by SOME reported line -- and deliberately NOT by the same one. It is
+# the complement of `assert_violation_all`, which requires one line to carry
+# every needle; here every pair must find its own.
+#
+# #229 is what needs it, and needs exactly this shape. The defect was that an
+# unclosed `<![CDATA[` switched XML001/XML002 off for the rest of the file, so a
+# real violation after it was never reported. A fixture asserting only "the
+# unclosed CDATA is reported" would pass against a checker that still went blind
+# straight afterwards -- which is the fix that looks like a fix and is not. The
+# case that pins it is one file reporting TWO findings, on two lines, under two
+# rule ids, and no existing helper could ask for that.
+assert_violations() {
+  local name="$1" out status rule needle missing=""
+  shift
+  out="$(bash "${CHECKER}" "${fixture_root}" 2>&1)"
+  status=$?
+  while [ "$#" -ge 2 ]; do
+    rule="$1"
+    needle="$2"
+    shift 2
+    printf '%s\n' "${out}" | grep "^${rule}: " | grep -qF -- "${needle}" \
+      || missing="${missing} ${rule}/\"${needle}\""
+  done
+  if [ "${status}" -ne 0 ] && [ -z "${missing}" ]; then
+    pass=$((pass + 1))
+    printf 'ok   %s\n' "${name}"
+  else
+    fail=$((fail + 1))
+    printf 'FAIL %s\n     nothing reported for%s; got exit %s\n%s\n' \
+      "${name}" "${missing:- (none missing)}" "${status}" "${out}"
+  fi
+  cleanup_fixture
+}
+
 # assert_helper_fails <name> <helper> <helper-arg>...
 #
 # Runs an assertion helper that is EXPECTED to report a failure, and turns that
@@ -435,6 +472,31 @@ printf '# ADR 0003\n' > "${fixture_root}/docs/adr/0003-gamma.md"
 assert_helper_passes "assert_helper_fails can tell a passing helper from a failing one" \
   assert_violation_all "(expected to pass) needles on one line" ADR001 \
   "docs/adr/0002-alpha.md" "docs/adr/0002-beta.md"
+cleanup_fixture
+
+# `assert_violations` (#229) gets the same pair of guards, because the whole
+# reason it exists is to prove a checker reported TWO things -- and a helper
+# that passes whatever it is handed would prove neither. One collision only, so
+# the second pair names a rule id nothing reported: a helper that answered
+# "something failed, near enough" would accept it.
+new_fixture
+printf '# ADR 0002\n' > "${fixture_root}/docs/adr/0002-alpha.md"
+printf '# ADR 0002\n' > "${fixture_root}/docs/adr/0002-beta.md"
+assert_helper_fails "assert_violations rejects a pair that nothing reported" \
+  assert_violations "(expected to fail) one pair unreported" \
+  ADR001 "docs/adr/0002-alpha.md" \
+  LIC001 "docs/adr/0002-alpha.md"
+cleanup_fixture
+
+new_fixture
+printf '# ADR 0002\n' > "${fixture_root}/docs/adr/0002-alpha.md"
+printf '# ADR 0002\n' > "${fixture_root}/docs/adr/0002-beta.md"
+printf '# ADR 0003\n' > "${fixture_root}/docs/adr/0003-delta.md"
+printf '# ADR 0003\n' > "${fixture_root}/docs/adr/0003-gamma.md"
+assert_helper_passes "assert_violations accepts two pairs satisfied by two different lines" \
+  assert_violations "(expected to pass) two pairs, two lines" \
+  ADR001 "docs/adr/0002-beta.md" \
+  ADR001 "docs/adr/0003-gamma.md"
 cleanup_fixture
 
 # `needle` is declared local. A loop variable surviving into the global scope is
@@ -1132,6 +1194,44 @@ printf -- '-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n' \
   > "${fixture_root}/packages/domain/device.pub"
 assert_clean "a public key and a file named monkey.ts are not key material"
 
+# --- REL001 walks the same trees every other rule walks (#229) ---------------
+#
+# It used to walk its own: an inline list that excluded `fixtures` and did not
+# exclude `coverage`, beside a shared prune array that did the opposite. One of
+# the two had to be wrong and nobody could say which, so #229 resolved it in the
+# direction the rule's own severity requires -- `fixtures` is a tree this
+# repository AUTHORS and commits, and a key committed there is as permanent as a
+# key committed anywhere else, while `coverage` is build output that is
+# gitignored and cannot carry a committed anything.
+#
+# Both halves of REL001 are pinned, because the two used to disagree with each
+# other as well: the content half never excluded `fixtures`, so a PEM under
+# `fixtures/` was already reported while a `.jks` beside it was not.
+
+new_fixture
+mkdir -p "${fixture_root}/packages/fit/fixtures"
+printf 'binary\n' > "${fixture_root}/packages/fit/fixtures/release.jks"
+assert_violation "a keystore under a fixtures directory is rejected" REL001 \
+  "packages/fit/fixtures/release.jks"
+
+new_fixture
+mkdir -p "${fixture_root}/packages/fit/fixtures"
+printf -- '-----BEGIN EC PRIVATE KEY-----\nAAAA\n-----END EC PRIVATE KEY-----\n' \
+  > "${fixture_root}/packages/fit/fixtures/sample.txt"
+assert_violation "a PRIVATE KEY block under a fixtures directory is rejected" REL001 \
+  "packages/fit/fixtures/sample.txt"
+
+# And the other direction: generated output is pruned by both halves, from the
+# shared list. `coverage/` is written by `test:coverage` on every contributor's
+# machine, so a rule that reported it would be red locally and green in CI --
+# the local-only red that `.prettierignore` already carries three entries for.
+new_fixture
+mkdir -p "${fixture_root}/coverage/tmp"
+printf 'binary\n' > "${fixture_root}/coverage/tmp/release.jks"
+printf -- '-----BEGIN RSA PRIVATE KEY-----\nAAAA\n-----END RSA PRIVATE KEY-----\n' \
+  > "${fixture_root}/coverage/tmp/report.json"
+assert_clean "key material inside generated coverage output is pruned"
+
 # --- REL002: the Android build targets a current API level (#95) -------------
 #
 # Checked here rather than in Gradle because nobody in this environment can run
@@ -1317,6 +1417,177 @@ target="$(manifest_path)"
   printf '</manifest>\n'
 } > "${target}"
 assert_clean "a hyphen at a line end and another at the next line start pass"
+
+# --- XML003: an unclosed CDATA section, and the blinding it used to cause -----
+#
+# #229. The hole XML001/XML002 were built to close, one construct across. An
+# unclosed `<![CDATA[` set the scanner's CDATA state and nothing ever cleared
+# it, so every later line took the "still inside CDATA" path and BOTH rules went
+# silent for the remainder of the file -- which is `DOC002`'s sticking fence
+# state exactly, in the rule written because of it.
+#
+# ⚠️ The order of these two cases is the point. The first proves the new rule
+# fires; on its own it would be satisfied by a checker that reports the unclosed
+# CDATA and then stays blind, which is a fix that looks like one. The second is
+# the issue's fixture A -- an unclosed CDATA FOLLOWED BY a real XML001 -- and it
+# is the case that says the blinding is gone.
+
+new_fixture
+target="$(manifest_path)"
+{ xml_header
+  printf '<manifest>\n'
+  printf '  <string name="raw"><![CDATA[ never closed\n'
+  printf '</manifest>\n'
+} > "${target}"
+assert_violation "an unclosed CDATA section is rejected" XML003 \
+  "apps/mobile/android/app/src/main/AndroidManifest.xml:4"
+
+# THE BLINDING. Reported by the review of #228 and reproduced before #229 was
+# filed: `xmllint` says "CData section not finished" and this checker said
+# "clean". The `--` on the line after the opener is a violation by XML001's own
+# definition, and every XML001 and XML002 defect further down that file went
+# with it.
+new_fixture
+target="$(manifest_path)"
+{ xml_header
+  printf '<manifest><![CDATA[ oops\n'
+  printf '  <!-- a -- b -->\n'
+  printf '</manifest>\n'
+} > "${target}"
+assert_violations "an unclosed CDATA reports itself AND no longer hides the violation after it" \
+  XML003 "apps/mobile/android/app/src/main/AndroidManifest.xml:3" \
+  XML001 "apps/mobile/android/app/src/main/AndroidManifest.xml:4"
+
+# The false positive the recovery must not introduce, and the reason it is
+# conditional on the section never closing at all. A CDATA section that spans
+# lines is legal and common, and everything inside it is text: a `--`, a `<!--`
+# and a `-->` in there are all ordinary characters. A scanner that simply gave
+# up on CDATA at the end of each line would report three violations here, in a
+# file `xmllint` accepts.
+new_fixture
+target="$(manifest_path)"
+{ xml_header
+  printf '<manifest>\n'
+  printf '  <string name="raw"><![CDATA[\n'
+  printf '    a -- b\n'
+  printf '    <!-- not a comment -- at all\n'
+  printf '    still text -->\n'
+  printf '  ]]></string>\n'
+  printf '</manifest>\n'
+} > "${target}"
+assert_clean "a CDATA section spanning lines, full of comment syntax, passes"
+
+# Two sections, the first closed and the second not. The line reported has to be
+# the opener with no terminator after it, not the first opener in the file: a
+# counting scanner -- two `<![CDATA[`, one `]]>`, therefore unbalanced -- would
+# report line 4 and send the reader to the section that is fine.
+new_fixture
+target="$(manifest_path)"
+{ xml_header
+  printf '<manifest>\n'
+  printf '  <string name="a"><![CDATA[ fine ]]></string>\n'
+  printf '  <string name="b"><![CDATA[ not fine\n'
+  printf '  <!-- a -- b -->\n'
+  printf '</manifest>\n'
+} > "${target}"
+assert_violations "the second of two CDATA sections is the unclosed one" \
+  XML003 "apps/mobile/android/app/src/main/AndroidManifest.xml:5" \
+  XML001 "apps/mobile/android/app/src/main/AndroidManifest.xml:6"
+
+# --- XML004: an unclosed processing instruction ------------------------------
+#
+# The same construct class, and the reason the processing instruction had to be
+# tracked at all: #228 reported XML001 for `<?php <!-- a -- b --> ?>`, which
+# `xmllint` accepts -- `Comment` is not a production inside `PIContent`, so
+# those characters are PI data and not a comment. Tracking a PI fixes that false
+# positive; reporting an unclosed one is what stops the fix becoming a second
+# way to switch the scanner off.
+
+new_fixture
+target="$(manifest_path)"
+{ xml_header
+  printf '<manifest>\n'
+  printf '  <?target data and no terminator\n'
+  printf '</manifest>\n'
+} > "${target}"
+assert_violation "an unclosed processing instruction is rejected" XML004 \
+  "apps/mobile/android/app/src/main/AndroidManifest.xml:4"
+
+new_fixture
+target="$(manifest_path)"
+{ xml_header
+  printf '<manifest>\n'
+  printf '  <?php <!-- a -- b --> ?>\n'
+  printf '</manifest>\n'
+} > "${target}"
+assert_clean "comment syntax inside a processing instruction is not a comment"
+
+# ...and the complement, without which the case above would be satisfied by a
+# checker that stopped looking at the first `<?`: a real violation AFTER a
+# well-formed processing instruction is still reported.
+new_fixture
+target="$(manifest_path)"
+{ xml_header
+  printf '<manifest>\n'
+  printf '  <?php <!-- a -- b --> ?>\n'
+  printf '  <!-- and this one -- is ours -->\n'
+  printf '</manifest>\n'
+} > "${target}"
+assert_violation "a violation after a processing instruction is still reported" XML001 \
+  "apps/mobile/android/app/src/main/AndroidManifest.xml:5"
+
+# The scanner marks each delimiter with a U+0001 before splitting on it, so a
+# U+0001 arriving IN the input would be read as a marker and cut the line where
+# no delimiter is. XML 1.0 forbids that character in a document at all, so a
+# file carrying one is already broken -- but broken input is exactly what this
+# rule set is pointed at, and the two cases below are the two directions it can
+# go wrong in.
+#
+# A hyphen, a control character and a hyphen are NOT a double hyphen, for the
+# same reason a hyphen either side of a line break is not: something sits
+# between them. Without the input being neutralised first, the marker splits the
+# content there and the two hyphens read as adjacent -- a violation reported
+# against a comment that does not contain one.
+new_fixture
+target="$(manifest_path)"
+{ xml_header
+  printf '<manifest>\n'
+  printf '  <!-- a -\001- b -->\n'
+  printf '</manifest>\n'
+} > "${target}"
+assert_clean "a hyphen, a control character and a hyphen are not a double hyphen"
+
+# And the other direction: a stray control character must not cost the scan its
+# place, leaving the real violation beside it unreported.
+new_fixture
+target="$(manifest_path)"
+{ xml_header
+  printf '<manifest>\n'
+  printf '  <string>\001</string><!-- a -- b -->\n'
+  printf '</manifest>\n'
+} > "${target}"
+assert_violation "a stray control character does not derail the scan" XML001 \
+  "apps/mobile/android/app/src/main/AndroidManifest.xml:4"
+
+# A minified document: one line, three thousand comments, one of them bad. It is
+# a correctness case rather than a timing one -- a suite that fails on a slow
+# machine is a suite people stop running -- but it is also what the tokenised
+# scan was written for. The character-position scan it replaced re-copied the
+# remainder of the line at every delimiter, which is quadratic in the number of
+# them; the measurements are in `check-repo-rules.sh` beside the loop.
+new_fixture
+target="$(manifest_path)"
+{ xml_header
+  awk 'BEGIN {
+    printf "<manifest>"
+    for (i = 0; i < 1500; i++) printf "<!-- ok --><a/>"
+    printf "<!-- bad -- here -->"
+    for (i = 0; i < 1500; i++) printf "<!-- ok --><a/>"
+    printf "</manifest>\n"
+  }'
+} > "${target}"
+assert_violation "one bad comment among three thousand on a single line is found" XML001 \
+  "apps/mobile/android/app/src/main/AndroidManifest.xml:3"
 
 # --- The generated trees are pruned, from the SAME list every other rule uses --
 #

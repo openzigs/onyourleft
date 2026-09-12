@@ -31,6 +31,9 @@
 #   REL002  the Android build targets at least API 36 (#95)
 #   XML001  no "--" inside an XML comment (#225)
 #   XML002  no XML comment left unclosed (#225)
+#   XML003  no CDATA section left unclosed -- the construct that used to switch
+#           XML001 and XML002 off for the rest of the file (#229)
+#   XML004  no processing instruction left unclosed (#229)
 #
 # Usage: scripts/check-repo-rules.sh [ROOT]   (ROOT defaults to the repo root)
 # Exit:  0 clean, 1 if any rule is violated.
@@ -70,12 +73,38 @@ report() {
 # `"${GENERATED[@]}"` rather than interpolated into a string: this script targets
 # the bash on a bare macOS clone, which is 3.2, and a `find` expression that went
 # through word splitting would break on the first path containing a space.
+#
+# ⚠️ `fixtures` is deliberately NOT here, and #229 is where that was settled.
+# REL001 used to walk its own inline list which excluded it, beside this one
+# which does not; the two disagreed and nobody could say which was right. A
+# fixture tree is code this repository AUTHORS and commits, so a key committed
+# there is exactly as permanent as a key committed anywhere else -- and the
+# content half of REL001 never excluded it in the first place, so the rule
+# already disagreed with itself. The resolution is one list: generated output is
+# pruned, authored trees are not.
 GENERATED=(
   -name node_modules -o -name dist -o -name build -o -name coverage -o -name .git
   -o -name capacitor-cordova-android-plugins
   -o -path '*/main/assets/public'
   -o -path '*/main/res/xml/config.xml'
 )
+
+# Every file this repository authors: the walk above, with nothing else added.
+# REL001 uses it for both of its halves and the XML rules use the same prune, so
+# a tree that is invisible to one rule is invisible to all of them rather than
+# to whichever list was edited last.
+repo_files() {
+  find "${ROOT}" \( "${GENERATED[@]}" \) -prune -o -type f -print
+}
+
+# The same walk, NUL-separated, for the one consumer that hands its output to
+# another program rather than reading it line by line. A newline is a legal
+# character in a filename, and `tr '\n' '\0'` over the list above would turn one
+# such name into two arguments that match nothing -- a file silently skipped by
+# the rule whose violation cannot be undone.
+repo_files_z() {
+  find "${ROOT}" \( "${GENERATED[@]}" \) -prune -o -type f -print0
+}
 
 # Source files we expect to carry an SPDX header. Data and generated formats are
 # excluded because a header cannot be added to them without corrupting them.
@@ -526,7 +555,18 @@ fi
 # them.
 KEY_MATERIAL_NAMES='.*\.(jks|keystore|p12|pfx|key)$|^keystore\.properties$|^(release|upload)-key\.'
 
+#
+# ⚠️ Both halves walk `repo_files`, which is the shared prune list and nothing
+# else (#229). They used to walk two different lists -- an inline one here that
+# skipped `fixtures` and kept `coverage`, and the shared one that does the
+# opposite -- and the two halves of this one rule therefore disagreed with each
+# other: a PEM under `fixtures/` was reported while a `.jks` beside it was not.
+# The disagreement is resolved towards scanning MORE, because this is the rule
+# whose violation cannot be undone: `fixtures` is authored and committed, and
+# `coverage` is build output that exists only on a machine that has run the
+# suite, so reporting it would be a red that only ever appears locally.
 check_no_key_material() {
+  local candidates
   while IFS= read -r file; do
     [ -n "${file}" ] || continue
     base="$(basename "${file}")"
@@ -534,28 +574,36 @@ check_no_key_material() {
     if printf '%s' "${base}" | grep -qE "${KEY_MATERIAL_NAMES}"; then
       report REL001 "${relative}: looks like signing key material; keys belong in CI secrets and never in the repository (#95)"
     fi
-  done < <(find "${ROOT}" -type f \
-    -not -path '*/node_modules/*' \
-    -not -path '*/.git/*' \
-    -not -path '*/dist/*' \
-    -not -path '*/build/*' \
-    -not -path '*/fixtures/*' | sort)
+  done < <(repo_files | sort)
 
   # A PEM private key carries its own banner, so this one IS checkable by
   # content -- and it is the case a name rule misses, because a private key
   # pasted into a config file has whatever name that file had.
+  #
+  # `grep` is handed the same walk's output rather than being asked to recurse
+  # with an exclusion list of its own, because `--exclude-dir` cannot express
+  # the two path-shaped prunes at all.
+  #
+  # ⚠️ The guard on an empty walk is where the two `xargs` disagree, and the
+  # disagreement is the reason it is here rather than a taste. Given no input at
+  # all, the BSD one on macOS does not run the utility -- observed -- and the
+  # GNU one on the CI runner runs it once with no operands, which is what
+  # `--no-run-if-empty` exists to prevent and is a GNU extension this script
+  # cannot use. `grep` with no file operands reads standard input. Whether that
+  # returns immediately or waits forever then depends on what standard input
+  # happens to be, which is not a thing a gate should depend on.
+  candidates="$(repo_files)"
+  [ -n "${candidates}" ] || return 0
   while IFS= read -r hit; do
     [ -n "${hit}" ] || continue
-    relative="${hit%%:*}"
-    relative="${relative#"${ROOT}"/}"
+    relative="${hit#"${ROOT}"/}"
     # This script and its own suite name the banner in order to look for it.
     case "${relative}" in
       scripts/check-repo-rules.sh | scripts/check-repo-rules.test.sh) continue ;;
     esac
     report REL001 "${relative}: contains a PRIVATE KEY block (#95)"
-  done < <(grep -rlE -- '-----BEGIN [A-Z ]*PRIVATE KEY-----' "${ROOT}" \
-    --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=build \
-    2>/dev/null | sed 's/$/:/' | sort)
+  done < <(repo_files_z \
+    | xargs -0 grep -lE -- '-----BEGIN [A-Z ]*PRIVATE KEY-----' 2>/dev/null | sort)
 }
 
 check_no_key_material
@@ -589,7 +637,7 @@ check_android_target_sdk() {
 
 check_android_target_sdk
 
-# --- XML001 / XML002: an XML comment a parser will accept ---------------------
+# --- XML001 / XML002 / XML003 / XML004: XML a parser will accept --------------
 #
 # #225. `apps/mobile/android/app/src/main/AndroidManifest.xml` shipped in #87 as
 # XML that NO parser accepts: three of its prose comments contained `--`, which
@@ -612,17 +660,7 @@ check_android_target_sdk
 # the same thing to a manifest, and it does something worse to a parser: every
 # element after it disappears from the document. XML002 is that rule.
 #
-# ⚠️ **This is deliberately NOT full well-formedness validation, and the limit
-# is recorded here rather than discovered later.** A stray `<`, a mismatched tag,
-# an unquoted attribute and a bad character reference all still pass. Full
-# validation needs `xmllint`, which is a tool rather than coreutils, and this is
-# the bare-clone gate -- CLAUDE.md section 4a: *bash and coreutils only, no
-# install, no network*. A narrow rule that always runs is worth more than a
-# broad one that is skipped wherever the tool is missing. Whether to ALSO add
-# `xmllint` as a CI step, on the `shellcheck` precedent, is a follow-up and is
-# out of scope for #225.
-#
-# The scan is a character-stream state machine rather than a regular expression,
+# The scan is a delimiter state machine rather than a regular expression,
 # because a comment spans lines and `grep` sees one line at a time -- a per-line
 # match for `--` would fire on every `--` in a table separator, an SPDX header
 # comment's rule, or an Android `tools:` attribute, none of which are inside a
@@ -632,57 +670,221 @@ check_android_target_sdk
 # TEXT, not a comment. Without this, a well-formed file carrying one in a CDATA
 # section would open a comment that never closes and fail XML002 -- a gate going
 # red on a correct file, which is the failure mode that teaches people to stop
-# running the gate.
+# running the gate. A processing instruction, `<?target ... ?>`, is tracked for
+# exactly the same reason: `Comment` is not a production inside `PIContent`, so
+# `<?php <!-- a -- b --> ?>` is valid XML that `xmllint` accepts and that #228
+# reported as XML001. #228's body claimed zero false positives; that one is the
+# exception, and this is where it was fixed rather than restated.
+#
+# ⚠️ XML003 and XML004 are why the two above can be believed at all (#229).
+# Tracking a region that suppresses scanning is tracking a way to switch the
+# scanner OFF: before #229 an unclosed `<![CDATA[` set the CDATA state, nothing
+# ever cleared it, and XML001 and XML002 both went silent for the remainder of
+# the file -- which is DOC002's sticking-fence failure, in the rule that exists
+# because of DOC002. The reproduction is in #229: `xmllint` says "CData section
+# not finished" and this checker said "clean", while a real `--` violation on
+# the next line went unreported.
+#
+# The fix is not a rule bolted on at EOF. It is that closure is decided WHEN THE
+# REGION OPENS, by asking whether its terminator occurs anywhere after it:
+#
+#   * terminator found  -- enter the region, exactly as before. A CDATA section
+#     spanning twenty lines is legal and its contents are text.
+#   * no terminator at all -- report it, treat the rest of THAT LINE as the
+#     region's text, and carry on scanning the next line.
+#
+# That is what makes the difference reportable rather than silent, and it is why
+# the second half matters as much as the first: a rule that only said "unclosed
+# CDATA" at EOF would fail the build and STILL hide every violation after it.
+#
+# ⚠️ Recovering at the end of the opening line, rather than dropping the opener
+# entirely, keeps the conservative reading: up to the newline those characters
+# really are the region's content, so nothing there is reported. Recovery is
+# conditional on there being no terminator in the whole file, which is what
+# stops it firing on a perfectly legal multi-line CDATA section.
+#
+# ⚠️ **This is deliberately NOT full well-formedness validation, and the limits
+# are recorded here rather than discovered later.** A stray `<`, a mismatched
+# tag, an unquoted attribute and a bad character reference all still pass. Nor
+# does it undo every blinding: a STRAY `<![CDATA[` or `<?` that does have a
+# terminator later in the file suppresses the span between the two, and no
+# amount of state machinery can tell that apart from a section somebody meant.
+# What #229 removes is the case where the region never ends and the file reports
+# clean regardless. Full validation needs `xmllint`, which is a tool rather than
+# coreutils, and this is the bare-clone gate -- CLAUDE.md section 4a: *bash and
+# coreutils only, no install, no network*. A narrow rule that always runs is
+# worth more than a broad one that is skipped wherever the tool is missing.
+# Whether to ALSO add `xmllint` as a CI step, on the `shellcheck` precedent, is
+# a follow-up and was out of scope for #225 and #229 alike.
+#
+# ⚠️ The line is tokenised by marking its delimiters rather than walked with a
+# moving position, and that is a cost fix rather than a style one (#229). The
+# version this replaced took `substr($0, pos)` on every iteration, copying the
+# whole remainder of the line each time: O(k x len) for k delimiters on one
+# line. Measured on this repository's awk (one-true-awk 20200816, macOS) against
+# a single line of `<!-- x --><a/>` repeated:
+#
+#              delimiters       before        after
+#              40 002           2.4 s         0.23 s
+#              80 002           8.5 s         0.61 s
+#             160 002          37.5 s         1.9 s
+#             320 002          (not run)      6.5 s
+#
+# Four times the time for twice the input is the quadratic curve rather than a
+# constant factor, and it put a 1 MB minified document in the tens of seconds
+# and an 8 MB one out of reach. ⚠️ The replacement is NOT flat either -- about
+# three times for twice the input at these sizes, which is awk allocating one
+# field per token and not the scan re-reading the line -- so the honest claim is
+# that the delimiter count no longer multiplies the line length, not that the
+# cost is linear. No `.xml` this repository authors is within three orders of
+# magnitude of these numbers; the case they are here for is a generator writing
+# one long line.
+#
+# ⚠️ `split` will not say WHICH delimiter it matched -- the fourth argument that
+# reports the separators is a GNU extension, and this has to run under the awk
+# on a bare macOS clone. Marking each delimiter and splitting on the marker is
+# how the delimiter ends up being read rather than located, which matters
+# because `substr(s, pos, 9)` is not a constant-time operation in this awk
+# either: it counts UTF-8 characters from the start of the string, so a scan
+# built on absolute positions stays quadratic however it finds them. That was
+# measured too -- a position-based version of this same tokeniser took 20 s on
+# the 160 002 line, against 1.9 s for this one.
 xml_comment_findings() {
   awk '
     function flag(kind, line, opened) {
       printf "%s\t%d\t%d\n", kind, line, opened
     }
-    BEGIN { incomment = 0; incdata = 0; opened = 0 }
-    {
-      pos = 1
-      len = length($0)
-      while (pos <= len) {
-        rest = substr($0, pos)
-        if (incdata) {
-          j = index(rest, "]]>")
-          if (j == 0) break
-          incdata = 0
-          pos = pos + j + 2
-          continue
-        }
-        if (!incomment) {
-          c = index(rest, "<!--")
-          d = index(rest, "<![CDATA[")
-          if (c == 0 && d == 0) break
-          if (d != 0 && (c == 0 || d < c)) {
-            incdata = 1
-            pos = pos + d + 8
-            continue
-          }
-          incomment = 1
-          opened = NR
-          pos = pos + c + 3
-          continue
-        }
-        j = index(rest, "-->")
-        if (j == 0) { content = rest; closed = 0 } else { content = substr(rest, 1, j - 1); closed = 1 }
-        bad = 0
-        if (index(content, "--") > 0) bad = 1
-        # "--->": the content ends on a hyphen that abuts the terminator, which
-        # the XML grammar (Comment ::= *(Char - "-" | "-" (Char - "-")) "-->")
-        # forbids for the same reason.
-        if (closed && content != "" && substr(content, length(content), 1) == "-") bad = 1
-        if (bad) flag("XML001", NR, opened)
-        if (closed) {
-          incomment = 0
-          pos = pos + j + 2
-          continue
-        }
-        break
+
+    # A line with every delimiter wrapped in a marker, so that splitting on the
+    # marker yields alternating text and delimiters and the delimiter can be
+    # READ rather than located. Seven passes over the line, then one split, all
+    # of them linear in its length.
+    #
+    # ⚠️ The markers are U+0001, which XML 1.0 forbids in a document at all --
+    # not merely discourages -- so a line carrying one is already not XML. Any
+    # that are there are replaced with a space first, because a marker arriving
+    # in the input would otherwise be read as a delimiter boundary.
+    #
+    # ⚠️ The passes run longest delimiter first, and that ordering is safe
+    # rather than lucky: no delimiter here is a substring of another, and each
+    # pass leaves behind only text the later passes cannot match inside. The
+    # result is the same token sequence a single leftmost-first scan produces --
+    # `<!-->` is `<!--` followed by a stray `>`, and `<?>` is `<?` followed by a
+    # stray `>`, in both readings.
+    function marked(s) {
+      gsub(/\001/, " ", s)
+      gsub(/<!\[CDATA\[/, "\001<![CDATA[\001", s)
+      gsub(/<!--/, "\001<!--\001", s)
+      gsub(/-->/, "\001-->\001", s)
+      gsub(/\]\]>/, "\001]]>\001", s)
+      gsub(/<\?/, "\001<?\001", s)
+      gsub(/\?>/, "\001?>\001", s)
+      return s
+    }
+
+    # Pass one over a line: the index of its LAST CDATA and processing
+    # instruction terminator, so that an opener can ask whether one follows it
+    # without searching the rest of the file from where it stands.
+    function survey(n,   part, m, i) {
+      lastcdataclose[n] = 0
+      lastpiclose[n] = 0
+      m = split(text[n], part, "\001")
+      for (i = 1; i <= m; i++) {
+        if (part[i] == "]]>") lastcdataclose[n] = i
+        else if (part[i] == "?>") lastpiclose[n] = i
       }
     }
-    END { if (incomment) flag("XML002", opened, opened) }
+
+    # Pass two: the state machine itself.
+    #
+    # ⚠️ The content of a comment is judged as it goes rather than assembled.
+    # Both things XML001 asks about survive that -- a `--` is either inside one
+    # field or straddles two, and the only delimiter that can begin with a
+    # hyphen is the one that CLOSES the comment -- and assembling it would put
+    # the quadratic cost back, one comment instead of one line: appending k
+    # fields to a growing string copies that string k times.
+    #
+    # ⚠️ `linebad` and `last` are reset at the start of every line, which is not
+    # tidiness: a hyphen ending one line and another opening the next is NOT a
+    # double hyphen, because the line break is a character between them and
+    # libxml2 accepts it. That is a case in the suite, found by running the rule
+    # against xmllint over four hundred generated documents.
+    function scan(n,   part, m, i, f, linebad, last) {
+      linebad = 0
+      last = ""
+      m = split(text[n], part, "\001")
+      for (i = 1; i <= m; i++) {
+        f = part[i]
+        if (incdata) {
+          if (f == "]]>") incdata = 0
+          continue
+        }
+        if (inpi) {
+          if (f == "?>") inpi = 0
+          continue
+        }
+        if (incomment) {
+          if (f != "-->") {
+            if (index(f, "--") > 0) linebad = 1
+            else if (last == "-" && substr(f, 1, 1) == "-") linebad = 1
+            if (f != "") last = substr(f, length(f), 1)
+            continue
+          }
+          # "--->": the content ends on a hyphen that abuts the terminator,
+          # which the XML grammar (Comment ::= *(Char - "-" | "-" (Char - "-"))
+          # "-->") forbids for the same reason.
+          if (linebad || last == "-") flag("XML001", n, opened)
+          incomment = 0
+          linebad = 0
+          last = ""
+          continue
+        }
+        if (f == "<!--") {
+          incomment = 1
+          opened = n
+          linebad = 0
+          last = ""
+          continue
+        }
+        if (f == "<![CDATA[") {
+          if (lastcdataclose[n] > i || cdatacloseafter[n]) { incdata = 1; continue }
+          flag("XML003", n, n)
+          return
+        }
+        if (f == "<?") {
+          if (lastpiclose[n] > i || picloseafter[n]) { inpi = 1; continue }
+          flag("XML004", n, n)
+          return
+        }
+        # A "-->" or a "]]>" outside any region is ordinary text.
+      }
+      # A comment still open at the end of the line: the trailing-hyphen rule is
+      # deliberately NOT applied here. It is about the character that abuts the
+      # terminator, and there is no terminator on this line.
+      if (incomment && linebad) flag("XML001", n, opened)
+    }
+
+    { text[NR] = marked($0) }
+
+    END {
+      for (n = 1; n <= NR; n++) survey(n)
+      # Does a terminator appear on any LATER line? Accumulated backwards, so
+      # the question costs nothing at the point an opener asks it.
+      cdatacloseafter[NR] = 0
+      picloseafter[NR] = 0
+      for (n = NR - 1; n >= 1; n--) {
+        cdatacloseafter[n] = (lastcdataclose[n + 1] > 0) || cdatacloseafter[n + 1]
+        picloseafter[n] = (lastpiclose[n + 1] > 0) || picloseafter[n + 1]
+      }
+      incomment = 0; incdata = 0; inpi = 0; opened = 0
+      for (n = 1; n <= NR; n++) scan(n)
+      # Only a comment can still be open here. A CDATA section or a processing
+      # instruction is entered ONLY when its terminator was already known to
+      # follow, so neither can reach the end of the file unclosed -- which is
+      # why there is no branch for them: a branch that cannot fire is the thing
+      # this rule set exists to stop shipping.
+      if (incomment) flag("XML002", opened, opened)
+    }
   ' "$1"
 }
 
@@ -702,6 +904,10 @@ check_xml_comments() {
           report XML001 "${relative}:${line}: \"--\" inside the XML comment opened at line ${opened}; XML 1.0 section 2.5 forbids it and no parser will read this file (#225)" ;;
         XML002)
           report XML002 "${relative}:${line}: XML comment is never closed; everything after it is swallowed, so the file parses as something other than what it looks like -- or not at all (#225)" ;;
+        XML003)
+          report XML003 "${relative}:${line}: <![CDATA[ opened here and never closed; a parser stops reading the document at this point, and before #229 it stopped this checker too (#229)" ;;
+        XML004)
+          report XML004 "${relative}:${line}: processing instruction opened here and never closed with \"?>\"; everything after it is read as instruction data (#229)" ;;
       esac
     done < <(xml_comment_findings "${file}")
   done < <(find "${ROOT}" \( "${GENERATED[@]}" \) -prune -o -type f -name '*.xml' -print | sort)
