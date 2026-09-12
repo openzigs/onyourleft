@@ -224,23 +224,78 @@ describe('the gap to whatever the rider is chasing', () => {
     expect(fieldNamed({ ...input, gap: behind, gapTo: 'ghost' }, 'gap').label).toBe('Your best');
   });
 
-  it('says behind or ahead in words rather than with a minus sign', () => {
-    // A minus sign is one glyph wide at arm's length and is the first thing lost.
+  it('says the PACER is ahead when the pacer is ahead (#255)', () => {
+    // ⚠️ The whole of #255's first defect. The sign in `pacer/gap.ts` is
+    // positive when the BOT is ahead, and this field used to render that as the
+    // word `behind` — true of the rider, and read under a label that names the
+    // pacer. "Pacer — 12 s behind" reads most naturally as *the pacer is 12 s
+    // behind you*, which is the opposite of what it means.
     const input = baseInput();
-    const behind = pacerGap({
+    const pacerInFront = pacerGap({
       botDistance: metres(200),
       riderDistance: metres(100),
       referenceSpeed: metresPerSecond(10),
     });
-    const ahead = pacerGap({
+
+    const field = fieldNamed({ ...input, gap: pacerInFront, gapTo: 'bot' }, 'gap');
+
+    expect(field.value).toBe('10');
+    expect(field.unit).toBe('s');
+    expect(field.detail).toBe('ahead of you');
+  });
+
+  it('says the pacer is behind when the RIDER is ahead (#255)', () => {
+    const input = baseInput();
+    const riderInFront = pacerGap({
       botDistance: metres(100),
       riderDistance: metres(200),
       referenceSpeed: metresPerSecond(10),
     });
 
-    expect(fieldNamed({ ...input, gap: behind, gapTo: 'bot' }, 'gap').value).toContain('behind');
-    expect(fieldNamed({ ...input, gap: ahead, gapTo: 'bot' }, 'gap').value).toContain('ahead');
-    expect(fieldNamed({ ...input, gap: ahead, gapTo: 'bot' }, 'gap').value).not.toContain('-');
+    const field = fieldNamed({ ...input, gap: riderInFront, gapTo: 'bot' }, 'gap');
+
+    expect(field.value).toBe('10');
+    expect(field.unit).toBe('s');
+    expect(field.detail).toBe('behind you');
+  });
+
+  it('carries the direction in a word rather than in a minus sign', () => {
+    // A minus sign is one glyph wide at arm's length and is the first thing lost.
+    const input = baseInput();
+    const riderInFront = pacerGap({
+      botDistance: metres(100),
+      riderDistance: metres(200),
+      referenceSpeed: metresPerSecond(10),
+    });
+
+    const field = fieldNamed({ ...input, gap: riderInFront, gapTo: 'bot' }, 'gap');
+
+    expect(`${field.value} ${field.unit} ${field.detail ?? ''}`).not.toContain('-');
+  });
+
+  it('reads level rather than nought seconds in some direction', () => {
+    // ⚠️ Whichever side of level a sub-second gap falls, it rounds to `0` — and
+    // "0 s ahead of you" is a direction claim the number does not support.
+    // `pacer/gap.ts` §`botIsAhead` makes the same argument: level is the honest
+    // answer and is not `behind`.
+    const input = baseInput();
+    const barelyAhead = pacerGap({
+      botDistance: metres(104),
+      riderDistance: metres(100),
+      referenceSpeed: metresPerSecond(10),
+    });
+    const barelyBehind = pacerGap({
+      botDistance: metres(96),
+      riderDistance: metres(100),
+      referenceSpeed: metresPerSecond(10),
+    });
+
+    for (const gap of [barelyAhead, barelyBehind]) {
+      const field = fieldNamed({ ...input, gap, gapTo: 'bot' }, 'gap');
+      expect(field.value).toBe('Level');
+      expect(field.unit).toBe('');
+      expect(field.detail).toBeUndefined();
+    }
   });
 
   it('shows a dash rather than a nought for a stationary rider', () => {
@@ -336,6 +391,9 @@ describe('the HUD follows the rider\u2019s units (#238)', () => {
       }),
     };
 
-    expect(fieldNamed(withGap, 'gap').value).toContain('s ');
+    // The magnitude and its unit, unconverted: a gap is a time, and a rider who
+    // reads miles does not read a different second.
+    expect(fieldNamed(withGap, 'gap').unit).toBe('s');
+    expect(fieldNamed(withGap, 'gap').value).toBe('10');
   });
 });

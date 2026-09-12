@@ -314,6 +314,38 @@ describe('tabbableElements', () => {
     );
     expect(tabbableElements(doc).map((element) => element.tagName)).toEqual(['A']);
   });
+
+  it('KEEPS an aria-disabled control, because no browser takes one out (#255)', () => {
+    // ⚠️ The model used to drop it, which made it disagree with every browser
+    // and made the only correct fix for #255's keyboard defect read as a
+    // regression in the keyboard tests. `audit.ts` §`removedFromTabOrder` says
+    // why the attribute and the ARIA state are different questions: the whole
+    // reason to reach for `aria-disabled` is to keep a blocked control
+    // reachable so it can explain itself.
+    const doc = documentWith(
+      CLEAN_BODY.replace('<button type="button">', '<button type="button" aria-disabled="true">'),
+    );
+
+    expect(tabbableElements(doc).map((element) => element.tagName)).toEqual([
+      'A',
+      'BUTTON',
+      'INPUT',
+    ]);
+  });
+
+  it('still exempts an aria-disabled control from having to be focusable', () => {
+    // The other half of the split, and the reason `isDisabled` survives: a
+    // `div role="button" aria-disabled="true"` is inert, so
+    // `interactive-role-is-focusable` must not demand a tab stop for it.
+    expect(
+      rulesFiredBy(
+        CLEAN_BODY.replace(
+          '<button type="button">Start a ride</button>',
+          '<div role="button" aria-disabled="true">Start a ride</div>',
+        ),
+      ),
+    ).toEqual([]);
+  });
 });
 
 describe('accessibleName', () => {

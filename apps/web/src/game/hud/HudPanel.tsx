@@ -88,6 +88,16 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
             <dd className="oyl-hud__value">
               {reading.value}
               {reading.unit === '' ? null : <span className="oyl-hud__unit"> {reading.unit}</span>}
+              {reading.detail === undefined ? null : (
+                // ⚠️ Inside the `dd`, not beside it. A screen reader announces
+                // one definition per term, so a phrase in a sibling element
+                // would be read as loose text after the reading rather than as
+                // part of it — and #255's first defect is precisely that the
+                // number and the words describing it were heard as one thing
+                // while meaning another. `fields.ts` §`HudReading.detail` says
+                // why the phrase is not folded into the value instead.
+                <span className="oyl-hud__detail"> {reading.detail}</span>
+              )}
               {reading.stale ? (
                 // ⚠️ Words, not only a tint. #94's second criterion is that a
                 // dropped sensor be distinguishable from a zero — and a rider

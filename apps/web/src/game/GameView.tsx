@@ -111,6 +111,23 @@ export interface GameViewProps {
 
 type Phase = 'choosing' | 'riding' | 'paused';
 
+/**
+ * The id the pacer refusal is announced under, and referred to from both the
+ * control that caused it and every control it blocks (#255).
+ *
+ * ⚠️ **A module constant rather than `useId`, and that is a decision.** The
+ * refusal is referenced from two *different* components — the intensity box
+ * inside {@link PacerControls} and every ride button inside
+ * {@link RoutePicker} — so a generated id would have to be threaded through
+ * both, and a mismatch would be a **dangling `aria-describedby`**: the one
+ * failure `a11y/audit.ts`'s `aria-reference-resolves` rule exists to catch, and
+ * silent to everyone who is not using a screen reader. A constant cannot
+ * collide because the picker is rendered at most once — this screen has exactly
+ * one intensity control, and `PacerControls`'s own header says why it is above
+ * the list rather than in it.
+ */
+const PACER_PROBLEM_ID = 'oyl-game-pacer-problem';
+
 export function GameView(props: GameViewProps): JSX.Element {
   const [routes, setRoutes] = useState<readonly RidableRoute[] | undefined>(undefined);
   const [chosen, setChosen] = useState<RidableRoute | undefined>(undefined);
@@ -350,7 +367,7 @@ function RoutePicker(props: {
       <p>No saved routes yet. Import a GPX route on the Routes screen and it will appear here.</p>
     );
   }
-  // ⚠️ The ride control is DISABLED rather than silently dropping the pacer.
+  // ⚠️ The ride control is BLOCKED rather than silently dropping the pacer.
   // Starting a ride that quietly has no bot in it, because the number in the box
   // could not make one, is the same defect #237 is about arriving from the other
   // side — and this time the rider would have asked for it.
@@ -387,10 +404,31 @@ function RoutePicker(props: {
                 ? 'Race your best — ride it once first'
                 : 'Race your own best attempt'}
             </label>
+            {/*
+              ⚠️ **`aria-disabled`, deliberately, and not the `disabled`
+              attribute** — #255's second defect. The attribute removes every
+              ride button on the screen from the tab order, so a rider who slips
+              a decimal point tabs from the intensity box straight past all of
+              them to whatever follows, with no indication that the controls
+              they were heading for exist at all. `aria-disabled` keeps the
+              button reachable and announced as unavailable, and
+              {@link PACER_PROBLEM_ID} tells it *why* — so the control that is
+              blocked says it is blocked, rather than only the field that
+              blocked it.
+
+              The refusal itself is unchanged: `onStart` is not called. A
+              guard in the handler is what enforces that now, because
+              `aria-disabled` is a promise to a screen reader and nothing
+              whatever to a click.
+            */}
             <button
               type="button"
-              disabled={refused}
+              aria-disabled={refused ? true : undefined}
+              aria-describedby={refused ? PACER_PROBLEM_ID : undefined}
               onClick={() => {
+                if (refused) {
+                  return;
+                }
                 void props.onStart(route, props.withGhost && route.attempts > 0, props.choice.plan);
               }}
             >
@@ -444,6 +482,15 @@ function PacerControls(props: {
           max={MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM}
           step={0.1}
           value={props.intensity}
+          // ⚠️ **The two attributes that make the refusal part of the control
+          // rather than text near it — #255.** A `role="alert"` is announced
+          // once, when it appears. A rider who tabs *back* to this box
+          // afterwards heard "Pacer intensity, watts per kilogram, 70" and
+          // nothing about why nothing worked; `aria-describedby` is what makes
+          // the reason travel with the field, every time it is reached, and
+          // `aria-invalid` is what says the value in it is the problem.
+          aria-invalid={props.problem === undefined ? undefined : true}
+          aria-describedby={props.problem === undefined ? undefined : PACER_PROBLEM_ID}
           onChange={(event) => {
             props.onIntensity(event.target.value);
           }}
@@ -453,10 +500,15 @@ function PacerControls(props: {
         ⚠️ `min`/`max` above are a hint to the browser and nothing more — they
         are trivially bypassed by typing, and they do not exist at all for the
         rider who pastes. The refusal that counts is `pacerChoice`'s, which is
-        `botPacerPlan`'s own bounds, and it is what disables the ride control.
+        `botPacerPlan`'s own bounds, and it is what blocks the ride control.
+
+        Rendered only when there is a problem, which is also what keeps the two
+        `aria-describedby` references above and in `RoutePicker` from dangling:
+        the attribute and the element it names appear and disappear together,
+        under the same condition.
       */}
       {props.problem === undefined ? null : (
-        <p className="oyl-game__problem" role="alert">
+        <p className="oyl-game__problem" id={PACER_PROBLEM_ID} role="alert">
           {props.problem}
         </p>
       )}

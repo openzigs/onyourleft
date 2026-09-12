@@ -77,6 +77,21 @@ export interface HudReading {
   readonly unit: string;
   /** Whether the underlying sensor is down. Drives the tint *and* the value. */
   readonly stale: boolean;
+  /**
+   * A short phrase the number on its own does not carry, rendered small and
+   * under it (#255).
+   *
+   * ⚠️ **It exists so that the big number stays a number.** The gap field used
+   * to put its direction inside {@link value} — `12 s behind` — which set a
+   * three-word sentence in the 2.5 rem type `theme.css` gives a HUD value, in a
+   * 7 rem grid cell. Every other field on this screen is a magnitude and a
+   * unit, and the one a rider most needs at a glance was the one that was not.
+   *
+   * Rendered inside the same `dd` as the value, so a screen reader announces
+   * the label, the number, its unit and this phrase as one reading rather than
+   * as two.
+   */
+  readonly detail?: string | undefined;
 }
 
 /** Everything the HUD needs. */
@@ -159,7 +174,26 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
   ];
 }
 
-/** The gap field, which is absent rather than dashed when nothing is being chased. */
+/**
+ * The gap field, which is absent rather than dashed when nothing is being chased.
+ *
+ * ## Whose direction the word describes — #255's first defect
+ *
+ * ⚠️ **The subject of this phrase is the thing the label names, not the
+ * rider.** `pacer/gap.ts` signs its seconds *positive when the bot is ahead*,
+ * and this function used to turn that into the word `behind` — which is true
+ * of the **rider** and is read under a label that says `Pacer`. A screen reader
+ * announced *"Pacer, 12 s behind"*, and the natural reading of that is *the
+ * pacer is 12 s behind you*: the exact opposite of what it means. #94's own
+ * criterion for this panel is *"glanceable, not readable — the rider looks for
+ * one second"*, so a value that has to be reasoned about fails the criterion
+ * rather than merely reading awkwardly.
+ *
+ * So the phrase now names the rider explicitly — `ahead of you` / `behind you`
+ * — and the sign is carried the way the label already implies: a positive gap
+ * means the chased rider is **ahead of you**. There is no reading of *"Pacer,
+ * 12 s ahead of you"* in which the pacer is the one losing.
+ */
 function gapReading(input: HudInput): HudReading {
   const label = input.gapTo === 'ghost' ? 'Your best' : 'Pacer';
   if (input.gap === undefined || input.gapTo === undefined) {
@@ -175,16 +209,30 @@ function gapReading(input: HudInput): HudReading {
   }
   // Signed, and the sign is carried in the word rather than in a minus sign: a
   // minus sign is one glyph wide at arm's length and is the first thing lost.
-  const magnitude = Math.abs(seconds);
-  const direction = seconds > 0 ? 'behind' : 'ahead';
+  const magnitude = Math.abs(seconds).toFixed(0);
+  if (Number(magnitude) === 0) {
+    // ⚠️ Judged on the **rounded** magnitude rather than on the raw one. A gap
+    // of four tenths of a second rounds to `0`, and `0 s ahead of you` claims a
+    // direction the displayed number does not support — while the true
+    // direction could be either. `pacer/gap.ts` §`botIsAhead` makes the same
+    // argument for the exactly-level case and says a HUD should render it as
+    // level; this is that, widened to everything that displays as nought.
+    return { key: 'gap', label, value: LEVEL, unit: '', stale: false };
+  }
   return {
     key: 'gap',
     label,
-    value: `${magnitude.toFixed(0)} s ${direction}`,
-    unit: '',
+    value: magnitude,
+    unit: 's',
+    // Positive is the chased rider ahead — see this function's header, which is
+    // the whole of #255's first defect.
+    detail: seconds > 0 ? 'ahead of you' : 'behind you',
     stale: false,
   };
 }
+
+/** What the gap field reads when the rounded gap is nought in either direction. */
+const LEVEL = 'Level';
 
 /** How many decimals the distance still to ride is counted down to. */
 const REMAINING_DECIMALS = 2;

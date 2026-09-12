@@ -25,6 +25,7 @@ import {
   geographicPosition,
   metres,
   metresPerSecond,
+  pacerGap,
   routeProfile,
   watts,
   type RoutePoint,
@@ -54,6 +55,34 @@ afterEach(() => {
   mounted?.unmount();
   mounted = undefined;
 });
+
+/**
+ * What a screen reader says when it reaches one field, as one string.
+ *
+ * ⚠️ **The announced text, not the markup** — #255's second acceptance
+ * criterion asks for exactly that, and the distinction is the whole point of
+ * the issue. The defect it is pinning was invisible in the markup: `<dd>12 s
+ * behind</dd>` is well-formed, named, associated and audits clean, and the only
+ * thing wrong with it is what a person hears. A test that asserted on elements
+ * and attributes could not have gone red for it.
+ *
+ * A `dt`/`dd` pair is announced as its term and then its definition, so the two
+ * texts joined with a comma is what a rider is told. Whitespace is collapsed
+ * the way `a11y/audit.ts` collapses it, because a screen reader does not read
+ * JSX indentation aloud.
+ */
+function announced(label: string): string {
+  const pairs = [...document.querySelectorAll('.oyl-hud__field')];
+  const field = pairs.find((pair) => text(pair.querySelector('dt')) === label);
+  if (field === undefined) {
+    throw new Error(`no HUD field labelled ${label}`);
+  }
+  return `${label}, ${text(field.querySelector('dd'))}`;
+}
+
+function text(element: Element | null): string {
+  return (element?.textContent ?? '').replace(/\s+/g, ' ').trim();
+}
 
 function route(): ReturnType<typeof routeProfile> {
   const points: RoutePoint[] = [];
@@ -210,5 +239,75 @@ describe('the mid-ride controls are usable with gloves on', () => {
     mounted = await mount(inRideScreen(<HudPanel {...props({})} paused />));
 
     expect(document.body.textContent).toContain('Resume');
+  });
+});
+
+describe('the gap says who is ahead, to the eye and to a screen reader (#255)', () => {
+  function chasing(botMetres: number, riderMetres: number): React.ReactElement {
+    const base = props();
+    return inRideScreen(
+      <HudPanel
+        {...base}
+        state={{
+          ...base.state,
+          ride: { speed: metresPerSecond(10), distance: metres(riderMetres) },
+        }}
+        gap={pacerGap({
+          botDistance: metres(botMetres),
+          riderDistance: metres(riderMetres),
+          referenceSpeed: metresPerSecond(10),
+        })}
+        gapTo="bot"
+      />,
+    );
+  }
+
+  it('announces a pacer in front as being ahead of the rider', async () => {
+    mounted = await mount(chasing(220, 100));
+
+    // ⚠️ The exact sentence, because the defect was a *true* sentence read
+    // under the wrong subject. `toContain('ahead')` would have passed against
+    // the old code too: it said `ahead` — about the rider.
+    expect(announced('Pacer')).toBe('Pacer, 12 s ahead of you');
+    expect(announced('Pacer')).not.toContain('behind');
+  });
+
+  it('announces a pacer the rider has dropped as being behind them', async () => {
+    mounted = await mount(chasing(100, 220));
+
+    expect(announced('Pacer')).toBe('Pacer, 12 s behind you');
+    expect(announced('Pacer')).not.toContain('ahead');
+  });
+
+  it('names the rider’s own best attempt as the thing that is ahead', async () => {
+    const base = props();
+    mounted = await mount(
+      inRideScreen(
+        <HudPanel
+          {...base}
+          state={{ ...base.state, ride: { speed: metresPerSecond(10), distance: metres(100) } }}
+          gap={pacerGap({
+            botDistance: metres(220),
+            riderDistance: metres(100),
+            referenceSpeed: metresPerSecond(10),
+          })}
+          gapTo="ghost"
+        />,
+      ),
+    );
+
+    expect(announced('Your best')).toBe('Your best, 12 s ahead of you');
+  });
+
+  it('announces level rather than a direction it cannot support', async () => {
+    mounted = await mount(chasing(104, 100));
+
+    expect(announced('Pacer')).toBe('Pacer, Level');
+  });
+
+  it('audits clean with a gap on the screen, which is a different tree', async () => {
+    mounted = await mount(chasing(220, 100));
+
+    expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 });
