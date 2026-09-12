@@ -36,6 +36,7 @@
 
 import type { QualitySettings } from './quality';
 import type { RoadCorridor } from './terrain';
+import type { WorldStyle } from './world';
 
 /** Where the chase camera is, in the corridor's local metres. */
 export interface CameraPose {
@@ -73,6 +74,21 @@ export interface SceneFrame {
   readonly corridor: RoadCorridor;
   readonly camera: CameraPose;
   readonly markers: readonly RiderMarker[];
+  /**
+   * The ground, the sky and how far you can see — #241.
+   *
+   * ⚠️ **Carried on the frame rather than passed to `create`**, which keeps
+   * `GameRenderer.create` taking only what a renderer needs to exist. A world
+   * is a property of the route, and the frame is the object that always carries
+   * the route's own answers — the corridor beside it is derived from the same
+   * profile for the same reason.
+   *
+   * ⚠️ A `WorldStyle` added here that `three-renderer.ts` never reads passes
+   * every test in the jsdom suite and changes nothing on screen — #240's named
+   * defect shape for this epic. `game.browser.spec.ts` reads the drawing buffer
+   * back for exactly that reason.
+   */
+  readonly world: WorldStyle;
 }
 
 /** A live 3D view. Created by a {@link GameRenderer}, destroyed by its owner. */

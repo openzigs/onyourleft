@@ -33,7 +33,28 @@ interface GameHarnessResult {
   readonly quadCount: number;
   readonly vertexCount: number;
   readonly markerKinds: readonly string[];
+  readonly skyPixel: readonly [number, number, number, number];
+  readonly groundPixel: readonly [number, number, number, number];
+  readonly roadPixel: readonly [number, number, number, number];
+  readonly resourcesAfterFirstFrame: number;
+  readonly resourcesAfterAllFrames: number;
   readonly errors: readonly string[];
+}
+
+/** How many frames the harness drives. Mirrors `FRAMES` in `game-harness.ts`. */
+const FRAMES = 100;
+
+/**
+ * Whether a read-back pixel is the colour a scene that drew nothing leaves.
+ *
+ * ⚠️ **Colour only.** The renderer is built with `alpha: false`, so every pixel
+ * in the drawing buffer reads alpha 255 whether anything was drawn or not —
+ * including the alpha of the clear colour itself. A check that counted the
+ * alpha channel would pass over a completely black frame, which is precisely
+ * the frame this gate exists to catch.
+ */
+function isClearColour(pixel: readonly [number, number, number, number]): boolean {
+  return pixel[0] === 0 && pixel[1] === 0 && pixel[2] === 0;
 }
 
 async function harness(page: import('@playwright/test').Page): Promise<GameHarnessResult> {
@@ -69,18 +90,18 @@ test.describe('the game renderer in a real browser', () => {
   test('draws a frame, rather than merely returning from render()', async ({ page }) => {
     const result = await harness(page);
 
-    expect(result.framesDrawn).toBe(3);
+    expect(result.framesDrawn).toBe(FRAMES);
     // Read back from the drawing buffer. `render` not throwing is a weaker claim
     // and is the one a harness gets for free.
     expect(result.drewPixels).toBe(true);
   });
 
   test('survives its buffers being reused across frames', async ({ page }) => {
-    // Three frames, because the renderer reuses and only grows its vertex
+    // A hundred frames, because the renderer reuses and only grows its vertex
     // buffer. A single-frame harness cannot see a reuse bug at all.
     const result = await harness(page);
 
-    expect(result.framesDrawn).toBe(3);
+    expect(result.framesDrawn).toBe(FRAMES);
     expect(result.errors).toEqual([]);
   });
 
@@ -89,5 +110,62 @@ test.describe('the game renderer in a real browser', () => {
 
     expect(result.markerKinds).toContain('rider');
     expect(result.markerKinds).toContain('bot');
+  });
+});
+
+test.describe('the world #241 derives from the route reaches the screen', () => {
+  /**
+   * ⚠️ **This is the criterion that catches #240's named defect for this
+   * epic.** A `WorldStyle` computed by `world.ts`, carried on `SceneFrame` and
+   * never read by `three-renderer.ts` passes every test in the jsdom suite and
+   * changes nothing a rider sees. Only a read-back can tell the two apart, and
+   * only in a browser: jsdom has no WebGL at all.
+   */
+  test('draws a sky above the horizon, where the clear colour used to be', async ({ page }) => {
+    const result = await harness(page);
+
+    expect(isClearColour(result.skyPixel)).toBe(false);
+  });
+
+  test('draws ground beside the road, where the clear colour used to be', async ({ page }) => {
+    const result = await harness(page);
+
+    expect(isClearColour(result.groundPixel)).toBe(false);
+  });
+
+  test('draws a sky and a ground that are not the same thing', async ({ page }) => {
+    // A renderer that painted one flat colour over the whole frame would pass
+    // both tests above and fail this one. There has to be a horizon.
+    const result = await harness(page);
+
+    expect(result.skyPixel.slice(0, 3)).not.toEqual(result.groundPixel.slice(0, 3));
+  });
+
+  test('puts the derived colours on the screen, not an arbitrary pair', async ({ page }) => {
+    // Asserted as channel ORDERING rather than as values, deliberately. Every
+    // step between `world.ts` and a read-back byte — colour management, the
+    // output transfer function, the fog blend — is monotone per channel, so an
+    // ordering survives all of them where an exact value does not. `world.ts`
+    // makes the sky blue-dominant at every latitude and altitude, and the
+    // harness route is temperate and near sea level, so its ground is
+    // vegetation and green-dominant.
+    const result = await harness(page);
+    const [skyRed, skyGreen, skyBlue] = result.skyPixel;
+    const [groundRed, groundGreen, groundBlue] = result.groundPixel;
+
+    expect(skyBlue).toBeGreaterThan(skyGreen);
+    expect(skyGreen).toBeGreaterThan(skyRed);
+    expect(groundGreen).toBeGreaterThan(groundRed);
+    expect(groundGreen).toBeGreaterThan(groundBlue);
+  });
+
+  test('allocates nothing new on the GPU after the first frame', async ({ page }) => {
+    // #240's NFR-3, measured with three's own allocations rather than with
+    // object identity: a renderer that rebuilt the ground mesh every frame
+    // would create a buffer every frame, and this count would rise by 99.
+    const result = await harness(page);
+
+    expect(result.resourcesAfterFirstFrame).toBeGreaterThan(0);
+    expect(result.resourcesAfterAllFrames).toBe(result.resourcesAfterFirstFrame);
   });
 });
