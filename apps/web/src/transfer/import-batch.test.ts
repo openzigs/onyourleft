@@ -205,6 +205,23 @@ describe('importActivityFiles — a bulk archive', () => {
     expect(stored?.name).toBe('Ride 9');
     expect(stored?.originalFile?.key).toBe('activities/2019-01-10_1234567.gpx');
   });
+
+  it('stores a distance for a GPX that states none, and a fresh read can see it', async () => {
+    const open = await openSeeded();
+    // #231, through the consumer rather than through the reader. GPX carries no
+    // lap total and no per-point cumulative distance, so this ride's distance
+    // exists nowhere in the file except its positions — and the assertion is
+    // deliberately made from a connection that did not write it, because a
+    // number the importer computed and did not persist reads identically at the
+    // moment of the write and as nought on the next open.
+    const source = corpusSource('nominal-ride.gpx', 'activities/2024-06-15.gpx');
+
+    const report = await run(open, [source]);
+
+    expect(named(report.outcomes, source.fileName).kind).toBe('imported');
+    const [summary] = await open.read(async (store) => store.listActivitySummaries(ATHLETE_A));
+    expect(summary?.distance).toBeGreaterThan(1000);
+  });
 });
 
 describe('importActivityFiles — deduplication against the local store', () => {

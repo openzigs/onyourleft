@@ -84,7 +84,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         an afternoon with real hardware into committable evidence,
                         and the two things it deliberately does not write down
     src/transfer/       file import and export (#51) — the batch importer, the
-                        1 Hz sample grid, the export writer, and since #15 the
+                        1 Hz sample grid, the export writer, and since #231 the
+                        distance an imported track derives from its own
+                        positions when the file states none — the three
+                        rejections and the anchor two of them need; and since
+                        #15 the
                         one fixture both clients encode, which is how "the
                         mobile client's FIT output is byte-identical to the
                         web's" is asserted without a phone (§4h); and since #35
@@ -1785,6 +1789,8 @@ top of an issue **supersedes its body**.
 | How a ride is recorded, checkpointed and recovered, and the stated data-loss bound | [`packages/store/README.md`](packages/store/README.md) §"Recording checkpoints", `apps/web/src/recording/recorder.ts`, `README.md` §"If the tab closes mid-ride" |
 | What the live ride screen may claim about a trainer, and why a stale metric shows no number | `apps/web/src/ride/controller.ts`, `apps/web/src/ride/metrics.ts`, `apps/web/src/ride/TrainerPanel.tsx` |
 | How a bulk import reports a file it cannot read, and what bounds the memory an imported file can ask for | `apps/web/src/transfer/import-batch.ts`, `apps/web/src/transfer/read-activity-file.ts` §`MAXIMUM_IMPORTED_SAMPLES` |
+| Why an imported ride's distance is derived from its positions where a recorded one is integrated from speed | `apps/web/src/transfer/track-distance.ts`, `apps/web/src/recording/finish.ts` §`distanceOf` |
+| Which steps of an imported track are not summed, and why a rejected step does not move the anchor | `apps/web/src/transfer/track-distance.ts` §`POSITION_GAP_SECONDS`, §`STATIONARY_SPEED_METRES_PER_SECOND`, §`IMPLAUSIBLE_SPEED_METRES_PER_SECOND` |
 | What an export tells a rider it could not carry, and why altitude can never be the answer | `apps/web/src/transfer/export-activity.ts` §`EXPORT_FAULT_TEXT`, and the finding in `export-activity.test.ts` §"what the file could not carry" |
 | How a signed activity record leaves the device, what the manifest says about a ride that has none, and which of the two verify functions applies to an archive | [ADR 0019](docs/adr/0019-signed-records-in-an-export.md), `apps/web/src/transfer/export-everything.ts` §`signedRecordFile`, [`docs/architecture.md`](docs/architecture.md) §"The signed activity record" |
 | What the import screen may say about another platform, word for word | [ADR 0009](docs/adr/0009-clean-room-posture.md) R3, `apps/web/src/transfer/TransferView.tsx`, and the assertions in `TransferView.test.tsx` |

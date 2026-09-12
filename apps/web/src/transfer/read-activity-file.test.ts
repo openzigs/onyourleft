@@ -12,8 +12,17 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { seconds, unixSeconds } from '@onyourleft/domain';
-import { decodeFitActivity, encodeFitActivity, type FitRecord } from '@onyourleft/fit';
+import { distanceBetween, seconds, unixSeconds } from '@onyourleft/domain';
+import {
+  decodeFitActivity,
+  decodeGpx,
+  decodeTcx,
+  encodeFitActivity,
+  encodeGpx,
+  trackPointsOf,
+  type FitRecord,
+  type TrackPoint,
+} from '@onyourleft/fit';
 
 import { corpusBytes, IMPORTABLE_CORPUS_FILES, REFUSED_CORPUS_FILES } from './corpus';
 import {
@@ -185,6 +194,77 @@ describe('readActivityFile', () => {
     expect(ride.movingTime).toBeLessThanOrEqual(ride.elapsedTime);
   });
 
+  it('derives a distance from the track when the file states none anywhere', () => {
+    // #231. `nominal-ride.gpx` carries 30 positioned trackpoints, no speed, no
+    // `<ele>`-adjacent distance and — because GPX has neither — no lap total
+    // and no per-point cumulative distance. Before the derivation this imported
+    // as 0.0 km with the whole ride sitting in the position channel.
+    const ride = readActivityFile('nominal-ride.gpx', corpusBytes('nominal-ride.gpx'));
+    const points = trackPointsOf(decodeGpx(text('nominal-ride.gpx')).activity);
+    const first = positionOf(points[0]);
+    const last = positionOf(points[points.length - 1]);
+
+    // The fixture's track is a straight line, so the sum of its steps and the
+    // great-circle distance between its two ends agree to within rounding —
+    // which is a check on the total that does not re-run the walk that produced
+    // it. A derivation that dropped a step, or double-counted one, misses this.
+    expect(ride.distance).toBeCloseTo(distanceBetween(first, last), 3);
+    expect(ride.distance).toBeGreaterThan(1000);
+  });
+
+  it('keeps a stated distance rather than deriving one over the top of it', () => {
+    // The second half of #231: the derivation is a fallback and never an
+    // override. The TCX fixture states lap totals AND carries positions, so
+    // this is the file where the two answers can disagree — and the stated one
+    // has to win, or an imported ride stops matching every other reader of it.
+    const ride = readActivityFile('nominal-ride.tcx', corpusBytes('nominal-ride.tcx'));
+    const activity = decodeTcx(text('nominal-ride.tcx')).activity;
+    const stated = activity.laps.reduce((sum, lap) => sum + (lap.totalDistance ?? 0), 0);
+
+    expect(stated).toBeGreaterThan(0);
+    expect(ride.distance).toBe(stated);
+    // And the two genuinely disagree, so `toBe(stated)` is not satisfied by
+    // both branches at once.
+    const first = positionOf(trackPointsOf(activity)[0]);
+    const last = positionOf(trackPointsOf(activity)[trackPointsOf(activity).length - 1]);
+    expect(distanceBetween(first, last)).not.toBeCloseTo(stated, 0);
+  });
+
+  it('keeps the per-point distances a file carries rather than deriving one', () => {
+    // A FIT file with no session at all still carries a cumulative distance on
+    // every record, and that is the file's own number too. Stripping the
+    // session is what makes this the `furthest` branch rather than the stated
+    // one — with the session present the first `??` answers and this path is
+    // never reached.
+    const nominal = decodeFitActivity(corpusBytes('nominal-outdoor-ride.fit')).activity;
+    const sessionless = encodeFitActivity({ ...nominal, sessions: [] }).bytes;
+    const furthest = nominal.records.reduce(
+      (best, record) => Math.max(best, record.distance ?? 0),
+      0,
+    );
+
+    const ride = readActivityFile('sessionless.fit', sessionless);
+
+    expect(furthest).toBeGreaterThan(0);
+    expect(ride.distance).toBe(furthest);
+  });
+
+  it('imports a GPX with no position at all and calls no distance a clean import', () => {
+    // The shape of `packages/fit/dist/validation-uploads/indoor-no-position.gpx`,
+    // built here through the same codec that writes it rather than read from a
+    // gitignored build directory: a track whose points carry a time and no
+    // coordinates. An indoor trainer ride is half this product, so nought
+    // metres is the honest answer and a refusal would be the bug.
+    const indoor = encodeGpx(decodeTcx(text('indoor-no-position.tcx')).activity);
+
+    const ride = readActivityFile('indoor-no-position.gpx', new TextEncoder().encode(indoor));
+
+    expect(ride.hasPosition).toBe(false);
+    expect(ride.distance).toBe(0);
+    expect(ride.sampleCount).toBeGreaterThan(0);
+    expect(ride.faults).toHaveLength(0);
+  });
+
   it('never reports a moving time longer than the ride’s own span', () => {
     const honest = decodeFitActivity(corpusBytes('paused-laps.fit')).activity;
     const session = honest.sessions[0];
@@ -268,6 +348,20 @@ describe('readActivityFile', () => {
     expect(refusal.message).toContain(String(MAXIMUM_IMPORTED_SAMPLES / 3600));
   });
 });
+
+/** One corpus file as text, for the tests that need the decoder's own view of it. */
+function text(name: string): string {
+  return new TextDecoder('utf-8', { fatal: true }).decode(corpusBytes(name));
+}
+
+/** A track point's position, or a failure naming the fixture's broken expectation. */
+function positionOf(point: TrackPoint | undefined) {
+  const position = point?.position;
+  if (position === undefined) {
+    throw new Error('this fixture is expected to carry a position on every trackpoint');
+  }
+  return position;
+}
 
 function startOf(record: FitRecord): number {
   const timestamp = record.timestamp;
