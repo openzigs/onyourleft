@@ -243,7 +243,7 @@ describe('riding against a pacer', () => {
     // a magnitude and a direction are both required — and the magnitude must
     // not be nought, which is what a gap measured against the rider themselves
     // would read.
-    const parsed = /^(\d+) s (ahead|behind)$/.exec(gap);
+    const parsed = /^(\d+) s (ahead of you|behind you)$/.exec(gap);
     expect(parsed).not.toBeNull();
     expect(Number(parsed?.[1])).toBeGreaterThan(0);
   });
@@ -252,8 +252,13 @@ describe('riding against a pacer', () => {
     await startRiding({ pacer: true, intensity: SLOW });
     await pump(60);
 
-    // The rider is on 2.75 w/kg against the bot's 0.5, so they are in front.
-    expect(hudField('Pacer')).toContain('ahead');
+    // ⚠️ The rider is on 2.75 w/kg against the bot's 0.5, so they are in front
+    // — and this field is labelled **Pacer**, so what it says is that the
+    // **pacer** is behind. This assertion read `toContain('ahead')` until #255,
+    // which is the defect in one line: the same true fact, stated about the
+    // rider under a label naming the bot.
+    expect(hudField('Pacer')).toContain('behind you');
+    expect(hudField('Pacer')).not.toContain('ahead');
   });
 });
 
@@ -294,7 +299,18 @@ describe('the choice itself', () => {
     const ride = queryAll<HTMLButtonElement>(mounted.container, 'button').find((button) =>
       (button.textContent ?? '').startsWith('Ride '),
     );
-    expect(ride?.disabled).toBe(true);
+    // ⚠️ `aria-disabled` rather than the `disabled` attribute since #255, so
+    // that a keyboard user still reaches the control and hears why — which
+    // means the refusal is now a guard in the handler rather than something the
+    // browser does. Clicking it is the half that matters: without the guard,
+    // this change would trade an accessibility defect for a rider being paced
+    // by a bot `botPacerPlan` rejected.
+    expect(ride?.getAttribute('aria-disabled')).toBe('true');
+    expect(ride?.disabled).toBe(false);
     expect(mounted.container.textContent ?? '').toContain('70');
+
+    await clickThrough(ride);
+
+    expect(mounted.container.querySelector('canvas')).toBeNull();
   });
 });

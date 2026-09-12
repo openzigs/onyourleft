@@ -102,8 +102,38 @@ function snippet(element: Element): string {
   return html.length > 160 ? `${html.slice(0, 157)}…` : html;
 }
 
+/**
+ * Whether a control is unavailable to a user, however it says so.
+ *
+ * Used by the rules that *exempt* an unavailable control from an expectation —
+ * it need not be focusable, and a focus that lands inside an `aria-hidden`
+ * subtree matters less when it lands on something inert.
+ *
+ * ⚠️ **This is not the same question as {@link removedFromTabOrder}**, and
+ * conflating the two is what #255 found. See that function.
+ */
 function isDisabled(element: Element): boolean {
   return element.hasAttribute('disabled') || element.getAttribute('aria-disabled') === 'true';
+}
+
+/**
+ * Whether the browser takes this element out of the tab sequence.
+ *
+ * ⚠️ **Only the `disabled` *attribute* does that. `aria-disabled` does not, in
+ * any browser** — that is the entire reason the attribute exists as a separate
+ * thing to reach for. A control marked `aria-disabled` is still focusable and
+ * is still announced, which is exactly what you want when a rider needs to
+ * *find out* that a control is blocked and why: the native attribute deletes it
+ * from the keyboard user's world, explanation and all.
+ *
+ * Until #255 {@link tabbableElements} used {@link isDisabled} here, so this
+ * model said an `aria-disabled` button could not be tabbed to. That made the
+ * model disagree with every browser, and it made the only correct fix for #255's
+ * second defect look like a regression in the keyboard tests. It is the tab
+ * order that is being modelled, so the attribute is what decides it.
+ */
+function removedFromTabOrder(element: Element): boolean {
+  return element.hasAttribute('disabled');
 }
 
 /** Whether this element, or anything above it, is hidden from assistive technology. */
@@ -130,7 +160,7 @@ export function isHiddenFromAssistiveTechnology(element: Element): boolean {
 export function tabbableElements(root: Document | Element): HTMLElement[] {
   const candidates = [...root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)];
   return candidates.filter((element) => {
-    if (isDisabled(element) || isHiddenFromAssistiveTechnology(element)) {
+    if (removedFromTabOrder(element) || isHiddenFromAssistiveTechnology(element)) {
       return false;
     }
     if (element.tagName === 'INPUT' && element.getAttribute('type') === 'hidden') {

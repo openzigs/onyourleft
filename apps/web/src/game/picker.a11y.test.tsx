@@ -23,7 +23,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import { auditAccessibility, formatViolations, tabbableElements } from '../a11y/audit';
-import { mount, queryAll, settle, type Mounted } from '../testing/mount';
+import {
+  activateWithKeyboard,
+  mount,
+  queryAll,
+  settle,
+  typeInto,
+  type Mounted,
+} from '../testing/mount';
 import {
   altitudeMetres,
   degreesLatitude,
@@ -117,5 +124,120 @@ describe('the route picker', () => {
     for (const control of controls) {
       expect(reachable).toContain(control);
     }
+  });
+});
+
+describe('the pacer refusal reaches the rider it stops (#255)', () => {
+  /**
+   * Puts the picker into the state a slipped decimal point produces: a pacer
+   * asked for, at an intensity `botPacerPlan` refuses.
+   *
+   * ⚠️ Driven through the controls rather than by rendering a refused picker
+   * directly. The association being asserted is between elements that appear
+   * and disappear together, and the failure mode is a **dangling**
+   * `aria-describedby` — which only shows up when the state is arrived at the
+   * way a rider arrives at it.
+   */
+  async function refused(): Promise<Mounted> {
+    const tree = await mountPicker();
+    const box = queryAll<HTMLInputElement>(tree.container, 'input[type="checkbox"]').find((input) =>
+      (input.closest('label')?.textContent ?? '').includes('pacer'),
+    );
+    expect(box).toBeDefined();
+    await activateWithKeyboard(box as HTMLInputElement);
+    const intensity = queryAll<HTMLInputElement>(tree.container, 'input[type="number"]')[0];
+    expect(intensity).toBeDefined();
+    await typeInto(intensity as HTMLInputElement, '70');
+    await settle();
+    return tree;
+  }
+
+  function rideButtons(root: ParentNode): HTMLButtonElement[] {
+    return queryAll<HTMLButtonElement>(root, 'button').filter((button) =>
+      (button.textContent ?? '').startsWith('Ride '),
+    );
+  }
+
+  function describedText(element: Element): string {
+    const ids = (element.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean);
+    expect(ids.length).toBeGreaterThan(0);
+    return ids
+      .map((id) => {
+        const target = document.getElementById(id);
+        // ⚠️ A dangling reference is the failure this whole association can
+        // have and still look correct in the markup, so it is named rather
+        // than allowed to surface as `null.textContent`.
+        expect(
+          target,
+          `aria-describedby names #${id}, which is not in the document`,
+        ).not.toBeNull();
+        return target?.textContent ?? '';
+      })
+      .join(' ');
+  }
+
+  it('describes the intensity box with the reason, and marks it invalid', async () => {
+    mounted = await refused();
+
+    const intensity = queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')[0];
+    expect(intensity?.getAttribute('aria-invalid')).toBe('true');
+    // The rule's own message, reached through the reference rather than found
+    // by reading the page — which is what a screen reader does with it.
+    expect(describedText(intensity as HTMLInputElement)).toContain('70');
+  });
+
+  it('says nothing about validity while the number is one the rule accepts', async () => {
+    mounted = await mountPicker();
+
+    const intensity = queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')[0];
+    expect(intensity?.getAttribute('aria-invalid')).toBeNull();
+    expect(intensity?.getAttribute('aria-describedby')).toBeNull();
+  });
+
+  it('leaves every blocked ride control in the tab order, not behind it', async () => {
+    // ⚠️ The defect in #255's own words: `disabled` *"removes every ride button
+    // from the tab order"*, so a rider who slips a decimal point tabs from the
+    // intensity box straight past all the ride controls to whatever follows,
+    // with the explanation left behind them.
+    mounted = await refused();
+
+    const reachable = tabbableElements(document);
+    const buttons = rideButtons(mounted.container);
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const button of buttons) {
+      expect(reachable).toContain(button);
+    }
+  });
+
+  it('tells the control that is blocked why it is blocked, not only the field', async () => {
+    mounted = await refused();
+
+    for (const button of rideButtons(mounted.container)) {
+      expect(button.getAttribute('aria-disabled')).toBe('true');
+      expect(describedText(button)).toContain('70');
+    }
+  });
+
+  it('still refuses to start the ride when the blocked control is activated', async () => {
+    // `aria-disabled` is a promise to a screen reader and nothing at all to a
+    // click, so the guard in the handler is the half that actually refuses.
+    // Without it this change would trade an accessibility defect for a rider
+    // being paced by a bot the rule rejected.
+    mounted = await refused();
+
+    const button = rideButtons(mounted.container)[0];
+    expect(button).toBeDefined();
+    await activateWithKeyboard(button as HTMLButtonElement);
+
+    // Still on the picker: the ride screen has a canvas and this does not.
+    expect(mounted.container.querySelector('canvas')).toBeNull();
+    expect(rideButtons(mounted.container).length).toBeGreaterThan(0);
+  });
+
+  it('audits clean while refusing, which is a different tree', async () => {
+    mounted = await refused();
+
+    const violations = auditAccessibility(document);
+    expect(violations, formatViolations(violations)).toEqual([]);
   });
 });

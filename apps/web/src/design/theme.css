@@ -552,6 +552,23 @@ body {
 }
 
 /*
+ * A ride control the pacer intensity has blocked (#255).
+ *
+ * ⚠️ It carries `aria-disabled` rather than the `disabled` attribute, so that a
+ * keyboard user still reaches it and hears why — `GameView.tsx` says why at
+ * length. The attribute used to bring the browser's own greying with it, and
+ * this is what replaces it: the same declarations `.oyl-button:disabled` uses,
+ * so the blocked state looks the same wherever a rider meets it. `cursor` is
+ * the pointer half of the same signal.
+ */
+.oyl-game__picker button[aria-disabled='true'] {
+  cursor: not-allowed;
+  border-color: var(--oyl-color-border);
+  background: var(--oyl-color-surface);
+  color: var(--oyl-color-ink-muted);
+}
+
+/*
  * The OpenStreetMap credit.
  *
  * Muted but not hidden, and deliberately not smaller than the body text: ODbL
@@ -703,6 +720,16 @@ body {
 
 .oyl-hud__unit {
   font-size: var(--oyl-font-size-md);
+  color: var(--oyl-color-hud-ink-muted);
+}
+
+/* #255. Small, and on its own line under the number, so the gap's direction is
+   legible without the 2.5 rem value becoming a sentence. `oyl-hud__label`'s
+   colour, which `contrast.a11y.test.ts` already pairs against the HUD
+   surface. */
+.oyl-hud__detail {
+  display: block;
+  font-size: var(--oyl-font-size-sm);
   color: var(--oyl-color-hud-ink-muted);
 }
 

@@ -1907,6 +1907,8 @@ top of an issue **supersedes its body**.
 | Why the HUD's panel is opaque, and why that is what makes its contrast checkable | `apps/web/src/design/tokens.ts` §`hudSurface` |
 | How a rider tells a dropped sensor from a genuine zero | `apps/web/src/game/hud/fields.ts` §`NO_READING`, `HudPanel.a11y.test.tsx` |
 | Why the wake lock's *release* is the half that is tested | `apps/web/src/game/hud/wake-lock.ts` |
+| Whom the gap's direction word describes, and why it is not the rider | `apps/web/src/game/hud/fields.ts` §`gapReading`, `HudPanel.a11y.test.tsx` §`announced` |
+| Why a blocked ride control keeps its tab stop, and what `aria-disabled` does not do to a click | `apps/web/src/game/GameView.tsx` §`PACER_PROBLEM_ID`, `apps/web/src/a11y/audit.ts` §`removedFromTabOrder` |
 | Why the renderer and the HUD are in `apps/web` when their issues say `apps/mobile` | §4h, `apps/mobile/capacitor.config.ts` §`webDir` |
 | How the client decides whether it is in a browser or the Android shell | `apps/web/src/support/capacitor.ts`, §4h |
 | Why a rider with no heart rate strap is not told their strap has dropped | `apps/web/src/game/sensors.ts`, `apps/web/src/ride/metrics.ts` |
