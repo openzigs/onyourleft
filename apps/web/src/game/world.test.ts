@@ -31,6 +31,7 @@ import {
 } from '@onyourleft/domain';
 
 import { relativeLuminance } from '../design/contrast';
+import { CAMERA_BEHIND_METRES } from './port';
 import { VIEW_AHEAD_METRES } from './terrain';
 import {
   FOG_OCCLUSION_AT_VIEW_END,
@@ -44,9 +45,6 @@ import {
   fogFactor,
   worldStyle,
 } from './world';
-
-/** How far behind the rider `three-renderer.ts` puts the chase camera. */
-const CHASE_CAMERA_METRES = 8;
 
 /**
  * A straight route at a latitude and an altitude, of a given length.
@@ -237,10 +235,17 @@ describe('the fog is derived, and is bounded at both ends', () => {
   it('leaves the road under the rider alone', () => {
     // #241's stated bound, at zero depth and at the distance the chase camera
     // actually sits from the rider's own marker.
+    //
+    // ⚠️ **The zero-depth line cannot fail, and is here because the criterion
+    // asks for it in those literal words.** `fogFactor(d, 0)` is
+    // `1 − exp(−(d·0)²)` = 0 for every density, `Infinity` included, so it
+    // pins the shape of the formula and nothing about this world. The line
+    // under it is the one doing the work: it has about a 15× margin against
+    // `NEAR_FOG_LIMIT` and goes red if the density rises to meet it.
     const densest = worldStyle(routeAt({ latitude: 46, altitude: -430 })).fogDensity;
 
     expect(fogFactor(densest, 0)).toBeLessThan(NEAR_FOG_LIMIT);
-    expect(fogFactor(densest, CHASE_CAMERA_METRES)).toBeLessThan(NEAR_FOG_LIMIT);
+    expect(fogFactor(densest, CAMERA_BEHIND_METRES)).toBeLessThan(NEAR_FOG_LIMIT);
   });
 
   it('hides the cut end of the corridor at sea level', () => {

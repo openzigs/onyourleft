@@ -295,6 +295,17 @@ function treeLine(latitudeDegrees: number): number {
  * different questions: below the tree line the ground is *what grows there*,
  * which depends on latitude; above it the ground is *what is left*, which does
  * not.
+ *
+ * ⚠️ **`treeLineMetres` is exactly 0 at and above 70° of latitude, and the
+ * division below is safe there in two steps rather than one.** No `NaN` is
+ * reachable: `0 / 0` would produce one, and it cannot happen, because an
+ * altitude of 0 with a tree line of 0 satisfies `>=` and takes the branch
+ * above. What is left is a route above 70° that is *below sea level*, where
+ * `-430 / 0` is `-Infinity`; `clamp01` maps that to 0 and the answer is
+ * vegetation. That is the right answer — polar land below sea level is not
+ * bare rock — but it arrives by a route worth writing down, because a reader
+ * checking this line for a divide-by-zero finds one and has to reconstruct
+ * both steps to see that it is fine.
  */
 function groundColour(warmth: number, altitudeMetresValue: number, treeLineMetres: number): number {
   if (altitudeMetresValue >= treeLineMetres) {

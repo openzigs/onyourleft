@@ -56,9 +56,28 @@ const NOT_SOURCE = new Set(['node_modules', 'dist', 'build', 'coverage', '.git',
 
 const SOURCE_EXTENSIONS = /\.(?:[cm]?js|jsx|tsx?)$/;
 
-/** `import … from 'three'` and `import … from 'three/addons/…'`, in either quote. */
-const IMPORTS_THREE =
-  /\bfrom\s+['"]three(?:\/[^'"]*)?['"]|\brequire\(\s*['"]three(?:\/[^'"]*)?['"]/;
+/**
+ * Every spelling of reaching for the rendering library, in either quote.
+ *
+ * ⚠️ **Four, not two.** A static `from 'three'` and a `require('three')` were
+ * the only ones matched at first, and they miss the two a second importer here
+ * is most likely to actually use: **`await import('three')`**, which is the
+ * idiomatic spelling in this codebase because `GameView.tsx` already lazy-loads
+ * the renderer to keep `three` out of the entry chunk (#240's NFR-4), and a
+ * bare side-effect `import 'three'`. A seam test that misses the idiomatic
+ * spelling is a seam test that passes while the seam erodes.
+ */
+const THREE_SPECIFIER = String.raw`['"]three(?:\/[^'"]*)?['"]`;
+const IMPORTS_THREE = new RegExp(
+  [
+    String.raw`\bfrom\s+${THREE_SPECIFIER}`,
+    String.raw`\brequire\(\s*${THREE_SPECIFIER}`,
+    // `import('three')` — dynamic, with or without `await`.
+    String.raw`\bimport\(\s*${THREE_SPECIFIER}`,
+    // `import 'three'` — a side-effect import, which has no `from`.
+    String.raw`\bimport\s+${THREE_SPECIFIER}`,
+  ].join('|'),
+);
 
 /** Every source file under `apps/` and `packages/`, repository-relative. */
 function sourceFiles(): readonly string[] {
@@ -101,10 +120,21 @@ describe('the rendering seam', () => {
 
   it('adds no illumination to the scene', () => {
     // #241's own criterion, and the one that would otherwise be checked by a
-    // reviewer running a grep by hand. Matched by suffix so that a lamp class
+    // reviewer running a grep by hand. Matched by shape so that a lamp class
     // nobody here has heard of is caught with the ones they have.
+    //
+    // ⚠️ The suffix forms alone (`[A-Za-z]Light\b`, `\bLight\(`) have a gap in
+    // three's own class list: `LightProbe` matches neither — there is no letter
+    // before `Light` and no word boundary after it — and nor does
+    // `HemisphereLightHelper`. Every illumination class three exports carries
+    // the capitalised word somewhere in its name, so that is the whole rule.
+    //
+    // It therefore also trips on a capitalised `Light` in prose, and that is
+    // the right trade: the fix is to lowercase a word, and the rule fails
+    // closed. The comment on `ROAD_COLOUR` says *"no lighting means no light
+    // budget"* in lower case for that reason.
     const renderer = readFileSync(join(repositoryRoot, THE_SEAM), 'utf8');
 
-    expect(renderer).not.toMatch(/[A-Za-z]Light\b|\bLight\(/);
+    expect(renderer).not.toMatch(/Light/);
   });
 });

@@ -58,19 +58,19 @@ import {
 } from 'three';
 
 import type { QualitySettings } from './quality';
+import { CAMERA_BEHIND_METRES } from './port';
 import type { CameraPose, GameRenderer, GameView, RiderMarker, SceneFrame } from './port';
 import type { WorldStyle } from './world';
 
 /**
- * How far behind and above the rider the chase camera sits, in metres.
+ * How far above the rider the chase camera sits, in metres.
  *
- * ADR 0008 **D-5** fixes the camera, so these are the whole of the camera's
- * configuration — there is no free-look and adding one is a change to that ADR.
- * Eight metres back and three up is roughly a following motorbike: far enough
- * that the road ahead fills the frame on a phone held at arm's length, close
- * enough that the rider's own marker stays large enough to find.
+ * Its sibling {@link CAMERA_BEHIND_METRES} is in `port.ts` rather than here,
+ * because `world.test.ts` needs it and must not import `three`; that is where
+ * the rest of this note lives. ADR 0008 **D-5** fixes the camera, so the two
+ * together are the whole of its configuration — there is no free-look, and
+ * adding one is a change to that ADR.
  */
-const CAMERA_BEHIND_METRES = 8;
 const CAMERA_ABOVE_METRES = 3;
 
 /** How far ahead of the rider the camera looks. */
