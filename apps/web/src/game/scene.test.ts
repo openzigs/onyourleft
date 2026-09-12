@@ -14,7 +14,14 @@ import { gapAgainst } from './hud/fields';
 import type { RiderMarker, SceneFrame } from './port';
 import { cameraPose, ghostFinished, sceneFrame } from './scene';
 import { corridorOrigin } from './terrain';
-import { GameSimulation, atStartLine, type SimulationSetup } from './simulation';
+import {
+  GameSimulation,
+  MAXIMUM_STEPS_PER_ADVANCE,
+  SIMULATION_STEP_SECONDS,
+  atStartLine,
+  type GameState,
+  type SimulationSetup,
+} from './simulation';
 import {
   altitudeMetres,
   buildGhostTrack,
@@ -167,8 +174,20 @@ describe('the frame carries every rider that is in play', () => {
   });
 });
 
+/**
+ * A ride `t` seconds in, with nothing stalled.
+ *
+ * ⚠️ **Both clocks, set to the same number, and that is the point** — #254.
+ * `elapsed` is the wall clock and `ridden` is what was actually integrated, and
+ * on an ordinary ride they are equal. A fixture that set only one of them would
+ * be asserting against a state the simulation cannot produce.
+ */
+function atRaceTime(base: GameState, atSeconds: number): GameState {
+  return { ...base, elapsed: seconds(atSeconds), ridden: seconds(atSeconds) };
+}
+
 describe('the ghost is raced, not merely replayed alongside', () => {
-  it('moves the ghost to where it was at this elapsed time', () => {
+  it('moves the ghost to where it was at this point in the race', () => {
     const setup = straightRoute();
     const origin = corridorOrigin(setup.profile);
     const simulation = new GameSimulation(setup);
@@ -177,13 +196,13 @@ describe('the ghost is raced, not merely replayed alongside', () => {
     const early = sceneFrame({
       profile: setup.profile,
       origin,
-      state: { ...simulation.state, elapsed: seconds(5) },
+      state: atRaceTime(simulation.state, 5),
       ghost: GHOST,
     });
     const later = sceneFrame({
       profile: setup.profile,
       origin,
-      state: { ...simulation.state, elapsed: seconds(30) },
+      state: atRaceTime(simulation.state, 30),
       ghost: GHOST,
     });
 
@@ -195,7 +214,7 @@ describe('the ghost is raced, not merely replayed alongside', () => {
 
   it('leaves the ghost at its finishing distance rather than removing it', () => {
     const setup = straightRoute();
-    const state = { ...atStartLine(setup.profile), elapsed: seconds(600) };
+    const state = atRaceTime(atStartLine(setup.profile), 600);
     const frame = sceneFrame({
       profile: setup.profile,
       origin: corridorOrigin(setup.profile),
@@ -205,6 +224,86 @@ describe('the ghost is raced, not merely replayed alongside', () => {
 
     expect(frame.markers.some((marker) => marker.kind === 'ghost')).toBe(true);
     expect(ghostFinished(GHOST, state)).toBe(true);
+  });
+});
+
+/**
+ * The seam #254 was, driven end to end — a real {@link GameSimulation} stalled
+ * for five minutes, and a real {@link sceneFrame} built from what it says.
+ *
+ * ⚠️ **Nothing below could be caught one file at a time, which is why it
+ * shipped.** `ghostDistanceAt` is right, {@link MAXIMUM_STEPS_PER_ADVANCE} is
+ * right, and crediting the whole outstanding amount to the clock is right. The
+ * defect was only in how they met, so the fixture has to be a simulation that
+ * has actually stalled rather than a hand-written state.
+ */
+describe('a stall does not hand the ghost road the rider never rode (#254)', () => {
+  const PEDALLING = { power: watts(200), live: true };
+
+  /** Five minutes backgrounded, from one `advanceTo` to the next. */
+  function stalledRide(setup: SimulationSetup): GameSimulation {
+    const simulation = new GameSimulation(setup);
+    simulation.advanceTo(0, PEDALLING);
+    simulation.advanceTo(300_000, PEDALLING);
+    return simulation;
+  }
+
+  /** The same ride, never backgrounded, run for the seconds the bound allows. */
+  function unstalledRide(setup: SimulationSetup): GameSimulation {
+    const simulation = new GameSimulation(setup);
+    simulation.advanceTo(0, PEDALLING);
+    const boundMs = MAXIMUM_STEPS_PER_ADVANCE * SIMULATION_STEP_SECONDS * 1000;
+    for (let nowMs = 250; nowMs <= boundMs; nowMs += 250) {
+      simulation.advanceTo(nowMs, PEDALLING);
+    }
+    return simulation;
+  }
+
+  function ghostMarker(setup: SimulationSetup, state: GameState): RiderMarker | undefined {
+    return sceneFrame({
+      profile: setup.profile,
+      origin: corridorOrigin(setup.profile),
+      state,
+      ghost: GHOST,
+    }).markers.find((marker) => marker.kind === 'ghost');
+  }
+
+  it('leaves the ghost where an unstalled ride of the same ridden time leaves it', () => {
+    const setup = straightRoute();
+    const stalled = stalledRide(setup);
+    const smooth = unstalledRide(setup);
+
+    // The two rides differ on the wall clock by the whole stall…
+    expect(stalled.state.elapsed).toBeGreaterThan(smooth.state.elapsed + 280);
+    // …and agree exactly on the road, which is #91's decoupling holding.
+    expect(stalled.state.ridden).toBe(smooth.state.ridden);
+    expect(stalled.state.ride.distance).toBe(smooth.state.ride.distance);
+
+    // So the ghost is in the same place too, which is the criterion.
+    expect(ghostMarker(setup, stalled.state)).toEqual(ghostMarker(setup, smooth.state));
+  });
+
+  it('does not place the ghost where the wall clock would have put it', () => {
+    const setup = straightRoute();
+    const stalled = stalledRide(setup);
+
+    // The state the defect produced: the racing clock carrying the whole stall.
+    // Asserting the difference is what stops the test above passing vacuously —
+    // two markers can agree because both are clamped to the same corridor end.
+    const onTheWallClock = { ...stalled.state, ridden: stalled.state.elapsed };
+
+    expect(ghostMarker(setup, stalled.state)).not.toEqual(ghostMarker(setup, onTheWallClock));
+  });
+
+  it('does not declare the attempt finished on time the rider never rode', () => {
+    const setup = straightRoute();
+    const stalled = stalledRide(setup);
+
+    // GHOST lasts 40 s. Five minutes of wall clock is past that; ten seconds of
+    // riding is not, and the rider is still racing it.
+    expect(stalled.state.elapsed).toBeGreaterThan(GHOST.totalTime);
+    expect(stalled.state.ridden).toBeLessThan(GHOST.totalTime);
+    expect(ghostFinished(GHOST, stalled.state)).toBe(false);
   });
 });
 

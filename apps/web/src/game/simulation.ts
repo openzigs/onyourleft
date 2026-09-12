@@ -122,6 +122,60 @@ export const SIMULATION_STEP_SECONDS = 0.05;
  */
 export const MAXIMUM_STEPS_PER_ADVANCE = 200;
 
+/**
+ * The clock everything that *races* the rider is read against — #254.
+ *
+ * ## The rule, stated next to the bound it belongs to
+ *
+ * > **A stall is time nobody rode.** The rider does not cover the road they were
+ * > away for, because {@link MAXIMUM_STEPS_PER_ADVANCE} bounds the steps one
+ * > `advanceTo` will integrate. The bot does not, because #237 put it inside
+ * > that same loop. **And neither does the ghost**, because every "where is it
+ * > now" question is asked at {@link GameState.ridden} — the seconds actually
+ * > integrated — and never at {@link GameState.elapsed}, which is wall clock
+ * > and carries the stall.
+ *
+ * ⚠️ **This is the seam #254 was, and the two constants have to be read
+ * together for the same reason.** Each piece was right on its own:
+ * `ghostDistanceAt` replays a recording against recorded time,
+ * {@link MAXIMUM_STEPS_PER_ADVANCE} bounds a catch-up burst, and crediting the
+ * whole outstanding amount to `elapsed` is right for a clock. Only the join was
+ * wrong: five minutes backgrounded advanced the rider and the bot by ten
+ * seconds of road and the ghost by five minutes of it, so a rider who picked
+ * the phone back up found the pacer where they left it and the ghost gone.
+ *
+ * ## What this rule deliberately is not
+ *
+ * - **It does not re-simulate the ghost.** Nothing about a recording is
+ *   recomputed: `ghostDistanceAt` is called unchanged, with a time in the
+ *   recording's own base, and `packages/domain/src/ghost/replay.ts`'s promise —
+ *   *"a replay of recorded distance against recorded time, never a
+ *   re-simulation"* — is untouched. What changed is **which** clock is handed
+ *   to it, not what it does with one.
+ * - **It does not rebase the ghost's clock.** The attempt's own samples are
+ *   never shifted or scaled, so the previous ride is never made to look slower
+ *   than it was. Both riders are compared at *T seconds of riding*, which is
+ *   the same basis the bot is already compared on and the only one under which
+ *   a stall favours neither.
+ *
+ * The cost, stated plainly: after a stall the ride's wall clock and its racing
+ * clock diverge, so a ride that says it lasted five minutes may have raced ten
+ * seconds of it. That divergence is the ride genuinely having lost time, and it
+ * is already reported to the rider through {@link SimulationTick.skippedSeconds}
+ * rather than being invented here.
+ *
+ * Every caller that places or measures a ghost goes through this function, so
+ * the marker on the road and the gap in the HUD cannot be read against two
+ * different clocks.
+ */
+export function ghostClock(state: GameState): Seconds {
+  // Clamped because `ghostDistanceAt` is documented at both ends and a negative
+  // time is neither of them. `ridden` cannot go negative today — it only ever
+  // accumulates — and the clamp is here rather than at three call sites so that
+  // it cannot be right at two of them and forgotten at the third.
+  return seconds(Math.max(0, state.ridden));
+}
+
 /** What the rider's sensors are currently reporting. */
 export interface RiderInput {
   /** Power at the pedals, as the trainer or meter reports it. */
@@ -194,8 +248,28 @@ export interface SimulationTick {
  */
 export interface GameState {
   readonly ride: RideState;
-  /** How long the simulation has been running, in simulated seconds. */
+  /**
+   * How long the ride has lasted, in seconds — **wall clock, stall included**.
+   *
+   * An exact multiple of {@link SIMULATION_STEP_SECONDS} derived from the
+   * origin, so it cannot drift. A ride that was backgrounded for five minutes
+   * really did last five minutes and this says so.
+   *
+   * ⚠️ **Not the clock to race anything against.** See {@link ridden} and
+   * {@link ghostClock}.
+   */
   readonly elapsed: Seconds;
+  /**
+   * How much of that was actually ridden — {@link elapsed} minus every second a
+   * stall discarded (#254).
+   *
+   * Equal to {@link elapsed} on every ordinary ride, and the two separate only
+   * once a single `advanceTo` has more than {@link MAXIMUM_STEPS_PER_ADVANCE}
+   * steps owed to it. This is the road the rider and the bot actually covered,
+   * so it is the clock the ghost is placed and measured against —
+   * {@link ghostClock} states the rule and is how every caller reads it.
+   */
+  readonly ridden: Seconds;
   /** The gradient at the rider's current position on the route. */
   readonly grade: GradePercent;
   /** The last input the simulation was advanced with. @see RiderInput */
@@ -242,6 +316,16 @@ export class GameSimulation {
    * {@link SimulationTick.skippedSeconds} instead of being pretended away.
    */
   #stepsCredited = 0;
+  /**
+   * How many steps were **integrated** — the other half of the pair
+   * {@link #stepsCredited} names, and the one every racer is read against.
+   *
+   * Kept as a count rather than derived by subtracting the skipped seconds from
+   * the elapsed ones, so it is an exact multiple of the step for the same
+   * reason `elapsed` is: a running sum of floating-point durations drifts, and
+   * `simulation.ts`'s header records the 0.23 m that cost the first time.
+   */
+  #stepsRun = 0;
 
   constructor(setup: SimulationSetup) {
     this.#setup = setup;
@@ -249,6 +333,7 @@ export class GameSimulation {
     this.#state = {
       ride: START_OF_RIDE,
       elapsed: seconds(0),
+      ridden: seconds(0),
       grade: gradeAtDistance(setup.profile, START_OF_RIDE.distance),
       input: { power: watts(0), live: false },
       // On the start line from the first frame rather than from the first tick:
@@ -341,12 +426,18 @@ export class GameSimulation {
     // Credit the whole outstanding amount even when only part of it was
     // integrated, so a stall is absorbed once rather than chased forever.
     this.#stepsCredited = owed;
+    // ⚠️ `toRun`, not `outstanding` — this is the counter that must NOT absorb
+    // the stall. It is what {@link ghostClock} reads, and crediting it the whole
+    // amount here would put #254 straight back: the rider and the bot would
+    // cover ten seconds of road and the ghost five minutes of it.
+    this.#stepsRun += toRun;
     const skippedSteps = outstanding - toRun;
 
     this.#state = {
       ride,
       // An exact multiple of the step, so this cannot drift from the step count.
       elapsed: seconds(this.#stepsCredited * SIMULATION_STEP_SECONDS),
+      ridden: seconds(this.#stepsRun * SIMULATION_STEP_SECONDS),
       grade: gradeAtDistance(this.#setup.profile, ride.distance),
       input,
       ...(bot === undefined ? {} : { bot }),
@@ -410,6 +501,7 @@ export function atStartLine(profile: RouteProfile): GameState {
   return {
     ride: { speed: metresPerSecond(0), distance: metres(0) },
     elapsed: seconds(0),
+    ridden: seconds(0),
     grade: gradeAtDistance(profile, metres(0)),
     input: { power: watts(0), live: false },
   };

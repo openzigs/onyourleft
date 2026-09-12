@@ -16,10 +16,10 @@
  * can be satisfied by accident.
  */
 
-import { ghostDistanceAt, ghostHasFinished, type GhostTrack, seconds } from '@onyourleft/domain';
+import { ghostDistanceAt, ghostHasFinished, type GhostTrack } from '@onyourleft/domain';
 
 import type { CameraPose, RiderMarker, SceneFrame } from './port';
-import type { GameState } from './simulation';
+import { ghostClock, type GameState } from './simulation';
 import {
   roadCorridor,
   type CorridorOrigin,
@@ -92,11 +92,17 @@ function markers(
     found.push(markerAt(corridor, input.botDistance, 'bot'));
   }
   if (input.ghost !== undefined) {
-    // ⚠️ The ghost is placed at where it had ridden **at this elapsed time**,
-    // which is what makes it a race rather than a replay running beside you.
-    // After it finishes it stays at its finishing distance rather than
+    // ⚠️ The ghost is placed at where it had ridden **at this point in the
+    // race**, which is what makes it a race rather than a replay running beside
+    // you. After it finishes it stays at its finishing distance rather than
     // disappearing — a rider who beat it wants to see it behind them.
-    const at = ghostDistanceAt(input.ghost, seconds(Math.max(0, input.state.elapsed)));
+    //
+    // ⚠️ **`ghostClock`, never `state.elapsed` — #254.** The two differ by
+    // exactly the time a backgrounded phone stalled for, and reading the wall
+    // clock here handed the ghost five minutes of road while the rider and the
+    // bot covered ten seconds of it. `simulation.ts` §`ghostClock` states the
+    // rule beside the bound that creates the difference.
+    const at = ghostDistanceAt(input.ghost, ghostClock(input.state));
     found.push(markerAt(corridor, at, 'ghost'));
   }
   return found;
@@ -153,7 +159,13 @@ function nearestPoint(
   return { point: corridor.centre[bestIndex] as CorridorPoint, index: bestIndex };
 }
 
-/** Whether the ghost has already finished, for a HUD that wants to say so. */
+/**
+ * Whether the ghost has already finished, for a HUD that wants to say so.
+ *
+ * ⚠️ Against {@link ghostClock} like every other ghost question (#254), so a
+ * stalled ride cannot declare the attempt finished while its marker is still
+ * halfway up the road.
+ */
 export function ghostFinished(ghost: GhostTrack, state: GameState): boolean {
-  return ghostHasFinished(ghost, seconds(Math.max(0, state.elapsed)));
+  return ghostHasFinished(ghost, ghostClock(state));
 }

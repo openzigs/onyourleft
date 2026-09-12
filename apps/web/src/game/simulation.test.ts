@@ -22,6 +22,7 @@ import {
   MAXIMUM_STEPS_PER_ADVANCE,
   SIMULATION_STEP_SECONDS,
   atStartLine,
+  ghostClock,
   type RiderInput,
   type SimulationSetup,
 } from './simulation';
@@ -108,6 +109,11 @@ describe('the simulation does not depend on the render loop', () => {
     expect(stalled.state.ride.distance).toBe(smooth.state.ride.distance);
     expect(stalled.state.ride.speed).toBe(smooth.state.ride.speed);
     expect(stalled.state.elapsed).toBe(smooth.state.elapsed);
+    // The ridden clock agrees too, which is what #254 needs of it: it is a
+    // function of the steps integrated, and the two runs integrated the same
+    // ones. Only a stall can move it away from `elapsed`.
+    expect(stalled.state.ridden).toBe(smooth.state.ridden);
+    expect(stalled.state.ridden).toBe(stalled.state.elapsed);
   });
 
   it('reaches the same position at 60 fps and at 30 fps', () => {
@@ -208,6 +214,30 @@ describe('a stall longer than the catch-up bound', () => {
 
     expect(tick.steps).toBe(MAXIMUM_STEPS_PER_ADVANCE);
     expect(tick.skippedSeconds).toBeGreaterThan(280);
+  });
+
+  it('keeps the wall clock and the ridden clock apart, by exactly what it dropped', () => {
+    // #254. `elapsed` is what the ride lasted and `ridden` is what it covered,
+    // and a stall is the only thing that separates them. Asserting the
+    // arithmetic rather than two independent numbers is what stops a future
+    // `ridden` that quietly tracks `elapsed` again.
+    const simulation = new GameSimulation(hillyRoute());
+    simulation.advanceTo(0, PEDALLING);
+    const tick = simulation.advanceTo(300_000, PEDALLING);
+
+    const bound = MAXIMUM_STEPS_PER_ADVANCE * SIMULATION_STEP_SECONDS;
+    expect(simulation.state.ridden).toBe(bound);
+    expect(simulation.state.elapsed).toBeCloseTo(bound + tick.skippedSeconds, 9);
+    expect(simulation.state.elapsed).toBeGreaterThan(simulation.state.ridden);
+  });
+
+  it('is the ridden clock that every racer is read against, never the wall one', () => {
+    const simulation = new GameSimulation(hillyRoute());
+    simulation.advanceTo(0, PEDALLING);
+    simulation.advanceTo(300_000, PEDALLING);
+
+    expect(ghostClock(simulation.state)).toBe(simulation.state.ridden);
+    expect(ghostClock(simulation.state)).not.toBe(simulation.state.elapsed);
   });
 
   it('does not block on a stall, which is the point of the bound', () => {

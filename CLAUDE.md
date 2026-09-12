@@ -1911,6 +1911,7 @@ top of an issue **supersedes its body**.
 | Why the eleventh store fake breaks a read where the other ten break a write | `packages/store/src/testing/fakes.ts` §`unscopedAttemptStoreFactory` |
 | Why the simulation derives its step count from the origin rather than accumulating deltas | `apps/web/src/game/simulation.ts`, and the 0.23 m drift recorded in its header |
 | What happens to a ride when the phone is backgrounded for five minutes | `apps/web/src/game/simulation.ts` §`MAXIMUM_STEPS_PER_ADVANCE` |
+| Why the ghost does not gain road while the phone is backgrounded, and which clock it is raced against | `apps/web/src/game/simulation.ts` §`ghostClock`, §`GameState.ridden` |
 | Why the road is a corridor rather than a world, and where its vertices come from | `apps/web/src/game/terrain.ts`, [ADR 0008](docs/adr/0008-mobile-client-architecture.md) D-5 |
 | Where the ground and sky colours came from, and which one of them is physics | `apps/web/src/game/world.ts` §Provenance |
 | Why the fog is solved from the view distance rather than written down, and what its floor costs | `apps/web/src/game/world.ts` §`FOG_OCCLUSION_AT_VIEW_END`, §`MINIMUM_VIEW_END_OCCLUSION` |
