@@ -95,7 +95,9 @@ apps/                 AGPL-3.0-or-later, without exception
     src/shell/          the hash route table, the router hook and AppShell (#48)
     src/support/        browser-capability detection and its notice (#48)
     src/transfer/       file import and export: the batch importer, the codec's
-                        first production caller, and the export writer (#51)
+                        first production caller, the export writer (#51), and
+                        the distance an imported track derives from its own
+                        positions when the file states none (#231)
     src/views/          one component per route (#48)
   mobile/             Capacitor shell wrapping the same web build (Phase 3)
 
@@ -498,6 +500,18 @@ Three things about it are load-bearing rather than incidental:
   and a failure is an outcome rather than an exception. A bulk export from another platform contains
   files this project cannot read — a summary spreadsheet, a compressed ride, whatever else — and an
   importer that stops at the first one turns a decade of history into "import failed".
+- **A distance the file does not state is derived from the track, and only then** —
+  [#231](https://github.com/openzigs/onyourleft/issues/231). GPX has no lap totals and no per-point
+  cumulative distance, so a file carrying five thousand positions and nothing else imported as
+  **0.0 km**. `track-distance.ts` derives one from the positions, behind both of the file's own
+  numbers rather than over them, and it is deliberately **not** the rule `recording/finish.ts`
+  uses: a recorded ride integrates its distance from *speed*, which is right for a live sensor and
+  turns an import's richest channel into a zero. Three rejections keep the sum honest — an interval
+  longer than a minute is a hole rather than a straight line, a step slower than walking pace is the
+  receiver drifting rather than the rider moving, and a step implying more than any bicycle has ever
+  gone is a fix that jumped. The anchor is what makes the middle one work: a rejected step does not
+  move it, so drift is measured as displacement from where the receiver actually was rather than one
+  metre at a time forever.
 - **The resource bound on an import is this component's, not the codec's.** A file's *timestamps*
   decide how long the sample arrays are, and two well-formed records a decade apart ask for 315
   million slots per channel. `MAXIMUM_IMPORTED_SAMPLES` is checked before anything is allocated. The

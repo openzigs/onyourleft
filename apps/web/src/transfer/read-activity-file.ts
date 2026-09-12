@@ -58,6 +58,7 @@ import {
 import type { StreamChannel, StreamChannels, StreamChannelValue } from '@onyourleft/store';
 
 import { detectActivityFileFormat, type ActivityFileFormat } from './file-format';
+import { distanceAlongTrack } from './track-distance';
 
 /**
  * The longest ride this client will build a sample grid for: 48 hours at 1 Hz.
@@ -373,7 +374,26 @@ function rideOf(input: RideInput): ImportedRide {
    */
   const observedSpan = seconds(last - first);
   const elapsedTime = boundedBy(input.statedElapsedTime, observedSpan);
-  const distance = input.statedDistance ?? metres(furthest ?? 0);
+  /**
+   * The distance, in the order of preference the file itself sets.
+   *
+   * 1. **A total the file states.** A session or lap total is what every other
+   *    reader shows for this file, and deriving over the top of it is how an
+   *    imported ride ends up disagreeing with the platform it came from.
+   * 2. **The largest per-point cumulative distance.** Also the file's own
+   *    number, one record at a time rather than one summary.
+   * 3. **Derived from the track's positions**, and only then. `track-distance.ts`
+   *    owns that rule and the three thresholds it rejects on; the header there
+   *    says why it is not the rule `recording/finish.ts` uses.
+   *
+   * ⚠️ **The derivation is a fallback and never an override** — #231's second
+   * criterion, and the reason it sits at the end of a `??` chain rather than
+   * inside a `Math.max`. A file that states a distance keeps the one it states,
+   * even when this module would have derived a larger one.
+   */
+  const distance =
+    input.statedDistance ??
+    (furthest === undefined ? distanceAlongTrack(input.points) : metres(furthest));
   return {
     format: input.format,
     name: input.name ?? nameFromFileName(input.fileName),
