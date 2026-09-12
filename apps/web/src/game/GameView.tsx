@@ -36,7 +36,7 @@ import { DEFAULT_PACER_INTENSITY, pacerChoice, type PacerChoice } from './pacer-
 import { INITIAL_QUALITY, nextQuality, qualitySettings, type QualityState } from './quality';
 import { RIDE_CONDITIONS } from './rider';
 import { sceneFrame } from './scene';
-import { GameSimulation, type GameState } from './simulation';
+import { GameSimulation, ghostClock, type GameState } from './simulation';
 import { corridorOrigin } from './terrain';
 import type { GameRenderer, GameView as RendererView } from './port';
 import { NO_SENSORS, type GameSensors } from './sensors';
@@ -45,7 +45,6 @@ import {
   MINIMUM_INTENSITY_WATTS_PER_KILOGRAM,
   ghostDistanceAt,
   pacerGap,
-  seconds,
   type BotPacerPlan,
   type GhostTrack,
   type RouteProfile,
@@ -341,9 +340,12 @@ export function GameView(props: GameViewProps): JSX.Element {
  * disagree; `scene.ts` §`nearestPoint` is the other half of that promise and
  * says why the wrap belongs there and not here.
  *
- * The ghost's distance is read **at this elapsed time**, by the same call
- * `scene.ts` places its marker with — a ghost is raced rather than replayed
- * beside you, so "where is it now" is a question about the clock.
+ * The ghost's distance is read at **this point in the race**, through the same
+ * {@link ghostClock} `scene.ts` places its marker with — a ghost is raced rather
+ * than replayed beside you, so "where is it now" is a question about the clock,
+ * and #254 is what happens when the HUD and the road answer it differently.
+ * That clock is the ride's *ridden* seconds and never its wall clock;
+ * `simulation.ts` §`ghostClock` states the rule and why.
  */
 function chasedGaps(state: GameState, ghost: GhostTrack | undefined): readonly ChasedGap[] {
   const found: ChasedGap[] = [];
@@ -352,7 +354,7 @@ function chasedGaps(state: GameState, ghost: GhostTrack | undefined): readonly C
     found.push({ to: 'bot', gap: pacerGap(gapAgainst(state, bot.state.distance)) });
   }
   if (ghost !== undefined) {
-    const at = ghostDistanceAt(ghost, seconds(Math.max(0, state.elapsed)));
+    const at = ghostDistanceAt(ghost, ghostClock(state));
     found.push({ to: 'ghost', gap: pacerGap(gapAgainst(state, at)) });
   }
   return found;

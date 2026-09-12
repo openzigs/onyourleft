@@ -70,6 +70,23 @@ const FAST_GHOST: GhostTrack = buildGhostTrack({
   distanceMetres: [0, 1_200],
 });
 
+/**
+ * A previous attempt at a walking pace — an hour at 1 m/s.
+ *
+ * ⚠️ **Slow on purpose, and the opposite purpose to {@link FAST_GHOST}'s.**
+ * #254's test has to distinguish "the ghost advanced by the road the rider
+ * rode" from "the ghost advanced by the whole stall", and a magnitude would do
+ * it with a threshold nobody can defend. At this pace the answer is
+ * **categorical**: after twenty-five seconds of riding the attempt is plainly
+ * behind this rider, and after ten minutes of wall clock it is plainly in
+ * front. The HUD says which, in words, so the assertion is a direction rather
+ * than a number.
+ */
+const WALKING_GHOST: GhostTrack = buildGhostTrack({
+  elapsedSeconds: [0, 3_600],
+  distanceMetres: [0, 3_600],
+});
+
 /** A rider on the trainer, pedalling steadily. */
 function pedallingPort(route: RidableRoute, ghost?: GhostTrack): GamePort {
   return {
@@ -161,12 +178,17 @@ async function startRiding(options: {
   readonly intensity?: string;
   /** Whether to also race a previous attempt. @see FAST_GHOST */
   readonly ghost?: boolean;
+  /** Which attempt, when the default is the wrong shape for the assertion. */
+  readonly track?: GhostTrack;
 }): Promise<SceneFrame[]> {
   const route = options.ghost === true ? { ...testRoute(), attempts: 1 } : testRoute();
   const frames: SceneFrame[] = [];
   mounted = await mount(
     <GameView
-      port={pedallingPort(route, options.ghost === true ? FAST_GHOST : undefined)}
+      port={pedallingPort(
+        route,
+        options.ghost === true ? (options.track ?? FAST_GHOST) : undefined,
+      )}
       renderer={() => Promise.resolve(capturingRenderer(frames))}
       now={() => nowMs}
     />,
@@ -328,6 +350,44 @@ describe('riding against both a pacer and your own best (#253)', () => {
     // could produce.
     expect(pacer).toContain('behind you');
     expect(best).toContain('ahead of you');
+  });
+});
+
+describe('a phone backgrounded mid-ride (#254)', () => {
+  /**
+   * The wiring #254 was about, driven the way a rider would produce it: frames
+   * stop arriving for ten minutes, then one arrives.
+   *
+   * ⚠️ **No unit test could see this and that is the finding, not an excuse.**
+   * `ghostDistanceAt` replaying a recording against recorded time is right,
+   * `MAXIMUM_STEPS_PER_ADVANCE` bounding a catch-up burst is right, and
+   * crediting the whole outstanding amount to the ride's clock is right. The
+   * ghost went up the road because the first of those was asked at the third's
+   * clock, and only a test that owns all three at once can watch it happen.
+   */
+  const BACKGROUNDED_MS = 600_000;
+
+  it('does not hand the ghost road the rider never covered', async () => {
+    const frames = await startRiding({ pacer: false, ghost: true, track: WALKING_GHOST });
+    await pump(60);
+
+    // Fifteen seconds in, the rider is comfortably up the road on an attempt
+    // that went round at a walking pace.
+    expect(hudField('Your best')).toContain('behind you');
+
+    await pump(1, BACKGROUNDED_MS);
+
+    // Ten minutes of wall clock later — and ten seconds of riding later, which
+    // is what MAXIMUM_STEPS_PER_ADVANCE allows — the attempt is still behind.
+    // Read against `elapsed` it would have walked another six hundred metres
+    // while the rider covered fifty, and this field would say 'ahead of you'.
+    expect(hudField('Your best')).toContain('behind you');
+    expect(hudField('Your best')).not.toContain('ahead');
+
+    // And it is still on the road: a ghost that vanished would also stop
+    // reporting a direction, so the assertions above need this one beside them.
+    const last = frames[frames.length - 1];
+    expect(last?.markers.map((marker) => marker.kind).sort()).toEqual(['ghost', 'rider']);
   });
 });
 
