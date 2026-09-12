@@ -20,6 +20,15 @@
 import type { AthleteId, AthleteRecord, UnitSystem } from '@onyourleft/store';
 
 export interface UnitsStore {
+  /**
+   * @returns the written row, or `undefined` when there is no such athlete.
+   *
+   * ⚠️ **`undefined` means nothing was written, and it does not throw.** Every
+   * caller must branch on it: discarding the return turns "nothing happened"
+   * into a success message and a screen that disagrees with the disk until the
+   * next reload. The same is true of `setAthleteThresholds`, which is the other
+   * narrow athlete write with this shape.
+   */
   setAthleteUnits(id: AthleteId, units: UnitSystem): Promise<AthleteRecord | undefined>;
 }
 

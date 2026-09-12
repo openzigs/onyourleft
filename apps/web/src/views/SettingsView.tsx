@@ -11,9 +11,17 @@
  * miles" would not think to look under Analysis, and a preference that is hard
  * to find is one that gets reported as a missing feature.
  *
- * It is also a route, which means the accessibility gate audits it without
- * anyone remembering to add a test: `routes.a11y.test.tsx` iterates the table
+ * It is also a route, which means the accessibility gate reaches it without
+ * anyone remembering to add a case: `routes.a11y.test.tsx` iterates the table
  * in `shell/routes.ts`.
+ *
+ * ⚠️ **The route being in the table is not enough, and a review caught this.**
+ * With no `settings` port the shell renders {@link UNITS_NO_STORE} — a
+ * paragraph with nothing interactive in it — so the gate audited a route on
+ * which the radio group had never rendered, and reported it clean. What makes
+ * the control audited is `routes.a11y.test.tsx` §`settingsPort`, which hands
+ * the shell a port that answers. Removing it turns a control with no
+ * accessible name back into a green run.
  *
  * ## The current choice is visible, never implied
  *
@@ -67,6 +75,22 @@ export function unitsSaveFailure(reason: string): string {
   return `That could not be saved, so this device is still reading in the units it was: ${reason}`;
 }
 
+/**
+ * Why a write can land nowhere without throwing.
+ *
+ * ⚠️ `setAthleteUnits` answers `undefined` for *"there is no such athlete"* —
+ * it does **not** throw, because a missing row is an ordinary state rather than
+ * an error. Reachable here: `main.tsx` builds the port unconditionally while
+ * `local-athlete.ts` §`renderAfterAthlete` deliberately swallows a failure from
+ * `ensureLocalAthlete`, so a start-up where the row could not be created still
+ * renders this screen over a store that answers. Discarding that return is
+ * CLAUDE.md §5's *"a write that reports success while the read cannot see it"*:
+ * every screen would flip to miles, the panel would say `UNITS_SAVED`, and the
+ * next reload would be back in kilometres with nothing having said so.
+ */
+export const UNITS_NO_ATHLETE =
+  'there is no athlete row on this device to save it against, so nothing was written';
+
 export interface SettingsViewProps {
   /** `undefined` where this browser has no local store — see {@link UNITS_NO_STORE}. */
   readonly port?: UnitsPort | undefined;
@@ -75,11 +99,13 @@ export interface SettingsViewProps {
   /**
    * Told when the write succeeded, so the rest of the client re-renders.
    *
-   * ⚠️ **Called only after the store has answered**, never optimistically. A
-   * screen that switched to miles and then failed to persist would show a
-   * rider miles until they reloaded and kilometres afterwards, with nothing
-   * saying which is real — the same class of defect as a write that reports
-   * success while the read cannot see it, moved up into the UI.
+   * ⚠️ **Called only after the store has answered with a written row**, never
+   * optimistically and never on the store's `undefined`. A screen that
+   * switched to miles and then failed to persist would show a rider miles
+   * until they reloaded and kilometres afterwards, with nothing saying which
+   * is real — the same class of defect as a write that reports success while
+   * the read cannot see it, moved up into the UI. "Answered" is not enough:
+   * `undefined` *is* an answer, and it means nothing was written.
    */
   readonly onUnitsChange: (units: UnitSystem) => void;
 }
@@ -94,7 +120,13 @@ export function SettingsView({ port, units, onUnitsChange }: SettingsViewProps):
       return;
     }
     try {
-      await port.store.setAthleteUnits(port.athleteId, chosen);
+      // ⚠️ The return is read, not discarded. `undefined` means the store found
+      // no such athlete and wrote nothing — see {@link UNITS_NO_ATHLETE}.
+      const saved = await port.store.setAthleteUnits(port.athleteId, chosen);
+      if (saved === undefined) {
+        setMessage({ tone: 'danger', text: unitsSaveFailure(UNITS_NO_ATHLETE) });
+        return;
+      }
       onUnitsChange(chosen);
       setMessage({ tone: 'success', text: UNITS_SAVED });
     } catch (error: unknown) {

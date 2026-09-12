@@ -32,6 +32,7 @@ import {
   createStoreHarness,
   rideFor,
   seedAthletes,
+  staleUnitsStoreFactory,
   type StoreHarness,
 } from './testing';
 import { DEFAULT_UNIT_SYSTEM, parseUnitSystem } from './unit-system';
@@ -232,6 +233,54 @@ describe('a stored value outside the two falls back rather than failing the row'
 
       expect(onDisk?.units).toBe(DEFAULT_UNIT_SYSTEM);
       expect(onDisk?.displayName).toBe('Rider');
+    } finally {
+      await harness.destroy();
+    }
+  });
+});
+
+/**
+ * The harness's own calibration for this write path — CLAUDE.md §5's rule that
+ * *"if you add a write path to `packages/store`, the fakes have to account for
+ * it"*.
+ *
+ * ⚠️ **The two cases below are a pair and neither means anything alone.** The
+ * first says the assertion passes against the real store; the second says the
+ * *same assertion* fails against a store that computes the row and never writes
+ * it. Without the second, an assertion that read back the value it had just
+ * been handed would look exactly as green as this one.
+ */
+describe('the round trip catches a unit write that never lands', () => {
+  /** The assertion under test, written once so both stores get the same one. */
+  async function assertUnitsPersist(harness: StoreHarness): Promise<void> {
+    await harness.write(async (fresh) => fresh.putAthlete(athlete()));
+    const answered = await harness.write(async (fresh) =>
+      fresh.setAthleteUnits(ATHLETE_A, 'imperial'),
+    );
+    // The write's own answer says imperial in both stores — this line is the
+    // one a naive harness would stop at, and it is why it is here rather than
+    // being the whole assertion.
+    expect(answered?.units).toBe('imperial');
+
+    const onDisk = await harness.read(async (fresh) => fresh.getAthlete(ATHLETE_A));
+    if (onDisk?.units !== 'imperial') {
+      throw new Error(`read back ${String(onDisk?.units)}, not imperial`);
+    }
+  }
+
+  it('passes against the real store', async () => {
+    const harness = createStoreHarness();
+    try {
+      await expect(assertUnitsPersist(harness)).resolves.toBeUndefined();
+    } finally {
+      await harness.destroy();
+    }
+  });
+
+  it('fails against a store that returns the row it did not write', async () => {
+    const harness = createStoreHarness({ factory: staleUnitsStoreFactory() });
+    try {
+      await expect(assertUnitsPersist(harness)).rejects.toThrow(/not imperial/);
     } finally {
       await harness.destroy();
     }

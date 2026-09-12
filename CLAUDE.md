@@ -1935,6 +1935,9 @@ top of an issue **supersedes its body**.
 | What proves an erased athlete leaves no row behind, and why the table list is derived | `packages/store/src/activity-store.erasure.test.ts`, `packages/store/src/schema.ts` §`SCHEMA_VERSIONS` |
 | Which units a rider reads in, where that is decided, and what stops a new screen hard-coding one | [ADR 0020](docs/adr/0020-display-units.md), `apps/web/src/units/format.ts`, `apps/web/src/units/no-inline-units.test.ts` |
 | Why the unit preference is on the athlete and not on the device, and what that costs a rider with two | [ADR 0020](docs/adr/0020-display-units.md) D-2, `packages/store/src/unit-system.ts` |
+| Why a narrow athlete write's `undefined` has to be branched on, and what discarding it reports | `apps/web/src/units/store-port.ts` §`UnitsStore`, `apps/web/src/views/SettingsView.tsx` §`UNITS_NO_ATHLETE`, `packages/store/src/testing/fakes.ts` §`staleUnitsStoreFactory` |
+| Where the imperial length definitions live, and why the foot is not beside its caller | `packages/domain/src/length.ts` |
+| What an erase does to the unit preference, and what has to be told | `apps/web/src/transfer/erase-device.ts` §`eraseDevice`, `apps/web/src/transfer/TransferView.tsx` §`onUnitsReset` |
 | Which way a payload faces, and why an export is deliberately not trimmed | `apps/web/src/privacy/boundaries.ts`, [#35](https://github.com/openzigs/onyourleft/issues/35) |
 
 <!-- Last updated: 2026-09-09 by delivery:code-issue on #35 (the account export, and the erase that is its pair) -->

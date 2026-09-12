@@ -22,7 +22,7 @@ import { describe, expect, it } from 'vitest';
 import { mount, queryAll, settle } from '../testing/mount';
 import type { UnitsPort } from '../units/store-port';
 
-import { SettingsView, UNITS_NO_STORE, UNITS_SAVED } from './SettingsView';
+import { SettingsView, UNITS_NO_ATHLETE, UNITS_NO_STORE, UNITS_SAVED } from './SettingsView';
 
 const OWNER = athleteId('local');
 
@@ -116,10 +116,14 @@ describe('SettingsView', () => {
     const port: UnitsPort = {
       athleteId: OWNER,
       store: {
-        setAthleteUnits: async (): Promise<AthleteRecord | undefined> => {
+        setAthleteUnits: async (id, units): Promise<AthleteRecord | undefined> => {
           await Promise.resolve();
           order.push('stored');
-          return undefined;
+          // ⚠️ A **record**, not `undefined`. `undefined` is the store's answer
+          // for "there is no such athlete", i.e. nothing was written, and the
+          // case below is what asserts that. A fake returning it here would
+          // have made this test assert an ordering that never happens.
+          return { id, displayName: 'You', createdAt: 0 as AthleteRecord['createdAt'], units };
         },
       },
     };
@@ -162,6 +166,41 @@ describe('SettingsView', () => {
 
     expect(told).toBe(0);
     expect(mounted.container.textContent).toContain('site data is blocked');
+    mounted.unmount();
+  });
+
+  it('does not tell the shell when the store wrote nothing, and says so', async () => {
+    // ⚠️ The defect this case exists for: `setAthleteUnits` answers `undefined`
+    // for "there is no such athlete" and does **not** throw, so a caller that
+    // only catches sees a resolved promise. `main.tsx` builds the port
+    // unconditionally while `renderAfterAthlete` swallows a failed
+    // `ensureLocalAthlete`, so this is a start-up state a rider can reach: the
+    // screen would flip every other screen to miles, say "Saved", and be back
+    // in kilometres on the next reload.
+    let told = 0;
+    const port: UnitsPort = {
+      athleteId: OWNER,
+      store: { setAthleteUnits: () => Promise.resolve(undefined) },
+    };
+    const mounted = await mount(
+      <SettingsView
+        port={port}
+        units="metric"
+        onUnitsChange={() => {
+          told += 1;
+        }}
+      />,
+    );
+
+    radios(mounted.container)
+      .find((radio) => radio.value === 'imperial')
+      ?.click();
+    await settle();
+
+    expect(told).toBe(0);
+    const text = mounted.container.textContent ?? '';
+    expect(text).toContain(UNITS_NO_ATHLETE);
+    expect(text).not.toContain(UNITS_SAVED);
     mounted.unmount();
   });
 

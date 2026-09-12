@@ -269,7 +269,19 @@ function viewFor(
     case 'devices':
       return <DevicesView capabilities={props.capabilities} />;
     case 'transfer':
-      return <TransferView port={props.transfer} />;
+      return (
+        <TransferView
+          port={props.transfer}
+          // ⚠️ An erase takes the unit preference with everything else — it is
+          // athlete data (ADR 0020 D-2). Without this the shell goes on
+          // rendering miles over a row that no longer says so, until a reload.
+          // `DEFAULT_UNIT_SYSTEM` is substituted here because this is the one
+          // place in the client that substitutes it.
+          onUnitsReset={(next) => {
+            onUnitsChange(next ?? DEFAULT_UNIT_SYSTEM);
+          }}
+        />
+      );
     case 'settings':
       return <SettingsView port={props.settings} units={units} onUnitsChange={onUnitsChange} />;
     case 'about':

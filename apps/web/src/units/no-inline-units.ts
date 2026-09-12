@@ -22,14 +22,29 @@
  *
  * ## What it looks for, and what it deliberately does not
  *
- * Two shapes, because they are the two this issue found in the wild:
+ * Three label shapes, the first two because they are the two this issue found
+ * in the wild and the third because a review found it missing:
  *
  * 1. **A quoted unit** — `'km/h'`, `"mi"` — which is the `SPEED_UNIT` shape.
  * 2. **A unit immediately after a template or JSX interpolation** — `` `${x}
  *    km` ``, `<td>{x} m</td>` — which is the `fields.ts` shape.
+ * 3. **A unit as a JSX text node of its own** — `<span>km</span>` — which is
+ *    what a label split into its own element looks like, and which neither of
+ *    the first two can see.
  *
- * And one arithmetic constant, `3.6`, because that is the specific inline
- * conversion `fields.ts` carried and it is cheap to name.
+ * And the arithmetic constants, {@link CONVERSION_FACTORS}. `3.6` alone was
+ * the first version of this rule and was not enough: it is the factor
+ * `fields.ts` happened to carry, and a *new* screen reaching for miles would
+ * reach for `2.2369…` or `1609.344` instead — the shapes this rule exists to
+ * stop, going straight past it.
+ *
+ * ⚠️ **A bare `/ 1000` is deliberately NOT one of them**, even though it is
+ * the metres-to-kilometres divisor. Thirteen non-test files in this client
+ * divide by a thousand for milliseconds, and none of them is a unit
+ * conversion. A rule that fires thirteen times on the day it lands is one that
+ * gets an exemption list rather than obedience, and the exemption list is what
+ * would then hide the real finding. The residue is a metric-only conversion
+ * with no label; every imperial one is named below.
  *
  * It reads **comment-stripped** source, so the prose in this repository — which
  * talks about kilometres and metres constantly, including in this very
@@ -43,11 +58,16 @@
  * converted number in the same object.
  */
 
-/** The unit labels only `units/` may write. */
-export const UNIT_TOKENS = ['km/h', 'mph', 'km', 'mi', 'ft', 'm'] as const;
-
 /** A quoted unit label — the `SPEED_UNIT = 'km/h'` shape. */
 const QUOTED = /['"`]\s*(km\/h|mph|km|mi|ft)\s*['"`]/;
+
+/**
+ * A unit as a JSX text node of its own — `<span>km</span>`.
+ *
+ * Bare `m` is excluded for {@link QUOTED}'s reason: `>m<` is a generic
+ * parameter or an operand far more often than it is a metre.
+ */
+const JSX_TEXT_NODE = />\s*(km\/h|mph|km|mi|ft)\s*</;
 
 /**
  * A unit label right after an interpolation — the `fields.ts` shape.
@@ -58,8 +78,33 @@ const QUOTED = /['"`]\s*(km\/h|mph|km|mi|ft)\s*['"`]/;
  */
 const AFTER_INTERPOLATION = /\}\s*(km\/h|mph|km|mi|ft|m)\b/;
 
-/** The metres-per-second to kilometres-per-hour factor, written out. */
-const INLINE_CONVERSION = /(?<![\w.])3\.6(?![\d\w])/;
+/**
+ * Every conversion factor between the units this client renders, written out.
+ *
+ * Each is a **prefix**: `2.2369` catches the rounded `2.23694` and the exact
+ * `2.2369362920544` alike, which is the point — a screen that hard-codes one
+ * of these has hard-coded the conversion however many digits it typed. Adding
+ * a quantity to #238's switch means adding its factors here; that is one line
+ * each and it is the whole maintenance cost of this rule.
+ *
+ * ⚠️ **Order matters within an alternation.** `3\.6` is tried before
+ * `3\.28084`, and the trailing `(?![\d\w])` is what stops `3.65` and `13.62`
+ * matching — the two cases the suite pins.
+ */
+const CONVERSION_FACTORS = [
+  '3\\.6', // m/s -> km/h
+  '2\\.2369\\d*', // m/s -> mph
+  '1609\\.344', // m   -> mi (exact, 1959 agreement)
+  '1\\.60934\\d*', // km  -> mi
+  '0\\.62137\\d*', // km  -> mi (reciprocal)
+  '0\\.3048', // m   -> ft (exact, 1959 agreement)
+  '3\\.28084\\d*', // m   -> ft (reciprocal)
+  '0\\.44704', // mph -> m/s
+  '5280', // ft  -> mi
+] as const;
+
+/** An inline unit conversion. @see CONVERSION_FACTORS */
+const INLINE_CONVERSION = new RegExp(`(?<![\\w.])(?:${CONVERSION_FACTORS.join('|')})(?![\\d\\w])`);
 
 /** One place a unit was written by hand. */
 export interface InlineUnitFinding {
@@ -149,7 +194,12 @@ export function inlineUnitsIn(file: string, source: string): readonly InlineUnit
   const findings: InlineUnitFinding[] = [];
   const lines = stripComments(source).split('\n');
   for (const [index, line] of lines.entries()) {
-    if (QUOTED.test(line) || AFTER_INTERPOLATION.test(line) || INLINE_CONVERSION.test(line)) {
+    if (
+      QUOTED.test(line) ||
+      AFTER_INTERPOLATION.test(line) ||
+      JSX_TEXT_NODE.test(line) ||
+      INLINE_CONVERSION.test(line)
+    ) {
       findings.push({ file, line: index + 1, text: line.trim() });
     }
   }

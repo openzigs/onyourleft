@@ -68,6 +68,7 @@
  */
 
 import {
+  METRES_PER_FOOT,
   METRES_PER_MILE,
   metresPerSecondToKilometresPerHour,
   metresPerSecondToMilesPerHour,
@@ -99,15 +100,6 @@ export interface Measurement {
 
 /** Metres in a kilometre. Named so the division below is not a bare 1000. */
 const METRES_PER_KILOMETRE = 1000;
-
-/**
- * Metres in an international foot, exactly.
- *
- * Defined as exactly 0.3048 m by the same 1959 agreement that fixes
- * `METRES_PER_MILE`, so this is a definition and carries no rounding. The two
- * are consistent with each other by construction: 5280 × 0.3048 = 1609.344.
- */
-const METRES_PER_FOOT = 0.3048;
 
 /** How many decimals a speed is shown to. @see the module note on rounding. */
 const SPEED_DECIMALS = 1;

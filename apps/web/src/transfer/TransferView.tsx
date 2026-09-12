@@ -95,9 +95,25 @@ const OUTCOME_WORD: Readonly<Record<ImportOutcome['kind'], string>> = {
 export interface TransferViewProps {
   /** `undefined` where this browser cannot do it — see the module note. */
   readonly port?: TransferPort | undefined;
+  /**
+   * Told what the unit preference has become after an erase (#238).
+   *
+   * ⚠️ **An erase resets it.** The preference is athlete data — ADR 0020 D-2
+   * puts it on the athlete row so it travels with the account export — so
+   * `deleteAthlete` takes it with everything else, and the row put back
+   * afterwards is what decides what it becomes. Without this callback the
+   * screens go on rendering the old choice until the next reload, which is the
+   * same disagreement between the disk and the UI that
+   * `views/SettingsView.tsx` refuses in the other direction.
+   *
+   * `undefined` means the recreated row names no preference, which is what
+   * `local-athlete.ts` §`localAthleteRecord` builds today. The default is
+   * substituted by the shell, in the one place that substitutes it.
+   */
+  readonly onUnitsReset?: ((units: UnitSystem | undefined) => void) | undefined;
 }
 
-export function TransferView({ port }: TransferViewProps): JSX.Element {
+export function TransferView({ port, onUnitsReset }: TransferViewProps): JSX.Element {
   /**
    * Bumped whenever the import panel has written to the store.
    *
@@ -163,6 +179,7 @@ export function TransferView({ port }: TransferViewProps): JSX.Element {
       ) : (
         <ErasePanel
           port={port}
+          {...(onUnitsReset === undefined ? {} : { onUnitsReset })}
           storeRevision={storeRevision}
           onStoreChanged={() => {
             setStoreRevision((previous) => previous + 1);
@@ -685,10 +702,12 @@ function ErasePanel({
   port,
   storeRevision,
   onStoreChanged,
+  onUnitsReset,
 }: {
   readonly port: TransferPort;
   readonly storeRevision: number;
   readonly onStoreChanged: () => void;
+  readonly onUnitsReset?: ((units: UnitSystem | undefined) => void) | undefined;
 }): JSX.Element {
   const [typed, setTyped] = useState('');
   const [holds, setHolds] = useState(false);
@@ -739,6 +758,13 @@ function ErasePanel({
       setDone(eraseSentence(outcome));
       setTyped('');
       setHolds(false);
+      // ⚠️ After the erase succeeded, never before, and never on the failure
+      // path below: the units on screen must follow the row that is actually
+      // on disk. `port.athleteRow` is the row `eraseDevice` just put back, so
+      // this reports what the preference has *become* rather than assuming it
+      // became the default — a recreated row that carried a preference would
+      // be followed rather than overridden.
+      onUnitsReset?.(port.athleteRow.units);
       // The panels above list what the store holds. Without this they go on
       // offering rides that are no longer there, and a rider who presses Export
       // on one is told their own ride does not exist.

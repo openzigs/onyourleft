@@ -198,6 +198,18 @@ export interface EraseOutcome {
  * The order matters. The drafts are forgotten **after** the cascade, so a
  * failed delete does not lose a half-drawn route for nothing; the row is
  * recreated **last**, so it cannot be deleted by the cascade it precedes.
+ *
+ * ⚠️ **The unit preference goes with the athlete, and the recreated row is
+ * what decides what it becomes** (#238). It is a field on the athlete row —
+ * ADR 0020 D-2 put it there so it travels with the account export — so
+ * `deleteAthlete` takes it, and `options.athlete` is what comes back.
+ * `local-athlete.ts` §`localAthleteRecord` names no preference, so today an
+ * erase returns this device to the default. Nothing here substitutes that
+ * default; the screen a rider is looking at has to be told, which is
+ * `TransferView.tsx` §`onUnitsReset`. Without that the client renders miles
+ * over a row that no longer says so until the next reload — the disagreement
+ * between the disk and the UI that `views/SettingsView.tsx` refuses in the
+ * other direction.
  */
 export async function eraseDevice(
   store: EraseStore,

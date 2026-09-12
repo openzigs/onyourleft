@@ -72,8 +72,39 @@ describe('the scan itself can fire', () => {
     expect(inlineUnitsIn('x.ts', "reading('speed', 'Speed', v, 'km/h', true, 1)")).toHaveLength(1);
   });
 
+  it('catches a unit that is a JSX text node of its own', () => {
+    // Neither QUOTED nor AFTER_INTERPOLATION can see this: there is no quote
+    // and no `}` before the label. A review found it missing.
+    expect(inlineUnitsIn('x.tsx', '<span className="u">km</span>')).toHaveLength(1);
+    expect(inlineUnitsIn('x.tsx', '<span>{v}</span><span>mph</span>')).toHaveLength(1);
+    expect(inlineUnitsIn('x.tsx', '<abbr title="feet">ft</abbr>')).toHaveLength(1);
+  });
+
   it('catches the inline metres-per-second conversion', () => {
     expect(inlineUnitsIn('x.ts', 'const kmh = speed * 3.6;')).toHaveLength(1);
+  });
+
+  it('catches every imperial conversion factor, not only the metric one', () => {
+    // ⚠️ The gap a review found. `3.6` is the factor `fields.ts` happened to
+    // carry; a *new* screen reaching for miles reaches for one of these, and
+    // with only `3.6` named it walked straight past the rule built to stop it.
+    expect(inlineUnitsIn('x.ts', 'const mph = speed * 2.2369362920544;')).toHaveLength(1);
+    expect(inlineUnitsIn('x.ts', 'const mph = speed * 2.23694;')).toHaveLength(1);
+    expect(inlineUnitsIn('x.ts', 'const mi = metres / 1609.344;')).toHaveLength(1);
+    expect(inlineUnitsIn('x.ts', 'const mi = km / 1.609344;')).toHaveLength(1);
+    expect(inlineUnitsIn('x.ts', 'const mi = km * 0.621371;')).toHaveLength(1);
+    expect(inlineUnitsIn('x.ts', 'const ft = metres / 0.3048;')).toHaveLength(1);
+    expect(inlineUnitsIn('x.ts', 'const ft = metres * 3.28084;')).toHaveLength(1);
+    expect(inlineUnitsIn('x.ts', 'const ms = mph * 0.44704;')).toHaveLength(1);
+    expect(inlineUnitsIn('x.ts', 'const feet = miles * 5280;')).toHaveLength(1);
+  });
+
+  it('does not fire on a bare division by a thousand, which is milliseconds here', () => {
+    // ⚠️ Deliberate, and stated in the module note: thirteen non-test files in
+    // this client divide by a thousand for milliseconds and none of them is a
+    // unit conversion. A rule that fires thirteen times on arrival gets an
+    // exemption list rather than obedience.
+    expect(inlineUnitsIn('x.ts', 'const seconds = Date.now() / 1000;')).toEqual([]);
   });
 
   it('reports the line number an editor would show', () => {

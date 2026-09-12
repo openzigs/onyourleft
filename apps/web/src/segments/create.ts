@@ -99,7 +99,16 @@ export function segmentRefusals(units: UnitSystem): Readonly<Record<SegmentRefus
   };
 }
 
-/** The sentences that do not depend on the rider's units. @see segmentRefusals */
+/**
+ * The sentences that do not depend on the rider's units. @see segmentRefusals
+ *
+ * ⚠️ **A unit-dependent reason is deliberately absent from this record**, not
+ * present with an empty string. An empty placeholder compiles, satisfies
+ * `Record<SegmentRefusalReason, string>`, and hands a rider a blank refusal the
+ * day somebody adds a second unit-dependent reason and forgets to spread it —
+ * with nothing failing. {@link UnitDependentRefusalReason} pushes that into the
+ * typechecker: `segmentRefusals` cannot return without supplying every one.
+ */
 const SEGMENT_REFUSAL_TEXT = {
   notYours:
     'That ride is not one of yours, so there is nothing here to cut a segment from. ' +
@@ -111,8 +120,6 @@ const SEGMENT_REFUSAL_TEXT = {
   tooFewPositions:
     `A segment needs at least ${String(MINIMUM_SEGMENT_POSITIONS)} recorded positions. ` +
     'The stretch you chose has fewer, which usually means the receiver lost its fix there.',
-  /** Replaced by {@link segmentRefusals}, which is the only reader of this one. */
-  tooShort: '',
   noDirection:
     'That stretch does not go anywhere — every position in it is the same place. A segment ' +
     'needs a direction of travel.',
@@ -131,7 +138,16 @@ export const SEGMENT_NOTE = {
     'A public segment start is a published address.',
 } as const;
 
-export type SegmentRefusalReason = keyof typeof SEGMENT_REFUSAL_TEXT;
+/**
+ * The refusals whose wording depends on the rider's units (#238).
+ *
+ * Only {@link segmentRefusals} can supply these, because only it is given a
+ * {@link UnitSystem}. Adding one here without adding its sentence there is a
+ * compile error rather than a blank message on screen.
+ */
+type UnitDependentRefusalReason = 'tooShort';
+
+export type SegmentRefusalReason = keyof typeof SEGMENT_REFUSAL_TEXT | UnitDependentRefusalReason;
 
 /** An existing segment this one runs along, and how much of it does. */
 export interface SegmentOverlap {

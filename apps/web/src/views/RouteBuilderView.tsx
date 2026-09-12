@@ -511,6 +511,22 @@ export function RouteBuilderView({
               The gradient along the route. Each row names its band, so nothing here is carried by
               colour alone. Bands: {GRADE_BANDS.map((band) => band.name).join(', ')}.
             </caption>
+            {/*
+              ⚠️ **The unit is in the column heading, not beside every number,
+              and that is a decision rather than a side effect of the #238
+              refactor.** #238's third criterion reads *"the unit is always
+              shown beside the number, never implied"*, and a review asked
+              whether this is a step away from it. It is not, for a reason
+              specific to a table: `scope="col"` is the association HTML
+              provides, so a screen reader announces "From (km), 0.0" for the
+              cell — the unit is *carried* rather than implied, which a caption
+              or a paragraph above the table would not do. Repeating it on
+              every row of a twenty-row gradient table would also be read out
+              twenty times. The library table and the laps table already work
+              this way; a number outside a table — the elevation sentence
+              above, every reading on the ride screen — still carries its own
+              unit, which is where the criterion bites.
+            */}
             <thead>
               <tr>
                 <th scope="col">From ({distanceUnit(units)})</th>

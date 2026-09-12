@@ -69,9 +69,19 @@ function settings(written: string[]): UnitsPort {
   return {
     athleteId: OWNER,
     store: {
-      setAthleteUnits: (_id, units): Promise<AthleteRecord | undefined> => {
+      // ⚠️ Answers with a **record**. `undefined` is this method's answer for
+      // "there is no such athlete", i.e. nothing was written, and the screen
+      // refuses to tell the shell on it — `views/SettingsView.tsx`
+      // §`UNITS_NO_ATHLETE`. A fake returning `undefined` here would have made
+      // this whole end-to-end case assert a path a rider never takes.
+      setAthleteUnits: (id, units): Promise<AthleteRecord | undefined> => {
         written.push(units);
-        return Promise.resolve(undefined);
+        return Promise.resolve({
+          id,
+          displayName: 'You',
+          createdAt: 0 as AthleteRecord['createdAt'],
+          units,
+        });
       },
     },
   };

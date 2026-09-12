@@ -7,14 +7,15 @@
  * observing the test go red. A harness that passes against a no-op write is
  * worthless, and this is the only way to know it does not."*
  *
- * There are **eleven** fakes here, and there are eleven on purpose: a harness
+ * There are **twelve** fakes here, and there are twelve on purpose: a harness
  * that catches one failure shape is calibrated to that shape. They stand for the
  * causes CLAUDE.md section 5 names, and they fail for different reasons at
  * different points in the read. The fourth arrived with #46's write path, the
  * fifth with #61's, the sixth with #64's, the seventh with #66's, the eighth
- * with #89's, the ninth with #73's, the tenth with #14's and the eleventh with
- * #93's, which is the rule this file exists to enforce: a new path may not ship
- * without a fake proving the harness catches its failure.
+ * with #89's, the ninth with #73's, the tenth with #14's, the eleventh with
+ * #93's and the twelfth with #238's, which is the rule this file exists to
+ * enforce: a new path may not ship without a fake proving the harness catches
+ * its failure.
  *
  * ⚠️ **The eleventh breaks a *read*, and every one before it breaks a write.**
  * That is not a category error, it is #93's fifth acceptance criterion: a ghost
@@ -35,6 +36,7 @@
  * | `publishedRouteStoreFactory` | *wrong layer* — a default applied on the way in, in the unsafe direction | the route comes back complete and correct, and **shared with everybody** |
  * | `truncatedWorkoutStoreFactory` | *wrong layer* — a layer above dropped the last block on its way in | the workout comes back with the right name and a valid shape, **ending early** |
  * | `unscopedAttemptStoreFactory` | *cross-athlete exposure* — a **read** that matched on route and forgot the rider | every ride is written and read back correctly, and the ghost list contains a stranger's ride |
+ * | `staleUnitsStoreFactory` | *wrong layer* — the narrow write computed the row and returned it without persisting it | the call answers with a row saying `imperial`, and a fresh connection still says metric |
  *
  * The second and third are the ones a naive harness misses. Both write to the
  * **real** IndexedDB, inside a **real** transaction that **really commits**, and
@@ -69,6 +71,7 @@ import type {
 } from '../records';
 import { fromPersistedActivity, type PersistedActivity } from '../persisted';
 import type { PersistedStreamBlob } from '../stream-persisted';
+import type { UnitSystem } from '../unit-system';
 import {
   STREAM_CHANNELS,
   type NewStreamSet,
@@ -723,6 +726,49 @@ export function unscopedAttemptStoreFactory(): StoreFactory {
             .limit(limit)
             .toArray();
           return rows.map(fromPersistedActivity);
+        },
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository whose **unit preference is computed, returned, and never
+ * written**.
+ *
+ * The twelfth fake, for #238's narrow athlete write. It is the purest form of
+ * the shape CLAUDE.md section 5 names: `setAthleteUnits` answers with exactly
+ * the row a correct implementation would have answered with — same id, same
+ * name, same `createdAt`, `units` set to what was asked for — and the database
+ * is untouched. Every caller that trusts the return value is satisfied. Only a
+ * read on a connection that did not write can tell, which is the whole of what
+ * the #28 harness is for.
+ *
+ * ⚠️ **The return is not `undefined`.** That matters: `undefined` is this
+ * method's honest answer for *"there is no such athlete"*, and a fake returning
+ * it would be caught by any caller branching on the return — which
+ * `apps/web/src/views/SettingsView.tsx` now does. The interesting failure is
+ * the one that looks exactly like success, so this one hands back a record.
+ *
+ * The red/green pair is in `activity-store.units.test.ts` rather than in
+ * `harness.test.ts`, for the reason `roundedClaimStoreFactory`'s lives in
+ * `identity-store.test.ts`: the assertion belongs beside the property it is
+ * about.
+ */
+export function staleUnitsStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        setAthleteUnits: async (id: AthleteId, units: UnitSystem) => {
+          // Reads the real row, so a missing athlete is still reported as one —
+          // the fake breaks the write, not the lookup.
+          const existing = await real.getAthlete(id);
+          return existing === undefined ? undefined : { ...existing, units };
         },
       };
     },

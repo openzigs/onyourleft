@@ -30,23 +30,13 @@
  * `kilometresPerHour()` would have accepted.
  */
 
+import { METRES_PER_MILE } from './length';
 import type { KilometresPerHour, MetresPerSecond, MilesPerHour } from './quantities';
 import { kilometresPerHour, metresPerSecond, milesPerHour } from './quantities';
 import { assertIntegerInRange } from './unit-error';
 
 /** Seconds in an hour divided by metres in a kilometre: 3600 / 1000. */
 const KILOMETRES_PER_HOUR_PER_METRE_PER_SECOND = 3.6;
-
-/**
- * Metres in an international mile, exactly.
- *
- * The international mile has been defined as exactly 1 609.344 m since the
- * 1959 international yard and pound agreement, so this is a definition rather
- * than a measurement and carries no rounding of its own. The US survey mile is
- * a different number by about three parts per million; it is a land-survey
- * unit and nothing renders a road distance in it.
- */
-export const METRES_PER_MILE = 1609.344;
 
 /** Seconds in an hour divided by metres in a mile. */
 const MILES_PER_HOUR_PER_METRE_PER_SECOND = 3600 / METRES_PER_MILE;
