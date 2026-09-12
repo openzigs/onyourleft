@@ -114,7 +114,22 @@ function markerAt(
   return { kind, x: point.x, y: point.y, z: point.z };
 }
 
-/** The corridor point closest to a route distance, and its index. */
+/**
+ * The corridor point closest to an odometer reading, and its index.
+ *
+ * ⚠️ **Matched on `CorridorPoint.along`, which is unwrapped, and never on
+ * `CorridorPoint.distance`, which is not — #253.** Every distance that reaches
+ * this file is an odometer: the rider's from the simulation, the bot's from
+ * `advanceBot`, the ghost's from a replay of recorded distance. `distance`
+ * wraps into `[0, totalDistance]`, so on a loop every corridor point compared
+ * smaller than an odometer past the wrap and this search returned the far end
+ * for **every** rider — the bot and the rider drawn at one point from lap two
+ * onward, which is the case the pacer exists for.
+ *
+ * The fix is on this side deliberately. Wrapping the odometer instead would
+ * place the markers correctly and break the HUD gap in the same motion, because
+ * `pacer/gap.ts` is right that a bot a lap ahead must read as a lap ahead.
+ */
 function nearestPoint(
   corridor: RoadCorridor,
   atDistance: number,
@@ -123,7 +138,7 @@ function nearestPoint(
   let bestGap = Number.POSITIVE_INFINITY;
   for (let index = 0; index < corridor.centre.length; index += 1) {
     const candidate = corridor.centre[index] as CorridorPoint;
-    const gap = Math.abs(candidate.distance - atDistance);
+    const gap = Math.abs(candidate.along - atDistance);
     if (gap < bestGap) {
       bestGap = gap;
       bestIndex = index;

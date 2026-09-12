@@ -94,15 +94,33 @@ export interface HudReading {
   readonly detail?: string | undefined;
 }
 
+/** One rider being raced, and how far ahead of the rider they are. */
+export interface ChasedGap {
+  /** Which of the two this is. Decides the label, and nothing else. */
+  readonly to: 'bot' | 'ghost';
+  /** Signed the way `pacer/gap.ts` signs it: positive when they are ahead. */
+  readonly gap: PacerGap;
+}
+
 /** Everything the HUD needs. */
 export interface HudInput {
   readonly state: GameState;
   readonly profile: RouteProfile;
   readonly cadence: SensorReading;
   readonly heartRate: SensorReading;
-  /** The gap to whichever of the bot or the ghost the rider is chasing. */
-  readonly gap?: PacerGap | undefined;
-  readonly gapTo?: 'bot' | 'ghost' | undefined;
+  /**
+   * Everyone the rider is racing, and the gap to each.
+   *
+   * ⚠️ **A list, and #253's second half is what one slot cost.** `withGhost`
+   * and `withPacer` are independent choices on the route picker and a rider may
+   * make both — at which point the single slot resolved to the bot and the
+   * ghost's own gap was computed nowhere and shown nowhere. A rider racing
+   * their previous best *and* a pacer was told about the pacer twice over.
+   *
+   * Empty, or absent, means nothing is being chased and the field shows a dash
+   * under the pacer's label — see {@link gapReadings}.
+   */
+  readonly chases?: readonly ChasedGap[] | undefined;
   /**
    * Which units the rider reads in (#238).
    *
@@ -128,6 +146,13 @@ export interface HudInput {
  * labels."* A field that moved when another became unavailable would defeat
  * that, which is why an unavailable field is still returned — showing a dash —
  * rather than being filtered out.
+ *
+ * ⚠️ **The gap is the one slot whose count varies, and it varies only between
+ * rides.** A rider who chose both a pacer and their own ghost gets two gap
+ * fields; one who chose neither gets one dashed one. Both choices are made on
+ * the route picker before the ride starts and neither can change while it runs,
+ * so nothing moves under a rider mid-ride — which is the property the fixed
+ * order exists to protect, rather than the count itself. @see gapReadings
  */
 export function hudReadings(input: HudInput): readonly HudReading[] {
   const { state } = input;
@@ -170,12 +195,33 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
     measured('speed', 'Speed', speed),
     reading('gradient', 'Gradient', state.grade, '%', true, 1),
     measured('remaining', 'To go', togo),
-    gapReading(input),
+    ...gapReadings(input),
   ];
 }
 
 /**
- * The gap field, which is absent rather than dashed when nothing is being chased.
+ * The gap fields: one per rider being chased, or a single dashed one.
+ *
+ * ⚠️ The placeholder carries the **pacer's** label rather than no label,
+ * because a `dt` with nothing in it is a field a rider cannot find by position
+ * — which is the whole reason an unavailable field is rendered at all.
+ */
+function gapReadings(input: HudInput): readonly HudReading[] {
+  const chases = input.chases ?? [];
+  if (chases.length === 0) {
+    return [{ key: 'gap', label: LABELS.bot, value: NO_READING, unit: '', stale: false }];
+  }
+  return chases.map((chase) => gapReading(chase));
+}
+
+/** What each chased rider is called on the HUD. */
+const LABELS: Readonly<Record<ChasedGap['to'], string>> = {
+  bot: 'Pacer',
+  ghost: 'Your best',
+};
+
+/**
+ * One gap field.
  *
  * ## Whose direction the word describes — #255's first defect
  *
@@ -194,18 +240,18 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
  * means the chased rider is **ahead of you**. There is no reading of *"Pacer,
  * 12 s ahead of you"* in which the pacer is the one losing.
  */
-function gapReading(input: HudInput): HudReading {
-  const label = input.gapTo === 'ghost' ? 'Your best' : 'Pacer';
-  if (input.gap === undefined || input.gapTo === undefined) {
-    return { key: 'gap', label: 'Pacer', value: NO_READING, unit: '', stale: false };
-  }
-  const seconds = input.gap.seconds;
+function gapReading(chase: ChasedGap): HudReading {
+  // Keyed by who it is about, so two of them can sit beside each other and a
+  // test can name the one it means. `HudPanel` uses the key as its React key.
+  const key = `gap-${chase.to}`;
+  const label = LABELS[chase.to];
+  const seconds = chase.gap.seconds;
   if (seconds === undefined) {
     // A stationary rider is closing no gap at all, and any number here would be
     // a lie about a division by zero — `pacer/gap.ts` says so where it returns
     // `undefined`, and rendering it as a nought is exactly what that guards
     // against.
-    return { key: 'gap', label, value: NO_READING, unit: '', stale: false };
+    return { key, label, value: NO_READING, unit: '', stale: false };
   }
   // Signed, and the sign is carried in the word rather than in a minus sign: a
   // minus sign is one glyph wide at arm's length and is the first thing lost.
@@ -217,10 +263,10 @@ function gapReading(input: HudInput): HudReading {
     // direction could be either. `pacer/gap.ts` §`botIsAhead` makes the same
     // argument for the exactly-level case and says a HUD should render it as
     // level; this is that, widened to everything that displays as nought.
-    return { key: 'gap', label, value: LEVEL, unit: '', stale: false };
+    return { key, label, value: LEVEL, unit: '', stale: false };
   }
   return {
-    key: 'gap',
+    key,
     label,
     value: magnitude,
     unit: 's',

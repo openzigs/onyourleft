@@ -252,12 +252,16 @@ describe('the gap says who is ahead, to the eye and to a screen reader (#255)', 
           ...base.state,
           ride: { speed: metresPerSecond(10), distance: metres(riderMetres) },
         }}
-        gap={pacerGap({
-          botDistance: metres(botMetres),
-          riderDistance: metres(riderMetres),
-          referenceSpeed: metresPerSecond(10),
-        })}
-        gapTo="bot"
+        chases={[
+          {
+            to: 'bot',
+            gap: pacerGap({
+              botDistance: metres(botMetres),
+              riderDistance: metres(riderMetres),
+              referenceSpeed: metresPerSecond(10),
+            }),
+          },
+        ]}
       />,
     );
   }
@@ -286,12 +290,16 @@ describe('the gap says who is ahead, to the eye and to a screen reader (#255)', 
         <HudPanel
           {...base}
           state={{ ...base.state, ride: { speed: metresPerSecond(10), distance: metres(100) } }}
-          gap={pacerGap({
-            botDistance: metres(220),
-            riderDistance: metres(100),
-            referenceSpeed: metresPerSecond(10),
-          })}
-          gapTo="ghost"
+          chases={[
+            {
+              to: 'ghost',
+              gap: pacerGap({
+                botDistance: metres(220),
+                riderDistance: metres(100),
+                referenceSpeed: metresPerSecond(10),
+              }),
+            },
+          ]}
         />,
       ),
     );
@@ -308,6 +316,43 @@ describe('the gap says who is ahead, to the eye and to a screen reader (#255)', 
   it('audits clean with a gap on the screen, which is a different tree', async () => {
     mounted = await mount(chasing(220, 100));
 
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
+  it('announces the pacer and your own best separately when both are raced (#253)', async () => {
+    // ⚠️ Two gap fields is a DOM shape this panel could not previously produce,
+    // so it is audited as well as read: the `dt`/`dd` association has to hold
+    // for both, and a duplicated React key would collapse them into one.
+    const base = props();
+    mounted = await mount(
+      inRideScreen(
+        <HudPanel
+          {...base}
+          state={{ ...base.state, ride: { speed: metresPerSecond(10), distance: metres(100) } }}
+          chases={[
+            {
+              to: 'bot',
+              gap: pacerGap({
+                botDistance: metres(20),
+                riderDistance: metres(100),
+                referenceSpeed: metresPerSecond(10),
+              }),
+            },
+            {
+              to: 'ghost',
+              gap: pacerGap({
+                botDistance: metres(220),
+                riderDistance: metres(100),
+                referenceSpeed: metresPerSecond(10),
+              }),
+            },
+          ]}
+        />,
+      ),
+    );
+
+    expect(announced('Pacer')).toBe('Pacer, 8 s behind you');
+    expect(announced('Your best')).toBe('Your best, 12 s ahead of you');
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 });

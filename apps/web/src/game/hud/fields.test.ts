@@ -220,8 +220,12 @@ describe('the gap to whatever the rider is chasing', () => {
       referenceSpeed: metresPerSecond(10),
     });
 
-    expect(fieldNamed({ ...input, gap: behind, gapTo: 'bot' }, 'gap').label).toBe('Pacer');
-    expect(fieldNamed({ ...input, gap: behind, gapTo: 'ghost' }, 'gap').label).toBe('Your best');
+    expect(fieldNamed({ ...input, chases: [{ to: 'bot', gap: behind }] }, 'gap-bot').label).toBe(
+      'Pacer',
+    );
+    expect(
+      fieldNamed({ ...input, chases: [{ to: 'ghost', gap: behind }] }, 'gap-ghost').label,
+    ).toBe('Your best');
   });
 
   it('says the PACER is ahead when the pacer is ahead (#255)', () => {
@@ -237,7 +241,7 @@ describe('the gap to whatever the rider is chasing', () => {
       referenceSpeed: metresPerSecond(10),
     });
 
-    const field = fieldNamed({ ...input, gap: pacerInFront, gapTo: 'bot' }, 'gap');
+    const field = fieldNamed({ ...input, chases: [{ to: 'bot', gap: pacerInFront }] }, 'gap-bot');
 
     expect(field.value).toBe('10');
     expect(field.unit).toBe('s');
@@ -252,7 +256,7 @@ describe('the gap to whatever the rider is chasing', () => {
       referenceSpeed: metresPerSecond(10),
     });
 
-    const field = fieldNamed({ ...input, gap: riderInFront, gapTo: 'bot' }, 'gap');
+    const field = fieldNamed({ ...input, chases: [{ to: 'bot', gap: riderInFront }] }, 'gap-bot');
 
     expect(field.value).toBe('10');
     expect(field.unit).toBe('s');
@@ -268,7 +272,7 @@ describe('the gap to whatever the rider is chasing', () => {
       referenceSpeed: metresPerSecond(10),
     });
 
-    const field = fieldNamed({ ...input, gap: riderInFront, gapTo: 'bot' }, 'gap');
+    const field = fieldNamed({ ...input, chases: [{ to: 'bot', gap: riderInFront }] }, 'gap-bot');
 
     expect(`${field.value} ${field.unit} ${field.detail ?? ''}`).not.toContain('-');
   });
@@ -291,7 +295,7 @@ describe('the gap to whatever the rider is chasing', () => {
     });
 
     for (const gap of [barelyAhead, barelyBehind]) {
-      const field = fieldNamed({ ...input, gap, gapTo: 'bot' }, 'gap');
+      const field = fieldNamed({ ...input, chases: [{ to: 'bot', gap }] }, 'gap-bot');
       expect(field.value).toBe('Level');
       expect(field.unit).toBe('');
       expect(field.detail).toBeUndefined();
@@ -306,7 +310,51 @@ describe('the gap to whatever the rider is chasing', () => {
       referenceSpeed: metresPerSecond(0),
     });
 
-    expect(fieldNamed({ ...input, gap: stopped, gapTo: 'bot' }, 'gap').value).toBe(NO_READING);
+    expect(fieldNamed({ ...input, chases: [{ to: 'bot', gap: stopped }] }, 'gap-bot').value).toBe(
+      NO_READING,
+    );
+  });
+
+  it('gives the pacer and the ghost a field each when the rider chose both (#253)', () => {
+    // ⚠️ The second half of #253. `withGhost` and `withPacer` are independent
+    // choices on the route picker, so a rider may make both — and the HUD had
+    // one gap slot, which resolved to the bot. The ghost's gap was computed
+    // nowhere and shown nowhere.
+    const input = baseInput();
+    const pacerAhead = pacerGap({
+      botDistance: metres(200),
+      riderDistance: metres(100),
+      referenceSpeed: metresPerSecond(10),
+    });
+    const ghostBehind = pacerGap({
+      botDistance: metres(50),
+      riderDistance: metres(100),
+      referenceSpeed: metresPerSecond(10),
+    });
+
+    const both: HudInput = {
+      ...input,
+      chases: [
+        { to: 'bot', gap: pacerAhead },
+        { to: 'ghost', gap: ghostBehind },
+      ],
+    };
+
+    expect(fieldNamed(both, 'gap-bot').label).toBe('Pacer');
+    expect(fieldNamed(both, 'gap-bot').detail).toBe('ahead of you');
+    expect(fieldNamed(both, 'gap-ghost').label).toBe('Your best');
+    expect(fieldNamed(both, 'gap-ghost').detail).toBe('behind you');
+    // Each is its own number, rather than one gap under two labels.
+    expect(fieldNamed(both, 'gap-bot').value).not.toBe(fieldNamed(both, 'gap-ghost').value);
+  });
+
+  it('shows one dashed field, under the pacer’s label, when nothing is chased', () => {
+    // The field is still there: #94's fixed order means an unavailable reading
+    // is dashed rather than removed, so nothing after it moves.
+    const field = fieldNamed(baseInput(), 'gap');
+
+    expect(field.label).toBe('Pacer');
+    expect(field.value).toBe(NO_READING);
   });
 
   it('builds its gap input from the rider’s own state', () => {
@@ -383,17 +431,21 @@ describe('the HUD follows the rider\u2019s units (#238)', () => {
     const input = riding('imperial');
     const withGap: HudInput = {
       ...input,
-      gapTo: 'bot',
-      gap: pacerGap({
-        botDistance: metres(500),
-        riderDistance: metres(400),
-        referenceSpeed: metresPerSecond(10),
-      }),
+      chases: [
+        {
+          to: 'bot',
+          gap: pacerGap({
+            botDistance: metres(500),
+            riderDistance: metres(400),
+            referenceSpeed: metresPerSecond(10),
+          }),
+        },
+      ],
     };
 
     // The magnitude and its unit, unconverted: a gap is a time, and a rider who
     // reads miles does not read a different second.
-    expect(fieldNamed(withGap, 'gap').unit).toBe('s');
-    expect(fieldNamed(withGap, 'gap').value).toBe('10');
+    expect(fieldNamed(withGap, 'gap-bot').unit).toBe('s');
+    expect(fieldNamed(withGap, 'gap-bot').value).toBe('10');
   });
 });

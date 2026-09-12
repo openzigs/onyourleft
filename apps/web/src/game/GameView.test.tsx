@@ -33,11 +33,13 @@ import { NO_READING } from './hud/fields';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 import {
   altitudeMetres,
+  buildGhostTrack,
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
   routeProfile,
   watts,
+  type GhostTrack,
   type RoutePoint,
 } from '@onyourleft/domain';
 
@@ -56,11 +58,23 @@ function testRoute(): RidableRoute {
   return { id: 'route-1', name: 'Test hill', profile: routeProfile(points), attempts: 0 };
 }
 
+/**
+ * A previous attempt that went round very much faster than this rider will.
+ *
+ * Fast on purpose: the gap to it has to be unmistakably different from the gap
+ * to a bot crawling at 0.5 w/kg, or a test asserting "each gets its own number"
+ * would pass against a HUD showing one number twice.
+ */
+const FAST_GHOST: GhostTrack = buildGhostTrack({
+  elapsedSeconds: [0, 60],
+  distanceMetres: [0, 1_200],
+});
+
 /** A rider on the trainer, pedalling steadily. */
-function pedallingPort(route: RidableRoute): GamePort {
+function pedallingPort(route: RidableRoute, ghost?: GhostTrack): GamePort {
   return {
     listRoutes: () => Promise.resolve([route]),
-    loadGhost: () => Promise.resolve(undefined),
+    loadGhost: () => Promise.resolve(ghost),
     readSensors: () => ({
       rider: { power: watts(220), live: true, paired: true },
       cadence: { value: 88, live: true, paired: true },
@@ -145,12 +159,14 @@ async function pump(count: number, framePeriodMs = FRAME_PERIOD_MS): Promise<voi
 async function startRiding(options: {
   readonly pacer: boolean;
   readonly intensity?: string;
+  /** Whether to also race a previous attempt. @see FAST_GHOST */
+  readonly ghost?: boolean;
 }): Promise<SceneFrame[]> {
-  const route = testRoute();
+  const route = options.ghost === true ? { ...testRoute(), attempts: 1 } : testRoute();
   const frames: SceneFrame[] = [];
   mounted = await mount(
     <GameView
-      port={pedallingPort(route)}
+      port={pedallingPort(route, options.ghost === true ? FAST_GHOST : undefined)}
       renderer={() => Promise.resolve(capturingRenderer(frames))}
       now={() => nowMs}
     />,
@@ -162,6 +178,13 @@ async function startRiding(options: {
       (input) => (input.closest('label')?.textContent ?? '').includes('pacer'),
     );
     expect(box).toBeDefined();
+    await clickThrough(box);
+  }
+  if (options.ghost === true) {
+    const box = queryAll<HTMLInputElement>(mounted.container, 'input[type="checkbox"]').find(
+      (input) => (input.closest('label')?.textContent ?? '').includes('Race your'),
+    );
+    expect(box?.disabled).toBe(false);
     await clickThrough(box);
   }
   if (options.intensity !== undefined) {
@@ -272,6 +295,39 @@ describe('riding without one', () => {
       true,
     );
     expect(hudField('Pacer')).toContain(NO_READING);
+  });
+});
+
+describe('riding against both a pacer and your own best (#253)', () => {
+  /**
+   * The path nothing drove before this issue.
+   *
+   * ⚠️ `withGhost` and `withPacer` are independent checkboxes, so a rider can
+   * take both — and the HUD had **one** gap slot, which resolved to the bot.
+   * Every unit test of `pacerGap` passed against a product that computed the
+   * ghost's gap nowhere, which is #237's lesson arriving a second time: the
+   * assertions below read what a rider can see, driven through the real
+   * component.
+   */
+  it('gives each of them its own gap, rather than the pacer’s twice', async () => {
+    const frames = await startRiding({ pacer: true, intensity: '0.5', ghost: true });
+    await pump(60);
+
+    // Both are on the road…
+    const last = frames[frames.length - 1];
+    expect(last?.markers.map((marker) => marker.kind).sort()).toEqual(['bot', 'ghost', 'rider']);
+
+    // …and both are in the HUD, with their own numbers.
+    const pacer = hudField('Pacer');
+    const best = hudField('Your best');
+    expect(pacer).not.toContain(NO_READING);
+    expect(best).not.toContain(NO_READING);
+    expect(pacer).not.toBe(best);
+    // The rider is on 2.75 w/kg against a bot on 0.5 and a ghost on 20 m/s, so
+    // the two directions are opposite — which no single gap under two labels
+    // could produce.
+    expect(pacer).toContain('behind you');
+    expect(best).toContain('ahead of you');
   });
 });
 

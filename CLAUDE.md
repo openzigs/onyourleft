@@ -1913,6 +1913,8 @@ top of an issue **supersedes its body**.
 | How the client decides whether it is in a browser or the Android shell | `apps/web/src/support/capacitor.ts`, §4h |
 | Why a rider with no heart rate strap is not told their strap has dropped | `apps/web/src/game/sensors.ts`, `apps/web/src/ride/metrics.ts` |
 | Which previous attempt a ghost races, and why it is the fastest rather than the latest | `apps/web/src/game/ghost-source.ts` §`fastestAttempt` |
+| Why a corridor point carries two distances, and which one a marker is placed by | `apps/web/src/game/terrain.ts` §`CorridorPoint.along`, `apps/web/src/game/scene.ts` §`nearestPoint` |
+| Why a rider racing both a pacer and their own best sees two gaps rather than one | `apps/web/src/game/GameView.tsx` §`chasedGaps`, `apps/web/src/game/hud/fields.ts` §`gapReadings` |
 | Where the bot pacer is advanced, and why it is the simulation's loop rather than the render loop | `apps/web/src/game/simulation.ts` §`botCourseFor`, [#237](https://github.com/openzigs/onyourleft/issues/237) |
 | What a rider is told when the pacer intensity they typed cannot make a plan | `apps/web/src/game/pacer-choice.ts` §`pacerChoice` |
 | Why a ghost's distance is integrated from speed, and what a long dropout does to it | `apps/web/src/game/ghost-source.ts` §`GHOST_GAP_TOLERANCE_SECONDS` |
