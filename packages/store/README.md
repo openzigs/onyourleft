@@ -238,6 +238,22 @@ in `migrations.ts` is written and is tested and is never called from `ActivitySt
 required is therefore a change to this store's core with real risk to real databases, and it belongs
 to whoever needs it rather than to a feature that only needs a number.
 
+`AthleteRecord.units` (#238) is optional for the same reason and lands the same way — an absent field
+means "nobody has chosen", and exactly one place in `apps/web` substitutes the default. ⚠️ It is the
+**one** field on this row whose decode is not faithful: a stored value outside the two falls back to
+`metric` rather than raising a `StoreDecodeError`. `unit-system.ts` says why — a visibility outside
+its three values could publish a private ride, so refusing the row is right there; a unit preference
+outside its two decides only whether a number reads `km` or `mi`, and taking a rider's whole library
+away over a hand-edited setting is not a trade worth making.
+
+⚠️ **A narrow write must be built from the row it read, not from a list of the fields it knows
+about.** `setAthleteThresholds` rebuilt the record from `id`, `displayName` and `createdAt` until
+#238, so saving a threshold silently erased `mass` — and would have erased `units`. The write it was
+*about* landed and the read for it agreed, which is why nothing noticed: it is CLAUDE.md §5's "a
+write that reports success while the read cannot see it", applied to the field nobody was looking
+at. Both narrow athlete writes now spread the decoded record, and
+`activity-store.units.test.ts` holds it.
+
 `fromPersistedAthlete` reads the field **faithfully** — absent stays absent — because a decoder that
 substituted a default would be lying about what is on disk. Exactly one place in the program
 substitutes one, `apps/web/src/analysis/thresholds.ts`, which is what makes #78's "a single athlete

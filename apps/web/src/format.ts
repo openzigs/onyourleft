@@ -1,50 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import type { Metres, MetresPerSecond, UnixSeconds, Watts } from '@onyourleft/domain';
-import { metresPerSecondToKilometresPerHour } from '@onyourleft/domain';
-
-/** The unit label a speed is shown in. */
-export const SPEED_UNIT = 'km/h';
-
-/** The unit label a distance is shown in. */
-export const DISTANCE_UNIT = 'km';
-
-/** The unit label an average power is shown in. */
-export const POWER_UNIT = 'W';
-
-/** Metres in a kilometre. Named so the division below is not a bare 1000. */
-const METRES_PER_KILOMETRE = 1000;
-
 /**
- * Format a speed for display, as digits without a unit.
+ * The formatting decisions that do **not** depend on which units a rider reads
+ * in: a duration, a power, and the instant a ride started.
  *
- * The conversion itself lives in `@onyourleft/domain` and is not repeated here:
- * every conversion in the program goes through that package so that the device
- * and a Phase 3 instance cannot disagree about a number. What belongs on this
- * side of the boundary is only the presentation decision — how many decimals,
- * and which unit label.
- *
- * The argument is a `MetresPerSecond` rather than a `number`, so a caller
- * holding a distance, a cadence or an unvalidated sensor reading cannot reach
- * this function at all. Validation happened when the quantity was constructed;
- * see `@onyourleft/domain`'s README.
- *
- * ⚠️ **Digits and unit are returned separately, and that is a requirement
- * rather than an oversight.** `ride/MetricGrid.tsx` renders the two in
- * different elements at different sizes, and announces them to a screen reader
- * as one sentence built by `metricSentence`. A single `'36.0 km/h'` string
- * would have to be split apart there to be rendered at all.
- *
- * This function replaced one that returned the combined string, which #143
- * found had lost its last production caller while `MetricGrid` carried its own
- * copy of the `.toFixed(1)` and the unit label. An exported helper with a test
- * and no caller survives refactors it should not, and two places deciding how
- * many decimals a speed has is exactly the disagreement this module exists to
- * prevent.
+ * ⚠️ **Speed and distance are not here any more, and this file used to be
+ * where they were.** A reviewer who remembers `SPEED_UNIT`, `DISTANCE_UNIT`,
+ * `formatSpeedValue` and `formatDistanceValue` is reading the old file: #238
+ * moved all four into `units/format.ts`, because a *constant* is exactly the
+ * mechanism that cannot carry a preference, and the note on `formatSpeedValue`
+ * about two places deciding how precise a speed is now applies one level up.
+ * Nothing in this file is a unit a rider may choose — a watt is a watt in both
+ * systems, and a minute is a minute — which is why these four stayed.
  */
-export function formatSpeedValue(speed: MetresPerSecond): string {
-  return metresPerSecondToKilometresPerHour(speed).toFixed(1);
-}
+
+import type { UnixSeconds, Watts } from '@onyourleft/domain';
+
+/** The unit label an average power is shown in. Not a preference: see above. */
+export const POWER_UNIT = 'W';
 
 /**
  * `3725` → `1:02:05`. Hours only when there are some.
@@ -52,8 +25,8 @@ export function formatSpeedValue(speed: MetresPerSecond): string {
  * Moved here from `views/RideView.tsx` by #62, which needed the same format for
  * a library row's duration. It was exported from a view and tested there, and
  * copying it would have been the second place deciding how a duration reads —
- * which the note on {@link formatSpeedValue} above records as the mistake this
- * module exists to prevent. `RideView` imports it now.
+ * which the note at the top of `units/format.ts` records as the mistake these
+ * two modules exist to prevent. `RideView` imports it now.
  *
  * Takes a plain `number` rather than {@link Seconds}, deliberately: the live
  * ride screen counts elapsed seconds it has not made a quantity of, and a
@@ -70,17 +43,6 @@ export function formatDuration(totalSeconds: number): string {
   return hours > 0
     ? `${String(hours)}:${pad(minutes)}:${pad(secs)}`
     : `${String(minutes)}:${pad(secs)}`;
-}
-
-/**
- * A stored distance in kilometres, as digits without a unit.
- *
- * One decimal, matching {@link formatSpeedValue}: a library row showing
- * `42.19` beside a speed showing `31.4` reads as two different kinds of
- * measurement rather than one ride.
- */
-export function formatDistanceValue(distance: Metres): string {
-  return (distance / METRES_PER_KILOMETRE).toFixed(1);
 }
 
 /** An average power as whole watts. A fractional watt is not a thing a rider reads. */

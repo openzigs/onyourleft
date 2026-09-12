@@ -46,14 +46,9 @@ import { activityId as toActivityId, type ActivityId } from '@onyourleft/store';
 import { Button } from '../design/Button';
 import { ChartSlot } from '../design/ChartSlot';
 import { StatusMessage } from '../design/StatusMessage';
-import {
-  DISTANCE_UNIT,
-  formatDistanceValue,
-  formatDuration,
-  formatPowerValue,
-  formatStartedAt,
-  POWER_UNIT,
-} from '../format';
+import { formatDuration, formatPowerValue, formatStartedAt, POWER_UNIT } from '../format';
+import { useUnits } from '../units/context';
+import { distanceUnit, formatDistance } from '../units/format';
 import {
   loadOverview,
   loadOwnTrack,
@@ -68,7 +63,7 @@ import {
   DEFAULT_SERIES,
   downsample,
   TABLE_ROWS,
-  TRACE_SERIES,
+  traceSeries,
   type TraceChannel,
 } from '../detail/series';
 import type { DetailPort } from '../detail/store-port';
@@ -149,6 +144,7 @@ export function ActivityDetailView({
   const [showShared, setShowShared] = useState(false);
   const [mapPort, setMapPort] = useState<MapPort | undefined>(undefined);
   const [ownTrack, setOwnTrack] = useState<TrackGeometry | undefined>(undefined);
+  const units = useUnits();
 
   const id: ActivityId | undefined =
     activityId === undefined || activityId === '' ? undefined : toActivityId(activityId);
@@ -196,7 +192,7 @@ export function ActivityDetailView({
     let live = true;
     void (async () => {
       for (const channel of wanted) {
-        const trace = await loadTrace(port, id, channel, CHART_POINTS);
+        const trace = await loadTrace(port, id, channel, units, CHART_POINTS);
         if (!live || trace === undefined) {
           continue;
         }
@@ -206,7 +202,22 @@ export function ActivityDetailView({
     return () => {
       live = false;
     };
-  }, [port, id, state, enabled, traces]);
+  }, [port, id, state, enabled, traces, units]);
+
+  /**
+   * Throw away every cached trace when the rider changes units (#238).
+   *
+   * ⚠️ **Without this the charts are a stale conversion and nothing says so.**
+   * A `Trace` holds numbers that have already been through
+   * `series.display` — miles per hour, or feet — so a cache keyed on the
+   * channel alone would keep serving the *old* system's numbers under the new
+   * system's axis label, which is a wrong number wearing a correct unit. That
+   * is the worst of the shapes this issue is about, and it is invisible: the
+   * chart redraws, the label changes, and the line does not move.
+   */
+  useEffect(() => {
+    setTraces(new Map());
+  }, [units]);
 
   /**
    * Load the map engine and the rider's own track, for a ride that has one.
@@ -311,7 +322,7 @@ export function ActivityDetailView({
 
   const { activity, streams, laps } = state.overview;
   const available = streams?.channels ?? [];
-  const chartable = TRACE_SERIES.filter((series) => available.includes(series.channel));
+  const chartable = traceSeries(units).filter((series) => available.includes(series.channel));
 
   return (
     <>
@@ -333,7 +344,7 @@ export function ActivityDetailView({
         <div>
           <dt>Distance</dt>
           <dd>
-            {formatDistanceValue(activity.distance)} {DISTANCE_UNIT}
+            {formatDistance(activity.distance, units).value} {distanceUnit(units)}
           </dd>
         </div>
         <div>
@@ -458,7 +469,7 @@ export function ActivityDetailView({
               <th scope="col">Lap</th>
               <th scope="col">Elapsed</th>
               <th scope="col">Moving</th>
-              <th scope="col">Distance ({DISTANCE_UNIT})</th>
+              <th scope="col">Distance ({distanceUnit(units)})</th>
               <th scope="col">Avg power ({POWER_UNIT})</th>
             </tr>
           </thead>
@@ -468,7 +479,7 @@ export function ActivityDetailView({
                 <th scope="row">{String(lap.ordinal + 1)}</th>
                 <td>{formatDuration(lap.elapsedTime)}</td>
                 <td>{formatDuration(lap.movingTime)}</td>
-                <td>{formatDistanceValue(lap.distance)}</td>
+                <td>{formatDistance(lap.distance, units).value}</td>
                 <td>{lap.averagePower === undefined ? '—' : formatPowerValue(lap.averagePower)}</td>
               </tr>
             ))}
@@ -528,6 +539,7 @@ function SharedSummary({
   /** The rider's own distance, for the comparison ADR 0004 decision C asks for. */
   readonly own: Metres;
 }): JSX.Element {
+  const units = useUnits();
   if (track === undefined) {
     return (
       <p className="oyl-muted" role="status">
@@ -554,13 +566,13 @@ function SharedSummary({
         <div>
           <dt>Shared distance</dt>
           <dd>
-            {formatDistanceValue(track.distance)} {DISTANCE_UNIT}
+            {formatDistance(track.distance, units).value} {distanceUnit(units)}
           </dd>
         </div>
         <div>
           <dt>Your own distance</dt>
           <dd>
-            {formatDistanceValue(own)} {DISTANCE_UNIT}
+            {formatDistance(own, units).value} {distanceUnit(units)}
           </dd>
         </div>
         <div>

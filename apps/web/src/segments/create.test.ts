@@ -28,7 +28,7 @@ import {
   MAXIMUM_SPAN_SAMPLES,
   readSpan,
   SEGMENT_NOTE,
-  SEGMENT_REFUSAL,
+  segmentRefusals,
   segmentDecision,
 } from './create';
 import { stubSegments } from './testing';
@@ -369,7 +369,7 @@ describe('criterion 1 — only from an activity the athlete owns', () => {
       createdAt: NOW,
     });
     expect(outcome).toMatchObject({ kind: 'refused', reason: 'notYours' });
-    expect(outcome.kind === 'refused' && outcome.message).toBe(SEGMENT_REFUSAL.notYours);
+    expect(outcome.kind === 'refused' && outcome.message).toBe(segmentRefusals('metric').notYours);
     expect(port.written).toEqual([]);
   });
 

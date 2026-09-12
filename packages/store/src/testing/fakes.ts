@@ -99,6 +99,7 @@ function bindStore(real: ActivityStore): PersistentStore {
     putAthlete: async (record) => real.putAthlete(record),
     ensureAthlete: async (record) => real.ensureAthlete(record),
     setAthleteThresholds: async (id, thresholds) => real.setAthleteThresholds(id, thresholds),
+    setAthleteUnits: async (id, units) => real.setAthleteUnits(id, units),
     setActivityLoadSummary: async (owner, activity, summary) =>
       real.setActivityLoadSummary(owner, activity, summary),
     getAthlete: async (id) => real.getAthlete(id),

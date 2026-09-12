@@ -16,7 +16,13 @@ import {
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';
-import { formatDistanceValue } from '../format';
+import { useUnits } from '../units/context';
+import {
+  distanceUnit,
+  formatDistance,
+  formatSmallDistance,
+  measurementText,
+} from '../units/format';
 import {
   addWaypoint,
   clear,
@@ -126,6 +132,18 @@ export interface RouteBuilderViewProps {
  */
 export const NUDGE_DEGREES = 0.0005;
 
+/**
+ * Metres in a degree of latitude, near enough for a sentence about a keyboard
+ * step.
+ *
+ * Named rather than left as the bare `111_320` it was before #238, because the
+ * sentence it feeds now goes through `units/format.ts` and a reader needs to
+ * see that this is a latitude conversion and not a unit one. It is an average:
+ * a degree of latitude varies by about 1 % between the equator and the poles,
+ * which does not matter for "about 55 m".
+ */
+const METRES_PER_DEGREE_LATITUDE = 111_320;
+
 const DEFAULT_ORIGIN = geographicPosition(degreesLatitude(51.5), degreesLongitude(-0.12));
 
 export function RouteBuilderView({
@@ -142,6 +160,7 @@ export function RouteBuilderView({
   const [elevation, setElevation] = useState<PlannedElevation | undefined>(undefined);
   const [elevationFault, setElevationFault] = useState<string | undefined>(undefined);
   const [clearArmed, setClearArmed] = useState(false);
+  const units = useUnits();
 
   const draft = history.present;
 
@@ -266,7 +285,7 @@ export function RouteBuilderView({
       <p>
         Place waypoints in order; the roads between them are worked out for you. Every control here
         works from the keyboard — a nudge moves a waypoint about{' '}
-        {String(Math.round(NUDGE_DEGREES * 111_320))} m.
+        {measurementText(formatSmallDistance(NUDGE_DEGREES * METRES_PER_DEGREE_LATITUDE, units))}.
       </p>
 
       {/*
@@ -415,7 +434,7 @@ export function RouteBuilderView({
                 <td>{surfaceWord(leg.surface)}</td>
                 <td>
                   {leg.state === 'routed'
-                    ? `${formatDistanceValue(leg.distance)} km`
+                    ? measurementText(formatDistance(leg.distance, units))
                     : (leg.failure?.message ?? 'Being routed')}
                   {leg.failure?.retryable === true ? ' This one is worth trying again.' : ''}
                 </td>
@@ -468,10 +487,10 @@ export function RouteBuilderView({
 
       <h2>Distance, climbing and surface</h2>
       <p>
-        {`${formatDistanceValue(draftDistance(draft))} km over ${String(draft.legs.length)} ${draft.legs.length === 1 ? 'leg' : 'legs'}.`}
+        {`${measurementText(formatDistance(draftDistance(draft), units))} over ${String(draft.legs.length)} ${draft.legs.length === 1 ? 'leg' : 'legs'}.`}
       </p>
       <p>
-        {`Paved ${formatDistanceValue(metres(surfaces.pavedMetres))} km, unpaved ${formatDistanceValue(metres(surfaces.unpavedMetres))} km, unknown ${formatDistanceValue(metres(surfaces.unknownMetres))} km.`}
+        {`Paved ${measurementText(formatDistance(metres(surfaces.pavedMetres), units))}, unpaved ${measurementText(formatDistance(metres(surfaces.unpavedMetres), units))}, unknown ${measurementText(formatDistance(metres(surfaces.unknownMetres), units))}.`}
         {surfaces.freehandLegs > 0
           ? ` ${String(surfaces.freehandLegs)} freehand ${surfaces.freehandLegs === 1 ? 'leg is' : 'legs are'} counted as unknown, because nothing was asked about them.`
           : ''}
@@ -486,7 +505,7 @@ export function RouteBuilderView({
         <p>No elevation profile yet.</p>
       ) : (
         <>
-          <p>{elevationSentence(elevation)}</p>
+          <p>{elevationSentence(elevation, units)}</p>
           <table>
             <caption>
               The gradient along the route. Each row names its band, so nothing here is carried by
@@ -494,18 +513,18 @@ export function RouteBuilderView({
             </caption>
             <thead>
               <tr>
-                <th scope="col">From</th>
-                <th scope="col">To</th>
+                <th scope="col">From ({distanceUnit(units)})</th>
+                <th scope="col">To ({distanceUnit(units)})</th>
                 <th scope="col">Gradient</th>
                 <th scope="col">Steepest</th>
                 <th scope="col">Measured</th>
               </tr>
             </thead>
             <tbody>
-              {profileRows(elevation).map((row) => (
+              {profileRows(elevation, units).map((row) => (
                 <tr key={`${row.from}-${row.to}`}>
-                  <th scope="row">{`${row.from} km`}</th>
-                  <td>{`${row.to} km`}</td>
+                  <th scope="row">{row.from}</th>
+                  <td>{row.to}</td>
                   <td>{row.band}</td>
                   <td>{`${String(row.steepest)}%`}</td>
                   <td>{row.measured ? 'Yes' : 'No — the dataset has no height here'}</td>

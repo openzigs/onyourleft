@@ -8,7 +8,7 @@
  *
  * | Criterion | What this file does |
  * |---|---|
- * | 1 — only from an activity the creating athlete owns | the read is athlete-scoped by signature (`store-port.ts`), and a miss is {@link SEGMENT_REFUSAL}`.notYours` |
+ * | 1 — only from an activity the creating athlete owns | the read is athlete-scoped by signature (`store-port.ts`), and a miss is {@link segmentRefusals}`().notYours` |
  * | 3 — duplicate detection surfaces overlapping segments; a near-duplicate is permitted but forced `private` | {@link segmentDecision} reports every overlap it found and downgrades the visibility |
  * | 4 — a segment whose endpoints fall inside a privacy zone cannot be created `public` | the same function, same mechanism |
  *
@@ -46,7 +46,15 @@ import {
   type UnixSeconds,
 } from '@onyourleft/domain';
 import { athleteId, segmentId } from '@onyourleft/store';
-import type { ActivityId, AthleteId, PrivacyZoneRecord, SegmentRecord } from '@onyourleft/store';
+import type {
+  ActivityId,
+  AthleteId,
+  PrivacyZoneRecord,
+  SegmentRecord,
+  UnitSystem,
+} from '@onyourleft/store';
+
+import { formatSmallDistance, measurementText } from '../units/format';
 
 import type { SegmentPort } from './store-port';
 
@@ -70,8 +78,29 @@ export const DUPLICATE_SCAN_LIMIT = 200;
 /** How many samples a creation will read from a ride. @see readSpan */
 export const MAXIMUM_SPAN_SAMPLES = 20_000;
 
-/** Why a segment could not be created. One sentence each, addressed to a rider. */
-export const SEGMENT_REFUSAL = {
+/**
+ * Why a segment could not be created. One sentence each, addressed to a rider.
+ *
+ * ⚠️ **A function of the rider's units rather than a constant, since #238.**
+ * Only one of these sentences names a distance — `tooShort` quotes the minimum
+ * segment length — but that one is a distance the client renders, so it
+ * follows the preference like every other. The rest are returned unchanged and
+ * are here so that a caller has one place to get a refusal from rather than
+ * two.
+ */
+export function segmentRefusals(units: UnitSystem): Readonly<Record<SegmentRefusalReason, string>> {
+  return {
+    ...SEGMENT_REFUSAL_TEXT,
+    tooShort:
+      `A segment has to be at least ` +
+      `${measurementText(formatSmallDistance(MINIMUM_SEGMENT_LENGTH_METRES, units))} long. ` +
+      'Below that, the error in locating each end is a large part of the time, and the board ' +
+      'would be ranking receivers rather than riders.',
+  };
+}
+
+/** The sentences that do not depend on the rider's units. @see segmentRefusals */
+const SEGMENT_REFUSAL_TEXT = {
   notYours:
     'That ride is not one of yours, so there is nothing here to cut a segment from. ' +
     'Segments are made from your own rides.',
@@ -82,10 +111,8 @@ export const SEGMENT_REFUSAL = {
   tooFewPositions:
     `A segment needs at least ${String(MINIMUM_SEGMENT_POSITIONS)} recorded positions. ` +
     'The stretch you chose has fewer, which usually means the receiver lost its fix there.',
-  tooShort:
-    `A segment has to be at least ${String(MINIMUM_SEGMENT_LENGTH_METRES)} m long. Below that, ` +
-    'the error in locating each end is a large part of the time, and the board would be ' +
-    'ranking receivers rather than riders.',
+  /** Replaced by {@link segmentRefusals}, which is the only reader of this one. */
+  tooShort: '',
   noDirection:
     'That stretch does not go anywhere — every position in it is the same place. A segment ' +
     'needs a direction of travel.',
@@ -104,7 +131,7 @@ export const SEGMENT_NOTE = {
     'A public segment start is a published address.',
 } as const;
 
-export type SegmentRefusalReason = keyof typeof SEGMENT_REFUSAL;
+export type SegmentRefusalReason = keyof typeof SEGMENT_REFUSAL_TEXT;
 
 /** An existing segment this one runs along, and how much of it does. */
 export interface SegmentOverlap {
@@ -148,6 +175,14 @@ export interface SegmentDecisionInput {
   readonly privacyZones: readonly PrivacyZoneRecord[];
   readonly existing: readonly SegmentRecord[];
   readonly createdAt: UnixSeconds;
+  /**
+   * Which units a refusal quotes a length in (#238).
+   *
+   * An ordinary field rather than a React context, because this module is
+   * pure. Optional, defaulting to metric, so a caller with no preference to
+   * hand on gets what a rider who has never chosen sees.
+   */
+  readonly units?: UnitSystem | undefined;
 }
 
 /**
@@ -159,6 +194,11 @@ export interface SegmentDecisionInput {
  * shown on screen is exactly such a layer.
  */
 export function segmentDecision(input: SegmentDecisionInput): SegmentDecision {
+  const refused = (reason: SegmentRefusalReason): SegmentDecision => ({
+    kind: 'refused',
+    reason,
+    message: segmentRefusals(input.units ?? 'metric')[reason],
+  });
   if (input.name.trim().length === 0) {
     return refused('unnamed');
   }
@@ -230,10 +270,6 @@ export function segmentDecision(input: SegmentDecisionInput): SegmentDecision {
     overlaps,
     notes,
   };
-}
-
-function refused(reason: SegmentRefusalReason): SegmentDecision {
-  return { kind: 'refused', reason, message: SEGMENT_REFUSAL[reason] };
 }
 
 /** Whether either end of the path is inside any of the athlete's zones. */
@@ -376,22 +412,25 @@ export async function createSegmentFromRide(
     readonly to: number;
     readonly requestedVisibility: SegmentVisibility;
     readonly createdAt: UnixSeconds;
+    /** Which units a refusal quotes a length in. @see SegmentDecisionInput.units */
+    readonly units?: UnitSystem | undefined;
   },
 ): Promise<SegmentCreation> {
+  const refusals = segmentRefusals(request.units ?? 'metric');
   const activity = await port.store.getActivity(port.athleteId, request.activityId);
   if (activity === undefined) {
-    return { kind: 'refused', reason: 'notYours', message: SEGMENT_REFUSAL.notYours };
+    return { kind: 'refused', reason: 'notYours', message: refusals.notYours };
   }
   if (!activity.hasPosition) {
     // Answered from the summary rather than by decoding two channels and
     // finding them empty. `hasPosition` is the one bit #26 stores for exactly
     // this kind of question.
-    return { kind: 'refused', reason: 'noTrack', message: SEGMENT_REFUSAL.noTrack };
+    return { kind: 'refused', reason: 'noTrack', message: refusals.noTrack };
   }
 
   const span = await readSpan(port, request.activityId, request.from, request.to);
   if (span === undefined) {
-    return { kind: 'refused', reason: 'noTrack', message: SEGMENT_REFUSAL.noTrack };
+    return { kind: 'refused', reason: 'noTrack', message: refusals.noTrack };
   }
 
   const [privacyZones, existing] = await Promise.all([
@@ -409,6 +448,7 @@ export async function createSegmentFromRide(
     privacyZones,
     existing,
     createdAt: request.createdAt,
+    ...(request.units === undefined ? {} : { units: request.units }),
   });
 
   if (decision.kind === 'refused') {

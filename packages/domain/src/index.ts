@@ -38,6 +38,7 @@ export type {
   KilometresPerHour,
   Metres,
   MetresPerSecond,
+  MilesPerHour,
   ResistanceLevel,
   RevolutionsPerMinute,
   Seconds,
@@ -60,6 +61,7 @@ export {
   kilometresPerHour,
   metres,
   metresPerSecond,
+  milesPerHour,
   resistanceLevel,
   revolutionsPerMinute,
   seconds,
@@ -73,7 +75,9 @@ export {
 export {
   hundredthsKilometresPerHourToMetresPerSecond,
   kilometresPerHourToMetresPerSecond,
+  METRES_PER_MILE,
   metresPerSecondToKilometresPerHour,
+  metresPerSecondToMilesPerHour,
 } from './speed';
 
 // --- Geodesy: distance on the earth's surface -------------------------------

@@ -12,7 +12,7 @@
 
 import { metres, seconds, unixSeconds } from '@onyourleft/domain';
 import { activityId, recordingSessionId, StoreReferentialError } from '@onyourleft/store';
-import type { NewActivity, NewRecordingSession } from '@onyourleft/store';
+import type { AthleteRecord, NewActivity, NewRecordingSession } from '@onyourleft/store';
 import { createStoreHarness, type StoreHarness } from '@onyourleft/store/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -20,6 +20,7 @@ import {
   ensureLocalAthlete,
   LOCAL_ATHLETE,
   LOCAL_ATHLETE_DISPLAY_NAME,
+  localAthleteRecord,
   renderAfterAthlete,
 } from './local-athlete';
 
@@ -175,10 +176,10 @@ describe('renderAfterAthlete — the ordering #184 turns on', () => {
 
     const started = renderAfterAthlete(
       async () =>
-        new Promise<void>((resolve) => {
+        new Promise<AthleteRecord>((resolve) => {
           resolveEnsure = () => {
             ensured = true;
-            resolve();
+            resolve(localAthleteRecord(NOW));
           };
         }),
       () => {
@@ -203,14 +204,22 @@ describe('renderAfterAthlete — the ordering #184 turns on', () => {
     // views that need a store explain themselves; a blank page does not.
     let rendered = false;
 
+    let handed: AthleteRecord | undefined | 'not called' = 'not called';
     await renderAfterAthlete(
       () => Promise.reject(new Error('site data is blocked')),
-      () => {
+      (athlete) => {
         rendered = true;
+        handed = athlete;
       },
     );
 
     expect(rendered).toBe(true);
+    // ⚠️ **And the row it hands on is `undefined`, not a fabricated one.**
+    // #238's unit preference rides on this record; inventing an athlete here
+    // would mean a rider whose store is blocked silently gets whatever default
+    // this line chose, from a second place. The shell's own default is the one
+    // place that decision is made.
+    expect(handed).toBeUndefined();
   });
 
   it('renders anyway when opening the store throws synchronously', async () => {
@@ -228,5 +237,22 @@ describe('renderAfterAthlete — the ordering #184 turns on', () => {
     );
 
     expect(rendered).toBe(true);
+  });
+
+  it('hands the stored athlete row to the render, so the first paint is in the right units', () => {
+    // #238. Reading the preference *after* the first render would paint every
+    // screen in kilometres and then switch, which a rider reads as the setting
+    // not working.
+    const row: AthleteRecord = { ...localAthleteRecord(NOW), units: 'imperial' };
+    let handed: AthleteRecord | undefined;
+
+    return renderAfterAthlete(
+      () => Promise.resolve(row),
+      (athlete) => {
+        handed = athlete;
+      },
+    ).then(() => {
+      expect(handed?.units).toBe('imperial');
+    });
   });
 });

@@ -30,10 +30,18 @@
  * from the full series rather than from the drawn one.
  */
 
-import { metresPerSecondToKilometresPerHour, type MetresPerSecond } from '@onyourleft/domain';
-import type { StreamChannel } from '@onyourleft/store';
+import type { MetresPerSecond } from '@onyourleft/domain';
+import type { StreamChannel, UnitSystem } from '@onyourleft/store';
 
-import { POWER_UNIT, SPEED_UNIT } from '../format';
+import { POWER_UNIT } from '../format';
+import {
+  smallDistanceIn,
+  smallDistanceUnit,
+  speedIn,
+  speedUnit,
+  formatSpeed,
+  formatSmallDistance,
+} from '../units/format';
 
 /**
  * A channel that is drawn as a trace against time.
@@ -54,9 +62,10 @@ export interface TraceSeriesDefinition {
   /**
    * Stored canonical value → the number shown.
    *
-   * The identity for every channel but speed, which is stored in metres per
-   * second and read in km/h. The conversion goes through `@onyourleft/domain`
-   * for the reason every conversion in this program does — see `format.ts`.
+   * The identity for every channel but speed and altitude, which are stored
+   * canonically — metres per second, metres — and read in whichever units the
+   * rider has chosen. The conversion goes through `units/format.ts`, which is
+   * the one place in this client that decides a unit (#238).
    */
   readonly display: (value: number) => number;
   /** The displayed number as digits, without its unit. */
@@ -72,56 +81,68 @@ const whole = (value: number): string => String(Math.round(value));
  * second because it is the one an outdoor ride is about, and altitude near the
  * end because it is absent from half the rides this product will hold.
  */
-export const TRACE_SERIES: readonly TraceSeriesDefinition[] = [
-  {
-    channel: 'power',
-    label: 'Power',
-    unit: POWER_UNIT,
-    display: (value) => value,
-    format: whole,
-  },
-  {
-    channel: 'heartRate',
-    label: 'Heart rate',
-    unit: 'bpm',
-    display: (value) => value,
-    format: whole,
-  },
-  {
-    channel: 'cadence',
-    label: 'Cadence',
-    unit: 'rpm',
-    display: (value) => value,
-    format: whole,
-  },
-  {
-    channel: 'speed',
-    label: 'Speed',
-    unit: SPEED_UNIT,
-    display: (value) => metresPerSecondToKilometresPerHour(value as MetresPerSecond),
-    format: (value) => value.toFixed(1),
-  },
-  {
-    channel: 'altitude',
-    label: 'Altitude',
-    unit: 'm',
-    display: (value) => value,
-    format: whole,
-  },
-  {
-    channel: 'temperature',
-    label: 'Temperature',
-    unit: '°C',
-    display: (value) => value,
-    format: whole,
-  },
-];
+export function traceSeries(units: UnitSystem): readonly TraceSeriesDefinition[] {
+  return [
+    {
+      channel: 'power',
+      label: 'Power',
+      unit: POWER_UNIT,
+      display: (value) => value,
+      format: whole,
+    },
+    {
+      channel: 'heartRate',
+      label: 'Heart rate',
+      unit: 'bpm',
+      display: (value) => value,
+      format: whole,
+    },
+    {
+      channel: 'cadence',
+      label: 'Cadence',
+      unit: 'rpm',
+      display: (value) => value,
+      format: whole,
+    },
+    {
+      channel: 'speed',
+      label: 'Speed',
+      unit: speedUnit(units),
+      display: (value) => speedIn(value as MetresPerSecond, units),
+      format: (value) => formatSpeed(value as MetresPerSecond, units).value,
+    },
+    {
+      channel: 'altitude',
+      label: 'Altitude',
+      // ⚠️ `display` and `format` do **not** compose here, and that is why the
+      // two are separate fields: `display` converts a stored value for the
+      // chart's geometry, `format` converts a stored value for the table's
+      // text. Both take the canonical metres. Feeding one the other's output
+      // would convert twice, which is a 3.3× error in the direction nobody
+      // checks.
+      unit: smallDistanceUnit(units),
+      display: (value) => smallDistanceIn(value, units),
+      format: (value) => formatSmallDistance(value, units).value,
+    },
+    {
+      channel: 'temperature',
+      label: 'Temperature',
+      // ⚠️ **Celsius in both systems, deliberately.** ADR 0020 D-1's single
+      // switch covers distance, speed, elevation and weight; temperature is
+      // not in that list and this client has never rendered a Fahrenheit
+      // reading. Adding one is additive and is not this issue's.
+      unit: '°C',
+      display: (value) => value,
+      format: whole,
+    },
+  ];
+}
 
 /** A series by channel. Total over {@link TraceChannel}, so no caller needs a fallback. */
-export function seriesFor(channel: TraceChannel): TraceSeriesDefinition {
-  const found = TRACE_SERIES.find((series) => series.channel === channel);
+export function seriesFor(channel: TraceChannel, units: UnitSystem): TraceSeriesDefinition {
+  const found = traceSeries(units).find((series) => series.channel === channel);
   if (found === undefined) {
-    // Unreachable while `TRACE_SERIES` covers `TraceChannel`, which the test
+    // Unreachable while `traceSeries` covers `TraceChannel`, which the test
     // `series.test.ts` asserts directly rather than trusting this line.
     throw new Error(`no trace series is defined for the ${channel} channel`);
   }

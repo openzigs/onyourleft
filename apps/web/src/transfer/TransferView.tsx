@@ -32,11 +32,13 @@
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type JSX } from 'react';
 
-import type { ActivityId, ActivitySummary } from '@onyourleft/store';
+import type { ActivityId, ActivitySummary, UnitSystem } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
 import { ChartSlot } from '../design/ChartSlot';
 import { StatusMessage, type StatusTone } from '../design/StatusMessage';
+import { useUnits } from '../units/context';
+import { formatDistance, measurementText } from '../units/format';
 
 import { ActivityExportError, exportActivity, LOSSY_CHANNELS } from './export-activity';
 import type { ActivityFileFormat } from './file-format';
@@ -379,6 +381,7 @@ function ExportPanel({
   const [selected, setSelected] = useState<string>('');
   const [format, setFormat] = useState<ActivityFileFormat>('fit');
   const [message, setMessage] = useState<{ tone: StatusTone; text: string } | undefined>(undefined);
+  const units = useUnits();
 
   // ⚠️ `storeRevision` is a dependency and not an unused prop: `port` is built
   // once in `main.tsx` and never changes, so it alone would pin this list to
@@ -463,7 +466,7 @@ function ExportPanel({
         >
           {rides.map((ride) => (
             <option key={ride.id} value={ride.id}>
-              {rideLabel(ride)}
+              {rideLabel(ride, units)}
             </option>
           ))}
         </select>
@@ -810,17 +813,18 @@ function ErasePanel({
 /**
  * How one ride reads in the chooser: its name, how far and how long.
  *
- * Deliberately **not** in `src/format.ts`. That module's own note records what
- * happened last time a presentation helper was exported ahead of a second
- * caller: it outlived the caller it was written for while the surviving screen
- * kept a private copy, and the two disagreed. There is exactly one caller for
- * this, here. #50 and #62 render a ride list properly, and that is when a
- * shared helper has two callers to keep in step.
+ * Deliberately **not** exported. `format.ts`'s own note records what happened
+ * last time a presentation helper was exported ahead of a second caller: it
+ * outlived the caller it was written for while the surviving screen kept a
+ * private copy, and the two disagreed. There is exactly one caller for this,
+ * here. What it no longer keeps a private copy of is the *unit* — #238 moved
+ * the divide and the label into `units/format.ts`, which is the one place
+ * either is decided.
  */
-function rideLabel(ride: ActivitySummary): string {
-  const kilometres = (ride.distance / 1000).toFixed(1);
+function rideLabel(ride: ActivitySummary, units: UnitSystem): string {
+  const distance = measurementText(formatDistance(ride.distance, units));
   const minutes = Math.round(ride.movingTime / 60);
-  return `${ride.name} — ${kilometres} km, ${String(minutes)} min`;
+  return `${ride.name} — ${distance}, ${String(minutes)} min`;
 }
 
 /**

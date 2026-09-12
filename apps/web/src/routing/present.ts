@@ -18,8 +18,9 @@
  */
 
 import { metres } from '@onyourleft/domain';
+import type { UnitSystem } from '@onyourleft/store';
 
-import { formatDistanceValue } from '../format';
+import { formatDistance, formatSmallDistance, measurementText } from '../units/format';
 import type { DraftLeg, RouteDraft } from './draft';
 import type { PlannedElevation } from './elevation';
 
@@ -110,7 +111,7 @@ export interface ProfileRow {
  */
 export const PROFILE_ROWS = 24;
 
-export function profileRows(planned: PlannedElevation): readonly ProfileRow[] {
+export function profileRows(planned: PlannedElevation, units: UnitSystem): readonly ProfileRow[] {
   const grades = planned.profile.grades;
   if (grades.length === 0) return [];
   const rows: ProfileRow[] = [];
@@ -125,8 +126,8 @@ export function profileRows(planned: PlannedElevation): readonly ProfileRow[] {
     const from = start * step;
     const to = Math.min((start + slice.length) * step, planned.profile.totalDistance);
     rows.push({
-      from: formatDistanceValue(metres(from)),
-      to: formatDistanceValue(metres(to)),
+      from: formatDistance(metres(from), units).value,
+      to: formatDistance(metres(to), units).value,
       band: bandFor(steepest),
       steepest: Math.round(steepest),
       measured: !overlapsGap(planned, from, to),
@@ -144,17 +145,23 @@ export function profileRows(planned: PlannedElevation): readonly ProfileRow[] {
  * and nothing else would be the number without the thing that makes it
  * comparable.
  */
-export function elevationSentence(planned: PlannedElevation): string {
-  const distance = formatDistanceValue(planned.profile.totalDistance);
-  const ascent = Math.round(planned.profile.totalAscent);
-  const descent = Math.round(planned.profile.totalDescent);
-  const base = `${distance} km, climbing ${String(ascent)} m and descending ${String(descent)} m, from ${planned.dataset.name} at ${String(planned.dataset.resolution)} m resolution, sampled every ${String(planned.interval)} m.`;
+export function elevationSentence(planned: PlannedElevation, units: UnitSystem): string {
+  // Every quantity in this sentence goes through `units/format.ts`, the
+  // dataset's own grid resolution included: a rider reading in feet reading
+  // "at 30 m resolution" is the half-converted screen #238 is about, in a
+  // sentence rather than on a tile.
+  const distance = measurementText(formatDistance(planned.profile.totalDistance, units));
+  const ascent = measurementText(formatSmallDistance(planned.profile.totalAscent, units));
+  const descent = measurementText(formatSmallDistance(planned.profile.totalDescent, units));
+  const resolution = measurementText(formatSmallDistance(planned.dataset.resolution, units));
+  const interval = measurementText(formatSmallDistance(planned.interval, units));
+  const base = `${distance}, climbing ${ascent} and descending ${descent}, from ${planned.dataset.name} at ${resolution} resolution, sampled every ${interval}.`;
   if (planned.coverage.complete) return base;
-  const missing = formatDistanceValue(planned.coverage.missing);
+  const missing = measurementText(formatDistance(planned.coverage.missing, units));
   // ⚠️ "at least" rather than a figure presented as final. The total was
   // computed across ground the dataset had no height for, and #72 requires the
   // profile to report incomplete rather than to sum silently.
-  return `${base} The elevation dataset has no height for ${missing} km of this route, so the climbing figure is at least ${String(ascent)} m rather than a measurement.`;
+  return `${base} The elevation dataset has no height for ${missing} of this route, so the climbing figure is at least ${ascent} rather than a measurement.`;
 }
 
 /** What a rider is told about a leg with no geometry. Plural-aware, because one is common. */

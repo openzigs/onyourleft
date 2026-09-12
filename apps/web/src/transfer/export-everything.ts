@@ -315,6 +315,8 @@ export function accountManifest(input: {
         readonly thresholdPower?: number | undefined;
         readonly thresholdHeartRate?: number | undefined;
         readonly mass?: number | undefined;
+        /** #238's display preference. ADR 0020 D-2 puts it on the athlete so it travels here. */
+        readonly units?: string | undefined;
       }
     | undefined;
   readonly deviceKey: { readonly algorithm: string; readonly publicKey: string } | undefined;
@@ -335,6 +337,12 @@ export function accountManifest(input: {
       thresholdPower: input.athlete?.thresholdPower,
       thresholdHeartRate: input.athlete?.thresholdHeartRate,
       mass: input.athlete?.mass,
+      // ⚠️ A **display** preference, exported because ADR 0020 D-2 put it on
+      // the athlete precisely so it travels with them and survives an
+      // erase-and-reimport. It describes nothing else in this file: every
+      // distance in every activity beside it is in the canonical unit, and
+      // that is true whichever way this reads.
+      units: input.athlete?.units,
     },
     // The public half only. See the file header: the private half is a handle
     // and would serialise to `{}`, which reads as "exported" and is not.

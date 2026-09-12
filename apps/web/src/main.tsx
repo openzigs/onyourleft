@@ -12,7 +12,13 @@ import {
 } from '@onyourleft/sensors/protocol';
 import { createWebBluetoothTransport } from '@onyourleft/sensors/web-bluetooth';
 import { metres, unixSeconds } from '@onyourleft/domain';
-import { activityId, openActivityStore, recordingSessionId, routeId } from '@onyourleft/store';
+import {
+  activityId,
+  openActivityStore,
+  recordingSessionId,
+  routeId,
+  type AthleteRecord,
+} from '@onyourleft/store';
 
 import './design/theme.css';
 import { browserClock, createRideController, type RideController } from './ride/controller';
@@ -44,6 +50,7 @@ import { browserBasemapConfig } from './map/basemap';
 import type { MapPort } from './map/port';
 import type { LibraryPort } from './library/store-port';
 import type { TransferPort } from './transfer/store-port';
+import type { UnitsPort } from './units/store-port';
 
 const found = document.getElementById('root');
 if (found === null) {
@@ -452,12 +459,30 @@ function buildTransferPort(): TransferPort | undefined {
   };
 }
 
-async function render(): Promise<void> {
+/**
+ * The settings screen's one write (#238).
+ *
+ * A ninth port over the same connection, and narrow for the reason the others
+ * are: `UnitsStore` names one method, so a screen that lets a rider choose
+ * kilometres or miles cannot reach a ride, a stream or another athlete's
+ * anything.
+ */
+function buildUnitsPort(): UnitsPort {
+  return { store: localStore(), athleteId: LOCAL_ATHLETE };
+}
+
+async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const rideController = await buildRideController(capabilities);
   createRoot(container).render(
     <StrictMode>
       <AppShell
         capabilities={capabilities}
+        settings={buildUnitsPort()}
+        // ⚠️ The **stored** preference, read before the first paint. The
+        // fallback is `DEFAULT_UNIT_SYSTEM` and it is applied in exactly one
+        // place — `AppShell`'s own default — so "a row with no setting" and "no
+        // row at all" read the same, which is what they mean.
+        {...(athlete?.units === undefined ? {} : { units: athlete.units })}
         rideController={rideController}
         transfer={buildTransferPort()}
         library={buildLibraryPort()}

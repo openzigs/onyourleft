@@ -14,7 +14,7 @@ import {
   traceExtent,
   traceMean,
   traceSegments,
-  TRACE_SERIES,
+  traceSeries,
   type TraceChannel,
 } from './series';
 
@@ -29,7 +29,7 @@ describe('the series table', () => {
     // to that line: a channel added to `packages/store` with no series defined
     // fails this test, which names the gap, instead of throwing at render time
     // on whichever ride happens to carry it.
-    const charted = new Set(TRACE_SERIES.map((series) => series.channel));
+    const charted = new Set(traceSeries('metric').map((series) => series.channel));
     const expected = STREAM_CHANNELS.filter(
       (channel: StreamChannel) => channel !== 'latitude' && channel !== 'longitude',
     );
@@ -37,14 +37,15 @@ describe('the series table', () => {
   });
 
   it('names no channel twice', () => {
-    expect(TRACE_SERIES).toHaveLength(new Set(TRACE_SERIES.map((s) => s.channel)).size);
+    const series = traceSeries('metric');
+    expect(series).toHaveLength(new Set(series.map((s) => s.channel)).size);
   });
 
   it('opens with fewer series than it offers, which is what makes the read budget a budget', () => {
     expect(DEFAULT_SERIES.length).toBeGreaterThan(0);
-    expect(DEFAULT_SERIES.length).toBeLessThan(TRACE_SERIES.length);
+    expect(DEFAULT_SERIES.length).toBeLessThan(traceSeries('metric').length);
     for (const channel of DEFAULT_SERIES) {
-      expect(TRACE_SERIES.map((s) => s.channel)).toContain(channel);
+      expect(traceSeries('metric').map((s) => s.channel)).toContain(channel);
     }
   });
 
@@ -52,14 +53,15 @@ describe('the series table', () => {
     // 10 m/s is 36 km/h. A series that forgot to convert would show "10.0"
     // beside a "km/h" heading, which is a wrong number that looks like a right
     // one.
-    const speed = seriesFor('speed');
+    const speed = seriesFor('speed', 'metric');
     expect(speed.unit).toBe('km/h');
-    expect(speed.format(speed.display(10))).toBe('36.0');
+    expect(speed.format(10)).toBe('36.0');
+    expect(speed.display(10)).toBeCloseTo(36, 9);
   });
 
   it('reads power, heart rate and cadence unchanged and whole', () => {
     for (const channel of ['power', 'heartRate', 'cadence'] as const) {
-      const series = seriesFor(channel);
+      const series = seriesFor(channel, 'metric');
       expect(series.display(212.4)).toBe(212.4);
       expect(series.format(212.4)).toBe('212');
     }
@@ -188,9 +190,44 @@ describe('the declared sizes', () => {
   });
 
   it('offers a series for every channel a chart can name', () => {
-    const channels: readonly TraceChannel[] = TRACE_SERIES.map((series) => series.channel);
+    const channels: readonly TraceChannel[] = traceSeries('metric').map((series) => series.channel);
     for (const channel of channels) {
-      expect(seriesFor(channel).label).not.toBe('');
+      expect(seriesFor(channel, 'metric').label).not.toBe('');
     }
+  });
+});
+
+describe('the traces follow the rider\u2019s units (#238)', () => {
+  it('reads a speed in mph and an altitude in feet for an imperial rider', () => {
+    const speed = seriesFor('speed', 'imperial');
+    expect(speed.unit).toBe('mph');
+    expect(speed.format(10)).toBe('22.4');
+
+    const altitude = seriesFor('altitude', 'imperial');
+    expect(altitude.unit).toBe('ft');
+    expect(altitude.format(100)).toBe('328');
+  });
+
+  it('plots and labels the same value, so the axis cannot disagree with the table', () => {
+    // ⚠️ `display` and `format` are separate fields and both take the STORED
+    // value. Composing them — `format(display(x))` — would convert twice, which
+    // is a 3.3x error on an altitude and reads as a plausible mountain.
+    for (const units of ['metric', 'imperial'] as const) {
+      const altitude = seriesFor('altitude', units);
+      expect(altitude.format(100)).toBe(String(Math.round(altitude.display(100))));
+    }
+  });
+
+  it('leaves power, cadence and heart rate alone in both systems', () => {
+    for (const channel of ['power', 'cadence', 'heartRate'] as const) {
+      const metric = seriesFor(channel, 'metric');
+      const imperial = seriesFor(channel, 'imperial');
+      expect(imperial.unit).toBe(metric.unit);
+      expect(imperial.format(250)).toBe(metric.format(250));
+    }
+  });
+
+  it('leaves temperature in Celsius, which ADR 0020 D-1 does not cover', () => {
+    expect(seriesFor('temperature', 'imperial').unit).toBe(seriesFor('temperature', 'metric').unit);
   });
 });

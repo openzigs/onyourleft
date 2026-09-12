@@ -19,6 +19,7 @@
 import { describe, expect, it, afterEach } from 'vitest';
 
 import { watts } from '@onyourleft/domain';
+import type { UnitSystem } from '@onyourleft/store';
 
 import { idleSnapshot, ridingSnapshot, stubRideController } from '../ride/testing';
 import {
@@ -31,6 +32,7 @@ import {
 } from '../testing/mount';
 
 import { formatDuration } from '../format';
+import { UnitsProvider } from '../units/context';
 import { RideView } from './RideView';
 
 let mounted: Mounted | undefined;
@@ -40,8 +42,17 @@ afterEach(() => {
   mounted = undefined;
 });
 
-async function show(stub: ReturnType<typeof stubRideController>): Promise<Mounted> {
-  const result = await mount(<RideView controller={stub.controller} />);
+async function show(
+  stub: ReturnType<typeof stubRideController>,
+  units?: UnitSystem,
+): Promise<Mounted> {
+  // Wrapped in the provider only when a test names a preference, so every
+  // existing case still exercises the no-provider path a rider who has never
+  // chosen gets — which is the same default, by construction.
+  const view = <RideView controller={stub.controller} />;
+  const result = await mount(
+    units === undefined ? view : <UnitsProvider units={units}>{view}</UnitsProvider>,
+  );
   await settle();
   mounted = result;
   return result;
@@ -468,5 +479,22 @@ describe('the ride clock', () => {
 
     expect(document.body.textContent).toContain('1:02:05 elapsed');
     expect(document.body.textContent).toContain('1:00:00 moving');
+  });
+});
+
+describe('the live metrics follow the rider\u2019s units (#238)', () => {
+  it('announces a speed in mph for an imperial rider', async () => {
+    // The same 9.4 m/s the metric case above reads as 33.8 km/h. 9.4 m/s is
+    // 21.03 mph.
+    const stub = stubRideController(ridingSnapshot());
+    await show(stub, 'imperial');
+
+    const announced = queryAll(document, '.oyl-metric .oyl-visually-hidden').map((node) =>
+      node.textContent?.trim(),
+    );
+    expect(announced).toContain('Speed: 21.0 mph');
+    // Power is a watt in both systems, and the sentence beside it must not
+    // have moved.
+    expect(announced).toContain('Power: 248 W');
   });
 });

@@ -35,8 +35,10 @@
  * `fields.test.ts` asserting the displayed distance is the state's own number.
  */
 
-import type { GapInput, PacerGap, RouteProfile } from '@onyourleft/domain';
+import type { GapInput, Metres, PacerGap, RouteProfile } from '@onyourleft/domain';
+import type { UnitSystem } from '@onyourleft/store';
 
+import { formatDistance, formatSpeed, type Measurement } from '../../units/format';
 import type { GameState } from '../simulation';
 
 /** What a HUD shows where it has no trustworthy number. An em dash. */
@@ -86,6 +88,20 @@ export interface HudInput {
   /** The gap to whichever of the bot or the ghost the rider is chasing. */
   readonly gap?: PacerGap | undefined;
   readonly gapTo?: 'bot' | 'ghost' | undefined;
+  /**
+   * Which units the rider reads in (#238).
+   *
+   * ⚠️ **An ordinary parameter, not a React context.** This file is pure —
+   * `HudPanel.tsx` is the component — and a pure function that reached for a
+   * context would stop being testable as one. `units/context.tsx` records the
+   * split.
+   *
+   * Optional, defaulting to metric, for the reason every other optional field
+   * here has one: a caller that has not been given a preference renders the
+   * same thing a rider who has never chosen sees, rather than a different
+   * thing.
+   */
+  readonly units?: UnitSystem | undefined;
 }
 
 /**
@@ -100,7 +116,20 @@ export interface HudInput {
  */
 export function hudReadings(input: HudInput): readonly HudReading[] {
   const { state } = input;
+  const units = input.units ?? 'metric';
   const remaining = Math.max(0, (input.profile.totalDistance as number) - state.ride.distance);
+  // ⚠️ **Both go through `units/format.ts`, and that is the whole of #238's
+  // second criterion.** This file used to convert and label inline —
+  // `(state.ride.speed as number) * 3.6, 'km/h'` and `remaining / 1000, 'km'`
+  // — which is why a preference wired only into `format.ts`'s constants would
+  // have changed most of the product and left the one screen a rider stares at
+  // for an hour unchanged.
+  const speed = formatSpeed(state.ride.speed, units);
+  // Two decimals rather than the default one, and it is a *precision*
+  // argument rather than a unit one: this is a countdown, and a rider watching
+  // the last kilometre go past wants the ten-metre digit. `units/format.ts`
+  // §Rounding says why the two are kept apart.
+  const togo = formatDistance(remaining as Metres, units, REMAINING_DECIMALS);
   return [
     reading('power', 'Power', state.input.power, 'W', state.input.live, 0, state.input.paired),
     reading(
@@ -123,9 +152,9 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
     ),
     // Speed, gradient and distance come from the simulation, which cannot drop
     // out: it is computation, not a sensor. They are never stale.
-    reading('speed', 'Speed', (state.ride.speed as number) * 3.6, 'km/h', true, 1),
+    measured('speed', 'Speed', speed),
     reading('gradient', 'Gradient', state.grade, '%', true, 1),
-    reading('remaining', 'To go', remaining / 1000, 'km', true, 2),
+    measured('remaining', 'To go', togo),
     gapReading(input),
   ];
 }
@@ -155,6 +184,19 @@ function gapReading(input: HudInput): HudReading {
     unit: '',
     stale: false,
   };
+}
+
+/** How many decimals the distance still to ride is counted down to. */
+const REMAINING_DECIMALS = 2;
+
+/**
+ * A field whose value and unit were produced together by `units/format.ts`.
+ *
+ * Never stale, because everything that goes through it comes from the
+ * simulation rather than from a sensor — see the comment at the call site.
+ */
+function measured(key: string, label: string, measurement: Measurement): HudReading {
+  return { key, label, value: measurement.value, unit: measurement.unit, stale: false };
 }
 
 function reading(

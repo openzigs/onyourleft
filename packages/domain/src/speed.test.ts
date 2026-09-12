@@ -8,6 +8,8 @@ import {
   kilometresPerHourToMetresPerSecond,
   metresPerSecond,
   metresPerSecondToKilometresPerHour,
+  metresPerSecondToMilesPerHour,
+  METRES_PER_MILE,
   UnitError,
 } from './index';
 
@@ -99,5 +101,46 @@ describe('the constructors validate, so the conversions do not have to', () => {
 
   it('rejects a negative magnitude rather than converting it', () => {
     expect(() => metresPerSecond(-1)).toThrow(UnitError);
+  });
+});
+
+describe('metresPerSecondToMilesPerHour (#238)', () => {
+  it('scales by 3600 divided by the metres in a mile', () => {
+    // 10 m/s is 22.369362920544 mph. Written out rather than recomputed from
+    // the same expression the implementation uses, which would assert only
+    // that the file agrees with itself.
+    expect(metresPerSecondToMilesPerHour(metresPerSecond(10))).toBeCloseTo(22.369362920544, 10);
+  });
+
+  it('leaves a standstill at zero', () => {
+    expect(metresPerSecondToMilesPerHour(metresPerSecond(0))).toBeCloseTo(0, 10);
+  });
+
+  it('uses the international mile, exactly 1609.344 m', () => {
+    // A mile per hour is a mile of ground in an hour, so the speed that covers
+    // exactly one mile in 3600 s must read as exactly 1.
+    expect(metresPerSecondToMilesPerHour(metresPerSecond(METRES_PER_MILE / 3600))).toBeCloseTo(
+      1,
+      12,
+    );
+  });
+
+  it('is a different number from the kilometres-per-hour reading of the same speed', () => {
+    // The reason the two are separate branded types: both are plausible
+    // bicycle speeds, so a mix-up produces a number nobody questions.
+    const speed = metresPerSecond(10);
+    expect(metresPerSecondToKilometresPerHour(speed)).toBeCloseTo(36, 10);
+    expect(metresPerSecondToMilesPerHour(speed)).not.toBeCloseTo(36, 1);
+  });
+
+  it('throws rather than returning Infinity typed as MilesPerHour', () => {
+    const fastest = metresPerSecond(Number.MAX_VALUE);
+    expect(() => metresPerSecondToMilesPerHour(fastest)).toThrow(UnitError);
+  });
+
+  it('names the unit it rejected, so a caller can tell which conversion failed', () => {
+    expect(() => metresPerSecondToMilesPerHour(metresPerSecond(Number.MAX_VALUE))).toThrow(
+      /miles per hour/,
+    );
   });
 });

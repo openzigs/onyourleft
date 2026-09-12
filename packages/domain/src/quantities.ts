@@ -81,6 +81,25 @@ export function kilometresPerHour(value: number): KilometresPerHour {
   return value as KilometresPerHour;
 }
 
+/**
+ * A speed in miles per hour — a **presentation** unit, like
+ * {@link KilometresPerHour} and for the same reasons.
+ *
+ * The header of this file has said "and later mph" since #25; #238 is the
+ * later. It is a distinct type rather than a second reading of
+ * {@link KilometresPerHour} because the two differ by a factor of 1.6 and are
+ * both plausible numbers for a bicycle — a mix-up between them produces a
+ * speed nobody would question, which is the failure a brand exists to make
+ * impossible. Nothing in this program stores or transmits either.
+ */
+export type MilesPerHour = Quantity<'mile per hour'>;
+
+/** @throws {UnitError} if not a finite, non-negative number. */
+export function milesPerHour(value: number): MilesPerHour {
+  assertNotNegative(value, 'speed in miles per hour');
+  return value as MilesPerHour;
+}
+
 // --- Power ------------------------------------------------------------------
 
 /**

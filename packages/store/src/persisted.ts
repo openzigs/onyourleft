@@ -56,6 +56,7 @@ import type {
   RouteRecord,
   WorkoutRecord,
 } from './records';
+import { parseUnitSystem } from './unit-system';
 import { DEFAULT_VISIBILITY, parseVisibility } from './visibility';
 
 // --- On-disk shapes ---------------------------------------------------------
@@ -68,6 +69,8 @@ export interface PersistedAthlete {
   thresholdPower?: number;
   thresholdHeartRate?: number;
   mass?: number;
+  /** @see AthleteRecord.units — a display preference, stored as its bare word. */
+  units?: string;
 }
 
 /** @see ActivityRecord */
@@ -336,6 +339,9 @@ export function toPersistedAthlete(record: AthleteRecord): PersistedAthlete {
   if (record.mass !== undefined) {
     row.mass = record.mass;
   }
+  if (record.units !== undefined) {
+    row.units = record.units;
+  }
   return row;
 }
 
@@ -380,6 +386,14 @@ export function fromPersistedAthlete(row: PersistedAthlete): AthleteRecord {
   // effort was. This is only ever the source of that copy.
   if (row.mass !== undefined) {
     record.mass = decoded('athlete.mass', decodedNumber('athlete.mass', row.mass), kilograms);
+  }
+  // #238. Absent stays absent for the reason above. Present but unrecognised
+  // becomes the default rather than a `StoreDecodeError`, which is the one
+  // place this field departs from every other on this row — `unit-system.ts`
+  // §"Why an unrecognised value falls back rather than throwing" says why a
+  // display preference is not worth taking a rider's library away over.
+  if (row.units !== undefined) {
+    record.units = parseUnitSystem(row.units);
   }
   return record;
 }
