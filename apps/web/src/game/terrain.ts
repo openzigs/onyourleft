@@ -92,8 +92,31 @@ export interface CorridorPoint {
   readonly y: number;
   /** North of the projection origin. */
   readonly z: number;
-  /** How far along the route this point is. */
+  /**
+   * Where on the route this point is, wrapped into `[0, totalDistance]`.
+   *
+   * The geometry's own coordinate: it is what the elevation and the position
+   * were read at, so on a loop two points a lap apart carry the same value
+   * because they *are* the same place.
+   */
   readonly distance: number;
+  /**
+   * The odometer reading this point was built for. **Not** wrapped.
+   *
+   * ⚠️ **Two fields rather than one, and #253 is what one cost.** A rider's and
+   * a bot's distances are odometers — how far each has ridden in total — and
+   * `pacer/gap.ts` requires them to stay that way, because a bot a full lap
+   * ahead must read as a lap ahead rather than as level. {@link distance}
+   * wraps, so matching an odometer against it made every corridor point compare
+   * smaller than the value being searched for once either rider passed
+   * `totalDistance`, and the rider and the bot were both drawn at the far end
+   * of the corridor from lap two onward.
+   *
+   * So placement matches on this and geometry is read at {@link distance}, and
+   * neither has to be bent to suit the other. `scene.ts` §`nearestPoint` is the
+   * one consumer.
+   */
+  readonly along: number;
 }
 
 /** A ribbon of road, ready to become a vertex buffer. */
@@ -180,7 +203,12 @@ export function roadCorridor(
   };
 }
 
-/** One centreline point, projected and wrapped. */
+/**
+ * One centreline point, projected and wrapped.
+ *
+ * The wrap is applied to the *geometry* and recorded in `distance`; the
+ * unwrapped `along` it was asked for is kept beside it. @see CorridorPoint.along
+ */
 function pointAt(profile: RouteProfile, origin: CorridorOrigin, along: number): CorridorPoint {
   // `distanceOnRoute` wraps a loop and clamps a point-to-point route, which is
   // exactly the behaviour the corridor wants at both ends: on a loop the road
@@ -199,6 +227,7 @@ function pointAt(profile: RouteProfile, origin: CorridorOrigin, along: number): 
     y: (elevationAt(profile, wrapped) as number) - origin.elevation,
     z: (position.latitude - origin.latitude) * METRES_PER_DEGREE_LATITUDE,
     distance: wrapped,
+    along,
   };
 }
 

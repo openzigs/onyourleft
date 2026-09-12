@@ -29,7 +29,7 @@
 
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 
-import { gapAgainst } from './hud/fields';
+import { gapAgainst, type ChasedGap } from './hud/fields';
 import { HudPanel } from './hud/HudPanel';
 import { NO_SCREEN_LOCK, type ScreenLock, type ScreenLockSource } from './hud/wake-lock';
 import { DEFAULT_PACER_INTENSITY, pacerChoice, type PacerChoice } from './pacer-choice';
@@ -43,10 +43,11 @@ import { NO_SENSORS, type GameSensors } from './sensors';
 import {
   MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM,
   MINIMUM_INTENSITY_WATTS_PER_KILOGRAM,
+  ghostDistanceAt,
   pacerGap,
+  seconds,
   type BotPacerPlan,
   type GhostTrack,
-  type PacerGap,
   type RouteProfile,
 } from '@onyourleft/domain';
 
@@ -293,7 +294,6 @@ export function GameView(props: GameViewProps): JSX.Element {
   }
 
   const sensors = port?.readSensors() ?? NO_SENSORS;
-  const gap = gapToBot(state);
   return (
     <section className="oyl-game" aria-label="Trainer game">
       <canvas
@@ -309,8 +309,7 @@ export function GameView(props: GameViewProps): JSX.Element {
         state={state}
         cadence={sensors.cadence}
         heartRate={sensors.heartRate}
-        gap={gap}
-        gapTo={gap === undefined ? undefined : 'bot'}
+        chases={chasedGaps(state, ghostRef.current)}
         paused={phase === 'paused'}
         onPause={() => {
           setPhase((current) => (current === 'paused' ? 'riding' : 'paused'));
@@ -326,21 +325,37 @@ export function GameView(props: GameViewProps): JSX.Element {
 }
 
 /**
- * The gap to the bot, or `undefined` when there is no bot to have one from.
+ * The gap to everyone the rider is racing — the bot, the ghost, or both.
  *
- * ⚠️ **Built from the ride state and nothing else**, through
- * `pacer/gap.ts`'s two unwrapped odometers — which is #237's fourth criterion,
- * and the reason a bot a full lap ahead reads as a lap ahead rather than as
- * level with you. `gapAgainst` assembles the input from the same `GameState`
- * the bot's marker is placed from, so the number in the HUD and the shape on
- * the road cannot disagree.
+ * ⚠️ **Both, when the rider asked for both, and #253's second half is that this
+ * used to return only the bot's.** The two choices are independent on the route
+ * picker, so the path is reachable and a rider taking it was shown the pacer's
+ * number under the pacer's label and nothing at all about the attempt they had
+ * chosen to race.
+ *
+ * ⚠️ **Built from the ride state and nothing else**, through `pacer/gap.ts`'s
+ * two unwrapped odometers — which is #237's fourth criterion, and the reason a
+ * bot a full lap ahead reads as a lap ahead rather than as level with you.
+ * `gapAgainst` assembles the input from the same `GameState` the markers are
+ * placed from, so the number in the HUD and the shape on the road cannot
+ * disagree; `scene.ts` §`nearestPoint` is the other half of that promise and
+ * says why the wrap belongs there and not here.
+ *
+ * The ghost's distance is read **at this elapsed time**, by the same call
+ * `scene.ts` places its marker with — a ghost is raced rather than replayed
+ * beside you, so "where is it now" is a question about the clock.
  */
-function gapToBot(state: GameState): PacerGap | undefined {
+function chasedGaps(state: GameState, ghost: GhostTrack | undefined): readonly ChasedGap[] {
+  const found: ChasedGap[] = [];
   const bot = state.bot;
-  if (bot === undefined) {
-    return undefined;
+  if (bot !== undefined) {
+    found.push({ to: 'bot', gap: pacerGap(gapAgainst(state, bot.state.distance)) });
   }
-  return pacerGap(gapAgainst(state, bot.state.distance));
+  if (ghost !== undefined) {
+    const at = ghostDistanceAt(ghost, seconds(Math.max(0, state.elapsed)));
+    found.push({ to: 'ghost', gap: pacerGap(gapAgainst(state, at)) });
+  }
+  return found;
 }
 
 /** Choosing a route, whether to race yourself on it, and whether to be paced. */
