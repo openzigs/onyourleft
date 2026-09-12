@@ -16,6 +16,17 @@
  * asset directory in this epic — which #91 records as the reason it can ship
  * without an art budget rather than as a shortcut.
  *
+ * ## The world is three objects, and still no illumination
+ *
+ * #241 gives the scene a ground plane, a sky and exponential fog, all three
+ * coloured from `world.ts`'s `WorldStyle` and therefore from the rider's own
+ * route. **No lamp of any kind was added and none is wanted**: a
+ * `MeshBasicMaterial` is unlit by definition, so the ground costs one draw call
+ * and no shading pass, and the statement below about a flat-shaded road still
+ * holds for everything in this file. A case-sensitive grep for three's
+ * illumination classes over this file returns nothing, and `three-seam.test.ts`
+ * is what keeps it that way rather than leaving it to review.
+ *
  * ## Why it is written against a lost context rather than assuming one
  *
  * `canvas.getContext('webgl2')` returns `null` for ordinary reasons — WebGL
@@ -30,12 +41,15 @@
 import {
   BufferAttribute,
   BufferGeometry,
+  Color,
   ConeGeometry,
   DoubleSide,
+  FogExp2,
   Mesh,
   MeshBasicMaterial,
   OctahedronGeometry,
   PerspectiveCamera,
+  PlaneGeometry,
   Scene,
   SphereGeometry,
   Vector3,
@@ -44,18 +58,19 @@ import {
 } from 'three';
 
 import type { QualitySettings } from './quality';
+import { CAMERA_BEHIND_METRES } from './port';
 import type { CameraPose, GameRenderer, GameView, RiderMarker, SceneFrame } from './port';
+import type { WorldStyle } from './world';
 
 /**
- * How far behind and above the rider the chase camera sits, in metres.
+ * How far above the rider the chase camera sits, in metres.
  *
- * ADR 0008 **D-5** fixes the camera, so these are the whole of the camera's
- * configuration — there is no free-look and adding one is a change to that ADR.
- * Eight metres back and three up is roughly a following motorbike: far enough
- * that the road ahead fills the frame on a phone held at arm's length, close
- * enough that the rider's own marker stays large enough to find.
+ * Its sibling {@link CAMERA_BEHIND_METRES} is in `port.ts` rather than here,
+ * because `world.test.ts` needs it and must not import `three`; that is where
+ * the rest of this note lives. ADR 0008 **D-5** fixes the camera, so the two
+ * together are the whole of its configuration — there is no free-look, and
+ * adding one is a change to that ADR.
  */
-const CAMERA_BEHIND_METRES = 8;
 const CAMERA_ABOVE_METRES = 3;
 
 /** How far ahead of the rider the camera looks. */
@@ -80,6 +95,38 @@ const MARKER_STYLE: Record<RiderMarker['kind'], { colour: number; radius: number
 /** The road surface. Flat-shaded on purpose: no lighting means no light budget. */
 const ROAD_COLOUR = 0x3f4a5a;
 
+/**
+ * How far the ground plane reaches from the camera, in metres.
+ *
+ * Far enough that its edge is past where {@link WorldStyle.fogDensity} has
+ * faded everything to the horizon colour, and inside the camera's own far plane
+ * so a driver never clips it: the corner of a 2 × 1 200 m square is 1 697 m
+ * away, against a far plane of 2 000.
+ *
+ * ⚠️ **It is one quad.** #240's NFR-2 is explicit that the budget here is draw
+ * calls, overdraw and fill rate rather than triangles, and a ground made of a
+ * grid would buy nothing — there is nothing shading it and no displacement on
+ * it. Two triangles is the whole cost.
+ */
+const GROUND_RADIUS_METRES = 1200;
+
+/** How far under the road the ground sits, so the road reads as a raised surface. */
+const GROUND_BELOW_ROAD_METRES = 0.25;
+
+/**
+ * What the sky and the ground are before a frame has said what they are.
+ *
+ * ⚠️ **Black, and chosen to be black deliberately.** No rider ever sees it —
+ * `#updateWorld` runs before every draw — but a renderer that stopped reading
+ * `SceneFrame.world` would then draw the *default* colours, and three's own
+ * default for both a `Color` and a `MeshBasicMaterial` is **white**. A browser
+ * gate asserting "the sky is no longer the clear colour" would pass over a
+ * white sky and a white ground, and #240's named defect for this epic would
+ * ship. Black is the clear colour, so that assertion goes red instead. It was
+ * white here first, and the mutation run for #241 is what found it.
+ */
+const UNSET_COLOUR = 0x000000;
+
 class ThreeGameView implements GameView {
   readonly hasContext: boolean;
   readonly #renderer: WebGLRenderer | undefined;
@@ -88,6 +135,26 @@ class ThreeGameView implements GameView {
   readonly #roadGeometry = new BufferGeometry();
   readonly #road: Mesh;
   readonly #markers = new Map<RiderMarker['kind'], Mesh>();
+  /**
+   * The world, as three objects built once and mutated thereafter — #240's
+   * NFR-3. Every one of them is a fixed instance: the sky is the `Color` the
+   * scene's background *is*, the fog is the `FogExp2` the scene holds, and the
+   * ground is one `Mesh` that follows the camera. `#updateWorld` sets numbers
+   * on these and never replaces them.
+   */
+  readonly #sky = new Color(UNSET_COLOUR);
+  readonly #fog = new FogExp2(UNSET_COLOUR, 0);
+  readonly #ground: Mesh;
+  readonly #groundMaterial = new MeshBasicMaterial({
+    color: UNSET_COLOUR,
+    // ⚠️ **Writes no depth, and draws first.** That is what lets a flat plane
+    // stand under a road that climbs and descends: the road, the markers and
+    // anything a later sub-issue adds are drawn over it whatever their height,
+    // so a rider descending never watches the road they are on disappear
+    // beneath a plane pinned to where they were. It is a backdrop, and a
+    // backdrop that occludes is a bug rather than a depth cue.
+    depthWrite: false,
+  });
   #quality: QualitySettings;
   #widthCssPixels = 1;
   #heightCssPixels = 1;
@@ -104,6 +171,19 @@ class ThreeGameView implements GameView {
     }
     this.#renderer = renderer;
     this.hasContext = renderer !== undefined;
+
+    this.#scene.background = this.#sky;
+    this.#scene.fog = this.#fog;
+
+    this.#ground = new Mesh(
+      new PlaneGeometry(GROUND_RADIUS_METRES * 2, GROUND_RADIUS_METRES * 2),
+      this.#groundMaterial,
+    );
+    // A `PlaneGeometry` stands up in the XY plane; this lays it down.
+    this.#ground.rotation.x = -Math.PI / 2;
+    this.#ground.frustumCulled = false;
+    this.#ground.renderOrder = -1;
+    this.#scene.add(this.#ground);
 
     this.#road = new Mesh(
       this.#roadGeometry,
@@ -137,6 +217,7 @@ class ThreeGameView implements GameView {
     if (this.#renderer === undefined) {
       return;
     }
+    this.#updateWorld(frame.world, frame.camera);
     this.#updateRoad(frame);
     this.#updateMarkers(frame.markers);
     this.#placeCamera(frame.camera);
@@ -156,6 +237,8 @@ class ThreeGameView implements GameView {
 
   destroy(): void {
     this.#roadGeometry.dispose();
+    this.#ground.geometry.dispose();
+    this.#groundMaterial.dispose();
     disposeMaterial(this.#road.material);
     for (const marker of this.#markers.values()) {
       marker.geometry.dispose();
@@ -167,6 +250,35 @@ class ThreeGameView implements GameView {
     // a rider starting five rides in a session would otherwise run out.
     this.#renderer?.forceContextLoss();
     this.#renderer?.dispose();
+  }
+
+  /**
+   * Applies the world `world.ts` derived from the route — #241.
+   *
+   * ⚠️ **This method is the whole of what makes `SceneFrame.world` real.** A
+   * field added to the frame and never read here passes every test in the jsdom
+   * suite and changes nothing on the screen, which is #240's named defect shape
+   * for this epic. `game.browser.spec.ts` reads the drawing buffer back above
+   * the horizon and beside the road for that reason.
+   *
+   * The three colours land in three different places and each is deliberate:
+   * the **sky** is the scene's background, which nothing fogs, so it stays the
+   * one flat reference the eye reads depth against; the **horizon** is the fog
+   * colour, so every distant surface converges on it and the line where the
+   * fogged ground meets the unfogged sky *is* the horizon; and the **ground**
+   * is the plane's own colour, near the camera where the fog has not reached.
+   *
+   * The plane follows the camera in the ground plane so it always reaches the
+   * horizon, and sits {@link GROUND_BELOW_ROAD_METRES} under the road at the
+   * rider rather than at a fixed height, so a climb does not leave the road
+   * hanging over a distant floor.
+   */
+  #updateWorld(world: WorldStyle, pose: CameraPose): void {
+    this.#sky.setHex(world.skyColour);
+    this.#fog.color.setHex(world.horizonColour);
+    this.#fog.density = world.fogDensity;
+    this.#groundMaterial.color.setHex(world.groundColour);
+    this.#ground.position.set(pose.x, pose.y - GROUND_BELOW_ROAD_METRES, pose.z);
   }
 
   /**

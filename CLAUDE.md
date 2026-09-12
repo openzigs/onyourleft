@@ -118,6 +118,15 @@ apps/                 AGPL-3.0-or-later, without exception
                         Since #237 the simulation also advances the bot pacer,
                         on the same fixed step as the rider and through
                         #92's advanceBot rather than a second integrator
+    src/game/world.ts   the ground, the sky and the depth cue (#241) — the two
+                        axes a route is read on, the one number that is physics
+                        rather than choice, and the provenance of every other
+                        one. Pure, so the renderer stays the only file that
+                        names three
+    src/game/three-seam.test.ts
+                        what keeps that true, and what keeps the scene unlit —
+                        a grep over apps/ and packages/ rather than a review
+                        note (#240's epic criterion)
     src/game/pacer-choice.ts
                         the rider's pacer choice, turned into a plan or into a
                         refusal (#237) — the one place in the client a
@@ -1903,6 +1912,11 @@ top of an issue **supersedes its body**.
 | Why the simulation derives its step count from the origin rather than accumulating deltas | `apps/web/src/game/simulation.ts`, and the 0.23 m drift recorded in its header |
 | What happens to a ride when the phone is backgrounded for five minutes | `apps/web/src/game/simulation.ts` §`MAXIMUM_STEPS_PER_ADVANCE` |
 | Why the road is a corridor rather than a world, and where its vertices come from | `apps/web/src/game/terrain.ts`, [ADR 0008](docs/adr/0008-mobile-client-architecture.md) D-5 |
+| Where the ground and sky colours came from, and which one of them is physics | `apps/web/src/game/world.ts` §Provenance |
+| Why the fog is solved from the view distance rather than written down, and what its floor costs | `apps/web/src/game/world.ts` §`FOG_OCCLUSION_AT_VIEW_END`, §`MINIMUM_VIEW_END_OCCLUSION` |
+| Why the ground plane writes no depth, and why an unset sky is black | `apps/web/src/game/three-renderer.ts` §`UNSET_COLOUR`, §`#updateWorld` |
+| What proves the world reaches the screen rather than only the frame | `apps/web/browser/game-harness.ts`, `apps/web/browser/game.browser.spec.ts` |
+| Why the HUD panel's opacity is asserted inside the accessibility gate | `apps/web/src/game/hud/hud-surface.a11y.test.ts`, `apps/web/src/design/tokens.ts` §`hudSurface` |
 | What the renderer gives up when the phone gets hot, and why recovery is not the same threshold | `apps/web/src/game/quality.ts` §`HEADROOM_RESTORE_BELOW` |
 | Why the HUD's panel is opaque, and why that is what makes its contrast checkable | `apps/web/src/design/tokens.ts` §`hudSurface` |
 | How a rider tells a dropped sensor from a genuine zero | `apps/web/src/game/hud/fields.ts` §`NO_READING`, `HudPanel.a11y.test.tsx` |

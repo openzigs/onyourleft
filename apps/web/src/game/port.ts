@@ -36,6 +36,28 @@
 
 import type { QualitySettings } from './quality';
 import type { RoadCorridor } from './terrain';
+import type { WorldStyle } from './world';
+
+/**
+ * How far behind the rider a renderer puts the chase camera, in metres.
+ *
+ * ⚠️ **Here rather than in `three-renderer.ts`, because two files need it and
+ * one of them must not import `three`.** `world.ts`'s near-fog bound is the
+ * claim that the road under the rider is left alone, and "under the rider"
+ * means *at the camera's distance from the rider's own marker* — so
+ * `world.test.ts` checks `fogFactor` at exactly this distance. It used to do
+ * that against a hand-copied `8`, which silently stops describing the camera
+ * the day the camera moves, and starts testing the wrong distance without
+ * going red. `world.ts` imports `VIEW_AHEAD_METRES` from `terrain.ts` for the
+ * same reason and says so: *"so the two cannot drift"*.
+ *
+ * ADR 0008 **D-5** fixes the camera, so this is part of the seam's contract
+ * rather than one renderer's taste: there is no free-look, and adding one is a
+ * change to that ADR. Eight metres back is roughly a following motorbike — far
+ * enough that the road ahead fills the frame on a phone held at arm's length,
+ * close enough that the rider's own marker stays large enough to find.
+ */
+export const CAMERA_BEHIND_METRES = 8;
 
 /** Where the chase camera is, in the corridor's local metres. */
 export interface CameraPose {
@@ -73,6 +95,21 @@ export interface SceneFrame {
   readonly corridor: RoadCorridor;
   readonly camera: CameraPose;
   readonly markers: readonly RiderMarker[];
+  /**
+   * The ground, the sky and how far you can see — #241.
+   *
+   * ⚠️ **Carried on the frame rather than passed to `create`**, which keeps
+   * `GameRenderer.create` taking only what a renderer needs to exist. A world
+   * is a property of the route, and the frame is the object that always carries
+   * the route's own answers — the corridor beside it is derived from the same
+   * profile for the same reason.
+   *
+   * ⚠️ A `WorldStyle` added here that `three-renderer.ts` never reads passes
+   * every test in the jsdom suite and changes nothing on screen — #240's named
+   * defect shape for this epic. `game.browser.spec.ts` reads the drawing buffer
+   * back for exactly that reason.
+   */
+  readonly world: WorldStyle;
 }
 
 /** A live 3D view. Created by a {@link GameRenderer}, destroyed by its owner. */

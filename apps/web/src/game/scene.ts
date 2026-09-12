@@ -26,6 +26,7 @@ import {
   type CorridorPoint,
   type RoadCorridor,
 } from './terrain';
+import { worldStyle } from './world';
 import type { RouteProfile } from '@onyourleft/domain';
 
 /** Everything a frame needs beyond the rider's own state. */
@@ -47,6 +48,11 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     corridor,
     camera: cameraPose(corridor, riderDistance),
     markers: markers(corridor, input, riderDistance),
+    // Recomputed per frame rather than cached against the profile: it is two
+    // bounded passes over at most `WORLD_SAMPLE_LIMIT` samples, and a cache
+    // keyed on a profile is a second source of truth that a route change has
+    // to remember to clear. `world.ts` says what the bound buys.
+    world: worldStyle(input.profile),
   };
 }
 
