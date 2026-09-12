@@ -45,6 +45,7 @@ export type RouteId =
   | 'game'
   | 'devices'
   | 'transfer'
+  | 'settings'
   | 'about'
   | 'not-found';
 
@@ -144,6 +145,15 @@ export const ROUTES: readonly RouteDefinition[] = [
     title: 'Import and export',
     summary:
       'Bring rides in from a FIT, GPX or TCX file, and take your own rides out in any of the three.',
+  },
+  {
+    id: 'settings',
+    path: '/settings',
+    navLabel: 'Settings',
+    title: 'Settings',
+    summary:
+      'How this device shows your numbers. Nothing here is sent anywhere, and nothing here ' +
+      'changes what a ride recorded.',
   },
   {
     id: 'about',

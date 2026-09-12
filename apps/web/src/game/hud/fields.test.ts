@@ -269,3 +269,73 @@ describe('the gap to whatever the rider is chasing', () => {
     expect(built.botDistance).toBe(220);
   });
 });
+
+describe('the HUD follows the rider\u2019s units (#238)', () => {
+  // ⚠️ This is the screen the issue is named for. It converted and labelled
+  // inline — `(state.ride.speed as number) * 3.6, 'km/h'` and
+  // `remaining / 1000, 'km'` — so a preference wired only into `format.ts`'s
+  // constants would have changed most of the product and left the one screen a
+  // rider stares at for an hour unchanged.
+
+  function riding(units: HudInput['units']): HudInput {
+    const input = baseInput();
+    return {
+      ...input,
+      units,
+      state: { ...input.state, ride: { speed: metresPerSecond(10), distance: metres(400) } },
+    };
+  }
+
+  it('reads speed in mph, digits and label together', () => {
+    const speed = fieldNamed(riding('imperial'), 'speed');
+    expect(speed.value).toBe('22.4');
+    expect(speed.unit).toBe('mph');
+  });
+
+  it('reads distance still to go in miles', () => {
+    const input = riding('imperial');
+    const total: number = input.profile.totalDistance;
+    const togo = fieldNamed(input, 'remaining');
+
+    expect(togo.unit).toBe('mi');
+    expect(togo.value).toBe(((total - 400) / 1609.344).toFixed(2));
+  });
+
+  it('is metric when nothing says otherwise, which is what a caller with no preference gets', () => {
+    const speed = fieldNamed(riding(undefined), 'speed');
+    expect(speed.value).toBe('36.0');
+    expect(speed.unit).toBe('km/h');
+  });
+
+  it('changes the number as well as the label', () => {
+    // The cheapest wrong implementation relabels without converting. It would
+    // pass a test that asserted `unit` alone.
+    expect(fieldNamed(riding('imperial'), 'speed').value).not.toBe(
+      fieldNamed(riding('metric'), 'speed').value,
+    );
+    expect(fieldNamed(riding('imperial'), 'remaining').value).not.toBe(
+      fieldNamed(riding('metric'), 'remaining').value,
+    );
+  });
+
+  it('leaves cadence, heart rate, power and gradient alone in both systems', () => {
+    for (const key of ['cadence', 'heartRate', 'power', 'gradient']) {
+      expect(fieldNamed(riding('imperial'), key)).toEqual(fieldNamed(riding('metric'), key));
+    }
+  });
+
+  it('keeps the gap in seconds, which is not a unit a rider chooses', () => {
+    const input = riding('imperial');
+    const withGap: HudInput = {
+      ...input,
+      gapTo: 'bot',
+      gap: pacerGap({
+        botDistance: metres(500),
+        riderDistance: metres(400),
+        referenceSpeed: metresPerSecond(10),
+      }),
+    };
+
+    expect(fieldNamed(withGap, 'gap').value).toContain('s ');
+  });
+});

@@ -104,7 +104,10 @@ describe('the gradient scale is stated and named', () => {
 
 describe('the profile has a non-visual equivalent', () => {
   it('summarises distance, climbing and descending in a sentence', () => {
-    const sentence = elevationSentence(planned(Array.from({ length: 41 }, (_, i) => 100 + i * 2)));
+    const sentence = elevationSentence(
+      planned(Array.from({ length: 41 }, (_, i) => 100 + i * 2)),
+      'metric',
+    );
     expect(sentence).toContain('km');
     expect(sentence).toContain('climbing');
     expect(sentence).toContain('descending');
@@ -113,13 +116,13 @@ describe('the profile has a non-visual equivalent', () => {
   it('names the dataset and its resolution', () => {
     // ⚠️ Not decoration. ADR 0010 D-5's Copernicus terms require the notice to
     // travel with adapted data, and #72 requires the source with the route.
-    const sentence = elevationSentence(planned(Array.from({ length: 41 }, () => 100)));
+    const sentence = elevationSentence(planned(Array.from({ length: 41 }, () => 100)), 'metric');
     expect(sentence).toContain('Copernicus DEM GLO-30');
     expect(sentence).toContain('30 m resolution');
   });
 
   it('states the sampling interval, because ascent depends on it', () => {
-    expect(elevationSentence(planned(Array.from({ length: 41 }, () => 100)))).toContain(
+    expect(elevationSentence(planned(Array.from({ length: 41 }, () => 100)), 'metric')).toContain(
       'sampled every 30 m',
     );
   });
@@ -128,15 +131,15 @@ describe('the profile has a non-visual equivalent', () => {
     const withHole = Array.from({ length: 41 }, (_, index) =>
       index > 10 && index < 15 ? undefined : 100 + index * 2,
     );
-    const sentence = elevationSentence(planned(withHole));
+    const sentence = elevationSentence(planned(withHole), 'metric');
     expect(sentence).toContain('no height for');
     expect(sentence).toContain('at least');
   });
 
   it('does not hedge when the dataset covered the whole route', () => {
-    expect(elevationSentence(planned(Array.from({ length: 41 }, () => 100)))).not.toContain(
-      'at least',
-    );
+    expect(
+      elevationSentence(planned(Array.from({ length: 41 }, () => 100)), 'metric'),
+    ).not.toContain('at least');
   });
 
   it('bounds the table rather than printing one row per grid sample', () => {
@@ -145,11 +148,11 @@ describe('the profile has a non-visual equivalent', () => {
       Array.from({ length: 401 }, (_, i) => 100 + i * 0.5),
       12_000,
     );
-    expect(profileRows(long).length).toBeLessThanOrEqual(PROFILE_ROWS);
+    expect(profileRows(long, 'metric').length).toBeLessThanOrEqual(PROFILE_ROWS);
   });
 
   it('names each stretch by band and gives its steepest gradient', () => {
-    const rows = profileRows(planned(Array.from({ length: 41 }, (_, i) => 100 + i * 3)));
+    const rows = profileRows(planned(Array.from({ length: 41 }, (_, i) => 100 + i * 3)), 'metric');
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
       expect(row.band.length).toBeGreaterThan(0);
@@ -163,7 +166,7 @@ describe('the profile has a non-visual equivalent', () => {
     const withHole = Array.from({ length: 41 }, (_, index) =>
       index > 20 && index < 26 ? undefined : 100 + index,
     );
-    const rows = profileRows(planned(withHole));
+    const rows = profileRows(planned(withHole), 'metric');
     expect(rows.some((row) => !row.measured)).toBe(true);
     expect(rows.some((row) => row.measured)).toBe(true);
   });
@@ -228,5 +231,35 @@ describe('what a rider is told about a leg with no geometry', () => {
   it('distinguishes still-being-routed from could-not-be-routed', () => {
     const draft = emptyDraft();
     expect(unresolvedSentence(draft.legs)).toBeUndefined();
+  });
+});
+
+describe('the sentence follows the rider\u2019s units (#238)', () => {
+  it('reads the same route in miles and feet', () => {
+    const heights = Array.from({ length: 41 }, (_, i) => 100 + i * 2);
+    const metric = elevationSentence(planned(heights), 'metric');
+    const imperial = elevationSentence(planned(heights), 'imperial');
+
+    expect(metric).toContain('km');
+    expect(metric).toContain('30 m resolution');
+    expect(imperial).toContain('mi');
+    expect(imperial).toContain('ft');
+    // ⚠️ The dataset's own grid resolution too. A rider reading in feet being
+    // told "at 30 m resolution" is the half-converted screen #238 is about,
+    // moved into a sentence.
+    expect(imperial).toContain('98 ft resolution');
+    expect(imperial).not.toContain('km');
+  });
+
+  it('renders the from and to columns in the units the rider reads in', () => {
+    const rows = profileRows(
+      planned(Array.from({ length: 41 }, (_, i) => 100 + i * 3)),
+      'imperial',
+    );
+    const metricRows = profileRows(
+      planned(Array.from({ length: 41 }, (_, i) => 100 + i * 3)),
+      'metric',
+    );
+    expect(rows.map((row) => row.to)).not.toEqual(metricRows.map((row) => row.to));
   });
 });

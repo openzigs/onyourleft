@@ -32,11 +32,13 @@
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type JSX } from 'react';
 
-import type { ActivityId, ActivitySummary } from '@onyourleft/store';
+import type { ActivityId, ActivitySummary, UnitSystem } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
 import { ChartSlot } from '../design/ChartSlot';
 import { StatusMessage, type StatusTone } from '../design/StatusMessage';
+import { useUnits } from '../units/context';
+import { formatDistance, measurementText } from '../units/format';
 
 import { ActivityExportError, exportActivity, LOSSY_CHANNELS } from './export-activity';
 import type { ActivityFileFormat } from './file-format';
@@ -93,9 +95,25 @@ const OUTCOME_WORD: Readonly<Record<ImportOutcome['kind'], string>> = {
 export interface TransferViewProps {
   /** `undefined` where this browser cannot do it — see the module note. */
   readonly port?: TransferPort | undefined;
+  /**
+   * Told what the unit preference has become after an erase (#238).
+   *
+   * ⚠️ **An erase resets it.** The preference is athlete data — ADR 0020 D-2
+   * puts it on the athlete row so it travels with the account export — so
+   * `deleteAthlete` takes it with everything else, and the row put back
+   * afterwards is what decides what it becomes. Without this callback the
+   * screens go on rendering the old choice until the next reload, which is the
+   * same disagreement between the disk and the UI that
+   * `views/SettingsView.tsx` refuses in the other direction.
+   *
+   * `undefined` means the recreated row names no preference, which is what
+   * `local-athlete.ts` §`localAthleteRecord` builds today. The default is
+   * substituted by the shell, in the one place that substitutes it.
+   */
+  readonly onUnitsReset?: ((units: UnitSystem | undefined) => void) | undefined;
 }
 
-export function TransferView({ port }: TransferViewProps): JSX.Element {
+export function TransferView({ port, onUnitsReset }: TransferViewProps): JSX.Element {
   /**
    * Bumped whenever the import panel has written to the store.
    *
@@ -161,6 +179,7 @@ export function TransferView({ port }: TransferViewProps): JSX.Element {
       ) : (
         <ErasePanel
           port={port}
+          {...(onUnitsReset === undefined ? {} : { onUnitsReset })}
           storeRevision={storeRevision}
           onStoreChanged={() => {
             setStoreRevision((previous) => previous + 1);
@@ -379,6 +398,7 @@ function ExportPanel({
   const [selected, setSelected] = useState<string>('');
   const [format, setFormat] = useState<ActivityFileFormat>('fit');
   const [message, setMessage] = useState<{ tone: StatusTone; text: string } | undefined>(undefined);
+  const units = useUnits();
 
   // ⚠️ `storeRevision` is a dependency and not an unused prop: `port` is built
   // once in `main.tsx` and never changes, so it alone would pin this list to
@@ -463,7 +483,7 @@ function ExportPanel({
         >
           {rides.map((ride) => (
             <option key={ride.id} value={ride.id}>
-              {rideLabel(ride)}
+              {rideLabel(ride, units)}
             </option>
           ))}
         </select>
@@ -682,10 +702,12 @@ function ErasePanel({
   port,
   storeRevision,
   onStoreChanged,
+  onUnitsReset,
 }: {
   readonly port: TransferPort;
   readonly storeRevision: number;
   readonly onStoreChanged: () => void;
+  readonly onUnitsReset?: ((units: UnitSystem | undefined) => void) | undefined;
 }): JSX.Element {
   const [typed, setTyped] = useState('');
   const [holds, setHolds] = useState(false);
@@ -736,6 +758,13 @@ function ErasePanel({
       setDone(eraseSentence(outcome));
       setTyped('');
       setHolds(false);
+      // ⚠️ After the erase succeeded, never before, and never on the failure
+      // path below: the units on screen must follow the row that is actually
+      // on disk. `port.athleteRow` is the row `eraseDevice` just put back, so
+      // this reports what the preference has *become* rather than assuming it
+      // became the default — a recreated row that carried a preference would
+      // be followed rather than overridden.
+      onUnitsReset?.(port.athleteRow.units);
       // The panels above list what the store holds. Without this they go on
       // offering rides that are no longer there, and a rider who presses Export
       // on one is told their own ride does not exist.
@@ -810,17 +839,18 @@ function ErasePanel({
 /**
  * How one ride reads in the chooser: its name, how far and how long.
  *
- * Deliberately **not** in `src/format.ts`. That module's own note records what
- * happened last time a presentation helper was exported ahead of a second
- * caller: it outlived the caller it was written for while the surviving screen
- * kept a private copy, and the two disagreed. There is exactly one caller for
- * this, here. #50 and #62 render a ride list properly, and that is when a
- * shared helper has two callers to keep in step.
+ * Deliberately **not** exported. `format.ts`'s own note records what happened
+ * last time a presentation helper was exported ahead of a second caller: it
+ * outlived the caller it was written for while the surviving screen kept a
+ * private copy, and the two disagreed. There is exactly one caller for this,
+ * here. What it no longer keeps a private copy of is the *unit* — #238 moved
+ * the divide and the label into `units/format.ts`, which is the one place
+ * either is decided.
  */
-function rideLabel(ride: ActivitySummary): string {
-  const kilometres = (ride.distance / 1000).toFixed(1);
+function rideLabel(ride: ActivitySummary, units: UnitSystem): string {
+  const distance = measurementText(formatDistance(ride.distance, units));
   const minutes = Math.round(ride.movingTime / 60);
-  return `${ride.name} — ${kilometres} km, ${String(minutes)} min`;
+  return `${ride.name} — ${distance}, ${String(minutes)} min`;
 }
 
 /**

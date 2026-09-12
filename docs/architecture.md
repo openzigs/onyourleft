@@ -94,6 +94,10 @@ apps/                 AGPL-3.0-or-later, without exception
     src/ride/           the live ride screen's state machine and its panels (#49)
     src/shell/          the hash route table, the router hook and AppShell (#48)
     src/support/        browser-capability detection and its notice (#48)
+    src/units/          which units a rider reads in (#238): the one place a
+                        number becomes a unit, the context a component asks,
+                        and the source scan that stops a future screen writing
+                        a unit literal by hand. ADR 0020
     src/transfer/       file import and export: the batch importer, the codec's
                         first production caller, the export writer (#51), and
                         the distance an imported track derives from its own
@@ -870,6 +874,8 @@ share one.
 | [0016](adr/0016-unlicense.md) | `Unlicense` — the first licence the fail-closed gate stopped, ruled on rather than waived | #87 |
 | [0017](adr/0017-workout-file-format.md) | A workout file format of this project's own, and why not the de facto one | #202 |
 | [0018](adr/0018-native-client-platform.md) | One client on more platforms — Capacitor for iOS, and no desktop client yet | #15 |
+| [0019](adr/0019-signed-records-in-an-export.md) | How a signed activity record travels in an export — its own file beside the ride | #221 |
+| [0020](adr/0020-display-units.md) | One display-unit switch, stored on the athlete — metric or imperial, and nothing below the formatting boundary knows | #238 |
 
 **0012 is deliberately absent from that list and is not free** — see the row for it below.
 
@@ -913,8 +919,9 @@ still a proposal.
 | 0017 | #202 — the workout file format | [Written](adr/0017-workout-file-format.md). #14's scope proposed adopting the de facto format; ADR 0009 R1 has no permitted route to its element set (no published specification, and every open implementation is GPL/AGPL, which §3 makes fatal under `packages/`) and ADR 0006 R2's provenance column would read "recalled". So the format is **ours** — JSON mirroring the model, one key that is both identity and version, and an unknown key refused rather than ignored because a silently dropped field would ride a different workout against a machine applying resistance to somebody. **Adopting the de facto format is filed as #210 rather than deferred inside the ADR.** The cost is stated plainly: the free library is not bought, and #14's corpus criterion is superseded rather than met. |
 | 0018 | #15 — the native client platform | [Written](adr/0018-native-client-platform.md). #15 names this *"the decision this epic must make first"*. Extends [ADR 0008](adr/0008-mobile-client-architecture.md) D-1 to iOS rather than superseding it; strikes Flutter and Kotlin Multiplatform on #15's **first** criterion (a second sensor implementation in a second language is not an adapter addition) rather than on any licence, and defers a desktop client because `webbluetooth` ships licence-variant majors — 3.x MIT, 4.x BSD-3, **5.x GPL-3.0, 6.x BUSL-1.1**. **It does not claim background recording works**: that is [spike 0002](spikes/0002-background-recording.md)'s blocked column and D-4 is conditional on the measurement nobody here can take. |
 | 0019 | #221 — how a signed activity record travels in an export | [Written](adr/0019-signed-records-in-an-export.md). A record leaves as **its own `.record.json` beside the activity file**. Rules out inlining it in the account manifest (the manifest carries the privacy zones and is the most sensitive file in the archive; a record is the least, and welding them means an athlete cannot share one ride's record without sharing their home address) and rules out a FIT developer field on a **technical** ground rather than a licensing one — it is circular, because `contentHash` is the digest of the file the record is being put inside. **The ADR 0006 question #221 asks is answered rather than dodged**: a developer field is not forbidden, and it is not worth a provenance argument for a publishing decision with a free alternative. Also records the distinction that matters to a holder of an archive — `verifyRecordSignature` applies, `verifyActivityRecord` does not, because the file beside the record is a re-encode. |
+| 0020 | #238 — display units | [Written](adr/0020-display-units.md). Two questions the issue deferred, both answered by the owner before any code was written because both decide the shape of a **stored** setting: **one switch** covering distance, speed, elevation and weight rather than four, with the miles-for-distance-and-metres-for-climbing combination it forecloses named as an accepted cost; and **on the athlete row** rather than per device, so it travels with the account export and survives an erase-and-reimport. Also records what makes "every screen follows it" checkable rather than asserted — a formatter that returns a value and its label together, and a source scan that fails the build on a hand-written unit literal anywhere outside `apps/web/src/units/`. |
 
-**The next free number is 0020.** Every number from 0001 to 0019 is now written; 0012 was the last reservation and #64 consumed it.
+**The next free number is 0021.** Every number from 0001 to 0020 is now written; 0012 was the last reservation and #64 consumed it.
 
 Three issues carry an acceptance criterion naming their old number — #19 (0002), #60 (0008) and #27
 (0006). **The number here wins**; each issue has been commented with its new one. Renumbering a

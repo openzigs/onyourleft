@@ -161,6 +161,20 @@ dropout in the middle contributes no long efforts rather than a made-up one. The
 segment bests**: "my best 20 minutes" and "my best on Box Hill" are different objects, and this
 device does not hold the second kind yet.
 
+### Riding in miles
+
+**Settings** holds one switch: kilometres or miles. It covers distance, speed, climbing and weight
+together — there is no way to have miles for distance and metres for climbing, and that is a
+deliberate trade rather than an oversight. The current choice is always shown selected, because the
+one thing worse than metric-only is a locale guess that silently reports every number in units you
+do not use.
+
+It changes how numbers are **shown** and nothing else. Every ride stays recorded exactly as it was —
+in metres and metres per second, which is what the files on your device contain — and a FIT, GPX or
+TCX file you export is unaffected, because those formats have their own unit rules and another
+program reads them. The choice is stored with you rather than with the browser, so it travels in an
+account export and comes back with it.
+
 Which platform, in which phase, with which capabilities — and which of those gaps are **permanent**
 rather than pending: [`docs/adr/0003-platform-support-matrix.md`](docs/adr/0003-platform-support-matrix.md).
 

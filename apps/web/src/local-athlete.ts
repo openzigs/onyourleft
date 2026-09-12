@@ -127,19 +127,28 @@ export function localAthleteRecord(now: UnixSeconds): AthleteRecord {
  * database producing a blank page instead of an explanation.
  */
 export async function renderAfterAthlete(
-  ensure: () => Promise<unknown>,
+  ensure: () => Promise<AthleteRecord>,
   // ⚠️ May return a promise, and it is **awaited**. `render` became
   // asynchronous when the client learned to load the Android BLE transport
   // lazily (`main.tsx` §`buildRideController`), and a signature that took only
   // `() => void` would have left the caller floating that promise — so a
   // start-up failure inside the render would have been an unhandled rejection
   // in the composition root, which is the one file with no test.
-  render: () => void | Promise<void>,
+  //
+  // ⚠️ **The row is handed to `render`, and `undefined` when there was
+  // none.** #238's unit preference lives on that row, and the shell needs it
+  // for its *first* paint: reading it afterwards would render every screen in
+  // kilometres and then switch, which a rider reads as the setting not
+  // working. `undefined` is the honest answer where the store is unreachable,
+  // and the shell falls back to the same default a rider who has never chosen
+  // gets.
+  render: (athlete: AthleteRecord | undefined) => void | Promise<void>,
 ): Promise<void> {
+  let athlete: AthleteRecord | undefined;
   try {
-    await ensure();
+    athlete = await ensure();
   } catch {
     // Deliberately silent, and deliberately not fatal. See above.
   }
-  await render();
+  await render(athlete);
 }

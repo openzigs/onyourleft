@@ -120,6 +120,7 @@ import type {
   RouteRecord,
   WorkoutRecord,
 } from './records';
+import type { UnitSystem } from './unit-system';
 import type {
   NewRecordingChunk,
   NewRecordingSession,
@@ -495,10 +496,18 @@ export class ActivityStore {
         return undefined;
       }
       const existing = fromPersistedAthlete(row);
+      // ⚠️ **Built from `existing`, not from a hand-written list of the fields
+      // this method happens to know about.** Until #238 this rebuilt the record
+      // from `id`, `displayName` and `createdAt` alone, so saving a threshold
+      // silently erased every *other* optional field on the row — `mass` then,
+      // and `units` now. That is the "a write that reports success while the
+      // read cannot see it" shape CLAUDE.md §5 names, in its quietest form: the
+      // write this method is *about* lands, the read for it succeeds, and a
+      // neighbouring field is gone. Spreading the decoded record and then
+      // overriding is what makes a field added to `AthleteRecord` survive a
+      // threshold save without anyone remembering to edit this line.
       const updated: AthleteRecord = {
-        id: existing.id,
-        displayName: existing.displayName,
-        createdAt: existing.createdAt,
+        ...withoutThresholds(existing),
         ...(thresholds.thresholdPower === undefined
           ? {}
           : { thresholdPower: thresholds.thresholdPower }),
@@ -506,6 +515,43 @@ export class ActivityStore {
           ? {}
           : { thresholdHeartRate: thresholds.thresholdHeartRate }),
       };
+      await this.#athletes.put(toPersistedAthlete(updated));
+      return updated;
+    });
+  }
+
+  /**
+   * Replaces the athlete's unit preference, leaving every other field alone.
+   *
+   * The write half of #238's setting, and narrow for
+   * {@link setAthleteThresholds}' reason: a caller saving a display preference
+   * must not have to reconstruct `displayName`, `createdAt` or a threshold
+   * correctly, and `putAthlete` would make that its problem.
+   *
+   * ⚠️ **Nothing else on this row, and nothing in any other table, changes.**
+   * That is #238's fourth acceptance criterion stated as a property of this
+   * method rather than as an intention, and
+   * `activity-store.units.test.ts` reads a ride back either side of a call to
+   * prove it.
+   *
+   * Unlike {@link setAthleteThresholds} there is no "clear it" case: the
+   * setting is one of two values and a rider returning to the default is
+   * choosing `metric`, not unsetting anything. So this takes a
+   * {@link UnitSystem} rather than an optional one, and an athlete row whose
+   * field is absent is one nobody has chosen for yet.
+   *
+   * Read and write in one transaction, for {@link ensureAthlete}'s reason.
+   *
+   * @returns the stored record, or `undefined` if there is no such athlete —
+   * which is not an error, for {@link setAthleteThresholds}' reason.
+   */
+  async setAthleteUnits(id: AthleteId, units: UnitSystem): Promise<AthleteRecord | undefined> {
+    return this.#db.transaction('rw', [this.#athletes], async () => {
+      const row = await this.#athletes.get(id);
+      if (row === undefined) {
+        return undefined;
+      }
+      const updated: AthleteRecord = { ...fromPersistedAthlete(row), units };
       await this.#athletes.put(toPersistedAthlete(updated));
       return updated;
     });
@@ -2328,4 +2374,21 @@ async function inflate(
       `stream channel ${channel}: the stored ${what} are not a valid ${STREAM_COMPRESSION} stream`,
     );
   }
+}
+
+/**
+ * The athlete row with both threshold fields removed.
+ *
+ * `delete` on a copy rather than a rest destructure, because
+ * `exactOptionalPropertyTypes` makes `{ ...record, thresholdPower: undefined }`
+ * a type error and a rest destructure leaves two bindings nothing reads. The
+ * point is the same either way: {@link ActivityStore.setAthleteThresholds}
+ * builds its result from **whatever is on the row**, so a field added to
+ * `AthleteRecord` survives a threshold save without anyone editing that method.
+ */
+function withoutThresholds(record: AthleteRecord): AthleteRecord {
+  const copy: { -readonly [K in keyof AthleteRecord]?: AthleteRecord[K] } = { ...record };
+  delete copy.thresholdPower;
+  delete copy.thresholdHeartRate;
+  return copy as AthleteRecord;
 }

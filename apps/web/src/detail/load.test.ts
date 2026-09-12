@@ -101,7 +101,7 @@ describe('loadTrace — one channel, at chart resolution', () => {
     // 14 400 samples in, 600 points out. This is the number criterion 4 is
     // about: the DOM never sees the full series.
     const port = fourHourRide();
-    const trace = await loadTrace(port, RIDE, 'power');
+    const trace = await loadTrace(port, RIDE, 'power', 'metric');
     expect(trace?.points).toHaveLength(CHART_POINTS);
     expect(trace?.sampleCount).toBe(FOUR_HOURS_OF_SAMPLES);
     expect((trace?.points.length ?? 0) * 20).toBeLessThan(FOUR_HOURS_OF_SAMPLES);
@@ -109,13 +109,13 @@ describe('loadTrace — one channel, at chart resolution', () => {
 
   it('reads exactly the one channel asked for', async () => {
     const port = fourHourRide();
-    await loadTrace(port, RIDE, 'power');
+    await loadTrace(port, RIDE, 'power', 'metric');
     expect(port.channelReads).toEqual(['power']);
   });
 
   it('says how much ride time one point covers', async () => {
     const port = fourHourRide();
-    const trace = await loadTrace(port, RIDE, 'power');
+    const trace = await loadTrace(port, RIDE, 'power', 'metric');
     expect(trace?.secondsPerPoint).toBe(FOUR_HOURS_OF_SAMPLES / CHART_POINTS);
   });
 
@@ -128,7 +128,7 @@ describe('loadTrace — one channel, at chart resolution', () => {
       channels: { power: powerSeries(FOUR_HOURS_OF_SAMPLES, 1000, 3) },
       laps: [],
     });
-    const trace = await loadTrace(port, RIDE, 'power');
+    const trace = await loadTrace(port, RIDE, 'power', 'metric');
     expect(trace?.missingSamples).toBe(3);
     expect(trace?.points.filter((point) => point === undefined)).toHaveLength(0);
   });
@@ -141,7 +141,7 @@ describe('loadTrace — one channel, at chart resolution', () => {
       channels: { power: powerSeries(FOUR_HOURS_OF_SAMPLES, 1000, 300) },
       laps: [],
     });
-    const trace = await loadTrace(port, RIDE, 'power');
+    const trace = await loadTrace(port, RIDE, 'power', 'metric');
     expect(trace?.missingSamples).toBe(300);
     expect((trace?.points ?? []).filter((point) => point === undefined).length).toBeGreaterThan(5);
   });
@@ -149,7 +149,7 @@ describe('loadTrace — one channel, at chart resolution', () => {
   it('is undefined for a channel the ride does not carry', async () => {
     // The ordinary case, not a failure: an indoor ride has no altitude.
     const port = fourHourRide();
-    expect(await loadTrace(port, RIDE, 'altitude')).toBeUndefined();
+    expect(await loadTrace(port, RIDE, 'altitude', 'metric')).toBeUndefined();
   });
 
   it('converts to display units, so the chart and the table read the same number', async () => {
@@ -158,7 +158,7 @@ describe('loadTrace — one channel, at chart resolution', () => {
       channels: { speed: Array.from({ length: 4 }, () => metresPerSecond(10)) },
       laps: [],
     });
-    const trace = await loadTrace(port, RIDE, 'speed');
+    const trace = await loadTrace(port, RIDE, 'speed', 'metric');
     // 10 m/s is 36 km/h. Stored metres per second reaching the chart unchanged
     // would draw a plausible-looking line against a "km/h" axis.
     expect(trace?.points).toEqual([36, 36, 36, 36]);
@@ -175,7 +175,7 @@ describe('the four-hour budget — #50 criterion 7', () => {
     const overview = await loadOverview(port, RIDE);
     const traces = [];
     for (const channel of ['power', 'heartRate'] as const) {
-      traces.push(await loadTrace(port, RIDE, channel));
+      traces.push(await loadTrace(port, RIDE, channel, 'metric'));
     }
 
     expect(overview?.streams?.sampleCount).toBe(14_400);
@@ -206,8 +206,8 @@ describe('the four-hour budget — #50 criterion 7', () => {
     const port = fourHourRide();
     const started = performance.now();
     await loadOverview(port, RIDE);
-    await loadTrace(port, RIDE, 'power');
-    await loadTrace(port, RIDE, 'heartRate');
+    await loadTrace(port, RIDE, 'power', 'metric');
+    await loadTrace(port, RIDE, 'heartRate', 'metric');
     expect(performance.now() - started).toBeLessThan(1000);
   });
 });

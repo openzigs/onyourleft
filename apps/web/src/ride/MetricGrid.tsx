@@ -24,9 +24,11 @@
 import type { JSX } from 'react';
 
 import type { MetresPerSecond } from '@onyourleft/domain';
+import type { UnitSystem } from '@onyourleft/store';
 
 import { VisuallyHidden } from '../design/VisuallyHidden';
-import { formatSpeedValue, SPEED_UNIT } from '../format';
+import { useUnits } from '../units/context';
+import { formatSpeed, speedUnit } from '../units/format';
 
 import type { RideMetric } from './controller';
 import type { MetricState, RideMetricId } from './metrics';
@@ -47,29 +49,38 @@ interface MetricPresentation {
   readonly format: (value: number) => string;
 }
 
-const PRESENTATION: Readonly<Record<RideMetricId, MetricPresentation>> = {
-  power: { label: 'Power', unit: 'W', format: (value) => String(Math.round(value)) },
-  cadence: { label: 'Cadence', unit: 'rpm', format: (value) => String(Math.round(value)) },
-  heartRate: { label: 'Heart rate', unit: 'bpm', format: (value) => String(Math.round(value)) },
-  speed: {
-    label: 'Speed',
-    unit: SPEED_UNIT,
-    // Through `../format`, which goes through `@onyourleft/domain`, because
-    // every conversion in this program does: the canonical unit is metres per
-    // second and a `* 3.6` here would be a second place for the device and a
-    // Phase 3 instance to disagree. The decimal count and the unit label lived
-    // here as well as in `format.ts` until #143 gave that module its caller;
-    // two places deciding how precise a speed is, is the same disagreement one
-    // level up.
-    //
-    // The cast is the honest edge of the branded type rather than a hole in it:
-    // `MetricState`'s `live` variant carries a plain `number` because all four
-    // channels share it, and this is the single place a speed re-enters the
-    // typed world. The value came off `metricStateFor`, which copies it from a
-    // reading the transport already validated.
-    format: (value) => formatSpeedValue(value as MetresPerSecond),
-  },
-};
+/**
+ * How each of the four reads, in the units this rider has chosen.
+ *
+ * ⚠️ **A function of the preference rather than a module constant, and the
+ * change is the point of #238.** A constant is precisely the mechanism that
+ * cannot carry a setting: it is evaluated once, at import, before anything
+ * knows whose screen this is. Three of the four are the same in both systems —
+ * a watt, a revolution and a beat are not units a rider chooses — and the
+ * fourth goes through `units/format.ts`, which produces the digits and the
+ * label together so this file cannot pair one system's number with the other's
+ * unit.
+ *
+ * The cast is the honest edge of the branded type rather than a hole in it:
+ * `MetricState`'s `live` variant carries a plain `number` because all four
+ * channels share it, and this is the single place a speed re-enters the typed
+ * world. The value came off `metricStateFor`, which copies it from a reading
+ * the transport already validated.
+ */
+export function presentationFor(
+  units: UnitSystem,
+): Readonly<Record<RideMetricId, MetricPresentation>> {
+  return {
+    power: { label: 'Power', unit: 'W', format: (value) => String(Math.round(value)) },
+    cadence: { label: 'Cadence', unit: 'rpm', format: (value) => String(Math.round(value)) },
+    heartRate: { label: 'Heart rate', unit: 'bpm', format: (value) => String(Math.round(value)) },
+    speed: {
+      label: 'Speed',
+      unit: speedUnit(units),
+      format: (value) => formatSpeed(value as MetresPerSecond, units).value,
+    },
+  };
+}
 
 /** The em dash a channel shows when there is no number it may show. */
 const NO_VALUE = '—';
@@ -117,10 +128,11 @@ export interface MetricGridProps {
 }
 
 export function MetricGrid({ metrics }: MetricGridProps): JSX.Element {
+  const presentations = presentationFor(useUnits());
   return (
     <ul className="oyl-metric-grid" aria-label="Live metrics">
       {metrics.map((metric) => {
-        const presentation = PRESENTATION[metric.id];
+        const presentation = presentations[metric.id];
         const text = metricText(metric.state, presentation);
         return (
           <li key={metric.id} className={`oyl-metric oyl-metric--${metric.state.kind}`}>

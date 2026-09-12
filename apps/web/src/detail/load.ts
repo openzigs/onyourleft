@@ -29,6 +29,7 @@ import type {
   LapRecord,
   StreamSetSummary,
   Samples,
+  UnitSystem,
 } from '@onyourleft/store';
 
 import { sharedTrack, type SharedTrack } from './privacy';
@@ -100,23 +101,26 @@ export interface Trace {
  *
  * ⚠️ **The display conversion is applied after the reduction, and that is
  * sound only because every conversion in {@link seriesFor} is linear.** Speed's
- * is a multiplication by 3.6, so the mean of the converted values equals the
- * converted mean exactly. A future series with a non-linear reading — a
- * logarithmic axis, a percentage of a threshold — must convert first, and this
- * comment is here so that whoever adds one sees the constraint rather than
- * discovers it as a wrong average.
+ * is a multiplication by a constant, and #238's imperial readings are too —
+ * miles per hour and feet are each one more constant factor — so the mean of
+ * the converted values equals the converted mean exactly in both systems. A
+ * future series with a non-linear reading — a logarithmic axis, a percentage
+ * of a threshold — must convert first, and this comment is here so that
+ * whoever adds one sees the constraint rather than discovers it as a wrong
+ * average.
  */
 export async function loadTrace(
   port: DetailPort,
   id: ActivityId,
   channel: TraceChannel,
+  units: UnitSystem,
   targetPoints: number = CHART_POINTS,
 ): Promise<Trace | undefined> {
   const samples = await port.store.getStreamChannel(port.athleteId, id, channel);
   if (samples === undefined) {
     return undefined;
   }
-  const series = seriesFor(channel);
+  const series = seriesFor(channel, units);
   const reduced = downsample(samples, targetPoints);
   return {
     channel,

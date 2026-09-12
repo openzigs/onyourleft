@@ -3,18 +3,25 @@
 import { useCallback, useEffect, useState, type FormEvent, type JSX } from 'react';
 
 import { unixSeconds, type SegmentVisibility } from '@onyourleft/domain';
-import { activityId, type ActivitySummary, type SegmentRecord } from '@onyourleft/store';
+import {
+  activityId,
+  type ActivitySummary,
+  type SegmentRecord,
+  type UnitSystem,
+} from '@onyourleft/store';
 
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
 import {
   createSegmentFromRide,
   DUPLICATE_SCAN_LIMIT,
-  SEGMENT_REFUSAL,
+  segmentRefusals,
   type SegmentOverlap,
 } from '../segments/create';
 import type { SegmentPort } from '../segments/store-port';
 import { hrefForSegment } from '../shell/routes';
+import { useUnits } from '../units/context';
+import { formatSmallDistance, measurementText } from '../units/format';
 
 /**
  * One text field of a submitted form.
@@ -31,16 +38,18 @@ function fieldOf(form: FormData, name: string): string {
 }
 
 /**
- * A segment's length, in **metres**.
+ * A segment's length, at the **small** scale — metres, or feet for a rider who
+ * reads in them (#238).
  *
- * Not `format.ts`'s `formatDistanceValue`, which renders kilometres to one
- * decimal: a segment runs from the 400 m minimum to a few kilometres, and
- * "0.4 km" throws away the digit that distinguishes one climb from another.
- * Metres is also the unit every sentence on this screen uses for a segment —
- * the minimum length, the endpoint radius — so the screen says one thing.
+ * Not `units/format.ts`'s `formatDistance`, which renders kilometres or miles
+ * to one decimal: a segment runs from the 400 m minimum to a few kilometres,
+ * and "0.4 km" throws away the digit that distinguishes one climb from
+ * another. The small scale is also what every other sentence on this screen
+ * uses for a segment — the minimum length, the endpoint radius — so the screen
+ * says one thing.
  */
-function segmentLength(distance: number): string {
-  return `${String(Math.round(distance))} m`;
+function segmentLength(distance: number, units: UnitSystem): string {
+  return measurementText(formatSmallDistance(distance, units));
 }
 
 /**
@@ -106,6 +115,7 @@ export function SegmentsView({ port }: SegmentsViewProps): JSX.Element {
   const [rides, setRides] = useState<readonly ActivitySummary[] | undefined>(undefined);
   const [outcome, setOutcome] = useState<Outcome | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+  const units = useUnits();
 
   const refresh = useCallback(async (): Promise<void> => {
     if (port === undefined) {
@@ -133,7 +143,7 @@ export function SegmentsView({ port }: SegmentsViewProps): JSX.Element {
     if (ride === '') {
       setOutcome({
         tone: 'danger',
-        message: SEGMENT_REFUSAL.notYours,
+        message: segmentRefusals(units).notYours,
         notes: [],
         overlaps: [],
       });
@@ -143,6 +153,7 @@ export function SegmentsView({ port }: SegmentsViewProps): JSX.Element {
     setBusy(true);
     try {
       const created = await createSegmentFromRide(port, {
+        units,
         // The id is generated here rather than by the store, because there is
         // no server to allocate one (owner decision D6) and `crypto.randomUUID`
         // is the platform's own collision-resistant source.
@@ -165,7 +176,7 @@ export function SegmentsView({ port }: SegmentsViewProps): JSX.Element {
       const saved = created.record.visibility;
       setOutcome({
         tone: created.notes.length === 0 ? 'success' : 'warning',
-        message: `Saved “${created.record.name}”, ${segmentLength(created.record.distance)} long, as ${saved}.`,
+        message: `Saved “${created.record.name}”, ${segmentLength(created.record.distance, units)} long, as ${saved}.`,
         notes: created.notes,
         overlaps: created.overlaps,
       });
@@ -303,7 +314,7 @@ export function SegmentsView({ port }: SegmentsViewProps): JSX.Element {
                         handler of ours in the path (`shell/routes.ts`). */}
                     <a href={hrefForSegment(segment.id)}>{segment.name}</a>
                   </td>
-                  <td>{segmentLength(segment.distance)}</td>
+                  <td>{segmentLength(segment.distance, units)}</td>
                   {/*
                     "Not measured", never "0 m". An unmeasured climb and a flat
                     road are different claims, which is why the record's
@@ -312,7 +323,7 @@ export function SegmentsView({ port }: SegmentsViewProps): JSX.Element {
                   <td>
                     {segment.elevationGain === undefined
                       ? 'Not measured'
-                      : `${Math.round(segment.elevationGain).toString()} m`}
+                      : measurementText(formatSmallDistance(segment.elevationGain, units))}
                   </td>
                   {/* A word, not a colour. */}
                   <td>{segment.visibility === 'private' ? 'Only me' : 'Anyone'}</td>

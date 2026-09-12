@@ -26,6 +26,11 @@ import type { BluetoothPort } from '@onyourleft/sensors/web-bluetooth';
 import { ridingSnapshot, stubRideController } from '../ride/testing';
 import { AppShell } from '../shell/AppShell';
 import { ALL_ROUTES, hrefFor, ROUTES, routeById } from '../shell/routes';
+import type { AthleteRecord, UnitSystem } from '@onyourleft/store';
+import { athleteId } from '@onyourleft/store';
+
+import type { UnitsPort } from '../units/store-port';
+
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
 
@@ -70,9 +75,45 @@ function midRide(): Parameters<typeof AppShell>[0]['rideController'] {
   return stubRideController(ridingSnapshot()).controller;
 }
 
-async function open(path: string, capabilities: CapabilityProbe = CAPABLE): Promise<Mounted> {
+/**
+ * A settings port that answers, so the **control** is what gets audited.
+ *
+ * ⚠️ Without it `/settings` renders its `UNITS_NO_STORE` explanation — a
+ * paragraph with nothing interactive in it — and the radio group #238 adds is
+ * audited nowhere, while this file's route loop still reports the route as
+ * covered. That is the vacuous pass a review caught: the gate ran, the route
+ * was green, and the only new control on it had never been rendered under it.
+ */
+function settingsPort(): UnitsPort {
+  const owner = athleteId('local');
+  return {
+    athleteId: owner,
+    store: {
+      setAthleteUnits: (id, units): Promise<AthleteRecord | undefined> =>
+        Promise.resolve({
+          id,
+          displayName: 'You',
+          createdAt: 0 as AthleteRecord['createdAt'],
+          units,
+        }),
+    },
+  };
+}
+
+async function open(
+  path: string,
+  capabilities: CapabilityProbe = CAPABLE,
+  units?: UnitSystem,
+): Promise<Mounted> {
   globalThis.location.hash = `#${path}`;
-  const result = await mount(<AppShell capabilities={capabilities} rideController={midRide()} />);
+  const result = await mount(
+    <AppShell
+      capabilities={capabilities}
+      rideController={midRide()}
+      settings={settingsPort()}
+      {...(units === undefined ? {} : { units })}
+    />,
+  );
   await settle();
   mounted = result;
   return result;
@@ -148,6 +189,39 @@ describe('criterion 4 — every route passes the automated audit', () => {
     release();
     await settle();
     expect(document.body.textContent).toContain('Bluetooth is available');
+  });
+});
+
+describe('#238 criterion 6 — every route passes the audit in either unit system', () => {
+  // ⚠️ **Both settings, every route.** #238 asks for this explicitly, and the
+  // failure it is watching for is a legibility one rather than a structural
+  // one: an imperial reading is a different string — `1312 ft` where metric
+  // says `400 m` — and a longer one is what overflows a tile. jsdom performs no
+  // layout so nothing here can assert a width, but the structural rules
+  // (`audit.ts`) and the names every control carries are checked against the
+  // markup that actually renders in each system, which is the half that is
+  // checkable without a browser. Stated rather than implied, so nobody reads
+  // this loop as proving more than it does.
+  for (const route of ALL_ROUTES) {
+    it(`${route.id} (${route.path}) has no accessibility violations in miles`, async () => {
+      await open(route.path, CAPABLE, 'imperial');
+      expect(document.querySelector('h1')?.textContent).toBe(route.title);
+      expectClean(`${route.id} reading in miles`);
+    });
+  }
+
+  it('renders a different string on a route that shows a distance, so this is not a no-op', async () => {
+    // Without this the loop above could pass with the preference doing
+    // nothing at all — the classic vacuous parameterisation.
+    await open('/routes/new', CAPABLE, 'metric');
+    const metric = document.body.textContent ?? '';
+    mounted?.unmount();
+    mounted = undefined;
+
+    await open('/routes/new', CAPABLE, 'imperial');
+    const imperial = document.body.textContent ?? '';
+
+    expect(imperial).not.toBe(metric);
   });
 });
 

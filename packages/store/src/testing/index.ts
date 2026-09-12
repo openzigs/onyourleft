@@ -78,6 +78,7 @@ export {
   appendingEffortStoreFactory,
   openedLoopStoreFactory,
   publishedRouteStoreFactory,
+  staleUnitsStoreFactory,
   thinnedGeometryStoreFactory,
   truncatedWorkoutStoreFactory,
   unscopedAttemptStoreFactory,

@@ -38,6 +38,7 @@ export type {
   KilometresPerHour,
   Metres,
   MetresPerSecond,
+  MilesPerHour,
   ResistanceLevel,
   RevolutionsPerMinute,
   Seconds,
@@ -60,6 +61,7 @@ export {
   kilometresPerHour,
   metres,
   metresPerSecond,
+  milesPerHour,
   resistanceLevel,
   revolutionsPerMinute,
   seconds,
@@ -74,7 +76,18 @@ export {
   hundredthsKilometresPerHourToMetresPerSecond,
   kilometresPerHourToMetresPerSecond,
   metresPerSecondToKilometresPerHour,
+  metresPerSecondToMilesPerHour,
 } from './speed';
+
+// --- Length: the 1959 agreement's imperial definitions -----------------------
+//
+// ⚠️ `METRES_PER_MILE` moved here from `speed.ts` and is exported from the same
+// place it always was, so nothing importing it changes. `METRES_PER_FOOT` came
+// the other way — up out of `apps/web/src/units/format.ts` — so that the two
+// are consistent by construction rather than by two packages agreeing. See
+// `length.ts`.
+
+export { FEET_PER_MILE, METRES_PER_FOOT, METRES_PER_MILE } from './length';
 
 // --- Geodesy: distance on the earth's surface -------------------------------
 //

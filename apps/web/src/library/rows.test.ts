@@ -41,8 +41,14 @@ describe('rowFor', () => {
     // the rider has since flown to Paris is wrong in a way they would notice
     // and could not correct.
     const instant = unixSeconds(1_700_000_000);
-    const lisbon = rowFor(summary('a', { startedAt: instant, startedAtTimeZone: 'Europe/Lisbon' }));
-    const tokyo = rowFor(summary('b', { startedAt: instant, startedAtTimeZone: 'Asia/Tokyo' }));
+    const lisbon = rowFor(
+      summary('a', { startedAt: instant, startedAtTimeZone: 'Europe/Lisbon' }),
+      'metric',
+    );
+    const tokyo = rowFor(
+      summary('b', { startedAt: instant, startedAtTimeZone: 'Asia/Tokyo' }),
+      'metric',
+    );
 
     expect(lisbon.startedAt).not.toBe(tokyo.startedAt);
     expect(tokyo.startedAt).toContain('2023');
@@ -52,7 +58,7 @@ describe('rowFor', () => {
     // A hand-edited row, or a zone an older ICU does not carry. Refusing to
     // list the ride would be worse than listing it an hour out — every other
     // column still identifies it.
-    const row = rowFor(summary('a', { startedAtTimeZone: 'Mars/Olympus_Mons' }));
+    const row = rowFor(summary('a', { startedAtTimeZone: 'Mars/Olympus_Mons' }), 'metric');
 
     expect(row.startedAt).not.toBe('');
     expect(row.startedAt).toContain('2023');
@@ -61,16 +67,29 @@ describe('rowFor', () => {
   it('renders an absent average power as undefined rather than zero', () => {
     // A ride with no power meter and a ride that averaged 0 W are different
     // facts, and 0 is a plausible-looking number for the first one.
-    expect(rowFor(summary('a')).averagePower).toBeUndefined();
-    expect(rowFor(summary('b', { averagePower: watts(0) })).averagePower).toBe('0');
-    expect(rowFor(summary('c', { averagePower: watts(212.6) })).averagePower).toBe('213');
+    expect(rowFor(summary('a'), 'metric').averagePower).toBeUndefined();
+    expect(rowFor(summary('b', { averagePower: watts(0) }), 'metric').averagePower).toBe('0');
+    expect(rowFor(summary('c', { averagePower: watts(212.6) }), 'metric').averagePower).toBe('213');
   });
 
   it('formats duration and distance the way the rest of the shell does', () => {
-    const row = rowFor(summary('a'));
+    const row = rowFor(summary('a'), 'metric');
 
     expect(row.duration).toBe('1:02:05');
     expect(row.distance).toBe('42.2');
+  });
+
+  it('renders the same ride in miles for an imperial rider (#238)', () => {
+    // 42 195 m is 42.2 km and 26.2 mi. The digits change, and nothing else
+    // about the row does — the unit itself is the column heading, which
+    // `ActivitiesView` takes from the same module.
+    const metric = rowFor(summary('a'), 'metric');
+    const imperial = rowFor(summary('a'), 'imperial');
+
+    expect(metric.distance).toBe('42.2');
+    expect(imperial.distance).toBe('26.2');
+    expect(imperial.duration).toBe(metric.duration);
+    expect(imperial.startedAt).toBe(metric.startedAt);
   });
 });
 
@@ -86,6 +105,7 @@ describe('orderedRows', () => {
       ],
       'startedAt',
       'descending',
+      'metric',
     );
 
     expect(rows.map((row) => row.name)).toStrictEqual(['Newest', 'Middle', 'Oldest']);
@@ -99,14 +119,12 @@ describe('orderedRows', () => {
       summary('alpha', { name: 'Alpha', startedAt: unixSeconds(100) }),
     ];
 
-    expect(orderedRows(tied, 'startedAt', 'descending').map((row) => row.name)).toStrictEqual([
-      'Alpha',
-      'Zulu',
-    ]);
-    expect(orderedRows(tied, 'startedAt', 'ascending').map((row) => row.name)).toStrictEqual([
-      'Alpha',
-      'Zulu',
-    ]);
+    expect(
+      orderedRows(tied, 'startedAt', 'descending', 'metric').map((row) => row.name),
+    ).toStrictEqual(['Alpha', 'Zulu']);
+    expect(
+      orderedRows(tied, 'startedAt', 'ascending', 'metric').map((row) => row.name),
+    ).toStrictEqual(['Alpha', 'Zulu']);
   });
 
   it('orders by distance when that is the column asked for', () => {
@@ -117,6 +135,7 @@ describe('orderedRows', () => {
       ],
       'distance',
       'descending',
+      'metric',
     );
 
     expect(rows.map((row) => row.name)).toStrictEqual(['Long', 'Short']);
@@ -129,7 +148,7 @@ describe('orderedRows', () => {
     ];
     const before = summaries.map((entry) => entry.id);
 
-    orderedRows(summaries, 'startedAt', 'descending');
+    orderedRows(summaries, 'startedAt', 'descending', 'metric');
 
     expect(summaries.map((entry) => entry.id)).toStrictEqual(before);
   });

@@ -97,6 +97,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         run, and the key half that is never written; and the
                         erase that is its pair, whose two lists say what goes
                         and what it cannot reach
+    src/units/          which units a rider reads in (#238) — the one place a
+                        number becomes a unit, the context a component asks,
+                        and the source scan that stops a future screen writing
+                        a unit literal by hand
     src/views/          one component per route (#48)
     src/workout/        the workout control loop (#14) — the one place the
                         player's decisions meet a trainer's control point,
@@ -1644,11 +1648,14 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   inside an ADR table cell.
 - **ADRs**: `docs/adr/NNNN-kebab-case.md`, with **Status, Context, Decision, Consequences**. Numbers
   are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. **Every number from 0001 to 0019 is
-  now written and the next free number is 0020** — there is no live reservation. ⚠️ **0019 is
+  **and which are claimed by open issues** before you pick one. **Every number from 0001 to 0020 is
+  now written and the next free number is 0021** — there is no live reservation. ⚠️ **0020 is
+  [ADR 0020](docs/adr/0020-display-units.md)**, taken by
+  [#238](https://github.com/openzigs/onyourleft/issues/238) for the display-unit switch; a reviewer
+  who remembers this paragraph offering 0018, 0019 or 0020 is reading an old one. **0019 is
   [ADR 0019](docs/adr/0019-signed-records-in-an-export.md)**, taken by
   [#221](https://github.com/openzigs/onyourleft/issues/221) for how a signed activity record travels
-  in an export; a reviewer who remembers this paragraph offering 0018 or 0019 is reading an old one.
+  in an export.
   **0018 is [ADR 0018](docs/adr/0018-native-client-platform.md)**, taken by
   [#15](https://github.com/openzigs/onyourleft/issues/15) for the native-client platform question. ⚠️ `0012` **was**
   reserved and is no longer: [#64](https://github.com/openzigs/onyourleft/issues/64) consumed it
@@ -1926,6 +1933,11 @@ top of an issue **supersedes its body**.
 | Why erasing needs a typed phrase rather than a second button | `apps/web/src/transfer/erase-device.ts` §`eraseDecision` |
 | What proves no store read crosses athletes, and how a new read is caught | `packages/store/src/activity-store.scoping.test.ts` |
 | What proves an erased athlete leaves no row behind, and why the table list is derived | `packages/store/src/activity-store.erasure.test.ts`, `packages/store/src/schema.ts` §`SCHEMA_VERSIONS` |
+| Which units a rider reads in, where that is decided, and what stops a new screen hard-coding one | [ADR 0020](docs/adr/0020-display-units.md), `apps/web/src/units/format.ts`, `apps/web/src/units/no-inline-units.test.ts` |
+| Why the unit preference is on the athlete and not on the device, and what that costs a rider with two | [ADR 0020](docs/adr/0020-display-units.md) D-2, `packages/store/src/unit-system.ts` |
+| Why a narrow athlete write's `undefined` has to be branched on, and what discarding it reports | `apps/web/src/units/store-port.ts` §`UnitsStore`, `apps/web/src/views/SettingsView.tsx` §`UNITS_NO_ATHLETE`, `packages/store/src/testing/fakes.ts` §`staleUnitsStoreFactory` |
+| Where the imperial length definitions live, and why the foot is not beside its caller | `packages/domain/src/length.ts` |
+| What an erase does to the unit preference, and what has to be told | `apps/web/src/transfer/erase-device.ts` §`eraseDevice`, `apps/web/src/transfer/TransferView.tsx` §`onUnitsReset` |
 | Which way a payload faces, and why an export is deliberately not trimmed | `apps/web/src/privacy/boundaries.ts`, [#35](https://github.com/openzigs/onyourleft/issues/35) |
 
 <!-- Last updated: 2026-09-09 by delivery:code-issue on #35 (the account export, and the erase that is its pair) -->

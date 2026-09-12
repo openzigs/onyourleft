@@ -36,7 +36,9 @@
  * the route does **not** change.
  */
 
-import { useEffect, useRef, type JSX, type MouseEvent } from 'react';
+import { useEffect, useRef, useState, type JSX, type MouseEvent } from 'react';
+
+import { DEFAULT_UNIT_SYSTEM, type UnitSystem } from '@onyourleft/store';
 
 import { GameView } from '../game/GameView';
 import { AboutView } from '../views/AboutView';
@@ -54,6 +56,9 @@ import { RoutesView } from '../views/RoutesView';
 import { WorkoutsView } from '../views/WorkoutsView';
 import { SegmentsView } from '../views/SegmentsView';
 import { RideSession } from '../ride/RideSession';
+import { SettingsView } from '../views/SettingsView';
+import { UnitsProvider } from '../units/context';
+import type { UnitsPort } from '../units/store-port';
 import type { RideController } from '../ride/controller';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { TransferView } from '../transfer/TransferView';
@@ -186,6 +191,25 @@ export interface AppShellProps {
    * sentence rather than crashing the audit.
    */
   readonly efforts?: EffortPort | undefined;
+  /**
+   * The settings screen's one write (#238).
+   *
+   * Optional like every other port here, and `undefined` renders an
+   * explanation rather than a control that would forget what it was told —
+   * `views/SettingsView.tsx` §`UNITS_NO_STORE`.
+   */
+  readonly settings?: UnitsPort | undefined;
+  /**
+   * Which units this client starts in, read from the athlete row at start-up.
+   *
+   * ⚠️ **The initial value only.** The shell owns the live value from here on,
+   * because the settings screen has to change what every other screen renders
+   * and a value that lived in `main.tsx` would need a reload to take effect —
+   * which is a preference that appears not to work. `main.tsx` reads the row
+   * once, before anything renders, so the first paint is already in the
+   * rider's units rather than flickering from metric.
+   */
+  readonly units?: UnitSystem | undefined;
 }
 
 /**
@@ -200,7 +224,12 @@ export interface AppShellProps {
  * build with "function lacks ending return statement", which is how this
  * function stays in step with `routes.ts` without anyone remembering.
  */
-function viewFor(match: RouteMatch, props: AppShellProps): JSX.Element {
+function viewFor(
+  match: RouteMatch,
+  props: AppShellProps,
+  units: UnitSystem,
+  onUnitsChange: (units: UnitSystem) => void,
+): JSX.Element {
   switch (match.route.id) {
     case 'ride':
       return (
@@ -240,7 +269,21 @@ function viewFor(match: RouteMatch, props: AppShellProps): JSX.Element {
     case 'devices':
       return <DevicesView capabilities={props.capabilities} />;
     case 'transfer':
-      return <TransferView port={props.transfer} />;
+      return (
+        <TransferView
+          port={props.transfer}
+          // ⚠️ An erase takes the unit preference with everything else — it is
+          // athlete data (ADR 0020 D-2). Without this the shell goes on
+          // rendering miles over a row that no longer says so, until a reload.
+          // `DEFAULT_UNIT_SYSTEM` is substituted here because this is the one
+          // place in the client that substitutes it.
+          onUnitsReset={(next) => {
+            onUnitsChange(next ?? DEFAULT_UNIT_SYSTEM);
+          }}
+        />
+      );
+    case 'settings':
+      return <SettingsView port={props.settings} units={units} onUnitsChange={onUnitsChange} />;
     case 'about':
       return <AboutView />;
     case 'not-found':
@@ -251,6 +294,8 @@ function viewFor(match: RouteMatch, props: AppShellProps): JSX.Element {
 export function AppShell(props: AppShellProps): JSX.Element {
   const match = useRoute();
   const route = match.route;
+  // ⚠️ Seeded from the prop and then owned here. See `AppShellProps.units`.
+  const [units, setUnits] = useState<UnitSystem>(props.units ?? DEFAULT_UNIT_SYSTEM);
   const mainRef = useRef<HTMLElement>(null);
   const previousRouteId = useRef<string | null>(null);
 
@@ -274,62 +319,64 @@ export function AppShell(props: AppShellProps): JSX.Element {
   }
 
   return (
-    <div className="oyl-shell">
-      {/*
+    <UnitsProvider units={units}>
+      <div className="oyl-shell">
+        {/*
         Outside `main`, and deliberately: a recording belongs to the app and not
         to whichever page is on screen. Mounted inside `viewFor` — as it was
         until #49's review — a route change unmounts the ride's clock and its
         unload guard, which stops the recorder checkpointing and lets the tab
         close without asking. It renders nothing. See `ride/RideSession.tsx`.
       */}
-      {props.rideController === undefined ? null : (
-        <RideSession controller={props.rideController} />
-      )}
+        {props.rideController === undefined ? null : (
+          <RideSession controller={props.rideController} />
+        )}
 
-      <a className="oyl-skip-link" href={`#${MAIN_ID}`} onClick={skipToContent}>
-        Skip to main content
-      </a>
+        <a className="oyl-skip-link" href={`#${MAIN_ID}`} onClick={skipToContent}>
+          Skip to main content
+        </a>
 
-      <header className="oyl-header">
-        <p className="oyl-wordmark">On Your Left</p>
-        <nav aria-label="Primary">
-          <ul className="oyl-nav-list">
-            {ROUTES.map((entry) => (
-              <li key={entry.id}>
-                <a
-                  className="oyl-nav-link"
-                  href={hrefFor(entry)}
-                  // The current page is marked for assistive technology as well
-                  // as visually. `aria-current` is the half that survives the
-                  // colour and the underline being unavailable — criterion 6.
-                  aria-current={entry.id === route.id ? 'page' : undefined}
-                >
-                  {entry.navLabel}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </nav>
-      </header>
+        <header className="oyl-header">
+          <p className="oyl-wordmark">On Your Left</p>
+          <nav aria-label="Primary">
+            <ul className="oyl-nav-list">
+              {ROUTES.map((entry) => (
+                <li key={entry.id}>
+                  <a
+                    className="oyl-nav-link"
+                    href={hrefFor(entry)}
+                    // The current page is marked for assistive technology as well
+                    // as visually. `aria-current` is the half that survives the
+                    // colour and the underline being unavailable — criterion 6.
+                    aria-current={entry.id === route.id ? 'page' : undefined}
+                  >
+                    {entry.navLabel}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        </header>
 
-      <main
-        id={MAIN_ID}
-        className="oyl-main"
-        ref={mainRef}
-        tabIndex={-1}
-        aria-labelledby={VIEW_TITLE_ID}
-      >
-        <h1 id={VIEW_TITLE_ID}>{route.title}</h1>
-        <p className="oyl-muted">{route.summary}</p>
-        {viewFor(match, props)}
-      </main>
+        <main
+          id={MAIN_ID}
+          className="oyl-main"
+          ref={mainRef}
+          tabIndex={-1}
+          aria-labelledby={VIEW_TITLE_ID}
+        >
+          <h1 id={VIEW_TITLE_ID}>{route.title}</h1>
+          <p className="oyl-muted">{route.summary}</p>
+          {viewFor(match, props, units, setUnits)}
+        </main>
 
-      <footer className="oyl-footer">
-        <p>
-          On Your Left — free and open source. No account, no server: everything here stays on this
-          device.
-        </p>
-      </footer>
-    </div>
+        <footer className="oyl-footer">
+          <p>
+            On Your Left — free and open source. No account, no server: everything here stays on
+            this device.
+          </p>
+        </footer>
+      </div>
+    </UnitsProvider>
   );
 }

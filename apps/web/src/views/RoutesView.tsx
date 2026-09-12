@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState, type FormEvent, type JSX } from 'react';
 
-import { unixSeconds } from '@onyourleft/domain';
-import type { RouteId, RouteRecord, Visibility } from '@onyourleft/store';
+import { unixSeconds, type Metres } from '@onyourleft/domain';
+import type { RouteId, RouteRecord, UnitSystem, Visibility } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
@@ -13,6 +13,8 @@ import { exportedFrom, ROUTE_FILE_FORMATS, type RouteFileFormat } from '../route
 import type { DownloadableFile } from '../transfer/store-port';
 import { ROUTE_LIST_LIMIT, type RoutePort } from '../routes/store-port';
 import { hrefFor, ROUTE_BUILDER_ROUTE } from '../shell/routes';
+import { useUnits } from '../units/context';
+import { formatDistance, formatSmallDistance, measurementText } from '../units/format';
 
 /**
  * Routes (#73) — the ones this device holds, and importing one from a file.
@@ -55,14 +57,20 @@ function fieldOf(form: FormData, name: string): string {
   return typeof value === 'string' ? value : '';
 }
 
-/** A route's length in kilometres, to one decimal — the unit a route is discussed in. */
-function routeLength(metres: number): string {
-  return `${(metres / 1000).toFixed(1)} km`;
+/**
+ * A route's length, at the scale a route is discussed in — kilometres, or
+ * miles for a rider who reads in them (#238).
+ */
+function routeLength(distance: number, units: UnitSystem): string {
+  return measurementText(formatDistance(distance as Metres, units));
 }
 
-/** A route's climb in whole metres. Rounding to a kilometre would erase the number. */
-function routeClimb(metres: number): string {
-  return `${String(Math.round(metres))} m`;
+/**
+ * A route's climb, at the small scale. Rounding it to a kilometre — or to a
+ * mile — would erase the number.
+ */
+function routeClimb(climb: number, units: UnitSystem): string {
+  return measurementText(formatSmallDistance(climb, units));
 }
 
 export interface RoutesViewProps {
@@ -101,6 +109,7 @@ export function RoutesView({ port, now, save }: RoutesViewProps): JSX.Element {
   const [saved, setSaved] = useState<string | undefined>(undefined);
   const [pendingDelete, setPendingDelete] = useState<RouteRecord | undefined>(undefined);
   const [exported, setExported] = useState<string | undefined>(undefined);
+  const units = useUnits();
 
   const clock = useCallback((): number => (now === undefined ? Date.now() / 1000 : now()), [now]);
 
@@ -317,8 +326,8 @@ export function RoutesView({ port, now, save }: RoutesViewProps): JSX.Element {
             {routes.map((route) => (
               <tr key={route.id}>
                 <td>{route.name}</td>
-                <td>{routeLength(route.profile.totalDistance)}</td>
-                <td>{routeClimb(route.profile.totalAscent)}</td>
+                <td>{routeLength(route.profile.totalDistance, units)}</td>
+                <td>{routeClimb(route.profile.totalAscent, units)}</td>
                 <td>{route.profile.loop ? 'Loop' : 'Point to point'}</td>
                 <td>{route.visibility}</td>
                 <td>

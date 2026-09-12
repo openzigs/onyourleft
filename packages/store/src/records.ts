@@ -52,6 +52,7 @@ import type {
   RouteId,
   WorkoutId,
 } from './ids';
+import type { UnitSystem } from './unit-system';
 import type { Visibility } from './visibility';
 
 /**
@@ -128,6 +129,29 @@ export interface AthleteRecord {
    * ever the *source* of that copy.
    */
   readonly mass?: Kilograms;
+
+  /**
+   * Which units this athlete reads their numbers in (#238).
+   *
+   * Optional, so it stays off the migration path for the reason
+   * `thresholdPower` gives above: a row written before #238 reads back with no
+   * setting, and the one place that substitutes a default is
+   * `apps/web/src/units/`.
+   *
+   * ⚠️ **Nothing this record describes changes when this field does.**
+   * `distance` stays metres, an effort's frozen `riderMass` stays kilograms,
+   * and an exported file is untouched. It is a **presentation** preference and
+   * the conversion happens at the last moment before a string; see
+   * `unit-system.ts` and ADR 0020.
+   *
+   * On the athlete rather than on the device, per ADR 0020 D-2, which is what
+   * makes it travel with the account export (#35) and survive an
+   * erase-and-reimport. The consequence to hold onto is that a rider with a
+   * tablet on the turbo and a phone on the road gets the **same** units on
+   * both; that is the intended behaviour of an athlete-scoped setting and not
+   * a defect to be worked around with a device override.
+   */
+  readonly units?: UnitSystem;
 }
 
 /** One recorded or imported ride. */

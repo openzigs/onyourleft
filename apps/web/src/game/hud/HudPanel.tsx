@@ -29,6 +29,8 @@
 
 import type { JSX } from 'react';
 
+import { useUnits } from '../../units/context';
+
 import { NO_READING, hudReadings, profilePosition, type HudInput } from './fields';
 
 /**
@@ -41,8 +43,17 @@ import { NO_READING, hudReadings, profilePosition, type HudInput } from './field
  */
 export const CONTROL_MINIMUM_PIXELS = 72;
 
-/** What the HUD needs beyond its readings. */
-export interface HudPanelProps extends HudInput {
+/**
+ * What the HUD needs beyond its readings.
+ *
+ * ⚠️ `units` is **omitted** from {@link HudInput} rather than inherited: the
+ * component reads the preference from `units/context.tsx` and the pure
+ * function takes it as a parameter, so there is exactly one way in on each
+ * side of the seam. A prop as well would be a second source for the same
+ * answer, and the two could disagree on the screen a rider stares at for an
+ * hour — which is the failure #238 is about.
+ */
+export interface HudPanelProps extends Omit<HudInput, 'units'> {
   /** Pauses the ride. Large target — see {@link CONTROL_MINIMUM_PIXELS}. */
   readonly onPause: () => void;
   /** Ends it. Same. */
@@ -52,7 +63,8 @@ export interface HudPanelProps extends HudInput {
 }
 
 export function HudPanel(props: HudPanelProps): JSX.Element {
-  const readings = hudReadings(props);
+  const units = useUnits();
+  const readings = hudReadings({ ...props, units });
   const position = profilePosition(props.state, props.profile);
 
   return (

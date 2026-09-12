@@ -23,13 +23,15 @@
 import { useCallback, useEffect, useMemo, useState, type JSX } from 'react';
 
 import { personalBest, RANKING_BASIS_LABEL, rankEfforts } from '@onyourleft/domain';
-import { segmentId, type SegmentEffortRecord } from '@onyourleft/store';
+import { segmentId, type SegmentEffortRecord, type UnitSystem } from '@onyourleft/store';
 
 import { StatusMessage } from '../design/StatusMessage';
 import { formatDuration } from '../format';
 import { loadHistory, loadOverlay, type EffortHistory, type OverlayResult } from '../efforts/load';
 import type { EffortPort } from '../efforts/store-port';
 import { hrefForActivity } from '../shell/routes';
+import { useUnits } from '../units/context';
+import { formatSmallDistance, measurementText } from '../units/format';
 
 /** A signed difference, as a rider reads it. */
 function formatDelta(seconds: number): string {
@@ -40,8 +42,13 @@ function formatDelta(seconds: number): string {
   return seconds > 0 ? `+${String(rounded)} s` : `−${String(rounded)} s`;
 }
 
-function formatMetres(value: number): string {
-  return `${String(Math.round(value))} m`;
+/**
+ * A segment-scale distance — metres, or feet for a rider who reads in them
+ * (#238). The small scale for `SegmentsView.tsx`'s reason: "0.4 km" throws
+ * away the digit that tells one climb from another.
+ */
+function formatSegmentDistance(value: number, units: UnitSystem): string {
+  return measurementText(formatSmallDistance(value, units));
 }
 
 export interface SegmentDetailViewProps {
@@ -56,6 +63,7 @@ export function SegmentDetailView({ port, segment }: SegmentDetailViewProps): JS
   const [loading, setLoading] = useState(false);
   const [chosen, setChosen] = useState<readonly string[]>([]);
   const [overlay, setOverlay] = useState<OverlayResult | undefined>(undefined);
+  const units = useUnits();
 
   useEffect(() => {
     if (port === undefined || segment === undefined || segment.startsWith(':')) {
@@ -148,7 +156,7 @@ export function SegmentDetailView({ port, segment }: SegmentDetailViewProps): JS
     <section aria-labelledby="segment-heading">
       <h2 id="segment-heading">{history.segment.name}</h2>
       <p>
-        {formatMetres(history.segment.distance)} · {ranked.length}{' '}
+        {formatSegmentDistance(history.segment.distance, units)} · {ranked.length}{' '}
         {ranked.length === 1 ? 'effort' : 'efforts'} · {RANKING_BASIS_LABEL}.
       </p>
       {history.truncated ? (
@@ -226,6 +234,7 @@ export function SegmentDetailView({ port, segment }: SegmentDetailViewProps): JS
 
 /** The comparison, as a table. The chart is a later addition over the same rows. */
 function Overlay({ result }: { readonly result: OverlayResult }): JSX.Element {
+  const units = useUnits();
   if (result.kind === 'no-track') {
     return (
       <StatusMessage tone="info">
@@ -271,7 +280,7 @@ function Overlay({ result }: { readonly result: OverlayResult }): JSX.Element {
         <tbody>
           {comparison.checkpoints.map((checkpoint) => (
             <tr key={checkpoint.distance}>
-              <th scope="row">{formatMetres(checkpoint.distance)}</th>
+              <th scope="row">{formatSegmentDistance(checkpoint.distance, units)}</th>
               <td>
                 {checkpoint.first === undefined ? '—' : formatDuration(checkpoint.first.elapsed)}
               </td>

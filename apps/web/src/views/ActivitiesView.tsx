@@ -7,7 +7,9 @@ import type { ActivityOrder, ActivitySummary, SortDirection } from '@onyourleft/
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';
-import { DISTANCE_UNIT, POWER_UNIT } from '../format';
+import { POWER_UNIT } from '../format';
+import { useUnits } from '../units/context';
+import { distanceUnit } from '../units/format';
 import { orderedRows, PAGE_SIZE, type LibraryRow } from '../library/rows';
 import type { LibraryPort } from '../library/store-port';
 import { hrefFor, hrefForActivity, routeById } from '../shell/routes';
@@ -76,6 +78,7 @@ export function ActivitiesView({ library }: ActivitiesViewProps): JSX.Element {
   /** The row a first Delete press armed. A second press on the same row deletes. */
   const [armed, setArmed] = useState<string | undefined>(undefined);
   const [reloads, setReloads] = useState(0);
+  const units = useUnits();
 
   const load = useCallback(async (): Promise<void> => {
     if (library === undefined) {
@@ -89,7 +92,7 @@ export function ActivitiesView({ library }: ActivitiesViewProps): JSX.Element {
       );
       setState({
         kind: 'ready',
-        rows: orderedRows(summaries, orderBy, direction),
+        rows: orderedRows(summaries, orderBy, direction, units),
         total: summaries.length,
       });
     } catch (error: unknown) {
@@ -101,7 +104,7 @@ export function ActivitiesView({ library }: ActivitiesViewProps): JSX.Element {
         reason: error instanceof Error ? error.message : String(error),
       });
     }
-  }, [library, orderBy, direction]);
+  }, [library, orderBy, direction, units]);
 
   useEffect(() => {
     void load();
@@ -174,7 +177,7 @@ export function ActivitiesView({ library }: ActivitiesViewProps): JSX.Element {
             <th scope="col">Ride</th>
             <th scope="col">Started</th>
             <th scope="col">Duration</th>
-            <th scope="col">Distance ({DISTANCE_UNIT})</th>
+            <th scope="col">Distance ({distanceUnit(units)})</th>
             <th scope="col">Avg power ({POWER_UNIT})</th>
             <th scope="col">Actions</th>
           </tr>

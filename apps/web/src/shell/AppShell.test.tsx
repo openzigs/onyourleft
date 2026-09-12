@@ -89,6 +89,7 @@ describe('the header', () => {
       '#/game',
       '#/devices',
       '#/transfer',
+      '#/settings',
       '#/about',
     ]);
   });

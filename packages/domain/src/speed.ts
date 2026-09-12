@@ -30,12 +30,16 @@
  * `kilometresPerHour()` would have accepted.
  */
 
-import type { KilometresPerHour, MetresPerSecond } from './quantities';
-import { kilometresPerHour, metresPerSecond } from './quantities';
+import { METRES_PER_MILE } from './length';
+import type { KilometresPerHour, MetresPerSecond, MilesPerHour } from './quantities';
+import { kilometresPerHour, metresPerSecond, milesPerHour } from './quantities';
 import { assertIntegerInRange } from './unit-error';
 
 /** Seconds in an hour divided by metres in a kilometre: 3600 / 1000. */
 const KILOMETRES_PER_HOUR_PER_METRE_PER_SECOND = 3.6;
+
+/** Seconds in an hour divided by metres in a mile. */
+const MILES_PER_HOUR_PER_METRE_PER_SECOND = 3600 / METRES_PER_MILE;
 
 /**
  * Convert a speed in metres per second to kilometres per hour, for display.
@@ -58,6 +62,24 @@ export function metresPerSecondToKilometresPerHour(speed: MetresPerSecond): Kilo
  */
 export function kilometresPerHourToMetresPerSecond(speed: KilometresPerHour): MetresPerSecond {
   return metresPerSecond(speed / KILOMETRES_PER_HOUR_PER_METRE_PER_SECOND);
+}
+
+/**
+ * Convert a speed in metres per second to miles per hour, for display.
+ *
+ * The imperial half of {@link metresPerSecondToKilometresPerHour}, added by
+ * #238 so that a rider who reads in miles gets their speed from the same place
+ * every other reader gets theirs. It converts and it does not decide: which of
+ * the two a screen calls is a **presentation** choice held in `apps/web`, and
+ * this package neither knows nor can reach the setting that makes it.
+ *
+ * @throws {UnitError} if the product is not a speed — which a validated
+ * argument does not rule out, for {@link metresPerSecondToKilometresPerHour}'s
+ * reason: multiplying by 2.24 overflows to `Infinity` near the top of the
+ * double range.
+ */
+export function metresPerSecondToMilesPerHour(speed: MetresPerSecond): MilesPerHour {
+  return milesPerHour(speed * MILES_PER_HOUR_PER_METRE_PER_SECOND);
 }
 
 /** The largest value a `uint16` field can hold. */

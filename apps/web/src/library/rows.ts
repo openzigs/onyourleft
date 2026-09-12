@@ -9,9 +9,10 @@
  * arithmetic in it to disagree with `format.ts`.
  */
 
-import type { ActivityOrder, ActivitySummary, SortDirection } from '@onyourleft/store';
+import type { ActivityOrder, ActivitySummary, SortDirection, UnitSystem } from '@onyourleft/store';
 
-import { formatDistanceValue, formatDuration, formatPowerValue, formatStartedAt } from '../format';
+import { formatDuration, formatPowerValue, formatStartedAt } from '../format';
+import { formatDistance } from '../units/format';
 
 /**
  * How many summaries one read asks for.
@@ -35,7 +36,11 @@ export interface LibraryRow {
   /** In the ride's own time zone. @see formatStartedAt */
   readonly startedAt: string;
   readonly duration: string;
-  /** Kilometres, one decimal, no unit — the unit is the column heading. */
+  /**
+   * The ride's distance, one decimal, **no unit** — the unit is the column
+   * heading, which `ActivitiesView` takes from `units/format.ts` so the
+   * heading and these digits cannot be in different systems.
+   */
   readonly distance: string;
   /**
    * Whole watts, or `undefined` when the ride carried no power at all.
@@ -57,13 +62,13 @@ export interface LibraryRow {
   readonly hasPosition: boolean;
 }
 
-export function rowFor(summary: ActivitySummary): LibraryRow {
+export function rowFor(summary: ActivitySummary, units: UnitSystem): LibraryRow {
   return {
     id: summary.id,
     name: summary.name,
     startedAt: formatStartedAt(summary.startedAt, summary.startedAtTimeZone),
     duration: formatDuration(summary.elapsedTime),
-    distance: formatDistanceValue(summary.distance),
+    distance: formatDistance(summary.distance, units).value,
     averagePower:
       summary.averagePower === undefined ? undefined : formatPowerValue(summary.averagePower),
     hasPosition: summary.hasPosition,
@@ -90,6 +95,7 @@ export function orderedRows(
   summaries: readonly ActivitySummary[],
   orderBy: ActivityOrder,
   direction: SortDirection,
+  units: UnitSystem,
 ): readonly LibraryRow[] {
   const keyOf = (summary: ActivitySummary): number =>
     orderBy === 'distance' ? summary.distance : summary.startedAt;
@@ -108,5 +114,5 @@ export function orderedRows(
       // symmetrical.
       return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
     })
-    .map(rowFor);
+    .map((summary) => rowFor(summary, units));
 }

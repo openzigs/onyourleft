@@ -29,7 +29,9 @@ import {
   privacyZoneId,
   type PrivacyZoneRecord,
   type Samples,
+  type UnitSystem,
 } from '@onyourleft/store';
+import type { ReactElement } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { trimRadius } from '../detail/privacy';
@@ -44,6 +46,7 @@ import {
   type StubMapPort,
 } from '../map/testing';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
+import { UnitsProvider } from '../units/context';
 
 import { ActivityDetailView } from './ActivityDetailView';
 
@@ -98,6 +101,15 @@ async function open(
   await settle();
   mounted = result;
   return result;
+}
+
+/** The view inside a unit preference, for the #238 cases below. */
+function reading(port: StubDetail, units: UnitSystem): ReactElement {
+  return (
+    <UnitsProvider units={units}>
+      <ActivityDetailView port={port} activityId={RIDE} />
+    </UnitsProvider>
+  );
 }
 
 function powerSeries(count: number, holeFrom = -1, holeLength = 0): Samples<'power'> {
@@ -518,5 +530,44 @@ describe('the lap table', () => {
     mounted = await open(port);
     expect(document.body.textContent).toContain('no laps recorded');
     expect(queryAll(document, 'table.oyl-table')).toHaveLength(0);
+  });
+});
+
+describe('a trace is not left converted into the units the rider has left (#238)', () => {
+  it('re-reads every open trace when the preference changes', async () => {
+    // ⚠️ **The defect this guards is invisible.** A `Trace` holds numbers that
+    // have already been through `series.display` — miles per hour, or feet —
+    // so a cache keyed on the channel alone keeps serving the *old* system's
+    // numbers under the new system's axis label. The chart redraws, the label
+    // changes, and the line does not move.
+    const port = indoorRide();
+    const view = await mount(reading(port, 'metric'));
+    await settle();
+    await settle();
+    mounted = view;
+
+    const before = [...port.channelReads];
+    expect(before).toEqual(['power', 'heartRate']);
+
+    await view.rerender(reading(port, 'imperial'));
+    await settle();
+    await settle();
+
+    expect(port.channelReads).toEqual([...before, 'power', 'heartRate']);
+  });
+
+  it('renders the ride summary in the rider\u2019s units', async () => {
+    const port = indoorRide();
+    const view = await mount(reading(port, 'imperial'));
+    await settle();
+    await settle();
+    mounted = view;
+
+    // `stubActivity`'s distance in miles rather than kilometres. Read from the
+    // summary list the view renders rather than from a helper, so a component
+    // that converted the number and kept the old label fails here.
+    const summary = document.querySelector('.oyl-ride-summary')?.textContent ?? '';
+    expect(summary).toContain('mi');
+    expect(summary).not.toContain('km');
   });
 });

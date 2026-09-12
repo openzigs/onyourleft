@@ -14,7 +14,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { unixSeconds } from '@onyourleft/domain';
-import { activityId, type ActivityId } from '@onyourleft/store';
+import { activityId, type ActivityId, type UnitSystem } from '@onyourleft/store';
 import {
   ATHLETE_A,
   createStoreHarness,
@@ -569,6 +569,53 @@ describe('TransferView — what it may say about another platform', () => {
     expect(
       await (harness ?? never()).read(async (store) => store.listActivitySummaries(ATHLETE_A)),
     ).toStrictEqual([]);
+  });
+
+  it('tells the shell what the unit preference has become, so the screen follows the disk', async () => {
+    // ⚠️ The preference is athlete data (ADR 0020 D-2), so the cascade takes
+    // it and the recreated row decides what it becomes. Without this the
+    // client renders miles over a row that no longer says so until the next
+    // reload — the same disagreement between the disk and the UI that
+    // `views/SettingsView.tsx` refuses in the other direction.
+    const port = await openPort();
+    // A device with something on it, or `eraseDecision` refuses before it runs.
+    await (harness ?? never()).write(async (store) => {
+      await store.putActivity(rideFor(ATHLETE_A, { name: 'Last one' }));
+    });
+    const reset: (UnitSystem | undefined)[] = [];
+    mounted = await mount(
+      <TransferView
+        port={port}
+        onUnitsReset={(units) => {
+          reset.push(units);
+        }}
+      />,
+    );
+    await runToCompletion(
+      () => document.querySelector('#oyl-erase-confirm') !== null,
+      'the erase panel to render',
+    );
+
+    // Not before the erase, and not on a refused one.
+    await activateWithKeyboard(buttonNamed('Erase everything'));
+    await settle();
+    expect(reset).toEqual([]);
+
+    const box = document.querySelector<HTMLInputElement>('#oyl-erase-confirm');
+    if (box === null) {
+      throw new Error('the confirmation box is not on the page');
+    }
+    await typeInto(box, 'erase everything');
+    await activateWithKeyboard(buttonNamed('Erase everything'));
+    await runToCompletion(
+      () => (document.body.textContent ?? '').includes('holds nothing about you'),
+      'the erase to finish',
+    );
+
+    // `undefined` — the row `local-athlete.ts` puts back names no preference,
+    // and the shell is the one place that substitutes the default. Reporting
+    // `'metric'` from here would be a second substitution.
+    expect(reset).toEqual([undefined]);
   });
 
   it('says what erasing cannot reach, and names the signing key, before the button', async () => {
