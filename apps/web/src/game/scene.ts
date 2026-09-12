@@ -86,12 +86,7 @@ function markers(
     found.push(markerAt(corridor, input.botDistance, 'bot'));
   }
   if (input.ghost !== undefined) {
-    // ⚠️ The ghost is placed at where it had ridden **at this elapsed time**,
-    // which is what makes it a race rather than a replay running beside you.
-    // After it finishes it stays at its finishing distance rather than
-    // disappearing — a rider who beat it wants to see it behind them.
-    const at = ghostDistanceAt(input.ghost, seconds(Math.max(0, input.state.elapsed)));
-    found.push(markerAt(corridor, at, 'ghost'));
+    found.push(markerAt(corridor, ghostDistanceNow(input.ghost, input.state), 'ghost'));
   }
   return found;
 }
@@ -103,7 +98,13 @@ function markers(
  * ahead to be outside the built corridor is drawn at its far end rather than
  * floating in space beyond it — the rider learns "it is somewhere up there",
  * which is true, and the exact gap is the HUD's job (#94) and is a number rather
- * than a position.
+ * than a position. On a loop that includes a bot a whole lap up: it is drawn at
+ * the far end of what the rider can see, and the HUD says how far.
+ *
+ * ⚠️ `atDistance` is an **odometer** — how far that rider has ridden in total,
+ * which is what every producer here hands over: `GameState.ride.distance`,
+ * `BotTick.state.distance` and `ghostDistanceAt` are all unwrapped. See
+ * {@link nearestPoint} for what that means for the search.
  */
 function markerAt(
   corridor: RoadCorridor,
@@ -114,7 +115,21 @@ function markerAt(
   return { kind, x: point.x, y: point.y, z: point.z };
 }
 
-/** The corridor point closest to a route distance, and its index. */
+/**
+ * The corridor point closest to an odometer reading, and its index.
+ *
+ * ⚠️ **Searched on `CorridorPoint.along`, never on `CorridorPoint.distance`,
+ * and #253 is what happens when it is the other way round.** `along` is how far
+ * into the *ride* a point is and is unwrapped; `distance` is where the point is
+ * on the *road* and is wrapped into `[0, totalDistance)` by `distanceOnRoute`.
+ * Every odometer handed to this function is unwrapped — deliberately, because
+ * `pacer/gap.ts` needs a bot a lap ahead to read as a lap ahead rather than as
+ * level. So on a `loop: true` route, from the moment either odometer passes
+ * `totalDistance`, every point's `distance` is smaller than the value being
+ * searched for, the search saturates at the corridor's far end, and the rider
+ * and the bot are drawn at one point for the rest of the ride. Two riders, one
+ * place, with both halves of the program behaving exactly as documented.
+ */
 function nearestPoint(
   corridor: RoadCorridor,
   atDistance: number,
@@ -123,13 +138,31 @@ function nearestPoint(
   let bestGap = Number.POSITIVE_INFINITY;
   for (let index = 0; index < corridor.centre.length; index += 1) {
     const candidate = corridor.centre[index] as CorridorPoint;
-    const gap = Math.abs(candidate.distance - atDistance);
+    const gap = Math.abs(candidate.along - atDistance);
     if (gap < bestGap) {
       bestGap = gap;
       bestIndex = index;
     }
   }
   return { point: corridor.centre[bestIndex] as CorridorPoint, index: bestIndex };
+}
+
+/**
+ * How far the ghost had ridden at this moment of the ride.
+ *
+ * ⚠️ The ghost is placed at where it had ridden **at this elapsed time**, which
+ * is what makes it a race rather than a replay running beside you. After it
+ * finishes it stays at its finishing distance rather than disappearing — a
+ * rider who beat it wants to see it behind them.
+ *
+ * Exported because the HUD needs the same number the marker is placed from: the
+ * gap a rider reads and the shape they see on the road must not be two answers
+ * to one question, which is the argument `GameState.bot` already makes for the
+ * bot's odometer. The clamp on a negative elapsed time is part of it — two
+ * callers clamping separately is two chances to stop.
+ */
+export function ghostDistanceNow(ghost: GhostTrack, state: GameState): number {
+  return ghostDistanceAt(ghost, seconds(Math.max(0, state.elapsed)));
 }
 
 /** Whether the ghost has already finished, for a HUD that wants to say so. */

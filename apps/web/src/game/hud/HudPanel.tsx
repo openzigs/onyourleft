@@ -71,12 +71,12 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
     <section className="oyl-hud" aria-label="Ride metrics">
       {/*
         A description list, because that is what these are: a label and its
-        value, seven times. It was an `ol` of `span`s first, which needed
+        value, once per field. It was an `ol` of `span`s first, which needed
         `aria-labelledby` to associate the two — and the audit rejected it,
         correctly: ARIA prohibits naming an element with no role, so the
-        association was decorative and a screen reader would have read seven
-        orphaned numbers. `dt`/`dd` carries the same association in HTML, with
-        no ARIA at all.
+        association was decorative and a screen reader would have read a column
+        of orphaned numbers. `dt`/`dd` carries the same association in HTML,
+        with no ARIA at all.
       */}
       <dl className="oyl-hud__fields">
         {readings.map((reading) => (

@@ -1914,6 +1914,9 @@ top of an issue **supersedes its body**.
 | Where the bot pacer is advanced, and why it is the simulation's loop rather than the render loop | `apps/web/src/game/simulation.ts` §`botCourseFor`, [#237](https://github.com/openzigs/onyourleft/issues/237) |
 | What a rider is told when the pacer intensity they typed cannot make a plan | `apps/web/src/game/pacer-choice.ts` §`pacerChoice` |
 | Why a ghost's distance is integrated from speed, and what a long dropout does to it | `apps/web/src/game/ghost-source.ts` §`GHOST_GAP_TOLERANCE_SECONDS` |
+| Why a corridor point carries two distances, and what drew two riders in one place on lap two | `apps/web/src/game/terrain.ts` §`CorridorPoint.along`, `apps/web/src/game/scene.ts` §`nearestPoint` |
+| Why the HUD has a gap field per chased rider rather than one field and a discriminator | `apps/web/src/game/hud/fields.ts` §`HudInput.pacerGap`, `apps/web/src/game/GameView.tsx` §`gapToGhost` |
+| Where the game's shared `loop: true` route fixture is, and why one existing in only one test file is how #253 happened | `apps/web/src/game/testing.ts` |
 | How trainer control reaches an FTMS control point on Android | `apps/mobile/src/ble/fitness-machine-channel.ts`, `apps/web/src/ride/trainer.ts` §`openCapacitorTrainer` |
 | Why the unacknowledged write is declared on the plugin port and never called | `apps/mobile/src/ble/plugin-port.ts` §`writeWithoutResponse`, §4h |
 | What a trainer that reports no power range gets, and why | `apps/mobile/src/ble/fitness-machine.ts` |

@@ -12,7 +12,8 @@ import { describe, expect, it } from 'vitest';
 
 import { cameraPose, ghostFinished, sceneFrame } from './scene';
 import { corridorOrigin } from './terrain';
-import { GameSimulation, atStartLine, type SimulationSetup } from './simulation';
+import { GameSimulation, atStartLine, type GameState, type SimulationSetup } from './simulation';
+import { squareLoopProfile } from './testing';
 import {
   altitudeMetres,
   buildGhostTrack,
@@ -21,6 +22,8 @@ import {
   degreesLongitude,
   geographicPosition,
   kilograms,
+  metres,
+  metresPerSecond,
   routeProfile,
   seconds,
   watts,
@@ -173,7 +176,7 @@ describe('the chase camera', () => {
     // resolves a zero-length look-at to NaN and draws nothing.
     const setup = straightRoute();
     const corridor = {
-      centre: [{ x: 0, y: 0, z: 0, distance: 0 }],
+      centre: [{ x: 0, y: 0, z: 0, distance: 0, along: 0 }],
       vertices: new Float32Array(6),
       quadCount: 0,
     };
@@ -183,5 +186,84 @@ describe('the chase camera', () => {
     expect(Number.isFinite(pose.headingZ)).toBe(true);
     expect(Math.hypot(pose.headingX, pose.headingZ)).toBeCloseTo(1, 6);
     expect(setup.profile.totalDistance).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * #253: the case every fixture in the pacer work missed.
+ *
+ * The rider's odometer and the bot's are deliberately **unwrapped** — #237's
+ * fourth criterion, argued at length in `pacer/gap.ts` — and the corridor's own
+ * points are **wrapped** by `distanceOnRoute`. Matching one against the other
+ * puts every marker at the far end of the corridor from lap two onward, which
+ * draws two riders in one place for the rest of the ride.
+ */
+describe('a loop, once the odometers have passed the finish line', () => {
+  /** A state on lap two, at `distance` metres of total riding. */
+  function riding(profile: ReturnType<typeof squareLoopProfile>, distance: number): GameState {
+    return {
+      ...atStartLine(profile),
+      ride: { speed: metresPerSecond(9), distance: metres(distance) },
+    };
+  }
+
+  it('draws the rider and the bot in two places, not one', () => {
+    const profile = squareLoopProfile();
+    const total: number = profile.totalDistance;
+    const frame = sceneFrame({
+      profile,
+      origin: corridorOrigin(profile),
+      // 200 m into lap two, with the bot 100 m up the road.
+      state: riding(profile, total + 200),
+      botDistance: total + 300,
+    });
+
+    const rider = frame.markers.find((marker) => marker.kind === 'rider');
+    const bot = frame.markers.find((marker) => marker.kind === 'bot');
+    expect(rider).toBeDefined();
+    expect(bot).toBeDefined();
+    expect(
+      Math.hypot((bot?.x ?? 0) - (rider?.x ?? 0), (bot?.z ?? 0) - (rider?.z ?? 0)),
+    ).toBeCloseTo(100, 0);
+  });
+
+  it('puts a rider on lap two exactly where the same road was on lap one', () => {
+    const profile = squareLoopProfile();
+    const total: number = profile.totalDistance;
+    const origin = corridorOrigin(profile);
+
+    const lapOne = sceneFrame({ profile, origin, state: riding(profile, 200) });
+    const lapTwo = sceneFrame({ profile, origin, state: riding(profile, total + 200) });
+
+    const at = (frame: typeof lapOne): readonly [number, number] => {
+      const rider = frame.markers.find((marker) => marker.kind === 'rider');
+      return [rider?.x ?? Number.NaN, rider?.z ?? Number.NaN];
+    };
+    expect(at(lapTwo)[0]).toBeCloseTo(at(lapOne)[0], 6);
+    expect(at(lapTwo)[1]).toBeCloseTo(at(lapOne)[1], 6);
+  });
+
+  it('places a ghost on lap two at its own distance rather than on top of the rider', () => {
+    const profile = squareLoopProfile();
+    const total: number = profile.totalDistance;
+    // A ghost that rode two laps in ten minutes, so at 400 s it is on lap two.
+    const ghost = buildGhostTrack({
+      elapsedSeconds: [0, 600],
+      distanceMetres: [0, total * 2],
+    });
+    const frame = sceneFrame({
+      profile,
+      origin: corridorOrigin(profile),
+      state: { ...riding(profile, total + 100), elapsed: seconds(400) },
+      ghost,
+    });
+
+    const rider = frame.markers.find((marker) => marker.kind === 'rider');
+    const ghostMarker = frame.markers.find((marker) => marker.kind === 'ghost');
+    // The ghost is at 2/3 of two laps — a long way past the rider's 100 m into
+    // lap two, and nowhere near it.
+    expect(
+      Math.hypot((ghostMarker?.x ?? 0) - (rider?.x ?? 0), (ghostMarker?.z ?? 0) - (rider?.z ?? 0)),
+    ).toBeGreaterThan(50);
   });
 });

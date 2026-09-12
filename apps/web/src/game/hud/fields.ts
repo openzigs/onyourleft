@@ -85,9 +85,20 @@ export interface HudInput {
   readonly profile: RouteProfile;
   readonly cadence: SensorReading;
   readonly heartRate: SensorReading;
-  /** The gap to whichever of the bot or the ghost the rider is chasing. */
-  readonly gap?: PacerGap | undefined;
-  readonly gapTo?: 'bot' | 'ghost' | undefined;
+  /**
+   * The gap to the bot pacer (#92), when one is riding.
+   *
+   * ⚠️ **One field per chased rider, rather than one field and a discriminator
+   * saying which rider it is about — #253.** The pair used to be a `gap` and a
+   * `gapTo: 'bot' | 'ghost'`, and `withGhost` and `withPacer` are independent
+   * controls: a rider who chose both got a HUD that resolved `gapTo` to
+   * `'bot'` and dropped the ghost's gap entirely, on the one ride where both
+   * numbers were wanted. A shape that can only carry one answer will silently
+   * choose one, so the shape carries both.
+   */
+  readonly pacerGap?: PacerGap | undefined;
+  /** The gap to the rider's own previous attempt (#93), when one is being raced. */
+  readonly ghostGap?: PacerGap | undefined;
   /**
    * Which units the rider reads in (#238).
    *
@@ -105,7 +116,12 @@ export interface HudInput {
 }
 
 /**
- * The eight fields #94 names, in a fixed order.
+ * The fields #94 names, in a fixed order.
+ *
+ * ⚠️ #94's table names the chase as one row — *"Gap to the bot (#92) / ghost
+ * (#93)"* — and it is rendered as **two**, because both can be in play at once
+ * and one row can only tell the rider about one of them (#253). Both are always
+ * returned, dashed when that rider is not being chased, for the reason below.
  *
  * ⚠️ The order is part of the contract, not a layout preference. #94:
  * *"Glanceable, not readable. The rider looks for one second. Numbers must be
@@ -155,30 +171,36 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
     measured('speed', 'Speed', speed),
     reading('gradient', 'Gradient', state.grade, '%', true, 1),
     measured('remaining', 'To go', togo),
-    gapReading(input),
+    gapReading('pacerGap', 'Pacer', input.pacerGap),
+    gapReading('ghostGap', 'Your best', input.ghostGap),
   ];
 }
 
-/** The gap field, which is absent rather than dashed when nothing is being chased. */
-function gapReading(input: HudInput): HudReading {
-  const label = input.gapTo === 'ghost' ? 'Your best' : 'Pacer';
-  if (input.gap === undefined || input.gapTo === undefined) {
-    return { key: 'gap', label: 'Pacer', value: NO_READING, unit: '', stale: false };
+/**
+ * One chased rider's gap.
+ *
+ * Dashed rather than dropped when that rider is not in play, like every other
+ * field here: a row that vanished would move the rows after it, and #94's whole
+ * argument is that a rider at threshold finds a number by position.
+ */
+function gapReading(key: string, label: string, gap: PacerGap | undefined): HudReading {
+  if (gap === undefined) {
+    return { key, label, value: NO_READING, unit: '', stale: false };
   }
-  const seconds = input.gap.seconds;
+  const seconds = gap.seconds;
   if (seconds === undefined) {
     // A stationary rider is closing no gap at all, and any number here would be
     // a lie about a division by zero — `pacer/gap.ts` says so where it returns
     // `undefined`, and rendering it as a nought is exactly what that guards
     // against.
-    return { key: 'gap', label, value: NO_READING, unit: '', stale: false };
+    return { key, label, value: NO_READING, unit: '', stale: false };
   }
   // Signed, and the sign is carried in the word rather than in a minus sign: a
   // minus sign is one glyph wide at arm's length and is the first thing lost.
   const magnitude = Math.abs(seconds);
   const direction = seconds > 0 ? 'behind' : 'ahead';
   return {
-    key: 'gap',
+    key,
     label,
     value: `${magnitude.toFixed(0)} s ${direction}`,
     unit: '',

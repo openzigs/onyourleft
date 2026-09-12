@@ -92,8 +92,29 @@ export interface CorridorPoint {
   readonly y: number;
   /** North of the projection origin. */
   readonly z: number;
-  /** How far along the route this point is. */
+  /**
+   * How far along the **route** this point is, wrapped into `[0, totalDistance)`
+   * on a loop — what {@link distanceOnRoute} answers.
+   *
+   * This is the point's place on the road: two laps apart, the same place.
+   */
   readonly distance: number;
+  /**
+   * How far into the **ride** this point is, unwrapped.
+   *
+   * ⚠️ **The two differ from lap two onward, and conflating them is #253.** The
+   * odometers everything else in the game carries — the rider's, the bot's,
+   * the ghost's — are unwrapped by design (`pacer/gap.ts`: *"a bot a full lap
+   * ahead reads as a lap's worth of metres ahead, not as zero"*), so an
+   * odometer looked up against {@link distance} matches nothing once it passes
+   * `totalDistance` and lands on the corridor's far end. Every marker then
+   * collapses onto one point, for the rest of the ride.
+   *
+   * So this is the axis a marker is placed on: it is the corridor's own
+   * parameter, measured on the same unwrapped scale a rider's odometer is, and
+   * `scene.ts` §`nearestPoint` searches it rather than {@link distance}.
+   */
+  readonly along: number;
 }
 
 /** A ribbon of road, ready to become a vertex buffer. */
@@ -180,7 +201,7 @@ export function roadCorridor(
   };
 }
 
-/** One centreline point, projected and wrapped. */
+/** One centreline point, projected and wrapped — and remembering both. */
 function pointAt(profile: RouteProfile, origin: CorridorOrigin, along: number): CorridorPoint {
   // `distanceOnRoute` wraps a loop and clamps a point-to-point route, which is
   // exactly the behaviour the corridor wants at both ends: on a loop the road
@@ -199,6 +220,7 @@ function pointAt(profile: RouteProfile, origin: CorridorOrigin, along: number): 
     y: (elevationAt(profile, wrapped) as number) - origin.elevation,
     z: (position.latitude - origin.latitude) * METRES_PER_DEGREE_LATITUDE,
     distance: wrapped,
+    along,
   };
 }
 

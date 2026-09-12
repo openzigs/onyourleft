@@ -35,7 +35,7 @@ import { NO_SCREEN_LOCK, type ScreenLock, type ScreenLockSource } from './hud/wa
 import { DEFAULT_PACER_INTENSITY, pacerChoice, type PacerChoice } from './pacer-choice';
 import { INITIAL_QUALITY, nextQuality, qualitySettings, type QualityState } from './quality';
 import { RIDE_CONDITIONS } from './rider';
-import { sceneFrame } from './scene';
+import { ghostDistanceNow, sceneFrame } from './scene';
 import { GameSimulation, type GameState } from './simulation';
 import { corridorOrigin } from './terrain';
 import type { GameRenderer, GameView as RendererView } from './port';
@@ -276,7 +276,12 @@ export function GameView(props: GameViewProps): JSX.Element {
   }
 
   const sensors = port?.readSensors() ?? NO_SENSORS;
-  const gap = gapToBot(state);
+  // ⚠️ Read from the ref rather than from state, and deliberately: the ghost is
+  // loaded once, before the ride begins, and cannot change while it runs.
+  // Holding it in state instead would make it a dependency of the frame loop's
+  // effect, and that effect must not re-run mid-ride — the comment at its
+  // dependency list says what restarting it costs.
+  const ghost = ghostRef.current;
   return (
     <section className="oyl-game" aria-label="Trainer game">
       <canvas
@@ -292,8 +297,12 @@ export function GameView(props: GameViewProps): JSX.Element {
         state={state}
         cadence={sensors.cadence}
         heartRate={sensors.heartRate}
-        gap={gap}
-        gapTo={gap === undefined ? undefined : 'bot'}
+        // ⚠️ Two gaps, one per chased rider (#253). `withGhost` and `withPacer`
+        // are independent controls, so both can be in play — and the single
+        // field this replaced resolved to the bot whenever one existed, which
+        // dropped the gap to the rider's own best time without saying so.
+        pacerGap={gapToBot(state)}
+        ghostGap={gapToGhost(state, ghost)}
         paused={phase === 'paused'}
         onPause={() => {
           setPhase((current) => (current === 'paused' ? 'riding' : 'paused'));
@@ -324,6 +333,23 @@ function gapToBot(state: GameState): PacerGap | undefined {
     return undefined;
   }
   return pacerGap(gapAgainst(state, bot.state.distance));
+}
+
+/**
+ * The gap to the rider's own previous attempt, or `undefined` when none is
+ * being raced.
+ *
+ * ⚠️ The ghost's distance comes from `scene.ts`'s `ghostDistanceNow`, which is
+ * the same call the ghost's **marker** is placed from. A second
+ * `ghostDistanceAt(…)` here would be a second answer to "where is the ghost
+ * now", and the two would drift apart the first time either clamp changed —
+ * the argument `GameState.bot` already makes for the bot's odometer.
+ */
+function gapToGhost(state: GameState, ghost: GhostTrack | undefined): PacerGap | undefined {
+  if (ghost === undefined) {
+    return undefined;
+  }
+  return pacerGap(gapAgainst(state, ghostDistanceNow(ghost, state)));
 }
 
 /** Choosing a route, whether to race yourself on it, and whether to be paced. */

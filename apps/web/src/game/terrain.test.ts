@@ -13,10 +13,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { MAXIMUM_CORRIDOR_QUADS, ROAD_WIDTH_METRES, corridorOrigin, roadCorridor } from './terrain';
+import { squareLoopProfile } from './testing';
 import {
   altitudeMetres,
   degreesLatitude,
   degreesLongitude,
+  distanceOnRoute,
   geographicPosition,
   routeProfile,
   type RoutePoint,
@@ -36,37 +38,6 @@ function straightClimb(resolutionMetres = 10): ReturnType<typeof routeProfile> {
     });
   }
   return routeProfile(points, { resolutionMetres });
-}
-
-/** A square loop, so the corridor has real corners and a wrap to cross. */
-function squareLoop(): ReturnType<typeof routeProfile> {
-  const side = 400;
-  const spacing = 10;
-  const corners: [number, number][] = [
-    [0, 0],
-    [0, side],
-    [side, side],
-    [side, 0],
-  ];
-  const perDegreeLongitude = 111_320 * Math.cos((51.5 * Math.PI) / 180);
-  const points: RoutePoint[] = [];
-  for (let leg = 0; leg < corners.length; leg += 1) {
-    const from = corners[leg] as [number, number];
-    const to = corners[(leg + 1) % corners.length] as [number, number];
-    const steps = side / spacing;
-    for (let step = 0; step < steps; step += 1) {
-      const north = from[0] + ((to[0] - from[0]) * step) / steps;
-      const east = from[1] + ((to[1] - from[1]) * step) / steps;
-      points.push({
-        position: geographicPosition(
-          degreesLatitude(51.5 + north / 111_320),
-          degreesLongitude(-0.12 + east / perDegreeLongitude),
-        ),
-        elevation: altitudeMetres(0),
-      });
-    }
-  }
-  return routeProfile(points, { loop: true });
 }
 
 describe('the corridor follows the route it was built from', () => {
@@ -133,7 +104,7 @@ describe('every vertex is a real number', () => {
    * which is where the naive `points[i + 1] - points[i]` walks off the array.
    */
   it('produces no NaN, including at the last point', () => {
-    for (const profile of [straightClimb(), squareLoop()]) {
+    for (const profile of [straightClimb(), squareLoopProfile()]) {
       const corridor = roadCorridor(profile, corridorOrigin(profile), 150);
       for (const value of corridor.vertices) {
         expect(Number.isFinite(value)).toBe(true);
@@ -198,7 +169,7 @@ describe('the rebuild is bounded', () => {
 
 describe('a loop', () => {
   it('carries the corridor across the wrap rather than stopping at it', () => {
-    const profile = squareLoop();
+    const profile = squareLoopProfile();
     const total: number = profile.totalDistance;
     // Sitting 30 m from the end, looking 400 m ahead: most of the corridor is
     // past the wrap.
@@ -217,8 +188,31 @@ describe('a loop', () => {
     }
   });
 
+  it('keeps the unwrapped ride distance beside the wrapped road distance (#253)', () => {
+    const profile = squareLoopProfile();
+    const total: number = profile.totalDistance;
+    // 200 m into lap two, so every point of the corridor is past the finish.
+    const corridor = roadCorridor(profile, corridorOrigin(profile), total + 200, {
+      aheadMetres: 400,
+      behindMetres: 60,
+    });
+
+    let previousAlong = Number.NEGATIVE_INFINITY;
+    for (const point of corridor.centre) {
+      // `along` is where the RIDE is: past the total, and strictly increasing
+      // even across the wrap, which is what a marker's odometer is measured on.
+      expect(point.along).toBeGreaterThan(total);
+      expect(point.along).toBeGreaterThan(previousAlong);
+      previousAlong = point.along;
+      // `distance` is where the ROAD is: inside the route, and the wrap of the
+      // same number. Two names for one point, and the pair is the whole fix.
+      expect(point.distance).toBeLessThanOrEqual(total + 1e-6);
+      expect(distanceOnRoute(profile, point.along)).toBeCloseTo(point.distance, 6);
+    }
+  });
+
   it('turns corners, so a square loop is not rendered as a straight line', () => {
-    const profile = squareLoop();
+    const profile = squareLoopProfile();
     const corridor = roadCorridor(profile, corridorOrigin(profile), 0, {
       aheadMetres: 800,
       behindMetres: 0,

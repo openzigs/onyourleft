@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 
 import { NO_READING, gapAgainst, hudReadings, profilePosition, type HudInput } from './fields';
 import { atStartLine } from '../simulation';
+import { squareLoopProfile } from '../testing';
 import {
   altitudeMetres,
   degreesLatitude,
@@ -220,8 +221,48 @@ describe('the gap to whatever the rider is chasing', () => {
       referenceSpeed: metresPerSecond(10),
     });
 
-    expect(fieldNamed({ ...input, gap: behind, gapTo: 'bot' }, 'gap').label).toBe('Pacer');
-    expect(fieldNamed({ ...input, gap: behind, gapTo: 'ghost' }, 'gap').label).toBe('Your best');
+    const both: HudInput = { ...input, pacerGap: behind, ghostGap: behind };
+    expect(fieldNamed(both, 'pacerGap').label).toBe('Pacer');
+    expect(fieldNamed(both, 'ghostGap').label).toBe('Your best');
+  });
+
+  /**
+   * #253: a rider can choose both, and the HUD used to be able to say only one
+   * of the two things — a `gapTo` discriminator that resolved to the bot
+   * whenever a bot existed, dropping the ghost's gap on the ride that asked for
+   * both.
+   */
+  it('carries a gap for the bot and a gap for the ghost at the same time', () => {
+    const input = baseInput();
+    const toBot = pacerGap({
+      botDistance: metres(200),
+      riderDistance: metres(100),
+      referenceSpeed: metresPerSecond(10),
+    });
+    const toGhost = pacerGap({
+      botDistance: metres(40),
+      riderDistance: metres(100),
+      referenceSpeed: metresPerSecond(10),
+    });
+
+    const both: HudInput = { ...input, pacerGap: toBot, ghostGap: toGhost };
+    expect(fieldNamed(both, 'pacerGap').value).toBe('10 s behind');
+    expect(fieldNamed(both, 'ghostGap').value).toBe('6 s ahead');
+  });
+
+  it('dashes the rider that is not being chased rather than dropping the field', () => {
+    // A field that vanished would move every field after it, which is what #94
+    // says a rider at threshold cannot cope with.
+    const input = baseInput();
+    const toGhost = pacerGap({
+      botDistance: metres(200),
+      riderDistance: metres(100),
+      referenceSpeed: metresPerSecond(10),
+    });
+
+    const readings = hudReadings({ ...input, ghostGap: toGhost });
+    expect(readings.map((reading) => reading.key)).toContain('pacerGap');
+    expect(fieldNamed({ ...input, ghostGap: toGhost }, 'pacerGap').value).toBe(NO_READING);
   });
 
   it('says behind or ahead in words rather than with a minus sign', () => {
@@ -238,9 +279,9 @@ describe('the gap to whatever the rider is chasing', () => {
       referenceSpeed: metresPerSecond(10),
     });
 
-    expect(fieldNamed({ ...input, gap: behind, gapTo: 'bot' }, 'gap').value).toContain('behind');
-    expect(fieldNamed({ ...input, gap: ahead, gapTo: 'bot' }, 'gap').value).toContain('ahead');
-    expect(fieldNamed({ ...input, gap: ahead, gapTo: 'bot' }, 'gap').value).not.toContain('-');
+    expect(fieldNamed({ ...input, pacerGap: behind }, 'pacerGap').value).toContain('behind');
+    expect(fieldNamed({ ...input, pacerGap: ahead }, 'pacerGap').value).toContain('ahead');
+    expect(fieldNamed({ ...input, pacerGap: ahead }, 'pacerGap').value).not.toContain('-');
   });
 
   it('shows a dash rather than a nought for a stationary rider', () => {
@@ -251,7 +292,36 @@ describe('the gap to whatever the rider is chasing', () => {
       referenceSpeed: metresPerSecond(0),
     });
 
-    expect(fieldNamed({ ...input, gap: stopped, gapTo: 'bot' }, 'gap').value).toBe(NO_READING);
+    expect(fieldNamed({ ...input, pacerGap: stopped }, 'pacerGap').value).toBe(NO_READING);
+    expect(fieldNamed({ ...input, ghostGap: stopped }, 'ghostGap').value).toBe(NO_READING);
+  });
+
+  /**
+   * #253's second acceptance criterion, and the half of it that is easiest to
+   * break while fixing the other half.
+   *
+   * The marker fix wraps a *placement* onto the road. The gap must not follow
+   * it: `pacer/gap.ts` is emphatic that *"a bot a full lap ahead reads as a
+   * lap's worth of metres ahead, not as zero"*, and wrapping the odometer here
+   * to make the marker behave would report a bot about to lap the rider as
+   * level with them — the same bug facing the other way.
+   */
+  it('leaves a bot a full lap ahead reading as a lap ahead, not as level', () => {
+    const profile = squareLoopProfile();
+    const total: number = profile.totalDistance;
+    const state = {
+      ...atStartLine(profile),
+      ride: { speed: metresPerSecond(10), distance: metres(100) },
+    };
+
+    const built = gapAgainst(state, total + 100);
+    const gap = pacerGap(built);
+
+    expect(built.riderDistance).toBe(100);
+    expect(gap.metres).toBeCloseTo(total, 6);
+    expect(fieldNamed({ ...baseInput(), profile, state, pacerGap: gap }, 'pacerGap').value).toBe(
+      `${(total / 10).toFixed(0)} s behind`,
+    );
   });
 
   it('builds its gap input from the rider’s own state', () => {
@@ -328,14 +398,13 @@ describe('the HUD follows the rider\u2019s units (#238)', () => {
     const input = riding('imperial');
     const withGap: HudInput = {
       ...input,
-      gapTo: 'bot',
-      gap: pacerGap({
+      pacerGap: pacerGap({
         botDistance: metres(500),
         riderDistance: metres(400),
         referenceSpeed: metresPerSecond(10),
       }),
     };
 
-    expect(fieldNamed(withGap, 'gap').value).toContain('s ');
+    expect(fieldNamed(withGap, 'pacerGap').value).toContain('s ');
   });
 });

@@ -36,8 +36,10 @@ import {
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
+  buildGhostTrack,
   routeProfile,
   watts,
+  type GhostTrack,
   type RoutePoint,
 } from '@onyourleft/domain';
 
@@ -56,11 +58,20 @@ function testRoute(): RidableRoute {
   return { id: 'route-1', name: 'Test hill', profile: routeProfile(points), attempts: 0 };
 }
 
+/**
+ * A previous attempt on the same road, ridden faster than the rider is riding
+ * now — so its gap is unmistakably its own rather than the bot's.
+ */
+const PREVIOUS_ATTEMPT = buildGhostTrack({
+  elapsedSeconds: [0, 60],
+  distanceMetres: [0, 1_200],
+});
+
 /** A rider on the trainer, pedalling steadily. */
-function pedallingPort(route: RidableRoute): GamePort {
+function pedallingPort(route: RidableRoute, ghost?: GhostTrack): GamePort {
   return {
     listRoutes: () => Promise.resolve([route]),
-    loadGhost: () => Promise.resolve(undefined),
+    loadGhost: () => Promise.resolve(ghost),
     readSensors: () => ({
       rider: { power: watts(220), live: true, paired: true },
       cadence: { value: 88, live: true, paired: true },
@@ -145,18 +156,26 @@ async function pump(count: number, framePeriodMs = FRAME_PERIOD_MS): Promise<voi
 async function startRiding(options: {
   readonly pacer: boolean;
   readonly intensity?: string;
+  readonly ghost?: boolean;
 }): Promise<SceneFrame[]> {
-  const route = testRoute();
+  const route = options.ghost === true ? { ...testRoute(), attempts: 1 } : testRoute();
   const frames: SceneFrame[] = [];
   mounted = await mount(
     <GameView
-      port={pedallingPort(route)}
+      port={pedallingPort(route, options.ghost === true ? PREVIOUS_ATTEMPT : undefined)}
       renderer={() => Promise.resolve(capturingRenderer(frames))}
       now={() => nowMs}
     />,
   );
   await settle();
 
+  if (options.ghost === true) {
+    const box = queryAll<HTMLInputElement>(mounted.container, 'input[type="checkbox"]').find(
+      (input) => (input.closest('label')?.textContent ?? '').includes('Race your own'),
+    );
+    expect(box).toBeDefined();
+    await clickThrough(box);
+  }
   if (options.pacer) {
     const box = queryAll<HTMLInputElement>(mounted.container, 'input[type="checkbox"]').find(
       (input) => (input.closest('label')?.textContent ?? '').includes('pacer'),
@@ -296,5 +315,58 @@ describe('the choice itself', () => {
     );
     expect(ride?.disabled).toBe(true);
     expect(mounted.container.textContent ?? '').toContain('70');
+  });
+});
+
+/**
+ * #253's second half: the path nothing drove.
+ *
+ * `withGhost` and `withPacer` are independent controls, so a rider can choose
+ * both — and until #253 the HUD had one gap field with a `gapTo` discriminator
+ * that resolved to `'bot'` whenever a bot existed, which silently dropped the
+ * ghost's gap on exactly that ride. A rider racing their own best time was told
+ * only about the bot.
+ */
+describe('riding against a ghost and a pacer at once', () => {
+  const SLOW = '0.5';
+
+  it('gives each chased rider a gap of its own rather than one shared field', async () => {
+    await startRiding({ pacer: true, ghost: true, intensity: SLOW });
+    await pump(60);
+
+    const pacer = hudField('Pacer');
+    const best = hudField('Your best');
+    const shape = /^(\d+) s (ahead|behind)$/;
+
+    expect(shape.test(pacer)).toBe(true);
+    expect(shape.test(best)).toBe(true);
+    // The bot is on 0.5 w/kg and the previous attempt rode 20 m/s, so the rider
+    // is ahead of one and behind the other. Two gaps, two answers.
+    expect(pacer).toContain('ahead');
+    expect(best).toContain('behind');
+    expect(pacer).not.toBe(best);
+  });
+
+  it('draws both of them on the road, in three different places', async () => {
+    const frames = await startRiding({ pacer: true, ghost: true, intensity: SLOW });
+    await pump(60);
+
+    const last = frames[frames.length - 1];
+    const kinds = (last?.markers ?? []).map((marker) => marker.kind).sort();
+    expect(kinds).toEqual(['bot', 'ghost', 'rider']);
+
+    const zs = (last?.markers ?? []).map((marker) => marker.z);
+    expect(new Set(zs).size).toBe(3);
+  });
+
+  it('shows only the gap that exists when the rider chases one of them', async () => {
+    await startRiding({ pacer: false, ghost: true });
+    await pump(60);
+
+    expect(hudField('Pacer')).toContain(NO_READING);
+    // Asserted by shape rather than by "not a dash": a field that does not
+    // exist at all also fails to contain a dash, which is a test that passes
+    // for the wrong reason and is how the missing field got this far.
+    expect(/^\d+ s (ahead|behind)$/.test(hudField('Your best'))).toBe(true);
   });
 });
