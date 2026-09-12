@@ -271,7 +271,7 @@ export function RoutesView({ port, now, save }: RoutesViewProps): JSX.Element {
       <form onSubmit={(event) => void onImport(event)}>
         <p>
           <label htmlFor="route-file">GPX file</label>
-          <input id="route-file" name="file" type="file" accept=".gpx,application/gpx+xml" />
+          <input id="route-file" name="file" type="file" />
         </p>
         <Button type="submit">Import route</Button>
       </form>

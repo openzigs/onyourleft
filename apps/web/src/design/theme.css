@@ -526,6 +526,32 @@ body {
 }
 
 /*
+ * The trainer game (#85, #91), and the second canvas in this client to need
+ * saying so.
+ *
+ * ⚠️ **The rule above for `.oyl-map` predicted this exact failure and the game
+ * shipped without an equivalent** (#236): "a WebGL canvas in a container with
+ * no height renders zero pixels and looks exactly like a map that failed to
+ * load." An unstyled `<canvas>` takes the HTML default intrinsic size of
+ * 300x150 CSS pixels whatever the viewport is, so the renderer drew a correct
+ * scene into a postage stamp beside a full-width HUD, on every device.
+ *
+ * `aspect-ratio` rather than a fixed height, because this one is ridden on a
+ * phone clamped to a handlebar and on a tablet, in both orientations, where the
+ * map is a panel on a reading page. `max-height` is what stops a wide landscape
+ * viewport pushing the HUD off the bottom -- the HUD is the half a rider needs
+ * and the world is the half they can lose.
+ */
+.oyl-game__world {
+  aspect-ratio: 16 / 9;
+  background: var(--oyl-color-ink);
+  border-radius: var(--oyl-radius);
+  display: block;
+  max-height: 60vh;
+  width: 100%;
+}
+
+/*
  * The OpenStreetMap credit.
  *
  * Muted but not hidden, and deliberately not smaller than the body text: ODbL

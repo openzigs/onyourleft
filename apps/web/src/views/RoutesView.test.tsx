@@ -315,6 +315,38 @@ describe('sending a route to a head unit (#74)', () => {
   });
 });
 
+describe('the file input a rider chooses a GPX with', () => {
+  it('carries no accept filter, because Android types a .gpx as octet-stream', async () => {
+    // ⚠️ **This asserts an ABSENCE, and the reason is a measurement rather than
+    // a preference.** `accept=".gpx,application/gpx+xml"` shipped here and made
+    // route import impossible on Android (#233): the system picker filters on
+    // MIME type and does not match on the extension half, and Android's
+    // MediaStore types a `.gpx` as `application/octet-stream` —
+    //
+    //   Row: 174 _display_name=Afternoon_Ride.gpx, mime_type=application/octet-stream
+    //
+    // read from a Pixel Tablet on Android 17. So the one file the rider came
+    // for was the one file the picker greyed out.
+    //
+    // `TransferView` reached the same answer from a different direction and
+    // says so at its own input: a filter "quietly drops them before the batch
+    // sees them". Two screens, two reasons, one rule — and this test is what
+    // stops a third screen learning it a third time.
+    //
+    // ⚠️ **It cannot stand in for the device check.** jsdom has no file picker,
+    // `testing/mount.tsx` deliberately provides no helper for attaching a file,
+    // and nothing here opens a chooser. This pins the attribute; only a device
+    // establishes that a file can be selected. `docs/validation/0002` Part A
+    // carries that step.
+    const stub = routeStub(ATHLETE);
+    const view = await render(stub);
+    const field = view.container.querySelector<HTMLInputElement>('#route-file');
+    if (field === null) throw new Error('no route-file field on this screen');
+
+    expect(field.hasAttribute('accept')).toBe(false);
+  });
+});
+
 describe('pressing Import with no file chosen', () => {
   it('asks for a file rather than reporting bad GPX', async () => {
     // ⚠️ The guard this covers is NOT `instanceof File`, and the reason is the
