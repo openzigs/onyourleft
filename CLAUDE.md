@@ -357,7 +357,7 @@ downstream issue's acceptance criteria depend on these.
 # Exits 0 clean; exits 1 listing each violation by rule id.
 bash scripts/check-repo-rules.sh
 
-# Test the checker itself. Fixture-driven; 100 cases.
+# Test the checker itself. Fixture-driven; 115 cases.
 bash scripts/check-repo-rules.test.sh
 
 # Verify the licence texts are byte-identical to the canonical ones, by
@@ -557,10 +557,12 @@ npm view typescript-eslint peerDependencies.typescript
 | `ADR001` | two ADRs share a number |
 | `ADR002` | an ADR filename is not `NNNN-kebab-case.md` |
 | `ADR003` | an ADR's `## Amendments` section is followed by **any** heading, or there are two of them, or an entry does not open with a bold ISO date, or an entry is dated **before the one above it**, or an **unclosed code fence** would hide any of those — see §7 and [ADR 0013](docs/adr/0013-adr-amendments.md) |
-| `REL001` | signing key material is committed anywhere — by name (`.jks`, `.keystore`, `.p12`, `.pfx`, `.key`, `keystore.properties`) **or** by content (a `PRIVATE KEY` block in a file with an innocent name). #95, and the one rule here whose violation cannot be undone by fixing it |
+| `REL001` | signing key material is committed anywhere — by name (`.jks`, `.keystore`, `.p12`, `.pfx`, `.key`, `keystore.properties`) **or** by content (a `PRIVATE KEY` block in a file with an innocent name). #95, and the one rule here whose violation cannot be undone by fixing it. ⚠️ Since #229 both halves walk the **same** prune list every other rule walks: it used to keep its own, which excluded `fixtures` and kept `coverage`, so a `.jks` under `packages/fit/fixtures/` was invisible while a PEM beside it was reported |
 | `REL002` | `apps/mobile/android/variables.gradle` targets below API **36**, or declares no `targetSdkVersion` at all. Checked here rather than in Gradle because nobody in this environment can run a Gradle build — a rule that only fires inside a build nobody runs never fires |
 | `XML001` | `--` appears inside an XML comment in a non-generated `.xml` file, which XML 1.0 §2.5 forbids and no parser accepts. #225 — the rule exists because `AndroidManifest.xml` shipped in #87 with three of them and passed every gate here for months, until the first Gradle build ever run failed on it |
 | `XML002` | an XML comment is never closed — the `DOC002` failure mode in XML, where the scanner's state sticks, everything after it is silently skipped, and a parser drops every element that follows |
+| `XML003` | a `<![CDATA[` section is never closed. #229, and it is the rule that keeps the two above honest: before it, an unclosed CDATA set the scanner's state and nothing cleared it, so **`XML001` and `XML002` went silent for the rest of the file and it reported clean** — `DOC002`'s own failure mode inside the rule written because of `DOC002`. Closure is now decided where a region opens, so the section is reported **and** the scan carries on |
+| `XML004` | a processing instruction is never closed with `?>`. The same construct class, and the reason a PI is tracked at all: `Comment` is not a production inside `PIContent`, so `<?php <!-- a -- b --> ?>` is valid XML that #225's first version reported as `XML001`. Tracking it fixes that false positive; `XML004` is what stops the tracking becoming a second way to switch the scanner off |
 
 `scripts/check-licence-hashes.sh` enforces one more, separately because it hashes files rather than
 reading paths:
@@ -1764,6 +1766,7 @@ top of an issue **supersedes its body**.
 | Why Dependabot is configured at all, and the one failure it will cause | [`.github/dependabot.yml`](.github/dependabot.yml) |
 | Why a link inside a code fence is not a broken link, and what an unclosed fence does | `scripts/check-doc-links.sh` |
 | Why a manifest no parser accepts passed every gate for months, and what the XML rule deliberately does not check | `scripts/check-repo-rules.sh` §`XML001`, [#225](https://github.com/openzigs/onyourleft/issues/225) |
+| Why an unclosed CDATA section used to switch the XML rules off, and what the scan costs per line | `scripts/check-repo-rules.sh` §`XML003`, [#229](https://github.com/openzigs/onyourleft/issues/229) |
 | Which lint rule enforces which boundary | [`eslint.config.js`](eslint.config.js) and §4d |
 | Why a package's tsconfig narrows `lib` and `types` | `packages/domain/tsconfig.json` and §4d |
 | The canonical unit for a quantity, and the conversion into it | [`packages/domain/README.md`](packages/domain/README.md) |
