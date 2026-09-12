@@ -29,22 +29,26 @@
 
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 
+import { gapAgainst } from './hud/fields';
 import { HudPanel } from './hud/HudPanel';
 import { NO_SCREEN_LOCK, type ScreenLock, type ScreenLockSource } from './hud/wake-lock';
+import { DEFAULT_PACER_INTENSITY, pacerChoice, type PacerChoice } from './pacer-choice';
 import { INITIAL_QUALITY, nextQuality, qualitySettings, type QualityState } from './quality';
+import { RIDE_CONDITIONS } from './rider';
 import { sceneFrame } from './scene';
-import { GameSimulation, atStartLine, type GameState } from './simulation';
+import { GameSimulation, type GameState } from './simulation';
 import { corridorOrigin } from './terrain';
 import type { GameRenderer, GameView as RendererView } from './port';
 import { NO_SENSORS, type GameSensors } from './sensors';
 import {
-  altitudeMetres,
-  degreesCelsius,
-  kilograms,
+  MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM,
+  MINIMUM_INTENSITY_WATTS_PER_KILOGRAM,
+  pacerGap,
+  type BotPacerPlan,
   type GhostTrack,
+  type PacerGap,
   type RouteProfile,
 } from '@onyourleft/domain';
-import { airDensityKilogramsPerCubicMetre, type RideConditions } from '@onyourleft/physics';
 
 /** One route the rider could ride, as the picker needs it. */
 export interface RidableRoute {
@@ -111,6 +115,8 @@ export function GameView(props: GameViewProps): JSX.Element {
   const [routes, setRoutes] = useState<readonly RidableRoute[] | undefined>(undefined);
   const [chosen, setChosen] = useState<RidableRoute | undefined>(undefined);
   const [withGhost, setWithGhost] = useState(false);
+  const [withPacer, setWithPacer] = useState(false);
+  const [intensity, setIntensity] = useState(String(DEFAULT_PACER_INTENSITY));
   const [phase, setPhase] = useState<Phase>('choosing');
   const [state, setState] = useState<GameState | undefined>(undefined);
   const [quality, setQuality] = useState<QualityState>(INITIAL_QUALITY);
@@ -159,14 +165,22 @@ export function GameView(props: GameViewProps): JSX.Element {
   useEffect(() => teardown, [teardown]);
 
   const start = useCallback(
-    async (route: RidableRoute, ghost: boolean): Promise<void> => {
+    async (route: RidableRoute, ghost: boolean, pacer: BotPacerPlan | undefined): Promise<void> => {
       const profile = route.profile;
       ghostRef.current = ghost && port !== undefined ? await port.loadGhost(route.id) : undefined;
-      simulationRef.current = new GameSimulation({
+      const simulation = new GameSimulation({
         profile,
         conditions: RIDE_CONDITIONS,
+        ...(pacer === undefined ? {} : { pacer }),
       });
-      setState(atStartLine(profile));
+      simulationRef.current = simulation;
+      // ⚠️ The simulation's own state rather than `atStartLine(profile)`, which
+      // is what this used to be. The two agreed about the rider and could not
+      // agree about the bot — `atStartLine` takes a profile and knows nothing
+      // about a pacer — so the first frame of every paced ride would have drawn
+      // no bot and shown a dash where the gap goes. Reading the one object that
+      // has the answer is cheaper than teaching a second one to guess it.
+      setState(simulation.state);
       setChosen(route);
       setPhase('riding');
       lockRef.current = (await props.screenLock?.acquire()) ?? NO_SCREEN_LOCK;
@@ -208,11 +222,17 @@ export function GameView(props: GameViewProps): JSX.Element {
       setState(simulation.state);
 
       const origin = corridorOrigin(chosen.profile);
+      const bot = simulation.state.bot;
       viewRef.current?.render(
         sceneFrame({
           profile: chosen.profile,
           origin,
           state: simulation.state,
+          // #237: the bot's odometer, straight off the state the simulation just
+          // advanced. `SceneInput.botDistance` was declared and optional and
+          // never supplied, which is why a built, tested and green pacer drew
+          // nothing on a real 47.53 km route.
+          ...(bot === undefined ? {} : { botDistance: bot.state.distance }),
           ghost: ghostRef.current,
         }),
       );
@@ -241,11 +261,22 @@ export function GameView(props: GameViewProps): JSX.Element {
 
   if (phase === 'choosing' || chosen === undefined || state === undefined) {
     return (
-      <RoutePicker routes={routes} withGhost={withGhost} onGhost={setWithGhost} onStart={start} />
+      <RoutePicker
+        routes={routes}
+        withGhost={withGhost}
+        onGhost={setWithGhost}
+        withPacer={withPacer}
+        onPacer={setWithPacer}
+        intensity={intensity}
+        onIntensity={setIntensity}
+        choice={pacerChoice(withPacer, intensity)}
+        onStart={start}
+      />
     );
   }
 
   const sensors = port?.readSensors() ?? NO_SENSORS;
+  const gap = gapToBot(state);
   return (
     <section className="oyl-game" aria-label="Trainer game">
       <canvas
@@ -261,6 +292,8 @@ export function GameView(props: GameViewProps): JSX.Element {
         state={state}
         cadence={sensors.cadence}
         heartRate={sensors.heartRate}
+        gap={gap}
+        gapTo={gap === undefined ? undefined : 'bot'}
         paused={phase === 'paused'}
         onPause={() => {
           setPhase((current) => (current === 'paused' ? 'riding' : 'paused'));
@@ -275,12 +308,39 @@ export function GameView(props: GameViewProps): JSX.Element {
   );
 }
 
-/** Choosing a route, and whether to race yourself on it. */
+/**
+ * The gap to the bot, or `undefined` when there is no bot to have one from.
+ *
+ * ⚠️ **Built from the ride state and nothing else**, through
+ * `pacer/gap.ts`'s two unwrapped odometers — which is #237's fourth criterion,
+ * and the reason a bot a full lap ahead reads as a lap ahead rather than as
+ * level with you. `gapAgainst` assembles the input from the same `GameState`
+ * the bot's marker is placed from, so the number in the HUD and the shape on
+ * the road cannot disagree.
+ */
+function gapToBot(state: GameState): PacerGap | undefined {
+  const bot = state.bot;
+  if (bot === undefined) {
+    return undefined;
+  }
+  return pacerGap(gapAgainst(state, bot.state.distance));
+}
+
+/** Choosing a route, whether to race yourself on it, and whether to be paced. */
 function RoutePicker(props: {
   readonly routes: readonly RidableRoute[] | undefined;
   readonly withGhost: boolean;
   readonly onGhost: (value: boolean) => void;
-  readonly onStart: (route: RidableRoute, ghost: boolean) => Promise<void>;
+  readonly withPacer: boolean;
+  readonly onPacer: (value: boolean) => void;
+  readonly intensity: string;
+  readonly onIntensity: (value: string) => void;
+  readonly choice: PacerChoice;
+  readonly onStart: (
+    route: RidableRoute,
+    ghost: boolean,
+    pacer: BotPacerPlan | undefined,
+  ) => Promise<void>;
 }): JSX.Element {
   if (props.routes === undefined) {
     return <p>Loading your routes…</p>;
@@ -290,9 +350,21 @@ function RoutePicker(props: {
       <p>No saved routes yet. Import a GPX route on the Routes screen and it will appear here.</p>
     );
   }
+  // ⚠️ The ride control is DISABLED rather than silently dropping the pacer.
+  // Starting a ride that quietly has no bot in it, because the number in the box
+  // could not make one, is the same defect #237 is about arriving from the other
+  // side — and this time the rider would have asked for it.
+  const refused = props.choice.problem !== undefined;
   return (
     <div className="oyl-game__picker">
       <h2>Choose a route</h2>
+      <PacerControls
+        withPacer={props.withPacer}
+        onPacer={props.onPacer}
+        intensity={props.intensity}
+        onIntensity={props.onIntensity}
+        problem={props.choice.problem}
+      />
       <ul>
         {props.routes.map((route) => (
           <li key={route.id}>
@@ -317,8 +389,9 @@ function RoutePicker(props: {
             </label>
             <button
               type="button"
+              disabled={refused}
               onClick={() => {
-                void props.onStart(route, props.withGhost && route.attempts > 0);
+                void props.onStart(route, props.withGhost && route.attempts > 0, props.choice.plan);
               }}
             >
               Ride {route.name}
@@ -331,19 +404,62 @@ function RoutePicker(props: {
 }
 
 /**
- * The rider's conditions.
+ * Whether to be paced, and how hard.
  *
- * ⚠️ A placeholder, and it is one on purpose rather than by omission: mass and
- * air density belong to the athlete and to where they are, and neither has a
- * home in the store yet — `AthleteRecord.mass` exists (schema 6) but nothing
- * writes it, and there is no altitude at all. Wiring those is its own change.
- * Until then a 80 kg rider at sea level is stated here where it can be found,
- * rather than buried at the call site.
+ * Once above the list rather than once per route, unlike the ghost control: a
+ * ghost belongs to a particular route — it is *your* previous attempt on *that*
+ * road — and a pacer belongs to the ride. Rendering the intensity box per route
+ * would put several identically-labelled number inputs on one screen, which is
+ * a worse answer for anybody reading the page with a screen reader than one
+ * control that plainly governs the whole list.
  */
-const RIDE_CONDITIONS: RideConditions = {
-  totalMass: kilograms(80),
-  airDensityKilogramsPerCubicMetre: airDensityKilogramsPerCubicMetre(
-    altitudeMetres(0),
-    degreesCelsius(15),
-  ),
-};
+function PacerControls(props: {
+  readonly withPacer: boolean;
+  readonly onPacer: (value: boolean) => void;
+  readonly intensity: string;
+  readonly onIntensity: (value: string) => void;
+  readonly problem: string | undefined;
+}): JSX.Element {
+  return (
+    <div className="oyl-game__pacer">
+      <label>
+        <input
+          type="checkbox"
+          checked={props.withPacer}
+          onChange={(event) => {
+            props.onPacer(event.target.checked);
+          }}
+        />
+        Ride against a pacer
+      </label>
+      <label>
+        Pacer intensity, watts per kilogram
+        <input
+          type="number"
+          // `inputMode` rather than only `type`, because this is read and typed
+          // on a phone clamped to a handlebar: a decimal keypad is the
+          // difference between 2.5 and 25 at the moment a rider is setting up.
+          inputMode="decimal"
+          min={MINIMUM_INTENSITY_WATTS_PER_KILOGRAM}
+          max={MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM}
+          step={0.1}
+          value={props.intensity}
+          onChange={(event) => {
+            props.onIntensity(event.target.value);
+          }}
+        />
+      </label>
+      {/*
+        ⚠️ `min`/`max` above are a hint to the browser and nothing more — they
+        are trivially bypassed by typing, and they do not exist at all for the
+        rider who pastes. The refusal that counts is `pacerChoice`'s, which is
+        `botPacerPlan`'s own bounds, and it is what disables the ride control.
+      */}
+      {props.problem === undefined ? null : (
+        <p className="oyl-game__problem" role="alert">
+          {props.problem}
+        </p>
+      )}
+    </div>
+  );
+}
