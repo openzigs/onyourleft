@@ -1262,14 +1262,21 @@ user agent, because a Capacitor WebView *is* Chrome and reports itself as Chrome
 `@onyourleft/mobile` and builds the Capacitor transport; in a browser it never downloads a line of
 it. `pnpm run build` shows the split, and `grep -c BleClient` over the entry chunk returns 0.
 
-⚠️ **Trainer control now works on Android too, and this paragraph used to say it did not** — a
-reviewer who remembers "a rider on a phone cannot yet have resistance driven for them" is reading
-the old file. `openCapacitorTrainer` in `apps/web/src/ride/trainer.ts` is the Android counterpart of
-`openWebBluetoothTrainer`, and `apps/mobile/src/ble/fitness-machine-channel.ts` implements
-`packages/sensors/protocol`'s `FitnessMachineChannel` over the plugin. Everything that decides *what
-may be written* — `createTrainerControl`, the bounding, the quantisation, the feature gating — is
-the same platform-free code on both, which is #39's promise being kept for the one operation that
-writes.
+⚠️ **The Android trainer-control path is WRITTEN and has never driven a trainer**, and this
+paragraph used to say "Trainer control now works on Android too" — a reviewer who remembers that
+sentence is reading the old file, and [#230](https://github.com/openzigs/onyourleft/issues/230) is
+why it was wrong. Nothing downstream of pairing could work, because **pairing itself did not**:
+`BleClient.initialize()` was called only from `availability()`, which nothing in `apps/web` calls,
+so every `discover()` reached `requestDevice()` with the plugin uninitialised. #230 fixed that
+(`transport.ts`'s `ensureInitialized`), and what is established today is that the **code** is
+there: `openCapacitorTrainer` in `apps/web/src/ride/trainer.ts` is the Android counterpart of
+`openWebBluetoothTrainer`, `apps/mobile/src/ble/fitness-machine-channel.ts` implements
+`packages/sensors/protocol`'s `FitnessMachineChannel` over the plugin, and everything that decides
+*what may be written* — `createTrainerControl`, the bounding, the quantisation, the feature gating
+— is the same platform-free code on both, which is #39's promise being kept for the one operation
+that writes. What is **not** established is that any of it has reached a trainer: that is
+[validation 0002](docs/validation/0002-android-shell-and-game.md) Parts B–D, and its result tables
+are still empty. Write "works on Android" again only when one of them is filled in.
 
 ⚠️ **The write is `port.write`, never `port.writeWithoutResponse`, and the wrong one is declared on
 the port so the swap is a red test.** `FitnessMachineChannel` warns that an unacknowledged write

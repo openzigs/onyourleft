@@ -20,7 +20,7 @@ import { describe, expect, it } from 'vitest';
 
 import { createCapacitorFitnessMachineChannel } from './fitness-machine-channel';
 import { readCapacitorFitnessMachine } from './fitness-machine';
-import { SCRIPTED_DEVICE, scriptedPort } from './testing';
+import { SCRIPTED_DEVICE, scriptedPort, type ScriptedPort, type ScriptedStack } from './testing';
 import { createCapacitorTransport } from './transport';
 import { unixSeconds } from '@onyourleft/domain';
 import {
@@ -39,9 +39,26 @@ function powerRangeBytes(): DataView {
   return view;
 }
 
+/**
+ * A scripted port with the stack already up.
+ *
+ * ⚠️ Since #230 the double refuses every call before `initialize()`, exactly as
+ * the plugin does — that constraint is what makes "pairing initialises first" a
+ * testable claim rather than a comment. Nothing about this file changes: on a
+ * phone the control point is only reachable through a device the transport
+ * discovered and connected, so the stack is always up by the time a byte is
+ * written to it. These tests now say that out loud instead of resting on a
+ * fixture that was more permissive than the plugin.
+ */
+async function startedPort(stack?: ScriptedStack): Promise<ScriptedPort> {
+  const port = scriptedPort(stack);
+  await port.initialize();
+  return port;
+}
+
 describe('the control point write is acknowledged', () => {
   it('writes through the acknowledged call', async () => {
-    const port = scriptedPort();
+    const port = await startedPort();
     const channel = createCapacitorFitnessMachineChannel(port, SCRIPTED_DEVICE.deviceId);
 
     await channel.writeControlPoint(new Uint8Array([0x00]));
@@ -56,7 +73,7 @@ describe('the control point write is acknowledged', () => {
     // `port.write` with `port.writeWithoutResponse` in the channel, leaves every
     // other test in this file green — which is precisely the failure the
     // interface's own warning describes.
-    const port = scriptedPort();
+    const port = await startedPort();
     const channel = createCapacitorFitnessMachineChannel(port, SCRIPTED_DEVICE.deviceId);
 
     await channel.writeControlPoint(new Uint8Array([0x00]));
@@ -72,7 +89,7 @@ describe('the control point write is acknowledged', () => {
     // applies physical resistance to somebody.
     const scratch = new Uint8Array([0xff, 0xff, 0x05, 0xc8, 0x00, 0xff]);
     const setpoint = scratch.subarray(2, 5);
-    const port = scriptedPort();
+    const port = await startedPort();
     const channel = createCapacitorFitnessMachineChannel(port, SCRIPTED_DEVICE.deviceId);
 
     await channel.writeControlPoint(setpoint);
@@ -90,7 +107,7 @@ describe('control point indications', () => {
     // The interface requires idempotence — it is called before the first write
     // and again after a reconnect — and the plugin rejects a second
     // `startNotifications` on a characteristic already subscribed.
-    const port = scriptedPort();
+    const port = await startedPort();
     const channel = createCapacitorFitnessMachineChannel(port, SCRIPTED_DEVICE.deviceId);
 
     await channel.enableControlPointIndications();
@@ -105,7 +122,7 @@ describe('control point indications', () => {
   });
 
   it('delivers an indication to every listener', async () => {
-    const port = scriptedPort();
+    const port = await startedPort();
     const channel = createCapacitorFitnessMachineChannel(port, SCRIPTED_DEVICE.deviceId);
     await channel.enableControlPointIndications();
 
@@ -128,7 +145,7 @@ describe('control point indications', () => {
     // nothing, so this passes whether the dispatcher copies or not. The test
     // below is the one that earns the copy — and the mutation that removed it
     // came back green until that test existed.
-    const port = scriptedPort();
+    const port = await startedPort();
     const channel = createCapacitorFitnessMachineChannel(port, SCRIPTED_DEVICE.deviceId);
     await channel.enableControlPointIndications();
 
@@ -155,7 +172,7 @@ describe('control point indications', () => {
     // exist when it arrived. `createTrainerControl` subscribes from inside an
     // indication handler when it chains a procedure, so this would complete a
     // procedure that never happened — on the path that sets resistance.
-    const port = scriptedPort();
+    const port = await startedPort();
     const channel = createCapacitorFitnessMachineChannel(port, SCRIPTED_DEVICE.deviceId);
     await channel.enableControlPointIndications();
 
@@ -177,7 +194,7 @@ describe('control point indications', () => {
   });
 
   it('stops delivering to a listener that unsubscribed', async () => {
-    const port = scriptedPort();
+    const port = await startedPort();
     const channel = createCapacitorFitnessMachineChannel(port, SCRIPTED_DEVICE.deviceId);
     await channel.enableControlPointIndications();
 
@@ -193,8 +210,8 @@ describe('control point indications', () => {
 });
 
 describe('fitness machine status', () => {
-  it('subscribes lazily, on the first listener', () => {
-    const port = scriptedPort();
+  it('subscribes lazily, on the first listener', async () => {
+    const port = await startedPort();
     const channel = createCapacitorFitnessMachineChannel(port, SCRIPTED_DEVICE.deviceId);
 
     expect(port.calls.some((call) => call.includes(FITNESS_MACHINE_STATUS))).toBe(false);
@@ -213,7 +230,7 @@ describe('fitness machine status', () => {
     // FTMS makes it optional and real trainers omit it. Losing status costs the
     // client its early warning that control was taken away, and nothing else —
     // so it must not take the ride screen down with it.
-    const port = scriptedPort();
+    const port = await startedPort();
     const failing = {
       ...port,
       startNotifications: (
@@ -236,7 +253,7 @@ describe('fitness machine status', () => {
 
 describe('what the trainer says it will accept', () => {
   it('reads the supported power range off the device', async () => {
-    const port = scriptedPort({
+    const port = await startedPort({
       reads: { [`${FITNESS_MACHINE_SERVICE}|${SUPPORTED_POWER_RANGE}`]: powerRangeBytes() },
     });
 
@@ -250,7 +267,7 @@ describe('what the trainer says it will accept', () => {
     // The one that matters: an unbounded setpoint on a machine whose limits are
     // unknown is the failure this whole path exists to prevent, so the caller
     // has to be able to tell that it does not know.
-    const port = scriptedPort();
+    const port = await startedPort();
 
     const machine = await readCapacitorFitnessMachine(port, SCRIPTED_DEVICE.deviceId);
 
@@ -261,7 +278,7 @@ describe('what the trainer says it will accept', () => {
     // A trainer serving a control point and a power range but no feature bits is
     // a controllable trainer. Refusing it because an optional read failed would
     // turn a working trainer into an uncontrollable one.
-    const port = scriptedPort({
+    const port = await startedPort({
       reads: { [`${FITNESS_MACHINE_SERVICE}|${SUPPORTED_POWER_RANGE}`]: powerRangeBytes() },
     });
 
@@ -275,7 +292,7 @@ describe('what the trainer says it will accept', () => {
   it('treats a malformed characteristic as unknown rather than trusting it', async () => {
     // A device lying about its own capabilities is untrusted input (CLAUDE.md
     // §6), and the safe direction is "we do not know".
-    const port = scriptedPort({
+    const port = await startedPort({
       reads: {
         [`${FITNESS_MACHINE_SERVICE}|${SUPPORTED_POWER_RANGE}`]: new DataView(new ArrayBuffer(1)),
       },
@@ -305,7 +322,7 @@ describe('the id the trainer path is handed', () => {
    * to somebody. This makes the change go red here instead.
    */
   it('is the plugin’s own id, unchanged', async () => {
-    const port = scriptedPort();
+    const port = await startedPort();
     const transport = createCapacitorTransport({
       plugin: port,
       profiles: [],

@@ -117,7 +117,7 @@ rather than after.
 |---|---|
 | `src/ble/plugin-port.ts` | the nine `@capacitor-community/bluetooth-le` calls the transport makes, as an interface — so the transport can be tested without a phone |
 | `src/ble/transport.ts` | `@onyourleft/sensors`' `SensorTransport`, over that port. `packages/sensors` is **untouched**, which is #87's seventh criterion |
-| `src/ble/testing.ts` | a scripted stack. It records call **order**, because the Android workaround is entirely a claim about order |
+| `src/ble/testing.ts` | a scripted stack. It records call **order**, because the Android workaround is entirely a claim about order — and since [#230](https://github.com/openzigs/onyourleft/issues/230) it **enforces** the plugin's own ordering rule: every method but `initialize` rejects with `Bluetooth LE not initialized.` until the stack is up, which is the constraint whose absence let a product that could not pair keep a green suite |
 | `src/permission/notice.ts` | criterion 8 — what a rider is told when Bluetooth will not work, as a pure function so the wording is testable |
 | `src/android/manifest.ts` | reads `uses-permission` and `service` out of a manifest **as a document**. It does not merge one; see §5 |
 | `android/app/src/main/java/…/RecordingService.java` | the `connectedDevice` foreground service |
@@ -192,7 +192,12 @@ The comments now use the em dash the rest of this repository's prose uses.
 | 5 | two overlapping writes both complete | **open.** Reading the plugin's `queue()` is not exercising it |
 | 6 | 40 connect/disconnect cycles, connection 40 still succeeds | **open** — needs a device |
 | 7 | #39's interface satisfied **unchanged** | ✅ **met.** `git diff` shows no change under `packages/sensors`, and `createCapacitorTransport` is annotated `SensorTransport` |
-| 8 | denying a permission produces an explanatory screen | ✅ **met** for the decision; the rendering is the shell's |
+| 8 | denying a permission produces an explanatory screen | ⚠️ **half, and this row used to read "✅ met for the decision".** `permissionNotice` is pure, total over `TransportAvailability` and tested — and **nothing calls it**, because nothing in `apps/web` calls `availability()`. [#230](https://github.com/openzigs/onyourleft/issues/230) is what that cost: a denied permission was rendered as *"no device was chosen"*. The pairing path now reports `not-permitted` as itself, so the rider is told something true; the explanatory *screen* still has no consumer, and wiring one is outstanding |
 
 Still open from the Definition of Done: **tested on at least two OEMs**, and the `adb` commands run
-by somebody. ⚠️ **A build is not a run.** The APK exists and has been installed on nothing.
+by somebody. ⚠️ **A build is not a run** — and this paragraph used to end *"The APK exists and has
+been installed on nothing"*, which is no longer true: it has been installed on a Pixel Tablet
+(`tangorpro`, Android 17 / SDK 37) and launched, which is how
+[#230](https://github.com/openzigs/onyourleft/issues/230) was found. That is the whole of what a
+device has established so far; `docs/validation/0002-android-shell-and-game.md`'s result tables are
+still empty in this repository, so nothing in them may be quoted as a result yet.
