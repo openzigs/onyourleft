@@ -110,7 +110,18 @@ apps/                 AGPL-3.0-or-later, without exception
                         #89's profile, the quality ladder for a throttling
                         phone, the scene, and the one file that names three.
                         ⚠️ Here rather than in apps/mobile because
-                        capacitor.config.ts ships apps/web/dist — see §4h
+                        capacitor.config.ts ships apps/web/dist — see §4h.
+                        Since #237 the simulation also advances the bot pacer,
+                        on the same fixed step as the rider and through
+                        #92's advanceBot rather than a second integrator
+    src/game/pacer-choice.ts
+                        the rider's pacer choice, turned into a plan or into a
+                        refusal (#237) — the one place in the client a
+                        BotPacerPlan is built, and therefore the only place the
+                        rider's own mass could get into one
+    src/game/rider.ts   what the rider weighs and what air they ride through,
+                        until the store carries either. Its own file since #237
+                        so the bot's 75 kg can be asserted against it
     src/game/hud/       the ride HUD (#94) — the eight fields, the dropped
                         sensor that is not a zero, and the wake lock
     src/game/sensors.ts the four metric states the ride controller reports,
@@ -1893,6 +1904,8 @@ top of an issue **supersedes its body**.
 | How the client decides whether it is in a browser or the Android shell | `apps/web/src/support/capacitor.ts`, §4h |
 | Why a rider with no heart rate strap is not told their strap has dropped | `apps/web/src/game/sensors.ts`, `apps/web/src/ride/metrics.ts` |
 | Which previous attempt a ghost races, and why it is the fastest rather than the latest | `apps/web/src/game/ghost-source.ts` §`fastestAttempt` |
+| Where the bot pacer is advanced, and why it is the simulation's loop rather than the render loop | `apps/web/src/game/simulation.ts` §`botCourseFor`, [#237](https://github.com/openzigs/onyourleft/issues/237) |
+| What a rider is told when the pacer intensity they typed cannot make a plan | `apps/web/src/game/pacer-choice.ts` §`pacerChoice` |
 | Why a ghost's distance is integrated from speed, and what a long dropout does to it | `apps/web/src/game/ghost-source.ts` §`GHOST_GAP_TOLERANCE_SECONDS` |
 | How trainer control reaches an FTMS control point on Android | `apps/mobile/src/ble/fitness-machine-channel.ts`, `apps/web/src/ride/trainer.ts` §`openCapacitorTrainer` |
 | Why the unacknowledged write is declared on the plugin port and never called | `apps/mobile/src/ble/plugin-port.ts` §`writeWithoutResponse`, §4h |

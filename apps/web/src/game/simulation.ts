@@ -60,13 +60,24 @@
  * reach for and is the defect. `port.ts` is the seam that keeps the two apart.
  */
 
-import { advance, START_OF_RIDE, type RideConditions, type RideState } from '@onyourleft/physics';
+import {
+  BOT_AT_START_LINE,
+  advance,
+  advanceBot,
+  botDemand,
+  START_OF_RIDE,
+  type BotCourse,
+  type BotTick,
+  type RideConditions,
+  type RideState,
+} from '@onyourleft/physics';
 import {
   gradeAt,
   metres,
   metresPerSecond,
   seconds,
   watts,
+  type BotPacerPlan,
   type GradePercent,
   type Metres,
   type RouteProfile,
@@ -145,6 +156,20 @@ export interface RiderInput {
 export interface SimulationSetup {
   readonly profile: RouteProfile;
   readonly conditions: RideConditions;
+  /**
+   * The bot pacer the rider chose to ride against, if any (#92, wired in #237).
+   *
+   * ⚠️ **A plan, not a mass and not a power.** The plan carries the bot's own
+   * mass — `BOT_MASS_KILOGRAMS`, never the rider's — and `pacing.ts`
+   * turns it into a power against the gradient the bot is on. Passing the
+   * rider's {@link RideConditions} to the bot instead is the one mistake this
+   * field exists to make impossible, and `simulation.test.ts` asserts the two
+   * trajectories differ.
+   *
+   * Absent means there is no bot: {@link GameState.bot} is then `undefined`,
+   * `sceneFrame` places no marker and the HUD's gap field shows a dash.
+   */
+  readonly pacer?: BotPacerPlan | undefined;
 }
 
 /** What one call to {@link GameSimulation.advanceTo} did. */
@@ -175,6 +200,20 @@ export interface GameState {
   readonly grade: GradePercent;
   /** The last input the simulation was advanced with. @see RiderInput */
   readonly input: RiderInput;
+  /**
+   * The bot pacer's own ride, when the rider chose one — #237.
+   *
+   * ⚠️ **It lives on the game state rather than beside it**, for the reason
+   * #94's fourth criterion gives about the HUD: the renderer and the HUD both
+   * read one object, so there is no second odometer for the bot's position on
+   * the road to disagree with the bot's gap in the HUD. `GameView` reads
+   * `bot.state.distance` for both.
+   *
+   * `undefined` when no pacer was chosen, which is what makes the bot's absence
+   * a fact the scene and the HUD can both see rather than a zero they would
+   * both draw.
+   */
+  readonly bot?: BotTick | undefined;
 }
 
 /**
@@ -187,6 +226,8 @@ export interface GameState {
  */
 export class GameSimulation {
   readonly #setup: SimulationSetup;
+  /** The bot's course, built once. `undefined` when no pacer was chosen. */
+  readonly #course: BotCourse | undefined;
   #state: GameState;
   #originMs: number | undefined;
   /**
@@ -204,11 +245,19 @@ export class GameSimulation {
 
   constructor(setup: SimulationSetup) {
     this.#setup = setup;
+    this.#course = botCourseFor(setup);
     this.#state = {
       ride: START_OF_RIDE,
       elapsed: seconds(0),
       grade: gradeAtDistance(setup.profile, START_OF_RIDE.distance),
       input: { power: watts(0), live: false },
+      // On the start line from the first frame rather than from the first tick:
+      // `GameView` renders a scene before the loop has run once, and a bot that
+      // appeared a frame late would pop onto the road in front of the rider.
+      // `botDemand` reads the road without advancing anything.
+      ...(this.#course === undefined
+        ? {}
+        : { bot: { state: BOT_AT_START_LINE, ...botDemand(BOT_AT_START_LINE, this.#course) } }),
     };
   }
 
@@ -256,6 +305,8 @@ export class GameSimulation {
 
     const toRun = Math.min(outstanding, MAXIMUM_STEPS_PER_ADVANCE);
     let ride = this.#state.ride;
+    const course = this.#course;
+    let bot = this.#state.bot;
     for (let step = 0; step < toRun; step += 1) {
       // Re-read per step rather than once per call: over a long stall the rider
       // crosses real terrain, and holding one grade for 200 steps would flatten
@@ -274,6 +325,17 @@ export class GameSimulation {
         },
         this.#setup.conditions,
       );
+      if (course !== undefined && bot !== undefined) {
+        // ⚠️ **In the same loop as the rider, at the same step, and through
+        // `advanceBot` rather than through `advance` directly.** Both halves are
+        // #237's second acceptance criterion. The same loop is what makes the
+        // bot skip exactly the time the rider skips, so a backgrounded phone
+        // cannot hand it a lead; `advanceBot` is what makes "the bot and the
+        // rider go through the same tick" a fact about the call graph, which is
+        // what `packages/physics/src/pacer.ts` exists for and what a second
+        // integrator here would quietly make false.
+        bot = advanceBot(bot.state, seconds(SIMULATION_STEP_SECONDS), course);
+      }
     }
 
     // Credit the whole outstanding amount even when only part of it was
@@ -287,6 +349,7 @@ export class GameSimulation {
       elapsed: seconds(this.#stepsCredited * SIMULATION_STEP_SECONDS),
       grade: gradeAtDistance(this.#setup.profile, ride.distance),
       input,
+      ...(bot === undefined ? {} : { bot }),
     };
     return { steps: toRun, skippedSeconds: skippedSteps * SIMULATION_STEP_SECONDS };
   }
@@ -303,7 +366,46 @@ function gradeAtDistance(profile: RouteProfile, distance: Metres): GradePercent 
   return gradeAt(profile, distance);
 }
 
-/** A stationary rider, for a screen that needs a state before the first tick. */
+/**
+ * The bot's course, or `undefined` when no pacer was chosen.
+ *
+ * ⚠️ **The rider's `totalMass` is dropped rather than passed through**, and
+ * `BotCourse` omits the field for exactly this reason: *"a caller who could
+ * pass a mass here would reasonably expect it to be used, and the one thing #92
+ * fixes about the bot is that its mass is 75 kg and not the rider's."* The
+ * environmental half — air density, headwind, coefficients, integration step —
+ * is shared on purpose: the bot and the rider are on the same road in the same
+ * air, and it is only the mass and the power that are the bot's own.
+ */
+function botCourseFor(setup: SimulationSetup): BotCourse | undefined {
+  if (setup.pacer === undefined) {
+    return undefined;
+  }
+  const conditions = setup.conditions;
+  return {
+    profile: setup.profile,
+    plan: setup.pacer,
+    airDensityKilogramsPerCubicMetre: conditions.airDensityKilogramsPerCubicMetre,
+    ...(conditions.headwindMetresPerSecond === undefined
+      ? {}
+      : { headwindMetresPerSecond: conditions.headwindMetresPerSecond }),
+    ...(conditions.coefficients === undefined ? {} : { coefficients: conditions.coefficients }),
+    ...(conditions.integrationStepSeconds === undefined
+      ? {}
+      : { integrationStepSeconds: conditions.integrationStepSeconds }),
+  };
+}
+
+/**
+ * A stationary rider, for a caller that needs a state before the first tick.
+ *
+ * ⚠️ **The ride screen no longer uses this, and #237 is why.** It takes a
+ * profile and knows nothing about a pacer, so the state it returns has no bot
+ * in it — a paced ride seeded from here would draw no bot and show a dash for
+ * the gap until the first tick landed. `GameView` reads `simulation.state`
+ * instead, which is the object that has the answer. What still calls it is
+ * `browser/game-harness.ts`, which builds a scene with no simulation at all.
+ */
 export function atStartLine(profile: RouteProfile): GameState {
   return {
     ride: { speed: metresPerSecond(0), distance: metres(0) },

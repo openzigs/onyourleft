@@ -779,6 +779,14 @@ recording engine is:
   the same profile. The split across two packages is **forced rather than chosen** — the rule needs
   `gradeAt`, which is in domain; the rider needs `advance`, which is in physics, and physics depends
   on domain, so the reverse would be a cycle.
+  ⚠️ **That pair had no caller under `apps/` until
+  [#237](https://github.com/openzigs/onyourleft/issues/237)**, and a reader who remembers this list
+  as three producers and no consumer is reading the old file. `advanceBot` is now called by
+  `apps/web/src/game/simulation.ts`, inside the **same fixed-step loop as the rider** — so the bot
+  goes through one integrator with the rider rather than two that agree, and a backgrounded phone
+  that costs the rider steps costs the bot exactly the same ones. It was built, tested, green and
+  unreachable for five weeks, which is the shape #237 names: *an optional parameter nobody supplies
+  and a function nobody calls are both perfectly well typed*, and no gate here looks at wiring.
 
 ⚠️ **The bot pacer is outside Peloton's leaderboard claims by construction, not by argument**, and
 [ADR 0007](adr/0007-patent-posture.md) D4 is where that is decided. '026 claim 1 needs *"archived

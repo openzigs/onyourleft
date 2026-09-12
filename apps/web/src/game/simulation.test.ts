@@ -25,15 +25,22 @@ import {
   type RiderInput,
   type SimulationSetup,
 } from './simulation';
-import { airDensityKilogramsPerCubicMetre } from '@onyourleft/physics';
+import {
+  BOT_AT_START_LINE,
+  advanceBot,
+  airDensityKilogramsPerCubicMetre,
+  type BotCourse,
+} from '@onyourleft/physics';
 import {
   altitudeMetres,
+  botPacerPlan,
   degreesCelsius,
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
   kilograms,
   routeProfile,
+  seconds,
   watts,
   type RoutePoint,
 } from '@onyourleft/domain';
@@ -267,5 +274,137 @@ describe('the gradient comes from the route', () => {
     }
 
     expect(simulation.state.grade).not.toBe(climbing);
+  });
+});
+
+/**
+ * The bot pacer, once the simulation is the thing that advances it — #237.
+ *
+ * ⚠️ **These are wiring assertions, not arithmetic ones.** `packages/physics`'s
+ * own `pacer.test.ts` already proves `advanceBot` is right and that it goes
+ * through `advance`; every one of those tests passed against a product with no
+ * pacer in it, which is #237's own complaint. What is missing is a test that
+ * fails when the *client* stops calling it, and that is what this block is.
+ *
+ * The central assertion is {@link advanceBot}-for-`advanceBot` equality against
+ * a course this file builds itself. It is strong in three separate directions
+ * at once: a second integrator in the client diverges, a bot advanced at the
+ * wrong step size diverges, and a bot ridden at the rider's own mass diverges.
+ */
+describe('the bot pacer', () => {
+  /** The plan a rider choosing 2.5 w/kg gets. */
+  const PLAN = botPacerPlan(2.5);
+
+  /** The course the bot should be riding, assembled here and not imported. */
+  function course(setup: SimulationSetup): BotCourse {
+    return {
+      profile: setup.profile,
+      plan: PLAN,
+      airDensityKilogramsPerCubicMetre: setup.conditions.airDensityKilogramsPerCubicMetre,
+    };
+  }
+
+  /** `advanceBot` run directly, one fixed step at a time. */
+  function reference(setup: SimulationSetup, steps: number, using: BotCourse = course(setup)) {
+    let state = BOT_AT_START_LINE;
+    for (let step = 0; step < steps; step += 1) {
+      state = advanceBot(state, seconds(SIMULATION_STEP_SECONDS), using).state;
+    }
+    return state;
+  }
+
+  it('is absent when the rider did not choose one', () => {
+    const simulation = new GameSimulation(hillyRoute());
+    simulation.advanceTo(0, PEDALLING);
+    simulation.advanceTo(10_000, PEDALLING);
+
+    expect(simulation.state.bot).toBeUndefined();
+  });
+
+  it('is on the start line before the first tick, so a frame has it to draw', () => {
+    const setup = { ...hillyRoute(), pacer: PLAN };
+    const simulation = new GameSimulation(setup);
+
+    expect(simulation.state.bot?.state.distance).toBe(0);
+    expect(simulation.state.bot?.power).toBeGreaterThan(0);
+  });
+
+  it('rides the route the rider is on', () => {
+    const setup = { ...hillyRoute(), pacer: PLAN };
+    const simulation = new GameSimulation(setup);
+    simulation.advanceTo(0, PEDALLING);
+    simulation.advanceTo(30_000, PEDALLING);
+
+    expect(simulation.state.bot?.state.distance).toBeGreaterThan(0);
+  });
+
+  it('goes through advanceBot, step for step, and through nothing else', () => {
+    const setup = { ...hillyRoute(), pacer: PLAN };
+    const simulation = new GameSimulation(setup);
+    simulation.advanceTo(0, PEDALLING);
+    // Exactly 100 fixed steps of wall clock.
+    simulation.advanceTo(100 * SIMULATION_STEP_SECONDS * 1000, PEDALLING);
+
+    const expected = reference(setup, 100);
+    // Exact, not close: this is the same arithmetic or it is not the same
+    // arithmetic. A tolerance here would admit the second integrator the
+    // criterion exists to forbid.
+    expect(simulation.state.bot?.state.distance).toBe(expected.distance);
+    expect(simulation.state.bot?.state.speed).toBe(expected.speed);
+  });
+
+  it('rides at the bot’s mass and not the rider’s', () => {
+    const setup = { ...hillyRoute(), pacer: PLAN };
+    const simulation = new GameSimulation(setup);
+    simulation.advanceTo(0, PEDALLING);
+    simulation.advanceTo(100 * SIMULATION_STEP_SECONDS * 1000, PEDALLING);
+
+    const atRidersMass = reference(setup, 100, {
+      ...course(setup),
+      plan: botPacerPlan(PLAN.intensityWattsPerKilogram, setup.conditions.totalMass),
+    });
+
+    // The rider is 80 kg and the bot is 75; a bot handed the rider's conditions
+    // wholesale would match this instead of the reference above.
+    expect(setup.conditions.totalMass).not.toBe(PLAN.massKilograms);
+    expect(simulation.state.bot?.state.distance).not.toBe(atRidersMass.distance);
+  });
+
+  it('rides on whether or not the rider is pedalling', () => {
+    const setup = { ...hillyRoute(), pacer: PLAN };
+    const simulation = new GameSimulation(setup);
+    const stopped: RiderInput = { power: watts(0), live: true };
+    simulation.advanceTo(0, stopped);
+    simulation.advanceTo(100 * SIMULATION_STEP_SECONDS * 1000, stopped);
+
+    expect(simulation.state.ride.distance).toBe(0);
+    expect(simulation.state.bot?.state.distance).toBe(reference(setup, 100).distance);
+  });
+
+  it('skips the same time the rider skips, so a backgrounded phone does not hand it a lead', () => {
+    const setup = { ...hillyRoute(), pacer: PLAN };
+    const simulation = new GameSimulation(setup);
+    simulation.advanceTo(0, PEDALLING);
+    // Five minutes away from the app: far more than MAXIMUM_STEPS_PER_ADVANCE.
+    const tick = simulation.advanceTo(300_000, PEDALLING);
+
+    expect(tick.skippedSeconds).toBeGreaterThan(0);
+    expect(simulation.state.bot?.state.distance).toBe(
+      reference(setup, MAXIMUM_STEPS_PER_ADVANCE).distance,
+    );
+  });
+
+  it('reports the gradient under the bot, which is not the rider’s', () => {
+    const setup = { ...hillyRoute(), pacer: PLAN };
+    const simulation = new GameSimulation(setup);
+    const coasting: RiderInput = { power: watts(0), live: true };
+    simulation.advanceTo(0, coasting);
+    for (let nowMs = 1_000; nowMs <= 120_000; nowMs += 1_000) {
+      simulation.advanceTo(nowMs, coasting);
+    }
+
+    // The rider never left the start line, so the bot is somewhere else on a
+    // route whose gradient changes — a single shared grade would be equal.
+    expect(simulation.state.bot?.grade).not.toBe(simulation.state.grade);
   });
 });
