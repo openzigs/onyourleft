@@ -192,7 +192,14 @@ export function GameView(props: GameViewProps): JSX.Element {
     viewRef.current?.destroy();
     viewRef.current = undefined;
     simulationRef.current = undefined;
-    outcomeRef.current = undefined;
+    // ⚠️ **`outcomeRef` is deliberately NOT cleared here, and `ghostRef` never
+    // was.** Both belong to the *ride*, and `start` is where a ride begins —
+    // this callback releases resources. Clearing it in both places made each
+    // assignment individually invisible: deleting either left the whole suite
+    // green, because the other covered for it, which is CLAUDE.md §5's "a test
+    // that cannot fail is not a test" seen from the implementation's side.
+    // There is exactly one way back to the picker (`onEnd`) and exactly one way
+    // out of it (`start`), so one reset is the whole of it.
   }, []);
 
   useEffect(() => teardown, [teardown]);
@@ -201,8 +208,14 @@ export function GameView(props: GameViewProps): JSX.Element {
     async (route: RidableRoute, ghost: boolean, pacer: BotPacerPlan | undefined): Promise<void> => {
       const profile = route.profile;
       ghostRef.current = ghost && port !== undefined ? await port.loadGhost(route.id) : undefined;
-      // A new ride settles its own result. Left over from the last one it would
-      // announce a verdict on a ghost that is no longer loaded.
+      // ⚠️ **A new ride settles its own result, and this is the only line that
+      // makes that true.** `ghost-outcome.ts` returns a settled answer
+      // unchanged for ever — that latch is its whole defence against a rider
+      // who keeps riding — so a verdict carried over from the last ride is
+      // never revisited. A rider who beat their best on one route and then
+      // started another would be congratulated on frame one, about an attempt
+      // that is no longer loaded: the same false congratulation that module
+      // exists to prevent, arriving from the other direction.
       outcomeRef.current = undefined;
       const simulation = new GameSimulation({
         profile,

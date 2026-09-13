@@ -93,6 +93,30 @@ export interface HudReading {
    * as two.
    */
   readonly detail?: string | undefined;
+  /**
+   * That {@link value} is a **word** rather than a magnitude, so it is set
+   * smaller — #259.
+   *
+   * ⚠️ **A layout flag in a pure function, and it is here rather than in the
+   * stylesheet because CSS cannot ask the question.** `theme.css` gives a HUD
+   * value 2.5 rem inside a `repeat(auto-fit, minmax(7rem, 1fr))` grid track. A
+   * track never grows past its content the way a flex item does — the `7rem`
+   * is a floor, not an `auto` — and a **single word has no break opportunity**,
+   * so a word wider than the track spills across the field beside it and sits
+   * on top of that field's number. Measured in the repository's pinned Chromium
+   * at 390 px: the track is 114 px and `Matched` is 151 px.
+   *
+   * {@link detail} exists for the other half of this: #255 moved the gap's
+   * *phrase* out of the value for exactly this reason, and #259 walked back
+   * into it with one word instead of three. Breaking the word instead would be
+   * worse than either — `Finish`, `Beat` and `Match` on a line of their own are
+   * different words, on a panel #94 requires to be glanceable.
+   *
+   * Absent means a number, which is every other field. `LEVEL` is left a number
+   * deliberately: it measures 89 px and fits, and changing what an untouched
+   * field renders at is not this issue's to do.
+   */
+  readonly word?: boolean | undefined;
 }
 
 /** One rider being raced, and how far ahead of the rider they are. */
@@ -268,7 +292,9 @@ function gapReading(chase: ChasedGap): HudReading {
     // would be a dash — the result does not depend on anybody's current speed
     // and pretending it is unknown would hide something that is known.
     const { value, detail } = SETTLED[chase.outcome];
-    return { key, label, value, unit: '', detail, stale: false };
+    // `word` because all three of these are — see {@link HudReading.word} for
+    // what a word does to a 7 rem grid track at 2.5 rem.
+    return { key, label, value, unit: '', detail, stale: false, word: true };
   }
   const seconds = chase.gap.seconds;
   if (seconds === undefined) {

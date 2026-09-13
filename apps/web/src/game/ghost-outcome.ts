@@ -43,16 +43,24 @@
  *
  * ## What it still cannot get right, and why that is the floor
  *
- * ⚠️ A ride stalled across **both** crossings — the phone backgrounded while
- * the rider is short of the attempt's distance, and foregrounded once they are
- * past it and its clock has run out — presents one frame in which both became
- * true, and there is no evidence left in the state to say which happened first.
- * It is reported as `beaten`. The window is bounded by
- * `simulation.ts` §`MAXIMUM_STEPS_PER_ADVANCE`, which is ten seconds of riding,
- * and closing it outright would mean the simulation recording the rider's
- * odometer at the attempt's finishing time — a second source of truth for a
- * number that exists to settle one field. It is written down here rather than
- * left to be rediscovered.
+ * ⚠️ A ride stalled across **both** crossings — the loop stops while the rider
+ * is short of the attempt's distance and resumes once they are past it and its
+ * clock has run out — presents one frame in which both became true, and there
+ * is no evidence left in the state to say which happened first. It is reported
+ * as `beaten`. The window is bounded by `simulation.ts`
+ * §`MAXIMUM_STEPS_PER_ADVANCE`, which is ten seconds of riding, and closing it
+ * outright would mean the simulation recording the rider's odometer at the
+ * attempt's finishing time — a second source of truth for a number that exists
+ * to settle one field. It is written down here rather than left to be
+ * rediscovered.
+ *
+ * ⚠️ **"Stalled" is not only a backgrounded phone, and this used to say it
+ * was.** `GameView`'s loop effect returns early whenever the phase is not
+ * `riding`, so the **Pause** button produces exactly the same catch-up burst:
+ * no frames while it is held, and one `advanceTo` covering the lot when it is
+ * released. A rider pausing for a drink is the ordinary way into this window,
+ * not an unusual one, which makes the ten-second bound the thing that keeps it
+ * small rather than its rarity.
  *
  * ## What it is not
  *
@@ -105,7 +113,18 @@ export function settleGhostOutcome(
   const reached: boolean = state.ride.distance >= ghost.totalDistance;
   if (!ghostFinished(ghost, state)) {
     // ⚠️ **Settled here, while the attempt is still riding, and that is the
-    // exact moment of the win rather than an approximation of it.** The rider
+    // exact moment of the win rather than an approximation of it.**
+    //
+    // This is deliberately WIDER than #259's first criterion, which asks only
+    // about the case where *"the ghost has finished and the rider has not"*. A
+    // rider who gets there first has won at the instant they get there, and the
+    // criterion's case is the one that needed fixing rather than the whole of
+    // the question. Narrowing it to match would mean waiting for the attempt's
+    // clock to run out before congratulating somebody who is already past the
+    // line — visibly late on a fast win, and up to ten seconds late after a
+    // pause.
+    //
+    // The rider
     // has covered the attempt's whole distance and the attempt's clock has not
     // run out, so they got there first — by however much of it is left. Waiting
     // for the attempt to finish before saying so would decide the same question

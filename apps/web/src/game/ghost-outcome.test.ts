@@ -75,9 +75,16 @@ describe('a rider who gets there first is told at the moment they do', () => {
   /**
    * ⚠️ Settled while the attempt is still riding, which is the exact instant of
    * the win rather than an approximation of it. Waiting for its clock to run
-   * out would decide the same question later — and after a backgrounded phone,
-   * up to ten seconds of riding later, which is ten seconds of road credited to
-   * a rider who may not have earned it.
+   * out would decide the same question later — and after a stall, up to ten
+   * seconds of riding later, which is ten seconds of road credited to a rider
+   * who may not have earned it. (A stall is a paused ride as readily as a
+   * backgrounded phone; the module header says why.)
+   *
+   * ⚠️ **Wider than #259's first criterion, deliberately.** That criterion is
+   * about the case where the attempt has finished and the rider has not. A
+   * rider who gets there first has won at the instant they get there, and
+   * narrowing this to the criterion's wording would mean withholding the news
+   * from exactly the rider the issue is named for.
    */
   it('says beaten the moment the rider covers its distance inside its time', () => {
     expect(settleGhostOutcome(undefined, GHOST, riding(45, 1_250))).toBe('beaten');
@@ -125,6 +132,16 @@ describe('the result is settled once and never revisited', () => {
     expect(settleGhostOutcome(atFinish, GHOST, riding(200, 1_505))).toBe('beaten');
   });
 
+  /**
+   * ⚠️ **A state production cannot reach, pinned on purpose.** `GameView`
+   * clears the settled answer in `start`, so a loaded ghost and a settled
+   * outcome arrive and depart together and this combination never occurs in the
+   * running app — `GameView.test.tsx` §*"does not carry one ride's result into
+   * the next"* is what holds that true, and is where the real defect would
+   * show. What this pins is the function's own contract: `settled` wins over
+   * every other input, including a missing ghost. A reader who takes it for a
+   * description of the app would be reading it wrongly.
+   */
   it('keeps a settled result even if the ghost is no longer loaded', () => {
     expect(settleGhostOutcome('beaten', undefined, riding(600, 20))).toBe('beaten');
   });
@@ -133,13 +150,20 @@ describe('the result is settled once and never revisited', () => {
 /**
  * ⚠️ **Where this stops working, pinned rather than described.**
  *
- * A phone backgrounded across *both* crossings presents one frame in which the
- * rider is past the attempt's distance **and** its clock has run out, with no
+ * A ride stalled across *both* crossings presents one frame in which the rider
+ * is past the attempt's distance **and** its clock has run out, with no
  * evidence left of which happened first. The answer is `beaten`, and it is
  * wrong for a rider who was in fact slower. The window is bounded by
  * `simulation.ts` §`MAXIMUM_STEPS_PER_ADVANCE` — ten seconds of riding — and
  * closing it would mean the simulation recording the rider's odometer at the
  * attempt's finishing time.
+ *
+ * ⚠️ **A stall is not only a backgrounded phone.** `GameView`'s loop effect
+ * returns early whenever the phase is not `riding`, so the **Pause** button
+ * produces the identical catch-up burst — no frames while it is held, one
+ * `advanceTo` covering the lot when it is released. A rider pausing for a drink
+ * is the ordinary way into this window rather than an unusual one, which is why
+ * the ten-second bound is what keeps it small and not its rarity.
  *
  * This test exists so that fixing it turns something red on purpose rather than
  * quietly changing a claim nobody wrote down.

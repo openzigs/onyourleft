@@ -432,6 +432,40 @@ describe('the gap to whatever the rider is chasing', () => {
       expect(field.value).toBe('10');
       expect(field.detail).toBe('ahead of you');
     });
+
+    /**
+     * ⚠️ A **layout** flag, asserted in a test about formatting, because this
+     * is the only place that produces it. `fields.ts` §`HudReading.word` is the
+     * measurement: 2.5 rem inside a `minmax(7rem, 1fr)` grid track fits about
+     * five characters, a single word cannot wrap, and all three of these are
+     * longer than that. `HudPanel.test.tsx` is the other half — that the flag
+     * reaches the element.
+     */
+    it.each(['beaten', 'level', 'not-beaten'] as const)(
+      'marks the settled value (%s) as a word rather than a magnitude',
+      (outcome) => {
+        const field = fieldNamed(
+          { ...baseInput(), chases: [{ to: 'ghost', gap: stillAhead, outcome }] },
+          'gap-ghost',
+        );
+
+        expect(field.word).toBe(true);
+        // The word is longer than the track fits at the size a number is set
+        // in, which is the whole reason the flag exists. A shorter one would
+        // not need it and this assertion says which case is which.
+        expect(field.value.length).toBeGreaterThan(5);
+      },
+    );
+
+    it('does not mark a number, a dash or a live gap', () => {
+      const input = baseInput();
+      const live = fieldNamed(
+        { ...input, chases: [{ to: 'ghost', gap: stillAhead }] },
+        'gap-ghost',
+      );
+      expect(live.word).toBeUndefined();
+      expect(hudReadings(input).every((reading) => reading.word === undefined)).toBe(true);
+    });
   });
 
   it('builds its gap input from the rider’s own state', () => {

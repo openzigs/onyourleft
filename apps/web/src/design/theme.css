@@ -718,6 +718,28 @@ body {
   color: var(--oyl-color-hud-ink);
 }
 
+/* #259. A value that is a WORD rather than a magnitude.
+
+   ⚠️ The grid track above is `minmax(7rem, 1fr)`, and `7rem` is a floor rather
+   than an `auto`: the track does not grow to fit its content. A single word has
+   no break opportunity either, so at 2.5 rem anything past about five
+   characters spills sideways across the next field and lands on its number.
+   Measured in the pinned Chromium at 390 px, where the track is 114 px:
+   `Beaten` 120 px, `Finished` 144 px, `Matched` 151 px — all three over, and
+   `Matched` and `Finished` are over the 128 px track in landscape too.
+
+   1.5 rem is chosen against the 7 rem FLOOR rather than against either of those
+   measurements, because the floor is the narrowest a track can be: 151 px ×
+   (1.5 / 2.5) = 91 px inside 112 px. Still far larger than the 0.875 rem label
+   beside it, which is what keeps the field glanceable (#94).
+
+   Deliberately no `overflow-wrap`. A longer word should be caught rather than
+   quietly broken into `Finish` and `ed`, which are different words on a panel
+   read at arm's length. */
+.oyl-hud__value--word {
+  font-size: 1.5rem;
+}
+
 .oyl-hud__unit {
   font-size: var(--oyl-font-size-md);
   color: var(--oyl-color-hud-ink-muted);

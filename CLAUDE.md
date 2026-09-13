@@ -151,6 +151,13 @@ apps/                 AGPL-3.0-or-later, without exception
     src/game/ghost-source.ts
                         which attempt a rider races, and how a ghost's distance
                         is integrated when no distance channel exists
+    src/game/ghost-outcome.ts
+                        how the race against that attempt ended (#259) — the
+                        one answer in game/ that is LATCHED rather than derived
+                        from the current state, why re-deriving it congratulates
+                        a slower rider who keeps pedalling, and the one case it
+                        gets wrong with the bound on it. `GameView` holds the
+                        single frame of memory and clears it in `start`
   mobile/             Capacitor shell wrapping the same web build (#85, #87)
     android/            the generated Android project, plus the connectedDevice
                         foreground service and its plugin bridge — MIT template
@@ -1947,6 +1954,10 @@ top of an issue **supersedes its body**.
 | Where the bot pacer is advanced, and why it is the simulation's loop rather than the render loop | `apps/web/src/game/simulation.ts` §`botCourseFor`, [#237](https://github.com/openzigs/onyourleft/issues/237) |
 | What a rider is told when the pacer intensity they typed cannot make a plan | `apps/web/src/game/pacer-choice.ts` §`pacerChoice` |
 | Why a ghost's distance is integrated from speed, and what a long dropout does to it | `apps/web/src/game/ghost-source.ts` §`GHOST_GAP_TOLERANCE_SECONDS` |
+| Why the result of racing your own best is latched, and what re-deriving it would tell a slower rider | `apps/web/src/game/ghost-outcome.ts` |
+| Which stall this gets wrong, and why a paused ride is one as readily as a backgrounded phone | `apps/web/src/game/ghost-outcome.ts` §"What it still cannot get right", `apps/web/src/game/simulation.ts` §`MAXIMUM_STEPS_PER_ADVANCE` |
+| What stops one ride's result being announced on the first frame of the next | `apps/web/src/game/GameView.tsx` §`start`, and the mutation note in §`teardown` |
+| Why a HUD value that is a word is set smaller than one that is a number | `apps/web/src/game/hud/fields.ts` §`HudReading.word`, `apps/web/src/design/theme.css` §`.oyl-hud__value--word`, `apps/web/src/game/hud/hud-value-size.test.ts` |
 | How trainer control reaches an FTMS control point on Android | `apps/mobile/src/ble/fitness-machine-channel.ts`, `apps/web/src/ride/trainer.ts` §`openCapacitorTrainer` |
 | Why the unacknowledged write is declared on the plugin port and never called | `apps/mobile/src/ble/plugin-port.ts` §`writeWithoutResponse`, §4h |
 | What a trainer that reports no power range gets, and why | `apps/mobile/src/ble/fitness-machine.ts` |
