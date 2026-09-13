@@ -314,6 +314,11 @@ export interface RoadCorridor {
    * Produced here rather than in the renderer because the road is no longer a
    * single strip: it is three lanes and a variable run of marks, and the shape
    * of that index list is a property of the geometry this file builds.
+   *
+   * ⚠️ **Borrowed, not owned.** Unlike {@link vertices} and {@link colours},
+   * this array is shared between every corridor built at the same configuration
+   * — see {@link roadIndices}. Read it; a caller that wants to change it copies
+   * it first.
    */
   readonly indices: Uint32Array;
   /**
@@ -656,6 +661,33 @@ function writeMarkEdge(
 }
 
 /**
+ * The last index list built, and the three numbers that determined it.
+ *
+ * ⚠️ **A frame-rate optimisation, and the reason {@link RoadCorridor.indices}
+ * is borrowed rather than owned.** `roadCorridor` runs inside
+ * `requestAnimationFrame`, and for a fixed corridor configuration
+ * {@link roadIndices}' three arguments do not change from one frame to the
+ * next: the default 10 m-grid corridor rebuilt an identical 1 116-entry
+ * `Uint32Array` — 4.5 kB — sixty times a second, on the thread GATT
+ * notifications arrive on. #240's NFR-2.
+ *
+ * Handing the same instance back is safe because the renderer *copies* what it
+ * is given into its own buffer rather than keeping the reference
+ * (`three-renderer.ts` §`upload`); nothing in the program mutates a corridor's
+ * indices. The key is every input the list depends on — `ROAD_COLUMNS` is a
+ * constant — so the cache cannot return a stale list for a corridor whose shape
+ * changed.
+ */
+let lastIndices:
+  | {
+      readonly pointCount: number;
+      readonly slots: number;
+      readonly firstMarkVertex: number;
+      readonly indices: Uint32Array;
+    }
+  | undefined;
+
+/**
  * Two triangles per quad, for every lane of the ribbon and every mark.
  *
  * One index list for the whole road, because there is one mesh. The winding is
@@ -664,7 +696,18 @@ function writeMarkEdge(
  * crests in front of them.
  */
 function roadIndices(pointCount: number, slots: number, firstMarkVertex: number): Uint32Array {
-  // Two columns per lane.  ROAD_COLUMNS
+  const cached = lastIndices;
+  if (
+    cached !== undefined &&
+    cached.pointCount === pointCount &&
+    cached.slots === slots &&
+    cached.firstMarkVertex === firstMarkVertex
+  ) {
+    return cached.indices;
+  }
+
+  // Two columns per lane — see {@link ROAD_COLUMNS}, which counts both edge
+  // lines and the carriageway.
   const lanes = ROAD_COLUMNS / 2;
   const segments = Math.max(0, pointCount - 1);
   const indices = new Uint32Array((lanes * segments + slots) * 6);
@@ -690,6 +733,7 @@ function roadIndices(pointCount: number, slots: number, firstMarkVertex: number)
     const base = firstMarkVertex + slot * 4;
     quad(base, base + 1, base + 2, base + 3);
   }
+  lastIndices = { pointCount, slots, firstMarkVertex, indices };
   return indices;
 }
 

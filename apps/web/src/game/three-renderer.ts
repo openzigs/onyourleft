@@ -336,6 +336,14 @@ class ThreeGameView implements GameView {
     }
     upload(this.#roadGeometry.getAttribute('position') as BufferAttribute, vertices);
     upload(this.#roadGeometry.getAttribute('color') as BufferAttribute, colours);
+    // ⚠️ `getIndex()` is `BufferAttribute | null`, and this cast rests on an
+    // invariant that lives in another file: `terrain.ts` §`markSlotCount`
+    // returns `floor(...) + 2`, so every corridor carries at least two mark
+    // slots, so `indices.length` is at least 12 and the branch above has always
+    // run by the time we get here. `terrain.test.ts` §"always has room for at
+    // least one whole mark and one clipped one" is what pins it, because a
+    // guard here would be a branch no test could take — the shape #242's own
+    // review removed from `roadTint`.
     upload(this.#roadGeometry.getIndex() as BufferAttribute, indices);
     // Draw only the triangles this frame actually has, so a shorter corridor
     // does not draw stale ones left in the buffer from a longer one.

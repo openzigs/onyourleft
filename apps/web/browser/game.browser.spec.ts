@@ -377,6 +377,12 @@ test.describe('the road reads as a road — #242', () => {
   test('still draws the whole road in one call', async ({ page }) => {
     const result = await harness(page);
 
+    // ⚠️ If this goes red at some number **other** than 6, read the
+    // enumeration above before reading `terrain.ts`: the literal is the whole
+    // scene, not the road, so a later sub-issue that adds a mesh — or a harness
+    // that starts showing the ghost — moves it for a reason that has nothing to
+    // do with the road being one call. Six is the failure that means what this
+    // test's name says.
     expect(result.drawCallsPerFrame).toBe(4);
   });
 });

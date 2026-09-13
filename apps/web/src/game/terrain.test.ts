@@ -502,6 +502,58 @@ describe('the pattern does not move when the rider does — #242', () => {
   });
 });
 
+describe('the centre line is painted on the road, not on the odometer — #242', () => {
+  /**
+   * ⚠️ **The wrap-versus-odometer confusion this file has already paid for
+   * once**, one function over. `CorridorPoint.along` records #253: a rider's
+   * distance is an odometer and keeps counting past the end of a loop, while
+   * the route's own distance wraps back to zero. `writeCentreLine` chooses its
+   * marks at route distances and then has to carry them back onto the ribbon's
+   * *unwrapped* parameter, and the single line that does that is invisible to
+   * every other test in this file — because they all use `straightClimb()`,
+   * where `distanceOnRoute` clamps and the correction is always exactly zero.
+   *
+   * What it costs is not a shift: from lap two onward every mark is clipped to
+   * the corridor's near end, collapses to zero area, and the road has no
+   * centre line at all. Deleting the correction leaves the rest of this file,
+   * and the rest of the repository, green.
+   */
+  it('paints the same marks in the same places on the second lap and the third', () => {
+    const profile = squareLoop();
+    const total: number = profile.totalDistance;
+    const origin = corridorOrigin(profile);
+
+    // Non-vacuity, and the whole reason this fixture rather than the other:
+    // on lap two every corridor point's odometer is past the end of the route
+    // while the route distance it is drawn at is not. On `straightClimb()`
+    // these two are the same number and the assertions below cannot fail.
+    const secondLap = roadCorridor(profile, origin, total + 200);
+    expect(secondLap.centre.length).toBeGreaterThan(10);
+    for (const point of secondLap.centre) {
+      expect(point.along).toBeGreaterThan(total);
+      expect(point.distance).toBeLessThanOrEqual(total + 1e-6);
+    }
+
+    const first = markStarts(roadCorridor(profile, origin, 200));
+    expect(first.length).toBeGreaterThan(10);
+
+    for (const lap of [1, 2]) {
+      const later = markStarts(roadCorridor(profile, origin, lap * total + 200));
+
+      // Counted off the vertex buffer, so a mark clipped away is a mark that
+      // is not here: the count is what goes to zero when the correction is
+      // dropped, and the positions are what would catch a correction that was
+      // present and wrong.
+      expect(later.length).toBe(first.length);
+      for (let index = 0; index < first.length; index += 1) {
+        const [x, , z] = first[index] as readonly [number, number, number];
+        const [laterX, , laterZ] = later[index] as readonly [number, number, number];
+        expect(Math.hypot(laterX - x, laterZ - z)).toBeLessThan(0.01);
+      }
+    }
+  });
+});
+
 describe('the gradient cue is readable without colour vision — #242', () => {
   /**
    * The criterion in its own words: the tint at `+12%`, `0%` and `-12%`, by
@@ -654,5 +706,71 @@ describe('the road is one buffer, and it does not grow as the rider moves — #2
     }
 
     expect(sizes.size).toBe(1);
+  });
+
+  /**
+   * ⚠️ **The same list, not an equal one — and it is the *instance* that is
+   * asserted.** `roadCorridor` is called from inside `requestAnimationFrame`,
+   * and the index list depends only on the corridor's shape, which does not
+   * change as the rider moves: rebuilding it was 4.5 kB of identical
+   * `Uint32Array` discarded sixty times a second on the thread GATT
+   * notifications arrive on. `toEqual` would pass against the version that
+   * allocates, which is the whole point of writing `toBe`.
+   */
+  it('hands back the same index list frame after frame rather than an equal one', () => {
+    const profile = straightClimb();
+    const origin = corridorOrigin(profile);
+    const first = roadCorridor(profile, origin, 100);
+    const later = roadCorridor(profile, origin, 137.4);
+
+    // Non-vacuity: these are two different corridors, covering different road.
+    expect(later.vertices).not.toBe(first.vertices);
+    expect((later.centre[0] as { along: number }).along).toBeGreaterThan(
+      (first.centre[0] as { along: number }).along,
+    );
+
+    expect(later.indices).toBe(first.indices);
+  });
+
+  /**
+   * ⚠️ **What stops the cache above being a correctness bug.** A list keyed on
+   * too little — or on nothing at all — hands a corridor of one shape the
+   * triangles of another, which draws the road into the wrong vertices.
+   */
+  it('rebuilds the index list when the corridor changes shape', () => {
+    const profile = straightClimb();
+    const origin = corridorOrigin(profile);
+    const wide = roadCorridor(profile, origin, 200, { aheadMetres: 400, behindMetres: 60 });
+    const narrow = roadCorridor(profile, origin, 200, { aheadMetres: 200, behindMetres: 20 });
+    const wideAgain = roadCorridor(profile, origin, 200, { aheadMetres: 400, behindMetres: 60 });
+
+    expect(narrow.indices.length).toBeLessThan(wide.indices.length);
+    expect(highestIndex(narrow)).toBeLessThan(narrow.vertices.length / 3);
+    expect([...wideAgain.indices]).toStrictEqual([...wide.indices]);
+    expect(highestIndex(wideAgain)).toBeLessThan(wideAgain.vertices.length / 3);
+  });
+
+  /**
+   * ⚠️ **The invariant `three-renderer.ts` casts on.** `getIndex()` is
+   * `BufferAttribute | null` there, and the cast is safe only because a
+   * corridor always carries enough triangles to force the grow-the-index-buffer
+   * branch on the very first frame. `markSlotCount`'s `+ 2` is what guarantees
+   * it, and its comment justifies the `+ 2` as covering partial marks — so
+   * nothing there says it is also a floor. This is the assertion that says so.
+   */
+  it('always has room for at least one whole mark and one clipped one', () => {
+    const profile = straightClimb();
+    const origin = corridorOrigin(profile);
+
+    // A corridor far shorter than one dash period is the case that would reach
+    // zero slots if the `+ 2` were ever lost.
+    for (const ahead of [0, 1, CENTRE_LINE_PERIOD_METRES, 400]) {
+      const corridor = roadCorridor(profile, origin, 200, { aheadMetres: ahead, behindMetres: 0 });
+      const slots = (corridor.vertices.length / 3 - corridor.centre.length * ROAD_COLUMNS) / 4;
+      expect(slots).toBeGreaterThanOrEqual(2);
+      // Two mark quads are twelve indices, which is what makes the renderer's
+      // `indices.length > 0` branch unconditional on the first frame.
+      expect(corridor.indices.length).toBeGreaterThanOrEqual(12);
+    }
   });
 });
