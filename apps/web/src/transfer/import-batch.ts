@@ -44,6 +44,7 @@
 import type { UnixSeconds } from '@onyourleft/domain';
 import type { ActivityId, AthleteId, NewActivity } from '@onyourleft/store';
 
+import type { CourseVerdict } from './course-shaped';
 import {
   ActivityImportError,
   readActivityFile,
@@ -95,6 +96,18 @@ export interface ImportOutcome {
   /** One sentence, for a `failed` or `duplicate` row. */
   readonly reason: string | undefined;
   readonly code: ImportFailureCode | undefined;
+  /**
+   * Whether this file looked like a **course** rather than a ride — #232, and
+   * `course-shaped.ts` for the rule.
+   *
+   * Carried on **every** kind of outcome that decoded a GPX, including
+   * `duplicate` and `failed`, and that is the point of putting it here rather
+   * than on {@link ImportedRide} alone: the two outcomes a rider most needs
+   * the offer on are the file that was refused for having no times — which is
+   * what a planner exports — and the file they already imported as a ride
+   * yesterday. `undefined` where there was no decoded GPX behind the row.
+   */
+  readonly course: CourseVerdict | undefined;
   /**
    * What was wrong with a file that imported anyway — a truncated tail, a
    * coordinate out of range. Empty for a clean file.
@@ -168,6 +181,7 @@ export async function importActivityFiles(options: ImportBatchOptions): Promise<
         activityId: undefined,
         reason: 'cancelled before this file was reached; nothing was written for it',
         code: undefined,
+        course: undefined,
         faults: [],
       });
       continue;
@@ -219,7 +233,7 @@ async function importOne(
     ride = readActivityFile(source.fileName, bytes);
   } catch (error: unknown) {
     if (error instanceof ActivityImportError) {
-      return failure(source, error.code, error.message);
+      return failure(source, error.code, error.message, error.course);
     }
     return failure(source, 'unreadable', messageOf(error));
   }
@@ -252,6 +266,7 @@ async function importOne(
           activityId: existing.id,
           reason: `already imported as “${existing.name}”; nothing was written`,
           code: undefined,
+          course: ride.course,
           faults: [],
         };
       }
@@ -269,10 +284,11 @@ async function importOne(
       activityId,
       reason: undefined,
       code: undefined,
+      course: ride.course,
       faults: ride.faults,
     };
   } catch (error: unknown) {
-    return failure(source, 'not-stored', messageOf(error));
+    return failure(source, 'not-stored', messageOf(error), ride.course);
   }
 }
 
@@ -362,13 +378,19 @@ async function storeRide(
   return id;
 }
 
-function failure(source: ImportSource, code: ImportFailureCode, reason: string): ImportOutcome {
+function failure(
+  source: ImportSource,
+  code: ImportFailureCode,
+  reason: string,
+  course?: CourseVerdict,
+): ImportOutcome {
   return {
     fileName: source.fileName,
     kind: 'failed',
     activityId: undefined,
     reason,
     code,
+    course,
     faults: [],
   };
 }

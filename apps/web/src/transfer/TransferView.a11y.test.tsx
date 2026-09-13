@@ -19,7 +19,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { unixSeconds } from '@onyourleft/domain';
-import { activityId, type ActivityId } from '@onyourleft/store';
+import { activityId, routeId, type ActivityId, type RouteId } from '@onyourleft/store';
 import {
   ATHLETE_A,
   createStoreHarness,
@@ -35,7 +35,13 @@ import type { CapabilityProbe } from '../support/bluetooth-support';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
 
 import { webCryptoDigest } from './browser';
-import type { AccountStore, DownloadableFile, TransferPort, TransferStore } from './store-port';
+import type {
+  AccountStore,
+  CourseStore,
+  DownloadableFile,
+  TransferPort,
+  TransferStore,
+} from './store-port';
 import { syntheticGpx } from './testing';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
@@ -60,7 +66,9 @@ async function openBusyScreen(): Promise<void> {
     await store.putActivity(ride);
     await store.putStreamSet(streamSetFor(ride, { sampleCount: 30 }));
   });
-  const store: TransferStore & AccountStore = await open.write((handle) => Promise.resolve(handle));
+  const store: TransferStore & AccountStore & CourseStore = await open.write((handle) =>
+    Promise.resolve(handle),
+  );
   let next = 0;
   const saved: DownloadableFile[] = [];
   const forgotten: string[] = [];
@@ -70,6 +78,10 @@ async function openBusyScreen(): Promise<void> {
     newActivityId: (): ActivityId => {
       next += 1;
       return activityId(`a11y-${String(next)}`);
+    },
+    newRouteId: (): RouteId => {
+      next += 1;
+      return routeId(`a11y-route-${String(next)}`);
     },
     now: () => unixSeconds(1_760_000_000),
     timeZone: 'Europe/London',

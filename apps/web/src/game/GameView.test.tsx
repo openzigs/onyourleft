@@ -30,6 +30,8 @@ import { GameView, type GamePort, type RidableRoute } from './GameView';
 import type { GameRenderer, SceneFrame } from './port';
 import { DEFAULT_PACER_INTENSITY } from './pacer-choice';
 import { NO_READING } from './hud/fields';
+import { NO_SENSORS } from './sensors';
+import { NO_ROUTES_YET } from '../routes/two-importers';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 import {
   altitudeMetres,
@@ -430,3 +432,46 @@ describe('the choice itself', () => {
     expect(mounted.container.querySelector('canvas')).toBeNull();
   });
 });
+
+describe('GameView — a picker with nothing in it', () => {
+  /** The port a rider with no saved routes has. */
+  const EMPTY: GamePort = {
+    listRoutes: () => Promise.resolve([]),
+    loadGhost: () => Promise.resolve(undefined),
+    readSensors: () => NO_SENSORS,
+  };
+
+  it('says how a route gets here, and links to both ways', async () => {
+    // #232's second criterion. The screen used to say only that there were
+    // none, plus one of the two ways, with no link to either.
+    mounted = await mount(<GameView port={EMPTY} renderer={() => Promise.resolve(NO_RENDERER)} />);
+    await settle();
+
+    const text = mounted.container.textContent ?? '';
+    expect(text).toContain(NO_ROUTES_YET);
+
+    const targets = queryAll<HTMLAnchorElement>(mounted.container, 'a').map(
+      (anchor) => anchor.getAttribute('href') ?? '',
+    );
+    expect(targets).toContain('#/routes');
+    expect(targets).toContain('#/routes/new');
+  });
+
+  it('names the mistake a rider looking for this screen has probably made', async () => {
+    // The observation in #232: the rider went to Files, the import succeeded as
+    // a ride, and the picker stayed empty with nothing anywhere saying why.
+    mounted = await mount(<GameView port={EMPTY} renderer={() => Promise.resolve(NO_RENDERER)} />);
+    await settle();
+
+    const text = mounted.container.textContent ?? '';
+    expect(text).toContain('Files screen');
+    expect(text).toContain('will not appear here');
+  });
+});
+
+/** A renderer nothing reaches: this screen never leaves the picker. */
+const NO_RENDERER: GameRenderer = {
+  create: () => {
+    throw new Error('the empty picker must not build a renderer');
+  },
+};

@@ -25,6 +25,7 @@ import {
 } from '@onyourleft/fit';
 
 import { corpusBytes, IMPORTABLE_CORPUS_FILES, REFUSED_CORPUS_FILES } from './corpus';
+import { syntheticCourseGpx } from './testing';
 import {
   ActivityImportError,
   MAXIMUM_IMPORTED_SAMPLES,
@@ -321,6 +322,43 @@ describe('readActivityFile', () => {
     );
 
     expect(refusal.code).toBe('no-timestamped-samples');
+  });
+
+  it('judges whether a GPX looks like a course, and judges nothing else', () => {
+    // #232. The verdict is GPX-only because `routes/save.ts` reads GPX and
+    // nothing else, so a verdict on a FIT or TCX file would describe an offer
+    // this app cannot make.
+    const gpx = readActivityFile('nominal-ride.gpx', corpusBytes('nominal-ride.gpx'));
+    const tcx = readActivityFile('nominal-ride.tcx', corpusBytes('nominal-ride.tcx'));
+    const fit = readActivityFile(
+      'nominal-outdoor-ride.fit',
+      corpusBytes('nominal-outdoor-ride.fit'),
+    );
+
+    expect(gpx.course).toBeDefined();
+    // And it is not flagged: the corpus ride is a synthetic straight line at a
+    // constant speed, so `steady-pace` fires — and it carries a heart rate, so
+    // the conjunction the rule needs does not. A fixture that *was* flagged
+    // would make this assertion pass for the wrong reason.
+    expect(gpx.course?.signals).toStrictEqual(['steady-pace']);
+    expect(gpx.course?.courseShaped).toBe(false);
+    expect(tcx.course).toBeUndefined();
+    expect(fit.course).toBeUndefined();
+  });
+
+  it('says a refused GPX looked like a course, which is the file a planner exports', () => {
+    // The commonest course in the wild: a line, elevation, and no time on any
+    // point. It cannot become a ride at all — there is no timeline to place it
+    // on — so without the verdict travelling on the refusal the screen's only
+    // answer would be "no-timestamped-samples" and the rider would never learn
+    // that the other importer takes this file happily.
+    const refusal = refusalOf(() =>
+      readActivityFile('downloaded-course.gpx', new TextEncoder().encode(syntheticCourseGpx())),
+    );
+
+    expect(refusal.code).toBe('no-timestamped-samples');
+    expect(refusal.course?.courseShaped).toBe(true);
+    expect(refusal.course?.signals).toContain('no-times');
   });
 
   it('refuses a file whose timestamps span longer than a sample grid is built for', () => {

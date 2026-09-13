@@ -12,7 +12,8 @@ import { PUBLIC_ROUTE_WARNING } from '../routes/share';
 import { exportedFrom, ROUTE_FILE_FORMATS, type RouteFileFormat } from '../routes/export';
 import type { DownloadableFile } from '../transfer/store-port';
 import { ROUTE_LIST_LIMIT, type RoutePort } from '../routes/store-port';
-import { hrefFor, ROUTE_BUILDER_ROUTE } from '../shell/routes';
+import { ROUTES_IMPORT_MEANS } from '../routes/two-importers';
+import { hrefFor, routeById, ROUTE_BUILDER_ROUTE } from '../shell/routes';
 import { useUnits } from '../units/context';
 import { formatDistance, formatSmallDistance, measurementText } from '../units/format';
 
@@ -276,6 +277,14 @@ export function RoutesView({ port, now, save }: RoutesViewProps): JSX.Element {
       <h2>Import a route</h2>
       <p>
         A GPX file from a route planner. The file is read on this device and never sent anywhere.
+      </p>
+      {/*
+        #232's third criterion. The wording is a constant in
+        `routes/two-importers.ts`, shared with the Files screen and the Trainer
+        game's empty picker, so one distinction is not explained three ways.
+      */}
+      <p>
+        {ROUTES_IMPORT_MEANS} <a href={hrefFor(routeById('transfer'))}>Files</a> is where those go.
       </p>
       <form onSubmit={(event) => void onImport(event)}>
         <p>

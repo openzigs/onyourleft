@@ -14,7 +14,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { unixSeconds } from '@onyourleft/domain';
-import { activityId, type ActivityId, type UnitSystem } from '@onyourleft/store';
+import {
+  activityId,
+  routeId,
+  type ActivityId,
+  type RouteId,
+  type UnitSystem,
+} from '@onyourleft/store';
 import {
   ATHLETE_A,
   createStoreHarness,
@@ -34,8 +40,15 @@ import {
 } from '../testing/mount';
 
 import { webCryptoDigest } from './browser';
-import type { AccountStore, DownloadableFile, TransferPort, TransferStore } from './store-port';
-import { syntheticGpx } from './testing';
+import type {
+  AccountStore,
+  CourseStore,
+  DownloadableFile,
+  TransferPort,
+  TransferStore,
+} from './store-port';
+import { syntheticCourseGpx, syntheticGpx } from './testing';
+import { FILES_IMPORT_MEANS } from '../routes/two-importers';
 import type { AccountExportReport } from './export-everything';
 import { everythingSentence, TransferView } from './TransferView';
 
@@ -62,7 +75,9 @@ async function openPort(): Promise<TransferPort> {
   const open = createStoreHarness();
   harness = open;
   await seedAthletes(open);
-  const store: TransferStore & AccountStore = await open.write((handle) => Promise.resolve(handle));
+  const store: TransferStore & AccountStore & CourseStore = await open.write((handle) =>
+    Promise.resolve(handle),
+  );
   let next = 0;
   return {
     store,
@@ -70,6 +85,10 @@ async function openPort(): Promise<TransferPort> {
     newActivityId: (): ActivityId => {
       next += 1;
       return activityId(`ui-${String(next)}`);
+    },
+    newRouteId: (): RouteId => {
+      next += 1;
+      return routeId(`ui-route-${String(next)}`);
     },
     now: () => unixSeconds(1_760_000_000),
     timeZone: 'Europe/London',
@@ -728,3 +747,136 @@ describe('everythingSentence', () => {
 function never(): StoreHarness {
   throw new Error('the harness is opened by openPort before any test body reaches this');
 }
+
+/**
+ * #232 — a `.gpx` means two things and this screen is the one a rider reaches
+ * for first.
+ *
+ * The assertions that matter are the two directions of "recoverable in one
+ * action": a course the screen **refused** as a ride is still one click from a
+ * route, and so is an ordinary ride file the heuristic did not flag.
+ */
+/**
+ * The real store with its one route write made to fail.
+ *
+ * ⚠️ **A spread does not work here**, and the way it fails is misleading: the
+ * store is a class instance, so `{ ...store }` copies its own enumerable
+ * properties and none of its prototype methods — and the first thing the page
+ * does with the result is call one, reported as
+ * `listActivitySummaries is not a function` from a panel that has nothing to do
+ * with the test. A proxy keeps every method, **bound to the real instance** so
+ * that its private fields still resolve when the page calls it.
+ */
+function refusingRouteWrites(store: TransferPort['store']): TransferPort['store'] {
+  return new Proxy(store, {
+    get(target, key) {
+      if (key === 'putRoute') {
+        return () => Promise.reject(new Error('quota exceeded'));
+      }
+      const value: unknown = Reflect.get(target, key, target);
+      return typeof value === 'function'
+        ? (value as (...args: readonly unknown[]) => unknown).bind(target)
+        : value;
+    },
+  });
+}
+
+describe('TransferView — did you mean a route?', () => {
+  /** Every route a fresh connection can see for this athlete. */
+  async function storedRoutes(): Promise<readonly { readonly name: string }[]> {
+    return (harness ?? never()).read(async (store) => store.listRoutes(ATHLETE_A));
+  }
+
+  async function waitForBody(fragment: string): Promise<void> {
+    await runToCompletion(
+      () => (document.body.textContent ?? '').includes(fragment),
+      `the page to say “${fragment}”`,
+    );
+  }
+
+  it('says what a file imported here becomes, and links to the other screen', async () => {
+    const port = await openPort();
+    mounted = await mount(<TransferView port={port} />);
+
+    expect(document.body.textContent).toContain(FILES_IMPORT_MEANS);
+    const targets = queryAll<HTMLAnchorElement>(document.body, 'a').map(
+      (anchor) => anchor.getAttribute('href') ?? '',
+    );
+    expect(targets).toContain('#/routes');
+  });
+
+  it('offers a route from a course it could not import as a ride, and saves one', async () => {
+    // The file a route planner exports: a line, elevation, and no time on any
+    // point. It cannot become a ride at all — and until #232 that was the
+    // whole of what this screen said about it.
+    const port = await openPort();
+    mounted = await mount(<TransferView port={port} />);
+
+    await choose([new File([syntheticCourseGpx()], 'course.gpx')]);
+    await activateWithKeyboard(buttonNamed('Import 1 file'));
+    await runToCompletion(finished, 'the batch to finish');
+
+    expect(document.body.textContent).toContain('Not imported');
+    expect(document.body.textContent).toContain('course to ride rather than a ride you did');
+
+    await activateWithKeyboard(buttonNamed('Make a route from course.gpx'));
+    await waitForBody('as a route');
+
+    // Read back through a fresh connection, not from what the click returned.
+    const routes = await storedRoutes();
+    expect(routes.map((route) => route.name)).toStrictEqual(['A course somebody downloaded 0']);
+    expect(document.body.textContent).toContain('It is private.');
+  });
+
+  it('offers a route from an ordinary ride file too, so a wrong guess costs one click', async () => {
+    // The other direction. `syntheticGpx` carries a heart rate on every point,
+    // so `course-shaped.ts` does not flag it — and the button is there anyway,
+    // which is the whole of what makes a false negative recoverable.
+    const port = await openPort();
+    mounted = await mount(<TransferView port={port} />);
+
+    await choose([new File([syntheticGpx(21)], 'ride.gpx')]);
+    await activateWithKeyboard(buttonNamed('Import 1 file'));
+    await runToCompletion(finished, 'the batch to finish');
+
+    expect(document.body.textContent).not.toContain('course to ride rather than a ride you did');
+
+    await activateWithKeyboard(buttonNamed('Make a route from ride.gpx'));
+    await waitForBody('as a route');
+
+    expect(await storedRoutes()).toHaveLength(1);
+    // And the ride it was imported as is still there: making a route adds, it
+    // does not undo.
+    const rides = await (harness ?? never()).read(async (store) =>
+      store.listActivitySummaries(ATHLETE_A),
+    );
+    expect(rides).toHaveLength(1);
+  });
+
+  it('offers nothing for a file that was never a GPX', async () => {
+    const port = await openPort();
+    mounted = await mount(<TransferView port={port} />);
+
+    await choose([new File(['a summary spreadsheet'], 'activities.csv')]);
+    await activateWithKeyboard(buttonNamed('Import 1 file'));
+    await runToCompletion(finished, 'the batch to finish');
+
+    expect(document.body.textContent).toContain('Not imported');
+    expect(() => buttonNamed('Make a route from')).toThrow();
+  });
+
+  it('tells the rider when the route could not be saved, and writes nothing', async () => {
+    const port = await openPort();
+    mounted = await mount(
+      <TransferView port={{ ...port, store: refusingRouteWrites(port.store) }} />,
+    );
+
+    await choose([new File([syntheticCourseGpx()], 'course.gpx')]);
+    await activateWithKeyboard(buttonNamed('Import 1 file'));
+    await runToCompletion(finished, 'the batch to finish');
+    await activateWithKeyboard(buttonNamed('Make a route from course.gpx'));
+    await waitForBody('could not save it');
+
+    expect(await storedRoutes()).toHaveLength(0);
+  });
+});

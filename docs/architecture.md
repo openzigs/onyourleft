@@ -85,7 +85,9 @@ apps/                 AGPL-3.0-or-later, without exception
                         protocol registration, and the MapLibre adapter
     src/recording/      the composition root: engine + checkpoints + recovery (#46)
     src/routes/         saved routes (#73): the store port, the edit decision and
-                        its concurrency token, and the shared-route payload
+                        its concurrency token, the shared-route payload, and the
+                        one wording of what each of the two GPX importers makes,
+                        shared by the three screens that say it (#232)
     src/routing/        planning a route (#70, #71, #72): the draft and the legs
                         an edit makes stale, undo over whole drafts, the draft
                         kept across a reload, and the elevation profile. The
@@ -99,9 +101,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         and the source scan that stops a future screen writing
                         a unit literal by hand. ADR 0020
     src/transfer/       file import and export: the batch importer, the codec's
-                        first production caller, the export writer (#51), and
-                        the distance an imported track derives from its own
-                        positions when the file states none (#231)
+                        first production caller, the export writer (#51), the
+                        distance an imported track derives from its own
+                        positions when the file states none (#231), and whether
+                        a GPX looked like a course rather than a ride — with the
+                        one action that turns it into a route (#232)
     src/views/          one component per route (#48)
   mobile/             Capacitor shell wrapping the same web build (Phase 3)
 
@@ -516,6 +520,21 @@ Three things about it are load-bearing rather than incidental:
   gone is a fix that jumped. The anchor is what makes the middle one work: a rejected step does not
   move it, so drift is measured as displacement from where the receiver actually was rather than one
   metre at a time forever.
+- **A `.gpx` means two things, and this screen says which one it makes** —
+  [#232](https://github.com/openzigs/onyourleft/issues/232). The Files screen turns a file into an
+  *activity*; the Routes screen turns one into a *route*, which is what the Trainer game rides.
+  "Files" is where a rider goes to import a file and it is the wrong screen for a downloaded course,
+  so a course imported here used to succeed, as a ride, with the game's picker left correctly empty
+  and nothing anywhere saying why. `course-shaped.ts` judges whether a GPX looked like a course and
+  `route-from-import.ts` is the one action that makes a route out of it, re-reading the file from
+  the rider's own disk rather than retaining three hundred files' bytes in case one of them is
+  wanted. ⚠️ **The heuristic decides the sentence and never the offer**: the button is on every GPX
+  the screen read, flagged or not, which is what makes a wrong guess in either direction cost one
+  click. And it is deliberately **not** "the file has no speed channel" — #231's file is a real
+  89-minute ride with positions, elevation, a time on every point and no speed at all, so that rule
+  would file a ride as a course. Two signals together do it instead: no sensor channel of any kind,
+  *and* an implied pace that never leaves a ten-per-cent band, which is a planner's assumed speed
+  rather than anything a rider holds.
 - **The resource bound on an import is this component's, not the codec's.** A file's *timestamps*
   decide how long the sample arrays are, and two well-formed records a decade apart ask for 315
   million slots per channel. `MAXIMUM_IMPORTED_SAMPLES` is checked before anything is allocated. The

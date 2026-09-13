@@ -173,6 +173,9 @@ async function buildRideController(probe: CapabilityProbe): Promise<RideControll
     rideSave: {
       store: localStore(),
       newActivityId: () => activityId(globalThis.crypto.randomUUID()),
+      // #232: a file the rider decides was a course after all. A separate
+      // generator rather than a cast, for the reason `store-port.ts` gives.
+      newRouteId: () => routeId(globalThis.crypto.randomUUID()),
       // Read once, at construction, from the device the ride is ridden on.
       // Stored on the activity so the fitness chart can aggregate to the day
       // the rider actually rode rather than to the day the reader is in.
@@ -450,6 +453,9 @@ function buildTransferPort(): TransferPort | undefined {
     store: localStore(),
     athleteId: LOCAL_ATHLETE,
     newActivityId: () => activityId(globalThis.crypto.randomUUID()),
+    // #232: a file the rider decides was a course after all. A separate
+    // generator rather than a cast, for the reason `store-port.ts` gives.
+    newRouteId: () => routeId(globalThis.crypto.randomUUID()),
     now: () => unixSeconds(Math.floor(Date.now() / 1000)),
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     digest: webCryptoDigest,
