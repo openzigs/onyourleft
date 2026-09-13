@@ -121,6 +121,12 @@ apps/                 AGPL-3.0-or-later, without exception
                         Since #237 the simulation also advances the bot pacer,
                         on the same fixed step as the rider and through
                         #92's advanceBot rather than a second integrator
+    src/game/terrain.ts the road as geometry (#91), and since #242 as a road: two
+                        edge lines and a broken centre line built into the same
+                        vertex buffer, and a surface tinted by signed gradient.
+                        The dash grid is in ROUTE distance, which is what stops
+                        it varying with a route's own grid or crawling as the
+                        rider moves
     src/game/world.ts   the ground, the sky and the depth cue (#241) — the two
                         axes a route is read on, the one number that is physics
                         rather than choice, and the provenance of every other
@@ -1916,6 +1922,11 @@ top of an issue **supersedes its body**.
 | What happens to a ride when the phone is backgrounded for five minutes | `apps/web/src/game/simulation.ts` §`MAXIMUM_STEPS_PER_ADVANCE` |
 | Why the ghost does not gain road while the phone is backgrounded, and which clock it is raced against | `apps/web/src/game/simulation.ts` §`ghostClock`, §`GameState.ridden` |
 | Why the road is a corridor rather than a world, and where its vertices come from | `apps/web/src/game/terrain.ts`, [ADR 0008](docs/adr/0008-mobile-client-architecture.md) D-5 |
+| Where the centre line's ten-metre period came from, and why it is not `profile.resolution` | `apps/web/src/game/terrain.ts` §`CENTRE_LINE_PERIOD_METRES` |
+| Why a dash indexed by vertex gives a rider a false speed cue, and what stops the pattern crawling | `apps/web/src/game/terrain.ts` §`writeCentreLine` |
+| Why the gradient tint changes luminance and not only hue | `apps/web/src/game/terrain.ts` §`MINIMUM_TINT_CONTRAST_RATIO`, `apps/web/src/design/contrast.ts` |
+| Why the road's vertex colours are linear light rather than the sRGB the constants are written in | `apps/web/src/game/terrain.ts` §`RoadCorridor.colours` |
+| What proves the road is still one draw call, and what proves a vertex buffer was re-uploaded at all | `apps/web/browser/game.browser.spec.ts` §"the road reads as a road", §`roadOnDescentPixel` |
 | Where the ground and sky colours came from, and which one of them is physics | `apps/web/src/game/world.ts` §Provenance |
 | Why the fog is solved from the view distance rather than written down, and what its floor costs | `apps/web/src/game/world.ts` §`FOG_OCCLUSION_AT_VIEW_END`, §`MINIMUM_VIEW_END_OCCLUSION` |
 | Why the ground plane writes no depth, and why an unset sky is black | `apps/web/src/game/three-renderer.ts` §`UNSET_COLOUR`, §`#updateWorld` |

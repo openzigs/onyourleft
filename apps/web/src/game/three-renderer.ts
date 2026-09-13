@@ -27,6 +27,20 @@
  * illumination classes over this file returns nothing, and `three-seam.test.ts`
  * is what keeps it that way rather than leaving it to review.
  *
+ * ## The road's colour is now its own vertices'
+ *
+ * ⚠️ **`ROAD_COLOUR` used to be a constant in this file and is now in
+ * `terrain.ts`**, beside the two gradient tints and the marking colour it is
+ * blended with. A reviewer who remembers a single road colour here is reading
+ * the old file. #242 gave the road two edge lines, a broken centre line and a
+ * surface tinted by gradient, and all four are vertex data in one buffer — so
+ * the road's material names **no colour at all**. three's default is white,
+ * and white multiplied by a vertex colour is the vertex colour.
+ *
+ * That is what keeps the whole road one mesh and one draw call, which #240's
+ * NFR-2 says is the budget that matters here. It is also still flat-shaded:
+ * an edge line that reads as an edge line costs a vertex rather than a lamp.
+ *
  * ## Why it is written against a lost context rather than assuming one
  *
  * `canvas.getContext('webgl2')` returns `null` for ordinary reasons — WebGL
@@ -92,9 +106,6 @@ const MARKER_STYLE: Record<RiderMarker['kind'], { colour: number; radius: number
   ghost: { colour: 0x64748b, radius: 0.8 },
 };
 
-/** The road surface. Flat-shaded on purpose: no lighting means no light budget. */
-const ROAD_COLOUR = 0x3f4a5a;
-
 /**
  * How far the ground plane reaches from the camera, in metres.
  *
@@ -159,6 +170,7 @@ class ThreeGameView implements GameView {
   #widthCssPixels = 1;
   #heightCssPixels = 1;
   #vertexCapacity = 0;
+  #indexCapacity = 0;
 
   constructor(canvas: HTMLCanvasElement, settings: QualitySettings) {
     this.#quality = settings;
@@ -187,7 +199,10 @@ class ThreeGameView implements GameView {
 
     this.#road = new Mesh(
       this.#roadGeometry,
-      new MeshBasicMaterial({ color: ROAD_COLOUR, side: DoubleSide }),
+      // `vertexColors` is what makes the surface, the two edge lines and the
+      // broken centre line **one mesh and one draw call** (#242). Without it
+      // each would need a material of its own, and a material is a draw call.
+      new MeshBasicMaterial({ side: DoubleSide, vertexColors: true }),
     );
     // The corridor is rebuilt in world coordinates every time, so three's own
     // frustum culling has nothing useful to test against and would occasionally
@@ -282,30 +297,57 @@ class ThreeGameView implements GameView {
   }
 
   /**
-   * Uploads the corridor.
+   * Uploads the corridor: its positions, its colours and its triangles.
    *
-   * The buffer is **reused and only grown**, never reallocated per frame: the
+   * The buffers are **reused and only grown**, never reallocated per frame: the
    * corridor is rebuilt as the rider moves, and allocating a new
    * `Float32Array` plus a new `BufferAttribute` thirty times a second is the
    * allocation pattern that produces a garbage-collection pause — which on this
-   * device shows up as the stutter #91's criterion is about.
+   * device shows up as the stutter #91's criterion is about. #240's NFR-3.
+   *
+   * ⚠️ **Three attributes now, and the index list comes from `terrain.ts`.**
+   * Until #242 the road was one lane of one colour, so a strip index could be
+   * generated here from a quad count. It is three lanes and a run of
+   * centre-line marks now, and the shape of that list is a property of the
+   * geometry rather than of the renderer — so this method uploads what it is
+   * given and decides nothing.
+   *
+   * ⚠️ **A colour attribute added here that `terrain.ts` never fills, or filled
+   * there and never uploaded here, is #240's named defect shape for this epic**:
+   * every jsdom test passes and the screen is unchanged. `game.browser.spec.ts`
+   * reads the drawing buffer back on the centre line for exactly that reason.
    */
   #updateRoad(frame: SceneFrame): void {
-    const vertices = frame.corridor.vertices;
+    const { vertices, colours, indices } = frame.corridor;
     if (vertices.length > this.#vertexCapacity) {
       this.#vertexCapacity = vertices.length;
       this.#roadGeometry.setAttribute(
         'position',
         new BufferAttribute(new Float32Array(this.#vertexCapacity), 3),
       );
-      this.#roadGeometry.setIndex(stripIndices(frame.corridor.quadCount));
+      this.#roadGeometry.setAttribute(
+        'color',
+        new BufferAttribute(new Float32Array(this.#vertexCapacity), 3),
+      );
     }
-    const attribute = this.#roadGeometry.getAttribute('position') as BufferAttribute;
-    (attribute.array as Float32Array).set(vertices);
-    attribute.needsUpdate = true;
-    // Draw only the quads this frame actually has, so a shorter corridor does
-    // not draw stale triangles left in the buffer from a longer one.
-    this.#roadGeometry.setDrawRange(0, Math.max(0, frame.corridor.quadCount * 6));
+    if (indices.length > this.#indexCapacity) {
+      this.#indexCapacity = indices.length;
+      this.#roadGeometry.setIndex(new BufferAttribute(new Uint32Array(this.#indexCapacity), 1));
+    }
+    upload(this.#roadGeometry.getAttribute('position') as BufferAttribute, vertices);
+    upload(this.#roadGeometry.getAttribute('color') as BufferAttribute, colours);
+    // ⚠️ `getIndex()` is `BufferAttribute | null`, and this cast rests on an
+    // invariant that lives in another file: `terrain.ts` §`markSlotCount`
+    // returns `floor(...) + 2`, so every corridor carries at least two mark
+    // slots, so `indices.length` is at least 12 and the branch above has always
+    // run by the time we get here. `terrain.test.ts` §"always has room for at
+    // least one whole mark and one clipped one" is what pins it, because a
+    // guard here would be a branch no test could take — the shape #242's own
+    // review removed from `roadTint`.
+    upload(this.#roadGeometry.getIndex() as BufferAttribute, indices);
+    // Draw only the triangles this frame actually has, so a shorter corridor
+    // does not draw stale ones left in the buffer from a longer one.
+    this.#roadGeometry.setDrawRange(0, indices.length);
   }
 
   #updateMarkers(markers: readonly RiderMarker[]): void {
@@ -358,20 +400,18 @@ class ThreeGameView implements GameView {
   }
 }
 
-/** Two triangles per quad, over a left/right vertex strip. */
-function stripIndices(quadCount: number): BufferAttribute {
-  const indices = new Uint32Array(Math.max(0, quadCount) * 6);
-  for (let quad = 0; quad < quadCount; quad += 1) {
-    const base = quad * 2;
-    const at = quad * 6;
-    indices[at] = base;
-    indices[at + 1] = base + 1;
-    indices[at + 2] = base + 2;
-    indices[at + 3] = base + 1;
-    indices[at + 4] = base + 3;
-    indices[at + 5] = base + 2;
-  }
-  return new BufferAttribute(indices, 1);
+/**
+ * Copies one of `terrain.ts`'s arrays into the buffer three already holds.
+ *
+ * `set` into the existing array rather than replacing it, because replacing it
+ * is the per-frame allocation #240's NFR-3 forbids. `needsUpdate` is the half
+ * that is easy to forget and impossible to see: without it the copy happens,
+ * nothing is re-uploaded, and the road stays wherever it was on the frame the
+ * buffer was created.
+ */
+function upload(attribute: BufferAttribute, values: Float32Array | Uint32Array): void {
+  (attribute.array as Float32Array | Uint32Array).set(values);
+  attribute.needsUpdate = true;
 }
 
 /** A different solid per kind — see {@link MARKER_STYLE}. */
