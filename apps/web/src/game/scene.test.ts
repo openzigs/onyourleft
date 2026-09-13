@@ -366,6 +366,8 @@ describe('the chase camera', () => {
     const corridor = {
       centre: [{ x: 0, y: 0, z: 0, distance: 0, along: 0 }],
       vertices: new Float32Array(6),
+      colours: new Float32Array(6),
+      indices: new Uint32Array(0),
       quadCount: 0,
     };
     const pose = cameraPose(corridor, 0);

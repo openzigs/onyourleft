@@ -34,6 +34,9 @@ interface GameHarnessResult {
   readonly framesDrawn: number;
   readonly quadCount: number;
   readonly vertexCount: number;
+  readonly indexCount: number;
+  readonly highestIndex: number;
+  readonly drawCallsPerFrame: number;
   readonly markerKinds: readonly string[];
   readonly world: {
     readonly skyColour: number;
@@ -47,6 +50,10 @@ interface GameHarnessResult {
   readonly roadFarPixel: Pixel;
   readonly resourcesAfterFirstFrame: number;
   readonly resourcesAfterAllFrames: number;
+  readonly centreLinePixel: Pixel;
+  readonly roadBesidePixel: Pixel;
+  readonly centreLineRowFraction: number;
+  readonly roadOnDescentPixel: Pixel;
   readonly errors: readonly string[];
 }
 
@@ -109,8 +116,16 @@ test.describe('the game renderer in a real browser', () => {
     // A vertex buffer whose length disagrees with its index buffer is a
     // type-correct object that a driver rejects at draw time, which is why this
     // is asserted here rather than only in `terrain.test.ts`.
+    //
+    // ⚠️ Stated as the invariant rather than as an arithmetic identity, since
+    // #242. It used to read `vertexCount === (quadCount + 1) * 6`, which was
+    // true of a single-lane strip and says nothing about a road that is three
+    // lanes and a run of centre-line marks — an index buffer's only contract
+    // with a driver is that every index it holds names a vertex that exists.
     expect(result.quadCount).toBeGreaterThan(0);
-    expect(result.vertexCount).toBe((result.quadCount + 1) * 6);
+    expect(result.indexCount).toBeGreaterThan(0);
+    expect(result.indexCount % 3).toBe(0);
+    expect(result.highestIndex).toBeLessThan(result.vertexCount / 3);
   });
 
   test('draws the road itself at the centre of the frame', async ({ page }) => {
@@ -296,5 +311,109 @@ test.describe('the world #241 derives from the route reaches the screen', () => 
 
     expect(result.resourcesAfterFirstFrame).toBeGreaterThan(0);
     expect(result.resourcesAfterAllFrames).toBe(result.resourcesAfterFirstFrame);
+  });
+});
+
+test.describe('the road reads as a road — #242', () => {
+  /**
+   * ⚠️ **The criterion that catches #240's named defect one layer down.** A
+   * colour attribute `terrain.ts` fills, carries on `RoadCorridor` and
+   * `three-renderer.ts` never uploads passes all 26 of `terrain.test.ts` and
+   * changes nothing a rider sees. Only a read-back can tell the two apart, and
+   * only in a browser.
+   *
+   * Asserted as **one pixel against another**, in the manner the rest of this
+   * file settled on: a road with no centre line is one flat colour across its
+   * width, so the two probes agree and this goes red. A fixed colour would
+   * decay the first time anybody adjusted the palette, and nothing would say
+   * it had.
+   */
+  test('draws a centre line that the carriageway beside it does not have', async ({ page }) => {
+    const result = await harness(page);
+    const [lineRed, , lineBlue] = result.centreLinePixel;
+    const [roadRed, , roadBlue] = result.roadBesidePixel;
+
+    expect(result.centreLinePixel.slice(0, 3)).not.toEqual(result.roadBesidePixel.slice(0, 3));
+    // Channel ordering, for the reason the sky-and-ground test gives: every
+    // step between a colour and a read-back byte is monotone per channel, so
+    // an ordering survives them where a value does not. The paint is warm and
+    // the asphalt is a desaturated blue, and a road drawn in no colour at all
+    // — a colour attribute never uploaded — satisfies neither.
+    expect(lineRed).toBeGreaterThan(lineBlue);
+    expect(roadBlue).toBeGreaterThan(roadRed);
+    // Found on the road, not at the horizon or on a marker: the band the
+    // harness searches is the road's own, and this pins that it stayed there.
+    expect(result.centreLineRowFraction).toBeGreaterThan(0.4);
+    expect(result.centreLineRowFraction).toBeLessThan(0.6);
+  });
+
+  test('paints the centre line brighter than the surface, not merely differently', async ({
+    page,
+  }) => {
+    // The luminance half of #242's accessibility argument, at the screen
+    // rather than at the constants: a marking a rider cannot pick out in
+    // sunlight is not a marking. `terrain.test.ts` asserts the contrast ratio
+    // the colours have; this asserts the direction survived the pipeline.
+    const result = await harness(page);
+    const brightness = (pixel: Pixel): number =>
+      0.2126 * (pixel[0] ?? 0) + 0.7152 * (pixel[1] ?? 0) + 0.0722 * (pixel[2] ?? 0);
+
+    expect(brightness(result.centreLinePixel)).toBeGreaterThan(
+      brightness(result.roadBesidePixel) + 20,
+    );
+  });
+
+  /**
+   * ⚠️ **#242's fifth criterion, measured in the driver rather than asserted
+   * in a review.** The road carries a surface, two edge lines and a run of
+   * centre-line marks, and all of it is meant to cost **one** draw call —
+   * #240's NFR-2 is explicit that draw calls, overdraw and fill rate are the
+   * budget here and triangles are not.
+   *
+   * Four is the whole scene: the ground plane, the road, the rider's marker
+   * and the bot's. The ghost is not in play in this harness and a hidden mesh
+   * issues nothing. A road split into three meshes reads as six.
+   */
+  test('still draws the whole road in one call', async ({ page }) => {
+    const result = await harness(page);
+
+    expect(result.drawCallsPerFrame).toBe(4);
+  });
+});
+
+test.describe('the gradient cue reaches the screen, on a frame after the first — #242', () => {
+  /**
+   * ⚠️ **This is the only test in the repository that can see a vertex buffer
+   * that was written and never re-uploaded**, and that is this program's
+   * dominant defect shape arriving in a new layer: *a write that reports
+   * success while the read cannot see it*. three uploads an attribute the
+   * first time it binds it and thereafter only when `needsUpdate` says to, so
+   * dropping that one line in `#updateRoad` leaves the GPU holding the first
+   * frame for the rest of the ride. Every other read-back in this file is
+   * taken from a re-render of the first frame and would agree with it happily.
+   *
+   * The claim is also #242's third criterion at the screen: the tint is
+   * luminance-carrying, so a descent is *brighter* than a climb — not merely a
+   * different hue.
+   */
+  test('draws the descent brighter than the climb', async ({ page }) => {
+    const result = await harness(page);
+    const brightness = (pixel: Pixel): number =>
+      0.2126 * (pixel[0] ?? 0) + 0.7152 * (pixel[1] ?? 0) + 0.0722 * (pixel[2] ?? 0);
+    const [descentRed, descentGreen, descentBlue] = result.roadOnDescentPixel;
+
+    // ⚠️ **The ordering check is what stops this passing for the wrong
+    // reason, and it was measured rather than assumed.** A renderer that
+    // never re-uploads still moves its *camera*, which comes from the frame
+    // and not from a buffer — so it looks at 800 m of route while holding the
+    // geometry of the first 460, and the probe lands on the ground plane. The
+    // ground is green-dominant under this temperate route and a brightness
+    // test alone reads that as a paler road and passes. The road is a
+    // desaturated blue at every gradient `roadTint` can produce.
+    expect(descentBlue).toBeGreaterThan(descentGreen);
+    expect(descentGreen).toBeGreaterThan(descentRed);
+    expect(brightness(result.roadOnDescentPixel)).toBeGreaterThan(
+      brightness(result.roadPixel) + 10,
+    );
   });
 });
