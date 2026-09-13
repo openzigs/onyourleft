@@ -39,6 +39,7 @@ import type { GapInput, Metres, PacerGap, RouteProfile } from '@onyourleft/domai
 import type { UnitSystem } from '@onyourleft/store';
 
 import { formatDistance, formatSpeed, type Measurement } from '../../units/format';
+import type { GhostOutcome } from '../ghost-outcome';
 import type { GameState } from '../simulation';
 
 /** What a HUD shows where it has no trustworthy number. An em dash. */
@@ -100,6 +101,22 @@ export interface ChasedGap {
   readonly to: 'bot' | 'ghost';
   /** Signed the way `pacer/gap.ts` signs it: positive when they are ahead. */
   readonly gap: PacerGap;
+  /**
+   * That the race against them is over, and how it went — #259.
+   *
+   * ⚠️ **Absent while it is still on, and it is the presence of this field
+   * rather than the sign of {@link gap} that decides what is shown.** Once the
+   * attempt has stopped, the gap to it goes on growing for as long as the rider
+   * keeps pedalling, and quoting it says *"it is 40 s up the road"* about a
+   * rider who crossed the line 40 s ago. It also, eventually, changes sign —
+   * which is why the result is decided in `game/ghost-outcome.ts` and carried
+   * here rather than re-derived from `gap` in this file. That header is the one
+   * to read before anything here is simplified.
+   *
+   * Only ever produced for a ghost. A bot pacer has no finish: it is generated
+   * from an intensity and a route and rides for as long as the rider does.
+   */
+  readonly outcome?: GhostOutcome | undefined;
 }
 
 /** Everything the HUD needs. */
@@ -245,6 +262,14 @@ function gapReading(chase: ChasedGap): HudReading {
   // test can name the one it means. `HudPanel` uses the key as its React key.
   const key = `gap-${chase.to}`;
   const label = LABELS[chase.to];
+  if (chase.outcome !== undefined) {
+    // ⚠️ Before every other branch, including the stationary one. A rider who
+    // has stopped pedalling still gets a settled result, where the live gap
+    // would be a dash — the result does not depend on anybody's current speed
+    // and pretending it is unknown would hide something that is known.
+    const { value, detail } = SETTLED[chase.outcome];
+    return { key, label, value, unit: '', detail, stale: false };
+  }
   const seconds = chase.gap.seconds;
   if (seconds === undefined) {
     // A stationary rider is closing no gap at all, and any number here would be
@@ -279,6 +304,33 @@ function gapReading(chase: ChasedGap): HudReading {
 
 /** What the gap field reads when the rounded gap is nought in either direction. */
 const LEVEL = 'Level';
+
+/**
+ * What the field says once the race against the attempt is settled — #259.
+ *
+ * ⚠️ **A word where the number was, and that is the point rather than a
+ * consequence.** #94 asks for a screen that is glanceable rather than readable,
+ * and a rider glancing at a number cannot tell a live gap from a dead one. The
+ * outcome is the only thing left to say, so it takes the slot the number had.
+ *
+ * ⚠️ **The subject is still the thing the label names**, exactly as
+ * {@link gapReading}'s header requires of the live phrasings: `Your best,
+ * Beaten by you` and `Your best, Finished ahead of you` are both statements
+ * about the attempt, not about the rider, so there is no reading of either in
+ * which the wrong person won. `by you` is redundant on the eye and is not
+ * redundant in the ear — a screen reader announcing *"Your best, Beaten"* alone
+ * leaves who did the beating to inference, and #255 is what inference costs on
+ * this panel.
+ *
+ * The three read nothing like each other, which is #259's second acceptance
+ * criterion: a rider who beat their best and one who did not must not see the
+ * same field.
+ */
+const SETTLED: Readonly<Record<GhostOutcome, { value: string; detail: string }>> = {
+  beaten: { value: 'Beaten', detail: 'by you' },
+  level: { value: 'Matched', detail: 'by you' },
+  'not-beaten': { value: 'Finished', detail: 'ahead of you' },
+};
 
 /** How many decimals the distance still to ride is counted down to. */
 const REMAINING_DECIMALS = 2;

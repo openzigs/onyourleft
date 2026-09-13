@@ -165,6 +165,11 @@ function nearestPoint(
  * ⚠️ Against {@link ghostClock} like every other ghost question (#254), so a
  * stalled ride cannot declare the attempt finished while its marker is still
  * halfway up the road.
+ *
+ * Its consumer is `game/ghost-outcome.ts`, and it did not have one until #259:
+ * this function was exported, unit-tested and green while the HUD went on
+ * quoting a gap against an attempt that had stopped. That header says why the
+ * answer is latched there rather than read afresh here.
  */
 export function ghostFinished(ghost: GhostTrack, state: GameState): boolean {
   return ghostHasFinished(ghost, ghostClock(state));

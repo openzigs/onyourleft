@@ -393,6 +393,78 @@ describe('a phone backgrounded mid-ride (#254)', () => {
   });
 });
 
+/**
+ * #259 — the third time in `game/` that something built, exported, unit-tested
+ * and green turned out to be reachable by nobody.
+ *
+ * `scene.ts` §`ghostFinished` had a unit test in `scene.test.ts` and no
+ * production consumer, so after the attempt crossed the line the HUD went on
+ * quoting a gap against a rider who had stopped — a screen on which *"it is
+ * 40 s up the road"* and *"it finished 40 s ago and you are still riding"* look
+ * identical. Both assertions below are about what a rider can **see**, driven
+ * through the real component, the real simulation and the real HUD, for the
+ * reason #237 gives: a unit test of the predicate is what let this ship.
+ */
+describe('your own best crossing the line (#259)', () => {
+  /**
+   * An attempt that stops after four seconds, three metres up the road.
+   *
+   * Deliberately hopeless, so this rider is unambiguously past it by the time
+   * it finishes and stays past it — the win is categorical rather than a
+   * margin somebody has to defend.
+   */
+  const BEATEN_GHOST: GhostTrack = buildGhostTrack({
+    elapsedSeconds: [0, 4],
+    distanceMetres: [0, 3],
+  });
+
+  /**
+   * One that stops just as soon, forty metres up the road.
+   *
+   * ⚠️ **Both of those numbers are load-bearing.** At the frame it finishes
+   * this rider is about eleven metres in, so they lost; ten seconds later they
+   * are past forty metres, so the *live* gap to the stopped attempt has changed
+   * sign. That is the window in which a screen deriving the result from the gap
+   * congratulates a rider on a ride they were plainly slower than, and it is
+   * why `ghost-outcome.ts` settles the answer once.
+   */
+  const OUTPACED_GHOST: GhostTrack = buildGhostTrack({
+    elapsedSeconds: [0, 4],
+    distanceMetres: [0, 40],
+  });
+
+  it('tells a rider who got there first that they beat it', async () => {
+    const frames = await startRiding({ pacer: false, ghost: true, track: BEATEN_GHOST });
+    await pump(60);
+
+    expect(hudField('Your best')).toBe('Beaten by you');
+    // Without the wiring this field reads `12 s behind you` — true of a race
+    // that is still on, and the attempt finished ten seconds ago.
+    expect(hudField('Your best')).not.toContain('behind you');
+
+    // ⚠️ And the marker is still on the road, which `scene.ts` is careful about
+    // for the same reason. A ghost that vanished would also stop quoting a gap,
+    // so the assertions above need this one beside them.
+    const last = frames[frames.length - 1];
+    expect(last?.markers.map((marker) => marker.kind).sort()).toEqual(['ghost', 'rider']);
+  });
+
+  it('does not congratulate a slower rider who later passes its distance', async () => {
+    await startRiding({ pacer: false, ghost: true, track: OUTPACED_GHOST });
+
+    // Five seconds in: the attempt has finished forty metres up the road and
+    // this rider is nowhere near it.
+    await pump(20);
+    expect(hudField('Your best')).toBe('Finished ahead of you');
+
+    // Ten seconds later they are well past forty metres — and they are still
+    // the slower of the two, because the four seconds it took have gone.
+    await pump(40);
+    expect(hudField('Your best')).toBe('Finished ahead of you');
+    expect(hudField('Your best')).not.toContain('Beaten');
+  });
+});
+
 describe('the choice itself', () => {
   it('offers the pacer the way the ghost is offered, with a default already in the box', async () => {
     mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);

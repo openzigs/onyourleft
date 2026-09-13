@@ -357,6 +357,83 @@ describe('the gap to whatever the rider is chasing', () => {
     expect(field.value).toBe(NO_READING);
   });
 
+  /**
+   * #259 — the field once the race against the attempt is settled.
+   *
+   * ⚠️ Every case below hands the formatter the *same* gap and varies only
+   * `outcome`, which is the property that matters: the result is carried in
+   * rather than re-derived from a number that goes on changing. A formatter
+   * that read the sign of the gap instead would give all three of these the
+   * same answer.
+   */
+  describe('once the race against it is settled', () => {
+    const stillAhead = pacerGap({
+      botDistance: metres(200),
+      riderDistance: metres(100),
+      referenceSpeed: metresPerSecond(10),
+    });
+
+    it('says the rider beat it, rather than quoting a gap to a stopped rider', () => {
+      const field = fieldNamed(
+        { ...baseInput(), chases: [{ to: 'ghost', gap: stillAhead, outcome: 'beaten' }] },
+        'gap-ghost',
+      );
+
+      expect(field.value).toBe('Beaten');
+      expect(field.detail).toBe('by you');
+      expect(field.unit).toBe('');
+    });
+
+    it('reads differently for a rider who did not beat it', () => {
+      const field = fieldNamed(
+        { ...baseInput(), chases: [{ to: 'ghost', gap: stillAhead, outcome: 'not-beaten' }] },
+        'gap-ghost',
+      );
+
+      expect(field.value).toBe('Finished');
+      expect(field.detail).toBe('ahead of you');
+    });
+
+    it('says matched on a dead heat', () => {
+      const field = fieldNamed(
+        { ...baseInput(), chases: [{ to: 'ghost', gap: stillAhead, outcome: 'level' }] },
+        'gap-ghost',
+      );
+
+      expect(field.value).toBe('Matched');
+      expect(field.detail).toBe('by you');
+    });
+
+    it('still reports the result for a rider who has stopped pedalling', () => {
+      // A standstill makes the *gap* unknowable — `pacer/gap.ts` returns
+      // `undefined` seconds rather than divide by zero — and the result is not
+      // a gap. Dashing it here would hide something that is known.
+      const stationary = pacerGap({
+        botDistance: metres(200),
+        riderDistance: metres(100),
+        referenceSpeed: metresPerSecond(0),
+      });
+
+      const field = fieldNamed(
+        { ...baseInput(), chases: [{ to: 'ghost', gap: stationary, outcome: 'beaten' }] },
+        'gap-ghost',
+      );
+
+      expect(field.value).toBe('Beaten');
+      expect(field.value).not.toBe(NO_READING);
+    });
+
+    it('leaves a live gap alone', () => {
+      const field = fieldNamed(
+        { ...baseInput(), chases: [{ to: 'ghost', gap: stillAhead }] },
+        'gap-ghost',
+      );
+
+      expect(field.value).toBe('10');
+      expect(field.detail).toBe('ahead of you');
+    });
+  });
+
   it('builds its gap input from the rider’s own state', () => {
     const input = baseInput();
     const state = {
