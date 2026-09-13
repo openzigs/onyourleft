@@ -242,6 +242,27 @@ async function typeIntensity(value: string): Promise<void> {
   });
 }
 
+/** The ghost control on the picker, found the way a rider finds it. */
+function ghostCheckbox(): HTMLInputElement | undefined {
+  return queryAll<HTMLInputElement>(mounted?.container ?? document, 'input[type="checkbox"]').find(
+    (input) => (input.closest('label')?.textContent ?? '').includes('Race your'),
+  );
+}
+
+/** The control that starts a ride. */
+function rideButton(): HTMLButtonElement | undefined {
+  return queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button').find((button) =>
+    (button.textContent ?? '').startsWith('Ride '),
+  );
+}
+
+/** The control that ends one, on the HUD. */
+function endRideButton(): HTMLButtonElement | undefined {
+  return queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button').find(
+    (button) => button.textContent === 'End ride',
+  );
+}
+
 /** The value a HUD field is showing, found by its label. */
 function hudField(label: string): string {
   const rows = queryAll(mounted?.container ?? document, '.oyl-hud__field');
@@ -390,6 +411,134 @@ describe('a phone backgrounded mid-ride (#254)', () => {
     // reporting a direction, so the assertions above need this one beside them.
     const last = frames[frames.length - 1];
     expect(last?.markers.map((marker) => marker.kind).sort()).toEqual(['ghost', 'rider']);
+  });
+});
+
+/**
+ * #259 — the third time in `game/` that something built, exported, unit-tested
+ * and green turned out to be reachable by nobody.
+ *
+ * `scene.ts` §`ghostFinished` had a unit test in `scene.test.ts` and no
+ * production consumer, so after the attempt crossed the line the HUD went on
+ * quoting a gap against a rider who had stopped — a screen on which *"it is
+ * 40 s up the road"* and *"it finished 40 s ago and you are still riding"* look
+ * identical. Both assertions below are about what a rider can **see**, driven
+ * through the real component, the real simulation and the real HUD, for the
+ * reason #237 gives: a unit test of the predicate is what let this ship.
+ */
+describe('your own best crossing the line (#259)', () => {
+  /**
+   * An attempt that stops after four seconds, three metres up the road.
+   *
+   * Deliberately hopeless, so this rider is unambiguously past it by the time
+   * it finishes and stays past it — the win is categorical rather than a
+   * margin somebody has to defend.
+   */
+  const BEATEN_GHOST: GhostTrack = buildGhostTrack({
+    elapsedSeconds: [0, 4],
+    distanceMetres: [0, 3],
+  });
+
+  /**
+   * One that stops just as soon, forty metres up the road.
+   *
+   * ⚠️ **Both of those numbers are load-bearing.** At the frame it finishes
+   * this rider is about eleven metres in, so they lost; ten seconds later they
+   * are past forty metres, so the *live* gap to the stopped attempt has changed
+   * sign. That is the window in which a screen deriving the result from the gap
+   * congratulates a rider on a ride they were plainly slower than, and it is
+   * why `ghost-outcome.ts` settles the answer once.
+   */
+  const OUTPACED_GHOST: GhostTrack = buildGhostTrack({
+    elapsedSeconds: [0, 4],
+    distanceMetres: [0, 40],
+  });
+
+  it('tells a rider who got there first that they beat it', async () => {
+    const frames = await startRiding({ pacer: false, ghost: true, track: BEATEN_GHOST });
+    await pump(60);
+
+    expect(hudField('Your best')).toBe('Beaten by you');
+    // Without the wiring this field reads `12 s behind you` — true of a race
+    // that is still on, and the attempt finished ten seconds ago.
+    expect(hudField('Your best')).not.toContain('behind you');
+
+    // ⚠️ And the marker is still on the road, which `scene.ts` is careful about
+    // for the same reason. A ghost that vanished would also stop quoting a gap,
+    // so the assertions above need this one beside them.
+    const last = frames[frames.length - 1];
+    expect(last?.markers.map((marker) => marker.kind).sort()).toEqual(['ghost', 'rider']);
+  });
+
+  it('does not congratulate a slower rider who later passes its distance', async () => {
+    await startRiding({ pacer: false, ghost: true, track: OUTPACED_GHOST });
+
+    // Five seconds in: the attempt has finished forty metres up the road and
+    // this rider is nowhere near it.
+    await pump(20);
+    expect(hudField('Your best')).toBe('Finished ahead of you');
+
+    // Ten seconds later they are well past forty metres — and they are still
+    // the slower of the two, because the four seconds it took have gone.
+    await pump(40);
+    expect(hudField('Your best')).toBe('Finished ahead of you');
+    expect(hudField('Your best')).not.toContain('Beaten');
+  });
+
+  /**
+   * The second ride, which is where a latched answer goes wrong if nothing
+   * clears it.
+   *
+   * ⚠️ **The latch is what makes this reachable.** `ghost-outcome.ts` returns
+   * `settled` unchanged whenever it is defined — that is the whole of its
+   * defence against a rider who keeps riding — so a verdict that survives into
+   * the next ride is never revisited and never corrected. A rider who beat
+   * their best on one route, ended the ride and started another would be
+   * congratulated on frame one, about an attempt that is no longer loaded.
+   *
+   * It is the same false congratulation the module exists to prevent, arriving
+   * from the other direction, and no assertion in this file could see it: the
+   * `End ride` control had never been clicked by a test at all.
+   */
+  it('does not carry one ride’s result into the next', async () => {
+    const route = { ...testRoute(), attempts: 1 };
+    // Beaten first, then an attempt still out on the road — so the second ride
+    // has a live gap to quote and a stale verdict would be visible as one.
+    const tracks: GhostTrack[] = [BEATEN_GHOST, WALKING_GHOST];
+    let loaded = 0;
+    const port: GamePort = {
+      ...pedallingPort(route),
+      loadGhost: () => {
+        const track = tracks[loaded] ?? WALKING_GHOST;
+        loaded += 1;
+        return Promise.resolve(track);
+      },
+    };
+    mounted = await mount(<GameView port={port} now={() => nowMs} />);
+    await settle();
+
+    await clickThrough(ghostCheckbox());
+    await clickThrough(rideButton());
+    await pump(60);
+    expect(hudField('Your best')).toBe('Beaten by you');
+
+    await clickThrough(endRideButton());
+    // ⚠️ `cancelAnimationFrame` is stubbed to do nothing, so the frame the
+    // ended ride had already requested is still in the queue and would advance
+    // the *new* simulation under the *old* loop's closure. A rider's browser
+    // really does cancel it; the test has to.
+    pending = [];
+
+    // The ghost box is still ticked — ending a ride does not un-choose it — so
+    // this is the picker as a rider leaves it.
+    await clickThrough(rideButton());
+    await pump(60);
+    expect(loaded).toBe(2);
+
+    // Racing a walking pace, fifteen seconds in: a gap, in front of them, and
+    // nothing settled. Left over, the field would still read `Beaten by you`.
+    expect(hudField('Your best')).not.toContain('Beaten');
+    expect(hudField('Your best')).toContain('behind you');
   });
 });
 

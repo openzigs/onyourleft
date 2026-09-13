@@ -319,6 +319,73 @@ describe('the gap says who is ahead, to the eye and to a screen reader (#255)', 
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 
+  /**
+   * #259 — what a rider is told once their own best has crossed the line.
+   *
+   * ⚠️ **The announced form, and the exact sentence.** #259's fourth criterion
+   * asks for the new wording here for the reason #94 binds this panel at all: a
+   * rider reads it at arm's length and a rider using a screen reader hears it
+   * in one breath, and "Your best, Beaten by you" and "Your best, Finished
+   * ahead of you" have to be impossible to confuse in either channel. The gap
+   * handed in is identical in both cases and is the *losing* one throughout —
+   * a panel that read the gap rather than the result would say the same thing
+   * twice.
+   */
+  describe('once the rider’s own best has finished (#259)', () => {
+    function afterTheirBestFinished(
+      outcome: 'beaten' | 'level' | 'not-beaten',
+    ): React.ReactElement {
+      const base = props();
+      return inRideScreen(
+        <HudPanel
+          {...base}
+          state={{ ...base.state, ride: { speed: metresPerSecond(10), distance: metres(100) } }}
+          chases={[
+            {
+              to: 'ghost',
+              gap: pacerGap({
+                botDistance: metres(220),
+                riderDistance: metres(100),
+                referenceSpeed: metresPerSecond(10),
+              }),
+              outcome,
+            },
+          ]}
+        />,
+      );
+    }
+
+    it('tells a rider who beat it that they beat it', async () => {
+      mounted = await mount(afterTheirBestFinished('beaten'));
+
+      expect(announced('Your best')).toBe('Your best, Beaten by you');
+      // The gap it was handed says the attempt is 12 s ahead. A field that went
+      // on quoting it would read exactly as it did before the line — which is
+      // the defect, in the rider's own words.
+      expect(announced('Your best')).not.toContain('12');
+      expect(announced('Your best')).not.toContain('ahead of you');
+    });
+
+    it('tells a rider who did not beat it something that cannot be mistaken for it', async () => {
+      mounted = await mount(afterTheirBestFinished('not-beaten'));
+
+      expect(announced('Your best')).toBe('Your best, Finished ahead of you');
+      expect(announced('Your best')).not.toContain('Beaten');
+    });
+
+    it('announces a dead heat as neither', async () => {
+      mounted = await mount(afterTheirBestFinished('level'));
+
+      expect(announced('Your best')).toBe('Your best, Matched by you');
+    });
+
+    it('audits clean with a finished attempt on the screen, which is a different tree', async () => {
+      mounted = await mount(afterTheirBestFinished('beaten'));
+
+      expect(formatViolations(auditAccessibility(document))).toBe('');
+    });
+  });
+
   it('announces the pacer and your own best separately when both are raced (#253)', async () => {
     // ⚠️ Two gap fields is a DOM shape this panel could not previously produce,
     // so it is audited as well as read: the `dt`/`dd` association has to hold

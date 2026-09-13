@@ -357,6 +357,117 @@ describe('the gap to whatever the rider is chasing', () => {
     expect(field.value).toBe(NO_READING);
   });
 
+  /**
+   * #259 — the field once the race against the attempt is settled.
+   *
+   * ⚠️ Every case below hands the formatter the *same* gap and varies only
+   * `outcome`, which is the property that matters: the result is carried in
+   * rather than re-derived from a number that goes on changing. A formatter
+   * that read the sign of the gap instead would give all three of these the
+   * same answer.
+   */
+  describe('once the race against it is settled', () => {
+    const stillAhead = pacerGap({
+      botDistance: metres(200),
+      riderDistance: metres(100),
+      referenceSpeed: metresPerSecond(10),
+    });
+
+    it('says the rider beat it, rather than quoting a gap to a stopped rider', () => {
+      const field = fieldNamed(
+        { ...baseInput(), chases: [{ to: 'ghost', gap: stillAhead, outcome: 'beaten' }] },
+        'gap-ghost',
+      );
+
+      expect(field.value).toBe('Beaten');
+      expect(field.detail).toBe('by you');
+      expect(field.unit).toBe('');
+    });
+
+    it('reads differently for a rider who did not beat it', () => {
+      const field = fieldNamed(
+        { ...baseInput(), chases: [{ to: 'ghost', gap: stillAhead, outcome: 'not-beaten' }] },
+        'gap-ghost',
+      );
+
+      expect(field.value).toBe('Finished');
+      expect(field.detail).toBe('ahead of you');
+    });
+
+    it('says matched on a dead heat', () => {
+      const field = fieldNamed(
+        { ...baseInput(), chases: [{ to: 'ghost', gap: stillAhead, outcome: 'level' }] },
+        'gap-ghost',
+      );
+
+      expect(field.value).toBe('Matched');
+      expect(field.detail).toBe('by you');
+    });
+
+    it('still reports the result for a rider who has stopped pedalling', () => {
+      // A standstill makes the *gap* unknowable — `pacer/gap.ts` returns
+      // `undefined` seconds rather than divide by zero — and the result is not
+      // a gap. Dashing it here would hide something that is known.
+      const stationary = pacerGap({
+        botDistance: metres(200),
+        riderDistance: metres(100),
+        referenceSpeed: metresPerSecond(0),
+      });
+
+      const field = fieldNamed(
+        { ...baseInput(), chases: [{ to: 'ghost', gap: stationary, outcome: 'beaten' }] },
+        'gap-ghost',
+      );
+
+      expect(field.value).toBe('Beaten');
+      expect(field.value).not.toBe(NO_READING);
+    });
+
+    it('leaves a live gap alone', () => {
+      const field = fieldNamed(
+        { ...baseInput(), chases: [{ to: 'ghost', gap: stillAhead }] },
+        'gap-ghost',
+      );
+
+      expect(field.value).toBe('10');
+      expect(field.detail).toBe('ahead of you');
+    });
+
+    /**
+     * ⚠️ A **layout** flag, asserted in a test about formatting, because this
+     * is the only place that produces it. `fields.ts` §`HudReading.word` is the
+     * measurement: 2.5 rem inside a `minmax(7rem, 1fr)` grid track fits about
+     * five characters, a single word cannot wrap, and all three of these are
+     * longer than that. `HudPanel.test.tsx` is the other half — that the flag
+     * reaches the element.
+     */
+    it.each(['beaten', 'level', 'not-beaten'] as const)(
+      'marks the settled value (%s) as a word rather than a magnitude',
+      (outcome) => {
+        const field = fieldNamed(
+          { ...baseInput(), chases: [{ to: 'ghost', gap: stillAhead, outcome }] },
+          'gap-ghost',
+        );
+
+        expect(field.word).toBe(true);
+        // The word is longer than the track fits at the size a number is set
+        // in, which is the whole reason the flag exists. A shorter one would
+        // not need it and this assertion says which case is which.
+        expect(field.value.length).toBeGreaterThan(5);
+      },
+    );
+
+    it('does not mark a number, a dash or a live gap', () => {
+      const input = baseInput();
+      const live = fieldNamed(
+        { ...input, chases: [{ to: 'ghost', gap: stillAhead }] },
+        'gap-ghost',
+      );
+      expect(live.word).toBeUndefined();
+      expect(hudReadings(input).every((reading) => reading.word === undefined)).toBe(true);
+    });
+  });
+
   it('builds its gap input from the rider’s own state', () => {
     const input = baseInput();
     const state = {

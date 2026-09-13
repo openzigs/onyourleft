@@ -85,7 +85,14 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
             className={reading.stale ? 'oyl-hud__field oyl-hud__field--stale' : 'oyl-hud__field'}
           >
             <dt className="oyl-hud__label">{reading.label}</dt>
-            <dd className="oyl-hud__value">
+            <dd
+              className={
+                // #259. A word does not fit the slot a number fits — the class
+                // is what sets it smaller, and `fields.ts` §`HudReading.word`
+                // is the measurement behind it.
+                reading.word === true ? 'oyl-hud__value oyl-hud__value--word' : 'oyl-hud__value'
+              }
+            >
               {reading.value}
               {reading.unit === '' ? null : <span className="oyl-hud__unit"> {reading.unit}</span>}
               {reading.detail === undefined ? null : (

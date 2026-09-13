@@ -31,6 +31,7 @@ import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 
 import { NO_ROUTES_YET } from '../routes/two-importers';
 import { hrefFor, routeById, ROUTE_BUILDER_ROUTE } from '../shell/routes';
+import { settleGhostOutcome, type GhostOutcome } from './ghost-outcome';
 import { gapAgainst, type ChasedGap } from './hud/fields';
 import { HudPanel } from './hud/HudPanel';
 import { NO_SCREEN_LOCK, type ScreenLock, type ScreenLockSource } from './hud/wake-lock';
@@ -144,6 +145,18 @@ export function GameView(props: GameViewProps): JSX.Element {
   const simulationRef = useRef<GameSimulation | undefined>(undefined);
   const viewRef = useRef<RendererView | undefined>(undefined);
   const ghostRef = useRef<GhostTrack | undefined>(undefined);
+  /**
+   * How the race against the ghost ended, once it has — #259.
+   *
+   * ⚠️ **A ref rather than state, and one frame of memory rather than none.**
+   * `ghost-outcome.ts` says why the answer cannot be recomputed from the
+   * current state after the fact; what matters here is that it is written in
+   * the tick, immediately before the `setState` that causes the render which
+   * reads it, so the HUD and the road are describing the same instant. As
+   * state it would be a second render per frame for a value that changes once
+   * in a ride.
+   */
+  const outcomeRef = useRef<GhostOutcome | undefined>(undefined);
   const lockRef = useRef<ScreenLock>(NO_SCREEN_LOCK);
 
   const port = props.port;
@@ -179,6 +192,14 @@ export function GameView(props: GameViewProps): JSX.Element {
     viewRef.current?.destroy();
     viewRef.current = undefined;
     simulationRef.current = undefined;
+    // ⚠️ **`outcomeRef` is deliberately NOT cleared here, and `ghostRef` never
+    // was.** Both belong to the *ride*, and `start` is where a ride begins —
+    // this callback releases resources. Clearing it in both places made each
+    // assignment individually invisible: deleting either left the whole suite
+    // green, because the other covered for it, which is CLAUDE.md §5's "a test
+    // that cannot fail is not a test" seen from the implementation's side.
+    // There is exactly one way back to the picker (`onEnd`) and exactly one way
+    // out of it (`start`), so one reset is the whole of it.
   }, []);
 
   useEffect(() => teardown, [teardown]);
@@ -187,6 +208,15 @@ export function GameView(props: GameViewProps): JSX.Element {
     async (route: RidableRoute, ghost: boolean, pacer: BotPacerPlan | undefined): Promise<void> => {
       const profile = route.profile;
       ghostRef.current = ghost && port !== undefined ? await port.loadGhost(route.id) : undefined;
+      // ⚠️ **A new ride settles its own result, and this is the only line that
+      // makes that true.** `ghost-outcome.ts` returns a settled answer
+      // unchanged for ever — that latch is its whole defence against a rider
+      // who keeps riding — so a verdict carried over from the last ride is
+      // never revisited. A rider who beat their best on one route and then
+      // started another would be congratulated on frame one, about an attempt
+      // that is no longer loaded: the same false congratulation that module
+      // exists to prevent, arriving from the other direction.
+      outcomeRef.current = undefined;
       const simulation = new GameSimulation({
         profile,
         conditions: RIDE_CONDITIONS,
@@ -238,6 +268,15 @@ export function GameView(props: GameViewProps): JSX.Element {
       }
       const at = clock();
       simulation.advanceTo(at, port.readSensors().rider);
+      // ⚠️ Before `setState`, so the render it schedules already has the answer.
+      // This is the production consumer `scene.ts` §`ghostFinished` did not have
+      // — #259, and the third time in `game/` that something built, exported and
+      // unit-tested turned out to be reachable by nobody.
+      outcomeRef.current = settleGhostOutcome(
+        outcomeRef.current,
+        ghostRef.current,
+        simulation.state,
+      );
       setState(simulation.state);
 
       const origin = corridorOrigin(chosen.profile);
@@ -310,7 +349,7 @@ export function GameView(props: GameViewProps): JSX.Element {
         state={state}
         cadence={sensors.cadence}
         heartRate={sensors.heartRate}
-        chases={chasedGaps(state, ghostRef.current)}
+        chases={chasedGaps(state, ghostRef.current, outcomeRef.current)}
         paused={phase === 'paused'}
         onPause={() => {
           setPhase((current) => (current === 'paused' ? 'riding' : 'paused'));
@@ -348,8 +387,16 @@ export function GameView(props: GameViewProps): JSX.Element {
  * and #254 is what happens when the HUD and the road answer it differently.
  * That clock is the ride's *ridden* seconds and never its wall clock;
  * `simulation.ts` §`ghostClock` states the rule and why.
+ *
+ * ⚠️ **And once the race against it is settled, the gap stops being the thing
+ * to show** — #259. `outcome` arrives already decided, from `ghost-outcome.ts`,
+ * which is where the reason it cannot be re-derived here is written down.
  */
-function chasedGaps(state: GameState, ghost: GhostTrack | undefined): readonly ChasedGap[] {
+function chasedGaps(
+  state: GameState,
+  ghost: GhostTrack | undefined,
+  outcome: GhostOutcome | undefined,
+): readonly ChasedGap[] {
   const found: ChasedGap[] = [];
   const bot = state.bot;
   if (bot !== undefined) {
@@ -357,7 +404,14 @@ function chasedGaps(state: GameState, ghost: GhostTrack | undefined): readonly C
   }
   if (ghost !== undefined) {
     const at = ghostDistanceAt(ghost, ghostClock(state));
-    found.push({ to: 'ghost', gap: pacerGap(gapAgainst(state, at)) });
+    found.push({
+      to: 'ghost',
+      gap: pacerGap(gapAgainst(state, at)),
+      // Present only once the race against the attempt is settled, which is
+      // what turns the field from a gap into a result — `hud/fields.ts`
+      // §`ChasedGap.outcome`.
+      ...(outcome === undefined ? {} : { outcome }),
+    });
   }
   return found;
 }
