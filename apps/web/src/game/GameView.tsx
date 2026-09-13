@@ -29,6 +29,8 @@
 
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 
+import { NO_ROUTES_YET } from '../routes/two-importers';
+import { hrefFor, routeById, ROUTE_BUILDER_ROUTE } from '../shell/routes';
 import { gapAgainst, type ChasedGap } from './hud/fields';
 import { HudPanel } from './hud/HudPanel';
 import { NO_SCREEN_LOCK, type ScreenLock, type ScreenLockSource } from './hud/wake-lock';
@@ -380,8 +382,28 @@ function RoutePicker(props: {
     return <p>Loading your routes…</p>;
   }
   if (props.routes.length === 0) {
+    // ⚠️ #232's second criterion: an empty picker says **how a route gets
+    // here**, not only that there are none. The sentence it used to carry named
+    // one of the two ways and named neither screen as a link — and it did not
+    // mention the thing a rider who has already tried has most likely done,
+    // which is to import the course on the Files screen and get a ride. The
+    // wording is a constant in `routes/two-importers.ts` so this screen, the
+    // Files screen and the Routes screen cannot drift apart.
     return (
-      <p>No saved routes yet. Import a GPX route on the Routes screen and it will appear here.</p>
+      <div className="oyl-game__picker">
+        <h2>Choose a route</h2>
+        <p>{NO_ROUTES_YET}</p>
+        <ul>
+          <li>
+            <a href={hrefFor(routeById('routes'))}>Import a GPX file on the Routes screen</a> — a
+            course from a route planner, read on this device.
+          </li>
+          <li>
+            <a href={hrefFor(ROUTE_BUILDER_ROUTE)}>Draw one on this device</a> — place waypoints and
+            have the roads between them worked out.
+          </li>
+        </ul>
+      </div>
     );
   }
   // ⚠️ The ride control is BLOCKED rather than silently dropping the pacer.

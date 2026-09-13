@@ -55,6 +55,9 @@ import {
   type AccountExportProgress,
   type AccountExportReport,
 } from './export-everything';
+import { FILES_IMPORT_MEANS } from '../routes/two-importers';
+import { hrefFor, routeById } from '../shell/routes';
+import { courseOffers, routeFromImportedFile, type CourseOffer } from './route-from-import';
 import {
   ERASE_CANNOT_REACH,
   ERASE_CONFIRMATION,
@@ -276,6 +279,16 @@ function ImportPanel({
         as many as you like; each one is reported on its own, and one file that cannot be read does
         not stop the rest.
       </p>
+      {/*
+        #232's third criterion: the two importers' distinct purposes are stated
+        where a rider chooses, not only in the code. The wording is a constant
+        in `routes/two-importers.ts` so that this screen, the routes screen and
+        the trainer game's empty picker cannot drift into three paraphrases of
+        one distinction.
+      */}
+      <p className="oyl-muted">
+        {FILES_IMPORT_MEANS} <a href={hrefFor(routeById('routes'))}>Routes</a> is where they live.
+      </p>
       <div className="oyl-transfer__form">
         <label htmlFor="oyl-import-files">Activity files</label>
         {/*
@@ -358,7 +371,96 @@ function ImportPanel({
         rows={outcomes.map(rowOf)}
         emptyMessage="Nothing imported yet. Choose files above and every one of them is listed here by name."
       />
+
+      <CoursePanel port={port} offers={courseOffers(chosen, outcomes)} />
     </>
+  );
+}
+
+/**
+ * "Did you mean a route?" — #232's first criterion.
+ *
+ * ⚠️ **Every GPX that decoded is listed here, flagged or not.** The heuristic
+ * in `course-shaped.ts` decides only whether a row carries a sentence; the
+ * button is unconditional, which is what makes a wrong guess in either
+ * direction cost one click. `route-from-import.ts` says the same thing from the
+ * other end, and `courseOffers` is where it is enforced.
+ *
+ * Nothing here is undone by pressing it: the file has already been imported as
+ * a ride (or refused as one), and making a route is an addition. A rider who
+ * meant a route and got a ride can delete the ride from the activities screen,
+ * which is a separate, ordinary action rather than something this button has to
+ * guess at.
+ */
+function CoursePanel({
+  port,
+  offers,
+}: {
+  readonly port: TransferPort;
+  readonly offers: readonly CourseOffer[];
+}): JSX.Element | null {
+  const [message, setMessage] = useState<{ tone: StatusTone; text: string } | undefined>(undefined);
+  const [made, setMade] = useState<readonly string[]>([]);
+
+  if (offers.length === 0) {
+    return null;
+  }
+
+  async function make(offer: CourseOffer): Promise<void> {
+    const outcome = await routeFromImportedFile({
+      source: offer.source,
+      store: port.store,
+      owner: port.athleteId,
+      id: port.newRouteId(),
+      now: port.now(),
+    });
+    if (outcome.status === 'refused') {
+      setMessage({ tone: 'warning', text: outcome.message });
+      return;
+    }
+    setMade((previous) => [...previous, offer.source.fileName]);
+    setMessage({
+      tone: 'success',
+      text: `Saved “${outcome.record.name}” as a route. It is private. Find it on Routes, or ride it in the Trainer game.`,
+    });
+  }
+
+  return (
+    <section className="oyl-transfer__courses">
+      <h3>Did you mean a route?</h3>
+      <p className="oyl-muted">
+        A route is a course you plan to ride, and it is what the{' '}
+        <a href={hrefFor(routeById('game'))}>Trainer game</a> rides. Any GPX you just chose can be
+        made into one here — the file is read again from your device, so there is nothing to find.
+      </p>
+      <ul>
+        {offers.map((offer) => (
+          <li key={offer.source.fileName}>
+            <span>{offer.source.fileName}</span>
+            {offer.note !== undefined && <span> — {offer.note}</span>}{' '}
+            <Button
+              variant="secondary"
+              onClick={() => {
+                void make(offer);
+              }}
+            >
+              {/* The filename is in the label rather than only in the row, so
+                  the control is named: #48's audit counts an unnamed control as
+                  a violation, and a page of "Make a route" buttons tells a
+                  screen-reader user which file each one is for only by
+                  position. */}
+              Make a route from {offer.source.fileName}
+              {made.includes(offer.source.fileName) ? ' again' : ''}
+            </Button>
+          </li>
+        ))}
+      </ul>
+      {message !== undefined && (
+        <StatusMessage tone={message.tone} live>
+          {message.text}
+        </StatusMessage>
+      )}
+    </section>
   );
 }
 

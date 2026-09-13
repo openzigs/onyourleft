@@ -7,12 +7,12 @@
  * ⚠️ **This file exists because the route-level audit cannot reach these
  * controls.** `routes.a11y.test.tsx` renders every entry in `shell/routes.ts`,
  * and it renders the game screen with **no port**, so `listRoutes` never
- * resolves to anything and the screen shows *"No saved routes yet"*. Every
- * control on this screen — the ghost checkbox, the new pacer checkbox, the
- * intensity box and the ride buttons — is therefore outside the gate that looks
- * exactly like the gate that covers them. Adding controls to a screen the a11y
- * suite renders is not the same as adding controls the a11y suite audits, and
- * this is the difference.
+ * resolves to anything and the screen shows the empty picker — the two links
+ * #232 put there, and nothing else. Every control on this screen — the ghost
+ * checkbox, the new pacer checkbox, the intensity box and the ride buttons — is
+ * therefore outside the gate that looks exactly like the gate that covers them.
+ * Adding controls to a screen the a11y suite renders is not the same as adding
+ * controls the a11y suite audits, and this is the difference.
  *
  * Named `*.a11y.test.tsx` so `test:a11y` selects it, and so
  * `scripts/check-a11y-suite.mjs` would catch it if it ever stopped being

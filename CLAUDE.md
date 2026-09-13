@@ -88,7 +88,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         distance an imported track derives from its own
                         positions when the file states none — the three
                         rejections and the anchor two of them need; and since
-                        #15 the
+                        #232 whether a GPX looked like a course rather than a
+                        ride — the rule, its failure modes, and the one action
+                        that turns the file into a route without re-finding it;
+                        and since #15 the
                         one fixture both clients encode, which is how "the
                         mobile client's FIT output is byte-identical to the
                         web's" is asserted without a phone (§4h); and since #35

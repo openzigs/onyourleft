@@ -39,6 +39,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { routeStub, stubRouteId, type RouteStub } from '../routes/testing';
 import type { DownloadableFile } from '../transfer/store-port';
 import { PUBLIC_ROUTE_WARNING } from '../routes/share';
+import { ROUTES_IMPORT_MEANS } from '../routes/two-importers';
 import {
   activateWithKeyboard,
   mount,
@@ -138,6 +139,19 @@ describe('the saved list', () => {
       expect(text).toContain('private');
       expect(text).toContain('Point to point');
     });
+  });
+
+  it('says what its importer makes, and where a ride already done goes — #232', async () => {
+    // #232's third criterion: the two importers' distinct purposes are stated
+    // where a rider chooses, not only in the code. The wording is the shared
+    // constant so this screen and the Files screen cannot drift apart.
+    const view = await render(routeStub(ATHLETE));
+
+    expect(view.container.textContent).toContain(ROUTES_IMPORT_MEANS);
+    const targets = queryAll<HTMLAnchorElement>(view.container, 'a').map(
+      (anchor) => anchor.getAttribute('href') ?? '',
+    );
+    expect(targets).toContain('#/transfer');
   });
 
   it('says there are none rather than rendering an empty table', async () => {

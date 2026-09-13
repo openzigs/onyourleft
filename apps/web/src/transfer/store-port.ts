@@ -27,6 +27,7 @@ import type {
   NewActivity,
   NewStreamSet,
   PrivacyZoneRecord,
+  RouteId,
   RouteRecord,
   SegmentRecord,
   StoredActivityRecord,
@@ -90,6 +91,20 @@ export interface AccountStore {
   getActivityRecord(owner: AthleteId, id: ActivityId): Promise<StoredActivityRecord | undefined>;
 }
 
+/**
+ * The one write this screen makes that is not an activity — #232.
+ *
+ * Separate from {@link TransferStore} for {@link AccountStore}'s reason, and it
+ * matters more here: this is a *route* write on the *files* screen, which is
+ * exactly the confusion #232 is about. Keeping it its own interface means a
+ * reader can see in one line that the Files screen's route powers are "save a
+ * route" and nothing else — it cannot list them, read them, publish one or
+ * delete one.
+ */
+export interface CourseStore {
+  putRoute(record: RouteRecord): Promise<RouteId>;
+}
+
 /** What import and export do to the store, and nothing else. */
 export interface TransferStore {
   findActivityByOriginalFileHash(
@@ -136,10 +151,19 @@ export interface DownloadableFile {
  * picker on that path at all.
  */
 export interface TransferPort {
-  readonly store: TransferStore & AccountStore;
+  readonly store: TransferStore & AccountStore & CourseStore;
   readonly athleteId: AthleteId;
   /** A fresh activity id per imported file. `crypto.randomUUID()` in production. */
   newActivityId(): ActivityId;
+  /**
+   * A fresh route id, for a file the rider turns into a course instead (#232).
+   *
+   * Its own generator rather than reusing {@link newActivityId} and casting: an
+   * `ActivityId` and a `RouteId` are different brands precisely so that one
+   * cannot be passed where the other belongs, and a cast at the call site is
+   * how that guarantee gets spent.
+   */
+  newRouteId(): RouteId;
   now(): UnixSeconds;
   /** The IANA zone an imported ride's local start time is read in. */
   readonly timeZone: string;

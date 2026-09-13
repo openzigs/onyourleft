@@ -57,6 +57,7 @@ import {
 } from '@onyourleft/fit';
 import type { StreamChannel, StreamChannels, StreamChannelValue } from '@onyourleft/store';
 
+import { courseVerdict, type CourseVerdict } from './course-shaped';
 import { detectActivityFileFormat, type ActivityFileFormat } from './file-format';
 import { distanceAlongTrack } from './track-distance';
 
@@ -100,11 +101,28 @@ export type ImportFaultCode =
  */
 export class ActivityImportError extends Error {
   readonly code: ImportFaultCode;
+  /**
+   * Whether the file this refusal is about looked like a **course** (#232).
+   *
+   * ⚠️ **A refusal is where this matters most.** A GPX carrying a line and no
+   * time on any point is exactly what a route planner exports, and it is also
+   * the one file `readActivityFile` cannot import at all — so without this the
+   * screen's only answer to the commonest course in the wild would be
+   * "no-timestamped-samples", and the rider would never learn that the other
+   * importer would have taken it. `undefined` for every refusal with no
+   * decoded track behind it, and for every format but GPX.
+   */
+  readonly course: CourseVerdict | undefined;
 
-  constructor(code: ImportFaultCode, message: string, options?: { cause?: unknown }) {
+  constructor(
+    code: ImportFaultCode,
+    message: string,
+    options?: { cause?: unknown; course?: CourseVerdict | undefined },
+  ) {
     super(message, options);
     this.name = 'ActivityImportError';
     this.code = code;
+    this.course = options?.course;
   }
 }
 
@@ -121,6 +139,15 @@ export interface ImportedRide {
   readonly sampleInterval: Seconds;
   readonly sampleCount: number;
   readonly channels: StreamChannels;
+  /**
+   * Whether this file looked like a **course to ride** rather than the ride it
+   * has just been imported as — #232, and `course-shaped.ts` for the rule.
+   *
+   * `undefined` for every format but GPX, because `routes/save.ts` reads GPX
+   * and nothing else: a verdict on a FIT file would describe an offer this app
+   * cannot make.
+   */
+  readonly course: CourseVerdict | undefined;
   /**
    * Recoverable faults the codec reported, one sentence each.
    *
@@ -287,6 +314,10 @@ interface TimedPoint {
 }
 
 function rideOf(input: RideInput): ImportedRide {
+  // Judged before anything can throw, so a file that is refused still carries
+  // the one thing the screen can usefully say about it. Only GPX is judged —
+  // see `course-shaped.ts`, and the field's own note on {@link ImportedRide}.
+  const course = input.format === 'gpx' ? courseVerdict(input.points) : undefined;
   const timed: TimedPoint[] = [];
   // ⚠️ A loop rather than `Math.min(...timestamps)`. A four-hour ride is about
   // 14,400 points and an ultra-endurance file is well past a hundred thousand,
@@ -310,6 +341,7 @@ function rideOf(input: RideInput): ImportedRide {
       'no-timestamped-samples',
       'the file decoded and carried no sample with an absolute time, so there is no ride to ' +
         'place on a timeline',
+      { course },
     );
   }
   // Checked before anything is allocated. This is the whole of the bound: past
@@ -321,6 +353,7 @@ function rideOf(input: RideInput): ImportedRide {
       `the file's samples span ${String(Math.round(sampleCount / 3600))} hours, past the ` +
         `${String(MAXIMUM_IMPORTED_SAMPLES / 3600)}-hour limit this client will build a ` +
         'sample grid for. A span that long is a device clock that jumped rather than a ride',
+      { course },
     );
   }
 
@@ -412,6 +445,7 @@ function rideOf(input: RideInput): ImportedRide {
     // `StreamChannels`. `putStreamSet` re-validates every sample against the
     // channel's declared resolution regardless, which is the second net.
     channels: Object.fromEntries(built),
+    course,
     faults: input.faults,
   };
 }

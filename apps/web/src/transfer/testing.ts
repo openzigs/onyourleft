@@ -69,6 +69,46 @@ export function syntheticGpx(index: number): string {
   ].join('\n');
 }
 
+/**
+ * A GPX **course** as a route planner exports one — #232.
+ *
+ * A positioned line with elevation, a name, and **no `<time>` anywhere**. That
+ * is the file the Files screen cannot import at all (there is no timeline to
+ * place it on) and the Routes screen takes happily, which is the whole of the
+ * confusion #232 is about.
+ *
+ * Hand-written rather than taken from the #29 corpus because that corpus holds
+ * no such file: every fixture in it is an *activity*, which is what it is for.
+ *
+ * ADR 0004 decision G: the coordinates are inside the `NULL-ISLAND` synthetic
+ * test region, which is open water in the Gulf of Guinea.
+ *
+ * @param index shifts the line so two calls produce different bytes, for the
+ * deduplication arm.
+ */
+export function syntheticCourseGpx(index = 0): string {
+  const points = Array.from({ length: 30 }, (_unused, offset) => {
+    const longitude = (0.02 + index * 0.01 + offset * 0.0001).toFixed(6);
+    return (
+      `      <trkpt lat="0.010000" lon="${longitude}">` +
+      `<ele>${String(10 + offset)}.0</ele></trkpt>`
+    );
+  }).join('\n');
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<gpx version="1.1" creator="a route planner that is not ours" ' +
+      'xmlns="http://www.topografix.com/GPX/1/1">',
+    '  <trk>',
+    `    <name>A course somebody downloaded ${String(index)}</name>`,
+    '    <trkseg>',
+    points,
+    '    </trkseg>',
+    '  </trk>',
+    '</gpx>',
+    '',
+  ].join('\n');
+}
+
 /** A counter-backed id generator, so an assertion can name the ids it expects. */
 export function sequentialActivityIds(prefix = 'imported'): () => ActivityId {
   let next = 0;

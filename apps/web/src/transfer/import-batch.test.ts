@@ -36,7 +36,13 @@ import {
   type ImportSource,
 } from './import-batch';
 import type { TransferStore } from './store-port';
-import { bytesSource, IMPORT_CLOCK, sequentialActivityIds, syntheticGpx } from './testing';
+import {
+  bytesSource,
+  IMPORT_CLOCK,
+  sequentialActivityIds,
+  syntheticCourseGpx,
+  syntheticGpx,
+} from './testing';
 
 let harness: StoreHarness | undefined;
 
@@ -248,6 +254,38 @@ describe('importActivityFiles — deduplication against the local store', () => 
 
     const stored = await open.read(async (store) => store.listActivitySummaries(ATHLETE_A));
     expect(stored).toHaveLength(1);
+  });
+
+  it('carries a course verdict on a refused file, an imported one and a duplicate', async () => {
+    // #232's first criterion, at the layer the screen reads. The three rows a
+    // rider can end up with are all rows they might want a route from, and the
+    // refusal is the one that matters most: a downloaded course has no times,
+    // so it is the row that never becomes a ride at all.
+    const open = await openSeeded();
+    const alreadyHere = syntheticGpx(41);
+
+    const report = await run(open, [
+      bytesSource('course.gpx', syntheticCourseGpx()),
+      bytesSource('ride.gpx', alreadyHere),
+      bytesSource('ride-again.gpx', alreadyHere),
+      bytesSource('notes.txt', 'not an activity file at all'),
+    ]);
+
+    const course = named(report.outcomes, 'course.gpx');
+    expect(course.kind).toBe('failed');
+    expect(course.code).toBe('no-timestamped-samples');
+    expect(course.course?.courseShaped).toBe(true);
+
+    // The two ordinary GPX rows carry a verdict too, so the screen can offer a
+    // route from either — a wrong guess has to be recoverable in one action.
+    expect(named(report.outcomes, 'ride.gpx').kind).toBe('imported');
+    expect(named(report.outcomes, 'ride.gpx').course?.courseShaped).toBe(false);
+    expect(named(report.outcomes, 'ride-again.gpx').kind).toBe('duplicate');
+    expect(named(report.outcomes, 'ride-again.gpx').course).toBeDefined();
+
+    // And a file that never decoded as GPX carries none, so the screen offers
+    // nothing it could not do.
+    expect(named(report.outcomes, 'notes.txt').course).toBeUndefined();
   });
 
   it('deduplicates within one batch, not only across batches', async () => {
