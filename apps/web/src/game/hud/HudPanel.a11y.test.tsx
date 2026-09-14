@@ -423,3 +423,140 @@ describe('the gap says who is ahead, to the eye and to a screen reader (#255)', 
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 });
+
+/**
+ * The route in plan, on the panel the audit actually renders — #285.
+ *
+ * ⚠️ **Here rather than in a file of its own**, because #285's fifth criterion
+ * is that `test:a11y` covers *the route with it present*, and the route-level
+ * audit (`routes.a11y.test.tsx`) renders the game screen with no port and
+ * therefore never reaches the HUD at all — `picker.a11y.test.tsx` records that
+ * gap in its own header. This file is the one place the gate sees this panel.
+ */
+describe('the route in plan (#285)', () => {
+  /** A 400 m × 200 m circuit, closed, so `loop: true` is honest. */
+  function loop(): ReturnType<typeof routeProfile> {
+    const metresPerDegree = 111_320;
+    const halfHeight = 100 / metresPerDegree;
+    const east = 400 / (metresPerDegree * Math.cos((51.5 * Math.PI) / 180));
+    const corners: readonly (readonly [number, number])[] = [
+      [51.5 - halfHeight, -0.12],
+      [51.5 - halfHeight, -0.12 + east],
+      [51.5 + halfHeight, -0.12 + east],
+      [51.5 + halfHeight, -0.12],
+      [51.5 - halfHeight, -0.12],
+    ];
+    const points: RoutePoint[] = [];
+    for (let corner = 0; corner < corners.length - 1; corner += 1) {
+      const [fromLatitude, fromLongitude] = corners[corner] as readonly [number, number];
+      const [toLatitude, toLongitude] = corners[corner + 1] as readonly [number, number];
+      for (let step = 0; step < 40; step += 1) {
+        const fraction = step / 40;
+        points.push({
+          position: geographicPosition(
+            degreesLatitude(fromLatitude + (toLatitude - fromLatitude) * fraction),
+            degreesLongitude(fromLongitude + (toLongitude - fromLongitude) * fraction),
+          ),
+          elevation: altitudeMetres(10),
+        });
+      }
+    }
+    const [lastLatitude, lastLongitude] = corners[corners.length - 1] as readonly [number, number];
+    points.push({
+      position: geographicPosition(degreesLatitude(lastLatitude), degreesLongitude(lastLongitude)),
+      elevation: altitudeMetres(10),
+    });
+    return routeProfile(points, { loop: true });
+  }
+
+  function markAt(): { readonly x: number; readonly y: number } {
+    const mark = document.querySelector('[data-testid="oyl-hud-plan-here"]');
+    if (mark === null) {
+      throw new Error('no rider mark on the plan');
+    }
+    return { x: Number(mark.getAttribute('data-x')), y: Number(mark.getAttribute('data-y')) };
+  }
+
+  it('is actually on the HUD, so the audit above is not passing over nothing', async () => {
+    mounted = await mount(inRideScreen(<HudPanel {...props()} />));
+
+    expect(document.querySelector('.oyl-hud__plan-svg')).not.toBeNull();
+    expect(document.querySelectorAll('.oyl-hud__plan-line').length).toBeGreaterThan(0);
+  });
+
+  it('carries a description rather than being a bare svg', async () => {
+    mounted = await mount(inRideScreen(<HudPanel {...props()} />));
+
+    const plan = document.querySelector('.oyl-hud__plan-svg');
+    expect(plan?.getAttribute('role')).toBe('img');
+    expect(plan?.getAttribute('aria-label')).toContain('Route in plan, north up');
+  });
+
+  it('audits clean on a loop, which is a different description and a different tree', async () => {
+    const profile = loop();
+    const base = props({ profile });
+    mounted = await mount(
+      inRideScreen(
+        <HudPanel
+          {...base}
+          state={{
+            ...base.state,
+            ride: { speed: metresPerSecond(8), distance: metres(profile.totalDistance * 1.5) },
+          }}
+        />,
+      ),
+    );
+
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+    expect(document.querySelector('.oyl-hud__plan-svg')?.getAttribute('aria-label')).toContain(
+      'on lap 2',
+    );
+  });
+
+  it('puts the rider in the right place on lap two of a loop', async () => {
+    // ⚠️ #285's fourth criterion, read off the rendered panel rather than off
+    // the projection. The elevation strip beside it is pinned at 100 % for this
+    // same ride state — `fields.ts` §`profilePosition` clamps — so a plan view
+    // that read the strip's number would draw the rider on the finish line for
+    // the whole of lap two.
+    const profile = loop();
+    const total: number = profile.totalDistance;
+    const base = props({ profile });
+
+    mounted = await mount(
+      inRideScreen(
+        <HudPanel
+          {...base}
+          state={{
+            ...base.state,
+            ride: { speed: metresPerSecond(8), distance: metres(total / 4) },
+          }}
+        />,
+      ),
+    );
+    const lapOne = markAt();
+    mounted.unmount();
+
+    mounted = await mount(
+      inRideScreen(
+        <HudPanel
+          {...base}
+          state={{
+            ...base.state,
+            ride: { speed: metresPerSecond(8), distance: metres(total * 1.25) },
+          }}
+        />,
+      ),
+    );
+    const lapTwo = markAt();
+
+    expect(lapTwo.x).toBeCloseTo(lapOne.x, 3);
+    expect(lapTwo.y).toBeCloseTo(lapOne.y, 3);
+    // And not simply sitting at the start line, which would satisfy the line
+    // above if BOTH readings were wrong in the same way.
+    mounted.unmount();
+    mounted = await mount(inRideScreen(<HudPanel {...base} />));
+    const startLine = markAt();
+    expect(Math.hypot(lapTwo.x - startLine.x, lapTwo.y - startLine.y)).toBeGreaterThan(1);
+  });
+});

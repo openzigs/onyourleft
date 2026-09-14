@@ -123,12 +123,34 @@ export interface ValueMeasurement {
   readonly trackWidth: number;
 }
 
+/**
+ * The plan view's box, and the box of the road drawn inside it — #285.
+ *
+ * ⚠️ **Only a browser can answer either.** The panel's height comes from
+ * `theme.css` (`8rem`) inside `.oyl-hud`'s flex column, and the road's box comes
+ * from `preserveAspectRatio` resolving a 100×100 viewBox into that. jsdom
+ * performs no layout and lays out no SVG at all, so both are zero there and the
+ * jsdom suite cannot tell a drawn route from a collapsed one.
+ */
+export interface PlanMeasurement {
+  /** The `<svg>`'s own border box. */
+  readonly width: number;
+  readonly height: number;
+  /** The union of the drawn road's boxes, in the same screen pixels. */
+  readonly roadWidth: number;
+  readonly roadHeight: number;
+  /** How many `<path>` elements the road was drawn as. */
+  readonly roads: number;
+}
+
 /** What the spec reads back. */
 export interface HudMeasurement {
   readonly viewport: { readonly width: number; readonly height: number };
   /** How many columns the `auto-fit` grid resolved to at this width. */
   readonly columns: number;
   readonly values: readonly ValueMeasurement[];
+  /** `undefined` when the panel has no plan view at all, which is a failure. */
+  readonly plan: PlanMeasurement | undefined;
 }
 
 declare global {
@@ -350,6 +372,34 @@ function measure(): HudMeasurement {
     viewport: { width: window.innerWidth, height: window.innerHeight },
     columns,
     values,
+    plan: measurePlan(),
+  };
+}
+
+/** The plan view of the first shipping panel. @see PlanMeasurement */
+function measurePlan(): PlanMeasurement | undefined {
+  const panel = document.querySelector('[data-oyl-control="false"]');
+  const svg = panel?.querySelector('.oyl-hud__plan-svg');
+  if (svg === undefined || svg === null) {
+    return undefined;
+  }
+  const box = svg.getBoundingClientRect();
+  const roads = [...svg.querySelectorAll('.oyl-hud__plan-line')];
+  const boxes = roads.map((road) => road.getBoundingClientRect());
+  const width =
+    boxes.length === 0
+      ? 0
+      : Math.max(...boxes.map((r) => r.right)) - Math.min(...boxes.map((r) => r.left));
+  const height =
+    boxes.length === 0
+      ? 0
+      : Math.max(...boxes.map((r) => r.bottom)) - Math.min(...boxes.map((r) => r.top));
+  return {
+    width: box.width,
+    height: box.height,
+    roadWidth: width,
+    roadHeight: height,
+    roads: roads.length,
   };
 }
 
