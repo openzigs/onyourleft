@@ -225,6 +225,33 @@ jobs:
       - name: Accessibility gate checker tests
         run: bash scripts/check-a11y-suite.test.sh
 
+      # The wiring gate (#278). Every gate above this one looks INSIDE a unit,
+      # and five defects in one week were a correct, unit-tested, typechecked,
+      # linted unit wired to nothing: no device could be paired on Android at
+      # all (#230), there was no pacer (#237), a rider who beat their own best
+      # was never told (#259). An exported function nobody calls and an optional
+      # parameter nobody supplies are both perfectly well typed, so neither the
+      # typechecker nor `no-unused-vars` can see one.
+      #
+      # This walks the module graph from the page Vite builds and reports what
+      # the client's own seams cannot reach. It needs an install (it parses with
+      # the TypeScript compiler's own parser), so it is NOT in `check:repo`.
+      #
+      # In this job rather than one of its own, for the reason the accessibility
+      # steps above give: `main` requires a status check whose context is
+      # exactly "Repository rules".
+      - name: Wiring
+        run: pnpm run check:wiring
+
+      # Its own suite, for the reason every checker here has one: a gate that
+      # silently stopped checking is indistinguishable from a clean tree. Five
+      # of its cases are #278's five defects, reproduced from the tree as it
+      # actually was, and two of those are green on purpose and named so --
+      # a stated limit nobody has pinned is a limit that quietly becomes a false
+      # claim.
+      - name: Wiring gate checker tests
+        run: bash scripts/check-wiring.test.sh
+
       # The renderer has logic of its own -- it decides which package a covered
       # file belongs to, from absolute paths that differ between a checkout, a
       # runner and a worktree -- so it has a suite, and the suite runs here. Its

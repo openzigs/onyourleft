@@ -226,6 +226,10 @@ export const SLOT_FILL = 0.5;
  * live with — and **not** the defect this constant exists to catch, which is two
  * items at the *same* position because the loop seam placed a cell twice. The
  * lateral separations do not compress, and they are what holds at any radius.
+ *
+ * @unwired a bound, not a setting: `scatter.test.ts` measures the placement
+ * against it and no scenery decision reads it. Wiring it into the placer would
+ * make the test assert the code against itself.
  */
 export const MINIMUM_SCATTER_SEPARATION_METRES = 2;
 

@@ -15,6 +15,13 @@
  * ⚠️ **Every method takes the owning athlete first.** There is no read here
  * that could answer "the activity with this id" without being told whose it is
  * — the cross-athlete shape CLAUDE.md §6 names, refused at the type level.
+ *
+ * @unwired #282 — and this is a defect rather than a decision. `main.tsx` never
+ * builds a `MatchPort`, nothing calls `sweepLibrary`, and `putActivityEfforts`
+ * has no production caller at all, so no segment effort has ever been written
+ * and the effort screens read a table only a test fills. #278's gate is what
+ * found it; the note stays until #282 wires the sweep, and goes in the same
+ * pull request that does.
  */
 
 import type {

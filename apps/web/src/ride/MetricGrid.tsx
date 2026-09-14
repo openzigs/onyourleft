@@ -39,6 +39,9 @@ import type { MetricState, RideMetricId } from './metrics';
  * 3.5 rem is 56 px at the default root size. At two metres that is roughly the
  * angular size of 16 px text at arm's length, which is the comparison that
  * makes the number a decision rather than a taste.
+ *
+ * @unwired a floor `a11y/ride-legibility.a11y.test.ts` holds the rendered sizes
+ * to; the sizes are design tokens and do not read it.
  */
 export const MINIMUM_PRIMARY_METRIC_REM = 3.5;
 

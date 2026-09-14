@@ -66,7 +66,15 @@ export interface CapacitorBlePort {
   /** Ask for the runtime permissions and bring the stack up. */
   initialize(): Promise<void>;
 
-  /** Whether the adapter is switched on. Distinct from being permitted. */
+  /**
+   * Whether the adapter is switched on. Distinct from being permitted.
+   *
+   * @unwired `availability()` is its only caller and nothing in `apps/web` asks
+   * a transport whether it is available — the client probes the browser itself
+   * (`support/bluetooth-support.ts`) and the shell's pairing path calls
+   * `ensureInitialized` instead. Left on the port because the plugin offers it
+   * and an availability screen for Android is real work, not a missing call.
+   */
   isEnabled(): Promise<boolean>;
 
   /**
@@ -82,6 +90,11 @@ export interface CapacitorBlePort {
    *
    * The plugin's `getDevices(ids)` takes the ids to look up, so the caller has
    * to have kept them. That is the adapter's business, not this seam's.
+   *
+   * @unwired nothing reconnects silently, on either platform. CLAUDE.md §8:
+   * *"there is no silent reconnect that is shippable in 2026 … do not build
+   * automatic reconnection"*. This is the call that would serve one when the
+   * product decides to have it.
    */
   getDevices(ids: readonly string[]): Promise<readonly PluginDevice[]>;
 
@@ -131,6 +144,9 @@ export interface CapacitorBlePort {
    *
    * Nothing in this repository calls it. If something ever needs to, that is a
    * decision to take in an issue rather than at a call site.
+   *
+   * @unwired being uncalled is the whole point, and `fitness-machine-channel.
+   * test.ts` asserts it stays that way. This is the exemption #278 names.
    */
   writeWithoutResponse(
     deviceId: string,

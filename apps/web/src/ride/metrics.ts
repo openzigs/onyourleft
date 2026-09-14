@@ -92,7 +92,14 @@ export function metricStateFor(
   return { kind: 'live', value: latest.value, at: latest.at };
 }
 
-/** Whether a state is one a rider may read a number off. */
+/**
+ * Whether a state is one a rider may read a number off.
+ *
+ * @unwired no screen calls it — `MetricGrid` switches on `state.kind` itself,
+ * because it renders something different for each of the four states rather
+ * than branching on two. Kept as the narrowing a caller outside this module
+ * would need, and `metrics.test.ts` is its only caller today.
+ */
 export function isReadable(state: MetricState): state is Extract<MetricState, { kind: 'live' }> {
   return state.kind === 'live';
 }
