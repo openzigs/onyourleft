@@ -792,6 +792,35 @@ body {
   vector-effect: non-scaling-stroke;
 }
 
+/* #285 — the route in plan, with the rider on it.
+
+   Both colours are tokens `contrast.a11y.test.ts` already walks against the HUD
+   surface, so this panel adds no pair and its measured contrast is unchanged.
+   `non-scaling-stroke` keeps the road one hairline wide whatever width the HUD
+   is given, which is what stops a 47 km route reading as a fat smear. */
+.oyl-hud__plan-svg {
+  width: 100%;
+  height: 8rem;
+  display: block;
+}
+
+.oyl-hud__plan-line {
+  fill: none;
+  stroke: var(--oyl-color-hud-ink-muted);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+/* The rider. A disc with a ring of the panel's own surface around it, so it
+   reads as a different SHAPE from the line it sits on rather than only as a
+   different colour — `PlanTrace.tsx` says why that matters here. */
+.oyl-hud__plan-here {
+  fill: var(--oyl-color-hud-ink);
+  stroke: var(--oyl-color-hud-surface);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
 .oyl-hud__profile-text {
   margin: 0;
   font-size: var(--oyl-font-size-sm);

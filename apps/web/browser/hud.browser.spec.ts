@@ -111,6 +111,17 @@ interface HudMeasurement {
   readonly viewport: { readonly width: number; readonly height: number };
   readonly columns: number;
   readonly values: readonly ValueMeasurement[];
+  /** #285 — the plan view's box and the road drawn in it. */
+  readonly plan: PlanMeasurement | undefined;
+}
+
+/** @see hud-harness.tsx §`PlanMeasurement` */
+interface PlanMeasurement {
+  readonly width: number;
+  readonly height: number;
+  readonly roadWidth: number;
+  readonly roadHeight: number;
+  readonly roads: number;
 }
 
 /**
@@ -304,5 +315,52 @@ test.describe('the measurement can see an overflow at all', () => {
     // And the finer comparison agrees, so neither measurement is load-bearing
     // on its own.
     expect(control(measured).filter((value) => overflowsFinely(value)).length).toBe(spilled.length);
+  });
+});
+
+/**
+ * The route in plan, drawn by a browser that actually lays SVG out — #285.
+ *
+ * ⚠️ **Nothing in the jsdom suite can see any of this.** `plan.test.ts` asserts
+ * the projection down to six decimal places and `PlanTrace.test.tsx` asserts the
+ * attributes, and both would stay green against a panel that resolved to zero
+ * pixels high — jsdom performs no layout and lays out no SVG. The two failures
+ * below are the ones that only exist once a real engine has read `theme.css`:
+ * a panel collapsed inside `.oyl-hud`'s flex column, and a viewBox that reached
+ * the element but drew nothing.
+ */
+test.describe('the plan view is drawn at a size a rider can see', () => {
+  /** Either orientation would do; the plan is a square box, not a grid track. */
+  const PORTRAIT = VIEWPORTS[0];
+
+  test('gives the panel real pixels rather than collapsing it', async ({ page }) => {
+    const measured = await measure(page, PORTRAIT);
+
+    const plan = measured.plan;
+    expect(plan, 'the HUD has no plan view at all').toBeDefined();
+    // ⚠️ A floor, and what it does and does not pin was MEASURED rather than
+    // assumed. Deleting `height: 8rem` from `.oyl-hud__plan-svg` leaves this
+    // green: an `<svg>` with a `viewBox` and `width: 100%` sizes itself from
+    // the viewBox's own 1:1 ratio, so it does not collapse. What this catches
+    // is the panel not being drawn at all — `display: none`, a zero height, or
+    // the component gone from `HudPanel` — and all three were checked against
+    // it. The stylesheet's number is the stylesheet's to change.
+    expect(plan?.height ?? 0).toBeGreaterThan(64);
+    expect(plan?.width ?? 0).toBeGreaterThan(64);
+  });
+
+  test('draws the road inside it, at the height the fit gives it', async ({ page }) => {
+    const measured = await measure(page, PORTRAIT);
+    const plan = measured.plan;
+
+    expect(plan?.roads ?? 0).toBeGreaterThan(0);
+    // The harness route runs due north, so its extent is vertical. The fit
+    // leaves `PLAN_PADDING` of the 100-unit box at each end, so the road is
+    // 88 % of the panel's height — a road drawn at a couple of pixels, or not
+    // drawn at all, fails this while every attribute assertion stays green.
+    expect(plan?.roadHeight ?? 0).toBeGreaterThan((plan?.height ?? 0) * 0.5);
+    // And it is inside the panel rather than overflowing it, which is what a
+    // `preserveAspectRatio` that stopped fitting would produce.
+    expect(plan?.roadHeight ?? 0).toBeLessThanOrEqual((plan?.height ?? 0) + 1);
   });
 });

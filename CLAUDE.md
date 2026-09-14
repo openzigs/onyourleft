@@ -156,7 +156,13 @@ apps/                 AGPL-3.0-or-later, without exception
                         until the store carries either. Its own file since #237
                         so the bot's 75 kg can be asserted against it
     src/game/hud/       the ride HUD (#94) — the eight fields, the dropped
-                        sensor that is not a zero, and the wake lock
+                        sensor that is not a zero, and the wake lock; and since
+                        #285 the route in plan with the rider on it — north-up,
+                        one path per unbroken run, and the wrapped fraction
+                        that keeps a rider on lap two off the finish line.
+                        ⚠️ It needs NO basemap and issues no request: it is a
+                        projection of `RouteProfile.positions`, which the game
+                        already holds
     src/game/sensors.ts the four metric states the ride controller reports,
                         mapped to the three things a HUD renders
     src/game/ghost-source.ts
@@ -2121,6 +2127,11 @@ top of an issue **supersedes its body**.
 | Why the HUD's panel is opaque, and why that is what makes its contrast checkable | `apps/web/src/design/tokens.ts` §`hudSurface` |
 | How a rider tells a dropped sensor from a genuine zero | `apps/web/src/game/hud/fields.ts` §`NO_READING`, `HudPanel.a11y.test.tsx` |
 | Why the wake lock's *release* is the half that is tested | `apps/web/src/game/hud/wake-lock.ts` |
+| Why the plan view needs no basemap, and what proves it asks for no tile | `apps/web/src/game/hud/plan.ts`, `apps/web/src/game/plan-no-network.test.tsx` |
+| Why the plan view is north-up rather than heading-up, and where the rider's mark comes from | `apps/web/src/game/hud/plan.ts` §`riderMark`, §"North-up, deliberately" |
+| Why the plan view's fraction is wrapped where the elevation strip's is clamped | `apps/web/src/game/hud/plan.ts` §`planProgress`, `apps/web/src/game/hud/fields.ts` §`profilePosition` |
+| What a jump in a route's positions means, which build can produce one, and which it cannot see | `apps/web/src/game/hud/plan.ts` §`PLAN_BREAK_FACTOR`, `packages/store/src/persisted.ts` §`fromPersistedRoute` |
+| What bounds the points of a route that reach the DOM, and why the memo is not enough on its own | `apps/web/src/game/hud/plan.ts` §`PLAN_MAX_POINTS`, `apps/web/src/game/hud/PlanTrace.tsx` |
 | Whom the gap's direction word describes, and why it is not the rider | `apps/web/src/game/hud/fields.ts` §`gapReading`, `HudPanel.a11y.test.tsx` §`announced` |
 | Why a blocked ride control keeps its tab stop, and what `aria-disabled` does not do to a click | `apps/web/src/game/GameView.tsx` §`PACER_PROBLEM_ID`, `apps/web/src/a11y/audit.ts` §`removedFromTabOrder` |
 | Why the renderer and the HUD are in `apps/web` when their issues say `apps/mobile` | §4h, `apps/mobile/capacitor.config.ts` §`webDir` |

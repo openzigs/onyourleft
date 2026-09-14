@@ -32,6 +32,7 @@ import type { JSX } from 'react';
 import { useUnits } from '../../units/context';
 
 import { NO_READING, hudReadings, profilePosition, type HudInput } from './fields';
+import { PlanTrace } from './PlanTrace';
 
 /**
  * The smallest a mid-ride control may be, in CSS pixels.
@@ -120,6 +121,18 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
       </dl>
 
       <ElevationStrip position={position} profile={props.profile} />
+
+      {/*
+        #285 — the other axis. The strip above says how far is left; this says
+        where on the road that is. It is handed the ride's own odometer and
+        nothing else, for the reason `ElevationStrip` is handed
+        {@link profilePosition}: there is no second value in existence for it to
+        drift from. ⚠️ **The odometer rather than `position`**, which is
+        `profilePosition`'s CLAMPED fraction — on lap two of a loop that value
+        is pinned at 1 and the mark would sit on the finish line for the rest of
+        the ride. `plan.ts` §`planProgress` records the split.
+      */}
+      <PlanTrace profile={props.profile} distance={props.state.ride.distance} />
 
       <div className="oyl-hud__controls">
         <button
