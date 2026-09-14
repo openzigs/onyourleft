@@ -69,10 +69,12 @@ export const ROAD_WIDTH_METRES = 7;
  * nothing outside the corridor to draw", and both halves of that have since
  * stopped being true.** #241 gave the world fog, and #244 put scenery beside
  * the road — which, unlike a road ribbon, is not always in front of you and
- * does have to be culled. `three-renderer.ts` §`SCATTER_LATERAL_METRES` is the
- * cull, and it is bounded by this constant so the belt and the corridor cannot
- * drift apart. ADR 0008 D-5 makes the same claim this sentence did and is
- * amended by #246.
+ * does have to be culled. `three-renderer.ts` §`lateralReachMetres` is the
+ * cull, and it is bounded by this constant twice over so the belt and the
+ * corridor cannot drift apart: once along the road, and once — since #269 —
+ * across it, because nothing this far away is less than three-quarters faded
+ * into the horizon at any fog density `world.ts` can produce. ADR 0008 D-5
+ * makes the same claim this sentence did and is amended by #246.
  */
 export const VIEW_AHEAD_METRES = 400;
 

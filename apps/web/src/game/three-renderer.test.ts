@@ -57,18 +57,41 @@ import { qualitySettings } from './quality';
 import { SCATTER_KINDS, type ScatterItem, type ScatterKind } from './scatter';
 import { VIEW_AHEAD_METRES, VIEW_BEHIND_METRES } from './terrain';
 import {
+  CAMERA_ABOVE_METRES,
+  CAMERA_FIELD_OF_VIEW_DEGREES,
+  CAMERA_TARGET_AHEAD_METRES,
+  FOGGED_OUT_METRES,
+  FRUSTUM_SPREAD,
+  lateralReachMetres,
   SCATTER_INSTANCE_CAPACITY,
   SCATTER_LATERAL_METRES,
   ScatterBelt,
   threeGameRenderer,
+  WORST_CASE_ASPECT,
 } from './three-renderer';
-import type { CameraPose, SceneFrame } from './port';
+import { CAMERA_BEHIND_METRES, type CameraPose, type SceneFrame } from './port';
+import { fogFactor, MINIMUM_VIEW_END_OCCLUSION, worldStyle } from './world';
 
 /** A rider at the origin, facing +z, so `along` is `z` and `across` is `x`. */
 const POSE: CameraPose = { x: 0, y: 0, z: 0, headingX: 0, headingZ: 1 };
 
 function item(overrides: Partial<ScatterItem> = {}): ScatterItem {
   return { kind: 'shrub', x: 3, y: 0, z: 10, rotation: 0, scale: 1, ...overrides };
+}
+
+/** A short level route at an altitude, for the one question the fog floor answers. */
+function flatRouteAt(altitude: number): RoutePoint[] {
+  const points: RoutePoint[] = [];
+  for (let step = 0; step <= 20; step += 1) {
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(51.5 + (step * 10) / 111_320),
+        degreesLongitude(-0.12),
+      ),
+      elevation: altitudeMetres(altitude),
+    });
+  }
+  return points;
 }
 
 /** How many instances the belt would submit in total, across every kind. */
@@ -351,7 +374,9 @@ describe('the cull, which is the thing this renderer has never had to do', () =>
 
   it('drops what is far off the road to the side', () => {
     // The lateral half of #244's fourth criterion, and the bound nothing in
-    // this repository had before it.
+    // this repository had before it. Ten metres up the road the cone is about
+    // 104 m wide to each side, so 200 is outside it at any aspect ratio the
+    // canvas can take.
     const belt = new ScatterBelt();
 
     belt.update(
@@ -363,8 +388,100 @@ describe('the cull, which is the thing this renderer has never had to do', () =>
       POSE,
     );
 
+    expect(lateralReachMetres(10)).toBeLessThan(200);
     expect(belt.meshes.get('rock')?.count).toBe(1);
     expect(instancePosition(belt, 'rock', 0)[0]).toBe(10);
+  });
+
+  it('widens the bound with distance, because what a camera sees is a cone', () => {
+    // #269's whole substance in one assertion. The same item, the same
+    // distance to the side, dropped beside the rider and kept up the road —
+    // which a constant half-width cannot do at any value, and which is why the
+    // box threw away scenery that was on screen on every bend.
+    const belt = new ScatterBelt();
+    const aside = SCATTER_LATERAL_METRES + 48;
+
+    belt.update([item({ kind: 'rock', x: aside, z: 0 })], POSE);
+    expect(belt.meshes.get('rock')?.count).toBe(0);
+
+    belt.update([item({ kind: 'rock', x: aside, z: 20 })], POSE);
+    expect(belt.meshes.get('rock')?.count).toBe(1);
+  });
+
+  it('keeps the whole placement band beside a rider the cone has not opened for', () => {
+    // At the camera itself the cone is `FRUSTUM_SPREAD` × 8 m wide and that is
+    // narrower than the band `scatter.ts` places into, so the floor is what
+    // stops the rider riding through a bare strip. Behind the camera the cone
+    // term is clamped to zero rather than allowed to go negative, which is the
+    // same floor arriving from the other side.
+    const belt = new ScatterBelt();
+    const edgeOfBand = SCATTER_LATERAL_METRES / 2;
+
+    belt.update(
+      [
+        item({ kind: 'rock', x: edgeOfBand, z: -VIEW_BEHIND_METRES }),
+        item({ kind: 'rock', x: -edgeOfBand, z: 0 }),
+      ],
+      POSE,
+    );
+
+    expect(lateralReachMetres(-VIEW_BEHIND_METRES)).toBe(SCATTER_LATERAL_METRES);
+    expect(belt.meshes.get('rock')?.count).toBe(2);
+  });
+
+  it('caps the bound where the fog has taken everything anyway', () => {
+    // Without the cap the cone is 1.3 km wide at the far end of the corridor,
+    // which is a lateral test that no longer tests anything. With it, an item
+    // beyond `FOGGED_OUT_METRES` to the side is dropped however far up the road
+    // it is — and it is dropped because it is invisible, not because it is off
+    // screen: at that distance it is at least three-quarters horizon colour.
+    const belt = new ScatterBelt();
+
+    belt.update(
+      [
+        item({ kind: 'rock', x: FOGGED_OUT_METRES + 1, z: 350 }),
+        item({ kind: 'rock', x: FOGGED_OUT_METRES - 1, z: 350 }),
+      ],
+      POSE,
+    );
+
+    expect(lateralReachMetres(350)).toBe(FOGGED_OUT_METRES);
+    expect(belt.meshes.get('rock')?.count).toBe(1);
+    expect(instancePosition(belt, 'rock', 0)[0]).toBe(FOGGED_OUT_METRES - 1);
+  });
+
+  it('pins the worst case the whole bound is stated against', () => {
+    // ⚠️ **The one thing "nothing on screen is culled" cannot catch, said where
+    // somebody would look for it.** That property re-derives the frustum from
+    // `WORST_CASE_ASPECT` — the same constant the bound is built from — so it
+    // is self-consistent at *any* value and would stay green on a worst case
+    // narrowed to the 16 : 9 the canvas is designed at. What makes 6 safe is
+    // the reading of `design/tokens.ts` and `theme.css` recorded on
+    // `WORST_CASE_ASPECT` itself, and a reading is not something a test can
+    // re-derive. So this pins the number instead: lower it and come back here.
+    expect(WORST_CASE_ASPECT).toBeGreaterThanOrEqual(6);
+    expect(FRUSTUM_SPREAD).toBeCloseTo(3.4641, 4);
+    // And the spread really is the camera's, rather than a number beside it.
+    expect(FRUSTUM_SPREAD).toBeCloseTo(
+      WORST_CASE_ASPECT * Math.tan((CAMERA_FIELD_OF_VIEW_DEGREES / 2) * (Math.PI / 180)),
+      10,
+    );
+  });
+
+  it('rests the far cap on a premise `world.ts` still holds', () => {
+    // ⚠️ The cap is only honest while the fog it appeals to is really there.
+    // `world.ts` floors the density so that the corridor's cut end is at least
+    // `MINIMUM_VIEW_END_OCCLUSION` faded at `VIEW_AHEAD_METRES`, on the
+    // thinnest air a route can be ridden in; `FogExp2` only thickens with
+    // depth from there. Lower that floor and the cap starts hiding scenery a
+    // rider could still make out, with nothing else in the suite to notice —
+    // so this asserts the premise rather than the bound.
+    expect(MINIMUM_VIEW_END_OCCLUSION).toBeGreaterThanOrEqual(0.75);
+    expect(FOGGED_OUT_METRES).toBe(VIEW_AHEAD_METRES);
+    // Driven through the real `worldStyle`, on the thinnest air a route can
+    // reach, because that is the one case where the floor is what binds.
+    const thinnest = worldStyle(routeProfile(flatRouteAt(5000)));
+    expect(fogFactor(thinnest.fogDensity, FOGGED_OUT_METRES)).toBeGreaterThanOrEqual(0.75);
   });
 
   it('keeps everything the placement band can actually reach', () => {
@@ -534,7 +651,32 @@ describe('the cull against what `scene.ts` actually hands it', () => {
     return tightest;
   };
 
-  const keptAlongTheRoute = (radius: number | null): { lowest: number; items: number } => {
+  /**
+   * The worst frame of a 1.5 km sweep, and everything it took to get there.
+   *
+   * ⚠️ **`tightestRadius` is returned rather than only asserted inside**, so
+   * that #269's first criterion — *"with the fixture's minimum radius of
+   * curvature stated in the test"* — is stated where somebody reads the number,
+   * not buried in a helper. It is computed back out of the points the fixture
+   * generated; a fixture that stops bending goes red on the radius before the
+   * cull is measured at all.
+   *
+   * `onScreenButCulled` is #269's third criterion, evaluated on every item of
+   * every frame: the count of items that are inside the camera's horizontal
+   * frustum at {@link WORST_CASE_ASPECT}, less than
+   * {@link MINIMUM_VIEW_END_OCCLUSION} faded at their depth, and dropped
+   * anyway. `onScreenAndClear` is its non-vacuity partner — a probe that found
+   * nothing on screen would report zero violations for the wrong reason.
+   */
+  interface Sweep {
+    readonly lowest: number;
+    readonly items: number;
+    readonly tightestRadius: number;
+    readonly onScreenButCulled: number;
+    readonly onScreenAndClear: number;
+  }
+
+  const keptAlongTheRoute = (radius: number | null): Sweep => {
     const { points, local } = arcRoute(radius);
     // ⚠️ Non-vacuity of the *fixture*, checked before the cull is measured at
     // all: this is the assertion the parabola would have failed.
@@ -552,6 +694,8 @@ describe('the cull against what `scene.ts` actually hands it', () => {
     const belt = new ScatterBelt();
     let lowest = 1;
     let items = 0;
+    let onScreenButCulled = 0;
+    let onScreenAndClear = 0;
     for (let at = 0; at < 1500; at += 47) {
       const frame = sceneFrame({
         profile,
@@ -561,51 +705,136 @@ describe('the cull against what `scene.ts` actually hands it', () => {
       belt.update(frame.scatter, frame.camera);
       items = Math.min(items === 0 ? frame.scatter.length : items, frame.scatter.length);
       lowest = Math.min(lowest, submitted(belt) / Math.max(1, frame.scatter.length));
+      // ⚠️ **The one thing that makes `wouldBeDrawn` evidence about the belt.**
+      // It restates the cull so that the property below can say *which* item
+      // was dropped, which a `count` cannot — and a restatement that drifted
+      // from `#inView` would let the property pass over a belt that culls
+      // something else entirely. That is the "wrong harness" cause of this
+      // program's named defect shape, so the two are reconciled every frame
+      // rather than trusted: if they ever disagree the totals differ.
+      expect(frame.scatter.filter((each) => wouldBeDrawn(each, frame.camera))).toHaveLength(
+        submitted(belt),
+      );
+      for (const each of frame.scatter) {
+        const seen = asTheCameraSeesIt(each, frame.camera);
+        if (!seen.insideHorizontally) {
+          continue;
+        }
+        if (fogFactor(frame.world.fogDensity, seen.depth) >= MINIMUM_VIEW_END_OCCLUSION) {
+          continue;
+        }
+        onScreenAndClear += 1;
+        if (!wouldBeDrawn(each, frame.camera)) {
+          onScreenButCulled += 1;
+        }
+      }
     }
-    return { lowest, items };
+    return { lowest, items, tightestRadius: bend, onScreenButCulled, onScreenAndClear };
   };
 
   it('keeps what a straight route puts beside the road', () => {
-    const { lowest, items } = keptAlongTheRoute(null);
+    const { lowest, items, tightestRadius } = keptAlongTheRoute(null);
 
     // Non-vacuity: a route that placed nothing would make the ratio 0/0.
     expect(items).toBeGreaterThan(100);
+    expect(tightestRadius).toBeGreaterThan(100_000);
     expect(lowest).toBeGreaterThan(0.95);
   });
 
   /**
-   * ⚠️ **These two assert a band rather than a floor, and the ceiling is the
-   * half that matters.** They are not "the cull keeps enough" — it does not; a
-   * box measured in the rider's frame throws away scenery a rider can see on an
-   * ordinary corner, which is
-   * {@link https://github.com/openzigs/onyourleft/issues/269 | #269} and is
-   * stated in `three-renderer.ts` §`SCATTER_LATERAL_METRES`. They are the
-   * measurement that comment quotes, pinned where it cannot age: widen the
-   * bound and the ceiling goes red, so the comment has to be re-measured in the
-   * same change rather than left describing the cull it used to have.
+   * ⚠️ **These used to assert a band with a ceiling, and the ceiling is gone
+   * because what it pinned has been fixed.** #268 shipped the cull as a
+   * constant-width box and wrote the loss down as a measurement — 56.7 % kept
+   * on a 450 m corner, 41.3 % on a 200 m one — with a ceiling on each so that
+   * widening the bound could not happen without re-measuring the comment that
+   * quoted them. #269 is that widening. The ceilings did their job: both went
+   * red on the first run of the new bound, which is what sent me back to
+   * `lateralReachMetres`'s own comment.
    *
-   * The floor is still a real regression guard. Swapping `along` and `across`,
-   * measuring from the camera rather than the rider, or quartering
-   * `SCATTER_LATERAL_METRES` all take these below it.
+   * What replaces them is a floor at 90 %, which is #269's first two criteria
+   * verbatim, and the far stronger assertion below it: **nothing that is on
+   * screen is dropped at all**. A floor alone would be met by a cull that kept
+   * 95 % of the scenery and threw away the five per cent directly in front of
+   * the rider.
    */
-  it('loses a measured share of what a 450 m corner puts beside the road', () => {
-    // 450 m is the radius `SCATTER_LATERAL_METRES`'s own comment names as where
-    // the far end of the belt starts leaving the box before the road does.
-    const { lowest, items } = keptAlongTheRoute(450);
+  it('keeps almost all of what a 450 m corner puts beside the road', () => {
+    // 450 m is the radius the box's own comment named as where the far end of
+    // the belt started leaving it: it kept 56.7 % here.
+    const { lowest, items, tightestRadius } = keptAlongTheRoute(450);
 
     expect(items).toBeGreaterThan(100);
-    expect(lowest).toBeGreaterThan(0.5);
-    expect(lowest).toBeLessThan(0.7);
+    expect(tightestRadius).toBeGreaterThan(445);
+    expect(tightestRadius).toBeLessThan(455);
+    expect(lowest).toBeGreaterThan(0.9);
   });
 
-  it('loses more of what an ordinary 200 m corner puts beside the road', () => {
-    // Tighter than a 450 m sweep and entirely ordinary — a 200 m radius is a
-    // fast country-lane bend, not a hairpin.
-    const { lowest, items } = keptAlongTheRoute(200);
+  it('keeps almost all of what an ordinary 200 m corner puts beside the road', () => {
+    // #269's first criterion, at its own radius. A 200 m bend is a fast
+    // country-lane corner rather than a hairpin, and the box kept 41.3 % of it.
+    const { lowest, items, tightestRadius } = keptAlongTheRoute(200);
 
     expect(items).toBeGreaterThan(100);
-    expect(lowest).toBeGreaterThan(0.35);
-    expect(lowest).toBeLessThan(0.5);
+    expect(tightestRadius).toBeGreaterThan(198);
+    expect(tightestRadius).toBeLessThan(202);
+    expect(lowest).toBeGreaterThan(0.9);
+  });
+
+  /**
+   * ⚠️ **The one place a ceiling survives, and it is the new bound's own
+   * "what this gets wrong".** A 100 m hairpin folds the road back beside and
+   * behind the rider, so a fifth of the scenery a frame carries is genuinely
+   * off screen there and is genuinely dropped. That number is quoted in
+   * `three-renderer.ts` §`lateralReachMetres`, so it is pinned here the way its
+   * predecessors were: widen the bound again and this goes red, and the comment
+   * has to be re-measured in the same change rather than left describing a cull
+   * that has moved.
+   */
+  it('drops a measured share of a 100 m hairpin, all of it off screen', () => {
+    const { lowest, items, tightestRadius, onScreenButCulled, onScreenAndClear } =
+      keptAlongTheRoute(100);
+
+    expect(items).toBeGreaterThan(100);
+    expect(tightestRadius).toBeGreaterThan(99);
+    expect(tightestRadius).toBeLessThan(101);
+    expect(lowest).toBeGreaterThan(0.75);
+    expect(lowest).toBeLessThan(0.85);
+    // The dropped fifth is the point: none of it was visible.
+    expect(onScreenAndClear).toBeGreaterThan(1000);
+    expect(onScreenButCulled).toBe(0);
+  });
+
+  /**
+   * #269's third criterion, which is the only one that is a *property* rather
+   * than a number: **no item that is inside the camera's frustum at the
+   * worst-case aspect ratio, and less than `MINIMUM_VIEW_END_OCCLUSION` faded
+   * at its depth, is culled.**
+   *
+   * ⚠️ **The frustum is re-derived from the camera's three numbers rather than
+   * read off the renderer's own `PerspectiveCamera`**, and it has to be:
+   * `three-seam.test.ts` forbids this file importing `three` at all, and a test
+   * that asked the object under test where it was looking would be checking the
+   * code against itself. {@link asTheCameraSeesIt} is an independent
+   * implementation of the same projection — the posture `packages/store`'s
+   * `identity-verifier.test.ts` takes towards a signature.
+   *
+   * ⚠️ **Ten radii, four of them tighter than anything #268 measured**, because
+   * the bound's error is worst where the road bends hardest and a sweep that
+   * stopped at 200 m would have called the box correct too.
+   */
+  it('never drops an item that is on screen and not yet fogged out', () => {
+    let clear = 0;
+    for (const radius of [null, 3000, 1000, 450, 300, 200, 150, 100, 75, 50]) {
+      const sweep = keptAlongTheRoute(radius);
+
+      // Non-vacuity, per radius: a probe that found nothing on screen would
+      // report no violations for entirely the wrong reason.
+      expect(sweep.onScreenAndClear).toBeGreaterThan(1000);
+      expect(sweep.onScreenButCulled).toBe(0);
+      clear += sweep.onScreenAndClear;
+    }
+
+    // 49 169 across the ten sweeps when this was written.
+    expect(clear).toBeGreaterThan(40_000);
   });
 });
 
@@ -627,6 +856,72 @@ describe('a ride with no GL context keeps its HUD — FR-5', () => {
     }).not.toThrow();
   });
 });
+
+/**
+ * Where an item sits in the camera's own frame, derived from nothing but the
+ * four numbers that configure the camera.
+ *
+ * ⚠️ **This is the independent half of #269's third criterion and it is
+ * deliberately not the implementation's arithmetic rearranged.**
+ * `lateralReachMetres` approximates; this does not. The camera sits
+ * `CAMERA_BEHIND_METRES` behind the rider and `CAMERA_ABOVE_METRES` above, and
+ * looks at a point `CAMERA_TARGET_AHEAD_METRES` up the road at the rider's own
+ * height — so its axis is pitched down by about 5.2° and the depth of a point
+ * is its projection on that pitched axis, not its distance up the road.
+ *
+ * The camera's *right* axis is exactly the rider's lateral one: three builds
+ * the basis from a world up of (0, 1, 0) and this camera has no roll, so the
+ * right vector is horizontal and perpendicular to a heading the pose already
+ * gives in the ground plane. That is why a horizontal frustum test needs no
+ * matrix here.
+ *
+ * `insideHorizontally` is the horizontal half alone — the vertical half is left
+ * out on purpose, because the cull under test does not test vertically either
+ * and including it would make the property *weaker* by excusing a drop that
+ * happened to be above the top of the screen.
+ */
+function asTheCameraSeesIt(
+  each: ScatterItem,
+  pose: CameraPose,
+): { readonly insideHorizontally: boolean; readonly depth: number } {
+  const dx = each.x - pose.x;
+  const dz = each.z - pose.z;
+  const along = dx * pose.headingX + dz * pose.headingZ;
+  const across = dx * pose.headingZ - dz * pose.headingX;
+  // From the camera rather than from the rider, in its own three axes.
+  const forward = along + CAMERA_BEHIND_METRES;
+  const rise = each.y - pose.y - CAMERA_ABOVE_METRES;
+  const axisRun = CAMERA_TARGET_AHEAD_METRES + CAMERA_BEHIND_METRES;
+  const axisDrop = -CAMERA_ABOVE_METRES;
+  const axisLength = Math.hypot(axisRun, axisDrop);
+  const depthOnAxis = (forward * axisRun + rise * axisDrop) / axisLength;
+  const halfAngleTangent =
+    WORST_CASE_ASPECT * Math.tan((CAMERA_FIELD_OF_VIEW_DEGREES / 2) * (Math.PI / 180));
+  return {
+    // The near plane the renderer constructs its camera with.
+    insideHorizontally: depthOnAxis > 0.5 && Math.abs(across) <= halfAngleTangent * depthOnAxis,
+    depth: Math.hypot(forward, across, rise),
+  };
+}
+
+/**
+ * Whether the belt would submit this item — the cull, read back through the
+ * bound rather than through a `count`.
+ *
+ * Counting a mesh cannot say *which* item survived, and "which" is the whole of
+ * the property above. The longitudinal half is restated from the same two
+ * imported constants `#inView` uses; the lateral half calls the exported bound.
+ */
+function wouldBeDrawn(each: ScatterItem, pose: CameraPose): boolean {
+  const dx = each.x - pose.x;
+  const dz = each.z - pose.z;
+  const along = dx * pose.headingX + dz * pose.headingZ;
+  if (along > VIEW_AHEAD_METRES || along < -VIEW_BEHIND_METRES) {
+    return false;
+  }
+  const across = dx * pose.headingZ - dz * pose.headingX;
+  return Math.abs(across) <= lateralReachMetres(along);
+}
 
 /** A frame with scenery on it and the least corridor a renderer will accept. */
 function frameWithScatter(): SceneFrame {

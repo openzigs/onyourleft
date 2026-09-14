@@ -56,6 +56,11 @@
  * across to a belt that stands beside the road is the mistake #244's fifth
  * criterion exists to catch. {@link ScatterBelt} says what it does instead.
  *
+ * ⚠️ **The belt's own cull is a cone rather than a box, and it was a box until
+ * #269** — a reviewer who remembers a constant 42 m half-width here is reading
+ * the old file. {@link lateralReachMetres} is the bound, the property it is
+ * derived from, and what it still gets wrong.
+ *
  * ## Why it is written against a lost context rather than assuming one
  *
  * `canvas.getContext('webgl2')` returns `null` for ordinary reasons — WebGL
@@ -115,11 +120,29 @@ import type { WorldStyle } from './world';
  * the rest of this note lives. ADR 0008 **D-5** fixes the camera, so the two
  * together are the whole of its configuration — there is no free-look, and
  * adding one is a change to that ADR.
+ *
+ * ⚠️ Exported since #269, with {@link CAMERA_TARGET_AHEAD_METRES} and
+ * {@link CAMERA_FIELD_OF_VIEW_DEGREES}, because the scenery cull is now derived
+ * from the camera's own geometry and `three-renderer.test.ts` re-derives the
+ * frustum from these three numbers independently. A test that read the camera
+ * back off this file's own `PerspectiveCamera` would be checking the code
+ * against itself; a test that typed `3` would stop meaning anything the day
+ * this moves.
  */
-const CAMERA_ABOVE_METRES = 3;
+export const CAMERA_ABOVE_METRES = 3;
 
 /** How far ahead of the rider the camera looks. */
-const CAMERA_TARGET_AHEAD_METRES = 25;
+export const CAMERA_TARGET_AHEAD_METRES = 25;
+
+/**
+ * The camera's **vertical** field of view, in degrees — three's own convention.
+ *
+ * The horizontal one is not a second number: three derives it per frame as
+ * `atan(aspect · tan(fov / 2))`, so the width of what a rider can see is this
+ * number and the shape of the canvas, and nothing else. {@link FRUSTUM_SPREAD}
+ * is where that becomes the scenery cull's bound.
+ */
+export const CAMERA_FIELD_OF_VIEW_DEGREES = 60;
 
 /**
  * Colours, and the shapes that carry the same distinction without them.
@@ -179,52 +202,148 @@ const SCATTER_BAND_REACH_METRES =
   ROAD_WIDTH_METRES / 2 + SCATTER_VERGE_METRES + SCATTER_BAND_METRES;
 
 /**
- * How far to the side of the rider a scatter item may stand and still be drawn.
+ * The widest the world canvas can be for its height: **6 : 1**.
  *
- * ⚠️ **The bound nothing in this repository had until #244.** The corridor has
- * been bounded *along* the road since #91 — {@link VIEW_AHEAD_METRES} and
- * {@link VIEW_BEHIND_METRES} — and `terrain.ts` could say *"there is no fog and
- * nothing to cull, because there is nothing outside the corridor to draw"*
- * because a road ribbon is the one shape that is always in front of you.
- * Scenery is not: it stands beside the road, it survives a bend, and a belt
- * drawn however far off the heading it has wandered is fill rate spent on
- * pixels nobody sees. ADR 0008 D-5's *decision* — a fixed camera — is untouched
- * by this; its stated *consequence*, that there is nothing to cull, is what
- * stops being true, and #246 is the appended amendment that records it.
+ * ⚠️ **Read out of `design/theme.css`, not chosen for roundness**, because
+ * {@link FRUSTUM_SPREAD} is only ever as safe as this number is pessimistic.
+ * `.oyl-game__world` is `aspect-ratio: 16 / 9` inside `.oyl-main`'s
+ * `max-width: 68ch`, with `max-height: 60vh`. The aspect ratio therefore *is*
+ * 16 : 9 — about 1.78 — until the `max-height` clamp bites, and past that point
+ * it is `width / (0.6 · viewportHeight)`. Taking 68ch at the default 16 px root
+ * as ≈ 544 px of border box and 512 px of content, that reaches:
  *
- * **Derived, not chosen.** One {@link SCATTER_BAND_REACH_METRES} is the scenery
- * itself; the second is room for the *road* to bend away from the rider's own
- * heading inside the view, because the cull is measured in the rider's frame
- * and the road is not straight.
+ * | aspect | viewport height it needs |
+ * |---|--:|
+ * | 16 : 9 | 512 CSS px and up |
+ * | 3 : 1 | 285 CSS px |
+ * | 4 : 1 | 213 CSS px |
+ * | **6 : 1** | **142 CSS px** |
  *
- * ⚠️ **What this gets wrong, measured rather than reasoned — and it is worse
- * than a first reading suggests.** The bound is a *constant* half-width; what a
- * camera can see is a **cone** that widens with distance. Beyond roughly
- * `SCATTER_LATERAL_METRES / tan(half the horizontal field of view)` — about
- * 37 m ahead — this box is therefore **narrower than the frustum**, so on a
- * bend the far end of the belt leaves it while it is still on screen and barely
- * fogged, and pops back in as the bend straightens.
+ * A phone in landscape is 320–450 CSS px tall and a desktop window cannot
+ * usefully be dragged under about 200, so 6 : 1 is past anything a rider can
+ * produce — including the awkward case, which is a **text**-only zoom: that
+ * widens 68ch without shortening the viewport, but only until the column stops
+ * being the narrower of the two, and on a 844 × 390 landscape phone at 200 %
+ * text the canvas is 812 × 234, which is 3.5 : 1. A whole-page zoom scales both
+ * axes and moves the ratio not at all.
  *
- * The onset is not one distance. It is `R · acos(1 − SCATTER_LATERAL_METRES / R)`
- * and it scales with the bend's radius: about 190 m at R = 450 m, about 95 m at
- * R = 100 m. At the shorter of those the fog has taken well under half of what
- * is being dropped, so *"beyond where the fog has taken most of it"* is true at
- * one radius and not in general.
+ * **Being generous here is nearly free**, which is why it is 6 rather than the
+ * 4 the measurements would also have supported: past about 95 m ahead the cone
+ * is wider than {@link FOGGED_OUT_METRES} and the cap is what binds, so
+ * widening this only affects the near field at all. The
+ * measured cost of 6 over 4 is that a 150 m bend keeps 98.8 % of its scenery
+ * instead of 95.0 % — and those extra items are ones that are *on screen* at
+ * 6 : 1, so the wider bound is the more correct one rather than the more
+ * wasteful one.
+ */
+export const WORST_CASE_ASPECT = 6;
+
+/**
+ * The tangent of the camera's horizontal half-angle, at {@link WORST_CASE_ASPECT}.
  *
- * Driving the real `sceneFrame` through this belt on constant-radius routes —
- * 240 items placed every frame, worst frame of a 1.5 km sweep — the fraction
- * submitted is **98.3 % straight, 80.0 % at R = 1 000 m, 56.7 % at R = 450 m,
- * 41.3 % at R = 200 m and 29.6 % at R = 100 m**. `three-renderer.test.ts`
- * §"the cull against what `scene.ts` actually hands it" pins those numbers at
- * a stated radius rather than leaving them here to age.
+ * three builds a perspective projection from a **vertical** field of view and
+ * an aspect ratio, so the horizontal half-angle is `atan(aspect · tan(fov / 2))`
+ * and this is its tangent: how many metres wider the visible cone gets per
+ * metre of depth, on each side. 6 × tan 30° ≈ 3.464.
+ */
+export const FRUSTUM_SPREAD =
+  WORST_CASE_ASPECT * Math.tan((CAMERA_FIELD_OF_VIEW_DEGREES / 2) * (Math.PI / 180));
+
+/**
+ * The depth past which everything is at least three-quarters fogged: **400 m**.
  *
- * So on an ordinary road corner this throws away scenery a rider can see. That
- * is a real cost of shipping the cull as a box, it is
- * {@link https://github.com/openzigs/onyourleft/issues/269 | #269}, and the two
- * ways out are recorded there: a frustum-shaped lateral test, or a cull against
- * `SceneFrame.corridor.centre` instead of the rider's straight-line frame.
+ * ⚠️ **Derived from `world.ts`, not from the corridor it happens to equal.**
+ * `MINIMUM_VIEW_END_OCCLUSION` is the *floor* on how much the fog has taken at
+ * {@link VIEW_AHEAD_METRES} — 0.75, binding only on the thinnest air a route
+ * can be ridden in — and `FogExp2`'s occlusion rises with depth at every
+ * density. So nothing beyond this depth is less than 75 % faded into the
+ * horizon, on any route, whatever the altitude. `three-renderer.test.ts`
+ * §"rests the far cap on a premise `world.ts` still holds" asserts that floor
+ * through the real `worldStyle` rather than trusting this paragraph, because
+ * the day somebody lowers it this bound starts hiding scenery a rider could
+ * still make out.
+ *
+ * It is what stops {@link lateralReachMetres} growing without limit: the cone
+ * alone would permit an item 950 m to the side of a rider at the far end of the
+ * corridor, which is on screen and invisible.
+ */
+export const FOGGED_OUT_METRES = VIEW_AHEAD_METRES;
+
+/**
+ * How far to the side of the *camera itself* a scatter item may stand: 42 m.
+ *
+ * ⚠️ **This is now the near-field floor of {@link lateralReachMetres} rather
+ * than the whole bound, and that is the substance of #269.** Until then it was
+ * a constant half-width applied at every distance, which is the one shape a
+ * perspective camera never has: what a camera can see is a **cone** that widens
+ * with depth, so past about 37 m ahead a 42 m box was *narrower than the
+ * frustum* and a bend threw away scenery that was on screen and barely fogged
+ * — 56.7 % kept on a 450 m corner, 41.3 % on a 200 m one, measured. The cone
+ * term is what fixed that; this constant is what the cone is added to.
+ *
+ * **Derived, not chosen, and now for two reasons rather than one.** One
+ * {@link SCATTER_BAND_REACH_METRES} is the scenery's own placement band, so
+ * nothing `scatter.ts` can put beside the rider is ever culled from beside the
+ * rider. The second one is the margin the two approximations in
+ * {@link lateralReachMetres} need:
+ *
+ * - **The camera is pitched down** by `atan(3 / 33) ≈ 5.2°`, so an item's depth
+ *   along the view axis is `0.996 · d − 0.090 · (itemHeight − cameraHeight)`
+ *   rather than `d`. Ignoring that overstates depth for anything *below* the
+ *   camera, and the margin covers it for a drop of `42 / (FRUSTUM_SPREAD ·
+ *   0.090) ≈ 134 m` inside the 400 m view — a sustained 34 % descent, which no
+ *   road is.
+ * - **An instance is placed at a point and drawn with a size**: the tallest
+ *   kind is about 7 m and the widest a little over 3 m across, so an item whose
+ *   centre is just outside the cone can still have a branch inside it.
  */
 export const SCATTER_LATERAL_METRES = 2 * SCATTER_BAND_REACH_METRES;
+
+/**
+ * How far to the side of the rider an item at `alongMetres` may stand and still
+ * be drawn — the camera's cone, floored near it and capped far from it.
+ *
+ * ⚠️ **The property this is derived from, and the one thing it must never do:**
+ * *no item that is inside the camera's frustum at {@link WORST_CASE_ASPECT},
+ * and less than `MINIMUM_VIEW_END_OCCLUSION` fogged at its depth, is
+ * culled.* A cull that drops something on screen is a visible defect; one that
+ * keeps something off screen costs a handful of instances in a buffer that was
+ * allocated anyway. Every approximation below therefore errs **wide**.
+ *
+ * Three terms, each with its own derivation on its own constant:
+ *
+ * 1. {@link SCATTER_LATERAL_METRES}, the floor — the placement band, plus the
+ *    margin the pitch and the items' own size need.
+ * 2. {@link FRUSTUM_SPREAD} × how far the item is ahead of **the camera**,
+ *    which sits {@link CAMERA_BEHIND_METRES} behind the rider. Clamped at zero
+ *    rather than allowed to go negative: behind the camera the cone has no
+ *    width, and the floor is what keeps the near band whole there.
+ * 3. {@link FOGGED_OUT_METRES}, the cap.
+ *
+ * ⚠️ **What this gets wrong, measured the same way the box was.** Driving the
+ * real `sceneFrame` through the real belt on constant-radius routes — 240 items
+ * placed every frame, worst frame of a 1.5 km sweep — it submits **98.3 %** on
+ * a straight route, **98.8 %** at R = 450 m, **99.2 %** at R = 200 m and
+ * R = 150 m, and **79.6 %** at R = 100 m. On the same sweep the box kept
+ * 98.3 %, 56.7 % and 41.3 % of the first three.
+ *
+ * The dropped fifth at R = 100 m is a hairpin folding the road back beside and
+ * behind the rider, and **none of it is inside the frustum**: that is asserted
+ * over every item of every frame at ten radii rather than argued for, in
+ * `three-renderer.test.ts` §"never drops an item that is on screen and not yet
+ * fogged out".
+ *
+ * What it still gets wrong is the aspect ratio, and it is a cliff rather than a
+ * slope: at 8 : 1 — a viewport about 107 CSS px tall, which nothing produces —
+ * a 100 m hairpin starts culling items that are on screen and only 59 % faded
+ * into the horizon. Past that the constant is simply the wrong instrument, and
+ * the fix would be to pass the camera's live aspect in rather than to widen it
+ * again.
+ */
+export function lateralReachMetres(alongMetres: number): number {
+  const aheadOfCamera = Math.max(0, alongMetres + CAMERA_BEHIND_METRES);
+  return Math.min(SCATTER_LATERAL_METRES + FRUSTUM_SPREAD * aheadOfCamera, FOGGED_OUT_METRES);
+}
 
 /**
  * How many instances of one kind the belt has room for before it has to grow.
@@ -384,11 +503,15 @@ export class ScatterBelt {
   /**
    * Places this frame's scenery, culled to what the rider can see.
    *
-   * ⚠️ **Measured from the rider rather than from the camera**, which sits
-   * {@link CAMERA_BEHIND_METRES} further back. {@link VIEW_AHEAD_METRES} and
-   * {@link VIEW_BEHIND_METRES} are the corridor's own bounds and the corridor
-   * is built around the rider's odometer, so measuring from anywhere else would
-   * cull scenery the road under it is still being drawn for.
+   * ⚠️ **The frame is the rider's, not the camera's**, and since #269 the two
+   * bounds use it differently on purpose. {@link VIEW_AHEAD_METRES} and
+   * {@link VIEW_BEHIND_METRES} are the corridor's own bounds, the corridor is
+   * built around the rider's odometer, and measuring *those* from anywhere else
+   * would cull scenery the road under it is still being drawn for — which is
+   * mutation M17 in #268 and is a red test. The lateral bound is a cone, and a
+   * cone has an apex: {@link lateralReachMetres} therefore adds
+   * {@link CAMERA_BEHIND_METRES} back on, because the eye it is describing is
+   * that far behind the rider. Neither is the other's convention borrowed.
    *
    * ⚠️ **The cull is here rather than left to the caller**, even though
    * `scene.ts` already asks `scatter.ts` for exactly the corridor's span. A
@@ -457,12 +580,18 @@ export class ScatterBelt {
   }
 
   /**
-   * Whether an item is inside the box the rider can see.
+   * Whether an item is inside what the rider can see.
    *
    * `along` is the item's distance up the rider's heading and `across` is its
    * distance to the side of it — the two components of the same offset in the
    * rider's own frame, which is the frame {@link VIEW_AHEAD_METRES} and
-   * {@link SCATTER_LATERAL_METRES} are both stated in.
+   * {@link lateralReachMetres} are both stated in.
+   *
+   * ⚠️ **Two bounds of different shapes, and they are not interchangeable.**
+   * Along the road it is a pair of constants, because the corridor itself is
+   * built between them and nothing outside them is drawn at all. To the side it
+   * is a **cone**, because that is what a perspective camera can see — #269,
+   * and {@link lateralReachMetres} carries the derivation and the measurement.
    */
   #inView(item: ScatterItem, pose: CameraPose): boolean {
     const dx = item.x - pose.x;
@@ -472,7 +601,7 @@ export class ScatterBelt {
       return false;
     }
     const across = dx * pose.headingZ - dz * pose.headingX;
-    return Math.abs(across) <= SCATTER_LATERAL_METRES;
+    return Math.abs(across) <= lateralReachMetres(along);
   }
 }
 
@@ -513,7 +642,7 @@ class ThreeGameView implements GameView {
   readonly hasContext: boolean;
   readonly #renderer: WebGLRenderer | undefined;
   readonly #scene = new Scene();
-  readonly #camera = new PerspectiveCamera(60, 1, 0.5, 2_000);
+  readonly #camera = new PerspectiveCamera(CAMERA_FIELD_OF_VIEW_DEGREES, 1, 0.5, 2_000);
   readonly #roadGeometry = new BufferGeometry();
   readonly #road: Mesh;
   readonly #markers = new Map<RiderMarker['kind'], Mesh>();
