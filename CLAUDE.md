@@ -34,7 +34,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         spec. See §4a and §4f. Since #111 it also holds
                         capture.html, which is NOT a gate: it is the tool a
                         person opens with a trainer in front of them, built by
-                        the same second Vite config so it can never ship
+                        the same second Vite config so it can never ship. Since
+                        #266 it also holds hud.html and hud-harness.tsx — the
+                        ride HUD laid out at a phone's width, which is a gate,
+                        and the one page here that renders React and measures a
+                        box rather than reading back a pixel
     src/a11y/           the accessibility gate: rules, routes, contrast (#48) — see §4e
     src/analysis/       zones and duration personal bests (#78) — the port, the one
                         place a threshold default is substituted, the bounded
@@ -513,6 +517,10 @@ pnpm run build
 # the map actually contacts**. That last one is #63's third criterion in its
 # literal form and the assertion `styleOrigins` cannot make, because a request
 # a dependency issues on its own initiative is in no style at all.
+#
+# Since #266 it also runs the HUD page, which is here for a DIFFERENT reason
+# than WebGL: jsdom performs no layout, so nothing in the Vitest suite can say
+# whether a value fits its grid track. See §4f.
 #
 # Needs the pinned browser present. In a container that already has one (
 # `PLAYWRIGHT_BROWSERS_PATH` set, revision matching) it runs as-is; on a bare
@@ -1104,6 +1112,8 @@ browser runs**.
 | `map.browser.spec.ts` | the Playwright spec that drives it |
 | `game.html`, `game-harness.ts` | since #91, the same idea for the renderer: a page that builds a scene through the **real** `game/three-renderer.ts` and the **real** `terrain.ts` |
 | `game.browser.spec.ts` | its spec — the renderer constructs against a live context, the geometry is one a driver accepts, and a frame reaches the drawing buffer (read back with `readPixels`, because `render` not throwing is a weaker claim) |
+| `hud.html`, `hud-harness.tsx` | since #266, the ride HUD: the **real** `game/hud/HudPanel.tsx` under the **real** `design/theme.css`, in the **real** `oyl-shell` → `oyl-main` → `oyl-game` chain `AppShell` and `GameView` give it, with every field populated and all three of #259's settled outcome words. A **`.tsx`**, and the only React in this directory |
+| `hud.browser.spec.ts` | its spec — no `.oyl-hud__value` overflows its grid track at a phone viewport in either orientation, read back from the browser's own layout. Its **control panels** are the half that makes a green run mean something |
 | `../playwright.config.ts` | Chromium only, no retries, and the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all |
 | `../vite.browser.config.ts` | the harness build. A second Vite config, so the harness cannot reach a shipped bundle |
 
@@ -1114,6 +1124,33 @@ MapLibre initialises against the style we build, whether `addProtocol` takes eff
 engine, and **which hosts the map actually contacts.** The third is #63's criterion 3 in its literal
 wording (*"intercepts all network traffic during a map render"*), and it catches what `styleOrigins`
 cannot: a request a dependency issues on its own initiative is in no style at all.
+
+**The HUD page is there for a second reason, and it is not WebGL: jsdom performs no layout.**
+`test:a11y` renders the HUD on every run and audits it, and it cannot measure one pixel — no layout,
+no resolved custom properties. `theme.css` sets a HUD value at 2.5 rem in a `repeat(auto-fit,
+minmax(7rem, 1fr))` track whose `7rem` is a *floor* rather than an `auto`, and a single word has no
+break opportunity, so #259's three outcome words spilled across the field beside them onto its
+number — passing every gate this repository had. `hud-value-size.test.ts` checks the same rule
+arithmetically against constants somebody measured by hand; this checks it against a browser.
+
+⚠️ **What the HUD half does NOT prove, and the assumption to avoid.** It is a **layout** check and
+not a look-right one: there is no reference image and ADR 0009 forbids deriving one from another
+product. It says nothing about colour (`contrast.a11y.test.ts` owns that), nothing about the scene
+behind the panel, and nothing about a real phone — a 390 px viewport in a headless Chromium is not a
+handlebar in the rain. ⚠️ And it does **not** replace `hud-value-size.test.ts`: that one runs in the
+fast suite, fails with the arithmetic in front of you, and is the only one that says the repair was
+not `overflow-wrap`. Neither is the other's superset, which is the same shape as `styleOrigins`
+below.
+
+⚠️ **A gate of this shape can be green because nothing was measured, so the HUD spec carries a
+control.** Every panel is rendered twice and the second copy has `oyl-hud__value--word` stripped
+off, so the same words are laid out at the size they had before #259 — and the spec requires *those*
+to overflow. Without it, a container that was too wide, a stylesheet that failed to load and a panel
+that rendered nothing would all report "no overflow". Two things were measured while building it and
+are recorded in the spec's header: Chromium reports `scrollWidth === clientWidth` for a
+non-scroll-container whenever nothing actually overflows, so that comparison alone can look
+identical for a broken page and a good one; and `auto-fit` answers a too-wide container by adding
+columns rather than widening tracks, so a track-width guard does not catch one.
 
 ⚠️ **The browser gate does not subsume `styleOrigins`, and it is easy to assume it does.** Adding a
 third-party `glyphs` URL to `basemapStyle` turns the **jsdom** check red and leaves the **browser**
@@ -1126,10 +1163,22 @@ deleting either leaves a real hole. Found by mutation; recorded here so it is no
 browser run does not belong in the fast suite a contributor runs on every save. It is its own
 command and its own CI step.
 
-⚠️ **`vite.browser.config.ts` names both entries explicitly, and must.** Vite's multi-page mode
+⚠️ **`vite.browser.config.ts` names every entry explicitly, and must.** Vite's multi-page mode
 discovers only `index.html`; a page added without a line in `build.rollupOptions.input` is simply
 not built, and the failure is a 404 while the spec runs rather than a build error — which reads
-like a server fault and sends the next person to `playwright.config.ts`.
+like a server fault and sends the next person to `playwright.config.ts`. There are **four** entries
+today, not two: the map, the game, the HUD and the capture tool. #266 confirmed the trap by
+deleting its own line — the run died sixty seconds later inside `waitForFunction` with no mention
+of the config, which is why `hud.browser.spec.ts` now checks the response status and names
+`build.rollupOptions.input` in the failure.
+
+⚠️ **The harness build has no React plugin and does not need one, and that is measured rather than
+assumed.** #266's page is a `.tsx` rendering the real `HudPanel`; Vite's esbuild transform reads
+`jsx` out of `apps/web/tsconfig.json` (`react-jsx`) and compiles it with no plugin at all.
+`@vitejs/plugin-react` adds Fast Refresh and the dev transforms, and this config is only ever built
+and then served by `vite preview`. ⚠️ `apps/web/tsconfig.json` had to gain `browser/**/*.tsx`
+alongside `browser/**/*.ts`, because Vite never reads `include` — without it the page builds and is
+never typechecked.
 
 ⚠️ **What the game half does NOT prove.** Not that the scene looks right — there is no reference
 image and ADR 0009 forbids deriving one from another product. And **not ADR 0008 D-2's spike**: no

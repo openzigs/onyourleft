@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      The viewport meta the product ships, because the product ships one. It
+      changes nothing under Playwright — a viewport size set on the page is CSS
+      pixels already — and leaving it out would make this page differ from
+      `apps/web/index.html` in exactly the dimension being measured.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>On Your Left — ride HUD browser harness</title>
+    <!--
+      No styles of this page's own. The harness imports `src/design/theme.css`,
+      which is the stylesheet under test: a rule added here could only make the
+      measurement one of this file rather than one of the product.
+    -->
+  </head>
+  <body>
+    <div id="hud"></div>
+    <script type="module" src="./hud-harness.tsx"></script>
+  </body>
+</html>

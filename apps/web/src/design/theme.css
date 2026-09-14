@@ -724,9 +724,17 @@ body {
    than an `auto`: the track does not grow to fit its content. A single word has
    no break opportunity either, so at 2.5 rem anything past about five
    characters spills sideways across the next field and lands on its number.
-   Measured in the pinned Chromium at 390 px, where the track is 114 px:
-   `Beaten` 120 px, `Finished` 144 px, `Matched` 151 px — all three over, and
-   `Matched` and `Finished` are over the 128 px track in landscape too.
+   Measured in the pinned Chromium: `Beaten` 120 px, `Finished` 144 px,
+   `Matched` 151 px.
+
+   ⚠️ Those three widths are confirmed; the track width beside them was not.
+   #266 re-measured through the product's own ancestor chain — `.oyl-main`
+   around `.oyl-game` around this panel — and the narrowest track the grid
+   actually produces is 118 px, at five columns, which is what every viewport
+   from 686 px up gets (a phone in landscape and a desktop alike). A 390 px
+   phone in portrait gets two columns of 159 px, in which all three words fit
+   even at 2.5 rem. `browser/hud.browser.spec.ts` carries the table and reads
+   the numbers off Chromium on every run.
 
    1.5 rem is chosen against the 7 rem FLOOR rather than against either of those
    measurements, because the floor is the narrowest a track can be: 151 px ×

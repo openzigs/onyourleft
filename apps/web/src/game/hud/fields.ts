@@ -103,8 +103,12 @@ export interface HudReading {
    * track never grows past its content the way a flex item does — the `7rem`
    * is a floor, not an `auto` — and a **single word has no break opportunity**,
    * so a word wider than the track spills across the field beside it and sits
-   * on top of that field's number. Measured in the repository's pinned Chromium
-   * at 390 px: the track is 114 px and `Matched` is 151 px.
+   * on top of that field's number. Measured in the repository's pinned
+   * Chromium: `Matched` is 151 px, against a track that is 118 px wherever the
+   * grid resolves to five columns — which is a phone in landscape and every
+   * window from 686 px up. (This used to name a 114 px track at 390 px; #266
+   * re-measured it through the product's own ancestor chain and 390 px portrait
+   * is the one width at which the words fit. `browser/hud.browser.spec.ts`.)
    *
    * {@link detail} exists for the other half of this: #255 moved the gap's
    * *phrase* out of the value for exactly this reason, and #259 walked back
