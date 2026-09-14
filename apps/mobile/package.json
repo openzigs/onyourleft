@@ -12,7 +12,7 @@
   "dependencies": {
     "@capacitor-community/bluetooth-le": "8.3.0",
     "@capacitor/android": "8.5.1",
-    "@capacitor/core": "8.5.1",
+    "@capacitor/core": "8.5.2",
     "@onyourleft/domain": "workspace:*",
     "@onyourleft/sensors": "workspace:*"
   },
