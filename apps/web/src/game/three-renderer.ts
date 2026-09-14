@@ -197,14 +197,32 @@ const SCATTER_BAND_REACH_METRES =
  * heading inside the view, because the cull is measured in the rider's frame
  * and the road is not straight.
  *
- * ⚠️ **What this gets wrong, stated rather than left to be discovered.** On a
- * bend tighter than about a 450 m radius the far end of the belt leaves this
- * box before the road does, and those items are not drawn. That starts beyond
- * roughly 190 m, which is where `world.ts`'s fog has already taken half of
- * them, and by {@link VIEW_AHEAD_METRES} it has taken
- * `FOG_OCCLUSION_AT_VIEW_END` — 95 % — of them. Widening the box would buy back
- * a bend's worth of near-invisible scenery at the cost of the cull itself,
- * which is the thing #244 exists to add.
+ * ⚠️ **What this gets wrong, measured rather than reasoned — and it is worse
+ * than a first reading suggests.** The bound is a *constant* half-width; what a
+ * camera can see is a **cone** that widens with distance. Beyond roughly
+ * `SCATTER_LATERAL_METRES / tan(half the horizontal field of view)` — about
+ * 37 m ahead — this box is therefore **narrower than the frustum**, so on a
+ * bend the far end of the belt leaves it while it is still on screen and barely
+ * fogged, and pops back in as the bend straightens.
+ *
+ * The onset is not one distance. It is `R · acos(1 − SCATTER_LATERAL_METRES / R)`
+ * and it scales with the bend's radius: about 190 m at R = 450 m, about 95 m at
+ * R = 100 m. At the shorter of those the fog has taken well under half of what
+ * is being dropped, so *"beyond where the fog has taken most of it"* is true at
+ * one radius and not in general.
+ *
+ * Driving the real `sceneFrame` through this belt on constant-radius routes —
+ * 240 items placed every frame, worst frame of a 1.5 km sweep — the fraction
+ * submitted is **98.3 % straight, 80.0 % at R = 1 000 m, 56.7 % at R = 450 m,
+ * 41.3 % at R = 200 m and 29.6 % at R = 100 m**. `three-renderer.test.ts`
+ * §"the cull against what `scene.ts` actually hands it" pins those numbers at
+ * a stated radius rather than leaving them here to age.
+ *
+ * So on an ordinary road corner this throws away scenery a rider can see. That
+ * is a real cost of shipping the cull as a box, it is
+ * {@link https://github.com/openzigs/onyourleft/issues/269 | #269}, and the two
+ * ways out are recorded there: a frustum-shaped lateral test, or a cull against
+ * `SceneFrame.corridor.centre` instead of the rider's straight-line frame.
  */
 export const SCATTER_LATERAL_METRES = 2 * SCATTER_BAND_REACH_METRES;
 
@@ -470,12 +488,23 @@ export class ScatterBelt {
  *
  * Nothing is copied out of the old buffer: every live matrix is written after
  * this returns, so a copy would be copying data about to be overwritten.
+ *
+ * ⚠️ **Replacing `instanceMatrix` strands the previous GL buffer, and the
+ * doubling is what bounds how many can be stranded.** three frees an instance
+ * buffer only in its `onInstancedMeshDispose`, which removes the attribute the
+ * mesh holds *at that moment* — so the one this discards stays in the driver
+ * for the life of the context. Sizing the replacement to exactly `needed` would
+ * mean a caller one item over budget reallocating, and stranding a buffer,
+ * **every frame**, which is precisely the per-frame-allocation shape #240's
+ * NFR-3 forbids. Doubling makes the number of strandings logarithmic in the
+ * count instead of linear in the frame number.
  */
 function reserve(mesh: InstancedMesh, needed: number): void {
-  if (needed <= mesh.instanceMatrix.count) {
+  const held = mesh.instanceMatrix.count;
+  if (needed <= held) {
     return;
   }
-  const grown = new InstancedBufferAttribute(new Float32Array(needed * 16), 16);
+  const grown = new InstancedBufferAttribute(new Float32Array(Math.max(needed, held * 2) * 16), 16);
   grown.setUsage(DynamicDrawUsage);
   mesh.instanceMatrix = grown;
 }

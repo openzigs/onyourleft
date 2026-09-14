@@ -92,13 +92,21 @@ declare global {
       /** The highest vertex any of those indices names. */
       readonly highestIndex: number;
       /**
-       * How many draw calls one frame of the whole scene issued — #242's
-       * fifth criterion, measured rather than reviewed.
+       * How many draw calls the **first** frame of the whole scene issued —
+       * #242's fifth criterion, measured rather than reviewed.
        *
        * The road is meant to be **one** of them however many lanes and marks
-       * it carries, so the total is the ground, the road, and the two markers
-       * this harness puts on the route. A road split into three meshes reads
-       * as six here.
+       * it carries, so the total is the ground, the road, the two markers this
+       * harness puts on the route, and — since #244 — one call per scatter
+       * kind that frame has beside it. A road split into three meshes reads as
+       * three more than it should.
+       *
+       * ⚠️ **`drawCallsWithoutScatter` is what #242's own test asserts on**,
+       * because it is measured on a frame with the scenery deliberately
+       * removed. This one is the unprepared frame, and `game.browser.spec.ts`
+       * checks it against `4 + scatterKindCount` — a harness field no spec
+       * reads is a measurement nobody is making, which is what #268's review
+       * found here.
        */
       readonly drawCallsPerFrame: number;
       readonly markerKinds: readonly string[];
@@ -537,10 +545,13 @@ const SWEEP_STEP_METRES = 3.7;
 function sweep(
   view: { render: (frame: SceneFrame) => void },
   frameAt: (at: number) => SceneFrame,
-): void {
+): number {
+  let drawn = 0;
   for (let index = 1; index <= FRAMES - 5; index += 1) {
     view.render(frameAt(index * SWEEP_STEP_METRES));
+    drawn += 1;
   }
+  return drawn;
 }
 
 function run(): void {
@@ -667,8 +678,12 @@ function run(): void {
         // **twice** — see {@link resourcesAfterSecondSweep} — and a second pass
         // over slightly different distances would be measuring a different
         // route rather than the same one again.
-        sweep(view, frameAt);
-        framesDrawn = FRAMES - 4;
+        // ⚠️ **Counted, not asserted on the sweep's behalf.** This read
+        // `framesDrawn = FRAMES - 4` until #268's review: a literal that goes
+        // on claiming a hundred after somebody changes `sweep`'s bounds, which
+        // leaves `game.browser.spec.ts`'s `framesDrawn === FRAMES` green over a
+        // harness that stopped doing what it says.
+        framesDrawn += sweep(view, frameAt);
 
         // Read the drawing buffer back. `preserveDrawingBuffer` is off, so this
         // is only valid immediately after a render and before the compositor
@@ -766,7 +781,7 @@ function run(): void {
         // ⚠️ **The same hundred frames again**, and the frames of this second
         // pass are deliberately not counted into {@link framesDrawn}. @see
         // {@link resourcesAfterSecondSweep} for what the pair of counts is for.
-        sweep(view, frameAt);
+        void sweep(view, frameAt);
         view.render(frame);
         view.render(withoutScenery);
         view.render(frameAt(ON_THE_DESCENT_METRES));

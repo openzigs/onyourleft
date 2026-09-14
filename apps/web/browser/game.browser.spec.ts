@@ -329,9 +329,18 @@ test.describe('the world #241 derives from the route reaches the screen', () => 
     // allocates its buffers two hundred metres in: **once**, for the life of
     // the view, bounded by six kinds. Driving the identical sweep a second time
     // and finding nothing further allocated is the claim that was wanted all
-    // along, and it is strictly stronger — it covers every kind, corridor
-    // length and scenery count the route reaches rather than whatever happened
-    // to be on screen at frame one.
+    // along, and for the belt it is strictly stronger — it covers every kind,
+    // corridor length and scenery count the route reaches rather than whatever
+    // happened to be on screen at frame one.
+    //
+    // ⚠️ **For the rest of the scene it is marginally weaker, and #268's review
+    // is right to say so.** The old form pinned the ground, the road and the
+    // markers to exact equality after frame one; the pair of tests below now
+    // tolerates up to thirty buffers from any source across the first pass. The
+    // residual hole is narrow — anything recurring is caught by the second
+    // sweep, so what fits through it is an allocation that happens once, at one
+    // distance, and never again — but it is a hole the previous assertion did
+    // not have.
     const result = await harness(page);
 
     expect(result.resourcesAfterFirstFrame).toBeGreaterThan(0);
@@ -525,5 +534,12 @@ test.describe('the scenery reaches the screen, and costs one call a kind — #24
     expect(result.drawCallsWithScatter - result.drawCallsWithoutScatter).toBe(
       result.scatterKindCount,
     );
+    // ⚠️ **The same ratio on a frame that was not prepared for it.** The two
+    // counts above are measured back to back late in the run, with the scenery
+    // removed from the second on purpose. `drawCallsPerFrame` is the **first**
+    // frame the harness ever drew, of the whole scene, with no such
+    // arrangement — and #268's review found it published and asserted by
+    // nothing. Four is the scenery-free scene the test above this one pins.
+    expect(result.drawCallsPerFrame).toBe(4 + result.scatterKindCount);
   });
 });

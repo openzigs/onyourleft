@@ -223,6 +223,30 @@ describe('the belt is reused rather than reallocated', () => {
     expect(belt.meshes.get('rock')?.instanceMatrix.count).toBeGreaterThanOrEqual(tooMany);
     expect(belt.meshes.get('rock')?.count).toBe(tooMany);
   });
+
+  it('grows geometrically, so a caller one over the budget does not reallocate every frame', () => {
+    // ⚠️ Replacing `instanceMatrix` **strands the previous GL buffer**: three
+    // frees an instance buffer only in `onInstancedMeshDispose`, which removes
+    // the attribute the mesh holds at that moment. Sizing the replacement to
+    // exactly what was asked for would strand one buffer per frame for a caller
+    // that sits one item over the budget — the per-frame-allocation shape
+    // #240's NFR-3 forbids, arriving on the one path built for a caller who
+    // ignores the budget.
+    const belt = new ScatterBelt();
+    const rocks = (count: number): ScatterItem[] =>
+      Array.from({ length: count }, (_, at) =>
+        item({ kind: 'rock', x: (at % 21) - 10, z: at % 300 }),
+      );
+
+    belt.update(rocks(SCATTER_INSTANCE_CAPACITY + 1), POSE);
+    const grown = belt.meshes.get('rock')?.instanceMatrix;
+    expect(grown?.count).toBeGreaterThanOrEqual(SCATTER_INSTANCE_CAPACITY * 2);
+
+    // One more item, and the buffer is the same object: the growth already
+    // made room. Sized to `needed`, this would be a second allocation.
+    belt.update(rocks(SCATTER_INSTANCE_CAPACITY + 2), POSE);
+    expect(belt.meshes.get('rock')?.instanceMatrix).toBe(grown);
+  });
 });
 
 describe('the matrices that are written are the matrices that are uploaded', () => {
@@ -434,28 +458,94 @@ describe('the cull against what `scene.ts` actually hands it', () => {
    * `scatter.ts` has ever had — `port.ts` §`scatter` says so — and the first
    * consumer is where that surfaces.
    *
-   * So these two drive the **real** `sceneFrame`, built from the **real**
-   * `packages/domain` route profile, at thirty-two rider positions, and assert
-   * that the cull keeps almost all of it. The threshold is deliberately loose:
-   * what matters is the difference between "a few items at the very ends of the
-   * corridor" and "most of the frame", and no arithmetic mistake of this kind
-   * lands between the two.
+   * So these drive the **real** `sceneFrame`, built from the **real**
+   * `packages/domain` route profile, at thirty-two rider positions.
+   *
+   * ## Why the fixture is a constant-radius arc, and why its radius is asserted
+   *
+   * ⚠️ **This block first shipped in #268 with a fixture that did not bend the
+   * way its own name claimed, and the review of that pull request is what found
+   * it.** The route was `east = 0.0002 · s²` — a parabola, whose radius of
+   * curvature is at its **tightest where s = 0** and *loosens* from there:
+   * 2 500 m at the start, 9 500 m three kilometres in. A fixture written to
+   * tighten did the opposite, so the test named for the hard case was asserted
+   * on a motorway curve and `lowest > 0.9` could not fail for the reason given.
+   *
+   * A constant-radius arc has one radius of curvature everywhere, and
+   * {@link tightestRadiusMetres} computes it back out of the points the fixture
+   * actually generated rather than trusting the algebra. A fixture that stops
+   * bending goes red on that assertion before it reaches the cull at all —
+   * which is the only thing that makes the numbers below mean anything.
    */
-  const keptAlongTheRoute = (bends: boolean): { lowest: number; items: number } => {
+  const LATITUDE_DEGREES = 51.5;
+  const METRES_PER_DEGREE_LATITUDE = 111_320;
+
+  /** A fixture point in flat metres — northing, easting — before it is a coordinate. */
+  type LocalPoint = readonly [number, number];
+
+  /** A route of one constant radius of curvature, or straight when `radius` is `null`. */
+  const arcRoute = (radius: number | null): { points: RoutePoint[]; local: LocalPoint[] } => {
     const points: RoutePoint[] = [];
-    for (let index = 0; index <= 300; index += 1) {
-      // A bend that tightens, so the later stretches curve hard away from any
-      // straight-line heading — which is what a lateral cull is most at risk of
-      // getting wrong.
-      const eastwards = bends ? (index * index * 0.02) / Math.cos((51.5 * Math.PI) / 180) : 0;
+    const local: LocalPoint[] = [];
+    for (let along = 0; along <= 3000; along += 10) {
+      const turned = radius === null ? 0 : along / radius;
+      const north = radius === null ? along : radius * Math.sin(turned);
+      const east = radius === null ? 0 : radius * (1 - Math.cos(turned));
+      local.push([north, east]);
       points.push({
         position: geographicPosition(
-          degreesLatitude(51.5 + (index * 10) / 111_320),
-          degreesLongitude(-0.12 + eastwards / 111_320),
+          degreesLatitude(LATITUDE_DEGREES + north / METRES_PER_DEGREE_LATITUDE),
+          degreesLongitude(
+            -0.12 +
+              east / (METRES_PER_DEGREE_LATITUDE * Math.cos((LATITUDE_DEGREES * Math.PI) / 180)),
+          ),
         ),
-        elevation: altitudeMetres(index <= 150 ? index * 0.4 : (300 - index) * 0.4),
+        // A climb and a descent, so the profile is not degenerate in height
+        // either. Nothing in the cull reads it; `scatterAt` does.
+        elevation: altitudeMetres(along <= 1500 ? along * 0.04 : (3000 - along) * 0.04),
       });
     }
+    return { points, local };
+  };
+
+  /**
+   * The tightest radius of curvature the fixture actually has, in metres.
+   *
+   * The circumradius of each consecutive triple — `abc / 4A` — which is the
+   * radius of curvature of the circle through those three points. Collinear
+   * triples have zero area and an infinite radius, which is what a straight
+   * route should report.
+   */
+  const tightestRadiusMetres = (local: readonly LocalPoint[]): number => {
+    let tightest = Number.POSITIVE_INFINITY;
+    for (let at = 1; at < local.length - 1; at += 1) {
+      const [ax, ay] = local[at - 1] ?? [0, 0];
+      const [bx, by] = local[at] ?? [0, 0];
+      const [cx, cy] = local[at + 1] ?? [0, 0];
+      const a = Math.hypot(bx - ax, by - ay);
+      const b = Math.hypot(cx - bx, cy - by);
+      const c = Math.hypot(cx - ax, cy - ay);
+      const area = Math.abs((bx - ax) * (cy - ay) - (by - ay) * (cx - ax)) / 2;
+      tightest = Math.min(
+        tightest,
+        area === 0 ? Number.POSITIVE_INFINITY : (a * b * c) / (4 * area),
+      );
+    }
+    return tightest;
+  };
+
+  const keptAlongTheRoute = (radius: number | null): { lowest: number; items: number } => {
+    const { points, local } = arcRoute(radius);
+    // ⚠️ Non-vacuity of the *fixture*, checked before the cull is measured at
+    // all: this is the assertion the parabola would have failed.
+    const bend = tightestRadiusMetres(local);
+    if (radius === null) {
+      expect(bend).toBeGreaterThan(100_000);
+    } else {
+      expect(bend).toBeGreaterThan(radius * 0.98);
+      expect(bend).toBeLessThan(radius * 1.02);
+    }
+
     const profile = routeProfile(points);
     const origin = corridorOrigin(profile);
     const start = atStartLine(profile);
@@ -476,21 +566,46 @@ describe('the cull against what `scene.ts` actually hands it', () => {
   };
 
   it('keeps what a straight route puts beside the road', () => {
-    const { lowest, items } = keptAlongTheRoute(false);
+    const { lowest, items } = keptAlongTheRoute(null);
 
     // Non-vacuity: a route that placed nothing would make the ratio 0/0.
     expect(items).toBeGreaterThan(100);
-    expect(lowest).toBeGreaterThan(0.9);
+    expect(lowest).toBeGreaterThan(0.95);
   });
 
-  it('keeps what a tightening bend puts beside the road', () => {
-    // The case a lateral bound measured in the rider's frame is most likely to
-    // get wrong, and the reason `SCATTER_LATERAL_METRES` is twice the band's
-    // own reach rather than equal to it.
-    const { lowest, items } = keptAlongTheRoute(true);
+  /**
+   * ⚠️ **These two assert a band rather than a floor, and the ceiling is the
+   * half that matters.** They are not "the cull keeps enough" — it does not; a
+   * box measured in the rider's frame throws away scenery a rider can see on an
+   * ordinary corner, which is
+   * {@link https://github.com/openzigs/onyourleft/issues/269 | #269} and is
+   * stated in `three-renderer.ts` §`SCATTER_LATERAL_METRES`. They are the
+   * measurement that comment quotes, pinned where it cannot age: widen the
+   * bound and the ceiling goes red, so the comment has to be re-measured in the
+   * same change rather than left describing the cull it used to have.
+   *
+   * The floor is still a real regression guard. Swapping `along` and `across`,
+   * measuring from the camera rather than the rider, or quartering
+   * `SCATTER_LATERAL_METRES` all take these below it.
+   */
+  it('loses a measured share of what a 450 m corner puts beside the road', () => {
+    // 450 m is the radius `SCATTER_LATERAL_METRES`'s own comment names as where
+    // the far end of the belt starts leaving the box before the road does.
+    const { lowest, items } = keptAlongTheRoute(450);
 
     expect(items).toBeGreaterThan(100);
-    expect(lowest).toBeGreaterThan(0.9);
+    expect(lowest).toBeGreaterThan(0.5);
+    expect(lowest).toBeLessThan(0.7);
+  });
+
+  it('loses more of what an ordinary 200 m corner puts beside the road', () => {
+    // Tighter than a 450 m sweep and entirely ordinary — a 200 m radius is a
+    // fast country-lane bend, not a hairpin.
+    const { lowest, items } = keptAlongTheRoute(200);
+
+    expect(items).toBeGreaterThan(100);
+    expect(lowest).toBeGreaterThan(0.35);
+    expect(lowest).toBeLessThan(0.5);
   });
 });
 
