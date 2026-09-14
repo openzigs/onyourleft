@@ -29,9 +29,11 @@
  * is a separate file because it reads `theme.css` as a file, and under jsdom
  * `import.meta.url` is an `http://` URL that `fileURLToPath` refuses.
  *
- * The pixels themselves were measured in the repository's pinned Chromium and
- * the numbers are in `theme.css` beside the rule. Turning that measurement into
- * a gate needs a HUD page in the browser gate (§4f), which is its own issue.
+ * The pixels themselves are measured on every run since #266, by
+ * `apps/web/browser/hud.browser.spec.ts` — this paragraph used to say that
+ * needed its own issue, and it did, and it landed. What is asserted here is
+ * still the wiring rather than the width: a browser gate cannot tell a value
+ * that fits from a value that was never marked, and this can.
  */
 
 import { afterEach, describe, expect, it } from 'vitest';

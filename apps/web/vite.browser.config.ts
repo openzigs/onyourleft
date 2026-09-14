@@ -9,8 +9,20 @@
  * split `packages/fit` and `packages/sensors` use for their platform-free
  * tsconfigs — one file for what ships, one for what checks it.
  *
- * No React plugin: the harness is plain TypeScript driving the map adapter
- * directly. What it tests is `map/maplibre.ts`, which has no React in it.
+ * ## No React plugin, and since #266 that is a measured claim rather than a
+ * description
+ *
+ * This header used to read *"the harness is plain TypeScript"*, and the HUD
+ * page (#266) renders a React component — so the sentence had to be either
+ * corrected or replaced by a plugin. It is the former: Vite's esbuild transform
+ * reads `jsx` out of `apps/web/tsconfig.json`, which is `react-jsx`, so a
+ * `.tsx` entry compiles here with no plugin at all. Verified by building this
+ * config and loading `hud.html` in the gate rather than by reasoning about it.
+ *
+ * ⚠️ What `@vitejs/plugin-react` adds over that is Fast Refresh and the dev
+ * transforms — a dev-server concern, and this config is only ever *built* and
+ * then served by `vite preview`. Adding it would be a second React toolchain to
+ * keep in step with `vite.config.ts` for no behaviour the gate can observe.
  */
 
 import { defineConfig } from 'vite';
@@ -42,6 +54,10 @@ export default defineConfig({
       input: {
         map: 'browser/index.html',
         game: 'browser/game.html',
+        // #266. The ride HUD, laid out by a real engine at a phone's width —
+        // the one thing jsdom cannot do, on the one surface where it is
+        // load-bearing. `hud-harness.tsx` says what it does and does not prove.
+        hud: 'browser/hud.html',
         // Not a gate the way the other two are: `capture.html` is the tool a
         // person opens with a trainer in front of them (#111), and a headless
         // runner has no Bluetooth adapter. It is built and loaded here so that

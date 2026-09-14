@@ -15,6 +15,11 @@
     // than left out: it imports the real map adapter, so a change that breaks
     // the adapter's signature has to break here too.
     "browser/**/*.ts",
+    // ⚠️ `.tsx` as well, since #266: the HUD page renders the real `HudPanel`,
+    // so the harness is a React file. Without this line it builds — Vite never
+    // reads `include` — and is never typechecked, which is the half of the gate
+    // that catches a prop the panel no longer takes.
+    "browser/**/*.tsx",
     "vite.config.ts",
     "vite.browser.config.ts",
     "playwright.config.ts",

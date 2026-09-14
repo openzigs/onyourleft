@@ -23,12 +23,20 @@
  *
  * ## What it cannot prove, stated rather than left to be assumed
  *
- * ⚠️ **Not that the word fits.** That is a pixel measurement and nothing in
- * this repository's test suites can take one. It was taken by hand in the
- * pinned Chromium and the numbers are in `theme.css` beside the rule; the
- * bound below is derived from them so that a later edit of the rule has to
- * clear the same arithmetic. A HUD page in the browser gate (§4f) is what would
- * measure it on every run.
+ * ⚠️ **Not that the word fits.** That is a pixel measurement and no Vitest
+ * suite in this repository can take one. It was taken by hand in the pinned
+ * Chromium and the numbers are in `theme.css` beside the rule; the bound below
+ * is derived from them so that a later edit of the rule has to clear the same
+ * arithmetic.
+ *
+ * ⚠️ **Since #266 a browser does take it on every run**, and this paragraph
+ * used to end by saying that would need a HUD page in the browser gate — a
+ * reader who remembers that is reading the old file.
+ * `apps/web/browser/hud.browser.spec.ts` lays the real panel out in the real
+ * ancestor chain at a phone's width and reads the overflow back off Chromium.
+ * The two are not redundant: this one runs in the fast suite on every save and
+ * fails with the arithmetic in front of it, and it is the only one that can
+ * say the repair was not `overflow-wrap`.
  */
 
 import { readFileSync } from 'node:fs';
