@@ -35,6 +35,7 @@
  */
 
 import type { QualitySettings } from './quality';
+import type { ScatterItem } from './scatter';
 import type { RoadCorridor } from './terrain';
 import type { WorldStyle } from './world';
 
@@ -110,6 +111,22 @@ export interface SceneFrame {
    * back for exactly that reason.
    */
   readonly world: WorldStyle;
+  /**
+   * What stands beside the road, for this stretch of it — #243.
+   *
+   * ⚠️ **Kinds and placements, never meshes.** The same reasoning
+   * {@link RiderMarker} gives: a caller handed a mesh has already chosen a
+   * rendering library, and `scatter.ts` is on the side of the seam that must
+   * not name one. `three-renderer.ts` decides what a conifer looks like, and
+   * #244 is the issue that makes it do so.
+   *
+   * ⚠️ Like {@link world}, an array added here that the renderer never reads
+   * passes every jsdom test and changes nothing on screen — #240's named defect
+   * shape for this epic. It **is** unread today: #243 places the scenery and
+   * #244 draws it, and that is said here rather than left for a reader to
+   * discover.
+   */
+  readonly scatter: readonly ScatterItem[];
 }
 
 /** A live 3D view. Created by a {@link GameRenderer}, destroyed by its owner. */
