@@ -12,8 +12,9 @@ import { describe, expect, it } from 'vitest';
 
 import { gapAgainst } from './hud/fields';
 import type { RiderMarker, SceneFrame } from './port';
+import { SCATTER_MAX_ITEMS, type ScatterItem } from './scatter';
 import { cameraPose, ghostFinished, sceneFrame } from './scene';
-import { corridorOrigin } from './terrain';
+import { VIEW_AHEAD_METRES, VIEW_BEHIND_METRES, corridorOrigin } from './terrain';
 import {
   GameSimulation,
   MAXIMUM_STEPS_PER_ADVANCE,
@@ -452,5 +453,79 @@ describe('a loop, once the rider has been round once (#253)', () => {
     const gap = pacerGap(gapAgainst(state, 200 + total));
 
     expect(gap.metres).toBeCloseTo(total, 6);
+  });
+});
+
+describe('the frame carries the scenery for the road it drew', () => {
+  function frameAt(setup: SimulationSetup, odometer: number): SceneFrame {
+    const base = atStartLine(setup.profile);
+    return sceneFrame({
+      profile: setup.profile,
+      origin: corridorOrigin(setup.profile),
+      state: { ...base, ride: { ...base.ride, distance: metres(odometer) } },
+    });
+  }
+
+  /** Where a frame's scatter sits along the route: the fixture runs north. */
+  function reach(frame: SceneFrame): { readonly nearest: number; readonly furthest: number } {
+    const zs = frame.scatter.map((item) => item.z);
+    return { nearest: Math.min(...zs), furthest: Math.max(...zs) };
+  }
+
+  it('places scenery beside a road that has some', () => {
+    // ⚠️ The whole point of asserting this in `scene.ts` rather than only in
+    // `scatter.test.ts`: a `sceneFrame` that carried `scatter: []` would leave
+    // every assertion in that file green and put nothing on screen. #240 names
+    // that defect shape for this epic and `port.ts` repeats it.
+    const setup = straightRoute();
+
+    expect(frameAt(setup, 0).scatter.length).toBeGreaterThan(0);
+  });
+
+  it('never hands the renderer more than the budget', () => {
+    const setup = straightRoute();
+
+    expect(frameAt(setup, 600).scatter.length).toBeLessThanOrEqual(SCATTER_MAX_ITEMS);
+  });
+
+  it('covers the corridor it built and not some other stretch of road', () => {
+    // The span is taken from the corridor's own first and last points, so the
+    // scenery moves with the rider by construction. A frame 600 m up the road
+    // that still carried the start line's trees would be a world that scrolled
+    // without moving.
+    const setup = straightRoute();
+    const atStart = reach(frameAt(setup, 0));
+    const alongTheWay = reach(frameAt(setup, 600));
+
+    expect(atStart.furthest).toBeLessThan(VIEW_AHEAD_METRES + 20);
+    expect(alongTheWay.nearest).toBeGreaterThan(600 - VIEW_BEHIND_METRES - 20);
+    expect(alongTheWay.furthest).toBeLessThan(600 + VIEW_AHEAD_METRES + 20);
+  });
+
+  it('gives one place one world, however many times it is asked', () => {
+    const setup = straightRoute();
+
+    expect(frameAt(setup, 600).scatter).toEqual(frameAt(setup, 600).scatter);
+  });
+
+  it('brings the same scenery back round on lap two of a loop', () => {
+    // The seam, through the frame: a rider rejoining a loop rides past the
+    // trees they rode past on lap one. #243's own criterion is asserted on
+    // `scatterAt`; this is the one that says `scene.ts` passes it odometers it
+    // can wrap rather than something it has already wrapped itself.
+    const setup = loopRoute();
+    const total: number = setup.profile.totalDistance;
+
+    const lapOne = frameAt(setup, 200).scatter;
+    const lapTwo = frameAt(setup, total + 200).scatter;
+
+    expect(lapOne.length).toBeGreaterThan(0);
+    expect(lapTwo.length).toBe(lapOne.length);
+    expect(lapTwo.map((item) => item.kind)).toEqual(lapOne.map((item) => item.kind));
+    for (let index = 0; index < lapOne.length; index += 1) {
+      const one = lapOne[index] as ScatterItem;
+      const two = lapTwo[index] as ScatterItem;
+      expect(Math.hypot(one.x - two.x, one.z - two.z)).toBeLessThan(1);
+    }
   });
 });

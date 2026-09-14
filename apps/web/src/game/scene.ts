@@ -19,6 +19,7 @@
 import { ghostDistanceAt, ghostHasFinished, type GhostTrack } from '@onyourleft/domain';
 
 import type { CameraPose, RiderMarker, SceneFrame } from './port';
+import { SCATTER_MAX_ITEMS, scatterAt, scatterSeed, type ScatterItem } from './scatter';
 import { ghostClock, type GameState } from './simulation';
 import {
   roadCorridor,
@@ -53,7 +54,39 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     // keyed on a profile is a second source of truth that a route change has
     // to remember to clear. `world.ts` says what the bound buys.
     world: worldStyle(input.profile),
+    scatter: scatter(corridor, input, riderDistance),
   };
+}
+
+/**
+ * The scenery for exactly the stretch of road this frame drew.
+ *
+ * ⚠️ **The span comes from the corridor rather than from `VIEW_AHEAD_METRES` and
+ * `VIEW_BEHIND_METRES`.** Reading the two constants here would be a second
+ * statement of how far the rider can see, and the day either moves — or the day
+ * a caller passes `roadCorridor` an override, which its options already allow —
+ * the scenery would stop where the road no longer does. Taking the first and
+ * last centreline point's own `along` cannot drift, because it *is* what was
+ * built.
+ */
+function scatter(
+  corridor: RoadCorridor,
+  input: SceneInput,
+  riderDistance: number,
+): readonly ScatterItem[] {
+  const first = corridor.centre[0] as CorridorPoint;
+  const last = corridor.centre[corridor.centre.length - 1] as CorridorPoint;
+  return scatterAt(
+    input.profile,
+    input.origin,
+    // O(1), and recomputed per frame for the reason `worldStyle` is: a cache
+    // keyed on a profile is a second source of truth a route change has to
+    // remember to clear.
+    scatterSeed(input.profile),
+    first.along,
+    last.along,
+    { maxItems: SCATTER_MAX_ITEMS, riderMetres: riderDistance },
+  );
 }
 
 /**

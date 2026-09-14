@@ -269,7 +269,7 @@ export function worldStyle(profile: RouteProfile): WorldStyle {
     // Haze is what the fog is coloured with, and thin air has less of it, so
     // the horizon of an alpine route is very nearly its sky.
     horizonColour: mix(HORIZON_HAZE, sky, thinness),
-    groundColour: groundColour(warmth, altitude, treeLine(latitude)),
+    groundColour: groundColour(warmth, altitude, treeLineMetres(latitude)),
     fogDensity: Math.max(MINIMUM_FOG_DENSITY, SEA_LEVEL_FOG_DENSITY * densityRatio),
   };
 }
@@ -280,8 +280,14 @@ export function worldStyle(profile: RouteProfile): WorldStyle {
  * Straight-line between the two anchors in the provenance table, and never
  * below zero: past {@link TREE_LINE_SEA_LEVEL_LATITUDE_DEGREES} there is no
  * altitude at which trees start, which is what tundra is.
+ *
+ * ⚠️ **Exported since #243, so that the scenery and the ground under it agree.**
+ * `scatter.ts` decides whether a place carries conifers or bare rock, and this
+ * file decides whether the ground beneath them is painted as vegetation or as
+ * rock. Two copies of this approximation would let a world paint bare rock and
+ * stand a forest on it, which is one question with two answers.
  */
-function treeLine(latitudeDegrees: number): number {
+export function treeLineMetres(latitudeDegrees: number): number {
   return Math.max(
     0,
     TREE_LINE_AT_EQUATOR_METRES * (1 - latitudeDegrees / TREE_LINE_SEA_LEVEL_LATITUDE_DEGREES),

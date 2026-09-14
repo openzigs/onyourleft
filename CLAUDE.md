@@ -132,6 +132,13 @@ apps/                 AGPL-3.0-or-later, without exception
                         rather than choice, and the provenance of every other
                         one. Pure, so the renderer stays the only file that
                         names three
+    src/game/scatter.ts where the scenery goes and what kind it is (#243) — a
+                        seeded, stateless hash of where you are rather than a
+                        walk forward, the three places a route is read as, the
+                        verge that keeps a tree out of the carriageway, and the
+                        budget that thins the far view instead of truncating
+                        it. ⚠️ It PLACES and draws nothing; #244 draws it, so
+                        SceneFrame.scatter ships unread until then
     src/game/three-seam.test.ts
                         what keeps that true, and what keeps the scene unlit —
                         a grep over apps/ and packages/ rather than a review
@@ -1929,6 +1936,10 @@ top of an issue **supersedes its body**.
 | What happens to a ride when the phone is backgrounded for five minutes | `apps/web/src/game/simulation.ts` §`MAXIMUM_STEPS_PER_ADVANCE` |
 | Why the ghost does not gain road while the phone is backgrounded, and which clock it is raced against | `apps/web/src/game/simulation.ts` §`ghostClock`, §`GameState.ridden` |
 | Why the road is a corridor rather than a world, and where its vertices come from | `apps/web/src/game/terrain.ts`, [ADR 0008](docs/adr/0008-mobile-client-architecture.md) D-5 |
+| Why the scenery is a hash of where you are rather than a generator that walks forward | `apps/web/src/game/scatter.ts` §`scatterAt`, §`scatterSeed` |
+| Where the tree line, the boreal latitude and the steep-pitch threshold came from | `apps/web/src/game/scatter.ts` §Provenance, `apps/web/src/game/world.ts` §`treeLineMetres` |
+| Why a full budget thins the far view instead of cutting it off, and what a wall across the road looks like | `apps/web/src/game/scatter.ts` §`thin`, §`SCATTER_NEAR_BIAS` |
+| What stops a loop shorter than the view from being drawn twice, and what else that bound buys | `apps/web/src/game/scatter.ts` §`scatterAt`, and the `cellCount` cap beside it |
 | Where the centre line's ten-metre period came from, and why it is not `profile.resolution` | `apps/web/src/game/terrain.ts` §`CENTRE_LINE_PERIOD_METRES` |
 | Why a dash indexed by vertex gives a rider a false speed cue, and what stops the pattern crawling | `apps/web/src/game/terrain.ts` §`writeCentreLine` |
 | Why the gradient tint changes luminance and not only hue | `apps/web/src/game/terrain.ts` §`MINIMUM_TINT_CONTRAST_RATIO`, `apps/web/src/design/contrast.ts` |

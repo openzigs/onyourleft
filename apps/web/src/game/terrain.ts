@@ -340,6 +340,31 @@ export interface CorridorOrigin {
 }
 
 /**
+ * Where a coordinate sits in the corridor's local metres, on the ground plane.
+ *
+ * ⚠️ **Exported so that `scatter.ts` (#243) projects with this projection rather
+ * than with its own copy of it.** Two implementations of the equirectangular
+ * projection is two sources of truth for where the world is, and a metre of
+ * disagreement between them would put the scenery a metre off the road — which
+ * is under the verge #243 puts between them, so it would show as trees in the
+ * carriageway on one side and a bare strip on the other.
+ *
+ * `y` is not here because it is not a projection question: the road's height is
+ * an interpolated elevation and the scenery's is the same one.
+ */
+export function localGroundPosition(
+  origin: CorridorOrigin,
+  position: GeographicPosition,
+): { readonly x: number; readonly z: number } {
+  const metresPerDegreeLongitude =
+    METRES_PER_DEGREE_LATITUDE * Math.cos((origin.latitude * Math.PI) / 180);
+  return {
+    x: (position.longitude - origin.longitude) * metresPerDegreeLongitude,
+    z: (position.latitude - origin.latitude) * METRES_PER_DEGREE_LATITUDE,
+  };
+}
+
+/**
  * The projection origin for a route: its first grid point.
  *
  * Computed once per route and reused for every rebuild, because a projection
@@ -803,12 +828,11 @@ function pointAt(profile: RouteProfile, origin: CorridorOrigin, along: number): 
     Math.max(0, Math.round(wrapped / profile.resolution)),
   );
   const position = profile.positions[index] as GeographicPosition;
-  const metresPerDegreeLongitude =
-    METRES_PER_DEGREE_LATITUDE * Math.cos((origin.latitude * Math.PI) / 180);
+  const ground = localGroundPosition(origin, position);
   return {
-    x: (position.longitude - origin.longitude) * metresPerDegreeLongitude,
+    x: ground.x,
     y: (elevationAt(profile, wrapped) as number) - origin.elevation,
-    z: (position.latitude - origin.latitude) * METRES_PER_DEGREE_LATITUDE,
+    z: ground.z,
     distance: wrapped,
     along,
   };
