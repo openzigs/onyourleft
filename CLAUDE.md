@@ -952,6 +952,31 @@ coverage gate is enforced and demonstrated to fail below threshold"*, and it **p
 does not govern**: §5 bans a percentage floor outright, and §4b reframes what is owed as the
 demonstration above. Read §5, not that criterion.
 
+⚠️ **`rules.yml` is not the only workflow, and this section used to read as though it were.**
+[`.github/workflows/release.yml`](.github/workflows/release.yml) — **`Android release`** — arrived
+with [#207](https://github.com/openzigs/onyourleft/pull/207) and is described here because §4c's own
+rule is that CI must not accumulate knowledge this file does not carry.
+
+| | |
+|---|---|
+| Triggers | a pushed tag matching `v*`, and `workflow_dispatch` |
+| Job | `Build and publish the APK` |
+| What it does | decodes an upload key **if this repository has one**, assembles, publishes a GitHub Release, and removes the key before anything else runs |
+| Permissions | ⚠️ `contents: write` — **the only workflow here that is not read-only**, because writing a Release needs it |
+
+⚠️ **It has never run.** There is no `v*` tag and no release has been cut;
+[`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §1 says so, and `workflow_dispatch` is on the
+trigger list precisely so the pipeline can be exercised before there is anything to release.
+[#95](https://github.com/openzigs/onyourleft/issues/95) owns that. Treat every claim about its
+behaviour as untested.
+
+⚠️ **It is not a required check and cannot block a merge**, which is right for a tag-triggered job
+and is also why its action pins drifted behind `rules.yml`'s without anything noticing —
+`actions/checkout` sat on v5.0.0 there while `rules.yml` was on v7.0.1. Each pin carries the
+`gh api …/commits/<tag> --jq .sha` line that produced it, and **a bump must move the comment with
+the SHA**: a Dependabot bump changes only the pin, which leaves the comment naming a different
+commit than the one running.
+
 Repository-level security scanning — CodeQL default setup, secret scanning with push protection, and
 Dependabot alerts and security updates — is **already enabled on the repository** and needs no
 workflow step. Adding one would duplicate it.
@@ -1781,7 +1806,15 @@ admits 7.x.
 **Node 26 is not the answer yet.** It enters Active LTS on **2026-10-28**. Until then Node 24
 "Krypton" is the line. Move on the date, not before.
 
-**Vitest 5 is in release candidate.** Ship on 4.1.11.
+**Vitest 5.0.0 is released, and this repository stays on 4.1.11 deliberately.** This line used
+to read *"Vitest 5 is in release candidate"*; `npm view vitest dist-tags` reported `latest:
+5.0.0` on 2026-09-14, so that reason has expired and the pin now rests on a different one. A
+major version of the test runner moves `vitest`, `@vitest/coverage-v8` and every
+`vitest.config.ts` in seven packages at once — including `packages/domain`'s, which **imports
+nothing on purpose** (§4d) and would be the first thing a config migration breaks. Take it as
+its own issue with the suite, the coverage reporter and both platform-free typechecks re-run,
+never as part of a grouped bump. Dependabot's #273 proposed it alongside TypeScript 7 and was
+closed for the TypeScript half.
 
 **pnpm 11 refuses a lockfile entry published in the last 24 hours.** `minimumReleaseAge` is a
 default, not something this repository configured, and it is a supply-chain control worth keeping:
