@@ -41,6 +41,21 @@
  * NFR-2 says is the budget that matters here. It is also still flat-shaded:
  * an edge line that reads as an edge line costs a vertex rather than a lamp.
  *
+ * ## The scenery is instanced, and it is the first thing here that is culled
+ *
+ * #244 draws what `scatter.ts` placed. **One `InstancedMesh` per kind**, six of
+ * them, built once and reused — five hundred trees is six draw calls rather
+ * than five hundred, which is the budget #240's NFR-2 says actually matters.
+ * Every shape is a three primitive built from numbers in {@link SCATTER_STYLE};
+ * as with the markers and the road, no model, texture or asset file is loaded
+ * and nothing is derived from any other product.
+ *
+ * ⚠️ **And it is the first object in this file that three is allowed to cull.**
+ * `frustumCulled = false` is right for the road and for the ground — one
+ * ribbon and one backdrop, both always in front of the camera — and copying it
+ * across to a belt that stands beside the road is the mistake #244's fifth
+ * criterion exists to catch. {@link ScatterBelt} says what it does instead.
+ *
  * ## Why it is written against a lost context rather than assuming one
  *
  * `canvas.getContext('webgl2')` returns `null` for ordinary reasons — WebGL
@@ -53,17 +68,24 @@
  */
 
 import {
+  BoxGeometry,
   BufferAttribute,
   BufferGeometry,
   Color,
   ConeGeometry,
+  CylinderGeometry,
   DoubleSide,
+  DynamicDrawUsage,
   FogExp2,
+  InstancedBufferAttribute,
+  InstancedMesh,
+  Matrix4,
   Mesh,
   MeshBasicMaterial,
   OctahedronGeometry,
   PerspectiveCamera,
   PlaneGeometry,
+  Quaternion,
   Scene,
   SphereGeometry,
   Vector3,
@@ -74,6 +96,15 @@ import {
 import type { QualitySettings } from './quality';
 import { CAMERA_BEHIND_METRES } from './port';
 import type { CameraPose, GameRenderer, GameView, RiderMarker, SceneFrame } from './port';
+import {
+  SCATTER_BAND_METRES,
+  SCATTER_KINDS,
+  SCATTER_MAX_ITEMS,
+  SCATTER_VERGE_METRES,
+  type ScatterItem,
+  type ScatterKind,
+} from './scatter';
+import { ROAD_WIDTH_METRES, VIEW_AHEAD_METRES, VIEW_BEHIND_METRES } from './terrain';
 import type { WorldStyle } from './world';
 
 /**
@@ -138,6 +169,346 @@ const GROUND_BELOW_ROAD_METRES = 0.25;
  */
 const UNSET_COLOUR = 0x000000;
 
+/**
+ * How far from the road's centreline `scatter.ts` can put anything: **21 m**.
+ *
+ * Derived from that file's own three numbers rather than restated here, so the
+ * cull below cannot go on describing a band that has moved.
+ */
+const SCATTER_BAND_REACH_METRES =
+  ROAD_WIDTH_METRES / 2 + SCATTER_VERGE_METRES + SCATTER_BAND_METRES;
+
+/**
+ * How far to the side of the rider a scatter item may stand and still be drawn.
+ *
+ * ⚠️ **The bound nothing in this repository had until #244.** The corridor has
+ * been bounded *along* the road since #91 — {@link VIEW_AHEAD_METRES} and
+ * {@link VIEW_BEHIND_METRES} — and `terrain.ts` could say *"there is no fog and
+ * nothing to cull, because there is nothing outside the corridor to draw"*
+ * because a road ribbon is the one shape that is always in front of you.
+ * Scenery is not: it stands beside the road, it survives a bend, and a belt
+ * drawn however far off the heading it has wandered is fill rate spent on
+ * pixels nobody sees. ADR 0008 D-5's *decision* — a fixed camera — is untouched
+ * by this; its stated *consequence*, that there is nothing to cull, is what
+ * stops being true, and #246 is the appended amendment that records it.
+ *
+ * **Derived, not chosen.** One {@link SCATTER_BAND_REACH_METRES} is the scenery
+ * itself; the second is room for the *road* to bend away from the rider's own
+ * heading inside the view, because the cull is measured in the rider's frame
+ * and the road is not straight.
+ *
+ * ⚠️ **What this gets wrong, measured rather than reasoned — and it is worse
+ * than a first reading suggests.** The bound is a *constant* half-width; what a
+ * camera can see is a **cone** that widens with distance. Beyond roughly
+ * `SCATTER_LATERAL_METRES / tan(half the horizontal field of view)` — about
+ * 37 m ahead — this box is therefore **narrower than the frustum**, so on a
+ * bend the far end of the belt leaves it while it is still on screen and barely
+ * fogged, and pops back in as the bend straightens.
+ *
+ * The onset is not one distance. It is `R · acos(1 − SCATTER_LATERAL_METRES / R)`
+ * and it scales with the bend's radius: about 190 m at R = 450 m, about 95 m at
+ * R = 100 m. At the shorter of those the fog has taken well under half of what
+ * is being dropped, so *"beyond where the fog has taken most of it"* is true at
+ * one radius and not in general.
+ *
+ * Driving the real `sceneFrame` through this belt on constant-radius routes —
+ * 240 items placed every frame, worst frame of a 1.5 km sweep — the fraction
+ * submitted is **98.3 % straight, 80.0 % at R = 1 000 m, 56.7 % at R = 450 m,
+ * 41.3 % at R = 200 m and 29.6 % at R = 100 m**. `three-renderer.test.ts`
+ * §"the cull against what `scene.ts` actually hands it" pins those numbers at
+ * a stated radius rather than leaving them here to age.
+ *
+ * So on an ordinary road corner this throws away scenery a rider can see. That
+ * is a real cost of shipping the cull as a box, it is
+ * {@link https://github.com/openzigs/onyourleft/issues/269 | #269}, and the two
+ * ways out are recorded there: a frustum-shaped lateral test, or a cull against
+ * `SceneFrame.corridor.centre` instead of the rider's straight-line frame.
+ */
+export const SCATTER_LATERAL_METRES = 2 * SCATTER_BAND_REACH_METRES;
+
+/**
+ * How many instances of one kind the belt has room for before it has to grow.
+ *
+ * ⚠️ **Allocated for every kind in the constructor, before a frame arrives, and
+ * that is the point rather than a shortcut.** three creates a GPU buffer the
+ * first time it draws an object; a belt that allocated a kind's matrices the
+ * frame that kind first appeared would allocate at 400 m into a ride, which is
+ * exactly the per-frame-allocation shape #240's NFR-3 forbids showing up late
+ * enough that no gate would see it. Six kinds at {@link SCATTER_MAX_ITEMS}
+ * matrices is 6 × 240 × 64 bytes ≈ 92 kB, once, on a device floor ADR 0008 D-4
+ * puts at 3 GB.
+ *
+ * It is {@link SCATTER_MAX_ITEMS} per kind rather than shared between them
+ * because the split cannot be known ahead of a frame: a stretch through a
+ * forest is very nearly all conifer, and a belt that had reserved a sixth of
+ * the budget for each kind would draw a sixth of the forest.
+ */
+export const SCATTER_INSTANCE_CAPACITY = SCATTER_MAX_ITEMS;
+
+/**
+ * What each kind is made of, and what colour it is.
+ *
+ * ⚠️ **Provenance, per #240's BR-1 and ADR 0009 L2.** Every entry is built from
+ * three's own geometry classes out of numbers typed here; **no model, texture,
+ * asset file or course geometry is loaded, and none of it was derived from
+ * another product, including "for reference"**. The dimensions are ordinary
+ * roadside sizes — a conifer about 7 m tall, a marker post a little over a
+ * metre, a building a few metres on a side — and the colours are plain
+ * vegetation, stone and paint. `scatter.ts` §"Provenance" makes the same
+ * declaration for the placement.
+ *
+ * The geometry is translated so that its **base sits at y = 0**, because a
+ * {@link ScatterItem}'s `y` is the ground under it: three centres every
+ * primitive on its own origin, so a cone left alone is half buried.
+ */
+const SCATTER_STYLE: Record<ScatterKind, { colour: number; geometry: () => BufferGeometry }> = {
+  'tree-broadleaf': {
+    colour: 0x3f6b33,
+    // A canopy, coarse on purpose: at the distances fog leaves visible, a
+    // six-segment sphere and a smooth one are the same handful of pixels.
+    geometry: () => new SphereGeometry(2.2, 6, 4).translate(0, 2.6, 0),
+  },
+  'tree-conifer': {
+    colour: 0x2b4a30,
+    geometry: () => new ConeGeometry(1.3, 7, 6).translate(0, 3.5, 0),
+  },
+  shrub: {
+    colour: 0x5c7a3f,
+    geometry: () => new SphereGeometry(0.8, 5, 3).translate(0, 0.6, 0),
+  },
+  rock: {
+    colour: 0x8a8579,
+    geometry: () => new OctahedronGeometry(0.9, 0).translate(0, 0.5, 0),
+  },
+  post: {
+    colour: 0xd8d5cc,
+    geometry: () => new CylinderGeometry(0.07, 0.07, 1.1, 5).translate(0, 0.55, 0),
+  },
+  building: {
+    colour: 0xa8968a,
+    geometry: () => new BoxGeometry(7, 6, 9).translate(0, 3, 0),
+  },
+};
+
+/**
+ * The scenery belt: one {@link InstancedMesh} per {@link ScatterKind}, reused.
+ *
+ * ## Why this is a class of its own, and why it is exported
+ *
+ * ⚠️ **Exported so the jsdom suite can drive it, and for no other reason.**
+ * `three-renderer.ts` is the one file allowed to name `three` (§4h,
+ * `three-seam.test.ts`), so a belt in a file of its own is not available; and a
+ * belt reachable only through {@link ThreeGameView} is not testable at all,
+ * because jsdom implements no WebGL and a `WebGLRenderer` cannot be constructed
+ * there. Every claim #244 makes about instancing — one mesh per kind, the same
+ * mesh at frame 100 as at frame 1, the count actually submitted — is arithmetic
+ * over three objects that need no context, so it is asserted where the rest of
+ * `game/` is asserted. What is left for the browser gate is the half jsdom
+ * genuinely cannot see: that the belt is **in the scene** and reaches the
+ * drawing buffer.
+ *
+ * ## One draw call per kind, which is the whole budget argument
+ *
+ * #240's NFR-2 is that the budget here is draw calls, overdraw and fill rate
+ * rather than triangles. Five hundred `Mesh` objects is five hundred draw calls
+ * and is invisible until a phone is in hand; five hundred instances of six
+ * meshes is six. That is the entire reason this class exists.
+ *
+ * ## Three things it is careful about
+ *
+ * 1. **Nothing is allocated per frame.** The meshes, their geometry, their
+ *    materials and their matrix buffers are built once — see
+ *    {@link SCATTER_INSTANCE_CAPACITY} — and {@link ScatterBelt.update} writes
+ *    into them. #240's NFR-3, and the rebuild runs on the same JavaScript
+ *    thread GATT notifications arrive on, so an allocation here is a dropped
+ *    sensor sample rather than only a stutter.
+ * 2. **`instanceMatrix.needsUpdate` is set whenever a matrix is written**, and
+ *    that is the half that is invisible when it is missing: three uploads an
+ *    instance buffer the first time it binds it and thereafter only when the
+ *    flag says to, so without it the matrices are written, every test asserting
+ *    the matrices passes, and the scenery stays where it was on frame one.
+ * 3. **`frustumCulled` is left alone.** The road sets it to `false` and is
+ *    right to — it is one ribbon, rebuilt in world coordinates every frame,
+ *    always in front of the camera. Copying that across to a scatter belt is
+ *    the specific mistake #244's fifth criterion exists to catch. The belt is
+ *    beside the road rather than on it, so three's own culling is worth having;
+ *    what it needs in exchange is a bounding sphere that is recomputed after
+ *    the matrices move, which {@link ScatterBelt.update} does.
+ */
+export class ScatterBelt {
+  readonly #meshes = new Map<ScatterKind, InstancedMesh>();
+  /** Survivors of the cull, per kind, for the frame being built. */
+  readonly #counts = new Map<ScatterKind, number>();
+  /** Reused every instance of every frame — see the header's first point. */
+  readonly #matrix = new Matrix4();
+  readonly #position = new Vector3();
+  readonly #quaternion = new Quaternion();
+  readonly #scale = new Vector3();
+  readonly #up = new Vector3(0, 1, 0);
+
+  constructor() {
+    for (const kind of SCATTER_KINDS) {
+      const mesh = new InstancedMesh(
+        SCATTER_STYLE[kind].geometry(),
+        // Unlit, like everything else in this file: a `MeshBasicMaterial` costs
+        // no shading pass, and "no lighting means no light budget" is the whole
+        // reason this renderer can ship without one.
+        new MeshBasicMaterial({ color: SCATTER_STYLE[kind].colour }),
+        SCATTER_INSTANCE_CAPACITY,
+      );
+      // The buffer is rewritten every frame, so tell the driver that rather
+      // than letting it hint STATIC_DRAW for something that never is.
+      mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+      // three's constructor fills every slot with the identity matrix and sets
+      // `count` to the capacity. A belt that drew before its first frame would
+      // draw the whole capacity stacked at the origin.
+      mesh.count = 0;
+      mesh.visible = false;
+      this.#meshes.set(kind, mesh);
+      this.#counts.set(kind, 0);
+    }
+  }
+
+  /** The meshes, by kind. Six of them, whatever the frame holds. */
+  get meshes(): ReadonlyMap<ScatterKind, InstancedMesh> {
+    return this.#meshes;
+  }
+
+  /** Puts the belt in a scene. Called once, by the view that owns it. */
+  addTo(scene: Scene): void {
+    for (const mesh of this.#meshes.values()) {
+      scene.add(mesh);
+    }
+  }
+
+  /**
+   * Places this frame's scenery, culled to what the rider can see.
+   *
+   * ⚠️ **Measured from the rider rather than from the camera**, which sits
+   * {@link CAMERA_BEHIND_METRES} further back. {@link VIEW_AHEAD_METRES} and
+   * {@link VIEW_BEHIND_METRES} are the corridor's own bounds and the corridor
+   * is built around the rider's odometer, so measuring from anywhere else would
+   * cull scenery the road under it is still being drawn for.
+   *
+   * ⚠️ **The cull is here rather than left to the caller**, even though
+   * `scene.ts` already asks `scatter.ts` for exactly the corridor's span. A
+   * renderer is handed a {@link SceneFrame} and does not know who built it —
+   * `roadCorridor`'s options already let a caller override the span — and a
+   * belt that trusted the list would submit whatever it was given. It also
+   * could not cull *laterally* at all, which nothing upstream does.
+   *
+   * Two passes over the items rather than one, so that a mesh grows at most
+   * once for a frame instead of once per item that overflows it.
+   */
+  update(items: readonly ScatterItem[], pose: CameraPose): void {
+    for (const kind of SCATTER_KINDS) {
+      this.#counts.set(kind, 0);
+    }
+    for (const item of items) {
+      if (this.#inView(item, pose)) {
+        this.#counts.set(item.kind, (this.#counts.get(item.kind) ?? 0) + 1);
+      }
+    }
+    for (const [kind, mesh] of this.#meshes) {
+      reserve(mesh, this.#counts.get(kind) ?? 0);
+      // Rewound here rather than tracked in a second map: the next loop uses
+      // `mesh.count` as its write cursor and this is where it starts.
+      mesh.count = 0;
+    }
+    for (const item of items) {
+      const mesh = this.#meshes.get(item.kind);
+      if (mesh === undefined || !this.#inView(item, pose)) {
+        continue;
+      }
+      this.#position.set(item.x, item.y, item.z);
+      this.#quaternion.setFromAxisAngle(this.#up, item.rotation);
+      this.#scale.setScalar(item.scale);
+      this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
+      mesh.setMatrixAt(mesh.count, this.#matrix);
+      mesh.count += 1;
+    }
+    for (const mesh of this.#meshes.values()) {
+      if (mesh.count > 0) {
+        // ⚠️ Every live matrix was just rewritten, so there is always something
+        // to upload when there is anything to draw. Comparing sixteen floats an
+        // instance to sometimes skip this would cost more than the upload.
+        mesh.instanceMatrix.needsUpdate = true;
+        // three caches a bounding sphere until it is asked to recompute one,
+        // and the instances move every frame. Without this the belt is culled
+        // against where it stood when the sphere was first needed, and the
+        // scenery vanishes as the rider rides out of it. @see the header's
+        // third point.
+        mesh.computeBoundingSphere();
+      }
+      // A mesh with `count === 0` issues no draw call in any case — three's own
+      // `renderInstances` returns early on it — but an invisible object is not
+      // projected, sorted or bound at all.
+      mesh.visible = mesh.count > 0;
+    }
+  }
+
+  /** Releases every GPU resource the belt owns. */
+  dispose(): void {
+    for (const mesh of this.#meshes.values()) {
+      mesh.geometry.dispose();
+      disposeMaterial(mesh.material);
+      mesh.dispose();
+    }
+  }
+
+  /**
+   * Whether an item is inside the box the rider can see.
+   *
+   * `along` is the item's distance up the rider's heading and `across` is its
+   * distance to the side of it — the two components of the same offset in the
+   * rider's own frame, which is the frame {@link VIEW_AHEAD_METRES} and
+   * {@link SCATTER_LATERAL_METRES} are both stated in.
+   */
+  #inView(item: ScatterItem, pose: CameraPose): boolean {
+    const dx = item.x - pose.x;
+    const dz = item.z - pose.z;
+    const along = dx * pose.headingX + dz * pose.headingZ;
+    if (along > VIEW_AHEAD_METRES || along < -VIEW_BEHIND_METRES) {
+      return false;
+    }
+    const across = dx * pose.headingZ - dz * pose.headingX;
+    return Math.abs(across) <= SCATTER_LATERAL_METRES;
+  }
+}
+
+/**
+ * Makes room for `needed` instances, growing the matrix buffer if it has to.
+ *
+ * ⚠️ **The mesh is never replaced, and in practice nor is its buffer**:
+ * {@link SCATTER_INSTANCE_CAPACITY} is reserved for every kind before the first
+ * frame, so this is a no-op for any caller inside `scatter.ts`'s own budget.
+ * The growth path is what stops a caller who ignores that budget being silently
+ * truncated, which would be scenery that a test placed and the screen never
+ * showed — #240's named defect shape for this epic.
+ *
+ * Nothing is copied out of the old buffer: every live matrix is written after
+ * this returns, so a copy would be copying data about to be overwritten.
+ *
+ * ⚠️ **Replacing `instanceMatrix` strands the previous GL buffer, and the
+ * doubling is what bounds how many can be stranded.** three frees an instance
+ * buffer only in its `onInstancedMeshDispose`, which removes the attribute the
+ * mesh holds *at that moment* — so the one this discards stays in the driver
+ * for the life of the context. Sizing the replacement to exactly `needed` would
+ * mean a caller one item over budget reallocating, and stranding a buffer,
+ * **every frame**, which is precisely the per-frame-allocation shape #240's
+ * NFR-3 forbids. Doubling makes the number of strandings logarithmic in the
+ * count instead of linear in the frame number.
+ */
+function reserve(mesh: InstancedMesh, needed: number): void {
+  const held = mesh.instanceMatrix.count;
+  if (needed <= held) {
+    return;
+  }
+  const grown = new InstancedBufferAttribute(new Float32Array(Math.max(needed, held * 2) * 16), 16);
+  grown.setUsage(DynamicDrawUsage);
+  mesh.instanceMatrix = grown;
+}
+
 class ThreeGameView implements GameView {
   readonly hasContext: boolean;
   readonly #renderer: WebGLRenderer | undefined;
@@ -156,6 +527,16 @@ class ThreeGameView implements GameView {
   readonly #sky = new Color(UNSET_COLOUR);
   readonly #fog = new FogExp2(UNSET_COLOUR, 0);
   readonly #ground: Mesh;
+  /**
+   * What stands beside the road — #244. One mesh per kind, built once.
+   *
+   * ⚠️ A belt that is built and never added to the scene, or added and left
+   * with `count === 0`, passes every test in the jsdom suite and draws nothing.
+   * That is #240's named defect shape for this epic arriving one layer down
+   * from `SceneFrame.scatter` being unread, and `game.browser.spec.ts` reads
+   * the drawing buffer back beside the road for exactly that reason.
+   */
+  readonly #scatter = new ScatterBelt();
   readonly #groundMaterial = new MeshBasicMaterial({
     color: UNSET_COLOUR,
     // ⚠️ **Writes no depth, and draws first.** That is what lets a flat plane
@@ -210,6 +591,8 @@ class ThreeGameView implements GameView {
     this.#road.frustumCulled = false;
     this.#scene.add(this.#road);
 
+    this.#scatter.addTo(this.#scene);
+
     for (const kind of ['ghost', 'bot', 'rider'] as const) {
       const marker = new Mesh(
         markerGeometry(kind),
@@ -234,6 +617,7 @@ class ThreeGameView implements GameView {
     }
     this.#updateWorld(frame.world, frame.camera);
     this.#updateRoad(frame);
+    this.#scatter.update(frame.scatter, frame.camera);
     this.#updateMarkers(frame.markers);
     this.#placeCamera(frame.camera);
     this.#renderer.render(this.#scene, this.#camera);
@@ -255,6 +639,7 @@ class ThreeGameView implements GameView {
     this.#ground.geometry.dispose();
     this.#groundMaterial.dispose();
     disposeMaterial(this.#road.material);
+    this.#scatter.dispose();
     for (const marker of this.#markers.values()) {
       marker.geometry.dispose();
       disposeMaterial(marker.material);

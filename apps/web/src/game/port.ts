@@ -122,9 +122,10 @@ export interface SceneFrame {
    *
    * ⚠️ Like {@link world}, an array added here that the renderer never reads
    * passes every jsdom test and changes nothing on screen — #240's named defect
-   * shape for this epic. It **is** unread today: #243 places the scenery and
-   * #244 draws it, and that is said here rather than left for a reader to
-   * discover.
+   * shape for this epic. It **was** unread between #243, which places the
+   * scenery, and #244, which draws it; `three-renderer.ts`'s `ScatterBelt` is
+   * the reader, and `game.browser.spec.ts` is what says so from the drawing
+   * buffer rather than from this sentence.
    */
   readonly scatter: readonly ScatterItem[];
 }
