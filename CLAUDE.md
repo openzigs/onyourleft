@@ -1936,8 +1936,10 @@ top of an issue **supersedes its body**.
 | What happens to a ride when the phone is backgrounded for five minutes | `apps/web/src/game/simulation.ts` §`MAXIMUM_STEPS_PER_ADVANCE` |
 | Why the ghost does not gain road while the phone is backgrounded, and which clock it is raced against | `apps/web/src/game/simulation.ts` §`ghostClock`, §`GameState.ridden` |
 | Why the road is a corridor rather than a world, and where its vertices come from | `apps/web/src/game/terrain.ts`, [ADR 0008](docs/adr/0008-mobile-client-architecture.md) D-5 |
-| Why the scenery is one mesh per kind, and the only thing this renderer culls | `apps/web/src/game/three-renderer.ts` §`ScatterBelt`, §`SCATTER_LATERAL_METRES` |
-| What the scenery cull throws away on a bend, at which radius, and why it is a box | `apps/web/src/game/three-renderer.ts` §`SCATTER_LATERAL_METRES`, `apps/web/src/game/three-renderer.test.ts` §"the cull against what `scene.ts` actually hands it" |
+| Why the scenery is one mesh per kind, and the only thing this renderer culls | `apps/web/src/game/three-renderer.ts` §`ScatterBelt`, §`lateralReachMetres` |
+| Why the scenery cull is a cone rather than a box, and what it still throws away on a bend | `apps/web/src/game/three-renderer.ts` §`lateralReachMetres`, §`SCATTER_LATERAL_METRES`, `apps/web/src/game/three-renderer.test.ts` §"the cull against what `scene.ts` actually hands it" |
+| Which aspect ratio the cull is stated against, and why a test cannot re-derive it | `apps/web/src/game/three-renderer.ts` §`WORST_CASE_ASPECT`, `apps/web/src/design/theme.css` §`.oyl-game__world` |
+| Why scenery beyond 400 m to the side is dropped however wide the view is | `apps/web/src/game/three-renderer.ts` §`FOGGED_OUT_METRES`, `apps/web/src/game/world.ts` §`MINIMUM_VIEW_END_OCCLUSION` |
 | Why the scenery is a hash of where you are rather than a generator that walks forward | `apps/web/src/game/scatter.ts` §`scatterAt`, §`scatterSeed` |
 | Where the tree line, the boreal latitude and the steep-pitch threshold came from | `apps/web/src/game/scatter.ts` §Provenance, `apps/web/src/game/world.ts` §`treeLineMetres` |
 | Why a full budget thins the far view instead of cutting it off, and what a wall across the road looks like | `apps/web/src/game/scatter.ts` §`thin`, §`SCATTER_NEAR_BIAS` |
