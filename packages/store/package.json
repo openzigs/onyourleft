@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@onyourleft/domain": "workspace:*",
-    "dexie": "4.4.5"
+    "dexie": "4.4.6"
   },
   "devDependencies": {
     "fake-indexeddb": "6.2.5",
