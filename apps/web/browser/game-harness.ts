@@ -33,6 +33,15 @@
  *    jsdom test too. So a fifth read-back finds the centre line against the
  *    carriageway beside it, and the driver's own draw calls are counted.
  *
+ * 6. **That the scenery is on the screen at all, and costs one draw call per
+ *    kind** — #244. An `InstancedMesh` built with `count = 0`, never added to
+ *    the scene, or left with a zero-scale matrix passes every assertion in
+ *    `three-renderer.test.ts` and draws nothing. So the harness renders **the
+ *    same frame twice, once with `SceneFrame.scatter` and once with it
+ *    emptied**, and reports where beside the road the two frames disagree —
+ *    together with the driver's own draw-call count for each, which is what
+ *    turns "one call per kind" from a review note into a measurement.
+ *
  * ⚠️ **It publishes measurements and asserts nothing.** Every claim is in
  * `game.browser.spec.ts`, and every claim there is now *relative* — one pixel
  * against another, or a pixel against the `WorldStyle` this page publishes.
@@ -58,6 +67,7 @@ import {
   type RoutePoint,
 } from '@onyourleft/domain';
 
+import type { SceneFrame } from '../src/game/port';
 import type { WorldStyle } from '../src/game/world';
 
 import { sceneFrame } from '../src/game/scene';
@@ -127,6 +137,27 @@ declare global {
       readonly resourcesAfterFirstFrame: number;
       readonly resourcesAfterAllFrames: number;
       /**
+       * The same count again, after the whole sweep has been driven a **second**
+       * time over exactly the same frames.
+       *
+       * ⚠️ **This exists because the pair above it stopped meaning what it
+       * said, and #244 is what made that visible.** three creates a GPU buffer
+       * the first time it *draws* an object, and the scenery belt has six
+       * meshes that are drawn only when the route puts that kind of thing
+       * beside the road. A kind that first appears two hundred metres in
+       * allocates its five buffers two hundred metres in — once, for the life
+       * of the view, bounded by six kinds. That is not a per-frame allocation
+       * and #240's NFR-3 is not about it, but it does make
+       * `resourcesAfterAllFrames === resourcesAfterFirstFrame` false.
+       *
+       * Driving the identical sweep again and finding **no further allocation
+       * at all** is the statement that was actually wanted, and it is strictly
+       * stronger: it covers every kind the route has, every corridor length it
+       * produces and every scenery count it reaches, rather than whatever
+       * happened to be on screen at frame one.
+       */
+      readonly resourcesAfterSecondSweep: number;
+      /**
        * The brightest disagreement between the road's centre column and the
        * carriageway beside it, found in the band the road fills — #242.
        *
@@ -163,6 +194,37 @@ declare global {
        * different colour.
        */
       readonly roadOnDescentPixel: Pixel;
+      /**
+       * How many items and how many distinct kinds the scatter frame carried.
+       *
+       * Published so the spec can state #244's first criterion as a *ratio*:
+       * many items, at most one draw call each kind. A frame that happened to
+       * carry six items would make the draw-call claim vacuous, so the spec
+       * checks this first.
+       */
+      readonly scatterItemCount: number;
+      readonly scatterKindCount: number;
+      /** Draw calls for one frame carrying {@link scatterItemCount} items. */
+      readonly drawCallsWithScatter: number;
+      /** Draw calls for the identical frame with `scatter` emptied. */
+      readonly drawCallsWithoutScatter: number;
+      /**
+       * How many pixels beside the road changed when the scenery was added.
+       *
+       * ⚠️ **The only thing in the repository that can say the scenery is
+       * drawn.** Everything else about the belt — six meshes, the counts, the
+       * matrices, the cull — is asserted in jsdom against objects that need no
+       * GL context, and all of it passes for a belt that was never added to a
+       * scene. #240's named defect shape for this epic, one layer further down
+       * than the two above it.
+       */
+      readonly sceneryPixelsChanged: number;
+      /** The most-changed pixel of those, with and without the scenery. */
+      readonly sceneryPixelWith: Pixel;
+      readonly sceneryPixelWithout: Pixel;
+      /** Where it was found, as fractions of the frame's width and height. */
+      readonly sceneryColumnFraction: number;
+      readonly sceneryRowFraction: number;
       readonly errors: readonly string[];
     };
   }
@@ -359,6 +421,128 @@ function findCentreLine(
   return best;
 }
 
+/**
+ * Where the scenery is looked for: beside the road, spanning the horizon.
+ *
+ * ⚠️ **Beside the road is enforced by the *columns*, and it is the half that
+ * makes this a scenery probe rather than a road probe.** The chase camera puts
+ * the carriageway up the middle of the frame, so the central quarter is
+ * excluded outright: a difference found there could be the road, a marker or a
+ * centre-line mark moving, none of which is what #244 added.
+ *
+ * The rows span the horizon — from a little below it, where the ground plane
+ * is, to well above it, where only sky was before. Scenery stands *on* the
+ * ground and reaches *above* it, so a belt that drew reaches into rows that
+ * were sky and rows that were ground, and a belt that drew nothing leaves both
+ * exactly as they were.
+ */
+const SCENERY_REGION = {
+  fromColumn: 0.0,
+  toColumn: 0.375,
+  fromRow: 0.4,
+  toRow: 0.85,
+} as const;
+
+/** Reads a rectangle of the drawing buffer, four bytes a pixel. */
+function readRegion(
+  gl: WebGL2RenderingContext | WebGLRenderingContext,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): Uint8Array {
+  const pixels = new Uint8Array(width * height * 4);
+  gl.readPixels(x, y, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+  return pixels;
+}
+
+/** What the two frames disagree about, and where they disagree most. */
+interface SceneryDifference {
+  readonly changed: number;
+  readonly with: Pixel;
+  readonly without: Pixel;
+  readonly columnFraction: number;
+  readonly rowFraction: number;
+}
+
+/**
+ * Compares the same region of two frames, and reports the biggest disagreement.
+ *
+ * ⚠️ **Searched rather than probed at a fixed point**, for the reason
+ * {@link findCentreLine} gives: where a tree lands in the frame depends on
+ * where the rider is and on a camera that a later sub-issue may move, and a
+ * hard-coded pixel is one adjustment away from measuring empty sky and saying
+ * so confidently. What a search cannot manufacture is a difference that is not
+ * there — a belt that drew nothing leaves every pixel in this region identical,
+ * the count is zero, and the spec goes red.
+ */
+function compareRegions(
+  withScenery: Uint8Array,
+  withoutScenery: Uint8Array,
+  width: number,
+  height: number,
+  originColumn: number,
+  originRow: number,
+  frameWidth: number,
+  frameHeight: number,
+): SceneryDifference {
+  let changed = 0;
+  let best = { apart: -1, at: 0 };
+  for (let index = 0; index < width * height; index += 1) {
+    const at = index * 4;
+    const apart =
+      Math.abs((withScenery[at] ?? 0) - (withoutScenery[at] ?? 0)) +
+      Math.abs((withScenery[at + 1] ?? 0) - (withoutScenery[at + 1] ?? 0)) +
+      Math.abs((withScenery[at + 2] ?? 0) - (withoutScenery[at + 2] ?? 0));
+    if (apart > 0) {
+      changed += 1;
+    }
+    if (apart > best.apart) {
+      best = { apart, at };
+    }
+  }
+  const index = best.at / 4;
+  const column = originColumn + (index % width);
+  const row = originRow + Math.floor(index / width);
+  return {
+    changed,
+    with: [
+      withScenery[best.at] ?? 0,
+      withScenery[best.at + 1] ?? 0,
+      withScenery[best.at + 2] ?? 0,
+      withScenery[best.at + 3] ?? 0,
+    ],
+    without: [
+      withoutScenery[best.at] ?? 0,
+      withoutScenery[best.at + 1] ?? 0,
+      withoutScenery[best.at + 2] ?? 0,
+      withoutScenery[best.at + 3] ?? 0,
+    ],
+    columnFraction: column / frameWidth,
+    rowFraction: row / frameHeight,
+  };
+}
+
+/** How far the rider moves between the frames of a sweep, in metres. */
+const SWEEP_STEP_METRES = 3.7;
+
+/**
+ * Drives the rider up the route once, at {@link SWEEP_STEP_METRES} a frame.
+ *
+ * A function rather than a loop in place because it is run **twice** and the
+ * two runs have to cover exactly the same distances — a second pass over even
+ * slightly different ones would be measuring a different stretch of route
+ * rather than the same one again. @see the harness's `resourcesAfterSecondSweep`.
+ */
+function sweep(
+  view: { render: (frame: SceneFrame) => void },
+  frameAt: (at: number) => SceneFrame,
+): void {
+  for (let index = 1; index <= FRAMES - 5; index += 1) {
+    view.render(frameAt(index * SWEEP_STEP_METRES));
+  }
+}
+
 function run(): void {
   const canvas = document.querySelector<HTMLCanvasElement>('#world');
   const errors: string[] = [];
@@ -380,10 +564,20 @@ function run(): void {
       roadFarPixel: NOWHERE,
       resourcesAfterFirstFrame: 0,
       resourcesAfterAllFrames: 0,
+      resourcesAfterSecondSweep: 0,
       centreLinePixel: NOWHERE,
       roadBesidePixel: NOWHERE,
       centreLineRowFraction: 0,
       roadOnDescentPixel: NOWHERE,
+      scatterItemCount: 0,
+      scatterKindCount: 0,
+      drawCallsWithScatter: 0,
+      drawCallsWithoutScatter: 0,
+      sceneryPixelsChanged: 0,
+      sceneryPixelWith: NOWHERE,
+      sceneryPixelWithout: NOWHERE,
+      sceneryColumnFraction: 0,
+      sceneryRowFraction: 0,
       errors: ['no canvas'],
     };
     return;
@@ -405,10 +599,20 @@ function run(): void {
   let roadFarPixel: Pixel = NOWHERE;
   let resourcesAfterFirstFrame = 0;
   let resourcesAfterAllFrames = 0;
+  let resourcesAfterSecondSweep = 0;
   let centreLinePixel: Pixel = NOWHERE;
   let roadBesidePixel: Pixel = NOWHERE;
   let centreLineRowFraction = 0;
   let roadOnDescentPixel: Pixel = NOWHERE;
+  let scatterItemCount = 0;
+  let scatterKindCount = 0;
+  let drawCallsWithScatter = 0;
+  let drawCallsWithoutScatter = 0;
+  let sceneryPixelsChanged = 0;
+  let sceneryPixelWith: Pixel = NOWHERE;
+  let sceneryPixelWithout: Pixel = NOWHERE;
+  let sceneryColumnFraction = 0;
+  let sceneryRowFraction = 0;
 
   try {
     const profile = harnessRoute();
@@ -439,6 +643,8 @@ function run(): void {
           highestIndex = Math.max(highestIndex, index);
         }
         markerKinds = frame.markers.map((marker) => marker.kind);
+        scatterItemCount = frame.scatter.length;
+        scatterKindCount = new Set(frame.scatter.map((each) => each.kind)).size;
 
         // A hundred frames rather than one. The first uploads the buffers, and
         // a bug that only appears when a buffer is *reused* would be invisible
@@ -449,17 +655,20 @@ function run(): void {
         drawCallsPerFrame = calls() - before;
         resourcesAfterFirstFrame = resources();
 
-        // ⚠️ **The ninety-eight after it move the rider**, which the harness
+        // ⚠️ **The ninety-five after it move the rider**, which the harness
         // did not do before #242. A corridor rebuilt at a new distance is a
         // new set of vertices and a new set of centre-line marks, and a road
         // whose buffer grew by one mark as the rider crossed a period would
         // allocate on the GPU forever — #240's NFR-3, and the whole reason
         // `terrain.ts` emits a zero-area quad for a mark outside the corridor
         // rather than leaving it out.
-        while (framesDrawn < FRAMES - 2) {
-          view.render(frameAt(framesDrawn * 3.7));
-          framesDrawn += 1;
-        }
+        //
+        // It is a named function since #244 because the whole sweep is driven
+        // **twice** — see {@link resourcesAfterSecondSweep} — and a second pass
+        // over slightly different distances would be measuring a different
+        // route rather than the same one again.
+        sweep(view, frameAt);
+        framesDrawn = FRAMES - 4;
 
         // Read the drawing buffer back. `preserveDrawingBuffer` is off, so this
         // is only valid immediately after a render and before the compositor
@@ -495,6 +704,56 @@ function run(): void {
           centreLineRowFraction = found.row / canvas.height;
         }
 
+        // ⚠️ **The same frame twice, once with the scenery and once with it
+        // emptied** — #244. Everything else known about the belt is asserted in
+        // jsdom against objects that need no GL context, and every one of those
+        // assertions passes for a belt that was never added to the scene, or
+        // whose instances are all scaled to zero, or whose count never leaves
+        // nought. Only a frame that was drawn twice can tell the difference,
+        // and only in a browser.
+        //
+        // The order matters and is the cheap way round: the scenery frame is
+        // rendered first so that its GPU buffers were already created by the
+        // ninety-odd frames above it, and the difference in `calls()` between
+        // the two is the number of draw calls the scenery itself costs.
+        const withoutScenery: SceneFrame = { ...frame, scatter: [] };
+        const originColumn = Math.floor(canvas.width * SCENERY_REGION.fromColumn);
+        const originRow = Math.floor(canvas.height * SCENERY_REGION.fromRow);
+        const regionWidth = Math.floor(canvas.width * SCENERY_REGION.toColumn) - originColumn;
+        const regionHeight = Math.floor(canvas.height * SCENERY_REGION.toRow) - originRow;
+
+        const beforeWithScenery = calls();
+        view.render(frame);
+        framesDrawn += 1;
+        drawCallsWithScatter = calls() - beforeWithScenery;
+        const sceneryPresent =
+          gl === null
+            ? undefined
+            : readRegion(gl, originColumn, originRow, regionWidth, regionHeight);
+
+        const beforeWithoutScenery = calls();
+        view.render(withoutScenery);
+        framesDrawn += 1;
+        drawCallsWithoutScatter = calls() - beforeWithoutScenery;
+        if (gl !== null && sceneryPresent !== undefined) {
+          const sceneryAbsent = readRegion(gl, originColumn, originRow, regionWidth, regionHeight);
+          const found = compareRegions(
+            sceneryPresent,
+            sceneryAbsent,
+            regionWidth,
+            regionHeight,
+            originColumn,
+            originRow,
+            canvas.width,
+            canvas.height,
+          );
+          sceneryPixelsChanged = found.changed;
+          sceneryPixelWith = found.with;
+          sceneryPixelWithout = found.without;
+          sceneryColumnFraction = found.columnFraction;
+          sceneryRowFraction = found.rowFraction;
+        }
+
         // The last frame, and the only one read back from a *different* place
         // on the route. @see roadOnDescentPixel
         view.render(frameAt(ON_THE_DESCENT_METRES));
@@ -503,6 +762,16 @@ function run(): void {
           roadOnDescentPixel = readPixel(gl, canvas.width * 0.51, canvas.height * 0.5);
         }
         resourcesAfterAllFrames = resources();
+
+        // ⚠️ **The same hundred frames again**, and the frames of this second
+        // pass are deliberately not counted into {@link framesDrawn}. @see
+        // {@link resourcesAfterSecondSweep} for what the pair of counts is for.
+        sweep(view, frameAt);
+        view.render(frame);
+        view.render(withoutScenery);
+        view.render(frameAt(ON_THE_DESCENT_METRES));
+        resourcesAfterSecondSweep = resources();
+
         view.destroy();
       });
     });
@@ -527,10 +796,20 @@ function run(): void {
     roadFarPixel,
     resourcesAfterFirstFrame,
     resourcesAfterAllFrames,
+    resourcesAfterSecondSweep,
     centreLinePixel,
     roadBesidePixel,
     centreLineRowFraction,
     roadOnDescentPixel,
+    scatterItemCount,
+    scatterKindCount,
+    drawCallsWithScatter,
+    drawCallsWithoutScatter,
+    sceneryPixelsChanged,
+    sceneryPixelWith,
+    sceneryPixelWithout,
+    sceneryColumnFraction,
+    sceneryRowFraction,
     errors,
   };
 }

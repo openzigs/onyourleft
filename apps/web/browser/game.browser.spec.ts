@@ -50,10 +50,20 @@ interface GameHarnessResult {
   readonly roadFarPixel: Pixel;
   readonly resourcesAfterFirstFrame: number;
   readonly resourcesAfterAllFrames: number;
+  readonly resourcesAfterSecondSweep: number;
   readonly centreLinePixel: Pixel;
   readonly roadBesidePixel: Pixel;
   readonly centreLineRowFraction: number;
   readonly roadOnDescentPixel: Pixel;
+  readonly scatterItemCount: number;
+  readonly scatterKindCount: number;
+  readonly drawCallsWithScatter: number;
+  readonly drawCallsWithoutScatter: number;
+  readonly sceneryPixelsChanged: number;
+  readonly sceneryPixelWith: Pixel;
+  readonly sceneryPixelWithout: Pixel;
+  readonly sceneryColumnFraction: number;
+  readonly sceneryRowFraction: number;
   readonly errors: readonly string[];
 }
 
@@ -303,14 +313,45 @@ test.describe('the world #241 derives from the route reaches the screen', () => 
    * not crest.
    */
 
-  test('allocates nothing new on the GPU after the first frame', async ({ page }) => {
+  test('allocates nothing new on the GPU on a second pass over the same route', async ({
+    page,
+  }) => {
     // #240's NFR-3, measured with three's own allocations rather than with
     // object identity: a renderer that rebuilt the ground mesh every frame
-    // would create a buffer every frame, and this count would rise by 99.
+    // would create a buffer every frame, and this count would rise by 99 on
+    // each pass.
+    //
+    // ⚠️ **This used to read `resourcesAfterAllFrames === resourcesAfterFirstFrame`
+    // and #244 is what made that false — legitimately.** three creates a GPU
+    // buffer the first time it *draws* an object, and the scenery belt has a
+    // mesh per kind that is drawn only where the route puts that kind of thing
+    // beside the road. A kind that first appears two hundred metres in
+    // allocates its buffers two hundred metres in: **once**, for the life of
+    // the view, bounded by six kinds. Driving the identical sweep a second time
+    // and finding nothing further allocated is the claim that was wanted all
+    // along, and it is strictly stronger — it covers every kind, corridor
+    // length and scenery count the route reaches rather than whatever happened
+    // to be on screen at frame one.
     const result = await harness(page);
 
     expect(result.resourcesAfterFirstFrame).toBeGreaterThan(0);
-    expect(result.resourcesAfterAllFrames).toBe(result.resourcesAfterFirstFrame);
+    expect(result.resourcesAfterSecondSweep).toBe(result.resourcesAfterAllFrames);
+  });
+
+  test("finishes allocating within one pass, and within the belt's own bound", async ({ page }) => {
+    // The other half of the test above, and what stops it passing vacuously
+    // over a renderer that allocates on the first pass without limit. Six
+    // kinds, five buffers each — position, normal, uv, index and the instance
+    // matrix — is everything the belt can ever ask the driver for beyond the
+    // first frame, and nothing else in the scene appears after it.
+    const result = await harness(page);
+    const MOST_BUFFERS_A_KIND_CAN_ADD = 5;
+    const KINDS = 6;
+
+    expect(result.resourcesAfterAllFrames).toBeGreaterThanOrEqual(result.resourcesAfterFirstFrame);
+    expect(result.resourcesAfterAllFrames - result.resourcesAfterFirstFrame).toBeLessThanOrEqual(
+      MOST_BUFFERS_A_KIND_CAN_ADD * KINDS,
+    );
   });
 });
 
@@ -383,7 +424,12 @@ test.describe('the road reads as a road — #242', () => {
     // that starts showing the ghost — moves it for a reason that has nothing to
     // do with the road being one call. Six is the failure that means what this
     // test's name says.
-    expect(result.drawCallsPerFrame).toBe(4);
+    //
+    // ⚠️ **Against the scenery-free frame, since #244.** `drawCallsPerFrame` is
+    // measured on a frame that now carries a scatter belt too, so the four this
+    // test is about are the ground, the road and the two markers — the same
+    // enumeration, measured where the scenery is not.
+    expect(result.drawCallsWithoutScatter).toBe(4);
   });
 });
 
@@ -420,6 +466,64 @@ test.describe('the gradient cue reaches the screen, on a frame after the first �
     expect(descentGreen).toBeGreaterThan(descentRed);
     expect(brightness(result.roadOnDescentPixel)).toBeGreaterThan(
       brightness(result.roadPixel) + 10,
+    );
+  });
+});
+
+test.describe('the scenery reaches the screen, and costs one call a kind — #244', () => {
+  /**
+   * ⚠️ **This is the criterion that catches #240's named defect for this epic
+   * one layer further down than #241's and #242's.** `scatter.ts` places the
+   * scenery, `SceneFrame.scatter` carries it, and `three-renderer.ts`'s belt
+   * turns it into instances — and an `InstancedMesh` that was built with
+   * `count = 0`, or never added to the scene, or given a zero-scale matrix,
+   * satisfies every one of the nineteen assertions in `three-renderer.test.ts`
+   * and draws nothing at all. Only a frame rendered twice can tell those apart,
+   * and only in a browser: jsdom has no WebGL.
+   */
+  test('changes what is beside the road when the scenery is added', async ({ page }) => {
+    const result = await harness(page);
+
+    // Non-vacuity first, and it is not ceremony: a harness route that placed
+    // no scenery would make every assertion below a claim about two identical
+    // frames, and the first of them would be the one that went red.
+    expect(result.scatterItemCount).toBeGreaterThan(20);
+    // Not one stray pixel. A belt that drew a single instance at the wrong
+    // scale would move a handful; a belt that drew changes a region.
+    expect(result.sceneryPixelsChanged).toBeGreaterThan(50);
+    expect(result.sceneryPixelWith.slice(0, 3)).not.toEqual(result.sceneryPixelWithout.slice(0, 3));
+  });
+
+  test('finds that change beside the road rather than on it', async ({ page }) => {
+    // The carriageway runs up the middle of the frame, so a difference found
+    // there could be the road, a marker or a centre-line mark. The harness
+    // searches the left of the frame only, and this pins that it stayed there:
+    // scenery is the thing #244 put *beside* the road.
+    const result = await harness(page);
+
+    expect(result.sceneryColumnFraction).toBeLessThan(0.375);
+    expect(result.sceneryRowFraction).toBeGreaterThan(0.4);
+    expect(result.sceneryRowFraction).toBeLessThan(0.85);
+  });
+
+  /**
+   * ⚠️ **#244's first criterion, measured in the driver rather than counted in
+   * jsdom.** `three-renderer.test.ts` asserts that the belt holds six meshes
+   * for five hundred items, which is a claim about a `Map`. This is the claim
+   * about what the GPU was actually asked to do, and it is the one that would
+   * have caught a per-item `Mesh` — a mistake that is invisible until a phone
+   * is in hand, because it is correct in every other respect.
+   */
+  test('draws many items in at most one call per kind', async ({ page }) => {
+    const result = await harness(page);
+
+    expect(result.scatterKindCount).toBeGreaterThan(0);
+    expect(result.scatterKindCount).toBeLessThanOrEqual(6);
+    // The ratio is the point. A per-item mesh reads here as
+    // `scatterItemCount` extra calls rather than `scatterKindCount`.
+    expect(result.scatterItemCount).toBeGreaterThan(result.scatterKindCount * 4);
+    expect(result.drawCallsWithScatter - result.drawCallsWithoutScatter).toBe(
+      result.scatterKindCount,
     );
   });
 });
