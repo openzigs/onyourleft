@@ -90,8 +90,17 @@
  *   known limit rather than a surprise;
  * - a **CSS class with no rule**, which is #236 and a different search
  *   altogether — see #266 and `apps/web/browser/`;
- * - a **collision**: an export called `create` is held alive by any `.create`
- *   in production, whoever declared it.
+ * - a **collision**, because a name is matched as a name and nothing here is
+ *   resolved to the declaration it came from. An export is held alive by any
+ *   *identifier* of the same name anywhere in reached production code — a
+ *   local, an import from elsewhere, a callback parameter whose body reads it.
+ *   An `export function update` in `game/world.ts` is silent for exactly that
+ *   reason: `onProgress: (update) => …` in `transfer/TransferView.tsx` names
+ *   `update`. A port method is held alive the same way by any `.name` member
+ *   access, whoever declared it. ⚠️ A member access is **not** what silences an
+ *   export: `x.create` contributes `member:create` and an exported `create` is
+ *   looked up as `value:create`, so that one is still reported. Measured, both
+ *   ways round, in #283's review.
  *
  * ## The exemption, and why it is not a list
  *
@@ -537,6 +546,26 @@ export function isWatched(relativePath) {
   );
 }
 
+/**
+ * The entries of `WATCHED_PREFIXES` that name no directory in `root`.
+ *
+ * ⚠️ **A selector written down here fails closed against deleting the thing it
+ * names and OPEN against renaming it.** Rename `apps/web/src/ride/` to
+ * `riding/` and the walk below simply finds nothing under the old prefix: every
+ * rule then passes over an empty population and the success line says every
+ * watched seam is reachable, having read none. That is #142's shape exactly
+ * (CLAUDE.md §4e, where a directory-name filter silently dropped a third of the
+ * accessibility suite), one gate later — so a prefix whose directory is not
+ * there is a failure, and moving a watched directory means editing this file in
+ * the same commit.
+ */
+export function missingPrefixes(root) {
+  return WATCHED_PREFIXES.filter((prefix) => {
+    const dir = join(root, ...prefix.split('/').filter((part) => part.length > 0));
+    return !existsSync(dir) || !statSync(dir).isDirectory();
+  });
+}
+
 /** Every watched source file on disk, whether or not anything reaches it. */
 export function watchedFiles(root) {
   const found = [];
@@ -658,11 +687,26 @@ const lineOf = (source, node) =>
  */
 export function wiringProblems(root) {
   const packages = workspacePackages(root);
+  const missing = missingPrefixes(root);
+  if (missing.length > 0) {
+    throw new Error(
+      `watched directory missing: ${missing.join(', ')}. WATCHED_PREFIXES names it and nothing ` +
+        'on disk does, so every rule below would pass over an empty population — the failure ' +
+        'mode #142 shipped. Move the prefix with the directory.',
+    );
+  }
   const entries = entryPoints(root);
   if (entries.length === 0) {
     throw new Error(
       'no entry point: apps/*/index.html names no module script this could resolve. A ' +
         'reachability check with no root would pass vacuously, so it fails instead.',
+    );
+  }
+  const watched = watchedFiles(root);
+  if (watched.length === 0) {
+    throw new Error(
+      'nothing watched: the watched directories are present and hold no source file this ' +
+        'reads, so a clean run would assert nothing at all.',
     );
   }
   const modules = productionModules(entries, packages);
@@ -671,24 +715,33 @@ export function wiringProblems(root) {
   const parsed = new Map(sources.map((source) => [source.fileName, source]));
   const problems = [];
 
-  /** True when the declaration says why it has no caller; a reasonless tag is a problem. */
-  const exempted = (source, node, what, rel) => {
-    const reason = unwiredReason(leadingCommentOf(source, node));
+  /**
+   * True when a declaration says why it has no caller; a reasonless tag is a problem.
+   *
+   * ⚠️ **Every rule goes through this one function, and that is the point.**
+   * `unwiredReason` returns `undefined` for no tag and `null` for a bare one, so
+   * a branch testing only `=== undefined` reads a reasonless tag as *exempt*.
+   * `WIRE001` did exactly that until #283's review, and it is the broadest
+   * exemption of the three — a bare `@unwired` in a file's doc comment silenced
+   * a whole module with no `WIRE000`. Three call sites, one decision.
+   */
+  const exempted = (comment, what, where) => {
+    const reason = unwiredReason(comment);
     if (reason !== null) return reason !== undefined;
     problems.push(
-      `WIRE000 ${rel}:${lineOf(source, node)} — ${what} carries \`@unwired\` with no reason. ` +
+      `WIRE000 ${where} — ${what} carries \`@unwired\` with no reason. ` +
         'Say what makes it deliberate: an exemption nobody can read is a list in a config ' +
         'file with extra steps.',
     );
     return true;
   };
 
-  for (const file of watchedFiles(root)) {
+  for (const file of watched) {
     const rel = slash(relative(root, file));
     const source = parsed.get(file);
     if (source === undefined) {
       const onDisk = parseFile(file);
-      if (unwiredReason(fileCommentOf(onDisk)) === undefined) {
+      if (!exempted(fileCommentOf(onDisk), 'this file', rel)) {
         problems.push(
           `WIRE001 ${rel} — no module the client's entry point can reach imports this file. ` +
             'It is built, it may well be tested, and none of it ships.',
@@ -698,7 +751,10 @@ export function wiringProblems(root) {
     }
     for (const declaration of exportedDeclarations(source)) {
       if (reached.has(`value:${declaration.name}`)) continue;
-      if (exempted(source, declaration.doc, `\`${declaration.name}\``, rel)) continue;
+      const at = `${rel}:${lineOf(source, declaration.doc)}`;
+      if (exempted(leadingCommentOf(source, declaration.doc), `\`${declaration.name}\``, at)) {
+        continue;
+      }
       problems.push(
         `WIRE002 ${rel}:${lineOf(source, declaration.node)} — \`${declaration.name}\` is ` +
           'exported and no production declaration names it. Wire it up, or say at the ' +
@@ -708,7 +764,12 @@ export function wiringProblems(root) {
     if (!WATCHED_SUFFIX.test(rel)) continue;
     for (const method of portMethods(source)) {
       if (reached.has(`member:${method.name}`)) continue;
-      if (exempted(source, method.node, `\`${method.owner}.${method.name}\``, rel)) continue;
+      const at = `${rel}:${lineOf(source, method.node)}`;
+      if (
+        exempted(leadingCommentOf(source, method.node), `\`${method.owner}.${method.name}\``, at)
+      ) {
+        continue;
+      }
       problems.push(
         `WIRE003 ${rel}:${lineOf(source, method.node)} — \`${method.owner}.${method.name}\` is ` +
           'declared on a port and nothing in production calls it. ⚠️ A call from a method ' +
@@ -717,7 +778,7 @@ export function wiringProblems(root) {
       );
     }
   }
-  return { problems, modules: modules.size };
+  return { problems, modules: modules.size, watched: watched.length };
 }
 
 // ----------------------------------------------------------------------- main
@@ -749,8 +810,12 @@ if (invoked !== undefined && import.meta.filename === realpathSync(invoked)) {
     console.error('\nSee CLAUDE.md §4j and scripts/check-wiring.mjs §Limits.');
     process.exit(1);
   }
+  // ⚠️ Both counts, and the watched one first. A success line naming only the
+  // population it WALKED reads like coverage of the population it CHECKED, and
+  // the two are different numbers: the watched set is the client's seams, not
+  // every module the entry point reaches.
   console.log(
     'check-wiring: every watched seam is reachable from the client’s entry point ' +
-      `(${String(result.modules)} production modules).`,
+      `(${String(result.watched)} watched files, ${String(result.modules)} production modules).`,
   );
 }

@@ -69,11 +69,14 @@ export interface CapacitorBlePort {
   /**
    * Whether the adapter is switched on. Distinct from being permitted.
    *
-   * @unwired `availability()` is its only caller and nothing in `apps/web` asks
-   * a transport whether it is available — the client probes the browser itself
-   * (`support/bluetooth-support.ts`) and the shell's pairing path calls
-   * `ensureInitialized` instead. Left on the port because the plugin offers it
-   * and an availability screen for Android is real work, not a missing call.
+   * @unwired #284 — a defect with an issue rather than a decision, and this note
+   * said the opposite until #283's review. `availability()` is its only caller
+   * and nothing in `apps/web` calls `availability()`: the Devices screen probes
+   * the *browser* (`support/bluetooth-support.ts`), so inside the shell it
+   * answers about a stack the shell does not use, while `permission/notice.ts`
+   * — written to answer it properly — is imported by nothing. Same class as
+   * #282, and outside what the #278 gate watches, which is why it took a
+   * reviewer. The note goes when #284 wires it.
    */
   isEnabled(): Promise<boolean>;
 

@@ -511,10 +511,12 @@ bash scripts/check-a11y-suite.test.sh
 # own parser), so it is NOT part of `check:repo`. See §4j.
 pnpm run check:wiring
 
-# Its own suite. Fixture-driven; 40 assertions over 25 throwaway trees, five of
+# Its own suite. Fixture-driven; 49 assertions over 28 throwaway trees, five of
 # them #278's five defects taken from the tree as it actually was — and two of
 # those green on purpose, because they are limits this gate states rather than
-# findings it makes.
+# findings it makes. Three more cover the two ways this gate could check nothing
+# and say so cheerfully: a renamed watched directory, an empty watched set, and
+# a reasonless `@unwired` on the one path that silences a whole file.
 bash scripts/check-wiring.test.sh
 
 # tsc --noEmit followed by `vite build`, for apps/web. A green typecheck is not
@@ -881,10 +883,10 @@ making a client's typecheck depend on another package's authoring-time directory
 push to `main`. It runs **exactly** the §4a commands and nothing else: the eight bare-clone script
 checks (`check-repo-rules`, `check-licence-hashes`, `check-env-example` and `check-doc-links`, each
 with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --frozen-lockfile`, `format:check`, `lint`,
-`typecheck`, `test:coverage`, `bash scripts/coverage-summary.test.sh`, `check:a11y-suite`,
+`typecheck`, `test:coverage`, `check:a11y-suite`,
 `test:a11y`, `bash scripts/check-a11y-suite.test.sh`, `check:wiring`,
-`bash scripts/check-wiring.test.sh`, `build`, `playwright install --with-deps
-chromium`, `test:browser`, `bash scripts/check-dependency-licences.test.sh` and `check:licences` — then
+`bash scripts/check-wiring.test.sh`, `bash scripts/coverage-summary.test.sh`, `build`,
+`playwright install --with-deps chromium`, `test:browser`, `bash scripts/check-dependency-licences.test.sh` and `check:licences` — then
 publishes the coverage table to the run summary and uploads the HTML report as an artefact.
 Those last two carry `if: always()` and cannot fail the job: the run where coverage moved
 unexpectedly is exactly the one whose table you want, and a reporting step that can fail a
@@ -1467,9 +1469,26 @@ Watching the libraries would report the several dozen exports §4b records as ha
 consumer *by design*, and a noisy rule gets an allowlist, and an allowlist that grows is how a rule
 stops firing.
 
+⚠️ **Measure that set before you read a green run as a clean client: it is 37 files of the 132
+non-test sources under `apps/*/src`, 28 %.** 26 come from the two directories and 11 from the
+`*-port.ts` suffix — and the suffix is the half that found #282, not the directories:
+`segments/match-port.ts` matches `*-port.ts`, while `segments/backfill.ts`, the module that is
+actually dead, is in no watched directory and **is not reported**. The gate prints both counts for
+this reason, the watched one first; a run that says *"260 production modules"* and nothing else
+reads like coverage of a population it never checked.
+
+⚠️ **`WATCHED_PREFIXES` is written down in the checker rather than discovered, so it is asserted to
+exist.** A selector like that fails closed against *deleting* what it names and open against
+*renaming* it — rename `ride/` to `riding/` and every rule passes over an empty population while the
+success line claims every seam is reachable. That is #142's shape (§4e), and it is why a prefix
+naming no directory, and a watched set holding no file, are both hard failures with their own
+fixtures. Moving a watched directory means editing `check-wiring.mjs` in the same commit.
+
 **Where something legitimately has no production caller, say so at the declaration**: `@unwired`
 followed by a reason, in its doc comment. The tag alone is refused — an exemption nobody can read is
-a config-file list with extra steps. ⚠️ **Not every `@unwired` in the tree is a decision**:
+a config-file list with extra steps — and it is refused on **all three** paths, including a file's
+own doc comment, which is the broadest of them because it silences a whole module. A reasonless tag
+is reported as `WIRE000` rather than quietly honoured. ⚠️ **Not every `@unwired` in the tree is a decision**:
 `segments/match-port.ts` carries one naming [#282](https://github.com/openzigs/onyourleft/issues/282),
 which is a **defect this gate found on its first run** — nothing in the client runs the segment
 matcher, so no segment effort has ever been written.

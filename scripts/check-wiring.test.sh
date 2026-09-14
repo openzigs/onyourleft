@@ -46,9 +46,14 @@ cleanup() { [ -n "${tmp}" ] && rm -rf "${tmp}"; }
 trap cleanup EXIT
 
 # new_fixture -- a repository with one app, its page, and an empty entry module.
+#
+# ⚠️ Both watched directories are created even when a case writes into neither:
+# since #283 a WATCHED_PREFIXES entry naming a directory that is not there is a
+# hard failure, so a fixture without them would exercise that rule instead of
+# the one it is about. The case that DOES exercise it removes one deliberately.
 new_fixture() {
   tmp="$(mktemp -d)"
-  mkdir -p "${tmp}/apps/web/src"
+  mkdir -p "${tmp}/apps/web/src/game" "${tmp}/apps/web/src/ride"
   printf '{"name":"onyourleft","private":true}' > "${tmp}/package.json"
   printf '{"name":"@onyourleft/web","private":true}' > "${tmp}/apps/web/package.json"
   cat > "${tmp}/apps/web/index.html" <<'HTML'
@@ -482,6 +487,37 @@ run_check
 assert_red 'an @unwired with no reason fails'
 assert_says 'and says why a bare tag is refused' 'with extra steps'
 
+# --- A reasonless tag is refused on the WIRE001 path too ---------------------
+# ⚠️ The file-comment exemption is the BROADEST of the three — it silences a
+# whole module — and it was the one branch with no fixture, which is how it
+# shipped reading a reasonless tag as "exempt" (`unwiredReason` returns `null`
+# there, not `undefined`). One fixture per exemption path, not per rule.
+new_fixture
+write apps/web/src/main.tsx <<'TS'
+import { startRide } from './ride/controller';
+startRide();
+TS
+write apps/web/src/ride/controller.ts <<'TS'
+export function startRide(): void {}
+TS
+write apps/web/src/segments/match-port.ts <<'TS'
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * What the sweep needs from the store.
+ *
+ * @unwired
+ */
+
+export interface MatchStore {
+  listActivities(): Promise<void>;
+}
+TS
+run_check
+assert_red 'a bare @unwired in a file comment does not exempt the whole module'
+assert_says 'and reports it as a reasonless tag rather than silently passing' 'WIRE000 apps/web/src/segments/match-port.ts'
+assert_says 'and says why a bare tag is refused there too' 'with extra steps'
+
 # --- The exemption reaches a port method and a whole module ------------------
 new_fixture
 write apps/web/src/main.tsx <<'TS'
@@ -603,6 +639,57 @@ TS
 run_check
 assert_red 'no entry point is a failure rather than a clean run'
 assert_says 'and says why' 'would pass vacuously'
+
+# --- The watched set itself fails closed ------------------------------------
+# #142's shape, one gate later: WATCHED_PREFIXES is written down rather than
+# discovered, so a renamed watched directory would leave every rule passing over
+# an empty population while the success line claimed every seam was reachable.
+new_fixture
+rmdir "${tmp}/apps/web/src/ride"
+mkdir -p "${tmp}/apps/web/src/riding"
+write apps/web/src/main.tsx <<'TS'
+import { buildScene } from './game/scene';
+buildScene();
+TS
+write apps/web/src/game/scene.ts <<'TS'
+export function buildScene(): void {}
+TS
+write apps/web/src/riding/controller.ts <<'TS'
+export function startRide(): void {}
+export function stopRide(): void {}
+TS
+run_check
+assert_red 'a watched directory that has been renamed away is a failure, not a quiet skip'
+assert_says 'and names the prefix that is missing' 'apps/web/src/ride/'
+
+# --- ...and so does a watched set that is present but empty ------------------
+new_fixture
+write apps/web/src/main.tsx <<'TS'
+console.log('nothing to see');
+TS
+run_check
+assert_red 'watched directories holding no source file is a failure rather than a clean run'
+assert_says 'and says the run would have asserted nothing' 'assert nothing at all'
+
+# --- The success line counts the population it CHECKED, not only the walk ----
+new_fixture
+write apps/web/src/main.tsx <<'TS'
+import { startRide } from './ride/controller';
+startRide();
+TS
+write apps/web/src/ride/controller.ts <<'TS'
+import { buildScene } from '../game/scene';
+
+export function startRide(): void {
+  buildScene();
+}
+TS
+write apps/web/src/game/scene.ts <<'TS'
+export function buildScene(): void {}
+TS
+run_check
+assert_green 'a wired tree passes'
+assert_says 'and says how many watched files it read, not only how far it walked' '2 watched files'
 
 # --- A workspace specifier resolves through the exports map ------------------
 new_fixture
