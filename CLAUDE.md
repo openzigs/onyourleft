@@ -503,6 +503,22 @@ pnpm run check:a11y-suite
 # `check:repo`.
 bash scripts/check-a11y-suite.test.sh
 
+# The wiring gate (#278). Walks the module graph from the page Vite builds and
+# reports what the client's own seams — apps/web/src/game/, apps/web/src/ride/
+# and every *-port.ts — cannot reach. This is the gate for the defect every
+# other one here is blind to: a correct, unit-tested, typechecked unit wired to
+# nothing. Needs Node and an install (it parses with the TypeScript compiler's
+# own parser), so it is NOT part of `check:repo`. See §4j.
+pnpm run check:wiring
+
+# Its own suite. Fixture-driven; 49 assertions over 28 throwaway trees, five of
+# them #278's five defects taken from the tree as it actually was — and two of
+# those green on purpose, because they are limits this gate states rather than
+# findings it makes. Three more cover the two ways this gate could check nothing
+# and say so cheerfully: a renamed watched directory, an empty watched set, and
+# a reasonless `@unwired` on the one path that silences a whole file.
+bash scripts/check-wiring.test.sh
+
 # tsc --noEmit followed by `vite build`, for apps/web. A green typecheck is not
 # a green build: the bundler resolves imports the typechecker only reads types
 # from, so run this before claiming a change compiles.
@@ -867,9 +883,10 @@ making a client's typecheck depend on another package's authoring-time directory
 push to `main`. It runs **exactly** the §4a commands and nothing else: the eight bare-clone script
 checks (`check-repo-rules`, `check-licence-hashes`, `check-env-example` and `check-doc-links`, each
 with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --frozen-lockfile`, `format:check`, `lint`,
-`typecheck`, `test:coverage`, `bash scripts/coverage-summary.test.sh`, `check:a11y-suite`,
-`test:a11y`, `bash scripts/check-a11y-suite.test.sh`, `build`, `playwright install --with-deps
-chromium`, `test:browser`, `bash scripts/check-dependency-licences.test.sh` and `check:licences` — then
+`typecheck`, `test:coverage`, `check:a11y-suite`,
+`test:a11y`, `bash scripts/check-a11y-suite.test.sh`, `check:wiring`,
+`bash scripts/check-wiring.test.sh`, `bash scripts/coverage-summary.test.sh`, `build`,
+`playwright install --with-deps chromium`, `test:browser`, `bash scripts/check-dependency-licences.test.sh` and `check:licences` — then
 publishes the coverage table to the run summary and uploads the HTML report as an artefact.
 Those last two carry `if: always()` and cannot fail the job: the run where coverage moved
 unexpectedly is exactly the one whose table you want, and a reporting step that can fail a
@@ -1417,6 +1434,70 @@ correct only because `transport.ts` mints the one from the other — and its own
 comment warns they are "not necessarily" the same. `fitness-machine-channel.test.ts` pins that
 assumption, because if it ever breaks the symptom is a control point write addressed to a device the
 plugin has never heard of, on the one path that applies physical resistance to somebody.
+
+### 4j. The wiring gate
+
+Added by [#278](https://github.com/openzigs/onyourleft/issues/278). It is
+[`scripts/check-wiring.mjs`](scripts/check-wiring.mjs), it runs as `pnpm run check:wiring`, and it
+is the one gate here that looks **between** units rather than inside one.
+
+Five defects in one week were a correct, unit-tested, typechecked, linted unit **wired to nothing**:
+`BleClient.initialize()` called only from a method nothing called, so no device could be paired on
+Android at all (#230); `advanceBot` with no caller, so there was no pacer (#237); `ghostFinished`
+exported, tested and computed by nobody, so a rider who beat their own best was never told (#259).
+⚠️ **§5's mutation requirement cannot see any of them** — `advanceBot` had a test proven to fail
+without it, and the test says nothing about whether anything calls it. Neither can the typechecker:
+**an exported function nobody calls and an optional parameter nobody supplies are both perfectly
+well typed.**
+
+| Rule | Fails when |
+|---|---|
+| `WIRE001` | a watched module no production module imports |
+| `WIRE002` | an exported symbol in a watched module that no production declaration names |
+| `WIRE003` | a method declared on a `*-port.ts` interface that no production declaration calls |
+
+**The entry point is read out of `apps/*/index.html`**, so it is the page Vite actually builds
+rather than a path written down twice. ⚠️ **`apps/web/browser/` is deliberately NOT an entry
+point**: a harness page is a gate, and #236 is exactly what happens when a harness's own canvas is
+mistaken for the product's. Neither is a test — every one of the five defects was unit-tested and
+green, so a test calling something is not evidence that anything ships it.
+
+⚠️ **The watched set is the client's own seams** — `apps/web/src/game/`, `apps/web/src/ride/` and
+every `*-port.ts` under `apps/` — **not the packages underneath**, and the cost of that line is
+stated rather than hidden: #237's `advanceBot` lived in `packages/physics` and would not be named.
+Watching the libraries would report the several dozen exports §4b records as having no production
+consumer *by design*, and a noisy rule gets an allowlist, and an allowlist that grows is how a rule
+stops firing.
+
+⚠️ **Measure that set before you read a green run as a clean client: it is 37 files of the 132
+non-test sources under `apps/*/src`, 28 %.** 26 come from the two directories and 11 from the
+`*-port.ts` suffix — and the suffix is the half that found #282, not the directories:
+`segments/match-port.ts` matches `*-port.ts`, while `segments/backfill.ts`, the module that is
+actually dead, is in no watched directory and **is not reported**. The gate prints both counts for
+this reason, the watched one first; a run that says *"260 production modules"* and nothing else
+reads like coverage of a population it never checked.
+
+⚠️ **`WATCHED_PREFIXES` is written down in the checker rather than discovered, so it is asserted to
+exist.** A selector like that fails closed against *deleting* what it names and open against
+*renaming* it — rename `ride/` to `riding/` and every rule passes over an empty population while the
+success line claims every seam is reachable. That is #142's shape (§4e), and it is why a prefix
+naming no directory, and a watched set holding no file, are both hard failures with their own
+fixtures. Moving a watched directory means editing `check-wiring.mjs` in the same commit.
+
+**Where something legitimately has no production caller, say so at the declaration**: `@unwired`
+followed by a reason, in its doc comment. The tag alone is refused — an exemption nobody can read is
+a config-file list with extra steps — and it is refused on **all three** paths, including a file's
+own doc comment, which is the broadest of them because it silences a whole module. A reasonless tag
+is reported as `WIRE000` rather than quietly honoured. ⚠️ **Not every `@unwired` in the tree is a decision**:
+`segments/match-port.ts` carries one naming [#282](https://github.com/openzigs/onyourleft/issues/282),
+which is a **defect this gate found on its first run** — nothing in the client runs the segment
+matcher, so no segment effort has ever been written.
+
+⚠️ **Read `check-wiring.mjs` §Limits before concluding something is wired because the gate is
+green.** It cannot see a call made through a string key, a dynamic import whose specifier is not a
+literal, or a prop threaded through JSX it does not follow — which is #252, measured against the
+tree as it was and **pinned as a green case** in `check-wiring.test.sh` so that the limit cannot
+quietly become a false claim.
 
 ---
 
@@ -2063,6 +2144,8 @@ top of an issue **supersedes its body**.
 | Which platform the next client is built on, and why there is no desktop one | [ADR 0018](docs/adr/0018-native-client-platform.md) |
 | What a person does with a real trainer, in what order, and why the dangerous step is last | [`docs/validation/0001-trainer-and-sensors.md`](docs/validation/0001-trainer-and-sensors.md) |
 | What a capture records off real hardware, and the two things it deliberately does not | `apps/web/src/validation/capture.ts`, `apps/web/browser/capture.html` |
+| What catches a correct, tested unit that nothing calls, and the three things it cannot see | §4j, [`scripts/check-wiring.mjs`](scripts/check-wiring.mjs) §Limits |
+| Why a declaration says `@unwired`, and what a reasonless one gets | §4j, `scripts/check-wiring.mjs` §"The exemption" |
 | Why an indoor GPX has trackpoints with no coordinates, and what settles whether that is wrong | `packages/fit/src/xml/gpx.ts` §`writeTrackPoint`, `packages/fit/tools/uploads/uploads.test.ts` |
 | Which of #15's acceptance criteria can be checked without a phone, and what each of the others needs | [`docs/spikes/0002-background-recording.md`](docs/spikes/0002-background-recording.md) |
 | What proves the mobile shell cannot encode a FIT file of its own | `apps/web/src/transfer/cross-client-fixture.ts`, `apps/web/src/transfer/cross-client-fit.test.ts` |

@@ -66,7 +66,18 @@ export interface CapacitorBlePort {
   /** Ask for the runtime permissions and bring the stack up. */
   initialize(): Promise<void>;
 
-  /** Whether the adapter is switched on. Distinct from being permitted. */
+  /**
+   * Whether the adapter is switched on. Distinct from being permitted.
+   *
+   * @unwired #284 — a defect with an issue rather than a decision, and this note
+   * said the opposite until #283's review. `availability()` is its only caller
+   * and nothing in `apps/web` calls `availability()`: the Devices screen probes
+   * the *browser* (`support/bluetooth-support.ts`), so inside the shell it
+   * answers about a stack the shell does not use, while `permission/notice.ts`
+   * — written to answer it properly — is imported by nothing. Same class as
+   * #282, and outside what the #278 gate watches, which is why it took a
+   * reviewer. The note goes when #284 wires it.
+   */
   isEnabled(): Promise<boolean>;
 
   /**
@@ -82,6 +93,11 @@ export interface CapacitorBlePort {
    *
    * The plugin's `getDevices(ids)` takes the ids to look up, so the caller has
    * to have kept them. That is the adapter's business, not this seam's.
+   *
+   * @unwired nothing reconnects silently, on either platform. CLAUDE.md §8:
+   * *"there is no silent reconnect that is shippable in 2026 … do not build
+   * automatic reconnection"*. This is the call that would serve one when the
+   * product decides to have it.
    */
   getDevices(ids: readonly string[]): Promise<readonly PluginDevice[]>;
 
@@ -131,6 +147,9 @@ export interface CapacitorBlePort {
    *
    * Nothing in this repository calls it. If something ever needs to, that is a
    * decision to take in an issue rather than at a call site.
+   *
+   * @unwired being uncalled is the whole point, and `fitness-machine-channel.
+   * test.ts` asserts it stays that way. This is the exemption #278 names.
    */
   writeWithoutResponse(
     deviceId: string,

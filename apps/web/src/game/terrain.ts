@@ -221,6 +221,9 @@ export const MARKING_COLOUR = 0xf2f0e6;
  * non-text graphic, which `design/contrast.ts` already exports as
  * `AA_LARGE_TEXT_OR_NON_TEXT`. `terrain.test.ts` asserts against that export
  * rather than against this sentence, so the two cannot drift.
+ *
+ * @unwired a bound `terrain.test.ts` holds the gradient tints to; the tints
+ * themselves are authored colours and read nothing from it.
  */
 export const MINIMUM_TINT_CONTRAST_RATIO = 3;
 

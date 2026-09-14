@@ -148,6 +148,9 @@ export const MINIMUM_VIEW_END_OCCLUSION = 0.75;
  * rider is actually on looking like road. `world.test.ts` asserts this at zero
  * depth and at the chase camera's own distance, because a density that failed
  * it would be a grey screen rather than a visible bug.
+ *
+ * @unwired a bound `world.test.ts` asserts the chosen density against; the
+ * density is derived from the view distance rather than from this number.
  */
 export const NEAR_FOG_LIMIT = 0.02;
 
@@ -226,6 +229,10 @@ function densityForOcclusion(occlusion: number): number {
  *
  * The `FogExp2` curve, written here rather than read off the renderer, so the
  * bound {@link NEAR_FOG_LIMIT} states can be asserted without a GL context.
+ *
+ * @unwired three applies its own `FogExp2` in the shader, so nothing in the
+ * client evaluates this — it exists to make that shader's behaviour checkable
+ * where there is no GL context, which is every test in the Vitest suite.
  */
 export function fogFactor(density: number, depthMetres: number): number {
   return 1 - Math.exp(-((density * depthMetres) ** 2));

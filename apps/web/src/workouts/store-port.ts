@@ -17,6 +17,14 @@ import type { AthleteId, WorkoutId, WorkoutRecord } from '@onyourleft/store';
 
 export interface WorkoutStore {
   listWorkouts(owner: AthleteId, limit?: number): Promise<WorkoutRecord[]>;
+  /**
+   * One saved workout.
+   *
+   * @unwired no screen reads a workout by id: the library lists whole records
+   * and the ride screen is handed the one the rider picked, so a second read
+   * would return what the caller already holds. Declared because the store
+   * offers it and a deep link to a workout would be its first caller.
+   */
   getWorkout(owner: AthleteId, id: WorkoutId): Promise<WorkoutRecord | undefined>;
   putWorkout(record: WorkoutRecord): Promise<WorkoutId>;
   deleteWorkout(owner: AthleteId, id: WorkoutId): Promise<boolean>;
