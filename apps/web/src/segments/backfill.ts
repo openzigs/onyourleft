@@ -22,6 +22,9 @@
  * ⚠️ **Never called from a render**, on the same rule as `analysis/history.ts`'s
  * backfill: a read path that writes is a read path whose cost nobody can state.
  * The screen offers a control and the rider decides when to pay for it.
+ * `segments/sweep.ts` is that caller — it indexes the corpus, loops this
+ * function and owns the checkpoint — and until #282 wired it there was no
+ * caller at all, so no segment effort had ever been written.
  *
  * ⚠️ **It yields between activities rather than running to completion.**
  * {@link sweepLibrary} processes one page and returns; the caller loops. A

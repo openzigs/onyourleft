@@ -45,10 +45,13 @@
  *   library's provenance inconsistent in a way no screen explains, so the
  *   consistent thing is to leave signing to whichever issue turns it on for
  *   every activity at once.
- * - **It does not run the segment matcher.** `segments/backfill.ts` is a
- *   resumable sweep over the library and picks up a newly saved ride the next
- *   time it runs. Matching inline would put a bounded-time sweep on the end of
- *   the one action a rider takes while sweaty and impatient.
+ * - **It does not run the segment matcher.** `segments/sweep.ts` drives a
+ *   resumable sweep over the library from a control on the segments screen, and
+ *   picks up a newly saved ride the next time a rider presses it. Matching
+ *   inline would put a bounded-time sweep on the end of the one action a rider
+ *   takes while sweaty and impatient. ⚠️ Until #282 there was no such control
+ *   and "the next time it runs" was never — which is the cost of this decision
+ *   being invisible until somebody wires the other half.
  * - **It sets no `visibility`.** `putActivity` applies ADR 0004's `private`
  *   default. The importer makes the same call for the same reason.
  */

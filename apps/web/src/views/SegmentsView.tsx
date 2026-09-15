@@ -18,7 +18,15 @@ import {
   segmentRefusals,
   type SegmentOverlap,
 } from '../segments/create';
+import type { MatchPort } from '../segments/match-port';
 import type { SegmentPort } from '../segments/store-port';
+import {
+  abandonedSentence,
+  matchLibrary,
+  sweepSentence,
+  SWEEP_ACTIVITY_BUDGET,
+  type SweepResult,
+} from '../segments/sweep';
 import { hrefForSegment } from '../shell/routes';
 import { useUnits } from '../units/context';
 import { formatSmallDistance, measurementText } from '../units/format';
@@ -91,6 +99,17 @@ export interface SegmentsViewProps {
    * no segments.
    */
   readonly port?: SegmentPort | undefined;
+  /**
+   * The sweep's reads and writes (#66, wired by #282), or `undefined` where
+   * there is no local store.
+   *
+   * A separate port from {@link port} over the same connection, for the reason
+   * every other pair in this client is separate: `SegmentStore` offers no way
+   * to write an effort and no way to touch the sweep's checkpoint, and
+   * `MatchStore` offers no way to create a segment. `ActivityStore` satisfies
+   * both structurally, so `main.tsx` passes one object twice.
+   */
+  readonly match?: MatchPort | undefined;
 }
 
 /**
@@ -110,11 +129,13 @@ interface Outcome {
   readonly overlaps: readonly SegmentOverlap[];
 }
 
-export function SegmentsView({ port }: SegmentsViewProps): JSX.Element {
+export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
   const [segments, setSegments] = useState<readonly SegmentRecord[] | undefined>(undefined);
   const [rides, setRides] = useState<readonly ActivitySummary[] | undefined>(undefined);
   const [outcome, setOutcome] = useState<Outcome | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+  const [matching, setMatching] = useState(false);
+  const [swept, setSwept] = useState<SweepResult | undefined>(undefined);
   const units = useUnits();
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -132,6 +153,26 @@ export function SegmentsView({ port }: SegmentsViewProps): JSX.Element {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  /**
+   * Match the library against the segments on this device.
+   *
+   * ⚠️ **From a control, never from `refresh`.** `segments/sweep.ts` carries the
+   * reasoning: this writes, and a read path that writes is a read path whose
+   * cost nobody can state. Putting it in the effect above would run a sweep
+   * every time a rider glanced at this screen.
+   */
+  const runSweep = useCallback(async (): Promise<void> => {
+    if (match === undefined || matching) {
+      return;
+    }
+    setMatching(true);
+    try {
+      setSwept(await matchLibrary(match));
+    } finally {
+      setMatching(false);
+    }
+  }, [match, matching]);
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -197,6 +238,10 @@ export function SegmentsView({ port }: SegmentsViewProps): JSX.Element {
 
   // Only rides with a track are offered — an indoor ride has no road.
   const withTrack = (rides ?? []).filter((ride) => ride.hasPosition);
+  // Computed once rather than twice inside the tree below, and `undefined`
+  // whenever the last sweep abandoned nothing — which is what renders no note
+  // at all rather than a sentence saying zero.
+  const gapNote = swept?.kind === 'swept' ? abandonedSentence(swept.abandoned) : undefined;
 
   return (
     <>
@@ -333,6 +378,38 @@ export function SegmentsView({ port }: SegmentsViewProps): JSX.Element {
           </table>
         )}
       </section>
+
+      {match === undefined ? null : (
+        <section aria-labelledby="segments-match">
+          <h2 id="segments-match">Find your efforts</h2>
+          <p className="oyl-muted">
+            Matching reads the positions of each ride once and stores every time you have set on
+            these segments. It is <strong>not</strong> done while you ride, and not when a ride is
+            saved: it decodes a ride&rsquo;s whole track, and that does not belong on the end of
+            pressing Stop. So a ride you have just recorded shows no effort until you run this.
+          </p>
+          <p className="oyl-muted">
+            One press covers up to {String(SWEEP_ACTIVITY_BUDGET)} rides and remembers where it got
+            to, so pressing it again carries on rather than starting over. Running it after making a
+            segment is what finds that segment in rides you have already stored.
+          </p>
+          <Button onClick={() => void runSweep()} disabled={matching}>
+            {matching ? 'Matching…' : 'Match my rides'}
+          </Button>
+          {swept === undefined ? null : (
+            <>
+              <StatusMessage tone={swept.kind === 'swept' ? 'success' : 'warning'} live>
+                {sweepSentence(swept)}
+              </StatusMessage>
+              {gapNote === undefined ? null : (
+                <StatusMessage tone="info" label="Why some rides have no time">
+                  {gapNote}
+                </StatusMessage>
+              )}
+            </>
+          )}
+        </section>
+      )}
     </>
   );
 }

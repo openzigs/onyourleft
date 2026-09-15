@@ -16,12 +16,13 @@
  * that could answer "the activity with this id" without being told whose it is
  * — the cross-athlete shape CLAUDE.md §6 names, refused at the type level.
  *
- * @unwired #282 — and this is a defect rather than a decision. `main.tsx` never
- * builds a `MatchPort`, nothing calls `sweepLibrary`, and `putActivityEfforts`
- * has no production caller at all, so no segment effort has ever been written
- * and the effort screens read a table only a test fills. #278's gate is what
- * found it; the note stays until #282 wires the sweep, and goes in the same
- * pull request that does.
+ * ⚠️ **This file carried an `@unwired` note until #282, and it was a defect
+ * rather than a decision**: `main.tsx` built no `MatchPort`, nothing called
+ * `sweepLibrary`, and `putActivityEfforts` had no production caller at all, so
+ * no segment effort had ever been written and the effort screens read a table
+ * only a test filled. #278's gate found it. `segments/sweep.ts` is the driver
+ * that now runs this, from a control on the segments screen, and `main.tsx`
+ * §`buildMatchPort` is the one caller that reaches the real store.
  */
 
 import type {
