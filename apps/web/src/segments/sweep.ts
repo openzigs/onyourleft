@@ -47,7 +47,7 @@
  */
 
 import type { IndexedSegment } from '@onyourleft/domain';
-import type { ActivityId } from '@onyourleft/store';
+import type { ActivityId, AthleteId } from '@onyourleft/store';
 
 import { indexSegments, sweepLibrary, type AbandonedNote } from './backfill';
 import type { MatchPort } from './match-port';
@@ -192,6 +192,34 @@ export interface MatchLibraryOptions {
 }
 
 /**
+ * The sweep this tab is running, per athlete, for as long as it runs (#294).
+ *
+ * ⚠️ **Module state rather than component state, because the state that has to
+ * outlive the component is not the component's.** `SegmentsView`'s `matching`
+ * flag disables the button that view owns and is right to; it dies with the
+ * view. Navigating away from `/segments` mid-sweep unmounts the screen and
+ * navigating back mounts a fresh one with `matching === false` and an enabled
+ * control, while the first sweep is still running — nothing cancels
+ * {@link matchLibrary}, because a page loop that abandoned its own checkpoint
+ * write half way through would be worse than the second press.
+ *
+ * ⚠️ **Keyed by athlete, not one handle for the tab.** Two athletes are two
+ * libraries, two corpora and two checkpoints — never the same piece of work —
+ * so a single handle would hand the second one the *first one's* outcome:
+ * counts of somebody else's rides, and `abandoned` notes naming somebody
+ * else's activity ids. That is CLAUDE.md §6's cross-athlete shape reached from
+ * an unusual direction, and it costs one `Map` to close.
+ *
+ * ⚠️ **Entries are removed in a `finally`, on rejection as well as on
+ * return.** A handle cleared only on the way out leaves a rejected promise
+ * here for the life of the tab: every later press joins a sweep that failed
+ * minutes ago, re-reports its error, and nothing ever sweeps again.
+ * `QuotaExceededError` is a real outcome of one press, so that is a path a
+ * rider reaches rather than a hypothetical one.
+ */
+const inFlight = new Map<AthleteId, Promise<SweepResult>>();
+
+/**
  * Match this athlete's library against their segments, resuming where the last
  * press stopped.
  *
@@ -202,11 +230,47 @@ export interface MatchLibraryOptions {
  * over — and a sweep that finished starts the next one from the beginning,
  * which is what lets a segment made since then find its efforts in rides the
  * previous sweep had already been past.
+ *
+ * ⚠️ **A call made while this athlete's sweep is still running JOINS it** and
+ * settles with its outcome — it does not start a second page loop, and it does
+ * not refuse. Two loops in one tab interleave `putMatchCheckpoint` writes, so
+ * the cursor can move backwards and the sentence a rider reads can describe
+ * neither loop's work. The efforts themselves survive it — the effort
+ * id is derived and `putActivityEfforts` replaces — which is what made this
+ * bounded rather than urgent, and is not a reason to leave it.
+ *
+ * Joining rather than refusing because the rider who comes back to the screen
+ * and presses is asking *"what is happening to my rides"*, and the running
+ * sweep's outcome is the true answer to that. A refusal would leave them with
+ * a warning and nothing ever telling them the sweep finished.
+ *
+ * ⚠️ **A joined call's {@link MatchLibraryOptions} are NOT applied** — the
+ * sweep that is running is running under the options it was started with.
+ * There is one production caller and it passes none; a second caller that
+ * cared about a budget would have to wait for the handle to clear rather than
+ * assume its numbers took effect.
  */
-export async function matchLibrary(
+export function matchLibrary(
   port: MatchPort,
   options: MatchLibraryOptions = {},
 ): Promise<SweepResult> {
+  const running = inFlight.get(port.athleteId);
+  if (running !== undefined) {
+    return running;
+  }
+  // The handle stored is the one carrying the `finally`, so a joining caller
+  // observes the sweep only after the entry has been removed — pressing again
+  // the instant a sweep reports back starts a new one rather than rejoining a
+  // settled handle.
+  const started = sweep(port, options).finally(() => {
+    inFlight.delete(port.athleteId);
+  });
+  inFlight.set(port.athleteId, started);
+  return started;
+}
+
+/** One sweep, as it was before there was anything to guard. */
+async function sweep(port: MatchPort, options: MatchLibraryOptions): Promise<SweepResult> {
   const corpusLimit = options.corpusLimit ?? SWEEP_CORPUS_LIMIT;
   // One more than the limit, so "exactly at the limit" and "over it" are told
   // apart by the read rather than by a count that has already been truncated.

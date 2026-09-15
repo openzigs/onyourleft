@@ -244,3 +244,66 @@ export function stubMatchPort(options: StubMatchOptions): StubMatch {
   port.store = store;
   return port;
 }
+
+/**
+ * A sweep held at its first library page, so a second call to `matchLibrary`
+ * is genuinely concurrent with the first (#294).
+ *
+ * ⚠️ **Without a hold there is no test.** Every read this stub answers
+ * resolves on the next microtask, so a sweep started and not awaited is
+ * finished before anything a test does next — and a second call that "cannot
+ * start a second loop" would be asserted against a first loop that had already
+ * ended. That test passes with no guard in the code at all, which is CLAUDE.md
+ * §5's test that cannot fail.
+ */
+export interface HeldPage {
+  /** Resolves once the sweep has asked for its first page and is waiting. */
+  readonly reached: Promise<void>;
+  /** Lets it go. */
+  release: () => void;
+}
+
+/**
+ * Hold this port's **first** library page until {@link HeldPage.release}.
+ *
+ * Only the first: a sweep that is released has to be able to run its remaining
+ * pages, and a hold that fired on every page would deadlock the release.
+ *
+ * ⚠️ **Wraps the store rather than mutating the method in place**, because the
+ * closures `stubMatchPort` built read `port.failNextWrite` off the port object
+ * and a copy of the port would silently stop the kill switch working — the
+ * trap that file's own comment records. Spreading the *store* keeps every one
+ * of those closures, and the wrapper delegates to the original rather than to
+ * itself.
+ */
+export function holdFirstLibraryPage(port: StubMatch): HeldPage {
+  const inner = port.store;
+  const reached = deferred();
+  const released = deferred();
+  let held = false;
+
+  port.store = {
+    ...inner,
+    listActivitySummaries: async (owner, listOptions) => {
+      if (!held) {
+        held = true;
+        reached.settle();
+        await released.promise;
+      }
+      return inner.listActivitySummaries(owner, listOptions);
+    },
+  };
+
+  return { reached: reached.promise, release: released.settle };
+}
+
+/** A promise and the handle that settles it. */
+function deferred(): { readonly promise: Promise<void>; readonly settle: () => void } {
+  // Assigned by the executor, which runs synchronously — there is no window in
+  // which `settle` is the uninitialised binding.
+  let settle!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
+  return { promise, settle };
+}
