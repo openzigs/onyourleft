@@ -283,6 +283,12 @@ run_check
 assert_red 'a generator that exits non-zero fails the check'
 assert_says 'and names the rule' 'CAP003 apps/mobile'
 assert_says 'and quotes what it said' 'could not find the android platform'
+# ⚠️ The hint CI earned. `cap update` falls back to a full `copy` when the
+# copied-build directory is missing, and `copy` refuses to start without
+# apps/web/dist -- so every generator failure carries the explanation, because
+# the message Capacitor prints names `npm run build` rather than this
+# repository's command and says nothing about the fallback.
+assert_says 'and says what to do about a missing web assets directory' 'pnpm run build'
 
 # --- CAP003: no Capacitor CLI at all -----------------------------------------
 new_fixture
@@ -323,22 +329,25 @@ assert_green 'the gitignored trees the generator also writes do not fail the che
 assert_silent_about 'and the copied web build is not reported' 'assets/public'
 assert_silent_about 'and neither is the cordova plugin tree' 'capacitor-cordova-android-plugins'
 
-# --- The directory `cap update` writes into is made, and unmade ---------------
-# ⚠️ The case CI found and a local run could not. `cap update` writes
-# capacitor.plugins.json beside the copied web build, and that directory is
-# `cap copy`'s output and gitignored -- so it is present on any machine that has
-# ever run `cap sync` and absent from every fresh checkout. This gate's first CI
-# run failed with ENOENT while the same command was green locally.
+# --- The directories `cap update` needs are made, and unmade ------------------
+# ⚠️ The case CI found twice and a local run could not. Both directories are
+# `cap copy`'s output and gitignored, so both are present on any machine that
+# has ever run `cap sync` and absent from every fresh checkout: `assets/` is
+# where the generator writes capacitor.plugins.json, and `assets/public/` is
+# what stops `cap update` falling back to a full `copy` that needs the web
+# build. The generator here asserts the second is there, which is the half a
+# green run would otherwise say nothing about.
 new_fixture
 fake_cap <<SH
 $(declare -f settings_at)
 $(declare -f build_with)
+test -d android/app/src/main/assets/public
 settings_at '8.5.2_@capacitor+core@8.5.2' '8.5.2' > android/capacitor.settings.gradle
 build_with 'capacitor-community-bluetooth-le' > android/app/capacitor.build.gradle
 echo '[]' > android/app/src/main/assets/capacitor.plugins.json
 SH
 run_check
-assert_green 'a generator writing into the gitignored assets directory works on a fresh checkout'
+assert_green 'a generator needing the gitignored assets directories works on a fresh checkout'
 if [ -e "${tmp}/apps/mobile/android/app/src/main/assets" ]; then
   fail=$((fail + 1))
   printf 'FAIL: the directory the check created was not removed again\n\n'

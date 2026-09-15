@@ -267,6 +267,15 @@ jobs:
       # against the lockfile and committed a DIFFERENT wrong path. A no-op here,
       # a few hundred milliseconds, because the install step above already ran.
       #
+      # ⚠️ It does NOT need the build, and the reason is not obvious: `cap
+      # update` falls back to a full `copy` when the copied-build directory
+      # is missing, and `copy` refuses to start without apps/web/dist. Both
+      # CI runs of this gate's first two commits died on exactly that, in two
+      # different ways, because a developer's tree always has the gitignored
+      # directories a fresh checkout does not. The checker creates them and
+      # removes them again -- see GENERATED_DIRECTORIES before moving this
+      # step or concluding it belongs after Build.
+      #
       # It needs an install, so it is NOT in `check:repo`, the bare-clone set.
       # In this job rather than one of its own, for the reason every step above
       # gives: `main` requires a status check whose context is exactly

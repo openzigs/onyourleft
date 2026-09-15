@@ -51,9 +51,12 @@
  *    the lockfile said 8.5.2, and committed
  *    `@capacitor+android@8.5.1_@capacitor+core@8.5.2` — a fix for stale drift
  *    that committed different stale drift, corrected in #300.
- * 2. `cap update android`, which rewrites exactly the two files below and
- *    needs no web build. (`cap sync` is `copy` + `update`; `copy` is the half
- *    that wants `apps/web/dist` and that writes the gitignored asset tree.)
+ * 2. `cap update android`, which rewrites exactly the two files below.
+ *    (`cap sync` is `copy` + `update`; `copy` is the half that copies the web
+ *    build into the gitignored asset tree, which is why only `update` is run —
+ *    a "run it and diff the tree" over `sync` would report every asset.)
+ *    ⚠️ **No web build is needed, but only because of `GENERATED_DIRECTORIES`**
+ *    — read that comment before moving this step in CI.
  * 3. Compare each file against the bytes that were there before, then **put the
  *    original bytes back**, so the check reports drift rather than quietly
  *    repairing it and leaving a clean `git status` behind.
@@ -119,20 +122,30 @@ export const GENERATED_FILES = [
 ];
 
 /**
- * Directories `cap update` writes into that a clean clone does not have.
+ * Directories `cap update` needs that a clean clone does not have.
  *
- * ⚠️ **Found by CI, not locally, and that is the point.** `cap update` writes
- * `capacitor.plugins.json` beside the copied web build, and that whole
- * directory is `cap copy`'s output and gitignored — so it exists on the machine
- * of anybody who has ever run `cap sync` and on no fresh checkout. The first CI
- * run of this gate failed with `ENOENT … capacitor.plugins.json` while the same
- * command was green locally, which is the "worked on my machine because of
- * leftover state" shape in its purest form.
+ * ⚠️ **Both were found by CI, not locally, and that is the point.** Each is
+ * `cap copy`'s output and gitignored, so both exist on the machine of anybody
+ * who has ever run `cap sync` and on no fresh checkout — the "worked on my
+ * machine because of leftover state" shape in its purest form, twice:
+ *
+ * - `assets/` is where `update` writes `capacitor.plugins.json`. Without it the
+ *   run dies on `ENOENT … capacitor.plugins.json`.
+ * - `assets/public/` is the copied web build, and ⚠️ **`update` falls back to a
+ *   full `copy` when it is missing** (`@capacitor/cli`'s `android/update.js`:
+ *   `if (!pathExists(config.android.webDirAbs)) await copy(…)`). `copy` runs
+ *   `checkWebDir`, which refuses to start without `apps/web/dist`. Creating the
+ *   directory is what keeps this gate independent of the web build rather than
+ *   ordered after it; the two files it compares are the same either way,
+ *   because `copy` writes neither.
  *
  * Each is created if absent and **removed again** if this check was the one
  * that created it, so a run leaves the tree exactly as it found it.
  */
-export const GENERATED_DIRECTORIES = ['android/app/src/main/assets'];
+export const GENERATED_DIRECTORIES = [
+  'android/app/src/main/assets',
+  'android/app/src/main/assets/public',
+];
 
 /** How the two files are put back the way they should be. */
 export const REPAIR =
@@ -265,7 +278,12 @@ export function capacitorDrift({ root, assumeInstalled = false }) {
     const update = spawnSync(cap, ['update', 'android'], { cwd: projectDir, encoding: 'utf8' });
     if (update.error !== undefined || update.status !== 0) {
       const detail = update.error?.message ?? outputOf(update);
-      problems.push(`CAP003 ${PROJECT} — \`cap update android\` failed: ${detail}`);
+      problems.push(
+        `CAP003 ${PROJECT} — \`cap update android\` failed: ${detail}\n` +
+          '        ⚠️ If it could not find the web assets directory, the copied-build ' +
+          'directory was missing and `update` fell back to a full `copy` — see ' +
+          '`GENERATED_DIRECTORIES`, or run `pnpm run build` first.',
+      );
       return { problems, compared: [] };
     }
 

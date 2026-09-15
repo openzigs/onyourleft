@@ -568,10 +568,11 @@ bash scripts/check-wiring.test.sh
 # It runs `pnpm install --frozen-lockfile` itself first and treats a non-zero
 # exit as its own failure, because `cap update` faithfully encodes whatever
 # node_modules holds -- see §4k. Needs an install, so it is NOT part of
-# `check:repo`. About half a second.
+# `check:repo`. It does NOT need a build, and ⚠️ that is not obvious -- see §4k.
+# About half a second.
 pnpm run check:capacitor
 
-# Its own suite. Fixture-driven; 52 assertions over 16 throwaway projects, two
+# Its own suite. Fixture-driven; 53 assertions over 16 throwaway projects, two
 # of them the drift that actually happened -- #276/#277's 8.5.1 path and #298's
 # own artefact, each reproduced from the tree as it was. Needs Node and pnpm, so
 # also not in `check:repo`.
@@ -1644,9 +1645,19 @@ regenerate-and-diff over an unverified install proves only that two wrong things
 therefore runs the frozen install itself rather than trusting a caller to have run one.
 
 ⚠️ **`cap update android`, not `cap sync`.** `sync` is `copy` + `update`; `copy` is the half that
-needs `apps/web/dist` and that writes the gitignored asset tree, and only `update` writes the two
-files in question. So the check needs no web build, runs in about half a second, and cannot report
-the trees §3a prunes.
+copies the web build into the gitignored asset tree, and only `update` writes the two files in
+question. So the check runs in about half a second and structurally cannot report the trees §3a
+prunes.
+
+⚠️ **Two gitignored directories are what make it independent of the web build, and both were
+found by CI rather than locally.** `cap update` writes `capacitor.plugins.json` into
+`android/app/src/main/assets/`, and — less obviously — it **falls back to a full `copy` when
+`android/app/src/main/assets/public/` is missing**, which then refuses to start without
+`apps/web/dist`. Both directories are `cap copy`'s output and gitignored, so both exist on the
+machine of anyone who has ever run `cap sync` and on no clean clone: the first two CI runs of this
+gate died on one each while the same command was green locally. The checker creates whichever is
+absent and **removes it again only if it was the one that created it**. Read
+`GENERATED_DIRECTORIES` before moving the CI step or concluding it belongs after `Build`.
 
 ⚠️ **Both files are overwritten with a marker before the generator runs**, and a marker that
 survives is `CAP003` rather than agreement. Without it a generator that exited 0 without writing —
@@ -1654,13 +1665,6 @@ a platform argument it did not understand, a Capacitor release that moved a file
 comparison of a file with itself, which passes whatever the file says. **The originals are put back
 in a `finally`**: a checker that left the repaired file in the tree would turn a red gate into a
 silent `git add -A`.
-
-⚠️ **`cap update` writes into a directory a fresh checkout does not have**, and this gate's own
-first CI run is how that was found. `capacitor.plugins.json` goes beside the copied web build in
-`android/app/src/main/assets/`, which is `cap copy`'s output and gitignored — so it is present on
-any machine that has ever run `cap sync` and absent from every clean clone. The check creates it
-when it is missing and **removes it again only if it was the one that created it**, so a run leaves
-the tree exactly as it found it. A local green said nothing about this; the runner did.
 
 ⚠️ **The cheaper check #299 floats does not work, and the measurement is worth keeping.** Asserting
 that every `node_modules/.pnpm/…` path named in the file exists on disk needs no `cap update` and
