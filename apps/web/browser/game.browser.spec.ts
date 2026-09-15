@@ -43,6 +43,13 @@ interface GameHarnessResult {
     readonly groundColour: number;
     readonly horizonColour: number;
     readonly fogDensity: number;
+    readonly sun: {
+      readonly x: number;
+      readonly y: number;
+      readonly z: number;
+      readonly ambient: number;
+      readonly direct: number;
+    };
   };
   readonly skyPixel: Pixel;
   readonly groundPixel: Pixel;
@@ -64,6 +71,18 @@ interface GameHarnessResult {
   readonly sceneryPixelWithout: Pixel;
   readonly sceneryColumnFraction: number;
   readonly sceneryRowFraction: number;
+  readonly litMarkerPixels: number;
+  readonly flatMarkerPixels: number;
+  readonly litMarkerSpread: number;
+  readonly flatMarkerSpread: number;
+  readonly litMarkerBrightest: Pixel;
+  readonly litMarkerDarkest: Pixel;
+  readonly litFrameMs: number;
+  readonly flatFrameMs: number;
+  readonly shadedFrames: number;
+  readonly frameMsNoise: number;
+  readonly litDrawCalls: number;
+  readonly flatDrawCalls: number;
   readonly errors: readonly string[];
 }
 
@@ -541,5 +560,158 @@ test.describe('the scenery reaches the screen, and costs one call a kind — #24
     // arrangement — and #268's review found it published and asserted by
     // nothing. Four is the scenery-free scene the test above this one pins.
     expect(result.drawCallsPerFrame).toBe(4 + result.scatterKindCount);
+  });
+});
+
+/**
+ * The world has a light direction, and it reaches the screen — #286.
+ *
+ * ⚠️ **This is the only place the change can be observed at all.** `world.ts`
+ * computes a sun and two intensities; `three-renderer.ts` turns them into an
+ * `AmbientLight` and a `DirectionalLight` and mounts a `MeshLambertMaterial`
+ * on everything with a form. Every one of those steps is asserted in jsdom
+ * against objects that need no GL context — and **all of it passes for lamps
+ * that were never added to the scene**, which is #240's named defect shape for
+ * this epic arriving one more time. Only a shader can say whether a face is
+ * lit, and only a browser has one.
+ *
+ * The probe is the rider's own marker: a 0.9 m sphere eight metres from the
+ * camera, rendered once with it and once without, so the pixels that changed
+ * are its silhouette and nothing else. At that range the fog takes about a
+ * tenth of a percent across the whole object, so a brightness range across it
+ * is shading or it is nothing.
+ */
+test.describe('the world is lit, and can stop being — #286', () => {
+  test('finds the rider marker at both shadings, so the spreads mean something', async ({
+    page,
+  }) => {
+    const result = await harness(page);
+
+    // Non-vacuity first. A marker that fell off the bottom of the frame would
+    // make every assertion below a comparison of two empty sets, and a spread
+    // of zero would then read as "the lit world is flat" — which is the wrong
+    // conclusion from the right number.
+    expect(result.litMarkerPixels).toBeGreaterThan(200);
+    expect(result.flatMarkerPixels).toBeGreaterThan(200);
+    // The same object, drawn twice: the shading changes its colours, never its
+    // silhouette. A large disagreement here would mean the two runs are not
+    // looking at the same thing and nothing below could be compared.
+    expect(Math.abs(result.litMarkerPixels - result.flatMarkerPixels)).toBeLessThan(
+      result.litMarkerPixels * 0.05,
+    );
+  });
+
+  test('gives one object a lit face and a shaded one — criterion 1', async ({ page }) => {
+    const result = await harness(page);
+
+    // ⚠️ **#286's first acceptance criterion in its own words**: *a form-giving
+    // difference between a lit and an unlit face, not only a hue difference*.
+    // The unlit scene this replaced reports a spread of about zero here, which
+    // is the whole reason the number is worth reading.
+    expect(result.litMarkerSpread).toBeGreaterThan(20);
+    // And the brightest and darkest pixels of the marker really are the same
+    // object seen at two angles, rather than two different objects: they share
+    // a hue and differ in level, which is what a diffuse light does.
+    const brighter = result.litMarkerBrightest;
+    const darker = result.litMarkerDarkest;
+    for (const channel of [0, 1, 2] as const) {
+      expect(brighter[channel]).toBeGreaterThanOrEqual(darker[channel]);
+    }
+  });
+
+  test('draws it flat at the floor rung — criterion 4', async ({ page }) => {
+    const result = await harness(page);
+
+    // ⚠️ **The rung is the answer #286 gives to #245**, and this is what says
+    // it is a real one rather than a field nothing reads. `QualitySettings.
+    // shading` at `'flat'` puts back exactly the `MeshBasicMaterial` the
+    // renderer used before #286 — one colour over the whole object.
+    //
+    // Not zero: the marker is drawn over a fogged road and a sky, and a couple
+    // of its edge pixels can land on a boundary the depth buffer resolves in
+    // the object's favour. A handful of levels is that; twenty is shading.
+    expect(result.flatMarkerSpread).toBeLessThan(4);
+    // Stated as a ratio too, because the pair is the claim: whatever the
+    // driver's own rounding does to either number, the lit one is a different
+    // kind of number from the flat one.
+    expect(result.litMarkerSpread).toBeGreaterThan(result.flatMarkerSpread * 5);
+  });
+
+  test('costs no extra draw call, whichever material is on', async ({ page }) => {
+    const result = await harness(page);
+
+    // Shading is a fragment cost. The lit and the unlit material are mounted
+    // on the same meshes, so the swap must not change what the driver is asked
+    // to do — a rung that split a mesh, or added a pass, would show up here
+    // and nowhere else.
+    expect(result.litDrawCalls).toBeGreaterThan(0);
+    expect(result.litDrawCalls).toBe(result.flatDrawCalls);
+  });
+
+  test('carries a real sun on the frame, derived from the route', async ({ page }) => {
+    const result = await harness(page);
+    const { sun } = result.world;
+
+    // The harness route is at 51.5° N, so the sun is well up but not at the
+    // zenith, and the two intensities are the ones `world.ts` solved. Read off
+    // the published frame rather than recomputed, so a renderer handed a
+    // different world would be visible here.
+    expect(Math.hypot(sun.x, sun.y, sun.z)).toBeCloseTo(1, 6);
+    expect(sun.y).toBeGreaterThan(0);
+    expect(sun.ambient).toBeGreaterThan(0);
+    expect(sun.direct).toBeGreaterThan(0);
+    // The identity the unlit ground and road rest on: a horizontal surface
+    // receives exactly one unit, so it renders at its own colour.
+    expect(sun.ambient + sun.direct * sun.y).toBeCloseTo(1, 9);
+  });
+
+  /**
+   * ⚠️ **What the shading costs, measured — and what the number does not say.**
+   *
+   * #286's third criterion asks for a frame-time figure *"from the browser gate
+   * at minimum"*, and the owner's decision on the issue narrows it to a
+   * **relative** one: the same scene and the same route, lit and flat. That is
+   * what the harness measures, at one render scale, with the GPU flushed before
+   * each clock is read.
+   *
+   * ⚠️ **It is deliberately not asserted against a threshold.** A wall-clock
+   * millisecond budget on a shared CI runner is a flaky gate, and a flaky gate
+   * gets disabled — which would leave this epic with a performance claim nobody
+   * re-runs, the exact defect #244's review found and #286 quotes back. So what
+   * is asserted is that both measurements are real and were taken over the same
+   * frames, and the numbers themselves are attached to the run for reading. The
+   * figure from the run that shipped this is in the pull request.
+   *
+   * ⚠️ And it is a **headless Chromium**, on a software rasteriser in CI. ADR
+   * 0008 D-2's rendering gate was waived rather than passed and #247 is
+   * outstanding, so nothing here says a mid-range phone in a handlebar mount
+   * can afford the shading. That is why the floor rung exists.
+   */
+  test('measures what the shading costs, rather than asserting it', async ({ page }, testInfo) => {
+    const result = await harness(page);
+
+    expect(result.shadedFrames).toBeGreaterThanOrEqual(30);
+    expect(result.litFrameMs).toBeGreaterThan(0);
+    expect(result.flatFrameMs).toBeGreaterThan(0);
+    expect(Number.isFinite(result.litFrameMs)).toBe(true);
+    expect(Number.isFinite(result.flatFrameMs)).toBe(true);
+
+    // ⚠️ **The noise floor is asserted to exist, because without it the pair
+    // above is a number nobody can act on** — and a performance number nobody
+    // can act on is what #286 quotes #244's review about. A run that reported
+    // no spread at all between two identical measurements would mean the clock
+    // is not measuring what it claims to.
+    expect(result.frameMsNoise).toBeGreaterThan(0);
+
+    const cost = result.litFrameMs - result.flatFrameMs;
+    testInfo.annotations.push({
+      type: 'frame cost of the lighting',
+      description:
+        `lit ${result.litFrameMs.toFixed(3)} ms, flat ${result.flatFrameMs.toFixed(3)} ms, ` +
+        `difference ${cost >= 0 ? '+' : ''}${cost.toFixed(3)} ms a frame, ` +
+        `against a same-shading run-to-run spread of ${result.frameMsNoise.toFixed(3)} ms; ` +
+        `${String(result.shadedFrames)} frames a measurement, same scene and route, ` +
+        `render scale unchanged`,
+    });
   });
 });

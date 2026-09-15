@@ -16,16 +16,45 @@
  * asset directory in this epic — which #91 records as the reason it can ship
  * without an art budget rather than as a shortcut.
  *
- * ## The world is three objects, and still no illumination
+ * ## The world is three objects, and since #286 it has a sun
  *
  * #241 gives the scene a ground plane, a sky and exponential fog, all three
  * coloured from `world.ts`'s `WorldStyle` and therefore from the rider's own
- * route. **No lamp of any kind was added and none is wanted**: a
- * `MeshBasicMaterial` is unlit by definition, so the ground costs one draw call
- * and no shading pass, and the statement below about a flat-shaded road still
- * holds for everything in this file. A case-sensitive grep for three's
- * illumination classes over this file returns nothing, and `three-seam.test.ts`
- * is what keeps it that way rather than leaving it to review.
+ * route.
+ *
+ * ⚠️ **This section used to say "and still no illumination", and that no lamp
+ * "is wanted". A reviewer who remembers that is reading the old file.** #286
+ * added exactly two — an `AmbientLight` and a `DirectionalLight`, pointed by
+ * {@link WorldLamps} from `world.ts`'s own `SunStyle` — because the
+ * sentence it replaced was a **performance claim with no number behind it**:
+ * *"no lighting means no light budget"*. ADR 0008 D-2's rendering gate was
+ * waived rather than passed, so nothing had measured what a shading pass
+ * costs, and nothing had measured what leaving it out cost either. What is
+ * there now is a measurement, in `game.browser.spec.ts`, and a rung of
+ * `QUALITY_LADDER` that takes the shading back off on a device that cannot
+ * afford it.
+ *
+ * **What is lit, and what deliberately is not.** The scenery and the three
+ * markers wear a `MeshLambertMaterial`, because a cone, a sphere, a box and an
+ * octahedron all have a form for a light to find. The **ground** and the
+ * **road** stay `MeshBasicMaterial`:
+ *
+ * - The ground is one horizontal quad, and `world.ts` solves the two
+ *   intensities so that a horizontal surface receives **exactly** 1. Putting
+ *   a lamp on it is therefore a provable no-op that costs a shading pass
+ *   over the whole backdrop — the largest fill in the frame.
+ * - The road is within a few degrees of horizontal everywhere a bicycle goes,
+ *   and it carries **no normal attribute**: `terrain.ts` emits positions,
+ *   colours and indices, and computing normals for a ribbon that is rebuilt
+ *   every frame is the per-frame allocation #240's NFR-3 forbids. ⚠️ The cost
+ *   is stated rather than hidden: a climb and a descent are told apart by
+ *   #242's gradient tint and not by the light, and on a 15 % ramp the light
+ *   the surface *would* have received differs from the light it is drawn with
+ *   by about 8 %.
+ *
+ * `three-seam.test.ts` no longer greps for the absence of a lamp — it now
+ * requires the file to name **exactly** these two illumination classes and no
+ * third, which fails just as closed and says what was decided.
  *
  * ## The road's colour is now its own vertices'
  *
@@ -38,8 +67,10 @@
  * and white multiplied by a vertex colour is the vertex colour.
  *
  * That is what keeps the whole road one mesh and one draw call, which #240's
- * NFR-2 says is the budget that matters here. It is also still flat-shaded:
- * an edge line that reads as an edge line costs a vertex rather than a lamp.
+ * NFR-2 says is the budget that matters here. It is also still flat-shaded,
+ * and since #286 that is a stated exception rather than the house rule: an
+ * edge line that reads as an edge line costs a vertex rather than a lamp, and
+ * the section above says what the road gives up by staying unlit.
  *
  * ## The scenery is instanced, and it is the first thing here that is culled
  *
@@ -73,12 +104,14 @@
  */
 
 import {
+  AmbientLight,
   BoxGeometry,
   BufferAttribute,
   BufferGeometry,
   Color,
   ConeGeometry,
   CylinderGeometry,
+  DirectionalLight,
   DoubleSide,
   DynamicDrawUsage,
   FogExp2,
@@ -87,6 +120,7 @@ import {
   Matrix4,
   Mesh,
   MeshBasicMaterial,
+  MeshLambertMaterial,
   OctahedronGeometry,
   PerspectiveCamera,
   PlaneGeometry,
@@ -110,7 +144,7 @@ import {
   type ScatterKind,
 } from './scatter';
 import { ROAD_WIDTH_METRES, VIEW_AHEAD_METRES, VIEW_BEHIND_METRES } from './terrain';
-import type { WorldStyle } from './world';
+import type { SunStyle, WorldStyle } from './world';
 
 /**
  * How far above the rider the chase camera sits, in metres.
@@ -410,6 +444,142 @@ const SCATTER_STYLE: Record<ScatterKind, { colour: number; geometry: () => Buffe
 };
 
 /**
+ * Every colour in this file that a lit material carries — #286.
+ *
+ * ⚠️ **Derived from the two style tables rather than written out**, so a
+ * scenery kind or a marker added without a thought for the light budget lands
+ * in it automatically. `three-renderer.test.ts` §"lights no colour past white"
+ * multiplies each through `world.ts`'s {@link PEAK_IRRADIANCE} in the linear
+ * space the shader works in and requires the result to stay under white. That
+ * is the check that keeps `SUN_ELEVATION_AT_POLE_DEGREES` honest, and the two
+ * halves of it are deliberately in different files: the elevation band cannot
+ * see a colour, and this file must never see a sun constant.
+ *
+ * @unwired a bound `three-renderer.test.ts` asserts against; nothing in the
+ * client reads it, because every material already holds its own colour.
+ */
+export const LIT_COLOURS: readonly number[] = [
+  ...SCATTER_KINDS.map((kind) => SCATTER_STYLE[kind].colour),
+  ...(['rider', 'bot', 'ghost'] as const).map((kind) => MARKER_STYLE[kind].colour),
+];
+
+/**
+ * What one normalised unit of `world.ts`'s light is, in three's own units: π.
+ *
+ * ⚠️ **Read out of three's shader, not chosen.** `BRDF_Lambert` in
+ * `common.glsl.js` is `RECIPROCAL_PI * diffuseColor`, and both the ambient
+ * irradiance in `lights_pars_begin.glsl.js` and `RE_Direct_Lambert` in
+ * `lights_lambert_pars_fragment.glsl.js` feed their irradiance straight into
+ * it — so a lamp of intensity `i` lands on a square-on surface as `i / π` of
+ * its colour. `world.ts` states its two intensities as shares of what a
+ * horizontal surface receives and knows nothing about that, which is the whole
+ * point of the seam; this is the one line that converts.
+ *
+ * ⚠️ It is **version-specific**, and three moved it once already: before r155
+ * the ambient path multiplied by π in the shader and this factor would have
+ * been 1 for one of the two lamps and not the other. `three` is pinned at
+ * 0.185.1 (CLAUDE.md §4b) and the browser gate reads the result back off a
+ * real drawing buffer, which is what would catch a bump that moved it again.
+ */
+const LAMBERT_IRRADIANCE_SCALE = Math.PI;
+
+/** A material and its unlit twin, built once. @see QualitySettings.shading */
+interface ShadedMaterials {
+  readonly lit: MeshLambertMaterial;
+  readonly flat: MeshBasicMaterial;
+}
+
+/**
+ * One colour, as the two materials a quality rung chooses between.
+ *
+ * ⚠️ **Both are built up front and neither is ever replaced**, which is what
+ * makes {@link QualitySettings.shading} free to change mid-ride: swapping
+ * `mesh.material` costs a program compile the first time each is drawn and
+ * nothing thereafter, where building a material on the way down the ladder
+ * would allocate on the frame a phone is already struggling with. #240's
+ * NFR-3, applied to the one path that only runs on a hot device.
+ */
+function shadedMaterials(colour: number): ShadedMaterials {
+  return {
+    lit: new MeshLambertMaterial({ color: colour }),
+    flat: new MeshBasicMaterial({ color: colour }),
+  };
+}
+
+/**
+ * The world's one light direction, as the two lamps that carry it — #286.
+ *
+ * ## Why two lamps and not one
+ *
+ * A single directional light leaves every face turned away from the sun at
+ * black, which reads as silhouettes rather than as objects — and on a phone in
+ * sunlight a black tree against a dark verge is less legible than the flat
+ * scene it replaced. The ambient is the shaded side's whole illumination, and
+ * `world.ts`'s {@link SunStyle.ambient} is the number that says how much.
+ *
+ * ## Why it is a class, and why it is exported
+ *
+ * The same two reasons {@link ScatterBelt} is: `three-renderer.ts` is the one
+ * file allowed to name `three`, so a lamp in a file of its own is not
+ * available; and something reachable only through {@link ThreeGameView} cannot
+ * be driven at all in jsdom, where a `WebGLRenderer` cannot be constructed.
+ * Everything below is arithmetic over two objects that need no GL context.
+ *
+ * ⚠️ **The conversion into three's units is the whole of what this adds**, and
+ * it is the one thing a jsdom test can get wrong in a way a rider would see.
+ * @see LAMBERT_IRRADIANCE_SCALE
+ */
+export class WorldLamps {
+  readonly #ambient = new AmbientLight(0xffffff, 0);
+  readonly #sun = new DirectionalLight(0xffffff, 0);
+
+  /**
+   * The two lamps, ambient first.
+   *
+   * Exposed as a plain array so `three-renderer.test.ts` can state what is in
+   * the scene without naming a `three` type — it reads `type` and `intensity`,
+   * which are structural.
+   */
+  get lamps(): readonly [AmbientLight, DirectionalLight] {
+    return [this.#ambient, this.#sun];
+  }
+
+  /** Puts both lamps in a scene. Called once, by the view that owns them. */
+  addTo(scene: Scene): void {
+    scene.add(this.#ambient);
+    // ⚠️ A `DirectionalLight`'s direction is `position − target`, and its
+    // `target` is an `Object3D` that is **not** in the scene by default. It is
+    // added here so that its world matrix is updated with everything else's;
+    // three leaves it at the origin, which is what `apply` writes against.
+    scene.add(this.#sun);
+    scene.add(this.#sun.target);
+  }
+
+  /**
+   * Points the lamps where the route's own sun is, at its own two intensities.
+   *
+   * ⚠️ **`position` and not a direction vector.** three has no setter for a
+   * directional light's direction: the shader takes `position − target`,
+   * normalised, so a unit vector written into `position` with the target left
+   * at the origin *is* the direction. The distance is irrelevant — nothing
+   * here casts a shadow, so there is no shadow camera to frame — which is why
+   * the unit vector is written straight in rather than scaled out to some
+   * arbitrary radius.
+   */
+  apply(sun: SunStyle): void {
+    this.#ambient.intensity = sun.ambient * LAMBERT_IRRADIANCE_SCALE;
+    this.#sun.intensity = sun.direct * LAMBERT_IRRADIANCE_SCALE;
+    this.#sun.position.set(sun.x, sun.y, sun.z);
+  }
+
+  /** Releases both lamps. Neither owns a GPU resource; three asks for this anyway. */
+  dispose(): void {
+    this.#ambient.dispose();
+    this.#sun.dispose();
+  }
+}
+
+/**
  * The scenery belt: one {@link InstancedMesh} per {@link ScatterKind}, reused.
  *
  * ## Why this is a class of its own, and why it is exported
@@ -456,6 +626,15 @@ const SCATTER_STYLE: Record<ScatterKind, { colour: number; geometry: () => Buffe
  */
 export class ScatterBelt {
   readonly #meshes = new Map<ScatterKind, InstancedMesh>();
+  /**
+   * Each kind's lit material and its unlit twin, built once — #286.
+   *
+   * ⚠️ **Both, from the constructor, for the reason every other buffer here is
+   * allocated up front:** the rung that turns the shading off is reached only
+   * on a device that is already too hot, and building a material there is an
+   * allocation on the worst frame of the ride. @see shadedMaterials
+   */
+  readonly #materials = new Map<ScatterKind, ShadedMaterials>();
   /** Survivors of the cull, per kind, for the frame being built. */
   readonly #counts = new Map<ScatterKind, number>();
   /** Reused every instance of every frame — see the header's first point. */
@@ -467,12 +646,19 @@ export class ScatterBelt {
 
   constructor() {
     for (const kind of SCATTER_KINDS) {
+      const materials = shadedMaterials(SCATTER_STYLE[kind].colour);
+      this.#materials.set(kind, materials);
       const mesh = new InstancedMesh(
         SCATTER_STYLE[kind].geometry(),
-        // Unlit, like everything else in this file: a `MeshBasicMaterial` costs
-        // no shading pass, and "no lighting means no light budget" is the whole
-        // reason this renderer can ship without one.
-        new MeshBasicMaterial({ color: SCATTER_STYLE[kind].colour }),
+        // ⚠️ **Lit since #286, and this is the file's biggest change of mind.**
+        // It used to say *"no lighting means no light budget"* here, which was
+        // a performance claim with no measurement behind it — #286's own
+        // framing. It is a `MeshLambertMaterial` now, so a conifer has a
+        // sunward face and a shaded one; the `flat` twin beside it is exactly
+        // the material that used to be here, and the bottom rung of
+        // `QUALITY_LADDER` puts it back. The cost is measured in
+        // `game.browser.spec.ts` rather than argued about here.
+        materials.lit,
         SCATTER_INSTANCE_CAPACITY,
       );
       // The buffer is rewritten every frame, so tell the driver that rather
@@ -491,6 +677,21 @@ export class ScatterBelt {
   /** The meshes, by kind. Six of them, whatever the frame holds. */
   get meshes(): ReadonlyMap<ScatterKind, InstancedMesh> {
     return this.#meshes;
+  }
+
+  /**
+   * Shades the belt, or stops shading it — #286.
+   *
+   * Swaps a material that already exists; allocates nothing, touches no
+   * geometry and no matrix. @see QualitySettings.shading
+   */
+  setShading(shading: QualitySettings['shading']): void {
+    for (const [kind, mesh] of this.#meshes) {
+      const materials = this.#materials.get(kind);
+      if (materials !== undefined) {
+        mesh.material = materials[shading];
+      }
+    }
   }
 
   /** Puts the belt in a scene. Called once, by the view that owns it. */
@@ -574,8 +775,15 @@ export class ScatterBelt {
   dispose(): void {
     for (const mesh of this.#meshes.values()) {
       mesh.geometry.dispose();
-      disposeMaterial(mesh.material);
       mesh.dispose();
+    }
+    // ⚠️ **Both materials, not `mesh.material`** — since #286 each kind holds
+    // a lit one and an unlit one and only one of them is mounted, so disposing
+    // what the mesh happens to be wearing leaks the other's program for the
+    // life of the context. The belt owns the pair, so the belt releases it.
+    for (const materials of this.#materials.values()) {
+      materials.lit.dispose();
+      materials.flat.dispose();
     }
   }
 
@@ -646,6 +854,8 @@ class ThreeGameView implements GameView {
   readonly #roadGeometry = new BufferGeometry();
   readonly #road: Mesh;
   readonly #markers = new Map<RiderMarker['kind'], Mesh>();
+  /** Each marker's lit material and its unlit twin — #286. @see shadedMaterials */
+  readonly #markerMaterials = new Map<RiderMarker['kind'], ShadedMaterials>();
   /**
    * The world, as three objects built once and mutated thereafter — #240's
    * NFR-3. Every one of them is a fixed instance: the sky is the `Color` the
@@ -666,6 +876,11 @@ class ThreeGameView implements GameView {
    * the drawing buffer back beside the road for exactly that reason.
    */
   readonly #scatter = new ScatterBelt();
+  /**
+   * The sun and the sky it is in — #286. Two lamps, built once and pointed
+   * every frame by `#updateWorld`, exactly as the fog is coloured every frame.
+   */
+  readonly #lighting = new WorldLamps();
   readonly #groundMaterial = new MeshBasicMaterial({
     color: UNSET_COLOUR,
     // ⚠️ **Writes no depth, and draws first.** That is what lets a flat plane
@@ -723,21 +938,29 @@ class ThreeGameView implements GameView {
     this.#scatter.addTo(this.#scene);
 
     for (const kind of ['ghost', 'bot', 'rider'] as const) {
-      const marker = new Mesh(
-        markerGeometry(kind),
-        new MeshBasicMaterial({
-          color: MARKER_STYLE[kind].colour,
-        }),
-      );
+      const materials = shadedMaterials(MARKER_STYLE[kind].colour);
+      this.#markerMaterials.set(kind, materials);
+      // Lit since #286, like the scenery and for the same reason: a sphere, a
+      // cone and an octahedron all have a form, and an unlit one is a flat
+      // disc of colour at any distance. @see shadedMaterials
+      const marker = new Mesh(markerGeometry(kind), materials.lit);
       marker.frustumCulled = false;
       marker.visible = false;
       this.#markers.set(kind, marker);
       this.#scene.add(marker);
     }
 
-    if (renderer !== undefined) {
-      this.setQuality(settings);
-    }
+    this.#lighting.addTo(this.#scene);
+
+    // ⚠️ **No longer inside a `renderer !== undefined` guard, since #286.**
+    // The guard was redundant before — `#applySize` returns early without a
+    // renderer — and it stopped being harmless when `setQuality` also became
+    // the one place the shading is chosen: a view constructed at a rung whose
+    // shading is `'flat'` would have been built wearing the lit material and
+    // never told otherwise. Nothing creates one at that rung today (`GameView`
+    // starts at `INITIAL_QUALITY`), which is exactly why it is worth closing
+    // rather than leaving for the first caller who does.
+    this.setQuality(settings);
   }
 
   render(frame: SceneFrame): void {
@@ -754,7 +977,25 @@ class ThreeGameView implements GameView {
 
   setQuality(settings: QualitySettings): void {
     this.#quality = settings;
+    this.#applyShading();
     this.#applySize();
+  }
+
+  /**
+   * Mounts the lit or the unlit material on everything that has both — #286.
+   *
+   * Nothing is created here: both materials of every pair were built in the
+   * constructor, and this chooses between them. @see QualitySettings.shading
+   */
+  #applyShading(): void {
+    const { shading } = this.#quality;
+    this.#scatter.setShading(shading);
+    for (const [kind, marker] of this.#markers) {
+      const materials = this.#markerMaterials.get(kind);
+      if (materials !== undefined) {
+        marker.material = materials[shading];
+      }
+    }
   }
 
   resize(widthCssPixels: number, heightCssPixels: number): void {
@@ -769,11 +1010,18 @@ class ThreeGameView implements GameView {
     this.#groundMaterial.dispose();
     disposeMaterial(this.#road.material);
     this.#scatter.dispose();
+    this.#lighting.dispose();
     for (const marker of this.#markers.values()) {
       marker.geometry.dispose();
-      disposeMaterial(marker.material);
+    }
+    // Both of each pair, for the reason `ScatterBelt.dispose` gives: only one
+    // of the two is mounted, and `marker.material` would leak the other.
+    for (const materials of this.#markerMaterials.values()) {
+      materials.lit.dispose();
+      materials.flat.dispose();
     }
     this.#markers.clear();
+    this.#markerMaterials.clear();
     // `forceContextLoss` before `dispose` because a WebGL context is not
     // garbage-collected promptly and a browser allows only a handful at once —
     // a rider starting five rides in a session would otherwise run out.
@@ -808,6 +1056,11 @@ class ThreeGameView implements GameView {
     this.#fog.density = world.fogDensity;
     this.#groundMaterial.color.setHex(world.groundColour);
     this.#ground.position.set(pose.x, pose.y - GROUND_BELOW_ROAD_METRES, pose.z);
+    // ⚠️ Every frame, like the fog and for the same reason: the world is a
+    // function of the route and a renderer is handed a frame, not a route. A
+    // sun pointed once in the constructor would be the previous route's sun
+    // for the whole of the next ride.
+    this.#lighting.apply(world.sun);
   }
 
   /**
