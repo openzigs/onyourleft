@@ -23,7 +23,7 @@ import {
   riderMark,
   routePlan,
 } from './plan';
-import { profilePosition } from './fields';
+import { profileReading } from './fields';
 import { atStartLine } from '../simulation';
 import {
   altitudeMetres,
@@ -277,9 +277,16 @@ describe('the rider’s mark on a loop, on lap two', () => {
   });
 
   it('is not pinned to the finish line once the rider passes it', () => {
-    // The failure this catches: reading the CLAMPED fraction the elevation strip
-    // uses. `profilePosition` is 1 for every distance past the end, so a mark
-    // placed from it sits on the start/finish corner for the rest of the ride.
+    // The failure this catches: a CLAMPED fraction, which is 1 for every
+    // distance past the end, so a mark placed from it sits on the start/finish
+    // corner for the rest of the ride.
+    //
+    // ⚠️ **This assertion used to read `profilePosition` and require it to
+    // DISAGREE with `planProgress` — #287 removed the disagreement rather than
+    // the assertion.** The elevation strip was the clamped one, and #285 built
+    // this wrapped fraction precisely because it could not read that one; the
+    // strip now reads this one too, so what is pinned here is that the shared
+    // function still wraps. `fields.test.ts` is the other end of the same wire.
     const profile = circuit();
     const plan = routePlan(profile);
     const total = profile.totalDistance as number;
@@ -289,8 +296,9 @@ describe('the rider’s mark on a loop, on lap two', () => {
       ride: { speed: metresPerSecond(8), distance: metres(total * 1.5) },
     };
 
-    expect(profilePosition(ridden, profile)).toBe(1);
     expect(planProgress(profile, total * 1.5)).toBeCloseTo(0.5, 6);
+    // And the strip agrees with it, which is the whole of #287: one value.
+    expect(profileReading(ridden, profile).position).toBeCloseTo(0.5, 6);
 
     const halfway = riderMark(plan, profile, total * 0.5);
     const lapTwo = riderMark(plan, profile, total * 1.5);
