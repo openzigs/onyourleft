@@ -61,6 +61,7 @@ import { UnitsProvider } from '../units/context';
 import type { UnitsPort } from '../units/store-port';
 import type { RideController } from '../ride/controller';
 import type { CapabilityProbe } from '../support/bluetooth-support';
+import type { ShellSupportPort } from '../support/shell-support-port';
 import { TransferView } from '../transfer/TransferView';
 import type { AnalysisPort } from '../analysis/store-port';
 import type { DetailPort } from '../detail/store-port';
@@ -93,6 +94,17 @@ export interface AppShellProps {
    * one caller that reads the real browser.
    */
   readonly capabilities: CapabilityProbe;
+  /**
+   * The Android shell's own Bluetooth availability (#284).
+   *
+   * `undefined` in every browser, and present only inside the Capacitor shell,
+   * where `capabilities` above describes a stack the app does not use. Built by
+   * `main.tsx` behind the same `isNativeShell` check that chooses the
+   * transport, so the two cannot disagree about which platform this is. Passed
+   * in for the reason `capabilities` is: the Devices screen's shell branch is
+   * rendered by the accessibility suite on a machine that is not a phone.
+   */
+  readonly shell?: ShellSupportPort | undefined;
   /**
    * The live ride screen's state machine (#49), built by `main.tsx` from the
    * transport and the store.
@@ -279,7 +291,12 @@ function viewFor(
     case 'segment-detail':
       return <SegmentDetailView port={props.efforts} segment={match.parameter} />;
     case 'devices':
-      return <DevicesView capabilities={props.capabilities} />;
+      return (
+        <DevicesView
+          capabilities={props.capabilities}
+          {...(props.shell === undefined ? {} : { shell: props.shell })}
+        />
+      );
     case 'transfer':
       return (
         <TransferView
