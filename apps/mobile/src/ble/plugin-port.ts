@@ -69,13 +69,14 @@ export interface CapacitorBlePort {
   /**
    * Whether the adapter is switched on. Distinct from being permitted.
    *
-   * ⚠️ **This carried an `@unwired` note until #284, and it is gone because the
-   * defect it named is fixed** — a reviewer who remembers it is reading the old
-   * file. `availability()` is still its only caller, but `availability()` is no
-   * longer called by nothing: `apps/web/src/support/shell-support.ts` is the
-   * Devices screen's read, so the answer a rider on Android sees now comes from
-   * this method rather than from the WebView's `navigator.bluetooth`. Part of
-   * that chain is now the #278 gate's business: the screen is wired through
+   * ⚠️ **This carried an `@unwired` note until the Devices screen was wired,
+   * and it is gone because the defect it named is fixed** — a reviewer who
+   * remembers it is reading the old file. `availability()` is still its only
+   * caller, but `availability()` is no longer called by nothing:
+   * `apps/web/src/support/shell-support.ts` is the Devices screen's read, so
+   * the answer a rider on Android sees now comes from this method rather than
+   * from the WebView's `navigator.bluetooth`. Part of that chain is now the
+   * #278 gate's business: the screen is wired through
    * `apps/web/src/support/shell-support-port.ts`, inside the watched set, so a
    * screen that stops reading it is a red `WIRE003`. ⚠️ **Only part.** The
    * gate cannot see `main.tsx` declining to build the port in the first place —

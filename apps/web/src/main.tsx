@@ -126,7 +126,7 @@ function localStore(): ReturnType<typeof openActivityStore> {
  * profile that carries it. Pairing a trainer is then one of about three
  * connections rather than three.
  *
- * ⚠️ Hoisted out of `buildRideController` so the browser and the Android shell
+ * ⚠️ Hoisted out of `buildPlatform` so the browser and the Android shell
  * pair against **the same list**. #39's promise is that one interface is
  * satisfied unchanged by both platforms; two profile lists would make that true
  * of the types and false of the behaviour, and the divergence would show up as

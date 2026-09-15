@@ -1421,7 +1421,8 @@ not pair with anything on Android. Three things were missing and all three are n
 **How the choice is made now.** `support/capacitor.ts` asks `Capacitor.isNativePlatform()` — not the
 user agent, because a Capacitor WebView *is* Chrome and reports itself as Chrome, and not
 `'Capacitor' in window`, because Capacitor's web build defines that global too. `main.tsx`'s
-`buildRideController` is asynchronous for exactly this: inside the shell it `import()`s
+`buildPlatform` — named `buildRideController` until #284 gave it a second thing to build — is
+asynchronous for exactly this: inside the shell it `import()`s
 `@onyourleft/mobile` and builds the Capacitor transport; in a browser it never downloads a line of
 it. `pnpm run build` shows the split, and `grep -c BleClient` over the entry chunk returns 0.
 
@@ -1429,8 +1430,10 @@ it. `pnpm run build` shows the split, and `grep -c BleClient` over the entry chu
 paragraph used to say "Trainer control now works on Android too" — a reviewer who remembers that
 sentence is reading the old file, and [#230](https://github.com/openzigs/onyourleft/issues/230) is
 why it was wrong. Nothing downstream of pairing could work, because **pairing itself did not**:
-`BleClient.initialize()` was called only from `availability()`, which nothing in `apps/web` calls,
-so every `discover()` reached `requestDevice()` with the plugin uninitialised. #230 fixed that
+`BleClient.initialize()` was called only from `availability()`, which at the time nothing in
+`apps/web` called, so every `discover()` reached `requestDevice()` with the plugin uninitialised.
+(⚠️ That last clause was present tense until #284 falsified it: `apps/web/src/support/shell-support.ts`
+is `availability()`'s production caller now, and the Devices screen is what reaches it.) #230 fixed that
 (`transport.ts`'s `ensureInitialized`), and what is established today is that the **code** is
 there: `openCapacitorTrainer` in `apps/web/src/ride/trainer.ts` is the Android counterpart of
 `openWebBluetoothTrainer`, `apps/mobile/src/ble/fitness-machine-channel.ts` implements

@@ -80,11 +80,17 @@ const INSTRUCTION: Record<PermissionAction['kind'], string | null> = {
 /**
  * One availability, as a screen's worth of already-decided text.
  *
- * Exported so that the mapping is reachable without a port, and because
- * `notice` and `mayShowDeviceList` are the two `apps/mobile` functions #284
- * exists to give a caller — a reader following either one arrives here.
+ * ⚠️ **Deliberately not exported**, and it was exported until #284's review —
+ * a reader who remembers reaching it from outside is reading the old file. The
+ * reason given was "so that the mapping is reachable without a port", and
+ * nothing reached it that way: not a caller, not a test. That is an export
+ * whose only caller is its own file, which is the shape #284 exists to remove
+ * one of. `check-wiring.mjs` watches ports rather than modules and is silent
+ * here, so the answer is to stop declaring a seam nobody uses rather than to
+ * widen the gate. {@link capacitorShellSupport} is the way in, and
+ * `shell-support.test.ts` goes through it.
  */
-export function shellSupportFrom(
+function shellSupportFrom(
   availability: TransportAvailability,
   notice: PermissionNotice | null,
   canPair: boolean,
