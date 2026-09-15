@@ -21,7 +21,7 @@
  * both.
  */
 
-import { metres, unixSeconds, type GeographicPosition } from '@onyourleft/domain';
+import { createSegment, metres, unixSeconds, type GeographicPosition } from '@onyourleft/domain';
 import { degreesLatitude, degreesLongitude, geographicPosition } from '@onyourleft/domain';
 import {
   activityId,
@@ -34,6 +34,7 @@ import {
 } from '@onyourleft/store';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { stubMatchPort } from '../segments/match-testing';
 import { stubSegments, type StubSegments } from '../segments/testing';
 import {
   activateWithKeyboard,
@@ -327,5 +328,161 @@ describe('what the table says', () => {
     await makeSegment(container, { name: '   ', to: '21', visibility: 'public' });
     expect(port.written).toEqual([]);
     expect(textOf(container)).toContain('Give the segment a name');
+  });
+});
+
+/**
+ * The sweep's control (#282).
+ *
+ * The screen half of the wiring: the sweep had no production caller at all, so
+ * a rider who made a segment never saw an effort on it. What is asserted here
+ * is the part `segments/sweep.test.ts` cannot see — that a **rider** can reach
+ * it, that it is reached by pressing a control and not by looking at the page,
+ * and that what happened is said afterwards.
+ */
+describe('finding efforts — the sweep’s control', () => {
+  /** A stub library the matcher will find one effort in. */
+  function matchable(): ReturnType<typeof stubMatchPort> {
+    const geometry = northward(26, 20);
+    const built = createSegment({
+      id: 'the-drag',
+      createdBy: OWNER,
+      name: 'The long drag',
+      sport: 'ride',
+      geometry,
+      elevationSource: 'none',
+      visibility: 'private',
+      createdAt: NOW,
+    });
+    const leadIn = [4, 3, 2, 1].map((back) =>
+      at(51.5 - (back * 20) / METRES_PER_DEGREE_LATITUDE, -0.12),
+    );
+    return stubMatchPort({
+      athleteId: OWNER,
+      rides: [{ activity: ride(), track: [...leadIn, ...geometry] }],
+      segments: [{ ...built, id: segmentId(built.id), createdBy: OWNER }],
+    });
+  }
+
+  /** Presses the control the way a rider does, by keyboard. */
+  async function pressMatch(container: HTMLElement): Promise<void> {
+    const button = queryAll(container, 'button').find(
+      (candidate) => (candidate.textContent ?? '').trim() === 'Match my rides',
+    );
+    if (button === undefined) {
+      throw new Error('no button labelled “Match my rides”');
+    }
+    await activateWithKeyboard(button);
+    await settle();
+  }
+
+  it('writes no effort until the rider presses it', async () => {
+    // ⚠️ The claim `segments/sweep.ts` makes in words: a read path that writes
+    // is a read path whose cost nobody can state. Rendering the screen must
+    // sweep nothing.
+    const match = matchable();
+    const port = stubSegments(OWNER, [{ activity: ride(), track: northward(21) }]);
+    view = await mount(<SegmentsView port={port} match={match} />);
+    await settle();
+
+    expect(match.writes).toEqual([]);
+
+    await pressMatch(view.container);
+
+    expect(match.writes).toHaveLength(1);
+    expect(match.stored.size).toBe(1);
+  });
+
+  it('says how many rides, segments and efforts the sweep found', async () => {
+    const match = matchable();
+    const port = stubSegments(OWNER, [{ activity: ride(), track: northward(21) }]);
+    view = await mount(<SegmentsView port={port} match={match} />);
+    await settle();
+
+    await pressMatch(view.container);
+
+    expect(textOf(view.container)).toContain(
+      'Matched 1 ride against 1 segment and found 1 effort.',
+    );
+  });
+
+  it('says there is nothing to match against rather than reporting a sweep of zero', async () => {
+    const match = stubMatchPort({ athleteId: OWNER, rides: [], segments: [] });
+    const port = stubSegments(OWNER, [{ activity: ride(), track: northward(21) }]);
+    view = await mount(<SegmentsView port={port} match={match} />);
+    await settle();
+
+    await pressMatch(view.container);
+
+    expect(textOf(view.container)).toContain('nothing to match your rides against yet');
+  });
+
+  it('says the sweep stopped part-way rather than re-enabling the button in silence', async () => {
+    // ⚠️ The failure a rider can actually hit: one press writes efforts for up
+    // to 100 rides, so a quota refusal, an effort naming another athlete and a
+    // stream that will not decode all reject this call. Without a `catch` the
+    // control returns to "Match my rides" with nothing said, which reads as
+    // "nothing happened" over a sweep that wrote part of its work.
+    const match = matchable();
+    match.failNextWrite = true;
+    const port = stubSegments(OWNER, [{ activity: ride(), track: northward(21) }]);
+    view = await mount(<SegmentsView port={port} match={match} />);
+    await settle();
+
+    await pressMatch(view.container);
+
+    expect(textOf(view.container)).toContain('Matching stopped part-way through');
+    // Not the success sentence as well: a failed sweep reports no count.
+    expect(textOf(view.container)).not.toContain('Matched 1 ride');
+    const button = queryAll(view.container, 'button').find(
+      (candidate) => (candidate.textContent ?? '').trim() === 'Match my rides',
+    );
+    expect(button?.hasAttribute('disabled')).toBe(false);
+  });
+
+  it('offers no control at all where there is no store behind it', async () => {
+    // #48's first criterion: a control that cannot work is not shown disabled,
+    // it is not shown. The rest of the screen still works.
+    const port = stubSegments(OWNER, [{ activity: ride(), track: northward(21) }]);
+    view = await mount(<SegmentsView port={port} />);
+    await settle();
+
+    expect(
+      queryAll(view.container, 'button').map((button) => (button.textContent ?? '').trim()),
+    ).not.toContain('Match my rides');
+  });
+
+  it('says a ride is not skipped when it is a recording gap that stopped it', async () => {
+    const geometry = northward(26, 20);
+    const built = createSegment({
+      id: 'the-drag',
+      createdBy: OWNER,
+      name: 'The long drag',
+      sport: 'ride',
+      geometry,
+      elevationSource: 'none',
+      visibility: 'private',
+      createdAt: NOW,
+    });
+    const leadIn = [4, 3, 2, 1].map((back) =>
+      at(51.5 - (back * 20) / METRES_PER_DEGREE_LATITUDE, -0.12),
+    );
+    const holed = [
+      ...geometry.slice(0, 12),
+      ...Array.from<undefined>({ length: 40 }).fill(undefined),
+      ...geometry.slice(12),
+    ];
+    const match = stubMatchPort({
+      athleteId: OWNER,
+      rides: [{ activity: ride(), track: [...leadIn, ...holed] }],
+      segments: [{ ...built, id: segmentId(built.id), createdBy: OWNER }],
+    });
+    const port = stubSegments(OWNER, [{ activity: ride(), track: northward(21) }]);
+    view = await mount(<SegmentsView port={port} match={match} />);
+    await settle();
+
+    await pressMatch(view.container);
+
+    expect(textOf(view.container)).toContain('gap in the recording');
   });
 });

@@ -79,7 +79,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         RoutingProvider INTERFACE is in packages/domain; there
                         is no engine adapter here and §4i says why
     src/segments/       the segment store port and the create form's pure core (#64),
-                        and the resumable matcher sweep over the library (#66)
+                        the resumable matcher sweep over the library (#66), and
+                        since #282 the thing that actually runs it — when a sweep
+                        runs and why that is a control rather than a save hook,
+                        the two refusals, and the only production writer of the
+                        match checkpoint
     src/shell/          the hash route table, the router hook and AppShell (#48)
     src/support/        browser-capability detection and its notice (#48), and
                         since #85 the one question that decides which BLE
@@ -1500,10 +1504,16 @@ fixtures. Moving a watched directory means editing `check-wiring.mjs` in the sam
 followed by a reason, in its doc comment. The tag alone is refused — an exemption nobody can read is
 a config-file list with extra steps — and it is refused on **all three** paths, including a file's
 own doc comment, which is the broadest of them because it silences a whole module. A reasonless tag
-is reported as `WIRE000` rather than quietly honoured. ⚠️ **Not every `@unwired` in the tree is a decision**:
-`segments/match-port.ts` carries one naming [#282](https://github.com/openzigs/onyourleft/issues/282),
-which is a **defect this gate found on its first run** — nothing in the client runs the segment
-matcher, so no segment effort has ever been written.
+is reported as `WIRE000` rather than quietly honoured. ⚠️ **Not every `@unwired` in the tree is a
+decision**: `apps/mobile/src/ble/plugin-port.ts` §`isEnabled` carries one naming
+[#284](https://github.com/openzigs/onyourleft/issues/284), which is a defect with an issue rather
+than a decision. ⚠️ **`segments/match-port.ts` carried the other one and no longer does** — a
+reviewer who remembers this paragraph naming it is reading the old file. It was this gate's first
+finding, [#282](https://github.com/openzigs/onyourleft/issues/282): nothing in the client ran the
+segment matcher, so no segment effort had ever been written and the effort screens read a table only
+a test filled. `apps/web/src/segments/sweep.ts` is what runs it now, and removing that wiring turns
+the gate red with four `WIRE003`s rather than nothing — measured, because a note deleted from a file
+proves only that the note is gone.
 
 ⚠️ **Read `check-wiring.mjs` §Limits before concluding something is wired because the gate is
 green.** It cannot see a call made through a string key, a dynamic import whose specifier is not a
@@ -2048,6 +2058,9 @@ top of an issue **supersedes its body**.
 | Why an effort's visibility has three values and never two | `packages/domain/src/segment/effort.ts`, `packages/store/src/records.ts` §`SegmentEffortRecord` |
 | What actually makes re-matching idempotent, and what the derived effort id buys instead | `packages/store/src/schema.ts` §`STORES_V6`, `packages/store/src/testing/fakes.ts` §`appendingEffortStoreFactory` |
 | How a backfill resumes, and why it is a cursor rather than an offset | `apps/web/src/segments/backfill.ts`, `packages/store/src/activity-store.ts` §`startedAfter` |
+| When a segment sweep runs, and why it is a control rather than something a saved ride triggers | `apps/web/src/segments/sweep.ts`, `apps/web/src/recording/finish.ts` §"What this does NOT do" |
+| Why a sweep refuses outright when there are more segments than it can carry | `apps/web/src/segments/sweep.ts` §`SWEEP_CORPUS_LIMIT` |
+| Why a test fixture at latitude 51.5, longitude -0.12 never matches anything | `apps/web/src/segments/sweep.store.test.ts` §`ORIGIN_LONGITUDE`, `packages/domain/src/segment/cells.ts` §`CELL_DEGREES` |
 | Where a device's capability set comes from, and what happens when a device contradicts itself | [`packages/sensors/README.md`](packages/sensors/README.md) §"What a device says it can do", `packages/sensors/web-bluetooth/src/transport.ts` §`declaredBy`, §`noteUndeclared` |
 | What a segment matcher may not do, and the prior art the design-around cites | [ADR 0007](docs/adr/0007-patent-posture.md) D-2 and D-6, `docs/spikes/0001-segment-matching.md` §7 |
 | Which time basis a segment board ranks by, and why moving time is not it | `packages/domain/src/segment/effort.ts` §`RANKING_BASIS` |

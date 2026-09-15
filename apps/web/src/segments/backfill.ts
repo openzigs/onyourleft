@@ -22,6 +22,9 @@
  * ⚠️ **Never called from a render**, on the same rule as `analysis/history.ts`'s
  * backfill: a read path that writes is a read path whose cost nobody can state.
  * The screen offers a control and the rider decides when to pay for it.
+ * `segments/sweep.ts` is that caller — it indexes the corpus, loops this
+ * function and owns the checkpoint — and until #282 wired it there was no
+ * caller at all, so no segment effort had ever been written.
  *
  * ⚠️ **It yields between activities rather than running to completion.**
  * {@link sweepLibrary} processes one page and returns; the caller loops. A
@@ -142,6 +145,14 @@ export async function sweepLibrary(options: SweepOptions): Promise<SweepStep> {
     // rather than repeating one — and repeating is harmless here because the
     // write replaces, while skipping leaves a ride with no efforts and nothing
     // to say so.
+    //
+    // ⚠️ **This bound is STRICTLY exclusive, so the sentence above is not yet
+    // true of two rides sharing a `startedAt`**: `activity-store.ts` passes
+    // `includeLower: false` whenever `startedAfter` is given, so when a page
+    // boundary falls between them the second is skipped and never returned —
+    // the exact failure a cursor was chosen to avoid. `MatchCheckpointRecord`
+    // §`lastActivityId` is the tie-break the record was designed around and it
+    // is written here and read nowhere. #293, found by a review of #290.
     ...(options.from === undefined ? {} : { startedAfter: options.from.lastStartedAt }),
   });
   if (page.length === 0) {

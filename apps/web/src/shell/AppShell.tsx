@@ -69,6 +69,7 @@ import type { MapPort } from '../map/port';
 import type { LibraryPort } from '../library/store-port';
 import type { TransferPort } from '../transfer/store-port';
 import type { EffortPort } from '../efforts/store-port';
+import type { MatchPort } from '../segments/match-port';
 import type { SegmentPort } from '../segments/store-port';
 import type { RoutePort } from '../routes/store-port';
 import type { WorkoutPort } from '../workouts/store-port';
@@ -170,6 +171,17 @@ export interface AppShellProps {
   readonly basemap?: BasemapConfig | undefined;
   /** Segments (#64), or `undefined` where this browser has no local store. */
   readonly segments?: SegmentPort | undefined;
+  /**
+   * The segment matcher's sweep (#66, wired by #282).
+   *
+   * A separate port from {@link segments} over the same connection: creating a
+   * segment and matching the library against one are different budgets and
+   * different writes, and `ActivityStore` satisfies both structurally. Optional
+   * like every other port here — the accessibility suite renders this route
+   * with none of them, and the screen offers no control rather than one that
+   * could not work.
+   */
+  readonly match?: MatchPort | undefined;
   /** Saved routes (#73), or `undefined` where this browser has no local store. */
   readonly routes?: RoutePort | undefined;
   /**
@@ -253,7 +265,7 @@ function viewFor(
     case 'analysis':
       return <AnalysisView port={props.analysis} />;
     case 'segments':
-      return <SegmentsView port={props.segments} />;
+      return <SegmentsView port={props.segments} match={props.match} />;
     case 'routes':
       return <RoutesView port={props.routes} save={props.transfer?.save} />;
     case 'route-builder':

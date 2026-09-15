@@ -42,6 +42,7 @@ import {
 } from './local-athlete';
 import type { AnalysisPort } from './analysis/store-port';
 import type { EffortPort } from './efforts/store-port';
+import type { MatchPort } from './segments/match-port';
 import type { SegmentPort } from './segments/store-port';
 import type { RoutePort } from './routes/store-port';
 import type { WorkoutPort } from './workouts/store-port';
@@ -282,6 +283,27 @@ function buildSegmentPort(): SegmentPort {
 }
 
 /**
+ * The segment matcher's sweep (#66), wired by #282.
+ *
+ * ⚠️ **This port is the whole of #282.** Everything under it — the matcher, the
+ * resumable sweep, `putActivityEfforts`, the match checkpoint — was built,
+ * tested and green, and `main.tsx` never constructed one, so no segment effort
+ * had ever been written and the effort screens read a table only a test filled.
+ * #278's wiring gate is what found it; `segments/sweep.ts` is the driver this
+ * hands the store to.
+ *
+ * A sixth port over the **same** connection, and separate from
+ * {@link buildSegmentPort} for the reason the others are separate: `MatchStore`
+ * is the only one in this client that may write an effort or touch the sweep's
+ * cursor, and `SegmentStore` is the only one that may create a segment. Neither
+ * can reach a whole stream set, and `ActivityStore` satisfies both
+ * structurally.
+ */
+function buildMatchPort(): MatchPort {
+  return { store: localStore(), athleteId: LOCAL_ATHLETE };
+}
+
+/**
  * The routes screen's port (#73).
  *
  * Unconditional, like the segments screen's and for the same reasons: importing
@@ -495,6 +517,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
         detail={buildDetailPort()}
         analysis={buildAnalysisPort()}
         segments={buildSegmentPort()}
+        match={buildMatchPort()}
         routes={buildRoutePort()}
         workouts={buildWorkoutPort()}
         efforts={buildEffortPort()}
