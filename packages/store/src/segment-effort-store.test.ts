@@ -491,12 +491,23 @@ describe('the startedAfter cursor a resumable sweep needs', () => {
     // #293's first criterion at the store. `afterActivityId` makes the lower
     // bound inclusive and drops the ids already covered at that instant, which
     // is exactly what the strictly-exclusive bound cannot express.
+    //
+    // ⚠️ **`later`'s id sorts BELOW the cursor's, and that is the assertion,
+    // not tidiness.** The filter is `startedAt !== startedAfter || id >
+    // afterActivityId`; drop the first half and every row is judged on its id
+    // alone. A fixture named `ride-c` would survive that mutation, because the
+    // ids in this file happen to ascend with time — and in production they do
+    // not: an activity id is a `crypto.randomUUID()` and carries no relation to
+    // when the ride started. So the later ride is deliberately named to sort
+    // under `ride-a`: the tie-break must apply AT the cursor instant and
+    // nowhere else, and only a fixture shaped like this one can tell the
+    // difference. Renaming it back is how this test stops being one.
     await seedAthletes(harness, [ATHLETE_A]);
     const at = unixSeconds(1_700_000_000);
     const first = rideFor(ATHLETE_A, { id: activityId('ride-a'), startedAt: at });
     const second = rideFor(ATHLETE_A, { id: activityId('ride-b'), startedAt: at });
     const later = rideFor(ATHLETE_A, {
-      id: activityId('ride-c'),
+      id: activityId('later-ride'),
       startedAt: unixSeconds(1_700_086_400),
     });
     await harness.write(async (store) => {

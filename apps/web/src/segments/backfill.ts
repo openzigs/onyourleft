@@ -161,6 +161,19 @@ export async function sweepLibrary(options: SweepOptions): Promise<SweepStep> {
     // `lastStartedAt` with an inclusive bound and no id re-reads one for ever.
     // `MatchCheckpointRecord` carries both for this reason, and until #293 the
     // id was written on every checkpoint and read by nothing.
+    //
+    // ⚠️ **A checkpoint row missing its id degrades SILENTLY here and throws in
+    // the double, and that asymmetry is deliberate rather than an oversight.**
+    // `lastActivityId` is required on `MatchCheckpointRecord`, so TypeScript
+    // says this cannot happen; `getMatchCheckpoint` validates nothing, so a row
+    // hand-edited in IndexedDB — or written by a build predating #66 — can
+    // still carry no id. The real store reads a present-but-`undefined`
+    // `afterActivityId` as absent and falls back to the strictly-exclusive
+    // instant, which is #293 exactly. `match-testing.ts` refuses the same input
+    // instead, because a double that agreed with the fallback would make the
+    // defect invisible in the one place built to catch it. Nothing today
+    // reaches either path; if a caller ever can, the store is where the refusal
+    // belongs, not here.
     ...(options.from === undefined
       ? {}
       : {
