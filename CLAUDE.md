@@ -1520,7 +1520,21 @@ fixtures. Moving a watched directory means editing `check-wiring.mjs` in the sam
 followed by a reason, in its doc comment. The tag alone is refused — an exemption nobody can read is
 a config-file list with extra steps — and it is refused on **all three** paths, including a file's
 own doc comment, which is the broadest of them because it silences a whole module. A reasonless tag
-is reported as `WIRE000` rather than quietly honoured. ⚠️ **`apps/mobile/src/ble/plugin-port.ts`
+is reported as `WIRE000` rather than quietly honoured.
+
+⚠️ **The tag has to OPEN a line to be a tag, and until
+[#292](https://github.com/openzigs/onyourleft/issues/292) it did not have to** — a reviewer who
+remembers being told not to spell `@unwired` in a watched file's prose is reading the old file.
+`unwiredReason` matched it anywhere in the stripped comment, so a paragraph *saying the exemption
+had been removed* parsed as a live one with the rest of the sentence as its reason, and on the
+file-comment path that silenced `WIRE001` for the whole module. It happened: #290's wording of
+`segments/match-port.ts`'s note re-exempted the file that had been this gate's first finding.
+Naming the tag in prose is now safe — it is matched at the start of a stripped line, with the
+leading whitespace a one-line `/** @unwired … */` leaves behind and nothing else. Three prose
+mentions in the tree parsed as exemptions before that change and none of them was load-bearing;
+all sixteen real ones parse unchanged, measured rather than reasoned about.
+
+⚠️ **`apps/mobile/src/ble/plugin-port.ts`
 §`isEnabled` carried one naming [#284](https://github.com/openzigs/onyourleft/issues/284) and no
 longer does** — a reviewer who remembers this paragraph citing it as the example of a tag that is a
 defect rather than a decision is reading the old file. #284 wired it: the Devices screen reads
