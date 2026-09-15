@@ -95,6 +95,7 @@ async function sweepToEnd(
   port: ReturnType<typeof stubMatchPort>,
   corpus: ReturnType<typeof indexSegments>,
   from?: MatchCheckpointRecord,
+  pageSize?: number,
 ): Promise<{ efforts: number; steps: number }> {
   let cursor = from;
   let efforts = 0;
@@ -105,6 +106,7 @@ async function sweepToEnd(
       store: port.store,
       corpus,
       ...(cursor === undefined ? {} : { from: cursor }),
+      ...(pageSize === undefined ? {} : { pageSize }),
     });
     efforts += step.efforts;
     steps += 1;
@@ -212,6 +214,50 @@ describe('resuming — #66’s fifth criterion', () => {
     expect(second.swept).toBe(1);
     expect(second.done).toBe(true);
     expect(second.checkpoint).toBeUndefined();
+  });
+
+  it('refuses half a cursor, so a sweep that dropped the tie-break would not merely be wrong', () => {
+    // The pair invariant, pinned in the double. `sweepLibrary` sends both
+    // halves or neither; an instant with no id is the shape #293 was, and it
+    // reads as a smaller effort count rather than as an error unless somebody
+    // refuses it here.
+    //
+    // ⚠️ Thrown synchronously rather than returned as a rejection, on purpose:
+    // this is a broken *caller*, not a store that failed, and a rejection would
+    // arrive down the same path a real read error does.
+    const port = stubMatchPort({ athleteId: OWNER, rides: libraryOf(1), segments: [theSegment()] });
+
+    expect(() =>
+      port.store.listActivitySummaries(OWNER, { startedAfter: unixSeconds(1_760_000_000) }),
+    ).toThrow(/pair/);
+  });
+
+  it('sweeps BOTH rides when two share a startedAt and the page boundary falls between them', async () => {
+    // #293, in the shape the review of #290 found it: `pageSize: 1`, two rides
+    // at one instant. The instant-only cursor was strictly exclusive, so the
+    // second was never returned — `port.stored.size` was 1 and the step
+    // reported `done: true`, a true-sounding report of a sweep that skipped a
+    // ride. `MatchCheckpointRecord.lastActivityId` was written on every
+    // checkpoint and read by nothing; it is what breaks the tie now.
+    //
+    // ⚠️ The two are seeded in REVERSE id order deliberately. IndexedDB orders
+    // index entries with equal keys by primary key, so the store returns them
+    // as `ride-0, ride-1` whatever order they were written in — and a stub
+    // whose sort is stable on the instant alone would hand them back the other
+    // way round, where an id tie-break drops the ride still to come. Seeding
+    // them in order would let that stub pass.
+    const sameSecond = 1_760_000_000;
+    const port = stubMatchPort({
+      athleteId: OWNER,
+      rides: [traversingRide(1, sameSecond), traversingRide(0, sameSecond)],
+      segments: [theSegment()],
+    });
+    const corpus = indexSegments([theSegment()]);
+
+    const run = await sweepToEnd(port, corpus, undefined, 1);
+
+    expect(port.stored.size).toBe(2);
+    expect(run.efforts).toBe(2);
   });
 
   it('re-sweeping the whole library three times leaves the effort count unchanged', async () => {

@@ -53,9 +53,15 @@ export interface MatchStore {
   /**
    * The library, a page at a time.
    *
-   * Ordered by `startedAt` ascending and bounded by `startedAfter`, which is
-   * what makes a sweep resumable — see `backfill.ts` for why that is a cursor
-   * rather than an offset.
+   * Ordered by `startedAt` ascending and bounded by the pair
+   * `startedAfter` + `afterActivityId`, which is what makes a sweep resumable —
+   * see `backfill.ts` for why that is a cursor rather than an offset, and why
+   * it takes an id as well as an instant.
+   *
+   * ⚠️ **A stub implementing this must break ties on the id the way the store
+   * does.** `match-testing.ts` does; one that sorted on the instant alone and
+   * honoured `startedAfter` alone would agree with a store that skips a ride.
+   * #293.
    */
   listActivitySummaries(
     owner: AthleteId,

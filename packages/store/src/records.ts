@@ -570,8 +570,15 @@ export interface MatchCheckpointRecord {
    * Activities are swept in `startedAt` order, so this plus `lastActivityId`
    * says exactly where to resume. Storing the *instant* rather than an offset
    * means an activity imported mid-sweep does not shift the cursor under it.
+   *
+   * ⚠️ **Both fields, always — and until #293 only this one was read.** The
+   * sweep resumed from the instant alone against a strictly-exclusive bound,
+   * so two rides sharing a second straddled a page boundary and the second was
+   * never swept. `activity-store.ts` §`afterActivityId` is the half that was
+   * designed here and had no consumer.
    */
   readonly lastStartedAt: UnixSeconds;
+  /** @see MatchCheckpointRecord.lastStartedAt — the tie-break, not decoration. */
   readonly lastActivityId: ActivityId;
   /** How many activities the sweep has covered. For the progress the issue asks for. */
   readonly swept: number;

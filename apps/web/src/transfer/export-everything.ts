@@ -209,12 +209,18 @@ export interface AccountExportReport {
    * one: a ride imported between two runs shifts every offset after it, which
    * silently skips a ride rather than repeating one.
    *
-   * ⚠️ **It is an instant, because that is what the store's `startedAfter`
-   * takes, and `startedAfter` is *strictly* after.** Two rides that started in
-   * the same second therefore straddle a resume badly: the second is skipped.
-   * `MatchCheckpointRecord` solves this with an id beside the instant and this
-   * does not, because an export is a thing a rider watches finish and a sweep
-   * is not. Worth fixing the day a library is large enough that nobody does.
+   * ⚠️ **It is an instant, and `startedAfter` alone is *strictly* after.** Two
+   * rides that started in the same second therefore straddle a resume badly:
+   * the second is skipped. `MatchCheckpointRecord` solves this with an id
+   * beside the instant and this does not, because an export is a thing a rider
+   * watches finish and a sweep is not.
+   *
+   * ⚠️ **The store half of that fix now exists and this report has not taken
+   * it.** #293 added `afterActivityId` to `listActivitySummaries`, so closing
+   * this needs only an id carried beside the instant here and through the
+   * screen that holds it between presses — deliberately not done in #293,
+   * whose scope was the sweep. Worth fixing the day a library is large enough
+   * that nobody watches the export finish.
    */
   readonly continueAfter: UnixSeconds | undefined;
 }

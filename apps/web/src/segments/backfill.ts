@@ -146,14 +146,27 @@ export async function sweepLibrary(options: SweepOptions): Promise<SweepStep> {
     // write replaces, while skipping leaves a ride with no efforts and nothing
     // to say so.
     //
-    // ⚠️ **This bound is STRICTLY exclusive, so the sentence above is not yet
-    // true of two rides sharing a `startedAt`**: `activity-store.ts` passes
-    // `includeLower: false` whenever `startedAfter` is given, so when a page
-    // boundary falls between them the second is skipped and never returned —
-    // the exact failure a cursor was chosen to avoid. `MatchCheckpointRecord`
-    // §`lastActivityId` is the tie-break the record was designed around and it
-    // is written here and read nowhere. #293, found by a review of #290.
-    ...(options.from === undefined ? {} : { startedAfter: options.from.lastStartedAt }),
+    // ⚠️ **The bound is the PAIR, and it is exclusive of exactly one row: the
+    // activity this cursor names.** `startedAfter` on its own is strictly
+    // after the *instant*, which cannot separate two rides that started in the
+    // same second — importing one file twice through #51 produces that, and so
+    // does any two indoor sessions started from a clock with second resolution.
+    // A page boundary between such a pair left the second never swept, on this
+    // press or any later one, because the ordering is deterministic and every
+    // retry reproduced it. `afterActivityId` makes the instant inclusive and
+    // drops the ids already covered at it, so the sentence above is now true of
+    // them too. #293, found by a review of #290.
+    //
+    // ⚠️ **Both halves or neither.** `lastStartedAt` alone skips a ride;
+    // `lastStartedAt` with an inclusive bound and no id re-reads one for ever.
+    // `MatchCheckpointRecord` carries both for this reason, and until #293 the
+    // id was written on every checkpoint and read by nothing.
+    ...(options.from === undefined
+      ? {}
+      : {
+          startedAfter: options.from.lastStartedAt,
+          afterActivityId: options.from.lastActivityId,
+        }),
   });
   if (page.length === 0) {
     return { swept: 0, efforts: 0, abandoned: [], checkpoint: undefined, done: true };
