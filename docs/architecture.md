@@ -486,6 +486,47 @@ in one file:
 - **The accessibility checker is ours too** (`src/a11y/`), for the licence and headless-DOM reasons
   in CLAUDE.md §4e. It runs on every route, in CI, as a step of its own, and it fails the build.
 
+[#307](https://github.com/openzigs/onyourleft/issues/307) gave that design system the three things
+it did not have, and each is checkable rather than a matter of taste:
+
+- **Elevation is a surface colour, never a shadow** (`tokens.ts` §`ELEVATION_SURFACES`). Four levels,
+  darkening with height because `canvas` is already `#ffffff` and there is nothing lighter to move
+  toward. A shadow is invisible to every gate this repository owns — the contrast suite reads
+  colours, jsdom performs no layout, and the browser gate renders a map and a 3D scene and no
+  chrome — so a shadow-based system would be the one part of the design system nothing could check.
+  `tokens.test.ts` requires the ramp to be monotone and every adjacent step to fall inside a stated
+  band, which is what a token set to a nonsense value breaks.
+- **The type scale has a ratio**: base 1 rem, ratio 1.25, steps −1 to 3 for reading and 6 for a live
+  ride metric. The sizes are literals and `tokens.test.ts` re-derives them — a ladder computed from
+  its own ratio agrees by construction and could not fail.
+- **Every token is painted by a rule.** `theme.a11y.test.ts` fails on a custom property no `var()`
+  reads. It found two that nothing read: `--oyl-font-size-xl` and `--oyl-space-xl`, both declared,
+  both asserted equal to `tokens.ts`, both painting nothing — which is why the headings were at the
+  user agent's own sizes and the client "read as an unstyled document".
+
+**The native controls are styled and still native.** `appearance: none` removes the platform's
+drawing of a closed `<select>` and nothing else: the popup, the keyboard model, typeahead and the
+accessibility tree stay the platform's, which is the line between styling a control and building a
+listbox out of `<div>`s ([#305](https://github.com/openzigs/onyourleft/issues/305)). It is reverted
+under `forced-colors: active`, because a control whose OS skin has been removed *and* whose
+replacement skin is then flattened has no affordance left at all.
+
+⚠️ **#307's review added a fourth thing, and it is a gate rather than a system.** The first three are
+all checkable *without a browser* — a colour ratio, a number against a ratio, a `var()` against a
+declaration — and that is exactly why the one part of #307 nothing could check went wrong. It made
+`.oyl-header` sticky and gave `.oyl-main` a `scroll-margin-top`, and at 320×256 — the viewport WCAG
+2.2 SC 1.4.10 names, and what a 1280×1024 window becomes at 400% zoom — the header covered **70% of
+the screen** and "Skip to main content" landed the `<h1>` entirely behind it. Every gate stayed
+green, because **this repository had no way to measure a layout**: jsdom performs none,
+`theme.a11y.test.ts` reads the stylesheet as a file, and the browser gate rendered a map and a 3D
+scene and never the chrome.
+
+So the header now sticks only where it is cheap — `@media (min-width: 64rem) and (min-height: 40rem)`,
+whose worst admitted case is a 97 px header on a 640 px viewport — and `apps/web/browser/shell.html`
+measures it. The general rule that falls out is worth more than the fix: **`position`, `z-index`,
+`scroll-margin` and the size of persistent chrome are reviewed by measuring them in the pinned
+Chromium, never by reading the CSS.** CLAUDE.md §4f is the record.
+
 **The unsupported-browser experience is a feature of this component, not an error path.**
 `src/support/bluetooth-support.ts` classifies the browser into six states —
 available, adapter-unavailable, not-permitted, insecure-context, absent, incomplete — by probing

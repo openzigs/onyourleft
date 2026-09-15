@@ -58,6 +58,12 @@ export default defineConfig({
         // the one thing jsdom cannot do, on the one surface where it is
         // load-bearing. `hud-harness.tsx` says what it does and does not prove.
         hud: 'browser/hud.html',
+        // #307's review. The app shell — header, skip link, `main` — laid out
+        // by a real engine at the viewport WCAG 2.2 SC 1.4.10 names. The chrome
+        // was the one surface no browser had ever laid out here, which is how a
+        // sticky header taking 70% of a 320×256 viewport passed every gate.
+        // `shell-harness.tsx` says what it does and does not prove.
+        shell: 'browser/shell.html',
         // Not a gate the way the other two are: `capture.html` is the tool a
         // person opens with a trainer in front of them (#111), and a headless
         // runner has no Bluetooth adapter. It is built and loaded here so that

@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The stylesheet end of `fields.ts` §`HudReading.word` — #259.
+ * The stylesheet end of `fields.ts` §`HudReading.word` — #259 — and, since
+ * #307's review, the floor under the HUD's *supporting* text as well.
+ *
+ * Two questions about HUD type size, in the one file that already reads this
+ * stylesheet for one of them. The second block at the bottom says what it is
+ * for; it is deliberately a **floor** where the first is a ceiling, because the
+ * two failures are opposite: a word too large spills out of its track, and a
+ * label too small is simply unreadable and spills out of nothing.
  *
  * ## What breaks without it
  *
@@ -44,10 +51,24 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import { FONT_SIZE_TOKENS } from '../../design/tokens';
+
 const themeCss = readFileSync(
   fileURLToPath(new URL('../../design/theme.css', import.meta.url)),
   'utf8',
 );
+
+/** `'0.8rem'` → `0.8`. Anything not in `rem` throws rather than being guessed at. */
+function remOf(value: string): number {
+  const match = /^([\d.]+)rem$/.exec(value.trim());
+  if (match?.[1] === undefined) {
+    throw new Error(
+      `"${value}" is not a rem. A px value does not scale with the reader's own font size, ` +
+        'which is the first thing somebody with poor eyesight changes.',
+    );
+  }
+  return Number(match[1]);
+}
 
 /** The stylesheet with comments stripped — a selector named in prose is not a rule. */
 const declarations = themeCss.replace(/\/\*[\s\S]*?\*\//g, '');
@@ -136,5 +157,120 @@ describe('a HUD value that is a word is set small enough for its track (#259)', 
     for (const [, body] of declarations.matchAll(block)) {
       expect(body).not.toMatch(/\b(overflow-wrap|word-break|hyphens)\s*:/);
     }
+  });
+});
+
+/**
+ * The floor under the HUD's *supporting* text — #307's review.
+ *
+ * ## Why this did not exist and had to
+ *
+ * Everything above is about the HUD's big numbers. The small text beside them
+ * had no floor of any kind, and #307 moved it: adopting a 1.25 type scale took
+ * `--oyl-font-size-sm` from 0.875 rem (14px) to 0.8 rem (12.8px), which is step
+ * −1 of the stated ratio. That token is what `.oyl-hud__label`,
+ * `.oyl-hud__stale`, `.oyl-hud__detail` and `.oyl-hud__profile-text` are all
+ * set in, so every one of them shrank, and nothing in the repository said so —
+ * `hud.browser.spec.ts` measures overflow, and overflow only gets *easier* as
+ * text shrinks, so the browser gate goes greener rather than redder.
+ *
+ * ⚠️ `.oyl-hud__stale` is the one that matters most. It is the mark that tells
+ * a rider a sensor has **dropped** rather than read zero — `game/hud/fields.ts`
+ * §`NO_READING` — and it is read at arm's length on a handlebar. A size it can
+ * be reduced to without anything noticing is the wrong arrangement for that
+ * particular piece of text.
+ *
+ * ## What the floor is, and what it is not
+ *
+ * It is the size that ships, so this test is a ratchet rather than a
+ * retrospective judgement: the 14px → 12.8px step is recorded as the deliberate
+ * cost of putting the scale on a ratio (#307's second acceptance criterion),
+ * and a *further* reduction is a red build. It is not a claim that 12.8px is
+ * the right size for a handlebar — nobody in the loop has ridden with this, and
+ * `docs/validation/0001-trainer-and-sensors.md` is where that would be settled.
+ */
+describe('the HUD’s supporting text has a floor (#307 review)', () => {
+  /**
+   * The smallest a HUD label, detail or staleness mark may be set, in rem.
+   *
+   * ⚠️ Deliberately NOT written as `FONT_SIZE_TOKENS.sm`. A floor defined as
+   * "whatever the token currently is" is the vacuous test this repository keeps
+   * finding: it moves with the thing it is meant to constrain and can never go
+   * red. This is a number, and changing it is a diff somebody has to justify.
+   */
+  const MINIMUM_HUD_SUPPORTING_REM = 0.8;
+
+  /** Every HUD rule that takes its size from the shared small-text token. */
+  const SUPPORTING = [
+    '.oyl-hud__label',
+    '.oyl-hud__stale',
+    '.oyl-hud__detail',
+    '.oyl-hud__profile-text',
+  ];
+
+  /**
+   * The size a selector is set in, resolving one `var(--oyl-font-size-*)`.
+   *
+   * ⚠️ `fontSizeRem` above reads a **literal** `rem`, and not one of these four
+   * rules has one — every one is `font-size: var(--oyl-font-size-sm)`. A floor
+   * built on that helper reports `undefined` for all four and, with a `?? 0`,
+   * fails on every run for the wrong reason; without one it would have passed
+   * on every run for the wrong reason. Resolving the token is also what makes
+   * this check the **join**: a rule re-pointed at a different token is read
+   * here as the size that token holds, not as the size it used to.
+   */
+  function resolvedFontSizeRem(selector: string): number | undefined {
+    const literal = fontSizeRem(selector);
+    if (literal !== undefined) {
+      return literal;
+    }
+    const occurrences = new RegExp(
+      `${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s*[,{])`,
+      'g',
+    );
+    let found: number | undefined;
+    for (const match of declarations.matchAll(occurrences)) {
+      const opened = declarations.indexOf('{', match.index);
+      const closed = declarations.indexOf('}', opened);
+      if (opened === -1 || closed === -1) {
+        continue;
+      }
+      const reference = /font-size:\s*var\(\s*--oyl-font-size-([a-z]+)\s*\)/.exec(
+        declarations.slice(opened + 1, closed),
+      );
+      const token = reference?.[1];
+      if (token !== undefined && token in FONT_SIZE_TOKENS) {
+        found = remOf(FONT_SIZE_TOKENS[token as keyof typeof FONT_SIZE_TOKENS]);
+      }
+    }
+    return found;
+  }
+
+  it.each(SUPPORTING)(
+    '%s is declared, so the floor below is not applied to nothing',
+    (selector) => {
+      expect(
+        resolvedFontSizeRem(selector),
+        `theme.css gives ${selector} no font-size this test can resolve, so this floor checks ` +
+          'nothing. A renamed selector and a size written in px both land here',
+      ).toBeDefined();
+    },
+  );
+
+  it.each(SUPPORTING)('%s is at or above the floor', (selector) => {
+    expect(resolvedFontSizeRem(selector) ?? 0).toBeGreaterThanOrEqual(MINIMUM_HUD_SUPPORTING_REM);
+  });
+
+  it('is a floor the shared token cannot slide under', () => {
+    // The four selectors above are all set in `--oyl-font-size-sm`, so the
+    // assertions above are really assertions about that token. Saying so here
+    // means a palette-wide edit fails with the reason attached, rather than
+    // four selector names and no mention of the thing that actually moved.
+    expect(
+      remOf(FONT_SIZE_TOKENS.sm),
+      'the `sm` type token is what the HUD’s labels, its detail line and its dropped-sensor ' +
+        'mark are all set in. Reducing it reduces all four at once, on the one screen that is ' +
+        'read at arm’s length on a handlebar.',
+    ).toBeGreaterThanOrEqual(MINIMUM_HUD_SUPPORTING_REM);
   });
 });
