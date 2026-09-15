@@ -23,6 +23,7 @@ import {
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
+  LOOP_CLOSURE_METRES,
   metres,
   routeProfile,
   unixSeconds,
@@ -36,7 +37,9 @@ import {
 } from '@onyourleft/store';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { routeStub, stubRouteId, type RouteStub } from '../routes/testing';
+import { FILE_FIELD, loopChosen, routeFromImportForm } from '../routes/import-form';
+import { LOOP_CHECKBOX_LABEL } from '../routes/save';
+import { loopGpx, routeStub, stubRouteId, type RouteStub } from '../routes/testing';
 import type { DownloadableFile } from '../transfer/store-port';
 import { PUBLIC_ROUTE_WARNING } from '../routes/share';
 import { ROUTES_IMPORT_MEANS } from '../routes/two-importers';
@@ -358,6 +361,87 @@ describe('the file input a rider chooses a GPX with', () => {
     if (field === null) throw new Error('no route-file field on this screen');
 
     expect(field.hasAttribute('accept')).toBe(false);
+  });
+});
+
+describe('the loop box — #296', () => {
+  /** The import form, found the way a rider finds it: through its file input. */
+  function importForm(view: Mounted): HTMLFormElement {
+    const field = view.container.querySelector<HTMLInputElement>('#route-file');
+    const form = field?.closest('form');
+    if (form == null) throw new Error('no import form on this screen');
+    return form;
+  }
+
+  it('is a named control beside the file input, not a second screen', async () => {
+    const view = await render(routeStub(ATHLETE));
+    const box = view.container.querySelector<HTMLInputElement>('#route-loop');
+
+    expect(box?.type).toBe('checkbox');
+    expect(importForm(view).contains(box)).toBe(true);
+    // #48's audit counts an unnamed control as a violation, and the words are
+    // the ones the refusal tells a rider to untick.
+    expect(box?.labels?.[0]?.textContent).toContain(LOOP_CHECKBOX_LABEL);
+    // The rule the geometry is held to, where the rider is making the claim.
+    expect(view.container.textContent).toContain(`${String(LOOP_CLOSURE_METRES)} m apart`);
+  });
+
+  it('lists a route imported as a loop as a Loop', async () => {
+    // The Shape column has said "Loop" since #73 and no route in the product
+    // could ever land in that branch, which is #296 in one table cell. The row
+    // is seeded from the **import path's** own record rather than from a
+    // hand-built profile, so the cell and the importer agree.
+    const outcome = await routeFromImportForm(
+      (() => {
+        const form = new FormData();
+        form.set(FILE_FIELD, new File([loopGpx()], 'circuit.gpx'));
+        form.set('loop', 'on');
+        return form;
+      })(),
+      { id: stubRouteId('route-1'), owner: ATHLETE, now: unixSeconds(1_700_000_000) },
+    );
+    if (outcome.status !== 'saved') throw new Error('the import refused the circuit');
+
+    const view = await render(routeStub(ATHLETE, [outcome.record]));
+
+    expect(view.container.textContent).toContain('Loop');
+    expect(view.container.textContent).not.toContain('Point to point');
+  });
+
+  it('starts unticked, so an import means what it has always meant', async () => {
+    const view = await render(routeStub(ATHLETE));
+
+    expect(loopChosen(new FormData(importForm(view)))).toBe(false);
+  });
+
+  it('reaches the importer under the name the importer reads', async () => {
+    // ⚠️ **This is the assertion #296 existed for, and it is shaped by what
+    // jsdom cannot do.** No file can be put into a file input here
+    // (`testing/mount.tsx` says why, from a false pass), so the form can never
+    // be submitted through to a decoded route. What CAN be done is to build a
+    // `FormData` from the **real rendered form** and put a real file into that
+    // — so the field names, the checkbox, the reader and the whole import path
+    // are the production ones, and only `new FormData(event.currentTarget)` is
+    // taken on trust.
+    const view = await render(routeStub(ATHLETE));
+    const box = view.container.querySelector<HTMLInputElement>('#route-loop');
+    if (box === null) throw new Error('no loop box on this screen');
+    box.click();
+    await settle();
+
+    const submitted = new FormData(importForm(view));
+    expect(loopChosen(submitted)).toBe(true);
+    submitted.set(FILE_FIELD, new File([loopGpx()], 'sunday.gpx'));
+
+    const outcome = await routeFromImportForm(submitted, {
+      id: stubRouteId('route-2'),
+      owner: ATHLETE,
+      now: unixSeconds(1_700_000_500),
+    });
+
+    expect(outcome.status).toBe('saved');
+    if (outcome.status !== 'saved') return;
+    expect(outcome.record.profile.loop).toBe(true);
   });
 });
 

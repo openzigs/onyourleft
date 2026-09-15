@@ -85,9 +85,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         protocol registration, and the MapLibre adapter
     src/recording/      the composition root: engine + checkpoints + recovery (#46)
     src/routes/         saved routes (#73): the store port, the edit decision and
-                        its concurrency token, the shared-route payload, and the
+                        its concurrency token, the shared-route payload, the
                         one wording of what each of the two GPX importers makes,
-                        shared by the three screens that say it (#232)
+                        shared by the three screens that say it (#232), and the
+                        import form itself (#296) — the one place a rider claims
+                        a file is a loop, and the refusal when it is not
     src/routing/        planning a route (#70, #71, #72): the draft and the legs
                         an edit makes stale, undo over whole drafts, the draft
                         kept across a reload, and the elevation profile. The
@@ -797,6 +799,11 @@ recording engine is:
   the queue and would leave the trainer simulating the oldest hill in the backlog until it drained.
 - **`apps/web/src/routes/`** ([#73](https://github.com/openzigs/onyourleft/issues/73)) is the other
   consumer: a rider imports a GPX route, names it and saves it, and the profile is what gets stored.
+  ⚠️ **It is also the only producer of `RouteProfile.loop`**, and until
+  [#296](https://github.com/openzigs/onyourleft/issues/296) there was none at all: every loop
+  feature in the game — the wrapped road markings, the lap counter, the elevation strip's second
+  lap — was correct, tested and unreachable, because nothing a rider could do set the flag.
+  `import-form.ts` is the tick box that sets it and records why the geometry is not read instead.
 - **`packages/domain/src/pacer/` and `packages/physics/src/pacer.ts`**
   ([#92](https://github.com/openzigs/onyourleft/issues/92)) are the third: a synthetic rider pacing
   the same profile. The split across two packages is **forced rather than chosen** — the rule needs
