@@ -197,8 +197,37 @@ export interface ListActivitiesOptions {
    * and skipping leaves a ride with no efforts and nothing to say so.
    *
    * Only meaningful with `orderBy: 'startedAt'`; it is a bound on that index.
+   *
+   * ⚠️ **Strictly after, and on its own that is not enough to resume from.**
+   * Two rides can share an instant — importing one file twice does it, and so
+   * does any two indoor sessions started from a clock with second resolution —
+   * and a page boundary between them makes the second unreachable for ever,
+   * because the ordering is deterministic and every retry reproduces it.
+   * {@link ListActivitiesOptions.afterActivityId} is the other half of the
+   * cursor and what a resumable sweep passes. #293.
    */
   readonly startedAfter?: UnixSeconds;
+  /**
+   * The last id already covered *at* {@link ListActivitiesOptions.startedAfter}
+   * — the second half of a resume cursor (#293).
+   *
+   * Given, the instant bound becomes **inclusive** and the rows at that instant
+   * whose id is at or before this one are dropped. IndexedDB orders index
+   * entries with equal keys by primary key, so `[startedAt, id]` is a total
+   * order over the list and this resumes from a point inside it rather than
+   * from a point between two instants.
+   *
+   * ⚠️ **The drop happens before `limit` counts**, which is the whole reason
+   * this lives here rather than in the caller. A caller asking for an inclusive
+   * bound and filtering the page itself spends its page budget on rides it has
+   * already covered, and a page of one becomes an empty page that reads as an
+   * exhausted library.
+   *
+   * Requires `startedAfter` and `direction: 'ascending'`; both are refused
+   * rather than reinterpreted, because "after this id" means the opposite
+   * read backwards and means nothing at all with no instant to sit at.
+   */
+  readonly afterActivityId?: ActivityId;
 }
 
 /** What `deleteAthlete` removed, so a caller can report it. */
@@ -765,6 +794,7 @@ export class ActivityStore {
       offset = 0,
       limit,
       startedAfter,
+      afterActivityId,
     } = options;
     const index = ORDER_INDEX.get(orderBy);
     if (index === undefined) {
@@ -784,14 +814,43 @@ export class ActivityStore {
         `startedAfter is a bound on the startedAt index and cannot be combined with orderBy ${orderBy}`,
       );
     }
+    if (afterActivityId !== undefined && startedAfter === undefined) {
+      throw new StoreValidationError(
+        'afterActivityId breaks a tie at startedAfter and cannot be given without it',
+      );
+    }
+    if (afterActivityId !== undefined && direction !== 'ascending') {
+      throw new StoreValidationError(
+        `afterActivityId is only meaningful reading forwards, received direction ${direction}`,
+      );
+    }
 
-    // `false` on the lower bound is what makes the cursor *strictly* after: a
-    // resumed sweep must not re-read the activity it stopped on as though it
-    // were the next one, or a library whose last page is one ride never ends.
+    // The lower bound is *strictly* after the instant on its own: a resumed
+    // sweep must not re-read the activity it stopped on as though it were the
+    // next one, or a library whose last page is one ride never ends.
+    //
+    // ⚠️ With a tie-break it becomes INCLUSIVE and the filter below does the
+    // excluding instead, one id at a time — because "strictly after this
+    // instant" cannot express "and the rest of the rides that started in the
+    // same second". #293: without it, a page boundary falling between two such
+    // rides left the second never swept, on this press or any later one.
     const lower = startedAfter === undefined ? Dexie.minKey : startedAfter;
+    const includeLower = startedAfter === undefined || afterActivityId !== undefined;
     let collection = this.#activities
       .where(index)
-      .between([owner, lower], [owner, Dexie.maxKey], startedAfter === undefined, true);
+      .between([owner, lower], [owner, Dexie.maxKey], includeLower, true);
+    if (afterActivityId !== undefined) {
+      // ⚠️ Dexie applies a `filter` during the cursor walk and counts `limit`
+      // against what survives it — **whatever order the two are chained in**,
+      // because both go into the collection's context rather than wrapping
+      // each other. `segment-effort-store.test.ts` asserts the composed
+      // behaviour rather than the line order, since moving this below `limit`
+      // changes nothing; the fix is worth nothing if a page of one is spent on
+      // a ride already covered.
+      collection = collection.filter(
+        (row) => row.startedAt !== startedAfter || row.id > afterActivityId,
+      );
+    }
     if (direction === 'descending') {
       collection = collection.reverse();
     }

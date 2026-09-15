@@ -461,6 +461,139 @@ describe('the startedAfter cursor a resumable sweep needs', () => {
     expect(all.map((row) => row.id)).toEqual([ride.id]);
   });
 
+  it('is STRICTLY after on the instant alone, so a page boundary between two rides that started in the same second skips the second', async () => {
+    // #293. This is the defect, stated as a test that passes: the bound on its
+    // own cannot separate two rides at one instant, which is why
+    // `afterActivityId` exists below. Two indoor sessions started from a clock
+    // with second resolution produce exactly this, and so does importing one
+    // file twice.
+    await seedAthletes(harness, [ATHLETE_A]);
+    const at = unixSeconds(1_700_000_000);
+    const first = rideFor(ATHLETE_A, { id: activityId('ride-a'), startedAt: at });
+    const second = rideFor(ATHLETE_A, { id: activityId('ride-b'), startedAt: at });
+    await harness.write(async (store) => {
+      await store.putActivity(first);
+      await store.putActivity(second);
+    });
+
+    const after = await harness.read(async (store) =>
+      store.listActivitySummaries(ATHLETE_A, {
+        orderBy: 'startedAt',
+        direction: 'ascending',
+        startedAfter: at,
+      }),
+    );
+
+    expect(after).toEqual([]);
+  });
+
+  it('breaks the tie on the activity id, so the second of two rides at one instant is returned', async () => {
+    // #293's first criterion at the store. `afterActivityId` makes the lower
+    // bound inclusive and drops the ids already covered at that instant, which
+    // is exactly what the strictly-exclusive bound cannot express.
+    //
+    // ⚠️ **`later`'s id sorts BELOW the cursor's, and that is the assertion,
+    // not tidiness.** The filter is `startedAt !== startedAfter || id >
+    // afterActivityId`; drop the first half and every row is judged on its id
+    // alone. A fixture named `ride-c` would survive that mutation, because the
+    // ids in this file happen to ascend with time — and in production they do
+    // not: an activity id is a `crypto.randomUUID()` and carries no relation to
+    // when the ride started. So the later ride is deliberately named to sort
+    // under `ride-a`: the tie-break must apply AT the cursor instant and
+    // nowhere else, and only a fixture shaped like this one can tell the
+    // difference. Renaming it back is how this test stops being one.
+    await seedAthletes(harness, [ATHLETE_A]);
+    const at = unixSeconds(1_700_000_000);
+    const first = rideFor(ATHLETE_A, { id: activityId('ride-a'), startedAt: at });
+    const second = rideFor(ATHLETE_A, { id: activityId('ride-b'), startedAt: at });
+    const later = rideFor(ATHLETE_A, {
+      id: activityId('later-ride'),
+      startedAt: unixSeconds(1_700_086_400),
+    });
+    await harness.write(async (store) => {
+      await store.putActivity(first);
+      await store.putActivity(second);
+      await store.putActivity(later);
+    });
+
+    const after = await harness.read(async (store) =>
+      store.listActivitySummaries(ATHLETE_A, {
+        orderBy: 'startedAt',
+        direction: 'ascending',
+        startedAfter: at,
+        afterActivityId: first.id,
+      }),
+    );
+
+    expect(after.map((row) => row.id)).toEqual([second.id, later.id]);
+  });
+
+  it('applies the limit AFTER the tie-break, so a page of one is not spent on a ride already covered', async () => {
+    // ⚠️ The half a naive implementation gets wrong, and the reason the
+    // tie-break is in the store rather than in the sweep. A caller that asked
+    // for an inclusive bound and filtered the page itself would receive one row
+    // — the ride it had already swept — filter it away, see an empty page and
+    // report the library exhausted. Dexie applies a `filter` during iteration
+    // and counts the limit against what survives it; this asserts that, because
+    // the whole fix rests on it.
+    await seedAthletes(harness, [ATHLETE_A]);
+    const at = unixSeconds(1_700_000_000);
+    const first = rideFor(ATHLETE_A, { id: activityId('ride-a'), startedAt: at });
+    const second = rideFor(ATHLETE_A, { id: activityId('ride-b'), startedAt: at });
+    await harness.write(async (store) => {
+      await store.putActivity(first);
+      await store.putActivity(second);
+    });
+
+    const page = await harness.read(async (store) =>
+      store.listActivitySummaries(ATHLETE_A, {
+        orderBy: 'startedAt',
+        direction: 'ascending',
+        limit: 1,
+        startedAfter: at,
+        afterActivityId: first.id,
+      }),
+    );
+
+    expect(page.map((row) => row.id)).toEqual([second.id]);
+  });
+
+  it('refuses a tie-break with no instant to break the tie at', async () => {
+    // An id alone is not a cursor: the list is ordered by `startedAt`, so
+    // "after this id" has no meaning without the instant it sat at. Accepting
+    // it silently would return the whole library and re-sweep it for ever.
+    //
+    // ⚠️ `direction` is spelled out, and that is what makes this case its own.
+    // The default is descending, which the *next* test's guard refuses — so
+    // without this line the case went green with the missing-instant guard
+    // deleted, and the two rules looked like one. Found by mutation.
+    await seedAthletes(harness, [ATHLETE_A]);
+    await expect(
+      harness.read(async (store) =>
+        store.listActivitySummaries(ATHLETE_A, {
+          direction: 'ascending',
+          afterActivityId: activityId('ride-a'),
+        }),
+      ),
+    ).rejects.toThrow(StoreValidationError);
+  });
+
+  it('refuses a tie-break read backwards, where "after this id" means the opposite', async () => {
+    // Descending, the ids at the boundary instant arrive in the other order, so
+    // dropping the ones at or below the cursor would drop the rides still to
+    // come. Nothing needs it; refusing is cheaper than getting it right.
+    await seedAthletes(harness, [ATHLETE_A]);
+    await expect(
+      harness.read(async (store) =>
+        store.listActivitySummaries(ATHLETE_A, {
+          direction: 'descending',
+          startedAfter: unixSeconds(1),
+          afterActivityId: activityId('ride-a'),
+        }),
+      ),
+    ).rejects.toThrow(StoreValidationError);
+  });
+
   it('refuses to combine the cursor with an order it is not an index on', async () => {
     // `startedAfter` is a bound on the startedAt index. Silently ignoring it
     // under `orderBy: 'distance'` would make a sweep restart from the top and

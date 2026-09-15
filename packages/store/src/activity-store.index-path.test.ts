@@ -175,6 +175,34 @@ describe('listActivitySummaries reads through an index, not a scan', () => {
     expect(counts.objectStoreScan).toBe(0);
   });
 
+  it('a resume cursor with a tie-break still reads through the index', async () => {
+    // #293 made the lower bound inclusive and added a per-row filter for the
+    // ids already covered at that instant. A filter is exactly the shape that
+    // turns into a full scan if it is written as `toArray()` and a predicate —
+    // correct answers, a table scan, and nothing in the result to say so.
+    // `schema.ts` names that class: "a performance regression with correct
+    // results is the kind that reaches production".
+    const [rows, counts] = await countAccess(() =>
+      store.listActivitySummaries(ATHLETE_A, {
+        direction: 'ascending',
+        startedAfter: unixSeconds(1_004),
+        afterActivityId: activityId('a-04'),
+      }),
+    );
+
+    expect(rows.map((row) => row.id)).toEqual([
+      'a-06',
+      'a-08',
+      'a-10',
+      'a-12',
+      'a-14',
+      'a-16',
+      'a-18',
+    ]);
+    expect(counts.index).toBeGreaterThan(0);
+    expect(counts.objectStoreScan).toBe(0);
+  });
+
   it('a limited first page still reads through the index', async () => {
     const [rows, counts] = await countAccess(() =>
       store.listActivitySummaries(ATHLETE_A, { limit: 3 }),

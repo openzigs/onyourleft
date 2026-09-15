@@ -102,15 +102,37 @@ export function stubMatchPort(options: StubMatchOptions): StubMatch {
       listOptions: ListActivitiesOptions = {},
     ): Promise<ActivitySummary[]> => {
       reads.push(`list:${owner}`);
+      // ⚠️ **Ties broken on the id, as the store breaks them.** IndexedDB
+      // orders index entries with equal keys by primary key, so two rides that
+      // started in the same second come back in id order — and a stub sorting
+      // on the instant alone would put them in insertion order and make the
+      // cursor below untestable. #293.
       let rows = options.rides
         .filter((ride) => ride.activity.athleteId === owner)
         .map((ride) => ride.activity)
-        .sort((a, b) => a.startedAt - b.startedAt);
+        .sort((a, b) => a.startedAt - b.startedAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
       const after = listOptions.startedAfter;
+      const afterId = listOptions.afterActivityId;
       if (after !== undefined) {
-        rows = rows.filter((row) => row.startedAt > after);
+        // ⚠️ **The cursor is a PAIR, and half of one is refused rather than
+        // interpreted.** `startedAfter` on its own is strictly after the
+        // instant, which cannot separate two rides that started in the same
+        // second — so a stub that quietly accepted it would agree with a store
+        // that skips a ride, which is the #293 defect reintroduced inside the
+        // double that is supposed to catch it. The store is free to take the
+        // instant alone (the account export does); this port's caller is not.
+        if (afterId === undefined) {
+          throw new Error(
+            'the sweep cursor is a pair: startedAfter was given without afterActivityId',
+          );
+        }
+        rows = rows.filter(
+          (row) => row.startedAt > after || (row.startedAt === after && row.id > afterId),
+        );
       }
       if (listOptions.limit !== undefined) {
+        // After the cursor, never before it — a page budget spent on rides
+        // already covered is an empty page that reads as an exhausted library.
         rows = rows.slice(0, listOptions.limit);
       }
       return Promise.resolve(rows.map((row) => ({ ...row })));

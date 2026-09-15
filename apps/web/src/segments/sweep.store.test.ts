@@ -155,8 +155,12 @@ async function openSeeded(): Promise<StoreHarness> {
 }
 
 /** One ride over the segment, written through the public path. */
-async function seedTraversingRide(open: StoreHarness, owner = ATHLETE_A): Promise<NewActivity> {
-  const ride = rideFor(owner, { hasPosition: true });
+async function seedTraversingRide(
+  open: StoreHarness,
+  owner = ATHLETE_A,
+  overrides: Partial<NewActivity> = {},
+): Promise<NewActivity> {
+  const ride = rideFor(owner, { hasPosition: true, ...overrides });
   const streams = streamsFor(ride, traversingTrack());
   await open.write(async (store) => {
     await store.putActivity(ride);
@@ -281,6 +285,76 @@ describe('criterion 2 — a newly created segment finds its efforts in the exist
     // And the first segment's effort is still there: the re-sweep replaced the
     // activity's efforts rather than appending to them or dropping them.
     expect((await historyOf(open, first))?.rows).toHaveLength(1);
+  });
+});
+
+describe('#293 — two rides that started in the same second', () => {
+  it('sweeps both when the page boundary falls between them', async () => {
+    // ⚠️ **The whole defect in one case.** `sweepLibrary` resumed from the
+    // instant alone and `listActivitySummaries` made that bound strictly
+    // exclusive, so the second of two rides at one instant was never returned
+    // — not on this press and not on any later one, because the ordering is
+    // deterministic and every retry reproduces it. The rider was told "Matched
+    // 1 ride … and found 1 effort", which is a true sentence about a sweep that
+    // silently skipped a ride.
+    //
+    // Two rides sharing an instant is not exotic: importing one file twice
+    // through #51's batch importer produces exactly that, and so does any two
+    // indoor sessions started from a clock with second resolution.
+    //
+    // Asserted through `loadHistory` on a connection the sweep never touched,
+    // so this is the store's own answer rather than a stub's.
+    const open = await openSeeded();
+    const segment = theSegment();
+    await open.write(async (store) => store.putSegment(segment));
+    const at = unixSeconds(1_760_100_000);
+    const first = await seedTraversingRide(open, ATHLETE_A, {
+      id: activityId('ride-a'),
+      startedAt: at,
+    });
+    const second = await seedTraversingRide(open, ATHLETE_A, {
+      id: activityId('ride-b'),
+      startedAt: at,
+    });
+
+    // Pages of one, so the boundary is guaranteed to fall between them.
+    const result = await open.write(async (store) =>
+      matchLibrary({ athleteId: ATHLETE_A, store }, { pageSize: 1 }),
+    );
+
+    expect(result).toMatchObject({ kind: 'swept', swept: 2, efforts: 2, done: true });
+    const history = await historyOf(open, segment);
+    expect(history?.rows.map((row) => row.effort.activityId).sort()).toEqual(
+      [first.id, second.id].sort(),
+    );
+  });
+
+  it('does not re-sweep the ride it stopped on', async () => {
+    // The other half of the same cursor, and what an inclusive bound with no
+    // tie-break would break: the page the sweep stopped on must not come back
+    // as the next page, or a library whose last page is one ride never ends.
+    // A budget of one stops the sweep with a cursor written; pressing again
+    // must cover the OTHER ride, not the same one twice.
+    const open = await openSeeded();
+    await open.write(async (store) => store.putSegment(theSegment()));
+    const at = unixSeconds(1_760_100_000);
+    await seedTraversingRide(open, ATHLETE_A, { id: activityId('ride-a'), startedAt: at });
+    await seedTraversingRide(open, ATHLETE_A, { id: activityId('ride-b'), startedAt: at });
+
+    const press = { pageSize: 1, budget: 1 };
+    const one = await open.write(async (store) =>
+      matchLibrary({ athleteId: ATHLETE_A, store }, press),
+    );
+    expect(one).toMatchObject({ kind: 'swept', swept: 1, done: false });
+
+    const two = await open.write(async (store) =>
+      matchLibrary({ athleteId: ATHLETE_A, store }, press),
+    );
+
+    expect(two).toMatchObject({ kind: 'swept', swept: 1, done: false });
+    const cursor = await open.read(async (store) => store.getMatchCheckpoint(ATHLETE_A));
+    expect(cursor?.swept).toBe(2);
+    expect(cursor?.lastActivityId).toBe('ride-b');
   });
 });
 

@@ -2078,6 +2078,7 @@ top of an issue **supersedes its body**.
 | Why an effort's visibility has three values and never two | `packages/domain/src/segment/effort.ts`, `packages/store/src/records.ts` §`SegmentEffortRecord` |
 | What actually makes re-matching idempotent, and what the derived effort id buys instead | `packages/store/src/schema.ts` §`STORES_V6`, `packages/store/src/testing/fakes.ts` §`appendingEffortStoreFactory` |
 | How a backfill resumes, and why it is a cursor rather than an offset | `apps/web/src/segments/backfill.ts`, `packages/store/src/activity-store.ts` §`startedAfter` |
+| Why that cursor is an instant **and** an id, and what one alone skipped | `packages/store/src/activity-store.ts` §`afterActivityId`, `apps/web/src/segments/backfill.ts` |
 | When a segment sweep runs, and why it is a control rather than something a saved ride triggers | `apps/web/src/segments/sweep.ts`, `apps/web/src/recording/finish.ts` §"What this does NOT do" |
 | Why a sweep refuses outright when there are more segments than it can carry | `apps/web/src/segments/sweep.ts` §`SWEEP_CORPUS_LIMIT` |
 | Why the prefilter reaches 100 m outside a segment, and why that is not a one-cell halo | `packages/domain/src/segment/cells.ts` §`PREFILTER_MARGIN_METRES`, §`paddedCellCover`, [spike 0003](docs/spikes/0003-segment-prefilter-margin.md) |
