@@ -34,7 +34,26 @@ import { DEFAULT_ENDPOINT_RADIUS_METRES } from './segment';
 
 import type { GeographicPosition } from '../quantities';
 
+/**
+ * Metres per degree of latitude, as a literal.
+ *
+ * `cells.ts` deliberately derives the same quantity from
+ * `EARTH_MEAN_RADIUS_METRES` so the margin cannot come to disagree with the
+ * distances `geodesy.ts` reports. This file deliberately does **not**, for the
+ * reason {@link A_MILLIMETRE_WEST} is written out rather than recomputed: a
+ * test that derives its expectation from the constant under test can only ever
+ * agree with it. The two figures agree today — 6 371 008.8 × π/180 is
+ * 111 194.93 — and the day `EARTH_MEAN_RADIUS_METRES` is revised this is the
+ * number that says by how much.
+ */
 const METRES_PER_DEGREE_LATITUDE = 111_194.9;
+
+/**
+ * Metres between samples at the slowest smart-recording interval in common use:
+ * 10 s at 30 km/h. Half of it is what `endpointReachRadius` adds to a segment's
+ * own radius, which is the wider of the two gates the margin has to clear.
+ */
+const WIDEST_SAMPLE_SPACING_METRES = 83;
 
 function at(latitude: number, longitude: number): GeographicPosition {
   return geographicPosition(degreesLatitude(latitude), degreesLongitude(longitude));
@@ -98,7 +117,9 @@ describe('the cell grid, and the boundary it used to split', () => {
     // spacing. A margin below either of those would let stage 1 reject a pair
     // a later stage would still have reported — which is the whole bug.
     expect(PREFILTER_MARGIN_METRES).toBeGreaterThan(SIMILARITY_METRES);
-    expect(PREFILTER_MARGIN_METRES).toBeGreaterThan(DEFAULT_ENDPOINT_RADIUS_METRES + 83 / 2);
+    expect(PREFILTER_MARGIN_METRES).toBeGreaterThan(
+      DEFAULT_ENDPOINT_RADIUS_METRES + WIDEST_SAMPLE_SPACING_METRES / 2,
+    );
   });
 });
 
@@ -121,16 +142,35 @@ describe('what the padding costs, which is the reason it is a margin and not a h
     expect(corner.size).toBe(4);
   });
 
-  it('reaches across a line 50 m away and not one 200 m away', () => {
+  it('reaches across a line 50 m away and not one 200 m away, in both directions', () => {
     // The margin is a distance, so it has to be testable as one. A row line
     // runs along 51.50; the cell south of it is the one a point just north of
     // the line must still claim, and a point 200 m north must not.
+    //
+    // ⚠️ **Both directions, and the second half is not decoration.** A padded
+    // cover probes a margin either side of a position and the two sides are
+    // separate arithmetic, so a test of one says nothing about the other. The
+    // northward half shipped unpinned in the first round of this change:
+    // `highRow` could be flattened to `rowOf(position.latitude)` with the whole
+    // 5 036-test suite still green, because every other case that looks like it
+    // covers the latitude axis either probes north for the cell south, or sits
+    // exactly on 51.5 where the padded row and the bare row are the same row.
+    // The failure that would let back in is the #291 one with the axes swapped:
+    // a segment point just south of a row line, a ride sample just north of it,
+    // covers disjoint, nothing downstream ever runs.
     const southOfTheLine = cellOf(at(51.5 - CELL_DEGREES / 2, -0.125));
     const fiftyMetresNorth = at(51.5 + 50 / METRES_PER_DEGREE_LATITUDE, -0.125);
     const twoHundredNorth = at(51.5 + 200 / METRES_PER_DEGREE_LATITUDE, -0.125);
 
     expect(paddedCellCover([fiftyMetresNorth]).has(southOfTheLine)).toBe(true);
     expect(paddedCellCover([twoHundredNorth]).has(southOfTheLine)).toBe(false);
+
+    const northOfTheLine = cellOf(at(51.5 + CELL_DEGREES / 2, -0.125));
+    const fiftyMetresSouth = at(51.5 - 50 / METRES_PER_DEGREE_LATITUDE, -0.125);
+    const twoHundredSouth = at(51.5 - 200 / METRES_PER_DEGREE_LATITUDE, -0.125);
+
+    expect(paddedCellCover([fiftyMetresSouth]).has(northOfTheLine)).toBe(true);
+    expect(paddedCellCover([twoHundredSouth]).has(northOfTheLine)).toBe(false);
   });
 
   it('widens the longitude margin towards the pole, where a degree is shorter', () => {
@@ -171,6 +211,25 @@ describe('the grid itself, unchanged by #291', () => {
 
     expect(antimeridian.has(cellOf(at(51.49, 180)))).toBe(false);
     expect(antimeridian.has(cellOf(at(51.5, -180)))).toBe(true);
+  });
+
+  it('does not let a margin off the east edge pack into the row above', () => {
+    // The mirror of the case above, and it was unpinned in the first round of
+    // this change: `columnOf`'s upper clamp could be deleted with the whole
+    // domain segment suite still green. The two edges are separate arithmetic
+    // and a test of one says nothing about the other — the same shape as the
+    // latitude margin's two directions.
+    //
+    // It binds only where the longitude margin is a whole cell, which is above
+    // about 84.8° — `(180 + 0.01 + 180) * 100` is 36 001, one past the last
+    // column. Unclamped that id is `row * COLUMNS + COLUMNS`, which is column 0
+    // of the row above: latitude 85.01 at longitude −180, a real cell on the
+    // far side of the world that a hundred metres of padding has no business
+    // claiming.
+    const eastEdge = paddedCellCover([at(85, 180)]);
+
+    expect(eastEdge.has(cellOf(at(85.01, -180)))).toBe(false);
+    expect(eastEdge.has(cellOf(at(85, 180)))).toBe(true);
   });
 
   it('caps the longitude margin at one cell where a degree of it vanishes', () => {

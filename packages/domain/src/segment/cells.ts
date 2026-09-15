@@ -109,11 +109,23 @@ export type CellId = number;
  *   Stage 2's gate is `endpointReachRadius` — the segment's own endpoint radius
  *   plus half the ride's median sample spacing — which at the default 15 m
  *   radius and the slowest smart-recording interval in common use (10 s, about
- *   83 m at 30 km/h) is 56 m. 100 m clears both, with room for a segment whose
- *   creator widened its endpoint radius. `cells.test.ts` asserts that
+ *   83 m at 30 km/h) is 56 m. 100 m clears both. `cells.test.ts` asserts that
  *   relationship against the constants themselves, so tuning
  *   `SIMILARITY_METRES` or `DEFAULT_ENDPOINT_RADIUS_METRES` past this number
  *   is a red test rather than a silent reintroduction of the bug.
+ *
+ *   ⚠️ **It clears them at their defaults, which is narrower than the rule
+ *   above and is stated here rather than implied.** Neither input to
+ *   `endpointReachRadius` is bounded: `createSegment` accepts any finite
+ *   non-negative `endpointRadiusMetres`, and `GAP_SECONDS` splits a ride's
+ *   spans in seconds rather than in metres, so nothing bounds a sample's
+ *   spacing either. A segment created with a 250 m radius, or a ride sampled
+ *   every 20 s at 50 km/h (a 154 m gate), has a stage-2 gate wider than this
+ *   margin, and stage 1 would then reject a pair stage 2 would have reported —
+ *   the #291 failure with a different trigger. Nothing in `apps/` or
+ *   `packages/` sets `endpointRadiusMetres` today, so it is a contract rather
+ *   than a live defect, and closing it is
+ *   https://github.com/openzigs/onyourleft/issues/304.
  * - **Not larger.** The margin is exactly the amount stage 1's admitted
  *   corridor is dilated by, and every metre of it hands stage 2 — the expensive
  *   stage — candidates it must then examine. At 100 m, under a tenth of a cell,
@@ -181,8 +193,20 @@ const MARGIN_DEGREES_LATITUDE = PREFILTER_MARGIN_METRES / METRES_PER_DEGREE_LATI
  * ⚠️ **The clamp changes nothing for a real position** — a
  * `GeographicPosition` is validated into [−90, 90], which maps to rows 0…18000
  * exactly. It is here for the *probes* {@link paddedCellCover} makes a margin
- * either side of a position, which can step outside the grid at a pole and
- * would otherwise pack into a cell id belonging to some other row.
+ * either side of a position, which can step outside the grid at a pole.
+ *
+ * ⚠️ **Its two halves are not symmetric and neither is pinned by a test, which
+ * is recorded here rather than left to be rediscovered.** The latitude margin
+ * is a fixed 0.0009° — a tenth of a cell — so `Math.min(ROWS - 1, …)` is
+ * **unreachable**: the widest probe a pole admits is `(90.0009 + 90) * 100`,
+ * which floors to 18 000 unaided. It is kept rather than deleted because
+ * {@link PREFILTER_MARGIN_METRES} is a tunable and a value above about 1.1 km
+ * would reach it. `Math.max(0, …)` does bind, at the south pole — but an
+ * unclamped row of −1 packs to a **negative** id, and every real cell id is
+ * non-negative, so it collides with nothing and produces no wrong answer.
+ * Contrast {@link columnOf}, where both halves are reachable and an unclamped
+ * id is a real cell somewhere else entirely; `cells.test.ts` pins both of
+ * those.
  */
 function rowOf(latitude: number): number {
   return Math.min(ROWS - 1, Math.max(0, Math.floor((latitude + 90) * CELLS_PER_DEGREE)));
@@ -198,6 +222,19 @@ function rowOf(latitude: number): number {
  * interpolation across the seam. Left alone deliberately — changing it is a
  * different decision from this one, and clamping keeps the probes from
  * manufacturing a cell id in the row below.
+ *
+ * ⚠️ **Column 36 000 is degenerate and is nonetheless reachable from its
+ * neighbour, which a future wrap would change alongside the seam.** That column
+ * holds the single longitude 180° and nothing between, yet a padded cover at
+ * 179.999° claims it and a padded cover at 180° claims column 35 999 — measured
+ * at 51.5°, where both covers are `{14149, 14150} × {35999, 36000}`. It is the
+ * flooring rather than the clamp that does that: the margin at that latitude is
+ * 0.0014°, so `(179.999 + 0.0014 + 180) * 100` floors to 36 000 without ever
+ * reaching the clamp. The clamp binds only where the margin is a whole cell —
+ * at a pole, where `(180 + 0.01 + 180) * 100` is exactly 36 001 and an
+ * unclamped id would be column 0 of the row above. Two separate behaviours in
+ * one function, and a wrap would replace both; neither is visible in a test
+ * written for the other.
  */
 function columnOf(longitude: number): number {
   return Math.min(COLUMNS - 1, Math.max(0, Math.floor((longitude + 180) * CELLS_PER_DEGREE)));
