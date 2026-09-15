@@ -112,6 +112,10 @@
  * the rule stops firing, and because the reader who needs the reason is the one
  * looking at the declaration.
  *
+ * ⚠️ **The tag must OPEN a line; naming it mid-sentence exempts nothing**
+ * (#292). Until that anchor, a comment saying an exemption had been removed
+ * parsed as one — see `unwiredReason`, which is where the measurement is.
+ *
  * Usage: node scripts/check-wiring.mjs [--root <dir>]
  */
 
@@ -595,17 +599,37 @@ export function watchedFiles(root) {
  * `undefined` when there is no `@unwired` tag at all, `null` when the tag is
  * there with no reason — which is refused, because an exemption nobody can read
  * is the config-file list with extra steps.
+ *
+ * ⚠️ **The tag has to OPEN a stripped line, and that anchor is the rule rather
+ * than a tidiness** (#292). Unanchored, any prose mention of the tag inside a
+ * comment parsed as a live exemption with the rest of the sentence as its
+ * reason — and the most natural place to name it is a paragraph saying the
+ * exemption was *removed*. In a file's own doc comment that is the broadest of
+ * the three paths, so one backticked mention silenced `WIRE001` for a whole
+ * module: measured on #290's branch, where the gate whose first finding was
+ * `segments/match-port.ts` could no longer report that finding on that file.
+ * `check-wiring.test.sh` carries the pair — a mention that exempts nothing, and
+ * a tag in the same comment that still does.
  */
 export function unwiredReason(text) {
   // The comment's own furniture first: `/**`, a trailing `*/`, the `*` down the
   // left margin and a `//` prefix. ⚠️ Without this the `*/` that closes a
   // one-line `@unwired` doc comment reads as the reason, and a tag with no
-  // reason at all passes — which this suite has a case for.
+  // reason at all passes — which this suite has a case for. It is also what
+  // makes the anchor below land on the text rather than on the margin.
   const stripped = text
     .replace(/\/\*+|\*+\//g, ' ')
     .replace(/^[ \t]*\*[ \t]?/gm, '')
     .replace(/^[ \t]*\/\/[ \t]?/gm, '');
-  const match = /@unwired\b[ \t:]*(.*)/.exec(stripped);
+  // ⚠️ `[ \t]*` after the anchor, not a bare `^`. The strip above turns `/**`
+  // into a SPACE rather than removing it, so a one-line `/** @unwired … */`
+  // leaves the tag two columns in — and a bare `^` would read that whole form
+  // as no tag at all. Measured: `/** @unwired */` stops being a `WIRE000` and
+  // becomes a plain report, and `/** @unwired a reason */` would stop being an
+  // exemption with nothing to show for it, which is the invisible half of this
+  // change. The tolerance costs nothing the anchor is for: prose naming the
+  // tag has a word or a backtick in front of it, never only whitespace.
+  const match = /^[ \t]*@unwired\b[ \t:]*(.*)/m.exec(stripped);
   if (match === null) return undefined;
   const reason = match[1].trim();
   return reason.length < 3 || !/[a-zA-Z0-9]/.test(reason) ? null : reason;

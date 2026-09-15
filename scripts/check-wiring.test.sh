@@ -571,6 +571,102 @@ TS
 run_check
 assert_green 'a module exempted in its own file comment passes'
 
+# --- The tag has to BE a tag, not a word in a sentence (#292) ----------------
+# `unwiredReason` matched the tag anywhere in the stripped comment, so any prose
+# mention of it inside a watched file's own doc comment silenced `WIRE001` for
+# the whole module — including a paragraph written to say the exemption had been
+# REMOVED, which is the most natural place to name it. Measured on #290's
+# branch: the gate whose first finding was `segments/match-port.ts` could no
+# longer report that finding on that file.
+#
+# ⚠️ These two cases are a pair and only mean something together. The red one
+# alone would pass against a regex that had stopped recognising the tag at all.
+new_fixture
+write apps/web/src/main.tsx <<'TS'
+import { startRide } from './ride/controller';
+startRide();
+TS
+write apps/web/src/ride/controller.ts <<'TS'
+export function startRide(): void {}
+TS
+write apps/web/src/segments/match-port.ts <<'TS'
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * What the sweep needs from the store.
+ *
+ * This file carried an `@unwired` note until #282 wired it, and the note is
+ * gone because the defect it named is fixed.
+ */
+
+export interface MatchStore {
+  listActivities(): Promise<void>;
+}
+TS
+run_check
+assert_red 'a prose mention of the tag in a file comment exempts nothing'
+assert_says 'and still reports the module as unreached' 'WIRE001 apps/web/src/segments/match-port.ts'
+assert_silent_about 'and does not read the sentence as a reason' 'WIRE000'
+
+# The other half: a real tag opens its own stripped line and is still honoured,
+# in the same comment as a sentence that merely names it.
+new_fixture
+write apps/web/src/main.tsx <<'TS'
+import { startRide } from './ride/controller';
+startRide();
+TS
+write apps/web/src/ride/controller.ts <<'TS'
+export function startRide(): void {}
+TS
+write apps/web/src/segments/match-port.ts <<'TS'
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * What the sweep needs from the store.
+ *
+ * An `@unwired` tag named mid-sentence is prose and exempts nothing.
+ *
+ * @unwired #282 — nothing runs the matcher yet, and that is a defect with an
+ * issue rather than a decision.
+ */
+
+export interface MatchStore {
+  listActivities(): Promise<void>;
+}
+TS
+run_check
+assert_green 'a tag opening a line is honoured beside a sentence that names it'
+
+# And on the declaration path, which strips a `//` margin rather than a `*` one.
+new_fixture
+write apps/web/src/main.tsx <<'TS'
+import { startRide } from './ride/controller';
+startRide();
+TS
+write apps/web/src/ride/controller.ts <<'TS'
+export function startRide(): void {}
+
+// This bound used to carry an `@unwired` note and no longer needs one.
+export const PROCEDURE_TIMEOUT = 5;
+TS
+run_check
+assert_red 'a prose mention above a declaration exempts nothing either'
+assert_says 'and names the export it cannot reach' '`PROCEDURE_TIMEOUT` is'
+
+new_fixture
+write apps/web/src/main.tsx <<'TS'
+import { startRide } from './ride/controller';
+startRide();
+TS
+write apps/web/src/ride/controller.ts <<'TS'
+export function startRide(): void {}
+
+// @unwired a bound `controller.test.ts` asserts against; nothing reads it.
+export const PROCEDURE_TIMEOUT = 5;
+TS
+run_check
+assert_green 'a tag opening a line comment is still honoured'
+
 # --- A test-support file is neither watched nor production -------------------
 new_fixture
 write apps/web/src/main.tsx <<'TS'

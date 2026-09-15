@@ -24,13 +24,17 @@
  * that now runs this, from a control on the segments screen, and `main.tsx`
  * §`buildMatchPort` is the one caller that reaches the real store.
  *
- * ⚠️ **Do not spell the exemption tag in this comment, even to say it is
- * gone.** `check-wiring.mjs` §`unwiredReason` strips the comment furniture and
- * then matches the tag *anywhere* in what is left, so a backticked mention
- * parses as a live exemption with the rest of the sentence as its reason — and
+ * ⚠️ **That exemption was an `@unwired` tag, and naming it here is now safe**
+ * — a reviewer who remembers this paragraph saying the tag must not be spelled
+ * in this comment is reading the old file. It had to be true: `unwiredReason`
+ * matched the tag *anywhere* in the stripped comment, so a backticked mention
+ * parsed as a live exemption with the rest of the sentence as its reason, and
  * in a file's own doc comment that silences `WIRE001` for the whole module.
- * The first wording of this paragraph did exactly that, and the gate whose
- * first finding was this file could no longer report it. #292.
+ * The gate whose first finding was this file could no longer report it.
+ * [#292](https://github.com/openzigs/onyourleft/issues/292) anchored the match
+ * to the start of a stripped line, so a tag is a tag and a sentence is a
+ * sentence; the constraint a wording rule was standing in for is in the
+ * checker now, where it cannot be forgotten.
  */
 
 import type {
