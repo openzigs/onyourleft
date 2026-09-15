@@ -100,7 +100,7 @@
 
 import { Buffer } from 'node:buffer';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 /** The Capacitor project, relative to the repository root. */
@@ -117,6 +117,22 @@ export const GENERATED_FILES = [
   'android/capacitor.settings.gradle',
   'android/app/capacitor.build.gradle',
 ];
+
+/**
+ * Directories `cap update` writes into that a clean clone does not have.
+ *
+ * ⚠️ **Found by CI, not locally, and that is the point.** `cap update` writes
+ * `capacitor.plugins.json` beside the copied web build, and that whole
+ * directory is `cap copy`'s output and gitignored — so it exists on the machine
+ * of anybody who has ever run `cap sync` and on no fresh checkout. The first CI
+ * run of this gate failed with `ENOENT … capacitor.plugins.json` while the same
+ * command was green locally, which is the "worked on my machine because of
+ * leftover state" shape in its purest form.
+ *
+ * Each is created if absent and **removed again** if this check was the one
+ * that created it, so a run leaves the tree exactly as it found it.
+ */
+export const GENERATED_DIRECTORIES = ['android/app/src/main/assets'];
 
 /** How the two files are put back the way they should be. */
 export const REPAIR =
@@ -228,7 +244,12 @@ export function capacitorDrift({ root, assumeInstalled = false }) {
       `// Put it back: ${REPAIR}\n`,
   );
 
+  const madeDirectories = GENERATED_DIRECTORIES.map((relative) =>
+    join(projectDir, relative),
+  ).filter((directory) => !existsSync(directory));
+
   try {
+    for (const directory of madeDirectories) mkdirSync(directory, { recursive: true });
     for (const file of files) writeFileSync(file.path, marker);
 
     const cap = join(projectDir, 'node_modules', '.bin', 'cap');
@@ -276,6 +297,7 @@ export function capacitorDrift({ root, assumeInstalled = false }) {
       );
     }
   } finally {
+    for (const directory of madeDirectories) rmSync(directory, { recursive: true, force: true });
     for (const [index, file] of files.entries()) {
       if (!existsSync(file.path)) {
         writeFileSync(file.path, original[index]);

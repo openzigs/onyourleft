@@ -571,7 +571,7 @@ bash scripts/check-wiring.test.sh
 # `check:repo`. About half a second.
 pnpm run check:capacitor
 
-# Its own suite. Fixture-driven; 48 assertions over 14 throwaway projects, two
+# Its own suite. Fixture-driven; 52 assertions over 16 throwaway projects, two
 # of them the drift that actually happened -- #276/#277's 8.5.1 path and #298's
 # own artefact, each reproduced from the tree as it was. Needs Node and pnpm, so
 # also not in `check:repo`.
@@ -1654,6 +1654,13 @@ a platform argument it did not understand, a Capacitor release that moved a file
 comparison of a file with itself, which passes whatever the file says. **The originals are put back
 in a `finally`**: a checker that left the repaired file in the tree would turn a red gate into a
 silent `git add -A`.
+
+⚠️ **`cap update` writes into a directory a fresh checkout does not have**, and this gate's own
+first CI run is how that was found. `capacitor.plugins.json` goes beside the copied web build in
+`android/app/src/main/assets/`, which is `cap copy`'s output and gitignored — so it is present on
+any machine that has ever run `cap sync` and absent from every clean clone. The check creates it
+when it is missing and **removes it again only if it was the one that created it**, so a run leaves
+the tree exactly as it found it. A local green said nothing about this; the runner did.
 
 ⚠️ **The cheaper check #299 floats does not work, and the measurement is worth keeping.** Asserting
 that every `node_modules/.pnpm/…` path named in the file exists on disk needs no `cap update` and

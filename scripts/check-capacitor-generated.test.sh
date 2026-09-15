@@ -323,6 +323,49 @@ assert_green 'the gitignored trees the generator also writes do not fail the che
 assert_silent_about 'and the copied web build is not reported' 'assets/public'
 assert_silent_about 'and neither is the cordova plugin tree' 'capacitor-cordova-android-plugins'
 
+# --- The directory `cap update` writes into is made, and unmade ---------------
+# ⚠️ The case CI found and a local run could not. `cap update` writes
+# capacitor.plugins.json beside the copied web build, and that directory is
+# `cap copy`'s output and gitignored -- so it is present on any machine that has
+# ever run `cap sync` and absent from every fresh checkout. This gate's first CI
+# run failed with ENOENT while the same command was green locally.
+new_fixture
+fake_cap <<SH
+$(declare -f settings_at)
+$(declare -f build_with)
+settings_at '8.5.2_@capacitor+core@8.5.2' '8.5.2' > android/capacitor.settings.gradle
+build_with 'capacitor-community-bluetooth-le' > android/app/capacitor.build.gradle
+echo '[]' > android/app/src/main/assets/capacitor.plugins.json
+SH
+run_check
+assert_green 'a generator writing into the gitignored assets directory works on a fresh checkout'
+if [ -e "${tmp}/apps/mobile/android/app/src/main/assets" ]; then
+  fail=$((fail + 1))
+  printf 'FAIL: the directory the check created was not removed again\n\n'
+else
+  pass=$((pass + 1))
+fi
+
+# --- ...and a directory that was already there is left alone -----------------
+new_fixture
+mkdir -p "${tmp}/apps/mobile/android/app/src/main/assets/public"
+echo 'kept' > "${tmp}/apps/mobile/android/app/src/main/assets/public/index.html"
+fake_cap <<SH
+$(declare -f settings_at)
+$(declare -f build_with)
+settings_at '8.5.2_@capacitor+core@8.5.2' '8.5.2' > android/capacitor.settings.gradle
+build_with 'capacitor-community-bluetooth-le' > android/app/capacitor.build.gradle
+echo '[]' > android/app/src/main/assets/capacitor.plugins.json
+SH
+run_check
+assert_green 'a checkout that already has the assets directory passes too'
+if [ "$(cat "${tmp}/apps/mobile/android/app/src/main/assets/public/index.html" 2>/dev/null)" = 'kept' ]; then
+  pass=$((pass + 1))
+else
+  fail=$((fail + 1))
+  printf 'FAIL: a directory the check did not create was removed anyway\n\n'
+fi
+
 # --- CAP001: the install is verified, and its failure is this check's ---------
 # ⚠️ The case that proves --assume-installed is a fixture's flag and not how
 # this runs. #298 regenerated from a node_modules nobody had checked against the
