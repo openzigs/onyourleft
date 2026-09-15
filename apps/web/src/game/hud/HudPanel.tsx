@@ -31,7 +31,13 @@ import type { JSX } from 'react';
 
 import { useUnits } from '../../units/context';
 
-import { NO_READING, hudReadings, profilePosition, type HudInput } from './fields';
+import {
+  NO_READING,
+  hudReadings,
+  profileReading,
+  type HudInput,
+  type ProfileReading,
+} from './fields';
 import { PlanTrace } from './PlanTrace';
 
 /**
@@ -66,7 +72,7 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
 export function HudPanel(props: HudPanelProps): JSX.Element {
   const units = useUnits();
   const readings = hudReadings({ ...props, units });
-  const position = profilePosition(props.state, props.profile);
+  const elevation = profileReading(props.state, props.profile);
 
   return (
     <section className="oyl-hud" aria-label="Ride metrics">
@@ -120,17 +126,19 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
         ))}
       </dl>
 
-      <ElevationStrip position={position} profile={props.profile} />
+      <ElevationStrip reading={elevation} profile={props.profile} />
 
       {/*
         #285 — the other axis. The strip above says how far is left; this says
         where on the road that is. It is handed the ride's own odometer and
         nothing else, for the reason `ElevationStrip` is handed
-        {@link profilePosition}: there is no second value in existence for it to
-        drift from. ⚠️ **The odometer rather than `position`**, which is
-        `profilePosition`'s CLAMPED fraction — on lap two of a loop that value
-        is pinned at 1 and the mark would sit on the finish line for the rest of
-        the ride. `plan.ts` §`planProgress` records the split.
+        {@link profileReading}: there is no second value in existence for it
+        to drift from. ⚠️ **The odometer rather than the strip's fraction**,
+        which is already wrapped — this component needs the unwrapped one,
+        because `riderMark` composes `distanceOnRoute` itself and wrapping twice
+        is not the same as wrapping once. Since #287 both panels wrap through
+        `plan.ts` §`planProgress`; before it, the strip clamped and this comment
+        recorded why the plan view could not read its number.
       */}
       <PlanTrace profile={props.profile} distance={props.state.ride.distance} />
 
@@ -164,19 +172,26 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
  * rest of the HUD is DOM, and it is drawn from the profile's own grid so the
  * shape a rider sees is the shape the trainer is about to make them ride.
  *
- * ⚠️ The marker's position comes from {@link profilePosition}, which reads the
- * ride state's distance and nothing else. #94's third criterion asks for exactly
- * that — *"a test asserts the marker tracks the physics position rather than a
- * separately-computed value that can drift"* — and the way to satisfy it is to
- * leave no second value in existence to drift from.
+ * ⚠️ The marker's position, the sentence and the accessible name all come from
+ * one {@link profileReading}, which reads the ride state's distance and nothing
+ * else. #94's third criterion asks for exactly that — *"a test asserts the
+ * marker tracks the physics position rather than a separately-computed value
+ * that can drift"* — and the way to satisfy it is to leave no second value in
+ * existence to drift from. This component therefore computes no percentage of
+ * its own; it is handed one and renders it three ways.
+ *
+ * ⚠️ **The picture is unchanged on a loop and that is deliberate — #287.** The
+ * elevation profile genuinely ends, so there is no more road to draw; what a
+ * second lap changes is where the marker is on it, which now sweeps the strip
+ * again rather than sitting on the right-hand edge for the rest of the ride.
  */
 function ElevationStrip(props: {
-  readonly position: number;
+  readonly reading: ProfileReading;
   readonly profile: HudInput['profile'];
 }): JSX.Element {
   const elevations = props.profile.elevations;
   const points = strip(elevations);
-  const percent = props.position * 100;
+  const percent = props.reading.position * 100;
   return (
     <div className="oyl-hud__profile">
       <svg
@@ -184,7 +199,7 @@ function ElevationStrip(props: {
         viewBox="0 0 100 24"
         preserveAspectRatio="none"
         role="img"
-        aria-label={`Route profile, ${String(Math.round(percent))} per cent complete`}
+        aria-label={props.reading.label}
       >
         <polyline className="oyl-hud__profile-line" points={points} />
         <line
@@ -194,7 +209,13 @@ function ElevationStrip(props: {
           x2={percent}
           y2={24}
           data-testid="oyl-hud-position"
-          data-position={String(props.position)}
+          // ⚠️ **The contract this attribute carries changed in #287**: it is
+          // the fraction along the profile, WRAPPED on a `loop: true` route and
+          // clamped on any other, rather than always clamped. It is the same
+          // number the marker's `x` is drawn from and the same one the sentence
+          // below is rounded from, so a test reading it is reading what the
+          // rider sees. `HudPanel.a11y.test.tsx` asserts both halves.
+          data-position={String(props.reading.position)}
         />
       </svg>
       {/*
@@ -202,7 +223,7 @@ function ElevationStrip(props: {
         chart (#77's, #50's). A profile is a picture of a number, and the number
         is available.
       */}
-      <p className="oyl-hud__profile-text">{Math.round(percent)}% complete</p>
+      <p className="oyl-hud__profile-text">{props.reading.text}</p>
     </div>
   );
 }

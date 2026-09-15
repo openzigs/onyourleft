@@ -42,6 +42,8 @@ import { formatDistance, formatSpeed, type Measurement } from '../../units/forma
 import type { GhostOutcome } from '../ghost-outcome';
 import type { GameState } from '../simulation';
 
+import { planLap, planProgress } from './plan';
+
 /** What a HUD shows where it has no trustworthy number. An em dash. */
 export const NO_READING = '—';
 
@@ -394,19 +396,60 @@ function reading(
 }
 
 /**
- * Where the rider is on the elevation profile, as a fraction from 0 to 1.
+ * Everything the elevation strip shows, from one number — #287.
  *
- * #94's third criterion: *"a test asserts the marker tracks the physics position
- * rather than a separately-computed value that can drift"*. So this takes the
- * ride state and nothing else — there is no second odometer it could disagree
- * with, because there is no second odometer.
+ * ⚠️ **One value, formatted three times.** #94's third criterion is *"a test
+ * asserts the marker tracks the physics position rather than a
+ * separately-computed value that can drift"*, and the marker is no longer the
+ * only thing on that strip: the sentence beside it and the picture's accessible
+ * name say the same thing in words. Three call sites computing their own
+ * percentage is the drift that criterion forbids, arrived at from the side, so
+ * all three come out of {@link profileReading} together.
  */
-export function profilePosition(state: GameState, profile: RouteProfile): number {
-  const total = profile.totalDistance as number;
-  if (!(total > 0)) {
-    return 0;
-  }
-  return Math.min(1, Math.max(0, (state.ride.distance as number) / total));
+export interface ProfileReading {
+  /**
+   * Where the rider is along the profile, as a fraction from 0 to 1.
+   *
+   * ⚠️ **Wrapped on a loop and clamped otherwise**, which is
+   * `plan.ts` §`planProgress` — the same function the plan view's mark is placed
+   * by, rather than a second one with the same job. This used to be clamped
+   * unconditionally, and #287 is what that cost: a rider's odometer keeps
+   * counting past `totalDistance` while a loop's geometry wraps, so from the
+   * first crossing of the line the strip read 1 and stayed there for lap two,
+   * lap three and lap ten.
+   */
+  readonly position: number;
+  /** The sentence under the strip. A rider reads this one. */
+  readonly text: string;
+  /** The picture's accessible name. A screen reader reads this one. */
+  readonly label: string;
+}
+
+/**
+ * The elevation strip's reading for a ride state.
+ *
+ * ⚠️ **The lap is what makes the wrapped fraction readable, and it is only
+ * offered for a loop.** `25% complete` on lap two would be a worse lie than the
+ * one it replaces — the rider has ridden further than the route is long. So a
+ * loop reads `25% of lap 2`, and a point-to-point route reads `100% complete`
+ * past its end exactly as it did before, because there the rider really has
+ * finished. `plan.ts` §`planLap` is where "which lap" is decided, and it returns
+ * nothing at all for a route that is not a loop.
+ */
+export function profileReading(state: GameState, profile: RouteProfile): ProfileReading {
+  const distance = state.ride.distance as number;
+  const position = planProgress(profile, distance);
+  const lap = planLap(profile, distance);
+  const percent = String(Math.round(position * 100));
+  // One phrase, so the sentence and the accessible name cannot describe
+  // different rides. `per cent` is spelled out in the label because a screen
+  // reader announcing `%` is the one place the two audiences differ.
+  const where = lap === undefined ? 'complete' : `of lap ${String(lap)}`;
+  return {
+    position,
+    text: `${percent}% ${where}`,
+    label: `Route profile, ${percent} per cent ${where}`,
+  };
 }
 
 /** The gap input for a chased rider, so a caller need not assemble it. @see pacerGap */

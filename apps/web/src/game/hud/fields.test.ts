@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { NO_READING, gapAgainst, hudReadings, profilePosition, type HudInput } from './fields';
+import { NO_READING, gapAgainst, hudReadings, profileReading, type HudInput } from './fields';
 import { atStartLine } from '../simulation';
 import {
   altitudeMetres,
@@ -43,6 +43,57 @@ function route(): ReturnType<typeof routeProfile> {
 
 function baseInput(): HudInput {
   const profile = route();
+  return {
+    profile,
+    state: atStartLine(profile),
+    cadence: { value: 88, live: true },
+    heartRate: { value: 152, live: true },
+  };
+}
+
+/**
+ * A 400 m x 200 m circuit, closed, so `loop: true` is honest — #287.
+ *
+ * `route()` above is a straight kilometre and can never be a loop, which is why
+ * the clamped fraction survived this file for as long as it did: every
+ * assertion here was made against the one shape the clamp is correct for.
+ */
+function circuit(): ReturnType<typeof routeProfile> {
+  const metresPerDegree = 111_320;
+  const halfHeight = 100 / metresPerDegree;
+  const east = 400 / (metresPerDegree * Math.cos((51.5 * Math.PI) / 180));
+  const corners: readonly (readonly [number, number])[] = [
+    [51.5 - halfHeight, -0.12],
+    [51.5 - halfHeight, -0.12 + east],
+    [51.5 + halfHeight, -0.12 + east],
+    [51.5 + halfHeight, -0.12],
+    [51.5 - halfHeight, -0.12],
+  ];
+  const points: RoutePoint[] = [];
+  for (let corner = 0; corner < corners.length - 1; corner += 1) {
+    const [fromLatitude, fromLongitude] = corners[corner] as readonly [number, number];
+    const [toLatitude, toLongitude] = corners[corner + 1] as readonly [number, number];
+    for (let step = 0; step < 40; step += 1) {
+      const fraction = step / 40;
+      points.push({
+        position: geographicPosition(
+          degreesLatitude(fromLatitude + (toLatitude - fromLatitude) * fraction),
+          degreesLongitude(fromLongitude + (toLongitude - fromLongitude) * fraction),
+        ),
+        elevation: altitudeMetres(10 + step * 0.1),
+      });
+    }
+  }
+  const [lastLatitude, lastLongitude] = corners[corners.length - 1] as readonly [number, number];
+  points.push({
+    position: geographicPosition(degreesLatitude(lastLatitude), degreesLongitude(lastLongitude)),
+    elevation: altitudeMetres(10),
+  });
+  return routeProfile(points, { loop: true });
+}
+
+function loopInput(): HudInput {
+  const profile = circuit();
   return {
     profile,
     state: atStartLine(profile),
@@ -196,10 +247,13 @@ describe('the HUD shows the simulation’s numbers and not its own', () => {
       state: { ...input.state, ride: { speed: metresPerSecond(0), distance: metres(total / 2) } },
     };
 
-    expect(profilePosition(halfway.state, halfway.profile)).toBeCloseTo(0.5, 6);
+    expect(profileReading(halfway.state, halfway.profile).position).toBeCloseTo(0.5, 6);
   });
 
-  it('clamps the marker rather than running it off the end on a loop', () => {
+  it('still reads the whole thing complete past the end of a route that is not a loop', () => {
+    // #287's second criterion. Past the end of a point-to-point route the rider
+    // HAS finished, and the clamp is the honest answer there — which is why the
+    // wrap below is conditional on `profile.loop` rather than unconditional.
     const input = baseInput();
     const total: number = input.profile.totalDistance;
     const past: HudInput = {
@@ -207,7 +261,79 @@ describe('the HUD shows the simulation’s numbers and not its own', () => {
       state: { ...input.state, ride: { speed: metresPerSecond(0), distance: metres(total * 3) } },
     };
 
-    expect(profilePosition(past.state, past.profile)).toBe(1);
+    const reading = profileReading(past.state, past.profile);
+
+    expect(past.profile.loop).toBe(false);
+    expect(reading.position).toBe(1);
+    expect(reading.text).toBe('100% complete');
+    expect(reading.label).toBe('Route profile, 100 per cent complete');
+  });
+
+  it('wraps rather than reading 100% complete for the whole of lap two', () => {
+    // #287's first criterion, and the defect itself: the clamped fraction pinned
+    // this at 1 from the first crossing of the line to the end of the ride.
+    const input = loopInput();
+    const total: number = input.profile.totalDistance;
+    const lapTwo: HudInput = {
+      ...input,
+      state: {
+        ...input.state,
+        ride: { speed: metresPerSecond(8), distance: metres(total * 1.25) },
+      },
+    };
+
+    const reading = profileReading(lapTwo.state, lapTwo.profile);
+
+    expect(reading.position).toBeCloseTo(0.25, 6);
+    expect(reading.text).toBe('25% of lap 2');
+    expect(reading.label).toBe('Route profile, 25 per cent of lap 2');
+    expect(reading.text).not.toContain('complete');
+  });
+
+  it('is in the same place a quarter of the way round on every lap', () => {
+    // The stronger form of the criterion above: not merely "less than 1" on lap
+    // two, but the SAME reading the rider saw at the same point of lap one. A
+    // fraction that decayed, or one that counted the whole ride against a
+    // growing total, would satisfy "not 100 %" and still be wrong.
+    const input = loopInput();
+    const total: number = input.profile.totalDistance;
+    const at = (distance: number): ReturnType<typeof profileReading> =>
+      profileReading(
+        { ...input.state, ride: { speed: metresPerSecond(8), distance: metres(distance) } },
+        input.profile,
+      );
+
+    expect(at(total * 3.25).position).toBeCloseTo(at(total * 0.25).position, 6);
+    expect(at(total * 3.25).text).toBe('25% of lap 4');
+    expect(at(total * 0.25).text).toBe('25% of lap 1');
+  });
+
+  it('says the same thing in the picture and in the sentence, from one value', () => {
+    // #94's third criterion, widened by #287's third: the marker's fraction, the
+    // sentence beside it and the picture's accessible name are one value
+    // formatted three times, so none of them can drift from the other two.
+    const input = loopInput();
+    const total: number = input.profile.totalDistance;
+
+    for (const fraction of [0, 0.37, 0.99, 1, 1.6, 2.5]) {
+      const reading = profileReading(
+        { ...input.state, ride: { speed: metresPerSecond(8), distance: metres(total * fraction) } },
+        input.profile,
+      );
+      const percent = String(Math.round(reading.position * 100));
+
+      expect(reading.text.startsWith(`${percent}%`)).toBe(true);
+      expect(reading.label.startsWith(`Route profile, ${percent} per cent`)).toBe(true);
+    }
+  });
+
+  it('reads nothing at all off a route with no length', () => {
+    const input = baseInput();
+    const empty = { ...input.profile, totalDistance: metres(0) };
+    const state = { ...input.state, ride: { speed: metresPerSecond(0), distance: metres(500) } };
+
+    expect(profileReading(state, empty).position).toBe(0);
+    expect(profileReading(state, empty).text).toBe('0% complete');
   });
 });
 

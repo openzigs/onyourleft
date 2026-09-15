@@ -98,6 +98,48 @@ function route(): ReturnType<typeof routeProfile> {
   return routeProfile(points);
 }
 
+/**
+ * A 400 m x 200 m circuit, closed, so `loop: true` is honest.
+ *
+ * ⚠️ At module scope rather than inside #285's describe block, because #287
+ * needs it too: `route()` above is a straight kilometre and can never be a loop,
+ * which is the one shape the elevation strip's old clamped fraction was correct
+ * for.
+ */
+function circuit(): ReturnType<typeof routeProfile> {
+  const metresPerDegree = 111_320;
+  const halfHeight = 100 / metresPerDegree;
+  const east = 400 / (metresPerDegree * Math.cos((51.5 * Math.PI) / 180));
+  const corners: readonly (readonly [number, number])[] = [
+    [51.5 - halfHeight, -0.12],
+    [51.5 - halfHeight, -0.12 + east],
+    [51.5 + halfHeight, -0.12 + east],
+    [51.5 + halfHeight, -0.12],
+    [51.5 - halfHeight, -0.12],
+  ];
+  const points: RoutePoint[] = [];
+  for (let corner = 0; corner < corners.length - 1; corner += 1) {
+    const [fromLatitude, fromLongitude] = corners[corner] as readonly [number, number];
+    const [toLatitude, toLongitude] = corners[corner + 1] as readonly [number, number];
+    for (let step = 0; step < 40; step += 1) {
+      const fraction = step / 40;
+      points.push({
+        position: geographicPosition(
+          degreesLatitude(fromLatitude + (toLatitude - fromLatitude) * fraction),
+          degreesLongitude(fromLongitude + (toLongitude - fromLongitude) * fraction),
+        ),
+        elevation: altitudeMetres(10),
+      });
+    }
+  }
+  const [lastLatitude, lastLongitude] = corners[corners.length - 1] as readonly [number, number];
+  points.push({
+    position: geographicPosition(degreesLatitude(lastLatitude), degreesLongitude(lastLongitude)),
+    elevation: altitudeMetres(10),
+  });
+  return routeProfile(points, { loop: true });
+}
+
 function props(overrides: Partial<HudInput> = {}): HudInput & {
   onPause: () => void;
   onEnd: () => void;
@@ -206,6 +248,93 @@ describe('the position marker tracks the physics', () => {
     );
 
     expect(document.body.textContent).toContain('50% complete');
+  });
+
+  /**
+   * What `data-position` means, stated — #287's fourth criterion.
+   *
+   * ⚠️ **The contract the two assertions above rest on changed.** It was *the
+   * rider's distance over the route's length, clamped to 1*. It is now *the
+   * fraction along the profile the marker is drawn at, wrapped on a
+   * `loop: true` route and clamped on any other* — the same number the sentence
+   * beside the strip is rounded from, which is why the three tests below read
+   * the attribute and the text together rather than either alone. A marker that
+   * agreed with no sentence would satisfy the old contract and still be the
+   * defect #287 is about.
+   */
+  describe('and says the same thing in words', () => {
+    it('does not tell a rider on lap two that the ride is complete', async () => {
+      const profile = circuit();
+      const total: number = profile.totalDistance;
+      const base = props({ profile });
+      mounted = await mount(
+        inRideScreen(
+          <HudPanel
+            {...base}
+            state={{
+              ...base.state,
+              ride: { speed: metresPerSecond(8), distance: metres(total * 1.25) },
+            }}
+          />,
+        ),
+      );
+
+      const marker = document.querySelector('[data-testid="oyl-hud-position"]');
+      expect(Number(marker?.getAttribute('data-position'))).toBeCloseTo(0.25, 6);
+      expect(document.body.textContent).toContain('25% of lap 2');
+      expect(document.body.textContent).not.toContain('100% complete');
+      expect(document.querySelector('.oyl-hud__profile-svg')?.getAttribute('aria-label')).toBe(
+        'Route profile, 25 per cent of lap 2',
+      );
+    });
+
+    it('still tells a rider past the end of a point-to-point route that it is', async () => {
+      const base = props();
+      const total: number = base.profile.totalDistance;
+      mounted = await mount(
+        inRideScreen(
+          <HudPanel
+            {...base}
+            state={{
+              ...base.state,
+              ride: { speed: metresPerSecond(0), distance: metres(total * 2) },
+            }}
+          />,
+        ),
+      );
+
+      const marker = document.querySelector('[data-testid="oyl-hud-position"]');
+      expect(base.profile.loop).toBe(false);
+      expect(Number(marker?.getAttribute('data-position'))).toBe(1);
+      expect(document.body.textContent).toContain('100% complete');
+    });
+
+    it('draws the marker where the sentence says it is', async () => {
+      // The picture and the words out of one value (#94's third criterion,
+      // widened by #287's third). The marker's `x` is the fraction as a
+      // percentage of the viewBox, so reading both off the DOM is what catches
+      // a second percentage computed in the component.
+      const profile = circuit();
+      const total: number = profile.totalDistance;
+      const base = props({ profile });
+      mounted = await mount(
+        inRideScreen(
+          <HudPanel
+            {...base}
+            state={{
+              ...base.state,
+              ride: { speed: metresPerSecond(8), distance: metres(total * 2.4) },
+            }}
+          />,
+        ),
+      );
+
+      const marker = document.querySelector('[data-testid="oyl-hud-position"]');
+      const x = Number(marker?.getAttribute('x1'));
+      const said = document.querySelector('.oyl-hud__profile-text')?.textContent ?? '';
+      expect(said).toBe(`${String(Math.round(x))}% of lap 3`);
+      expect(Number(marker?.getAttribute('data-position')) * 100).toBeCloseTo(x, 6);
+    });
   });
 });
 
@@ -434,40 +563,8 @@ describe('the gap says who is ahead, to the eye and to a screen reader (#255)', 
  * gap in its own header. This file is the one place the gate sees this panel.
  */
 describe('the route in plan (#285)', () => {
-  /** A 400 m × 200 m circuit, closed, so `loop: true` is honest. */
-  function loop(): ReturnType<typeof routeProfile> {
-    const metresPerDegree = 111_320;
-    const halfHeight = 100 / metresPerDegree;
-    const east = 400 / (metresPerDegree * Math.cos((51.5 * Math.PI) / 180));
-    const corners: readonly (readonly [number, number])[] = [
-      [51.5 - halfHeight, -0.12],
-      [51.5 - halfHeight, -0.12 + east],
-      [51.5 + halfHeight, -0.12 + east],
-      [51.5 + halfHeight, -0.12],
-      [51.5 - halfHeight, -0.12],
-    ];
-    const points: RoutePoint[] = [];
-    for (let corner = 0; corner < corners.length - 1; corner += 1) {
-      const [fromLatitude, fromLongitude] = corners[corner] as readonly [number, number];
-      const [toLatitude, toLongitude] = corners[corner + 1] as readonly [number, number];
-      for (let step = 0; step < 40; step += 1) {
-        const fraction = step / 40;
-        points.push({
-          position: geographicPosition(
-            degreesLatitude(fromLatitude + (toLatitude - fromLatitude) * fraction),
-            degreesLongitude(fromLongitude + (toLongitude - fromLongitude) * fraction),
-          ),
-          elevation: altitudeMetres(10),
-        });
-      }
-    }
-    const [lastLatitude, lastLongitude] = corners[corners.length - 1] as readonly [number, number];
-    points.push({
-      position: geographicPosition(degreesLatitude(lastLatitude), degreesLongitude(lastLongitude)),
-      elevation: altitudeMetres(10),
-    });
-    return routeProfile(points, { loop: true });
-  }
+  /** The module-scope circuit, which #287 shares. @see circuit */
+  const loop = circuit;
 
   function markAt(): { readonly x: number; readonly y: number } {
     const mark = document.querySelector('[data-testid="oyl-hud-plan-here"]');
@@ -515,10 +612,11 @@ describe('the route in plan (#285)', () => {
 
   it('puts the rider in the right place on lap two of a loop', async () => {
     // ⚠️ #285's fourth criterion, read off the rendered panel rather than off
-    // the projection. The elevation strip beside it is pinned at 100 % for this
-    // same ride state — `fields.ts` §`profilePosition` clamps — so a plan view
-    // that read the strip's number would draw the rider on the finish line for
-    // the whole of lap two.
+    // the projection. ⚠️ **This comment used to say the elevation strip beside
+    // it was pinned at 100 % for this same ride state, because
+    // `fields.ts` §`profilePosition` clamped — #287 fixed that and the strip now
+    // shares this panel's wrapped fraction.** What the assertion below still
+    // catches is a mark placed from a clamped value of any origin.
     const profile = loop();
     const total: number = profile.totalDistance;
     const base = props({ profile });

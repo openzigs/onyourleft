@@ -175,7 +175,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         that keeps a rider on lap two off the finish line.
                         ⚠️ It needs NO basemap and issues no request: it is a
                         projection of `RouteProfile.positions`, which the game
-                        already holds
+                        already holds. ⚠️ **Since #287 the elevation strip
+                        shares that wrapped fraction** — it used to clamp, and
+                        a reviewer who remembers the two deliberately
+                        disagreeing is reading the old file
     src/game/sensors.ts the four metric states the ride controller reports,
                         mapped to the three things a HUD renders
     src/game/ghost-source.ts
@@ -2162,6 +2165,7 @@ top of an issue **supersedes its body**.
 | What the lighting actually costs a frame, and why the number is published rather than asserted | `apps/web/browser/game.browser.spec.ts` §"measures what the shading costs", `apps/web/browser/game-harness.ts` §`awaitTheGpu` |
 | Why the HUD's panel is opaque, and why that is what makes its contrast checkable | `apps/web/src/design/tokens.ts` §`hudSurface` |
 | How a rider tells a dropped sensor from a genuine zero | `apps/web/src/game/hud/fields.ts` §`NO_READING`, `HudPanel.a11y.test.tsx` |
+| What the elevation strip says on lap two of a loop, and why a point-to-point route still reads 100 % | `apps/web/src/game/hud/fields.ts` §`profileReading`, `plan.ts` §`planProgress` |
 | Why the wake lock's *release* is the half that is tested | `apps/web/src/game/hud/wake-lock.ts` |
 | Why the plan view needs no basemap, and what proves it asks for no tile | `apps/web/src/game/hud/plan.ts`, `apps/web/src/game/plan-no-network.test.tsx` |
 | Why the plan view is north-up rather than heading-up, and where the rider's mark comes from | `apps/web/src/game/hud/plan.ts` §`riderMark`, §"North-up, deliberately" |
