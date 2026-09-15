@@ -252,6 +252,45 @@ jobs:
       - name: Wiring gate checker tests
         run: bash scripts/check-wiring.test.sh
 
+      # The generated-artefact gate (#299). `cap sync` writes two files this
+      # repository commits, and pnpm's store path carries the PEER version as
+      # well as the package's own -- so any Capacitor bump invalidates
+      # capacitor.settings.gradle, and #276/#277 did exactly that. Nothing could
+      # see it: CI never builds Android, release.yml is tag-triggered and has
+      # never run, and the documented local sequence regenerates the file before
+      # Gradle reads it, so the person most likely to notice is the one whose
+      # workflow guarantees they cannot.
+      #
+      # This regenerates with `cap update android` and fails if either file
+      # changes. It runs its own `pnpm install --frozen-lockfile` first, and that
+      # is not ceremony: #298 regenerated from a node_modules nobody had checked
+      # against the lockfile and committed a DIFFERENT wrong path. A no-op here,
+      # a few hundred milliseconds, because the install step above already ran.
+      #
+      # ⚠️ It does NOT need the build, and the reason is not obvious: `cap
+      # update` falls back to a full `copy` when the copied-build directory
+      # is missing, and `copy` refuses to start without apps/web/dist. Both
+      # CI runs of this gate's first two commits died on exactly that, in two
+      # different ways, because a developer's tree always has the gitignored
+      # directories a fresh checkout does not. The checker creates them and
+      # removes them again -- see GENERATED_DIRECTORIES before moving this
+      # step or concluding it belongs after Build.
+      #
+      # It needs an install, so it is NOT in `check:repo`, the bare-clone set.
+      # In this job rather than one of its own, for the reason every step above
+      # gives: `main` requires a status check whose context is exactly
+      # "Repository rules".
+      - name: Capacitor generated files
+        run: pnpm run check:capacitor
+
+      # Its own suite, for the reason every checker here has one. Two of its red
+      # cases are the drift that actually happened, reproduced from the tree as
+      # it was -- including #298's own artefact, where the `core` half of the
+      # path is right and the `android` half is wrong, which is what a check
+      # comparing one dependency or stopping at the first path would pass.
+      - name: Capacitor gate checker tests
+        run: bash scripts/check-capacitor-generated.test.sh
+
       # The renderer has logic of its own -- it decides which package a covered
       # file belongs to, from absolute paths that differ between a checkout, a
       # runner and a worktree -- so it has a suite, and the suite runs here. Its
