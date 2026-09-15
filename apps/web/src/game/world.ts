@@ -24,7 +24,10 @@
  * **Latitude.** The mean absolute latitude of the route's own positions. The
  * sun's elevation falls monotonically from the equator to a pole, and with it
  * the colour of the sky and what grows under it. {@link warmth} is that axis,
- * 1 at the equator and 0 at a pole.
+ * 1 at the equator and 0 at a pole. ⚠️ **Since #286 it also decides where the
+ * sun actually is**, and not only what colour it makes things: {@link SunStyle}
+ * is the world's one light direction, and the same sentence that was already
+ * true of the sky is what its elevation is interpolated along.
  *
  * **Altitude, twice over.** The mean elevation decides two different things and
  * they are deliberately computed separately:
@@ -49,6 +52,8 @@
  * | {@link SNOW_BAND_METRES} | **This repository's own.** Tree line and snow line are separated by a few hundred metres to a kilometre and no single published figure applies everywhere |
  * | {@link FOG_OCCLUSION_AT_VIEW_END} | **This repository's own**, and it is a requirement rather than a taste: #241 keeps `VIEW_AHEAD_METRES` at 400 and hides the corridor's cut end with depth instead of extending it. The density follows from this number and from `terrain.ts`'s own view distance, so the two cannot drift |
  * | The eight sRGB endpoints | **This repository's own**, chosen to satisfy the properties `world.test.ts` asserts — the sky's blue channel is always its largest, the ground brightens monotonically from vegetation through rock to snow — rather than to match any image |
+ * | {@link SUN_ELEVATION_AT_EQUATOR_DEGREES}, {@link SUN_ELEVATION_AT_POLE_DEGREES} | The *fall* from equator to pole is plane geometry, the same fact {@link warmth} rests on. The two ends of the band are **this repository's own** — the top so that a vertical face is not unlit, the bottom so that no lit colour clips, which `three-renderer.test.ts` checks against {@link PEAK_IRRADIANCE} rather than taking on trust |
+ * | {@link SUN_AZIMUTH_DEGREES}, {@link SUN_AMBIENT_SHARE} | **This repository's own.** Each carries its requirement at its own declaration, and each has a `world.test.ts` assertion that goes red if it is set to zero |
  *
  * ## What it deliberately does not model
  *
@@ -80,6 +85,54 @@ export interface WorldStyle {
   readonly horizonColour: number;
   /** Exponential fog density, per metre. 0 disables fog. */
   readonly fogDensity: number;
+  /** Where the light comes from, and how much of it — #286. @see SunStyle */
+  readonly sun: SunStyle;
+}
+
+/**
+ * The one light direction the world has — #286.
+ *
+ * ## Why a direction is worth a field at all
+ *
+ * Until #286 every mesh in `three-renderer.ts` was a `MeshBasicMaterial`,
+ * which is unlit by definition, so a conifer and the grass behind it differed
+ * only in hue: nothing had a lit side and a shaded side, and the scene read as
+ * coloured paper shapes. One direction and two intensities is the whole of the
+ * fix — **no asset, no texture, no model and no new dependency**, which is why
+ * ADR 0009 L2 is not engaged by it at all.
+ *
+ * ## The units are normalised, and that is a decision
+ *
+ * {@link ambient} and {@link direct} are shares of the light a **horizontal**
+ * surface receives, not three's own intensities: three's Lambert shader
+ * divides by π and `three-renderer.ts` multiplies it back, with the shader
+ * chunk cited at the constant that does it. A renderer's unit convention is a
+ * renderer's business, and this file must not know one — it is on the side of
+ * `port.ts` that ADR 0008 D-2's fallback would keep.
+ *
+ * ⚠️ **The two intensities are chosen so a horizontal surface receives exactly
+ * 1**, which is what lets the ground plane and the road stay unlit and still
+ * agree with the scenery standing on them: an unlit surface renders at its own
+ * colour, and so does a lit horizontal one. `world.test.ts` asserts that
+ * identity on every route rather than leaving it to this paragraph, because it
+ * is the property the whole change rests on.
+ */
+export interface SunStyle {
+  /**
+   * A unit vector from the ground **toward** the sun, in the corridor's frame
+   * — `x` east, `y` up, `z` north, exactly as `terrain.ts` builds it.
+   */
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  /**
+   * The share of a horizontal surface's light that arrives from the whole sky
+   * rather than from the sun — so also, exactly, what a face turned away from
+   * the sun receives.
+   */
+  readonly ambient: number;
+  /** What a face square-on to the sun receives from it, on the same scale. */
+  readonly direct: number;
 }
 
 /**
@@ -153,6 +206,159 @@ export const MINIMUM_VIEW_END_OCCLUSION = 0.75;
  * density is derived from the view distance rather than from this number.
  */
 export const NEAR_FOG_LIMIT = 0.02;
+
+/**
+ * The sun's elevation above the horizon at the equator, in degrees: **70**.
+ *
+ * ⚠️ **The direction of the fall is the fact; the two ends of the band are
+ * this repository's own.** Solar elevation decreases monotonically from the
+ * equator to a pole — that is plane geometry and it is the same fact
+ * {@link warmth} already rests on — so the elevation is interpolated along the
+ * axis this file already reads. What is *chosen* is where the band starts and
+ * stops, and each end answers a requirement rather than a taste:
+ *
+ * - **The top is not 90°.** A sun straight overhead lights every vertical face
+ *   identically, which is a light direction that gives a tree no lit side and
+ *   no shaded one — exactly the flatness #286 exists to remove. 70° leaves a
+ *   sunward face of a conifer about half as bright again as its shaded one.
+ * - **The bottom is {@link SUN_ELEVATION_AT_POLE_DEGREES}**, and that one has
+ *   a derivation rather than an argument.
+ */
+export const SUN_ELEVATION_AT_EQUATOR_DEGREES = 70;
+
+/**
+ * The sun's elevation at a pole, in degrees: **55**.
+ *
+ * ⚠️ **The floor exists because a low sun makes a bright face clip**, and the
+ * number is checked rather than asserted. {@link SunStyle.direct} is solved
+ * from the requirement that a horizontal surface receive exactly 1, so it is
+ * `(1 − ambient) / sin(elevation)` and it grows without limit as the sun sinks
+ * — and a face square-on to a sun that intense renders above white and is
+ * clamped, which turns a shaded model into a flat white patch.
+ *
+ * {@link PEAK_IRRADIANCE} is what that costs at this elevation, and
+ * `three-renderer.test.ts` §"lights no colour past white" multiplies it
+ * through **every lit colour in the scene**, in the linear space the shader
+ * works in. Lowering this number, or adding a brighter scenery colour, turns
+ * that test red — which is the point: the constraint is stated once, in the
+ * one place that can see both halves of it.
+ */
+export const SUN_ELEVATION_AT_POLE_DEGREES = 55;
+
+/**
+ * Where the sun is in the compass, in degrees clockwise from north: **135**.
+ *
+ * **This repository's own**, with one requirement: it is not along an axis of
+ * the corridor's own frame, so a road running due north and a road running due
+ * east are lit from different sides rather than both being lit head-on. The
+ * sun is fixed in the **world** and the rider turns under it, which is what
+ * makes a bend read as a bend — the lit verge changes as the road swings.
+ *
+ * ⚠️ **What that gets wrong, stated rather than discovered later:** a route
+ * that happens to run along this azimuth is lit from behind for its whole
+ * length, and its two verges are shaded alike. Deriving the azimuth from the
+ * route's own principal axis would fix it and is not done here — it is a
+ * second pass over the positions on a path `worldStyle` is called from every
+ * frame, and #240's NFR-2 is that the frame's cost must not grow with the
+ * route.
+ */
+export const SUN_AZIMUTH_DEGREES = 135;
+
+/**
+ * The share of a horizontal surface's light that comes from the sky: **0.4**.
+ *
+ * **This repository's own**, and bounded at both ends by a requirement rather
+ * than picked for looks:
+ *
+ * - **Above zero**, or a face turned away from the sun is black and the
+ *   scenery reads as silhouettes rather than as objects. `world.test.ts`
+ *   §"leaves a shaded face readable" is what says so — #241's lesson is that a
+ *   constant which can be set to zero with the suite still green is not
+ *   covered, and zero is precisely the value this one must not take.
+ * - **Well below one**, or nothing has a lit side and the scene is exactly as
+ *   flat as it was before #286. `world.test.ts` §"gives a sunward face a real
+ *   lead over a shaded one" is the other half.
+ *
+ * A clear-sky diffuse fraction on a horizontal surface is of this order rather
+ * than this number; nothing here claims to be an irradiance model, and the two
+ * assertions above are the whole of what it has to satisfy.
+ */
+export const SUN_AMBIENT_SHARE = 0.4;
+
+/**
+ * One degree in radians.
+ *
+ * ⚠️ Declared **above** {@link PEAK_IRRADIANCE} rather than beside the two
+ * functions that use it: that constant's initialiser calls
+ * {@link directIntensity} at module load, and a `const` below it is still in
+ * its temporal dead zone at that moment. A hoisted function does not save it.
+ */
+const DEGREES_TO_RADIANS = Math.PI / 180;
+
+/**
+ * The most light any surface can receive, on any route: about **1.13**.
+ *
+ * A face square-on to the sun at the lowest elevation the band reaches — which
+ * is the worst case, because {@link SunStyle.direct} is largest there. Above 1
+ * by construction: a horizontal surface receives exactly 1, and a surface
+ * tilted into the sun receives more.
+ *
+ * ⚠️ **Exported so that the palette can be checked against it**, which is the
+ * only thing that keeps {@link SUN_ELEVATION_AT_POLE_DEGREES} honest — the
+ * colours live in `three-renderer.ts` and this file must never see them.
+ *
+ * @unwired a bound `three-renderer.test.ts` multiplies through every lit
+ * colour in the scene; nothing in the client evaluates it.
+ */
+export const PEAK_IRRADIANCE = SUN_AMBIENT_SHARE + directIntensity(SUN_ELEVATION_AT_POLE_DEGREES);
+
+/**
+ * How much light a surface facing `(nx, ny, nz)` receives from `sun`.
+ *
+ * The Lambert term three's own shader computes, written here rather than read
+ * off the renderer — `lights_lambert_pars_fragment.glsl.js` is
+ * `saturate(dot(normal, lightDirection)) * lightColour`, plus the ambient
+ * irradiance, and this is that with the π both sides cancel.
+ *
+ * @unwired three applies its own Lambert term in the shader, so nothing in the
+ * client evaluates this — it exists to make that shader's behaviour checkable
+ * where there is no GL context, which is every test in the Vitest suite.
+ * `fogFactor` above it exists for exactly the same reason.
+ */
+export function irradianceOn(sun: SunStyle, nx: number, ny: number, nz: number): number {
+  const facing = Math.max(0, nx * sun.x + ny * sun.y + nz * sun.z);
+  return sun.ambient + sun.direct * facing;
+}
+
+/**
+ * The sun a route implies.
+ *
+ * ⚠️ **`direct` is solved, not chosen.** The requirement is that a horizontal
+ * surface receive exactly 1 — see {@link SunStyle} — so with the sun's own
+ * `y` being `sin(elevation)`, `ambient + direct · sin(elevation) = 1` and
+ * there is one value `direct` can take. Writing the two numbers down instead
+ * would let them disagree the day the elevation band moves.
+ */
+function sunFor(warmth: number): SunStyle {
+  const elevation =
+    SUN_ELEVATION_AT_POLE_DEGREES +
+    (SUN_ELEVATION_AT_EQUATOR_DEGREES - SUN_ELEVATION_AT_POLE_DEGREES) * clamp01(warmth);
+  const elevationRadians = elevation * DEGREES_TO_RADIANS;
+  const azimuthRadians = SUN_AZIMUTH_DEGREES * DEGREES_TO_RADIANS;
+  const horizontal = Math.cos(elevationRadians);
+  return {
+    x: horizontal * Math.sin(azimuthRadians),
+    y: Math.sin(elevationRadians),
+    z: horizontal * Math.cos(azimuthRadians),
+    ambient: SUN_AMBIENT_SHARE,
+    direct: directIntensity(elevation),
+  };
+}
+
+/** What {@link SunStyle.direct} has to be at an elevation. @see sunFor */
+function directIntensity(elevationDegrees: number): number {
+  return (1 - SUN_AMBIENT_SHARE) / Math.sin(elevationDegrees * DEGREES_TO_RADIANS);
+}
 
 /**
  * The sky at the equator, at sea level.
@@ -278,6 +484,10 @@ export function worldStyle(profile: RouteProfile): WorldStyle {
     horizonColour: mix(HORIZON_HAZE, sky, thinness),
     groundColour: groundColour(warmth, altitude, treeLineMetres(latitude)),
     fogDensity: Math.max(MINIMUM_FOG_DENSITY, SEA_LEVEL_FOG_DENSITY * densityRatio),
+    // On the latitude axis alone, and deliberately not on the altitude one:
+    // thinner air makes a sun *harsher*, which is a contrast and a colour
+    // rather than a direction, and #286 adds a direction. @see sunFor
+    sun: sunFor(warmth),
   };
 }
 

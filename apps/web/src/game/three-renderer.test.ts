@@ -67,10 +67,18 @@ import {
   SCATTER_LATERAL_METRES,
   ScatterBelt,
   threeGameRenderer,
+  WorldLamps,
+  LIT_COLOURS,
   WORST_CASE_ASPECT,
 } from './three-renderer';
 import { CAMERA_BEHIND_METRES, type CameraPose, type SceneFrame } from './port';
-import { fogFactor, MINIMUM_VIEW_END_OCCLUSION, worldStyle } from './world';
+import {
+  fogFactor,
+  irradianceOn,
+  MINIMUM_VIEW_END_OCCLUSION,
+  PEAK_IRRADIANCE,
+  worldStyle,
+} from './world';
 
 /** A rider at the origin, facing +z, so `along` is `z` and `across` is `x`. */
 const POSE: CameraPose = { x: 0, y: 0, z: 0, headingX: 0, headingZ: 1 };
@@ -940,7 +948,292 @@ function frameWithScatter(): SceneFrame {
       groundColour: 0x557744,
       horizonColour: 0xb8c2c9,
       fogDensity: 0.004,
+      // A real one rather than a hand-written literal, because #286's
+      // intensities are *solved* and a made-up pair would be a world this
+      // program cannot produce. @see world.ts §`sunFor`
+      sun: worldStyle(routeProfile(flatRouteAt(120))).sun,
     },
     scatter: [item({ kind: 'tree-conifer', z: 30 }), item({ kind: 'rock', z: 60 })],
   };
 }
+
+/**
+ * sRGB to linear, three's own transfer function.
+ *
+ * ⚠️ **three's, not WCAG's**, even though the two agree to the last digit:
+ * `design/contrast.ts` linearises for a contrast ratio and this linearises to
+ * ask what the shader will do with a colour. Copied from
+ * `three/src/math/ColorManagement.js` §`SRGBToLinear`, which is the function
+ * `Color.setHex` runs a material's colour through on its way to the GPU, and
+ * written out here because this file must not import `three`.
+ */
+function toLinear(channel: number): number {
+  const proportion = channel / 255;
+  return proportion < 0.04045
+    ? proportion * 0.0773993808
+    : Math.pow(proportion * 0.9478672986 + 0.0521327014, 2.4);
+}
+
+/**
+ * The world's two lamps — #286.
+ *
+ * ⚠️ **What is checkable here and what is not.** That the lamps exist, that
+ * there are two of them, that they are the two classes `three-seam.test.ts`
+ * allows, and — the one that matters — that `world.ts`'s normalised shares
+ * arrive in three's own units. What is **not** checkable here is that anything
+ * is lit by them: a `WorldLamps` that {@link ThreeGameView} never added to the
+ * scene satisfies every assertion below, which is #240's named defect shape
+ * for this epic one more time. `game.browser.spec.ts` reads the rider's marker
+ * back out of the drawing buffer for exactly that reason.
+ */
+describe('the world has a light direction — #286', () => {
+  /** The real sun of a real route, never a hand-written pair of intensities. */
+  const harnessSun = () => worldStyle(routeProfile(flatRouteAt(0))).sun;
+
+  it('is exactly two lamps, an ambient and a directional', () => {
+    const lamps = new WorldLamps();
+
+    expect(lamps.lamps.map((lamp) => lamp.type)).toEqual(['AmbientLight', 'DirectionalLight']);
+  });
+
+  it('starts dark, so an unapplied sun cannot look like a lit one', () => {
+    // Both lamps are built at intensity 0 for the reason `UNSET_COLOUR` is
+    // black: three's own default is 1, and a renderer that stopped calling
+    // `apply` would then light the world with a sun that came from nowhere —
+    // and every assertion about *a* lit scene would pass over it.
+    const lamps = new WorldLamps();
+
+    for (const lamp of lamps.lamps) {
+      expect(lamp.intensity).toBe(0);
+    }
+  });
+
+  it('converts the normalised shares into three own units, with the π', () => {
+    // ⚠️ **The one line in this change that a reviewer cannot check by
+    // reading.** three's Lambert path divides every irradiance by π
+    // (`BRDF_Lambert`), so a share of 1 is an intensity of π and not of 1.
+    // Drop the factor and the whole world renders at 32 % of its colours — a
+    // scene that is plausibly "moodier" rather than obviously broken, which is
+    // why it is asserted rather than eyeballed.
+    const sun = harnessSun();
+    const lamps = new WorldLamps();
+    lamps.apply(sun);
+    const [ambient, directional] = lamps.lamps;
+
+    expect(ambient.intensity).toBeCloseTo(sun.ambient * Math.PI, 12);
+    expect(directional.intensity).toBeCloseTo(sun.direct * Math.PI, 12);
+    // And the property the two numbers exist to satisfy, restated through the
+    // shader's own arithmetic: a horizontal surface comes out at its own
+    // colour, which is what lets the ground plane and the road stay unlit.
+    const horizontal = (ambient.intensity + directional.intensity * sun.y) / Math.PI;
+    expect(horizontal).toBeCloseTo(1, 12);
+  });
+
+  it('points the directional lamp at the route own sun', () => {
+    const sun = harnessSun();
+    const lamps = new WorldLamps();
+    lamps.apply(sun);
+    const [, directional] = lamps.lamps;
+
+    // three takes the direction as `position − target`, and the target is left
+    // at the origin — so the position *is* the direction. A lamp positioned
+    // anywhere else is a lamp shining somewhere else.
+    expect([directional.position.x, directional.position.y, directional.position.z]).toEqual([
+      sun.x,
+      sun.y,
+      sun.z,
+    ]);
+    expect([
+      directional.target.position.x,
+      directional.target.position.y,
+      directional.target.position.z,
+    ]).toEqual([0, 0, 0]);
+  });
+
+  it('lights no colour past white', () => {
+    // ⚠️ **What keeps `SUN_ELEVATION_AT_POLE_DEGREES` honest, and the only
+    // place both halves of that constraint are visible at once.** `world.ts`
+    // solves `direct` from the requirement that a horizontal surface receive
+    // exactly 1, so a lower sun means a brighter direct lamp; a face square-on
+    // to it receives `PEAK_IRRADIANCE`, and a colour that then exceeds white
+    // is clamped — which turns a shaded model into a flat white patch and
+    // takes away exactly the form #286 added.
+    //
+    // Lower the elevation floor, or add a brighter scenery or marker colour,
+    // and this goes red. That is the intended way to find out.
+    expect(LIT_COLOURS.length).toBeGreaterThan(6);
+    for (const colour of LIT_COLOURS) {
+      for (const shift of [16, 8, 0]) {
+        const channel = (colour >> shift) & 0xff;
+        expect(toLinear(channel) * PEAK_IRRADIANCE).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it('covers every lit material in the scene, not a sample of them', () => {
+    // The list is derived from the two style tables rather than typed out, so
+    // this states the size it must have: one per scenery kind and one per
+    // marker. A kind added without a colour in the list would make the bound
+    // above pass vacuously for it.
+    expect(LIT_COLOURS).toHaveLength(SCATTER_KINDS.length + 3);
+    expect(new Set(LIT_COLOURS).size).toBe(LIT_COLOURS.length);
+  });
+});
+
+/**
+ * The floor rung takes the shading back off — #286, and #245's question.
+ *
+ * ADR 0008 D-2's rendering gate was **waived rather than passed**, so nobody
+ * knows what a shading pass costs on the device floor. The answer #286 records
+ * is a rung: `QUALITY_LADDER`'s last entry is `shading: 'flat'`, and what
+ * follows from that is asserted here.
+ */
+describe('the scenery can lose its shading — #286', () => {
+  it('wears the lit material at the target quality', () => {
+    const belt = new ScatterBelt();
+    belt.setShading(qualitySettings(0).shading);
+
+    for (const kind of SCATTER_KINDS) {
+      expect(materialTypeOf(belt, kind)).toBe('MeshLambertMaterial');
+    }
+  });
+
+  it('wears the unlit one at the floor rung', () => {
+    const belt = new ScatterBelt();
+    belt.setShading(qualitySettings(3).shading);
+
+    for (const kind of SCATTER_KINDS) {
+      expect(materialTypeOf(belt, kind)).toBe('MeshBasicMaterial');
+    }
+  });
+
+  it('swaps back and forth without building anything', () => {
+    // ⚠️ **Identity, not type.** The rung is reached on a phone that is
+    // already too hot, and a material built on the way down is an allocation
+    // on the worst frame of the ride — #240's NFR-3. Both materials exist from
+    // construction, so going down and back up has to return the *same objects*
+    // rather than equivalent ones.
+    const belt = new ScatterBelt();
+    const first = belt.meshes.get('tree-conifer')?.material;
+    belt.setShading('flat');
+    const flat = belt.meshes.get('tree-conifer')?.material;
+    belt.setShading('lit');
+
+    expect(flat).not.toBe(first);
+    expect(belt.meshes.get('tree-conifer')?.material).toBe(first);
+    belt.setShading('flat');
+    expect(belt.meshes.get('tree-conifer')?.material).toBe(flat);
+  });
+
+  it('keeps the colour it was given, whichever material is on', () => {
+    // The rung gives up the *shading*, not the palette: a flat conifer is the
+    // colour a lit conifer averages around, which is what `three-renderer.ts`
+    // drew before #286 at all.
+    const belt = new ScatterBelt();
+    const colourOf = () => {
+      const material = belt.meshes.get('rock')?.material;
+      return material !== undefined && !Array.isArray(material)
+        ? (material as unknown as { color: { getHex: () => number } }).color.getHex()
+        : -1;
+    };
+    belt.setShading('lit');
+    const lit = colourOf();
+    belt.setShading('flat');
+
+    expect(colourOf()).toBe(lit);
+    expect(lit).toBeGreaterThan(0);
+  });
+
+  it('releases both materials of every pair, not the one that is mounted', () => {
+    // ⚠️ **A leak no other assertion here can see, and it is the cost of
+    // holding two materials instead of one.** `mesh.material` is whichever is
+    // mounted, so a `dispose` written the obvious way releases half of them
+    // and strands the other half's program in the driver for the life of the
+    // context — for six kinds, on a device that has just told us it is short
+    // of resources. three has no "was disposed" flag; the event its own
+    // `dispose()` fires is what there is, so that is what is counted.
+    const belt = new ScatterBelt();
+    const released = new Set<unknown>();
+    const watch = (material: unknown) => {
+      (
+        material as { addEventListener: (type: string, listener: () => void) => void }
+      ).addEventListener('dispose', () => released.add(material));
+      return material;
+    };
+    belt.setShading('lit');
+    const lit = [...belt.meshes.values()].map((mesh) => watch(mesh.material));
+    belt.setShading('flat');
+    const flat = [...belt.meshes.values()].map((mesh) => watch(mesh.material));
+
+    expect(new Set([...lit, ...flat]).size).toBe(SCATTER_KINDS.length * 2);
+    belt.dispose();
+
+    for (const material of [...lit, ...flat]) {
+      expect(released.has(material)).toBe(true);
+    }
+  });
+
+  it('is the last rung of the ladder that gives it up, and only that one', () => {
+    // Resolution and frame rate are each given up twice before the sun goes,
+    // because a rider notices a softer world far less than a world that has
+    // stopped having a light direction in it.
+    expect(qualitySettings(0).shading).toBe('lit');
+    expect(qualitySettings(1).shading).toBe('lit');
+    expect(qualitySettings(2).shading).toBe('lit');
+    expect(qualitySettings(3).shading).toBe('flat');
+  });
+});
+
+/**
+ * The material a belt's mesh is wearing, by three's own `type` string.
+ *
+ * Read as a string rather than with an `instanceof`, because this file must
+ * not import `three` — `three-seam.test.ts` is what says so.
+ */
+function materialTypeOf(belt: ScatterBelt, kind: ScatterKind): string {
+  const material = belt.meshes.get(kind)?.material;
+  if (material === undefined || Array.isArray(material)) {
+    return 'none';
+  }
+  return material.type;
+}
+
+/**
+ * What the shader would put on a face, from the lamps rather than from the
+ * shares — the round trip through three's units and back.
+ *
+ * @unwired the arithmetic `irradianceOn` states in normalised units, restated
+ * through the two lamp intensities so that the π conversion is covered by a
+ * property rather than only by an equality.
+ */
+function irradianceFromLamps(lamps: WorldLamps, nx: number, ny: number, nz: number): number {
+  const [ambient, directional] = lamps.lamps;
+  const { x, y, z } = directional.position;
+  const length = Math.hypot(x, y, z);
+  const facing = Math.max(0, (nx * x + ny * y + nz * z) / length);
+  return (ambient.intensity + directional.intensity * facing) / Math.PI;
+}
+
+describe('the lamps and the arithmetic agree — #286', () => {
+  it('reproduces `irradianceOn` for every face, through three own units', () => {
+    // ⚠️ Two independent statements of the same quantity: `world.ts` computes
+    // it in shares of a horizontal surface's light, and this reads it back off
+    // the two lamp intensities the renderer actually set. They can only agree
+    // while the π conversion is right in both directions.
+    const sun = worldStyle(routeProfile(flatRouteAt(0))).sun;
+    const lamps = new WorldLamps();
+    lamps.apply(sun);
+
+    const normals: readonly (readonly [number, number, number])[] = [
+      [0, 1, 0],
+      [1, 0, 0],
+      [0, 0, 1],
+      [-1, 0, 0],
+      [sun.x, sun.y, sun.z],
+      [-sun.x, -sun.y, -sun.z],
+    ];
+    for (const [nx, ny, nz] of normals) {
+      expect(irradianceFromLamps(lamps, nx, ny, nz)).toBeCloseTo(irradianceOn(sun, nx, ny, nz), 12);
+    }
+  });
+});

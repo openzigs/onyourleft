@@ -55,6 +55,32 @@ export interface QualitySettings {
   readonly renderScale: number;
   /** The frame cap, in frames per second. */
   readonly frameCap: number;
+  /**
+   * Whether the world is shaded by a light direction, or flat — #286.
+   *
+   * ⚠️ **The third thing a rung can give up, and the first that is not a
+   * number.** #286 gives the scene one directional light and one ambient, and
+   * puts `MeshLambertMaterial` on everything with a form to show — which buys
+   * a lit side and a shaded side and costs a shading pass per lit fragment.
+   * ADR 0008 D-2's rendering gate was **waived rather than passed** and
+   * [#247](https://github.com/openzigs/onyourleft/issues/247)'s run on the
+   * device floor is outstanding, so nobody knows what that pass costs on a
+   * mid-range phone in a handlebar mount.
+   *
+   * So the floor rung can lose it. `'flat'` puts back exactly the unlit
+   * `MeshBasicMaterial` the renderer used before #286 — the same colours,
+   * the same draw calls, no shading pass — and `three-renderer.ts` holds both
+   * materials from construction so the swap allocates nothing.
+   *
+   * ⚠️ **A rung, not a build-time flag, and the reason is the measurement
+   * problem.** A build-time choice would have to be made by somebody who knows
+   * which device the build will run on, and nobody does: the same bundle is
+   * served to a desktop browser and wrapped by `apps/mobile`. A rung is
+   * decided by the device itself, from the two signals {@link nextQuality}
+   * already reads, and it is the answer #286 records for
+   * [#245](https://github.com/openzigs/onyourleft/issues/245)'s question.
+   */
+  readonly shading: 'lit' | 'flat';
   /** A human-readable name, for the diagnostic line #91 asks to be recorded. */
   readonly label: string;
 }
@@ -69,10 +95,20 @@ export interface QualitySettings {
  * be a rung the device spends its headroom on before the ride has warmed up.
  */
 export const QUALITY_LADDER: readonly QualitySettings[] = [
-  { renderScale: 1, frameCap: 30, label: 'full' },
-  { renderScale: 0.83, frameCap: 30, label: 'reduced resolution' },
-  { renderScale: 0.67, frameCap: 24, label: 'reduced resolution and frame rate' },
-  { renderScale: 0.5, frameCap: 20, label: 'minimum' },
+  { renderScale: 1, frameCap: 30, shading: 'lit', label: 'full' },
+  { renderScale: 0.83, frameCap: 30, shading: 'lit', label: 'reduced resolution' },
+  {
+    renderScale: 0.67,
+    frameCap: 24,
+    shading: 'lit',
+    label: 'reduced resolution and frame rate',
+  },
+  // ⚠️ The only rung that is flat. Resolution and frame rate are given up
+  // twice each before the shading is given up once, because a rider notices a
+  // softer world far less than a world that has stopped having a sun in it —
+  // the same ordering argument {@link QualitySettings.renderScale} makes for
+  // resolution going before frame rate.
+  { renderScale: 0.5, frameCap: 20, shading: 'flat', label: 'minimum' },
 ];
 
 /**

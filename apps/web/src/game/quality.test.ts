@@ -188,4 +188,33 @@ describe('the ladder itself', () => {
       expect(rung.label.length).toBeGreaterThan(0);
     }
   });
+
+  it('never gives the shading back as it gets cooler — #286', () => {
+    // The third thing a rung can give up, and the first that is not a number,
+    // so `gets monotonically cheaper` above cannot see it. Once a rung has
+    // dropped the light direction no cooler rung may have it again, or the
+    // ladder would buy back the most expensive thing on it on the way down.
+    let dropped = false;
+    for (const rung of QUALITY_LADDER) {
+      if (rung.shading === 'flat') {
+        dropped = true;
+      }
+      expect(rung.shading === 'lit' && dropped).toBe(false);
+    }
+  });
+
+  it('keeps the light direction until the very last rung — #286', () => {
+    // ⚠️ **Two halves, and the second is what stops this passing vacuously.**
+    // A ladder that was flat all the way down would satisfy the monotone rule
+    // above and would ship the unlit world #286 exists to replace; a ladder
+    // that was lit all the way down would satisfy it too and would leave the
+    // floor device no way out. So: the target rung is lit, the floor rung is
+    // not, and there is exactly one of each condition.
+    const first = QUALITY_LADDER[0] as (typeof QUALITY_LADDER)[number];
+    const last = QUALITY_LADDER[QUALITY_LADDER.length - 1] as (typeof QUALITY_LADDER)[number];
+
+    expect(first.shading).toBe('lit');
+    expect(last.shading).toBe('flat');
+    expect(QUALITY_LADDER.filter((rung) => rung.shading === 'flat')).toHaveLength(1);
+  });
 });

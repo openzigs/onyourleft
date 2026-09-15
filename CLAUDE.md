@@ -131,11 +131,13 @@ apps/                 AGPL-3.0-or-later, without exception
                         The dash grid is in ROUTE distance, which is what stops
                         it varying with a route's own grid or crawling as the
                         rider moves
-    src/game/world.ts   the ground, the sky and the depth cue (#241) — the two
-                        axes a route is read on, the one number that is physics
-                        rather than choice, and the provenance of every other
-                        one. Pure, so the renderer stays the only file that
-                        names three
+    src/game/world.ts   the ground, the sky and the depth cue (#241), and since
+                        #286 the one light direction — the two axes a route is
+                        read on, the one number that is physics rather than
+                        choice, the sun's elevation band and the intensity that
+                        is solved rather than written down, and the provenance
+                        of every other one. Pure, so the renderer stays the
+                        only file that names three
     src/game/scatter.ts where the scenery goes and what kind it is (#243) — a
                         seeded, stateless hash of where you are rather than a
                         walk forward, the three places a route is read as, the
@@ -144,9 +146,13 @@ apps/                 AGPL-3.0-or-later, without exception
                         it. ⚠️ It PLACES and draws nothing; #244 draws it, so
                         SceneFrame.scatter ships unread until then
     src/game/three-seam.test.ts
-                        what keeps that true, and what keeps the scene unlit —
-                        a grep over apps/ and packages/ rather than a review
-                        note (#240's epic criterion)
+                        what keeps that true, and which illumination classes the
+                        scene is allowed — a grep over apps/ and packages/
+                        rather than a review note (#240's epic criterion).
+                        ⚠️ Since #286 it allows EXACTLY an AmbientLight and a
+                        DirectionalLight; until then it allowed none at all, and
+                        a reviewer who remembers "keeps the scene unlit" is
+                        reading the old file
     src/game/pacer-choice.ts
                         the rider's pacer choice, turned into a plan or into a
                         refusal (#237) — the one place in the client a
@@ -2124,6 +2130,11 @@ top of an issue **supersedes its body**.
 | What proves the world reaches the screen rather than only the frame | `apps/web/browser/game-harness.ts`, `apps/web/browser/game.browser.spec.ts` |
 | Why the HUD panel's opacity is asserted inside the accessibility gate | `apps/web/src/game/hud/hud-surface.a11y.test.ts`, `apps/web/src/design/tokens.ts` §`hudSurface` |
 | What the renderer gives up when the phone gets hot, and why recovery is not the same threshold | `apps/web/src/game/quality.ts` §`HEADROOM_RESTORE_BELOW` |
+| Why the world has a sun at all, where its elevation came from, and what a low one would clip | `apps/web/src/game/world.ts` §`SunStyle`, §`SUN_ELEVATION_AT_POLE_DEGREES`, §4h |
+| Why the ground and the road are the two things that stay unlit | `apps/web/src/game/three-renderer.ts` header §"The world is three objects, and since #286 it has a sun" |
+| Where a normalised light share becomes a three intensity, and why the factor is π | `apps/web/src/game/three-renderer.ts` §`LAMBERT_IRRADIANCE_SCALE` |
+| Which rung of the quality ladder turns the shading off, and why it is a rung rather than a build flag | `apps/web/src/game/quality.ts` §`QualitySettings.shading` |
+| What the lighting actually costs a frame, and why the number is published rather than asserted | `apps/web/browser/game.browser.spec.ts` §"measures what the shading costs", `apps/web/browser/game-harness.ts` §`awaitTheGpu` |
 | Why the HUD's panel is opaque, and why that is what makes its contrast checkable | `apps/web/src/design/tokens.ts` §`hudSurface` |
 | How a rider tells a dropped sensor from a genuine zero | `apps/web/src/game/hud/fields.ts` §`NO_READING`, `HudPanel.a11y.test.tsx` |
 | Why the wake lock's *release* is the half that is tested | `apps/web/src/game/hud/wake-lock.ts` |

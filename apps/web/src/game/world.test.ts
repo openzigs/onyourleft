@@ -38,11 +38,17 @@ import {
   HORIZON_HAZE,
   MINIMUM_VIEW_END_OCCLUSION,
   NEAR_FOG_LIMIT,
+  PEAK_IRRADIANCE,
   SNOW_BAND_METRES,
+  SUN_AMBIENT_SHARE,
+  SUN_AZIMUTH_DEGREES,
+  SUN_ELEVATION_AT_EQUATOR_DEGREES,
+  SUN_ELEVATION_AT_POLE_DEGREES,
   TREE_LINE_AT_EQUATOR_METRES,
   WORLD_HIGHEST_LAND_METRES,
   WORLD_SAMPLE_LIMIT,
   fogFactor,
+  irradianceOn,
   worldStyle,
 } from './world';
 
@@ -333,5 +339,161 @@ describe('the cost of a frame does not grow with the length of the route', () =>
     expect(worldStyle(routeAt({ latitude: 46, altitude: 500, points: 4000 }))).toEqual(
       worldStyle(routeAt({ latitude: 46, altitude: 500, points: 60 })),
     );
+  });
+});
+
+/**
+ * The world has one light direction — #286.
+ *
+ * ⚠️ **Properties, not numbers, and each one is a constant that could
+ * otherwise be set to zero with the suite still green.** That is #241's own
+ * lesson quoted back by #286: `fog.density = 0` left all nineteen browser
+ * tests passing, and the three constants added here — the ambient share, the
+ * two ends of the elevation band — are exactly the same shape. So every
+ * assertion below is written so that zeroing the constant it rests on turns it
+ * red, and the mutation list in the pull request says which.
+ *
+ * The arithmetic is {@link irradianceOn}, which is `@unwired` on purpose: it
+ * is this file's copy of the Lambert term three's own shader computes, exactly
+ * as {@link fogFactor} is its copy of `FogExp2`. What the *renderer* does with
+ * the two intensities is `three-renderer.test.ts`'s claim, and what reaches a
+ * real drawing buffer is `game.browser.spec.ts`'s.
+ */
+describe('the sun', () => {
+  /** Straight up, which is the ground plane's and the road's own normal. */
+  const UP = [0, 1, 0] as const;
+
+  it('points somewhere real, as a unit vector', () => {
+    for (const latitude of [0, 23, 46, 68, 89]) {
+      const { sun } = worldStyle(routeAt({ latitude, altitude: 300 }));
+
+      expect(Math.hypot(sun.x, sun.y, sun.z)).toBeCloseTo(1, 12);
+      // Above the horizon on every route there is: a sun at or below it lights
+      // nothing a rider is looking at, and `direct` would diverge.
+      expect(sun.y).toBeGreaterThan(0);
+    }
+  });
+
+  it('is not straight overhead, so a vertical face has a lit side', () => {
+    // The flatness #286 exists to remove is a *vertical* face with no lit
+    // side, which is exactly what a sun at the zenith gives every tree on the
+    // route. So the sun keeps a horizontal component everywhere.
+    for (const latitude of [0, 45, 89]) {
+      const { sun } = worldStyle(routeAt({ latitude, altitude: 0 }));
+
+      expect(Math.hypot(sun.x, sun.z)).toBeGreaterThan(0.3);
+    }
+  });
+
+  it('sinks toward the horizon as the route moves toward a pole', () => {
+    // The one fact in this file's sun that is not a choice — the same one
+    // `warmth` already rests on. Asserted as a monotone fall rather than as
+    // two numbers, so it survives the band being retuned.
+    const elevations = [0, 20, 40, 60, 80, 89].map(
+      (latitude) => worldStyle(routeAt({ latitude, altitude: 0 })).sun.y,
+    );
+
+    for (let index = 1; index < elevations.length; index += 1) {
+      expect(elevations[index] as number).toBeLessThan(elevations[index - 1] as number);
+    }
+  });
+
+  it('stays inside the band both ends of it were chosen for', () => {
+    const radians = (degrees: number) => Math.sin((degrees * Math.PI) / 180);
+
+    for (const latitude of [0, 31, 62, 89]) {
+      const { sun } = worldStyle(routeAt({ latitude, altitude: 1200 }));
+
+      expect(sun.y).toBeGreaterThanOrEqual(radians(SUN_ELEVATION_AT_POLE_DEGREES) - 1e-12);
+      expect(sun.y).toBeLessThanOrEqual(radians(SUN_ELEVATION_AT_EQUATOR_DEGREES) + 1e-12);
+    }
+  });
+
+  it('leaves a horizontal surface at exactly the light it would have unlit', () => {
+    // ⚠️ **The property the whole change rests on.** The ground plane and the
+    // road stay `MeshBasicMaterial`, which draws a colour with no light on it
+    // at all; everything standing on them is lit. The two only agree because
+    // `direct` is *solved* from this identity rather than written down, and a
+    // hand-written pair of intensities would put the scenery at a different
+    // brightness from the ground under it on every route but one.
+    for (const latitude of [0, 12, 37, 55, 74, 89]) {
+      for (const altitude of [-430, 0, 900, 3400, 8849]) {
+        const { sun } = worldStyle(routeAt({ latitude, altitude }));
+
+        expect(irradianceOn(sun, UP[0], UP[1], UP[2])).toBeCloseTo(1, 12);
+      }
+    }
+  });
+
+  it('leaves a shaded face readable rather than black', () => {
+    // The lower bound on `SUN_AMBIENT_SHARE`. Set it to 0 and a face turned
+    // away from the sun receives nothing at all, and the scenery reads as
+    // silhouettes — which on a phone in sunlight is worse than the flat scene
+    // #286 replaced, not better.
+    const { sun } = worldStyle(routeAt({ latitude: 51, altitude: 100 }));
+    const away = irradianceOn(sun, -sun.x, -sun.y, -sun.z);
+
+    expect(away).toBe(SUN_AMBIENT_SHARE);
+    expect(away).toBeGreaterThan(0.2);
+  });
+
+  it('gives a sunward face a real lead over a shaded one', () => {
+    // The upper bound on `SUN_AMBIENT_SHARE`, and #286's first criterion in
+    // arithmetic: *a form-giving difference between a lit and an unlit face*.
+    // Set the share to 1 and `direct` is 0, every face receives the same
+    // light, and the scene is exactly as flat as it was before #286 — with a
+    // shading pass paid for and nothing bought.
+    for (const latitude of [0, 45, 89]) {
+      const { sun } = worldStyle(routeAt({ latitude, altitude: 0 }));
+      // A vertical face turned to the sun's own compass bearing, which is the
+      // brightest a tree trunk or a building wall ever gets.
+      const across = Math.hypot(sun.x, sun.z);
+      const lit = irradianceOn(sun, sun.x / across, 0, sun.z / across);
+      const shaded = irradianceOn(sun, -sun.x / across, 0, -sun.z / across);
+
+      expect(shaded).toBe(SUN_AMBIENT_SHARE);
+      expect(lit / shaded).toBeGreaterThan(1.4);
+    }
+  });
+
+  it('never lights anything harder than PEAK_IRRADIANCE says', () => {
+    // What `three-renderer.test.ts` multiplies through the palette. A face
+    // square-on to the sun is the worst case by construction, and the worst
+    // route is the one with the lowest sun — so this states the bound over
+    // both, in this file, where the colours are invisible.
+    for (const latitude of [0, 28, 59, 89]) {
+      const { sun } = worldStyle(routeAt({ latitude, altitude: 0 }));
+
+      expect(irradianceOn(sun, sun.x, sun.y, sun.z)).toBeLessThanOrEqual(PEAK_IRRADIANCE + 1e-12);
+    }
+    // And it is above 1, or a horizontal surface could not be at exactly 1.
+    expect(PEAK_IRRADIANCE).toBeGreaterThan(1);
+  });
+
+  it('stands where the azimuth says, not on an axis of the corridor', () => {
+    // A sun on the corridor's own x or z axis lights a road running that way
+    // head-on and gives its two verges the same shade. Both components are
+    // therefore required to be real, which is what `SUN_AZIMUTH_DEGREES` is
+    // for — and setting it to 0 or 90 turns this red.
+    const { sun } = worldStyle(routeAt({ latitude: 51, altitude: 0 }));
+    const across = Math.hypot(sun.x, sun.z);
+
+    expect(Math.abs(sun.x) / across).toBeGreaterThan(0.2);
+    expect(Math.abs(sun.z) / across).toBeGreaterThan(0.2);
+    // And it is the azimuth this file names rather than some other bearing:
+    // atan2(east, north), which is a compass bearing clockwise from north.
+    const bearing = (Math.atan2(sun.x, sun.z) * 180) / Math.PI;
+    expect(((bearing % 360) + 360) % 360).toBeCloseTo(SUN_AZIMUTH_DEGREES, 9);
+  });
+
+  it('is a function of the route like everything else here', () => {
+    // #240's FR-2: the world is derived from the rider's own GPX and from
+    // nothing else, so two routes in different places get different suns and
+    // the same route twice gets the same one.
+    const alpine = worldStyle(routeAt({ latitude: 46, altitude: 1800 })).sun;
+    const tropical = worldStyle(routeAt({ latitude: 2, altitude: 40 })).sun;
+
+    expect(alpine.y).not.toBeCloseTo(tropical.y, 3);
+    expect(worldStyle(routeAt({ latitude: 46, altitude: 1800 })).sun).toEqual(alpine);
   });
 });

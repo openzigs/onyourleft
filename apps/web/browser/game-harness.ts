@@ -233,6 +233,82 @@ declare global {
       /** Where it was found, as fractions of the frame's width and height. */
       readonly sceneryColumnFraction: number;
       readonly sceneryRowFraction: number;
+      /**
+       * How many pixels the rider's own marker occupies, lit and flat — #286.
+       *
+       * Found by rendering the same frame with the rider's marker and without
+       * it and taking the pixels that changed, so it is the marker's silhouette
+       * and nothing else: no road, no scenery, no fog gradient. Published so
+       * the spec can check the two spreads below are taken over a real object
+       * rather than over three stray pixels.
+       */
+      readonly litMarkerPixels: number;
+      readonly flatMarkerPixels: number;
+      /**
+       * The range of brightness **across the rider's own marker** — #286's
+       * first criterion, in the only place it can actually be observed.
+       *
+       * ⚠️ **This is the whole of what says the world has a light direction.**
+       * A sphere lit from one side has a bright face and a dark one; the same
+       * sphere unlit is one flat colour from edge to edge, because nothing in
+       * the scene varies over 1.8 m at 8 m from the camera — the fog takes
+       * 0.1 % over that depth. So a large spread is shading and a spread of
+       * nothing is the unlit world #241 shipped.
+       *
+       * It is measured at the **target** rung and at the **floor** rung of
+       * `QUALITY_LADDER`, which is what makes #245's answer checkable: the
+       * floor rung is supposed to put the flat world back, and a rung that
+       * changed nothing would report the same spread twice.
+       */
+      readonly litMarkerSpread: number;
+      readonly flatMarkerSpread: number;
+      /** The brightest and darkest of the lit marker's own pixels. */
+      readonly litMarkerBrightest: Pixel;
+      readonly litMarkerDarkest: Pixel;
+      /**
+       * The relative cost of the shading, in milliseconds a frame — #286.
+       *
+       * ⚠️ **Same scene, same route, same drawing-buffer size; the only
+       * difference is the material.** The floor rung also halves the render
+       * scale, so timing rung 0 against rung 3 would be measuring two things
+       * at once — these two sweeps run at rung 0's own settings with
+       * `shading` overridden, which is the *"before and after"* the owner's
+       * decision on #286 asks for and is the only frame-cost claim this
+       * repository can make today.
+       *
+       * ⚠️ **What it is not.** It is a headless Chromium on whatever hardware
+       * the run happens to be on — a software rasteriser in CI. ADR 0008 D-2's
+       * gate is about the **device floor** and #247 is outstanding, so nothing
+       * here says a mid-range phone can afford it. That is stated in the pull
+       * request and in `QualitySettings.shading` rather than papered over.
+       *
+       * Each is the mean over {@link shadedFrames} frames, taken twice and
+       * averaged, with the GPU flushed before the clock is read.
+       */
+      readonly litFrameMs: number;
+      readonly flatFrameMs: number;
+      /** How many frames each of those two means was taken over. */
+      readonly shadedFrames: number;
+      /**
+       * How far apart two measurements of the **same** shading came out.
+       *
+       * ⚠️ **Without this the pair above is uninterpretable**, and #286 exists
+       * partly because this epic keeps producing performance numbers nobody
+       * can act on. The lit and the flat means are each taken
+       * {@link SHADING_ROUNDS} times; this is the widest range within either
+       * group. A lit-minus-flat difference smaller than it is a difference
+       * this measurement cannot see, which is a finding rather than a failure.
+       */
+      readonly frameMsNoise: number;
+      /**
+       * Draw calls for one frame, lit and flat.
+       *
+       * Shading is a *fragment* cost and must not be a draw-call cost: the
+       * lit and the unlit material are mounted on the same meshes, so the two
+       * numbers are equal and a swap that split a mesh would show up here.
+       */
+      readonly litDrawCalls: number;
+      readonly flatDrawCalls: number;
       readonly errors: readonly string[];
     };
   }
@@ -272,6 +348,10 @@ const NO_WORLD: WorldStyle = {
   groundColour: 0,
   horizonColour: 0,
   fogDensity: 0,
+  // Straight up and dark, which is the same reasoning the three colours above
+  // use: no rider ever sees it, and a *plausible* sun here would let a spec
+  // that stopped reading the real one go on passing.
+  sun: { x: 0, y: 1, z: 0, ambient: 0, direct: 0 },
 };
 
 /** One pixel out of the drawing buffer, in readPixels coordinates (origin bottom left). */
@@ -386,6 +466,67 @@ const BESIDE_FRACTION = 0.01;
 /** Perceived brightness of a pixel, for comparing two of them. */
 function luminanceOf(pixel: Pixel): number {
   return 0.2126 * pixel[0] + 0.7152 * pixel[1] + 0.0722 * pixel[2];
+}
+
+/** What one object's own pixels look like, found by rendering it twice. */
+interface MarkerShading {
+  readonly pixels: number;
+  readonly spread: number;
+  readonly brightest: Pixel;
+  readonly darkest: Pixel;
+}
+
+/**
+ * The brightness range across the pixels two frames disagree about — #286.
+ *
+ * ⚠️ **The difference is only used to decide *which* pixels belong to the
+ * object; the spread is then taken over the frame that has it.** That is what
+ * makes this a shading measurement rather than a "something changed"
+ * measurement: a flat object also changes every one of those pixels, and it
+ * changes them all to the *same* value.
+ *
+ * ⚠️ The edge pixels of a silhouette are not excluded and do not need to be:
+ * the renderer is built with `antialias: false`, so a pixel is either the
+ * object or the background and there is no blend between them to widen the
+ * range artificially.
+ */
+function shadingAcross(present: Uint8Array, absent: Uint8Array): MarkerShading {
+  let pixels = 0;
+  let brightest: Pixel = NOWHERE;
+  let darkest: Pixel = NOWHERE;
+  let high = Number.NEGATIVE_INFINITY;
+  let low = Number.POSITIVE_INFINITY;
+  for (let at = 0; at < present.length; at += 4) {
+    if (
+      present[at] === absent[at] &&
+      present[at + 1] === absent[at + 1] &&
+      present[at + 2] === absent[at + 2]
+    ) {
+      continue;
+    }
+    pixels += 1;
+    const pixel: Pixel = [
+      present[at] ?? 0,
+      present[at + 1] ?? 0,
+      present[at + 2] ?? 0,
+      present[at + 3] ?? 0,
+    ];
+    const luminance = luminanceOf(pixel);
+    if (luminance > high) {
+      high = luminance;
+      brightest = pixel;
+    }
+    if (luminance < low) {
+      low = luminance;
+      darkest = pixel;
+    }
+  }
+  return {
+    pixels,
+    spread: pixels === 0 ? 0 : high - low,
+    brightest,
+    darkest,
+  };
 }
 
 /**
@@ -535,6 +676,91 @@ function compareRegions(
 const SWEEP_STEP_METRES = 3.7;
 
 /**
+ * How many frames each of #286's two frame-cost means is taken over: **60**.
+ *
+ * Two seconds of riding at the 30 fps `QUALITY_LADDER` targets, which is long
+ * enough that one slow frame is a sixtieth of the answer and short enough that
+ * the whole measurement — four sweeps, two at each shading — is under a second
+ * on top of a gate that already runs for twenty.
+ */
+const SHADING_FRAMES = 60;
+
+/**
+ * How many times each shading is timed, so the two alternate: **4**.
+ *
+ * ⚠️ **Alternating matters more than the count does.** A machine that is
+ * warming up, or a compositor that takes a frame, drifts *monotonically* over
+ * a run — so timing all of one shading and then all of the other charges the
+ * drift entirely to whichever went second. Interleaving and averaging charges
+ * it to both.
+ *
+ * ⚠️ **More than two, so that a noise floor exists at all.** Two measurements
+ * of the same shading give one spread and no sense of whether it is typical;
+ * four give the range {@link frameMsNoise} reports, which is what turns
+ * *"lighting costs 0.1 ms"* into a statement somebody can act on. A difference
+ * smaller than the spread between two identical measurements is not a cost
+ * that has been measured, and saying so is the whole point.
+ *
+ * ⚠️ **Even rather than odd**, because the order alternates: an odd count puts
+ * one shading first one more time than the other, and whatever a machine does
+ * at the start of a round is then charged unevenly.
+ */
+const SHADING_ROUNDS = 4;
+
+/**
+ * Blocks until everything asked of the GPU has actually happened.
+ *
+ * ⚠️ **`readPixels` and not `finish()`, and the difference was measured.**
+ * WebGL calls are queued, so `render` returning means the driver has been
+ * *asked*, not that anything was drawn — and a timing loop that does not
+ * synchronise reports how fast JavaScript can submit commands, which is
+ * exactly the number a shading change does not move.
+ *
+ * `gl.finish()` is the call that is supposed to do this and **in this browser
+ * it does not**: with `finish()` alone, timing the identical scene into a
+ * 1 800 × 1 200 drawing buffer instead of a 600 × 400 one — nine times the
+ * fill — came out at 0.137 ms a frame against 0.136, which is a clock that is
+ * not watching the rasteriser at all. Chromium's WebGL runs over a command
+ * buffer in another process and `finish` is free to return once that is
+ * flushed. `readPixels` cannot: it has to hand back a pixel that exists.
+ *
+ * The same pair of measurements with this in place reads 3.4 ms and 6.7 ms,
+ * which is a clock that responds to fill — not the ninefold a purely
+ * fill-bound scene would give, because a frame here is also vertex work and
+ * command submission that the buffer's size does not touch.
+ *
+ * One pixel, so the read itself is not what is being timed.
+ */
+function awaitTheGpu(gl: WebGL2RenderingContext | WebGLRenderingContext | null): void {
+  if (gl === null) {
+    return;
+  }
+  gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+}
+
+/**
+ * Drives {@link SHADING_FRAMES} frames and returns the mean milliseconds each.
+ *
+ * ⚠️ The GPU is synchronised **once, at the end**, rather than after every
+ * frame: a per-frame stall would measure the round trip as well as the work,
+ * and sixty frames' worth of it would swamp the difference being looked for.
+ * What matters is that nothing is left queued when the clock is read.
+ * @see awaitTheGpu
+ */
+function timeFrames(
+  view: { render: (frame: SceneFrame) => void },
+  frameAt: (at: number) => SceneFrame,
+  gl: WebGL2RenderingContext | WebGLRenderingContext | null,
+): number {
+  const started = performance.now();
+  for (let index = 1; index <= SHADING_FRAMES; index += 1) {
+    view.render(frameAt(index * SWEEP_STEP_METRES));
+  }
+  awaitTheGpu(gl);
+  return (performance.now() - started) / SHADING_FRAMES;
+}
+
+/**
  * Drives the rider up the route once, at {@link SWEEP_STEP_METRES} a frame.
  *
  * A function rather than a loop in place because it is run **twice** and the
@@ -589,6 +815,18 @@ function run(): void {
       sceneryPixelWithout: NOWHERE,
       sceneryColumnFraction: 0,
       sceneryRowFraction: 0,
+      litMarkerPixels: 0,
+      flatMarkerPixels: 0,
+      litMarkerSpread: 0,
+      flatMarkerSpread: 0,
+      litMarkerBrightest: NOWHERE,
+      litMarkerDarkest: NOWHERE,
+      litFrameMs: 0,
+      flatFrameMs: 0,
+      shadedFrames: SHADING_FRAMES,
+      frameMsNoise: 0,
+      litDrawCalls: 0,
+      flatDrawCalls: 0,
       errors: ['no canvas'],
     };
     return;
@@ -624,6 +862,17 @@ function run(): void {
   let sceneryPixelWithout: Pixel = NOWHERE;
   let sceneryColumnFraction = 0;
   let sceneryRowFraction = 0;
+  let litMarkerPixels = 0;
+  let flatMarkerPixels = 0;
+  let litMarkerSpread = 0;
+  let flatMarkerSpread = 0;
+  let litMarkerBrightest: Pixel = NOWHERE;
+  let litMarkerDarkest: Pixel = NOWHERE;
+  let litFrameMs = 0;
+  let flatFrameMs = 0;
+  let frameMsNoise = 0;
+  let litDrawCalls = 0;
+  let flatDrawCalls = 0;
 
   try {
     const profile = harnessRoute();
@@ -787,6 +1036,100 @@ function run(): void {
         view.render(frameAt(ON_THE_DESCENT_METRES));
         resourcesAfterSecondSweep = resources();
 
+        // ------------------------------------------------ the light — #286
+        //
+        // ⚠️ **Everything below runs at rung 0's own render scale, with only
+        // `shading` overridden.** `qualitySettings(3)` is the rung that turns
+        // the shading off in the product, and it *also* halves the drawing
+        // buffer — so measuring against it would confound a shading cost with
+        // a fill-rate cost, and a pixel read back at half the resolution is a
+        // different pixel. The rung itself is asserted in jsdom
+        // (`three-renderer.test.ts` §"the scenery can lose its shading"); what
+        // needs a driver is what the shading *does*, and this isolates it.
+        const lit = { ...qualitySettings(0), shading: 'lit' as const };
+        const flat = { ...qualitySettings(0), shading: 'flat' as const };
+
+        // The rider's marker alone, and then nothing at all. The difference is
+        // one sphere's silhouette, 8 m from the camera — the one object in the
+        // frame whose whole surface is at one depth, so the only thing that
+        // can vary across it is the light on it. @see shadingAcross
+        const riderOnly: SceneFrame = {
+          ...frame,
+          markers: frame.markers.filter((marker) => marker.kind === 'rider'),
+          scatter: [],
+        };
+        const noMarkers: SceneFrame = { ...riderOnly, markers: [] };
+        const wholeFrame = () =>
+          gl === null ? undefined : readRegion(gl, 0, 0, canvas.width, canvas.height);
+
+        for (const [settings, record] of [
+          [lit, 'lit'],
+          [flat, 'flat'],
+        ] as const) {
+          view.setQuality(settings);
+          const beforeCalls = calls();
+          view.render(riderOnly);
+          const drawn = calls() - beforeCalls;
+          const present = wholeFrame();
+          view.render(noMarkers);
+          const absent = wholeFrame();
+          if (present !== undefined && absent !== undefined) {
+            const found = shadingAcross(present, absent);
+            if (record === 'lit') {
+              litMarkerPixels = found.pixels;
+              litMarkerSpread = found.spread;
+              litMarkerBrightest = found.brightest;
+              litMarkerDarkest = found.darkest;
+              litDrawCalls = drawn;
+            } else {
+              flatMarkerPixels = found.pixels;
+              flatMarkerSpread = found.spread;
+              flatDrawCalls = drawn;
+            }
+          }
+        }
+
+        // ⚠️ **Warmed with a whole discarded sweep at each shading, not one
+        // frame.** three compiles a program the first time it draws a
+        // material, and the flat one has just been drawn for the first time —
+        // but a compile is not the only thing that settles: the first timed
+        // sweep of a run came out about a third of a millisecond a frame above
+        // every later one whichever shading it was, and that is a warm-up, not
+        // a cost. Throwing one away at each shading is what makes the rounds
+        // below comparable to each other.
+        for (const settings of [lit, flat]) {
+          view.setQuality(settings);
+          void timeFrames(view, frameAt, gl);
+        }
+
+        const litRounds: number[] = [];
+        const flatRounds: number[] = [];
+        for (let round = 0; round < SHADING_ROUNDS; round += 1) {
+          // ⚠️ **Which shading goes first alternates**, and that is a defect
+          // found by reading the numbers rather than a precaution. With `flat`
+          // always first it came out consistently *faster* to light the scene
+          // — about 0.3 ms a frame, across every run — because whatever the
+          // machine does at the start of a round was charged to whichever
+          // sweep opened it, every time. Averaging two orders charges it to
+          // both, and the sign stopped being stable, which is the honest
+          // answer for a difference this far inside the noise.
+          const flatFirst = round % 2 === 0;
+          for (const shading of flatFirst ? ([flat, lit] as const) : ([lit, flat] as const)) {
+            view.setQuality(shading);
+            const each = timeFrames(view, frameAt, gl);
+            (shading === lit ? litRounds : flatRounds).push(each);
+          }
+        }
+        const mean = (values: readonly number[]) =>
+          values.reduce((total, each) => total + each, 0) / values.length;
+        const range = (values: readonly number[]) => Math.max(...values) - Math.min(...values);
+        litFrameMs = mean(litRounds);
+        flatFrameMs = mean(flatRounds);
+        // The widest disagreement between two measurements of the *same*
+        // shading — see `frameMsNoise`. The larger of the two groups, because
+        // the question is how much this measurement moves on its own.
+        frameMsNoise = Math.max(range(litRounds), range(flatRounds));
+
         view.destroy();
       });
     });
@@ -825,6 +1168,18 @@ function run(): void {
     sceneryPixelWithout,
     sceneryColumnFraction,
     sceneryRowFraction,
+    litMarkerPixels,
+    flatMarkerPixels,
+    litMarkerSpread,
+    flatMarkerSpread,
+    litMarkerBrightest,
+    litMarkerDarkest,
+    litFrameMs,
+    flatFrameMs,
+    shadedFrames: SHADING_FRAMES,
+    frameMsNoise,
+    litDrawCalls,
+    flatDrawCalls,
     errors,
   };
 }
