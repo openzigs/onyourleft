@@ -704,14 +704,18 @@ test.describe('the world is lit, and can stop being — #286', () => {
     expect(result.frameMsNoise).toBeGreaterThan(0);
 
     const cost = result.litFrameMs - result.flatFrameMs;
-    testInfo.annotations.push({
-      type: 'frame cost of the lighting',
-      description:
-        `lit ${result.litFrameMs.toFixed(3)} ms, flat ${result.flatFrameMs.toFixed(3)} ms, ` +
-        `difference ${cost >= 0 ? '+' : ''}${cost.toFixed(3)} ms a frame, ` +
-        `against a same-shading run-to-run spread of ${result.frameMsNoise.toFixed(3)} ms; ` +
-        `${String(result.shadedFrames)} frames a measurement, same scene and route, ` +
-        `render scale unchanged`,
-    });
+    const measured =
+      `lit ${result.litFrameMs.toFixed(3)} ms, flat ${result.flatFrameMs.toFixed(3)} ms, ` +
+      `difference ${cost >= 0 ? '+' : ''}${cost.toFixed(3)} ms a frame, ` +
+      `against a same-shading run-to-run spread of ${result.frameMsNoise.toFixed(3)} ms; ` +
+      `${String(result.shadedFrames)} frames a measurement, same scene and route, ` +
+      `render scale unchanged`;
+    testInfo.annotations.push({ type: 'frame cost of the lighting', description: measured });
+    // ⚠️ **And printed, not only annotated.** An annotation reaches the JSON
+    // and HTML reports and **not the log**, which is the only artefact anybody
+    // reads on a green run — so a number published solely there is a number
+    // nobody re-runs, which is the failure #286 quotes #244's review about.
+    // The list reporter prints a test's stdout beside its own line.
+    console.log(`frame cost of the lighting — ${measured}`);
   });
 });
