@@ -67,14 +67,29 @@ export const COLOUR_TOKENS = {
    */
   surface: '#f2f5f4',
   /**
-   * Elevation 2: something resting on a panel rather than on the page — a
-   * metric card, a table's header row.
+   * Elevation 2: two steps off the page, for something that has to read as an
+   * object rather than as a tinted area — a metric card, a table's header row.
+   *
+   * ⚠️ Two steps, and **not** because either of them rests on a level-1 panel:
+   * both consumers sit directly on the canvas. One step was not enough at the
+   * size they are drawn. `#f2f5f4` on `#ffffff` is 1.097:1, and a 10 rem card
+   * at that separation reads as a faintly tinted rectangle. The level is what
+   * the separation had to be, not a count of the things underneath — and an
+   * earlier version of this comment said the opposite of the two rules in
+   * `theme.css` that use it.
    */
   surfaceRaised: '#e7eae9',
   /**
-   * Elevation 3: the header, which is sticky and therefore passes *over*
-   * content rather than sitting beside it. The top of the ramp, and the only
-   * level whose whole job is to stay legible while something scrolls under it.
+   * Elevation 3: the header, the chrome that frames every view — and the only
+   * surface other content ever passes beneath.
+   *
+   * ⚠️ It is sticky only on a viewport with room for it, which is a bound
+   * #307's review established by measuring: at 320×256 — the viewport WCAG 2.2
+   * SC 1.4.10 names — an eleven-link header is 178px, 70% of the screen.
+   * `theme.css`'s `@media (min-width: 64rem) and (min-height: 40rem)` block is
+   * where that is decided and where the numbers are. The level is unchanged by
+   * it: the header is the top of the ramp on every viewport, and on a small
+   * one it simply does not have anything scrolling under it.
    */
   surfaceOverlay: '#dde0df',
   /** The boundary of a control or a panel. A non-text contrast, not a text one. */
@@ -208,7 +223,7 @@ export const ELEVATION_SURFACES: readonly ElevationSurface[] = [
   { level: 0, token: 'canvas', where: 'the page itself' },
   { level: 1, token: 'surface', where: 'a panel, a chart well, the header of the page' },
   { level: 2, token: 'surfaceRaised', where: 'a metric card, a table header row' },
-  { level: 3, token: 'surfaceOverlay', where: 'the sticky header, over scrolled content' },
+  { level: 3, token: 'surfaceOverlay', where: 'the app header, over content where it sticks' },
 ];
 
 /**
@@ -524,14 +539,14 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     background: 'surfaceOverlay',
     minimum: AA_TEXT,
     measured: 13.15,
-    where: 'the wordmark and the navigation, on the sticky header',
+    where: 'the wordmark and the navigation, on the app header',
   },
   {
     foreground: 'inkMuted',
     background: 'surfaceOverlay',
     minimum: AA_TEXT,
     measured: 5.37,
-    where: 'secondary text on the sticky header',
+    where: 'secondary text on the app header',
   },
   {
     foreground: 'border',
@@ -545,14 +560,14 @@ export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
     background: 'surfaceOverlay',
     minimum: AA_TEXT,
     measured: 5.9,
-    where: 'a navigation link on the sticky header',
+    where: 'a navigation link on the app header',
   },
   {
     foreground: 'focus',
     background: 'surfaceOverlay',
     minimum: AA_LARGE_TEXT_OR_NON_TEXT,
     measured: 13.15,
-    where: 'the focus ring, offset onto the sticky header (WCAG 2.2 SC 2.4.13)',
+    where: 'the focus ring, offset onto the app header (WCAG 2.2 SC 2.4.13)',
   },
 
   {

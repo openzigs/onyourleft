@@ -1,0 +1,438 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * The app shell, laid out by a real engine — #307's review.
+ *
+ * ## The hole this closes
+ *
+ * #307 made `.oyl-header` sticky and gave `.oyl-main` a `scroll-margin-top`,
+ * and every gate in the repository stayed green while the result was, at
+ * 320×256, a header covering **70% of the viewport** and a "Skip to main
+ * content" that landed the `<h1>` **entirely behind it**. The review's durable
+ * finding was that this repository's accessibility gate is structurally blind
+ * to *layout*: jsdom performs no layout (CLAUDE.md §4e), `theme.a11y.test.ts`
+ * reads the stylesheet as a file, and the browser gate rendered a map, a 3D
+ * scene and a HUD panel — never the chrome.
+ *
+ * So `position`, `z-index`, `scroll-margin-top` and the height of persistent
+ * chrome had **zero** coverage, and `test:a11y` passing was not evidence about
+ * any of them. This file is the missing measurement.
+ *
+ * ## Which assertions are invariants and which are the literal regression
+ *
+ * Both kinds are here on purpose and they fail for different reasons.
+ *
+ * - {@link PERSISTENT_CHROME_BUDGET} is the **invariant**. It says nothing
+ *   about `position: sticky`: it scrolls the page and asks how much of the
+ *   viewport the chrome still covers. A header made sticky again at a phone's
+ *   width fails it, and so would a fixed footer, a banner, or anything else
+ *   somebody pins to the edge of a small screen later.
+ * - the skip-link and stacking tests pin the two **specific** defects, so that
+ *   a failure names the thing a rider would experience rather than a ratio.
+ *
+ * ## Why every assertion is taken from the browser
+ *
+ * Nothing here recomputes a layout. Every number is `getBoundingClientRect`,
+ * `getComputedStyle`, `scrollY` or `elementFromPoint`, read out of Chromium
+ * after it has laid the real markup out under the real stylesheet. A harness
+ * that worked out where the `h1` ought to be would be measuring itself — the
+ * lesson `hud-harness.tsx` records.
+ *
+ * ## What this does NOT prove
+ *
+ * That the shell looks right; there is no reference image and ADR 0009 forbids
+ * deriving one from another product. That it works on a real phone; a 320 px
+ * viewport in a headless Chromium is not a handlebar in the rain. And nothing
+ * about colour beyond the one background asserted below —
+ * `contrast.a11y.test.ts` owns the palette.
+ */
+
+import { expect, test, type Page } from '@playwright/test';
+
+/**
+ * The viewports measured, and why each is here.
+ *
+ * ⚠️ 320×256 is not a device. It is the viewport **WCAG 2.2 SC 1.4.10 (Reflow,
+ * AA)** names, and it is what a 1280×1024 window becomes at 400% zoom — so it
+ * is the low-vision reader this product has, not a phone nobody owns. It is
+ * first in the list because it is the one that found the defect.
+ */
+const VIEWPORTS = [
+  { name: '320×256 — the SC 1.4.10 viewport', width: 320, height: 256 },
+  { name: '375×667 — a phone', width: 375, height: 667 },
+  { name: '768×1024 — a tablet', width: 768, height: 1024 },
+  { name: '1024×640 — the smallest the sticky query admits', width: 1024, height: 640 },
+  { name: '1280×800 — a laptop', width: 1280, height: 800 },
+] as const;
+
+/**
+ * The most of a viewport that chrome may still cover once the page is scrolled.
+ *
+ * Measured on this branch in the lockfile-pinned Chromium: the worst case the
+ * `@media (min-width: 64rem) and (min-height: 40rem)` block can admit is
+ * 1024×640, where the header is 97 px — **15.2%**. Before the fix, 320×256 was
+ * **70%**.
+ *
+ * ⚠️ 20% is a budget with headroom over the worst admitted case, and that is
+ * deliberate rather than slack: it is loose enough that a font-metric
+ * difference between Chromium builds cannot turn this red, and tight enough to
+ * catch every failure of the shape that has actually occurred — a twelfth
+ * route wrapping the nav to a second line at 1024 px takes the header to 138 px
+ * and 21.6%, which fails.
+ */
+const PERSISTENT_CHROME_BUDGET = 0.2;
+
+/**
+ * How far clear of the chrome a heading has to land after a fragment jump, in
+ * CSS pixels.
+ *
+ * Without a sticky header the gap is `.oyl-main`'s own 1.5rem top padding —
+ * 24px — so anything much under that is a regression against the layout with no
+ * sticky header at all, and a heading flush against the bottom edge of the
+ * chrome reads as part of the chrome rather than as the top of the page.
+ *
+ * ⚠️ This floor, not the sign of the gap, is what pins the `scroll-margin-top`
+ * VALUE. #307 shipped `5rem` (80px); inside the media query the header measures
+ * 97px, so the heading would land 7px clear — positive, and a
+ * `heading >= chrome` assertion would pass it. 16px is under the 24px the
+ * non-sticky layout gives and over the 7px that value produces, so the gate
+ * fails the number rather than only failing its absence.
+ */
+const MINIMUM_HEADING_CLEARANCE = 16;
+
+/** `#dde0df`, elevation 3 in `design/tokens.ts`, as Chromium reports a colour. */
+const ELEVATION_3 = 'rgb(221, 224, 223)';
+
+async function openShell(page: Page): Promise<void> {
+  await page.goto('/shell.html');
+  await page.waitForSelector('html[data-oyl-shell-ready]');
+}
+
+/** Two animation frames, which is when a scroll a focus call caused has settled. */
+async function settled(page: Page): Promise<void> {
+  await page.evaluate(
+    async () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            resolve();
+          });
+        });
+      }),
+  );
+}
+
+for (const viewport of VIEWPORTS) {
+  test.describe(viewport.name, () => {
+    test.use({ viewport: { width: viewport.width, height: viewport.height } });
+
+    test('the stylesheet loaded and the page can scroll, or nothing below means anything', async ({
+      page,
+    }) => {
+      // The control, and it is not ceremony. Both of the measurements this file
+      // exists for are trivially satisfied by a broken page: chrome that is
+      // zero pixels tall is inside any budget, and a document shorter than the
+      // viewport cannot scroll, so a fragment jump moves nothing and the `h1`
+      // is "clear of the header" by having never moved. Every viewport above
+      // 320×640 reported exactly that on this harness's first run, before
+      // `shell-harness.tsx` §SPACER_PIXELS existed.
+      await openShell(page);
+
+      const state = await page.evaluate(() => {
+        const header = document.querySelector('.oyl-header');
+        const region = document.querySelector('.oyl-main');
+        if (header === null || region === null) throw new Error('no .oyl-header or no .oyl-main');
+        return {
+          headerHeight: header.getBoundingClientRect().height,
+          headerBackground: getComputedStyle(header).backgroundColor,
+          scrollable: document.documentElement.scrollHeight - window.innerHeight,
+          overflowsViewport: region.getBoundingClientRect().height - window.innerHeight,
+        };
+      });
+
+      expect(state.headerHeight, 'the header has no height — did theme.css load?').toBeGreaterThan(
+        0,
+      );
+      expect(
+        state.headerBackground,
+        'the header is not painted in the elevation-3 surface. Either theme.css did not load, ' +
+          'or the ramp and the rules that use it have drifted apart',
+      ).toBe(ELEVATION_3);
+      expect(
+        state.scrollable,
+        'the document is not taller than the viewport, so nothing below can scroll and the ' +
+          'skip-link assertions would pass over a page that never moved',
+      ).toBeGreaterThan(200);
+
+      // ⚠️ The second half of the control, and the one that is easy to leave
+      // out. A `focus()` on an element that already fits on screen scrolls to
+      // the top of the document and stops — `scroll-margin-top` is never
+      // consulted, and the skip-link test below passes without ever exercising
+      // the property it is about. Measured: with the harness spacer placed
+      // after the footer instead of inside `main`, `scroll-margin-top: 5rem` —
+      // the value #307 shipped and its review blocked on — left the entire
+      // spec green. `main` taller than the viewport is what the product's own
+      // views are, and it is what makes the measurement real.
+      expect(
+        state.overflowsViewport,
+        '<main> fits inside the viewport, so focusing it scrolls to the top of the document ' +
+          'and scroll-margin-top is never applied. Every skip-link assertion in this file is ' +
+          'then vacuous — see shell-harness.tsx §SPACER_PIXELS',
+      ).toBeGreaterThan(0);
+    });
+
+    test('content is not required to scroll in two dimensions (SC 1.4.10)', async ({ page }) => {
+      await openShell(page);
+
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - window.innerWidth,
+      );
+
+      // The literal requirement of SC 1.4.10 for vertical-scrolling content:
+      // at 320 CSS px there is no horizontal scrollbar. Sub-pixel rounding is
+      // tolerated; a wrapped nav or an over-wide table is not.
+      expect(
+        overflow,
+        'the page scrolls horizontally, which SC 1.4.10 forbids',
+      ).toBeLessThanOrEqual(1);
+    });
+
+    test('persistent chrome leaves the viewport to the content', async ({ page }) => {
+      await openShell(page);
+
+      // Scroll well past anything in the flow. Whatever still covers part of
+      // the viewport after this is, by definition, persistent.
+      await page.evaluate(() => {
+        window.scrollTo(0, 2000);
+      });
+      await settled(page);
+
+      const covered = await page.evaluate(() => {
+        const header = document.querySelector('.oyl-header');
+        if (header === null) throw new Error('no .oyl-header');
+        const box = header.getBoundingClientRect();
+        // How much of the viewport the header still covers: zero when it has
+        // scrolled away, its own height when it is pinned to the top.
+        const visible = Math.max(
+          0,
+          Math.min(box.bottom, window.innerHeight) - Math.max(box.top, 0),
+        );
+        return { visible, viewport: window.innerHeight, scrollY: window.scrollY };
+      });
+
+      expect(covered.scrollY, 'the page did not scroll, so this measures nothing').toBeGreaterThan(
+        0,
+      );
+
+      const share = covered.visible / covered.viewport;
+      expect(
+        share,
+        `the header still covers ${covered.visible.toFixed(0)}px of a ${String(
+          covered.viewport,
+        )}px viewport — ${(share * 100).toFixed(1)}%. Persistent chrome on a small viewport is ` +
+          'the #307 regression: at 320×256, the viewport SC 1.4.10 names, a sticky eleven-link ' +
+          'header left 78px for the content. theme.css bounds this with a media query; see the ' +
+          'block below .oyl-main',
+      ).toBeLessThanOrEqual(PERSISTENT_CHROME_BUDGET);
+    });
+
+    /*
+     * ⚠️ This covers **every route change as well as the skip link**, and that
+     * is worth saying because the skip link looks like a rare path.
+     * `AppShell.skipToContent` calls `mainRef.current.focus()`, and so does the
+     * `useEffect` that runs on every route change — the same call, the same
+     * scroll, the same `scroll-margin-top`. A rider who never presses Tab meets
+     * this on every tap of the navigation.
+     */
+    test('“Skip to main content” lands the heading where it can be read', async ({ page }) => {
+      await openShell(page);
+
+      // Tab, rather than `focus()`, because the skip link is revealed by
+      // `:focus-visible` and a scripted focus does not reliably satisfy it.
+      // This is also what a keyboard user actually does, and the skip link is
+      // the first focusable thing in the document.
+      await page.keyboard.press('Tab');
+      await expect(page.locator('.oyl-skip-link')).toBeFocused();
+
+      await page.locator('.oyl-skip-link').press('Enter');
+      await settled(page);
+
+      const landed = await page.evaluate(() => {
+        const header = document.querySelector('.oyl-header');
+        const heading = document.querySelector('h1');
+        const main = document.querySelector('.oyl-main');
+        if (header === null || heading === null || main === null) {
+          throw new Error('the shell is missing its header, its h1 or its main');
+        }
+        const headerBox = header.getBoundingClientRect();
+        const headingBox = heading.getBoundingClientRect();
+        return {
+          // Zero when the header has scrolled away, its height when pinned.
+          headerBottom: Math.max(0, Math.min(headerBox.bottom, window.innerHeight)),
+          headingTop: headingBox.top,
+          headingBottom: headingBox.bottom,
+          viewport: window.innerHeight,
+          focusedMain: document.activeElement === main,
+          scrollY: window.scrollY,
+        };
+      });
+
+      // The control for this one: if focus never reached `main`, the scroll
+      // that follows from it never happened either and the numbers below are
+      // about a page nobody skipped into.
+      expect(landed.focusedMain, 'focus did not reach <main>, so no fragment jump occurred').toBe(
+        true,
+      );
+
+      expect(
+        landed.headingTop - landed.headerBottom,
+        `the h1 is at y=${landed.headingTop.toFixed(0)} with the header occupying ` +
+          `0..${landed.headerBottom.toFixed(0)}. The heading a rider was just sent to is ` +
+          'underneath the chrome, or close enough to it to read as part of it — #307 shipped ' +
+          'this with scroll-margin-top: 5rem (80px) against a header of 97px to 178px',
+      ).toBeGreaterThanOrEqual(MINIMUM_HEADING_CLEARANCE);
+
+      expect(
+        landed.headingBottom,
+        'the h1 is below the fold after skipping to it, which is the same failure upside down',
+      ).toBeLessThanOrEqual(landed.viewport);
+    });
+
+    test('the focused skip link is painted above the header, not under it', async ({ page }) => {
+      await openShell(page);
+      await page.keyboard.press('Tab');
+      await expect(page.locator('.oyl-skip-link')).toBeFocused();
+      await settled(page);
+
+      const hit = await page.evaluate(() => {
+        const link = document.querySelector('.oyl-skip-link');
+        const header = document.querySelector('.oyl-header');
+        if (link === null || header === null) throw new Error('no skip link or no header');
+        const box = link.getBoundingClientRect();
+        const centre = document.elementFromPoint(
+          box.left + box.width / 2,
+          box.top + box.height / 2,
+        );
+
+        // The control: a point inside the header and clear of the link has to
+        // hit the header. Without it, an `elementFromPoint` that returned
+        // `null` for everything — an off-screen link, a zero-size box — would
+        // make the assertion below unfalsifiable.
+        const headerBox = header.getBoundingClientRect();
+        const elsewhere = document.elementFromPoint(headerBox.right - 4, box.bottom + 8);
+
+        return {
+          onLink: centre !== null && link.contains(centre),
+          onHeaderElsewhere: elsewhere !== null && header.contains(elsewhere),
+          linkHeight: box.height,
+        };
+      });
+
+      expect(hit.linkHeight, 'the skip link has no box to hit-test').toBeGreaterThan(0);
+      expect(
+        hit.onHeaderElsewhere,
+        'a point inside the header does not hit the header, so this hit test proves nothing',
+      ).toBe(true);
+      expect(
+        hit.onLink,
+        'the focused skip link is not the topmost thing at its own centre. The header is ' +
+          'painted over it — invisible to the only input method that uses it, while remaining ' +
+          'perfectly focusable and therefore invisible to the accessibility audit too. ' +
+          'theme.css keeps the header’s z-index below the link’s 10 for exactly this reason',
+      ).toBe(true);
+    });
+  });
+}
+
+/**
+ * The apparatus control for the chrome budget, and it is the one this file
+ * would be worthless without.
+ *
+ * "How much of the viewport does the chrome still cover after scrolling" is
+ * trivially inside any budget when the answer is **zero for the wrong reason**
+ * — and that is exactly what this spec did on its first draft. The harness
+ * extended the document with a spacer placed after `.oyl-shell`, so scrolling
+ * carried the whole shell off the top; the header measured 0 px; and the
+ * budget test passed *with `position: sticky` restored unconditionally*, which
+ * is the precise defect it exists to catch.
+ *
+ * So this asserts the apparatus can see pinned chrome at all. At 1280×800 the
+ * header is sticky by design, and after a long scroll it has to still be
+ * covering part of the viewport. If it does not, every per-viewport budget
+ * assertion above is passing over nothing and this is the test that says so.
+ */
+test.describe('the apparatus can see chrome that stays', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test('a pinned header is still measured after the page has scrolled', async ({ page }) => {
+    await openShell(page);
+    await page.evaluate(() => {
+      window.scrollTo(0, 2000);
+    });
+    await settled(page);
+
+    const visible = await page.evaluate(() => {
+      const header = document.querySelector('.oyl-header');
+      if (header === null) throw new Error('no .oyl-header');
+      const box = header.getBoundingClientRect();
+      return Math.max(0, Math.min(box.bottom, window.innerHeight) - Math.max(box.top, 0));
+    });
+
+    expect(
+      visible,
+      'the header covers nothing after scrolling on a viewport where theme.css makes it ' +
+        'sticky. Either the sticky rule is gone, or — the failure this test was written for — ' +
+        'the harness has scrolled past the header’s own containing block, in which case every ' +
+        'chrome-budget assertion in this file is vacuous. See shell-harness.tsx §SPACER_PIXELS',
+    ).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * The coupling `theme.css` claims between the two rules it puts in one block.
+ *
+ * `scroll-margin-top` is meaningless when the header is not sticky and wrong
+ * when it is absent. Declaring them together is what stops one being edited
+ * without the other, and this is what says the pairing still holds — read off
+ * the browser at both ends of the query rather than out of the stylesheet.
+ */
+test.describe('the sticky header and its scroll margin are one decision', () => {
+  test('both are off below the breakpoint and both are on above it', async ({ browser }) => {
+    async function read(width: number, height: number): Promise<[string, string]> {
+      const page = await browser.newPage({ viewport: { width, height } });
+      await openShell(page);
+      const measured = await page.evaluate(() => {
+        const header = document.querySelector('.oyl-header');
+        const main = document.querySelector('.oyl-main');
+        if (header === null || main === null) throw new Error('no header or no main');
+        return [getComputedStyle(header).position, getComputedStyle(main).scrollMarginTop] as [
+          string,
+          string,
+        ];
+      });
+      await page.close();
+      return measured;
+    }
+
+    const [smallPosition, smallMargin] = await read(375, 667);
+    expect(smallPosition, 'the header sticks at a phone’s width, which #307’s review found').toBe(
+      'static',
+    );
+    expect(
+      smallMargin,
+      'a scroll margin is reserved for a header that is not there, pushing the heading down for ' +
+        'no reason',
+    ).toBe('0px');
+
+    const [largePosition, largeMargin] = await read(1280, 800);
+    expect(
+      largePosition,
+      'the header no longer sticks anywhere, which leaves the scroll margin below guarding ' +
+        'nothing — delete both or restore both',
+    ).toBe('sticky');
+    expect(
+      Number.parseFloat(largeMargin),
+      'the header sticks and nothing compensates the fragment jump for it',
+    ).toBeGreaterThan(0);
+  });
+});

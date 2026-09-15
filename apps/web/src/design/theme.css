@@ -110,11 +110,18 @@ body {
  * paragraph is a gap at 31px, and `text-wrap: balance` keeps a two-line title
  * from leaving one word on the second line. `balance` is ignored by anything
  * that does not implement it, so it needs no query.
+ *
+ * ⚠️ `h1` to `h3` and no further, because `h1` to `h3` is what the views
+ * render: `grep '<h4' apps/web/src` finds only `a11y/audit.a11y.test.ts`'s
+ * heading-order fixtures, which are strings in a test and are never painted.
+ * An `h4` rule here would be a declaration nothing applies to — the shape
+ * `theme.a11y.test.ts` §"every token is painted by something" exists to catch
+ * one level down, arriving at the level above it. The day a view needs an `h4`
+ * is the day to add one and see it.
  */
 h1,
 h2,
-h3,
-h4 {
+h3 {
   line-height: 1.2;
   margin: 0 0 var(--oyl-space-sm);
   text-wrap: balance;
@@ -136,21 +143,12 @@ h3 {
   margin-top: var(--oyl-space-lg);
 }
 
-h4 {
-  font-size: var(--oyl-font-size-md);
-  margin-top: var(--oyl-space-lg);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--oyl-color-ink-muted);
-}
-
 /*
  * The first heading in a region opens it; it does not need the gap that
  * separates it from the section above, because there is no section above.
  */
 h2:first-child,
-h3:first-child,
-h4:first-child {
+h3:first-child {
   margin-top: 0;
 }
 
@@ -209,26 +207,18 @@ h4:first-child {
 }
 
 /*
- * Elevation 3, the top of the ramp, and the one element that genuinely passes
- * over other content: it is sticky, so the page scrolls underneath it.
+ * Elevation 3, the top of the ramp: the chrome that frames every view, and the
+ * only surface that other content ever passes beneath — see the sticky block
+ * below `.oyl-main`, which is where that happens and where it is bounded.
  *
  * That is what the darkest surface is for. With `--oyl-color-surface` the
  * header and a panel scrolling past it were the same colour and the boundary
  * disappeared at exactly the moment it mattered.
- *
- * ⚠️ `z-index` is 5, BELOW the skip link's 10, and that ordering is not a
- * preference. The skip link is earlier in the DOM than the header, so at equal
- * z-index the header wins the paint and the focused skip link is drawn
- * underneath it — invisible to the only input method that uses it, while
- * remaining perfectly focusable and therefore invisible to the audit as well.
  */
 .oyl-header {
   background: var(--oyl-color-surface-overlay);
   border-bottom: 1px solid var(--oyl-color-border);
   padding: var(--oyl-space-md);
-  position: sticky;
-  top: 0;
-  z-index: 5;
 }
 
 .oyl-wordmark {
@@ -264,17 +254,10 @@ h4:first-child {
   text-underline-offset: 4px;
 }
 
-/*
- * `scroll-margin-top` is what the sticky header above costs, and paying it here
- * is cheaper than making the header shorter: a fragment jump — the skip link,
- * or any `#anchor` — otherwise scrolls the target to y=0, which is behind the
- * header. 5rem is the header's own height plus a gap.
- */
 .oyl-main {
   flex: 1;
   padding: var(--oyl-space-lg) var(--oyl-space-md);
   max-width: var(--oyl-measure);
-  scroll-margin-top: 5rem;
 }
 
 .oyl-main:focus {
@@ -284,6 +267,90 @@ h4:first-child {
 .oyl-main:focus-visible {
   outline: 3px solid var(--oyl-color-focus);
   outline-offset: -3px;
+}
+
+/*
+ * The header sticks only where it is cheap, and this query is where that is
+ * decided. Both halves of the cost are paid here, in one block, because they
+ * are one decision — see "why the two rules share a block" below.
+ *
+ * ## The measurement, which is the whole argument
+ *
+ * The header is the wordmark plus one link per entry in `shell/routes.ts` —
+ * eleven today — in a `flex-wrap: wrap` list, so its height is a function of
+ * the viewport's WIDTH and the share it costs is a function of the HEIGHT.
+ * Read off the lockfile-pinned Chromium against this stylesheet and the real
+ * `AppShell` markup, by `browser/shell.browser.spec.ts`:
+ *
+ *   320×256   header 178px   70% of the viewport      ← SC 1.4.10's target
+ *   375×667   header 178px   27%
+ *   768×1024  header 138px   13%
+ *   1280×800  header  97px   12%
+ *
+ * ⚠️ A sticky header costing 70% of a 320×256 viewport is what this query
+ * exists to prevent, and it is not a matter of taste. 320×256 is the viewport
+ * WCAG 2.2 SC 1.4.10 (Reflow, AA) names, and it is what a 1280×1024 window
+ * becomes at 400% zoom — so those numbers are not a phone nobody owns, they
+ * are the low-vision reader this product has. Leaving 78px of content is a
+ * loss of content in the sense that SC means it.
+ *
+ * ## Why width AND height, and why `rem`
+ *
+ * Neither alone is the predicate. Height alone would admit a 320×1024 window,
+ * where the header is still 178px because the nav still wraps. Width alone
+ * would admit 1024×400. Together they bound the worst case this query can
+ * admit at 1024×640 — a 97px header, 15% of the viewport.
+ *
+ * `rem` rather than `px` deliberately: in a media query `rem` resolves against
+ * the initial font size, which is the reader's own browser default. A reader
+ * who has set 24px gets a breakpoint at 1536px, which is the right direction
+ * for a query whose whole subject is how much room text needs. Page zoom is
+ * unaffected and is handled by the viewport shrinking, as above.
+ *
+ * ## Why the two rules share a block
+ *
+ * `scroll-margin-top` is what a sticky header costs a fragment jump: the skip
+ * link, `AppShell`'s focus move on every route change, and any `#anchor` all
+ * scroll the target to y=0, which is behind a sticky header. It is meaningless
+ * when the header is not sticky, and it was WRONG before #307's review — 5rem
+ * (80px) against a header of 97px to 178px, so "Skip to main content" landed
+ * the `h1` entirely behind the header on a phone. Declaring the two together
+ * is what stops one of them being changed without the other.
+ *
+ * 7rem is 112px, and it is deliberately LARGER than the 97px the header
+ * measures at every width this query admits. That is what makes it safe rather
+ * than merely bigger: the target scroll position is `main`'s offset minus the
+ * margin, which comes out negative, so the browser clamps it to the top of the
+ * document and `main` is never tucked under the header at all. Measured by
+ * `shell.browser.spec.ts`: `scrollY` 0, the `h1` 24px clear of the header —
+ * which is `.oyl-main`'s own 1.5rem top padding, the same gap the layout has
+ * with no sticky header. The 5rem this replaces lands `scrollY` at 17 and the
+ * `h1` 7px clear, flush against the chrome.
+ *
+ * ⚠️ The 97px is a MEASUREMENT and a twelfth route would change it. If the
+ * header ever grows past 112px this margin stops clamping and starts tucking.
+ * `shell.browser.spec.ts` re-takes the clearance on every CI run and fails with
+ * it in the message, so this number cannot rot quietly the way the 5rem did.
+ */
+@media (min-width: 64rem) and (min-height: 40rem) {
+  .oyl-header {
+    position: sticky;
+    top: 0;
+    /*
+     * ⚠️ BELOW the skip link's 10, and that ordering is not a preference. The
+     * skip link is earlier in the DOM than the header, so at equal z-index the
+     * header wins the paint and the focused skip link is drawn underneath it —
+     * invisible to the only input method that uses it, while remaining
+     * perfectly focusable and therefore invisible to the audit as well.
+     * `shell.browser.spec.ts` hit-tests the focused link rather than reading
+     * this number, so raising it is a red build and not a review note.
+     */
+    z-index: 5;
+  }
+
+  .oyl-main {
+    scroll-margin-top: 7rem;
+  }
 }
 
 .oyl-footer {
@@ -527,8 +594,12 @@ select {
   border-radius: var(--oyl-radius);
   color: var(--oyl-color-ink);
   font: inherit;
-  /* 44px, WCAG 2.2 SC 2.5.8's target size, which a default-height select on a
-     phone does not reach. */
+  /* 44px. ⚠️ That is NOT SC 2.5.8, which an earlier version of this comment
+     cited: SC 2.5.8 (Target Size (Minimum), AA) is 24×24 CSS px, and 44×44 is
+     SC 2.5.5 (Target Size (Enhanced), AAA). The value is deliberate and the
+     citation was not — a default-height select clears the AA minimum easily
+     and is still a poor target on a phone in gloves, which is the device this
+     product is used on. */
   min-height: 2.75rem;
   padding: var(--oyl-space-sm) 2rem var(--oyl-space-sm) var(--oyl-space-sm);
   transition: border-color 120ms ease;

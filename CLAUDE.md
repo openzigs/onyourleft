@@ -38,7 +38,13 @@ apps/                 AGPL-3.0-or-later, without exception
                         #266 it also holds hud.html and hud-harness.tsx — the
                         ride HUD laid out at a phone's width, which is a gate,
                         and the one page here that renders React and measures a
-                        box rather than reading back a pixel
+                        box rather than reading back a pixel. Since #307's
+                        review it also holds shell.html and shell-harness.tsx —
+                        the app shell's own chrome at 320×256, the viewport
+                        WCAG 2.2 SC 1.4.10 names, which is what closes this
+                        repository's structural blindness to LAYOUT: jsdom
+                        performs none and nothing here had ever laid out a
+                        header
     src/a11y/           the accessibility gate: rules, routes, contrast (#48) — see §4e
     src/analysis/       zones and duration personal bests (#78) — the port, the one
                         place a threshold default is substituted, the bounded
@@ -1191,6 +1197,8 @@ browser runs**.
 | `game.browser.spec.ts` | its spec — the renderer constructs against a live context, the geometry is one a driver accepts, and a frame reaches the drawing buffer (read back with `readPixels`, because `render` not throwing is a weaker claim) |
 | `hud.html`, `hud-harness.tsx` | since #266, the ride HUD: the **real** `game/hud/HudPanel.tsx` under the **real** `design/theme.css`, in the **real** `oyl-shell` → `oyl-main` → `oyl-game` chain `AppShell` and `GameView` give it, with every field populated and all three of #259's settled outcome words. A **`.tsx`**, and the only React in this directory |
 | `hud.browser.spec.ts` | its spec — no `.oyl-hud__value` overflows its grid track at a phone viewport in either orientation, read back from the browser's own layout. Its **control panels** are the half that makes a green run mean something |
+| `shell.html`, `shell-harness.tsx` | since #307's review, the app **shell**: the **real** `shell/AppShell.tsx` with the **real** `ROUTES` table under the **real** `design/theme.css`. The second `.tsx` here. ⚠️ Its spacer goes **inside `.oyl-main`** and the file says why at length — after `.oyl-shell` the header scrolls out of its own sticky containing block and measures 0 px, and inside `.oyl-shell` `main` stays shorter than the viewport so a focus scroll never consults `scroll-margin-top`. Each mistake made a different assertion pass over nothing |
+| `shell.browser.spec.ts` | its spec — how much of the viewport persistent chrome still covers after a scroll, where a fragment jump lands the `h1`, whether the focused skip link is the topmost thing at its own centre (hit-tested, not read off a `z-index`), and no horizontal scrolling at 320 px |
 | `../playwright.config.ts` | Chromium only, no retries, and the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all |
 | `../vite.browser.config.ts` | the harness build. A second Vite config, so the harness cannot reach a shipped bundle |
 
@@ -1228,6 +1236,15 @@ are recorded in the spec's header: Chromium reports `scrollWidth === clientWidth
 non-scroll-container whenever nothing actually overflows, so that comparison alone can look
 identical for a broken page and a good one; and `auto-fit` answers a too-wide container by adding
 columns rather than widening tracks, so a track-width guard does not catch one.
+
+⚠️ **Until #307's review this gate rendered a map, a 3D scene and a HUD panel, and never the
+chrome** — so `position`, `z-index`, `scroll-margin-top` and the height of anything pinned to the
+edge of the screen had **no coverage anywhere in the repository**, and `test:a11y` passing was not
+evidence about any of them. #307 shipped a sticky header covering **70% of a 320×256 viewport** and
+a "Skip to main content" that landed the `<h1>` entirely behind it, through every gate green.
+`shell.browser.spec.ts` is what closes that, and the rule it leaves behind is: **a change to
+`position`, `z-index`, `scroll-margin` or the size of persistent chrome is reviewed by measuring it
+in the pinned Chromium, not by reading the CSS.**
 
 ⚠️ **The browser gate does not subsume `styleOrigins`, and it is easy to assume it does.** Adding a
 third-party `glyphs` URL to `basemapStyle` turns the **jsdom** check red and leaves the **browser**
@@ -2188,6 +2205,10 @@ top of an issue **supersedes its body**.
 | What stops a design token being declared, asserted and painted by nothing | `apps/web/src/a11y/theme.a11y.test.ts` §"every token is painted by something" |
 | Why a contrast pair records what it measures as well as what it must clear | `apps/web/src/design/tokens.ts` §`ContrastRequirement.measured` |
 | How far a `<select>` may be styled before it stops being one | `apps/web/src/design/theme.css` §`select`, [#305](https://github.com/openzigs/onyourleft/issues/305) |
+| When the header sticks, when it deliberately does not, and the measurement that decides | `apps/web/src/design/theme.css` §`@media (min-width: 64rem) and (min-height: 40rem)`, `apps/web/browser/shell.browser.spec.ts` |
+| What stops persistent chrome eating a small viewport, and why no other gate can see it | `apps/web/browser/shell.browser.spec.ts` §`PERSISTENT_CHROME_BUDGET`, §4f |
+| Why the harness spacer's position is load-bearing, and the two places it must not go | `apps/web/browser/shell-harness.tsx` §`SPACER_PIXELS` |
+| What floor the HUD's labels and its dropped-sensor mark sit on | `apps/web/src/game/hud/hud-value-size.test.ts` §"the HUD’s supporting text has a floor" |
 | How a rider tells a dropped sensor from a genuine zero | `apps/web/src/game/hud/fields.ts` §`NO_READING`, `HudPanel.a11y.test.tsx` |
 | What the elevation strip says on lap two of a loop, and why a point-to-point route still reads 100 % | `apps/web/src/game/hud/fields.ts` §`profileReading`, `plan.ts` §`planProgress` |
 | Why the wake lock's *release* is the half that is tested | `apps/web/src/game/hud/wake-lock.ts` |

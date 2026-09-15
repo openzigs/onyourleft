@@ -511,6 +511,22 @@ listbox out of `<div>`s ([#305](https://github.com/openzigs/onyourleft/issues/30
 under `forced-colors: active`, because a control whose OS skin has been removed *and* whose
 replacement skin is then flattened has no affordance left at all.
 
+⚠️ **#307's review added a fourth thing, and it is a gate rather than a system.** The first three are
+all checkable *without a browser* — a colour ratio, a number against a ratio, a `var()` against a
+declaration — and that is exactly why the one part of #307 nothing could check went wrong. It made
+`.oyl-header` sticky and gave `.oyl-main` a `scroll-margin-top`, and at 320×256 — the viewport WCAG
+2.2 SC 1.4.10 names, and what a 1280×1024 window becomes at 400% zoom — the header covered **70% of
+the screen** and "Skip to main content" landed the `<h1>` entirely behind it. Every gate stayed
+green, because **this repository had no way to measure a layout**: jsdom performs none,
+`theme.a11y.test.ts` reads the stylesheet as a file, and the browser gate rendered a map and a 3D
+scene and never the chrome.
+
+So the header now sticks only where it is cheap — `@media (min-width: 64rem) and (min-height: 40rem)`,
+whose worst admitted case is a 97 px header on a 640 px viewport — and `apps/web/browser/shell.html`
+measures it. The general rule that falls out is worth more than the fix: **`position`, `z-index`,
+`scroll-margin` and the size of persistent chrome are reviewed by measuring them in the pinned
+Chromium, never by reading the CSS.** CLAUDE.md §4f is the record.
+
 **The unsupported-browser experience is a feature of this component, not an error path.**
 `src/support/bluetooth-support.ts` classifies the browser into six states —
 available, adapter-unavailable, not-permitted, insecure-context, absent, incomplete — by probing
