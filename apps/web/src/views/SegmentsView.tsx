@@ -136,6 +136,7 @@ export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [matching, setMatching] = useState(false);
   const [swept, setSwept] = useState<SweepResult | undefined>(undefined);
+  const [sweepFailure, setSweepFailure] = useState<string | undefined>(undefined);
   const units = useUnits();
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -161,14 +162,36 @@ export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
    * reasoning: this writes, and a read path that writes is a read path whose
    * cost nobody can state. Putting it in the effect above would run a sweep
    * every time a rider glanced at this screen.
+   *
+   * ⚠️ **`matching` guards this component, not the tab.** Navigating away
+   * mid-sweep unmounts the view and coming back mounts a fresh one with the
+   * control enabled while the first sweep is still running. The damage is
+   * bounded — the effort id is derived and the write replaces — but two loops
+   * interleave checkpoint writes. A module-level guard is the honest fix and
+   * is #294, not this PR's line to change.
    */
   const runSweep = useCallback(async (): Promise<void> => {
     if (match === undefined || matching) {
       return;
     }
     setMatching(true);
+    setSweepFailure(undefined);
     try {
       setSwept(await matchLibrary(match));
+    } catch (error: unknown) {
+      // ⚠️ **Said out loud, because the control re-enables either way.** A
+      // sweep writes efforts for up to `SWEEP_ACTIVITY_BUDGET` rides, so
+      // `QuotaExceededError` is a real outcome; `putActivityEfforts` rejects
+      // outright on an effort naming another athlete; and a stream that will
+      // not decode fails the read. Without this the button simply returns to
+      // "Match my rides" and a rider concludes nothing happened, when some
+      // rides were swept and a checkpoint may have been written.
+      //
+      // The partial progress is not lost: a page that throws writes no
+      // checkpoint, so the next press redoes that page from the last good
+      // cursor rather than stepping over it.
+      setSweepFailure(error instanceof Error ? error.message : String(error));
+      setSwept(undefined);
     } finally {
       setMatching(false);
     }
@@ -396,6 +419,13 @@ export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
           <Button onClick={() => void runSweep()} disabled={matching}>
             {matching ? 'Matching…' : 'Match my rides'}
           </Button>
+          {sweepFailure === undefined ? null : (
+            <StatusMessage tone="danger" live>
+              Matching stopped part-way through and this device may hold fewer efforts than your
+              rides contain. Pressing it again carries on from the last ride it finished.{' '}
+              {sweepFailure}
+            </StatusMessage>
+          )}
           {swept === undefined ? null : (
             <>
               <StatusMessage tone={swept.kind === 'swept' ? 'success' : 'warning'} live>

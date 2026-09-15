@@ -47,6 +47,7 @@
  */
 
 import type { IndexedSegment } from '@onyourleft/domain';
+import type { ActivityId } from '@onyourleft/store';
 
 import { indexSegments, sweepLibrary, type AbandonedNote } from './backfill';
 import type { MatchPort } from './match-port';
@@ -91,6 +92,15 @@ export interface SweepOutcome {
    *
    * #66's fourth criterion: the reason is carried out to where the athlete can
    * be told, rather than a silently shorter list of efforts.
+   *
+   * ⚠️ **One note per ride, not one per (ride, segment) pair**, which is both
+   * what the sentence needs and what bounds this. `sweepLibrary` reports a note
+   * per pair, so accumulating every one of them across a press is
+   * {@link SWEEP_ACTIVITY_BUDGET} × {@link SWEEP_CORPUS_LIMIT} — a hundred
+   * thousand objects held for the length of a sweep, on a phone. Nothing is
+   * lost by the first note winning: `reason` has one value, and
+   * {@link abandonedSentence} counts rides because two segments abandoned in
+   * one ride is one hole in one recording.
    */
   readonly abandoned: readonly AbandonedNote[];
   /** How many segments the library was matched against. */
@@ -215,6 +225,8 @@ export async function matchLibrary(
   let swept = 0;
   let efforts = 0;
   const abandoned: AbandonedNote[] = [];
+  // The set is the bound, not a tidy-up: see `SweepOutcome.abandoned`.
+  const abandonedRides = new Set<ActivityId>();
 
   for (;;) {
     const step = await sweepLibrary({
@@ -226,7 +238,13 @@ export async function matchLibrary(
     });
     swept += step.swept;
     efforts += step.efforts;
-    abandoned.push(...step.abandoned);
+    for (const note of step.abandoned) {
+      if (abandonedRides.has(note.activityId)) {
+        continue;
+      }
+      abandonedRides.add(note.activityId);
+      abandoned.push(note);
+    }
 
     const next = step.checkpoint;
     if (step.done || next === undefined) {

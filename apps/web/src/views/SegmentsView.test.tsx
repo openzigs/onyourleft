@@ -417,6 +417,29 @@ describe('finding efforts — the sweep’s control', () => {
     expect(textOf(view.container)).toContain('nothing to match your rides against yet');
   });
 
+  it('says the sweep stopped part-way rather than re-enabling the button in silence', async () => {
+    // ⚠️ The failure a rider can actually hit: one press writes efforts for up
+    // to 100 rides, so a quota refusal, an effort naming another athlete and a
+    // stream that will not decode all reject this call. Without a `catch` the
+    // control returns to "Match my rides" with nothing said, which reads as
+    // "nothing happened" over a sweep that wrote part of its work.
+    const match = matchable();
+    match.failNextWrite = true;
+    const port = stubSegments(OWNER, [{ activity: ride(), track: northward(21) }]);
+    view = await mount(<SegmentsView port={port} match={match} />);
+    await settle();
+
+    await pressMatch(view.container);
+
+    expect(textOf(view.container)).toContain('Matching stopped part-way through');
+    // Not the success sentence as well: a failed sweep reports no count.
+    expect(textOf(view.container)).not.toContain('Matched 1 ride');
+    const button = queryAll(view.container, 'button').find(
+      (candidate) => (candidate.textContent ?? '').trim() === 'Match my rides',
+    );
+    expect(button?.hasAttribute('disabled')).toBe(false);
+  });
+
   it('offers no control at all where there is no store behind it', async () => {
     // #48's first criterion: a control that cannot work is not shown disabled,
     // it is not shown. The rest of the screen still works.

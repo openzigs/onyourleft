@@ -21,13 +21,25 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import {
+  createSegment,
+  degreesLatitude,
+  degreesLongitude,
+  geographicPosition,
+  unixSeconds,
+  type GeographicPosition,
+} from '@onyourleft/domain';
 import type { BluetoothPort } from '@onyourleft/sensors/web-bluetooth';
 
 import { ridingSnapshot, stubRideController } from '../ride/testing';
+import { stubMatchPort } from '../segments/match-testing';
+import { stubSegments } from '../segments/testing';
+import type { MatchPort } from '../segments/match-port';
+import type { SegmentPort } from '../segments/store-port';
 import { AppShell } from '../shell/AppShell';
 import { ALL_ROUTES, hrefFor, ROUTES, routeById } from '../shell/routes';
-import type { AthleteRecord, UnitSystem } from '@onyourleft/store';
-import { athleteId } from '@onyourleft/store';
+import type { ActivityRecord, AthleteRecord, SegmentRecord, UnitSystem } from '@onyourleft/store';
+import { activityId, athleteId, segmentId } from '@onyourleft/store';
 
 import type { UnitsPort } from '../units/store-port';
 
@@ -100,6 +112,109 @@ function settingsPort(): UnitsPort {
   };
 }
 
+/**
+ * Segment ports that answer, so the **controls** are what get audited (#282).
+ *
+ * ⚠️ The same vacuous pass `settingsPort` above records, in a second place. A
+ * `/segments` mounted with no port renders `SegmentsView`'s "No storage"
+ * `StatusMessage` — a paragraph with nothing interactive in it — and returns
+ * before the create form or #282's "Match my rides" control exist at all,
+ * while the route loop below still reports `/segments` as covered. A review of
+ * #290 caught it on the new control; the create form (#64) had been outside
+ * the audit since it was written.
+ */
+const SEGMENTS_ATHLETE = athleteId('local');
+const SEGMENTS_ORIGIN_LATITUDE = 51.5;
+const SEGMENTS_ORIGIN_LONGITUDE = -0.12;
+const METRES_PER_DEGREE_LATITUDE = 111_194.9;
+const SEGMENTS_NOW = unixSeconds(1_760_000_000);
+
+/** A straight northbound track, which is all the matcher needs to find one. */
+function northward(count: number, spacingMetres = 50): GeographicPosition[] {
+  const step = spacingMetres / METRES_PER_DEGREE_LATITUDE;
+  return Array.from({ length: count }, (_unused, index) =>
+    geographicPosition(
+      degreesLatitude(SEGMENTS_ORIGIN_LATITUDE + index * step),
+      degreesLongitude(SEGMENTS_ORIGIN_LONGITUDE),
+    ),
+  );
+}
+
+function segmentsRide(): ActivityRecord {
+  return {
+    id: activityId('ride-1'),
+    athleteId: SEGMENTS_ATHLETE,
+    name: 'Morning ride',
+    startedAt: SEGMENTS_NOW,
+    startedAtTimeZone: 'UTC',
+    elapsedTime: 3600 as ActivityRecord['elapsedTime'],
+    movingTime: 3500 as ActivityRecord['movingTime'],
+    distance: 30_000 as ActivityRecord['distance'],
+    visibility: 'private',
+    hasPosition: true,
+    createdAt: SEGMENTS_NOW,
+  };
+}
+
+function aSegment(geometry: readonly GeographicPosition[]): SegmentRecord {
+  const built = createSegment({
+    id: 'the-drag',
+    createdBy: SEGMENTS_ATHLETE,
+    name: 'The long drag',
+    sport: 'ride',
+    geometry,
+    elevationSource: 'none',
+    visibility: 'private',
+    createdAt: SEGMENTS_NOW,
+  });
+  return { ...built, id: segmentId(built.id), createdBy: SEGMENTS_ATHLETE };
+}
+
+function segmentsPort(): SegmentPort {
+  const geometry = northward(26, 20);
+  return stubSegments(SEGMENTS_ATHLETE, [{ activity: segmentsRide(), track: northward(21) }], {
+    existing: [aSegment(geometry)],
+  });
+}
+
+/**
+ * A library the sweep finds one effort in, and one traversal it abandons.
+ *
+ * Both, in one press: the success `StatusMessage` and the labelled gap note are
+ * the two messages #282 adds, and a press that produced neither would audit the
+ * control and none of what it renders.
+ */
+function matchPort(): MatchPort {
+  const geometry = northward(26, 20);
+  const step = 20 / METRES_PER_DEGREE_LATITUDE;
+  const leadIn = [4, 3, 2, 1].map((back) =>
+    geographicPosition(
+      degreesLatitude(SEGMENTS_ORIGIN_LATITUDE - back * step),
+      degreesLongitude(SEGMENTS_ORIGIN_LONGITUDE),
+    ),
+  );
+  const holed = [
+    ...geometry.slice(0, 12),
+    ...Array.from<undefined>({ length: 40 }).fill(undefined),
+    ...geometry.slice(12),
+  ];
+  return stubMatchPort({
+    athleteId: SEGMENTS_ATHLETE,
+    rides: [
+      { activity: segmentsRide(), track: [...leadIn, ...geometry] },
+      {
+        activity: {
+          ...segmentsRide(),
+          id: activityId('ride-2'),
+          startedAt: unixSeconds(1_760_003_600),
+        },
+        track: [...leadIn, ...holed],
+      },
+    ],
+    segments: [aSegment(geometry)],
+  });
+}
+
 async function open(
   path: string,
   capabilities: CapabilityProbe = CAPABLE,
@@ -111,6 +226,8 @@ async function open(
       capabilities={capabilities}
       rideController={midRide()}
       settings={settingsPort()}
+      segments={segmentsPort()}
+      match={matchPort()}
       {...(units === undefined ? {} : { units })}
     />,
   );
@@ -143,6 +260,27 @@ describe('criterion 4 — every route passes the automated audit', () => {
     await open('/devices', NO_BLUETOOTH);
     expect(document.body.textContent).toContain('Safari and Firefox');
     expectClean('devices with no Bluetooth');
+  });
+
+  it('the segments route passes with the sweep’s result on screen, not only its control', async () => {
+    // ⚠️ The loop above audits the control; the two messages it renders appear
+    // only after a press, and a message is where a live region, a label and a
+    // heading order get broken. Pressed by keyboard for the same reason
+    // criterion 3 does: a control that cannot be focused cannot be activated
+    // here at all.
+    await open('/segments');
+    const button = queryAll(document, 'button').find(
+      (candidate) => (candidate.textContent ?? '').trim() === 'Match my rides',
+    );
+    expect(button, 'the sweep control is not on the segments page').not.toBeUndefined();
+
+    await activateWithKeyboard(button as HTMLElement);
+    await settle();
+
+    // Both messages, so this is not auditing an unchanged page.
+    expect(document.body.textContent).toContain('Matched 2 rides against 1 segment');
+    expect(document.body.textContent).toContain('gap in the recording');
+    expectClean('segments after a sweep');
   });
 
   it('the ride route passes with no controller, which is what Safari and Firefox get', async () => {

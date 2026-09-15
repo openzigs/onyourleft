@@ -16,13 +16,21 @@
  * that could answer "the activity with this id" without being told whose it is
  * — the cross-athlete shape CLAUDE.md §6 names, refused at the type level.
  *
- * ⚠️ **This file carried an `@unwired` note until #282, and it was a defect
+ * ⚠️ **This file carried a wiring exemption until #282, and it was a defect
  * rather than a decision**: `main.tsx` built no `MatchPort`, nothing called
  * `sweepLibrary`, and `putActivityEfforts` had no production caller at all, so
  * no segment effort had ever been written and the effort screens read a table
  * only a test filled. #278's gate found it. `segments/sweep.ts` is the driver
  * that now runs this, from a control on the segments screen, and `main.tsx`
  * §`buildMatchPort` is the one caller that reaches the real store.
+ *
+ * ⚠️ **Do not spell the exemption tag in this comment, even to say it is
+ * gone.** `check-wiring.mjs` §`unwiredReason` strips the comment furniture and
+ * then matches the tag *anywhere* in what is left, so a backticked mention
+ * parses as a live exemption with the rest of the sentence as its reason — and
+ * in a file's own doc comment that silences `WIRE001` for the whole module.
+ * The first wording of this paragraph did exactly that, and the gate whose
+ * first finding was this file could no longer report it. #292.
  */
 
 import type {

@@ -145,6 +145,14 @@ export async function sweepLibrary(options: SweepOptions): Promise<SweepStep> {
     // rather than repeating one — and repeating is harmless here because the
     // write replaces, while skipping leaves a ride with no efforts and nothing
     // to say so.
+    //
+    // ⚠️ **This bound is STRICTLY exclusive, so the sentence above is not yet
+    // true of two rides sharing a `startedAt`**: `activity-store.ts` passes
+    // `includeLower: false` whenever `startedAfter` is given, so when a page
+    // boundary falls between them the second is skipped and never returned —
+    // the exact failure a cursor was chosen to avoid. `MatchCheckpointRecord`
+    // §`lastActivityId` is the tie-break the record was designed around and it
+    // is written here and read nowhere. #293, found by a review of #290.
     ...(options.from === undefined ? {} : { startedAfter: options.from.lastStartedAt }),
   });
   if (page.length === 0) {

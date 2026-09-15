@@ -135,6 +135,33 @@ describe('one press of the control', () => {
       { activityId: activityId('ride-0'), segmentId: 'segment-1', reason: 'recording-gap' },
     ]);
   });
+
+  it('carries one note per ride rather than one per segment abandoned in it', async () => {
+    // ⚠️ The bound, asserted as behaviour: `sweepLibrary` reports a note per
+    // (ride, segment) pair, so a press against a full corpus would accumulate
+    // SWEEP_ACTIVITY_BUDGET × SWEEP_CORPUS_LIMIT = 100,000 objects before
+    // `abandonedSentence` reduced them to a set of ride ids. Two segments over
+    // the same line, one gap through both: one hole in one recording is one
+    // note, and the sentence it produces is unchanged.
+    const leadIn = [4, 3, 2, 1].map((back) => northOf(ORIGIN, -back * 20));
+    const path = northboundPath(26);
+    const holed = [
+      ...path.slice(0, 12),
+      ...Array.from<undefined>({ length: 40 }).fill(undefined),
+      ...path.slice(12),
+    ];
+    const port = portWith(
+      [{ activity: rideRecord(0, 1_760_000_000), track: [...leadIn, ...holed] }],
+      [theSegment('segment-1'), theSegment('segment-2')],
+    );
+
+    const result = await matchLibrary(port, { pageSize: 1 });
+
+    expect(result.kind === 'swept' ? result.abandoned : []).toEqual([
+      { activityId: activityId('ride-0'), segmentId: 'segment-1', reason: 'recording-gap' },
+    ]);
+    expect(abandonedSentence(result.kind === 'swept' ? result.abandoned : [])).toContain('1 ride');
+  });
 });
 
 describe('the two refusals — a sweep that would do damage does nothing instead', () => {
