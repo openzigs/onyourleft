@@ -34,7 +34,7 @@ import {
 } from '@onyourleft/store';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { stubMatchPort } from '../segments/match-testing';
+import { holdFirstLibraryPage, stubMatchPort, type HeldPage } from '../segments/match-testing';
 import { stubSegments, type StubSegments } from '../segments/testing';
 import {
   activateWithKeyboard,
@@ -364,16 +364,61 @@ describe('finding efforts — the sweep’s control', () => {
     });
   }
 
-  /** Presses the control the way a rider does, by keyboard. */
-  async function pressMatch(container: HTMLElement): Promise<void> {
-    const button = queryAll(container, 'button').find(
-      (candidate) => (candidate.textContent ?? '').trim() === 'Match my rides',
+  /**
+   * A held sweep, released after the test whatever the test did.
+   *
+   * ⚠️ **A gate left closed leaks into the NEXT test**, because the in-flight
+   * guard `matchLibrary` keeps is module state and every test here sweeps as
+   * the same athlete: a test that fails before releasing leaves a sweep
+   * running for ever, and the test after it *joins* that stuck sweep and reads
+   * nothing at all. That is a cascade of failures with one real cause, which
+   * is how this hook came to be written — it happened.
+   */
+  const gates: HeldPage[] = [];
+
+  function hold(port: ReturnType<typeof stubMatchPort>): HeldPage {
+    const held = holdFirstLibraryPage(port);
+    gates.push(held);
+    return held;
+  }
+
+  afterEach(async () => {
+    for (const gate of gates) {
+      gate.release();
+    }
+    gates.length = 0;
+    await settle();
+  });
+
+  /** The sweep's control, by the label it is currently carrying. */
+  function matchButton(container: HTMLElement, label: string): HTMLElement | undefined {
+    return queryAll(container, 'button').find(
+      (candidate) => (candidate.textContent ?? '').trim() === label,
     );
+  }
+
+  /**
+   * Presses the control the way a rider does, by keyboard.
+   *
+   * @param settledLabel what the button must read once the press has been
+   * handled. It defaults to the idle label because most of these tests press a
+   * sweep that finishes within the press; a test that holds a sweep open passes
+   * “Matching…”, and the check is what stops it asserting against a screen
+   * where the press never landed at all.
+   */
+  async function pressMatch(
+    container: HTMLElement,
+    settledLabel = 'Match my rides',
+  ): Promise<void> {
+    const button = matchButton(container, 'Match my rides');
     if (button === undefined) {
       throw new Error('no button labelled “Match my rides”');
     }
     await activateWithKeyboard(button);
     await settle();
+    if (matchButton(container, settledLabel) === undefined) {
+      throw new Error(`the control does not read “${settledLabel}” after the press`);
+    }
   }
 
   it('writes no effort until the rider presses it', async () => {
@@ -484,5 +529,59 @@ describe('finding efforts — the sweep’s control', () => {
     await pressMatch(view.container);
 
     expect(textOf(view.container)).toContain('gap in the recording');
+  });
+
+  it('disables the control it owns while its own sweep runs', async () => {
+    // #294's third criterion: the module guard does not replace `matching`.
+    // The component flag is what puts "Matching…" on the button and takes it
+    // out of the tab order for the press that started the sweep, and that is
+    // still this view's job.
+    const match = matchable();
+    const held = hold(match);
+    const port = stubSegments(OWNER, [{ activity: ride(), track: northward(21) }]);
+    view = await mount(<SegmentsView port={port} match={match} />);
+    await settle();
+
+    await pressMatch(view.container, 'Matching…');
+
+    const busy = matchButton(view.container, 'Matching…');
+    expect(busy?.hasAttribute('disabled')).toBe(true);
+
+    held.release();
+    await settle();
+
+    expect(matchButton(view.container, 'Match my rides')?.hasAttribute('disabled')).toBe(false);
+  });
+
+  it('does not start a second sweep when the screen is left and come back to mid-sweep', async () => {
+    // ⚠️ #294, the whole of it. `matching` dies with the view: navigating away
+    // unmounts this screen and navigating back mounts a fresh one with the
+    // control enabled, while the first sweep is still running — nothing
+    // cancels it. Counted by the corpus read, which happens once per sweep
+    // that actually starts: a second loop reads the segments again.
+    const match = matchable();
+    const held = hold(match);
+    const port = stubSegments(OWNER, [{ activity: ride(), track: northward(21) }]);
+    view = await mount(<SegmentsView port={port} match={match} />);
+    await settle();
+    await pressMatch(view.container, 'Matching…');
+
+    // Away, and back: a brand new component, with `matching` false again.
+    view.unmount();
+    view = await mount(<SegmentsView port={port} match={match} />);
+    await settle();
+    expect(matchButton(view.container, 'Match my rides')?.hasAttribute('disabled')).toBe(false);
+
+    await pressMatch(view.container, 'Matching…');
+    held.release();
+    await settle();
+
+    expect(match.reads.filter((read) => read.startsWith('segments:'))).toHaveLength(1);
+    expect(match.writes).toHaveLength(1);
+    // The second press reports the sweep that was running rather than nothing:
+    // a rider who came back to the screen is told what happened to their rides.
+    expect(textOf(view.container)).toContain(
+      'Matched 1 ride against 1 segment and found 1 effort.',
+    );
   });
 });

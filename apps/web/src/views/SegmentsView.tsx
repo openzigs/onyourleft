@@ -163,12 +163,19 @@ export function SegmentsView({ port, match }: SegmentsViewProps): JSX.Element {
    * cost nobody can state. Putting it in the effect above would run a sweep
    * every time a rider glanced at this screen.
    *
-   * ⚠️ **`matching` guards this component, not the tab.** Navigating away
-   * mid-sweep unmounts the view and coming back mounts a fresh one with the
-   * control enabled while the first sweep is still running. The damage is
-   * bounded — the effort id is derived and the write replaces — but two loops
-   * interleave checkpoint writes. A module-level guard is the honest fix and
-   * is #294, not this PR's line to change.
+   * ⚠️ **`matching` guards this component, not the tab, and that is all it is
+   * for.** Navigating away mid-sweep unmounts the view and coming back mounts
+   * a fresh one with `matching` false and the control enabled, while the first
+   * sweep is still running. What stops that second press starting a second
+   * page loop is `segments/sweep.ts`'s own in-flight handle (#294), which
+   * outlives this component because the state does; this flag stays because
+   * disabling the button *this* view renders is a different job that the
+   * module guard cannot do — it knows nothing about a button.
+   *
+   * A second press therefore **joins** the running sweep and reports its
+   * outcome. That is why there is no third state here for "somebody else's
+   * sweep is running": there is no such thing to a rider, only their rides
+   * being matched.
    */
   const runSweep = useCallback(async (): Promise<void> => {
     if (match === undefined || matching) {

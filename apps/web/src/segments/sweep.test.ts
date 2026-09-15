@@ -22,12 +22,13 @@ import {
 import { activityId, athleteId, segmentId } from '@onyourleft/store';
 import { describe, expect, it } from 'vitest';
 
-import { stubMatchPort, type StubMatchRide } from './match-testing';
+import { holdFirstLibraryPage, stubMatchPort, type StubMatchRide } from './match-testing';
 import { abandonedSentence, matchLibrary, sweepSentence } from './sweep';
 
 import type { ActivityRecord, AthleteId, SegmentRecord } from '@onyourleft/store';
 
 const OWNER: AthleteId = athleteId('athlete-a');
+const OTHER: AthleteId = athleteId('athlete-b');
 const METRES_PER_DEGREE_LATITUDE = 111_194.9;
 const ORIGIN = geographicPosition(degreesLatitude(51.5), degreesLongitude(-0.12));
 
@@ -276,5 +277,115 @@ describe('what a rider is told, as a pure function of the result', () => {
     ]);
 
     expect(note).toContain('on 1 ride,');
+  });
+});
+
+describe('one sweep at a time in this tab (#294)', () => {
+  /**
+   * Why these tests hold the first page rather than firing two calls back to
+   * back: every read this stub answers resolves on the next microtask, so a
+   * sweep started and not awaited is *finished* before the next line runs. A
+   * "second call" made after that is not concurrent with anything, and the
+   * assertion below would hold with no guard in the code at all.
+   */
+  function segmentOf(owner: AthleteId, id: string): SegmentRecord {
+    const built = createSegment({
+      id,
+      createdBy: owner,
+      name: 'The long drag',
+      sport: 'ride',
+      geometry: northboundPath(26),
+      elevationSource: 'none',
+      visibility: 'private',
+      createdAt: unixSeconds(1_760_000_000),
+    });
+    return { ...built, id: segmentId(built.id), createdBy: owner };
+  }
+
+  /** A traversing ride belonging to `owner`, with an id nobody else's shares. */
+  function rideOf(owner: AthleteId, index: number): StubMatchRide {
+    const ride = traversingRide(index);
+    return {
+      ...ride,
+      activity: {
+        ...ride.activity,
+        id: activityId(`${owner}-ride-${String(index)}`),
+        athleteId: owner,
+      },
+    };
+  }
+
+  it('joins the sweep already running rather than starting a second page loop', async () => {
+    // The scenario: navigate away from /segments mid-sweep, navigate back, and
+    // press the control on the freshly mounted screen. Counted by reads,
+    // because a second loop is a second pass over the library — and the writes
+    // it makes land on the same derived effort ids, so `stored` cannot tell
+    // one loop from two.
+    const port = portWith(libraryOf(3), [theSegment()]);
+    const held = holdFirstLibraryPage(port);
+
+    const first = matchLibrary(port, { pageSize: 1 });
+    await held.reached;
+    const second = matchLibrary(port, { pageSize: 1 });
+    held.release();
+    const [one, two] = await Promise.all([first, second]);
+
+    // Four pages of one ride — three that sweep and one that finds the library
+    // exhausted — and not one more. A second loop doubles all three of these,
+    // and they are asserted BEFORE the identity below because the two outcomes
+    // of two loops over one library are indistinguishable by value: the counts
+    // are the only thing that can tell one loop from two.
+    expect(port.reads.filter((read) => read.startsWith('list:'))).toHaveLength(4);
+    expect(port.reads.filter((read) => read.startsWith('segments:'))).toHaveLength(1);
+    expect(port.writes).toHaveLength(3);
+    // The same outcome object: the second press reports the sweep that was
+    // running, which is what actually happened in this tab.
+    expect(two).toBe(one);
+    expect(one).toMatchObject({ kind: 'swept', swept: 3, efforts: 3, done: true });
+  });
+
+  it('clears the guard when the sweep rejects, rather than wedging the control for the life of the tab', async () => {
+    // ⚠️ The half a `then` would get wrong. A guard cleared only on the way out
+    // leaves a rejected promise in the handle for ever: every later press
+    // "joins" a sweep that failed minutes ago, re-reports its error, and no
+    // press ever sweeps again until the tab is closed. `QuotaExceededError` is
+    // a real outcome of one press, so this is not a hypothetical path.
+    const port = portWith(libraryOf(2), [theSegment()]);
+    port.failNextWrite = true;
+
+    await expect(matchLibrary(port, { pageSize: 1 })).rejects.toThrow('the tab was closed');
+
+    const again = await matchLibrary(port, { pageSize: 1 });
+
+    expect(again).toMatchObject({ kind: 'swept', swept: 2, efforts: 2, done: true });
+    expect(port.stored.size).toBe(2);
+  });
+
+  it('is one sweep per athlete, not one per tab', async () => {
+    // ⚠️ A single handle would hand athlete B the *outcome of athlete A's
+    // sweep* — counts of A's rides, and `abandoned` notes naming A's activity
+    // ids. Two athletes on one device sweep two libraries and two checkpoints;
+    // they are not the same piece of work and joining them is the
+    // cross-athlete shape CLAUDE.md §6 names, arrived at from an unusual
+    // direction.
+    const mine = portWith(libraryOf(3), [theSegment()]);
+    const theirs = stubMatchPort({
+      athleteId: OTHER,
+      rides: [rideOf(OTHER, 0)],
+      segments: [segmentOf(OTHER, 'their-segment')],
+    });
+    const held = holdFirstLibraryPage(mine);
+
+    const ours = matchLibrary(mine, { pageSize: 1 });
+    await held.reached;
+    const other = matchLibrary(theirs, { pageSize: 1 });
+    held.release();
+    const [outcome, theirOutcome] = await Promise.all([ours, other]);
+
+    expect(theirOutcome).not.toBe(outcome);
+    expect(theirOutcome).toMatchObject({ kind: 'swept', swept: 1, efforts: 1 });
+    expect(theirs.writes).toHaveLength(1);
+    // Their sweep read their own library, and nothing of ours.
+    expect(theirs.reads.every((read) => !read.includes(OWNER))).toBe(true);
   });
 });

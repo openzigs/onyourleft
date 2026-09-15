@@ -86,7 +86,9 @@ apps/                 AGPL-3.0-or-later, without exception
                         since #282 the thing that actually runs it — when a sweep
                         runs and why that is a control rather than a save hook,
                         the two refusals, and the only production writer of the
-                        match checkpoint
+                        match checkpoint; and since #294 the one sweep this tab
+                        runs, which is module state because the state that has
+                        to outlive the screen is not the screen's
     src/shell/          the hash route table, the router hook and AppShell (#48)
     src/support/        browser-capability detection and its notice (#48), and
                         since #85 the one question that decides which BLE
@@ -2080,6 +2082,7 @@ top of an issue **supersedes its body**.
 | How a backfill resumes, and why it is a cursor rather than an offset | `apps/web/src/segments/backfill.ts`, `packages/store/src/activity-store.ts` §`startedAfter` |
 | Why that cursor is an instant **and** an id, and what one alone skipped | `packages/store/src/activity-store.ts` §`afterActivityId`, `apps/web/src/segments/backfill.ts` |
 | When a segment sweep runs, and why it is a control rather than something a saved ride triggers | `apps/web/src/segments/sweep.ts`, `apps/web/src/recording/finish.ts` §"What this does NOT do" |
+| Why a second press of the sweep control joins the running sweep instead of starting another, and why the handle is per athlete | `apps/web/src/segments/sweep.ts` §`inFlight`, `apps/web/src/views/SegmentsView.tsx` §`runSweep` |
 | Why a sweep refuses outright when there are more segments than it can carry | `apps/web/src/segments/sweep.ts` §`SWEEP_CORPUS_LIMIT` |
 | Why the prefilter reaches 100 m outside a segment, and why that is not a one-cell halo | `packages/domain/src/segment/cells.ts` §`PREFILTER_MARGIN_METRES`, §`paddedCellCover`, [spike 0003](docs/spikes/0003-segment-prefilter-margin.md) |
 | What a test fixture at latitude 51.5, longitude -0.12 used to break, and what fixed it | `packages/domain/src/segment/cells.test.ts`, `apps/web/src/segments/sweep.store.test.ts` §`ORIGIN_LONGITUDE` |
