@@ -486,6 +486,31 @@ in one file:
 - **The accessibility checker is ours too** (`src/a11y/`), for the licence and headless-DOM reasons
   in CLAUDE.md §4e. It runs on every route, in CI, as a step of its own, and it fails the build.
 
+[#307](https://github.com/openzigs/onyourleft/issues/307) gave that design system the three things
+it did not have, and each is checkable rather than a matter of taste:
+
+- **Elevation is a surface colour, never a shadow** (`tokens.ts` §`ELEVATION_SURFACES`). Four levels,
+  darkening with height because `canvas` is already `#ffffff` and there is nothing lighter to move
+  toward. A shadow is invisible to every gate this repository owns — the contrast suite reads
+  colours, jsdom performs no layout, and the browser gate renders a map and a 3D scene and no
+  chrome — so a shadow-based system would be the one part of the design system nothing could check.
+  `tokens.test.ts` requires the ramp to be monotone and every adjacent step to fall inside a stated
+  band, which is what a token set to a nonsense value breaks.
+- **The type scale has a ratio**: base 1 rem, ratio 1.25, steps −1 to 3 for reading and 6 for a live
+  ride metric. The sizes are literals and `tokens.test.ts` re-derives them — a ladder computed from
+  its own ratio agrees by construction and could not fail.
+- **Every token is painted by a rule.** `theme.a11y.test.ts` fails on a custom property no `var()`
+  reads. It found two that nothing read: `--oyl-font-size-xl` and `--oyl-space-xl`, both declared,
+  both asserted equal to `tokens.ts`, both painting nothing — which is why the headings were at the
+  user agent's own sizes and the client "read as an unstyled document".
+
+**The native controls are styled and still native.** `appearance: none` removes the platform's
+drawing of a closed `<select>` and nothing else: the popup, the keyboard model, typeahead and the
+accessibility tree stay the platform's, which is the line between styling a control and building a
+listbox out of `<div>`s ([#305](https://github.com/openzigs/onyourleft/issues/305)). It is reverted
+under `forced-colors: active`, because a control whose OS skin has been removed *and* whose
+replacement skin is then flattened has no affordance left at all.
+
 **The unsupported-browser experience is a feature of this component, not an error path.**
 `src/support/bluetooth-support.ts` classifies the browser into six states —
 available, adapter-unavailable, not-permitted, insecure-context, absent, incomplete — by probing

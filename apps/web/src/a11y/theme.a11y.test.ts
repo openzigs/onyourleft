@@ -58,6 +58,51 @@ describe('theme.css and tokens.ts cannot drift', () => {
   });
 });
 
+/**
+ * Every place the stylesheet *reads* a custom property, whatever the prefix.
+ *
+ * Deliberately not scoped to a rule body: a `var()` inside `:root` would be one
+ * token defined in terms of another, which is a use. What is not a use is a
+ * declaration nothing ever reads, and that is what the check below looks for.
+ */
+const referenced = new Set(
+  [...themeCss.matchAll(/var\(\s*(--oyl-[a-z0-9-]+)/g)].map((match) => match[1] ?? ''),
+);
+
+/** `'inkMuted'` with prefix `'color'` → `'--oyl-color-ink-muted'`. */
+function customProperty(prefix: string, token: string): string {
+  return `--oyl-${prefix}-${token.replaceAll(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`;
+}
+
+/**
+ * The gate #307's last criterion asks for: *"a token that can be set to a
+ * nonsense value with the suite still green is not covered"*.
+ *
+ * ⚠️ This is the #236 defect in a new place, and it was already present when
+ * #307 was written. `--oyl-font-size-xl` and `--oyl-space-xl` were both
+ * declared in `:root`, both asserted by the test above to match `tokens.ts`
+ * exactly — and neither was read by a single rule. The declaration is the
+ * write, the `var()` is the read, and the suite was green while the read did
+ * not exist. Every existing gate agreed the token was fine; the browser painted
+ * nothing with it.
+ */
+describe('every token is painted by something', () => {
+  it.each([
+    ['color', COLOUR_TOKENS as Record<string, string>],
+    ['space', SPACE_TOKENS as Record<string, string>],
+    ['font-size', FONT_SIZE_TOKENS as Record<string, string>],
+  ])('has a rule reading each %s token', (prefix, tokens) => {
+    const unread = Object.keys(tokens)
+      .map((token) => customProperty(prefix, token))
+      .filter((property) => !referenced.has(property));
+    expect(
+      unread,
+      'these custom properties are declared and no rule reads them. A token nothing paints ' +
+        'with can hold any value at all and every other check in this suite stays green.',
+    ).toEqual([]);
+  });
+});
+
 describe('the stylesheet keeps the promises the checks depend on', () => {
   it('never removes a focus outline without replacing it', () => {
     // `outline: none` on `:focus-visible` is the single most common way a
@@ -91,6 +136,90 @@ describe('the stylesheet keeps the promises the checks depend on', () => {
 
   it('honours a reduced-motion preference', () => {
     expect(themeCss).toContain('@media (prefers-reduced-motion: reduce)');
+  });
+
+  it('has something for the reduced-motion block to suppress', () => {
+    // Until #307 that block guarded nothing: there was not one `transition` or
+    // `animation` in the file. A preference honoured over an empty set is a
+    // claim rather than a behaviour, and this is what stops it becoming one
+    // again if the transitions are ever removed.
+    expect(themeCss).toMatch(/\n\s*transition:/);
+  });
+});
+
+/**
+ * #307's fourth criterion: at least one capability beyond
+ * `prefers-reduced-motion`, *"chosen for a real device rather than for
+ * completeness"*.
+ *
+ * Each assertion below checks the block does the specific thing it exists for,
+ * not merely that the `@media` line is present. A query that matches and then
+ * changes nothing is the same shape as the unpainted token above.
+ */
+describe('the capability queries change something', () => {
+  /** The body of an `@media` block, brace-matched rather than regex-matched. */
+  function mediaBlock(condition: string): string {
+    const start = themeCss.indexOf(`@media ${condition} {`);
+    expect(start, `theme.css has no @media ${condition} block`).toBeGreaterThanOrEqual(0);
+    let depth = 0;
+    for (let index = themeCss.indexOf('{', start); index < themeCss.length; index += 1) {
+      const character = themeCss[index];
+      if (character === '{') depth += 1;
+      if (character === '}') {
+        depth -= 1;
+        if (depth === 0) return themeCss.slice(start, index + 1);
+      }
+    }
+    throw new Error(`the @media ${condition} block is never closed`);
+  }
+
+  it('hands a styled select back to the platform under forced colours', () => {
+    // The styling and its revert are one change. `appearance: none` takes the
+    // operating system's drawing of the control away, and a high-contrast user
+    // whose replacement skin has also been flattened is left with a control
+    // that has no affordance at all.
+    const block = mediaBlock('(forced-colors: active)');
+    expect(block).toContain('appearance: auto');
+    expect(block).toContain('background-image: none');
+  });
+
+  it('collapses motion on a screen that cannot cheaply repaint', () => {
+    const block = mediaBlock('(update: slow)');
+    expect(block).toContain('transition-duration: 0.01ms !important');
+    expect(block).toContain('animation-duration: 0.01ms !important');
+  });
+});
+
+/**
+ * #307's third criterion, and the ⚠️ attached to it: the native controls are
+ * styled *"without replacing them"*.
+ */
+describe('the native select is styled and still native', () => {
+  it('skins the closed control', () => {
+    const rule = /\nselect \{([^}]*)\}/.exec(themeCss)?.[1] ?? '';
+    expect(rule, 'theme.css has no rule for `select`').not.toBe('');
+    expect(rule).toContain('border: 1px solid var(--oyl-color-border)');
+    expect(rule).toContain('border-radius: var(--oyl-radius)');
+    expect(rule).toContain('font: inherit');
+  });
+
+  it('reserves room for the chevron it draws, so an option cannot run under it', () => {
+    // The two are one decision. A `background-image` chevron with no
+    // `padding-right` is a control whose longest option is unreadable, which is
+    // worse than the platform default this replaced.
+    const rule = /\nselect \{([^}]*)\}/.exec(themeCss)?.[1] ?? '';
+    expect(rule).toContain('background-image:');
+    expect(rule).toMatch(/padding:[^;]*\s2rem\s/);
+  });
+
+  it('never reaches for the one property that would replace the control', () => {
+    // `appearance: base-select` opts the element into a fully author-styled
+    // control, popup included — which is a listbox built out of the select's
+    // own parts, and #305 is the record of not building one. `appearance: none`
+    // stops at the closed control's skin and leaves the popup, the keyboard
+    // model and the accessibility tree to the platform.
+    expect(themeCss).not.toContain('base-select');
+    expect(themeCss).not.toContain('::picker(');
   });
 });
 

@@ -16,8 +16,14 @@
  */
 
 :root {
+  /* The elevation ramp, lightest first. `tokens.ts` §ELEVATION_SURFACES says
+     why depth is a colour here and not a shadow: a shadow is invisible to
+     every gate this repository has, and a surface colour arrives inside the
+     contrast suite that already exists. */
   --oyl-color-canvas: #ffffff;
   --oyl-color-surface: #f2f5f4;
+  --oyl-color-surface-raised: #e7eae9;
+  --oyl-color-surface-overlay: #dde0df;
   --oyl-color-border: #767e7e;
   --oyl-color-ink: #141b1a;
   --oyl-color-ink-muted: #4a5b5c;
@@ -57,12 +63,15 @@
   --oyl-space-lg: 1.5rem;
   --oyl-space-xl: 2.5rem;
 
-  --oyl-font-size-sm: 0.875rem;
+  /* A major-third ladder: base 1rem, ratio 1.25, steps -1 to 3 and then 6.
+     `tokens.ts` §TYPE_SCALE_RATIO holds the literals to the ratio. */
+  --oyl-font-size-sm: 0.8rem;
   --oyl-font-size-md: 1rem;
   --oyl-font-size-lg: 1.25rem;
-  --oyl-font-size-xl: 1.75rem;
+  --oyl-font-size-xl: 1.5625rem;
+  --oyl-font-size-xxl: 1.953125rem;
   /* A live ride metric. See tokens.ts — this one has an acceptance criterion. */
-  --oyl-font-size-metric: 4rem;
+  --oyl-font-size-metric: 3.814697265625rem;
 
   --oyl-radius: 0.375rem;
   --oyl-measure: 68ch;
@@ -85,6 +94,64 @@ body {
     sans-serif;
   font-size: var(--oyl-font-size-md);
   line-height: 1.55;
+}
+
+/*
+ * The headings, which had no rules at all until #307 and were therefore drawn
+ * at the user agent's own sizes and margins — the single largest reason the
+ * client "read as an unstyled document".
+ *
+ * ⚠️ The sizes are the ladder, not a browser default that happens to look
+ * similar. `--oyl-font-size-xl` was declared and used by nothing before this;
+ * `theme.a11y.test.ts` now fails on a token no rule paints, which is what stops
+ * that recurring.
+ *
+ * `line-height` tightens as the size grows, because leading that is right for a
+ * paragraph is a gap at 31px, and `text-wrap: balance` keeps a two-line title
+ * from leaving one word on the second line. `balance` is ignored by anything
+ * that does not implement it, so it needs no query.
+ */
+h1,
+h2,
+h3,
+h4 {
+  line-height: 1.2;
+  margin: 0 0 var(--oyl-space-sm);
+  text-wrap: balance;
+}
+
+h1 {
+  font-size: var(--oyl-font-size-xxl);
+  letter-spacing: -0.015em;
+}
+
+h2 {
+  font-size: var(--oyl-font-size-xl);
+  letter-spacing: -0.01em;
+  margin-top: var(--oyl-space-xl);
+}
+
+h3 {
+  font-size: var(--oyl-font-size-lg);
+  margin-top: var(--oyl-space-lg);
+}
+
+h4 {
+  font-size: var(--oyl-font-size-md);
+  margin-top: var(--oyl-space-lg);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--oyl-color-ink-muted);
+}
+
+/*
+ * The first heading in a region opens it; it does not need the gap that
+ * separates it from the section above, because there is no section above.
+ */
+h2:first-child,
+h3:first-child,
+h4:first-child {
+  margin-top: 0;
 }
 
 /*
@@ -141,15 +208,33 @@ body {
   flex-direction: column;
 }
 
+/*
+ * Elevation 3, the top of the ramp, and the one element that genuinely passes
+ * over other content: it is sticky, so the page scrolls underneath it.
+ *
+ * That is what the darkest surface is for. With `--oyl-color-surface` the
+ * header and a panel scrolling past it were the same colour and the boundary
+ * disappeared at exactly the moment it mattered.
+ *
+ * ⚠️ `z-index` is 5, BELOW the skip link's 10, and that ordering is not a
+ * preference. The skip link is earlier in the DOM than the header, so at equal
+ * z-index the header wins the paint and the focused skip link is drawn
+ * underneath it — invisible to the only input method that uses it, while
+ * remaining perfectly focusable and therefore invisible to the audit as well.
+ */
 .oyl-header {
-  background: var(--oyl-color-surface);
+  background: var(--oyl-color-surface-overlay);
   border-bottom: 1px solid var(--oyl-color-border);
   padding: var(--oyl-space-md);
+  position: sticky;
+  top: 0;
+  z-index: 5;
 }
 
 .oyl-wordmark {
   font-size: var(--oyl-font-size-lg);
   font-weight: 700;
+  letter-spacing: -0.01em;
   margin: 0 0 var(--oyl-space-sm);
 }
 
@@ -179,10 +264,17 @@ body {
   text-underline-offset: 4px;
 }
 
+/*
+ * `scroll-margin-top` is what the sticky header above costs, and paying it here
+ * is cheaper than making the header shorter: a fragment jump — the skip link,
+ * or any `#anchor` — otherwise scrolls the target to y=0, which is behind the
+ * header. 5rem is the header's own height plus a gap.
+ */
 .oyl-main {
   flex: 1;
   padding: var(--oyl-space-lg) var(--oyl-space-md);
   max-width: var(--oyl-measure);
+  scroll-margin-top: 5rem;
 }
 
 .oyl-main:focus {
@@ -209,6 +301,9 @@ body {
   border: 2px solid var(--oyl-color-accent);
   background: var(--oyl-color-accent);
   color: var(--oyl-color-accent-ink);
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
 }
 
 .oyl-button:hover:not(:disabled) {
@@ -299,6 +394,18 @@ body {
   text-align: left;
 }
 
+/*
+ * Elevation 2 again, for the same reason a card is: a header row is the one
+ * row that is not data, and until #307 the only thing saying so was the
+ * browser's own bold. Both table classes take it, so the two tables stay
+ * distinguishable from each other by density and not by whether their header
+ * looks like a header.
+ */
+.oyl-data-table th,
+.oyl-table th {
+  background: var(--oyl-color-surface-raised);
+}
+
 /* --- The live ride screen (#49) ------------------------------------------- */
 
 /*
@@ -316,8 +423,14 @@ body {
   padding: 0;
 }
 
+/*
+ * Elevation 2: a card, and the grid it sits in is the page rather than a panel,
+ * so it is two steps up from the canvas behind it. One step was not enough —
+ * `#f2f5f4` on `#ffffff` is 1.097:1 and a 10 rem card at that separation reads
+ * as a faintly tinted rectangle rather than as an object.
+ */
 .oyl-metric {
-  background: var(--oyl-color-surface);
+  background: var(--oyl-color-surface-raised);
   border: 1px solid var(--oyl-color-border);
   border-radius: var(--oyl-radius);
   padding: var(--oyl-space-md);
@@ -368,6 +481,81 @@ body {
   flex-wrap: wrap;
   gap: var(--oyl-space-sm);
   align-items: center;
+}
+
+/*
+ * The native controls, styled — and still native. #307's third criterion, and
+ * the ⚠️ attached to it: *"without replacing them. They are `<select>` and
+ * `<nav>` for a reason; styling must not cost the keyboard and screen-reader
+ * behaviour the platform supplies for free."*
+ *
+ * There were ten `<select>` across six views drawn at the platform default,
+ * next to `.oyl-input` and `.oyl-button` which were not. This is what closes
+ * that, and the whole of it is a skin:
+ *
+ * - `appearance: none` removes the operating system's drawing of the **closed**
+ *   control. It does not touch the popup, the keyboard model, the typeahead or
+ *   the accessibility tree — the element is still a `<select>` and every one of
+ *   those is the platform's. That is the line between styling one and building
+ *   a listbox out of `<div>`s, which #305 is the record of not doing.
+ * - The chevron is two linear gradients, not an image and not an icon font.
+ *   There is no asset directory, no icon set to license, and nothing here is
+ *   anybody's get-up (ADR 0009 L1).
+ * - `padding-right` leaves the chevron room. Without it a long option name runs
+ *   underneath it.
+ *
+ * ⚠️ `appearance: none` is reverted under `forced-colors` — see the block at the
+ * end of this file. A control whose OS skin has been removed and whose
+ * replacement skin is then flattened to two system colours is a control with no
+ * affordance at all, and that is the state a high-contrast user would have been
+ * left in.
+ */
+select {
+  appearance: none;
+  background-color: var(--oyl-color-canvas);
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentcolor 50%),
+    linear-gradient(135deg, currentcolor 50%, transparent 50%);
+  background-position:
+    right 1.05rem center,
+    right 0.75rem center;
+  background-size:
+    0.3rem 0.3rem,
+    0.3rem 0.3rem;
+  background-repeat: no-repeat;
+  border: 1px solid var(--oyl-color-border);
+  border-radius: var(--oyl-radius);
+  color: var(--oyl-color-ink);
+  font: inherit;
+  /* 44px, WCAG 2.2 SC 2.5.8's target size, which a default-height select on a
+     phone does not reach. */
+  min-height: 2.75rem;
+  padding: var(--oyl-space-sm) 2rem var(--oyl-space-sm) var(--oyl-space-sm);
+  transition: border-color 120ms ease;
+}
+
+select:hover:not(:disabled) {
+  border-color: var(--oyl-color-ink);
+}
+
+select:disabled {
+  background-color: var(--oyl-color-surface);
+  color: var(--oyl-color-ink-muted);
+  cursor: not-allowed;
+}
+
+/*
+ * ⚠️ The options themselves are drawn by the operating system, and everything
+ * above stops at the edge of the closed control. These two declarations are the
+ * only ones that reach the popup and they exist because they are the two that
+ * go WRONG: a dark-mode platform popup inherits neither, and an option with no
+ * colours of its own is white-on-white on Windows. Nothing else is attempted
+ * here — a styled popup is a listbox, and that is the thing #305 says not to
+ * build.
+ */
+select option {
+  background-color: var(--oyl-color-canvas);
+  color: var(--oyl-color-ink);
 }
 
 .oyl-input {
@@ -846,4 +1034,75 @@ body {
 .oyl-hud__control:focus-visible {
   outline: 3px solid var(--oyl-color-hud-ink);
   outline-offset: 2px;
+}
+
+/* --- Capability queries (#307) --------------------------------------------- */
+
+/*
+ * ⚠️ Read this before adding a third one. #307's fourth criterion asks for a
+ * capability *"chosen for a real device rather than for completeness"*, and the
+ * test of that is whether the block below would change anything on a screen
+ * somebody actually owns. The two here each answer something in this same diff:
+ *
+ * - `forced-colors` exists because the `select` rule above sets
+ *   `appearance: none`. Removing the platform's drawing of a control is
+ *   precisely the thing a high-contrast user cannot afford, so the styling and
+ *   its revert arrive together rather than the revert arriving later.
+ * - `update` exists because the `transition` declarations above are the first
+ *   motion in this stylesheet. Until #307 the `prefers-reduced-motion` block
+ *   had nothing to suppress and said so.
+ *
+ * `prefers-contrast` and `@supports` are deliberately NOT here. Nothing in this
+ * design system has a low-contrast state for the first to raise — every pair is
+ * gated at AA already — and there is no progressive enhancement for the second
+ * to guard. A block that changes nothing is a claim that a preference is
+ * honoured, which is worse than not making it.
+ */
+
+/*
+ * Windows and Android high-contrast modes, and the one rule this diff owes
+ * them.
+ *
+ * `appearance: auto` hands the control back to the operating system, which then
+ * draws it in the user's own colours — including a chevron, which is why the
+ * gradient one is removed rather than recoloured. `padding-right` goes back
+ * because the room it was reserving was for a chevron that is no longer there.
+ *
+ * Everything else in this stylesheet already survives forced colours: the
+ * elevation ramp flattens to a single `Canvas`, and every boundary that mattered
+ * — the header's rule, a card's border, a table's row lines — is a `border`
+ * rather than a colour change, so each is repainted as `CanvasText` instead of
+ * disappearing. That is why this block is one rule and not twenty.
+ */
+@media (forced-colors: active) {
+  select {
+    appearance: auto;
+    background-image: none;
+    padding-right: var(--oyl-space-sm);
+  }
+}
+
+/*
+ * A screen that cannot cheaply repaint: e-ink, and the low-refresh modes a
+ * phone drops into when it is hot — which is the device this product is used
+ * on, clamped to a handlebar, in the sun, running a 3D scene.
+ *
+ * A 120ms cross-fade on such a screen is not a cross-fade. It is a sequence of
+ * two or three visibly wrong intermediate frames, and it costs a full-panel
+ * refresh to draw each of them. So transitions collapse rather than play.
+ *
+ * Separate from the `prefers-reduced-motion` block on purpose, even though the
+ * declarations are nearly the same: one is a person's stated preference and the
+ * other is a fact about the hardware. A reader who wants motion still gets none
+ * here, and merging them would lose the ability to say why.
+ */
+@media (update: slow) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

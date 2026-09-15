@@ -407,6 +407,67 @@ describe('criterion 3 — everything interactive is reachable by keyboard', () =
   });
 });
 
+/**
+ * #307's third criterion, in the DOM rather than in the stylesheet.
+ *
+ * `theme.a11y.test.ts` proves the `select` rule stops at the closed control's
+ * skin. This proves the other direction: that no route has answered "the select
+ * is hard to style" by building a listbox instead. The two are separate
+ * failures and only one of them is visible in `theme.css` — a view that
+ * replaced its `<select>` with a `div[role="listbox"]` would leave that
+ * stylesheet rule perfectly correct and unused.
+ *
+ * The audit above would not catch it either: a hand-built listbox can carry a
+ * label, a `tabindex` and an intact heading order, and still lose typeahead,
+ * the platform popup, and every screen reader's own list-navigation mode.
+ *
+ * ## §Limit — measured, not assumed
+ *
+ * There are ten `<select>` in six views and this reaches **three** of them: two
+ * on `segments` and one on `route-builder`. The other seven are behind data
+ * these route stubs do not supply — an empty activity library renders no ride
+ * chooser — so replacing one of those with a listbox passes this loop. Measured
+ * by counting per route, not inferred. Widening it means richer stubs for the
+ * views that need them, which is a bigger change than #307 and is not this
+ * one's.
+ */
+describe('#307 — a chooser on a route is a native select, not a listbox', () => {
+  for (const route of ALL_ROUTES) {
+    it(`${route.id} builds no listbox of its own`, async () => {
+      await open(route.path);
+      const handmade = queryAll(document, '[role="listbox"], [role="combobox"], [role="option"]');
+      expect(
+        handmade.map((element) => element.outerHTML.slice(0, 120)),
+        'a control with one of these roles is a chooser built out of generic elements. #305 ' +
+          'records why this product uses the platform one, and #307 styles it rather than ' +
+          'replacing it.',
+      ).toEqual([]);
+    });
+  }
+
+  it('finds native selects to have been talking about', async () => {
+    // Without this the loop above passes on a client that has no choosers at
+    // all, which is the vacuous-pass shape: it would go on passing after every
+    // `<select>` had been deleted.
+    // ⚠️ Sequentially, and unmounted between routes. `open` assigns the module
+    // `mounted` and the `afterEach` unmounts only that one, so a test that
+    // opens several routes and leaves them mounted puts several `<main>`
+    // elements in the document — which the *next* test reads as focus having
+    // been lost. Cost an afternoon once; do not visit routes in a loop without
+    // this line.
+    let found = 0;
+    for (const route of ALL_ROUTES) {
+      const page = await open(route.path);
+      found += queryAll(document, 'select').length;
+      page.unmount();
+    }
+    expect(
+      found,
+      'no route rendered a native chooser, so the loop above asserts nothing',
+    ).toBeGreaterThan(0);
+  });
+});
+
 describe('criterion 5 — focus is managed on navigation', () => {
   it('moves focus to the new view rather than leaving it on the link', async () => {
     await open('/');

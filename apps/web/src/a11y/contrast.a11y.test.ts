@@ -33,6 +33,56 @@ describe('every declared pair meets WCAG 2.2 AA', () => {
   }
 });
 
+/**
+ * #307's fifth criterion, which is a different question from the one above.
+ *
+ * *"No contrast pair's measured ratio falls, even where it stays above its
+ * threshold — a change that quietly erodes margin is the one this gate would
+ * let through."* Every pair in this palette clears AA with room, and a palette
+ * edit that spends all of that room passes every assertion in the block above
+ * while leaving the next edit nothing to spend. So the margin itself is
+ * recorded, and it is checked in both directions.
+ */
+describe('no pair has eroded since the margin was last recorded', () => {
+  for (const requirement of CONTRAST_REQUIREMENTS) {
+    it(`${requirement.foreground} on ${requirement.background} still measures ${String(
+      requirement.measured,
+    )}`, () => {
+      const ratio = Number(
+        contrastRatio(
+          COLOUR_TOKENS[requirement.foreground],
+          COLOUR_TOKENS[requirement.background],
+        ).toFixed(2),
+      );
+      expect(
+        ratio,
+        `this pair now measures ${String(ratio)}:1 where ${String(requirement.measured)}:1 was ` +
+          'recorded. That is erosion: the pair may still clear its threshold, but the margin ' +
+          'it had is gone and #307 forbids spending it silently.',
+      ).toBeGreaterThanOrEqual(requirement.measured);
+      expect(
+        ratio,
+        `this pair now measures ${String(ratio)}:1 where ${String(requirement.measured)}:1 was ` +
+          'recorded — an improvement, which is welcome and has to be written down. Update ' +
+          '`measured` in tokens.ts so the next change is checked against the new margin and ' +
+          'not the old one.',
+      ).toBeLessThanOrEqual(requirement.measured);
+    });
+  }
+
+  it('records a margin that is itself above the threshold', () => {
+    // Without this, `measured` could be set below `minimum` and the erosion
+    // floor would sit under the standard — a floor that permits a failure.
+    for (const requirement of CONTRAST_REQUIREMENTS) {
+      expect(
+        requirement.measured,
+        `${requirement.foreground} on ${requirement.background} records a margin below its own ` +
+          'threshold',
+      ).toBeGreaterThanOrEqual(requirement.minimum);
+    }
+  });
+});
+
 describe('the requirement list is worth checking', () => {
   it('covers every colour token, so none is unaccounted for', () => {
     // Without this, a token could be added, used in the CSS, and never appear

@@ -43,7 +43,13 @@ apps/                 AGPL-3.0-or-later, without exception
     src/analysis/       zones and duration personal bests (#78) — the port, the one
                         place a threshold default is substituted, the bounded
                         library read, and the wording
-    src/design/         design tokens, theme.css and the primitives (#48)
+    src/design/         design tokens, theme.css and the primitives (#48), and since
+                        #307 the two systems those tokens now form — the elevation
+                        ramp, which is a surface COLOUR because a shadow is invisible
+                        to every gate here, and the type scale's ratio. A new token
+                        needs four things, not one: a value, a contrast pair with its
+                        measured margin, a level if it is a surface, and a rule that
+                        actually paints with it
     src/efforts/        the effort-history screen's reads and its stub (#67) — the
                         read budget, and where a sample index comes from
     src/detail/         the ride detail view's data layer (#50) — the read budget, the
@@ -2177,6 +2183,11 @@ top of an issue **supersedes its body**.
 | Which rung of the quality ladder turns the shading off, and why it is a rung rather than a build flag | `apps/web/src/game/quality.ts` §`QualitySettings.shading` |
 | What the lighting actually costs a frame, and why the number is published rather than asserted | `apps/web/browser/game.browser.spec.ts` §"measures what the shading costs", `apps/web/browser/game-harness.ts` §`awaitTheGpu` |
 | Why the HUD's panel is opaque, and why that is what makes its contrast checkable | `apps/web/src/design/tokens.ts` §`hudSurface` |
+| Why depth in this client is a colour and never a shadow, and what holds the ramp to being one | `apps/web/src/design/tokens.ts` §`ELEVATION_SURFACES`, `apps/web/src/design/tokens.test.ts` |
+| What ratio the type scale follows, and why the sizes are written out rather than computed | `apps/web/src/design/tokens.ts` §`TYPE_SCALE_RATIO` |
+| What stops a design token being declared, asserted and painted by nothing | `apps/web/src/a11y/theme.a11y.test.ts` §"every token is painted by something" |
+| Why a contrast pair records what it measures as well as what it must clear | `apps/web/src/design/tokens.ts` §`ContrastRequirement.measured` |
+| How far a `<select>` may be styled before it stops being one | `apps/web/src/design/theme.css` §`select`, [#305](https://github.com/openzigs/onyourleft/issues/305) |
 | How a rider tells a dropped sensor from a genuine zero | `apps/web/src/game/hud/fields.ts` §`NO_READING`, `HudPanel.a11y.test.tsx` |
 | What the elevation strip says on lap two of a loop, and why a point-to-point route still reads 100 % | `apps/web/src/game/hud/fields.ts` §`profileReading`, `plan.ts` §`planProgress` |
 | Why the wake lock's *release* is the half that is tested | `apps/web/src/game/hud/wake-lock.ts` |
@@ -2230,4 +2241,4 @@ top of an issue **supersedes its body**.
 | What an erase does to the unit preference, and what has to be told | `apps/web/src/transfer/erase-device.ts` §`eraseDevice`, `apps/web/src/transfer/TransferView.tsx` §`onUnitsReset` |
 | Which way a payload faces, and why an export is deliberately not trimmed | `apps/web/src/privacy/boundaries.ts`, [#35](https://github.com/openzigs/onyourleft/issues/35) |
 
-<!-- Last updated: 2026-09-09 by delivery:code-issue on #35 (the account export, and the erase that is its pair) -->
+<!-- Last updated: 2026-09-15 by delivery:code-issue resolving #307 (elevation, the type scale's ratio, and the capability queries) -->
