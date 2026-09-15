@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useState, type FormEvent, type JSX } from 'react';
 
-import { unixSeconds, type Metres } from '@onyourleft/domain';
+import { LOOP_CLOSURE_METRES, unixSeconds, type Metres } from '@onyourleft/domain';
 import type { RouteId, RouteRecord, UnitSystem, Visibility } from '@onyourleft/store';
 
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
-import { checkName, editRoute, routeFromGpx, type SaveRefusal } from '../routes/save';
+import { checkName, editRoute, LOOP_CHECKBOX_LABEL, type SaveRefusal } from '../routes/save';
+import { FILE_FIELD, LOOP_FIELD, routeFromImportForm } from '../routes/import-form';
 import { PUBLIC_ROUTE_WARNING } from '../routes/share';
 import { exportedFrom, ROUTE_FILE_FORMATS, type RouteFileFormat } from '../routes/export';
 import type { DownloadableFile } from '../transfer/store-port';
@@ -165,26 +166,16 @@ export function RoutesView({ port, now, save }: RoutesViewProps): JSX.Element {
     async (event: FormEvent<HTMLFormElement>): Promise<void> => {
       event.preventDefault();
       if (port === undefined) return;
-      const form = new FormData(event.currentTarget);
-      const file = form.get('file');
-      // ⚠️ `instanceof File` is NOT the test for "a file was chosen", and this
-      // is the HTML specification rather than a quirk: a file input with no
-      // selection still appends an entry, holding a `File` with an empty name,
-      // a type of `application/octet-stream` and no body. So the obvious guard
-      // passes, the empty body reaches `routeFromGpx`, and a rider who pressed
-      // Import without choosing anything is told their file is not valid GPX.
-      // The name is the discriminator — a chosen file always has one.
-      //
-      // Found in #202's review of the identical guard on the workouts screen.
-      if (!(file instanceof File) || file.name === '') {
-        setRefusal({ code: 'unreadable-file', message: 'Choose a GPX file to import.' });
-        return;
-      }
-      const text = await file.text();
-      const outcome = routeFromGpx(text, {
+      // ⚠️ **Every decision this handler makes is in `import-form.ts`**, which
+      // takes the `FormData` and hands back what to save or what to say. Not
+      // for tidiness: jsdom cannot put a file into a file input, so a test that
+      // submitted this form could never reach a decoded route — and #296 was
+      // precisely a wiring defect of that shape, where the loop flag worked
+      // everywhere except on the one path a rider uses. What is left here is
+      // the one expression no test can witness.
+      const outcome = await routeFromImportForm(new FormData(event.currentTarget), {
         id: `route-${String(Math.round(clock() * 1000))}` as RouteId,
         owner: port.athleteId,
-        fileName: file.name,
         now: unixSeconds(Math.floor(clock())),
       });
       if (outcome.status === 'refused') {
@@ -289,7 +280,36 @@ export function RoutesView({ port, now, save }: RoutesViewProps): JSX.Element {
       <form onSubmit={(event) => void onImport(event)}>
         <p>
           <label htmlFor="route-file">GPX file</label>
-          <input id="route-file" name="file" type="file" />
+          <input id="route-file" name={FILE_FIELD} type="file" />
+        </p>
+        {/*
+          #296. Until this box existed, nothing in this product could produce a
+          route with `loop: true` — so the game's lap counting, its wrapped road
+          markers and the plan view's "on lap 2" were all correct, all tested
+          and all unreachable.
+
+          ⚠️ **Declared, not inferred.** The geometry is right there and 25 m is
+          already the threshold, and `import-form.ts` records why reading it
+          silently would be worse: an out-and-back that happens to finish in the
+          same car park would start wrapping, a lap of a lake ending 30 m along
+          the towpath would not, and neither screen would say which happened.
+        */}
+        <p>
+          <label htmlFor="route-loop">{LOOP_CHECKBOX_LABEL}</label>
+          <input id="route-loop" name={LOOP_FIELD} type="checkbox" />
+        </p>
+        {/*
+          ⚠️ The threshold is shown in the rider's own units (#238) while the
+          refusal quotes the importer's metres, because the refusal's numbers
+          come from `packages/domain`, which has no unit preference and must not
+          acquire one — a profile is arithmetic and a rider's choice of units is
+          a client's. Both name the same distance.
+        */}
+        <p>
+          Tick it for a circuit that finishes where it starts, so riding past the finish begins
+          another lap. The file has to close: if its two ends are more than{' '}
+          {measurementText(formatSmallDistance(LOOP_CLOSURE_METRES, units))} apart, nothing is saved
+          and the import says how far apart they are.
         </p>
         <Button type="submit">Import route</Button>
       </form>

@@ -229,6 +229,41 @@ describe('the HUD shows the simulation’s numbers and not its own', () => {
     expect(fieldNamed(along, 'remaining').value).toBe(expected);
   });
 
+  it('counts down to the end of the lap on a loop, rather than sticking at zero — #296', () => {
+    // ⚠️ **The same defect #287 fixed one field over, found by building the
+    // first route a rider could actually make into a loop.** `To go` was
+    // `max(0, totalDistance - odometer)`, and a rider's odometer keeps counting
+    // past `totalDistance` while a loop's geometry wraps — so from the first
+    // crossing of the line this field read `0.00` for the rest of the ride,
+    // beside an elevation strip that was sweeping round again. Nothing caught
+    // it because no route in the product was ever a loop.
+    const input = loopInput();
+    const total: number = input.profile.totalDistance;
+    const secondLap: HudInput = {
+      ...input,
+      state: {
+        ...input.state,
+        ride: { speed: metresPerSecond(8), distance: metres(total + 100) },
+      },
+    };
+
+    expect(fieldNamed(secondLap, 'remaining').value).toBe(((total - 100) / 1000).toFixed(2));
+  });
+
+  it('still counts down to the finish on a route that is not a loop', () => {
+    // The other half: a point-to-point route really does end, and a rider who
+    // has ridden past its end has finished. `distanceOnRoute` clamps there, so
+    // one expression serves both and there is no second rule to drift.
+    const input = baseInput();
+    const total: number = input.profile.totalDistance;
+    const past: HudInput = {
+      ...input,
+      state: { ...input.state, ride: { speed: metresPerSecond(0), distance: metres(total + 500) } },
+    };
+
+    expect(fieldNamed(past, 'remaining').value).toBe('0.00');
+  });
+
   it('converts speed without recomputing it', () => {
     const input = baseInput();
     const moving: HudInput = {

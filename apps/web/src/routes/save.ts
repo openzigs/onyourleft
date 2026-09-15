@@ -48,6 +48,7 @@ export interface SaveRefusal {
     | 'name-too-long'
     | 'unreadable-file'
     | 'not-a-route'
+    | 'not-a-loop'
     | 'edited-elsewhere'
     | 'cannot-be-shared';
   readonly message: string;
@@ -98,7 +99,43 @@ export interface ImportOptions {
   readonly fileName: string;
   /** Passed in rather than read: this module may not consult a clock. */
   readonly now: UnixSeconds;
+  /**
+   * Whether the rider said this file comes back to where it started.
+   *
+   * ⚠️ **A claim, checked against the geometry and refused when it is wrong** —
+   * `routeProfile` compares the two ends against `LOOP_CLOSURE_METRES` and
+   * raises `RouteError('not-a-loop')`, which arrives at the rider as
+   * {@link loopRefusalText} below rather than as a saved point-to-point route.
+   * `import-form.ts` is where the claim is read, and why it is declared rather
+   * than inferred.
+   */
   readonly loop?: boolean;
+}
+
+/**
+ * The words beside the loop checkbox, quoted back in the refusal below.
+ *
+ * One constant, so the control a rider is told to untick is named the way the
+ * control they are looking at is actually labelled.
+ */
+export const LOOP_CHECKBOX_LABEL = 'This route is a loop';
+
+/**
+ * What a rider is told when the file they ticked the loop box for does not
+ * close, given the importer's own sentence about why.
+ *
+ * ⚠️ **The domain's message is passed through rather than replaced**, and the
+ * reason is that it carries the two numbers this refusal exists to report: how
+ * far apart the ends actually are, and how close they had to be. Both are
+ * distances, which ADR 0004 decision D keeps in a message; *where* the two ends
+ * are is a coordinate and appears nowhere. What this adds is the half a
+ * validation failure leaves out — which file, and what to do next.
+ */
+export function loopRefusalText(fileName: string, because: string): string {
+  return (
+    `${fileName} was not saved: ${because}. Import it again without “${LOOP_CHECKBOX_LABEL}” ` +
+    'ticked to save it as a point-to-point route.'
+  );
 }
 
 /**
@@ -116,6 +153,14 @@ export function routeFromGpx(text: string, options: ImportOptions): SaveOutcome 
     decoded = decodeGpxRoute(text, options.loop === undefined ? {} : { loop: options.loop });
   } catch (error: unknown) {
     if (error instanceof RouteError) {
+      if (error.code === 'not-a-loop') {
+        // ⚠️ Its own code, rather than `not-a-route`. This file *is* a route —
+        // the rider's claim about its shape is what failed — and telling them
+        // their route file is not a route would send them to check the file
+        // instead of the tick box. #296's second criterion is that they can act
+        // on it, and acting on it means knowing which of the two was wrong.
+        return refuse('not-a-loop', loopRefusalText(options.fileName, error.message));
+      }
       // The importer's own messages already name the problem — "no route points",
       // "no elevation anywhere" — so they are passed through rather than
       // replaced with something vaguer.

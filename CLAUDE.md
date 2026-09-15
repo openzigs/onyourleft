@@ -70,8 +70,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         the registry checked against the files on disk
     src/routes/         saved routes (#73) — the store port and its read budget,
                         the edit decision and its concurrency token, what a
-                        shared copy of a route contains, and the export a rider
-                        copies to a head unit (#74)
+                        shared copy of a route contains, the export a rider
+                        copies to a head unit (#74), and since #296 the import
+                        form — the one claim a rider makes about a file's shape,
+                        why it is declared rather than inferred, and the
+                        refusal when the geometry disagrees
     src/routing/        planning a route (#70, #71, #72) — the draft and the
                         legs an edit makes stale, undo over whole drafts, what
                         a half-drawn route keeps across a reload, the elevation
@@ -2087,6 +2090,9 @@ top of an issue **supersedes its body**.
 | What happens when a rider passes the end of a loop, and when a route is refused as one | `packages/domain/src/route/profile.ts` §`distanceOnRoute`, §`LOOP_CLOSURE_METRES` |
 | Which GPX element a planned route is read from, and which one wins when a file has both | `packages/fit/src/xml/gpx.ts` §`decodeGpx`, `packages/fit/src/route/gpx-route.ts` |
 | Why a saved route stores its whole profile where a ride stores half a load | `packages/store/src/records.ts` §`RouteRecord` |
+| How a route a rider imported becomes a loop at all, and why it is a tick box rather than the geometry | `apps/web/src/routes/import-form.ts`, `apps/web/src/game/loop-from-import.test.tsx` |
+| What a rider is told when the file they marked as a loop does not close | `apps/web/src/routes/save.ts` §`loopRefusalText` |
+| Why the HUD's "To go" counts down to the end of the lap rather than to the route's length | `apps/web/src/game/hud/fields.ts` §`hudReadings` |
 | Where a route's heights came from, and why an absent source is never substituted | `packages/store/src/records.ts` §`RouteRecord.elevation`, `apps/web/src/routing/elevation.ts` |
 | Why only two legs are re-routed when a waypoint moves, and what a change-detector gets wrong | `apps/web/src/routing/draft.ts` §`moveWaypoint`, §`insertWaypoint` |
 | Why undo stores whole drafts, and why an engine's answer is not a history step | `apps/web/src/routing/history.ts` §`record`, §`settle` |

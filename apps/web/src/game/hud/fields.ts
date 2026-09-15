@@ -204,7 +204,21 @@ export interface HudInput {
 export function hudReadings(input: HudInput): readonly HudReading[] {
   const { state } = input;
   const units = input.units ?? 'metric';
-  const remaining = Math.max(0, (input.profile.totalDistance as number) - state.ride.distance);
+  // ⚠️ **To the end of THIS lap, not to a total a rider on a loop never
+  // reaches — #296.** This was `max(0, totalDistance - odometer)`, which is
+  // exactly the clamp #287 removed from the elevation strip one field over, and
+  // it survived for the same reason: no route the product could produce was
+  // ever a loop, so `distance` never exceeded `totalDistance` outside a unit
+  // test. On a circuit that made this field read `0.00` from the first crossing
+  // of the line for the rest of the ride.
+  //
+  // `planProgress` wraps for a loop and clamps for anything else, so one
+  // expression serves both shapes and there is no second rule to drift from the
+  // strip beside it — #94's third criterion, which asks that no separately
+  // computed value exist to drift at all.
+  const remaining =
+    (input.profile.totalDistance as number) *
+    (1 - planProgress(input.profile, state.ride.distance));
   // ⚠️ **Both go through `units/format.ts`, and that is the whole of #238's
   // second criterion.** This file used to convert and label inline —
   // `(state.ride.speed as number) * 3.6, 'km/h'` and `remaining / 1000, 'km'`
