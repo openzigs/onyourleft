@@ -32,6 +32,8 @@ import type { GamePort, RidableRoute } from './game/GameView';
 import type { GhostTrack } from '@onyourleft/domain';
 import type { GameRenderer } from './game/port';
 import { probeBrowser, type CapabilityProbe } from './support/bluetooth-support';
+import { capacitorShellSupport } from './support/shell-support';
+import type { ShellSupportPort } from './support/shell-support-port';
 import { saveWithAnchor, webCryptoDigest } from './transfer/browser';
 import { browserDraftStorage } from './routing/draft-storage';
 import {
@@ -124,7 +126,7 @@ function localStore(): ReturnType<typeof openActivityStore> {
  * profile that carries it. Pairing a trainer is then one of about three
  * connections rather than three.
  *
- * ⚠️ Hoisted out of `buildRideController` so the browser and the Android shell
+ * ⚠️ Hoisted out of `buildPlatform` so the browser and the Android shell
  * pair against **the same list**. #39's promise is that one interface is
  * satisfied unchanged by both platforms; two profile lists would make that true
  * of the types and false of the behaviour, and the divergence would show up as
@@ -140,7 +142,25 @@ function rideProfiles(): GattProfile[] {
 }
 
 /**
- * The live ride screen's state machine, on whichever platform this is.
+ * What this platform gives the client: a ride screen, and — inside the Android
+ * shell — the Devices screen's own answer about Bluetooth (#284).
+ *
+ * The two are built together because they must share **one** transport. A
+ * second one would mean a second plugin initialisation, a second permission
+ * prompt, and two views of which links are up against an OS-wide budget of
+ * about three connections. It also means a permission granted from the Devices
+ * screen is granted for pairing, because `ensureInitialized` is memoised per
+ * transport and this is the same transport.
+ */
+interface ClientPlatform {
+  readonly rideController: RideController | undefined;
+  /** `undefined` in a browser, where `DevicesView` reads {@link capabilities}. */
+  readonly shell: ShellSupportPort | undefined;
+}
+
+/**
+ * The live ride screen's state machine, on whichever platform this is — and,
+ * on Android, the Devices screen's read of the same transport (#284).
  *
  * ⚠️ **Asynchronous because the Android transport is loaded lazily**, and that
  * is the whole reason `apps/mobile` is no longer dead code. `capacitor.config.ts`
@@ -159,7 +179,7 @@ function rideProfiles(): GattProfile[] {
  * `controller.ts` documents that omitting `openTrainer` makes the screen report
  * no controllable trainer, which is the honest state rather than a silent one.
  */
-async function buildRideController(probe: CapabilityProbe): Promise<RideController | undefined> {
+async function buildPlatform(probe: CapabilityProbe): Promise<ClientPlatform> {
   const shared = {
     store: localStore(),
     athleteId: LOCAL_ATHLETE,
@@ -187,13 +207,26 @@ async function buildRideController(probe: CapabilityProbe): Promise<RideControll
   if (isNativeShell(platformCapacitor())) {
     const mobile = await import('@onyourleft/mobile');
     const plugin = mobile.capacitorBlePort();
-    return createRideController({
+    const transport = mobile.createCapacitorTransport({
+      plugin,
+      profiles: rideProfiles(),
+      now: browserClock,
+    });
+    // ⚠️ #284. `permissionNotice` and `mayShowDeviceList` are #87's answer to
+    // "what does a rider see when Bluetooth will not work", and until this line
+    // nothing in `apps/web` imported either of them — so the Devices screen
+    // reported the WebView's Web Bluetooth verdict about a stack this build
+    // does not use. They are passed rather than imported by the module that
+    // uses them so that a browser downloads no line of `@onyourleft/mobile`,
+    // which is the same reason this whole branch is behind an `import()`.
+    const shell = capacitorShellSupport({
+      availability: async () => transport.availability(),
+      notice: mobile.permissionNotice,
+      mayShowDeviceList: mobile.mayShowDeviceList,
+    });
+    const rideController = createRideController({
       ...shared,
-      transport: mobile.createCapacitorTransport({
-        plugin,
-        profiles: rideProfiles(),
-        now: browserClock,
-      }),
+      transport,
       // ⚠️ The **same** `plugin` object the transport holds, deliberately.
       // Building a second one would give the trainer control path its own
       // subscriptions and its own view of which links are up, and the first
@@ -204,20 +237,27 @@ async function buildRideController(probe: CapabilityProbe): Promise<RideControll
         openChannel: (deviceId) => mobile.createCapacitorFitnessMachineChannel(plugin, deviceId),
       }),
     });
+    return { rideController, shell };
   }
 
   if (probe.bluetooth === undefined || !probe.secureContext) {
-    return undefined;
+    return { rideController: undefined, shell: undefined };
   }
-  const transport = createWebBluetoothTransport({
+  const browserTransport = createWebBluetoothTransport({
     profiles: rideProfiles(),
     bluetooth: probe.bluetooth,
   });
-  return createRideController({
-    ...shared,
-    transport,
-    openTrainer: openWebBluetoothTrainer(transport),
-  });
+  return {
+    rideController: createRideController({
+      ...shared,
+      transport: browserTransport,
+      openTrainer: openWebBluetoothTrainer(browserTransport),
+    }),
+    // No port, which is what puts `DevicesView` on the browser probe. The
+    // absence is the decision, taken here, in the one file that may read a
+    // global.
+    shell: undefined,
+  };
 }
 
 /**
@@ -500,11 +540,13 @@ function buildUnitsPort(): UnitsPort {
 }
 
 async function render(athlete: AthleteRecord | undefined): Promise<void> {
-  const rideController = await buildRideController(capabilities);
+  const platform = await buildPlatform(capabilities);
+  const rideController = platform.rideController;
   createRoot(container).render(
     <StrictMode>
       <AppShell
         capabilities={capabilities}
+        {...(platform.shell === undefined ? {} : { shell: platform.shell })}
         settings={buildUnitsPort()}
         // ⚠️ The **stored** preference, read before the first paint. The
         // fallback is `DEFAULT_UNIT_SYSTEM` and it is applied in exactly one

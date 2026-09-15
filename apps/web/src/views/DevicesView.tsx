@@ -4,12 +4,28 @@ import type { JSX } from 'react';
 
 import { StatusMessage } from '../design/StatusMessage';
 import { BluetoothSupportNotice } from '../support/BluetoothSupportNotice';
+import { ShellSupportNotice } from '../support/ShellSupportNotice';
 import type { CapabilityProbe } from '../support/bluetooth-support';
+import type { ShellSupportPort } from '../support/shell-support-port';
 import { useBluetoothSupport } from '../support/useBluetoothSupport';
+import { useShellSupport } from '../support/useShellSupport';
 
 export interface DevicesViewProps {
   /** Stable for the life of the app — see `useBluetoothSupport`. */
   readonly capabilities: CapabilityProbe;
+  /**
+   * The Android shell's own answer, or `undefined` in a browser (#284).
+   *
+   * ⚠️ **Present is the question this screen must ask.** Inside the shell the
+   * BLE stack is `apps/mobile`'s Capacitor plugin, so `capabilities` — which is
+   * `navigator.bluetooth` and `isSecureContext`, read from the WebView —
+   * describes a stack the app does not use. It was the *only* question this
+   * screen asked until #284, so a rider on Android was told "Sensors cannot be
+   * paired in this browser" while the ride screen paired a trainer and drove
+   * it. `main.tsx` supplies this only when `isNativeShell` is true, which is
+   * the same choice it already makes for the transport.
+   */
+  readonly shell?: ShellSupportPort | undefined;
 }
 
 /**
@@ -29,8 +45,31 @@ export interface DevicesViewProps {
  * what to do if it is not, and that the pairing flow itself is still to come.
  * When #49 lands, the button goes where the second `StatusMessage` is, behind
  * the same `support.canPair` check that guards it now.
+ *
+ * ## Two platforms, two questions, and why they are two components
+ *
+ * #284: inside the Android shell the honest answer comes from the plugin, not
+ * from `navigator.bluetooth`. The branch is on {@link DevicesViewProps.shell}
+ * rather than on a platform name, for the reason `support/capacitor.ts` gives —
+ * the presence of the port *is* `main.tsx`'s `isNativeShell` decision, already
+ * taken once, in the one place that may read a global.
+ *
+ * It is two components rather than one with a conditional because each holds a
+ * hook, and a hook cannot be called behind an `if`. That is a React rule and
+ * not a preference, and it is worth the extra function: the browser half below
+ * is byte-for-byte what it was, which is #284's third acceptance criterion
+ * (`DevicesView.test.tsx` is untouched by that change).
  */
-export function DevicesView({ capabilities }: DevicesViewProps): JSX.Element {
+export function DevicesView({ capabilities, shell }: DevicesViewProps): JSX.Element {
+  return shell === undefined ? (
+    <BrowserDevices capabilities={capabilities} />
+  ) : (
+    <ShellDevices port={shell} />
+  );
+}
+
+/** The Devices screen in a browser — Web Bluetooth's answer, unchanged. */
+function BrowserDevices({ capabilities }: { readonly capabilities: CapabilityProbe }): JSX.Element {
   const { support, recheck } = useBluetoothSupport(capabilities);
 
   return (
@@ -57,6 +96,41 @@ export function DevicesView({ capabilities }: DevicesViewProps): JSX.Element {
       ) : (
         <p className="oyl-muted">
           Sensors cannot be paired in this browser, so there is nothing to list.
+        </p>
+      )}
+    </>
+  );
+}
+
+/**
+ * The Devices screen inside the Android shell — the plugin's answer (#284).
+ *
+ * The same three states as the browser half, and the third one deliberately:
+ * `undefined` is "not known yet", which is a different thing from "cannot
+ * pair". Reading `support?.canPair === true` here would tell a rider their
+ * phone cannot pair sensors while the notice above still said "Checking", and
+ * on Android the read is the one that raises the permission dialog, so that
+ * window is as long as the rider takes to answer it.
+ */
+function ShellDevices({ port }: { readonly port: ShellSupportPort }): JSX.Element {
+  const { support, recheck } = useShellSupport(port);
+
+  return (
+    <>
+      <h2>This phone</h2>
+      <ShellSupportNotice support={support} onRecheck={recheck} />
+
+      <h2>Paired sensors</h2>
+      {support === undefined ? (
+        <p className="oyl-muted">Waiting for the check to finish.</p>
+      ) : support.canPair ? (
+        <StatusMessage tone="info" label="Not listed here">
+          Sensors are paired on the Ride screen, where the recording that needs them is. This page
+          reports what this phone can do, so that it never offers a control that cannot work.
+        </StatusMessage>
+      ) : (
+        <p className="oyl-muted">
+          Sensors cannot be paired on this phone right now, so there is nothing to list.
         </p>
       )}
     </>

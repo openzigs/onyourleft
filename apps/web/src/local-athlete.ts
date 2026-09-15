@@ -130,7 +130,7 @@ export async function renderAfterAthlete(
   ensure: () => Promise<AthleteRecord>,
   // ⚠️ May return a promise, and it is **awaited**. `render` became
   // asynchronous when the client learned to load the Android BLE transport
-  // lazily (`main.tsx` §`buildRideController`), and a signature that took only
+  // lazily (`main.tsx` §`buildPlatform`), and a signature that took only
   // `() => void` would have left the caller floating that promise — so a
   // start-up failure inside the render would have been an unhandled rejection
   // in the composition root, which is the one file with no test.

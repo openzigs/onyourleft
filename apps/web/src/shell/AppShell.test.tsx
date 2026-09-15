@@ -6,15 +6,24 @@
  * `../a11y/routes.a11y.test.tsx` asserts across every route.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
 import type { CapabilityProbe } from '../support/bluetooth-support';
+import type { ShellSupport } from '../support/shell-support-port';
 
 import { AppShell } from './AppShell';
 import { hrefFor, routeById } from './routes';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
+
+/** What the plugin says on a phone where everything works. */
+const PHONE_CAN_PAIR: ShellSupport = { kind: 'available', canPair: true, notice: null };
+
+/** The `h2`s the rendered view carries, which is where the two halves differ. */
+function viewSections(): (string | null)[] {
+  return [...document.querySelectorAll('main h2')].map((heading) => heading.textContent);
+}
 
 let mounted: Mounted | undefined;
 
@@ -92,6 +101,38 @@ describe('the header', () => {
       '#/settings',
       '#/about',
     ]);
+  });
+});
+
+describe('the Devices screen inside the Android shell', () => {
+  // ⚠️ **This is the second JSX hop #284's port travels through, and the one
+  // nothing else watches.** The #278 gate sees the *view*'s read of
+  // `ShellSupportPort` (`WIRE003`), and `DevicesView.shell.test.tsx` drives the
+  // component directly with a port in hand — so replacing the `devices` case in
+  // `AppShell.tsx` with `<DevicesView capabilities={props.capabilities} />`
+  // leaves the whole suite, `check:wiring`, `typecheck` and `lint` green while a
+  // rider on Android is silently back on the WebView's answer, which is #284 in
+  // full. Measured. These two tests are what notices.
+  it('hands the screen the shell port when `main.tsx` supplied one', async () => {
+    const readShellSupport = vi.fn<() => Promise<ShellSupport>>().mockResolvedValue(PHONE_CAN_PAIR);
+    globalThis.location.hash = '#/devices';
+    mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} shell={{ readShellSupport }} />);
+    await settle();
+
+    // The port was reached at all — the prop arrived rather than being dropped.
+    expect(readShellSupport).toHaveBeenCalledTimes(1);
+    // And the rider-visible half: the shell branch heads its answer "This
+    // phone". `NO_BLUETOOTH` is deliberately the capabilities here, so a screen
+    // that fell back to the browser probe would render the browser heading and
+    // "Sensors cannot be paired in this browser" underneath it.
+    expect(viewSections()).toContain('This phone');
+    expect(viewSections()).not.toContain('This browser');
+  });
+
+  it('leaves the browser branch alone when there is no port', async () => {
+    await open('/devices');
+    expect(viewSections()).toContain('This browser');
+    expect(viewSections()).not.toContain('This phone');
   });
 });
 

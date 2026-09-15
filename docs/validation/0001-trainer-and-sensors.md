@@ -332,6 +332,19 @@ Said here rather than discovered later:
 - **Nothing about Android.** The Capacitor transport is a different code path with a different
   plugin under it. Its FTMS control point is `apps/mobile/src/ble/fitness-machine-channel.ts`, and
   it needs its own session on a phone.
+  - ⚠️ **One Android question is open and only a phone settles it**, raised in the review of
+    [#284](https://github.com/openzigs/onyourleft/issues/284) and recorded here rather than
+    answered from a machine with no SDK. Opening the Devices screen inside the shell calls
+    `availability()`, which initialises the plugin, and the claim is that this is where Android's
+    runtime `BLUETOOTH_SCAN` / `BLUETOOTH_CONNECT` dialog appears. If it does, then because
+    Android stops showing that dialog after two declines, a rider who taps **Devices** out of
+    curiosity and dismisses it twice has permanently spent the app's ability to ask, and is routed
+    to the Settings prose for good — reached by navigation rather than by intent. **What to
+    observe:** open Devices on a fresh install and note whether a system dialog appears at all,
+    whether it appears again on a second visit after one decline, and whether it appears a third
+    time. A "yes, and it stops" is an argument for deferring the first read behind a *Check this
+    phone* control; a "no dialog on this path" closes the question. Nothing in the repository can
+    tell the two apart.
 - **Nothing about background recording.** That is
   [spike 0002](../spikes/0002-background-recording.md)'s blocked column.
 - **Nothing about frame rate or thermal behaviour.** ADR 0008 D-2's rendering gate was **waived**,

@@ -87,7 +87,10 @@ apps/                 AGPL-3.0-or-later, without exception
     src/shell/          the hash route table, the router hook and AppShell (#48)
     src/support/        browser-capability detection and its notice (#48), and
                         since #85 the one question that decides which BLE
-                        transport this build uses (§4h)
+                        transport this build uses (§4h), and since #284 the
+                        OTHER answer that question decides — the Devices
+                        screen's read of the Android plugin's own availability,
+                        and the half of that wiring the #278 gate can see
     src/validation/     the recording BluetoothPort (#111) — the wrapper that turns
                         an afternoon with real hardware into committable evidence,
                         and the two things it deliberately does not write down
@@ -1418,7 +1421,8 @@ not pair with anything on Android. Three things were missing and all three are n
 **How the choice is made now.** `support/capacitor.ts` asks `Capacitor.isNativePlatform()` — not the
 user agent, because a Capacitor WebView *is* Chrome and reports itself as Chrome, and not
 `'Capacitor' in window`, because Capacitor's web build defines that global too. `main.tsx`'s
-`buildRideController` is asynchronous for exactly this: inside the shell it `import()`s
+`buildPlatform` — named `buildRideController` until #284 gave it a second thing to build — is
+asynchronous for exactly this: inside the shell it `import()`s
 `@onyourleft/mobile` and builds the Capacitor transport; in a browser it never downloads a line of
 it. `pnpm run build` shows the split, and `grep -c BleClient` over the entry chunk returns 0.
 
@@ -1426,8 +1430,10 @@ it. `pnpm run build` shows the split, and `grep -c BleClient` over the entry chu
 paragraph used to say "Trainer control now works on Android too" — a reviewer who remembers that
 sentence is reading the old file, and [#230](https://github.com/openzigs/onyourleft/issues/230) is
 why it was wrong. Nothing downstream of pairing could work, because **pairing itself did not**:
-`BleClient.initialize()` was called only from `availability()`, which nothing in `apps/web` calls,
-so every `discover()` reached `requestDevice()` with the plugin uninitialised. #230 fixed that
+`BleClient.initialize()` was called only from `availability()`, which at the time nothing in
+`apps/web` called, so every `discover()` reached `requestDevice()` with the plugin uninitialised.
+(⚠️ That last clause was present tense until #284 falsified it: `apps/web/src/support/shell-support.ts`
+is `availability()`'s production caller now, and the Devices screen is what reaches it.) #230 fixed that
 (`transport.ts`'s `ensureInitialized`), and what is established today is that the **code** is
 there: `openCapacitorTrainer` in `apps/web/src/ride/trainer.ts` is the Android counterpart of
 `openWebBluetoothTrainer`, `apps/mobile/src/ble/fitness-machine-channel.ts` implements
@@ -1504,10 +1510,16 @@ fixtures. Moving a watched directory means editing `check-wiring.mjs` in the sam
 followed by a reason, in its doc comment. The tag alone is refused — an exemption nobody can read is
 a config-file list with extra steps — and it is refused on **all three** paths, including a file's
 own doc comment, which is the broadest of them because it silences a whole module. A reasonless tag
-is reported as `WIRE000` rather than quietly honoured. ⚠️ **Not every `@unwired` in the tree is a
-decision**: `apps/mobile/src/ble/plugin-port.ts` §`isEnabled` carries one naming
-[#284](https://github.com/openzigs/onyourleft/issues/284), which is a defect with an issue rather
-than a decision. ⚠️ **`segments/match-port.ts` carried the other one and no longer does** — a
+is reported as `WIRE000` rather than quietly honoured. ⚠️ **`apps/mobile/src/ble/plugin-port.ts`
+§`isEnabled` carried one naming [#284](https://github.com/openzigs/onyourleft/issues/284) and no
+longer does** — a reviewer who remembers this paragraph citing it as the example of a tag that is a
+defect rather than a decision is reading the old file. #284 wired it: the Devices screen reads
+`apps/web/src/support/shell-support-port.ts` inside the shell, so the answer a rider on Android gets
+comes from the plugin rather than from the WebView's `navigator.bluetooth`. ⚠️ **That gave this
+gate half the chain and not all of it, measured both ways round**: deleting the screen's branch is a
+red `WIRE003`, and having `main.tsx` hand the screen no port at all is **green**, because an
+optional prop nobody supplies is the third §Limits entry. It is recorded at the port's own
+declaration rather than only here. ⚠️ **`segments/match-port.ts` carried the other one and no longer does** — a
 reviewer who remembers this paragraph naming it is reading the old file. It was this gate's first
 finding, [#282](https://github.com/openzigs/onyourleft/issues/282): nothing in the client ran the
 segment matcher, so no segment effort had ever been written and the effort screens read a table only
@@ -2160,6 +2172,8 @@ top of an issue **supersedes its body**.
 | Why a blocked ride control keeps its tab stop, and what `aria-disabled` does not do to a click | `apps/web/src/game/GameView.tsx` §`PACER_PROBLEM_ID`, `apps/web/src/a11y/audit.ts` §`removedFromTabOrder` |
 | Why the renderer and the HUD are in `apps/web` when their issues say `apps/mobile` | §4h, `apps/mobile/capacitor.config.ts` §`webDir` |
 | How the client decides whether it is in a browser or the Android shell | `apps/web/src/support/capacitor.ts`, §4h |
+| Which Bluetooth question the Devices screen asks on each platform, and why a browser's answer is the wrong one inside the shell | `apps/web/src/support/shell-support-port.ts`, `apps/web/src/support/shell-support.ts` |
+| Which half of that wiring the #278 gate can see, and which half only a test covers | `apps/web/src/support/shell-support-port.ts` §"This is a `*-port.ts` on purpose", §4j |
 | Why a rider with no heart rate strap is not told their strap has dropped | `apps/web/src/game/sensors.ts`, `apps/web/src/ride/metrics.ts` |
 | Which previous attempt a ghost races, and why it is the fastest rather than the latest | `apps/web/src/game/ghost-source.ts` §`fastestAttempt` |
 | Why a corridor point carries two distances, and which one a marker is placed by | `apps/web/src/game/terrain.ts` §`CorridorPoint.along`, `apps/web/src/game/scene.ts` §`nearestPoint` |
