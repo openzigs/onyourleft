@@ -398,7 +398,10 @@ YAML
 run_check_installing
 assert_red 'an install that does not match the lockfile fails the check'
 assert_says 'and names the rule and the command' 'CAP001 pnpm install --frozen-lockfile'
-assert_says 'and quotes what pnpm said, which it writes to stdout' "specifiers in the lockfile don't match"
+# ⚠️ The error CODE rather than the prose. pnpm writes both to stdout, and the
+# prose tail differs between a runner and a terminal -- which is how this suite
+# went red on CI while green locally. The code does not move.
+assert_says 'and quotes the code pnpm wrote to stdout' 'ERR_PNPM_OUTDATED_LOCKFILE'
 assert_silent_about 'and regenerates nothing on top of it' 'CAP004'
 
 # --- ...and the same tree passes when the install is taken as given ----------

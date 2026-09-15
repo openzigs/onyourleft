@@ -174,9 +174,21 @@ export function differingLines(committed, generated, limit = 6) {
 
 const show = (value) => (value === undefined ? '(no such line)' : `\`${value}\``);
 
-/** The last few lines of a failed command's output, for a message that has to fit on a screen. */
+/**
+ * What a failed command said, in one line, for a message that has to fit on a
+ * screen.
+ *
+ * ⚠️ **The line carrying a machine-readable error code wins over the last few
+ * lines**, and that is not a tidiness preference. pnpm 11.18.0 appends a
+ * `help: Regenerate the lockfile …` block on a CI runner and not on a
+ * developer's terminal, which pushes `ERR_PNPM_OUTDATED_LOCKFILE` out of the
+ * tail — so a fixture asserting on the tail was green locally and red on the
+ * runner. This gate's third CI run is the measurement.
+ */
 const tail = (text) => {
   const lines = text.trim().split('\n');
+  const coded = lines.find((line) => /ERR_[A-Z0-9_]+/.test(line));
+  if (coded !== undefined) return coded.trim();
   return lines.slice(-3).join(' / ') || '(no output)';
 };
 
