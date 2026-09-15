@@ -90,6 +90,28 @@ interface GameHarnessResult {
 const FRAMES = 100;
 
 /**
+ * The most a lit frame may cost against an unlit one: **1.5×** — #286.
+ *
+ * ⚠️ **A ratio rather than a millisecond budget, so it survives the machine.**
+ * Measured on the two this change was run on: **1.10** on the CI runner
+ * (7.419 ms lit against 6.764 ms flat) and **0.99** on a developer's laptop
+ * (3.333 against 3.372 — the shading is under that machine's noise floor
+ * there). Both were taken with a same-shading run-to-run spread under 2 % of
+ * the mean, so the bound has about four times the margin it needs against the
+ * worse of the two, and roughly thirty times the noise.
+ *
+ * What it is for: a future change to the shading path — a second lamp, a
+ * per-pixel material, a shadow map — that made the lit world half again as
+ * expensive as the unlit one would be a decision somebody should take rather
+ * than a line somebody adds, which is the same argument `three-seam.test.ts`
+ * makes about the lamps themselves.
+ *
+ * ⚠️ It says nothing about the **device floor**. Both machines are desktops
+ * with a software rasteriser; ADR 0008 D-2's gate is #247 and is outstanding.
+ */
+const SHADING_CEILING = 1.5;
+
+/**
  * Whether a read-back pixel is the colour a scene that drew nothing leaves.
  *
  * ⚠️ **Colour only.** The renderer is built with `alpha: false`, so every pixel
@@ -674,13 +696,14 @@ test.describe('the world is lit, and can stop being — #286', () => {
    * what the harness measures, at one render scale, with the GPU flushed before
    * each clock is read.
    *
-   * ⚠️ **It is deliberately not asserted against a threshold.** A wall-clock
-   * millisecond budget on a shared CI runner is a flaky gate, and a flaky gate
+   * ⚠️ **No wall-clock budget is asserted, and a ratio is.** An absolute
+   * millisecond threshold on a shared runner is a flaky gate, and a flaky gate
    * gets disabled — which would leave this epic with a performance claim nobody
-   * re-runs, the exact defect #244's review found and #286 quotes back. So what
-   * is asserted is that both measurements are real and were taken over the same
-   * frames, and the numbers themselves are attached to the run for reading. The
-   * figure from the run that shipped this is in the pull request.
+   * re-runs, the exact defect #244's review found and #286 quotes back. A
+   * **ratio** is dimensionless and survives the change of machine outright:
+   * measured at 1.10 on the CI runner and 0.99 on a developer's laptop, both
+   * against a noise floor under 2 % of the mean. {@link SHADING_CEILING} is
+   * where the margin between those and the bound is argued.
    *
    * ⚠️ And it is a **headless Chromium**, on a software rasteriser in CI. ADR
    * 0008 D-2's rendering gate was waived rather than passed and #247 is
@@ -702,6 +725,8 @@ test.describe('the world is lit, and can stop being — #286', () => {
     // no spread at all between two identical measurements would mean the clock
     // is not measuring what it claims to.
     expect(result.frameMsNoise).toBeGreaterThan(0);
+    // The gate itself. @see SHADING_CEILING
+    expect(result.litFrameMs).toBeLessThan(result.flatFrameMs * SHADING_CEILING);
 
     const cost = result.litFrameMs - result.flatFrameMs;
     const measured =
