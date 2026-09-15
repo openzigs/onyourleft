@@ -61,7 +61,7 @@ import { distanceBetween } from '../geodesy';
 import { metres, seconds } from '../quantities';
 import { UnitError } from '../unit-error';
 
-import { cellCover, coversIntersect, type CellId } from './cells';
+import { cellCover, coversIntersect, paddedCellCover, type CellId } from './cells';
 import { COMPARISON_STEP_METRES, densify, discreteFrechet } from './frechet';
 import { endpointReachRadius, nearestEndpointSample, sampleHeading, type Segment } from './segment';
 
@@ -192,7 +192,15 @@ export interface SegmentMatch {
   readonly counts: StageCounts;
 }
 
-/** A segment with its cell cover precomputed, which is what an index is. */
+/**
+ * A segment with its **padded** cell cover precomputed, which is what an index
+ * is.
+ *
+ * ⚠️ Padded, and the ride's is not — `cells.ts` §`paddedCellCover` has the
+ * reasoning. A caller that builds this field with `cellCover` instead
+ * reintroduces #291 and nothing fails loudly: the covers are well-formed and a
+ * perfect traversal is simply never reported.
+ */
 export interface IndexedSegment {
   readonly segment: Segment;
   readonly cells: ReadonlySet<CellId>;
@@ -205,9 +213,13 @@ export interface IndexedSegment {
  * segment is created and matching is a cost paid on every ride, and rolling
  * them together makes the per-ride number look far worse than it is. The spike
  * reported them separately for the same reason.
+ *
+ * ⚠️ **This is the one place a padded cover is built** (#291). Stage 1 must not
+ * reject a pair stage 2 or stage 3 could still report, and an unpadded cover
+ * rejects two paths a millimetre apart across a cell line.
  */
 export function indexCorpus(segments: readonly Segment[]): IndexedSegment[] {
-  return segments.map((segment) => ({ segment, cells: cellCover(segment.geometry) }));
+  return segments.map((segment) => ({ segment, cells: paddedCellCover(segment.geometry) }));
 }
 
 /**

@@ -20,6 +20,7 @@ import {
 } from '../quantities';
 import { UnitError } from '../unit-error';
 
+import { PREFILTER_MARGIN_METRES } from './cells';
 import {
   GAP_SECONDS,
   indexCorpus,
@@ -376,6 +377,46 @@ describe('the funnel narrows, and the thresholds are ours', () => {
     expect(SIMILARITY_METRES).toBe(25);
     expect(GAP_SECONDS).toBe(20);
     expect(DEFAULT_ENDPOINT_RADIUS_METRES).toBe(15);
+    expect(PREFILTER_MARGIN_METRES).toBe(100);
+  });
+
+  it('matches a noiseless traversal that straddles a cell line (#291)', () => {
+    // The #282 pair, in the matcher rather than in the index. The segment sits
+    // on longitude -0.12, which is EXACTLY a column line on the 0.01° grid;
+    // the ride is the same road as a stream set gives it back — about 1.4 mm
+    // west, in the column below. Before #291 the covers were disjoint,
+    // `afterPrefilter` was 0, and a perfect traversal produced no effort at
+    // all. No tolerance change fixes that, because nothing downstream of
+    // stage 1 ever ran.
+    const onTheLine = createSegment({
+      id: 'on-the-line',
+      createdBy: 'athlete-a',
+      name: 'on the line',
+      sport: 'ride',
+      geometry: straightPath(
+        geographicPosition(degreesLatitude(51.5), degreesLongitude(-0.12)),
+        0,
+        500,
+        26,
+      ),
+      elevationSource: 'none',
+      visibility: 'private',
+      createdAt: unixSeconds(1_760_000_000),
+    });
+    const aMillimetreWest = rideAlong(
+      straightPath(
+        geographicPosition(degreesLatitude(51.5), degreesLongitude(-0.12000001966953278)),
+        0,
+        500,
+        26,
+      ),
+    );
+
+    const result = matchRide(aMillimetreWest, indexCorpus([onTheLine]));
+
+    expect(result.counts.afterPrefilter).toBe(1);
+    expect(result.efforts).toHaveLength(1);
+    expect(result.efforts[0]?.segmentId).toBe('on-the-line');
   });
 
   it('finds nothing in an empty corpus rather than throwing', () => {

@@ -579,7 +579,15 @@ export {
   directedHausdorff,
   discreteFrechet,
 } from './segment/frechet';
-export { CELL_DEGREES, cellCover, cellOf, coversIntersect, type CellId } from './segment/cells';
+export {
+  CELL_DEGREES,
+  cellCover,
+  cellOf,
+  coversIntersect,
+  paddedCellCover,
+  PREFILTER_MARGIN_METRES,
+  type CellId,
+} from './segment/cells';
 
 export {
   createSegment,
