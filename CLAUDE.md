@@ -242,7 +242,9 @@ packages/             Apache-2.0, without exception
                         segments. ADR 0017, and §6
     segment/            the segment model (#64), the matcher (#66) and the effort
                         comparison (#67) — endpoints and bearings, the cell
-                        prefilter, discrete Fréchet, the effort with its
+                        prefilter and, since #291, the margin that makes it
+                        conservative at a cell line rather than only at a
+                        cell's shape, discrete Fréchet, the effort with its
                         three-state visibility, and where the time went
   fit/                FIT / GPX / TCX codec (#29-#32)
     tools/uploads/      the six files #138 asks a person to upload (#111) — this
@@ -2078,7 +2080,8 @@ top of an issue **supersedes its body**.
 | How a backfill resumes, and why it is a cursor rather than an offset | `apps/web/src/segments/backfill.ts`, `packages/store/src/activity-store.ts` §`startedAfter` |
 | When a segment sweep runs, and why it is a control rather than something a saved ride triggers | `apps/web/src/segments/sweep.ts`, `apps/web/src/recording/finish.ts` §"What this does NOT do" |
 | Why a sweep refuses outright when there are more segments than it can carry | `apps/web/src/segments/sweep.ts` §`SWEEP_CORPUS_LIMIT` |
-| Why a test fixture at latitude 51.5, longitude -0.12 never matches anything | `apps/web/src/segments/sweep.store.test.ts` §`ORIGIN_LONGITUDE`, `packages/domain/src/segment/cells.ts` §`CELL_DEGREES` |
+| Why the prefilter reaches 100 m outside a segment, and why that is not a one-cell halo | `packages/domain/src/segment/cells.ts` §`PREFILTER_MARGIN_METRES`, §`paddedCellCover`, [spike 0003](docs/spikes/0003-segment-prefilter-margin.md) |
+| What a test fixture at latitude 51.5, longitude -0.12 used to break, and what fixed it | `packages/domain/src/segment/cells.test.ts`, `apps/web/src/segments/sweep.store.test.ts` §`ORIGIN_LONGITUDE` |
 | Where a device's capability set comes from, and what happens when a device contradicts itself | [`packages/sensors/README.md`](packages/sensors/README.md) §"What a device says it can do", `packages/sensors/web-bluetooth/src/transport.ts` §`declaredBy`, §`noteUndeclared` |
 | What a segment matcher may not do, and the prior art the design-around cites | [ADR 0007](docs/adr/0007-patent-posture.md) D-2 and D-6, `docs/spikes/0001-segment-matching.md` §7 |
 | Which time basis a segment board ranks by, and why moving time is not it | `packages/domain/src/segment/effort.ts` §`RANKING_BASIS` |

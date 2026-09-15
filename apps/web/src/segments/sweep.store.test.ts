@@ -59,26 +59,30 @@ import { matchLibrary } from './sweep';
 const METRES_PER_DEGREE_LATITUDE = 111_194.9;
 
 /**
- * ⚠️ **Deliberately not on a cell boundary, and `@onyourleft/store/testing`'s
- * own `segmentFor` is.**
+ * ⚠️ **Deliberately ON a cell corner, and this note used to say the opposite.**
+ * A reviewer who remembers "deliberately not on a cell boundary" is reading the
+ * old file.
  *
  * The matcher's stage-1 prefilter (`packages/domain/src/segment/cells.ts`) is a
- * 0.01° grid, so **51.5 and -0.12 are exactly a cell corner** — `segmentFor`'s
- * defaults. A stream set round-trips through the semicircle grid and comes back
- * about 1.4 mm to the west of what was written, which is enough to put a
- * noiseless straight track in the *next* column while the segment written from
- * literal coordinates stays in this one. The covers then share no cell and a
- * perfect traversal is rejected by the index, which `cells.ts` calls "the worst
- * kind" of false negative because no tolerance change fixes it.
+ * 0.01° grid, so **51.5 and -0.12 are exactly a cell corner** — and they are
+ * also `@onyourleft/store/testing`'s `segmentFor` defaults. A stream set
+ * round-trips through the semicircle grid and comes back about 1.4 mm to the
+ * west of what was written, which put a noiseless straight track in the *next*
+ * column while the segment written from literal coordinates stayed in this one.
+ * The covers shared no cell, `matchRide` reported `afterPrefilter: 0` for a
+ * ride that traversed the segment exactly, and #282 moved this fixture off the
+ * corner to get round it.
  *
- * It costs nothing in real data — two recordings of one road differ by metres
- * of receiver noise, so a ride straddles the boundary and covers both columns —
- * and it cost an hour here. Moving the fixture off the corner is the right fix
- * for **this** file; whether the prefilter should pad its cover is #66's
- * question and is raised separately rather than changed under a wiring issue.
+ * **[#291](https://github.com/openzigs/onyourleft/issues/291) fixed the
+ * prefilter instead**: a corpus cover now reaches `PREFILTER_MARGIN_METRES`
+ * outside its own footprint, so a millimetre either side of a grid line meets.
+ * The fixture is back on the corner **because that is the harder case**, and
+ * this file is now the store-backed half of #291's regression: reverting
+ * `indexCorpus` to the unpadded cover turns two of the tests below red, through
+ * a real IndexedDB round trip rather than in the matcher's own unit suite.
  */
-const ORIGIN_LATITUDE = 51.5043;
-const ORIGIN_LONGITUDE = -0.1234;
+const ORIGIN_LATITUDE = 51.5;
+const ORIGIN_LONGITUDE = -0.12;
 
 let harness: StoreHarness | undefined;
 
@@ -98,8 +102,9 @@ function northOf(metresNorth: number): GeographicPosition {
  * A 500 m northbound segment from the origin, in 26 positions.
  *
  * The same shape `backfill.test.ts` matches against. Built here rather than
- * with `segmentFor` because that helper's longitude is fixed at `-0.12` — see
- * {@link ORIGIN_LONGITUDE}.
+ * with `segmentFor` because this file needs a 500 m segment with a lead-in the
+ * ride can share, and that helper builds a kilometre of its own — not, since
+ * #291, because of where it sits on the grid. See {@link ORIGIN_LONGITUDE}.
  */
 function theSegment(id = 'the-long-drag'): SegmentRecord {
   const built = createSegment({
