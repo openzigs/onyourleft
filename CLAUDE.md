@@ -560,6 +560,23 @@ pnpm run check:wiring
 # a reasonless `@unwired` on the one path that silences a whole file.
 bash scripts/check-wiring.test.sh
 
+# The generated-artefact gate (#299). `cap sync` writes two files this
+# repository commits -- apps/mobile/android/capacitor.settings.gradle and
+# app/capacitor.build.gradle -- and pnpm's store path carries the PEER version
+# as well as the package's own, so any Capacitor bump invalidates the first.
+# This regenerates them with `cap update android` and fails if either changes.
+# It runs `pnpm install --frozen-lockfile` itself first and treats a non-zero
+# exit as its own failure, because `cap update` faithfully encodes whatever
+# node_modules holds -- see §4k. Needs an install, so it is NOT part of
+# `check:repo`. About half a second.
+pnpm run check:capacitor
+
+# Its own suite. Fixture-driven; 48 assertions over 14 throwaway projects, two
+# of them the drift that actually happened -- #276/#277's 8.5.1 path and #298's
+# own artefact, each reproduced from the tree as it was. Needs Node and pnpm, so
+# also not in `check:repo`.
+bash scripts/check-capacitor-generated.test.sh
+
 # tsc --noEmit followed by `vite build`, for apps/web. A green typecheck is not
 # a green build: the bundler resolves imports the typechecker only reads types
 # from, so run this before claiming a change compiles.
@@ -926,7 +943,8 @@ checks (`check-repo-rules`, `check-licence-hashes`, `check-env-example` and `che
 with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --frozen-lockfile`, `format:check`, `lint`,
 `typecheck`, `test:coverage`, `check:a11y-suite`,
 `test:a11y`, `bash scripts/check-a11y-suite.test.sh`, `check:wiring`,
-`bash scripts/check-wiring.test.sh`, `bash scripts/coverage-summary.test.sh`, `build`,
+`bash scripts/check-wiring.test.sh`, `check:capacitor`,
+`bash scripts/check-capacitor-generated.test.sh`, `bash scripts/coverage-summary.test.sh`, `build`,
 `playwright install --with-deps chromium`, `test:browser`, `bash scripts/check-dependency-licences.test.sh` and `check:licences` — then
 publishes the coverage table to the run summary and uploads the HTML report as an artefact.
 Those last two carry `if: always()` and cannot fail the job: the run where coverage moved
@@ -1579,6 +1597,75 @@ green.** It cannot see a call made through a string key, a dynamic import whose 
 literal, or a prop threaded through JSX it does not follow — which is #252, measured against the
 tree as it was and **pinned as a green case** in `check-wiring.test.sh` so that the limit cannot
 quietly become a false claim.
+
+### 4k. The generated-artefact gate
+
+Added by [#299](https://github.com/openzigs/onyourleft/issues/299). It is
+[`scripts/check-capacitor-generated.mjs`](scripts/check-capacitor-generated.mjs), it runs as
+`pnpm run check:capacitor`, and it answers a question no other gate here asks: **is a file this
+repository generated and committed still what its generator writes?**
+
+`cap sync` writes two files that are committed —
+`apps/mobile/android/capacitor.settings.gradle` and `apps/mobile/android/app/capacitor.build.gradle`
+— and ⚠️ **pnpm's store path carries the PEER version as well as the package's own**, so
+`@capacitor+android@8.5.1_@capacitor+core@8.5.1` is a different directory from
+`@capacitor+android@8.5.2_@capacitor+core@8.5.2` and **any** Capacitor bump invalidates the first
+file. [#276](https://github.com/openzigs/onyourleft/pull/276) and
+[#277](https://github.com/openzigs/onyourleft/pull/277) did exactly that, and nothing could tell:
+CI never builds Android, `release.yml` is tag-triggered and has never run, `check:wiring` walks the
+TypeScript module graph and a Gradle settings file is outside it entirely — and ⚠️ **the documented
+local sequence hides it**, because `apps/mobile/README.md` §1 is `build` → `cap sync` → `gradlew`
+and the sync regenerates the file before Gradle reads it. The person most likely to notice is the
+one whose workflow guarantees they cannot.
+
+This is the **third** variant of a shape this repository keeps finding, and the common property is
+that the green result is indistinguishable from the correct one:
+
+| Variant | Gate |
+|---|---|
+| a unit wired to nothing (#278) | §4j, `check:wiring` |
+| a guard that cannot fire (#229, #225) | the fixture suites, one red case per rule |
+| **a generated artefact that has drifted from its source** (#299) | **§4k, `check:capacitor`** |
+
+| Rule | Fails when |
+|---|---|
+| `CAP001` | `pnpm install --frozen-lockfile` does not succeed, so the installed tree is not the one the lockfile describes |
+| `CAP002` | the Capacitor project, or a file `cap update` generates and this repository commits, is not in the tree |
+| `CAP003` | the generator could not be run, failed, or **exited 0 without writing one of the files** |
+| `CAP004` | a committed file is not what `cap update android` writes |
+
+⚠️ **The install is the half that is easy to drop, and dropping it is what
+[#298](https://github.com/openzigs/onyourleft/pull/298) did.** That pull request regenerated the
+settings file from a `node_modules` holding `@capacitor/android@8.5.1` while the lockfile said
+8.5.2, and committed `@capacitor+android@8.5.1_@capacitor+core@8.5.2` — a fix for stale drift that
+committed **different** stale drift, corrected in #300. `cap update` faithfully encodes whatever
+`node_modules` holds and says nothing about whether that matches the lockfile, so a
+regenerate-and-diff over an unverified install proves only that two wrong things agree. The check
+therefore runs the frozen install itself rather than trusting a caller to have run one.
+
+⚠️ **`cap update android`, not `cap sync`.** `sync` is `copy` + `update`; `copy` is the half that
+needs `apps/web/dist` and that writes the gitignored asset tree, and only `update` writes the two
+files in question. So the check needs no web build, runs in about half a second, and cannot report
+the trees §3a prunes.
+
+⚠️ **Both files are overwritten with a marker before the generator runs**, and a marker that
+survives is `CAP003` rather than agreement. Without it a generator that exited 0 without writing —
+a platform argument it did not understand, a Capacitor release that moved a file — would be a
+comparison of a file with itself, which passes whatever the file says. **The originals are put back
+in a `finally`**: a checker that left the repaired file in the tree would turn a red gate into a
+silent `git add -A`.
+
+⚠️ **The cheaper check #299 floats does not work, and the measurement is worth keeping.** Asserting
+that every `node_modules/.pnpm/…` path named in the file exists on disk needs no `cap update` and
+is a few lines — but on 2026-09-15, on a machine that had installed both versions in turn,
+`node_modules/.pnpm/@capacitor+android@8.5.1_@capacitor+core@8.5.2` was **still present and fully
+populated**. pnpm leaves an orphaned store directory behind rather than pruning it, so the existence
+check would have looked at #298's own artefact and passed. A gate whose answer depends on what a
+developer happened to install last week is not a gate.
+
+**Read `check-capacitor-generated.mjs` §Limits before reading a green run as more than it is.** It
+does not run Gradle and says nothing about whether the project builds — nobody in this environment
+can, and `apps/mobile/README.md` §4 records why.
 
 ---
 
@@ -2258,6 +2345,8 @@ top of an issue **supersedes its body**.
 | What a capture records off real hardware, and the two things it deliberately does not | `apps/web/src/validation/capture.ts`, `apps/web/browser/capture.html` |
 | What catches a correct, tested unit that nothing calls, and the three things it cannot see | §4j, [`scripts/check-wiring.mjs`](scripts/check-wiring.mjs) §Limits |
 | Why a declaration says `@unwired`, and what a reasonless one gets | §4j, `scripts/check-wiring.mjs` §"The exemption" |
+| What catches a generated-and-committed file a dependency bump left stale, and why the cheap version of it does not work | §4k, [`scripts/check-capacitor-generated.mjs`](scripts/check-capacitor-generated.mjs) §"Why not the cheaper check" |
+| Why a regenerate-and-diff runs its own frozen install first | §4k, `scripts/check-capacitor-generated.mjs` §`capacitorDrift`, [#298](https://github.com/openzigs/onyourleft/pull/298) |
 | Why an indoor GPX has trackpoints with no coordinates, and what settles whether that is wrong | `packages/fit/src/xml/gpx.ts` §`writeTrackPoint`, `packages/fit/tools/uploads/uploads.test.ts` |
 | Which of #15's acceptance criteria can be checked without a phone, and what each of the others needs | [`docs/spikes/0002-background-recording.md`](docs/spikes/0002-background-recording.md) |
 | What proves the mobile shell cannot encode a FIT file of its own | `apps/web/src/transfer/cross-client-fixture.ts`, `apps/web/src/transfer/cross-client-fit.test.ts` |
