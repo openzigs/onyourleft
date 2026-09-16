@@ -126,6 +126,19 @@ function documentScreenReturn(listener: () => void): () => void {
  *    check is **re-run when the screen comes back**, which is an event rather
  *    than an elapsed time and is therefore immune to the clock having stopped.
  *
+ *    ⚠️ **This one re-read carries no ordering guarantee, and the button
+ *    does.** `SHELL_ANSWER_TIMEOUT` is longer than `apps/mobile`'s
+ *    `INITIALIZE_ANSWER_WINDOW` precisely so that a re-check a rider presses
+ *    reaches the plugin rather than the memoised dead `initialize()` — but
+ *    "Check again" is only on screen *after* this hook's deadline, and a
+ *    `visibilitychange` obeys nobody's clock. A screen that comes back at three
+ *    seconds re-reads while the transport is still sharing the hung call, so
+ *    the second attempt attaches to the same dead promise as the first. It is
+ *    not worth guarding: the new attempt arms a new deadline, the screen says
+ *    `unanswered` ten seconds later, and the button it offers then does have
+ *    the ordering. The cost of the unlucky return is a later message, not a
+ *    stuck one — which is the whole difference from the state #322 reported.
+ *
  * A promise can carry (1). Only a component can carry (2) and (3), which is why
  * `ShellSupportPort.readShellSupport` is deliberately left unbounded.
  */
@@ -199,6 +212,17 @@ export function useShellSupport(
   }, []);
 
   useEffect(() => {
+    // ⚠️ `onScreenReturn` is read ONCE, where `schedule` and `answerWithin` are
+    // re-read on every attempt, and the asymmetry is the difference between a
+    // setting and a subscription. A caller that swapped the subscriber between
+    // renders and had it honoured would mean tearing down a listener and
+    // attaching another on a render, which is churn on the one path that has to
+    // survive the activity being stopped and started. The two schedule settings
+    // are read per attempt because each attempt arms its own deadline and there
+    // is nothing to keep alive across them. Nothing in production supplies
+    // either — `DevicesView` is the only caller and passes no options at all —
+    // so this is a statement about what a TEST may change mid-flight, and the
+    // answer for this one is "remount instead".
     const subscribe = settings.current.onScreenReturn ?? documentScreenReturn;
     return subscribe(() => {
       // Only where there is nothing to lose. A settled answer is not re-read on

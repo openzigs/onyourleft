@@ -914,4 +914,75 @@ describe('an initialisation that never answers is not shared for ever (#322)', (
     await transport.availability();
     expect(plugin.calls.filter((call) => call === 'initialize')).toHaveLength(1);
   });
+
+  it('does not clear a LATER initialisation when the dead one finally rejects', async () => {
+    // The `initializing === pending` guard in the CATCH, and the sequence that
+    // needs it. It is a different sequence from the one above: there the stale
+    // deadline fires against a replaced memo, here the stale *promise* settles
+    // against one — and only a rejection reaches this branch, so a test of the
+    // deadline cannot reach it.
+    //
+    // ⚠️ A late rejection is not hypothetical on the device #322 was reported
+    // from. The plugin threw inside its own permission callback; a throw that
+    // the bridge eventually maps to a rejection is an answer arriving after
+    // everybody has moved on, and Android's own permission dialog can hold the
+    // first `initialize()` open for as long as a rider takes to read it.
+    // Clearing the memo unconditionally there discards a healthy, settled
+    // initialisation that a second caller has already paid for, so the next
+    // caller pays a third platform call and, on Android, a third permission
+    // prompt.
+    let initializeCalls = 0;
+    let rejectTheDeadOne: ((error: unknown) => void) | undefined;
+    const plugin = scriptedPort();
+    const deadlines: (() => void)[] = [];
+    const transport: SensorTransport = createCapacitorTransport({
+      plugin: {
+        ...plugin,
+        initialize: async (): Promise<void> => {
+          initializeCalls += 1;
+          if (initializeCalls === 1) {
+            // Hung, and answerable by this test rather than never — the one
+            // thing `initializeNeverAnswers` deliberately cannot do.
+            return new Promise<void>((_resolve, reject) => {
+              rejectTheDeadOne = reject;
+            });
+          }
+          return plugin.initialize();
+        },
+      },
+      profiles: [compositeProfile],
+      now: () => AT,
+      schedule: (callback) => {
+        deadlines.push(callback);
+        return () => {
+          const index = deadlines.indexOf(callback);
+          if (index >= 0) {
+            deadlines.splice(index, 1);
+          }
+        };
+      },
+    });
+
+    void transport.availability();
+    await flush();
+    expect(initializeCalls).toBe(1);
+
+    // The window gives up on sharing the hung call, and a second caller — the
+    // rider's "Check again" — starts one that answers.
+    for (const deadline of [...deadlines]) {
+      deadline();
+    }
+    await expect(transport.availability()).resolves.toEqual({ kind: 'available' });
+    expect(initializeCalls).toBe(2);
+
+    // Only now does the dead call answer, and a rejection is the only answer
+    // that reaches the catch at all.
+    rejectTheDeadOne?.(new Error(NOT_INITIALIZED_MESSAGE));
+    await flush();
+
+    // Still two. Without the guard this is three: the late rejection forgets
+    // the healthy initialisation and the next caller re-asks the platform.
+    await expect(transport.availability()).resolves.toEqual({ kind: 'available' });
+    expect(initializeCalls).toBe(2);
+  });
 });
