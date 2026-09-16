@@ -15,24 +15,31 @@
  * jsdom (CLAUDE.md §4e says so of the accessibility gate, and the rest follows
  * it), so `new maplibregl.Map(...)` cannot be constructed in this suite at all.
  *
- * The alternative would be a headless-browser job. That is a real option and it
- * was not taken here, for a reason worth stating rather than assuming: CI runs
- * **exactly** the §4a commands, `main` requires a status check whose context is
- * the string `Repository rules`, and CLAUDE.md §4c records that a *second* job
- * reports under a different context and its failure would therefore not block a
- * merge. Adding browser tests is a change to the gate, and it is a decision
- * rather than a detail.
+ * The alternative would be a headless-browser job. ⚠️ **It was taken, after
+ * this paragraph was written** — a reviewer who remembers this file saying the
+ * option *"was not taken here"* is reading the old one. #176 added
+ * `apps/web/browser/`, inside the existing `Repository rules` job rather than
+ * beside it, for exactly the reason the old paragraph gave: CLAUDE.md §4c
+ * records that a second job reports under a different context and could not
+ * block a merge. §4f is what that gate is and is not.
  *
- * What the seam buys is not a workaround. Every one of #63's criteria except
- * the cold-load measurement is about **what this client does** — how many times
- * it registers a protocol, which origins its style reaches, what coordinate
- * array it hands the map, what it renders when there is no GPS. All of those
- * are decided on this side of the boundary, and asserting them here is stronger
- * than reading pixels: a screenshot cannot tell you the array behind the line
- * had the front door still in it.
+ * What the seam buys is not a workaround. Most of #63's criteria are about
+ * **what this client does** — how many times it registers a protocol, which
+ * origins its style reaches, what coordinate array it hands the map, what it
+ * renders when there is no GPS. All of those are decided on this side of the
+ * boundary, and asserting them here is stronger than reading pixels: a
+ * screenshot cannot tell you the array behind the line had the front door still
+ * in it.
  *
- * What it does **not** buy is a check that MapLibre draws what we asked. That
- * is real, and it is named in the pull request rather than papered over.
+ * ⚠️ What it does **not** buy is a check that MapLibre draws what we asked —
+ * and that gap was not theoretical. `maplibre.ts` shipped for months unable to
+ * load its own tile-parsing worker under a bundler, so a production map would
+ * have fetched every tile and drawn none of them. Nothing on this side of the
+ * seam could see it: the port was satisfied, the style was right, the origins
+ * were right, the protocol registered once. It took a real archive rendered in
+ * a real engine (`browser/pmtiles-fixture.ts`) to find it. Read
+ * `maplibre.ts`'s `setWorkerUrl` note before trusting a green suite here to
+ * mean the map works.
  */
 
 import type { BasemapStyle } from './basemap';

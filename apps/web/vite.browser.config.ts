@@ -25,9 +25,40 @@
  * keep in step with `vite.config.ts` for no behaviour the gate can observe.
  */
 
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
+
+import { buildFixtureArchive, FIXTURE_ARCHIVE_FILE } from './browser/pmtiles-fixture';
+
+/**
+ * Emit the PMTiles archive the gate renders from (#63).
+ *
+ * Built rather than committed. `browser/dist` is already gitignored and already
+ * pruned by `scripts/check-repo-rules.sh`, so the archive needs no new ignore
+ * line, no `.spdx-exempt` entry — which §3a would refuse it anyway, since it is
+ * not third-party generator output — and leaves nothing in the tree that a
+ * reviewer cannot read. `pmtiles-fixture.ts` says what is in it and why it
+ * carries no OpenStreetMap data.
+ *
+ * ⚠️ **`generateBundle` rather than a `public/` file**, because a file in
+ * `browser/public/` would be a binary in the repository, which is the thing
+ * above. The cost is that the archive exists only after a build: `vite preview`
+ * serves `browser/dist`, and `test:browser` builds before it previews.
+ */
+function pmtilesFixture(): Plugin {
+  return {
+    name: 'oyl-pmtiles-fixture',
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: FIXTURE_ARCHIVE_FILE,
+        source: buildFixtureArchive(),
+      });
+    },
+  };
+}
 
 export default defineConfig({
+  plugins: [pmtilesFixture()],
   root: 'browser',
   // ⚠️ A **multi-page** app, which here means "a static file server". Vite's
   // default single-page mode rewrites every unknown path to `index.html`, so a

@@ -31,7 +31,10 @@ apps/                 AGPL-3.0-or-later, without exception
   web/                browser client — the Phase 1 product (#48-#51)
     browser/            the browser gate (#63) — the one place a real browser runs;
                         a harness page driving the map adapter, and its Playwright
-                        spec. See §4a and §4f. Since #111 it also holds
+                        spec, and since #63's cold-load criterion the PMTiles
+                        archive that page renders: built from arithmetic, emitted
+                        at build time, never committed, and carrying no
+                        OpenStreetMap data. See §4a and §4f. Since #111 it also holds
                         capture.html, which is NOT a gate: it is the tool a
                         person opens with a trainer in front of them, built by
                         the same second Vite config so it can never ship. Since
@@ -1210,8 +1213,9 @@ browser runs**.
 
 | File | What it is |
 |---|---|
-| `index.html`, `harness.ts` | a page that builds a map through the **real** `map/maplibre.ts` and the **real** `basemapStyle`, and publishes what happened on `window.__oylHarness` |
+| `index.html`, `harness.ts` | a page that builds a map through the **real** `map/maplibre.ts` and the **real** `basemapStyle`, and publishes what happened on `window.__oylHarness` — and, since the fixture archive, what reached the drawing buffer and when, on `window.__oylMapLoad` |
 | `map.browser.spec.ts` | the Playwright spec that drives it |
+| `pmtiles-fixture.ts` | a PMTiles v3 archive written from arithmetic, so the gate has a basemap to render. Emitted into `browser/dist` by `vite.browser.config.ts`, never committed, and carrying no OpenStreetMap data. The **only** file in this directory with a Vitest test beside it (`pmtiles-fixture.test.ts`), which is why `apps/web/vitest.config.ts` includes `browser/**/*.test.ts` |
 | `game.html`, `game-harness.ts` | since #91, the same idea for the renderer: a page that builds a scene through the **real** `game/three-renderer.ts` and the **real** `terrain.ts` |
 | `game.browser.spec.ts` | its spec — the renderer constructs against a live context, the geometry is one a driver accepts, and a frame reaches the drawing buffer (read back with `readPixels`, because `render` not throwing is a weaker claim) |
 | `hud.html`, `hud-harness.tsx` | since #266, the ride HUD: the **real** `game/hud/HudPanel.tsx` under the **real** `design/theme.css`, in the **real** `oyl-shell` → `oyl-main` → `oyl-game` chain `AppShell` and `GameView` give it, with every field populated and all three of #259's settled outcome words. A **`.tsx`**, and the only React in this directory |
@@ -1332,9 +1336,45 @@ builds the bind address and the polled URL from one `HOST` constant so they cann
 shape happens. A green browser gate on a developer's machine says nothing about which addresses
 that machine has.
 
-**What it does not prove: that tiles render.** There is no archive to render from. The spec asserts
-the 404 rather than tolerating it, so the day #53 lands that test goes red — which is the right
-moment for somebody to come back and replace it with one that asserts tiles actually drew.
+⚠️ **This section used to end "What it does not prove: that tiles render — there is no archive to
+render from", and that is no longer true.** A reviewer who remembers it is reading the old file. The
+gate now builds its own archive: `apps/web/browser/pmtiles-fixture.ts` writes a **PMTiles v3**
+archive from arithmetic — a 127-byte header, a one-entry root directory whose run length spans every
+tile id from z0 to z14, and one Mapbox Vector Tile of three rectangles and a line — and
+`vite.browser.config.ts` emits it into `browser/dist` at build time. It is **not committed**:
+`browser/dist` is already gitignored and already pruned by `scripts/check-repo-rules.sh`, and a
+binary in the tree would need an `.spdx-exempt` entry §3a would refuse it. It contains **no
+OpenStreetMap data**, so no ODbL attribution obligation attaches to a build artefact.
+
+⚠️ **It is served at `/basemap-fixture.pmtiles`, NOT at `/basemap.pmtiles`.** The "there is still no
+published archive" test asserts the 404 at the latter, and it stays: moving the fixture there would
+make a tripwire permanently green against a file of our own, which is the shape of a test that
+cannot fail. The day #53 publishes an archive, that test still goes red.
+
+**What this bought, immediately, was a defect no gate here could see.** `maplibre.ts` could not load
+MapLibre's **tile-parsing worker** under a bundler at all — `defaultWorkerUrl()` resolves
+`./maplibre-gl-worker.mjs` against the hashed chunk and nothing emits that file, so a production map
+fetched every tile and drew none of them, silently. Every symptom was an absence: no throw, a live GL
+context, the right origin, the right range request, `registrations === 1`. The fix is
+`setWorkerUrl(…'?worker&url')` and `docs/architecture.md` §"The map dependencies" records why
+`?worker&url` rather than `?url`. Reverting it turns **exactly** the two fixture tests red and leaves
+every pre-existing browser test green — which is the measurement, not the argument.
+
+⚠️ **What the fixture still does NOT prove**, and criterion 8 is only **partly** discharged by it.
+The archive is served from the loopback interface, so the cold-load figure carries **none** of the
+hosting latency the criterion is pointed at — ADR 0010 D-1 quotes Protomaps' warning that R2 is
+*"known to have higher latency (500 ms or higher)"*, and that term is removed here by construction.
+The tile is uncompressed and 98 bytes; a real one is gzipped and thousands of times larger. What is
+measured is the **client-side floor**, printed by the spec on every run, and the harness that will
+take the hosted measurement the day #53 lands. Read `pmtiles-fixture.ts`'s header before quoting the
+number.
+
+⚠️ **The paint is read back with `preserveDrawingBuffer` forced on by the harness**, by patching
+`HTMLCanvasElement.prototype.getContext` before the map is built — `maplibre.ts` must not set it, and
+an earlier attempt to borrow MapLibre's own animation frame instead **did not work**: v6 reaches its
+renderer through `browser.frameAsync`, which resolves a promise, so anything chained synchronously
+onto the frame callback reads a buffer that has already been presented and cleared. Every sample came
+back `#000000`. The cost is in the measured number and is identical on both pages.
 
 ### 4g. The dependency-licence gate
 
@@ -2207,6 +2247,9 @@ top of an issue **supersedes its body**.
 | Which origins the map is allowed to reach, and why the style is built rather than fetched | `apps/web/src/map/basemap.ts` §`styleOrigins`, [ADR 0010](docs/adr/0010-map-tiles-and-routing.md) D-1 |
 | Why MapLibre is behind a seam, and what that seam does not prove | `apps/web/src/map/port.ts` |
 | What a real browser checks that jsdom cannot, and why it shares one CI job | §4f, `apps/web/browser/`, `.github/workflows/rules.yml` |
+| Why a built map fetches every tile and draws none of them without one extra line | `apps/web/src/map/maplibre.ts` §`setWorkerUrl`, [`docs/architecture.md`](docs/architecture.md) §"The map dependencies" |
+| Where the basemap the browser gate renders comes from, and what it deliberately does not contain | `apps/web/browser/pmtiles-fixture.ts`, §4f |
+| What a cold load costs the client, what that number leaves out, and who owns the rest | `apps/web/browser/map.browser.spec.ts` §"a real archive, rendered and timed", [#53](https://github.com/openzigs/onyourleft/issues/53) |
 | Whether a dependency's licence is allowed where it lands, and which licences are ruled on | §4g, [ADR 0015](docs/adr/0015-dependency-licences.md), `scripts/check-dependency-licences.mjs` §`POLICY` |
 | Where the basemap URL is configured, and why nothing is configured today | `.env.example` §`VITE_BASEMAP_PMTILES_URL`, [#53](https://github.com/openzigs/onyourleft/issues/53) |
 | Which segment-matching approach was chosen, what it measured, and which of its numbers no longer describe the shipped code | [`docs/spikes/0001-segment-matching.md`](docs/spikes/0001-segment-matching.md) and its 2026-09-08 retirement note |
