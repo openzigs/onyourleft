@@ -42,14 +42,41 @@ const attribute = (element: string, name: string): string | null => {
 /**
  * The document with every XML comment removed.
  *
- * `XML001` forbids `--` inside a comment and `XML002` forbids an unclosed one,
- * so the non-greedy match below cannot stop early or run away on any file this
- * repository will accept. It is applied to *generated* input too: the merged
- * manifest reproduces our prose comments verbatim, and those comments name
- * permissions.
+ * Applied before every scan below, because the manifests in this repository
+ * carry long prose comments that quote permission and element names at each
+ * other, and the generated merged manifest reproduces every one of them
+ * verbatim.
+ *
+ * ⚠️ **A single `replace(/<!--[\s\S]*?-->/g, '')` is NOT equivalent and was the
+ * first version of this.** CodeQL's `js/incomplete-multi-character-sanitization`
+ * flagged it at high severity on #318's own pull request, and the finding is
+ * right in kind: one pass can leave a `<!--` in its own output, so a caller that
+ * assumed the result was comment-free would be wrong. The forward scan below
+ * cannot — each piece it keeps is taken from the current cursor up to the *next*
+ * `<!--`, so by construction no `<!--` survives into the result.
+ *
+ * ⚠️ **An unclosed comment throws rather than being left in place.** That is
+ * `DOC002`'s failure mode, and this repository has shipped it several times: a
+ * scanner whose state sticks reports the rest of the file as containing nothing,
+ * and every "the merge adds no X" assertion then passes over the silence.
+ * `XML002` forbids an unclosed comment in a committed file; nothing checks a
+ * generated one, which is exactly the input this reader is pointed at.
  */
 export function withoutComments(manifest: string): string {
-  return manifest.replace(/<!--[\s\S]*?-->/g, '');
+  let kept = '';
+  let index = 0;
+  for (;;) {
+    const open = manifest.indexOf('<!--', index);
+    if (open < 0) {
+      return kept + manifest.slice(index);
+    }
+    const close = manifest.indexOf('-->', open + '<!--'.length);
+    if (close < 0) {
+      throw new Error(`manifest: comment opened at offset ${String(open)} is never closed`);
+    }
+    kept += manifest.slice(index, open);
+    index = close + '-->'.length;
+  }
 }
 
 /** Every `uses-permission` in a manifest, in document order. */

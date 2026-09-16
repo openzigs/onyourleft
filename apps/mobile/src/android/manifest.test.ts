@@ -209,6 +209,23 @@ describe('reading the shapes a permission list cannot see', () => {
     expect(withoutComments(xml)).not.toContain('CAMERA');
   });
 
+  it('leaves no comment opener in its own output', () => {
+    // CodeQL's js/incomplete-multi-character-sanitization, at high severity, on
+    // this issue's own pull request: a single non-greedy replace can leave a
+    // `<!--` behind, and a caller that believed the result was comment-free
+    // would then read a permission out of prose.
+    const xml = '<manifest><!--a--><!--b--><uses-permission android:name="x" /></manifest>';
+    expect(withoutComments(xml)).not.toContain('<!--');
+    expect(usesPermissions(xml).map((one) => one.name)).toEqual(['x']);
+  });
+
+  it('throws on a comment that is never closed', () => {
+    // DOC002's failure mode. Leaving it in place makes every scan below report
+    // that the rest of the document contains nothing. XML002 forbids this in a
+    // committed file and checks no generated one, which is this reader's input.
+    expect(() => usesPermissions('<manifest><!-- never closed')).toThrow(/never closed/);
+  });
+
   it('reads an element that has children, not the first child that closes', () => {
     // The trap the whole-element regexes above fall into: a lazy match from
     // `<activity` to the first `/>` stops inside `<action … />`.
