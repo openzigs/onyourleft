@@ -1,0 +1,201 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * What the rider rides under, and the three things #325 asks this layer to
+ * prove.
+ *
+ * 1. **Mass has an effect at all.** The defect was that it did not: everybody
+ *    rode at a hard-coded 80 kg whatever the athlete row said. So the assertion
+ *    is about a *difference* — the same power on the same gradient has to
+ *    produce a different speed at two different masses — and deliberately not
+ *    about any particular number, which would pin the integrator's output and
+ *    turn red the next time `SIMULATION_STEP_SECONDS` is tuned.
+ * 2. **The bot is unmoved by it.** #92 criterion 5 and ADR 0007 D4 rest on the
+ *    pacer being synthetic, and making the rider's mass dynamic makes that
+ *    easier to break rather than harder. The assertion runs the *same* pacer
+ *    plan against two different rider masses and requires the bot's trajectory
+ *    to be bit-identical while the rider's is not.
+ * 3. **Nothing moved for a rider who has said nothing.** 71 + 9 = 80, which is
+ *    the constant this file used to carry, so a rider with no recorded mass
+ *    rides exactly as they did before. That is a property worth pinning rather
+ *    than describing, because the two halves live in different modules and
+ *    either could be adjusted alone.
+ */
+
+import { describe, expect, it } from 'vitest';
+
+import {
+  altitudeMetres,
+  botPacerPlan,
+  degreesLatitude,
+  degreesLongitude,
+  geographicPosition,
+  kilograms,
+  routeProfile,
+  watts,
+  type RoutePoint,
+} from '@onyourleft/domain';
+
+import { riderMassFor } from '../athlete/mass';
+import { rideConditionsFor } from './rider';
+import { GameSimulation, SIMULATION_STEP_SECONDS, type RiderInput } from './simulation';
+
+/** What the whole client rode at before #325, as one number. */
+const THE_OLD_HARD_CODED_TOTAL = 80;
+
+/**
+ * A kilometre of steady 6 % climb.
+ *
+ * Steady, and a climb, because that is where the defect is largest: on the flat
+ * aerodynamic drag dominates and mass barely shows, so a flat fixture would
+ * make a correct implementation and the broken one look almost alike. A
+ * *constant* gradient is what lets "the same gradient" in #325's third
+ * criterion be a fact about the fixture rather than about where each rider got
+ * to.
+ */
+function steadyClimb(): ReturnType<typeof routeProfile> {
+  const points: RoutePoint[] = [];
+  for (let index = 0; index <= 100; index += 1) {
+    const alongMetres = index * 10;
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(51.5 + alongMetres / 111_320),
+        degreesLongitude(-0.12),
+      ),
+      elevation: altitudeMetres(alongMetres * 0.06),
+    });
+  }
+  return routeProfile(points);
+}
+
+const PEDALLING: RiderInput = { power: watts(250), live: true };
+
+/** The same ride, at the same power, for the same wall-clock minute. */
+function climbAt(
+  riderMassKilograms: number,
+  pacer?: ReturnType<typeof botPacerPlan>,
+): GameSimulation {
+  const simulation = new GameSimulation({
+    profile: steadyClimb(),
+    conditions: rideConditionsFor(kilograms(riderMassKilograms)),
+    ...(pacer === undefined ? {} : { pacer }),
+  });
+  const startMs = 1_000_000;
+  simulation.advanceTo(startMs, PEDALLING);
+  simulation.advanceTo(startMs + 60_000, PEDALLING);
+  return simulation;
+}
+
+describe('rideConditionsFor', () => {
+  it('adds the bicycle, because the athlete row holds the athlete and the physics wants both', () => {
+    // ⚠️ The mistake this is here to catch: handing `AthleteRecord.mass`
+    // straight to `RideConditions.totalMass` rides a rider on no bicycle. It is
+    // an error in the *opposite* direction to the one #325 fixes and it would
+    // look exactly like a fix.
+    const light = rideConditionsFor(kilograms(60));
+    const heavy = rideConditionsFor(kilograms(90));
+
+    expect(light.totalMass).toBeGreaterThan(60);
+    expect(heavy.totalMass).toBeGreaterThan(90);
+    // One for one: whatever the bicycle weighs, thirty kilograms of rider is
+    // thirty kilograms of system. A bicycle that scaled with the rider would
+    // pass the two lines above.
+    expect(heavy.totalMass - light.totalMass).toBeCloseTo(30, 9);
+  });
+
+  it('leaves a rider who has said nothing exactly where they were', () => {
+    // 71 + 9 = 80, the constant `rider.ts` used to export. The two halves live
+    // in different modules — the default in `athlete/mass.ts`, the bicycle here
+    // — so this is the only place the sum is checked.
+    expect(rideConditionsFor(riderMassFor(undefined).mass).totalMass).toBe(
+      THE_OLD_HARD_CODED_TOTAL,
+    );
+  });
+
+  it('rides everybody through the same air', () => {
+    // The other half of `RideConditions` is not the rider's, and a change that
+    // made air density a function of mass would be nonsense that no speed
+    // assertion would notice.
+    expect(rideConditionsFor(kilograms(60)).airDensityKilogramsPerCubicMetre).toBe(
+      rideConditionsFor(kilograms(90)).airDensityKilogramsPerCubicMetre,
+    );
+  });
+});
+
+describe('#325 criterion 3 — the same power on the same gradient at two masses', () => {
+  it('covers different ground, which it did not before', () => {
+    const light = climbAt(60);
+    const heavy = climbAt(100);
+
+    // ⚠️ `not.toBe` is the whole criterion. Before #325 both of these were
+    // `rideConditionsFor` of nothing at all — a hard-coded 80 — and this
+    // assertion is the one that could not have passed.
+    expect(heavy.state.ride.distance).not.toBe(light.state.ride.distance);
+    expect(heavy.state.ride.speed).not.toBe(light.state.ride.speed);
+  });
+
+  it('puts the lighter rider ahead, because this is a climb', () => {
+    // The direction, not only the difference. A sign error in
+    // `gravityForceNewtons`' caller would satisfy the case above and send the
+    // heavier rider up the hill faster.
+    const light = climbAt(60);
+    const heavy = climbAt(100);
+
+    expect(light.state.ride.distance).toBeGreaterThan(heavy.state.ride.distance);
+  });
+
+  it('moves the speed by an amount a rider would notice, not by a rounding', () => {
+    // ⚠️ A floor rather than an exact figure. `not.toBe` above is satisfied by
+    // a difference in the fifteenth decimal place, which is what a mass that
+    // reached only the rotational-inertia term would produce — the gravity term
+    // is the one that matters on a hill, and this is what says it is connected.
+    const light = climbAt(60);
+    const heavy = climbAt(100);
+
+    expect(light.state.ride.speed - heavy.state.ride.speed).toBeGreaterThan(0.5);
+  });
+});
+
+describe('#325 criterion 4 — the bot stays at its own mass', () => {
+  const plan = botPacerPlan(2.5);
+
+  it('rides the identical line whatever the rider weighs', () => {
+    const light = climbAt(60, plan);
+    const heavy = climbAt(100, plan);
+
+    // ⚠️ **`toBe`, not `toBeCloseTo`.** The bot's course is built from the
+    // rider's *environment* and its own mass, so the two runs integrate the
+    // same arithmetic and are bit-identical. A tolerance here would admit a
+    // bot that was slightly the rider's, which is exactly the failure — and
+    // `simulation.ts` §`botCourseFor` is the one line that keeps it true.
+    expect(heavy.state.bot?.state.distance).toBe(light.state.bot?.state.distance);
+    expect(heavy.state.bot?.state.speed).toBe(light.state.bot?.state.speed);
+  });
+
+  it('is riding at all, so the case above is not two absences agreeing', () => {
+    const paced = climbAt(60, plan);
+
+    expect(paced.state.bot?.state.distance).toBeGreaterThan(0);
+    expect(plan.massKilograms).toBe(75);
+  });
+
+  it('goes red if the two are ever read from one source', () => {
+    // The pair. The riders differ and the bots do not, in the same two runs —
+    // so a `botCourseFor` that passed `conditions.totalMass` through would turn
+    // the first assertion red while leaving this one green, and nothing else in
+    // this repository would notice.
+    const light = climbAt(60, plan);
+    const heavy = climbAt(100, plan);
+
+    expect(heavy.state.ride.distance).not.toBe(light.state.ride.distance);
+    expect(heavy.state.bot?.state.distance).toBe(light.state.bot?.state.distance);
+  });
+
+  it('runs long enough for a divergence to show', () => {
+    // A guard on the fixture rather than on the code: sixty seconds at 0.05 s
+    // is 1 200 steps, and a fixture that advanced zero steps would make every
+    // `toBe` above pass over two start lines.
+    expect(60 / SIMULATION_STEP_SECONDS).toBeGreaterThan(1000);
+    expect(climbAt(60).state.ride.distance).toBeGreaterThan(0);
+  });
+});

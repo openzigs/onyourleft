@@ -218,6 +218,23 @@ cannot destroy their display name. ⚠️ **It replaces both, and `undefined` me
 than "leave alone"** — with the other reading there would be no way to clear a threshold at all, and
 a rider who set one by mistake could never get back to the default.
 
+`setAthleteMass(id, mass)` ([#325](https://github.com/openzigs/onyourleft/issues/325)) is the third
+narrow athlete write, and it arrived a long way after the field it writes. `AthleteRecord.mass` has
+been on this row since **schema 6**; the segment matcher froze it onto an effort and the account
+export carried it, and until #325 **nothing in the program ever wrote one** — so both consumers read
+a field that was always absent, and the trainer game rode every athlete at a hard-coded 80 kg. A
+store can hold a field with no writer for a long time without anything going red, which is worth
+remembering when reading the rest of this table. ⚠️ `undefined` **clears it**, following
+`setAthleteThresholds` rather than `setAthleteUnits`: a unit system has a value a rider returns to
+and a mass does not, so blank is the only way back to `apps/web`'s documented default.
+
+⚠️ **It writes one athlete row and nothing else, and that is the whole of what keeps a board
+honest.** `SegmentEffortRecord.attributes.riderMass` is a *frozen copy*, taken when the effort was
+matched; `records.ts` warns that replacing it with a lookup "produces a board which looks right and
+quietly rewrites history whenever somebody edits their profile".
+`activity-store.mass.test.ts` reads an effort back either side of a mass change to prove it rather
+than to assert it.
+
 `setActivityLoadSummary(owner, id, summary)` (#77) is the same shape again, for a ride: it writes
 the threshold-independent half of a ride's load and touches nothing else, and it is **athlete-scoped**
 — a ride id alone must never be enough to modify a row (CLAUDE.md §6). ⚠️ The *load* is deliberately
@@ -251,8 +268,12 @@ about.** `setAthleteThresholds` rebuilt the record from `id`, `displayName` and 
 #238, so saving a threshold silently erased `mass` — and would have erased `units`. The write it was
 *about* landed and the read for it agreed, which is why nothing noticed: it is CLAUDE.md §5's "a
 write that reports success while the read cannot see it", applied to the field nobody was looking
-at. Both narrow athlete writes now spread the decoded record, and
-`activity-store.units.test.ts` holds it.
+at. All three narrow athlete writes now build from the decoded record, and
+`activity-store.units.test.ts` and `activity-store.mass.test.ts` hold it. ⚠️ `setAthleteMass` needs
+a `delete` on a copy rather than a spread for its *clearing* branch, because
+`exactOptionalPropertyTypes` makes `{ ...row, mass: undefined }` a type error — `withoutMass` is the
+same device `withoutThresholds` is, and the clear is the branch a hand-written field list would get
+wrong while every assertion about the mass itself still passed.
 
 `fromPersistedAthlete` reads the field **faithfully** — absent stays absent — because a decoder that
 substituted a default would be lying about what is on disk. Exactly one place in the program

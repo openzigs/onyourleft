@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Where a rider says whether they ride in kilometres or in miles (#238).
+ * Where a rider says whether they ride in kilometres or in miles (#238), and
+ * what they weigh (#325).
  *
  * ## Why this is its own screen
  *
@@ -14,6 +15,20 @@
  * It is also a route, which means the accessibility gate reaches it without
  * anyone remembering to add a case: `routes.a11y.test.tsx` iterates the table
  * in `shell/routes.ts`.
+ *
+ * ## Why the weight is here and not on the game screen
+ *
+ * #325's sixth acceptance criterion is that there *be* a way for a rider to
+ * enter their mass. The physics reads it, so the game is where its effect is
+ * felt — and a setting belongs where a rider would look for it rather than
+ * where it is consumed, which is the same argument this file already makes
+ * about units against the thresholds on the analysis screen. It is also the
+ * screen that already knows which units the rider reads in, and a weight is the
+ * fourth quantity ADR 0020 D-1 put inside that switch.
+ *
+ * ⚠️ **Two ports, not one.** `athlete/store-port.ts` says why: a display
+ * preference and an input to the physics are not the same kind of thing, and a
+ * screen offering one is not thereby entitled to the other.
  *
  * ⚠️ **The route being in the table is not enough, and a review caught this.**
  * With no `settings` port the shell renders {@link UNITS_NO_STORE} — a
@@ -45,9 +60,14 @@
 
 import { useState, type JSX } from 'react';
 
+import { kilograms, type Kilograms } from '@onyourleft/domain';
 import { UNIT_SYSTEMS, type UnitSystem } from '@onyourleft/store';
 
+import { DEFAULT_RIDER_MASS_KILOGRAMS, massToSave, riderMassFor } from '../athlete/mass';
+import type { AthleteMassPort } from '../athlete/store-port';
+import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
+import { formatMass, massIn, massUnit, measurementText } from '../units/format';
 import type { UnitsPort } from '../units/store-port';
 
 /** What each choice is called, and the units it actually means. */
@@ -91,6 +111,39 @@ export function unitsSaveFailure(reason: string): string {
 export const UNITS_NO_ATHLETE =
   'there is no athlete row on this device to save it against, so nothing was written';
 
+/** Said when the weight has been written and read back. */
+export const MASS_SAVED = 'Saved. The trainer game now rides you at this weight.';
+
+/** Said when the weight has been cleared and the default is back. */
+export const MASS_CLEARED = 'Cleared. The trainer game rides you at the assumed weight again.';
+
+/** Said when there is nothing to write a weight to. */
+export const MASS_NO_STORE =
+  'This browser has no local store, so a weight entered here would be forgotten as soon as the ' +
+  'page reloaded.';
+
+/** Said when the write failed. Names the failure rather than swallowing it. */
+export function massSaveFailure(reason: string): string {
+  return `That could not be saved, so the trainer game is still using the weight it was: ${reason}`;
+}
+
+/**
+ * Why a weight write can land nowhere without throwing.
+ *
+ * `setAthleteMass` answers `undefined` for *"there is no such athlete"* for
+ * {@link UNITS_NO_ATHLETE}'s reason, and it is reachable here for the same
+ * reason. Discarding it would tell a rider the game was riding them at a weight
+ * that had never been written down.
+ *
+ * ⚠️ **The same sentence as {@link UNITS_NO_ATHLETE}, written out rather than
+ * shared.** They say the same thing today because the store's two narrow writes
+ * fail the same way; they are two panels' copy, and one may be reworded without
+ * the other. A shared constant would make "these read alike" a constraint
+ * instead of a coincidence, which is not something either panel needs.
+ */
+export const MASS_NO_ATHLETE =
+  'there is no athlete row on this device to save it against, so nothing was written';
+
 export interface SettingsViewProps {
   /** `undefined` where this browser has no local store — see {@link UNITS_NO_STORE}. */
   readonly port?: UnitsPort | undefined;
@@ -108,9 +161,37 @@ export interface SettingsViewProps {
    * `undefined` *is* an answer, and it means nothing was written.
    */
   readonly onUnitsChange: (units: UnitSystem) => void;
+  /** `undefined` where this browser has no local store — see {@link MASS_NO_STORE}. */
+  readonly mass?: AthleteMassPort | undefined;
+  /**
+   * What the rider currently weighs, or `undefined` where they have never said.
+   *
+   * ⚠️ **Not defaulted on the way in.** The one place a default is substituted
+   * is `athlete/mass.ts` §`riderMassFor`, and this screen has to be able to tell
+   * "assumed" from "entered" in order to say which it is showing — a prop that
+   * arrived pre-defaulted could not.
+   */
+  readonly riderMass?: Kilograms | undefined;
+  /**
+   * Told when the weight write succeeded, so the rest of the client follows.
+   *
+   * ⚠️ **Called only after the store has answered with a written row**, never
+   * optimistically and never on the store's `undefined`, for
+   * {@link SettingsViewProps.onUnitsChange}'s reason — and here the
+   * disagreement would be a rider being ridden up a hill at a weight the disk
+   * does not hold.
+   */
+  readonly onRiderMassChange: (mass: Kilograms | undefined) => void;
 }
 
-export function SettingsView({ port, units, onUnitsChange }: SettingsViewProps): JSX.Element {
+export function SettingsView({
+  port,
+  units,
+  onUnitsChange,
+  mass,
+  riderMass,
+  onRiderMassChange,
+}: SettingsViewProps): JSX.Element {
   const [message, setMessage] = useState<{ tone: 'success' | 'danger'; text: string } | undefined>(
     undefined,
   );
@@ -138,15 +219,16 @@ export function SettingsView({ port, units, onUnitsChange }: SettingsViewProps):
   }
 
   return (
-    <section className="oyl-panel" aria-labelledby="oyl-units-heading">
-      <h2 id="oyl-units-heading">Units</h2>
-      <p className="oyl-muted">
-        One choice covers distance, speed, climbing and weight. A rider who wants miles for distance
-        and metres for climbing cannot have that — the whole app follows one setting, and splitting
-        it later is something we can add without taking anything away.
-      </p>
+    <>
+      <section className="oyl-panel" aria-labelledby="oyl-units-heading">
+        <h2 id="oyl-units-heading">Units</h2>
+        <p className="oyl-muted">
+          One choice covers distance, speed, climbing and weight. A rider who wants miles for
+          distance and metres for climbing cannot have that — the whole app follows one setting, and
+          splitting it later is something we can add without taking anything away.
+        </p>
 
-      {/*
+        {/*
         A radio group rather than a select, because there are two options and
         both should be readable without opening anything: #238 asks for the
         current unit to be visible rather than implied, and a collapsed select
@@ -154,50 +236,228 @@ export function SettingsView({ port, units, onUnitsChange }: SettingsViewProps):
         grouping HTML already has, so no ARIA is needed to associate the label
         with the group — the same argument `HudPanel.tsx` makes for `dl`.
       */}
-      {/*
+        {/*
         ⚠️ **Absent rather than disabled where there is nothing to write to.**
         `design/Button.tsx` states the rule and #48's first criterion is behind
         it: a disabled control leaves the tab order, so a keyboard user never
         reaches it and never hears why. The explanation takes its place.
       */}
+        {port === undefined ? (
+          <StatusMessage tone="warning" label="No local store">
+            {UNITS_NO_STORE}
+          </StatusMessage>
+        ) : (
+          <fieldset className="oyl-fieldset">
+            <legend>Which units do you ride in?</legend>
+            {UNIT_SYSTEMS.map((option) => (
+              <p key={option}>
+                <label htmlFor={`oyl-units-${option}`}>
+                  <input
+                    type="radio"
+                    id={`oyl-units-${option}`}
+                    name="oyl-units"
+                    value={option}
+                    checked={units === option}
+                    onChange={() => {
+                      void choose(option);
+                    }}
+                  />{' '}
+                  {CHOICES[option].label} — {CHOICES[option].detail}
+                </label>
+              </p>
+            ))}
+          </fieldset>
+        )}
+
+        {message === undefined ? null : (
+          <StatusMessage tone={message.tone} live>
+            {message.text}
+          </StatusMessage>
+        )}
+
+        <p className="oyl-muted">
+          This changes how numbers are <strong>shown</strong> and nothing else. Every ride stays
+          recorded exactly as it was, and a FIT, GPX or TCX file you export is unaffected — those
+          formats have their own unit rules and another program reads them.
+        </p>
+      </section>
+
+      {/*
+        ⚠️ A **sibling section**, not a second fieldset inside the units one.
+        `a11y/audit.ts` checks heading order, and a rider looking for "where do
+        I put my weight" is looking for a heading rather than for a control
+        inside a panel about kilometres and miles. The two do interact — the box
+        below is in whichever unit the panel above selects — and that is a
+        reason to put them on one screen rather than in one panel.
+      */}
+      <WeightPanel
+        {...(mass === undefined ? {} : { port: mass })}
+        units={units}
+        {...(riderMass === undefined ? {} : { riderMass })}
+        onRiderMassChange={onRiderMassChange}
+      />
+    </>
+  );
+}
+
+/**
+ * What the rider weighs (#325).
+ *
+ * ## Why this control exists at all
+ *
+ * `AthleteRecord.mass` had been on the athlete row since schema 6, was read by
+ * the segment matcher and by the account export — and **nothing in the program
+ * ever wrote one**, so the trainer game rode every athlete at a hard-coded
+ * 80 kg. Adding the read without adding this box would have left the fix
+ * unreachable: a field with a consumer and no writer is the same defect seen
+ * from the other end, and it is the one `check:wiring` cannot see because
+ * nothing is dead.
+ *
+ * ## The box is in the rider's own units, and the store's is not
+ *
+ * A rider reading in miles types pounds, and what is stored is kilograms —
+ * every time, in both systems, because `packages/domain`'s canonical unit does
+ * not move for a display preference (ADR 0020). The conversion happens once, in
+ * `athlete/mass.ts` §`massToSave`, and the reverse happens once, in
+ * `units/format.ts` §`massIn`.
+ *
+ * ⚠️ **The field is keyed on the units and the stored value**, which is what
+ * makes switching to miles re-seed the box with pounds instead of leaving a
+ * kilogram figure sitting under a `lb` label — a reading that is wrong by a
+ * factor of 2.2 and looks entirely plausible. A remount is the React idiom for
+ * "this input's identity changed"; the alternative is an effect that writes
+ * state during render and is harder to be sure of.
+ */
+function WeightPanel({
+  port,
+  units,
+  riderMass,
+  onRiderMassChange,
+}: {
+  readonly port?: AthleteMassPort | undefined;
+  readonly units: UnitSystem;
+  readonly riderMass?: Kilograms | undefined;
+  readonly onRiderMassChange: (mass: Kilograms | undefined) => void;
+}): JSX.Element {
+  const current = riderMassFor(riderMass);
+  return (
+    <section className="oyl-panel" aria-labelledby="oyl-weight-heading">
+      <h2 id="oyl-weight-heading">Your weight</h2>
+      <p className="oyl-muted">
+        The trainer game works out how fast you are going from how hard you are pedalling, and what
+        you weigh is most of the answer on a climb. Nothing is sent anywhere — it is stored on this
+        device with your rides.
+      </p>
+      <p className="oyl-muted">
+        {current.assumed ? 'You have not entered one, so rides use an assumed ' : 'Rides use '}
+        {measurementText(formatMass(current.mass, units))}
+        {current.assumed
+          ? '. That is a stand-in and not a measurement, and it is wrong for almost everybody.'
+          : '.'}{' '}
+        A bicycle is added to it — the game rides a rider and a bike, not a rider.
+      </p>
+
       {port === undefined ? (
         <StatusMessage tone="warning" label="No local store">
-          {UNITS_NO_STORE}
+          {MASS_NO_STORE}
         </StatusMessage>
       ) : (
-        <fieldset className="oyl-fieldset">
-          <legend>Which units do you ride in?</legend>
-          {UNIT_SYSTEMS.map((option) => (
-            <p key={option}>
-              <label htmlFor={`oyl-units-${option}`}>
-                <input
-                  type="radio"
-                  id={`oyl-units-${option}`}
-                  name="oyl-units"
-                  value={option}
-                  checked={units === option}
-                  onChange={() => {
-                    void choose(option);
-                  }}
-                />{' '}
-                {CHOICES[option].label} — {CHOICES[option].detail}
-              </label>
-            </p>
-          ))}
-        </fieldset>
+        // ⚠️ Remounted when the units or the stored value change. See the note
+        // above; a stale kilogram figure under a `lb` label is the defect.
+        <WeightField
+          key={`${units}:${String(riderMass ?? '')}`}
+          port={port}
+          units={units}
+          {...(riderMass === undefined ? {} : { riderMass })}
+          onRiderMassChange={onRiderMassChange}
+        />
       )}
+    </section>
+  );
+}
+
+/** The box, the button and what they are told. @see WeightPanel */
+function WeightField({
+  port,
+  units,
+  riderMass,
+  onRiderMassChange,
+}: {
+  readonly port: AthleteMassPort;
+  readonly units: UnitSystem;
+  readonly riderMass?: Kilograms | undefined;
+  readonly onRiderMassChange: (mass: Kilograms | undefined) => void;
+}): JSX.Element {
+  const [typed, setTyped] = useState(
+    riderMass === undefined ? '' : massIn(riderMass, units).toFixed(1),
+  );
+  const [message, setMessage] = useState<{ tone: 'success' | 'danger'; text: string } | undefined>(
+    undefined,
+  );
+
+  async function save(): Promise<void> {
+    const decision = massToSave(typed, units);
+    if (decision.kind === 'refused') {
+      setMessage({ tone: 'danger', text: decision.reason });
+      return;
+    }
+    try {
+      // ⚠️ The return is read, not discarded. `undefined` means the store found
+      // no such athlete and wrote nothing — see {@link MASS_NO_ATHLETE}.
+      const saved = await port.store.setAthleteMass(port.athleteId, decision.mass);
+      if (saved === undefined) {
+        setMessage({ tone: 'danger', text: massSaveFailure(MASS_NO_ATHLETE) });
+        return;
+      }
+      // ⚠️ `saved.mass` rather than `decision.mass`: what the rest of the
+      // client is told is what came back off the row, so a store that stored
+      // something else cannot be papered over by the value we sent it.
+      onRiderMassChange(saved.mass);
+      setMessage({
+        tone: 'success',
+        text: decision.mass === undefined ? MASS_CLEARED : MASS_SAVED,
+      });
+    } catch (error: unknown) {
+      setMessage({
+        tone: 'danger',
+        text: massSaveFailure(error instanceof Error ? error.message : String(error)),
+      });
+    }
+  }
+
+  return (
+    <div className="oyl-trainer__form">
+      <p>
+        <label htmlFor="oyl-rider-mass">Your weight ({massUnit(units)})</label>{' '}
+        <input
+          className="oyl-input"
+          id="oyl-rider-mass"
+          inputMode="decimal"
+          value={typed}
+          placeholder="not set"
+          onChange={(event) => {
+            setTyped(event.target.value);
+            setMessage(undefined);
+          }}
+        />
+      </p>
+      <p className="oyl-muted">
+        Leave it blank to go back to the assumed{' '}
+        {measurementText(formatMass(kilograms(DEFAULT_RIDER_MASS_KILOGRAMS), units))}.
+      </p>
+      <Button
+        onClick={() => {
+          void save();
+        }}
+      >
+        Save weight
+      </Button>
 
       {message === undefined ? null : (
         <StatusMessage tone={message.tone} live>
           {message.text}
         </StatusMessage>
       )}
-
-      <p className="oyl-muted">
-        This changes how numbers are <strong>shown</strong> and nothing else. Every ride stays
-        recorded exactly as it was, and a FIT, GPX or TCX file you export is unaffected — those
-        formats have their own unit rules and another program reads them.
-      </p>
-    </section>
+    </div>
   );
 }

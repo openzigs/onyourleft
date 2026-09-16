@@ -55,6 +55,12 @@ apps/                 AGPL-3.0-or-later, without exception
                         specimens the touch-target measurement needs, because a
                         shell handed no ports renders no control at all
     src/a11y/           the accessibility gate: rules, routes, contrast (#48) — see §4e
+    src/athlete/        what the rider weighs (#325) — the one place a missing
+                        mass is substituted, the one place a typed weight
+                        becomes a kilogram, and the narrow write that puts it on
+                        the athlete row. ⚠️ The mass here is the ATHLETE's; the
+                        bicycle is added by `game/rider.ts` and only there,
+                        because `RideConditions.totalMass` is both of them
     src/analysis/       zones and duration personal bests (#78) — the port, the one
                         place a threshold default is substituted, the bounded
                         library read, and the wording
@@ -143,7 +149,11 @@ apps/                 AGPL-3.0-or-later, without exception
     src/units/          which units a rider reads in (#238) — the one place a
                         number becomes a unit, the context a component asks,
                         and the source scan that stops a future screen writing
-                        a unit literal by hand
+                        a unit literal by hand. ⚠️ Since #325 it has a fourth
+                        tier, the mass one ADR 0020 D-1 reserved and declined to
+                        ship without a caller; adding a quantity to the switch
+                        means adding its labels AND its factors to the scan, and
+                        #325 is the first time that has actually been done
     src/views/          one component per route (#48)
     src/workout/        the workout control loop (#14) — the one place the
                         player's decisions meet a trainer's control point,
@@ -205,9 +215,16 @@ apps/                 AGPL-3.0-or-later, without exception
                         refusal (#237) — the one place in the client a
                         BotPacerPlan is built, and therefore the only place the
                         rider's own mass could get into one
-    src/game/rider.ts   what the rider weighs and what air they ride through,
-                        until the store carries either. Its own file since #237
-                        so the bot's 75 kg can be asserted against it
+    src/game/rider.ts   what the rider and their bicycle weigh together, and what
+                        air they ride through. ⚠️ **Since #325 it exports a
+                        FUNCTION and no `RIDER_MASS_KILOGRAMS`** — the mass is
+                        the athlete's own now, so a reviewer who remembers a
+                        constant to assert the bot's 75 kg against is reading
+                        the old file; `simulation.test.ts` asserts the bot is
+                        unmoved across two rider masses instead, which is the
+                        same claim without the coincidence. The bicycle is added
+                        here and nowhere else, and the air is still a
+                        placeholder: there is no altitude in the store at all
     src/game/hud/       the ride HUD (#94) — the eight fields, the dropped
                         sensor that is not a zero, and the wake lock; and since
                         #285 the route in plan with the rider on it — north-up,
@@ -2598,6 +2615,11 @@ top of an issue **supersedes its body**.
 | What proves no store read crosses athletes, and how a new read is caught | `packages/store/src/activity-store.scoping.test.ts` |
 | What proves an erased athlete leaves no row behind, and why the table list is derived | `packages/store/src/activity-store.erasure.test.ts`, `packages/store/src/schema.ts` §`SCHEMA_VERSIONS` |
 | Which units a rider reads in, where that is decided, and what stops a new screen hard-coding one | [ADR 0020](docs/adr/0020-display-units.md), `apps/web/src/units/format.ts`, `apps/web/src/units/no-inline-units.test.ts` |
+| Where a rider enters their weight, and why the game rather than the store substitutes a default | `apps/web/src/athlete/mass.ts`, `apps/web/src/views/SettingsView.tsx` §`WeightPanel` |
+| Why the athlete's mass and the physics' `totalMass` are different numbers, and where the bicycle is added | `apps/web/src/game/rider.ts` §`BICYCLE_MASS_KILOGRAMS`, `packages/store/src/records.ts` §`AthleteRecord.mass` |
+| What keeps the bot at 75 kg once the rider's mass can move, and the assertion that replaced the old one | `apps/web/src/game/rider.test.ts` §"#325 criterion 4", `apps/web/src/game/simulation.ts` §`botCourseFor` |
+| Why a weight box remounts when the rider switches units | `apps/web/src/views/SettingsView.tsx` §`WeightPanel` |
+| What a change of weight does NOT do to a segment effort already on the board | `packages/store/src/activity-store.ts` §`setAthleteMass`, `packages/store/src/activity-store.mass.test.ts` |
 | Why the unit preference is on the athlete and not on the device, and what that costs a rider with two | [ADR 0020](docs/adr/0020-display-units.md) D-2, `packages/store/src/unit-system.ts` |
 | Why a narrow athlete write's `undefined` has to be branched on, and what discarding it reports | `apps/web/src/units/store-port.ts` §`UnitsStore`, `apps/web/src/views/SettingsView.tsx` §`UNITS_NO_ATHLETE`, `packages/store/src/testing/fakes.ts` §`staleUnitsStoreFactory` |
 | Where the imperial length definitions live, and why the foot is not beside its caller | `packages/domain/src/length.ts` |

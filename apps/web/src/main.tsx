@@ -54,6 +54,7 @@ import type { MapPort } from './map/port';
 import type { LibraryPort } from './library/store-port';
 import type { TransferPort } from './transfer/store-port';
 import type { UnitsPort } from './units/store-port';
+import type { AthleteMassPort } from './athlete/store-port';
 
 const found = document.getElementById('root');
 if (found === null) {
@@ -539,6 +540,22 @@ function buildUnitsPort(): UnitsPort {
   return { store: localStore(), athleteId: LOCAL_ATHLETE };
 }
 
+/**
+ * The settings screen's other write: what the rider weighs (#325).
+ *
+ * A tenth port over the same connection, and separate from
+ * {@link buildUnitsPort} for the reason `athlete/store-port.ts` gives.
+ *
+ * ⚠️ **This port is the whole of #325's sixth criterion.** `AthleteRecord.mass`
+ * had been migrated since schema 6 and read by two consumers, and nothing in
+ * this client had ever constructed a way to write one — so the game's new read
+ * of it would have found `undefined` on every device for ever, and the fix
+ * would have been indistinguishable from the defect.
+ */
+function buildAthleteMassPort(): AthleteMassPort {
+  return { store: localStore(), athleteId: LOCAL_ATHLETE };
+}
+
 async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const platform = await buildPlatform(capabilities);
   const rideController = platform.rideController;
@@ -548,6 +565,11 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
         capabilities={capabilities}
         {...(platform.shell === undefined ? {} : { shell: platform.shell })}
         settings={buildUnitsPort()}
+        athleteMass={buildAthleteMassPort()}
+        // ⚠️ The **stored** mass, read before the first paint, and passed on
+        // undefaulted: `athlete/mass.ts` is the one place a missing one is
+        // substituted, and a default applied here would be a second.
+        {...(athlete?.mass === undefined ? {} : { riderMass: athlete.mass })}
         // ⚠️ The **stored** preference, read before the first paint. The
         // fallback is `DEFAULT_UNIT_SYSTEM` and it is applied in exactly one
         // place — `AppShell`'s own default — so "a row with no setting" and "no

@@ -75,6 +75,11 @@ graph TB
 apps/                 AGPL-3.0-or-later, without exception
   web/                browser client — the Phase 1 product
     src/a11y/           the accessibility gate: rules, per-route audit, contrast (#48)
+    src/athlete/        what the rider weighs (#325): the one place a missing mass
+                        is substituted, the one place a typed weight becomes a
+                        kilogram, and the narrow write that puts it on the
+                        athlete row. The mass here is the ATHLETE's — the bicycle
+                        is added by src/game/rider.ts and only there
     src/design/         design tokens, theme.css and the primitives (#48)
     src/detail/         the ride detail view's data layer (#50): the read budget, the
                         gap-preserving downsampler, the SVG trace, and the

@@ -10,7 +10,13 @@
  * still the function on the path a sensor reading takes to the screen.
  */
 
-import { metres, metresPerSecond, UnitError } from '@onyourleft/domain';
+import {
+  kilograms,
+  KILOGRAMS_PER_POUND,
+  metres,
+  metresPerSecond,
+  UnitError,
+} from '@onyourleft/domain';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -18,8 +24,11 @@ import {
   distanceIn,
   distanceUnit,
   formatDistance,
+  formatMass,
   formatSmallDistance,
   formatSpeed,
+  massIn,
+  massUnit,
   measurementText,
   smallDistanceIn,
   smallDistanceUnit,
@@ -179,5 +188,47 @@ describe('the two systems are actually different', () => {
     // and 1000 m was '1.0' before this issue, and must still be.
     expect(formatSpeed(metresPerSecond(10), 'metric').value).toBe('36.0');
     expect(formatDistance(metres(1000), 'metric').value).toBe('1.0');
+  });
+});
+
+describe('formatMass (#325, the tier ADR 0020 D-1 reserved and did not ship)', () => {
+  it('reads a stored kilogram back unchanged in metric', () => {
+    expect(formatMass(kilograms(71), 'metric')).toEqual({ value: '71.0', unit: 'kg' });
+  });
+
+  it('reads the same stored kilogram in pounds for an imperial rider', () => {
+    // 69.853 kg is 154 lb, which is the number a rider typed. A formatter that
+    // multiplied instead of dividing would read 30.7 and look like a unit
+    // label problem rather than a conversion one.
+    expect(formatMass(kilograms(154 * KILOGRAMS_PER_POUND), 'imperial')).toEqual({
+      value: '154.0',
+      unit: 'lb',
+    });
+  });
+
+  it('gives a different number and not only a different label', () => {
+    // The cheapest way to "support pounds" and ship nothing.
+    expect(massIn(kilograms(71), 'metric')).not.toBeCloseTo(massIn(kilograms(71), 'imperial'), 3);
+  });
+
+  it('agrees with its own label helper', () => {
+    for (const units of ['metric', 'imperial'] as const) {
+      expect(massUnit(units)).toBe(formatMass(kilograms(71), units).unit);
+      expect(formatMass(kilograms(71), units).unit).not.toBe('');
+    }
+  });
+
+  it('refuses a raw number at the type, which is what stops pounds being read as kilograms', () => {
+    // CLAUDE.md §5's compile-time guarantee, mutation-tested the way that
+    // section prescribes: widen `formatMass`'s parameter to `number` and this
+    // file fails to compile with TS2578, an unused '@ts-expect-error'.
+    //
+    // ⚠️ Nothing throws here, and that is the point rather than a weakness.
+    // `massIn` divides; it calls no domain constructor, so a pounds figure
+    // that reached it renders as a plausible weight that is 84 kg wrong. The
+    // type is the only thing between the two, which is why the directive is
+    // the assertion and the line below is the consequence it prevents.
+    // @ts-expect-error a raw number is not a Kilograms.
+    expect(formatMass(154, 'metric')).toEqual({ value: '154.0', unit: 'kg' });
   });
 });

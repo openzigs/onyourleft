@@ -42,9 +42,17 @@ import type { ActivityRecord, AthleteRecord, SegmentRecord, UnitSystem } from '@
 import { activityId, athleteId, segmentId } from '@onyourleft/store';
 
 import type { UnitsPort } from '../units/store-port';
+import type { AthleteMassPort } from '../athlete/store-port';
 
 import type { CapabilityProbe } from '../support/bluetooth-support';
-import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
+import {
+  activateWithKeyboard,
+  mount,
+  queryAll,
+  settle,
+  typeInto,
+  type Mounted,
+} from '../testing/mount';
 
 import { accessibleName, auditAccessibility, formatViolations, tabbableElements } from './audit';
 
@@ -107,6 +115,31 @@ function settingsPort(): UnitsPort {
           displayName: 'You',
           createdAt: 0 as AthleteRecord['createdAt'],
           units,
+        }),
+    },
+  };
+}
+
+/**
+ * The same, for the weight box #325 adds to that screen.
+ *
+ * ⚠️ **The same trap, a second time and in the same file.** With no
+ * `athleteMass` port the settings route renders `MASS_NO_STORE` — a paragraph
+ * with nothing interactive in it — so the route loop below would report the
+ * screen clean while the labelled input, its button and its live status message
+ * had never been rendered under the audit.
+ */
+function athleteMassPort(): AthleteMassPort {
+  const owner = athleteId('local');
+  return {
+    athleteId: owner,
+    store: {
+      setAthleteMass: (id, mass): Promise<AthleteRecord | undefined> =>
+        Promise.resolve({
+          id,
+          displayName: 'You',
+          createdAt: 0 as AthleteRecord['createdAt'],
+          ...(mass === undefined ? {} : { mass }),
         }),
     },
   };
@@ -226,6 +259,7 @@ async function open(
       capabilities={capabilities}
       rideController={midRide()}
       settings={settingsPort()}
+      athleteMass={athleteMassPort()}
       segments={segmentsPort()}
       match={matchPort()}
       {...(units === undefined ? {} : { units })}
@@ -252,6 +286,31 @@ describe('criterion 4 — every route passes the automated audit', () => {
       expectClean(`${route.id} with Bluetooth available`);
     });
   }
+
+  it('the settings route passes with its controls actually rendered, and its refusal', async () => {
+    // ⚠️ **The vacuous pass, guarded rather than described.** The loop above
+    // reports `/settings` clean either way; these two lines are what say the
+    // audit had something to look at. #238's radio group and #325's weight box
+    // are both gone the moment a port is missing, and the file header records
+    // that this has already happened once.
+    await open('/settings');
+    expect(queryAll(document, 'input[type="radio"]').length).toBeGreaterThan(0);
+    expect(document.querySelector('#oyl-rider-mass')).not.toBeNull();
+
+    // And the state the loop cannot reach: a refusal, which is a live region
+    // beside a labelled input and is where an `aria-describedby` goes dangling.
+    const box = document.querySelector('#oyl-rider-mass');
+    await typeInto(box as HTMLInputElement, '6.5');
+    const save = queryAll(document, 'button').find(
+      (candidate) => (candidate.textContent ?? '').trim() === 'Save weight',
+    );
+    expect(save, 'the save control is not on the settings page').not.toBeUndefined();
+    await activateWithKeyboard(save as HTMLElement);
+    await settle();
+
+    expect(document.body.textContent).toContain('Your weight must be a number');
+    expectClean('settings with a refused weight');
+  });
 
   it('the devices route passes in a browser with no Bluetooth at all', async () => {
     // The Safari and Firefox branch renders different markup — a different
