@@ -699,3 +699,219 @@ describe('known devices', () => {
     expect(known.map((one) => one.identity.id)).toEqual([SCRIPTED_DEVICE.deviceId]);
   });
 });
+
+/**
+ * An initialisation that is received and never answered (#322).
+ *
+ * ⚠️ **Not a rejection, and the difference is the whole issue.** Every test
+ * above that exercises a failing `initialize()` gives it an error to reject
+ * with, and every caller in this transport has an error path for one. What was
+ * measured on a Pixel Tablet is a plugin that received the bridge call and then
+ * threw inside its own permission callback, so `PluginCall.resolve()` was never
+ * reached and nothing came back at all. `initializeNeverAnswers` is that, and
+ * `testing.ts` says why a long delay would not do.
+ *
+ * What this half owes is narrow and worth stating: the rider-facing bound is
+ * `apps/web/src/support`'s, and nothing here gives up on anything. All that is
+ * asserted below is that a **later** caller is not attached to the dead promise,
+ * because that is what turned the screen's "Check again" into a control that
+ * could not work.
+ */
+describe('an initialisation that never answers is not shared for ever (#322)', () => {
+  /**
+   * Let every pending promise chain drain.
+   *
+   * ⚠️ A macrotask rather than `await Promise.resolve()`. Counting microtasks
+   * is how an assertion ends up pinned to the number of `await`s between here
+   * and the plugin instead of to the behaviour: replacing the silent stack with
+   * one that answers immediately then leaves these tests green, because the
+   * answer had not arrived *yet* rather than because it never would. Measured —
+   * that mutation survived until this helper replaced the microtask turns.
+   */
+  const flush = async (): Promise<void> => {
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+  };
+
+  /** The transport with a scheduler this test fires by hand. */
+  const withHandScheduler = (stack: ScriptedStack) => {
+    const deadlines: (() => void)[] = [];
+    const plugin = scriptedPort(stack);
+    const transport: SensorTransport = createCapacitorTransport({
+      plugin,
+      profiles: [compositeProfile],
+      now: () => AT,
+      schedule: (callback) => {
+        deadlines.push(callback);
+        return () => {
+          const index = deadlines.indexOf(callback);
+          if (index >= 0) {
+            deadlines.splice(index, 1);
+          }
+        };
+      },
+    });
+    return {
+      plugin,
+      transport,
+      /** Let the sharing window expire, as an unanswered call does. */
+      expire: () => {
+        for (const deadline of [...deadlines]) {
+          deadline();
+        }
+      },
+      /** Deadlines still armed. A settled initialisation leaves none. */
+      armed: () => deadlines.length,
+    };
+  };
+
+  it('hands a later caller a FRESH initialisation rather than the dead one', async () => {
+    // The defect in one assertion. Before this, the second read attached to the
+    // first promise, which could never resolve, so a rider pressing "Check
+    // again" was pressing a control wired to nothing.
+    const { plugin, transport, expire } = withHandScheduler({ initializeNeverAnswers: true });
+
+    void transport.availability();
+    await flush();
+    // Nothing follows the `initialize`, because nothing can: `isEnabled` is
+    // behind an await that will never resume.
+    expect(plugin.calls).toEqual(['initialize']);
+
+    expire();
+
+    void transport.availability();
+    await flush();
+    expect(plugin.calls).toEqual(['initialize', 'initialize']);
+  });
+
+  it('still shares it with a caller that arrives INSIDE the window', async () => {
+    // The #230 property this must not break: two callers racing cost one
+    // platform call. A window that forgot immediately would re-ask the platform
+    // on every concurrent pairing, and on Android that is a second prompt.
+    const { plugin, transport } = withHandScheduler({ initializeNeverAnswers: true });
+
+    void transport.availability();
+    void transport.availability();
+    await flush();
+    expect(plugin.calls).toEqual(['initialize']);
+  });
+
+  it('does not give up on the caller that is already waiting', async () => {
+    // ⚠️ The window stops SHARING; it does not reject. A rejection here would
+    // be classified by `initializationError` and rendered by `availability()`
+    // as `unsupported` — the one screen that offers no retry at all — so a
+    // silent plugin would be reported as a phone with no Bluetooth radio.
+    const { transport, expire } = withHandScheduler({ initializeNeverAnswers: true });
+
+    let settled: unknown = 'still waiting';
+    void transport.availability().then(
+      (value) => {
+        settled = value;
+      },
+      (error: unknown) => {
+        settled = error;
+      },
+    );
+
+    expire();
+    await flush();
+    expect(settled).toBe('still waiting');
+  });
+
+  it('answers normally once the plugin starts answering again', async () => {
+    // The recovery a rider's second press actually takes: the window has
+    // expired, the retry reaches the plugin, and the plugin — in a fresh call,
+    // which #322 measured to be the case that works — answers.
+    let mute = true;
+    const plugin = scriptedPort();
+    const transport: SensorTransport = createCapacitorTransport({
+      plugin: {
+        ...plugin,
+        initialize: async (): Promise<void> => {
+          if (mute) {
+            return new Promise<void>(() => undefined);
+          }
+          return plugin.initialize();
+        },
+      },
+      profiles: [compositeProfile],
+      now: () => AT,
+      // Zero-length window, fired synchronously: this test is about what the
+      // retry reaches, not about when.
+      schedule: (callback) => {
+        callback();
+        return () => undefined;
+      },
+    });
+
+    void transport.availability();
+    await flush();
+    mute = false;
+    await expect(transport.availability()).resolves.toEqual({ kind: 'available' });
+  });
+
+  it('leaves no deadline armed once an initialisation has settled', async () => {
+    // A timer per caller is the cheap way to arm this, and the cost of getting
+    // the cancellation wrong is a stray timer on every successful pairing —
+    // which in a WebView is a wake-up the phone does not need.
+    const { transport, expire, armed } = withHandScheduler({});
+    await transport.availability();
+    expect(armed()).toBe(0);
+
+    // And an expiry after a successful initialisation cannot un-memoise it:
+    // there is nothing left to fire.
+    expire();
+    await transport.availability();
+  });
+
+  it('does not clear a REPLACEMENT initialisation when the old window expires', async () => {
+    // The `initializing === pending` guard, and the sequence that needs it.
+    // Two callers share one hung initialisation and each arms its own window.
+    // The FIRST window expires and stops the sharing; a third caller starts a
+    // fresh initialisation, which answers. Then the second window — still armed
+    // against a promise nobody is sharing any more — fires. Without the guard
+    // it throws the healthy initialisation away, costing another platform call
+    // and, on Android, another permission prompt.
+    let mute = true;
+    const plugin = scriptedPort();
+    const deadlines: (() => void)[] = [];
+    const transport: SensorTransport = createCapacitorTransport({
+      plugin: {
+        ...plugin,
+        initialize: async (): Promise<void> => {
+          if (mute) {
+            return new Promise<void>(() => undefined);
+          }
+          return plugin.initialize();
+        },
+      },
+      profiles: [compositeProfile],
+      now: () => AT,
+      schedule: (callback) => {
+        deadlines.push(callback);
+        return () => {
+          const index = deadlines.indexOf(callback);
+          if (index >= 0) {
+            deadlines.splice(index, 1);
+          }
+        };
+      },
+    });
+
+    void transport.availability();
+    void transport.availability();
+    await flush();
+    expect(deadlines).toHaveLength(2);
+    const [first, second] = deadlines;
+
+    first?.();
+    mute = false;
+    await expect(transport.availability()).resolves.toEqual({ kind: 'available' });
+    expect(plugin.calls.filter((call) => call === 'initialize')).toHaveLength(1);
+
+    second?.();
+    await transport.availability();
+    expect(plugin.calls.filter((call) => call === 'initialize')).toHaveLength(1);
+  });
+});

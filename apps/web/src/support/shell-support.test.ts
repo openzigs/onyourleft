@@ -9,12 +9,17 @@
  */
 
 import type { TransportAvailability } from '@onyourleft/sensors';
-import { createCapacitorTransport, mayShowDeviceList, permissionNotice } from '@onyourleft/mobile';
+import {
+  createCapacitorTransport,
+  INITIALIZE_ANSWER_WINDOW,
+  mayShowDeviceList,
+  permissionNotice,
+} from '@onyourleft/mobile';
 import { scriptedPort, type ScriptedStack } from '@onyourleft/mobile/testing';
 import { unixSeconds } from '@onyourleft/domain';
 import { describe, expect, it, vi } from 'vitest';
 
-import { capacitorShellSupport } from './shell-support';
+import { capacitorShellSupport, SHELL_ANSWER_TIMEOUT } from './shell-support';
 
 const ALL: readonly TransportAvailability[] = [
   { kind: 'available' },
@@ -208,5 +213,34 @@ describe('a permission granted outside the app is visible to the next read', () 
     const off = await port.readShellSupport();
     expect(off.kind).toBe('adapter-unavailable');
     expect(off.notice?.title).toBe('Bluetooth is switched off');
+  });
+});
+
+/**
+ * The two deadlines #322 leaves behind, and the one relationship between them.
+ *
+ * `SHELL_ANSWER_TIMEOUT` is what a rider waits before this screen says the
+ * phone has not answered and offers a re-check. `INITIALIZE_ANSWER_WINDOW` is
+ * how long the transport keeps handing a later caller the same unanswered
+ * `initialize()`. If the second is ever the longer, the button the first one
+ * puts on screen attaches the rider to the promise that already failed them —
+ * a control that cannot work, which is the shape #48's first criterion bars.
+ *
+ * ⚠️ They are in different packages, so nothing else in this repository would
+ * notice them crossing: a bump to either is a one-line diff in a file the other
+ * one's reviewer is not reading. `DevicesView.shell.test.tsx` observes the
+ * ordering end to end on one clock; this asserts it as arithmetic, because the
+ * end-to-end test would fail with a timeout and no explanation.
+ */
+describe('the screen waits longer than the transport shares (#322)', () => {
+  it('gives up after the transport has stopped handing out the dead promise', () => {
+    expect(INITIALIZE_ANSWER_WINDOW).toBeLessThan(SHELL_ANSWER_TIMEOUT);
+  });
+
+  it('leaves room for a human to find the button', () => {
+    // Not merely "less than": a margin measured in seconds rather than in
+    // microtasks, because what has to happen in the gap is a person reading a
+    // sentence and pressing a control.
+    expect(SHELL_ANSWER_TIMEOUT - INITIALIZE_ANSWER_WINDOW).toBeGreaterThanOrEqual(1);
   });
 });

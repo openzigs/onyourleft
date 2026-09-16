@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { auditAccessibility, formatViolations } from '../a11y/audit';
 import type { CapabilityProbe } from '../support/bluetooth-support';
-import { capacitorShellSupport } from '../support/shell-support';
+import { capacitorShellSupport, UNANSWERED_SHELL_SUPPORT } from '../support/shell-support';
 import { mount, settle, type Mounted } from '../testing/mount';
 
 import { DevicesView } from './DevicesView';
@@ -102,5 +102,25 @@ describe('every state of the Android shell’s Devices screen passes the audit',
     );
     expect(document.body.textContent).toContain('Asking this phone about Bluetooth');
     expectClean('devices in the shell, still asking');
+  });
+
+  it('passes once the deadline has said the plugin did not answer', async () => {
+    // #322's state, and the one most likely to be built out of loose markup:
+    // it is the only notice on this screen whose wording is not
+    // `permissionNotice`'s, so it is the only one not already covered by
+    // `apps/mobile`'s own tests. Rendered from the value the hook delivers
+    // rather than by waiting out a real deadline.
+    mounted = await mount(
+      <main>
+        <h1>Devices</h1>
+        <DevicesView
+          capabilities={WEBVIEW}
+          shell={{ readShellSupport: async () => Promise.resolve(UNANSWERED_SHELL_SUPPORT) }}
+        />
+      </main>,
+    );
+    await settle();
+    expect(document.body.textContent).toContain('This phone has not answered about Bluetooth');
+    expectClean('devices in the shell, unanswered');
   });
 });

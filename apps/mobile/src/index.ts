@@ -24,8 +24,8 @@
  * transport already has, with a different platform on the other end.
  */
 
-export { createCapacitorTransport, systemClock } from './ble/transport';
-export type { CapacitorTransportOptions } from './ble/transport';
+export { createCapacitorTransport, INITIALIZE_ANSWER_WINDOW, systemClock } from './ble/transport';
+export type { CapacitorTransportOptions, Schedule } from './ble/transport';
 export { capacitorBlePort } from './ble/ble-client';
 export { createCapacitorFitnessMachineChannel } from './ble/fitness-machine-channel';
 export { readCapacitorFitnessMachine } from './ble/fitness-machine';

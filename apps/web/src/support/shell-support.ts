@@ -32,10 +32,87 @@
  * the shell gets a component of its own and shares the *screen*, not the copy.
  */
 
+import { seconds, type Seconds } from '@onyourleft/domain';
 import type { PermissionAction, PermissionNotice } from '@onyourleft/mobile';
 import type { TransportAvailability } from '@onyourleft/sensors';
 
 import type { ShellNotice, ShellSupport, ShellSupportPort } from './shell-support-port';
+
+/**
+ * How long the Devices screen waits for the plugin before it says so (#322).
+ *
+ * ⚠️ **A bound on a hang, not a performance target** — the same posture
+ * `DEFAULT_GATT_OPERATION_TIMEOUT` states in `packages/sensors/web-bluetooth`,
+ * and it is the same rule: *"Web Bluetooth also specifies no timeout for any
+ * operation"*, so every operation is bounded by the caller. Nothing in the
+ * Capacitor plugin's contract bounds `initialize()` either, and #322 is what
+ * that costs when the plugin dies without answering.
+ *
+ * **Why ten and not five or thirty.** The device measurements in #322 are the
+ * whole of the justification and they point both ways. A cold start answers
+ * effectively immediately, and the hung case was still hung at 45 s — so there
+ * is no value of this constant that separates "slow" from "dead" by waiting
+ * longer, which is the argument against thirty. Against five: Android's own
+ * input-ANR threshold is five seconds, and a first initialisation on a cold
+ * adapter is allowed to be slower than the point at which the OS would call an
+ * app unresponsive.
+ *
+ * ⚠️ **Being early costs nothing, and that is what makes ten defensible rather
+ * than arbitrary.** {@link useShellSupport} keeps the read alive past the
+ * deadline and adopts a late answer, so a rider who spends half a minute
+ * reading Android's permission dialog sees this message and then watches it be
+ * replaced by the real one. A deadline that could only ever be wrong in the
+ * "too slow" direction would have to be generous; this one cannot be wrong in
+ * the other direction at all.
+ *
+ * ⚠️ **It must stay LONGER than `apps/mobile`'s `INITIALIZE_ANSWER_WINDOW`**,
+ * which is what makes the re-check offered below a control that can work: the
+ * transport has to have stopped sharing the hung `initialize()` before a rider
+ * can press the button. `shell-support.test.ts` asserts the ordering, because
+ * the two constants are in different packages and nothing else would notice
+ * them crossing.
+ */
+export const SHELL_ANSWER_TIMEOUT: Seconds = seconds(10);
+
+/**
+ * What a rider is told when the plugin has not answered (#322).
+ *
+ * ⚠️ **This wording is HERE and not in `apps/mobile`'s `permissionNotice`**,
+ * which is where every other sentence on this screen comes from. That function
+ * is total over `TransportAvailability`, and this state is not one of its
+ * members — it is the absence of an answer rather than an answer, and it is
+ * produced by a deadline this module owns. Putting it there would mean widening
+ * a union shared with two transports that cannot produce it; `shell-support-port.ts`
+ * §`ShellSupportKind` records that decision in full.
+ *
+ * The distinction the text has to carry is #322's fourth criterion: *"this
+ * phone said no"* and *"this phone did not answer"* are different problems and
+ * a rider can act on the second. So the first sentence refuses the accusation
+ * — nothing has been refused — before it says what happened.
+ *
+ * ⚠️ The instruction is **measured rather than plausible.** #322's device run
+ * establishes that a cold start resolves and that backgrounding, returning and
+ * reloading the page all do not: the one path out is a genuinely new process.
+ * "Swipe it away" is the recent-apps gesture, named because "force stop" is a
+ * Settings screen and a rider in a garage is not going to find it.
+ */
+export const UNANSWERED_SHELL_SUPPORT: ShellSupport = {
+  kind: 'unanswered',
+  // The same rule as every other unusable state: no device list, and no
+  // pairing control anywhere near it. `mayShowDeviceList` is not consulted
+  // because there is no availability to consult it with.
+  canPair: false,
+  notice: {
+    title: 'This phone has not answered about Bluetooth',
+    explanation: `Nothing has been refused. The question went to Android’s Bluetooth service and no reply came back within ${String(SHELL_ANSWER_TIMEOUT)} seconds, which is what happens when the phone has been asleep.`,
+    instruction:
+      'If checking again does not help, close On Your Left completely — swipe it out of the recent apps list — and open it again. A fresh start answers.',
+    // A retry is exactly the right offer here, and it is the one state on this
+    // screen where that is true because the rider has changed nothing outside
+    // the app: the thing that failed was the asking.
+    recoverable: true,
+  },
+};
 
 /**
  * What {@link capacitorShellSupport} needs from the Android shell.

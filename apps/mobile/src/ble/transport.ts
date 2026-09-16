@@ -57,9 +57,65 @@ import {
 
 import type { GattProfile, MeasurementSink } from '@onyourleft/sensors/protocol';
 
-import { unixSeconds, type UnixSeconds } from '@onyourleft/domain';
+import { seconds, unixSeconds, type Seconds, type UnixSeconds } from '@onyourleft/domain';
 
 import type { CapacitorBlePort, PluginDevice } from './plugin-port';
+
+/**
+ * How long an unanswered `initialize()` may still be handed to a later caller
+ * (#322).
+ *
+ * ⚠️ **This is not a timeout on the call, and reading it as one gets the whole
+ * design backwards.** Nothing here rejects and nothing here gives up: the
+ * promise is left exactly as it is, and all that expires is this transport's
+ * willingness to *share* it. `ensureInitialized` memoises the in-flight
+ * initialisation so that two callers racing cost one platform call, and #322
+ * found what that memo does when the platform call never settles — the plugin
+ * threw inside its own permission callback and resolved nothing, so every
+ * subsequent caller, including the rider pressing "Check again", was attached
+ * to a promise that could not answer. The screen's re-check became a control
+ * that could not work, which is the shape #48's first criterion exists to
+ * prevent, arrived at from underneath.
+ *
+ * **Why it must not reject instead.** A rejection here is classified by
+ * `initializationError` and rendered by `availability()`, and there is no
+ * member of `TransportAvailability` that means *"no answer"* — the nearest is
+ * `unsupported`, which puts a rider on the one screen that offers no retry at
+ * all. Rejecting would therefore trade a screen that says nothing for a screen
+ * that says something false. The rider-facing half of #322 is
+ * `apps/web/src/support`'s deadline, which can say it; this half only has to
+ * make sure that what the rider does next reaches the plugin.
+ *
+ * **Why eight seconds.** It has to be shorter than
+ * `apps/web/src/support/shell-support.ts` §`SHELL_ANSWER_TIMEOUT`, because
+ * the memo must already be gone by the time that deadline puts a "check again"
+ * button in front of a rider — otherwise the first press re-attaches to the
+ * same dead promise. Two seconds of margin on a button a human has to find and
+ * press is generous. ⚠️ The ordering is asserted in
+ * `apps/web/src/support/shell-support.test.ts`: the two constants live in
+ * different packages and nothing else would notice them crossing.
+ *
+ * It is *not* also a bound on how long a first initialisation may take. Sharing
+ * stops; the original caller's await does not. A rider who spends thirty
+ * seconds on Android's permission dialog still gets their answer.
+ */
+export const INITIALIZE_ANSWER_WINDOW: Seconds = seconds(8);
+
+/**
+ * Run `callback` after `after` seconds, and return a way to cancel it.
+ *
+ * The shape `createGattQueue` uses in `packages/sensors/web-bluetooth`, and
+ * injected for the same reason: a test fires the deadline by hand instead of
+ * waiting eight real seconds, so the expiry is a decision rather than a race.
+ */
+export type Schedule = (callback: () => void, after: Seconds) => () => void;
+
+function defaultSchedule(callback: () => void, after: Seconds): () => void {
+  const handle = setTimeout(callback, after * 1000);
+  return () => {
+    clearTimeout(handle);
+  };
+}
 
 /**
  * How the transport is built.
@@ -81,6 +137,14 @@ export interface CapacitorTransportOptions {
    * this adapter's timing untestable.
    */
   readonly now: () => UnixSeconds;
+  /**
+   * How long an unanswered `initialize()` stays shared. Defaults to
+   * {@link INITIALIZE_ANSWER_WINDOW}; see there for what it does and does not
+   * bound.
+   */
+  readonly initializeAnswerWindow?: Seconds | undefined;
+  /** Defaults to `setTimeout`. @see Schedule */
+  readonly schedule?: Schedule | undefined;
 }
 
 /**
@@ -147,6 +211,8 @@ interface Link {
  */
 export function createCapacitorTransport(options: CapacitorTransportOptions): SensorTransport {
   const { plugin, profiles, now } = options;
+  const answerWindow = options.initializeAnswerWindow ?? INITIALIZE_ANSWER_WINDOW;
+  const schedule = options.schedule ?? defaultSchedule;
   const links = new Map<DeviceId, Link>();
   /** Plugin ids seen this session, so `knownDevices` has something to ask for. */
   const seen = new Set<string>();
@@ -182,17 +248,47 @@ export function createCapacitorTransport(options: CapacitorTransportOptions): Se
    * mean that granting it and pressing Pair again did nothing until the app was
    * restarted, which is the "explanatory screen with a Try again that cannot
    * work" #87 criterion 8 exists to prevent.
+   *
+   * ⚠️ **Neither is one that never ANSWERS, and until #322 it was.** A rejected
+   * initialisation clears the memo above; one that simply never settles left it
+   * in place for the life of the transport, so every later caller awaited a
+   * promise that could not resolve. On the device that produced #322 the plugin
+   * threw inside its own permission callback on an activity restart and
+   * resolved nothing, and the effect was not merely a stuck screen: the "check
+   * again" button on it re-entered this function and attached to the same dead
+   * promise. {@link INITIALIZE_ANSWER_WINDOW} is what stops that, and it says
+   * at length why the answer is to stop sharing rather than to reject.
    */
   const ensureInitialized = async (): Promise<void> => {
     initializing ??= plugin.initialize();
+    const pending = initializing;
+    // ⚠️ Armed per CALLER rather than once per initialisation, which is the
+    // cheap way round and the correct one: `schedule` returns a canceller, the
+    // `finally` below always runs, and two racing callers arming two timers on
+    // one promise both cancel them. Arming it where the promise is created
+    // instead would need its own bookkeeping to avoid leaking a timer when the
+    // initialisation settles normally — which is every initialisation but one.
+    const stopSharing = schedule(() => {
+      if (initializing === pending) {
+        // Not `initializing = undefined` unconditionally: a later caller may
+        // already have replaced it after a rejection, and clearing a *fresh*
+        // initialisation would cost a second platform call and, on Android, a
+        // second permission prompt.
+        initializing = undefined;
+      }
+    }, answerWindow);
     try {
-      await initializing;
+      await pending;
     } catch (error) {
-      initializing = undefined;
+      if (initializing === pending) {
+        initializing = undefined;
+      }
       // Mapped HERE rather than at each call site, so the permission reading
       // `availability()` has always done cannot be lost by a second caller
       // forgetting it — #230's third criterion.
       throw initializationError(error);
+    } finally {
+      stopSharing();
     }
   };
 

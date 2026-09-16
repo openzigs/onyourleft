@@ -105,12 +105,17 @@ function BrowserDevices({ capabilities }: { readonly capabilities: CapabilityPro
 /**
  * The Devices screen inside the Android shell — the plugin's answer (#284).
  *
- * The same three states as the browser half, and the third one deliberately:
- * `undefined` is "not known yet", which is a different thing from "cannot
- * pair". Reading `support?.canPair === true` here would tell a rider their
- * phone cannot pair sensors while the notice above still said "Checking", and
- * on Android the read is the one that raises the permission dialog, so that
- * window is as long as the rider takes to answer it.
+ * The browser half's three states, and the third one deliberately: `undefined`
+ * is "not known yet", which is a different thing from "cannot pair". Reading
+ * `support?.canPair === true` here would tell a rider their phone cannot pair
+ * sensors while the notice above still said "Checking", and on Android the read
+ * is the one that raises the permission dialog, so that window is as long as
+ * the rider takes to answer it.
+ *
+ * ⚠️ **Four since #322**, because `undefined` is no longer permanent: the read
+ * is bounded, so "not known yet" now has a successor that is still not a
+ * verdict. `unanswered` is that successor and it needs its own sentence for
+ * exactly the reason the `undefined` branch needed one.
  */
 function ShellDevices({ port }: { readonly port: ShellSupportPort }): JSX.Element {
   const { support, recheck } = useShellSupport(port);
@@ -123,6 +128,17 @@ function ShellDevices({ port }: { readonly port: ShellSupportPort }): JSX.Elemen
       <h2>Paired sensors</h2>
       {support === undefined ? (
         <p className="oyl-muted">Waiting for the check to finish.</p>
+      ) : support.kind === 'unanswered' ? (
+        // ⚠️ A fourth branch, and it is here because the third one would be an
+        // overclaim (#322). `canPair` is false for an unanswered check, so
+        // without this the screen would say "Sensors cannot be paired on this
+        // phone" — a verdict — on the strength of a question that got no reply.
+        // That is the same dishonesty the `undefined` branch above exists to
+        // avoid, one state further along.
+        <p className="oyl-muted">
+          The check did not finish, so there is nothing to list. This says nothing about the sensors
+          themselves.
+        </p>
       ) : support.canPair ? (
         <StatusMessage tone="info" label="Not listed here">
           Sensors are paired on the Ride screen, where the recording that needs them is. This page

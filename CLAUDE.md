@@ -119,7 +119,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         transport this build uses (§4h), and since #284 the
                         OTHER answer that question decides — the Devices
                         screen's read of the Android plugin's own availability,
-                        and the half of that wiring the #278 gate can see
+                        and the half of that wiring the #278 gate can see; and
+                        since #322 the bound on that read — the fifth thing the
+                        screen can say, which is the one the plugin cannot, why
+                        a late answer still wins, and why the deadline that
+                        matters is an event rather than a timer
     src/validation/     the recording BluetoothPort (#111) — the wrapper that turns
                         an afternoon with real hardware into committable evidence,
                         and the two things it deliberately does not write down
@@ -2555,6 +2559,11 @@ top of an issue **supersedes its body**.
 | How the client decides whether it is in a browser or the Android shell | `apps/web/src/support/capacitor.ts`, §4h |
 | Which Bluetooth question the Devices screen asks on each platform, and why a browser's answer is the wrong one inside the shell | `apps/web/src/support/shell-support-port.ts`, `apps/web/src/support/shell-support.ts` |
 | Which half of that wiring the #278 gate can see, and which half only a test covers | `apps/web/src/support/shell-support-port.ts` §"This is a `*-port.ts` on purpose", §4j |
+| What a rider is told when the plugin is asked and never answers, and why that is not one of the four things it can say | `apps/web/src/support/shell-support.ts` §`UNANSWERED_SHELL_SUPPORT`, `shell-support-port.ts` §`ShellSupportKind` |
+| Why the Devices screen's deadline is in the hook and not in the port | `apps/web/src/support/useShellSupport.ts` §"The bound, and why it is here rather than in the port" |
+| Why two deadlines in two packages have to expire in one order, and what asserts it | `apps/mobile/src/ble/transport.ts` §`INITIALIZE_ANSWER_WINDOW`, `apps/web/src/support/shell-support.test.ts` |
+| Why an unanswered `initialize()` stops being shared rather than being rejected | `apps/mobile/src/ble/transport.ts` §`INITIALIZE_ANSWER_WINDOW`, [#322](https://github.com/openzigs/onyourleft/issues/322) |
+| Which of the two causes the Android Devices-screen hang turned out to be | [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part G |
 | Why a rider with no heart rate strap is not told their strap has dropped | `apps/web/src/game/sensors.ts`, `apps/web/src/ride/metrics.ts` |
 | Which previous attempt a ghost races, and why it is the fastest rather than the latest | `apps/web/src/game/ghost-source.ts` §`fastestAttempt` |
 | Why a corridor point carries two distances, and which one a marker is placed by | `apps/web/src/game/terrain.ts` §`CorridorPoint.along`, `apps/web/src/game/scene.ts` §`nearestPoint` |

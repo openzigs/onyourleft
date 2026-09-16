@@ -16,13 +16,16 @@
  * is given, which is the one thing #284 was never in doubt about.
  */
 
+import { act } from 'react';
 import type { TransportAvailability } from '@onyourleft/sensors';
-import { mayShowDeviceList, permissionNotice } from '@onyourleft/mobile';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createCapacitorTransport, mayShowDeviceList, permissionNotice } from '@onyourleft/mobile';
+import { scriptedPort, type ScriptedPort, type ScriptedStack } from '@onyourleft/mobile/testing';
+import { unixSeconds } from '@onyourleft/domain';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { tabbableElements } from '../a11y/audit';
 import type { CapabilityProbe } from '../support/bluetooth-support';
-import { capacitorShellSupport } from '../support/shell-support';
+import { capacitorShellSupport, SHELL_ANSWER_TIMEOUT } from '../support/shell-support';
 import type { ShellSupportPort } from '../support/shell-support-port';
 import { mount, settle, type Mounted } from '../testing/mount';
 
@@ -207,5 +210,177 @@ describe('the browser branch is still reachable', () => {
     mounted = result;
     expect(result.container.textContent).toContain('Bluetooth is switched off');
     expect(result.container.textContent).toContain('This browser supports Bluetooth');
+  });
+});
+
+/**
+ * #322 — the plugin is asked and never answers.
+ *
+ * ⚠️ **Fake timers and the REAL constants, deliberately.** Every other file in
+ * this change injects a scheduler so a deadline can be fired by hand, which is
+ * the right shape for a unit and blind to the one thing that actually broke:
+ * two deadlines in two packages, `apps/mobile`'s `INITIALIZE_ANSWER_WINDOW` and
+ * `apps/web`'s `SHELL_ANSWER_TIMEOUT`, which have to expire in that order for
+ * the button this screen offers to reach the plugin at all. Nothing injects
+ * them here — `DevicesView` takes no scheduler and must not — so both run on
+ * the global clock and the ordering is observed rather than asserted from two
+ * numbers.
+ *
+ * The whole chain is real: `createCapacitorTransport` over `scriptedPort`, the
+ * real `capacitorShellSupport`, the real `permissionNotice`, the real hook.
+ * Only the plugin's silence is scripted, and it is the silence that was
+ * measured on the device.
+ */
+describe('the plugin is asked and never answers (#322)', () => {
+  /** The port `main.tsx` builds, over a plugin that receives and never replies. */
+  function overSilentPlugin(stack: ScriptedStack): {
+    readonly port: ShellSupportPort;
+    readonly plugin: ScriptedPort;
+  } {
+    const plugin = scriptedPort(stack);
+    const transport = createCapacitorTransport({
+      plugin,
+      profiles: [],
+      now: () => unixSeconds(0),
+    });
+    return {
+      plugin,
+      port: capacitorShellSupport({
+        availability: async () => transport.availability(),
+        notice: permissionNotice,
+        mayShowDeviceList,
+      }),
+    };
+  }
+
+  /** Let both packages' deadlines run, on one clock, in whatever order they fall. */
+  async function waitOutTheDeadline(): Promise<void> {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SHELL_ANSWER_TIMEOUT * 1000);
+    });
+  }
+
+  beforeEach(() => {
+    // `shouldAdvanceTime` keeps `settle()`'s own zero-length timer working,
+    // which is what lets the rest of this file's helpers be reused unchanged.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('stops saying "Checking" and says the phone has not answered', async () => {
+    // The defect, in one test. On the device this screen read "Checking: Asking
+    // this phone about Bluetooth" at 0 s, 5 s, 15 s, 30 s and 45 s.
+    const { port } = overSilentPlugin({ initializeNeverAnswers: true });
+    const result = await mount(<DevicesView capabilities={WEBVIEW} shell={port} />);
+    mounted = result;
+    expect(result.container.textContent).toContain('Asking this phone about Bluetooth');
+
+    await waitOutTheDeadline();
+
+    const text = result.container.textContent ?? '';
+    expect(text).toContain('This phone has not answered about Bluetooth');
+    expect(text).not.toContain('Asking this phone about Bluetooth');
+  });
+
+  it('does not report a silence as a refusal, or as a phone with no radio', async () => {
+    // #322's fourth criterion. `unsupported` is the screen with no retry on it
+    // and `not-permitted` sends a rider to a Settings page that will not help;
+    // being wrong in either direction here is worse than saying nothing.
+    const { port } = overSilentPlugin({ initializeNeverAnswers: true });
+    const result = await mount(<DevicesView capabilities={WEBVIEW} shell={port} />);
+    mounted = result;
+    await waitOutTheDeadline();
+
+    const text = result.container.textContent ?? '';
+    expect(text).toContain('Nothing has been refused');
+    expect(text).not.toContain('On Your Left needs Bluetooth permission');
+    expect(text).not.toContain('This device cannot use Bluetooth sensors');
+    expect(text).not.toContain('Bluetooth is switched off');
+  });
+
+  it('lists no sensors, and claims nothing about them either', async () => {
+    const { port } = overSilentPlugin({ initializeNeverAnswers: true });
+    const result = await mount(<DevicesView capabilities={WEBVIEW} shell={port} />);
+    mounted = result;
+    await waitOutTheDeadline();
+
+    expect(pairingControls(result.container)).toEqual([]);
+    // Not "Sensors cannot be paired on this phone" — that is a verdict, and no
+    // verdict was given.
+    expect(result.container.textContent).toContain('The check did not finish');
+    expect(result.container.textContent).not.toMatch(/cannot be paired on this phone/i);
+  });
+
+  it('offers a re-check that REACHES THE PLUGIN, rather than a dead promise', async () => {
+    // ⚠️ The half that needs both packages. `ensureInitialized` memoises the
+    // in-flight initialisation so two callers racing cost one platform call —
+    // and before #322 it kept memoising one that never settled, so this button
+    // attached the rider to the same dead promise every time they pressed it.
+    // A screen that said "check again" and could not was #48 criterion 1's
+    // silently non-functional control, reached from underneath.
+    const { port, plugin } = overSilentPlugin({ initializeNeverAnswers: true });
+    const result = await mount(<DevicesView capabilities={WEBVIEW} shell={port} />);
+    mounted = result;
+    await waitOutTheDeadline();
+    expect(plugin.calls.filter((call) => call === 'initialize')).toHaveLength(1);
+
+    const recheck = [...result.container.querySelectorAll('button')].find((button) =>
+      /check again/i.test(button.textContent ?? ''),
+    );
+    expect(recheck, 'no re-check offered for an unanswered check').toBeDefined();
+    await act(async () => {
+      recheck?.click();
+      await Promise.resolve();
+    });
+
+    expect(plugin.calls.filter((call) => call === 'initialize')).toHaveLength(2);
+  });
+
+  it('adopts the answer when the plugin finally speaks', async () => {
+    // A rider reading Android's permission dialog is not a hang, and the first
+    // `initialize()` is the call that raises it. The deadline can be short
+    // because being early costs nothing: the real answer replaces the message.
+    let silent = true;
+    const plugin = scriptedPort();
+    const transport = createCapacitorTransport({
+      plugin: {
+        ...plugin,
+        initialize: async (): Promise<void> => {
+          if (silent) {
+            return new Promise<void>(() => undefined);
+          }
+          return plugin.initialize();
+        },
+      },
+      profiles: [],
+      now: () => unixSeconds(0),
+    });
+    const port = capacitorShellSupport({
+      availability: async () => transport.availability(),
+      notice: permissionNotice,
+      mayShowDeviceList,
+    });
+
+    const result = await mount(<DevicesView capabilities={WEBVIEW} shell={port} />);
+    mounted = result;
+    await waitOutTheDeadline();
+    expect(result.container.textContent).toContain('This phone has not answered about Bluetooth');
+
+    silent = false;
+    const recheck = [...result.container.querySelectorAll('button')].find((button) =>
+      /check again/i.test(button.textContent ?? ''),
+    );
+    await act(async () => {
+      recheck?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(result.container.textContent).toContain('This phone can pair sensors');
   });
 });
