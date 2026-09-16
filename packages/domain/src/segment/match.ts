@@ -116,6 +116,35 @@ export const SIMILARITY_METRES = 25;
  * that includes a period nobody measured. #66's fourth criterion adds the other
  * half — the rider is *told*, via {@link SegmentMatch.abandoned}, rather than
  * left to wonder where their effort went.
+ *
+ * ## ⚠️ Raising this is bounded by stage 1, and the bound is a test (#304)
+ *
+ * This constant decides the coarsest interval the matcher calls *recording*,
+ * and it is therefore an input to a number in another file. Stage 2's endpoint
+ * gate widens by half the ride's median spacing, and stage 1's corridor —
+ * `cells.ts`'s `PREFILTER_MARGIN_METRES`, 100 m — must be at least as wide as that
+ * gate, or stage 1 rejects pairs stage 2 would have reported. That is the #291
+ * failure with a different trigger and it is silent: covers disjoint,
+ * `afterPrefilter: 0`, nothing downstream ever runs.
+ *
+ * **The decision is that the gate stops growing, not that the corridor does.**
+ * {@link endpointReachRadius} caps at
+ * `segment.ts`'s `MAXIMUM_ENDPOINT_REACH_METRES` — 100 m, which is the default endpoint
+ * radius plus half the spacing *this* constant produces at 30 km/h, rounded up
+ * — so the invariant holds for every segment and every ride rather than for the
+ * default configuration alone. The corridor was not widened instead because
+ * that margin is the amount stage 1 dilates by for **every**
+ * segment in the corpus, and `docs/spikes/0003-segment-prefilter-margin.md`
+ * measures what each metre of it costs stage 2.
+ *
+ * ⚠️ **What that costs, where somebody tuning this will read it.** A ride whose
+ * median spacing is above 170 m — this interval above 30.6 km/h, or a 10 s one
+ * above 61 km/h — has a gate that no longer scales with its own recording, so a
+ * traversal may yield no effort. Raising this constant enlarges that band
+ * rather than the gate, and past about 24 s at 30 km/h the ceiling stops
+ * covering even the default radius: `cells.test.ts` asserts that relationship
+ * against these constants, so the day it stops holding is a red test here
+ * rather than a silent false negative in the field.
  */
 export const GAP_SECONDS = 20;
 

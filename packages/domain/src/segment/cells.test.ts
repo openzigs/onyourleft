@@ -19,7 +19,14 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { degreesLatitude, degreesLongitude, geographicPosition } from '../quantities';
+import {
+  degreesBearing,
+  degreesLatitude,
+  degreesLongitude,
+  geographicPosition,
+  metres,
+  unixSeconds,
+} from '../quantities';
 
 import {
   CELL_DEGREES,
@@ -29,8 +36,13 @@ import {
   paddedCellCover,
   PREFILTER_MARGIN_METRES,
 } from './cells';
-import { SIMILARITY_METRES } from './match';
-import { DEFAULT_ENDPOINT_RADIUS_METRES } from './segment';
+import { GAP_SECONDS, SIMILARITY_METRES } from './match';
+import {
+  createSegment,
+  DEFAULT_ENDPOINT_RADIUS_METRES,
+  endpointReachRadius,
+  MAXIMUM_ENDPOINT_REACH_METRES,
+} from './segment';
 
 import type { GeographicPosition } from '../quantities';
 
@@ -120,6 +132,144 @@ describe('the cell grid, and the boundary it used to split', () => {
     expect(PREFILTER_MARGIN_METRES).toBeGreaterThan(
       DEFAULT_ENDPOINT_RADIUS_METRES + WIDEST_SAMPLE_SPACING_METRES / 2,
     );
+  });
+
+  it('pads far enough to cover the WIDEST gate stage 2 can apply, not only the default one', () => {
+    // #304. The assertion above is about the two tolerances at their defaults,
+    // which is the one configuration the problem is defined by not being: the
+    // endpoint radius is a per-segment field and the spacing term is a property
+    // of the recording, so neither is the default in general. This is the same
+    // relationship stated over the whole range instead — every gate
+    // `endpointReachRadius` can now return is at most this margin, so stage 1
+    // cannot reject a pair stage 2 would have reported, for ANY segment and ANY
+    // ride.
+    expect(PREFILTER_MARGIN_METRES).toBeGreaterThanOrEqual(MAXIMUM_ENDPOINT_REACH_METRES);
+  });
+
+  it('leaves the ceiling room for the coarsest recording the matcher calls recording', () => {
+    // #304's other direction, and the reason `MAXIMUM_ENDPOINT_REACH_METRES` is
+    // 100 rather than whatever the margin happens to be. A sample interval up
+    // to GAP_SECONDS is recording rather than a hole, so the ceiling has to
+    // cover the default radius plus half the spacing such an interval produces
+    // at the 30 km/h this package derives its other segment constants at. That
+    // makes GAP_SECONDS an input to this file: raising it past the point where
+    // the ceiling stops covering it is a red test here, which is where somebody
+    // tuning it finds out.
+    const referenceSpeedMetresPerSecond = 30_000 / 3600;
+    expect(MAXIMUM_ENDPOINT_REACH_METRES).toBeGreaterThanOrEqual(
+      DEFAULT_ENDPOINT_RADIUS_METRES + (GAP_SECONDS * referenceSpeedMetresPerSecond) / 2,
+    );
+  });
+});
+
+describe('the widest gate stage 2 can now reach, against stage 1 (#304)', () => {
+  /**
+   * The widest reach the pipeline can produce, taken from the function that
+   * produces it rather than written down: the widest radius `createSegment`
+   * will build, against a ride sampled far more sparsely than any recorder
+   * makes.
+   *
+   * ⚠️ **Derived on purpose.** Every probe below is placed at this distance, so
+   * raising the ceiling — or deleting the cap inside `endpointReachRadius` —
+   * moves the probes rather than leaving them where the fix put them.
+   */
+  const WIDEST_REACH = endpointReachRadius(
+    {
+      position: at(51.5, -0.12),
+      bearing: degreesBearing(0),
+      radius: metres(MAXIMUM_ENDPOINT_REACH_METRES),
+    },
+    metres(40_000),
+  );
+
+  /**
+   * How far past the margin a cell line is placed: **one metre**.
+   *
+   * The cells are 1.1 km and the margin is 100 m, so a probe only leaves the
+   * padded cover when a cell line falls between the margin and the probe. This
+   * band is what puts one there. A mutation smaller than the band — a ceiling
+   * of 101 — slips through this case and is caught by the constants assertion
+   * above instead; the two are complementary and neither is the other's
+   * superset.
+   */
+  const BAND_METRES = 1;
+
+  /** A degree of longitude at 51.5°, in metres. */
+  const METRES_PER_DEGREE_LONGITUDE = METRES_PER_DEGREE_LATITUDE * Math.cos((51.5 * Math.PI) / 180);
+
+  /**
+   * A segment whose start sits `PREFILTER_MARGIN_METRES + BAND_METRES` north of
+   * a row line and the same distance east of a column line, built at the widest
+   * endpoint radius `createSegment` admits, running due north away from both.
+   */
+  function segmentAboveTheLines(): ReturnType<typeof createSegment> {
+    const latitude = 51.5 + (PREFILTER_MARGIN_METRES + BAND_METRES) / METRES_PER_DEGREE_LATITUDE;
+    const longitude = -0.12 + (PREFILTER_MARGIN_METRES + BAND_METRES) / METRES_PER_DEGREE_LONGITUDE;
+    return createSegment({
+      id: 'segment-widest',
+      createdBy: 'athlete-a',
+      name: 'The long drag',
+      sport: 'ride',
+      geometry: Array.from({ length: 26 }, (_unused, index) =>
+        at(latitude + (index * 20) / METRES_PER_DEGREE_LATITUDE, longitude),
+      ),
+      elevationSource: 'none',
+      visibility: 'private',
+      createdAt: unixSeconds(1_760_000_000),
+      endpointRadiusMetres: MAXIMUM_ENDPOINT_REACH_METRES,
+    });
+  }
+
+  it('admits a ride sample at the widest reach south of the start endpoint', () => {
+    // The #304 case, constructed: a segment at the widest radius the model
+    // admits, and a ride sample as far from its start endpoint as stage 2 can
+    // now reach. Stage 2 would consider that sample, so stage 1 must hand it
+    // over — and a row line one metre past the margin is what makes this a real
+    // question rather than an artefact of a 1.1 km cell.
+    const segment = segmentAboveTheLines();
+    const corpus = paddedCellCover(segment.geometry);
+    const atTheReach = at(
+      segment.start.position.latitude - WIDEST_REACH / METRES_PER_DEGREE_LATITUDE,
+      segment.start.position.longitude,
+    );
+
+    expect(coversIntersect(cellCover([atTheReach]), corpus)).toBe(true);
+  });
+
+  it('admits a ride sample at the widest reach west of the start endpoint', () => {
+    // The same case on the other axis, because the two are separate arithmetic
+    // — `marginDegreesLongitude` divides by a cosine and the latitude margin
+    // does not, so a test of one says nothing about the other.
+    const segment = segmentAboveTheLines();
+    const corpus = paddedCellCover(segment.geometry);
+    const atTheReach = at(
+      segment.start.position.latitude,
+      segment.start.position.longitude - WIDEST_REACH / METRES_PER_DEGREE_LONGITUDE,
+    );
+
+    expect(coversIntersect(cellCover([atTheReach]), corpus)).toBe(true);
+  });
+
+  it('stops just past the margin, which is what makes the two cases above cases', () => {
+    // The control. Without it a cover that reached a kilometre in every
+    // direction — or a probe placed nowhere near a line — would satisfy both
+    // assertions above while saying nothing, which is the shape this file's own
+    // header warns about. Two metres past the margin is over the line and out.
+    const segment = segmentAboveTheLines();
+    const corpus = paddedCellCover(segment.geometry);
+    const pastTheMargin = at(
+      segment.start.position.latitude -
+        (PREFILTER_MARGIN_METRES + 2 * BAND_METRES) / METRES_PER_DEGREE_LATITUDE,
+      segment.start.position.longitude,
+    );
+    const pastTheMarginWest = at(
+      segment.start.position.latitude,
+      segment.start.position.longitude -
+        (PREFILTER_MARGIN_METRES + 2 * BAND_METRES) / METRES_PER_DEGREE_LONGITUDE,
+    );
+
+    expect(coversIntersect(cellCover([pastTheMargin]), corpus)).toBe(false);
+    expect(coversIntersect(cellCover([pastTheMarginWest]), corpus)).toBe(false);
   });
 });
 

@@ -2347,6 +2347,7 @@ top of an issue **supersedes its body**.
 | Why a second press of the sweep control joins the running sweep instead of starting another, and why the handle is per athlete | `apps/web/src/segments/sweep.ts` §`inFlight`, `apps/web/src/views/SegmentsView.tsx` §`runSweep` |
 | Why a sweep refuses outright when there are more segments than it can carry | `apps/web/src/segments/sweep.ts` §`SWEEP_CORPUS_LIMIT` |
 | Why the prefilter reaches 100 m outside a segment, and why that is not a one-cell halo | `packages/domain/src/segment/cells.ts` §`PREFILTER_MARGIN_METRES`, §`paddedCellCover`, [spike 0003](docs/spikes/0003-segment-prefilter-margin.md) |
+| What stops a widened endpoint radius or a sparse ride outrunning that margin, and what a ride coarser than the ceiling loses | `packages/domain/src/segment/segment.ts` §`MAXIMUM_ENDPOINT_REACH_METRES`, `packages/domain/src/segment/match.ts` §`GAP_SECONDS` |
 | What a test fixture at latitude 51.5, longitude -0.12 used to break, and what fixed it | `packages/domain/src/segment/cells.test.ts`, `apps/web/src/segments/sweep.store.test.ts` §`ORIGIN_LONGITUDE` |
 | Where a device's capability set comes from, and what happens when a device contradicts itself | [`packages/sensors/README.md`](packages/sensors/README.md) §"What a device says it can do", `packages/sensors/web-bluetooth/src/transport.ts` §`declaredBy`, §`noteUndeclared` |
 | What a segment matcher may not do, and the prior art the design-around cites | [ADR 0007](docs/adr/0007-patent-posture.md) D-2 and D-6, `docs/spikes/0001-segment-matching.md` §7 |

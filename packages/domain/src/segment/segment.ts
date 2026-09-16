@@ -152,7 +152,10 @@ export interface SegmentEndpoint {
    *
    * Per endpoint rather than global, because the right value is a property of
    * the road: a segment ending at a roundabout needs more slack than one on a
-   * straight. {@link DEFAULT_ENDPOINT_RADIUS_METRES} is what creation proposes.
+   * straight. {@link DEFAULT_ENDPOINT_RADIUS_METRES} is what creation proposes,
+   * and {@link MAXIMUM_ENDPOINT_REACH_METRES} is the most any of it is ever
+   * used at — see {@link endpointReachRadius}, which bounds this field as well
+   * as the spacing term, because nothing stops a stored row carrying more.
    */
   readonly radius: Metres;
 }
@@ -174,6 +177,65 @@ export interface SegmentEndpoint {
  * here and this is our tunable, exactly as #64 says of the minimum length.
  */
 export const DEFAULT_ENDPOINT_RADIUS_METRES = 15;
+
+/**
+ * The widest an endpoint gate may ever be: **100 metres**.
+ *
+ * ## What it is for, which is not this file
+ *
+ * Stage 1 of the matcher — `cells.ts` — exists to reject pairs cheaply, and it
+ * states the rule that makes it safe to do so: *the prefilter must not reject a
+ * pair a later stage could still report*. That rule is a claim about the widest
+ * gate any later stage applies, and stage 2's gate is that gate:
+ * {@link endpointReachRadius}, the endpoint's own radius plus half the ride's
+ * median sample spacing.
+ *
+ * ⚠️ **Neither input to it was bounded, and #304 is that.** `createSegment`
+ * accepted any finite non-negative `endpointRadiusMetres`, and the spacing is a
+ * property of the *recording* rather than of the segment, so no check made at
+ * creation time reaches it. A segment with a 250 m radius, or a ride sampled
+ * every 20 s at 50 km/h — inside `GAP_SECONDS`, so the matcher reads it as
+ * recording rather than as a hole, and about 278 m between samples — produced a
+ * gate wider than the 100 m corridor stage 1 admits. Stage 1 then rejected
+ * pairs stage 2 would have reported, with the failure shape #291 had: covers
+ * disjoint, `afterPrefilter: 0`, nothing downstream ever runs, no error and no
+ * log line.
+ *
+ * ## The derivation, which is this file's own and not the margin's
+ *
+ * A gate is `radius + spacing / 2`, so a ceiling on it is a statement about the
+ * coarsest recording worth paying for. `GAP_SECONDS` (20 s, in `match.ts`) is
+ * the longest interval the matcher treats as recording rather than as a hole;
+ * at the 30 km/h this package derives {@link MINIMUM_SEGMENT_LENGTH_METRES} and
+ * {@link DEFAULT_ENDPOINT_RADIUS_METRES}'s reasoning at, that is 167 m between
+ * samples, so half a spacing is 83 m. With the default radius that is 98 m,
+ * and 100 m is that rounded up.
+ *
+ * ⚠️ **It equals `PREFILTER_MARGIN_METRES` and is deliberately not an import of
+ * it.** `cells.ts` says swapping the cell index later is "a change to this file
+ * and to nothing else", which an import from here would make false — the model
+ * would then carry stage 1's tunable. So the two numbers are derived
+ * independently and `cells.test.ts` asserts the relationship between them,
+ * which is the shape that file already uses for `SIMILARITY_METRES`. Tuning
+ * either past the other is a red test rather than a silent reintroduction of
+ * the bug, and so is raising `GAP_SECONDS` past what this clears.
+ *
+ * ## What falls outside, stated rather than fixed
+ *
+ * A ride whose median spacing exceeds `2 × (ceiling − radius)` — 170 m at the
+ * default radius, which is a 20 s interval above 30.6 km/h or a 10 s one above
+ * 61 km/h — gets a gate that has **stopped growing with the recording**. Its
+ * nearest sample to an endpoint may be further away than the gate, and the
+ * traversal then yields no effort at all. That is the spike's first finding
+ * returning at a spacing an order of magnitude coarser than the one it was
+ * measured at, and it is accepted here for the reason
+ * {@link nearestEndpointSample} accepts its own cost: the alternative is a
+ * stage 2 that asks for ground stage 1 never handed it, which fails in exactly
+ * the same way and says nothing at all. `match.ts`'s `GAP_SECONDS` carries the
+ * other half of this note, because that is the constant somebody tuning the
+ * coarsest admissible recording is reading.
+ */
+export const MAXIMUM_ENDPOINT_REACH_METRES = 100;
 
 /**
  * The default direction-agreement tolerance: **60 degrees**.
@@ -471,6 +533,23 @@ export function endpointReached(
  * 15 + 4.2 ≈ 19 m and a 10 s ride at 15 + 41.7 ≈ 57 m, and the difference is a
  * property of the two recordings rather than a knob anyone chose.
  *
+ * ## ⚠️ The ceiling, and why it is applied here rather than only at creation
+ *
+ * The widening stops at {@link MAXIMUM_ENDPOINT_REACH_METRES}, so this function
+ * can never return a gate wider than the corridor stage 1 admitted (#304). Read
+ * that constant for the derivation and for what a ride coarser than the ceiling
+ * loses.
+ *
+ * ⚠️ **It is applied to `endpoint.radius` too, not only to the spacing term.**
+ * `createSegment` refuses a draft asking for a radius above the ceiling, but a
+ * {@link SegmentEndpoint} does not have to come from a draft:
+ * `packages/store`'s `fromPersistedSegment` rebuilds one straight from a stored
+ * number and never calls `createSegment`, so a hand-edited row — or a segment
+ * import written later — reaches this function having passed no check at all.
+ * Bounding it where it is *used* is one rule instead of two that can drift,
+ * which is the reasoning `validateWorkout` bounds an expansion by rather than
+ * the decoder doing it.
+ *
  * ⚠️ **This would have been unsafe before the trimming below existed.** The
  * spike's second finding was that widening the radius *raised* the Fréchet
  * distance of a perfect traversal, because the span opened at the first sample
@@ -485,7 +564,7 @@ export function endpointReachRadius(endpoint: SegmentEndpoint, spacingMetres: nu
   if (!Number.isFinite(spacingMetres) || spacingMetres < 0) {
     throw new UnitError('sample spacing must be a non-negative, finite number of metres');
   }
-  return metres(endpoint.radius + spacingMetres / 2);
+  return metres(Math.min(endpoint.radius + spacingMetres / 2, MAXIMUM_ENDPOINT_REACH_METRES));
 }
 
 /**
@@ -652,7 +731,12 @@ export interface SegmentDraft {
   readonly elevationResolutionMetres?: number;
   readonly visibility: SegmentVisibility;
   readonly createdAt: UnixSeconds;
-  /** Overrides {@link DEFAULT_ENDPOINT_RADIUS_METRES} when the road needs it. */
+  /**
+   * Overrides {@link DEFAULT_ENDPOINT_RADIUS_METRES} when the road needs it.
+   *
+   * Bounded above by {@link MAXIMUM_ENDPOINT_REACH_METRES}, and a draft asking
+   * for more is refused rather than capped (#304).
+   */
   readonly endpointRadiusMetres?: number;
   /** Overrides {@link DEFAULT_BEARING_TOLERANCE_DEGREES}. */
   readonly bearingToleranceDegrees?: number;
@@ -669,8 +753,15 @@ export interface SegmentDraft {
  *
  * @throws {UnitError} naming the constraint, for a geometry too short to be a
  * segment, one with fewer than {@link MINIMUM_SEGMENT_POSITIONS} positions, one
- * whose positions are all identical, or an altitude array that does not match
- * the geometry.
+ * whose positions are all identical, an altitude array that does not match the
+ * geometry, or an `endpointRadiusMetres` above
+ * {@link MAXIMUM_ENDPOINT_REACH_METRES}.
+ *
+ * ⚠️ **The radius is refused rather than quietly capped** (#304). An author who
+ * asks for 250 m and is handed a segment gated at 100 m has been told nothing,
+ * and the segment they get is not the one they described — and the field is
+ * documented as *"overrides the default when the road needs it"*, which is a
+ * promise a silent cap breaks.
  *
  * ⚠️ **None of those messages names a coordinate value**, per ADR 0004
  * decision D: a message about a coordinate names the field and the constraint
@@ -720,6 +811,15 @@ export function createSegment(draft: SegmentDraft): Segment {
     throw new UnitError('a segment needs a first and a last position');
   }
 
+  if (
+    draft.endpointRadiusMetres !== undefined &&
+    draft.endpointRadiusMetres > MAXIMUM_ENDPOINT_REACH_METRES
+  ) {
+    throw new UnitError(
+      `an endpoint radius may be at most ${String(MAXIMUM_ENDPOINT_REACH_METRES)} m, and this ` +
+        `draft asks for ${String(draft.endpointRadiusMetres)} m`,
+    );
+  }
   const radius = metres(draft.endpointRadiusMetres ?? DEFAULT_ENDPOINT_RADIUS_METRES);
   const elevation = elevationOf(geometry, altitudes, distance);
 

@@ -274,6 +274,13 @@ export function segmentDecision(input: SegmentDecisionInput): SegmentDecision {
     // a geometry with no direction of travel — every position identical, which
     // has a non-zero path length only when the positions differ. Anything else
     // is a bug here rather than a rider's mistake, so it is rethrown.
+    //
+    // ⚠️ #304 gave `createSegment` a second refusal — an `endpointRadiusMetres`
+    // above `MAXIMUM_ENDPOINT_REACH_METRES` — and it is unreachable from here
+    // because this caller supplies no radius at all. The day a screen lets a
+    // rider widen one, that refusal needs its own `SEGMENT_NOTE` rather than
+    // arriving as "no direction of travel".
+
     if (error instanceof UnitError) {
       return refused('noDirection');
     }
