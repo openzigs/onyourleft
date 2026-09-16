@@ -73,6 +73,7 @@ import {
 } from '@onyourleft/physics';
 import {
   gradeAt,
+  headwindOnRoute,
   metres,
   metresPerSecond,
   seconds,
@@ -83,6 +84,7 @@ import {
   type RouteProfile,
   type Seconds,
   type Watts,
+  type Wind,
 } from '@onyourleft/domain';
 
 /**
@@ -224,6 +226,35 @@ export interface SimulationSetup {
    * `sceneFrame` places no marker and the HUD's gap field shows a dash.
    */
   readonly pacer?: BotPacerPlan | undefined;
+  /**
+   * The air the ride happens in, if the rider set one — #326.
+   *
+   * ⚠️ **A wind vector, not a headwind**, and the difference is the whole of
+   * why this field exists rather than a number on {@link RideConditions}.
+   * `RideConditions.headwindMetresPerSecond` is *"everything about the ride
+   * that does not change from tick to tick"* — and a headwind is not that: it
+   * is the wind resolved against the direction the rider is pointing, and the
+   * rider turns. A route with a single bend has a headwind on one leg and a
+   * tailwind on the other from one unchanging wind, which is exactly what a
+   * rider recognises from outdoors. So the *vector* is what does not change,
+   * and the headwind is derived per step by {@link GameSimulation.advanceTo}.
+   *
+   * Absent means still air, which is what every ride in this program had
+   * before #326: the conditions are then passed to `advance` byte for byte as
+   * they arrive, so nothing about a windless ride's trajectory moves.
+   *
+   * ⚠️ **This does NOT reach the trainer, and that is deliberate.** FTMS's
+   * Set Indoor Bike Simulation Parameters carries a wind speed of its own —
+   * `packages/sensors/protocol/src/fitness-machine-control.ts` §`windSpeed` —
+   * and sending one would change the physical resistance applied to somebody
+   * who is pedalling, which CLAUDE.md §6 makes a safety question rather than a
+   * feature. #326 asks for a wind in the *model*; it asks for nothing about
+   * the brake. Two further things would have to be settled first: the field is
+   * a `MetresPerSecond` and so cannot carry a tailwind at all, and a trainer
+   * given both a gradient and a wind applies its own drag model on top of the
+   * one this simulation has already applied.
+   */
+  readonly wind?: Wind | undefined;
 }
 
 /** What one call to {@link GameSimulation.advanceTo} did. */
@@ -522,7 +553,11 @@ export class GameSimulation {
           grade,
           duration: seconds(SIMULATION_STEP_SECONDS),
         },
-        this.#setup.conditions,
+        // ⚠️ **Re-resolved per step, for the reason the grade above is.** The
+        // wind is fixed; the rider's heading is not, so the *headwind* changes
+        // every time the road bends. Holding one headwind for a whole ride
+        // would give a rider a tailwind all the way out and all the way back.
+        this.#conditionsAt(ride.distance),
       );
       if (course !== undefined && bot !== undefined) {
         // ⚠️ **In the same loop as the rider, at the same step, and through
@@ -533,7 +568,21 @@ export class GameSimulation {
         // rider go through the same tick" a fact about the call graph, which is
         // what `packages/physics/src/pacer.ts` exists for and what a second
         // integrator here would quietly make false.
-        bot = advanceBot(bot.state, seconds(SIMULATION_STEP_SECONDS), course);
+        //
+        // ⚠️ **The bot rides the SAME WIND as the rider, resolved at the bot's
+        // own heading** — #326's fourth criterion, which asks for this to be
+        // decided rather than left to happen. One wind vector reaches both, so
+        // a pacer can never be sheltered from a headwind the rider is fighting;
+        // and each resolves it where it actually is, so on a bend the one
+        // already round the corner feels what that corner does, which is what
+        // riding beside somebody outdoors is like. Handing the bot the rider's
+        // *headwind* instead would be the cheaper code and a different race: it
+        // would put the bot in air that depends on where the rider is.
+        bot = advanceBot(
+          bot.state,
+          seconds(SIMULATION_STEP_SECONDS),
+          this.#courseAt(course, bot.state.distance),
+        );
       }
     }
 
@@ -561,6 +610,42 @@ export class GameSimulation {
       ...(bot === undefined ? {} : { bot }),
     };
     return { steps: toRun, skippedSeconds: skippedSteps * SIMULATION_STEP_SECONDS };
+  }
+
+  /**
+   * The rider's conditions at one point on the route — #326.
+   *
+   * Everything in {@link SimulationSetup.conditions}, with the headwind
+   * replaced by the wind resolved against the heading at `distance`.
+   *
+   * ⚠️ **The object identity is preserved when there is no wind**, and that is
+   * load-bearing rather than a micro-optimisation: a windless ride must be
+   * *exactly* the ride it was before this change, down to the last bit of the
+   * odometer, and `simulation.test.ts`'s determinism cases are written against
+   * that. Returning a fresh spread would still be correct; returning the same
+   * object is what makes "nothing moved" obvious.
+   */
+  #conditionsAt(distance: number): RideConditions {
+    const wind = this.#setup.wind;
+    if (wind === undefined) {
+      return this.#setup.conditions;
+    }
+    return {
+      ...this.#setup.conditions,
+      headwindMetresPerSecond: headwindOnRoute(this.#setup.profile, distance, wind),
+    };
+  }
+
+  /** The bot's course at one point on the route. @see #conditionsAt */
+  #courseAt(course: BotCourse, distance: number): BotCourse {
+    const wind = this.#setup.wind;
+    if (wind === undefined) {
+      return course;
+    }
+    return {
+      ...course,
+      headwindMetresPerSecond: headwindOnRoute(course.profile, distance, wind),
+    };
   }
 }
 
@@ -590,6 +675,11 @@ function gradeAtDistance(profile: RouteProfile, distance: Metres): GradePercent 
  * environmental half — air density, headwind, coefficients, integration step —
  * is shared on purpose: the bot and the rider are on the same road in the same
  * air, and it is only the mass and the power that are the bot's own.
+ *
+ * ⚠️ The headwind copied here is a **constant** one, from
+ * {@link RideConditions}. When {@link SimulationSetup.wind} is set,
+ * {@link GameSimulation.advanceTo} overrides it every step with the wind
+ * resolved at the bot's own heading — this course is the base it overrides.
  */
 function botCourseFor(setup: SimulationSetup): BotCourse | undefined {
   if (setup.pacer === undefined) {

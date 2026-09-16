@@ -230,6 +230,17 @@ apps/                 AGPL-3.0-or-later, without exception
                         coincidence. The bicycle is added
                         here and nowhere else, and the air is still a
                         placeholder: there is no altitude in the store at all
+                        yet. ⚠️ It carries NO headwind and must not: since
+                        #326 the wind is a vector on `SimulationSetup`, resolved
+                        per step, because a headwind is not "everything about
+                        the ride that does not change from tick to tick" — the
+                        rider turns
+    src/game/wind-choice.ts
+                        the rider's wind, typed in and turned into a `Wind` or
+                        into a refusal (#326) — and the answer to that issue's
+                        fifth criterion, which is that the source is
+                        **rider-entered**. Anything external is #248 and is not
+                        attempted here
     src/game/hud/       the ride HUD (#94) — the eight fields, the dropped
                         sensor that is not a zero, and the wake lock; and since
                         #285 the route in plan with the rider on it — north-up,
@@ -282,7 +293,13 @@ packages/             Apache-2.0, without exception
     recording/          the recording session state machine and stream merge (#45)
     route/              the route profile (#89) — elevation and gradient as a
                         function of distance, the three windows it is built
-                        from, and the loop wrap
+                        from, and the loop wrap; and since #326 `wind.ts` — the
+                        heading at a distance and the wind resolved against it,
+                        which is the ONE place a wind vector becomes a headwind.
+                        Here because `packages/physics` says that resolution
+                        "needs a course and a compass and this package has
+                        neither", and because the rider and the bot pacer must
+                        read one implementation of it
     routing/            the engine-agnostic routing interface (#70) — the
                         named product options a rider chooses, and the one
                         place an engine's numbers are checked before anything
@@ -2593,6 +2610,12 @@ top of an issue **supersedes its body**.
 | Why a rider racing both a pacer and their own best sees two gaps rather than one | `apps/web/src/game/GameView.tsx` §`chasedGaps`, `apps/web/src/game/hud/fields.ts` §`gapReadings` |
 | Where the bot pacer is advanced, and why it is the simulation's loop rather than the render loop | `apps/web/src/game/simulation.ts` §`botCourseFor`, [#237](https://github.com/openzigs/onyourleft/issues/237) |
 | What a rider is told when the pacer intensity they typed cannot make a plan | `apps/web/src/game/pacer-choice.ts` §`pacerChoice` |
+| Where a ride's wind comes from, and why it is not a weather service | `apps/web/src/game/wind-choice.ts`, [#248](https://github.com/openzigs/onyourleft/issues/248) |
+| Why a wind is a vector on the simulation rather than a headwind on the conditions | `apps/web/src/game/simulation.ts` §`SimulationSetup.wind`, §`#conditionsAt` |
+| Whether the bot pacer rides the rider's wind, and at whose heading | `apps/web/src/game/simulation.ts` §`#courseAt`, `apps/web/src/game/wind.test.ts` |
+| Which way the road points at a distance along it, and when it has no answer | `packages/domain/src/route/profile.ts` §`headingOnRoute` |
+| Which way a wind bearing is measured, and what makes a tailwind negative | `packages/domain/src/route/wind.ts` §`tangentialWindMetresPerSecond` |
+| Why a rider can type a speed at all, and where the conversion inwards lives | `apps/web/src/units/format.ts` §`speedFrom`, `packages/domain/src/speed.ts` §`milesPerHourToMetresPerSecond` |
 | Why a ghost's distance is integrated from speed, and what a long dropout does to it | `apps/web/src/game/ghost-source.ts` §`GHOST_GAP_TOLERANCE_SECONDS` |
 | Why the result of racing your own best is latched, and what re-deriving it would tell a slower rider | `apps/web/src/game/ghost-outcome.ts` |
 | Which stall this gets wrong, and why a paused ride is one as readily as a backgrounded phone | `apps/web/src/game/ghost-outcome.ts` §"What it still cannot get right", `apps/web/src/game/simulation.ts` §`MAXIMUM_STEPS_PER_ADVANCE` |

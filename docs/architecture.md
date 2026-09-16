@@ -127,7 +127,11 @@ packages/             Apache-2.0, without exception
                         them
     route/              the route profile (#89): elevation and gradient as a
                         function of distance, the three windows it is built
-                        from, and the loop wrap
+                        from, and the loop wrap; and since #326 the heading at
+                        a distance and the wind resolved against it — the one
+                        place a wind vector becomes a headwind, here because
+                        `packages/physics` says that resolution needs a course
+                        and a compass and it has neither
     trainer/            the gradient setpoint driver (#90): the grade at the
                         rider's position, and whether it is worth a write
     pacer/              the bot pacer's pacing rule and its gap (#92): a target

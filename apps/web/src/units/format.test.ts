@@ -32,6 +32,7 @@ import {
   measurementText,
   smallDistanceIn,
   smallDistanceUnit,
+  speedFrom,
   speedIn,
   speedUnit,
 } from './format';
@@ -230,5 +231,29 @@ describe('formatMass (#325, the tier ADR 0020 D-1 reserved and did not ship)', (
     // the assertion and the line below is the consequence it prevents.
     // @ts-expect-error a raw number is not a Kilograms.
     expect(formatMass(154, 'metric')).toEqual({ value: '154.0', unit: 'kg' });
+  });
+});
+
+describe('speedFrom — the conversion that goes inwards (#326)', () => {
+  it('undoes speedIn, in both systems', () => {
+    // The property, rather than a second table of numbers: whatever a rider is
+    // shown, typing it back must be the speed they were shown it for.
+    for (const units of ['metric', 'imperial'] as const) {
+      for (const speed of [0, 4.5, 12.7]) {
+        expect(speedFrom(speedIn(metresPerSecond(speed), units), units)).toBeCloseTo(speed, 9);
+      }
+    }
+  });
+
+  it('reads the same digits differently in the two systems', () => {
+    // A `speedFrom` that ignored its second argument would be the silent
+    // half-conversion #238 exists to stop, arriving from the input side.
+    expect(speedFrom(36, 'metric')).toBeCloseTo(10, 9);
+    expect(speedFrom(36, 'imperial')).not.toBeCloseTo(10, 3);
+  });
+
+  it('refuses a speed that is not one, because the argument came off a keyboard', () => {
+    expect(() => speedFrom(-1, 'metric')).toThrow(UnitError);
+    expect(() => speedFrom(Number.NaN, 'imperial')).toThrow(UnitError);
   });
 });

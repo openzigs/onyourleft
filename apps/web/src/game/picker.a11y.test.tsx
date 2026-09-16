@@ -100,17 +100,20 @@ describe('the route picker', () => {
     expect(violations, formatViolations(violations)).toEqual([]);
   });
 
-  it('names every one of its controls, the pacer ones included', async () => {
+  it('names every one of its controls, the pacer and wind ones included', async () => {
     mounted = await mountPicker();
 
-    // The pacer checkbox and the intensity box are both present — if either
-    // disappeared the rule above would have nothing to audit and would pass.
-    expect(queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')).toHaveLength(1);
-    expect(
-      queryAll<HTMLInputElement>(mounted.container, 'input[type="checkbox"]').filter((input) =>
-        (input.closest('label')?.textContent ?? '').includes('pacer'),
-      ),
-    ).toHaveLength(1);
+    // Every control the rule above audits is present — if one disappeared the
+    // rule would have nothing to audit and would pass. Three number boxes: the
+    // pacer's intensity, and #326's wind speed and direction.
+    expect(queryAll<HTMLInputElement>(mounted.container, 'input[type="number"]')).toHaveLength(3);
+    for (const words of ['pacer', 'wind']) {
+      expect(
+        queryAll<HTMLInputElement>(mounted.container, 'input[type="checkbox"]').filter((input) =>
+          (input.closest('label')?.textContent ?? '').includes(words),
+        ),
+      ).toHaveLength(1);
+    }
   });
 
   it('puts every control in the tab order, so none of them needs a pointer', async () => {
@@ -236,6 +239,91 @@ describe('the pacer refusal reaches the rider it stops (#255)', () => {
 
   it('audits clean while refusing, which is a different tree', async () => {
     mounted = await refused();
+
+    const violations = auditAccessibility(document);
+    expect(violations, formatViolations(violations)).toEqual([]);
+  });
+});
+
+describe('the wind refusal reaches the rider it stops (#326)', () => {
+  /**
+   * Puts the picker into the state an empty wind-speed box produces: a wind
+   * asked for, and no number to make one from.
+   *
+   * Driven through the controls for `refused`'s reason — the association being
+   * asserted is between elements that appear and disappear together, and the
+   * failure mode is a dangling `aria-describedby`.
+   */
+  async function windRefused(): Promise<Mounted> {
+    const tree = await mountPicker();
+    const box = queryAll<HTMLInputElement>(tree.container, 'input[type="checkbox"]').find((input) =>
+      (input.closest('label')?.textContent ?? '').includes('wind'),
+    );
+    expect(box).toBeDefined();
+    await activateWithKeyboard(box as HTMLInputElement);
+    await settle();
+    return tree;
+  }
+
+  /** A number box, found by the words beside it rather than by its position. */
+  function boxLabelled(root: ParentNode, words: string): HTMLInputElement | undefined {
+    return queryAll<HTMLInputElement>(root, 'input[type="number"]').find((input) =>
+      (input.closest('label')?.textContent ?? '').includes(words),
+    );
+  }
+
+  it('marks BOTH wind boxes invalid and describes them with the reason', async () => {
+    mounted = await windRefused();
+
+    for (const words of ['Wind speed', 'Wind direction']) {
+      const box = boxLabelled(mounted.container, words);
+      expect(box, words).toBeDefined();
+      expect(box?.getAttribute('aria-invalid')).toBe('true');
+      const id = box?.getAttribute('aria-describedby') ?? '';
+      expect(document.getElementById(id)?.textContent ?? '').toMatch(/wind speed/);
+    }
+  });
+
+  it('says nothing about validity while the rider has not asked for a wind', async () => {
+    mounted = await mountPicker();
+
+    const box = boxLabelled(mounted.container, 'Wind speed');
+    expect(box?.getAttribute('aria-invalid')).toBeNull();
+    expect(box?.getAttribute('aria-describedby')).toBeNull();
+  });
+
+  it('blocks every ride control and tells it why, without taking its tab stop', async () => {
+    mounted = await windRefused();
+
+    const reachable = tabbableElements(document);
+    const buttons = queryAll<HTMLButtonElement>(mounted.container, 'button').filter((button) =>
+      (button.textContent ?? '').startsWith('Ride '),
+    );
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const button of buttons) {
+      expect(button.getAttribute('aria-disabled')).toBe('true');
+      expect(reachable).toContain(button);
+      const ids = (button.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean);
+      expect(ids).toHaveLength(1);
+      expect(document.getElementById(ids[0] ?? '')?.textContent ?? '').toMatch(/wind speed/);
+    }
+  });
+
+  it('still refuses to start the ride when the blocked control is activated', async () => {
+    mounted = await windRefused();
+
+    const button = queryAll<HTMLButtonElement>(mounted.container, 'button').find((candidate) =>
+      (candidate.textContent ?? '').startsWith('Ride '),
+    );
+    expect(button).toBeDefined();
+    await activateWithKeyboard(button as HTMLButtonElement);
+
+    // Still on the picker: the ride screen has a canvas and this does not.
+    expect(mounted.container.querySelector('canvas')).toBeNull();
+  });
+
+  it('audits clean while refusing, which is a different tree again', async () => {
+    mounted = await windRefused();
 
     const violations = auditAccessibility(document);
     expect(violations, formatViolations(violations)).toEqual([]);

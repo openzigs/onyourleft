@@ -86,10 +86,14 @@
 
 import {
   KILOGRAMS_PER_POUND,
+  kilometresPerHour,
+  kilometresPerHourToMetresPerSecond,
   METRES_PER_FOOT,
   METRES_PER_MILE,
   metresPerSecondToKilometresPerHour,
   metresPerSecondToMilesPerHour,
+  milesPerHour,
+  milesPerHourToMetresPerSecond,
   type Kilograms,
   type Metres,
   type MetresPerSecond,
@@ -184,6 +188,30 @@ export function smallDistanceIn(distance: number, units: UnitSystem): number {
  */
 export function massIn(mass: Kilograms, units: UnitSystem): number {
   return units === 'imperial' ? mass / KILOGRAMS_PER_POUND : mass;
+}
+
+/**
+ * A speed the rider **typed**, back in the canonical unit — the inverse of
+ * {@link speedIn}, added by #326.
+ *
+ * ⚠️ **The second inward conversion in this client, and the first one *here*.**
+ * #325's is `athlete/mass.ts` §`massToSave`, which lives beside its screen
+ * because a typed mass can also be blank or refused and that is a decision
+ * rather than a conversion. A wind speed is refused too — by
+ * `game/wind-choice.ts`, which is the decision half — so what is left for this
+ * module is the conversion, and it belongs with the outward one it inverts.
+ * The number in the box is in whichever unit that rider's screens show, and a
+ * caller dividing by 3.6 itself is precisely what this module and
+ * `no-inline-units.ts` exist to stop.
+ *
+ * @throws {UnitError} if `value` is not a finite, non-negative number — which
+ * is a real branch here and not a formality, because the argument came off a
+ * keyboard. Callers turn it into a refusal a rider can act on.
+ */
+export function speedFrom(value: number, units: UnitSystem): MetresPerSecond {
+  return units === 'imperial'
+    ? milesPerHourToMetresPerSecond(milesPerHour(value))
+    : kilometresPerHourToMetresPerSecond(kilometresPerHour(value));
 }
 
 /**

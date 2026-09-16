@@ -34,6 +34,15 @@
  * unmoved across two different rider masses, which is the same claim without
  * the coincidence — see `rider.test.ts` §"#325 criterion 4 — the bot stays at
  * its own mass", which drives `simulation.ts` §`botCourseFor` to get there.
+ *
+ * ⚠️ **There is no `headwindMetresPerSecond` here either, and adding one would
+ * be the wrong repair for #326.** `RideConditions` is *"everything about the
+ * ride that does not change from tick to tick"*, and a headwind is not that: it
+ * is a wind resolved against the direction the rider is pointing, and the rider
+ * turns. A constant here would give a rider a tailwind all the way out and all
+ * the way home. The wind is a **vector** on `SimulationSetup.wind`, and
+ * `simulation.ts` §`#conditionsAt` resolves it per step against the route's own
+ * bearings.
  */
 
 import { altitudeMetres, degreesCelsius, kilograms, type Kilograms } from '@onyourleft/domain';

@@ -53,7 +53,13 @@
  * `packages/store` round-trips one and compares.
  */
 
-import type { AltitudeMetres, GeographicPosition, GradePercent, Metres } from '../quantities';
+import type {
+  AltitudeMetres,
+  DegreesBearing,
+  GeographicPosition,
+  GradePercent,
+  Metres,
+} from '../quantities';
 import {
   altitudeMetres,
   degreesLatitude,
@@ -62,7 +68,7 @@ import {
   gradePercent,
   metres,
 } from '../quantities';
-import { distanceBetween } from '../geodesy';
+import { distanceBetween, initialBearing } from '../geodesy';
 import { RouteError } from './errors';
 
 /**
@@ -526,6 +532,44 @@ export function gradeAt(profile: RouteProfile, distance: number): GradePercent {
   const low = profile.grades[index] as number;
   const high = profile.grades[index + 1] as number;
   return gradePercent(low + (high - low) * fraction);
+}
+
+/**
+ * Which way the rider is **facing** at a distance along the route, or
+ * `undefined` where the route does not say — #326.
+ *
+ * The bearing of the grid cell the distance lands in, read through the same
+ * {@link gridAt} that {@link gradeAt} and {@link positionAt} use. That shared
+ * lookup is the point rather than a convenience: the hill the rider is on, the
+ * place they are drawn and the direction they are pointing all come from one
+ * answer about which ten metres of road they are in, so the three cannot
+ * disagree about it.
+ *
+ * ⚠️ **Held across the cell rather than interpolated between two of them**, and
+ * unlike `gradeAt` that is right. A gradient is a scalar and interpolating it
+ * is what stops a trainer stepping (see {@link gradeAt}); a bearing is an angle
+ * on a circle, where a blend between 359° and 1° is 180° — due south, on a road
+ * heading due north — unless the wrap is handled. There is nothing to be gained
+ * from interpolating one here: the consumer is a cosine, and the difference a
+ * blend would make across a 10 m cell is smaller than the error in the route's
+ * own positions.
+ *
+ * **Two identical grid positions have no bearing**, which is `initialBearing`'s
+ * own rule and is why this returns `undefined` rather than a defensible-looking
+ * north. A route with a single grid point has no cell at all and is the other
+ * case.
+ */
+export function headingOnRoute(
+  profile: RouteProfile,
+  distance: number,
+): DegreesBearing | undefined {
+  if (profile.positions.length < 2) {
+    return undefined;
+  }
+  const { index } = gridAt(profile, distance);
+  const from = profile.positions[index] as GeographicPosition;
+  const to = profile.positions[index + 1] as GeographicPosition;
+  return initialBearing(from, to);
 }
 
 /** The position at a distance along the route, for the renderer's camera. */
