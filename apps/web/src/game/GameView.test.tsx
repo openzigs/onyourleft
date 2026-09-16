@@ -618,6 +618,122 @@ describe('GameView — a picker with nothing in it', () => {
   });
 });
 
+/**
+ * The world moves between simulation steps, rather than three times a second —
+ * #323.
+ *
+ * ⚠️ **The assertion is DISTINCTNESS, because the defect is duplicate frames.**
+ * The simulation ticks at 20 Hz and the loop renders at whatever the phone
+ * gives it, so every test that asks "is the rider in the right place" passed
+ * against a world that stood still for two frames out of three and then
+ * jumped. Only "were these three consecutive frames different from each other"
+ * fails against it.
+ *
+ * ⚠️ **And it is driven through the real component, the real simulation and
+ * the real scene builder**, for the reason the header of this file gives about
+ * #237: the pieces are all unit-tested and a hole between them is invisible to
+ * every one of those tests. #323 needed three separate wirings to hold — the
+ * simulation keeping its previous step, `sceneFrame` being handed the blended
+ * distance rather than the state's own, and the corridor placing a marker
+ * between its points instead of on the nearest one — and removing any one of
+ * the three leaves the other two green. This is the test that fails for all
+ * three.
+ */
+describe('GameView — the world moves rather than steps (#323)', () => {
+  /**
+   * Three frames at 8 ms, which is 24 ms and therefore inside one 50 ms step
+   * for at least two of the three gaps.
+   *
+   * ⚠️ Deliberately far shorter than {@link FRAME_PERIOD_MS}, which exists to
+   * step *over* the corridor's own resolution. This one has to land several
+   * frames **inside** one simulation step, which is the whole question.
+   */
+  const INSIDE_ONE_STEP_MS = 8;
+
+  /**
+   * How far up the road a frame put something, in the corridor's own metres.
+   *
+   * ⚠️ **`z` alone, and NOT a key built from `x`, `y` and `z` — which is what
+   * this was, and it made the bot's assertion pass over a defect.** The
+   * fixture runs due north, so `z` is the along-the-road axis and `x` never
+   * moves. `y` does: the corridor's heights are sampled at distances that
+   * shift with the rider every frame, so piecewise-linear interpolation of a
+   * hill gives a marker a slightly different height on every frame **whatever
+   * distance it was placed at**. A three-distinct-keys assertion therefore
+   * went green against a `GameView` handing `sceneFrame` the bot's *stepped*
+   * odometer. Asserting that the marker advanced up the road cannot be
+   * satisfied that way.
+   */
+  function alongTheRoad(frame: SceneFrame, kind: 'rider' | 'bot' | 'camera'): number {
+    if (kind === 'camera') {
+      return frame.camera.z;
+    }
+    const marker = frame.markers.find((each) => each.kind === kind);
+    expect(marker).toBeDefined();
+    return marker?.z ?? Number.NaN;
+  }
+
+  /** Assert three consecutive frames each moved something further up the road. */
+  function movedEveryFrame(frames: readonly SceneFrame[], kind: 'rider' | 'bot' | 'camera'): void {
+    const zs = frames.map((frame) => alongTheRoad(frame, kind));
+    expect(zs[1] as number).toBeGreaterThan(zs[0] as number);
+    expect(zs[2] as number).toBeGreaterThan(zs[1] as number);
+  }
+
+  it('hands the renderer a different rider and camera on every frame of a step', async () => {
+    const frames = await startRiding({ pacer: false });
+    // Fifteen seconds of riding, so the rider is moving at a real speed.
+    await pump(60);
+    frames.length = 0;
+
+    await pump(3, INSIDE_ONE_STEP_MS);
+
+    expect(frames).toHaveLength(3);
+    movedEveryFrame(frames, 'camera');
+    movedEveryFrame(frames, 'rider');
+  });
+
+  it('moves the bot on every frame too, not only the rider', async () => {
+    // #323's first criterion names all three — the rider, the bot and the
+    // camera — and the bot is the one a rider watching a pacer would see step,
+    // because it is the only thing on the road that is not directly under the
+    // camera.
+    const frames = await startRiding({ pacer: true, intensity: '2.5' });
+    await pump(60);
+    frames.length = 0;
+
+    await pump(3, INSIDE_ONE_STEP_MS);
+
+    expect(frames).toHaveLength(3);
+    expect(frames.every((frame) => frame.markers.some((each) => each.kind === 'bot'))).toBe(true);
+    movedEveryFrame(frames, 'bot');
+  });
+
+  it('draws no further than the newest step even when the loop is starved', async () => {
+    // The backgrounded phone, through the component: one frame covering five
+    // minutes. `MAXIMUM_STEPS_PER_ADVANCE` throws most of it away, and the
+    // blend must not spend the discarded wall clock projecting the rider up a
+    // road nothing integrated.
+    const frames = await startRiding({ pacer: false });
+    await pump(20);
+    const before = frames[frames.length - 1] as SceneFrame;
+    frames.length = 0;
+
+    await pump(1, 300_000);
+    const after = frames[0] as SceneFrame;
+
+    // It moved — the bound still integrates ten seconds of road…
+    expect(alongTheRoad(after, 'rider')).toBeGreaterThan(alongTheRoad(before, 'rider'));
+    // …and it is still on the corridor this frame built, which is the whole of
+    // "does not extrapolate a rider through scenery": every marker is placed
+    // between two of these points or clamped to one of them.
+    const zs = after.corridor.centre.map((point) => point.z);
+    const rider = after.markers.find((each) => each.kind === 'rider');
+    expect(rider?.z).toBeGreaterThanOrEqual(Math.min(...zs));
+    expect(rider?.z).toBeLessThanOrEqual(Math.max(...zs));
+  });
+});
+
 /** A renderer nothing reaches: this screen never leaves the picker. */
 const NO_RENDERER: GameRenderer = {
   create: () => {

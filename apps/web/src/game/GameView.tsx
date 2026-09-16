@@ -280,17 +280,33 @@ export function GameView(props: GameViewProps): JSX.Element {
       setState(simulation.state);
 
       const origin = corridorOrigin(chosen.profile);
-      const bot = simulation.state.bot;
+      // ⚠️ **Where to DRAW them, which is not where the newest step left them**
+      // — #323. The simulation ticks twenty times a second and this loop runs
+      // sixty, so reading the state's own distances here drew each position
+      // three times and then jumped: the world stepped rather than moved.
+      // `drawnAt` blends the last two steps and advances nothing, so calling it
+      // once per frame costs a subtraction and cannot move the ride.
+      //
+      // It is read after `advanceTo` so that the pair it blends is the freshest
+      // two steps. ⚠️ **Swapping the two lines is not caught by any test here,
+      // and that was measured rather than assumed**: the blend is clamped, so
+      // reading it first is still monotonic and still smooth — it simply draws
+      // a second whole step further behind, 100 ms instead of 50. That is a
+      // latency regression a rider would feel and no assertion in this
+      // repository would notice, so it is recorded here rather than claimed to
+      // be guarded.
+      const drawn = simulation.drawnAt(at);
       viewRef.current?.render(
         sceneFrame({
           profile: chosen.profile,
           origin,
           state: simulation.state,
-          // #237: the bot's odometer, straight off the state the simulation just
+          riderDistance: drawn.riderDistance,
+          // #237: the bot's odometer, from the state the simulation just
           // advanced. `SceneInput.botDistance` was declared and optional and
           // never supplied, which is why a built, tested and green pacer drew
           // nothing on a real 47.53 km route.
-          ...(bot === undefined ? {} : { botDistance: bot.state.distance }),
+          ...(drawn.botDistance === undefined ? {} : { botDistance: drawn.botDistance }),
           ghost: ghostRef.current,
         }),
       );

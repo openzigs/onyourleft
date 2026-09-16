@@ -156,6 +156,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         renderer cannot influence, the road corridor built from
                         #89's profile, the quality ladder for a throttling
                         phone, the scene, and the one file that names three.
+                        ⚠️ Since #323 the simulation also keeps the step BEFORE
+                        the newest one, and the frame is drawn between the two:
+                        20 Hz physics under a 60 fps loop drew each position
+                        three times and jumped, and no gate here could see it
+                        because every one of them asks where the rider IS.
                         ⚠️ Here rather than in apps/mobile because
                         capacitor.config.ts ships apps/web/dist — see §4h.
                         Since #237 the simulation also advances the bot pacer,
@@ -166,7 +171,13 @@ apps/                 AGPL-3.0-or-later, without exception
                         vertex buffer, and a surface tinted by signed gradient.
                         The dash grid is in ROUTE distance, which is what stops
                         it varying with a route's own grid or crawling as the
-                        rider moves
+                        rider moves. ⚠️ Since #323 a centreline point's
+                        POSITION is interpolated between two route samples
+                        rather than rounded to the nearer — it used to freeze
+                        the whole world for a grid cell and then jump one — and
+                        the phase correction that rounding needed is gone with
+                        it. A reviewer who remembers `writeCentreLine` carrying
+                        one is reading the old file
     src/game/world.ts   the ground, the sky and the depth cue (#241), and since
                         #286 the one light direction — the two axes a route is
                         read on, the one number that is physics rather than
@@ -2487,6 +2498,11 @@ top of an issue **supersedes its body**.
 | What stops a ghost being somebody else's ride, and why it is not in the ghost code | `packages/store/src/activity-store.ts` §`listRouteAttempts`, `activity-store.ghost-scope.test.ts` |
 | Why the eleventh store fake breaks a read where the other ten break a write | `packages/store/src/testing/fakes.ts` §`unscopedAttemptStoreFactory` |
 | Why the simulation derives its step count from the origin rather than accumulating deltas | `apps/web/src/game/simulation.ts`, and the 0.23 m drift recorded in its header |
+| Why a frame is drawn between two simulation steps rather than at the newest one, and what that costs | `apps/web/src/game/simulation.ts` §`DrawnRide`, §`drawnAt`, [#323](https://github.com/openzigs/onyourleft/issues/323) |
+| Why raising the tick rate is the wrong answer to a world that steps, and what pins it | `apps/web/src/game/simulation.ts` §`SIMULATION_STEP_SECONDS`, `simulation.test.ts` §"keeps the simulation on its 20 Hz step" |
+| Why the road's geometry is interpolated between route samples, and what rounding it froze | `apps/web/src/game/terrain.ts` §`pointAt`, `packages/domain/src/route/profile.ts` §`positionAt` |
+| Why a marker is placed between two corridor points rather than on the nearest one | `apps/web/src/game/scene.ts` §`placeOnCorridor` |
+| What a `dumpsys gfxinfo` capture with zero modern jank and 94 % legacy jank means | [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) §"Part F" |
 | What happens to a ride when the phone is backgrounded for five minutes | `apps/web/src/game/simulation.ts` §`MAXIMUM_STEPS_PER_ADVANCE` |
 | Why the ghost does not gain road while the phone is backgrounded, and which clock it is raced against | `apps/web/src/game/simulation.ts` §`ghostClock`, §`GameState.ridden` |
 | Why the road is a corridor rather than a world, and where its vertices come from | `apps/web/src/game/terrain.ts`, [ADR 0008](docs/adr/0008-mobile-client-architecture.md) D-5 |

@@ -41,6 +41,7 @@ import {
   distanceOnRoute,
   elevationAt,
   gradeAt,
+  positionAt,
   type GeographicPosition,
   type RouteProfile,
 } from '@onyourleft/domain';
@@ -444,7 +445,6 @@ export function roadCorridor(
     behind,
     start,
     step,
-    stride,
     firstVertex: surfaceVertices,
     slots,
     vertices,
@@ -580,7 +580,6 @@ interface CentreLineRequest {
   readonly behind: number;
   readonly start: number;
   readonly step: number;
-  readonly stride: number;
   readonly firstVertex: number;
   readonly slots: number;
   readonly vertices: Float32Array;
@@ -612,19 +611,24 @@ interface CentreLineRequest {
  *
  * ## Why the marks are placed on the ribbon's own parameter and not by position
  *
- * ⚠️ `pointAt` **snaps** a corridor point's `x` and `z` to the nearest profile
- * grid point while interpolating its height, so the ribbon's vertices sit at
- * grid coordinates that are whole numbers — and the corridor's first point is
- * at a grid coordinate that is generally *not* the one its odometer implies.
- * Interpolating a mark by `(odometer - start) / step` therefore places it up to
- * half a grid cell from where it belongs, and that error changes continuously
- * as the rider moves: the crawl, arrived at from the other direction. So the
- * parameter carries a **fixed phase correction** — the difference between the
- * corridor's first point's odometer and the grid coordinate it was snapped to —
- * which puts every mark exactly where the ribbon's own geometry says that
- * route distance is.
+ * A mark's ends are interpolated along the ribbon by `(odometer - start) /
+ * step`, which is exact: `pointAt` places the ribbon's point `k` at odometer
+ * `start + k * step`, so the parameter *is* the ribbon coordinate of that route
+ * distance.
  *
- * ⚠️ It is therefore only exact where `pointAt` did not clamp, which is
+ * ⚠️ **It carried a phase correction until #323 and no longer does, and a
+ * reviewer who remembers one is reading the old file.** `pointAt` used to snap
+ * a corridor point's `x` and `z` to the nearest profile grid point while
+ * interpolating its height, so the ribbon's vertices sat at whole grid
+ * coordinates and the corridor's first point was generally *not* at the grid
+ * coordinate its odometer implied. The correction — the difference between the
+ * two, in ribbon points — is what put a mark back where the geometry said that
+ * route distance was. #323 removed the snapping, because it was freezing the
+ * whole world for a grid cell at a time; with it gone the correction is the
+ * error, and leaving it in moved every mark by up to half a grid cell. Both
+ * `#242` tests above went red on exactly that.
+ *
+ * ⚠️ It is exact everywhere `distanceOnRoute` did not clamp, which is
  * everywhere except beyond the two ends of a point-to-point route. There the
  * ribbon is degenerate anyway — every point past the end is the same point —
  * so there is nothing for a mark to be misplaced on.
@@ -635,15 +639,9 @@ function writeCentreLine(
   normals: Float64Array,
   request: CentreLineRequest,
 ): void {
-  const { start, step, stride, vertices, colours } = request;
+  const { start, step, vertices, colours } = request;
   const half = CENTRE_LINE_WIDTH_METRES / 2;
   const lastIndex = centre.length - 1;
-
-  // See the note above: the ribbon's point `k` is at grid coordinate
-  // `round(start / resolution) + k * stride`, and the odometer `a` is at
-  // `a / resolution`. This is the difference between the two, in ribbon points.
-  const gridAtStart = start / profile.resolution;
-  const phase = (gridAtStart - Math.round(gridAtStart)) / stride;
 
   // An odometer is not a route distance once a lap has been ridden, and the
   // marks are painted on the road. @see CorridorPoint.along
@@ -659,8 +657,8 @@ function writeCentreLine(
     // Clamped to the ribbon rather than dropped. A mark whose whole length is
     // outside collapses to one parameter, which makes its four vertices
     // coincide and its two triangles cover no pixels at all.
-    const fromParameter = clamp((from - start) / step + phase, 0, lastIndex);
-    const toParameter = clamp((to - start) / step + phase, 0, lastIndex);
+    const fromParameter = clamp((from - start) / step, 0, lastIndex);
+    const toParameter = clamp((to - start) / step, 0, lastIndex);
 
     const at = (request.firstVertex + slot * 4) * 3;
     writeMarkEdge(centre, normals, fromParameter, half, vertices, at);
@@ -835,12 +833,23 @@ function pointAt(profile: RouteProfile, origin: CorridorOrigin, along: number): 
   // continues, and on a straight route it stops rather than extrapolating into
   // terrain that was never surveyed.
   const wrapped = distanceOnRoute(profile, along);
-  const index = Math.min(
-    profile.positions.length - 1,
-    Math.max(0, Math.round(wrapped / profile.resolution)),
-  );
-  const position = profile.positions[index] as GeographicPosition;
-  const ground = localGroundPosition(origin, position);
+  // ⚠️ **`positionAt`, which interpolates between the two grid points either
+  // side, and NOT `positions[Math.round(wrapped / resolution)]`, which is what
+  // this was until #323.** Rounding made every centreline point — and with it
+  // the chase camera, which is placed on one — hold completely still for a
+  // whole grid cell and then jump the width of one: at a route's nominal 10 m
+  // grid and a plausible 8 m/s, 1.25 seconds of frozen world followed by a
+  // ten-metre jump. `elevationAt` on the next line always interpolated, so the
+  // camera rose and fell smoothly over ground that was standing still, which
+  // is why the symptom read as a frame-rate problem rather than as a
+  // resolution one.
+  //
+  // `gradeAt` in the same package states the rule this was breaking, about the
+  // gradient it writes to a trainer: *"a held value steps by the whole
+  // difference between two grid points every time the rider crosses one"*.
+  // `scatter.ts` and `hud/plan.ts` were already reading positions this way;
+  // this file was the one that was not.
+  const ground = localGroundPosition(origin, positionAt(profile, wrapped));
   return {
     x: ground.x,
     y: (elevationAt(profile, wrapped) as number) - origin.elevation,

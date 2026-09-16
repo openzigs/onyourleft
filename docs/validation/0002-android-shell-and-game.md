@@ -277,6 +277,81 @@ Sample all three every five minutes for the hour.
 
 ---
 
+## Part F — frame pacing ([#323](https://github.com/openzigs/onyourleft/issues/323))
+
+**This is the one criterion of #323 that no gate in this repository can discharge**, and it is the
+criterion the issue says mattered most: *"A green modern figure said nothing here; the legacy one
+and a human's eyes both did."* Everything else about #323 is asserted in the Vitest suite; this is
+the part that needs a phone with a trainer in front of it.
+
+### What was measured before the fix
+
+Pixel Tablet, Android 17, debug build, `dumpsys gfxinfo` over a 12-second window during a ride,
+2026-09-16 — the numbers in #323's body, repeated here so the re-measurement has a baseline beside
+it rather than in an issue tracker:
+
+| | Before |
+|---|---|
+| Total frames rendered | 756 in 12 s ≈ 63 fps |
+| Janky frames (modern) | 0 (0.00 %) |
+| **Janky frames (legacy, > 16 ms)** | **714 — 94.44 %** |
+| Frame time 50th / 90th / 95th / 99th | 24 / 26 / 27 / 28 ms |
+| GPU time 50th / 90th | 6 / 9 ms |
+| Missed Vsync | 0 |
+
+### ⚠️ Read this before planning the measurement
+
+- **The modern jank figure was 0.00 % while the world was visibly stepping.** It counts frames that
+  missed their deadline, and none did: the loop presented 63 fps of *duplicates*. **Record both
+  figures or the measurement says nothing.**
+- **A low GPU time is not good news here.** 6 ms against a 16.7 ms budget is what "the renderer is
+  waiting on a simulation with nothing new to say" looks like, and it is why #323 is not a
+  performance fix and why nothing in `quality.ts` was touched for it.
+- **The fix trades 50 ms of display latency for smoothness** — one fixed step — because the frame is
+  drawn *between* the last two simulation states and never ahead of the newest.
+  `apps/web/src/game/simulation.ts` §`DrawnRide` says so. If a rider reports the world feeling
+  *behind* their pedalling rather than stepping, that is this trade and it belongs in F5.
+
+```bash
+# Reset the counters, ride for a measured window, then read them.
+adb shell dumpsys gfxinfo dev.openzigs.onyourleft reset
+# ... ride for 12 s with the game visible and the rider pedalling ...
+adb shell dumpsys gfxinfo dev.openzigs.onyourleft | grep -iE "Total frames|Janky|percentile|Missed Vsync|GPU"
+```
+
+| Step | What to do | What to record |
+|---|---|---|
+| F1 | Start a ride on a route with the game visible; pedal steadily | — |
+| F2 | Reset the counters, ride a 12-second window, read them back | every row of the table below |
+| F3 | Repeat F2 with a bot pacer on the road | the same rows again, and whether the bot steps |
+| F4 | ⚠️ Watch the world, not the numbers | Does it **move**? One sentence in your own words |
+| F5 | Watch for the opposite complaint | Does the world feel *behind* the pedals? @see the note above |
+| F6 | Repeat once the phone is warm — 20 minutes in | whether the answer to F4 changed |
+
+### F results
+
+| | After (F2, no pacer) | After (F3, with pacer) |
+|---|---|---|
+| Total frames rendered | | |
+| Janky frames (modern) | | |
+| **Janky frames (legacy, > 16 ms)** | | |
+| Frame time 50th / 90th / 95th / 99th | | |
+| GPU time 50th / 90th | | |
+| Missed Vsync | | |
+
+**Does the world move rather than step (F4)?** ______________
+
+**Does it feel behind the pedals (F5)?** ______________
+
+**Phone (OEM, model, Android):** ______________  **Build:** ______________
+
+⚠️ **A legacy jank figure that is still high is not automatically a failure now.** It counts frames
+over 16 ms of wall time, and a loop that is idle between vsyncs can produce one. What settles #323
+is F4: whether a person watching the screen sees a world that moves. Record the numbers anyway —
+they are what a future regression would be compared against.
+
+---
+
 ## After the session
 
 1. **Fill the tables in this file and commit it.** An empty table in `main` is the honest state; a
