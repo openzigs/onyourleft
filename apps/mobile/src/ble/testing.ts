@@ -32,8 +32,27 @@ import type { CapacitorBlePort, PluginDevice, PluginDeviceRequest } from './plug
 export interface ScriptedStack {
   /** Rejects `initialize()` with this. A permission denial is the usual one. */
   readonly initializeRejectsWith?: unknown;
+  /**
+   * `initialize()` is received and **never answered** — neither resolved nor
+   * rejected (#322).
+   *
+   * ⚠️ **This is not a slow stack and it is not a rejection**, and the double
+   * would be useless for #322 if it could only do those two. What was measured
+   * on a Pixel Tablet is a plugin that received the bridge call — both outbound
+   * logcat lines are there, with the callback id — and then threw inside its own
+   * permission callback, so `PluginCall.resolve()` was never reached. Nothing
+   * comes back, ever. `initializeRejectsWith` cannot stand in for that: a
+   * rejection is an answer, and every caller in this transport has an error path
+   * for one. A hang has no path at all, which is the defect.
+   *
+   * The call is still **recorded** before it is dropped, so a test can assert
+   * that a retry reached the plugin rather than a memo.
+   */
+  readonly initializeNeverAnswers?: boolean;
   readonly enabled?: boolean;
   readonly isEnabledRejectsWith?: unknown;
+  /** `isEnabled()` is received and never answered. @see initializeNeverAnswers */
+  readonly isEnabledNeverAnswers?: boolean;
   /** What the chooser returns, or a rejection for a cancel. */
   readonly chooses?: PluginDevice;
   readonly chooserRejectsWith?: unknown;
@@ -101,6 +120,17 @@ export function scriptedPort(stack: ScriptedStack = {}): ScriptedPort {
    */
   const notInitialized = (): Promise<never> => reject(new Error(NOT_INITIALIZED_MESSAGE));
 
+  /**
+   * A call the plugin received and will never answer (#322).
+   *
+   * ⚠️ A promise with no settle path at all, rather than one resolved after a
+   * long delay. A delay is a race a test can lose on a slow machine and it
+   * leaves a timer behind in the runner; this leaves the caller exactly where
+   * the device left it, and the only thing that can move the caller on is the
+   * bound under test.
+   */
+  const never = (): Promise<never> => new Promise<never>(() => undefined);
+
   return {
     get calls() {
       return calls;
@@ -111,6 +141,9 @@ export function scriptedPort(stack: ScriptedStack = {}): ScriptedPort {
 
     async initialize() {
       calls.push('initialize');
+      if (stack.initializeNeverAnswers === true) {
+        return never();
+      }
       if (stack.initializeRejectsWith !== undefined) {
         return reject(stack.initializeRejectsWith);
       }
@@ -121,6 +154,9 @@ export function scriptedPort(stack: ScriptedStack = {}): ScriptedPort {
       calls.push('isEnabled');
       if (!started) {
         return notInitialized();
+      }
+      if (stack.isEnabledNeverAnswers === true) {
+        return never();
       }
       if (stack.isEnabledRejectsWith !== undefined) {
         return reject(stack.isEnabledRejectsWith);

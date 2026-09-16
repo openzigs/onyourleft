@@ -31,6 +31,24 @@
  * attempt reached `requestDevice()` with the stack down and no sensor could be
  * paired at all (#230). `transport.ts`'s `ensureInitialized` is where it is
  * called from now: once per transport, on every path that reaches the plugin.
+ *
+ * ⚠️ **And it can be received and never answered, which is neither of the two
+ * outcomes above** ([#322](https://github.com/openzigs/onyourleft/issues/322)).
+ * Measured on a Pixel Tablet on 2026-09-16: on an activity **restart after the
+ * device had slept**, the plugin ran `checkPermission` → `runInitialization`
+ * with its held `PluginCall` **null**, threw an NPE inside its own callback,
+ * and therefore never resolved. logcat carried the two outbound bridge lines
+ * for the callback id and nothing else. Permissions were granted, the radio was
+ * on, there was no pending dialog and there were no JS exceptions — so nothing
+ * on this side can tell that case from a slow one by inspection.
+ *
+ * The plugin defect is upstream and is not fixed here. What is fixed here is
+ * that this program stops depending on an answer: `transport.ts`
+ * §`INITIALIZE_ANSWER_WINDOW` stops sharing an unanswered initialisation so a
+ * retry reaches the plugin, and `apps/web/src/support` §`SHELL_ANSWER_TIMEOUT`
+ * is what the rider is told in the meantime. A cold start was measured to
+ * resolve; backgrounding, returning and reloading the page were measured **not**
+ * to reproduce it.
  */
 
 /** A device as the plugin describes it. */

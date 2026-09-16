@@ -85,9 +85,31 @@ export interface ShellNotice {
   readonly recoverable: boolean;
 }
 
+/**
+ * What the shell can report, which is the plugin's four answers **and one it
+ * cannot give** (#322).
+ *
+ * ⚠️ `unanswered` is not a `TransportAvailability` and deliberately is not one.
+ * `availability()` is total over that union — every one of its four members is
+ * a thing the stack *said* — and the state this adds is the absence of anything
+ * being said at all. It is produced by {@link useShellSupport}'s deadline, not
+ * by the plugin, and it exists because the screen it feeds must be able to tell
+ * *"this phone said no"* from *"this phone did not answer"*: the first is a
+ * verdict and the second is a hang, and only the second is worth retrying for
+ * the reason a retry exists.
+ *
+ * ⚠️ **Widening `TransportAvailability` instead was considered and rejected.**
+ * That union is shared with the Web Bluetooth transport and the simulator, and
+ * a fifth member there would force a branch through `supportFor`,
+ * `BluetoothSupportNotice` and `simulator.ts` for a state none of the three can
+ * reach, because nothing in `packages/sensors/web-bluetooth` is bounded either.
+ * The hang this fixes is the shell's, so the vocabulary for it is the shell's.
+ */
+export type ShellSupportKind = TransportAvailability['kind'] | 'unanswered';
+
 /** The plugin's answer, and what to tell the rider about it. */
 export interface ShellSupport {
-  readonly kind: TransportAvailability['kind'];
+  readonly kind: ShellSupportKind;
   /**
    * Whether a device list may be shown at all — `mayShowDeviceList`.
    *
@@ -115,6 +137,25 @@ export interface ShellSupportPort {
    * `TransportAvailability` — the Capacitor implementation catches an
    * initialisation failure and an `isEnabled()` rejection and returns a kind
    * for each — so a caller has no error path to render.
+   *
+   * ⚠️ **And it may never SETTLE, which is a different thing and is
+   * [#322](https://github.com/openzigs/onyourleft/issues/322).** On a device
+   * that had slept, `@capacitor-community/bluetooth-le` ran `runInitialization`
+   * with a null `PluginCall`, threw, and therefore resolved nothing: the
+   * outbound bridge call was the last line in logcat mentioning its callback
+   * id. A promise nobody settles is indistinguishable from a slow one, so
+   * *"never rejects"* is no comfort at all to the screen — it sat on "Checking:
+   * Asking this phone about Bluetooth" at 0 s, 5 s, 15 s, 30 s and 45 s with no
+   * timeout, no error state and no way forward.
+   *
+   * **Nothing here is bounded, on purpose.** The deadline belongs to
+   * {@link useShellSupport} rather than to this method, for two reasons that
+   * are both about the rider: a late answer must still be adopted when it
+   * finally arrives — the first `initialize()` on Android is the one that
+   * raises the permission dialog, and a rider reading that dialog is not a hang
+   * — and the bound has to be re-evaluated when the screen comes back, which is
+   * a lifecycle event a promise cannot see. `shell-support.ts`
+   * §`SHELL_ANSWER_TIMEOUT` is the number and the reasoning.
    */
   readShellSupport(): Promise<ShellSupport>;
 }

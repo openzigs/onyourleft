@@ -79,7 +79,32 @@ function RecheckButton({ onRecheck }: { readonly onRecheck: () => void }): JSX.E
   );
 }
 
-/** The notice for one shell support state. */
+/**
+ * The notice for one shell support state.
+ *
+ * ## The live region has to be the SAME region (#322)
+ *
+ * A live region is announced when the content *inside* an existing region
+ * changes. One inserted into the document already holding its text is announced
+ * by some assistive technologies and not by others, which is the well-known way
+ * to ship an `aria-live` that does nothing — so `role="status"` on the state a
+ * deadline delivers is worth nothing unless React updates the `<p>` that was
+ * already there rather than replacing it.
+ *
+ * ⚠️ **It does, and that was MEASURED rather than reasoned about.** The obvious
+ * defence is to make every branch return the same element shape — the
+ * `undefined` branch returns a bare element and the two below return fragments,
+ * which looks exactly like the mismatch that would make React unmount one `<p>`
+ * and mount another. It is not: wrapping the first branch in a fragment to
+ * match changed nothing, because the reconciler matches a lone child against
+ * index 0 of a child array by type. The wrapper was therefore a line no
+ * mutation could turn red, which CLAUDE.md §5 treats as worse than absent, and
+ * it is not here. What stands in its place is
+ * `DevicesView.shell.a11y.test.tsx`, which asserts the node's **identity**
+ * across the transition rather than reading `role` off whatever is on screen at
+ * the end — an attribute on a freshly mounted node is the false pass this
+ * paragraph is about, and only the identity assertion can tell the two apart.
+ */
 export function ShellSupportNotice({ support, onRecheck }: ShellSupportNoticeProps): JSX.Element {
   if (support === undefined) {
     return (
@@ -106,7 +131,22 @@ export function ShellSupportNotice({ support, onRecheck }: ShellSupportNoticePro
       {/* `danger` only where nothing can be done. A radio that is switched off
           and a permission that has not been granted are both a step away from
           working, and a red message about a one-tap fix reads as a broken app. */}
-      <StatusMessage tone={recoverable ? 'warning' : 'danger'} label={title}>
+      {/* ⚠️ `live` for `unanswered` ALONE, and the line is about who is
+          looking rather than about which message matters (#322). Every other
+          state here arrives within a moment of the rider opening this screen or
+          pressing "Check again" — they are looking at it, and a region
+          announcing over the page they have just landed on is the
+          double-announcement `StatusMessage.live` is off by default for. The
+          unanswered state is the only one delivered by a DEADLINE: it replaces
+          "Checking" ten seconds later, with no rider action, at the moment they
+          have most likely looked away. Unannounced, a screen reader user is
+          left on "Asking this phone about Bluetooth" with the answer on screen
+          and a "Check again" they were never told about. */}
+      <StatusMessage
+        tone={recoverable ? 'warning' : 'danger'}
+        label={title}
+        live={support.kind === 'unanswered'}
+      >
         {explanation}
       </StatusMessage>
       {instruction === null ? null : <p>{instruction}</p>}

@@ -352,6 +352,91 @@ they are what a future regression would be compared against.
 
 ---
 
+## Part G — the availability check on a phone that has slept ([#322](https://github.com/openzigs/onyourleft/issues/322))
+
+**The cause is settled and is recorded here rather than left in an issue thread**, because #322's
+fifth acceptance criterion is a re-run on an unlocked device and this is the file that keeps device
+findings. What is *not* settled is whether the fix behaves on a phone, which is what G1–G5 are for.
+
+### What was measured, and which of the two causes it was
+
+Pixel Tablet · Android 17 · Chrome 151 WebView · debug build at `362d0867` ·
+`@capacitor-community/bluetooth-le` as pinned in the lockfile, driven over CDP through
+`adb forward`. Two runs on 2026-09-16.
+
+**Run 1, device PIN-locked.** The Devices screen showed *"Checking: Asking this phone about
+Bluetooth"* and *"Waiting for the check to finish"* at 0 s, 5 s, 15 s, 30 s and 45 s, unchanged.
+`adb logcat` carried exactly two lines mentioning the callback id, both outbound; nothing resolved
+it. Bluetooth was **on**, `BLUETOOTH_SCAN` and `BLUETOOTH_CONNECT` were both **granted**, there was
+no pending permission dialog and there were no JS exceptions. The run flagged its own confound: the
+tablet was locked throughout (`mDreamingLockscreen=true`) and could not be unlocked.
+
+**Run 2, device unlocked** (`mDreamingLockscreen=false`, screen on,
+`stay_on_while_plugged_in=2`). ⚠️ **It still hung** — same five polls, same text. **The lockscreen
+was not the cause and is struck from this issue.** The cause is upstream, from the device's own
+stack trace:
+
+```
+Caused by: java.lang.NullPointerException:
+  Attempt to invoke virtual method 'void com.getcapacitor.PluginCall.resolve()'
+  on a null object reference
+    at com.capacitorjs.community.plugins.bluetoothle.BluetoothLe.runInitialization(BluetoothLe.kt:156)
+    at com.capacitorjs.community.plugins.bluetoothle.BluetoothLe.checkPermission(BluetoothLe.kt:137)
+...
+at androidx.lifecycle.ReportFragment$LifecycleCallbacks.onActivityPostStarted(ReportFragment.kt:121)
+at android.app.Activity.performStart(Activity.java:9422)
+```
+
+The plugin holds the `PluginCall` to resolve after its permission check; on an **activity start** it
+runs `checkPermission` → `runInitialization` with that reference **null**, throws, and therefore
+never resolves. So the answer to "which of the two causes was it" is: **the plugin call itself, not
+the lockscreen.**
+
+**What does not trigger it**, measured so nobody re-treads it:
+
+| Path | Result |
+|---|---|
+| Cold start (`force-stop`, then launch) | ✅ resolves — *"✓ Bluetooth is available"* |
+| Background with HOME, wait 4 s, return (same pid) | ✅ resolves, no NPE |
+| Reload the page 3× **during** an in-flight check | ✅ resolves, no NPE |
+| Long-running instance across a **Doze + screen-off + lock** cycle | ❌ **hangs, NPE** |
+
+### What was changed, and what still needs a phone
+
+The plugin defect is upstream and is **not** fixed here. What #322 changed is that this program
+stops depending on an answer: `apps/web/src/support/shell-support.ts` §`SHELL_ANSWER_TIMEOUT`
+bounds what the rider waits, and `apps/mobile/src/ble/transport.ts` §`INITIALIZE_ANSWER_WINDOW`
+stops sharing an unanswered `initialize()` so that the re-check reaches the plugin. Both are
+asserted in the Vitest suite against a plugin double that never answers; neither has been seen on a
+device.
+
+| Step | What to do | What should happen |
+|---|---|---|
+| G1 | Reproduce the hang: leave the app running, let the tablet sleep and lock, wake it, open Devices | Within ~10 s the screen stops saying "Checking" and reads **"This phone has not answered about Bluetooth"** |
+| G2 | Read the whole notice | It says **nothing has been refused**; it does **not** name a permission, a switched-off radio, or a phone with no Bluetooth |
+| G3 | Press **Check again** | `adb logcat` shows a **second** outbound `initialize` with a **new** callback id. This is `INITIALIZE_ANSWER_WINDOW` doing its job; a repeat of the first id means the memo is still being shared |
+| G4 | Note whether that second call answers | Expected to, on the evidence that a cold start does — but it is the one step of this part that is a prediction rather than a measurement |
+| G5 | With the app in this state, leave it and come back (HOME, then return) | The check **re-runs by itself** on the return, without the rider pressing anything. This is the lifecycle half: a timer armed before the activity stopped may be suspended, so the return is the trigger |
+| G6 | Separately: launch with the permission **not** granted, and take **longer than 10 s** over Android's dialog | The "has not answered" message appears **and is then replaced** by the real answer when the dialog is finally answered. A screen still saying "has not answered" after a grant is a defect |
+
+### G results
+
+| Step | Phone 1 (OEM, model, Android version) | Phone 2 |
+|---|---|---|
+| G1 | | |
+| G2 | | |
+| G3 | callback id reused? | |
+| G4 | | |
+| G5 | | |
+| G6 | | |
+
+⚠️ **G3 is the one that cannot be read off the screen.** A "Check again" that re-attaches to the
+dead promise and a "Check again" that reaches the plugin and is ignored look identical to a rider —
+both end on the same message. Only the callback id in logcat tells them apart, which is why the
+step asks for it rather than for a verdict.
+
+---
+
 ## After the session
 
 1. **Fill the tables in this file and commit it.** An empty table in `main` is the honest state; a
