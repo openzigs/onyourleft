@@ -2569,6 +2569,9 @@ top of an issue **supersedes its body**.
 | What proves the world reaches the screen rather than only the frame | `apps/web/browser/game-harness.ts`, `apps/web/browser/game.browser.spec.ts` |
 | Why the HUD panel's opacity is asserted inside the accessibility gate | `apps/web/src/game/hud/hud-surface.a11y.test.ts`, `apps/web/src/design/tokens.ts` §`hudSurface` |
 | What the renderer gives up when the phone gets hot, and why recovery is not the same threshold | `apps/web/src/game/quality.ts` §`HEADROOM_RESTORE_BELOW` |
+| Where scenery sits on the quality ladder, why it goes before frame rate, and why the floor is not zero | `apps/web/src/game/quality.ts` §`QualitySettings.scatterItems` |
+| Why a scenery budget is applied twice, in two files, and which of the two actually saves the work | `apps/web/src/game/scene.ts` §`SceneInput.scatterItems`, `apps/web/src/game/three-renderer.ts` §`ScatterBelt.setBudget` |
+| Why the render loop reads its frame time before it hands it to the ladder, and what it fed the ladder before | `apps/web/src/game/GameView.tsx` §`tick` |
 | Why the world has a sun at all, where its elevation came from, and what a low one would clip | `apps/web/src/game/world.ts` §`SunStyle`, §`SUN_ELEVATION_AT_POLE_DEGREES`, §4h |
 | Why the ground and the road are the two things that stay unlit | `apps/web/src/game/three-renderer.ts` header §"The world is three objects, and since #286 it has a sun" |
 | Where a normalised light share becomes a three intensity, and why the factor is π | `apps/web/src/game/three-renderer.ts` §`LAMBERT_IRRADIANCE_SCALE` |

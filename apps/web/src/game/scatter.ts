@@ -140,15 +140,21 @@ export interface ScatterBudget {
 }
 
 /**
- * The most items a frame carries by default: **240**.
+ * The most items a frame carries **at the target quality**: **240**.
  *
- * ⚠️ **This repository's own, and a placeholder in one specific sense**: #245
- * makes scenery density a rung on `quality.ts`'s ladder, and this constant is
- * what that issue will replace with a per-level figure. Until then it is one
- * number for every device, which is the honest state — ADR 0008 D-2's
- * measurement was waived rather than passed and #247 is the run that would
- * settle it, so a number that claimed to be tuned would be claiming a
- * measurement nobody has made.
+ * ⚠️ **Since #245 this is one rung's figure rather than every device's**, and a
+ * reviewer who remembers this comment saying *"one number for every device"* is
+ * reading the old one. `quality.ts`'s `QUALITY_LADDER` carries a `scatterItems`
+ * per level and takes **this constant** for level 0; a phone that is throttling
+ * is handed a smaller one, which is the whole of #245. Nothing here chooses
+ * between them — a budget arrives as {@link ScatterBudget.maxItems} and this
+ * file spends it.
+ *
+ * ⚠️ **This repository's own, and still a placeholder in the sense it always
+ * was**: ADR 0008 D-2's measurement was waived rather than passed and #247 is
+ * the run that would settle it, so a number that claimed to be tuned would be
+ * claiming a measurement nobody has made. The same warning covers the three
+ * figures #245 wrote below it.
  */
 export const SCATTER_MAX_ITEMS = 240;
 

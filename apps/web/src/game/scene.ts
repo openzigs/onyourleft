@@ -59,6 +59,24 @@ export interface SceneInput {
   readonly botDistance?: number | undefined;
   /** The rider's own previous attempt, when they chose to race one. Optional. */
   readonly ghost?: GhostTrack | undefined;
+  /**
+   * The most scenery this frame may carry — the current quality rung's
+   * `scatterItems`, #245.
+   *
+   * ⚠️ **Optional, and absent means the target rung** rather than "no budget":
+   * `atStartLine` and the browser harness build frames with no quality state
+   * behind them at all, exactly as they build frames with no interpolation
+   * behind them, and {@link SCATTER_MAX_ITEMS} is what every frame carried
+   * before #245.
+   *
+   * ⚠️ **This is where the reduction is actually saved**, and it is a different
+   * saving from the one `three-renderer.ts` makes with the same number. Here it
+   * stops the items being *placed* — a sort over three hundred candidates on
+   * the thread GATT notifications arrive on — and there it stops them being
+   * *submitted*. A rung applied only in the renderer would leave a throttling
+   * phone doing all the arithmetic and then throwing the answer away.
+   */
+  readonly scatterItems?: number | undefined;
 }
 
 /** Builds one frame. */
@@ -105,7 +123,7 @@ function scatter(
     scatterSeed(input.profile),
     first.along,
     last.along,
-    { maxItems: SCATTER_MAX_ITEMS, riderMetres: riderDistance },
+    { maxItems: input.scatterItems ?? SCATTER_MAX_ITEMS, riderMetres: riderDistance },
   );
 }
 
