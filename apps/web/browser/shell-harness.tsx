@@ -51,10 +51,11 @@
  * headless Chromium is not a handlebar in the rain.
  */
 
-import { StrictMode } from 'react';
+import { StrictMode, type JSX } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 
+import { Button } from '../src/design/Button';
 import { AppShell } from '../src/shell/AppShell';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
 
@@ -136,6 +137,52 @@ const SPACER_PIXELS = 4000;
  */
 const READY_ATTRIBUTE = 'data-oyl-shell-ready';
 
+/**
+ * The `.oyl-button` controls a rider touches mid-ride, rendered so that a real
+ * engine lays them out — #316.
+ *
+ * ## Why they are specimens rather than a route
+ *
+ * `AppShell` here is handed no ports, which is what the rest of this page needs
+ * (see the header). Every view then takes its honest cannot-do-this-here branch
+ * and renders a `StatusMessage` instead of a control: measured on this harness,
+ * **all eleven routes render zero buttons, zero inputs and zero selects**. So
+ * navigating to `#/` and measuring "the ride screen's Pause button" would
+ * measure nothing at all, and — the failure mode that matters — it would do so
+ * silently, because a `querySelectorAll` over an empty page is an empty list
+ * and an assertion over an empty list passes. `shell.browser.spec.ts` counts
+ * what it found for exactly that reason.
+ *
+ * ## What is real here, and it is the part being measured
+ *
+ * The component is the shipping {@link Button}, the class names are the ones it
+ * emits, the stylesheet is the shipping `design/theme.css`, and the box they are
+ * laid out in is the shipping `.oyl-main` inside the shipping `.oyl-shell`.
+ * Nothing about the geometry is this file's. What the harness supplies is the
+ * *labels*, and they are copied from `views/RideView.tsx` rather than invented:
+ * `Stop` is the shortest label any `.oyl-button` in the product carries, so it
+ * is the narrowest target that ships.
+ *
+ * ⚠️ They are rendered **inside `.oyl-main`**, above the spacer, for the reason
+ * {@link SPACER_PIXELS} gives at length: a control measured outside `.oyl-shell`
+ * is a control outside the layout under test.
+ *
+ * `data-oyl-touch-target` is what `shell.browser.spec.ts` selects on. Renaming
+ * it is a red build there rather than a quiet one, because that spec asserts
+ * how many specimens it found before it measures any of them.
+ */
+function TouchTargets(): JSX.Element {
+  return (
+    <section data-oyl-touch-target="true" aria-label="Touch target specimens">
+      <Button variant="secondary">Pause</Button>
+      <Button>Resume</Button>
+      <Button variant="secondary">Stop</Button>
+      <Button>Yes, stop the ride</Button>
+      <Button variant="secondary">Keep riding</Button>
+    </section>
+  );
+}
+
 function main(): void {
   const host = document.querySelector('#shell');
   if (host === null) {
@@ -154,6 +201,23 @@ function main(): void {
   if (region === null) {
     throw new Error('shell harness: AppShell rendered no .oyl-main to extend');
   }
+
+  // #316's specimens, in their own root inside `.oyl-main`. A second root
+  // rather than a prop on `AppShell`, because the shell's job is to render a
+  // route and adding a "render these buttons too" input to a shipping component
+  // for a harness's benefit is the change `hud-harness.tsx` warns against.
+  // `flushSync` for the same reason as above: the attribute the spec waits on
+  // has to mean the browser has these boxes to lay out.
+  const specimens = document.createElement('div');
+  region.append(specimens);
+  flushSync(() => {
+    createRoot(specimens).render(
+      <StrictMode>
+        <TouchTargets />
+      </StrictMode>,
+    );
+  });
+
   const spacer = document.createElement('div');
   spacer.dataset['oylSpacer'] = 'true';
   spacer.style.height = `${String(SPACER_PIXELS)}px`;

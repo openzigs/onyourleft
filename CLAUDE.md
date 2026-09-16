@@ -47,7 +47,9 @@ apps/                 AGPL-3.0-or-later, without exception
                         WCAG 2.2 SC 1.4.10 names, which is what closes this
                         repository's structural blindness to LAYOUT: jsdom
                         performs none and nothing here had ever laid out a
-                        header
+                        header. Since #316 that page also carries the button
+                        specimens the touch-target measurement needs, because a
+                        shell handed no ports renders no control at all
     src/a11y/           the accessibility gate: rules, routes, contrast (#48) — see §4e
     src/analysis/       zones and duration personal bests (#78) — the port, the one
                         place a threshold default is substituted, the bounded
@@ -58,7 +60,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         to every gate here, and the type scale's ratio. A new token
                         needs four things, not one: a value, a contrast pair with its
                         measured margin, a level if it is a surface, and a rule that
-                        actually paints with it
+                        actually paints with it. Since #316 `.oyl-button` DECLARES its
+                        touch target rather than arriving at one: the height used to
+                        be a by-product of two spacing tokens, a type token and a
+                        border, landing 0.8 px clear of 44 — see §4f
     src/efforts/        the effort-history screen's reads and its stub (#67) — the
                         read budget, and where a sample index comes from
     src/detail/         the ride detail view's data layer (#50) — the read budget, the
@@ -1243,8 +1248,8 @@ browser runs**.
 | `game.browser.spec.ts` | its spec — the renderer constructs against a live context, the geometry is one a driver accepts, and a frame reaches the drawing buffer (read back with `readPixels`, because `render` not throwing is a weaker claim) |
 | `hud.html`, `hud-harness.tsx` | since #266, the ride HUD: the **real** `game/hud/HudPanel.tsx` under the **real** `design/theme.css`, in the **real** `oyl-shell` → `oyl-main` → `oyl-game` chain `AppShell` and `GameView` give it, with every field populated and all three of #259's settled outcome words. A **`.tsx`**, and the only React in this directory |
 | `hud.browser.spec.ts` | its spec — no `.oyl-hud__value` overflows its grid track at a phone viewport in either orientation, read back from the browser's own layout. Its **control panels** are the half that makes a green run mean something |
-| `shell.html`, `shell-harness.tsx` | since #307's review, the app **shell**: the **real** `shell/AppShell.tsx` with the **real** `ROUTES` table under the **real** `design/theme.css`. The second `.tsx` here. ⚠️ Its spacer goes **inside `.oyl-main`** and the file says why at length — after `.oyl-shell` the header scrolls out of its own sticky containing block and measures 0 px, and inside `.oyl-shell` `main` stays shorter than the viewport so a focus scroll never consults `scroll-margin-top`. Each mistake made a different assertion pass over nothing |
-| `shell.browser.spec.ts` | its spec — how much of the viewport persistent chrome still covers after a scroll, where a fragment jump lands the `h1`, whether the focused skip link is the topmost thing at its own centre (hit-tested, not read off a `z-index`), and no horizontal scrolling at 320 px |
+| `shell.html`, `shell-harness.tsx` | since #307's review, the app **shell**: the **real** `shell/AppShell.tsx` with the **real** `ROUTES` table under the **real** `design/theme.css`. The second `.tsx` here. ⚠️ Its spacer goes **inside `.oyl-main`** and the file says why at length — after `.oyl-shell` the header scrolls out of its own sticky containing block and measures 0 px, and inside `.oyl-shell` `main` stays shorter than the viewport so a focus scroll never consults `scroll-margin-top`. Each mistake made a different assertion pass over nothing. ⚠️ Since #316 it also renders the **real** `design/Button.tsx` in both variants, with `RideView`'s own labels, because a shell handed no ports renders **zero** controls on all eleven routes and a size assertion over an empty list passes |
+| `shell.browser.spec.ts` | its spec — how much of the viewport persistent chrome still covers after a scroll, where a fragment jump lands the `h1`, whether the focused skip link is the topmost thing at its own centre (hit-tested, not read off a `z-index`), and no horizontal scrolling at 320 px. ⚠️ Since #316 it also measures the **touch target** three ways, and the three fail for different reasons — see below |
 | `../playwright.config.ts` | Chromium only, no retries, and the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all |
 | `../vite.browser.config.ts` | the harness build. A second Vite config, so the harness cannot reach a shipped bundle |
 
@@ -1291,6 +1296,22 @@ a "Skip to main content" that landed the `<h1>` entirely behind it, through ever
 `shell.browser.spec.ts` is what closes that, and the rule it leaves behind is: **a change to
 `position`, `z-index`, `scroll-margin` or the size of persistent chrome is reviewed by measuring it
 in the pinned Chromium, not by reading the CSS.**
+
+⚠️ **The same gate now owns the touch target, and it makes three assertions that are NOT
+interchangeable** ([#316](https://github.com/openzigs/onyourleft/issues/316)). `.oyl-button`
+declared no minimum size at all: its height was 0.5rem of padding twice, plus `--oyl-font-size-md`
+at `body`'s `line-height: 1.55`, plus two 2 px borders — **44.8 px**, clearing the target by
+0.8 px, with `--oyl-space-sm`, the base line-height and `--oyl-font-size-md` each dropping it under
+44 on their own. So the spec measures (1) the **shipped box**, per viewport, which is what a thumb
+lands on; (2) the **declaration**, which is what stops the target being emergent again — ⚠️ and on
+its own it is weak, because with the tokens as they are *deleting* `min-height` leaves the box at
+44.8 px and (1) still passes; and (3) the box with the **floor stripped off**, which is the only
+one that goes red for the arithmetic. A `min-height` absorbs what it stands on: once declared, the
+padding can halve while the button still measures 44 px and every other control built from the same
+tokens starts below the target with nothing saying so. ⚠️ **44×44 is SC 2.5.5 (Target Size
+(Enhanced), AAA), not SC 2.5.8, which is the AA criterion and is 24×24.** Both `theme.css` and the
+spec carry that correction because an earlier comment in this repository had it the wrong way round;
+do not "fix" a failure here by citing 2.5.8.
 
 ⚠️ **The browser gate does not subsume `styleOrigins`, and it is easy to assume it does.** Adding a
 third-party `glyphs` URL to `basemapStyle` turns the **jsdom** check red and leaves the **browser**
@@ -2445,6 +2466,7 @@ top of an issue **supersedes its body**.
 | What stops a design token being declared, asserted and painted by nothing | `apps/web/src/a11y/theme.a11y.test.ts` §"every token is painted by something" |
 | Why a contrast pair records what it measures as well as what it must clear | `apps/web/src/design/tokens.ts` §`ContrastRequirement.measured` |
 | How far a `<select>` may be styled before it stops being one | `apps/web/src/design/theme.css` §`select`, [#305](https://github.com/openzigs/onyourleft/issues/305) |
+| Why the button's 44 px touch target is declared rather than emergent, and why a floor is not enough on its own | `apps/web/src/design/theme.css` §`.oyl-button`, `apps/web/browser/shell.browser.spec.ts` §`TOUCH_TARGET_PIXELS` |
 | When the header sticks, when it deliberately does not, and the measurement that decides | `apps/web/src/design/theme.css` §`@media (min-width: 64rem) and (min-height: 40rem)`, `apps/web/browser/shell.browser.spec.ts` |
 | What stops persistent chrome eating a small viewport, and why no other gate can see it | `apps/web/browser/shell.browser.spec.ts` §`PERSISTENT_CHROME_BUDGET`, §4f |
 | Why the harness spacer's position is load-bearing, and the two places it must not go | `apps/web/browser/shell-harness.tsx` §`SPACER_PIXELS` |

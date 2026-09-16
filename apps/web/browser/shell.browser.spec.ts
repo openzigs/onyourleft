@@ -436,3 +436,272 @@ test.describe('the sticky header and its scroll margin are one decision', () => 
     ).toBeGreaterThan(0);
   });
 });
+
+/**
+ * The touch target — #316.
+ *
+ * ## What was wrong
+ *
+ * `.oyl-button` declared no minimum size at all. Its height was the sum of
+ * three tokens nobody thinks of as belonging to a button — `--oyl-space-sm`
+ * twice, `--oyl-font-size-md` at `body`'s `line-height: 1.55`, and two 2 px
+ * borders — which came to **44.8 px**. It cleared 44 by 0.8 px, by coincidence,
+ * and each of those three drops it under on its own. #307 had already moved the
+ * type scale under this control in the week the number was measured.
+ *
+ * `select` had been given an explicit `min-height: 2.75rem` by #305 with a
+ * comment explaining the value. The button beside it got nothing — so the
+ * repository had already decided the number mattered, on the control that
+ * matters less.
+ *
+ * ## ⚠️ The citation
+ *
+ * 44×44 is **SC 2.5.5 (Target Size (Enhanced), AAA)**. SC 2.5.8 (Target Size
+ * (Minimum), AA) is **24×24** — a different criterion with a different number,
+ * and `theme.css` records that an earlier comment of its own confused the two.
+ * This product is used on a handlebar, in gloves, in the rain; clearing the AA
+ * minimum easily is not the same as being usable there, and 44 is chosen for
+ * that reason rather than read off a conformance table.
+ *
+ * ## Why here and not in the fast suite
+ *
+ * jsdom performs no layout and resolves no custom property (CLAUDE.md §4e), so
+ * nothing in `pnpm run test` can measure a button. `theme.a11y.test.ts` reads
+ * the stylesheet as a file: it can see a declaration, never what the
+ * declaration does — which is the same blindness that let #307 ship a header
+ * covering 70 % of a 320×256 viewport.
+ *
+ * ## Three assertions, and they fail for three different reasons
+ *
+ * - **the shipped box** is what a rider's thumb actually lands on, and it is
+ *   per-viewport because a wrapped label and a narrow container are layout,
+ *   not arithmetic.
+ * - **the declaration** is what stops the target being emergent again. ⚠️ On
+ *   its own it is weak: with the tokens as they are, deleting `min-height`
+ *   leaves the box at 44.8 px and the assertion above still passes.
+ * - **the tokens on their own** is the one that goes red for the arithmetic.
+ *   A floor absorbs what it stands on: once `min-height` is declared, the
+ *   padding can halve and the button stays 44 px while every other control
+ *   built from the same tokens starts below the target, with nothing anywhere
+ *   saying so. This measures the button with its floor taken away, which is
+ *   the number the issue's table is about.
+ */
+
+/**
+ * The smallest a control a rider touches may be, in CSS px, in both axes.
+ *
+ * WCAG 2.2 **SC 2.5.5 (Target Size (Enhanced), AAA)**. ⚠️ Not SC 2.5.8, which
+ * is the AA criterion and is 24×24 — see this block's header.
+ */
+const TOUCH_TARGET_PIXELS = 44;
+
+/** Where `shell-harness.tsx` puts the specimens, and how many it renders. */
+const SPECIMEN_SELECTOR = '[data-oyl-touch-target] .oyl-button';
+const SPECIMEN_COUNT = 5;
+
+interface SpecimenBox {
+  readonly label: string;
+  readonly secondary: boolean;
+  readonly height: number;
+  readonly width: number;
+  readonly borderTop: string;
+}
+
+async function specimenBoxes(page: Page): Promise<readonly SpecimenBox[]> {
+  return page.evaluate((selector) => {
+    return [...document.querySelectorAll(selector)].map((element) => {
+      const box = element.getBoundingClientRect();
+      return {
+        label: (element.textContent ?? '').trim(),
+        secondary: element.classList.contains('oyl-button--secondary'),
+        height: box.height,
+        width: box.width,
+        // The apparatus control: `.oyl-button` is the only rule in the
+        // stylesheet that gives a button a 2px border, so a specimen reporting
+        // anything else is a specimen `theme.css` never reached — and every
+        // number beside it is then about an unstyled `<button>`.
+        borderTop: getComputedStyle(element).borderTopWidth,
+      };
+    });
+  }, SPECIMEN_SELECTOR);
+}
+
+for (const viewport of VIEWPORTS) {
+  test.describe(`${viewport.name} — the touch target`, () => {
+    test.use({ viewport: { width: viewport.width, height: viewport.height } });
+
+    test('every mid-ride control is at least a 44×44 target as Chromium lays it out', async ({
+      page,
+    }) => {
+      await openShell(page);
+      const boxes = await specimenBoxes(page);
+
+      // ⚠️ The control that matters most here. Handed no ports, every one of
+      // the shell's eleven routes renders a StatusMessage instead of a
+      // control — measured: zero buttons, zero inputs, zero selects on all of
+      // them. A `querySelectorAll` that found nothing is an empty list, and
+      // every `for` loop below it passes cheerfully. See
+      // `shell-harness.tsx` §TouchTargets.
+      expect(
+        boxes.length,
+        `found ${String(boxes.length)} specimens at ${SPECIMEN_SELECTOR}, not ${String(
+          SPECIMEN_COUNT,
+        )}. Every assertion below iterates them, so a missing specimen is a silent pass — see ` +
+          'shell-harness.tsx §TouchTargets',
+      ).toBe(SPECIMEN_COUNT);
+
+      // #316's fifth criterion: both variants, because a rider mid-ride
+      // presses Pause and Stop, which are `oyl-button--secondary`.
+      expect(
+        boxes.filter((box) => box.secondary).length,
+        'no secondary specimen, so oyl-button--secondary is unmeasured',
+      ).toBeGreaterThan(0);
+      expect(boxes.filter((box) => !box.secondary).length, 'no primary specimen').toBeGreaterThan(
+        0,
+      );
+
+      for (const box of boxes) {
+        expect(
+          box.borderTop,
+          `“${box.label}” has no 2px border, so theme.css did not style it and its size is a ` +
+            'measurement of an unstyled button',
+        ).toBe('2px');
+      }
+
+      for (const box of boxes) {
+        expect(
+          box.height,
+          `“${box.label}” is ${box.height.toFixed(1)}px tall. WCAG 2.2 SC 2.5.5 asks for ` +
+            `${String(TOUCH_TARGET_PIXELS)}px, and this control is tapped by a rider in gloves ` +
+            'on a moving bike',
+        ).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+        expect(
+          box.width,
+          `“${box.label}” is ${box.width.toFixed(1)}px wide. A target is two-dimensional`,
+        ).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+      }
+    });
+  });
+}
+
+test.describe('the touch target is declared rather than emergent', () => {
+  // One viewport. Nothing in `theme.css` puts `.oyl-button`'s minimum behind a
+  // media query, and the per-viewport block above is what would catch it if
+  // somebody did: it measures the box a rider touches at all five.
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test('the minimum is a declaration on .oyl-button, in both axes', async ({ page }) => {
+    await openShell(page);
+
+    const declared = await page.evaluate((selector) => {
+      return [...document.querySelectorAll(selector)].map((element) => {
+        const style = getComputedStyle(element);
+        return {
+          label: (element.textContent ?? '').trim(),
+          // Computed rather than specified, so this is in CSS px and a `rem`
+          // whose root moved is caught as well as a value that was edited.
+          minHeight: Number.parseFloat(style.minHeight),
+          minWidth: Number.parseFloat(style.minWidth),
+        };
+      });
+    }, SPECIMEN_SELECTOR);
+
+    expect(declared.length, 'no specimens to read a declaration from').toBe(SPECIMEN_COUNT);
+
+    for (const control of declared) {
+      expect(
+        control.minHeight,
+        `“${control.label}” declares min-height ${String(control.minHeight)}px. Before #316 it ` +
+          'declared none at all and stood 0.8px clear of the target by arithmetic nobody owned',
+      ).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+      expect(
+        control.minWidth,
+        `“${control.label}” declares min-width ${String(control.minWidth)}px. Asserting a width ` +
+          'that only the label produces would re-create the emergent guarantee in the other axis',
+      ).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+    }
+  });
+
+  /*
+   * ⚠️ This is the assertion #316 is actually about, and the one that goes red
+   * for each of the three token changes.
+   *
+   * The declaration above holds the button at 44px whatever the tokens do —
+   * which fixes the button and hides the tokens. Drop `--oyl-space-sm` to
+   * 0.25rem and the button still measures 44px while the arithmetic behind it
+   * has fallen to 36.8px; the next control written from the same spacing scale
+   * starts under the target and no gate anywhere says so.
+   *
+   * So the floor is taken away and the button is measured again. When this
+   * fires, the repair is not to widen the tolerance: it is to decide, in the
+   * open, either that the token moves back or that this control now leans on
+   * its floor — and to write which down here.
+   *
+   * Measured in the lockfile-pinned Chromium on this branch: 44.8px, from
+   * 16px of padding, 24.8px of line box and 4px of border.
+   */
+  test('the tokens the button is built from still reach the target on their own', async ({
+    page,
+  }) => {
+    await openShell(page);
+
+    const intrinsic = await page.evaluate((selector) => {
+      return [...document.querySelectorAll(selector)].map((element) => {
+        const styled = element as HTMLElement;
+        const before = styled.style.cssText;
+        styled.style.minHeight = '0px';
+        styled.style.minWidth = '0px';
+        const style = getComputedStyle(styled);
+        const box = styled.getBoundingClientRect();
+        const measured = {
+          label: (styled.textContent ?? '').trim(),
+          height: box.height,
+          // Whether the floor was really taken off. Without this the numbers
+          // below could be the floored ones and the whole test would be the
+          // one above again, wearing a different name.
+          neutralised: style.minHeight,
+          // The line box, the padding and the borders — the three terms of the
+          // arithmetic, read back so the failure shows its working.
+          lineHeight: Number.parseFloat(style.lineHeight),
+          padding: Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom),
+          border:
+            Number.parseFloat(style.borderTopWidth) + Number.parseFloat(style.borderBottomWidth),
+        };
+        styled.style.cssText = before;
+        return measured;
+      });
+    }, SPECIMEN_SELECTOR);
+
+    expect(intrinsic.length, 'no specimens to strip a floor from').toBe(SPECIMEN_COUNT);
+
+    for (const control of intrinsic) {
+      expect(
+        control.neutralised,
+        `“${control.label}” still reports a min-height of ${control.neutralised} after it was ` +
+          'stripped, so this test is measuring the floor and not the arithmetic under it',
+      ).toBe('0px');
+
+      // The second apparatus control: a label that wrapped to two lines is
+      // tall for a reason that has nothing to do with the tokens, and it would
+      // sail over 44px with the padding halved. Every label here is one word
+      // or a short phrase and none of them wraps at 1280px; this says so
+      // rather than assuming it.
+      expect(
+        control.height - control.padding - control.border,
+        `“${control.label}” wraps to more than one line, so its height is not the arithmetic ` +
+          'this test is about',
+      ).toBeLessThan(control.lineHeight * 2);
+
+      expect(
+        control.height,
+        `“${control.label}” is ${control.height.toFixed(1)}px tall once min-height is taken ` +
+          `away: ${control.padding.toFixed(1)}px of padding (--oyl-space-sm), ` +
+          `${control.lineHeight.toFixed(1)}px of line box (--oyl-font-size-md at body's ` +
+          `line-height) and ${control.border.toFixed(1)}px of border. That is under ` +
+          `${String(TOUCH_TARGET_PIXELS)}px, so min-height is now the only thing holding this ` +
+          'control at the target and every other control built from the same tokens is below ' +
+          'it. Move the token back, or decide here that this button leans on its floor',
+      ).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+    }
+  });
+});
