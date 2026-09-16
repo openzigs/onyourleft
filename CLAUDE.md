@@ -2364,7 +2364,8 @@ top of an issue **supersedes its body**.
 | Why an ANT+ dependency used to pass the rule that bans ANT+ | `scripts/check-repo-rules.sh` §`SCOPE001`, §6 |
 | What an athlete gets when they ask for everything, and what the manifest carries | `apps/web/src/transfer/export-everything.ts` §`accountManifest` |
 | Why the manifest names its fields instead of spreading the row | `apps/web/src/transfer/export-everything.ts` §`accountManifest` |
-| Why the account export's cursor is an instant, and the case it gets wrong | `apps/web/src/transfer/export-everything.ts` §`continueAfter` |
+| Why the account export's cursor is a pair, and why the store takes two options where the report carries one object | `apps/web/src/transfer/export-everything.ts` §`AccountExportCursor`, §`continueAfter` |
+| What carries that cursor between presses, and why changing the format abandons it | `apps/web/src/transfer/TransferView.tsx` §`resumeFrom` |
 | What a rider is told before erasing a device, and why the signing key is named | `apps/web/src/transfer/erase-device.ts` §`ERASE_CANNOT_REACH`, [ADR 0014](docs/adr/0014-portable-identity.md) D-7 |
 | Why erasing needs a typed phrase rather than a second button | `apps/web/src/transfer/erase-device.ts` §`eraseDecision` |
 | What proves no store read crosses athletes, and how a new read is caught | `packages/store/src/activity-store.scoping.test.ts` |
