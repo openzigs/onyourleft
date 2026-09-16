@@ -64,12 +64,26 @@
  *   from the document's stated premises, and that each premise says where it
  *   came from. Whether $0.015/GB-month is still R2's price is a question for a
  *   person with a browser, and the document records the date it was last read.
- * - **The prose is not checked.** Only the three anchored tables are. The
- *   crossover figure quoted in the text is derived by `--print` and stated in
- *   the document, but a reader editing an input has to re-run `--print` to
- *   notice it moved; no rule fires. That is a deliberate stopping point rather
- *   than an oversight — machine-checking a sentence means pinning its wording,
- *   and a gate that forbids rewording a paragraph gets deleted.
+ * - **The prose is not checked, and that is where the figures a reader quotes
+ *   live.** Only the three anchored tables are checked. Every share, ratio,
+ *   threshold and band stated in a sentence — the crossover derived by
+ *   `--print`, the instance's percentage of each total, the price band the box
+ *   dominates across — is outside every rule, and a reader editing an input
+ *   has to recompute them by hand to notice they moved.
+ *
+ *   ⚠️ **This is not hypothetical: the document shipped for review with three
+ *   of them wrong on the day they were typed** — an instance share taken
+ *   against the infrastructure subtotal and quoted as a fully-loaded one, a
+ *   dominance claim that was false at the floor of its own stated band, and a
+ *   donations arithmetic the table beneath it already contradicted. All three
+ *   are corrected and each now carries a note saying what it used to say. The
+ *   lesson generalises past this gate: **a checker over a document's tables
+ *   creates a blind spot in that document's prose**, so a green run here is
+ *   evidence about the tables and about nothing a person will actually quote.
+ *
+ *   The stopping point is deliberate all the same. Machine-checking a sentence
+ *   means pinning its wording, and a gate that forbids rewording a paragraph
+ *   gets deleted. The answer is a reviewer who recomputes, not a rule.
  * - **It says nothing about any bill.** No traffic has been served and no
  *   invoice exists. The document says so in its own words and this script
  *   cannot tell the difference.
@@ -264,7 +278,12 @@ export function readInputs(rows) {
   for (const row of rows.slice(1)) {
     if (row.length < 5) continue;
     const key = plain(row[0]);
-    if (key === '' || !(key in REQUIRED_INPUTS)) continue;
+    // `Object.hasOwn` rather than `in`, which reaches `Object.prototype`: a row
+    // keyed `toString`, `constructor` or `valueOf` would otherwise be treated
+    // as an input the model reads, validated for provenance, and written into
+    // `values` where it shadows a prototype member. Harmless today and exactly
+    // the kind of thing that stops being harmless quietly.
+    if (key === '' || !Object.hasOwn(REQUIRED_INPUTS, key)) continue;
     seen.set(key, row);
     const value = numberIn(row[1]);
     if (value === undefined) {
@@ -500,14 +519,15 @@ export function printable(inputs) {
     });
     body.push(`| ${label} | ${cells.join(' | ')} |`);
   }
-  const crossoverAt = Math.round(crossover(inputs));
-  return [
-    head,
-    rule,
-    ...body,
-    '',
-    `Tile requests overtake archive storage at ${crossoverAt.toLocaleString('en-US')} monthly actives.`,
-  ].join('\n');
+  // A non-finite crossover is said in words rather than printed as `∞`. This
+  // output is pasted into the document as prose, and "at ∞ monthly actives" is
+  // a sentence nobody would leave in a cost model — so it would be hand-edited,
+  // which is the one thing `--print` exists to stop.
+  const crossoverAt = crossover(inputs);
+  const sentence = Number.isFinite(crossoverAt)
+    ? `Tile requests overtake archive storage at ${Math.round(crossoverAt).toLocaleString('en-US')} monthly actives.`
+    : 'Tile requests never overtake archive storage: at these inputs no tile request is billed.';
+  return [head, rule, ...body, '', sentence].join('\n');
 }
 
 const entryPoint = process.argv[1];

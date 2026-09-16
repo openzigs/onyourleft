@@ -1779,14 +1779,28 @@ a fixture where one parses as a table and yields nothing.
 ⚠️ **A fixture at the identity value of the operation it feeds tests nothing, and this suite shipped
 one.** The first version priced Class B reads at **$1.00 per million**, which makes `× p_classB`
 indistinguishable from omitting it — a mutation deleting that multiplication passed all 49
-assertions. A zero egress price hides the tile size the same way and an exchange rate of 1.00 hides
+assertions the suite then had. A zero egress price hides the tile size the same way and a rate of
+1.00 hides
 `fx`. Every rate in `base_document` is now deliberately away from 1 and from 0, and the file says
 so where a reader would otherwise simplify it back.
 
 ⚠️ **Read `check-cost-model.mjs` §Limits before reading a green run as more than it is.** It checks
 that the document's conclusions follow from the document's premises; it says nothing about whether a
-premise is true, and nothing about any bill, because there is no traffic and no invoice. The prose
-is not checked either — including the crossover figure, which `--print` derives and a person pastes.
+premise is true, and nothing about any bill, because there is no traffic and no invoice.
+
+⚠️ **The prose is not checked, and that is where the figures a reader quotes live.** Only the three
+anchored tables are. Every share, ratio, threshold and band stated in a *sentence* is outside every
+rule — the crossover `--print` derives and a person pastes, the instance's percentage of each total,
+the price band the box is said to dominate across. **This is the gate's blind spot and it is not
+hypothetical**: #54's own review found **three** prose figures that were wrong the day they were
+typed — an instance share taken against the infrastructure subtotal and quoted as a fully-loaded
+one, a dominance claim false at the floor of its own stated band, and a donations arithmetic the
+table beneath it already contradicted — inside the document arguing that derived figures rot. Each
+is corrected and each now carries a note saying what it used to say. **A green `check:cost-model` is
+evidence about the tables only.** Reviewing this document means recomputing every percentage, ratio
+and band in its prose against the gated table above it; the stopping point is deliberate, because
+machine-checking a sentence means pinning its wording and a gate that forbids rewording a paragraph
+gets deleted.
 
 ---
 

@@ -149,8 +149,12 @@ is the harder half of that problem, and no part of it is measured here.
 
 ### The box is the whole bill, at every scale modelled
 
-The dominant line item is the instance at 1,000, 10,000 **and** 100,000 monthly actives — 92%, 86%
-and 66% of the fully-loaded total. #54's second criterion asks that the next thing to optimise be
+The dominant line item is the instance at 1,000, 10,000 **and** 100,000 monthly actives — 89%, 86%
+and 66% of the fully-loaded total. ⚠️ **Against the *infrastructure subtotal* the same three shares
+read 92%, 89% and 67%**, and they are stated here because mixing the two denominators is the
+specific mistake this paragraph shipped with: its 92% was the infrastructure share of the smallest
+column quoted as a fully-loaded one. Either reading supports the sentence below; neither may be
+quoted without its denominator. #54's second criterion asks that the next thing to optimise be
 known in advance rather than discovered, and the answer is blunt: **it is never the tiles and never
 the streams. It is whether one box still serves.**
 
@@ -176,8 +180,13 @@ measurement:
 
 Basemap **archive storage** is second at 1,000 and 10,000 actives; basemap **tile requests** take
 over at 100,000. The crossover is at **25,561 monthly actives** on the stated inputs — derived by
-`node scripts/check-cost-model.mjs --print`, and the one figure in this document that the gate does
-not check, because it is prose.
+`node scripts/check-cost-model.mjs --print`. ⚠️ **It is not the only figure here the gate does not
+check, and an earlier draft of this sentence said it was.** The gate reads the three anchored
+tables and nothing else, so *every* number in prose — the shares above, the €7.02 threshold below,
+the disk arithmetic, this crossover — is unchecked. Three of them were wrong on the day they were
+typed, inside the document arguing that derived figures rot. **A green `check:cost-model` is
+evidence about the tables only**; recompute a prose figure from the table above it before quoting
+it, and see `check-cost-model.mjs` §Limits for why the gate deliberately stops at the table edge.
 
 It is also almost entirely a statement about `L`. Archive storage does not depend on `L` at all;
 tile requests are linear in it. Double `L` and the crossover halves. That asymmetry is the practical
@@ -334,11 +343,15 @@ differentiator: the closest analogue with a comparable free offering is closed-s
 self-hosted option at all.
 
 **It is not free either, and saying so is the point.** It is the box — €20.99/month at the reference
-size, €5.99 at the floor — plus somebody's evenings. A self-hoster serving one region pays about a
-fifteenth of the archive line, or nothing at all if a z13 or z14 extract fits inside R2's 10 GB free
-tier. What they do not pay is a second bill for a managed database, an object store, a CDN account
-or per-request compute, because [ADR 0002](adr/0002-local-first-architecture.md) decision A forbids
-requiring any of them.
+size — plus somebody's evenings. ⚠️ **[ADR 0002](adr/0002-local-first-architecture.md) decision A's
+floor is a size, not a price**: ~2 vCPU / 4 GB for a single-athlete or single-club deployment, with
+no figure attached. An earlier draft of this sentence put €5.99 on it; no source in
+*[Sources](#sources)* supports that number and none was reachable for it, so it is withdrawn rather
+than re-derived. A smaller box costs less, and how much less is not a figure this document has. A
+self-hoster serving one region pays about a fifteenth of the archive line, or nothing at all if a
+z13 or z14 extract fits inside R2's 10 GB free tier. What they do not pay is a second bill for a
+managed database, an object store, a CDN account or per-request compute, because
+[ADR 0002](adr/0002-local-first-architecture.md) decision A forbids requiring any of them.
 
 ⚠️ **The single-command deploy in #54's fifth and sixth acceptance criteria is not in this change,
 and could not be.** Three independent reasons, in the order they bite:
@@ -389,7 +402,10 @@ current balance, against an estimated annual budget of $433.59 — and its real 
 grants. Hosting being cheap is what makes small donations *sufficient*, which is a different and much
 better claim, and it is the one this model supports: at 10,000 monthly actives the whole
 fully-loaded bill is **$28.12 a month**, which one supporter at $4 a month almost covers a seventh
-of, and seven of them cover outright.
+of. ⚠️ **Seven of them do not cover it — eight do.** Seven gifts are $28.00 gross against a $28.12
+bill, and **$25.09** net of the 10.4% monthly card fee the next section computes; eight are $32.00
+gross and $28.67 net. An earlier draft said seven covered it outright, which the fee table below
+already contradicted — a prose figure disagreeing with the checked table a screen away.
 
 ### What it costs to be given ten dollars
 
@@ -415,9 +431,16 @@ difference is the fixed fee. That is a product decision with a number attached, 
 - **`L` is measured and is not 30.** The tile-request line is linear in it and the crossover moves
   inversely. #53 already carries a *"measured cost per 100,000 tile requests"* criterion;
   instrumenting the client for one week replaces the guess. Nothing else in the model depends on it.
-- **The reference box's price is read from a primary source and is not €20.99.** The *ordering* does
-  not move — the box dominates anywhere in the €6–€43 band the secondary sources span, and at €43 it
-  would dominate harder. What moves is the per-athlete figure, by up to a factor of two.
+- **The reference box's price is read from a primary source and is not €20.99.** The *ordering*
+  holds across the band the secondary sources in *[Sources](#sources)* actually span — **€12.49**
+  (a February 2026 CAX31 reading) to **€129.99** (the top of a September 2026 CAX line) — where the
+  box is the dominant line item at all three scales. ⚠️ **It does not hold arbitrarily far down,
+  and an earlier draft of this bullet claimed it did.** Below **€7.02/month** the basemap
+  tile-request line overtakes the box at 100,000 actives: that line is $8.10 there and does not
+  depend on the box at all, so €7.02 is simply $8.10 at `fx`. Check it rather than trusting this
+  sentence — edit `box_eur` and run `node scripts/check-cost-model.mjs --print`, whose *Dominant
+  line item* row is computed rather than typed. What moves with the price is the per-athlete
+  figure, and it tracks the box almost one-for-one because the box is most of the bill.
 - **One box stops serving.** This is the one that would change the shape rather than the size, and
   it is unmeasured. The three bounds above are where to start.
 - **The real-time billing test comes back badly.** Then decision H's mitigation sentence is what

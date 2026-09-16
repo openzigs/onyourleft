@@ -359,6 +359,37 @@ run_check --print
 assert_red 'printing refuses when an input cannot be read'
 assert_silent_about 'and prints no NaN' 'NaN'
 
+# --- ...and says in words when there is no crossover at all -----------------
+#
+# `crossover` returns Infinity when nothing is billed per active -- no map
+# loads, no tiles per load, a perfect cache, or a zero read price. It was the
+# only branch in the checker with no case, which in this repository is the
+# shape that turns out not to fire at all. It fires, and it must not print
+# "at Infinity monthly actives": this output is pasted into the document as
+# prose, and a sentence a person would rewrite by hand defeats `--print`.
+base_document
+edit 's/| `L` | 10 |/| `L` | 0 |/'
+run_check --print
+assert_green 'printing survives inputs that bill nothing per active'
+assert_says 'and says there is no crossover, in words' 'Tile requests never overtake archive storage'
+assert_silent_about 'and never prints an infinity' 'Infinity'
+assert_silent_about 'nor the symbol for one' '∞'
+
+# --- An inputs row named after an Object.prototype member is not an input ---
+#
+# `key in REQUIRED_INPUTS` reaches the prototype, so a row keyed `toString`
+# parsed as an input the model reads: validated for provenance, and written
+# into `values` where it shadows a prototype member. An unrecognised key is
+# meant to be IGNORED -- a model may quote a figure in prose without deriving
+# anything from it -- so the tell is that this row's deliberately invalid
+# confidence draws no COST004.
+base_document
+edit 's/| `m` | 10 | months | a source | inferred |/| `m` | 10 | months | a source | inferred |\
+| `toString` | 5 | not an input | a source | wishful |/'
+run_check
+assert_green 'a row named after a prototype member is ignored rather than read'
+assert_silent_about 'and draws no complaint about its confidence' 'toString'
+
 # --- The checker run from a path containing a space --------------------------
 #
 # `realpathSync` on the entry point is how this script decides it is being run
