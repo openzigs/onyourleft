@@ -360,9 +360,44 @@ h3:first-child {
   font-size: var(--oyl-font-size-sm);
 }
 
+/*
+ * ⚠️ The two `min-*` declarations below are the touch target, and before #316
+ * this rule had neither of them. The height was a by-product — 0.5rem of
+ * padding twice, plus 1rem of inherited type at `body`'s 1.55 line-height, plus
+ * two 2px borders — which comes to **44.8 px**. It cleared the target by 0.8 px
+ * and nothing held it there: `--oyl-space-sm`, the base `line-height` and
+ * `--oyl-font-size-md` each drop it below 44 on their own, and none of the
+ * three looks like it is touching a button when you change it. #307 had already
+ * moved the type scale under this control in the week it was measured.
+ *
+ * 44px. ⚠️ That is **SC 2.5.5 (Target Size (Enhanced), AAA)**, which is 44×44.
+ * SC 2.5.8 (Target Size (Minimum), AA) is 24×24 and is NOT what this is — the
+ * same confusion `select` records below, where an earlier version of the
+ * comment cited the wrong one. The value is deliberate rather than conformant:
+ * `views/RideView.tsx` renders Pause, Resume and the two halves of the stop
+ * confirmation as these buttons, and they are tapped by a gloved, sweating
+ * rider on a moving bike. Clearing the AA minimum easily is not the same as
+ * being usable there.
+ *
+ * `min-width` as well as `min-height`, because a target is two-dimensional and
+ * every button here is wide enough only because its label happens to be a word.
+ * Asserting a width the labels produce would re-create in the other axis
+ * exactly the emergent guarantee this comment exists to remove.
+ *
+ * `box-sizing: border-box` is set on everything at the top of this file, so
+ * 2.75rem is the whole box including the padding and the borders above.
+ *
+ * ⚠️ A floor absorbs what it stands on: once this is declared, the tokens can
+ * drift under it and the button stays 44 px while every other control built
+ * from them starts below the target. `browser/shell.browser.spec.ts` therefore
+ * measures the shipped box *and* the box the tokens alone produce, and the
+ * second is what goes red when one of the three moves.
+ */
 .oyl-button {
   font: inherit;
   cursor: pointer;
+  min-height: 2.75rem;
+  min-width: 2.75rem;
   padding: var(--oyl-space-sm) var(--oyl-space-md);
   border-radius: var(--oyl-radius);
   border: 2px solid var(--oyl-color-accent);
