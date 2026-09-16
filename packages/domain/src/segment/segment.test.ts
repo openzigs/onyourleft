@@ -18,7 +18,9 @@ import {
   DEFAULT_BEARING_TOLERANCE_DEGREES,
   DEFAULT_ENDPOINT_RADIUS_METRES,
   endBearing,
+  endpointReachRadius,
   endpointReached,
+  MAXIMUM_ENDPOINT_REACH_METRES,
   MINIMUM_SEGMENT_LENGTH_METRES,
   MINIMUM_SEGMENT_POSITIONS,
   NEAR_DUPLICATE_OVERLAP,
@@ -30,7 +32,7 @@ import {
 } from './segment';
 
 import type { SegmentDraft } from './segment';
-import type { GeographicPosition } from '../quantities';
+import type { GeographicPosition, Metres } from '../quantities';
 
 // A degree of latitude is about 111.19 km on the sphere this package uses, so
 // these two constants let a test say "300 m north" without a magic number.
@@ -488,6 +490,88 @@ describe('creating a segment', () => {
     }
     for (const forbidden of ['wayId', 'osmId', 'nodeId', 'edgeId', 'wayIds', 'edgeIds']) {
       expect(keys).not.toContain(forbidden);
+    }
+  });
+});
+
+describe('the ceiling on an endpoint reach (#304)', () => {
+  // The invariant `cells.ts` states is that stage 1 must not reject a pair a
+  // later stage could still report. Stage 2's gate is the widest of those, and
+  // until #304 neither of its two inputs had a ceiling: `createSegment` took
+  // any finite radius, and the ride's median spacing is a property of the
+  // recording. `cells.test.ts` holds the half that ties this number to
+  // `PREFILTER_MARGIN_METRES`; this file holds the half that says the number is
+  // applied.
+
+  const endpoint = {
+    position: at(51.5, -0.12),
+    bearing: degreesBearing(0),
+    radius: metres(DEFAULT_ENDPOINT_RADIUS_METRES),
+  } as const;
+
+  it('widens by half the spacing while that stays under the ceiling', () => {
+    // The spike's first finding, unchanged: a gate that does not scale with the
+    // recording interval detects nothing above a 1 s one. 83 m is the slowest
+    // smart-recording interval in common use.
+    expect(endpointReachRadius(endpoint, metres(83))).toBeCloseTo(
+      DEFAULT_ENDPOINT_RADIUS_METRES + 83 / 2,
+      6,
+    );
+  });
+
+  it('stops widening at the ceiling, however sparse the ride', () => {
+    // A 20 s interval at 50 km/h — inside `GAP_SECONDS`, so the matcher reads
+    // it as recording rather than as a hole — is 278 m between samples, which
+    // is a 154 m gate uncapped. Above the ceiling the gate stops growing
+    // instead of outrunning the prefilter that fed it.
+    expect(endpointReachRadius(endpoint, metres(278))).toBe(MAXIMUM_ENDPOINT_REACH_METRES);
+    expect(endpointReachRadius(endpoint, metres(40_000))).toBe(MAXIMUM_ENDPOINT_REACH_METRES);
+  });
+
+  it('caps a wide endpoint radius the same way, whatever built the segment', () => {
+    // `fromPersistedSegment` reconstructs an endpoint straight from a stored
+    // number and never calls `createSegment`, so a hand-edited row reaches this
+    // function without passing the refusal below. The cap is here as well as
+    // there for the reason `validateWorkout` bounds an expansion rather than
+    // the decoder doing it: one rule instead of two that can drift.
+    const wide = { ...endpoint, radius: metres(250) } as const;
+    expect(endpointReachRadius(wide, metres(0))).toBe(MAXIMUM_ENDPOINT_REACH_METRES);
+  });
+
+  it('still refuses a spacing that is not a non-negative finite number', () => {
+    expect(() => endpointReachRadius(endpoint, metres(0))).not.toThrow();
+    expect(() => endpointReachRadius(endpoint, Number.NaN as Metres)).toThrow(UnitError);
+    expect(() => endpointReachRadius(endpoint, -1 as Metres)).toThrow(UnitError);
+  });
+
+  it('refuses a draft asking for a radius above the ceiling, naming the ceiling', () => {
+    // Refused rather than silently capped: an author who asks for 250 m and is
+    // given 100 m has been told nothing, and the segment they get is not the
+    // one they described.
+    expect(() =>
+      createSegment(draftOf({ endpointRadiusMetres: MAXIMUM_ENDPOINT_REACH_METRES + 1 })),
+    ).toThrow(new RegExp(String(MAXIMUM_ENDPOINT_REACH_METRES)));
+  });
+
+  it('accepts a draft asking for exactly the ceiling', () => {
+    // The boundary is inclusive, and it is asserted so that tightening the
+    // comparison to `>=` is a red test rather than a silent narrowing.
+    const segment = createSegment(draftOf({ endpointRadiusMetres: MAXIMUM_ENDPOINT_REACH_METRES }));
+    expect(segment.start.radius).toBe(MAXIMUM_ENDPOINT_REACH_METRES);
+    expect(segment.end.radius).toBe(MAXIMUM_ENDPOINT_REACH_METRES);
+  });
+
+  it('names no coordinate in the refusal', () => {
+    // ADR 0004 decision D. The radius and the ceiling are the diagnostic and
+    // are named; the endpoint's position is not a number this message may
+    // carry, and the draft's own geometry must not leak into it either.
+    try {
+      createSegment(draftOf({ endpointRadiusMetres: 1_000 }));
+      expect.unreachable('the draft should have been refused');
+    } catch (error) {
+      expect(error).toBeInstanceOf(UnitError);
+      expect((error as UnitError).message).not.toContain('51.5');
+      expect((error as UnitError).message).not.toContain('0.12');
     }
   });
 });

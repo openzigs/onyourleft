@@ -114,18 +114,37 @@ export type CellId = number;
  *   `SIMILARITY_METRES` or `DEFAULT_ENDPOINT_RADIUS_METRES` past this number
  *   is a red test rather than a silent reintroduction of the bug.
  *
- *   ⚠️ **It clears them at their defaults, which is narrower than the rule
- *   above and is stated here rather than implied.** Neither input to
- *   `endpointReachRadius` is bounded: `createSegment` accepts any finite
+ *   ⚠️ **That sentence used to hold at the defaults only, and now holds
+ *   outright (#304). A reviewer who remembers this paragraph saying the
+ *   general case was an open contract is reading the old file.** Neither input
+ *   to `endpointReachRadius` had a ceiling: `createSegment` took any finite
  *   non-negative `endpointRadiusMetres`, and `GAP_SECONDS` splits a ride's
- *   spans in seconds rather than in metres, so nothing bounds a sample's
+ *   spans in seconds rather than in metres, so nothing bounded a sample's
  *   spacing either. A segment created with a 250 m radius, or a ride sampled
- *   every 20 s at 50 km/h (a 154 m gate), has a stage-2 gate wider than this
+ *   every 20 s at 50 km/h (a 154 m gate), had a stage-2 gate wider than this
  *   margin, and stage 1 would then reject a pair stage 2 would have reported —
- *   the #291 failure with a different trigger. Nothing in `apps/` or
- *   `packages/` sets `endpointRadiusMetres` today, so it is a contract rather
- *   than a live defect, and closing it is
- *   https://github.com/openzigs/onyourleft/issues/304.
+ *   the #291 failure with a different trigger, and silent in the same way.
+ *
+ *   **The decision was to bound the gate rather than to derive the margin from
+ *   it.** `endpointReachRadius` now caps at
+ *   `MAXIMUM_ENDPOINT_REACH_METRES` (100 m), which bounds **both** inputs at
+ *   once — the segment's stored radius as well as the ride's spacing — and so
+ *   reaches the half no check made at segment-creation time could, because a
+ *   ride's spacing is a property of the recording. A margin derived per ride
+ *   was rejected for a structural reason rather than a taste one: a corpus
+ *   cover is built once by `indexCorpus`, **before any ride is known**, so
+ *   deriving the margin from a ride's spacing would mean re-indexing the whole
+ *   corpus per ride, and this stage exists to make a 100 000-segment corpus
+ *   affordable. It also keeps this number a constant, which is what lets
+ *   `docs/spikes/0003-segment-prefilter-margin.md` go on describing one.
+ *
+ *   ⚠️ **The cost is real and is stated where it is tuned, not only here.** A
+ *   ride whose median spacing is above 170 m has a gate that no longer scales
+ *   with its own recording and may yield no effort; `segment.ts`'s
+ *   `MAXIMUM_ENDPOINT_REACH_METRES` and `match.ts`'s `GAP_SECONDS` both carry
+ *   that note. The two constants are derived independently and tied by a test
+ *   rather than by an import, because this file promises that swapping the cell
+ *   index later is a change to it and to nothing else.
  * - **Not larger.** The margin is exactly the amount stage 1's admitted
  *   corridor is dilated by, and every metre of it hands stage 2 — the expensive
  *   stage — candidates it must then examine. At 100 m, under a tenth of a cell,
