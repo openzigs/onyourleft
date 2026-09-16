@@ -718,3 +718,15 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   the archive's size — and every figure is now an input with a date on it in
   [`docs/cost-model.md`](../cost-model.md), recomputed by `pnpm run check:cost-model`.
   ([#54](https://github.com/openzigs/onyourleft/issues/54))
+- **2026-09-16** — D-1's cold-request estimate has been measured, and it stands with a correction of
+  sign. The body says the trade *"saves about $35/month and costs up to ~300 ms on a cold request"*;
+  time to **first painted tile** against the archive #53 published, in the pinned Chromium, is
+  **320 ms slower than the same page against a loopback archive** at the median of seven runs, and
+  280 – 356 ms across them. So the ~300 ms figure was close and slightly optimistic, and the
+  Protomaps warning it hedges against — *"500ms or higher"* — did not materialise in the browser at
+  all. The decision is unaffected. ⚠️ A separate finding does bear on the number: **every response
+  in every run carried `cf-cache-status: DYNAMIC`**, so nothing is cached at the edge and each of
+  these is an origin hit; a cache rule on that hostname is the largest available improvement and
+  costs nothing. Method, environment and the full figures are in
+  [spike 0004](../spikes/0004-cold-load-first-painted-tile.md).
+  ([#63](https://github.com/openzigs/onyourleft/issues/63))

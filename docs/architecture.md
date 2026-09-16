@@ -713,7 +713,7 @@ alternatives are there.
 | Coverage gate | **no percentage** — every new code path covered by a test proven to fail without the change |
 | Linter / formatter | ESLint 10 + typescript-eslint + Prettier 3 |
 | Map rendering | **MapLibre GL JS 6.7.0** + **`pmtiles` 4.5.0**, both BSD-3-Clause — installed by #63, in `apps/web` (ADR 0010 D-1) |
-| Basemap | Protomaps basemap as a PMTiles archive on storage this project controls. **Not published yet — #53.** The browser gate renders from a synthetic archive built by `apps/web/browser/pmtiles-fixture.ts`, which contains no OpenStreetMap data |
+| Basemap | Protomaps basemap as a PMTiles archive on storage this project controls. ⚠️ **This row used to read "not published yet — #53" and no longer does**: #53 published a continental-US extract of a pinned daily build on 2026-09-16, and #63's browser gate has rendered from it. It is not in `.env.example` — see below. The gate's *default* archive is still the synthetic one built by `apps/web/browser/pmtiles-fixture.ts`, which contains no OpenStreetMap data |
 | Real-time transport | deferred to [#16](https://github.com/openzigs/onyourleft/issues/16) |
 
 Installed as of #23: the toolchain above, React 19.2.8, React DOM 19.2.8 and Vite 8.2.2. Everything
@@ -754,6 +754,32 @@ first import and produces the same blank map by a different route. `pnpm run bui
 split is unaffected).
 
 This was found by #63's browser gate only once it had a real archive to render — see below.
+
+### What a cold map load costs, measured
+
+[#63](https://github.com/openzigs/onyourleft/issues/63)'s eighth criterion asks for time to first
+painted tile on a cold cache, *recorded in the PR*. It is recorded there and, because a number in a
+pull request body ages out of sight, in [spike 0004](spikes/0004-cold-load-first-painted-tile.md).
+
+| | Loopback fixture archive | Hosted archive over the internet |
+|---|---|---|
+| First painted tile, from `renderer.create` | 206.0 ms (205.3 – 208.8) | **525.6 ms** (488.4 – 561.6) |
+| From navigation start | 246.1 ms | 564.6 ms |
+
+Medians of seven runs each, macOS on Apple silicon, Chromium 1243, 2026-09-16. The hosted
+configuration therefore costs **about 320 ms more**, against [ADR 0010](adr/0010-map-tiles-and-routing.md)
+D-1's estimate of *"up to ~300 ms on a cold request"* — close, and slightly optimistic. An amendment
+on that ADR records it.
+
+⚠️ **Every response carried `cf-cache-status: DYNAMIC`**, so nothing is cached at the CDN edge and
+each range request is an origin hit. That is the largest available improvement to the figure and it
+is a configuration change on #53's side, not a code change here.
+
+⚠️ **The hosted half of the browser gate is opt-in and CI does not run it.**
+`OYL_HOSTED_BASEMAP_URL` turns it on; unset, the block is skipped, because a gate that needs
+somebody else's CDN fails on an aeroplane. `apps/web/browser/hosted-archive.ts` argues that trade and
+says what is done about the skip — chiefly that everything decidable without a network is decided
+there and asserted in `pnpm run test`.
 
 ### Segment matching: every tolerance, and that each is ours
 
@@ -916,6 +942,7 @@ write-up. They live in `docs/spikes/NNNN-kebab-case.md`, and the `ADR00*` rules 
 | [0001](spikes/0001-segment-matching.md) | Which of two segment-matching approaches should #66 build? ([#65](https://github.com/openzigs/onyourleft/issues/65)) | Geometric matching against the athlete's own trace — but two of #64's endpoint parameters have to change first, and the road-graph approach is deferred rather than rejected | `packages/matching`, measured 2026-09-07. ⚠️ **That package is gone**: #66 acted on the recommendation, hardened the algorithm into `packages/domain/src/segment/` and deleted the prototype. The write-up carries a dated note saying which of its numbers no longer describe the shipped code |
 | [0002](spikes/0002-background-recording.md) | Which of #15's six acceptance criteria can be verified from this environment at all? ([#15](https://github.com/openzigs/onyourleft/issues/15)) | Two of six. Criteria 5 and 6 were checked and the checks committed; 2, 3 and 4 need a phone, a real trainer and — for 4 — a Mac and a paid Apple Developer membership, and 1 is true today but was not asserted | Read against the repository on 2026-09-09. Records the hole it found in `SCOPE001`: the rule never scanned `package.json`, so an ANT+ **dependency** — a word #15's fifth criterion names — passed a rule described as what stops the scope quietly returning |
 | [0003](spikes/0003-segment-prefilter-margin.md) | What does padding the segment prefilter's cover cost, now that an unpadded one has been found not to be conservative at a cell boundary? ([#291](https://github.com/openzigs/onyourleft/issues/291)) | A 100 m margin on the corpus side adds 10–16% to the candidates reaching stage 2 and takes a segment's index from 1.45 cells to 2.11; the one-cell halo #291 proposed adds 57–123% and takes it to 10.35. Spike 0001 §3's headline — fan-out bounded by the ride rather than the corpus — survives the padding | `prefilter-fanout.test.ts`, measured 2026-09-15. The second write-up spike 0001 §3 needs, because that measurement rests on an unpadded cover and a spike is never edited |
+| [0004](spikes/0004-cold-load-first-painted-tile.md) | What does a map cost a rider on a cold cache, against the archive #53 published rather than against a loopback fixture? ([#63](https://github.com/openzigs/onyourleft/issues/63)) | First painted tile at a median of 525.6 ms, which is ~320 ms more than the same page against a loopback archive — close to ADR 0010 D-1's ~300 ms estimate and slightly above it. Every response was `cf-cache-status: DYNAMIC`, so none of it was edge-cached | `map.browser.spec.ts`'s hosted block, seven runs each side, measured 2026-09-16. Records the reading defect it found: a cross-origin resource with no `Timing-Allow-Origin` reports zero bytes, which the loopback measurement uses to mean "served from cache" |
 
 ## Hardware validation procedures
 
