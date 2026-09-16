@@ -14,6 +14,15 @@
  * against the app's own manifest and calling the criterion met is precisely the
  * false pass the criterion exists to prevent, so it is reported undischarged.
  *
+ * ⚠️ **Since [#318](https://github.com/openzigs/onyourleft/issues/318) that
+ * last sentence is only half true, and a reviewer who remembers this file as
+ * the whole of criterion 1 is reading the old one.** An Android SDK is
+ * available now, `merged-manifest.test.ts` reads the artefact the merge
+ * produces, and it is that file — not this one — that discharges the criterion.
+ * The division is worth keeping straight: **this file is about the INPUTS to
+ * the merge and runs everywhere; that one is about its OUTPUT and skips loudly
+ * where Gradle has never run**, which is CI and every clean clone.
+ *
  * What these tests *can* establish is everything the merge is a function of:
  *
  * 1. **the plugin still declares the problem** — asserted against the real file
@@ -36,7 +45,17 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { permission, services, usesPermissions } from './manifest';
+import {
+  components,
+  definedPermissions,
+  permission,
+  queries,
+  services,
+  startTags,
+  UNNAMED,
+  usesPermissions,
+  withoutComments,
+} from './manifest';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -164,5 +183,143 @@ describe('what the app does NOT ask for', () => {
     // The complete set is BLUETOOTH, BLUETOOTH_ADMIN, BLUETOOTH_ADVERTISE,
     // BLUETOOTH_CONNECT, BLUETOOTH_PRIVILEGED and BLUETOOTH_SCAN.
     expect(APP_MANIFEST).not.toContain('BLUETOOTH_BACKGROUND');
+  });
+});
+
+/* -------------------------------------------------------------------------- *
+ * #318: the three shapes a merge injects, read out of synthetic documents.
+ *
+ * These run everywhere, including on a clean clone and in CI, because they need
+ * no Gradle. `merged-manifest.test.ts` points the same readers at the artefact
+ * and skips where there is not one; without the cases below, a reader bug would
+ * be invisible in exactly the environment where the artefact is missing.
+ * -------------------------------------------------------------------------- */
+
+describe('reading the shapes a permission list cannot see', () => {
+  it('counts nothing that is only mentioned in a comment', () => {
+    // Both manifests in this repository carry long prose comments that quote
+    // permission names at each other, and the generated merged manifest
+    // reproduces every one of them verbatim.
+    const xml = `<manifest>
+      <!-- we deliberately do NOT declare
+           <uses-permission android:name="android.permission.CAMERA" /> -->
+      <uses-permission android:name="android.permission.INTERNET" />
+    </manifest>`;
+    expect(usesPermissions(xml).map((one) => one.name)).toEqual(['android.permission.INTERNET']);
+    expect(withoutComments(xml)).not.toContain('CAMERA');
+  });
+
+  it('reads an element that has children, not the first child that closes', () => {
+    // The trap the whole-element regexes above fall into: a lazy match from
+    // `<activity` to the first `/>` stops inside `<action … />`.
+    const xml = `<manifest><application>
+      <activity android:name=".Main" android:exported="true">
+        <intent-filter><action android:name="android.intent.action.MAIN" /></intent-filter>
+      </activity>
+    </application></manifest>`;
+    expect(components(xml)).toEqual([
+      { kind: 'activity', name: '.Main', exported: true, permission: null },
+    ]);
+  });
+
+  it('reports an absent android:exported as unknown rather than as false', () => {
+    // The platform's default depends on the target SDK and on whether the
+    // component has an intent filter. A reader that guessed would be answering
+    // the question the caller asked it.
+    const xml = '<manifest><application><service android:name=".S" /></application></manifest>';
+    expect(components(xml)[0]?.exported).toBeNull();
+  });
+
+  it('keeps the permission that guards an exported component', () => {
+    const xml =
+      '<manifest><application><receiver android:name="R" android:exported="true" ' +
+      'android:permission="android.permission.DUMP" /></application></manifest>';
+    expect(components(xml)[0]?.permission).toBe('android.permission.DUMP');
+  });
+
+  it('does not end a tag at a greater-than inside an attribute value', () => {
+    const xml = '<manifest><application><service android:name="a>b" /></application></manifest>';
+    expect(components(xml).map((one) => one.name)).toEqual(['a>b']);
+  });
+
+  it('throws on a start tag that is never closed', () => {
+    // `DOC002`'s failure mode in XML: a scanner that returns what it found so
+    // far reports "no exported components" for a truncated document.
+    expect(() => components('<manifest><application><service android:name=".S"')).toThrow(
+      /never closed/,
+    );
+  });
+
+  it('names an unnamed component rather than dropping it from the list', () => {
+    // Dropping it is the failure #318 is about, one layer down: an exported
+    // component that is absent from the exported list makes "the merge exports
+    // nothing new" true by omission. `android:name` is mandatory and AGP
+    // rejects a manifest without it, so this is a belt on a brace.
+    const xml =
+      '<manifest><application><receiver android:exported="true" /></application></manifest>';
+    expect(components(xml)).toEqual([
+      { kind: 'receiver', name: UNNAMED, exported: true, permission: null },
+    ]);
+  });
+
+  it('names an unnamed permission definition the same way', () => {
+    expect(
+      definedPermissions('<manifest><permission android:protectionLevel="normal" /></manifest>'),
+    ).toEqual([{ name: UNNAMED, protectionLevel: 'normal' }]);
+  });
+
+  it('steps over a bare less-than in text rather than reading it as a tag', () => {
+    // `<` that starts no name: the scan moves past it. Asserted through
+    // `startTags` rather than `components`, because a bogus tag that is not a
+    // component kind would be filtered out and the mis-scan would not show.
+    const xml =
+      '<manifest><application><service android:name=".S" android:exported="false" />' +
+      '< 3 is text, not a tag</application></manifest>';
+    expect(startTags(xml).map((one) => one.name)).toEqual(['manifest', 'application', 'service']);
+    expect(components(xml).map((one) => one.name)).toEqual(['.S']);
+  });
+
+  it('reads a defined permission and its protection level', () => {
+    // Defining one is the dangerous half: at `normal` any application on the
+    // device can hold it.
+    const xml =
+      '<manifest><permission android:name="x.P" android:protectionLevel="signature" /></manifest>';
+    expect(definedPermissions(xml)).toEqual([{ name: 'x.P', protectionLevel: 'signature' }]);
+  });
+
+  it('separates defining a permission from using one', () => {
+    const xml =
+      '<manifest><permission android:name="x.P" /><uses-permission android:name="x.P" /></manifest>';
+    expect(definedPermissions(xml).map((one) => one.name)).toEqual(['x.P']);
+    expect(usesPermissions(xml).map((one) => one.name)).toEqual(['x.P']);
+  });
+
+  it('lists the direct children of a queries block and nothing else', () => {
+    // Package visibility is not a permission and appears in no permission list.
+    const xml = `<manifest>
+      <queries>
+        <package android:name="com.example.other" />
+        <intent><action android:name="android.intent.action.VIEW" /></intent>
+        <provider android:authorities="com.example.provider" />
+      </queries>
+      <application><service android:name=".S" android:exported="false" /></application>
+    </manifest>`;
+    expect(queries(xml)).toEqual([
+      'package:com.example.other',
+      'intent',
+      'provider:com.example.provider',
+    ]);
+  });
+
+  it('reports no queries for a manifest that declares none', () => {
+    expect(queries(APP_MANIFEST)).toEqual([]);
+  });
+
+  it('stops listing queries at the end of the block', () => {
+    const xml = `<manifest>
+      <queries><package android:name="com.example.other" /></queries>
+      <application><service android:name=".S" android:exported="false" /></application>
+    </manifest>`;
+    expect(queries(xml)).toEqual(['package:com.example.other']);
   });
 });

@@ -221,7 +221,12 @@ apps/                 AGPL-3.0-or-later, without exception
                         foreground service and its plugin bridge — MIT template
                         output, whose provenance and licence obligation are
                         apps/mobile/README.md §2 and whose exemptions are .spdx-exempt
-    src/android/        reading a manifest as a document — NOT merging one (#87)
+    src/android/        reading a manifest as a document — NOT merging one (#87),
+                        and since #318 reading the one the Gradle merge actually
+                        ships: which file is the artefact, the reviewed list the
+                        three injected permissions are checked against, and the
+                        loud skip where nobody has run Gradle — which is CI and
+                        every clean clone
     src/index.ts        what the shell offers the client that runs inside it —
                         the reason this package is no longer an island (§4h)
     src/ble/            the Capacitor transport against #39's interface,
@@ -802,12 +807,21 @@ three editing this list on its own branch and conflicting with the other two.
 
   - **`apps/mobile`** ([#87](https://github.com/openzigs/onyourleft/issues/87)) holds
     `capacitor.config.ts`, the generated `android/` project, and the Capacitor BLE adapter. ⚠️ **Six
-    of #87's eight acceptance criteria cannot be verified in a container and were not.** There is no
-    Android SDK and `dl.google.com` is refused by the egress proxy, so nothing in `android/` has
-    been compiled, no emulator or device has run it, and — the one that matters most — **the merged
-    manifest has not been asserted**, because the merge is the SDK's and checking the app's *own*
-    manifest instead would be exactly the false pass #87 warns about.
-    [`apps/mobile/README.md`](apps/mobile/README.md) §4 is the table of what was and was not
+    of #87's eight acceptance criteria could not be verified in the container this was written in
+    and were not.** There was no Android SDK and `dl.google.com` is refused by the egress proxy, so
+    nothing in `android/` had been compiled and no emulator or device had run it. ⚠️ **This bullet
+    used to go on to say that "the merged manifest has not been asserted", and a reviewer who
+    remembers that sentence is reading the old file.**
+    [#318](https://github.com/openzigs/onyourleft/issues/318) discharged it: an Android SDK is
+    available on a developer machine, `apps/mobile/src/android/merged-manifest.ts` locates the
+    Gradle merge's own output and `merged-manifest.test.ts` asserts the permission set it ships —
+    each `maxSdkVersion`, every `<permission>` it defines, every component it exports and every
+    `<queries>` entry — against a **reviewed list** rather than against our own manifest, because
+    three of the eleven permissions that ship are injected by libraries and all three are correct.
+    ⚠️ **It is not a CI gate and must not be quoted as one**: CI does not build Android (§4c), so
+    those assertions **skip** there, loudly, naming the paths they looked in and the Gradle command
+    that would produce one. The half that runs everywhere is the reader, over throwaway trees.
+    [`apps/mobile/README.md`](apps/mobile/README.md) §5 is the table of what was and was not
     available; read it before treating any Android claim here as checked. ⚠️ It also records that
     `android/gradle/wrapper/gradle-wrapper.jar` is a **committed binary whose checksum could not be
     verified** from this environment, and what would settle it.
@@ -2499,6 +2513,8 @@ top of an issue **supersedes its body**.
 | How trainer control reaches an FTMS control point on Android | `apps/mobile/src/ble/fitness-machine-channel.ts`, `apps/web/src/ride/trainer.ts` §`openCapacitorTrainer` |
 | Why the unacknowledged write is declared on the plugin port and never called | `apps/mobile/src/ble/plugin-port.ts` §`writeWithoutResponse`, §4h |
 | What a trainer that reports no power range gets, and why | `apps/mobile/src/ble/fitness-machine.ts` |
+| Which manifest the app actually ships, and why an injected permission is not automatically wrong | `apps/mobile/src/android/merged-manifest.ts` §`REVIEWED_PERMISSIONS`, [#318](https://github.com/openzigs/onyourleft/issues/318) |
+| What the merged-manifest gate says on a machine that has never run Gradle, and why it is not a CI gate | `apps/mobile/src/android/merged-manifest.ts` §`mergedManifestAbsence`, `merged-manifest.test.ts` §`shipped` |
 | What is enforced about Android signing keys, and what is merely written down | [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §1, `scripts/check-repo-rules.sh` §`REL001` |
 | Why ADR 0008's rendering gate was waived, and what that does not cancel | [ADR 0008](docs/adr/0008-mobile-client-architecture.md) §Amendments, 2026-09-08 |
 | Which platform the next client is built on, and why there is no desktop one | [ADR 0018](docs/adr/0018-native-client-platform.md) |
