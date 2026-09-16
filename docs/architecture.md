@@ -82,7 +82,9 @@ apps/                 AGPL-3.0-or-later, without exception
     src/library/        the activity library's row model and its port (#62)
     src/map/            the ride map (#63): the basemap configuration and its
                         origin proof, the GeoJSON conversion, the once-per-app
-                        protocol registration, and the MapLibre adapter
+                        protocol registration, and the MapLibre adapter — which
+                        is also the one place the tile-parsing worker's URL is
+                        set, without which a built map draws no tile at all
     src/recording/      the composition root: engine + checkpoints + recovery (#46)
     src/routes/         saved routes (#73): the store port, the edit decision and
                         its concurrency token, the shared-route payload, the
@@ -708,7 +710,7 @@ alternatives are there.
 | Coverage gate | **no percentage** — every new code path covered by a test proven to fail without the change |
 | Linter / formatter | ESLint 10 + typescript-eslint + Prettier 3 |
 | Map rendering | **MapLibre GL JS 6.7.0** + **`pmtiles` 4.5.0**, both BSD-3-Clause — installed by #63, in `apps/web` (ADR 0010 D-1) |
-| Basemap | Protomaps basemap as a PMTiles archive on storage this project controls. **Not published yet — #53** |
+| Basemap | Protomaps basemap as a PMTiles archive on storage this project controls. **Not published yet — #53.** The browser gate renders from a synthetic archive built by `apps/web/browser/pmtiles-fixture.ts`, which contains no OpenStreetMap data |
 | Real-time transport | deferred to [#16](https://github.com/openzigs/onyourleft/issues/16) |
 
 Installed as of #23: the toolchain above, React 19.2.8, React DOM 19.2.8 and Vite 8.2.2. Everything
@@ -732,6 +734,23 @@ Their closure adds BSD-2-Clause, ISC, MIT and one `(MIT OR Apache-2.0)` and no G
 nothing non-OSI. `maplibre-gl` is **977 kB minified**, which is why `apps/web/src/map/maplibre.ts` is
 reached through a dynamic `import()` and lands in its own chunk: a rider who only opens indoor rides
 never downloads it.
+
+⚠️ **MapLibre v6 needs a second file emitted beside that chunk, and no bundler emits it by
+itself.** Every vector tile is parsed in a Web Worker, and MapLibre finds that worker with
+`new URL('./maplibre-gl-worker.mjs', import.meta.url)` — under a bundler `import.meta.url` is the
+hashed chunk MapLibre was bundled into, and the expression is built from a variable, so it is not
+statically analysable and the file is never emitted. The request 404s, the `Worker` is constructed
+anyway, every tile-parse message is sent into it and never answered, and the map fetches all its
+tiles and draws none of them, with no error anywhere.
+
+`maplibre.ts` therefore calls `setWorkerUrl` with a URL imported as
+`maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url`. **`?worker&url` and not `?url`**: the dist
+worker imports its sibling `maplibre-gl-shared.mjs`, so a verbatim copy of one file fails on its
+first import and produces the same blank map by a different route. `pnpm run build` emits
+`assets/maplibre-gl-worker-*.js` (~486 kB, referenced only from the lazy map chunk, so the code
+split is unaffected).
+
+This was found by #63's browser gate only once it had a real archive to render — see below.
 
 ### Segment matching: every tolerance, and that each is ours
 

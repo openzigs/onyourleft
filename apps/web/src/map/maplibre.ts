@@ -42,16 +42,54 @@ import {
   addProtocol,
   Map as MapLibreMap,
   removeProtocol,
+  setWorkerUrl,
   type AddProtocolAction,
   type GeoJSONSource,
   type StyleSpecification,
 } from 'maplibre-gl';
+// The worker, bundled by Vite and addressed by URL. @see the setWorkerUrl note
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { Protocol } from 'pmtiles';
 
 import { TRACK_LAYER_ID, TRACK_SOURCE_ID } from './basemap';
 import type { MapPort, MapRenderer, MapView, MapViewOptions } from './port';
 import { createProtocolRegistry } from './protocol';
 import type { TrackBounds, TrackFeature } from './track';
+
+/**
+ * Where the tile-parsing worker is, because MapLibre cannot work it out here.
+ *
+ * ⚠️ **Without this the map fetches its tiles and draws none of them, in a
+ * production build, silently.** MapLibre v6 parses every vector tile in a Web
+ * Worker, and it locates that worker with
+ * `new URL('./maplibre-gl-worker.mjs', import.meta.url)`. Under a bundler
+ * `import.meta.url` is the **hashed chunk** MapLibre was bundled into, so the
+ * request goes to `/assets/maplibre-gl-worker.mjs` — a file no bundler emits,
+ * because that expression is built from a variable and is not statically
+ * analysable. The worker's script 404s, the `Worker` object is created anyway,
+ * every `loadTile` message is sent into it and never answered, and the tile sits
+ * in `loading` for ever.
+ *
+ * **Every symptom of that is an absence.** No exception is thrown, `create`
+ * returns normally, the canvas has a live GL context, the archive is fetched
+ * from the right origin over a correct range request, and the map reports no
+ * error. #63's browser gate was green through all of it, because until the
+ * fixture archive (#63, `browser/pmtiles-fixture.ts`) there was no tile for the
+ * worker to fail to parse — the gate asserted routing, and routing was fine.
+ * Building the archive is what surfaced it, which is the ordinary way an
+ * endpoint's first real consumer finds its defects.
+ *
+ * `?worker&url` and **not** `?url`: `maplibre-gl-worker.mjs` imports its sibling
+ * `maplibre-gl-shared.mjs`, so a verbatim copy of the one file fails on its
+ * first import and nothing loads — the same blank map by a different route.
+ * `?worker&url` makes Vite bundle the worker with what it imports and hands back
+ * the emitted URL.
+ *
+ * Set at module scope rather than per map: it is process-wide configuration, and
+ * this module is only evaluated when a map is actually wanted — `main.tsx`
+ * reaches it through `import()`.
+ */
+setWorkerUrl(workerUrl);
 
 /** An empty geometry, for a map created before its track is known. */
 const EMPTY_TRACK = {
