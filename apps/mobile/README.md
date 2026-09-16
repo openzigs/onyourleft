@@ -119,7 +119,8 @@ rather than after.
 | `src/ble/transport.ts` | `@onyourleft/sensors`' `SensorTransport`, over that port. `packages/sensors` is **untouched**, which is #87's seventh criterion |
 | `src/ble/testing.ts` | a scripted stack. It records call **order**, because the Android workaround is entirely a claim about order — and since [#230](https://github.com/openzigs/onyourleft/issues/230) it **enforces** the plugin's own ordering rule: every method but `initialize` rejects with `Bluetooth LE not initialized.` until the stack is up, which is the constraint whose absence let a product that could not pair keep a green suite |
 | `src/permission/notice.ts` | criterion 8 — what a rider is told when Bluetooth will not work, as a pure function so the wording is testable |
-| `src/android/manifest.ts` | reads `uses-permission` and `service` out of a manifest **as a document**. It does not merge one; see §5 |
+| `src/android/manifest.ts` | reads `uses-permission`, `service`, every component, every `<permission>` definition and every `<queries>` entry out of a manifest **as a document**. It does not merge one; see §5 |
+| `src/android/merged-manifest.ts` | **which** document — the Gradle merge's own output, and the reviewed list of what the app is allowed to ship. The three permissions no file in this repository declares are on it, with their provenance. See §6 |
 | `android/app/src/main/java/…/RecordingService.java` | the `connectedDevice` foreground service |
 | `android/app/src/main/java/…/RecordingServicePlugin.java` | two methods, start and stop, bridging it to the web client |
 
@@ -185,7 +186,7 @@ The comments now use the em dash the rest of this repository's prose uses.
 
 | # | Criterion | Status |
 |---|---|---|
-| 1 | the permissions, asserted **in the merged manifest** | ✅ **met, 2026-09-09.** Read out of `app/build/intermediates/merged_manifest/debug/processDebugMainManifest/AndroidManifest.xml`: `ACCESS_FINE_LOCATION` and `ACCESS_COARSE_LOCATION` both carry `maxSdkVersion="30"`, and `BLUETOOTH_SCAN` carries `neverForLocation`. So `tools:replace` did beat the plugin's unconstrained declarations, which was an assumption until this build. `BLUETOOTH` and `BLUETOOTH_ADMIN` arrive from the plugin already bounded at 30. No location permission is requested on API 31+ |
+| 1 | the permissions, asserted **in the merged manifest** | ✅ **met, 2026-09-09, and asserted by a test since 2026-09-16.** Read out of `app/build/intermediates/merged_manifest/debug/processDebugMainManifest/AndroidManifest.xml`: `ACCESS_FINE_LOCATION` and `ACCESS_COARSE_LOCATION` both carry `maxSdkVersion="30"`, and `BLUETOOTH_SCAN` carries `neverForLocation`. So `tools:replace` did beat the plugin's unconstrained declarations, which was an assumption until this build. `BLUETOOTH` and `BLUETOOTH_ADMIN` arrive from the plugin already bounded at 30. No location permission is requested on API 31+. ⚠️ **That row used to record a person reading a file once. [#318](https://github.com/openzigs/onyourleft/issues/318) made it a test** — `src/android/merged-manifest.test.ts` — and re-reading the artefact found two things the 2026-09-09 read had missed: an **eleventh** `uses-permission`, `${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`, which `androidx.core` 1.17.0 both defines and uses, and an **exported receiver**, `androidx.profileinstaller.ProfileInstallReceiver`, guarded by `android.permission.DUMP`. Both are fine; neither was on anybody's list. See §6 |
 | 2 | a `connectedDevice` service with a "Recording ride" notification | ⚠️ **half.** The merged manifest declares `RecordingService` with `foregroundServiceType="connectedDevice"` and `exported="false"`, so the declaration is verified. The **notification has never been seen** — that needs a device |
 | 3 | a 60-minute backgrounded session, verified with `adb` | **open** — needs a device |
 | 4 | killing the renderer does not stop recording | ⚠️ **not satisfiable as specified**, unchanged. In a Capacitor shell the recorder is `packages/domain`'s state machine running as JavaScript in the WebView, so the renderer *is* the recorder. Meeting this means porting the engine to native and giving up #85's "the same web build", which is an ADR, not a quiet half-implementation |
@@ -201,3 +202,70 @@ been installed on nothing"*, which is no longer true: it has been installed on a
 [#230](https://github.com/openzigs/onyourleft/issues/230) was found. That is the whole of what a
 device has established so far; `docs/validation/0002-android-shell-and-game.md`'s result tables are
 still empty in this repository, so nothing in them may be quoted as a result yet.
+
+## 6. What the shipped manifest actually contains
+
+Added by [#318](https://github.com/openzigs/onyourleft/issues/318), which is the issue that said the
+quiet part: **`src/android/manifest.test.ts` reads a different file from the one that ships.**
+`app/src/main/AndroidManifest.xml` is what a developer edits; what the APK carries is the Android
+Gradle Plugin's merge of it with every library's, and the merge adds things the app never declared.
+A gate whose subject is not the artefact under test cannot fail for the right reason — the same
+shape as [#142](https://github.com/openzigs/onyourleft/issues/142) and
+[#278](https://github.com/openzigs/onyourleft/issues/278).
+
+Measured 2026-09-16 from `:app:processDebugMainManifest`, with provenance from
+`app/build/outputs/logs/manifest-merger-debug-report.txt`. **We declare 8 permissions; the app ships
+11.**
+
+| `uses-permission` | `maxSdkVersion` | Contributed by |
+|---|---|---|
+| `INTERNET` | — | us |
+| `BLUETOOTH_SCAN` (`neverForLocation`) | — | us |
+| `BLUETOOTH_CONNECT` | — | us |
+| `ACCESS_FINE_LOCATION` | 30 | us |
+| `ACCESS_COARSE_LOCATION` | 30 | us |
+| `FOREGROUND_SERVICE` | — | us |
+| `FOREGROUND_SERVICE_CONNECTED_DEVICE` | — | us |
+| `POST_NOTIFICATIONS` | — | us |
+| `BLUETOOTH` | **30** | `@capacitor-community/bluetooth-le` 8.3.0 |
+| `BLUETOOTH_ADMIN` | **30** | `@capacitor-community/bluetooth-le` 8.3.0 |
+| `${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` | — | `androidx.core` 1.17.0 |
+
+Plus one `<permission>` **definition** — the same `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`, at
+`protectionLevel="signature"`, which is the whole of why it grants nothing outside this app — and
+**two exported components**: our own `MainActivity`, which a launcher entry has to be, and
+`androidx.profileinstaller.ProfileInstallReceiver`, which is exported but guarded by
+`android.permission.DUMP`.
+
+⚠️ **All three injected permissions are correct, and that is the point rather than a mitigation.**
+Both legacy Bluetooth permissions arrive already bounded at API 30, where they are genuinely
+required and where `BLUETOOTH_SCAN` and `BLUETOOTH_CONNECT` have not yet taken over. Nothing
+checked. The merge could as easily have injected an unbounded location permission, a `<queries>`
+block or an unguarded exported service, and every test in this repository would still have been
+green.
+
+### What the test does about it
+
+`src/android/merged-manifest.ts` locates the artefact and holds the **reviewed list**;
+`src/android/merged-manifest.test.ts` asserts against it. Three things about the design are
+decisions rather than details:
+
+- **The expectation is a reviewed list, not a derivation from our own manifest.** Deriving it would
+  re-create the defect from the other direction: an injected permission would either always fail —
+  useless, since three of them are right — or be filtered out by a rule nobody reviewed. Each entry
+  names who contributes it and why it is acceptable, and adding one is a review decision with a diff.
+- **It asserts what a permission list cannot.** Every component the merge exports, with the
+  permission that guards it; every `<permission>` the merge defines, with its protection level,
+  because a custom permission at `normal` rather than `signature` is a public door; and every
+  `<queries>` entry, which is package visibility and appears in no permission list at all.
+- ⚠️ **It skips loudly where Gradle has never run, and it is NOT a CI gate.** CI does not build
+  Android, so on a runner and on a clean clone those assertions skip while printing the paths they
+  looked in and the command that would produce one. A green run on a machine with no merged manifest
+  would be #318 recurring inside its own fix. What *does* run everywhere is the reader, over
+  throwaway trees — including the case where a merged manifest is present but truncated, which
+  throws rather than reporting "declares nothing".
+
+⚠️ **A red "keeps every declaration our own manifest makes" has two readings and the failure message
+gives both**: the merged manifest on that machine predates the source that produced it (rebuild), or
+the merge dropped something we declared. Gradle's own up-to-date check is content-based rather than
+timestamp-based, so file times are not a usable staleness signal and are deliberately not consulted.
