@@ -120,7 +120,9 @@ export function stubMatchPort(options: StubMatchOptions): StubMatch {
         // second — so a stub that quietly accepted it would agree with a store
         // that skips a ride, which is the #293 defect reintroduced inside the
         // double that is supposed to catch it. The store is free to take the
-        // instant alone (the account export does); this port's caller is not.
+        // instant alone; no caller in this client now does, and #306 was the
+        // last one — `export-everything.ts` carried the instant by itself until
+        // then and lost exactly the ride this refusal describes.
         if (afterId === undefined) {
           throw new Error(
             'the sweep cursor is a pair: startedAfter was given without afterActivityId',

@@ -527,6 +527,206 @@ describe('TransferView — what it may say about another platform', () => {
     expect(document.body.textContent).toContain('Saved 3 rides');
   });
 
+  it('carries the cursor between presses, so a stopped export continues rather than restarting', async () => {
+    // #306's third criterion, through the screen. The interesting half is NOT
+    // that a cursor exists — `export-everything.test.ts` covers that — but that
+    // this panel holds one at all: until #306 it computed `continueAfter`,
+    // printed a sentence quoting it, and passed no `after`, so a second press
+    // re-exported the library from the start. An optional argument nobody
+    // supplies typechecks and is invisible to `check:wiring` (§4j §Limits).
+    //
+    // ⚠️ **The first two rides share a `startedAt`**, so this is also #306's
+    // first criterion end to end: with the instant-only cursor the second press
+    // begins strictly after that second and `Two` is unreachable for ever.
+    const port = await openPort();
+    const at = unixSeconds(1_700_000_000);
+    const rides = [
+      rideFor(ATHLETE_A, {
+        id: activityId('tie-a'),
+        name: 'One',
+        hasPosition: true,
+        startedAt: at,
+      }),
+      rideFor(ATHLETE_A, {
+        id: activityId('tie-b'),
+        name: 'Two',
+        hasPosition: true,
+        startedAt: at,
+      }),
+      rideFor(ATHLETE_A, {
+        id: activityId('z-later'),
+        name: 'Three',
+        hasPosition: true,
+        startedAt: unixSeconds(at + 3_600),
+      }),
+    ];
+    await (harness ?? never()).write(async (store) => {
+      for (const ride of rides) {
+        await store.putActivity(ride);
+        await store.putStreamSet(streamSetFor(ride, { sampleCount: 30 }));
+      }
+    });
+
+    // Stop the instant the first ride's file is handed over. That is the
+    // control a rider presses, and on a library of three it is the only way to
+    // reach a page boundary at all — `ACCOUNT_EXPORT_LIMIT` is 500 and the
+    // panel deliberately exposes no page size for a test to shrink.
+    //
+    // Pressing it from inside `save` is what makes the boundary land in a fixed
+    // place rather than wherever the loop happened to be when the test next
+    // turned it. The button is on the page by then: `run` sets `running` before
+    // its first `await`, and React flushes that render at the end of the click's
+    // own `act` scope, before the export reaches a file.
+    let stopOnNextFile = true;
+    const stopping: TransferPort = {
+      ...port,
+      save: (file) => {
+        saved.push(file);
+        if (stopOnNextFile) {
+          stopOnNextFile = false;
+          buttonNamed('Stop').click();
+        }
+      },
+    };
+
+    mounted = await mount(<TransferView port={stopping} />);
+    await runToCompletion(
+      () => document.querySelector('#oyl-everything-format') !== null,
+      'the export-everything panel to render',
+    );
+    await activateWithKeyboard(buttonNamed('Export everything'));
+    await runToCompletion(
+      () => saved.some((file) => file.fileName === 'on-your-left-account.json'),
+      'the stopped run to write its manifest',
+    );
+
+    expect(saved.filter((file) => file.fileName.endsWith('.fit'))).toHaveLength(1);
+    expect(document.body.textContent).toContain('press Continue export to take the rest');
+
+    // The label is the assertion: a panel that had discarded the cursor would
+    // offer the first-press control again, and `buttonNamed` would throw.
+    await activateWithKeyboard(buttonNamed('Continue export'));
+    await runToCompletion(
+      () => saved.filter((file) => file.fileName === 'on-your-left-account.json').length >= 2,
+      'the continued run to write its manifest',
+    );
+
+    // Each ride once, in list order, across the two presses. Against the
+    // instant-only cursor `Two.fit` is missing; against a panel that held no
+    // cursor `One.fit` appears twice.
+    expect(
+      saved.filter((file) => file.fileName.endsWith('.fit')).map((file) => file.fileName),
+    ).toEqual(['One.fit', 'Two.fit', 'Three.fit']);
+    expect(document.body.textContent).toContain('Saved 2 more rides');
+    expect(document.body.textContent).toContain('that is the end of your library');
+    // And the library having ended, the panel is back to offering a whole one.
+    expect(buttonNamed('Export everything')).toBeDefined();
+    expect(mounted.caughtErrors).toHaveLength(0);
+  });
+
+  it('offers a way back to a whole archive after a stop', async () => {
+    // The pair to the resume: without it a rider who stopped an export can
+    // only ever take the rest, and the one thing a partial archive lacks is a
+    // manifest describing all of it.
+    const port = await openPort();
+    const rides = [
+      rideFor(ATHLETE_A, { id: activityId('back-a'), name: 'One', hasPosition: true }),
+      rideFor(ATHLETE_A, { id: activityId('back-b'), name: 'Two', hasPosition: true }),
+    ];
+    await (harness ?? never()).write(async (store) => {
+      for (const ride of rides) {
+        await store.putActivity(ride);
+        await store.putStreamSet(streamSetFor(ride, { sampleCount: 30 }));
+      }
+    });
+
+    let stopOnNextFile = true;
+    const stopping: TransferPort = {
+      ...port,
+      save: (file) => {
+        saved.push(file);
+        if (stopOnNextFile) {
+          stopOnNextFile = false;
+          buttonNamed('Stop').click();
+        }
+      },
+    };
+    mounted = await mount(<TransferView port={stopping} />);
+    await runToCompletion(
+      () => document.querySelector('#oyl-everything-format') !== null,
+      'the export-everything panel to render',
+    );
+    await activateWithKeyboard(buttonNamed('Export everything'));
+    await runToCompletion(
+      () => saved.some((file) => file.fileName === 'on-your-left-account.json'),
+      'the stopped run to write its manifest',
+    );
+
+    await activateWithKeyboard(buttonNamed('Start over'));
+
+    // The cursor is gone, the stopped run's sentence with it, and the next
+    // press takes the library from the top.
+    expect(buttonNamed('Export everything')).toBeDefined();
+    expect(document.body.textContent).not.toContain('press Continue export to take the rest');
+  });
+
+  it('abandons the resume when the rider changes format', async () => {
+    // A cursor says which rides have been taken, not which files exist. Carried
+    // across a format change it would leave the first half of one archive as
+    // FIT and the second as GPX — neither a complete archive in either format
+    // nor anything the manifest describes.
+    const port = await openPort();
+    // Two, not one: a Stop only produces a cursor when it leaves a ride
+    // unreached, and a library of one is finished before the Stop is read.
+    const rides = [
+      rideFor(ATHLETE_A, { id: activityId('one-a'), name: 'One', hasPosition: true }),
+      rideFor(ATHLETE_A, { id: activityId('two-b'), name: 'Two', hasPosition: true }),
+    ];
+    await (harness ?? never()).write(async (store) => {
+      for (const ride of rides) {
+        await store.putActivity(ride);
+        await store.putStreamSet(streamSetFor(ride, { sampleCount: 30 }));
+      }
+    });
+
+    let stopOnNextFile = true;
+    const stopping: TransferPort = {
+      ...port,
+      save: (file) => {
+        saved.push(file);
+        if (stopOnNextFile) {
+          stopOnNextFile = false;
+          buttonNamed('Stop').click();
+        }
+      },
+    };
+    mounted = await mount(<TransferView port={stopping} />);
+    await runToCompletion(
+      () => document.querySelector('#oyl-everything-format') !== null,
+      'the export-everything panel to render',
+    );
+    await activateWithKeyboard(buttonNamed('Export everything'));
+    await runToCompletion(
+      () => saved.some((file) => file.fileName === 'on-your-left-account.json'),
+      'the stopped run to write its manifest',
+    );
+    expect(buttonNamed('Continue export')).toBeDefined();
+
+    const select = document.querySelector<HTMLSelectElement>('#oyl-everything-format');
+    if (select === null) {
+      throw new Error('the format select is not on the page');
+    }
+    select.value = 'gpx';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    expect(buttonNamed('Export everything')).toBeDefined();
+    // And the stopped run's sentence goes with it: it names the Continue
+    // control, and leaving it beside a button that no longer exists is the
+    // screen contradicting itself.
+    expect(document.body.textContent).not.toContain('press Continue export to take the rest');
+  });
+
   it('says what the archive contains before the rider presses anything', async () => {
     const port = await openPort();
     mounted = await mount(<TransferView port={port} />);
@@ -734,12 +934,26 @@ describe('everythingSentence', () => {
       failed: 1,
       cancelled: 2,
       signedRecords: 1,
-      continueAfter: unixSeconds(1_700_000_000),
+      continueAfter: {
+        startedAt: unixSeconds(1_700_000_000),
+        activityId: activityId('ride-a'),
+      },
     });
 
     expect(sentence).toContain('could not be written');
     expect(sentence).toContain('you stopped it');
-    expect(sentence).toContain('run it again to continue');
+    // It names the control rather than saying "run it again", because since
+    // #306 those are two different buttons.
+    expect(sentence).toContain('press Continue export to take the rest');
+  });
+
+  it('says how many a continued run added, and that the library is behind you', () => {
+    // The ambiguity #306 names: a resumed run that finished says "Saved 2
+    // rides" to a rider with nine hundred, and nothing distinguishes that from
+    // an archive of the whole library.
+    const sentence = everythingSentence({ ...clean, exported: 2 }, true);
+
+    expect(sentence).toBe('Saved 2 more rides; that is the end of your library.');
   });
 });
 

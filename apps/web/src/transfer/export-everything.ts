@@ -136,6 +136,35 @@ export interface ManifestEntry {
   readonly signedRecord: string | null;
 }
 
+/**
+ * Where an export stopped, in the terms the list is ordered by.
+ *
+ * **A pair, because `startedAt` is not a key.** Activities come back ordered by
+ * `[startedAt, id]` — IndexedDB orders index entries with equal keys by primary
+ * key — so the instant alone names a *set* of rides rather than a place in the
+ * list, and a `startedAfter` bound that is strictly after it steps over every
+ * other member of that set. Two rides sharing a second is not exotic:
+ * `import-batch.ts` run twice over one file produces it, and so does any two
+ * indoor sessions started from a clock with second resolution. #306.
+ *
+ * ⚠️ **An object here, and two sibling options at the store — that difference
+ * is deliberate.** `ListActivitiesOptions` is a flat bag whose members are
+ * independently optional and independently refused: `activity-store.ts` rejects
+ * an id with no instant, and an id read backwards, with two different messages
+ * that name the member at fault. Folding those into one object would replace
+ * three precise refusals with one, and would touch `segments/backfill.ts` and
+ * `segments/match-testing.ts`, which are the proven callers of the read #293
+ * fixed. What a *report* needs is the opposite shape: one value a screen can
+ * hold in one state slot and hand back unexamined, where carrying half of it is
+ * not expressible. So the pair is named here and spread at the one call site.
+ */
+export interface AccountExportCursor {
+  /** The `startedAt` of the last activity this run finished. */
+  readonly startedAt: UnixSeconds;
+  /** That activity's id — the tie-break, not decoration. @see AccountExportCursor */
+  readonly activityId: ActivityId;
+}
+
 /** The format version, and the identity, in one key — ADR 0017 D-3's shape. */
 export const ACCOUNT_EXPORT_VERSION = 1;
 
@@ -202,27 +231,28 @@ export interface AccountExportReport {
    */
   readonly signedRecords: number;
   /**
-   * The instant to pass as `after` to continue, or `undefined` when the library
-   * ended inside this run.
+   * What to pass as `after` to continue, or `undefined` when the library ended
+   * inside this run.
    *
    * A cursor rather than an offset, for the reason `segments/backfill.ts` uses
    * one: a ride imported between two runs shifts every offset after it, which
    * silently skips a ride rather than repeating one.
    *
-   * ⚠️ **It is an instant, and `startedAfter` alone is *strictly* after.** Two
-   * rides that started in the same second therefore straddle a resume badly:
-   * the second is skipped. `MatchCheckpointRecord` solves this with an id
-   * beside the instant and this does not, because an export is a thing a rider
-   * watches finish and a sweep is not.
+   * ⚠️ **The bound it produces is exclusive of exactly one row: the activity
+   * this cursor names.** It used to be the instant alone, and `startedAfter`
+   * alone is strictly after the *instant* — so two rides that started in the
+   * same second straddled a resume badly and the second never reached the
+   * archive, on this press or any later one, because the ordering is
+   * deterministic and every retry reproduced it. {@link AccountExportCursor}
+   * carries the id beside the instant and `activity-store.ts`'s
+   * `afterActivityId` makes the instant inclusive and drops the ids already
+   * covered at it, before `limit` counts. #306, the export's half of #293.
    *
-   * ⚠️ **The store half of that fix now exists and this report has not taken
-   * it.** #293 added `afterActivityId` to `listActivitySummaries`, so closing
-   * this needs only an id carried beside the instant here and through the
-   * screen that holds it between presses — deliberately not done in #293,
-   * whose scope was the sweep. Worth fixing the day a library is large enough
-   * that nobody watches the export finish.
+   * ⚠️ **Both halves or neither**, which is why this is one value and not two
+   * optional ones: the instant alone skips a ride and an inclusive instant with
+   * no id re-reads one for ever.
    */
-  readonly continueAfter: UnixSeconds | undefined;
+  readonly continueAfter: AccountExportCursor | undefined;
 }
 
 /** @see exportEverything */
@@ -242,8 +272,11 @@ export interface AccountExportOptions {
    */
   readonly onFile: (file: DownloadableFile) => Promise<void> | void;
   readonly limit?: number | undefined;
-  /** Continue after this instant. From a previous report's `continueAfter`. */
-  readonly after?: UnixSeconds | undefined;
+  /**
+   * Continue after this ride. From a previous report's `continueAfter`, handed
+   * back unexamined — see {@link AccountExportCursor} for why it is one value.
+   */
+  readonly after?: AccountExportCursor | undefined;
   /** Aborting stops the loop between rides. Files already handed over stand. */
   readonly signal?: AbortSignal | undefined;
   readonly onProgress?: ((progress: AccountExportProgress) => void) | undefined;
@@ -387,6 +420,18 @@ export function accountManifest(input: {
  * list nothing, which is not an index. A reader looking for it looks at the end
  * of the sequence, and `MANIFEST_FILE_NAME` is fixed so it can be found by name
  * rather than by position.
+ *
+ * ⚠️ **One manifest per run, not per archive — and since #306 that is visible.**
+ * Each run indexes the rides *it* exported, so a library taken in three presses
+ * is three manifests, which a browser names `on-your-left-account.json`,
+ * `… (2).json`, `… (3).json`. Every ride is listed in exactly one of them, so
+ * the set is complete and no ride is present-but-unlisted; what it is not is a
+ * single index over the whole archive. Making it one would mean this function
+ * accumulating every prior run's entries, which it cannot do without being
+ * handed them — the report deliberately never holds the bytes, and the cursor
+ * deliberately holds a place rather than a history. It is worth doing when a
+ * rider has to read one of these; until then it is a stated shape rather than a
+ * defect nobody wrote down.
  */
 export async function exportEverything(
   options: AccountExportOptions,
@@ -398,7 +443,16 @@ export async function exportEverything(
     orderBy: 'startedAt',
     direction: 'ascending',
     limit: limit + 1,
-    ...(options.after === undefined ? {} : { startedAfter: options.after }),
+    // ⚠️ **Both halves, spread together.** `startedAfter` on its own is
+    // strictly after the *instant*, which cannot separate two rides that
+    // started in the same second; `afterActivityId` makes that bound inclusive
+    // and drops the ids already covered at it — **before `limit` counts**,
+    // which is why it lives in the store rather than as a filter here. A page
+    // of one spent on a ride already exported is an empty page that reads as an
+    // exhausted library. #306.
+    ...(options.after === undefined
+      ? {}
+      : { startedAfter: options.after.startedAt, afterActivityId: options.after.activityId }),
   });
   const wanted = summaries.slice(0, limit);
   const more = summaries.length > limit;
@@ -552,6 +606,8 @@ export async function exportEverything(
     // stopped part-way. Both mean "there is more of your history than this
     // archive holds", which is the only thing the sentence claims.
     continueAfter:
-      (more || cancelled > 0) && lastFinished !== undefined ? lastFinished.startedAt : undefined,
+      (more || cancelled > 0) && lastFinished !== undefined
+        ? { startedAt: lastFinished.startedAt, activityId: lastFinished.id }
+        : undefined,
   };
 }

@@ -52,6 +52,7 @@ import type { TransferPort } from './store-port';
 import {
   MANIFEST_FILE_NAME,
   exportEverything,
+  type AccountExportCursor,
   type AccountExportProgress,
   type AccountExportReport,
 } from './export-everything';
@@ -657,14 +658,44 @@ function TakeEverythingPanel({
   const [report, setReport] = useState<AccountExportReport | undefined>(undefined);
   const [running, setRunning] = useState(false);
   const [failed, setFailed] = useState(false);
+  /**
+   * Where the last run stopped, carried to the next press — #306.
+   *
+   * ⚠️ **Until #306 nothing held this and the panel said "run it again to
+   * continue" anyway.** `exportEverything` computed `continueAfter`, the
+   * sentence below quoted it, and `run` passed no `after` — so a second press
+   * re-exported the library from the start and a rider who had stopped one got
+   * duplicates instead of the rest. An optional argument nobody supplies is
+   * well typed and invisible to `check:wiring` (§4j §Limits, the third entry),
+   * which is exactly the shape that defect had.
+   */
+  const [resumeFrom, setResumeFrom] = useState<AccountExportCursor | undefined>(undefined);
+  /**
+   * Whether the run the report describes was a continuation.
+   *
+   * Separate from `resumeFrom`, which is about the *next* press. Without it a
+   * finished resume reads "Saved 2 rides." to a rider with nine hundred of
+   * them — which is the thing the issue calls out as making this defect
+   * invisible: nothing distinguished "the archive is complete" from "the
+   * archive is complete as far as this run got".
+   */
+  const [resumedRun, setResumedRun] = useState(false);
   const cancel = useRef<AbortController | undefined>(undefined);
 
   // Reset when something else on the page writes a ride, so a report cannot
   // outlive the library it describes — the same reason the panel above takes
   // `storeRevision`.
+  //
+  // ⚠️ **The cursor goes with it, and that is the more important half.** It
+  // names a place in a list ordered by `[startedAt, id]`; a ride imported on
+  // this page can land *before* it, and resuming past one a rider has just
+  // added would leave it out of the archive silently. Starting over repeats
+  // files, which costs disk and nothing else.
   useEffect(() => {
     setReport(undefined);
     setProgress(undefined);
+    setResumeFrom(undefined);
+    setResumedRun(false);
   }, [storeRevision]);
 
   async function run(): Promise<void> {
@@ -673,6 +704,11 @@ function TakeEverythingPanel({
     setRunning(true);
     setReport(undefined);
     setFailed(false);
+    // Read once, here: `resumeFrom` is cleared below on a finished library, and
+    // the sentence has to say whether *this* run was a continuation rather than
+    // what the panel offers next.
+    const resumed = resumeFrom !== undefined;
+    setResumedRun(resumed);
     try {
       const finished = await exportEverything({
         store: port.store,
@@ -683,12 +719,21 @@ function TakeEverythingPanel({
           port.save(file);
         },
         onProgress: setProgress,
+        ...(resumeFrom === undefined ? {} : { after: resumeFrom }),
       });
       setReport(finished);
+      setResumeFrom(finished.continueAfter);
     } catch {
       // `exportEverything` swallows anything one ride did; reaching here means
       // the run itself failed, and saying nothing would leave a rider watching
       // a stopped progress line with no idea whether they have their data.
+      //
+      // ⚠️ `resumeFrom` is deliberately left alone. A run that threw reported
+      // no cursor at all, so the last one that did is still the newest thing
+      // known to have been exported — clearing it would restart a library the
+      // rider has most of, and advancing it is not possible. The same
+      // conservative posture as `lastFinished`, which points at the last ride a
+      // run *finished* rather than the last one it looked at.
       setReport(undefined);
       setFailed(true);
     } finally {
@@ -717,6 +762,20 @@ function TakeEverythingPanel({
           disabled={running}
           onChange={(event) => {
             setFormat(event.target.value as ActivityFileFormat);
+            // ⚠️ **Changing the format abandons the resume**, deliberately. The
+            // cursor says which rides have been taken, not which files exist;
+            // continuing into a different format would leave the first half of
+            // one archive as FIT and the second as GPX, which is neither a
+            // complete archive in either format nor anything a manifest
+            // describes. Starting over costs a repeat, which is the cheaper of
+            // the two mistakes.
+            //
+            // The report goes too: its sentence names the Continue control, and
+            // leaving it up beside a button that now says "Export everything"
+            // is the screen contradicting itself.
+            setResumeFrom(undefined);
+            setResumedRun(false);
+            setReport(undefined);
           }}
         >
           {FORMATS.map((option) => (
@@ -731,7 +790,7 @@ function TakeEverythingPanel({
             void run();
           }}
         >
-          Export everything
+          {resumeFrom === undefined ? 'Export everything' : 'Continue export'}
         </Button>
         {running ? (
           <Button
@@ -740,6 +799,21 @@ function TakeEverythingPanel({
             }}
           >
             Stop
+          </Button>
+        ) : null}
+        {!running && resumeFrom !== undefined ? (
+          // The way back. Without it a rider who stopped an export has no way
+          // to ask for a whole archive again short of reloading the tab, and
+          // the one thing a partial archive is missing is a manifest that
+          // describes all of it.
+          <Button
+            onClick={() => {
+              setResumeFrom(undefined);
+              setResumedRun(false);
+              setReport(undefined);
+            }}
+          >
+            Start over
           </Button>
         ) : null}
       </div>
@@ -756,16 +830,27 @@ function TakeEverythingPanel({
       ) : null}
       {report === undefined ? null : (
         <StatusMessage tone={report.failed === 0 ? 'success' : 'warning'} live>
-          {everythingSentence(report)}
+          {everythingSentence(report, resumedRun)}
         </StatusMessage>
       )}
     </>
   );
 }
 
-/** What the finished export is told to a rider. One sentence, no jargon. */
-export function everythingSentence(report: AccountExportReport): string {
-  const parts = [`Saved ${String(report.exported)} ride${report.exported === 1 ? '' : 's'}`];
+/**
+ * What the finished export is told to a rider. One sentence, no jargon.
+ *
+ * `resumed` is the screen's knowledge and not the report's: `exportEverything`
+ * is handed a cursor and has no idea whether one press or four produced the
+ * archive. It changes "Saved 2 rides" into "Saved 2 more rides", which is the
+ * difference between a rider believing they have their whole history and
+ * knowing what this press added. #306.
+ */
+export function everythingSentence(report: AccountExportReport, resumed = false): string {
+  const qualifier = resumed ? 'more ' : '';
+  const parts = [
+    `Saved ${String(report.exported)} ${qualifier}ride${report.exported === 1 ? '' : 's'}`,
+  ];
   if (report.signedRecords > 0) {
     // #221. Said only when there are some: most libraries have none, and a
     // clause that is always present is one a rider stops reading. When there
@@ -784,7 +869,16 @@ export function everythingSentence(report: AccountExportReport): string {
   if (report.continueAfter !== undefined) {
     // Said plainly rather than hidden: a rider who reads "saved 500 rides" and
     // has 900 would otherwise believe they had left with all of them.
-    parts.push('there are more — run it again to continue');
+    //
+    // ⚠️ It names the control rather than saying "run it again", because since
+    // #306 those are two different buttons and running it again from the start
+    // is the other one.
+    parts.push('there are more — press Continue export to take the rest');
+  } else if (resumed) {
+    // The other half of the ambiguity #306 names: a resumed run that finished
+    // says how many *this press* added, and nothing else here would say that
+    // the library is now behind you.
+    parts.push('that is the end of your library');
   }
   return `${parts.join('; ')}.`;
 }

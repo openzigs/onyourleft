@@ -21,8 +21,8 @@ import {
   streamSetFor,
   workoutFor,
 } from '@onyourleft/store/testing';
-import type { PrivacyZoneRecord } from '@onyourleft/store';
-import { privacyZoneId, webCryptoVerifier } from '@onyourleft/store';
+import type { ActivityId, PrivacyZoneRecord } from '@onyourleft/store';
+import { activityId, privacyZoneId, webCryptoVerifier } from '@onyourleft/store';
 import {
   degreesLatitude,
   degreesLongitude,
@@ -44,6 +44,7 @@ import {
   accountManifest,
   exportEverything,
   signedRecordFileName,
+  type AccountExportCursor,
 } from './export-everything';
 import type { DownloadableFile } from './store-port';
 
@@ -305,8 +306,12 @@ describe('exporting everything', () => {
 
     expect(report.exported).toBe(1);
     expect(report.cancelled).toBe(2);
-    // The first ride, not the third.
-    expect(report.continueAfter).toBe(written[0]?.ride.startedAt);
+    // The first ride, not the third — and the id beside the instant, because
+    // the instant alone names a set of rides rather than a place in the list.
+    expect(report.continueAfter).toEqual({
+      startedAt: written[0]?.ride.startedAt,
+      activityId: written[0]?.ride.id,
+    });
 
     const rest = await runExport({ after: report.continueAfter });
     expect(rest.report.exported).toBe(2);
@@ -317,11 +322,93 @@ describe('exporting everything', () => {
     const { report } = await runExport({ limit: 2 });
 
     expect(report.exported).toBe(2);
-    expect(report.continueAfter).toBe(written[1]?.ride.startedAt);
+    expect(report.continueAfter).toEqual({
+      startedAt: written[1]?.ride.startedAt,
+      activityId: written[1]?.ride.id,
+    });
 
     const rest = await runExport({ limit: 2, after: report.continueAfter });
     expect(rest.report.exported).toBe(1);
     expect(rest.report.continueAfter).toBeUndefined();
+  });
+
+  /**
+   * Three rides where the first two started in the same second — the shape
+   * #306 is about.
+   *
+   * Ids are written out rather than left to the fixture counter, because the
+   * list is ordered by `[startedAt, id]` and `activity-10` sorts before
+   * `activity-9`. A test whose expected order depends on how many rides
+   * earlier tests happened to mint is a test that passes for the wrong reason.
+   *
+   * Two rides at one instant is not a contrived fixture: `import-batch.ts` run
+   * twice over one file produces it, and so does any two indoor sessions
+   * started from a clock with second resolution.
+   */
+  async function seedTiedLibrary(): Promise<
+    { id: ActivityId; startedAt: ReturnType<typeof unixSeconds> }[]
+  > {
+    await seedAthletes(harness);
+    const at = unixSeconds(1_700_000_000);
+    const rides = [
+      rideFor(ATHLETE_A, { id: activityId('tie-a'), hasPosition: true, startedAt: at }),
+      rideFor(ATHLETE_A, { id: activityId('tie-b'), hasPosition: true, startedAt: at }),
+      rideFor(ATHLETE_A, {
+        id: activityId('z-later'),
+        hasPosition: true,
+        startedAt: unixSeconds(at + 3_600),
+      }),
+    ];
+    await harness.write(async (store) => {
+      for (const ride of rides) {
+        await store.putActivity(ride);
+        await store.putStreamSet(streamSetFor(ride, { sampleCount: 20 }));
+      }
+    });
+    return rides.map((ride) => ({ id: ride.id, startedAt: ride.startedAt }));
+  }
+
+  it('takes the ride that shares a startedAt with the one a page ended on', async () => {
+    // #306's first criterion, through the real store rather than a stub — the
+    // whole defect is in how the store interprets the bound, so a double that
+    // agreed with the caller would prove nothing.
+    //
+    // ⚠️ **The page boundary falls BETWEEN the tied pair**, which is the only
+    // arrangement that shows it. A boundary after both is exclusive of both
+    // under either cursor and is green whatever the bound means.
+    const rides = await seedTiedLibrary();
+
+    const exported: ActivityId[] = [];
+    const manifested: unknown[] = [];
+    let after: AccountExportCursor | undefined;
+    let presses = 0;
+    for (; presses < 6; presses += 1) {
+      const run = await runExport({ limit: 1, ...(after === undefined ? {} : { after }) });
+      exported.push(
+        ...run.report.outcomes
+          .filter((outcome) => outcome.kind === 'exported')
+          .map((outcome) => outcome.activityId),
+      );
+      manifested.push(
+        ...(manifestOf(run.files)['activities'] as { activityId: ActivityId; written: boolean }[])
+          .filter((entry) => entry.written)
+          .map((entry) => entry.activityId),
+      );
+      after = run.report.continueAfter;
+      if (after === undefined) {
+        break;
+      }
+    }
+
+    // Three presses, three rides, in list order. Against the instant-only
+    // cursor the second press begins strictly after that instant, `tie-b` is
+    // unreachable for ever, and the library reads as exhausted after two.
+    expect(after).toBeUndefined();
+    expect(exported).toEqual([rides[0]?.id, rides[1]?.id, rides[2]?.id]);
+    // #306's second criterion: present-and-unlisted is the failure a manifest
+    // exists to make impossible, so the index has to name the recovered ride
+    // too rather than the file merely existing beside it.
+    expect(manifested).toEqual(exported);
   });
 
   it('says nothing about a library that ended exactly on the limit', async () => {
