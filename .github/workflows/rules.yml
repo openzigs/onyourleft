@@ -291,6 +291,29 @@ jobs:
       - name: Capacitor gate checker tests
         run: bash scripts/check-capacitor-generated.test.sh
 
+      # The cost model (#54). docs/cost-model.md states its inputs with their
+      # provenance and states what follows from them; this recomputes the second
+      # from the first and fails when they disagree. It is the gate for a defect
+      # no other one here can see: arithmetic that was true on the day it was
+      # typed, in a document whose inputs move. Two of them moved while it was
+      # being written -- the Protomaps planet build grew 103 MB in four days,
+      # and Verisign has announced a `.com` rise for 1 November 2026.
+      #
+      # It needs Node but no dependencies; it is nevertheless not in
+      # `check:repo`, which is the bare-clone set and is bash and coreutils
+      # only. In this job rather than one of its own, for the reason every step
+      # above gives: `main` requires a status check whose context is exactly
+      # "Repository rules".
+      - name: Cost model (COST001-6)
+        run: pnpm run check:cost-model
+
+      # Its own suite, for the reason every checker here has one. Its most
+      # important case is the vacuous pass: a document whose tables parse and
+      # are never actually compared against anything, which without a guard
+      # exits 0 with a success line saying the model checks out.
+      - name: Cost model checker tests
+        run: bash scripts/check-cost-model.test.sh
+
       # The renderer has logic of its own -- it decides which package a covered
       # file belongs to, from absolute paths that differ between a checkout, a
       # runner and a worktree -- so it has a suite, and the suite runs here. Its

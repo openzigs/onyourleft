@@ -139,6 +139,9 @@ packages/             Apache-2.0, without exception
 
 docs/
   architecture.md     this file
+  cost-model.md       what "free to the end user" costs and who pays it (#54).
+                      Its arithmetic is a gate: `pnpm run check:cost-model`
+                      recomputes every figure from the inputs stated beside it
   adr/                numbered architecture decision records
   spikes/             numbered spike write-ups — a dated measurement, not a decision
   validation/         numbered hardware-validation procedures — a script for one
@@ -975,9 +978,13 @@ of fact in the body has become false. The body is still never edited, `Status` d
 **reversing a decision still needs a superseding ADR**. Rule `ADR003` enforces the shape.
 
 **This index does not gain a row per amendment** (ADR 0013 D-6): an amendment is a change within an
-ADR, found by reading it, and a second partial copy of the amendment logs here would drift. Two ADRs
-carry one today — [0001](adr/0001-licence.md), for the deferral pointer #119 reports, and
-[0011](adr/0011-stream-storage.md), for the sentence #147 was opened for.
+ADR, found by reading it, and a second partial copy of the amendment logs here would drift. Four
+ADRs carry one today — [0001](adr/0001-licence.md), for the deferral pointer #119 reports;
+[0008](adr/0008-mobile-client-architecture.md), for the rendering gate that was waived rather than
+passed; [0010](adr/0010-map-tiles-and-routing.md), for the archive size #54 measured at 138.0 GB
+against D-3's ~120 GB; and [0011](adr/0011-stream-storage.md), for the sentence #147 was opened for.
+⚠️ This sentence said **two** until #54, and had been wrong since ADR 0008's was appended — which is
+the drift D-6 predicts, arriving in the paragraph that explains why the index does not track them.
 
 ### Claimed by open issues — **check here before you pick a number**
 
