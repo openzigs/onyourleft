@@ -32,7 +32,8 @@
  * bot's plan did not carry the rider's 80, which a single hard-coded number
  * made easy to state and easy to satisfy by accident. It now asserts the bot is
  * unmoved across two different rider masses, which is the same claim without
- * the coincidence — see `simulation.test.ts` §"regardless of the rider's mass".
+ * the coincidence — see `rider.test.ts` §"#325 criterion 4 — the bot stays at
+ * its own mass", which drives `simulation.ts` §`botCourseFor` to get there.
  */
 
 import { altitudeMetres, degreesCelsius, kilograms, type Kilograms } from '@onyourleft/domain';

@@ -28,6 +28,7 @@ import type { GamePort, RidableRoute } from '../game/GameView';
 import { activateWithKeyboard, mount, settle, typeInto, type Mounted } from '../testing/mount';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import type { ShellSupport } from '../support/shell-support-port';
+import { MASS_CLEARED, MASS_SAVED } from '../views/SettingsView';
 
 import { AppShell } from './AppShell';
 import { hrefFor, routeById } from './routes';
@@ -201,6 +202,17 @@ describe('what the rider weighs (#325)', () => {
     };
   }
 
+  /** The one button on the weight panel, found by its words rather than by order. */
+  function saveWeight(): void {
+    const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+      (candidate) => candidate.textContent === 'Save weight',
+    );
+    if (button === undefined) {
+      throw new Error('the Save weight button is not on the page');
+    }
+    button.click();
+  }
+
   it('shows the settings screen the stored weight, in the stored units', async () => {
     globalThis.location.hash = '#/settings';
     mounted = await mount(
@@ -247,14 +259,86 @@ describe('what the rider weighs (#325)', () => {
       throw new Error('the weight box is not on the page');
     }
     await typeInto(box, '64');
-    [...document.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent === 'Save weight')
-      ?.click();
+    saveWeight();
     await settle();
 
     expect(writes).toEqual([64]);
     expect(document.querySelector<HTMLInputElement>('#oyl-rider-mass')?.value).toBe('64.0');
     expect(document.body.textContent).not.toContain('You have not entered one');
+  });
+
+  /**
+   * ⚠️ **These two are here rather than in `SettingsView.test.tsx` because that
+   * file cannot see the defect they cover.** Every view-level case passes
+   * `onRiderMassChange={() => undefined}`, so the `riderMass` prop never moves;
+   * in the shell it does, and `WeightField` is keyed on it. A successful save
+   * therefore remounted the field and threw away the confirmation the same
+   * handler had just set — CLAUDE.md §5's *wrong harness*, where the double is
+   * inert in exactly the dimension the bug lives in.
+   *
+   * The confirmation is a `StatusMessage live`, which is the **only**
+   * announcement a screen-reader user gets that the write landed, so losing it
+   * is not cosmetic.
+   */
+  it('confirms a saved weight, which is the only announcement of the write', async () => {
+    globalThis.location.hash = '#/settings';
+    mounted = await mount(
+      <AppShell capabilities={NO_BLUETOOTH} athleteMass={massPort([])} riderMass={kilograms(70)} />,
+    );
+    await settle();
+
+    const box = document.querySelector<HTMLInputElement>('#oyl-rider-mass');
+    if (box === null) {
+      throw new Error('the weight box is not on the page');
+    }
+    await typeInto(box, '64');
+    saveWeight();
+    await settle();
+
+    expect(document.body.textContent).toContain(MASS_SAVED);
+  });
+
+  it('confirms a cleared weight, on the branch that returns the rider to the default', async () => {
+    globalThis.location.hash = '#/settings';
+    mounted = await mount(
+      <AppShell capabilities={NO_BLUETOOTH} athleteMass={massPort([])} riderMass={kilograms(70)} />,
+    );
+    await settle();
+
+    const box = document.querySelector<HTMLInputElement>('#oyl-rider-mass');
+    if (box === null) {
+      throw new Error('the weight box is not on the page');
+    }
+    await typeInto(box, '');
+    saveWeight();
+    await settle();
+
+    expect(document.body.textContent).toContain(MASS_CLEARED);
+  });
+
+  /**
+   * The control that stops the two above being satisfied by a panel that always
+   * says something. Re-saving the weight already on the row leaves the key
+   * unchanged, so this case passed even while both of those failed — which is
+   * the inversion worth keeping: before the fix the confirmation appeared
+   * exactly when nothing had changed.
+   */
+  it('confirms a re-save of the weight already on the row', async () => {
+    globalThis.location.hash = '#/settings';
+    mounted = await mount(
+      <AppShell capabilities={NO_BLUETOOTH} athleteMass={massPort([])} riderMass={kilograms(70)} />,
+    );
+    await settle();
+
+    const box = document.querySelector<HTMLInputElement>('#oyl-rider-mass');
+    if (box === null) {
+      throw new Error('the weight box is not on the page');
+    }
+    await typeInto(box, '70');
+    saveWeight();
+    await settle();
+
+    expect(document.body.textContent).toContain(MASS_SAVED);
   });
 });
 

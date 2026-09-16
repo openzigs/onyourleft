@@ -474,6 +474,42 @@ describe('SettingsView — your weight (#325)', () => {
     mounted.unmount();
   });
 
+  it('does not let a confirmation outlive the units it was saved in', async () => {
+    // ⚠️ The other half of the panel's `key`. The confirmation is held by
+    // `WeightPanel` so that a save cannot destroy it (see `SettingsView.tsx`),
+    // and the thing that must still retire it is a units switch: "the trainer
+    // game now rides you at this weight" sitting above a box that has just been
+    // re-seeded in pounds is a sentence about a number no longer on screen.
+    const { port } = massPort();
+    const mounted = await mount(
+      <SettingsView
+        units="metric"
+        onUnitsChange={() => undefined}
+        mass={port}
+        riderMass={kilograms(70)}
+        onRiderMassChange={() => undefined}
+      />,
+    );
+
+    await typeInto(massBox(mounted.container), '64');
+    saveButton(mounted.container).click();
+    await settle();
+    expect(mounted.container.textContent).toContain(MASS_SAVED);
+
+    await mounted.rerender(
+      <SettingsView
+        units="imperial"
+        onUnitsChange={() => undefined}
+        mass={port}
+        riderMass={kilograms(70)}
+        onRiderMassChange={() => undefined}
+      />,
+    );
+
+    expect(mounted.container.textContent).not.toContain(MASS_SAVED);
+    mounted.unmount();
+  });
+
   it('treats a blank box as a clear, and says the default is back', async () => {
     const { port, writes } = massPort();
     const mounted = await mount(

@@ -70,6 +70,14 @@ import { StatusMessage } from '../design/StatusMessage';
 import { formatMass, massIn, massUnit, measurementText } from '../units/format';
 import type { UnitsPort } from '../units/store-port';
 
+/**
+ * What a panel is currently telling the rider, or `undefined` for nothing.
+ *
+ * Named because it crosses a component boundary — see {@link WeightPanel} for
+ * why the weight panel's message is held a level above the field that sets it.
+ */
+type PanelMessage = { readonly tone: 'success' | 'danger'; readonly text: string };
+
 /** What each choice is called, and the units it actually means. */
 const CHOICES: Readonly<Record<UnitSystem, { readonly label: string; readonly detail: string }>> = {
   metric: {
@@ -192,9 +200,7 @@ export function SettingsView({
   riderMass,
   onRiderMassChange,
 }: SettingsViewProps): JSX.Element {
-  const [message, setMessage] = useState<{ tone: 'success' | 'danger'; text: string } | undefined>(
-    undefined,
-  );
+  const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
 
   async function choose(chosen: UnitSystem): Promise<void> {
     if (port === undefined || chosen === units) {
@@ -290,7 +296,16 @@ export function SettingsView({
         below is in whichever unit the panel above selects — and that is a
         reason to put them on one screen rather than in one panel.
       */}
+      {/*
+        ⚠️ **Keyed on the units, and on nothing else.** The panel is what a
+        units switch invalidates: the box below it has to be re-seeded in the
+        new unit, and a confirmation about the old one has stopped describing
+        what is on screen. It is deliberately **not** keyed on `riderMass` —
+        that value moves on every successful save, and a remount there threw
+        the confirmation away. See {@link WeightPanel}.
+      */}
       <WeightPanel
+        key={units}
         {...(mass === undefined ? {} : { port: mass })}
         units={units}
         {...(riderMass === undefined ? {} : { riderMass })}
@@ -321,12 +336,42 @@ export function SettingsView({
  * `athlete/mass.ts` §`massToSave`, and the reverse happens once, in
  * `units/format.ts` §`massIn`.
  *
- * ⚠️ **The field is keyed on the units and the stored value**, which is what
- * makes switching to miles re-seed the box with pounds instead of leaving a
- * kilogram figure sitting under a `lb` label — a reading that is wrong by a
- * factor of 2.2 and looks entirely plausible. A remount is the React idiom for
- * "this input's identity changed"; the alternative is an effect that writes
- * state during render and is harder to be sure of.
+ * ## Two keys, at two levels, and the defect that put them there
+ *
+ * A remount is the React idiom for *"this input's identity changed"*; the
+ * alternative is an effect that writes state during render and is harder to be
+ * sure of. Two different things can change that identity, and they are keyed
+ * separately because **they invalidate different amounts of state**:
+ *
+ * - **The units** key this panel, at the call site. Switching to miles has to
+ *   re-seed the box with pounds rather than leave a kilogram figure sitting
+ *   under a `lb` label — a reading that is wrong by a factor of 2.2 and looks
+ *   entirely plausible — and it also retires any confirmation about the weight
+ *   in the units it was saved in.
+ * - **The stored value** keys {@link WeightField} alone, so that a save
+ *   normalises what the rider typed (`64` → `64.0`) and an external write is
+ *   not left stale underneath them.
+ *
+ * ⚠️ **The message is held here, ABOVE the second key, and a review found out
+ * why the hard way.** Both keys used to be on `WeightField`, so a successful
+ * save — which calls `onRiderMassChange(saved.mass)` and *then* sets the
+ * message — moved the key, remounted the field, and landed its own
+ * confirmation on the instance it had just destroyed. Nothing was ever
+ * announced. The inversion is the tell: re-saving the *same* weight left the
+ * key still and the confirmation appeared, so it showed up exactly when
+ * nothing had changed.
+ *
+ * It is not cosmetic. {@link MASS_SAVED} and {@link MASS_CLEARED} are rendered
+ * in a `StatusMessage live`, which is the only announcement a screen-reader
+ * user gets that the write landed at all.
+ *
+ * ⚠️ **No view-level test could see it**, because every case in
+ * `SettingsView.test.tsx` passes `onRiderMassChange={() => undefined}` — the
+ * prop never moves, so the key never moves. That is CLAUDE.md §5's *wrong
+ * harness*: the double is inert in exactly the dimension the defect lives in.
+ * `shell/AppShell.test.tsx` §`what the rider weighs (#325)` is where the
+ * regression is held, because the shell is the one place that supplies a real
+ * setter.
  */
 function WeightPanel({
   port,
@@ -340,6 +385,9 @@ function WeightPanel({
   readonly onRiderMassChange: (mass: Kilograms | undefined) => void;
 }): JSX.Element {
   const current = riderMassFor(riderMass);
+  // ⚠️ Here rather than in `WeightField`, which is remounted by a save. See the
+  // note above: this is the state the field's own key used to discard.
+  const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
   return (
     <section className="oyl-panel" aria-labelledby="oyl-weight-heading">
       <h2 id="oyl-weight-heading">Your weight</h2>
@@ -362,43 +410,63 @@ function WeightPanel({
           {MASS_NO_STORE}
         </StatusMessage>
       ) : (
-        // ⚠️ Remounted when the units or the stored value change. See the note
-        // above; a stale kilogram figure under a `lb` label is the defect.
+        // ⚠️ Remounted when the stored value changes, so the box shows what
+        // landed rather than what was typed. The units are the panel's key, one
+        // level up, because they invalidate the message too. See the note above.
         <WeightField
-          key={`${units}:${String(riderMass ?? '')}`}
+          key={String(riderMass ?? '')}
           port={port}
           units={units}
           {...(riderMass === undefined ? {} : { riderMass })}
           onRiderMassChange={onRiderMassChange}
+          {...(message === undefined ? {} : { message })}
+          onMessage={setMessage}
         />
       )}
     </section>
   );
 }
 
-/** The box, the button and what they are told. @see WeightPanel */
+/**
+ * The box, the button and what they are told.
+ *
+ * ⚠️ **`message` is a prop and not state.** A successful save moves
+ * `riderMass`, which is this component's key, so anything held here is
+ * discarded before it can be rendered — see {@link WeightPanel}.
+ *
+ * @see WeightPanel
+ */
 function WeightField({
   port,
   units,
   riderMass,
   onRiderMassChange,
+  message,
+  onMessage,
 }: {
   readonly port: AthleteMassPort;
   readonly units: UnitSystem;
   readonly riderMass?: Kilograms | undefined;
   readonly onRiderMassChange: (mass: Kilograms | undefined) => void;
+  readonly message?: PanelMessage | undefined;
+  readonly onMessage: (message: PanelMessage | undefined) => void;
 }): JSX.Element {
+  // ⚠️ Seeded to one decimal place, which makes a re-save in imperial a
+  // slightly lossy round trip: 69.853 kg shows as `154.0` lb and saves back as
+  // 69.85322 kg. Raised in review and left as it is. The error is bounded by
+  // half a tenth of a pound — 0.05 × 0.45359237 = **22.7 g at worst**, and
+  // 0.2 g in that example — on a rider-plus-bicycle of about eighty kilograms,
+  // which is three orders of magnitude below what a bathroom scale reports and
+  // far below anything `packages/physics` could express as a speed. Keeping the
+  // original kilograms for an unedited box would need a second piece of state
+  // whose only job is to be invisible.
   const [typed, setTyped] = useState(
     riderMass === undefined ? '' : massIn(riderMass, units).toFixed(1),
   );
-  const [message, setMessage] = useState<{ tone: 'success' | 'danger'; text: string } | undefined>(
-    undefined,
-  );
-
   async function save(): Promise<void> {
     const decision = massToSave(typed, units);
     if (decision.kind === 'refused') {
-      setMessage({ tone: 'danger', text: decision.reason });
+      onMessage({ tone: 'danger', text: decision.reason });
       return;
     }
     try {
@@ -406,19 +474,23 @@ function WeightField({
       // no such athlete and wrote nothing — see {@link MASS_NO_ATHLETE}.
       const saved = await port.store.setAthleteMass(port.athleteId, decision.mass);
       if (saved === undefined) {
-        setMessage({ tone: 'danger', text: massSaveFailure(MASS_NO_ATHLETE) });
+        onMessage({ tone: 'danger', text: massSaveFailure(MASS_NO_ATHLETE) });
         return;
       }
       // ⚠️ `saved.mass` rather than `decision.mass`: what the rest of the
       // client is told is what came back off the row, so a store that stored
       // something else cannot be papered over by the value we sent it.
+      //
+      // ⚠️ **This is what remounts the component the line below it is setting
+      // a message on**, which is why that message is the panel's state rather
+      // than this one's. See {@link WeightPanel}.
       onRiderMassChange(saved.mass);
-      setMessage({
+      onMessage({
         tone: 'success',
         text: decision.mass === undefined ? MASS_CLEARED : MASS_SAVED,
       });
     } catch (error: unknown) {
-      setMessage({
+      onMessage({
         tone: 'danger',
         text: massSaveFailure(error instanceof Error ? error.message : String(error)),
       });
@@ -437,7 +509,7 @@ function WeightField({
           placeholder="not set"
           onChange={(event) => {
             setTyped(event.target.value);
-            setMessage(undefined);
+            onMessage(undefined);
           }}
         />
       </p>

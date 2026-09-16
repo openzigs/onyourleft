@@ -21,8 +21,9 @@
  * not happen to weigh 75 kg. What replaces it is stronger and is stated over a
  * *range* of rider masses: the plan this function builds is the same plan
  * whatever the rider weighs, including when they weigh exactly what the bot
- * does. `simulation.test.ts` §"regardless of the rider's mass" is the other
- * half, one layer down, where the two masses actually meet.
+ * does. `rider.test.ts` §"#325 criterion 4 — the bot stays at its own mass" is
+ * the other half, one layer down, where the two masses actually meet through
+ * `simulation.ts` §`botCourseFor`.
  */
 
 import { describe, expect, it } from 'vitest';

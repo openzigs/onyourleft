@@ -220,9 +220,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         FUNCTION and no `RIDER_MASS_KILOGRAMS`** — the mass is
                         the athlete's own now, so a reviewer who remembers a
                         constant to assert the bot's 75 kg against is reading
-                        the old file; `simulation.test.ts` asserts the bot is
-                        unmoved across two rider masses instead, which is the
-                        same claim without the coincidence. The bicycle is added
+                        the old file; `rider.test.ts` §"#325 criterion 4"
+                        asserts the bot is unmoved across two rider masses
+                        instead, which is the same claim without the
+                        coincidence. The bicycle is added
                         here and nowhere else, and the air is still a
                         placeholder: there is no altitude in the store at all
     src/game/hud/       the ride HUD (#94) — the eight fields, the dropped
@@ -1707,13 +1708,15 @@ Watching the libraries would report the several dozen exports §4b records as ha
 consumer *by design*, and a noisy rule gets an allowlist, and an allowlist that grows is how a rule
 stops firing.
 
-⚠️ **Measure that set before you read a green run as a clean client: it is 37 files of the 132
-non-test sources under `apps/*/src`, 28 %.** 26 come from the two directories and 11 from the
+⚠️ **Measure that set before you read a green run as a clean client: it is 41 files of the 143
+non-test sources under `apps/*/src`, 29 %.** 28 come from the two directories and 13 from the
 `*-port.ts` suffix — and the suffix is the half that found #282, not the directories:
 `segments/match-port.ts` matches `*-port.ts`, while `segments/backfill.ts`, the module that is
 actually dead, is in no watched directory and **is not reported**. The gate prints both counts for
-this reason, the watched one first; a run that says *"260 production modules"* and nothing else
-reads like coverage of a population it never checked.
+this reason, the watched one first; a run that says *"273 production modules"* and nothing else
+reads like coverage of a population it never checked. ⚠️ **These are counts and they age**, and
+they were 37 of 132 until #325 added `athlete/store-port.ts`; re-read them from the gate's own
+success line rather than from this paragraph.
 
 ⚠️ **`WATCHED_PREFIXES` is written down in the checker rather than discovered, so it is asserted to
 exist.** A selector like that fails closed against *deleting* what it names and open against
@@ -2020,16 +2023,19 @@ Four things to know before you use it:
 - **The assertions throw `RoundTripFailure`; they are not `expect` calls.** That is what lets the
   same assertion body run green against the real store and red against a fake, which is the only
   honest proof that a harness works.
-- **`fakes.ts` holds five deliberately broken stores** — one that writes to memory, one that
-  commits to the real database under a key the reader does not use, one that fills every gap
-  with a zero, one whose every second flush is acknowledged and never written, and one that
-  **tidies a signed claim on its way in**. The same round trip is run against each and required to
+- **`fakes.ts` holds thirteen deliberately broken stores**, and the first five are the ones worth
+  knowing by heart — one that writes to memory, one that commits to the real database under a key
+  the reader does not use, one that fills every gap with a zero, one whose every second flush is
+  acknowledged and never written, and one that **tidies a signed claim on its way in**. The same
+  round trip is run against each and required to
   go red. **If you add a write path to `packages/store`, the `PersistentStore` type fails to compile
   until the fakes account for it.** That is deliberate: it is what stops a write path shipping with
   nothing proving the harness catches its failure — and it is how the fourth fake arrived, with
   #46's checkpoint write, and the fifth with #61's signed record. The fifth one's red/green pair is
   in `identity-store.test.ts` rather than `harness.test.ts`, because it needs WebCrypto and that
-  file imports no platform primitive.
+  file imports no platform primitive. ⚠️ **That is a count and it ages**: this paragraph said
+  *five* from #61 until #325's `roundedMassStoreFactory` made it thirteen, because every write path
+  added since brought one. Count the `StoreFactory` exports rather than reading a number here.
 - **A round trip over a *signed* artefact ends in a verification, not a comparison.**
   `assertSignedRecordRoundTrip` verifies the signature on what came back, using only the public key
   inside the record. The rounding fake is why: the record comes back complete, well-formed and

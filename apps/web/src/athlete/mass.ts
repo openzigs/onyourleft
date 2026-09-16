@@ -97,6 +97,25 @@ export interface RiderMass {
  * rider saved. A second overload taking a record was written and deleted,
  * because it had no caller: "this device has no athlete row at all" already
  * arrives here as `undefined`, which is exactly what it means.
+ *
+ * ⚠️ **It does NOT re-apply {@link MINIMUM_MASS_KILOGRAMS} and
+ * {@link MAXIMUM_MASS_KILOGRAMS} to a recorded value**, and a review asked
+ * whether it should. Those two are an **input** bound — what this client will
+ * accept off a keyboard — rather than an invariant of the field, so a row
+ * holding 5 kg is ridden at 5 kg. What *is* re-applied on the way out is
+ * narrower and belongs to the store: `packages/store/src/persisted.ts` decodes
+ * `athlete.mass` through `kilograms()`, so a non-finite or non-positive value
+ * is refused there and never reaches here.
+ *
+ * The gap that leaves is a hand-edited IndexedDB row, and it is deliberately
+ * not closed. The precedent that would close it is that same file's
+ * `fromPersistedWorkout`, which re-validates on the way out — but that one
+ * guards a **trainer applying physical resistance to somebody**, and this
+ * guards the speed of a bicycle in a game, on the rider's own device, over
+ * their own data, which they would have had to edit by hand. Substituting the
+ * default instead would also make {@link RiderMass.assumed} tell a rider who
+ * *had* entered a weight that they had not, which is a worse answer than an
+ * odd speed.
  */
 export function riderMassFor(recorded: Kilograms | undefined): RiderMass {
   return {
@@ -136,6 +155,22 @@ export const MASS_REFUSAL =
  * `@onyourleft/domain`'s constant rather than a factor written out locally. A
  * conversion applied twice, or not at all, is the shape this is arranged to
  * make impossible: there is one multiplication and it is in one branch.
+ *
+ * ## What `Number()` accepts and refuses, and why it is not changed here
+ *
+ * Raised in review and left alone deliberately, because both halves are a
+ * property of **every** typed-number box in this client rather than of this
+ * one: `analysis/thresholds.ts` §`thresholdsToSave` and `workouts/build.ts`
+ * parse the same way, so changing it here alone would make four boxes disagree
+ * about what a number is.
+ *
+ * - `0x40` is read as 64 and saved. Harmless — it is bounded and converted like
+ *   any other 64 — but it is not a weight anybody meant to type.
+ * - `71,5` is **refused**, because a decimal comma is not a JavaScript numeric
+ *   literal. A rider in most of Europe types that. {@link MASS_REFUSAL} names
+ *   the range but does not name the separator, so the refusal is less helpful
+ *   to them than it should be. Fixing it is a decision about all four boxes and
+ *   belongs to its own issue, not to this field.
  */
 export function massToSave(text: string, units: UnitSystem): MassSave {
   const trimmed = text.trim();
