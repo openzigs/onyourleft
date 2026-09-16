@@ -39,11 +39,15 @@ import {
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
+  kilograms,
   routeProfile,
   watts,
   type GhostTrack,
+  type Kilograms,
   type RoutePoint,
 } from '@onyourleft/domain';
+
+import { DEFAULT_RIDER_MASS_KILOGRAMS } from '../athlete/mass';
 
 /** Two kilometres of road that rises and falls, so a gradient is in play. */
 function testRoute(): RidableRoute {
@@ -740,3 +744,86 @@ const NO_RENDERER: GameRenderer = {
     throw new Error('the empty picker must not build a renderer');
   },
 };
+
+/**
+ * The rider's own mass reaches the physics (#325).
+ *
+ * ⚠️ **The wiring, not the maths.** `rider.test.ts` proves that two masses
+ * produce two speeds through `GameSimulation` directly. That test passes
+ * whether or not anything hands this component a mass — which is precisely the
+ * shape #237 and #278 are about, and it is why this one is here: it drives the
+ * real component, from the prop, through a real ride, and reads what the
+ * renderer was handed.
+ *
+ * Deleting `riderMass={…}` from the simulation's `conditions` turns this red and
+ * leaves the rest of this file green.
+ */
+async function rideAtMass(riderMass: Kilograms | undefined): Promise<SceneFrame[]> {
+  // ⚠️ Both runs start from the same clock and an empty frame queue. `nowMs`
+  // and `pending` are module state reset per *test*, and this helper is called
+  // twice inside one — without this the second ride starts wherever the first
+  // left off and the two differ for a reason that has nothing to do with mass.
+  pending = [];
+  nowMs = 1_000_000;
+  const frames: SceneFrame[] = [];
+  mounted = await mount(
+    <GameView
+      port={pedallingPort(testRoute())}
+      renderer={() => Promise.resolve(capturingRenderer(frames))}
+      now={() => nowMs}
+      {...(riderMass === undefined ? {} : { riderMass })}
+    />,
+  );
+  await settle();
+  const ride = queryAll<HTMLButtonElement>(mounted.container, 'button').find((button) =>
+    (button.textContent ?? '').startsWith('Ride '),
+  );
+  await clickThrough(ride);
+  await pump(2, 1000 / 30);
+  await settle();
+  await pump(40);
+  mounted.unmount();
+  mounted = undefined;
+  return frames;
+}
+
+describe('the ride is at the athlete’s own weight (#325)', () => {
+  /**
+   * How far up the road the last frame drew the rider.
+   *
+   * The **marker**, which is what a rider on a phone actually sees, rather than
+   * an internal number: `z` is measured from `corridorOrigin(profile)`, which is
+   * a function of the route alone, so two runs over the same route are
+   * comparable.
+   */
+  function finishedAt(frames: readonly SceneFrame[]): number {
+    // A fixture guard as well as a read: an empty frame list would make every
+    // comparison below pass over nothing.
+    expect(frames.length).toBeGreaterThan(10);
+    const last = frames[frames.length - 1] as SceneFrame;
+    const rider = last.markers.find((each) => each.kind === 'rider');
+    expect(rider).toBeDefined();
+    return rider?.z ?? Number.NaN;
+  }
+
+  it('covers different ground for a light rider than for a heavy one', async () => {
+    // ⚠️ The same route, the same power, the same clock and the same number of
+    // frames. The only difference is the prop, so a component that ignored it
+    // — which is what this component did before #325 — makes these identical.
+    const light = await rideAtMass(kilograms(55));
+    const heavy = await rideAtMass(kilograms(105));
+
+    expect(light.length).toBe(heavy.length);
+    expect(finishedAt(light)).not.toBe(finishedAt(heavy));
+  });
+
+  it('rides a rider who has never entered one at the documented default', async () => {
+    // Not "at some number": at the *same* number as a rider whose row says 71.
+    // A component that fell back to its own literal would pass an assertion
+    // that only checked the ride happened.
+    const assumed = await rideAtMass(undefined);
+    const stated = await rideAtMass(kilograms(DEFAULT_RIDER_MASS_KILOGRAMS));
+
+    expect(finishedAt(assumed)).toBe(finishedAt(stated));
+  });
+});

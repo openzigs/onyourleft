@@ -55,6 +55,12 @@ apps/                 AGPL-3.0-or-later, without exception
                         specimens the touch-target measurement needs, because a
                         shell handed no ports renders no control at all
     src/a11y/           the accessibility gate: rules, routes, contrast (#48) — see §4e
+    src/athlete/        what the rider weighs (#325) — the one place a missing
+                        mass is substituted, the one place a typed weight
+                        becomes a kilogram, and the narrow write that puts it on
+                        the athlete row. ⚠️ The mass here is the ATHLETE's; the
+                        bicycle is added by `game/rider.ts` and only there,
+                        because `RideConditions.totalMass` is both of them
     src/analysis/       zones and duration personal bests (#78) — the port, the one
                         place a threshold default is substituted, the bounded
                         library read, and the wording
@@ -147,7 +153,11 @@ apps/                 AGPL-3.0-or-later, without exception
     src/units/          which units a rider reads in (#238) — the one place a
                         number becomes a unit, the context a component asks,
                         and the source scan that stops a future screen writing
-                        a unit literal by hand
+                        a unit literal by hand. ⚠️ Since #325 it has a fourth
+                        tier, the mass one ADR 0020 D-1 reserved and declined to
+                        ship without a caller; adding a quantity to the switch
+                        means adding its labels AND its factors to the scan, and
+                        #325 is the first time that has actually been done
     src/views/          one component per route (#48)
     src/workout/        the workout control loop (#14) — the one place the
                         player's decisions meet a trainer's control point,
@@ -209,9 +219,17 @@ apps/                 AGPL-3.0-or-later, without exception
                         refusal (#237) — the one place in the client a
                         BotPacerPlan is built, and therefore the only place the
                         rider's own mass could get into one
-    src/game/rider.ts   what the rider weighs and what air they ride through,
-                        until the store carries either. Its own file since #237
-                        so the bot's 75 kg can be asserted against it
+    src/game/rider.ts   what the rider and their bicycle weigh together, and what
+                        air they ride through. ⚠️ **Since #325 it exports a
+                        FUNCTION and no `RIDER_MASS_KILOGRAMS`** — the mass is
+                        the athlete's own now, so a reviewer who remembers a
+                        constant to assert the bot's 75 kg against is reading
+                        the old file; `rider.test.ts` §"#325 criterion 4"
+                        asserts the bot is unmoved across two rider masses
+                        instead, which is the same claim without the
+                        coincidence. The bicycle is added
+                        here and nowhere else, and the air is still a
+                        placeholder: there is no altitude in the store at all
     src/game/hud/       the ride HUD (#94) — the eight fields, the dropped
                         sensor that is not a zero, and the wake lock; and since
                         #285 the route in plan with the rider on it — north-up,
@@ -1694,13 +1712,15 @@ Watching the libraries would report the several dozen exports §4b records as ha
 consumer *by design*, and a noisy rule gets an allowlist, and an allowlist that grows is how a rule
 stops firing.
 
-⚠️ **Measure that set before you read a green run as a clean client: it is 37 files of the 132
-non-test sources under `apps/*/src`, 28 %.** 26 come from the two directories and 11 from the
+⚠️ **Measure that set before you read a green run as a clean client: it is 41 files of the 143
+non-test sources under `apps/*/src`, 29 %.** 28 come from the two directories and 13 from the
 `*-port.ts` suffix — and the suffix is the half that found #282, not the directories:
 `segments/match-port.ts` matches `*-port.ts`, while `segments/backfill.ts`, the module that is
 actually dead, is in no watched directory and **is not reported**. The gate prints both counts for
-this reason, the watched one first; a run that says *"260 production modules"* and nothing else
-reads like coverage of a population it never checked.
+this reason, the watched one first; a run that says *"273 production modules"* and nothing else
+reads like coverage of a population it never checked. ⚠️ **These are counts and they age**, and
+they were 37 of 132 until #325 added `athlete/store-port.ts`; re-read them from the gate's own
+success line rather than from this paragraph.
 
 ⚠️ **`WATCHED_PREFIXES` is written down in the checker rather than discovered, so it is asserted to
 exist.** A selector like that fails closed against *deleting* what it names and open against
@@ -2007,16 +2027,19 @@ Four things to know before you use it:
 - **The assertions throw `RoundTripFailure`; they are not `expect` calls.** That is what lets the
   same assertion body run green against the real store and red against a fake, which is the only
   honest proof that a harness works.
-- **`fakes.ts` holds five deliberately broken stores** — one that writes to memory, one that
-  commits to the real database under a key the reader does not use, one that fills every gap
-  with a zero, one whose every second flush is acknowledged and never written, and one that
-  **tidies a signed claim on its way in**. The same round trip is run against each and required to
+- **`fakes.ts` holds thirteen deliberately broken stores**, and the first five are the ones worth
+  knowing by heart — one that writes to memory, one that commits to the real database under a key
+  the reader does not use, one that fills every gap with a zero, one whose every second flush is
+  acknowledged and never written, and one that **tidies a signed claim on its way in**. The same
+  round trip is run against each and required to
   go red. **If you add a write path to `packages/store`, the `PersistentStore` type fails to compile
   until the fakes account for it.** That is deliberate: it is what stops a write path shipping with
   nothing proving the harness catches its failure — and it is how the fourth fake arrived, with
   #46's checkpoint write, and the fifth with #61's signed record. The fifth one's red/green pair is
   in `identity-store.test.ts` rather than `harness.test.ts`, because it needs WebCrypto and that
-  file imports no platform primitive.
+  file imports no platform primitive. ⚠️ **That is a count and it ages**: this paragraph said
+  *five* from #61 until #325's `roundedMassStoreFactory` made it thirteen, because every write path
+  added since brought one. Count the `StoreFactory` exports rather than reading a number here.
 - **A round trip over a *signed* artefact ends in a verification, not a comparison.**
   `assertSignedRecordRoundTrip` verifies the signature on what came back, using only the public key
   inside the record. The rounding fake is why: the record comes back complete, well-formed and
@@ -2607,6 +2630,11 @@ top of an issue **supersedes its body**.
 | What proves no store read crosses athletes, and how a new read is caught | `packages/store/src/activity-store.scoping.test.ts` |
 | What proves an erased athlete leaves no row behind, and why the table list is derived | `packages/store/src/activity-store.erasure.test.ts`, `packages/store/src/schema.ts` §`SCHEMA_VERSIONS` |
 | Which units a rider reads in, where that is decided, and what stops a new screen hard-coding one | [ADR 0020](docs/adr/0020-display-units.md), `apps/web/src/units/format.ts`, `apps/web/src/units/no-inline-units.test.ts` |
+| Where a rider enters their weight, and why the game rather than the store substitutes a default | `apps/web/src/athlete/mass.ts`, `apps/web/src/views/SettingsView.tsx` §`WeightPanel` |
+| Why the athlete's mass and the physics' `totalMass` are different numbers, and where the bicycle is added | `apps/web/src/game/rider.ts` §`BICYCLE_MASS_KILOGRAMS`, `packages/store/src/records.ts` §`AthleteRecord.mass` |
+| What keeps the bot at 75 kg once the rider's mass can move, and the assertion that replaced the old one | `apps/web/src/game/rider.test.ts` §"#325 criterion 4", `apps/web/src/game/simulation.ts` §`botCourseFor` |
+| Why a weight box remounts when the rider switches units | `apps/web/src/views/SettingsView.tsx` §`WeightPanel` |
+| What a change of weight does NOT do to a segment effort already on the board | `packages/store/src/activity-store.ts` §`setAthleteMass`, `packages/store/src/activity-store.mass.test.ts` |
 | Why the unit preference is on the athlete and not on the device, and what that costs a rider with two | [ADR 0020](docs/adr/0020-display-units.md) D-2, `packages/store/src/unit-system.ts` |
 | Why a narrow athlete write's `undefined` has to be branched on, and what discarding it reports | `apps/web/src/units/store-port.ts` §`UnitsStore`, `apps/web/src/views/SettingsView.tsx` §`UNITS_NO_ATHLETE`, `packages/store/src/testing/fakes.ts` §`staleUnitsStoreFactory` |
 | Where the imperial length definitions live, and why the foot is not beside its caller | `packages/domain/src/length.ts` |

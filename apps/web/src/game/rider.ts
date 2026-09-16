@@ -3,39 +3,95 @@
 /**
  * The conditions the **rider** rides under.
  *
- * ⚠️ A placeholder, and it is one on purpose rather than by omission: mass and
- * air density belong to the athlete and to where they are, and neither has a
- * home in the store yet — `AthleteRecord.mass` exists (schema 6) but nothing
- * writes it, and there is no altitude at all. Wiring those is its own change.
- * Until then an 80 kg rider at sea level is stated here where it can be found,
- * rather than buried at a call site.
+ * ⚠️ **This file used to export a hard-coded `RIDER_MASS_KILOGRAMS = 80` and a
+ * ready-made `RIDE_CONDITIONS`, and a reviewer who remembers that is reading
+ * the old file.** [#325](https://github.com/openzigs/onyourleft/issues/325)
+ * replaced both: the mass is the athlete's own now, so there is a *function*
+ * here and no constant to import. `AthleteRecord.mass` had been on the row
+ * since schema 6, read by the segment matcher and by the account export, and
+ * the game rode everybody at 80 kg regardless — which is not cosmetic, because
+ * mass enters `packages/physics` twice, through `gravityForceNewtons` and
+ * through `effectiveMassKilograms`, and on a climb it is very nearly the whole
+ * of the resistance.
  *
- * ⚠️ **It moved out of `GameView.tsx` in #237 so that a test could name the
- * number without mounting a React tree**, and the number it names is the one
- * that matters: the bot pacer rides at {@link BOT_MASS_KILOGRAMS} and never at
- * this. `pacer-choice.test.ts` asserts the two are different, which is a
- * stronger statement than asserting the bot's is 75 — a plan quietly built from
- * the rider's conditions would satisfy the second and fail the first.
+ * ⚠️ **Where the default lives, and why it is not here.**
+ * `athlete/mass.ts` §`DEFAULT_RIDER_MASS_KILOGRAMS` is the one place a missing
+ * mass is substituted, and this module does not substitute one: it takes a
+ * {@link Kilograms} and uses it. The settings screen names the same constant to
+ * tell a rider what they are being ridden at, and if both did their own `??`
+ * the two would agree until somebody changed one.
+ *
+ * ⚠️ **What is still a placeholder**: air density. Altitude has no home in the
+ * store at all, so a rider in Denver rides through sea-level air. That is its
+ * own change and is deliberately not this one.
+ *
+ * ⚠️ **The bot's mass is a different constant and stays fixed.**
+ * `packages/domain`'s `BOT_MASS_KILOGRAMS` is 75 and nothing here may reach it
+ * or be reached by it. Making the rider's mass dynamic makes that separation
+ * *more* important rather than less: `pacer-choice.test.ts` used to assert the
+ * bot's plan did not carry the rider's 80, which a single hard-coded number
+ * made easy to state and easy to satisfy by accident. It now asserts the bot is
+ * unmoved across two different rider masses, which is the same claim without
+ * the coincidence — see `rider.test.ts` §"#325 criterion 4 — the bot stays at
+ * its own mass", which drives `simulation.ts` §`botCourseFor` to get there.
  */
 
-import { altitudeMetres, degreesCelsius, kilograms } from '@onyourleft/domain';
+import { altitudeMetres, degreesCelsius, kilograms, type Kilograms } from '@onyourleft/domain';
 import { airDensityKilogramsPerCubicMetre, type RideConditions } from '@onyourleft/physics';
 
 /**
- * What the rider and their bicycle weigh together, until the store carries it.
+ * What the bicycle under the rider weighs, in kilograms.
  *
- * Exported separately from {@link RIDE_CONDITIONS} so that the one assertion
- * that needs it — "the bot is not ridden at the rider's mass" — can be written
- * against a name rather than against a literal 80 that would silently stop
- * meaning anything the day this becomes the athlete's own.
+ * ⚠️ **Not exported, deliberately.** A test that imported it could only assert
+ * this number equals this number; what is worth pinning is the *sum*, and
+ * `rider.test.ts` pins that through {@link rideConditionsFor} instead. It is
+ * also the shape `check:wiring` asks for — an export in `game/` with no
+ * production caller is a `WIRE002`.
+ *
+ * ⚠️ **It exists because `AthleteRecord.mass` is the athlete and
+ * `RideConditions.totalMass` is `m_T`** — *"rider plus bicycle plus anything
+ * either is carrying"*, per `packages/physics/src/power.ts`. Handing an
+ * athlete's mass straight through would ride them on no bicycle, which is a
+ * 13 % error in the *opposite* direction to the one #325 is about and would
+ * look like a fix.
+ *
+ * **Provenance**: 9 kg is a road bike a rider owns, with pedals. The UCI
+ * minimum is 6.8 kg and applies to a race machine nobody puts on a turbo; a
+ * mid-range aluminium or carbon road bike with clinchers is 8–10 kg. It is a
+ * **default and not a measurement**, and a rider cannot yet tell us what their
+ * bicycle weighs — that is the same gap this issue closed for the rider
+ * themselves, one object along, and it is deliberately left open rather than
+ * guessed at with a second settings field nobody asked for.
+ *
+ * ⚠️ 71 + 9 = 80, which is exactly the constant this file used to carry. So a
+ * rider who has entered nothing rides precisely as they did before #325, and
+ * that is asserted rather than described — `rider.test.ts` §"leaves a rider who
+ * has said nothing exactly where they were".
  */
-export const RIDER_MASS_KILOGRAMS = 80;
+const BICYCLE_MASS_KILOGRAMS = 9;
 
-/** Sea level, 15 °C: the ISO 2533 reference, from `packages/physics`'s model. */
-export const RIDE_CONDITIONS: RideConditions = {
-  totalMass: kilograms(RIDER_MASS_KILOGRAMS),
-  airDensityKilogramsPerCubicMetre: airDensityKilogramsPerCubicMetre(
-    altitudeMetres(0),
-    degreesCelsius(15),
-  ),
-};
+/**
+ * Sea level, 15 °C: the ISO 2533 reference, from `packages/physics`'s model.
+ *
+ * Computed once at module scope rather than per call, because it does not
+ * depend on the rider and `airDensityKilogramsPerCubicMetre` is a handful of
+ * exponentials.
+ */
+const SEA_LEVEL_AIR_DENSITY = airDensityKilogramsPerCubicMetre(
+  altitudeMetres(0),
+  degreesCelsius(15),
+);
+
+/**
+ * What to ride an athlete of this mass under.
+ *
+ * @param riderMass the **athlete's** mass, defaulted where they have not said
+ * — `athlete/mass.ts` §`riderMassFor` is the one place that defaulting happens.
+ * The bicycle is added here and only here.
+ */
+export function rideConditionsFor(riderMass: Kilograms): RideConditions {
+  return {
+    totalMass: kilograms(riderMass + BICYCLE_MASS_KILOGRAMS),
+    airDensityKilogramsPerCubicMetre: SEA_LEVEL_AIR_DENSITY,
+  };
+}

@@ -25,6 +25,14 @@
  * Three label shapes, the first two because they are the two this issue found
  * in the wild and the third because a review found it missing:
  *
+ * ⚠️ **Adding a quantity to #238's switch means adding its labels and its
+ * factors here**, and #325 is the first time that has actually happened: the
+ * mass tier arrived with the settings screen where a rider enters their weight,
+ * so `kg`, `lb` and the pound are in the lists below. That is one line each and
+ * it is the whole maintenance cost of this rule — but it is a line that has to
+ * be written, because a rule that does not know about a quantity reports the
+ * new screen clean.
+ *
  * 1. **A quoted unit** — `'km/h'`, `"mi"` — which is the `SPEED_UNIT` shape.
  * 2. **A unit immediately after a template or JSX interpolation** — `` `${x}
  *    km` ``, `<td>{x} m</td>` — which is the `fields.ts` shape.
@@ -58,8 +66,16 @@
  * converted number in the same object.
  */
 
-/** A quoted unit label — the `SPEED_UNIT = 'km/h'` shape. */
-const QUOTED = /['"`]\s*(km\/h|mph|km|mi|ft)\s*['"`]/;
+/**
+ * A quoted unit label — the `SPEED_UNIT = 'km/h'` shape.
+ *
+ * ⚠️ `kg` and `lb` joined the list with #325's mass tier, and `kg` needed one
+ * thing checking rather than assuming: this is anchored on the quote at both
+ * ends, so `'W/kg'` — the pacer intensity, which is the same in both systems
+ * and is not in the switch — does not match, while a bare `'kg'` does. Both
+ * are pinned in `no-inline-units.test.ts`.
+ */
+const QUOTED = /['"`]\s*(km\/h|mph|km|mi|ft|kg|lb)\s*['"`]/;
 
 /**
  * A unit as a JSX text node of its own — `<span>km</span>`.
@@ -67,7 +83,7 @@ const QUOTED = /['"`]\s*(km\/h|mph|km|mi|ft)\s*['"`]/;
  * Bare `m` is excluded for {@link QUOTED}'s reason: `>m<` is a generic
  * parameter or an operand far more often than it is a metre.
  */
-const JSX_TEXT_NODE = />\s*(km\/h|mph|km|mi|ft)\s*</;
+const JSX_TEXT_NODE = />\s*(km\/h|mph|km|mi|ft|kg|lb)\s*</;
 
 /**
  * A unit label right after an interpolation — the `fields.ts` shape.
@@ -76,7 +92,7 @@ const JSX_TEXT_NODE = />\s*(km\/h|mph|km|mi|ft)\s*</;
  * variable name, a format code and a regular expression flag far more often
  * than it is a metre, whereas `${x} m` is a metre essentially always.
  */
-const AFTER_INTERPOLATION = /\}\s*(km\/h|mph|km|mi|ft|m)\b/;
+const AFTER_INTERPOLATION = /\}\s*(km\/h|mph|km|mi|ft|kg|lb|m)\b/;
 
 /**
  * Every conversion factor between the units this client renders, written out.
@@ -101,6 +117,8 @@ const CONVERSION_FACTORS = [
   '3\\.28084\\d*', // m   -> ft (reciprocal)
   '0\\.44704', // mph -> m/s
   '5280', // ft  -> mi
+  '0\\.45359237', // lb  -> kg (exact, 1959 agreement)
+  '2\\.2046\\d*', // kg  -> lb (reciprocal)
 ] as const;
 
 /** An inline unit conversion. @see CONVERSION_FACTORS */

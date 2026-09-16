@@ -29,6 +29,7 @@
 
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 
+import { riderMassFor } from '../athlete/mass';
 import { NO_ROUTES_YET } from '../routes/two-importers';
 import { hrefFor, routeById, ROUTE_BUILDER_ROUTE } from '../shell/routes';
 import { settleGhostOutcome, type GhostOutcome } from './ghost-outcome';
@@ -37,7 +38,7 @@ import { HudPanel } from './hud/HudPanel';
 import { NO_SCREEN_LOCK, type ScreenLock, type ScreenLockSource } from './hud/wake-lock';
 import { DEFAULT_PACER_INTENSITY, pacerChoice, type PacerChoice } from './pacer-choice';
 import { INITIAL_QUALITY, nextQuality, qualitySettings, type QualityState } from './quality';
-import { RIDE_CONDITIONS } from './rider';
+import { rideConditionsFor } from './rider';
 import { sceneFrame } from './scene';
 import { GameSimulation, ghostClock, type GameState } from './simulation';
 import { corridorOrigin } from './terrain';
@@ -50,6 +51,7 @@ import {
   pacerGap,
   type BotPacerPlan,
   type GhostTrack,
+  type Kilograms,
   type RouteProfile,
 } from '@onyourleft/domain';
 
@@ -108,6 +110,27 @@ export interface GameViewProps {
    */
   readonly renderer?: (() => Promise<GameRenderer>) | undefined;
   readonly screenLock?: ScreenLockSource | undefined;
+  /**
+   * What the rider weighs, from the athlete row (#325).
+   *
+   * ⚠️ **The athlete's own mass, not `RideConditions.totalMass`.** The bicycle
+   * is added by `rider.ts` §`rideConditionsFor` and only there, because the two
+   * are different quantities and `AthleteRecord.mass` is the first.
+   *
+   * `undefined` is an ordinary state — a rider who has never entered one, or a
+   * browser with no athlete row — and it means the documented default is
+   * ridden. The substitution is `athlete/mass.ts` §`riderMassFor` and happens
+   * nowhere else, so this prop stays honestly optional all the way down rather
+   * than arriving pre-defaulted by whichever caller thought of it first.
+   *
+   * ⚠️ **A prop rather than a `GamePort` read**, and not an accident: the shell
+   * holds the live value so that a rider who changes their weight on the
+   * settings screen and then opens the game is ridden at the new one without a
+   * reload, and a per-frame or per-ride store read would be a second answer to
+   * a question the shell already has. `AppShellProps.riderMass` is the other
+   * half.
+   */
+  readonly riderMass?: Kilograms | undefined;
   /** Injected so a test can drive the loop without a real animation frame. */
   readonly now?: (() => number) | undefined;
 }
@@ -217,9 +240,16 @@ export function GameView(props: GameViewProps): JSX.Element {
       // that is no longer loaded: the same false congratulation that module
       // exists to prevent, arriving from the other direction.
       outcomeRef.current = undefined;
+      // ⚠️ **Read at the start of the ride and held for its length**, which is
+      // what makes "changing your weight mid-session does not rewrite the ride
+      // you are on" true by construction rather than by a rule somebody
+      // follows. A rider who is climbing when the number changes does not have
+      // the hill they are on get heavier under them, and `simulation.ts`'s
+      // determinism — a step count derived from the origin — would be a
+      // different claim if its conditions could move.
       const simulation = new GameSimulation({
         profile,
-        conditions: RIDE_CONDITIONS,
+        conditions: rideConditionsFor(riderMassFor(props.riderMass).mass),
         ...(pacer === undefined ? {} : { pacer }),
       });
       simulationRef.current = simulation;
@@ -234,7 +264,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       setPhase('riding');
       lockRef.current = (await props.screenLock?.acquire()) ?? NO_SCREEN_LOCK;
     },
-    [port, props.screenLock],
+    [port, props.screenLock, props.riderMass],
   );
 
   // The loop. Deliberately the only place `requestAnimationFrame` appears.

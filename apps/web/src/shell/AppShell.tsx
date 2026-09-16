@@ -39,6 +39,7 @@
 import { useEffect, useRef, useState, type JSX, type MouseEvent } from 'react';
 
 import { DEFAULT_UNIT_SYSTEM, type UnitSystem } from '@onyourleft/store';
+import type { Kilograms } from '@onyourleft/domain';
 
 import { GameView } from '../game/GameView';
 import { AboutView } from '../views/AboutView';
@@ -59,6 +60,7 @@ import { RideSession } from '../ride/RideSession';
 import { SettingsView } from '../views/SettingsView';
 import { UnitsProvider } from '../units/context';
 import type { UnitsPort } from '../units/store-port';
+import type { AthleteMassPort } from '../athlete/store-port';
 import type { RideController } from '../ride/controller';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import type { ShellSupportPort } from '../support/shell-support-port';
@@ -224,6 +226,26 @@ export interface AppShellProps {
    */
   readonly settings?: UnitsPort | undefined;
   /**
+   * The settings screen's other write: what the rider weighs (#325).
+   *
+   * A separate port from {@link settings} for the reason `athlete/store-port.ts`
+   * gives — a display preference and an input to the physics are not the same
+   * kind of thing — and optional like every other port here, so the
+   * accessibility suite reaches the screen with or without it.
+   */
+  readonly athleteMass?: AthleteMassPort | undefined;
+  /**
+   * What the rider weighs, read from the athlete row at start-up (#325).
+   *
+   * ⚠️ **The initial value only**, exactly like {@link units}: the shell owns
+   * the live value from here on, because the settings screen has to change what
+   * the game rides at and a value that lived in `main.tsx` would need a reload
+   * to take effect. `undefined` is the honest state for a rider who has never
+   * entered one; `athlete/mass.ts` substitutes the default in the one place
+   * that substitutes it, and it is not here.
+   */
+  readonly riderMass?: Kilograms | undefined;
+  /**
    * Which units this client starts in, read from the athlete row at start-up.
    *
    * ⚠️ **The initial value only.** The shell owns the live value from here on,
@@ -253,6 +275,8 @@ function viewFor(
   props: AppShellProps,
   units: UnitSystem,
   onUnitsChange: (units: UnitSystem) => void,
+  riderMass: Kilograms | undefined,
+  onMassChange: (mass: Kilograms | undefined) => void,
 ): JSX.Element {
   switch (match.route.id) {
     case 'ride':
@@ -286,7 +310,16 @@ function viewFor(
       return <WorkoutsView port={props.workouts} save={props.transfer?.save} />;
     case 'game':
       return (
-        <GameView port={props.game} renderer={props.gameRenderer} screenLock={props.screenLock} />
+        <GameView
+          port={props.game}
+          renderer={props.gameRenderer}
+          screenLock={props.screenLock}
+          // ⚠️ The **live** value rather than `props.riderMass`, so a rider who
+          // sets their weight and then opens the game is ridden at it without a
+          // reload. `GameViewProps.riderMass` says why this is threaded rather
+          // than read from the store.
+          riderMass={riderMass}
+        />
       );
     case 'segment-detail':
       return <SegmentDetailView port={props.efforts} segment={match.parameter} />;
@@ -309,10 +342,29 @@ function viewFor(
           onUnitsReset={(next) => {
             onUnitsChange(next ?? DEFAULT_UNIT_SYSTEM);
           }}
+          // ⚠️ #325, and the same argument one field along: an erase takes the
+          // recorded mass with everything else, and the recreated row carries
+          // none. Without this the game would go on riding at the old weight
+          // over a row that no longer says so, until a reload.
+          //
+          // Handed straight through rather than wrapped, unlike its neighbour:
+          // there is **no default to substitute** here. `undefined` is what the
+          // row says, and `athlete/mass.ts` is the one place in this client that
+          // answers what to ride instead.
+          onMassReset={onMassChange}
         />
       );
     case 'settings':
-      return <SettingsView port={props.settings} units={units} onUnitsChange={onUnitsChange} />;
+      return (
+        <SettingsView
+          port={props.settings}
+          units={units}
+          onUnitsChange={onUnitsChange}
+          mass={props.athleteMass}
+          riderMass={riderMass}
+          onRiderMassChange={onMassChange}
+        />
+      );
     case 'about':
       return <AboutView />;
     case 'not-found':
@@ -325,6 +377,12 @@ export function AppShell(props: AppShellProps): JSX.Element {
   const route = match.route;
   // ⚠️ Seeded from the prop and then owned here. See `AppShellProps.units`.
   const [units, setUnits] = useState<UnitSystem>(props.units ?? DEFAULT_UNIT_SYSTEM);
+  // ⚠️ Seeded from the prop and then owned here, like `units` — and **not**
+  // defaulted here, unlike `units`. `DEFAULT_UNIT_SYSTEM` is substituted at this
+  // line because the shell is the one place that substitutes it; the mass
+  // default belongs to `athlete/mass.ts`, so what the shell holds is the honest
+  // `undefined`. See `AppShellProps.riderMass`.
+  const [riderMass, setRiderMass] = useState<Kilograms | undefined>(props.riderMass);
   const mainRef = useRef<HTMLElement>(null);
   const previousRouteId = useRef<string | null>(null);
 
@@ -396,7 +454,7 @@ export function AppShell(props: AppShellProps): JSX.Element {
         >
           <h1 id={VIEW_TITLE_ID}>{route.title}</h1>
           <p className="oyl-muted">{route.summary}</p>
-          {viewFor(match, props, units, setUnits)}
+          {viewFor(match, props, units, setUnits, riderMass, setRiderMass)}
         </main>
 
         <footer className="oyl-footer">

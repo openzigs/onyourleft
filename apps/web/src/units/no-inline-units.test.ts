@@ -99,6 +99,39 @@ describe('the scan itself can fire', () => {
     expect(inlineUnitsIn('x.ts', 'const feet = miles * 5280;')).toHaveLength(1);
   });
 
+  it('catches a hand-written mass label, which the switch has covered since ADR 0020', () => {
+    // ⚠️ The tier #325 added. Before it, a screen rendering a rider's weight
+    // could write `kg` by hand and this gate reported the file clean — which is
+    // exactly the hole the rule exists to close, waiting for whichever screen
+    // first rendered a mass. All three shapes, because the three catch
+    // different things.
+    expect(inlineUnitsIn('x.ts', "const MASS_UNIT = 'kg';")).toHaveLength(1);
+    expect(inlineUnitsIn('x.ts', 'return `${String(m)} lb`;')).toHaveLength(1);
+    expect(inlineUnitsIn('x.tsx', '<span>kg</span>')).toHaveLength(1);
+  });
+
+  it('catches the pound conversion in both directions', () => {
+    expect(inlineUnitsIn('x.ts', 'const kg = pounds * 0.45359237;')).toHaveLength(1);
+    expect(inlineUnitsIn('x.ts', 'const lb = mass * 2.20462;')).toHaveLength(1);
+    expect(inlineUnitsIn('x.ts', 'const lb = mass * 2.2046226218;')).toHaveLength(1);
+  });
+
+  it('does not fire on watts per kilogram, which is not in the switch', () => {
+    // ⚠️ The one thing adding `kg` to the label lists had to not break. A
+    // pacer intensity is W/kg in both unit systems — there is no imperial
+    // counterpart and nothing converts it — so a screen naming it is not
+    // hard-coding a choice this preference could have made differently.
+    expect(inlineUnitsIn('x.ts', "const INTENSITY_UNIT = 'W/kg';")).toEqual([]);
+    expect(inlineUnitsIn('x.ts', 'return `${String(i)} W/kg`;')).toEqual([]);
+    expect(inlineUnitsIn('x.tsx', '<span>W/kg</span>')).toEqual([]);
+  });
+
+  it('does not fire on a word that merely starts with a mass unit', () => {
+    // `lbs` is caught by `\b`; `kgm` and `label` are not units at all.
+    expect(inlineUnitsIn('x.ts', 'const label = `${x} kgm`;')).toEqual([]);
+    expect(inlineUnitsIn('x.ts', 'const n = 2.20;')).toEqual([]);
+  });
+
   it('does not fire on a bare division by a thousand, which is milliseconds here', () => {
     // ⚠️ Deliberate, and stated in the module note: thirteen non-test files in
     // this client divide by a thousand for milliseconds and none of them is a

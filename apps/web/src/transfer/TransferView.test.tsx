@@ -13,7 +13,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { unixSeconds } from '@onyourleft/domain';
+import { kilograms, unixSeconds } from '@onyourleft/domain';
 import {
   activityId,
   routeId,
@@ -834,6 +834,60 @@ describe('TransferView — what it may say about another platform', () => {
     // `undefined` — the row `local-athlete.ts` puts back names no preference,
     // and the shell is the one place that substitutes the default. Reporting
     // `'metric'` from here would be a second substitution.
+    expect(reset).toEqual([undefined]);
+  });
+
+  it('tells the shell what the recorded weight has become, so the game follows the disk', async () => {
+    // ⚠️ #325, and one field along from the case above with a sharper
+    // consequence: the mass is not a display preference, it is an input to the
+    // physics. A shell that kept the erased value would ride the next route at
+    // the weight of an athlete who no longer exists on this device.
+    const port = await openPort();
+    await (harness ?? never()).write(async (store) => {
+      await store.putActivity(rideFor(ATHLETE_A, { name: 'Last one' }));
+      await store.setAthleteMass(ATHLETE_A, kilograms(62.4));
+    });
+    // The weight really was on the row, so the assertion below is not two
+    // absences agreeing. ⚠️ Read through `write`, not `read`: the harness's
+    // `read` discards every open handle before opening a fresh one — which is
+    // the whole point of it — and the port above is holding one, so a `read`
+    // here closes the database the screen is about to erase.
+    expect(
+      await (harness ?? never()).write(async (store) => (await store.getAthlete(ATHLETE_A))?.mass),
+    ).toBe(62.4);
+
+    const reset: (number | undefined)[] = [];
+    mounted = await mount(
+      <TransferView
+        port={port}
+        onMassReset={(mass) => {
+          reset.push(mass);
+        }}
+      />,
+    );
+    await runToCompletion(
+      () => document.querySelector('#oyl-erase-confirm') !== null,
+      'the erase panel to render',
+    );
+
+    // Not on a refused erase.
+    await activateWithKeyboard(buttonNamed('Erase everything'));
+    await settle();
+    expect(reset).toEqual([]);
+
+    const box = document.querySelector<HTMLInputElement>('#oyl-erase-confirm');
+    if (box === null) {
+      throw new Error('the confirmation box is not on the page');
+    }
+    await typeInto(box, 'erase everything');
+    await activateWithKeyboard(buttonNamed('Erase everything'));
+    await runToCompletion(
+      () => (document.body.textContent ?? '').includes('holds nothing about you'),
+      'the erase to finish',
+    );
+
+    // `undefined` — the row `local-athlete.ts` puts back carries no mass, and
+    // `athlete/mass.ts` is the one place that answers what to ride instead.
     expect(reset).toEqual([undefined]);
   });
 

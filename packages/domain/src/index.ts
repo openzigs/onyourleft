@@ -89,6 +89,15 @@ export {
 
 export { FEET_PER_MILE, METRES_PER_FOOT, METRES_PER_MILE } from './length';
 
+// --- Mass: the 1959 agreement's imperial definition ---------------------------
+//
+// Here for `length.ts`'s reason rather than in the client that renders it, and
+// #325 is the issue that first needed one: a rider entering their own weight in
+// pounds is a conversion, and every conversion in this program goes through
+// this package. See `mass.ts` for what is deliberately absent from it.
+
+export { KILOGRAMS_PER_POUND } from './mass';
+
 // --- Geodesy: distance on the earth's surface -------------------------------
 //
 // One implementation, because ADR 0004 decision C requires the device and a

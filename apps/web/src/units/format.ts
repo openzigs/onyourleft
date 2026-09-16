@@ -40,6 +40,7 @@
  * | {@link formatSpeed} | km/h | mph | a live or recorded speed |
  * | {@link formatDistance} | km | mi | a ride, a route, a leg |
  * | {@link formatSmallDistance} | m | ft | a segment, a climb, an altitude, a nudge |
+ * | {@link formatMass} | kg | lb | what the rider weighs |
  *
  * The third tier is not a rounding choice, it is the reason `SegmentsView`
  * never used `formatDistanceValue` in the first place: a segment runs from the
@@ -65,13 +66,31 @@
  *   module exists to keep.
  * - A small distance at no decimals: a foot is 0.3 m, so whole feet are finer
  *   than whole metres.
+ * - A mass at one decimal: 0.1 kg is 3.5 oz and 0.1 lb is 1.6 oz, so both are
+ *   finer than a rider can weigh themselves to. It is one decimal rather than
+ *   none because a rider who types 71.5 and reads back 72 would reasonably
+ *   conclude the box discarded what they typed — which is the *appearance* of
+ *   the defect `roundedMassStoreFactory` stands for, arriving from the display
+ *   side.
+ *
+ * ## The mass tier arrived with its first caller, deliberately
+ *
+ * ⚠️ ADR 0020 D-1 put weight inside the switch's scope and then declined to
+ * ship a formatter for it: *"`units/format.ts` deliberately does not ship a
+ * mass formatter with no caller — `format.ts`'s own history records what
+ * happens to an exported helper written ahead of its second caller."*
+ * [#325](https://github.com/openzigs/onyourleft/issues/325) is that caller —
+ * the settings screen where a rider enters their own weight — so the tier is
+ * added here in the same change that renders one, and not before.
  */
 
 import {
+  KILOGRAMS_PER_POUND,
   METRES_PER_FOOT,
   METRES_PER_MILE,
   metresPerSecondToKilometresPerHour,
   metresPerSecondToMilesPerHour,
+  type Kilograms,
   type Metres,
   type MetresPerSecond,
 } from '@onyourleft/domain';
@@ -122,6 +141,14 @@ export function smallDistanceUnit(units: UnitSystem): string {
   return units === 'imperial' ? 'ft' : 'm';
 }
 
+/** How many decimals a mass is shown to. @see the module note on rounding. */
+const MASS_DECIMALS = 1;
+
+/** The unit label a rider's weight carries. */
+export function massUnit(units: UnitSystem): string {
+  return units === 'imperial' ? 'lb' : 'kg';
+}
+
 /**
  * A speed in the rider's units, as a number.
  *
@@ -144,6 +171,19 @@ export function distanceIn(distance: number, units: UnitSystem): number {
 /** A segment-scale distance or an elevation in the rider's units, as a number. */
 export function smallDistanceIn(distance: number, units: UnitSystem): number {
   return units === 'imperial' ? distance / METRES_PER_FOOT : distance;
+}
+
+/**
+ * A mass in the rider's units, as a number.
+ *
+ * ⚠️ **The one direction.** Kilograms are what is stored, so this divides; the
+ * *other* direction — what a rider typed, into kilograms — is
+ * `athlete/mass.ts` §`massToSave`, because a typed value can also be blank or
+ * refused and that is a decision rather than a conversion. Both reach for the
+ * same `@onyourleft/domain` constant, so the pair cannot drift.
+ */
+export function massIn(mass: Kilograms, units: UnitSystem): number {
+  return units === 'imperial' ? mass / KILOGRAMS_PER_POUND : mass;
 }
 
 /**
@@ -189,6 +229,18 @@ export function formatSmallDistance(distance: number, units: UnitSystem): Measur
     value: String(Math.round(smallDistanceIn(distance, units))),
     unit: smallDistanceUnit(units),
   };
+}
+
+/**
+ * A rider's weight, for display.
+ *
+ * The argument is a `Kilograms` rather than a `number` for `formatSpeed`'s
+ * reason: a caller holding a distance, a power or a stored figure it has not
+ * validated cannot reach this function at all, and the brand is what stops a
+ * *pounds* value being handed to something that will divide by the pound again.
+ */
+export function formatMass(mass: Kilograms, units: UnitSystem): Measurement {
+  return { value: massIn(mass, units).toFixed(MASS_DECIMALS), unit: massUnit(units) };
 }
 
 /**

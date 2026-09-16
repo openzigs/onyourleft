@@ -11,15 +11,25 @@
  * The second is the mass. #237's third criterion is that *"the bot's power is a
  * fraction of a flat 75 kg figure and never a recorded one"*, and this file is
  * the only place in the client that builds a plan — so it is the only place the
- * rider's own mass could get into one. The assertion below pins it against
- * `RIDER_MASS_KILOGRAMS`, the number `GameView` rides the *rider* at, rather
- * than only against the constant: a plan built from the rider's conditions
- * would satisfy "is a number" and "is 80" and fail this.
+ * rider's own mass could get into one.
+ *
+ * ⚠️ **That assertion used to be written against `RIDER_MASS_KILOGRAMS`, a
+ * constant this client no longer has, and a reviewer who remembers it is
+ * reading the old file.** #325 made the rider's mass the athlete's own, so
+ * there is no single number to be "not equal to" any more — and the old
+ * assertion was weaker than it looked, because it passed for any rider who did
+ * not happen to weigh 75 kg. What replaces it is stronger and is stated over a
+ * *range* of rider masses: the plan this function builds is the same plan
+ * whatever the rider weighs, including when they weigh exactly what the bot
+ * does. `rider.test.ts` §"#325 criterion 4 — the bot stays at its own mass" is
+ * the other half, one layer down, where the two masses actually meet through
+ * `simulation.ts` §`botCourseFor`.
  */
 
 import { describe, expect, it } from 'vitest';
 
 import {
+  kilograms,
   BOT_MASS_KILOGRAMS,
   MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM,
   MINIMUM_INTENSITY_WATTS_PER_KILOGRAM,
@@ -27,7 +37,6 @@ import {
 } from '@onyourleft/domain';
 
 import { DEFAULT_PACER_INTENSITY, pacerChoice } from './pacer-choice';
-import { RIDER_MASS_KILOGRAMS } from './rider';
 
 describe('a rider who did not ask for a pacer', () => {
   it('gets no plan and — this is the point — no complaint about the box', () => {
@@ -47,10 +56,25 @@ describe('a rider who did ask for one', () => {
 
     expect(choice.problem).toBeUndefined();
     expect(choice.plan?.massKilograms).toBe(BOT_MASS_KILOGRAMS);
-    // The rider's mass is a different number, and a plan carrying it would be
-    // the defect #237's third criterion names.
-    expect(choice.plan?.massKilograms).not.toBe(RIDER_MASS_KILOGRAMS);
     expect(choice.plan?.intensityWattsPerKilogram).toBe(DEFAULT_PACER_INTENSITY);
+  });
+
+  it('cannot be told what the rider weighs, which is what keeps the two apart', () => {
+    // ⚠️ **A compile-time guarantee, mutation-tested the way CLAUDE.md §5
+    // prescribes**: give `pacerChoice` a third parameter for the rider's mass
+    // and this file fails to compile with TS2578, an unused
+    // '@ts-expect-error'. It replaces an assertion that used to read
+    // `not.toBe(RIDER_MASS_KILOGRAMS)` — which #325 removed the constant for,
+    // and which was in any case satisfied by every rider who did not weigh
+    // 75 kg. This one is satisfied by nobody who adds the parameter.
+    const choice = pacerChoice(
+      true,
+      String(DEFAULT_PACER_INTENSITY),
+      // @ts-expect-error `pacerChoice` takes no rider mass, and must not.
+      kilograms(55),
+    );
+
+    expect(choice.plan?.massKilograms).toBe(BOT_MASS_KILOGRAMS);
   });
 
   it('carries the intensity they typed through to the flat power', () => {

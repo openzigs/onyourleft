@@ -55,7 +55,7 @@
  */
 
 import Dexie, { type Table } from 'dexie';
-import type { BeatsPerMinute, Seconds, UnixSeconds, Watts } from '@onyourleft/domain';
+import type { BeatsPerMinute, Kilograms, Seconds, UnixSeconds, Watts } from '@onyourleft/domain';
 
 import {
   StoreDecodeError,
@@ -581,6 +581,60 @@ export class ActivityStore {
         return undefined;
       }
       const updated: AthleteRecord = { ...fromPersistedAthlete(row), units };
+      await this.#athletes.put(toPersistedAthlete(updated));
+      return updated;
+    });
+  }
+
+  /**
+   * Replaces the athlete's recorded mass, leaving every other field alone.
+   *
+   * The write half of #325's setting, and narrow for
+   * {@link setAthleteThresholds}' reason. `mass` has been on this row since
+   * schema 6 and until #325 **nothing in the program wrote one** — the segment
+   * matcher froze it onto an effort and the account export carried it, and both
+   * read a field that was always absent. A store can hold a field no caller can
+   * set for a long time without anything going red.
+   *
+   * ⚠️ **`undefined` clears it**, for {@link setAthleteThresholds}' reason and
+   * not {@link setAthleteUnits}': a unit system is one of two values and a
+   * rider returning to the default is *choosing* metric, whereas a mass has no
+   * "back to the default" value to type. Blank is the only way back to
+   * `apps/web`'s documented default, so blank has to be a write rather than a
+   * refusal.
+   *
+   * ⚠️ **It does not reach an effort that has already been matched.**
+   * `records.ts` §`FrozenEffortAttributes` warns that replacing a frozen value
+   * with a lookup *"produces a board which looks right and quietly rewrites
+   * history whenever somebody edits their profile"*. This method writes one
+   * athlete row and nothing else, which is what keeps that true;
+   * `activity-store.mass.test.ts` reads an effort back either side of a call to
+   * prove it rather than to assert it.
+   *
+   * Read and write in one transaction, for {@link ensureAthlete}'s reason.
+   *
+   * @returns the stored record, or `undefined` if there is no such athlete —
+   * which is not an error, for {@link setAthleteThresholds}' reason.
+   */
+  async setAthleteMass(
+    id: AthleteId,
+    mass: Kilograms | undefined,
+  ): Promise<AthleteRecord | undefined> {
+    return this.#db.transaction('rw', [this.#athletes], async () => {
+      const row = await this.#athletes.get(id);
+      if (row === undefined) {
+        return undefined;
+      }
+      // Built from `withoutMass(existing)` for the reason
+      // `setAthleteThresholds` is built from `withoutThresholds(existing)`:
+      // spreading the decoded row and overriding is what makes a field added to
+      // `AthleteRecord` survive this save without anyone editing this line, and
+      // `exactOptionalPropertyTypes` makes the `: undefined` spelling a type
+      // error rather than a clear.
+      const updated: AthleteRecord = {
+        ...withoutMass(fromPersistedAthlete(row)),
+        ...(mass === undefined ? {} : { mass }),
+      };
       await this.#athletes.put(toPersistedAthlete(updated));
       return updated;
     });
@@ -2449,5 +2503,20 @@ function withoutThresholds(record: AthleteRecord): AthleteRecord {
   const copy: { -readonly [K in keyof AthleteRecord]?: AthleteRecord[K] } = { ...record };
   delete copy.thresholdPower;
   delete copy.thresholdHeartRate;
+  return copy as AthleteRecord;
+}
+
+/**
+ * The athlete row with the mass removed.
+ *
+ * {@link withoutThresholds}' shape and its reason, for
+ * {@link ActivityStore.setAthleteMass}: a `mass: undefined` in a spread is a
+ * type error under `exactOptionalPropertyTypes`, so clearing the field needs a
+ * `delete` on a copy, and building the result from the whole decoded row is
+ * what stops this method erasing a neighbouring field the day one is added.
+ */
+function withoutMass(record: AthleteRecord): AthleteRecord {
+  const copy: { -readonly [K in keyof AthleteRecord]?: AthleteRecord[K] } = { ...record };
+  delete copy.mass;
   return copy as AthleteRecord;
 }

@@ -167,3 +167,26 @@ it can be because the imperial units bracket the metric ones acceptably:
 - **Something below the presentation boundary needs to know.** Nothing does today, and if something
   ever appears to, the first question is whether it is really a presentation concern; D-4 is the
   line that makes every claim in this ADR checkable.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-09-16** — **Weight has a render site now, and `units/format.ts` ships a mass formatter.**
+  D-1 records that *"weight has **no render site today** … and `units/format.ts` deliberately does
+  **not** ship a mass formatter with no caller"*. That statement of fact has become false, in the
+  way D-1 anticipated: [#325](https://github.com/openzigs/onyourleft/issues/325) found that the
+  trainer game rode every athlete at a hard-coded 80 kg while `AthleteRecord.mass` sat on the row
+  unread, and the fix needs a way for a rider to enter one. So the settings screen gained a weight
+  box, and `format.ts` gained `massUnit`, `massIn` and `formatMass` **in the same change that
+  renders one** — which is the condition D-1 attached rather than an exception to it. The
+  arithmetic definition is `packages/domain`'s `KILOGRAMS_PER_POUND`, and
+  `units/no-inline-units.ts` gained `kg`, `lb` and the pound's two factors, so a future screen
+  still cannot write a weight label by hand. **No decision in this ADR is changed**: the switch is
+  still one choice, still on the athlete row, still metric by default, and the store still holds
+  kilograms whatever a rider reads in.
+- **2026-09-16** — **The stone is out of scope, and it is a shape question rather than a constant.**
+  A British rider says "eleven stone seven", and `Measurement` cannot carry that: it is one value
+  and one unit by construction, which is D-1's own fifth criterion. Rendering stones needs a
+  two-part reading, so it belongs to whichever issue decides a rider needs one.
+  `packages/domain/src/mass.ts` records the same thing where somebody would go looking.

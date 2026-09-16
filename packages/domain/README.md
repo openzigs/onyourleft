@@ -35,6 +35,17 @@ already speak SI; the rest are conversions *out*.
 
 Presentation-only, never stored or transmitted: `KilometresPerHour` (`kilometresPerHour()`).
 
+### The imperial definitions live here too
+
+A client that renders miles, feet or pounds needs the factor, and a factor written out in a client
+is one the device and a Phase 3 instance can disagree about. So the 1959 international yard and
+pound agreement's definitions are exported from this package and nowhere else:
+`METRES_PER_FOOT`, `FEET_PER_MILE` and `METRES_PER_MILE` in
+[`src/length.ts`](src/length.ts), and `KILOGRAMS_PER_POUND` in [`src/mass.ts`](src/mass.ts) since
+[#325](https://github.com/openzigs/onyourleft/issues/325). Each is exact; `mass.ts` records what it
+deliberately leaves out, including the stone, and why that is a change to the shape of a measurement
+rather than a constant.
+
 ### Three of those choices are worth reading twice
 
 **Altitude is signed and is not a `Metres`.** About a hundred million people live below sea level and

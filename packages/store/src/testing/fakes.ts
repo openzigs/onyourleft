@@ -37,6 +37,7 @@
  * | `truncatedWorkoutStoreFactory` | *wrong layer* — a layer above dropped the last block on its way in | the workout comes back with the right name and a valid shape, **ending early** |
  * | `unscopedAttemptStoreFactory` | *cross-athlete exposure* — a **read** that matched on route and forgot the rider | every ride is written and read back correctly, and the ghost list contains a stranger's ride |
  * | `staleUnitsStoreFactory` | *wrong layer* — the narrow write computed the row and returned it without persisting it | the call answers with a row saying `imperial`, and a fresh connection still says metric |
+ * | `roundedMassStoreFactory` | *wrong layer* — a layer above tidied a mass to a whole kilogram on its way in | the row comes back with a mass, a plausible one, and a pound reading that is no longer what the rider typed |
  *
  * The second and third are the ones a naive harness misses. Both write to the
  * **real** IndexedDB, inside a **real** transaction that **really commits**, and
@@ -49,6 +50,8 @@
  */
 
 import Dexie from 'dexie';
+
+import { kilograms, type Kilograms } from '@onyourleft/domain';
 
 import { openActivityStore, deleteActivityStore, type ActivityStore } from '../activity-store';
 import {
@@ -103,6 +106,7 @@ function bindStore(real: ActivityStore): PersistentStore {
     ensureAthlete: async (record) => real.ensureAthlete(record),
     setAthleteThresholds: async (id, thresholds) => real.setAthleteThresholds(id, thresholds),
     setAthleteUnits: async (id, units) => real.setAthleteUnits(id, units),
+    setAthleteMass: async (id, mass) => real.setAthleteMass(id, mass),
     setActivityLoadSummary: async (owner, activity, summary) =>
       real.setActivityLoadSummary(owner, activity, summary),
     getAthlete: async (id) => real.getAthlete(id),
@@ -770,6 +774,48 @@ export function staleUnitsStoreFactory(): StoreFactory {
           const existing = await real.getAthlete(id);
           return existing === undefined ? undefined : { ...existing, units };
         },
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository that **rounds the athlete's mass to a whole kilogram** on its
+ * way in, and persists it.
+ *
+ * The thirteenth fake, for #325's narrow athlete write, and it is deliberately
+ * **not** another `staleUnitsStoreFactory`. That one stands for a write that
+ * never lands; this one lands. The row is really written, a fresh connection
+ * really reads it back, `getAthlete` really answers with a mass — and it is not
+ * the mass the rider entered.
+ *
+ * ⚠️ **Which is why the assertion it calibrates has to be about the value and
+ * not about presence.** A rider who typed 154 lb has 69.853 kg stored; rounded
+ * to 70 it reads back as 154.3 lb, which is plausible, is beside the box they
+ * typed into, and is wrong. `toBeDefined()` would pass against this store, and
+ * so would any assertion that compared the read to the *rounded* figure — which
+ * is what a test written after the fact, against the rounding, would do.
+ *
+ * A whole kilogram is chosen over a coarser tidy for the same reason: the
+ * failure this stands for is a formatter or a form reaching one layer too far
+ * down, and those round to something that still looks like an answer.
+ *
+ * The red/green pair is in `activity-store.mass.test.ts`, beside the property
+ * it is about, for `staleUnitsStoreFactory`'s reason.
+ */
+export function roundedMassStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        setAthleteMass: async (id: AthleteId, mass: Kilograms | undefined) =>
+          // Clearing is left alone: the defect this stands for is a tidy
+          // applied to a number, and there is no number to tidy.
+          real.setAthleteMass(id, mass === undefined ? undefined : kilograms(Math.round(mass))),
       };
     },
     destroy: async (name) => {

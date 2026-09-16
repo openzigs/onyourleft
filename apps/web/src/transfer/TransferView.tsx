@@ -33,6 +33,7 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type JSX } from 'react';
 
 import type { ActivityId, ActivitySummary, UnitSystem } from '@onyourleft/store';
+import type { Kilograms } from '@onyourleft/domain';
 
 import { Button } from '../design/Button';
 import { ChartSlot } from '../design/ChartSlot';
@@ -115,9 +116,23 @@ export interface TransferViewProps {
    * substituted by the shell, in the one place that substitutes it.
    */
   readonly onUnitsReset?: ((units: UnitSystem | undefined) => void) | undefined;
+  /**
+   * Told what the rider's recorded mass has become after an erase (#325).
+   *
+   * {@link onUnitsReset}'s argument, one field along and with a sharper
+   * consequence: the mass is not a display preference, it is an input to the
+   * physics, so a shell that went on holding the erased value would ride the
+   * next route at the weight of an athlete who no longer exists on this device.
+   *
+   * `undefined` means the recreated row carries no mass, which is what
+   * `local-athlete.ts` §`localAthleteRecord` builds today — and it is passed on
+   * as `undefined` rather than as a default, because the one place a default is
+   * substituted is `athlete/mass.ts`.
+   */
+  readonly onMassReset?: ((mass: Kilograms | undefined) => void) | undefined;
 }
 
-export function TransferView({ port, onUnitsReset }: TransferViewProps): JSX.Element {
+export function TransferView({ port, onUnitsReset, onMassReset }: TransferViewProps): JSX.Element {
   /**
    * Bumped whenever the import panel has written to the store.
    *
@@ -184,6 +199,7 @@ export function TransferView({ port, onUnitsReset }: TransferViewProps): JSX.Ele
         <ErasePanel
           port={port}
           {...(onUnitsReset === undefined ? {} : { onUnitsReset })}
+          {...(onMassReset === undefined ? {} : { onMassReset })}
           storeRevision={storeRevision}
           onStoreChanged={() => {
             setStoreRevision((previous) => previous + 1);
@@ -899,11 +915,13 @@ function ErasePanel({
   storeRevision,
   onStoreChanged,
   onUnitsReset,
+  onMassReset,
 }: {
   readonly port: TransferPort;
   readonly storeRevision: number;
   readonly onStoreChanged: () => void;
   readonly onUnitsReset?: ((units: UnitSystem | undefined) => void) | undefined;
+  readonly onMassReset?: ((mass: Kilograms | undefined) => void) | undefined;
 }): JSX.Element {
   const [typed, setTyped] = useState('');
   const [holds, setHolds] = useState(false);
@@ -961,6 +979,9 @@ function ErasePanel({
       // became the default — a recreated row that carried a preference would
       // be followed rather than overridden.
       onUnitsReset?.(port.athleteRow.units);
+      // The same, for the recorded mass (#325). Read off the row that was put
+      // back rather than assumed absent, for the reason above.
+      onMassReset?.(port.athleteRow.mass);
       // The panels above list what the store holds. Without this they go on
       // offering rides that are no longer there, and a rider who presses Export
       // on one is told their own ride does not exist.
