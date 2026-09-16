@@ -77,6 +77,7 @@ export {
   kilometresPerHourToMetresPerSecond,
   metresPerSecondToKilometresPerHour,
   metresPerSecondToMilesPerHour,
+  milesPerHourToMetresPerSecond,
 } from './speed';
 
 // --- Length: the 1959 agreement's imperial definitions -----------------------
@@ -387,11 +388,26 @@ export {
   elevationAt,
   gradeAt,
   GRADIENT_WINDOW_METRES,
+  headingOnRoute,
   LOOP_CLOSURE_METRES,
   positionAt,
   PROFILE_RESOLUTION_METRES,
   routeProfile,
 } from './route/profile';
+
+// The wind, and the resolution of it against the route's own bearings (#326).
+// Here rather than in the game for the reason `route/wind.ts` gives: the rider
+// and the bot pacer must read one implementation, and `packages/physics` says
+// outright that resolving a heading is the caller's job because it has no
+// course and no compass. This package has both.
+
+export type { Wind } from './route/wind';
+export {
+  headwindOnRoute,
+  MAXIMUM_WIND_SPEED_METRES_PER_SECOND,
+  tangentialWindMetresPerSecond,
+  wind,
+} from './route/wind';
 
 // --- Routing (#70) -----------------------------------------------------------
 //

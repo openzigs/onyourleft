@@ -33,7 +33,8 @@ already speak SI; the rest are conversions *out*.
 | Gradient | percent of grade, **signed** | `GradePercent` | `gradePercent()` | non-finite |
 | Resistance | unitless brake level | `ResistanceLevel` | `resistanceLevel()` | non-finite, negative |
 
-Presentation-only, never stored or transmitted: `KilometresPerHour` (`kilometresPerHour()`).
+Presentation-only, never stored or transmitted: `KilometresPerHour` (`kilometresPerHour()`) and
+`MilesPerHour` (`milesPerHour()`).
 
 ### The imperial definitions live here too
 
@@ -271,6 +272,40 @@ FTMS Indoor Bike Data carries speed as a `uint16` in units of **0.01 km/h**.
 Every function in this file returns through a constructor rather than casting, so
 `metresPerSecondToKilometresPerHour(metresPerSecond(Number.MAX_VALUE))` throws `UnitError` instead
 of handing back `Infinity` labelled `KilometresPerHour` (#103).
+
+⚠️ **The imperial pair is now complete in both directions, and #326 is why.** Until then every
+conversion here went *outwards* — a canonical value becoming something a rider reads — because
+nothing in the program asked a rider for a speed. The wind control on the game screen does, and a
+rider who reads in miles per hour has to be able to type in them, so
+`milesPerHourToMetresPerSecond()` joined `kilometresPerHourToMetresPerSecond()`. The alternative is
+a client dividing by 2.2369 at a call site, which is exactly what
+`apps/web/src/units/no-inline-units.ts` refuses.
+
+## The wind — `route/wind.ts`
+
+`packages/physics` models a headwind completely — a **signed** air speed and a drag term written
+`V_a·|V_a|` rather than `V_a²` specifically so that a tailwind stronger than the rider does not come
+out as a headwind — and says outright that turning a wind *direction* into that headwind is the
+caller's job, *"because it needs a course and a compass and this package has neither"*. Between #88
+and #326 no caller supplied one, so the value was zero on every tick of every ride.
+
+This package has the course (`route/profile.ts`) and the compass (`geodesy.ts`), so the resolution
+lives here:
+
+- `headingOnRoute(profile, distance)` — which way the road goes at a distance along it, read through
+  the same grid lookup `gradeAt` and `positionAt` use, so the hill, the drawn position and the
+  direction cannot disagree about which ten metres the rider is in. `undefined` where the route does
+  not say, which is two coincident grid positions or a profile with one point.
+- `tangentialWindMetresPerSecond(wind, heading)` — `speed · cos(fromBearing − heading)`, **positive
+  for a headwind**, which is the sign `airSpeedMetresPerSecond` adds to the ground speed.
+  `Wind.fromBearing` is the meteorological convention: the direction the wind blows *from*.
+- `headwindOnRoute(profile, distance, wind)` — the two composed.
+
+It is here rather than in a client for the reason `distanceBetween` is: the rider's tick and the bot
+pacer's tick both need this number, and a second copy of the cosine would be the first crack in "the
+bot and the rider ride the same air". Where a wind *vector* comes from is not this package's
+question — `apps/web/src/game/wind-choice.ts` has a rider type one in today, and anything external
+is [#248](https://github.com/openzigs/onyourleft/issues/248).
 
 ## Geodesy — `geodesy.ts`
 

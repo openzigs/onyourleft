@@ -82,6 +82,24 @@ export function metresPerSecondToMilesPerHour(speed: MetresPerSecond): MilesPerH
   return milesPerHour(speed * MILES_PER_HOUR_PER_METRE_PER_SECOND);
 }
 
+/**
+ * Convert a speed in miles per hour back to the canonical unit.
+ *
+ * The fourth corner of the conversion square, added by #326 because a rider
+ * who **reads** in miles per hour has to be able to **type** in them: the wind
+ * control on the game screen collects a speed in whichever unit that rider's
+ * screens already show, and the inverse of
+ * {@link metresPerSecondToMilesPerHour} is the only honest way back to metres
+ * per second. Doing the arithmetic at the call site is exactly what
+ * `apps/web/src/units/no-inline-units.ts` refuses, and rightly.
+ *
+ * @throws {UnitError} if the quotient is not a speed, for
+ * {@link kilometresPerHourToMetresPerSecond}'s reason.
+ */
+export function milesPerHourToMetresPerSecond(speed: MilesPerHour): MetresPerSecond {
+  return metresPerSecond(speed / MILES_PER_HOUR_PER_METRE_PER_SECOND);
+}
+
 /** The largest value a `uint16` field can hold. */
 const UINT16_MAX = 65535;
 

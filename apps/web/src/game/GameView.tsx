@@ -37,6 +37,13 @@ import { gapAgainst, type ChasedGap } from './hud/fields';
 import { HudPanel } from './hud/HudPanel';
 import { NO_SCREEN_LOCK, type ScreenLock, type ScreenLockSource } from './hud/wake-lock';
 import { DEFAULT_PACER_INTENSITY, pacerChoice, type PacerChoice } from './pacer-choice';
+import {
+  DEFAULT_WIND_FROM_BEARING,
+  MAXIMUM_BEARING_DEGREES,
+  windChoice,
+  type WindChoice,
+  type WindProblemField,
+} from './wind-choice';
 import { INITIAL_QUALITY, nextQuality, qualitySettings, type QualityState } from './quality';
 import { rideConditionsFor } from './rider';
 import { sceneFrame } from './scene';
@@ -44,6 +51,8 @@ import { GameSimulation, ghostClock, type GameState } from './simulation';
 import { corridorOrigin } from './terrain';
 import type { GameRenderer, GameView as RendererView } from './port';
 import { NO_SENSORS, type GameSensors } from './sensors';
+import { speedUnit } from '../units/format';
+import { useUnits } from '../units/context';
 import {
   MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM,
   MINIMUM_INTENSITY_WATTS_PER_KILOGRAM,
@@ -53,6 +62,7 @@ import {
   type GhostTrack,
   type Kilograms,
   type RouteProfile,
+  type Wind,
 } from '@onyourleft/domain';
 
 /** One route the rider could ride, as the picker needs it. */
@@ -154,12 +164,30 @@ type Phase = 'choosing' | 'riding' | 'paused';
  */
 const PACER_PROBLEM_ID = 'oyl-game-pacer-problem';
 
+/**
+ * The same, for the wind refusal (#326) — a second id for the same reason the
+ * first one is a module constant, and it must not be the same string.
+ *
+ * Two independent refusals can be live at once: a rider may slip a decimal in
+ * the pacer box *and* leave the wind speed blank. One shared id would make
+ * `aria-describedby` on the ride button point at whichever of the two happened
+ * to render, so the rider would be told about one problem and blocked by two.
+ */
+const WIND_PROBLEM_ID = 'oyl-game-wind-problem';
+
 export function GameView(props: GameViewProps): JSX.Element {
+  // ⚠️ Read here rather than inside `WindControls`, because `windChoice` is a
+  // pure function and has to be called where its answer can be handed to both
+  // the control that shows the refusal and the button the refusal blocks.
+  const units = useUnits();
   const [routes, setRoutes] = useState<readonly RidableRoute[] | undefined>(undefined);
   const [chosen, setChosen] = useState<RidableRoute | undefined>(undefined);
   const [withGhost, setWithGhost] = useState(false);
   const [withPacer, setWithPacer] = useState(false);
   const [intensity, setIntensity] = useState(String(DEFAULT_PACER_INTENSITY));
+  const [withWind, setWithWind] = useState(false);
+  const [windSpeed, setWindSpeed] = useState('');
+  const [windFrom, setWindFrom] = useState(String(DEFAULT_WIND_FROM_BEARING));
   const [phase, setPhase] = useState<Phase>('choosing');
   const [state, setState] = useState<GameState | undefined>(undefined);
   const [quality, setQuality] = useState<QualityState>(INITIAL_QUALITY);
@@ -228,7 +256,12 @@ export function GameView(props: GameViewProps): JSX.Element {
   useEffect(() => teardown, [teardown]);
 
   const start = useCallback(
-    async (route: RidableRoute, ghost: boolean, pacer: BotPacerPlan | undefined): Promise<void> => {
+    async (
+      route: RidableRoute,
+      ghost: boolean,
+      pacer: BotPacerPlan | undefined,
+      air: Wind | undefined,
+    ): Promise<void> => {
       const profile = route.profile;
       ghostRef.current = ghost && port !== undefined ? await port.loadGhost(route.id) : undefined;
       // ⚠️ **A new ride settles its own result, and this is the only line that
@@ -251,6 +284,13 @@ export function GameView(props: GameViewProps): JSX.Element {
         profile,
         conditions: rideConditionsFor(riderMassFor(props.riderMass).mass),
         ...(pacer === undefined ? {} : { pacer }),
+        // ⚠️ #326: the line that makes `packages/physics`'s entire wind model
+        // reachable from a ride. `RideConditions.headwindMetresPerSecond` was
+        // plumbed through three packages, spread into the bot's course, and
+        // supplied by nobody — so a signed air speed and a `V_a·│V_a│` drag
+        // term written specifically so a tailwind could exceed the ground
+        // speed had, between them, never seen a value other than zero.
+        ...(air === undefined ? {} : { wind: air }),
       });
       simulationRef.current = simulation;
       // ⚠️ The simulation's own state rather than `atStartLine(profile)`, which
@@ -374,6 +414,14 @@ export function GameView(props: GameViewProps): JSX.Element {
         intensity={intensity}
         onIntensity={setIntensity}
         choice={pacerChoice(withPacer, intensity)}
+        withWind={withWind}
+        onWind={setWithWind}
+        windSpeed={windSpeed}
+        onWindSpeed={setWindSpeed}
+        windFrom={windFrom}
+        onWindFrom={setWindFrom}
+        air={windChoice(withWind, windSpeed, windFrom, units)}
+        windUnit={speedUnit(units)}
         onStart={start}
       />
     );
@@ -472,10 +520,20 @@ function RoutePicker(props: {
   readonly intensity: string;
   readonly onIntensity: (value: string) => void;
   readonly choice: PacerChoice;
+  readonly withWind: boolean;
+  readonly onWind: (value: boolean) => void;
+  readonly windSpeed: string;
+  readonly onWindSpeed: (value: string) => void;
+  readonly windFrom: string;
+  readonly onWindFrom: (value: string) => void;
+  readonly air: WindChoice;
+  /** The label the speed box is in, from `units/format.ts`. @see WindControls */
+  readonly windUnit: string;
   readonly onStart: (
     route: RidableRoute,
     ghost: boolean,
     pacer: BotPacerPlan | undefined,
+    air: Wind | undefined,
   ) => Promise<void>;
 }): JSX.Element {
   if (props.routes === undefined) {
@@ -510,7 +568,18 @@ function RoutePicker(props: {
   // Starting a ride that quietly has no bot in it, because the number in the box
   // could not make one, is the same defect #237 is about arriving from the other
   // side — and this time the rider would have asked for it.
-  const refused = props.choice.problem !== undefined;
+  // ⚠️ **Either refusal blocks the ride**, and the button describes whichever
+  // ones are live. A wind the numbers could not make would otherwise start a
+  // ride in still air after the rider had asked for a gale — #237's defect
+  // arriving from the side the rider can see, which is what the pacer control
+  // already refuses for its own box.
+  const pacerRefused = props.choice.problem !== undefined;
+  const windRefused = props.air.problem !== undefined;
+  const refused = pacerRefused || windRefused;
+  const describedBy =
+    [pacerRefused ? PACER_PROBLEM_ID : undefined, windRefused ? WIND_PROBLEM_ID : undefined]
+      .filter((id) => id !== undefined)
+      .join(' ') || undefined;
   return (
     <div className="oyl-game__picker">
       <h2>Choose a route</h2>
@@ -520,6 +589,17 @@ function RoutePicker(props: {
         intensity={props.intensity}
         onIntensity={props.onIntensity}
         problem={props.choice.problem}
+      />
+      <WindControls
+        withWind={props.withWind}
+        onWind={props.onWind}
+        speed={props.windSpeed}
+        onSpeed={props.onWindSpeed}
+        fromBearing={props.windFrom}
+        onFromBearing={props.onWindFrom}
+        speedUnit={props.windUnit}
+        problem={props.air.problem}
+        field={props.air.field}
       />
       <ul>
         {props.routes.map((route) => (
@@ -563,12 +643,17 @@ function RoutePicker(props: {
             <button
               type="button"
               aria-disabled={refused ? true : undefined}
-              aria-describedby={refused ? PACER_PROBLEM_ID : undefined}
+              aria-describedby={describedBy}
               onClick={() => {
                 if (refused) {
                   return;
                 }
-                void props.onStart(route, props.withGhost && route.attempts > 0, props.choice.plan);
+                void props.onStart(
+                  route,
+                  props.withGhost && route.attempts > 0,
+                  props.choice.plan,
+                  props.air.wind,
+                );
               }}
             >
               Ride {route.name}
@@ -648,6 +733,113 @@ function PacerControls(props: {
       */}
       {props.problem === undefined ? null : (
         <p className="oyl-game__problem" id={PACER_PROBLEM_ID} role="alert">
+          {props.problem}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Whether there is a wind, how strong, and where from — #326.
+ *
+ * Once above the list, beside {@link PacerControls} and for its reason: a wind
+ * belongs to the ride rather than to a route, and three identically-labelled
+ * controls per route would be a worse page for anybody using a screen reader
+ * than one set that plainly governs the whole list.
+ *
+ * ⚠️ **The speed's unit label arrives as a prop and is not written here.**
+ * #238's fifth criterion and `units/no-inline-units.ts`: this client has
+ * exactly one place a number becomes a unit, and a `km/h` typed into a label
+ * on this screen is the defect that rule was written after finding in the HUD.
+ *
+ * ⚠️ **The direction is a bearing in degrees rather than a compass point.**
+ * A "north-west" picker would need a name-to-bearing table that nothing else
+ * in this program has, and the game screen is not where a new vocabulary
+ * should be introduced; a number box maps one-for-one onto `DegreesBearing`
+ * and onto what a forecast quotes.
+ */
+function WindControls(props: {
+  readonly withWind: boolean;
+  readonly onWind: (value: boolean) => void;
+  readonly speed: string;
+  readonly onSpeed: (value: string) => void;
+  readonly fromBearing: string;
+  readonly onFromBearing: (value: string) => void;
+  readonly speedUnit: string;
+  readonly problem: string | undefined;
+  /** Which box {@link problem} is about. @see markedFor */
+  readonly field: WindProblemField | undefined;
+}): JSX.Element {
+  /**
+   * The validity attributes for one box: set on the box the refusal is
+   * **about**, and on no other.
+   *
+   * ⚠️ Marking both boxes was the first version of this, and it is wrong in a
+   * way only a screen reader hears: a rider who left the speed blank was told
+   * their perfectly good direction was invalid too, and following its
+   * `aria-describedby` took them to a sentence about the speed. #255's pattern
+   * is one refusal and one box, so it carries no answer for a second box; this
+   * is that answer.
+   */
+  const markedFor = (
+    field: WindProblemField,
+  ): {
+    readonly 'aria-invalid': true | undefined;
+    readonly 'aria-describedby': string | undefined;
+  } =>
+    props.field === field
+      ? { 'aria-invalid': true, 'aria-describedby': WIND_PROBLEM_ID }
+      : { 'aria-invalid': undefined, 'aria-describedby': undefined };
+  return (
+    <div className="oyl-game__wind">
+      <label>
+        <input
+          type="checkbox"
+          checked={props.withWind}
+          onChange={(event) => {
+            props.onWind(event.target.checked);
+          }}
+        />
+        Ride in a wind
+      </label>
+      <label>
+        {`Wind speed, ${props.speedUnit}`}
+        <input
+          type="number"
+          inputMode="decimal"
+          min={0}
+          step={0.1}
+          value={props.speed}
+          {...markedFor('speed')}
+          onChange={(event) => {
+            props.onSpeed(event.target.value);
+          }}
+        />
+      </label>
+      <label>
+        Wind direction, degrees it blows from
+        <input
+          type="number"
+          inputMode="numeric"
+          min={0}
+          max={MAXIMUM_BEARING_DEGREES}
+          step={1}
+          value={props.fromBearing}
+          {...markedFor('fromBearing')}
+          onChange={(event) => {
+            props.onFromBearing(event.target.value);
+          }}
+        />
+      </label>
+      {/*
+        Rendered only when there is a problem, which is what keeps every
+        `aria-describedby` naming {@link WIND_PROBLEM_ID} — here and on each
+        ride button — from dangling: the attribute and the element it names
+        appear and disappear together, under one condition.
+      */}
+      {props.problem === undefined ? null : (
+        <p className="oyl-game__problem" id={WIND_PROBLEM_ID} role="alert">
           {props.problem}
         </p>
       )}

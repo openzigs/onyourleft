@@ -10,6 +10,8 @@ import {
   metresPerSecondToKilometresPerHour,
   metresPerSecondToMilesPerHour,
   METRES_PER_MILE,
+  milesPerHour,
+  milesPerHourToMetresPerSecond,
   UnitError,
 } from './index';
 
@@ -142,5 +144,34 @@ describe('metresPerSecondToMilesPerHour (#238)', () => {
     expect(() => metresPerSecondToMilesPerHour(metresPerSecond(Number.MAX_VALUE))).toThrow(
       /miles per hour/,
     );
+  });
+});
+
+describe('milesPerHourToMetresPerSecond (#326)', () => {
+  it('is the inverse of the outward conversion', () => {
+    // A round trip rather than a second table of numbers: the outward
+    // direction is already pinned against the 1959 international mile above,
+    // and what this function has to be is *that*, backwards.
+    for (const speed of [0, 1, 12, 26.8224, 40]) {
+      expect(
+        milesPerHourToMetresPerSecond(metresPerSecondToMilesPerHour(metresPerSecond(speed))),
+      ).toBeCloseTo(speed, 9);
+    }
+  });
+
+  it('is not the kilometre-per-hour conversion wearing a different name', () => {
+    // The mistake this pair of functions invites: one body, two exports. At
+    // 60 the two answers are 26.82 and 16.67, so a caller that got the wrong
+    // one would be out by 60 %.
+    expect(milesPerHourToMetresPerSecond(milesPerHour(60))).toBeCloseTo(26.8224, 6);
+    expect(milesPerHourToMetresPerSecond(milesPerHour(60))).not.toBeCloseTo(
+      kilometresPerHourToMetresPerSecond(kilometresPerHour(60)),
+      2,
+    );
+  });
+
+  it('refuses a speed its own constructor would refuse', () => {
+    expect(() => milesPerHour(-1)).toThrow(UnitError);
+    expect(() => milesPerHour(Number.NaN)).toThrow(UnitError);
   });
 });
