@@ -27,7 +27,6 @@ import { headingOnRoute, routeProfile, type RoutePoint } from './profile';
 import {
   headwindOnRoute,
   MAXIMUM_WIND_SPEED_METRES_PER_SECOND,
-  STILL_AIR,
   tangentialWindMetresPerSecond,
   wind,
 } from './wind';
@@ -160,7 +159,7 @@ describe('tangentialWindMetresPerSecond', () => {
       // `toBeCloseTo` rather than `toBe`, because `0 * cos 180°` is IEEE 754's
       // negative zero. It adds to a ground speed exactly as `+0` does, so the
       // distinction is the matcher's and not the model's.
-      expect(tangentialWindMetresPerSecond(STILL_AIR, degreesBearing(heading))).toBeCloseTo(0, 12);
+      expect(tangentialWindMetresPerSecond(wind(0, 0), degreesBearing(heading))).toBeCloseTo(0, 12);
     }
   });
 });

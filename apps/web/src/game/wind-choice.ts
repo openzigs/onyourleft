@@ -60,6 +60,17 @@ export const DEFAULT_WIND_FROM_BEARING = 270;
 /** The most degrees a bearing box will accept, so `360` is refused as `0`'s twin. */
 export const MAXIMUM_BEARING_DEGREES = 359;
 
+/**
+ * Which of the two boxes a refusal is about.
+ *
+ * ⚠️ **A second field on the answer rather than a second refusal**, and the
+ * distinction is what keeps `windChoice`'s "one refusal at a time" rule: a
+ * rider is told about the speed first and about the direction once the speed
+ * is usable, exactly as before. What this adds is *which box* that one
+ * sentence is talking about, which a screen needs and a sentence cannot carry.
+ */
+export type WindProblemField = 'speed' | 'fromBearing';
+
 /** What the rider asked for, or what is wrong with it. Exactly one is defined. */
 export interface WindChoice {
   /** The wind to ride in, or `undefined` when the ride is to be in still air. */
@@ -74,6 +85,18 @@ export interface WindChoice {
    * refusals.
    */
   readonly problem: string | undefined;
+  /**
+   * The box {@link problem} is about, so a screen can mark **that** one
+   * invalid and leave the other alone.
+   *
+   * ⚠️ Defined exactly when {@link problem} is, which is what stops a control
+   * marking a box invalid with nothing to describe it by. #255's single-box
+   * pattern — one refusal, one `aria-invalid`, one `aria-describedby` — does
+   * not generalise to two boxes on its own: applying the flag to both makes a
+   * perfectly good direction report itself invalid and point at a sentence
+   * about the speed, which WCAG 2.2 SC 3.3.1 is precisely about not doing.
+   */
+  readonly field: WindProblemField | undefined;
 }
 
 /**
@@ -122,11 +145,15 @@ export function windChoice(
   units: UnitSystem,
 ): WindChoice {
   if (!wanted) {
-    return { wind: undefined, problem: undefined };
+    return { wind: undefined, problem: undefined, field: undefined };
   }
   const speedValue = typed(speed);
   if (!Number.isFinite(speedValue) || speedValue < 0) {
-    return { wind: undefined, problem: `Choose a wind speed: ${speedRangeSentence(units)}.` };
+    return {
+      wind: undefined,
+      problem: `Choose a wind speed: ${speedRangeSentence(units)}.`,
+      field: 'speed',
+    };
   }
   const bearingValue = typed(fromBearing);
   if (
@@ -134,17 +161,29 @@ export function windChoice(
     bearingValue < 0 ||
     bearingValue > MAXIMUM_BEARING_DEGREES
   ) {
-    return { wind: undefined, problem: `Choose a wind direction: ${bearingRangeSentence()}.` };
+    return {
+      wind: undefined,
+      problem: `Choose a wind direction: ${bearingRangeSentence()}.`,
+      field: 'fromBearing',
+    };
   }
   try {
-    return { wind: wind(speedFrom(speedValue, units), bearingValue), problem: undefined };
+    return {
+      wind: wind(speedFrom(speedValue, units), bearingValue),
+      problem: undefined,
+      field: undefined,
+    };
   } catch (error) {
     if (error instanceof UnitError) {
       // The bound restated in the rider's own units. `wind`'s own message names
       // metres per second, which is the canonical unit and not the one in the
       // box in front of them — the one case where the rule's own wording is
       // the wrong thing to show.
-      return { wind: undefined, problem: `Choose a wind speed: ${speedRangeSentence(units)}.` };
+      return {
+        wind: undefined,
+        problem: `Choose a wind speed: ${speedRangeSentence(units)}.`,
+        field: 'speed',
+      };
     }
     throw error;
   }

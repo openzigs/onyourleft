@@ -272,16 +272,50 @@ describe('the wind refusal reaches the rider it stops (#326)', () => {
     );
   }
 
-  it('marks BOTH wind boxes invalid and describes them with the reason', async () => {
+  /** What a box says about its own validity, as the two attributes together. */
+  function validity(
+    root: ParentNode,
+    words: string,
+  ): { invalid: string | null; describes: string } {
+    const box = boxLabelled(root, words);
+    expect(box, words).toBeDefined();
+    const id = box?.getAttribute('aria-describedby') ?? '';
+    return {
+      invalid: box?.getAttribute('aria-invalid') ?? null,
+      describes: id === '' ? '' : (document.getElementById(id)?.textContent ?? ''),
+    };
+  }
+
+  it('marks the box the refusal is ABOUT, and leaves the other one alone', async () => {
     mounted = await windRefused();
 
-    for (const words of ['Wind speed', 'Wind direction']) {
-      const box = boxLabelled(mounted.container, words);
-      expect(box, words).toBeDefined();
-      expect(box?.getAttribute('aria-invalid')).toBe('true');
-      const id = box?.getAttribute('aria-describedby') ?? '';
-      expect(document.getElementById(id)?.textContent ?? '').toMatch(/wind speed/);
-    }
+    // The speed box is the empty one, so it is the one that is wrong.
+    expect(validity(mounted.container, 'Wind speed').invalid).toBe('true');
+    expect(validity(mounted.container, 'Wind speed').describes).toMatch(/wind speed/);
+    // ⚠️ And the direction box, which holds a perfectly good bearing, says
+    // nothing about its own validity. Marking it too — #255's single-box
+    // pattern applied to two boxes — points a screen reader at a sentence
+    // about a different control, which is what WCAG 2.2 SC 3.3.1 asks a page
+    // not to do.
+    expect(validity(mounted.container, 'Wind direction').invalid).toBeNull();
+    expect(validity(mounted.container, 'Wind direction').describes).toBe('');
+  });
+
+  it('moves the mark to the direction box when that is the box that is wrong', async () => {
+    // The other way round, so neither assertion above can be passing because
+    // the mark is simply pinned to the first box on the screen.
+    mounted = await windRefused();
+    const speed = boxLabelled(mounted.container, 'Wind speed');
+    const direction = boxLabelled(mounted.container, 'Wind direction');
+    expect(speed).toBeDefined();
+    expect(direction).toBeDefined();
+    await typeInto(speed as HTMLInputElement, '12');
+    await typeInto(direction as HTMLInputElement, '3600');
+    await settle();
+
+    expect(validity(mounted.container, 'Wind direction').invalid).toBe('true');
+    expect(validity(mounted.container, 'Wind direction').describes).toMatch(/wind direction/);
+    expect(validity(mounted.container, 'Wind speed').invalid).toBeNull();
   });
 
   it('says nothing about validity while the rider has not asked for a wind', async () => {

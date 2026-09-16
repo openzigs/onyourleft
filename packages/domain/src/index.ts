@@ -405,7 +405,6 @@ export type { Wind } from './route/wind';
 export {
   headwindOnRoute,
   MAXIMUM_WIND_SPEED_METRES_PER_SECOND,
-  STILL_AIR,
   tangentialWindMetresPerSecond,
   wind,
 } from './route/wind';

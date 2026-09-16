@@ -558,6 +558,16 @@ export function gradeAt(profile: RouteProfile, distance: number): GradePercent {
  * own rule and is why this returns `undefined` rather than a defensible-looking
  * north. A route with a single grid point has no cell at all and is the other
  * case.
+ *
+ * ⚠️ **The guard counts `positions` and {@link gridAt} bounds against
+ * `elevations`, and those are the same number by this type's own contract** —
+ * {@link RouteProfile} states that *"the three arrays are the same length and
+ * are indexed together"*, `routeProfile` fills all three in one loop, and
+ * `packages/store`'s `fromPersistedRoute` refuses a stored route whose lengths
+ * disagree. So `index + 1` is in range and the assertions below are sound for
+ * the same reason {@link positionAt}'s identical pair is. A second guard
+ * against the other array would be a branch for a state this type does not
+ * have, and nothing could make it go red.
  */
 export function headingOnRoute(
   profile: RouteProfile,

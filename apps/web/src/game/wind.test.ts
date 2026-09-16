@@ -125,10 +125,13 @@ describe('the same power on the same gradient, in three different winds', () => 
     expect(into.state.ride.distance).toBeLessThan(behind.state.ride.distance);
   });
 
-  it('is exactly the ride it always was when no wind is given', () => {
-    // The conditions object is passed through unchanged, so a windless ride
-    // must be bit-identical rather than merely close — `simulation.ts`
-    // §`#conditionsAt` says why the identity is preserved.
+  it('is exactly the ride it always was when the wind is calm', () => {
+    // ⚠️ This is the SPREAD branch of `simulation.ts` §`#conditionsAt`, not the
+    // identity one: `wind(0, 0)` is a wind, so the conditions object is rebuilt
+    // every step with a headwind resolved from it. The point is that the
+    // resolution comes back as zero at every heading, so the rebuilt ride is
+    // bit-identical to the one that took the identity branch — which is what
+    // `before`, with no wind at all, is.
     const before = ride(northRoad(4000), 220, 30);
     const zero = ride({ ...northRoad(4000), wind: wind(0, 0) }, 220, 30);
     expect(zero.state.ride.distance).toBe(before.state.ride.distance);

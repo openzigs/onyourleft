@@ -27,6 +27,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import type { GameRenderer, SceneFrame } from './port';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
+import { UnitsProvider } from '../units/context';
+import type { UnitSystem } from '@onyourleft/store';
 import {
   altitudeMetres,
   degreesLatitude,
@@ -269,5 +271,90 @@ describe('the ride control refuses a wind it cannot make', () => {
     const ridden = await rideWith({ speed: '20', fromBearing: '270' });
     expect(ridden.refused).toBe(false);
     expect(ridden.speed).toBeGreaterThan(0);
+  });
+});
+
+describe("the wind box is read in the RIDER's own units (#238, #326)", () => {
+  /**
+   * ⚠️ **What this block is for, and why the cases above cannot do it.**
+   *
+   * `GameView` reads the rider's unit system from a React context and hands it
+   * to two pure functions — `windChoice`, which reads the number in the box,
+   * and `speedUnit`, which labels it. Both of those are mutation-tested against
+   * their own `units` parameter in `wind-choice.test.ts` and
+   * `units/format.test.ts`, and **neither says anything about the seam**:
+   * replacing `useUnits()` with the literal `'metric'` at either call site left
+   * the entire suite green, because every other test here mounts with no
+   * provider and a rider with no preference *is* metric.
+   *
+   * That is the context-read seam, and it is invisible to both of this
+   * repository's automatic gates: `check:wiring` states it cannot follow a prop
+   * through JSX (§4j), and the typechecker is perfectly happy with a literal
+   * where a variable was. The only thing that catches it is mounting under a
+   * **non-default** provider and asserting the difference, which is what these
+   * cases do.
+   */
+  async function pickerIn(units: UnitSystem | undefined, typed: string): Promise<void> {
+    const view = <GameView port={pedallingPort(northRoute())} now={() => nowMs} />;
+    mounted = await mount(
+      units === undefined ? view : <UnitsProvider units={units}>{view}</UnitsProvider>,
+    );
+    await settle();
+    await clickThrough(boxLabelled('Ride in a wind'));
+    await type(boxLabelled('Wind speed'), typed);
+  }
+
+  function labelOf(words: string): string {
+    return boxLabelled(words)?.closest('label')?.textContent ?? '';
+  }
+
+  function problemText(): string {
+    return mounted?.container.querySelector('.oyl-game__problem')?.textContent ?? '';
+  }
+
+  /**
+   * A speed that straddles the domain's own bound once it is converted.
+   *
+   * `route/wind.ts`'s `MAXIMUM_WIND_SPEED_METRES_PER_SECOND` is 40 m/s. 100 km/h is 27.8
+   * m/s and is accepted; 100 mph is 44.7 m/s and is not. So the *same digits*
+   * in the same box have to produce different answers for the two riders, and
+   * a client that read every box as metric would accept both.
+   */
+  const STRADDLES_THE_BOUND = '100';
+
+  it('labels the speed box in the unit that rider reads, not in a fixed one', async () => {
+    await pickerIn('imperial', '');
+    expect(labelOf('Wind speed')).toContain('mph');
+    expect(labelOf('Wind speed')).not.toContain('km/h');
+  });
+
+  it('labels it in kilometres per hour for a rider who has chosen nothing', async () => {
+    // The control case. Without it the assertion above could be passing
+    // because the label is hard-coded to 'mph'.
+    await pickerIn(undefined, '');
+    expect(labelOf('Wind speed')).toContain('km/h');
+  });
+
+  it('accepts 100 from a metric rider and refuses it from an imperial one', async () => {
+    await pickerIn(undefined, STRADDLES_THE_BOUND);
+    // 100 km/h is a wind the model takes, so the ride is not blocked.
+    expect(rideButton()?.getAttribute('aria-disabled')).toBeNull();
+
+    mounted?.unmount();
+    mounted = undefined;
+
+    await pickerIn('imperial', STRADDLES_THE_BOUND);
+    // The same digits are 100 mph, which is past the bound — and the bound is
+    // in metres per second, so only a conversion that actually happened can
+    // put these two rides on opposite sides of it.
+    expect(rideButton()?.getAttribute('aria-disabled')).toBe('true');
+  });
+
+  it('quotes the bound back in the unit the box is in', async () => {
+    await pickerIn('imperial', STRADDLES_THE_BOUND);
+    // 40 m/s is 89.5 mph. A refusal naming 144.0 km/h would be the domain's
+    // bound restated in a unit that is on none of this rider's screens.
+    expect(problemText()).toMatch(/89\.5 mph/);
+    expect(problemText()).not.toMatch(/km\/h/);
   });
 });

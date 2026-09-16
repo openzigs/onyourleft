@@ -94,23 +94,18 @@ export interface Wind {
   /**
    * The compass bearing the wind blows **from** — meteorological convention.
    *
-   * Meaningless when the speed is zero, which is why {@link STILL_AIR} picks
-   * north arbitrarily and says so.
+   * ⚠️ **Meaningless when the speed is zero**, and deliberately not given a
+   * name of its own. A `STILL_AIR` constant was written here and removed
+   * before it shipped: nothing in production would have read it — still air is
+   * spelled as an **absent** `SimulationSetup.wind`, so that a windless ride
+   * is bit-for-bit the ride it was before #326 — and an exported, tested
+   * constant no production declaration names is the #237 / #259 shape this
+   * repository keeps finding, which `check:wiring` cannot see here because
+   * `packages/domain` is outside its watched set (CLAUDE.md §4j).
+   * `wind(0, …)` is the same value for a caller that wants one.
    */
   readonly fromBearing: DegreesBearing;
 }
-
-/**
- * No wind at all: the conditions every ride in this program has had until now.
- *
- * The bearing is north because a bearing is required and still air has none.
- * Nothing may read it: {@link tangentialWindMetresPerSecond} multiplies by a
- * speed of zero, so every direction gives the same answer.
- */
-export const STILL_AIR: Wind = {
-  speedMetresPerSecond: metresPerSecond(0),
-  fromBearing: degreesBearing(0),
-};
 
 /**
  * A wind, validated.

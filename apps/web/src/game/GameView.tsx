@@ -42,6 +42,7 @@ import {
   MAXIMUM_BEARING_DEGREES,
   windChoice,
   type WindChoice,
+  type WindProblemField,
 } from './wind-choice';
 import { INITIAL_QUALITY, nextQuality, qualitySettings, type QualityState } from './quality';
 import { rideConditionsFor } from './rider';
@@ -598,6 +599,7 @@ function RoutePicker(props: {
         onFromBearing={props.onWindFrom}
         speedUnit={props.windUnit}
         problem={props.air.problem}
+        field={props.air.field}
       />
       <ul>
         {props.routes.map((route) => (
@@ -766,9 +768,29 @@ function WindControls(props: {
   readonly onFromBearing: (value: string) => void;
   readonly speedUnit: string;
   readonly problem: string | undefined;
+  /** Which box {@link problem} is about. @see markedFor */
+  readonly field: WindProblemField | undefined;
 }): JSX.Element {
-  const invalid = props.problem === undefined ? undefined : true;
-  const describedBy = props.problem === undefined ? undefined : WIND_PROBLEM_ID;
+  /**
+   * The validity attributes for one box: set on the box the refusal is
+   * **about**, and on no other.
+   *
+   * ⚠️ Marking both boxes was the first version of this, and it is wrong in a
+   * way only a screen reader hears: a rider who left the speed blank was told
+   * their perfectly good direction was invalid too, and following its
+   * `aria-describedby` took them to a sentence about the speed. #255's pattern
+   * is one refusal and one box, so it carries no answer for a second box; this
+   * is that answer.
+   */
+  const markedFor = (
+    field: WindProblemField,
+  ): {
+    readonly 'aria-invalid': true | undefined;
+    readonly 'aria-describedby': string | undefined;
+  } =>
+    props.field === field
+      ? { 'aria-invalid': true, 'aria-describedby': WIND_PROBLEM_ID }
+      : { 'aria-invalid': undefined, 'aria-describedby': undefined };
   return (
     <div className="oyl-game__wind">
       <label>
@@ -789,8 +811,7 @@ function WindControls(props: {
           min={0}
           step={0.1}
           value={props.speed}
-          aria-invalid={invalid}
-          aria-describedby={describedBy}
+          {...markedFor('speed')}
           onChange={(event) => {
             props.onSpeed(event.target.value);
           }}
@@ -805,8 +826,7 @@ function WindControls(props: {
           max={MAXIMUM_BEARING_DEGREES}
           step={1}
           value={props.fromBearing}
-          aria-invalid={invalid}
-          aria-describedby={describedBy}
+          {...markedFor('fromBearing')}
           onChange={(event) => {
             props.onFromBearing(event.target.value);
           }}
