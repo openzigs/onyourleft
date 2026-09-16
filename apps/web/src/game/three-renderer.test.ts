@@ -53,8 +53,8 @@ import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
 import { corridorOrigin } from './terrain';
 
-import { qualitySettings } from './quality';
-import { SCATTER_KINDS, type ScatterItem, type ScatterKind } from './scatter';
+import { QUALITY_LADDER, qualitySettings } from './quality';
+import { SCATTER_KINDS, SCATTER_MAX_ITEMS, type ScatterItem, type ScatterKind } from './scatter';
 import { VIEW_AHEAD_METRES, VIEW_BEHIND_METRES } from './terrain';
 import {
   CAMERA_ABOVE_METRES,
@@ -1235,5 +1235,172 @@ describe('the lamps and the arithmetic agree — #286', () => {
     for (const [nx, ny, nz] of normals) {
       expect(irradianceFromLamps(lamps, nx, ny, nz)).toBeCloseTo(irradianceOn(sun, nx, ny, nz), 12);
     }
+  });
+});
+
+describe('the scenery belt spends a budget it never sets — #245', () => {
+  /**
+   * In-view scenery, one item a metre up the road.
+   *
+   * ⚠️ A metre apart rather than anything wider, so that three hundred items
+   * all sit inside {@link VIEW_AHEAD_METRES} and the *cull* is not what bounds
+   * the count. Spaced two metres apart the first of these assertions read 201
+   * rather than 240 and would have been a test of the corridor's length.
+   */
+  function belt(count: number, kind: ScatterKind = 'shrub'): readonly ScatterItem[] {
+    return Array.from({ length: count }, (_, at) => item({ kind, x: 3, z: at }));
+  }
+
+  it('submits no more instances than the rung allows', () => {
+    // #245's fifth criterion. `count` is what a driver is asked to draw, so
+    // `count` is what this reads — a belt that left the matrices in place and
+    // only moved `visible` would submit every one of them.
+    const scenery = new ScatterBelt();
+    const floor = qualitySettings(3).scatterItems;
+
+    scenery.setBudget(floor);
+    scenery.update(belt(floor + 40), POSE);
+
+    expect(submitted(scenery)).toBe(floor);
+  });
+
+  it('is unbudgeted until a rung says otherwise', () => {
+    // ⚠️ **The control for the test above, and a decision rather than a
+    // default.** `grows the buffer, and keeps the mesh, when a caller exceeds
+    // the budget` is the assertion that a caller who ignores `scatter.ts`'s
+    // figure is grown for rather than silently truncated — scenery placed and
+    // never shown is #240's named defect shape. A belt that budgeted itself at
+    // `SCATTER_MAX_ITEMS` from construction would convert that decision into
+    // exactly the truncation it refuses, and would do it invisibly.
+    const scenery = new ScatterBelt();
+    const many = SCATTER_INSTANCE_CAPACITY + 30;
+
+    scenery.update(belt(many, 'rock'), POSE);
+
+    expect(submitted(scenery)).toBe(many);
+  });
+
+  it('changes what is submitted across all four rungs, and reallocates for none of them', () => {
+    // #245's sixth criterion, NFR-3. The rungs are reached on a phone that is
+    // already too hot, so a buffer replaced on the way down is an allocation on
+    // the worst frame of the ride — and on the same JavaScript thread GATT
+    // notifications arrive on.
+    const scenery = new ScatterBelt();
+    const frame = belt(SCATTER_MAX_ITEMS + 60, 'tree-conifer');
+    const mesh = scenery.meshes.get('tree-conifer');
+    scenery.setBudget(qualitySettings(0).scatterItems);
+    scenery.update(frame, POSE);
+    const attributeAtTheTop = mesh?.instanceMatrix;
+    const bufferAtTheTop = mesh?.instanceMatrix.array;
+
+    const counts = [0, 1, 2, 3].map((level) => {
+      scenery.setBudget(qualitySettings(level as 0 | 1 | 2 | 3).scatterItems);
+      scenery.update(frame, POSE);
+      return submitted(scenery);
+    });
+
+    expect(counts).toEqual(QUALITY_LADDER.map((rung) => rung.scatterItems));
+    // Non-vacuity: the counts have to have actually moved, or the three
+    // identity assertions below are a claim about a belt nobody disturbed.
+    expect(new Set(counts).size).toBe(QUALITY_LADDER.length);
+    expect(scenery.meshes.get('tree-conifer')).toBe(mesh);
+    expect(scenery.meshes.get('tree-conifer')?.instanceMatrix).toBe(attributeAtTheTop);
+    expect(scenery.meshes.get('tree-conifer')?.instanceMatrix.array).toBe(bufferAtTheTop);
+  });
+
+  it('never grows a buffer for scenery a rung has already refused', () => {
+    // ⚠️ **What the two passes' identical guards actually buy**, and the
+    // mutation that finds it: a budget that stopped the *writing* pass and not
+    // the *counting* pass leaves `mesh.count` correct — so every assertion
+    // above stays green — while {@link reserve} sizes for everything that was
+    // placed. A caller over `SCATTER_INSTANCE_CAPACITY` would then strand a GL
+    // buffer on the floor rung, which is a per-frame allocation on the one
+    // device that has already said it is short of resources. NFR-3.
+    const scenery = new ScatterBelt();
+    const mesh = scenery.meshes.get('rock');
+    const attributeBefore = mesh?.instanceMatrix;
+    scenery.setBudget(qualitySettings(3).scatterItems);
+
+    scenery.update(belt(SCATTER_INSTANCE_CAPACITY + 60, 'rock'), POSE);
+
+    expect(submitted(scenery)).toBe(qualitySettings(3).scatterItems);
+    expect(scenery.meshes.get('rock')?.instanceMatrix).toBe(attributeBefore);
+    expect(scenery.meshes.get('rock')?.instanceMatrix.count).toBe(SCATTER_INSTANCE_CAPACITY);
+  });
+
+  it('takes the frame in the order it was given rather than choosing for itself', () => {
+    // ⚠️ **"The renderer applies the budget and never decides it"**, asserted
+    // rather than asserted-about. The thinning that decides *which* scenery
+    // survives is `scatter.ts`'s, it is biased towards the rider, and it runs
+    // where jsdom can see it. A belt that ranked its own items would be a
+    // scenery decision inside the render loop — code whose first execution is
+    // on a rider's phone at minute fifty, which is the whole reason
+    // `quality.ts` is a pure function in a file of its own.
+    const scenery = new ScatterBelt();
+    scenery.setBudget(3);
+
+    scenery.update(belt(9), POSE);
+
+    expect(submitted(scenery)).toBe(3);
+    expect(instancePosition(scenery, 'shrub', 0)[2]).toBe(0);
+    expect(instancePosition(scenery, 'shrub', 1)[2]).toBe(1);
+    expect(instancePosition(scenery, 'shrub', 2)[2]).toBe(2);
+  });
+
+  it('counts the same items it writes, kind by kind', () => {
+    // ⚠️ The defect the two passes' identical guards exist to prevent, and it
+    // is this program's named shape one layer below a frame: a budget that
+    // stopped the *counting* pass and the *writing* pass at different items
+    // leaves `mesh.count` disagreeing with the matrices behind it — a submitted
+    // instance whose matrix was never written, drawn at whatever the buffer
+    // last held.
+    const scenery = new ScatterBelt();
+    const mixed = Array.from({ length: 10 }, (_, at) =>
+      item({ kind: at % 2 === 0 ? 'rock' : 'post', x: 3, z: at * 2 }),
+    );
+    scenery.setBudget(7);
+
+    scenery.update(mixed, POSE);
+
+    expect(scenery.meshes.get('rock')?.count).toBe(4);
+    expect(scenery.meshes.get('post')?.count).toBe(3);
+    expect(instancePosition(scenery, 'rock', 3)[2]).toBe(12);
+    expect(instancePosition(scenery, 'post', 2)[2]).toBe(10);
+  });
+
+  it('spends the budget on what survives the cull, not on what was placed', () => {
+    // A budget counted before the cull would be spent on scenery behind the
+    // rider and off the side of the road, and the rung would thin the view a
+    // second time on a frame that had already lost most of it.
+    const scenery = new ScatterBelt();
+    scenery.setBudget(2);
+
+    scenery.update(
+      [
+        item({ kind: 'shrub', z: 900 }),
+        item({ kind: 'shrub', x: 900, z: 10 }),
+        item({ kind: 'shrub', z: 20 }),
+        item({ kind: 'shrub', z: 30 }),
+        item({ kind: 'shrub', z: 40 }),
+      ],
+      POSE,
+    );
+
+    expect(submitted(scenery)).toBe(2);
+    expect(instancePosition(scenery, 'shrub', 0)[2]).toBe(20);
+    expect(instancePosition(scenery, 'shrub', 1)[2]).toBe(30);
+  });
+
+  it('draws nothing, and hides everything, when a rung allows nothing', () => {
+    // Not a rung the ladder has — `QualitySettings.scatterItems` says why the
+    // floor is sixty rather than zero — and the behaviour is asserted anyway,
+    // because `mesh.visible` is the half a `count` of zero does not state.
+    const scenery = new ScatterBelt();
+    scenery.setBudget(0);
+
+    scenery.update(belt(40), POSE);
+
+    expect(submitted(scenery)).toBe(0);
+    expect([...scenery.meshes.values()].every((mesh) => !mesh.visible)).toBe(true);
   });
 });

@@ -27,9 +27,11 @@ import {
   SUSTAINED_SAMPLES,
   nextQuality,
   qualitySettings,
+  type QualityLevel,
   type QualitySample,
   type QualityState,
 } from './quality';
+import { SCATTER_MAX_ITEMS } from './scatter';
 
 /** Feeds the same measurement `count` times, as a sustained condition would. */
 function sustain(state: QualityState, sample: QualitySample, count: number): QualityState {
@@ -216,5 +218,110 @@ describe('the ladder itself', () => {
     expect(first.shading).toBe('lit');
     expect(last.shading).toBe('flat');
     expect(QUALITY_LADDER.filter((rung) => rung.shading === 'flat')).toHaveLength(1);
+  });
+});
+
+describe('the scenery budget is a rung on the ladder — #245', () => {
+  /** Every rung, in order, as the settings a renderer would be handed. */
+  const rungs = QUALITY_LADDER.map((_, level) => qualitySettings(level as QualityLevel));
+
+  it('gives every rung a budget, and never a bigger one as the phone gets hotter', () => {
+    // #245's first criterion. A ladder where a hotter rung asks for *more*
+    // scenery is not a ladder, and nothing else in this file could see it:
+    // `gets monotonically cheaper` above reads only the two numbers that
+    // existed before #245.
+    for (const rung of rungs) {
+      expect(Number.isFinite(rung.scatterItems)).toBe(true);
+    }
+    for (let rung = 1; rung < rungs.length; rung += 1) {
+      const previous = rungs[rung - 1] as (typeof rungs)[number];
+      const current = rungs[rung] as (typeof rungs)[number];
+      expect(current.scatterItems).toBeLessThanOrEqual(previous.scatterItems);
+    }
+  });
+
+  it('starts at `scatter.ts`’s own figure and ends above zero', () => {
+    // ⚠️ **Non-vacuity, and the half that stops the monotone rule above passing
+    // over a flat ladder.** A ladder holding 240 at every rung satisfies
+    // "never bigger", and would be #245 not implemented. A ladder holding zero
+    // at the floor satisfies it too, and would ship an empty verge to the
+    // riders least able to tell a hot phone from a broken one — which is the
+    // one thing `QualitySettings.scatterItems` says the floor must not do.
+    const top = rungs[0] as (typeof rungs)[number];
+    const floor = rungs[rungs.length - 1] as (typeof rungs)[number];
+
+    expect(top.scatterItems).toBe(SCATTER_MAX_ITEMS);
+    expect(floor.scatterItems).toBeGreaterThan(0);
+    expect(floor.scatterItems).toBeLessThan(top.scatterItems);
+  });
+
+  it('sheds scenery before it sheds frame rate — FR-4', () => {
+    // ⚠️ **Walked with `nextQuality` rather than read off the table**, because
+    // the claim is about the order a throttling phone arrives at the rungs in,
+    // not about the order they are written down in. A ladder whose entries were
+    // right and whose walk skipped a rung would pass the table version of this.
+    let state = INITIAL_QUALITY;
+    const full = qualitySettings(state.level).scatterItems;
+    let firstFrameRateDrop: number | undefined;
+
+    for (let step = 0; step < QUALITY_LADDER.length; step += 1) {
+      state = sustain(state, HOT, SUSTAINED_SAMPLES);
+      const settings = qualitySettings(state.level);
+      if (settings.frameCap < 30 && firstFrameRateDrop === undefined) {
+        firstFrameRateDrop = settings.scatterItems;
+      }
+    }
+
+    expect(firstFrameRateDrop).toBeDefined();
+    expect(firstFrameRateDrop).toBeLessThan(full);
+    // And the first rung down gave up scenery without giving up a frame.
+    expect(qualitySettings(1).frameCap).toBe(30);
+    expect(qualitySettings(1).scatterItems).toBeLessThan(full);
+  });
+
+  it('does not change the budget on every sample when the phone hovers', () => {
+    // #245's third criterion. ⚠️ A flickering scenery budget is worse than a
+    // flickering resolution, because items appear and vanish rather than the
+    // whole world softening — so the hysteresis has to hold with the new
+    // dimension on it, not merely with the two it was written for.
+    const above = HEADROOM_REDUCE_ABOVE + 0.05;
+    const below = HEADROOM_RESTORE_BELOW - 0.05;
+    let state = INITIAL_QUALITY;
+    const seen: number[] = [qualitySettings(state.level).scatterItems];
+
+    for (let sample = 0; sample < SUSTAINED_SAMPLES * 8; sample += 1) {
+      const headroom = sample % 2 === 0 ? above : below;
+      state = nextQuality(state, { thermalHeadroom: headroom, frameMs: 20 });
+      seen.push(qualitySettings(state.level).scatterItems);
+    }
+
+    const changes = seen.filter((items, at) => at > 0 && items !== seen[at - 1]).length;
+    expect(changes).toBe(0);
+    expect(new Set(seen).size).toBe(1);
+  });
+
+  it('is not merely a budget that never moves', () => {
+    // ⚠️ The control for the test above, and without it that assertion is
+    // satisfied by a ladder whose budget is constant. The *same* signal, held
+    // rather than alternated, has to move it.
+    const held = sustain(
+      INITIAL_QUALITY,
+      { thermalHeadroom: 0.95, frameMs: 20 },
+      SUSTAINED_SAMPLES,
+    );
+
+    expect(qualitySettings(held.level).scatterItems).toBeLessThan(
+      qualitySettings(INITIAL_QUALITY.level).scatterItems,
+    );
+  });
+
+  it('leaves the budget at full when the forecast is NaN and the frames are fine', () => {
+    // #245's fourth criterion, and the behaviour is deliberate: reading NaN as
+    // hot would thin the scenery on every device whose vendor never implemented
+    // `getThermalHeadroom`, which is most of them.
+    const broken: QualitySample = { thermalHeadroom: Number.NaN, frameMs: 20 };
+    const unchanged = sustain(INITIAL_QUALITY, broken, SUSTAINED_SAMPLES * 3);
+
+    expect(qualitySettings(unchanged.level).scatterItems).toBe(SCATTER_MAX_ITEMS);
   });
 });

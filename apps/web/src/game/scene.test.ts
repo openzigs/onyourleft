@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 
 import { gapAgainst } from './hud/fields';
 import type { RiderMarker, SceneFrame } from './port';
+import { qualitySettings } from './quality';
 import { SCATTER_MAX_ITEMS, type ScatterItem } from './scatter';
 import { cameraPose, ghostFinished, sceneFrame } from './scene';
 import { VIEW_AHEAD_METRES, VIEW_BEHIND_METRES, corridorOrigin, roadCorridor } from './terrain';
@@ -457,12 +458,13 @@ describe('a loop, once the rider has been round once (#253)', () => {
 });
 
 describe('the frame carries the scenery for the road it drew', () => {
-  function frameAt(setup: SimulationSetup, odometer: number): SceneFrame {
+  function frameAt(setup: SimulationSetup, odometer: number, scatterItems?: number): SceneFrame {
     const base = atStartLine(setup.profile);
     return sceneFrame({
       profile: setup.profile,
       origin: corridorOrigin(setup.profile),
       state: { ...base, ride: { ...base.ride, distance: metres(odometer) } },
+      ...(scatterItems === undefined ? {} : { scatterItems }),
     });
   }
 
@@ -486,6 +488,37 @@ describe('the frame carries the scenery for the road it drew', () => {
     const setup = straightRoute();
 
     expect(frameAt(setup, 600).scatter.length).toBeLessThanOrEqual(SCATTER_MAX_ITEMS);
+  });
+
+  it('spends the rung\u2019s budget rather than the target rung\u2019s \u2014 #245', () => {
+    // ⚠️ **This is where a throttling phone actually saves the work**, and it is
+    // a different saving from the one `ScatterBelt.setBudget` makes with the
+    // same number: the items are not *placed*, so the sort over three hundred
+    // candidates does not run on the thread GATT notifications arrive on. A
+    // rung applied only in the renderer leaves that cost exactly where it was.
+    const setup = straightRoute();
+    const floor = qualitySettings(3).scatterItems;
+
+    const atTheTop = frameAt(setup, 600).scatter.length;
+    const atTheFloor = frameAt(setup, 600, floor).scatter.length;
+
+    expect(atTheFloor).toBe(floor);
+    // Non-vacuity: the top rung has to be carrying more than the floor allows,
+    // or this fixture is too sparse for the budget to bind and the assertion
+    // above is about a route rather than about a rung.
+    expect(atTheTop).toBeGreaterThan(floor);
+  });
+
+  it('carries the target rung\u2019s budget when no rung is named \u2014 #245', () => {
+    // `atStartLine` and the browser harness build frames with no quality state
+    // behind them. Absent has to mean "as much as this program ever draws"
+    // rather than "none", or a harness page would render an empty verge and a
+    // reviewer would read it as the world being broken.
+    const setup = straightRoute();
+
+    expect(frameAt(setup, 600).scatter.length).toBe(
+      frameAt(setup, 600, qualitySettings(0).scatterItems).scatter.length,
+    );
   });
 
   it('covers the corridor it built and not some other stretch of road', () => {

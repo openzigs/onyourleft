@@ -643,6 +643,20 @@ export class ScatterBelt {
   readonly #quaternion = new Quaternion();
   readonly #scale = new Vector3();
   readonly #up = new Vector3(0, 1, 0);
+  /**
+   * The most instances one frame may submit, from the quality rung — #245.
+   *
+   * ⚠️ **Unbounded until a rung says otherwise, and that is not laziness.** A
+   * belt is a mechanism and a rung is a policy; `ThreeGameView`'s constructor
+   * calls {@link ThreeGameView.setQuality} before it draws anything, so nothing
+   * in the shipped client is ever unbudgeted. What the default protects is the
+   * *other* caller — the one that exceeds {@link SCATTER_INSTANCE_CAPACITY} and
+   * is grown for rather than truncated, because scenery a caller placed and the
+   * screen never showed is #240's named defect shape for this epic. Defaulting
+   * this to `SCATTER_MAX_ITEMS` would silently convert that decision into a
+   * truncation.
+   */
+  #budget = Number.POSITIVE_INFINITY;
 
   constructor() {
     for (const kind of SCATTER_KINDS) {
@@ -694,6 +708,44 @@ export class ScatterBelt {
     }
   }
 
+  /**
+   * How much of the belt this rung is willing to draw — #245.
+   *
+   * ⚠️ **Applies a budget; never decides one.** The figure is
+   * `QualitySettings.scatterItems` and the reasoning for it is beside
+   * `QUALITY_LADDER`, where a reviewer can read it without a GL context.
+   * Nothing here ranks, sorts or weighs an item — {@link ScatterBelt.update}
+   * takes the frame's own order and stops — because a scenery decision taken in
+   * the render loop is one that runs for the first time on a rider's phone at
+   * minute fifty, which is the whole reason `quality.ts` is a pure function in
+   * a file of its own.
+   *
+   * ⚠️ **In the shipped client this binds on almost no frame, and it is still
+   * the half that makes the rung real.** `scene.ts` asks `scatter.ts` for the
+   * same number, so a frame arrives already thinned — by a *distance-biased*
+   * thinning this method deliberately does not reimplement. What is left for
+   * this to catch is the frame built at the rung before last, and the caller
+   * that did not ask: `update`'s own note says a renderer is handed a
+   * `SceneFrame` and does not know who built it, and that is as true of the
+   * budget as it is of the cull.
+   *
+   * ⚠️ **What no gate here can see, measured rather than assumed.** Deleting
+   * the `setBudget` call in {@link ThreeGameView.setQuality} leaves the whole
+   * suite green, and that is a property of the two applications rather than of
+   * the tests: `scene.ts` has already thinned the frame to this same figure, so
+   * an unbudgeted belt submits exactly what a budgeted one would and the
+   * shipped client is unchanged. jsdom cannot construct a `ThreeGameView` with
+   * a context, so there is nowhere to observe the line at all —
+   * `#applyShading`'s call has had the same hole since #286. What the tests do
+   * prove is that a belt *spends* a budget; what nothing proves is the line
+   * that hands it one.
+   *
+   * Allocates nothing, and cannot: it only ever lowers a count.
+   */
+  setBudget(items: number): void {
+    this.#budget = items;
+  }
+
   /** Puts the belt in a scene. Called once, by the view that owns it. */
   addTo(scene: Scene): void {
     for (const mesh of this.#meshes.values()) {
@@ -723,15 +775,32 @@ export class ScatterBelt {
    *
    * Two passes over the items rather than one, so that a mesh grows at most
    * once for a frame instead of once per item that overflows it.
+   *
+   * ⚠️ **The two passes carry identical guards, in the same order, and that is
+   * load-bearing since #245.** The first counts what will be submitted so that
+   * {@link reserve} sizes for it; the second writes it. A budget that stopped
+   * the second pass earlier than the first would reserve room for instances
+   * that are never written and leave `mesh.count` disagreeing with the matrices
+   * behind it, which is this program's named defect shape — a write that
+   * reports success where the read cannot see it — one layer below a frame.
+   * That is why the counting pass looks up a mesh it does not otherwise need:
+   * a guard the two passes do not share is a guard that can disagree.
    */
   update(items: readonly ScatterItem[], pose: CameraPose): void {
     for (const kind of SCATTER_KINDS) {
       this.#counts.set(kind, 0);
     }
+    let admitted = 0;
     for (const item of items) {
-      if (this.#inView(item, pose)) {
-        this.#counts.set(item.kind, (this.#counts.get(item.kind) ?? 0) + 1);
+      const mesh = this.#meshes.get(item.kind);
+      if (mesh === undefined || !this.#inView(item, pose)) {
+        continue;
       }
+      if (admitted >= this.#budget) {
+        break;
+      }
+      admitted += 1;
+      this.#counts.set(item.kind, (this.#counts.get(item.kind) ?? 0) + 1);
     }
     for (const [kind, mesh] of this.#meshes) {
       reserve(mesh, this.#counts.get(kind) ?? 0);
@@ -739,11 +808,16 @@ export class ScatterBelt {
       // `mesh.count` as its write cursor and this is where it starts.
       mesh.count = 0;
     }
+    admitted = 0;
     for (const item of items) {
       const mesh = this.#meshes.get(item.kind);
       if (mesh === undefined || !this.#inView(item, pose)) {
         continue;
       }
+      if (admitted >= this.#budget) {
+        break;
+      }
+      admitted += 1;
       this.#position.set(item.x, item.y, item.z);
       this.#quaternion.setFromAxisAngle(this.#up, item.rotation);
       this.#scale.setScalar(item.scale);
@@ -978,6 +1052,10 @@ class ThreeGameView implements GameView {
   setQuality(settings: QualitySettings): void {
     this.#quality = settings;
     this.#applyShading();
+    // #245. Applied here rather than read in `render`, so that the rung is a
+    // property of the belt between frames and the render loop takes no scenery
+    // decision at all. @see ScatterBelt.setBudget
+    this.#scatter.setBudget(settings.scatterItems);
     this.#applySize();
   }
 

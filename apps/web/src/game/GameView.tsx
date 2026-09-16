@@ -197,6 +197,18 @@ export function GameView(props: GameViewProps): JSX.Element {
   const viewRef = useRef<RendererView | undefined>(undefined);
   const ghostRef = useRef<GhostTrack | undefined>(undefined);
   /**
+   * How much scenery the current rung allows — #245.
+   *
+   * ⚠️ **A ref rather than the `quality` state, for the same reason the loop
+   * below does not depend on `quality`.** That effect is deliberately not
+   * re-run on a rung change, so the `quality` it closes over is the one the
+   * ride started at — reading `qualitySettings(quality.level).scatterItems`
+   * inside `tick` would hand `sceneFrame` the target rung's budget for the
+   * whole ride and every test of it would pass. The effect that tells the
+   * renderer about the new rung is the one place the two are kept together.
+   */
+  const scatterItemsRef = useRef<number>(qualitySettings(INITIAL_QUALITY.level).scatterItems);
+  /**
    * How the race against the ghost ended, once it has — #259.
    *
    * ⚠️ **A ref rather than state, and one frame of memory rather than none.**
@@ -378,13 +390,28 @@ export function GameView(props: GameViewProps): JSX.Element {
           // nothing on a real 47.53 km route.
           ...(drawn.botDistance === undefined ? {} : { botDistance: drawn.botDistance }),
           ghost: ghostRef.current,
+          // #245: the rung's scenery budget, so a throttling phone stops
+          // *placing* the scenery it is about to stop drawing. @see
+          // scatterItemsRef for why this is not read off `quality` here.
+          scatterItems: scatterItemsRef.current,
         }),
       );
 
       // The measurement `quality.ts` decides from. Taken here because this is
       // the only place that knows how long a frame took.
-      setQuality((previous) => nextQuality(previous, { frameMs: at - lastFrameAt }));
+      // ⚠️ **Read and closed over BEFORE the updater, and that is the whole
+      // of #245's second finding.** `lastFrameAt` is a `let` in this effect's
+      // scope, so an updater that subtracted it *inside* the closure would be
+      // captured by reference — and React invokes an updater during the next
+      // render, by which time the line below has already moved it to `at`. The
+      // ladder was therefore fed `frameMs: 0` on every frame of every ride:
+      // always "cool", never hot, so the reduction path #91 asks for could not
+      // fire at all. `thermalHeadroom` is `undefined` in the shipped app
+      // (`docs/validation/0002-android-shell-and-game.md` Part E), so this was
+      // the only live input to the whole policy.
+      const frameMs = at - lastFrameAt;
       lastFrameAt = at;
+      setQuality((previous) => nextQuality(previous, { frameMs }));
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
@@ -400,7 +427,12 @@ export function GameView(props: GameViewProps): JSX.Element {
   }, [phase, chosen, port, props.renderer, props.now]);
 
   useEffect(() => {
-    viewRef.current?.setQuality(qualitySettings(quality.level));
+    const settings = qualitySettings(quality.level);
+    // ⚠️ Both halves of the rung, from one place. The renderer stops submitting
+    // the instances and `sceneFrame` stops placing them — #245, and
+    // `ScatterBelt.setBudget` says why neither alone is the whole of it.
+    scatterItemsRef.current = settings.scatterItems;
+    viewRef.current?.setQuality(settings);
   }, [quality.level]);
 
   if (phase === 'choosing' || chosen === undefined || state === undefined) {

@@ -38,6 +38,8 @@
  * is not the reduction threshold.
  */
 
+import { SCATTER_MAX_ITEMS } from './scatter';
+
 /** How hard the renderer is working. Lower is cooler. */
 export type QualityLevel = 0 | 1 | 2 | 3;
 
@@ -55,6 +57,72 @@ export interface QualitySettings {
   readonly renderScale: number;
   /** The frame cap, in frames per second. */
   readonly frameCap: number;
+  /**
+   * How many pieces of scenery a frame may carry — #245.
+   *
+   * ⚠️ **The fourth thing a rung can give up, and the only one whose cost
+   * scales with the figure written here.** {@link renderScale} and
+   * {@link frameCap} each change one fixed property of a frame, and
+   * {@link shading} swaps one material for another. This number *is*
+   * `scatter.ts`'s `ScatterBudget.maxItems`, which is also the instances the
+   * belt submits, the fragments they shade and the overdraw beside the road —
+   * #240's NFR-2 names exactly those three as the budget.
+   *
+   * ## Where scenery sits on the ladder, argued rather than inherited
+   *
+   * {@link renderScale}'s own note puts resolution first because *"the world
+   * behind [the HUD] is a stylised corridor with no fine detail to lose"*.
+   * #243 and #244 gave it fine detail to lose, so that reason cannot simply be
+   * carried over; #245 asks for it to be re-made.
+   *
+   * It is re-made and it lands in the same place, on a ground the older note
+   * could not have stood on: **the first slice of this budget is the only
+   * reduction on the ladder that is invisible where it is taken.** `scatter.ts`
+   * thins towards the rider — `SCATTER_NEAR_BIAS` — so the items that go first
+   * are the furthest away, and `world.ts` has already fogged the far end of the
+   * view to `FOG_OCCLUSION_AT_VIEW_END` of the horizon colour by the time the
+   * rider can see it. A resolution step is visible across the whole screen at
+   * once and a frame-rate step is visible in everything that moves; the first
+   * third of the scenery is visible in a band the fog has mostly taken.
+   *
+   * So the scenery goes **with** the first resolution step rather than before
+   * it or after it:
+   *
+   * - **Not before**, as a rung of its own. The slice that is nearly free to
+   *   lose is also the slice that buys the least back, so a rung spent on it
+   *   alone would be a rung spent for almost nothing — and every rung costs a
+   *   visible change, which is the whole of {@link HEADROOM_RESTORE_BELOW}'s
+   *   argument for the hysteresis. Fewer rungs that each do something beat
+   *   more rungs that each do little.
+   * - **Not after the frame rate.** #245's FR-4 fixes that outer bound
+   *   directly — scenery is reduced before frame rate is — and the first rung
+   *   whose `frameCap` drops below 30 is the **second step down**, by which
+   *   point this budget has already fallen twice.
+   *
+   * ## Why the floor rung is sixty and not zero
+   *
+   * A corridor with nothing standing beside it leaves a rider no way to read
+   * their own speed: what passes the verge is the only motion cue in a world
+   * whose road is a repeating surface and whose horizon does not move. That is
+   * why #243 exists at all, and a floor rung that took all of it away would
+   * ship the world #243 replaced to precisely the riders least able to tell a
+   * hot phone from a broken one.
+   *
+   * ## ⚠️ Provenance — BR-1, and none of these numbers is a measurement
+   *
+   * 240 → 160 → 100 → 60. Each rung keeps about two-thirds of the one above and
+   * the floor keeps a quarter of the top, which is the shape {@link renderScale}
+   * already takes in *pixels*: 1, 0.83, 0.67 and 0.5 square to 1, 0.69, 0.45
+   * and 0.25. That shape is **chosen, not measured.** ADR 0008 D-2's rendering
+   * gate was waived rather than passed and
+   * [#247](https://github.com/openzigs/onyourleft/issues/247) is the 60-minute
+   * run on the device floor that would settle it, so every figure here is a
+   * **starting position for that measurement to revise** rather than a result
+   * it has already produced. `SCATTER_MAX_ITEMS` has carried the same warning
+   * for the top rung since #243, and the top rung is that constant rather than
+   * a copy of it.
+   */
+  readonly scatterItems: number;
   /**
    * Whether the world is shaded by a light direction, or flat — #286.
    *
@@ -95,20 +163,44 @@ export interface QualitySettings {
  * be a rung the device spends its headroom on before the ride has warmed up.
  */
 export const QUALITY_LADDER: readonly QualitySettings[] = [
-  { renderScale: 1, frameCap: 30, shading: 'lit', label: 'full' },
-  { renderScale: 0.83, frameCap: 30, shading: 'lit', label: 'reduced resolution' },
+  {
+    renderScale: 1,
+    frameCap: 30,
+    // The target rung takes `scatter.ts`'s own constant rather than a copy of
+    // it, so there is one figure for "as much scenery as this program ever
+    // draws" instead of two that can drift. @see QualitySettings.scatterItems
+    scatterItems: SCATTER_MAX_ITEMS,
+    shading: 'lit',
+    label: 'full',
+  },
+  // ⚠️ The scenery goes here, WITH the first resolution step rather than as a
+  // rung of its own — {@link QualitySettings.scatterItems} argues why, and #245
+  // FR-4's outer bound is discharged by the rung below rather than by this one.
+  {
+    renderScale: 0.83,
+    frameCap: 30,
+    scatterItems: 160,
+    shading: 'lit',
+    label: 'reduced resolution and scenery',
+  },
   {
     renderScale: 0.67,
     frameCap: 24,
+    scatterItems: 100,
     shading: 'lit',
-    label: 'reduced resolution and frame rate',
+    label: 'reduced resolution, scenery and frame rate',
   },
   // ⚠️ The only rung that is flat. Resolution and frame rate are given up
   // twice each before the shading is given up once, because a rider notices a
   // softer world far less than a world that has stopped having a sun in it —
   // the same ordering argument {@link QualitySettings.renderScale} makes for
   // resolution going before frame rate.
-  { renderScale: 0.5, frameCap: 20, shading: 'flat', label: 'minimum' },
+  //
+  // ⚠️ And sixty pieces of scenery rather than none, which is the one figure on
+  // this ladder that does not go to its own floor:
+  // {@link QualitySettings.scatterItems} §"Why the floor rung is sixty and not
+  // zero" says what an empty verge costs a rider.
+  { renderScale: 0.5, frameCap: 20, scatterItems: 60, shading: 'flat', label: 'minimum' },
 ];
 
 /**

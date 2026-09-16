@@ -28,6 +28,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import type { GameRenderer, SceneFrame } from './port';
+import {
+  FRAME_MS_REDUCE_ABOVE,
+  QUALITY_LADDER,
+  SUSTAINED_SAMPLES,
+  qualitySettings,
+  type QualitySettings,
+} from './quality';
 import { DEFAULT_PACER_INTENSITY } from './pacer-choice';
 import { NO_READING } from './hud/fields';
 import { NO_SENSORS } from './sensors';
@@ -106,7 +113,15 @@ function pedallingPort(route: RidableRoute, ghost?: GhostTrack): GamePort {
   };
 }
 
-/** A renderer that draws nothing and keeps every frame it was given. */
+/**
+ * A renderer that draws nothing and keeps every frame it was given.
+ *
+ * ⚠️ It keeps every **rung** it was told about too, since #245. The scenery
+ * budget reaches the screen down two paths — `sceneFrame` stops placing the
+ * items and `setQuality` stops the belt submitting them — and only one of those
+ * is visible in a `SceneFrame`. A fake that swallowed `setQuality` would leave
+ * half the wiring assertable by nothing here.
+ */
 function capturingRenderer(frames: SceneFrame[]): GameRenderer {
   return {
     create: () => ({
@@ -114,7 +129,9 @@ function capturingRenderer(frames: SceneFrame[]): GameRenderer {
       render: (frame: SceneFrame) => {
         frames.push(frame);
       },
-      setQuality: () => undefined,
+      setQuality: (settings: QualitySettings) => {
+        rungs.push(settings);
+      },
       resize: () => undefined,
       destroy: () => undefined,
     }),
@@ -124,9 +141,12 @@ function capturingRenderer(frames: SceneFrame[]): GameRenderer {
 let pending: FrameRequestCallback[] = [];
 let nowMs = 0;
 let mounted: Mounted | undefined;
+/** Every quality rung a renderer was handed this test. @see capturingRenderer */
+let rungs: QualitySettings[] = [];
 
 beforeEach(() => {
   pending = [];
+  rungs = [];
   nowMs = 1_000_000;
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
     pending.push(callback);
@@ -825,5 +845,87 @@ describe('the ride is at the athlete’s own weight (#325)', () => {
     const stated = await rideAtMass(kilograms(DEFAULT_RIDER_MASS_KILOGRAMS));
 
     expect(finishedAt(assumed)).toBe(finishedAt(stated));
+  });
+});
+
+/**
+ * #245's wiring, driven the way a rider on a hot phone would produce it.
+ *
+ * ⚠️ **Both halves or neither.** `quality.test.ts` proves the ladder carries a
+ * scenery budget and `three-renderer.test.ts` proves a belt spends one, and
+ * #278's gate is explicit that a correct, unit-tested, typechecked unit wired
+ * to nothing passes both — `advanceBot` had a test proven to fail without it
+ * and no caller at all. So this drives real frames through the real
+ * `nextQuality` until the rung moves, and then asks what the renderer was
+ * handed.
+ *
+ * The frames are long on purpose: {@link FRAME_PERIOD_MS} is already well past
+ * `FRAME_MS_REDUCE_ABOVE`, so a phone this slow is a sustained hot measurement
+ * and nothing has to reach for the thermal API — which, per
+ * `docs/validation/0002-android-shell-and-game.md` Part E, is `undefined` in
+ * the shipped app in any case.
+ */
+describe('GameView — a hot phone sheds scenery before frame rate (#245)', () => {
+  it('tells the renderer a leaner rung, and stops placing what it stops drawing', async () => {
+    const frames = await startRiding({ pacer: false });
+    const atTheTop = frames[frames.length - 1] as SceneFrame;
+    // Non-vacuity, and the one thing about this fixture that could quietly make
+    // the whole test meaningless: a route too sparse to exceed a lower rung's
+    // budget would satisfy every assertion below with no reduction at all.
+    expect(atTheTop.scatter.length).toBeGreaterThan(
+      QUALITY_LADDER[1]?.scatterItems ?? Number.POSITIVE_INFINITY,
+    );
+
+    // Sustained slow frames, which is what `nextQuality` reads as a hot phone.
+    await pump(SUSTAINED_SAMPLES + 5);
+    const told = rungs[rungs.length - 1];
+    const drawn = frames[frames.length - 1] as SceneFrame;
+
+    expect(told).toBeDefined();
+    expect(told?.scatterItems).toBeLessThan(qualitySettings(0).scatterItems);
+    expect(drawn.scatter.length).toBeLessThanOrEqual(told?.scatterItems ?? 0);
+    expect(drawn.scatter.length).toBeLessThan(atTheTop.scatter.length);
+    // The rung it settled on is one of the ladder's, not a number this view
+    // invented — `quality.ts` is where a scenery decision is taken.
+    expect(QUALITY_LADDER).toContainEqual(told);
+  });
+
+  it('measures the frame it just drew, not the frame it is about to draw', async () => {
+    // ⚠️ **The defect this pull request found, and it is older than #245.**
+    // `setQuality`'s updater closed over `lastFrameAt` — a `let` in the loop's
+    // own scope — and React invokes an updater during the *next* render, by
+    // which time the loop had already moved it to `at`. So the ladder was fed
+    // `frameMs: 0` on every frame of every ride: permanently "cool", never
+    // once hot. With `thermalHeadroom` `undefined` in the shipped app
+    // (validation 0002 Part E) that was the only live input to the policy, so
+    // #91's whole reduction path was unreachable — and every test of it passed,
+    // because `quality.ts` is pure and was being asked the right question by
+    // nobody.
+    //
+    // Asserted at the threshold rather than with "slow" and "fast", because a
+    // measurement that is merely *non-zero* would also satisfy the pair of
+    // tests either side of this one.
+    const frames = await startRiding({ pacer: false });
+    frames.length = 0;
+
+    await pump(SUSTAINED_SAMPLES + 5, FRAME_MS_REDUCE_ABOVE - 1);
+    expect(rungs).toEqual([]);
+
+    await pump(SUSTAINED_SAMPLES + 5, FRAME_MS_REDUCE_ABOVE + 1);
+    expect(rungs.length).toBeGreaterThan(0);
+  });
+
+  it('keeps the scenery at the target rung while the frames are fine', async () => {
+    // The control. A view that simply handed `sceneFrame` an ever-smaller
+    // budget, or that thinned on every frame, would pass the test above.
+    const frames = await startRiding({ pacer: false });
+
+    await pump(SUSTAINED_SAMPLES + 5, 1000 / 60);
+    const drawn = frames[frames.length - 1] as SceneFrame;
+
+    expect(rungs.every((rung) => rung.scatterItems === qualitySettings(0).scatterItems)).toBe(true);
+    expect(drawn.scatter.length).toBeGreaterThan(
+      QUALITY_LADDER[1]?.scatterItems ?? Number.POSITIVE_INFINITY,
+    );
   });
 });
