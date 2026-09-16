@@ -287,6 +287,12 @@ packages/             Apache-2.0, without exception
 
 docs/
   architecture.md     layout, component boundaries, ADR index
+  cost-model.md       what "free to the end user" costs and who pays it (#54) —
+                      the inputs with their provenance, what follows from them at
+                      three populations, and the line item that dominates at each.
+                      ⚠️ Its arithmetic is a GATE, not prose: `check:cost-model`
+                      recomputes every figure from the inputs beside it, so
+                      editing a rate without the table is a red build. §4l
   adr/                numbered architecture decision records
   spikes/             numbered spike write-ups — a dated measurement, not a decision
   validation/         numbered hardware-validation procedures — a script for one
@@ -580,6 +586,22 @@ pnpm run check:capacitor
 # own artefact, each reproduced from the tree as it was. Needs Node and pnpm, so
 # also not in `check:repo`.
 bash scripts/check-capacitor-generated.test.sh
+
+# The cost model (#54). Recomputes every figure in docs/cost-model.md from the
+# inputs stated in docs/cost-model.md, and fails when the two disagree. The
+# defect it catches is arithmetic that was true on the day somebody typed it, in
+# a document whose inputs move -- two of them moved while it was being written.
+# `--print` emits the tables the model computes, which is what to paste in after
+# a rate is re-read rather than editing cells until the build goes green.
+# Needs Node but no install; it is NOT part of `check:repo` all the same,
+# because that is the bash-and-coreutils set. See section 4l.
+pnpm run check:cost-model
+node scripts/check-cost-model.mjs --print
+
+# Its own suite. Fixture-driven; 51 assertions over throwaway documents, one per
+# rule, plus the vacuous pass -- a document whose tables parse and are never
+# compared against anything. Needs Node, so also not in `check:repo`.
+bash scripts/check-cost-model.test.sh
 
 # tsc --noEmit followed by `vite build`, for apps/web. A green typecheck is not
 # a green build: the bundler resolves imports the typechecker only reads types
@@ -948,7 +970,8 @@ with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --fro
 `typecheck`, `test:coverage`, `check:a11y-suite`,
 `test:a11y`, `bash scripts/check-a11y-suite.test.sh`, `check:wiring`,
 `bash scripts/check-wiring.test.sh`, `check:capacitor`,
-`bash scripts/check-capacitor-generated.test.sh`, `bash scripts/coverage-summary.test.sh`, `build`,
+`bash scripts/check-capacitor-generated.test.sh`, `check:cost-model`,
+`bash scripts/check-cost-model.test.sh`, `bash scripts/coverage-summary.test.sh`, `build`,
 `playwright install --with-deps chromium`, `test:browser`, `bash scripts/check-dependency-licences.test.sh` and `check:licences` — then
 publishes the coverage table to the run summary and uploads the HTML report as an artefact.
 Those last two carry `if: always()` and cannot fail the job: the run where coverage moved
@@ -1667,6 +1690,7 @@ that the green result is indistinguishable from the correct one:
 | a unit wired to nothing (#278) | §4j, `check:wiring` |
 | a guard that cannot fire (#229, #225) | the fixture suites, one red case per rule |
 | **a generated artefact that has drifted from its source** (#299) | **§4k, `check:capacitor`** |
+| a derived figure whose input has moved under it (#54) | §4l, `check:cost-model` |
 
 | Rule | Fails when |
 |---|---|
@@ -1717,6 +1741,66 @@ developer happened to install last week is not a gate.
 **Read `check-capacitor-generated.mjs` §Limits before reading a green run as more than it is.** It
 does not run Gradle and says nothing about whether the project builds — nobody in this environment
 can, and `apps/mobile/README.md` §4 records why.
+
+### 4l. The cost-model gate
+
+Added by [#54](https://github.com/openzigs/onyourleft/issues/54). It is
+[`scripts/check-cost-model.mjs`](scripts/check-cost-model.mjs), it runs as `pnpm run
+check:cost-model`, and the artefact it guards is
+[`docs/cost-model.md`](docs/cost-model.md) — the answer to what "free to the end user" costs and who
+pays it.
+
+**The document holds the inputs and the outputs; the script holds the arithmetic; nothing holds two
+of the three.** Every input is written down once with its provenance and a confidence word, and
+every figure that follows from it is recomputed on each CI run. Editing a rate without the table is
+a red build rather than a stale document.
+
+| Rule | Fails when |
+|---|---|
+| `COST001` | the document, a table anchor, a table, or the three required scale columns is missing or unreadable |
+| `COST002` | an input the model needs is absent from the inputs table, or its value is not a number |
+| `COST003` | a stated figure disagrees with what the model computes from the inputs |
+| `COST004` | an input carries no provenance, or a confidence outside `measured`/`read`/`inherited`/`inferred` |
+| `COST005` | a table yielded no comparison at all |
+| `COST006` | a stated dominant or second-largest line item is not the one the model computes |
+
+This is the **fourth** variant of the shape §4k tabulates, and the common property is unchanged: the
+green result is indistinguishable from the correct one. A cost table is arithmetic somebody did
+once, in a document that outlives the day they did it — and two of this model's inputs moved while
+it was being written. The Protomaps planet build grew **103.0 MB in the four days to 2026-09-15**,
+and Verisign has announced a `.com` wholesale rise for **2026-11-01**.
+
+⚠️ **`COST005` is counted per table rather than once for the run, and that is what makes it
+reachable.** A run-wide count is satisfied by any one table having rows, so the donations table
+could be skipped in its entirety while the projection kept the total above zero — a guard against a
+vacuous pass that is itself vacuous. Both tables must have contributed something, and the suite has
+a fixture where one parses as a table and yields nothing.
+
+⚠️ **A fixture at the identity value of the operation it feeds tests nothing, and this suite shipped
+one.** The first version priced Class B reads at **$1.00 per million**, which makes `× p_classB`
+indistinguishable from omitting it — a mutation deleting that multiplication passed all 49
+assertions the suite then had. A zero egress price hides the tile size the same way and a rate of
+1.00 hides
+`fx`. Every rate in `base_document` is now deliberately away from 1 and from 0, and the file says
+so where a reader would otherwise simplify it back.
+
+⚠️ **Read `check-cost-model.mjs` §Limits before reading a green run as more than it is.** It checks
+that the document's conclusions follow from the document's premises; it says nothing about whether a
+premise is true, and nothing about any bill, because there is no traffic and no invoice.
+
+⚠️ **The prose is not checked, and that is where the figures a reader quotes live.** Only the three
+anchored tables are. Every share, ratio, threshold and band stated in a *sentence* is outside every
+rule — the crossover `--print` derives and a person pastes, the instance's percentage of each total,
+the price band the box is said to dominate across. **This is the gate's blind spot and it is not
+hypothetical**: #54's own review found **three** prose figures that were wrong the day they were
+typed — an instance share taken against the infrastructure subtotal and quoted as a fully-loaded
+one, a dominance claim false at the floor of its own stated band, and a donations arithmetic the
+table beneath it already contradicted — inside the document arguing that derived figures rot. Each
+is corrected and each now carries a note saying what it used to say. **A green `check:cost-model` is
+evidence about the tables only.** Reviewing this document means recomputing every percentage, ratio
+and band in its prose against the gated table above it; the stopping point is deliberate, because
+machine-checking a sentence means pinning its wording and a gate that forbids rewording a paragraph
+gets deleted.
 
 ---
 
@@ -2400,6 +2484,11 @@ top of an issue **supersedes its body**.
 | What catches a correct, tested unit that nothing calls, and the three things it cannot see | §4j, [`scripts/check-wiring.mjs`](scripts/check-wiring.mjs) §Limits |
 | Why a declaration says `@unwired`, and what a reasonless one gets | §4j, `scripts/check-wiring.mjs` §"The exemption" |
 | What catches a generated-and-committed file a dependency bump left stale, and why the cheap version of it does not work | §4k, [`scripts/check-capacitor-generated.mjs`](scripts/check-capacitor-generated.mjs) §"Why not the cheaper check" |
+| What "free to the end user" costs, who pays it, and which of its numbers are measured rather than guessed | [`docs/cost-model.md`](docs/cost-model.md), §4l |
+| Why the cost model's arithmetic is a gate rather than a table, and what a green run does NOT say | §4l, [`scripts/check-cost-model.mjs`](scripts/check-cost-model.mjs) §Limits |
+| Why no real-time cost figure is asserted anywhere, and what would let one be | [`docs/cost-model.md`](docs/cost-model.md) §"Unmodelled risk", [ADR 0002](docs/adr/0002-local-first-architecture.md) decision H |
+| Why there is no single-command self-host deploy in the repository, and who owns writing one | [`docs/cost-model.md`](docs/cost-model.md) §"Self-hosting", [#52](https://github.com/openzigs/onyourleft/issues/52) |
+| How big the basemap archive actually is, and why no document hard-codes it | [`docs/cost-model.md`](docs/cost-model.md) §"Basemap — archive storage", [ADR 0010](docs/adr/0010-map-tiles-and-routing.md) §Amendments |
 | Why a regenerate-and-diff runs its own frozen install first | §4k, `scripts/check-capacitor-generated.mjs` §`capacitorDrift`, [#298](https://github.com/openzigs/onyourleft/pull/298) |
 | Why an indoor GPX has trackpoints with no coordinates, and what settles whether that is wrong | `packages/fit/src/xml/gpx.ts` §`writeTrackPoint`, `packages/fit/tools/uploads/uploads.test.ts` |
 | Which of #15's acceptance criteria can be checked without a phone, and what each of the others needs | [`docs/spikes/0002-background-recording.md`](docs/spikes/0002-background-recording.md) |

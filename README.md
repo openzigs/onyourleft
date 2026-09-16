@@ -235,10 +235,23 @@ patent grant.
 
 Reasoning, and what the choice forecloses: [`docs/adr/0001-licence.md`](docs/adr/0001-licence.md).
 
-## Self-hosting
+## Self-hosting, and what "free" actually means
 
 Self-hosting is a first-class, supported goal, not an afterthought — the architecture is one small
 self-hostable instance rather than a single central service.
+
+**"Free" means free to you. It is not free to run, and the size of that bill is written down rather
+than waved at.** Phase 1 has no server and no hosting bill at all. Once there is one, the whole
+modelled bill at 10,000 monthly active riders is about **$28 a month fully loaded** — $27.26 of it
+infrastructure and the rest a domain name — which is a few cents per rider per year, of which
+roughly six-sevenths is one small virtual machine. Self-hosting your own is about €21 a month at
+the reference size and somebody's evenings.
+
+Nobody in this space is funded by hosting being cheap. Hosting being cheap is what makes small
+donations *sufficient*, which is a different and better claim.
+
+Every figure, where it came from, and which of them are guesses:
+[`docs/cost-model.md`](docs/cost-model.md).
 
 ## Contributing
 

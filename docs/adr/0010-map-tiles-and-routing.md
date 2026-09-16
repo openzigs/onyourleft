@@ -702,3 +702,19 @@ say which:
   deployment-specific and belongs under `apps/`, then reason 1 in D-4 weakens to a preference. It
   would not change the outcome, because reasons 2 and 3 are independent of it, but the ADR would be
   overstating its case and should say so.
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-09-15** — D-3's archive size is no longer accurate, and the cost model's `S` = 110 GB with
+  it. Measured from `build-metadata.protomaps.dev/builds.json`, the planet build is **138.0 GB**:
+  137,928,448,540 bytes on `20260911` rising to 138,031,484,053 on `20260915`, **+103.0 MB in four
+  days**. So the figure is not merely stale, it is drifting, and D-3's "~120 GB quarterly transfer"
+  and the $1.65 storage line derived from 110 GB are both understated by about a quarter. The
+  decision is unaffected — D-1's argument turns on R2's zero egress against metered egress, not on
+  the archive's size — and every figure is now an input with a date on it in
+  [`docs/cost-model.md`](../cost-model.md), recomputed by `pnpm run check:cost-model`.
+  ([#54](https://github.com/openzigs/onyourleft/issues/54))
