@@ -487,3 +487,34 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   `apps/mobile` at all. The split this ADR's D-1 reasoning implies is preserved: computation and UI
   in `apps/web`, and only genuinely native capability — the thermal-headroom reading and the
   foreground-service wake lock — behind ports with Capacitor implementations in `apps/mobile`.
+- **2026-09-16** — **D-5's "a fixed camera removes the culling, level-of-detail and visible-rider
+  problems simultaneously" is now false in two of its three claims.**
+  [#240](https://github.com/openzigs/onyourleft/issues/240) gave the game scenery placed from the
+  route's own geography, and there is now something outside the corridor to draw. **Culling is
+  back**: [#244](https://github.com/openzigs/onyourleft/issues/244) added one, and it is a real
+  stage rather than a figure of speech — `apps/web/src/game/three-renderer.ts`
+  §`lateralReachMetres` runs per item per frame, a cone about the camera floored at the placement
+  band and capped at `FOGGED_OUT_METRES`, and it carries its own measured error table because a
+  cull that drops something on screen is a visible defect. **Level-of-detail is partly back**:
+  [#245](https://github.com/openzigs/onyourleft/issues/245) made scenery density a rung on
+  `QUALITY_LADDER`, from 240 items at the target rung to 60 at the floor, and
+  [#243](https://github.com/openzigs/onyourleft/issues/243)'s `scatter.ts` §`thin` spends that
+  budget on a rider-biased rank so the far view thins rather than ending in a wall. Both are
+  level-of-detail mechanisms under other names. What D-5 was right about survives underneath: there
+  is still no mesh-swapping LOD, no mip chain and no impostor system, and the **visible-rider**
+  problem is untouched — markers are drawn exactly as they were. ⚠️ **The 2026-09-08 entry above
+  has gone stale in the same place and cannot be edited**, which is the point of an append-only log:
+  it says the corridor means "there is no culling stage, no level-of-detail system and no
+  visible-rider bound", and the first two clauses stopped being true on the day #244 merged. This
+  entry is where a reader of that one is sent. ⚠️ **What does NOT follow, and must not be read into
+  this.** D-5's *decision* is untouched in both halves — the camera is still fixed, no free-look was
+  added, and terrain still comes from the athlete's own imported route, which #240 reinforced rather
+  than weakened by adding **no** new data source. That is why this is an amendment and not a
+  superseding ADR: a consequence D-5 asserted has become false, not the ruling it asserted it about.
+  ⚠️ **But D-5's reason for believing the D-4 floor was reachable is weakened**, because it named
+  those three removals as "most of why", and two of them are back. Nothing here says the floor is
+  still reachable and nothing has measured it: the 2026-09-08 entry records that D-2's gate was
+  waived and never run, and that is still true. What bounds the cost now is the cull and the density
+  rung themselves, neither of which has a frame time against it on any device. **Also corrected in
+  [#246](https://github.com/openzigs/onyourleft/issues/246)**: `apps/web/src/game/terrain.ts`'s file
+  comment made D-5's claim in its own words and now points here instead.

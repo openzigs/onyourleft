@@ -8,10 +8,22 @@
  * ADR 0008 **D-5** settles the camera: a **fixed chase camera** over terrain
  * generated from the imported route. A free camera is out of scope, and
  * reopening it is a change to that ADR rather than an implementation detail.
- * #91 records what the fixed camera buys — *"it removes the culling problem, the
- * LOD problem and the visible-rider problem simultaneously"* — and this file is
- * where that saving is actually taken: the geometry built is a **corridor along
- * the route**, a few hundred metres of it at a time, rather than a scene.
+ * What that buys is taken here: the geometry built is a **corridor along the
+ * route**, a few hundred metres of it at a time, rather than a scene.
+ *
+ * ⚠️ **This paragraph used to add that the fixed camera "removes the culling
+ * problem, the LOD problem and the visible-rider problem simultaneously" —
+ * #91's words, and D-5's — and two of those three have since stopped being
+ * true.** A reviewer who remembers the old sentence is reading the old file.
+ * #244 put scenery beside the road, which unlike a road ribbon is not always in
+ * front of you and does have to be culled: `three-renderer.ts`
+ * §`lateralReachMetres` is the cull. #245 then made scenery density a rung on
+ * `QUALITY_LADDER`, which is level-of-detail under another name. What survives
+ * is the **visible-rider** third, untouched, and the corridor itself — nothing
+ * in THIS file needs a cull or a level of detail, because the road ribbon is
+ * still built only where the rider is about to be. ADR 0008 is amended to say
+ * the same thing rather than left asserting the old one: see its
+ * `## Amendments` entry of **2026-09-16**, appended by #246.
  *
  * ⚠️ **#19 and ADR 0009 forbid deriving any world asset, course geometry,
  * texture or model from another product.** Nothing here is derived from
