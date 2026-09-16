@@ -38,6 +38,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         capture.html, which is NOT a gate: it is the tool a
                         person opens with a trainer in front of them, built by
                         the same second Vite config so it can never ship. Since
+                        #63's hosted measurement it also holds hosted-archive.ts
+                        — the opt-in archive on the real internet, the origins a
+                        render may then reach, and where a ride goes inside
+                        whatever coverage an archive declares. Since
                         #266 it also holds hud.html and hud-harness.tsx — the
                         ride HUD laid out at a phone's width, which is a gate,
                         and the one page here that renders React and measures a
@@ -636,6 +640,16 @@ pnpm run build
 # `PLAYWRIGHT_BROWSERS_PATH` set, revision matching) it runs as-is; on a bare
 # machine or a CI runner, install it first with the line below.
 pnpm run test:browser
+
+# The same gate with its HOSTED block turned on (#63). Renders the same harness
+# page against a real PMTiles archive over the internet and prints #63's eighth
+# measurement -- time to first painted tile on a cold cache. Unset, that block
+# is SKIPPED and the gate is exactly what the line above runs: CI sets nothing,
+# because a gate that needs somebody else's CDN fails on an aeroplane.
+# ⚠️ Set but malformed is an ERROR rather than a skip.
+# `apps/web/browser/hosted-archive.ts` argues the trade; the figures it produced
+# on 2026-09-16 are in `docs/spikes/0004-cold-load-first-painted-tile.md`.
+OYL_HOSTED_BASEMAP_URL=https://…/basemap.pmtiles pnpm run test:browser
 
 # Fetch the browser the lockfile pins. @playwright/test 1.63.0 ships Chromium
 # revision 1243 and this fetches exactly that, so the browser is as
@@ -1256,8 +1270,9 @@ browser runs**.
 | File | What it is |
 |---|---|
 | `index.html`, `harness.ts` | a page that builds a map through the **real** `map/maplibre.ts` and the **real** `basemapStyle`, and publishes what happened on `window.__oylHarness` — and, since the fixture archive, what reached the drawing buffer and when, on `window.__oylMapLoad` |
-| `map.browser.spec.ts` | the Playwright spec that drives it |
-| `pmtiles-fixture.ts` | a PMTiles v3 archive written from arithmetic, so the gate has a basemap to render. Emitted into `browser/dist` by `vite.browser.config.ts`, never committed, and carrying no OpenStreetMap data. The **only** file in this directory with a Vitest test beside it (`pmtiles-fixture.test.ts`), which is why `apps/web/vitest.config.ts` includes `browser/**/*.test.ts` |
+| `map.browser.spec.ts` | the Playwright spec that drives it. Three blocks: the routing, the fixture archive, and — since #63's hosted measurement — a real archive over the internet, which is **skipped unless `OYL_HOSTED_BASEMAP_URL` is set** |
+| `hosted-archive.ts` | what that third block decides **without** a network: which archive, which origins it may then reach, and where to put the ride inside whatever coverage the archive's own header declares. Pure, with `hosted-archive.test.ts` beside it in the Vitest suite — which is the answer to "a skipped block rots unseen" |
+| `pmtiles-fixture.ts` | a PMTiles v3 archive written from arithmetic, so the gate has a basemap to render. Emitted into `browser/dist` by `vite.browser.config.ts`, never committed, and carrying no OpenStreetMap data. ⚠️ It used to be the **only** file here with a Vitest test beside it; `hosted-archive.ts` is the second, and `apps/web/vitest.config.ts`'s `browser/**/*.test.ts` covers both |
 | `game.html`, `game-harness.ts` | since #91, the same idea for the renderer: a page that builds a scene through the **real** `game/three-renderer.ts` and the **real** `terrain.ts` |
 | `game.browser.spec.ts` | its spec — the renderer constructs against a live context, the geometry is one a driver accepts, and a frame reaches the drawing buffer (read back with `readPixels`, because `render` not throwing is a weaker claim) |
 | `hud.html`, `hud-harness.tsx` | since #266, the ride HUD: the **real** `game/hud/HudPanel.tsx` under the **real** `design/theme.css`, in the **real** `oyl-shell` → `oyl-main` → `oyl-game` chain `AppShell` and `GameView` give it, with every field populated and all three of #259's settled outcome words. A **`.tsx`**, and the only React in this directory |
@@ -1361,7 +1376,7 @@ frame rate, no thermal behaviour, nothing measured on a phone. That gate was **w
 passed (see the 2026-09-08 amendment on [ADR 0008](docs/adr/0008-mobile-client-architecture.md)),
 and #91's 60-minute measured run on the device floor is still outstanding.
 
-⚠️ **Do not reach for `networkidle`.** There is no published archive (#53), so the archive request
+⚠️ **Do not reach for `networkidle`.** The harness server holds no archive at the default path, so that request
 404s and **MapLibre retries a failed source** — the network never goes idle. The first version of
 the spec waited on it and four of five tests burned sixty seconds each before failing. Wait on the
 event you mean (`waitForRequest`), which is both faster and stricter: it fails immediately when the
@@ -1404,10 +1419,14 @@ tile id from z0 to z14, and one Mapbox Vector Tile of three rectangles and a lin
 binary in the tree would need an `.spdx-exempt` entry §3a would refuse it. It contains **no
 OpenStreetMap data**, so no ODbL attribution obligation attaches to a build artefact.
 
-⚠️ **It is served at `/basemap-fixture.pmtiles`, NOT at `/basemap.pmtiles`.** The "there is still no
-published archive" test asserts the 404 at the latter, and it stays: moving the fixture there would
-make a tripwire permanently green against a file of our own, which is the shape of a test that
-cannot fail. The day #53 publishes an archive, that test still goes red.
+⚠️ **It is served at `/basemap-fixture.pmtiles`, NOT at `/basemap.pmtiles`.** The 404 test asserts
+the latter, and it stays: moving the fixture there would make it permanently green against a file of
+our own, which is the shape of a test that cannot fail. ⚠️ **What that test is actually about is the
+harness server, and this paragraph used to say otherwise** — it called it a tripwire for #53 and
+predicted it would go red the day an archive was published. #53 published one on 2026-09-16 and it
+stayed green, correctly: the permitted origin there is the harness origin, and a bucket somewhere
+else cannot change what `vite preview` serves. What it is worth is that `appType: 'mpa'` is still in
+force, so a missing archive is a 404 rather than 200 with a page of HTML.
 
 **What this bought, immediately, was a defect no gate here could see.** `maplibre.ts` could not load
 MapLibre's **tile-parsing worker** under a bundler at all — `defaultWorkerUrl()` resolves
@@ -1418,14 +1437,33 @@ context, the right origin, the right range request, `registrations === 1`. The f
 `?worker&url` rather than `?url`. Reverting it turns **exactly** the two fixture tests red and leaves
 every pre-existing browser test green — which is the measurement, not the argument.
 
-⚠️ **What the fixture still does NOT prove**, and criterion 8 is only **partly** discharged by it.
-The archive is served from the loopback interface, so the cold-load figure carries **none** of the
-hosting latency the criterion is pointed at — ADR 0010 D-1 quotes Protomaps' warning that R2 is
-*"known to have higher latency (500 ms or higher)"*, and that term is removed here by construction.
-The tile is uncompressed and 98 bytes; a real one is gzipped and thousands of times larger. What is
-measured is the **client-side floor**, printed by the spec on every run, and the harness that will
-take the hosted measurement the day #53 lands. Read `pmtiles-fixture.ts`'s header before quoting the
-number.
+⚠️ **What the fixture does NOT prove.** The archive is served from the loopback interface, so its
+cold-load figure carries **none** of the hosting latency #63's criterion 8 is pointed at — ADR 0010
+D-1 quotes Protomaps' warning that R2 is *"known to have higher latency (500 ms or higher)"*, and
+that term is removed there by construction. The tile is uncompressed and 98 bytes; a real one is
+gzipped and thousands of times larger. What it measures is the **client-side floor**, printed on
+every run. Read `pmtiles-fixture.ts`'s header before quoting the number.
+
+⚠️ **The hosted half is what completes it, and it is OPT-IN — this section used to say criterion 8
+was only partly discharged, and a reviewer who remembers that is reading the old file.**
+`OYL_HOSTED_BASEMAP_URL` points the same page at a real archive over the internet; unset, the block
+is skipped and the gate is byte-for-byte the one described above. **CI sets nothing**, deliberately:
+a gate that needs somebody else's CDN fails on an aeroplane, behind an egress proxy, and on the
+morning that CDN has a bad hour — the same posture `scripts/check-doc-links.sh` takes toward an
+`https:` link. A **malformed** value is an error rather than a skip, because "nothing configured" and
+"configured wrongly" are different states. The cost of an opt-in block is that it can rot unseen, so
+everything decidable without a network lives in `browser/hosted-archive.ts` with a Vitest suite
+inside `pnpm run test`. Measured 2026-09-16: **525.6 ms** to first painted tile against the hosted
+archive, median of seven, against **206.0 ms** on the loopback fixture — about 320 ms of hosting,
+where ADR 0010 D-1 estimated ~300. `docs/spikes/0004-cold-load-first-painted-tile.md` is the write-up
+and the ADR carries an appended amendment.
+
+⚠️ **One thing that block found, worth knowing before reading any of these numbers.**
+`PerformanceResourceTiming` zeroes `transferSize` and every phase for a cross-origin resource with no
+`Timing-Allow-Origin` — which the archive's host does not send. So a hosted request reports **zero
+bytes**, identical to what the loopback measurement uses to mean *"served from cache"*, and meaning
+the opposite. `ArchiveRequestTiming.timingOpaque` is which, and both halves are asserted: loopback
+requests must be transparent, hosted ones opaque.
 
 ⚠️ **The paint is read back with `preserveDrawingBuffer` forced on by the harness**, by patching
 `HTMLCanvasElement.prototype.getContext` before the map is built — `maplibre.ts` must not set it, and
@@ -2366,6 +2404,8 @@ top of an issue **supersedes its body**.
 | Which origins the map is allowed to reach, and why the style is built rather than fetched | `apps/web/src/map/basemap.ts` §`styleOrigins`, [ADR 0010](docs/adr/0010-map-tiles-and-routing.md) D-1 |
 | Why MapLibre is behind a seam, and what that seam does not prove | `apps/web/src/map/port.ts` |
 | What a real browser checks that jsdom cannot, and why it shares one CI job | §4f, `apps/web/browser/`, `.github/workflows/rules.yml` |
+| What a map costs a rider on a cold cache, and why CI does not measure it | §4f, [`docs/spikes/0004-cold-load-first-painted-tile.md`](docs/spikes/0004-cold-load-first-painted-tile.md), `apps/web/browser/hosted-archive.ts` |
+| Why a zero byte count means two opposite things, depending on the origin | `apps/web/browser/harness.ts` §`ArchiveRequestTiming.timingOpaque` |
 | Why a built map fetches every tile and draws none of them without one extra line | `apps/web/src/map/maplibre.ts` §`setWorkerUrl`, [`docs/architecture.md`](docs/architecture.md) §"The map dependencies" |
 | Where the basemap the browser gate renders comes from, and what it deliberately does not contain | `apps/web/browser/pmtiles-fixture.ts`, §4f |
 | What a cold load costs the client, what that number leaves out, and who owns the rest | `apps/web/browser/map.browser.spec.ts` §"a real archive, rendered and timed", [#53](https://github.com/openzigs/onyourleft/issues/53) |

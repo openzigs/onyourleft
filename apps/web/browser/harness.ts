@@ -46,13 +46,22 @@
  * tile-parsing worker under a bundler at all, and no gate in this repository
  * could see that until something asked it to parse a tile.
  *
- * With no `?archive=` the default is still `/basemap.pmtiles`, which 404s
- * because #53 has published nothing — and the spec asserts that 404 rather than
- * tolerating it, so the day an archive exists the gate says so.
+ * With no `?archive=` the default is still `/basemap.pmtiles`, which 404s on
+ * the harness server — and the spec asserts that 404 rather than tolerating it.
+ * ⚠️ That assertion is about the **local harness** and is not a tripwire for
+ * #53: publishing an archive to a bucket changes nothing about a path this
+ * server does not serve. An earlier note of mine said it would go red the day
+ * #53 landed; #53 landed, it did not, and the correction is #63's own.
  *
- * What is still unproven is anything about a **hosted** archive: latency,
- * compression, CDN behaviour, a tile that is not 98 bytes of synthetic
- * geometry. `pmtiles-fixture.ts` sets out that limit in full.
+ * ⚠️ **A hosted archive is no longer unproven either, and this paragraph used
+ * to say it was** — a reviewer who remembers *"what is still unproven is
+ * anything about a hosted archive: latency, compression, CDN behaviour"* is
+ * reading the old file. `hosted-archive.ts` and the last block of
+ * `map.browser.spec.ts` point this same page at the archive #53 published, over
+ * the real internet, and take #63's eighth measurement there. That block is
+ * **opt-in** — `OYL_HOSTED_BASEMAP_URL`, unset in CI — and `hosted-archive.ts`
+ * says why, and what is done about the skip. `pmtiles-fixture.ts` still sets out
+ * what the loopback half does and does not prove, which is unchanged.
  */
 
 import {
@@ -64,6 +73,7 @@ import {
 } from '../src/map/basemap';
 import { mapLibrePort } from '../src/map/maplibre';
 import { trackBounds, trackFeature, type TrackGeometry } from '../src/map/track';
+import { parseTrackParameter } from './hosted-archive';
 
 /** What the spec reads back off the page. Serialisable, so it survives `evaluate`. */
 export interface HarnessResult {
@@ -98,8 +108,28 @@ export interface ArchiveRequestTiming {
   readonly startedMs: number;
   /** How long it took, request to last byte. */
   readonly durationMs: number;
-  /** Bytes over the wire, `0` when the browser served it from cache. */
+  /**
+   * Bytes over the wire — and ⚠️ **`0` means two different things.**
+   *
+   * On a same-origin archive it means what it used to say here on its own: the
+   * browser served the range from its cache. On a **cross-origin** one it means
+   * the browser refused to tell us, because `PerformanceResourceTiming` zeroes
+   * the byte counts and every intermediate phase unless the server sends
+   * `Timing-Allow-Origin` — which the archive #53 published does not. The two
+   * are indistinguishable from this number alone, and a reader comparing a
+   * hosted run with the loopback one would conclude the CDN served everything
+   * from cache. {@link timingOpaque} is which.
+   */
   readonly transferredBytes: number;
+  /**
+   * The browser would not report this request's phases.
+   *
+   * `responseStart` is zeroed for a cross-origin resource with no
+   * `Timing-Allow-Origin`, and it is the discriminator above: with it set,
+   * {@link durationMs} is still real end to end but every figure inside it is
+   * a floor of zero, and {@link transferredBytes} says nothing at all.
+   */
+  readonly timingOpaque: boolean;
 }
 
 /**
@@ -251,6 +281,10 @@ function archiveTimings(archive: string): ArchiveRequestTiming[] {
         startedMs: resource.startTime,
         durationMs: resource.duration,
         transferredBytes: resource.transferSize,
+        // Zero only ever happens for a resource whose timing the browser is
+        // withholding: a same-origin response always reports a real
+        // `responseStart`. @see ArchiveRequestTiming.timingOpaque
+        timingOpaque: resource.responseStart === 0,
       };
     });
 }
@@ -431,6 +465,27 @@ const TRACK: TrackGeometry = {
 };
 
 /**
+ * The ride to lay over the basemap, which `?track=` may replace.
+ *
+ * ⚠️ **It exists because a basemap covers somewhere in particular.** {@link
+ * TRACK} is in London, and the archive #53 published is a continental-US
+ * extract — pointed at that archive, this page would ask for tiles it does not
+ * hold, paint nothing, and report "no basemap reached the screen" about an
+ * archive that is working perfectly. The hosted spec derives a track from the
+ * archive's own declared bounds and passes it here, so neither this file nor
+ * that one names a place.
+ *
+ * A malformed parameter **throws**, by {@link parseTrackParameter}'s own
+ * decision, and this function does not catch it: falling back to London would
+ * turn a typo in a query string into a failed measurement whose cause is
+ * invisible.
+ */
+function trackFor(): TrackGeometry {
+  const configured = new URL(window.location.href).searchParams.get('track');
+  return configured === null ? TRACK : parseTrackParameter(configured);
+}
+
+/**
  * Whether to register the `pmtiles://` handler.
  *
  * `?protocol=off` skips it. That exists so the spec can prove the handler is
@@ -484,7 +539,8 @@ function run(): void {
     }
     const view = mapLibrePort.renderer.create(container, { style });
     created = true;
-    view.setTrack(trackFeature(TRACK), trackBounds(TRACK));
+    const track = trackFor();
+    view.setTrack(trackFeature(track), trackBounds(track));
   } catch (error: unknown) {
     errors.push(error instanceof Error ? error.message : String(error));
   }

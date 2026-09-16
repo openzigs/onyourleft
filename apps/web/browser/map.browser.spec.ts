@@ -35,21 +35,46 @@
  * *"there is no published archive, so the archive request 404s… the routing,
  * not the picture"* is reading the old file. It still describes the first
  * `describe` block exactly: those tests drive `/basemap.pmtiles`, which does
- * 404, and the 404 is asserted rather than tolerated so that the day #53
- * publishes an archive the gate goes red and somebody comes back.
+ * 404 **on the harness server**, and the 404 is asserted rather than tolerated.
+ * ⚠️ An earlier draft added *"so the day #53 publishes an archive the gate goes
+ * red"*, and that was simply wrong: #53 has published one and this block stayed
+ * green, because the path it asks for is served by `vite preview` and by nobody
+ * else. The correction is kept rather than the claim deleted.
  *
  * The **second** block is what changed. `pmtiles-fixture.ts` builds a PMTiles
  * v3 archive from arithmetic, `vite.browser.config.ts` emits it into the
  * harness build at a **different** path, and the gate renders from it — so
  * "a tile decoded and reached the drawing buffer" is now checked, and the
- * client's share of a cold load is measured. What is still not checked is
- * anything about a *hosted* archive: see that block's own note, and #53.
+ * client's share of a cold load is measured.
+ *
+ * ⚠️ **The sentence that used to end this comment — *"what is still not checked
+ * is anything about a hosted archive"* — is no longer true**, and a reviewer who
+ * remembers it is reading the old file. #53 published one, and the **third**
+ * block renders this same page against it over the real internet and takes
+ * #63's eighth measurement there. It is **opt-in**: `OYL_HOSTED_BASEMAP_URL`,
+ * which CI does not set, so `pnpm run test:browser` on a bare clone runs exactly
+ * what it ran before. `hosted-archive.ts` argues that trade and says what is
+ * done about the skip.
  */
 
 import { expect, test } from '@playwright/test';
+import { PMTiles } from 'pmtiles';
 
 import { HARNESS_ORIGIN } from '../playwright.config';
 import type { HarnessResult, MapLoadResult } from './harness';
+import {
+  centreTrack,
+  coldLoadReport,
+  foreignRequests,
+  HOSTED_ARCHIVE_VARIABLE,
+  HOSTED_TRACK_METRES,
+  permittedOrigins,
+  readHostedArchive,
+  requireCoverage,
+  trackParameter,
+  type ArchiveBounds,
+  type ArchiveResponseFact,
+} from './hosted-archive';
 import { FIXTURE_ARCHIVE_FILE } from './pmtiles-fixture';
 
 /** Where the harness asks for its archive. Same origin as the page. */
@@ -60,13 +85,13 @@ const ARCHIVE_PATH = '/basemap.pmtiles';
  *
  * ⚠️ A **different path** from {@link ARCHIVE_PATH}, deliberately, and this is
  * the decision most worth reading before changing anything below. The tests
- * above assert that `/basemap.pmtiles` **404s**, because #53 has not published
- * one, and they exist so the day it does the gate goes red and somebody comes
- * back. Serving the fixture at that path would discharge that tripwire by
- * making it permanently green against a file of our own — which is the same
- * shape as a test that cannot fail. So the fixture is additive: it proves what
- * a real engine does with a real archive, and it leaves the "there is still no
- * published basemap" assertion exactly as it was.
+ * above assert that `/basemap.pmtiles` **404s** on the harness server, which is
+ * what proves `appType: 'mpa'` is still in force — Vite's default would answer
+ * with 200 and a page of HTML, and a decoder handed that is a different failure
+ * from a decoder handed nothing. Serving the fixture at that path would make
+ * that assertion permanently green against a file of our own, which is the same
+ * shape as a test that cannot fail. So the fixture is additive and leaves it
+ * exactly as it was.
  */
 const FIXTURE_PATH = `/${FIXTURE_ARCHIVE_FILE}`;
 const FIXTURE_URL = `${HARNESS_ORIGIN}${FIXTURE_PATH}`;
@@ -234,10 +259,20 @@ test.describe('the map engine in a real browser', () => {
     expect(foreign, `requests left the configured origin: ${foreign.join(', ')}`).toEqual([]);
   });
 
-  test('fails to load the archive, because there is not one yet — #53', async ({ page }) => {
-    // Asserted rather than tolerated. The day #53 publishes an archive this
-    // test goes red, which is the correct moment for someone to come back here
-    // and replace it with one that asserts tiles actually drew.
+  test('fails to load the archive, because this server serves none', async ({ page }) => {
+    // ⚠️ **This comment used to predict that #53 publishing an archive would
+    // turn this test red, and that was wrong.** #53 has published one, and this
+    // stayed green — correctly. `PERMITTED_ORIGIN` is `HARNESS_ORIGIN`, so what
+    // is asserted here is that the **harness server** serves nothing at this
+    // path, which a bucket somewhere else cannot change. The test is right; the
+    // prediction was not, and the correction is recorded rather than the
+    // sentence quietly deleted.
+    //
+    // What it is still worth: `appType: 'mpa'` in `vite.browser.config.ts` is
+    // what makes a missing archive a 404 rather than 200 with a page of HTML,
+    // and that behaviour is the only thing standing between "there is no
+    // archive" and "the archive decoded to nonsense". The hosted block below is
+    // where a real archive is asserted against.
     const seen = watch(page);
     const requested = archiveRequested(page);
     await page.goto('/');
@@ -399,6 +434,13 @@ test.describe('a real archive, rendered and timed', () => {
     // that multiplier is the cold-load cost, and it belongs in #53's reading of
     // whatever number it measures.
     expect(load.archiveRequests.length).toBeGreaterThanOrEqual(1);
+    // ⚠️ **Half of a pair, whose other half is in the hosted block.** These
+    // requests are same-origin, so the browser reports their phases and their
+    // byte counts in full — which is what makes `transferredBytes: 0` mean
+    // "served from cache" *here*. It means something else entirely on a
+    // cross-origin archive, and without this assertion nothing in the gate would
+    // notice the difference. @see ArchiveRequestTiming.timingOpaque
+    expect(load.archiveRequests.map((request) => request.timingOpaque)).not.toContain(true);
     const wire = load.archiveRequests.reduce((total, request) => total + request.durationMs, 0);
 
     const measured =
@@ -418,5 +460,260 @@ test.describe('a real archive, rendered and timed', () => {
     // a green run. #63's criterion 8 says "recorded in the PR", and a number
     // nobody can see is not recorded.
     console.log(`cold load — ${measured}`);
+  });
+});
+
+/**
+ * The archive #53 published, over the real internet — #63's criterion 8.
+ *
+ * Everything above this line is served from the loopback interface, and says so
+ * repeatedly, because criterion 8's last sentence is about **hosting**:
+ * *"Protomaps' own deployment docs warn that R2 latency is '500 ms or higher';
+ * if the chosen host is R2 this is where it becomes visible."* A localhost
+ * server removes that term by construction.
+ *
+ * This block puts it back. It drives the **same** harness page, through the
+ * **same** adapter and the **same** style builder, at a `https:` archive on
+ * object storage behind a CDN — which is exactly what #63's seventh criterion
+ * asks for in its own words, *"a test proves the map renders against a second
+ * archive URL without a code change"*, executed against a second archive that is
+ * not ours to control.
+ *
+ * ⚠️ **Skipped unless `OYL_HOSTED_BASEMAP_URL` is set, and CI sets nothing.**
+ * `hosted-archive.ts` argues that trade at length — the short form is that a
+ * gate needing somebody else's CDN is a gate that fails on an aeroplane, and
+ * that the parts of this which can be decided without a network are decided in
+ * `hosted-archive.test.ts`, inside `pnpm run test`.
+ *
+ * ⚠️ **What it does not prove.** Not that the map looks right: ADR 0009 forbids
+ * deriving a reference image from another product, and the assertion here is
+ * that colours the style itself declares reached the drawing buffer. Not what a
+ * phone on mobile data sees — this is a desktop machine, on whatever connection
+ * it has, against whichever CDN edge answered it, and the run's own
+ * `cf-cache-status` is reported for that reason rather than assumed. And not
+ * that the archive is correct cartography: its contents are #53's.
+ */
+
+/**
+ * The archive to measure against, read once.
+ *
+ * ⚠️ Deliberately at module scope, so a **malformed** value fails the whole file
+ * at collection rather than inside one test. The variable is spelled out here
+ * rather than read through {@link HOSTED_ARCHIVE_VARIABLE} because rule `ENV001`
+ * greps for exactly this form — the same reason, recorded in the same words, as
+ * `src/map/basemap.ts`'s `browserBasemapConfig`.
+ */
+const hosted = readHostedArchive({
+  OYL_HOSTED_BASEMAP_URL: process.env.OYL_HOSTED_BASEMAP_URL,
+});
+
+/**
+ * How long a hosted page waits before reporting that nothing painted.
+ *
+ * ⚠️ **A time box for the negative assertion, not a performance budget**, the
+ * same distinction the fixture block records: the positive test requires its
+ * paint inside half of this, so a machine or a link slow enough to make the box
+ * too short fails the positive test first, with a number in the message, rather
+ * than turning the control into a quiet false pass. It is generous because the
+ * thing on the other end is a CDN somebody else operates; **no wall-clock
+ * threshold is asserted and one must not be added**, for the reason
+ * `game.browser.spec.ts` gives about a flaky gate becoming a deleted one.
+ */
+const HOSTED_DEADLINE_MS = 20_000;
+
+/** The coverage the archive declares in its own header. */
+async function archiveBounds(archiveUrl: string): Promise<ArchiveBounds> {
+  const header = await new PMTiles(archiveUrl).getHeader();
+  return requireCoverage({
+    west: header.minLon,
+    south: header.minLat,
+    east: header.maxLon,
+    north: header.maxLat,
+  });
+}
+
+/** Archive responses, with the CDN's own verdict on each. */
+function watchArchiveResponses(
+  page: import('@playwright/test').Page,
+  archiveUrl: string,
+): ArchiveResponseFact[] {
+  const facts: ArchiveResponseFact[] = [];
+  page.on('response', (response) => {
+    if (response.url().startsWith(archiveUrl)) {
+      facts.push({ status: response.status(), cacheStatus: response.headers()['cf-cache-status'] });
+    }
+  });
+  return facts;
+}
+
+test.describe('a hosted archive, rendered and timed over the internet', () => {
+  test.skip(
+    hosted === undefined,
+    `set ${HOSTED_ARCHIVE_VARIABLE} to an https: PMTiles archive to run this block; ` +
+      'CI sets nothing on purpose — see hosted-archive.ts',
+  );
+
+  // Empty until `beforeAll` runs, which only happens when the block is not
+  // skipped. Read through {@link requireArchive} so a mistake here is an error
+  // naming the cause rather than a request for `undefined`.
+  let archiveUrl = '';
+  let track = '';
+
+  function requireArchive(): string {
+    if (archiveUrl === '') {
+      throw new Error('the hosted archive was not read; this block should have been skipped');
+    }
+    return archiveUrl;
+  }
+
+  test.beforeAll(async () => {
+    archiveUrl = hosted?.archiveUrl ?? '';
+    // ⚠️ Read over the network **before** any browser is involved, and that
+    // ordering is the useful half: if the archive is unreachable or its header
+    // is not a PMTiles header, this fails here, naming the archive — rather
+    // than as a blank map twenty seconds later, where the cause could equally
+    // be the engine, the protocol handler, the style or the machine.
+    const bounds = await archiveBounds(requireArchive());
+    track = trackParameter(centreTrack(bounds, HOSTED_TRACK_METRES));
+  });
+
+  test('paints the hosted basemap under the ride trace — criterion 1, and 7', async ({ page }) => {
+    const seen = watch(page);
+    await page.goto(
+      `/?archive=${encodeURIComponent(requireArchive())}&track=${encodeURIComponent(track)}` +
+        `&paintDeadline=${String(HOSTED_DEADLINE_MS)}`,
+    );
+    const load = await mapLoad(page);
+
+    expect(
+      load.painted,
+      `no basemap colour reached the drawing buffer. Looked for ${load.basemapColours.join(', ')}; ` +
+        `read ${load.samples.join(', ')} over ${String(load.frames)} frames`,
+    ).toBe(true);
+    expect(load.frames).toBeGreaterThan(0);
+    // The colours are the style's own, so this is our cartography drawn from
+    // somebody else's geometry rather than anything that merely differs from the
+    // background.
+    expect(
+      load.samples.filter((sample) => load.basemapColours.includes(sample)).length,
+    ).toBeGreaterThan(0);
+    // It came over the wire from the configured archive.
+    expect(load.archiveRequests.length).toBeGreaterThan(0);
+    expect(seen.requests.filter((url) => url.startsWith(requireArchive())).length).toBeGreaterThan(
+      0,
+    );
+    // @see HOSTED_DEADLINE_MS — the box the control below rests on.
+    expect(load.firstPaintMs ?? Number.POSITIVE_INFINITY).toBeLessThan(HOSTED_DEADLINE_MS / 2);
+  });
+
+  test('contacts the page and the archive, and nothing else — criterion 3', async ({ page }) => {
+    // ⚠️ **The strongest form of criterion 3 available anywhere in this
+    // repository**, and the first time it has been executed against a host that
+    // is not the loopback interface. Everything above asserts "one origin, and
+    // it is ours"; a render that never leaves the machine cannot distinguish
+    // "contacts nothing else" from "cannot reach anything". Here the engine has
+    // a real CDN to talk to, and the assertion is that it talks to that one and
+    // to no other — no telemetry, no font fallback, no tile API arriving in a
+    // dependency default, which is the sentence the criterion is written around.
+    const seen = watch(page);
+    await page.goto(
+      `/?archive=${encodeURIComponent(requireArchive())}&track=${encodeURIComponent(track)}` +
+        `&paintDeadline=${String(HOSTED_DEADLINE_MS)}`,
+    );
+    await mapLoad(page);
+
+    expect(seen.requests.length).toBeGreaterThan(0);
+    const permitted = permittedOrigins(HARNESS_ORIGIN, {
+      archiveUrl: requireArchive(),
+      origin: new URL(requireArchive()).origin,
+    });
+    const foreign = foreignRequests(seen.requests, permitted);
+    expect(foreign, `requests left the permitted origins: ${foreign.join(', ')}`).toEqual([]);
+  });
+
+  test('paints no tile colour when the hosted object is not there — the control', async ({
+    page,
+  }) => {
+    // The half that makes the two above mean something. Same host, same
+    // protocol handler, same style, same track — and an object key the bucket
+    // does not hold. If this painted, the probe would be reading something that
+    // is not a tile, and every green above would be worth nothing.
+    const missing = new URL('/oyl-no-such-archive.pmtiles', requireArchive()).toString();
+    await page.goto(
+      `/?archive=${encodeURIComponent(missing)}&track=${encodeURIComponent(track)}` +
+        `&paintDeadline=${String(HOSTED_DEADLINE_MS / 4)}`,
+    );
+    const load = await mapLoad(page);
+
+    expect(load.painted).toBe(false);
+    expect(load.firstPaintMs).toBeUndefined();
+    // The probe did run, and what it read was the style's own background —
+    // without which "no tile colour" is satisfied by a blank canvas.
+    expect(load.frames).toBeGreaterThan(0);
+    expect(load.samples).toContain(load.backgroundColour);
+  });
+
+  test('records what a cold load costs against the hosted archive — criterion 8', async ({
+    page,
+  }, testInfo) => {
+    // A fresh Playwright context per test is an empty **browser** cache, which
+    // is what "cold" can mean from here. The CDN's own edge cache is not ours to
+    // clear, so it is *reported* rather than assumed: `cf-cache-status` for
+    // every archive response goes into the line below, and a run that was served
+    // entirely from a warm edge is visible as such instead of being quoted as a
+    // cold number.
+    const responses = watchArchiveResponses(page, requireArchive());
+    await page.goto(
+      `/?archive=${encodeURIComponent(requireArchive())}&track=${encodeURIComponent(track)}` +
+        `&paintDeadline=${String(HOSTED_DEADLINE_MS)}`,
+    );
+    const load = await mapLoad(page);
+
+    expect(load.painted).toBe(true);
+    const clientMs = load.firstPaintMs ?? Number.NaN;
+    const pageMs = load.firstPaintSinceNavigationMs ?? Number.NaN;
+    expect(Number.isFinite(clientMs)).toBe(true);
+    expect(clientMs).toBeGreaterThan(0);
+    // Sanity bounds, not a budget: the page cannot have painted before it began
+    // loading, and the client's share cannot exceed the whole.
+    expect(pageMs).toBeGreaterThanOrEqual(clientMs);
+    // Every archive response is a range request that succeeded. A 200 here would
+    // mean the whole 19 GB object was being asked for, which is the failure mode
+    // that makes PMTiles-on-object-storage untenable and is worth catching
+    // rather than timing.
+    for (const response of responses) {
+      expect(response.status).toBe(206);
+    }
+    // ⚠️ **The other half of the pair, and a tripwire rather than a fact about
+    // us.** The archive's host sends no `Timing-Allow-Origin` — checked, not
+    // assumed — so the browser withholds every per-request phase and byte count
+    // for these. If this ever goes red, the host has started sending one: the
+    // per-request figures below became real, and the note on
+    // `ArchiveRequestTiming.transferredBytes` needs rewriting rather than this
+    // assertion relaxing.
+    expect(
+      load.archiveRequests.map((request) => request.timingOpaque),
+      'the archive host now sends Timing-Allow-Origin — see ArchiveRequestTiming',
+    ).not.toContain(false);
+
+    const measured = coldLoadReport({
+      archiveUrl: requireArchive(),
+      firstPaintMs: clientMs,
+      firstPaintSinceNavigationMs: pageMs,
+      requestCount: load.archiveRequests.length,
+      wireMs: load.archiveRequests.reduce((total, request) => total + request.durationMs, 0),
+      timingOpaque: load.archiveRequests.some((request) => request.timingOpaque),
+      frames: load.frames,
+      responses,
+    });
+    testInfo.annotations.push({
+      type: 'cold load — time to first painted tile, hosted',
+      description: measured,
+    });
+    // Printed as well as annotated, for the reason the fixture block gives: an
+    // annotation reaches the JSON and HTML reports and not the log, and the log
+    // is the only artefact anybody reads on a green run. Criterion 8 says
+    // "recorded in the PR", and a number nobody can see is not recorded.
+    console.log(measured);
   });
 });
