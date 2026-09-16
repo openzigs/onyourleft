@@ -11,10 +11,15 @@ app's About page and from the Google Play listing, and those two links point at 
 stays on the device that recorded it, and nothing is uploaded — not a ride, not a heart rate, not a
 position, not a crash report, not a page view.
 
-That is not a promise about our intentions. It is a property of the software: the client contains no
-code that sends data anywhere. There is no `fetch`, `XMLHttpRequest`, `WebSocket` or `sendBeacon`
-call in it, and the whole thing is [open source](https://github.com/openzigs/onyourleft) so you can
-check that rather than take our word for it.
+That is not a promise about our intentions. It is a property of the software: the code this project
+writes contains no `fetch`, `XMLHttpRequest`, `WebSocket` or `sendBeacon` call at all, so there is
+nothing in it that could send your data anywhere. The whole thing is
+[open source](https://github.com/openzigs/onyourleft), so you can check that rather than take our
+word for it.
+
+The one exception is a map, and it is described under **What leaves the device** below: if a basemap
+is configured, the map library the app uses requests tiles from the host it is configured with. That
+is the only outbound request the app can make, and no basemap is configured in this build.
 
 ## What the app holds, and where
 
