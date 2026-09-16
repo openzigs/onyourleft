@@ -368,6 +368,13 @@ scripts/              dependency-free repository checks; run on a bare clone
 .spdx-exempt          the files LIC001/LIC002 do not apply to, one exact path at a
                       time — third-party generator output only, enforced by LIC006
 
+ASSETS.toml           the provenance, licence and SHA-256 of every committed
+                      BINARY, which is the one file class no SPDX header can
+                      reach and no dependency gate ever sees (#339). Enforced by
+                      ASSET001–ASSET005, and ⚠️ discovery walks for binaries by
+                      CONTENT rather than by extension, which is what stops a
+                      `.gltf` beside a `.glb` reintroducing the hole
+
 .github/
   workflows/rules.yml runs those checks on every pull request — see §4c
   dependabot.yml      weekly version updates, so DEP001 sees a bump before a
@@ -796,6 +803,11 @@ npm view typescript-eslint peerDependencies.typescript
 | `XML002` | an XML comment is never closed — the `DOC002` failure mode in XML, where the scanner's state sticks, everything after it is silently skipped, and a parser drops every element that follows |
 | `XML003` | a `<![CDATA[` section is never closed. #229, and it is the rule that keeps the two above honest: before it, an unclosed CDATA set the scanner's state and nothing cleared it, so **`XML001` and `XML002` went silent for the rest of the file and it reported clean** — `DOC002`'s own failure mode inside the rule written because of `DOC002`. Closure is now decided where a region opens, so the section is reported **and** the scan carries on |
 | `XML004` | a processing instruction is never closed with `?>`. The same construct class, and the reason a PI is tracked at all: `Comment` is not a production inside `PIContent`, so `<?php <!-- a -- b --> ?>` is valid XML that #225's first version reported as `XML001`. Tracking it fixes that false positive; `XML004` is what stops the tracking becoming a second way to switch the scanner off |
+| `ASSET001` | a committed **binary** exists that `ASSETS.toml` does not name. #339, filed before the first `.glb` exists rather than after. ⚠️ Discovery walks for binaries by **content** — a NUL byte in the first 8000, which is git's own rule — and deliberately **not** by an extension list: a list fails closed against deleting a format and **open** against adding one, which is #142's defect exactly |
+| `ASSET002` | `ASSETS.toml` names a path that is not there. A stale entry records the provenance of nothing. A glob lands here rather than being refused as syntax, unlike `.spdx-exempt`: the lookup is string equality, so a pattern truly names no file |
+| `ASSET003` | a named file's SHA-256 does not reproduce, or none is recorded. ⚠️ It pins **what is committed**, so a substitution is visible; it does **not** establish that the bytes are the upstream artefact they name, which nothing offline can — `apps/mobile/README.md` §4 still stands on `gradle-wrapper.jar` |
+| `ASSET004` | an entry's licence is absent, on neither list, or not permitted where the file lands. Permissive anywhere, weak (`CC0-1.0` and friends) under `apps/` only — ADR 0015 D-2's distributed-closure table, applied to a committed file. ⚠️ Fails **closed**: GPL, AGPL and `CC-BY-4.0` are on neither list and adding one is a decision |
+| `ASSET005` | `ASSETS.toml` is absent, or does not parse. ⚠️ Five ids where #339 names four, and the fifth is the reason the other four cannot pass vacuously — the same move `LIC006` made for `.spdx-exempt`. An unrecognised key is **refused rather than ignored** (ADR 0017 D-4's choice, for the same reason), and a manifest that does not parse **stops the walk** rather than reporting every entry after the bad line as unnamed |
 
 `scripts/check-licence-hashes.sh` enforces one more, separately because it hashes files rather than
 reading paths:
@@ -2415,6 +2427,9 @@ top of an issue **supersedes its body**.
 | Why a link inside a code fence is not a broken link, and what an unclosed fence does | `scripts/check-doc-links.sh` |
 | Why a manifest no parser accepts passed every gate for months, and what the XML rule deliberately does not check | `scripts/check-repo-rules.sh` §`XML001`, [#225](https://github.com/openzigs/onyourleft/issues/225) |
 | Why an unclosed CDATA section used to switch the XML rules off, and what the scan costs per line | `scripts/check-repo-rules.sh` §`XML003`, [#229](https://github.com/openzigs/onyourleft/issues/229) |
+| What records the licence and provenance of a file no SPDX header can reach, and why discovery reads the file rather than its extension | [`ASSETS.toml`](ASSETS.toml), `scripts/check-repo-rules.sh` §`ASSET001`, [#339](https://github.com/openzigs/onyourleft/issues/339) |
+| What a recorded asset digest proves, and the thing it deliberately does not | `scripts/check-repo-rules.sh` §Limits above `ASSET_MANIFEST_NAME`, [`apps/mobile/README.md`](apps/mobile/README.md) §4 |
+| Why the repository walk prunes `.claude`, and what that cost REL001 | `scripts/check-repo-rules.sh` §`GENERATED`, [`.prettierignore`](.prettierignore) |
 | Which lint rule enforces which boundary | [`eslint.config.js`](eslint.config.js) and §4d |
 | Why a package's tsconfig narrows `lib` and `types` | `packages/domain/tsconfig.json` and §4d |
 | The canonical unit for a quantity, and the conversion into it | [`packages/domain/README.md`](packages/domain/README.md) |

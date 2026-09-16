@@ -34,6 +34,11 @@
 #   XML003  no CDATA section left unclosed -- the construct that used to switch
 #           XML001 and XML002 off for the rest of the file (#229)
 #   XML004  no processing instruction left unclosed (#229)
+#   ASSET001 every committed binary is named in ASSETS.toml (#339)
+#   ASSET002 every path ASSETS.toml names is really there (#339)
+#   ASSET003 every named file reproduces its recorded SHA-256 (#339)
+#   ASSET004 every entry's licence is permitted where the file lands (#339)
+#   ASSET005 ASSETS.toml itself is present and parses (#339)
 #
 # Usage: scripts/check-repo-rules.sh [ROOT]   (ROOT defaults to the repo root)
 # Exit:  0 clean, 1 if any rule is violated.
@@ -82,8 +87,36 @@ report() {
 # content half of REL001 never excluded it in the first place, so the rule
 # already disagreed with itself. The resolution is one list: generated output is
 # pruned, authored trees are not.
+#
+# ⚠️ `.claude`, `.gradle` and `.DS_Store` were added by #339, and the reason is
+# worth stating because the first two were invisible until a rule walked for
+# CONTENT rather than for an extension. All three are ignored -- `.gitignore`
+# names `.claude/` and `.DS_Store`, and Capacitor's `apps/mobile/android/
+# .gitignore` names `.gradle/` -- so nothing under any of them can be committed
+# from this repository, which is the property every rule here is really asking
+# about. They are pruned rather than exempted for the same reason the Capacitor
+# trees are: they are absent from a clean clone.
+#
+# What made them worth finding: `.claude/worktrees/` holds git worktrees of
+# OTHER branches, which is whole checkouts of this repository. Before #339 this
+# walk descended into all of them, so `check-repo-rules.sh` on a machine with
+# six worktrees read 3194 files instead of 893 and took 18 s instead of 2 s --
+# and REL001's `PRIVATE KEY` grep ran over every one of them. Nothing went red,
+# because another branch of this repository passes this repository's rules, so
+# there was no symptom until #339's ASSET001 reported another branch's binaries
+# as unnamed. `.prettierignore` already carries `.claude/` for the same reason
+# and says so at length; this is the same local-only red, one gate across.
+#
+# ⚠️ REL001 is the rule this costs something, and the cost is named rather than
+# glossed: it is the rule whose violation cannot be undone, and #229 resolved an
+# earlier disagreement about its reach "towards scanning MORE". Pruning here
+# scans less. It is still right, because all three are ignored wholesale -- a key
+# under any of them cannot reach a commit from this checkout at all, and a key
+# committed on the branch a worktree holds is REL001's business on that branch,
+# where this same script runs.
 GENERATED=(
   -name node_modules -o -name dist -o -name build -o -name coverage -o -name .git
+  -o -name .claude -o -name .gradle -o -name .DS_Store
   -o -name capacitor-cordova-android-plugins
   -o -path '*/main/assets/public'
   -o -path '*/main/res/xml/config.xml'
@@ -915,6 +948,386 @@ check_xml_comments() {
 
 check_xml_comments
 
+# --- ASSET001..ASSET005: provenance for every committed binary ----------------
+#
+# #339, filed before the first model file exists rather than after. The owner
+# has ruled on #302 that the game adopts a CC0 model pack, and a `.glb` landing
+# in this tree would arrive with no SPDX header (it is a binary, and the header
+# has to be in the first five lines of a text file), no licence check (DEP001
+# reads npm manifests, and a committed file is in none), no provenance and no
+# integrity. Every gate in this repository would have been green about it.
+#
+# That is the shape this repository has now refused four times -- #299 (a
+# generated artefact nothing verified), #318 (a manifest test reading the wrong
+# file), #142 (a gate selecting on the wrong thing), #278 (a unit nothing calls)
+# -- and its common property is that the green result is indistinguishable from
+# the correct one.
+#
+# So: one text record, `ASSETS.toml` at the repository root, with one entry per
+# committed binary. Text, so that `git diff` shows a provenance change in review
+# and so that this checker can read it with no toolchain at all.
+#
+# ⚠️ **Discovery is a walk for BINARIES, not a list of known extensions**, and
+# that is the whole design. An extension list fails closed against DELETING a
+# format and open against ADDING one: name `.glb` and the `.gltf` beside it is
+# invisible, which is #142's defect exactly. Asking whether a file could carry
+# an SPDX header at all is a question about the file, so a format nobody has
+# thought of is covered on the day it arrives.
+#
+# ⚠️ Why at the repository ROOT rather than `assets/MANIFEST.toml`, which #339
+# floats: the assets themselves will land under `apps/web` (§4h -- the Android
+# shell ships apps/web's build), so an `assets/` directory holding only a
+# manifest would read as the place the assets live. Root is where `.spdx-exempt`
+# already keeps the other list of exact paths this repository maintains by hand.
+#
+# ⚠️ **§Limits -- read these before taking a green run for more than it is.**
+#
+#   * "Binary" is decided by CONTENT: a NUL byte in the first
+#     ASSET_SNIFF_BYTES. That is git's own rule for the same question, and it
+#     is why `.glb`, `.png`, `.jar` and `.fit` are all found without being
+#     named. It also means a TEXT-format asset -- a `.gltf`, an `.obj`, an
+#     `.svg` -- is NOT discovered. Those are no worse off than before (LIC001's
+#     extension list never covered them either) and the manifest may name one
+#     voluntarily, which buys ASSET002/ASSET003/ASSET004 over it. Closing that
+#     half needs a rule about which text extensions are assets, which is the
+#     extension list this one exists to avoid; it is a separate decision.
+#   * A zero-byte file carries no NUL and is therefore text by this rule. It
+#     also carries nothing to licence. `packages/fit/fixtures/corpus/
+#     zero-length.fit` is named in the manifest anyway, because naming it is
+#     free and it keeps the corpus's twelve files together.
+#   * A recorded SHA-256 pins WHAT IS COMMITTED. It does not prove the bytes
+#     are the upstream artefact they claim to be -- nothing here can, without
+#     the network this gate refuses to need. `apps/mobile/README.md` §4 records
+#     that `gradle-wrapper.jar` is exactly such a file; the manifest makes a
+#     later SUBSTITUTION visible, which is the half that is checkable here.
+#   * A `path` must be repository-relative and may contain no `..`, so an entry
+#     cannot reach outside this tree -- but a committed SYMLINK inside it can,
+#     and `[ -f ]` and `shasum` both follow one. Discovery never does (`find
+#     -type f` does not match a symlink), so this only affects a file somebody
+#     deliberately named. What such an entry can produce is a SHA-256 of the
+#     link's target in a failure message, which is why it is recorded here
+#     rather than guarded against: the job this runs in holds no secrets (§8),
+#     and a digest of a file is not its contents.
+#   * Discovery is a filesystem walk, not `git ls-files`, because the fixture
+#     suite runs this checker against throwaway directories that are not git
+#     repositories. So an ignored-but-present binary is excluded by the
+#     GENERATED prune list above rather than by consulting `.gitignore`, and a
+#     generated tree that is not on that list produces a local-only red. The
+#     fix for one is a line up there, not a line here.
+ASSET_MANIFEST_NAME="ASSETS.toml"
+ASSET_MANIFEST="${ROOT}/${ASSET_MANIFEST_NAME}"
+
+# git reads the first 8000 bytes when it decides whether a blob is binary. The
+# same window here, for the same reason: it bounds the read on a file that may
+# be very large, and every container format in the world puts a version or a
+# length field carrying a zero byte in its first few.
+ASSET_SNIFF_BYTES=8000
+
+# The licence sets, and the path they are judged against. This mirrors
+# ADR 0015 D-2's DISTRIBUTED closure table -- permissive anywhere, weak under
+# `apps/` only -- because the reasoning transfers exactly: an Apache-2.0 leaf
+# package under `packages/` exists to be droppable into someone else's project,
+# and a shipped CC0 or MPL file carries obligations (or a public-domain
+# dedication whose fallback licence is not Apache-2.0) that the package's own
+# LICENSE does not describe. #339 says as much: CC0 requires no attribution,
+# and "where the asset lands is already constrained; the manifest is what makes
+# that checkable".
+#
+# ⚠️ It FAILS CLOSED, like DEP001. A licence in neither set is a violation, not
+# a pass -- this gate exists for the licence nobody has considered yet. GPL and
+# AGPL are deliberately absent from BOTH sets, including under `apps/`: §3
+# permits a GPL DEPENDENCY there, and whether a GPL-licensed creative asset is
+# the same question is an owner's decision rather than a side effect of writing
+# a checker. `CC-BY-4.0` is absent for the same reason -- nothing in the tree
+# needs it, and a licence nobody has an asset for is a licence nobody has read
+# (the posture ADR 0016 took towards `Zlib`).
+ASSET_LICENCES_PERMISSIVE="Apache-2.0 MIT BSD-2-Clause BSD-3-Clause ISC"
+ASSET_LICENCES_WEAK="CC0-1.0 MPL-2.0 BlueOak-1.0.0 MIT-0 0BSD Unlicense"
+
+# `shasum` is what CLAUDE.md §4a documents and what macOS ships; `sha256sum` is
+# what the GNU coreutils on the CI runner ship. The same pair, and the same
+# order, as check-licence-hashes.sh -- a second spelling of "take a digest"
+# would be a second thing to keep in step.
+if command -v shasum >/dev/null 2>&1; then
+  asset_digest() { shasum -a 256 "$1" | cut -d' ' -f1; }
+  ASSET_DIGEST_TOOL=1
+elif command -v sha256sum >/dev/null 2>&1; then
+  asset_digest() { sha256sum "$1" | cut -d' ' -f1; }
+  ASSET_DIGEST_TOOL=1
+else
+  asset_digest() { printf ''; }
+  ASSET_DIGEST_TOOL=0
+fi
+
+# A file no SPDX header could ever be added to. Decided by reading it rather
+# than by its name, so that the rule covers a format that does not exist yet.
+#
+# The read is bounded by `head` and the test is "did `tr` throw anything away",
+# which is three processes per file and about 2 s over this repository. A
+# command substitution cannot be used to hold the bytes themselves: bash drops
+# NUL from one, which is the byte being looked for.
+#
+# `< "$1"` rather than `head -c N -- "$1"`, because a redirection cannot mistake
+# a filename beginning with a hyphen for an option bundle.
+asset_is_binary() {
+  local nuls
+  nuls="$(head -c "${ASSET_SNIFF_BYTES}" < "$1" 2>/dev/null \
+    | LC_ALL=C tr -dc '\000' | wc -c | tr -d '[:space:]')"
+  [ -n "${nuls}" ] && [ "${nuls}" != "0" ]
+}
+
+# --- Reading ASSETS.toml ------------------------------------------------------
+#
+# A deliberately small subset of TOML: whole-line `#` comments, `[[asset]]`
+# headers, and `key = "value"` lines whose value is a double-quoted string
+# containing no quote and no tab. Anything else is a parse ERROR rather than a
+# line to skip.
+#
+# ⚠️ **An unrecognised key is refused, not ignored**, which is the opposite of
+# the usual convention and is the same choice ADR 0017 D-4 made for the workout
+# file. The reasoning is the same too: a key nobody reads is a claim about an
+# asset that silently has no effect, and this file exists precisely so that a
+# claim about an asset is checked.
+#
+# ⚠️ And every parse failure is REPORTED rather than skipped, because a parser
+# that skips what it cannot read is how a manifest ends up naming nothing while
+# the gate reports clean -- DOC002's sticking fence and XML003's unclosed CDATA
+# are the same defect in two other file formats, and this repository has now
+# shipped that shape five times.
+#
+# Emits tab-separated records on stdout:
+#   E <line> <message>                     a structural problem  (ASSET005)
+#   A <line> <path> <licence> <sha256>     one entry, licence and digest
+#                                          possibly empty for ASSET004/ASSET003
+asset_manifest_records() {
+  awk -v SEP='|' '
+    function reset() { k_path = ""; k_source = ""; k_licence = ""; k_read = ""; k_sha = "" }
+
+    function flush() {
+      if (!inentry) return
+      inentry = 0
+      if (k_path == "") {
+        print "E" SEP startline SEP "the [[asset]] opened here names no path"
+        reset(); return
+      }
+      if (k_source == "") {
+        print "E" SEP startline SEP "the entry for " k_path " records no source; where it came from is the point of this file"
+        reset(); return
+      }
+      # The SHAPE of the date, not its validity -- the same line ADR003 draws,
+      # for the same reason: a calendar in bash 3.2 is not worth the lines, and
+      # a typo in a date nobody disputes is not the failure this is here for.
+      # Spelled out digit by digit rather than with an interval expression,
+      # because `{4}` is not portable to every awk this has to run under.
+      if (k_read !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) {
+        print "E" SEP startline SEP "the entry for " k_path " records no read date in the form YYYY-MM-DD"
+        reset(); return
+      }
+      print "A" SEP startline SEP k_path SEP k_licence SEP k_sha
+      reset()
+    }
+
+    BEGIN { inentry = 0; startline = 0; reset() }
+
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      t = line
+      sub(/^[ \t]+/, "", t)
+      sub(/[ \t]+$/, "", t)
+      if (t == "") next
+      if (substr(t, 1, 1) == "#") next
+      if (t == "[[asset]]") { flush(); inentry = 1; startline = NR; reset(); next }
+      if (substr(t, 1, 1) == "[") {
+        print "E" SEP NR SEP "expected an [[asset]] header, found \"" t "\""
+        next
+      }
+      if (t !~ /^[a-z][a-z0-9]*[ \t]*=[ \t]*"[^"]*"$/) {
+        print "E" SEP NR SEP "not a comment, an [[asset]] header or a key = \"value\" line: \"" t "\""
+        next
+      }
+      k = t; sub(/[ \t]*=.*$/, "", k)
+      v = t; sub(/^[a-z][a-z0-9]*[ \t]*=[ \t]*"/, "", v); sub(/"$/, "", v)
+      if (!inentry) {
+        print "E" SEP NR SEP "key \"" k "\" appears before any [[asset]] header"
+        next
+      }
+      if (v == "") { print "E" SEP NR SEP "key \"" k "\" has an empty value"; next }
+      # The three keys below are emitted as fields of a "|"-separated record,
+      # so neither character may appear in one. `source` is free prose and is
+      # never emitted, so it is not restricted.
+      if (k != "source" && (index(v, "|") > 0 || index(v, "\t") > 0)) {
+        print "E" SEP NR SEP "key \"" k "\" has a \"|\" or a tab in its value"
+        next
+      }
+      if (k == "path") {
+        if (k_path != "") { print "E" SEP NR SEP "duplicate key \"path\" in one entry"; next }
+        k_path = v; next
+      }
+      if (k == "source") {
+        if (k_source != "") { print "E" SEP NR SEP "duplicate key \"source\" in one entry"; next }
+        k_source = v; next
+      }
+      if (k == "licence") {
+        if (k_licence != "") { print "E" SEP NR SEP "duplicate key \"licence\" in one entry"; next }
+        k_licence = v; next
+      }
+      if (k == "read") {
+        if (k_read != "") { print "E" SEP NR SEP "duplicate key \"read\" in one entry"; next }
+        k_read = v; next
+      }
+      if (k == "sha256") {
+        if (k_sha != "") { print "E" SEP NR SEP "duplicate key \"sha256\" in one entry"; next }
+        k_sha = v; next
+      }
+      print "E" SEP NR SEP "unknown key \"" k "\"; an unrecognised key is refused rather than ignored, so that a claim about an asset cannot be one nothing reads (ADR 0017 D-4)"
+    }
+
+    END { flush() }
+  ' "$1"
+}
+
+# Is this licence permitted for a file at this repository-relative path?
+# A loop rather than a `case` over a packed string: a licence identifier is
+# interpolated into the pattern there, and a pattern is not a literal.
+asset_licence_permitted() {
+  local licence="$1" path="$2" candidate
+  for candidate in ${ASSET_LICENCES_PERMISSIVE}; do
+    [ "${candidate}" = "${licence}" ] && return 0
+  done
+  case "${path}" in
+    packages/*) return 1 ;;
+  esac
+  for candidate in ${ASSET_LICENCES_WEAK}; do
+    [ "${candidate}" = "${licence}" ] && return 0
+  done
+  return 1
+}
+
+check_assets() {
+  local record kind line rest path licence sha got relative errors=0
+  local -a asset_paths=() asset_lines=()
+  local i named
+
+  # ⚠️ ASSET005 first, and it returns. A manifest that is not there is not "no
+  # entries": it is the gate removed. `check-env-example.sh` sets the precedent
+  # in as many words -- "a template that is not there documents nothing" -- and
+  # the four rules below would all pass vacuously over an absent file.
+  #
+  # It does NOT then list every binary as unnamed. One cause, one finding; the
+  # build is red either way and forty lines about a single deletion buries it.
+  if [ ! -f "${ASSET_MANIFEST}" ]; then
+    report ASSET005 "${ASSET_MANIFEST_NAME}: not found; it records the provenance, licence and SHA-256 of every committed binary, and without it ASSET001-ASSET004 check nothing (#339)"
+    return 0
+  fi
+
+  # ⚠️ **Split by hand rather than with `IFS=<sep> read -r a b c d e`, and both
+  # halves of that are findings the fixture suite made rather than preferences.**
+  #
+  # A TAB separator is wrong because a tab is IFS *whitespace*: `read` collapses
+  # a RUN of them into one delimiter, and a record whose licence field is empty
+  # because the entry records none is exactly such a run. Every field after it
+  # shifted left, so an entry with no `licence` key was read as one whose licence
+  # was its SHA-256 -- ASSET004 reported an unintelligible licence, ASSET003
+  # reported a missing digest, and the one true finding, "no licence recorded",
+  # was the only thing that did not appear.
+  #
+  # U+0001 is the obvious answer -- not IFS whitespace, and the character
+  # `xml_comment_findings` already uses for "cannot occur in the input". It does
+  # not work: **bash 3.2.57, which is what a bare macOS clone runs, does not
+  # split on it at all.** Measured -- `printf 'A\001B\001C' | IFS=$'\001' read -r
+  # a b c` yields `a=ABC`, where the same line with `|` splits correctly. So an
+  # exotic separator would have made this parser silently return no entries on
+  # one of the two platforms this gate has to run on, which is the vacuous pass
+  # the whole rule set exists to stop.
+  #
+  # `|` it is, refused inside the three values that become fields, and the free
+  # text of an E record is the LAST field so it may contain anything.
+  while IFS= read -r record; do
+    [ -n "${record}" ] || continue
+    kind="${record%%|*}"
+    rest="${record#*|}"
+    line="${rest%%|*}"
+    rest="${rest#*|}"
+    case "${kind}" in
+      E)
+        report ASSET005 "${ASSET_MANIFEST_NAME}:${line}: ${rest}"
+        errors=$((errors + 1))
+        ;;
+      A)
+        path="${rest%%|*}"
+        rest="${rest#*|}"
+        licence="${rest%%|*}"
+        sha="${rest#*|}"
+        asset_paths[${#asset_paths[@]}]="${path}"
+        asset_lines[${#asset_lines[@]}]="${line}"
+
+        # ⚠️ Refused for the reason LIC006 refuses them in `.spdx-exempt`: an
+        # entry has to name one file inside this repository, and an absolute or
+        # `..` path names something outside it -- which would also hand the
+        # digest step a file the repository does not contain. A glob is NOT
+        # refused separately here, because the lookup below is string equality
+        # rather than matching: `models/*.glb` simply names no file and is
+        # reported as ASSET002, which is the true statement about it.
+        case "${path}" in
+          /* | *'..'*)
+            report ASSET005 "${ASSET_MANIFEST_NAME}:${line}: ${path}: entries are repository-relative paths"
+            errors=$((errors + 1))
+            continue
+            ;;
+        esac
+
+        if [ -z "${licence}" ]; then
+          report ASSET004 "${ASSET_MANIFEST_NAME}:${line}: ${path}: no licence recorded; an asset whose terms nobody wrote down is an asset nobody has read (#339)"
+        elif ! asset_licence_permitted "${licence}" "${path}"; then
+          report ASSET004 "${ASSET_MANIFEST_NAME}:${line}: ${path}: licence ${licence} is not permitted at this path; permissive (${ASSET_LICENCES_PERMISSIVE}) anywhere, weak (${ASSET_LICENCES_WEAK}) under apps/ only, and anything else needs a decision recorded in an ADR first (ADR 0015 D-2)"
+        fi
+
+        if [ ! -f "${ROOT}/${path}" ]; then
+          report ASSET002 "${ASSET_MANIFEST_NAME}:${line}: ${path}: no such file; a stale entry records the provenance of nothing (#339)"
+          continue
+        fi
+
+        if [ "${ASSET_DIGEST_TOOL}" -eq 0 ]; then
+          report ASSET003 "${ASSET_MANIFEST_NAME}:${line}: ${path}: neither shasum nor sha256sum is available, so no asset's integrity can be checked (#339)"
+          continue
+        fi
+        if [ -z "${sha}" ]; then
+          report ASSET003 "${ASSET_MANIFEST_NAME}:${line}: ${path}: no SHA-256 recorded; nothing would notice this file being replaced (#339)"
+          continue
+        fi
+        got="$(asset_digest "${ROOT}/${path}")"
+        if [ "${got}" != "${sha}" ]; then
+          report ASSET003 "${ASSET_MANIFEST_NAME}:${line}: ${path}: SHA-256 is ${got}, but the manifest records ${sha} (#339)"
+        fi
+        ;;
+    esac
+  done < <(asset_manifest_records "${ASSET_MANIFEST}")
+
+  # ⚠️ A partially parsed manifest is not a manifest. Walking the tree against
+  # a half-read entry list would report every asset whose entry sat after the
+  # bad line as unnamed, so the one real finding arrives buried under
+  # consequences of itself. The build is already red; ASSET005 is what to fix.
+  [ "${errors}" -eq 0 ] || return 0
+
+  while IFS= read -r file; do
+    [ -n "${file}" ] || continue
+    asset_is_binary "${file}" || continue
+    relative="${file#"${ROOT}"/}"
+    named=0
+    for (( i = 0; i < ${#asset_paths[@]}; i++ )); do
+      if [ "${asset_paths[i]}" = "${relative}" ]; then named=1; break; fi
+    done
+    [ "${named}" -eq 1 ] && continue
+    report ASSET001 "${relative}: a committed binary that ${ASSET_MANIFEST_NAME} does not name; no SPDX header can be put in it, so its licence, its source and its integrity are recorded there or nowhere (#339)"
+  done < <(repo_files | sort)
+
+  ASSET_NAMED_COUNT="${#asset_paths[@]}"
+}
+
+ASSET_NAMED_COUNT=0
+check_assets
+
 # --- Result -------------------------------------------------------------------
 
 if [ "${findings}" -gt 0 ]; then
@@ -923,4 +1336,9 @@ if [ "${findings}" -gt 0 ]; then
   exit 1
 fi
 
-printf 'check-repo-rules: clean (%s)\n' "${ROOT}"
+# The asset count is on the success line deliberately. A rule whose population
+# can be empty reads identically whether it checked forty files or none, which
+# is the complaint #278 records against a gate that reports only "clean"; this
+# is the cheapest possible answer to it.
+printf 'check-repo-rules: clean (%s); %s binary asset(s) named in %s\n' \
+  "${ROOT}" "${ASSET_NAMED_COUNT}" "${ASSET_MANIFEST_NAME}"
