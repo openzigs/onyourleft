@@ -495,7 +495,24 @@ describe('the pattern does not move when the rider does — #242', () => {
     const profile = straightClimb();
     const corridor = roadCorridor(profile, corridorOrigin(profile), 213.7);
 
-    for (const along of routeDistancesOf(corridor, markStarts(corridor))) {
+    // ⚠️ **The one mark whose start is before the corridor begins is excluded,
+    // and #323 is why it used to be included by accident.**
+    // `markSlotCount`'s "+ 2" exists for exactly two such marks, and
+    // `writeCentreLine` clamps their ends to the ribbon rather than dropping
+    // them — so the near one's *start* vertex sits at the corridor's near end,
+    // which is 52 m behind the camera and is on no period boundary at all. It
+    // landed on one before #323 only because the phase correction `pointAt`'s
+    // rounding needed happened to push it a fortieth of a grid point inside
+    // the ribbon. Every other mark is still checked, so a pattern anchored on
+    // the corridor's near end still fails this: those marks would be at
+    // 153.7 m, 163.7 m and so on, and none of them is a multiple of ten.
+    const nearEnd: number = (corridor.centre[0] as { along: number }).along;
+    const begun = routeDistancesOf(corridor, markStarts(corridor)).filter(
+      (along) => along > nearEnd + 0.01,
+    );
+    expect(begun.length).toBeGreaterThan(10);
+
+    for (const along of begun) {
       const intoPeriod = along % CENTRE_LINE_PERIOD_METRES;
       expect(Math.min(intoPeriod, CENTRE_LINE_PERIOD_METRES - intoPeriod)).toBeLessThan(0.01);
     }
@@ -772,5 +789,84 @@ describe('the road is one buffer, and it does not grow as the rider moves — #2
       // `indices.length > 0` branch unconditional on the first frame.
       expect(corridor.indices.length).toBeGreaterThanOrEqual(12);
     }
+  });
+});
+
+/**
+ * The road slides under the rider rather than jumping a grid point at a time —
+ * #323.
+ *
+ * ⚠️ **This is the half of "the world steps rather than moves" that is not
+ * about the tick rate**, and it is the larger half. #323 diagnoses a 20 Hz
+ * simulation drawn at 60 fps with nothing interpolating between the two, which
+ * duplicates each position for three frames — 50 ms of stillness. This was
+ * worse: {@link roadCorridor} read each centreline point's *position* out of
+ * `profile.positions` at `Math.round(wrapped / resolution)`, so every point in
+ * the corridor — and with it the camera, which is placed on one — held
+ * completely still for a whole grid cell and then jumped the width of one. At
+ * a route's nominal 10 m grid and a plausible 8 m/s that is **1.25 seconds of
+ * a frozen world followed by a ten-metre jump**, and no amount of interpolating
+ * between simulation states can be seen through it.
+ *
+ * ⚠️ **Only `x` and `z` were quantised. `y` was not**, because it came from
+ * `elevationAt`, which interpolates — so the camera rose and fell smoothly
+ * while the ground under it stood still, which is exactly the kind of partial
+ * motion that makes a defect like this read as "the frame rate is bad".
+ *
+ * `packages/domain` had the answer the whole time: `positionAt` is documented
+ * *"the position at a distance along the route, **for the renderer's camera**"*
+ * and `gradeAt` beside it explains the rule this file was breaking — *"a held
+ * value steps by the whole difference between two grid points every time the
+ * rider crosses one"*. `scatter.ts` and `hud/plan.ts` both already used it;
+ * this file was the one that did not.
+ */
+describe('the road slides with the rider rather than jumping a grid point — #323', () => {
+  it('moves the road for a rider movement smaller than one grid point', () => {
+    const profile = straightClimb();
+    const origin = corridorOrigin(profile);
+    const resolution: number = profile.resolution;
+
+    const here = roadCorridor(profile, origin, 200);
+    // A tenth of a grid cell — a single frame's worth of riding, and less than
+    // half a cell, so rounding to the nearest sample cannot see it at all.
+    const aMetreOn = roadCorridor(profile, origin, 200 + resolution / 10);
+
+    const from = here.centre[0] as { x: number; z: number };
+    const to = aMetreOn.centre[0] as { x: number; z: number };
+    expect(Math.hypot(to.x - from.x, to.z - from.z)).toBeCloseTo(resolution / 10, 1);
+  });
+
+  it('places a point between two route samples rather than on the nearer one', () => {
+    const profile = straightClimb();
+    const origin = corridorOrigin(profile);
+    const resolution: number = profile.resolution;
+    /** The one centreline point of a corridor with no span at all. */
+    const pointAt = (distance: number): { x: number; z: number } =>
+      roadCorridor(profile, origin, distance, { behindMetres: 0, aheadMetres: 0 })
+        .centre[0] as unknown as { x: number; z: number };
+
+    const low = pointAt(resolution);
+    const high = pointAt(resolution * 2);
+    const between = pointAt(resolution * 1.5);
+
+    // Halfway between two samples is halfway along the ground between them.
+    // Rounding to the nearer sample puts it on `high` instead, half a grid
+    // cell — about five metres — from where the rider actually is.
+    expect(between.z).toBeCloseTo((low.z + high.z) / 2, 6);
+    expect(between.z).not.toBeCloseTo(high.z, 2);
+  });
+
+  it('keeps every grid point itself exactly where it was', () => {
+    // The interpolation is only ever asked for between two samples, so a point
+    // that lands on one must be unchanged — otherwise this is a new projection
+    // rather than the same one read at a finer resolution.
+    const profile = straightClimb();
+    const origin = corridorOrigin(profile);
+    const corridor = roadCorridor(profile, origin, 0, { behindMetres: 0, aheadMetres: 0 });
+    const first = corridor.centre[0] as { x: number; y: number; z: number };
+
+    expect(first.x).toBeCloseTo(0, 9);
+    expect(first.z).toBeCloseTo(0, 9);
+    expect(first.y).toBeCloseTo(0, 9);
   });
 });

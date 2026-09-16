@@ -438,3 +438,142 @@ describe('the bot pacer', () => {
     expect(simulation.state.bot?.grade).not.toBe(simulation.state.grade);
   });
 });
+
+/**
+ * The world is drawn **between** the last two steps, rather than snapped to the
+ * newest one — #323.
+ *
+ * ⚠️ **Every assertion here is about two answers being DIFFERENT**, which is
+ * unusual in this file and is the point: the defect is duplicate frames. A
+ * simulation that never interpolates is correct about where the rider is at
+ * every tick and wrong about every frame in between, so an assertion that the
+ * position is right cannot see it. Three quarters of the frames the phone drew
+ * were copies of the one before, and only distinctness says so.
+ */
+describe('the world is drawn between the two most recent steps — #323', () => {
+  /** A frame period that is not a factor of the step, as a real one is not. */
+  const FRAME_MS = 1000 / 60;
+
+  it('keeps the simulation on its 20 Hz step rather than raising it', () => {
+    // #323's second acceptance criterion, in its literal form. The tempting
+    // non-fix is to tick at 60 Hz so that every frame has a new state: that
+    // triples the physics work to hide a display problem, and it moves a
+    // number `MAXIMUM_STEPS_PER_ADVANCE` counts in and the 0.23 m drift
+    // measurement in this file's header is stated against.
+    expect(SIMULATION_STEP_SECONDS).toBe(0.05);
+  });
+
+  it('draws a different position on every frame inside one step', () => {
+    const simulation = new GameSimulation(hillyRoute());
+    simulation.advanceTo(0, PEDALLING);
+    // A second of riding, so the rider is moving and there is a previous step.
+    simulation.advanceTo(1_000, PEDALLING);
+
+    const drawn = [0, FRAME_MS, FRAME_MS * 2].map(
+      (offset) => simulation.drawnAt(1_000 + offset).riderDistance,
+    );
+
+    expect(drawn[1]).toBeGreaterThan(drawn[0] as number);
+    expect(drawn[2]).toBeGreaterThan(drawn[1] as number);
+    // Non-vacuity: the three are inside ONE step, so nothing was simulated
+    // between them. Without interpolation all three are the same number.
+    expect(simulation.advanceTo(1_000 + FRAME_MS * 2, PEDALLING).steps).toBe(0);
+  });
+
+  it('draws the bot on the same blend as the rider', () => {
+    const simulation = new GameSimulation({ ...hillyRoute(), pacer: botPacerPlan(2.5) });
+    simulation.advanceTo(0, PEDALLING);
+    simulation.advanceTo(1_000, PEDALLING);
+
+    const early = simulation.drawnAt(1_000);
+    const late = simulation.drawnAt(1_000 + FRAME_MS * 2);
+
+    expect(late.botDistance).toBeGreaterThan(early.botDistance ?? Number.POSITIVE_INFINITY);
+    expect(late.riderDistance).toBeGreaterThan(early.riderDistance);
+  });
+
+  it('has no bot to draw when the rider chose none', () => {
+    const simulation = new GameSimulation(hillyRoute());
+    simulation.advanceTo(0, PEDALLING);
+    simulation.advanceTo(1_000, PEDALLING);
+
+    expect(simulation.drawnAt(1_000).botDistance).toBeUndefined();
+  });
+
+  it('never draws the rider past the newest step that was simulated', () => {
+    const simulation = new GameSimulation(hillyRoute());
+    simulation.advanceTo(0, PEDALLING);
+    simulation.advanceTo(1_000, PEDALLING);
+
+    // Late in the step, which is where an off-by-one would show.
+    const drawn = simulation.drawnAt(1_000 + SIMULATION_STEP_SECONDS * 1000 * 0.999);
+
+    expect(drawn.riderDistance).toBeLessThanOrEqual(simulation.state.ride.distance);
+    // And within one step of it, so it is not lagging by a whole ride.
+    expect(drawn.riderDistance).toBeGreaterThan(simulation.state.ride.distance - 1);
+  });
+
+  it('draws the start line before any step has run, rather than nothing', () => {
+    const simulation = new GameSimulation({ ...hillyRoute(), pacer: botPacerPlan(2.5) });
+
+    // `GameView` renders a scene before the loop has run once.
+    const drawn = simulation.drawnAt(0);
+
+    expect(drawn.riderDistance).toBe(0);
+    expect(drawn.botDistance).toBe(0);
+  });
+
+  /**
+   * ⚠️ #323's third acceptance criterion: *"after a catch-up burst, or a
+   * backgrounded phone where `MAXIMUM_STEPS_PER_ADVANCE` has thrown wall-clock
+   * away, it must not extrapolate a rider through scenery"*.
+   *
+   * Both halves are here because they are different arithmetic. The burst is
+   * about which state is blended **from** — one step back, not two hundred.
+   * The unlocked phone is about the blend itself, which is a ratio of
+   * wall-clock seconds the stall makes enormous.
+   */
+  describe('a stall does not project the rider up the road', () => {
+    /** Five minutes backgrounded, from one `advanceTo` to the next. */
+    function stalled(): GameSimulation {
+      const simulation = new GameSimulation(hillyRoute());
+      simulation.advanceTo(0, PEDALLING);
+      simulation.advanceTo(300_000, PEDALLING);
+      return simulation;
+    }
+
+    it('blends from one step back rather than from before the whole burst', () => {
+      const simulation = stalled();
+
+      const drawn = simulation.drawnAt(300_000);
+
+      // Ten seconds of road were integrated in that one call — 38 m from a
+      // standing start on this hill. Blending from where the rider was before
+      // it would draw them all of that back down the road, and then glide them
+      // forward through the next second of frames.
+      expect(simulation.state.ride.distance).toBeGreaterThan(30);
+      expect(drawn.riderDistance).toBeGreaterThan(simulation.state.ride.distance - 1);
+    });
+
+    it('never draws past the newest step, however late the frame is', () => {
+      const simulation = stalled();
+
+      // A frame that arrives five seconds after the last `advanceTo` — a
+      // hundred steps' worth of wall clock, with nothing simulated for it.
+      const late = simulation.drawnAt(305_000);
+
+      // Clamped to the newest state exactly, never beyond it. Unclamped this
+      // is the rider a hundred blends up the road, through the scenery.
+      expect(late.riderDistance).toBe(simulation.state.ride.distance);
+    });
+
+    it('does not draw the rider backwards when the clock goes back', () => {
+      const simulation = stalled();
+
+      const backwards = simulation.drawnAt(299_000);
+
+      expect(backwards.riderDistance).toBeLessThanOrEqual(simulation.state.ride.distance);
+      expect(backwards.riderDistance).toBeGreaterThan(simulation.state.ride.distance - 1);
+    });
+  });
+});

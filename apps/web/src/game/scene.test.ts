@@ -14,7 +14,7 @@ import { gapAgainst } from './hud/fields';
 import type { RiderMarker, SceneFrame } from './port';
 import { SCATTER_MAX_ITEMS, type ScatterItem } from './scatter';
 import { cameraPose, ghostFinished, sceneFrame } from './scene';
-import { VIEW_AHEAD_METRES, VIEW_BEHIND_METRES, corridorOrigin } from './terrain';
+import { VIEW_AHEAD_METRES, VIEW_BEHIND_METRES, corridorOrigin, roadCorridor } from './terrain';
 import {
   GameSimulation,
   MAXIMUM_STEPS_PER_ADVANCE,
@@ -527,5 +527,131 @@ describe('the frame carries the scenery for the road it drew', () => {
       const two = lapTwo[index] as ScatterItem;
       expect(Math.hypot(one.x - two.x, one.z - two.z)).toBeLessThan(1);
     }
+  });
+});
+
+/**
+ * A marker slides along the road rather than snapping to a corridor point —
+ * #323.
+ *
+ * ⚠️ **The other half of "the world steps rather than moves", and the half
+ * that decides whether interpolating the *simulation* is visible at all.**
+ * `markerAt` placed a marker at the corridor point nearest its distance, so a
+ * bot or a ghost moved in whole corridor points — about ten metres at a
+ * route's nominal grid. Handing it a distance interpolated between two
+ * simulation steps, a centimetre at a time, would have changed nothing on
+ * screen for a second at a time and then jumped: the interpolation would have
+ * been computed, tested, green, and thrown away by the next function down.
+ * That is this repository's own named defect shape (`port.ts`, #240) reached
+ * from inside `game/`.
+ *
+ * The rider's own marker was the exception, and it is why this was hard to
+ * see: the corridor is *built* from the rider's distance, so a point lands on
+ * the rider by construction and only the bot and the ghost were coarse.
+ */
+describe('a marker slides along the road rather than snapping to a corridor point — #323', () => {
+  const setup = straightRoute();
+  const origin = corridorOrigin(setup.profile);
+
+  /** A frame with the rider at 100 m and the bot wherever it is asked for. */
+  function botAt(distance: number): RiderMarker {
+    const base = atStartLine(setup.profile);
+    const frame = sceneFrame({
+      profile: setup.profile,
+      origin,
+      state: { ...base, ride: { ...base.ride, distance: metres(100) } },
+      botDistance: distance,
+    });
+    const marker = frame.markers.find((each) => each.kind === 'bot');
+    expect(marker).toBeDefined();
+    return marker as RiderMarker;
+  }
+
+  it('moves the bot for a step far smaller than the corridor’s own spacing', () => {
+    // Two metres, against a corridor sampled every ten. Snapping to the
+    // nearest point puts both in exactly the same place.
+    const from = botAt(200);
+    const to = botAt(202);
+
+    const moved = Math.hypot(to.x - from.x, to.z - from.z);
+    expect(moved).toBeGreaterThan(1.9);
+    expect(moved).toBeLessThan(2.1);
+  });
+
+  it('places it in proportion between the two points either side', () => {
+    const before = botAt(200);
+    const after = botAt(210);
+    const between = botAt(205);
+
+    expect(between.z).toBeCloseTo((before.z + after.z) / 2, 3);
+    expect(between.x).toBeCloseTo((before.x + after.x) / 2, 3);
+  });
+
+  it('anchors the camera on the rider, not on the corridor point nearest them', () => {
+    // ⚠️ **Sub-step, and a test is the only thing that says which of the two it
+    // is.** The corridor is built *from* the rider's distance, so the point
+    // before them sits at a FIXED offset — it moves one-for-one with the rider
+    // and a camera placed on it is just as smooth. It is simply in the wrong
+    // place, by up to one corridor step, and nothing about motion can see
+    // that. `cameraPose` returning the interpolated position rather than the
+    // point it follows is what this pins.
+    const base = atStartLine(setup.profile);
+    const frame = sceneFrame({
+      profile: setup.profile,
+      origin,
+      state: { ...base, ride: { ...base.ride, distance: metres(107.3) } },
+    });
+    const rider = frame.markers.find((each) => each.kind === 'rider');
+
+    expect(frame.camera.x).toBeCloseTo(rider?.x ?? Number.NaN, 6);
+    expect(frame.camera.y).toBeCloseTo(rider?.y ?? Number.NaN, 6);
+    expect(frame.camera.z).toBeCloseTo(rider?.z ?? Number.NaN, 6);
+  });
+
+  it('keeps a heading at the corridor’s far end, where the position stops moving', () => {
+    // ⚠️ The degenerate-heading case, reached from the direction interpolation
+    // opens: at the far end the placement clamps, so a heading measured from
+    // the *interpolated* point to the next one is zero-length and falls
+    // through to the arbitrary north below — a camera that swings sideways for
+    // a rider at the end of a point-to-point route. Measuring it between the
+    // two corridor points either side cannot become degenerate that way.
+    const perDegreeLongitude = 111_320 * Math.cos((51.5 * Math.PI) / 180);
+    const points: RoutePoint[] = [];
+    for (let index = 0; index <= 200; index += 1) {
+      points.push({
+        position: geographicPosition(
+          degreesLatitude(51.5),
+          degreesLongitude(-0.12 + (index * 10) / perDegreeLongitude),
+        ),
+        elevation: altitudeMetres(0),
+      });
+    }
+    const profile = routeProfile(points);
+    const corridor = roadCorridor(profile, corridorOrigin(profile), 100);
+    const farEnd = corridor.centre[corridor.centre.length - 1];
+
+    const pose = cameraPose(corridor, (farEnd?.along ?? 0) + 50);
+
+    // The route runs due east, and so does the camera at its far end.
+    expect(pose.headingX).toBeGreaterThan(0.9);
+    expect(Math.abs(pose.headingZ)).toBeLessThan(0.1);
+  });
+
+  it('still clamps a bot beyond the corridor to its far end rather than extrapolating', () => {
+    // `markerAt`'s own promise, unchanged: a rider far enough ahead to be
+    // outside the built corridor is drawn at its far end rather than floating
+    // in space beyond it, and the exact gap is the HUD's job.
+    const beyond = botAt(5_000);
+    const further = botAt(50_000);
+
+    expect(beyond).toEqual(further);
+    const base = atStartLine(setup.profile);
+    const frame = sceneFrame({
+      profile: setup.profile,
+      origin,
+      state: { ...base, ride: { ...base.ride, distance: metres(100) } },
+    });
+    const farEnd = frame.corridor.centre[frame.corridor.centre.length - 1];
+    expect(beyond.z).toBeCloseTo(farEnd?.z ?? Number.NaN, 6);
   });
 });

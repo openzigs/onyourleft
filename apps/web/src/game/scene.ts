@@ -35,7 +35,27 @@ export interface SceneInput {
   readonly profile: RouteProfile;
   readonly origin: CorridorOrigin;
   readonly state: GameState;
-  /** The bot's odometer, from `@onyourleft/physics`'s `advanceBot`. Optional. */
+  /**
+   * Where to draw the rider this frame, if not where the last step left them.
+   *
+   * ⚠️ **The whole of #323's seam on this side, and it is optional for one
+   * reason only**: `atStartLine` and the browser harness build frames from a
+   * state with no simulation behind it at all, and there is nothing for them
+   * to interpolate. The ride screen supplies it on every frame, from
+   * `GameSimulation.drawnAt`, and `GameView.test.tsx` fails if it stops —
+   * `check-wiring.mjs` §Limits is explicit that an optional field nobody
+   * supplies is a hole this repository's gates cannot see, so the guard is a
+   * test that reads what the renderer was handed.
+   *
+   * Absent means "where the newest completed step left them", which is what
+   * every frame drew before #323 and is what made the world step.
+   */
+  readonly riderDistance?: number | undefined;
+  /**
+   * Where to draw the bot — its odometer, from `@onyourleft/physics`'s
+   * `advanceBot`, or a blend of its last two (#323). Optional; absent means
+   * there is no bot.
+   */
   readonly botDistance?: number | undefined;
   /** The rider's own previous attempt, when they chose to race one. Optional. */
   readonly ghost?: GhostTrack | undefined;
@@ -43,7 +63,7 @@ export interface SceneInput {
 
 /** Builds one frame. */
 export function sceneFrame(input: SceneInput): SceneFrame {
-  const riderDistance: number = input.state.ride.distance;
+  const riderDistance: number = input.riderDistance ?? input.state.ride.distance;
   const corridor = roadCorridor(input.profile, input.origin, riderDistance);
   return {
     corridor,
@@ -99,9 +119,14 @@ function scatter(
  * camera lagging the corner.
  */
 export function cameraPose(corridor: RoadCorridor, atDistance: number): CameraPose {
-  const here = nearestPoint(corridor, atDistance);
+  const here = placeOnCorridor(corridor, atDistance);
+  const from = corridor.centre[here.index] as CorridorPoint;
   const ahead = corridor.centre[Math.min(corridor.centre.length - 1, here.index + 1)];
-  const from = here.point;
+  // ⚠️ The heading is taken between the two corridor POINTS either side rather
+  // than from `here` to the next one, and that is not a simplification: a
+  // camera sitting exactly on `ahead` would have a zero-length direction and
+  // fall through to the arbitrary north below, which is a camera that snaps
+  // sideways once per corridor point.
   const dx = (ahead?.x ?? from.x + 1) - from.x;
   const dz = (ahead?.z ?? from.z) - from.z;
   const length = Math.hypot(dx, dz);
@@ -111,7 +136,7 @@ export function cameraPose(corridor: RoadCorridor, atDistance: number): CameraPo
   // three resolves to NaN and renders as a black screen.
   const headingX = length > 0 ? dx / length : 0;
   const headingZ = length > 0 ? dz / length : 1;
-  return { x: from.x, y: from.y, z: from.z, headingX, headingZ };
+  return { x: here.x, y: here.y, z: here.z, headingX, headingZ };
 }
 
 /** The rider, and whichever of the bot and the ghost are in play. */
@@ -155,41 +180,77 @@ function markerAt(
   atDistance: number,
   kind: RiderMarker['kind'],
 ): RiderMarker {
-  const { point } = nearestPoint(corridor, atDistance);
-  return { kind, x: point.x, y: point.y, z: point.z };
+  const at = placeOnCorridor(corridor, atDistance);
+  return { kind, x: at.x, y: at.y, z: at.z };
+}
+
+/** A position on the corridor, and the centreline point it follows. */
+interface CorridorPlacement {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  /**
+   * The index of the point at or before it, for a caller that needs the road's
+   * direction there. Never the last index, so `index + 1` is always a point.
+   */
+  readonly index: number;
 }
 
 /**
- * The corridor point closest to an odometer reading, and its index.
+ * Where an odometer reading falls on the corridor, **between** its points.
  *
  * ⚠️ **Matched on `CorridorPoint.along`, which is unwrapped, and never on
  * `CorridorPoint.distance`, which is not — #253.** Every distance that reaches
  * this file is an odometer: the rider's from the simulation, the bot's from
  * `advanceBot`, the ghost's from a replay of recorded distance. `distance`
  * wraps into `[0, totalDistance]`, so on a loop every corridor point compared
- * smaller than an odometer past the wrap and this search returned the far end
+ * smaller than an odometer past the wrap and the search returned the far end
  * for **every** rider — the bot and the rider drawn at one point from lap two
  * onward, which is the case the pacer exists for.
  *
  * The fix is on this side deliberately. Wrapping the odometer instead would
  * place the markers correctly and break the HUD gap in the same motion, because
  * `pacer/gap.ts` is right that a bot a lap ahead must read as a lap ahead.
+ *
+ * ⚠️ **It interpolates, where until #323 it returned the NEAREST point.** The
+ * corridor samples the road about every ten metres, so a nearest-point lookup
+ * quantised every marker to that grid: a bot that gained two metres gained
+ * nothing on screen, and then jumped ten. The rider's own marker hid it — the
+ * corridor is built *from* the rider's distance, so a point lands on the rider
+ * by construction — and that is exactly why the bot and the ghost were the
+ * riders that stepped. It is also what would have thrown away #323's other
+ * half: a distance interpolated between two simulation steps is a centimetre
+ * at a time, and the next function down was rounding it to ten metres.
+ *
+ * Clamped rather than extrapolated at both ends, which is what
+ * {@link markerAt} promises and what keeps a bot far up the road on the road.
  */
-function nearestPoint(
-  corridor: RoadCorridor,
-  atDistance: number,
-): { readonly point: CorridorPoint; readonly index: number } {
-  let bestIndex = 0;
-  let bestGap = Number.POSITIVE_INFINITY;
-  for (let index = 0; index < corridor.centre.length; index += 1) {
-    const candidate = corridor.centre[index] as CorridorPoint;
-    const gap = Math.abs(candidate.along - atDistance);
-    if (gap < bestGap) {
-      bestGap = gap;
-      bestIndex = index;
-    }
+function placeOnCorridor(corridor: RoadCorridor, atDistance: number): CorridorPlacement {
+  const centre = corridor.centre;
+  const last = centre.length - 1;
+  if (last <= 0) {
+    // A one-point corridor has nothing to interpolate along. `cameraPose`'s own
+    // degenerate-heading case, and it must not divide by a zero span.
+    const only = centre[0] as CorridorPoint;
+    return { x: only.x, y: only.y, z: only.z, index: 0 };
   }
-  return { point: corridor.centre[bestIndex] as CorridorPoint, index: bestIndex };
+  let index = 0;
+  for (let candidate = 0; candidate < last; candidate += 1) {
+    if ((centre[candidate] as CorridorPoint).along > atDistance) {
+      break;
+    }
+    index = candidate;
+  }
+  const from = centre[index] as CorridorPoint;
+  const to = centre[index + 1] as CorridorPoint;
+  const span = to.along - from.along;
+  const fraction = span > 0 ? Math.min(1, Math.max(0, (atDistance - from.along) / span)) : 0;
+  return {
+    x: from.x + (to.x - from.x) * fraction,
+    y: from.y + (to.y - from.y) * fraction,
+    z: from.z + (to.z - from.z) * fraction,
+    index,
+  };
 }
 
 /**

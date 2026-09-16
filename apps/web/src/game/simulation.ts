@@ -238,6 +238,59 @@ export interface SimulationTick {
 }
 
 /**
+ * Where the moving things are drawn on **this frame** — #323.
+ *
+ * ## The defect this exists for
+ *
+ * {@link SIMULATION_STEP_SECONDS} is 0.05, so the world advances twenty times a
+ * second. A phone renders at sixty. Nothing interpolated between the two, so
+ * **each simulated position was drawn three times and then jumped**, and what
+ * the owner saw on a Pixel Tablet was a world that stepped rather than moved.
+ * The `dumpsys gfxinfo` capture in #323 is the shape of it: 63 fps presented, 0
+ * missed vsyncs, 6 ms of GPU work against a 16.7 ms budget — and 94 % of frames
+ * over 16 ms of wall time, because the loop was waiting on a simulation that
+ * had nothing new to say for two frames out of every three. Drawing faster
+ * would have changed nothing; three quarters of the frames were duplicates.
+ *
+ * ## Why it cannot be done in the renderer
+ *
+ * The standard fixed-timestep answer renders **between** the last two
+ * simulation states, with the leftover accumulator as the blend. The simulation
+ * already holds the fixed step, the step count derived from the origin and the
+ * leftover ({@link GameSimulation.pendingSecondsAt}). What it did not hold is
+ * the **previous** state, and nothing downstream can reconstruct it: the
+ * renderer sees one `GameState` per frame and has no way to know whether the
+ * one before it was a step earlier or a stall earlier.
+ *
+ * ## What it deliberately is not
+ *
+ * ⚠️ **It is not a higher tick rate.** Raising {@link SIMULATION_STEP_SECONDS}
+ * to 60 Hz triples the physics work to hide a display problem and moves a
+ * number the determinism tests are written against — the step is load-bearing,
+ * and `simulation.test.ts` pins it for that reason.
+ *
+ * ⚠️ **It is not extrapolation.** The frame is drawn at one whole step *behind*
+ * the newest simulated state, never ahead of it, so a rider is never projected
+ * onto road the physics has not integrated. That is what makes it safe after a
+ * catch-up burst or a backgrounded phone, where the wall clock outruns the
+ * simulation by minutes — {@link GameSimulation.drawnAt} clamps the blend and
+ * `simulation.test.ts` drives that case. The cost is a constant 50 ms of
+ * display latency, which is a third of what a rider's own reaction time is and
+ * is invisible beside the stepping it removes.
+ *
+ * ⚠️ **It carries distances and nothing else.** The HUD reads numbers off
+ * {@link GameState} and those are fine at 20 Hz — text that changed sixty times
+ * a second would be unreadable. What steps visibly is *position*, so position
+ * is what is blended: the rider, the bot, and the camera through the rider.
+ */
+export interface DrawnRide {
+  /** Where to draw the rider, in the same odometer metres as `RideState`. */
+  readonly riderDistance: number;
+  /** Where to draw the bot, when there is one. @see GameState.bot */
+  readonly botDistance?: number | undefined;
+}
+
+/**
  * A ride in progress: where the rider is, how fast, and how long they have been
  * riding.
  *
@@ -326,6 +379,17 @@ export class GameSimulation {
    * `simulation.ts`'s header records the 0.23 m that cost the first time.
    */
   #stepsRun = 0;
+  /**
+   * Where the rider and the bot were one fixed step before {@link #state} —
+   * the other end of the blend {@link drawnAt} draws between (#323).
+   *
+   * `undefined` until a step has actually run, which is the whole of the first
+   * frame of a ride and every frame of a ride nobody is pedalling: with one
+   * state there is nothing to interpolate and {@link drawnAt} says so by
+   * returning that state.
+   */
+  #previous:
+    { readonly riderDistance: number; readonly botDistance: number | undefined } | undefined;
 
   constructor(setup: SimulationSetup) {
     this.#setup = setup;
@@ -363,6 +427,46 @@ export class GameSimulation {
   }
 
   /**
+   * Where to draw the rider and the bot at `nowMs` — #323. @see DrawnRide
+   *
+   * Reads and advances nothing: it is a blend of the two states the simulation
+   * already holds, so a caller may ask for one frame or a hundred between two
+   * ticks and get a different answer each time without moving the ride by a
+   * millimetre. `advanceTo` is still the only thing that simulates.
+   *
+   * ⚠️ **The blend is clamped to `[0, 1]`, and that clamp is the acceptance
+   * criterion rather than a tidiness.** It is `pendingSecondsAt / step`, which
+   * is below one on any frame that follows an `advanceTo` — but a caller that
+   * draws without advancing, and a phone that was backgrounded between the two,
+   * both hand this a `nowMs` seconds past the newest step. Unclamped that
+   * projects the rider hundreds of metres up a road nothing has integrated,
+   * through whatever scenery is there. Clamped, the worst case is the newest
+   * simulated position, which is exactly where the old code always drew.
+   */
+  drawnAt(nowMs: number): DrawnRide {
+    const current = this.#state;
+    const currentBot = current.bot?.state.distance;
+    const previous = this.#previous;
+    if (previous === undefined) {
+      return {
+        riderDistance: current.ride.distance,
+        ...(currentBot === undefined ? {} : { botDistance: currentBot }),
+      };
+    }
+    const blend = Math.min(1, Math.max(0, this.pendingSecondsAt(nowMs) / SIMULATION_STEP_SECONDS));
+    // A ride either has a bot for all of it or for none of it — the course is
+    // built once, in the constructor — so the two are absent together.
+    const botDistance =
+      currentBot === undefined || previous.botDistance === undefined
+        ? currentBot
+        : between(previous.botDistance, currentBot, blend);
+    return {
+      riderDistance: between(previous.riderDistance, current.ride.distance, blend),
+      ...(botDistance === undefined ? {} : { botDistance }),
+    };
+  }
+
+  /**
    * Advances the ride to `nowMs`, running every fixed step owed since the origin.
    *
    * The first call establishes that origin and simulates nothing: there is no
@@ -392,7 +496,17 @@ export class GameSimulation {
     let ride = this.#state.ride;
     const course = this.#course;
     let bot = this.#state.bot;
+    // ⚠️ **One step back, not one `advanceTo` back** — #323. A catch-up burst
+    // runs up to {@link MAXIMUM_STEPS_PER_ADVANCE} steps in one call, and
+    // blending from where the rider was before all of them would draw them
+    // gliding through ten seconds of road they had already covered. Captured at
+    // the top of each iteration, so after the loop it holds the step before the
+    // one the next frames blend towards.
+    let previousRide = ride;
+    let previousBot = bot;
     for (let step = 0; step < toRun; step += 1) {
+      previousRide = ride;
+      previousBot = bot;
       // Re-read per step rather than once per call: over a long stall the rider
       // crosses real terrain, and holding one grade for 200 steps would flatten
       // a hill they actually climbed.
@@ -432,6 +546,10 @@ export class GameSimulation {
     // cover ten seconds of road and the ghost five minutes of it.
     this.#stepsRun += toRun;
     const skippedSteps = outstanding - toRun;
+    this.#previous = {
+      riderDistance: previousRide.distance,
+      botDistance: previousBot?.state.distance,
+    };
 
     this.#state = {
       ride,
@@ -444,6 +562,11 @@ export class GameSimulation {
     };
     return { steps: toRun, skippedSeconds: skippedSteps * SIMULATION_STEP_SECONDS };
   }
+}
+
+/** Linear blend between two odometer readings. @see DrawnRide */
+function between(from: number, to: number, blend: number): number {
+  return from + (to - from) * blend;
 }
 
 /**
