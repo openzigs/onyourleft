@@ -1179,8 +1179,15 @@ every claim about its behaviour as untested" is reading the old file.
 [#95](https://github.com/openzigs/onyourleft/issues/95) exercised it: two `workflow_dispatch` runs on
 2026-09-16 assembled a **signed release APK** on a GitHub-hosted runner
 ([35160018484](https://github.com/openzigs/onyourleft/actions/runs/35160018484),
-[35162828363](https://github.com/openzigs/onyourleft/actions/runs/35162828363)), and the four
-`ANDROID_*` secrets are set. ⚠️ **It has still never run on a tag**, so the GitHub Release step
+[35162828363](https://github.com/openzigs/onyourleft/actions/runs/35162828363)), and the signing
+inputs are set. ⚠️ **Three of them are secrets and the fourth is a repository VARIABLE** — this
+paragraph used to say "the four `ANDROID_*` secrets". `ANDROID_KEY_ALIAS` is
+`vars.ANDROID_KEY_ALIAS` since [#338](https://github.com/openzigs/onyourleft/issues/338), because
+Actions redacts every occurrence of a secret's **value** and this one is the word `upload`, which
+rendered the pinned `actions/upload-artifact` as `actions/***-artifact` — taking an action's own
+name out of the audit trail §8 pins it for. Moving the reference is only half of it: the runner
+masks every secret in the job's map whether the workflow reads it or not, so the secret has to be
+**deleted**. [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §9 and §10. ⚠️ **It has still never run on a tag**, so the GitHub Release step
 alone is untested, and no phone has installed the result —
 [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §1 is the table of which is which.
 
@@ -2674,6 +2681,8 @@ top of an issue **supersedes its body**.
 | What the merged-manifest gate says on a machine that has never run Gradle, and why it is not a CI gate | `apps/mobile/src/android/merged-manifest.ts` §`mergedManifestAbsence`, `merged-manifest.test.ts` §`shipped` |
 | What is enforced about Android signing keys, and what is merely written down | [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §1, `scripts/check-repo-rules.sh` §`REL001` |
 | Why a green `assembleRelease` is not a signed APK, and what reads the packaged file instead | [`.github/workflows/release.yml`](.github/workflows/release.yml) §"Verify the artefact", §4c |
+| Why the Android key alias is a repository variable rather than a secret, and why moving the reference is not the fix | [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §9, §10 |
+| What a release build does when the keystore is there and the alias is not, and what proves that guard can fire | `apps/mobile/src/android/release-pipeline.test.ts` §"the signing step, run under the shell the runner uses" |
 | How to get an installable APK without cutting a tag | [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §8 |
 | Where the target API floor is stated, and the four regressions that used to pass the rule | [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §7, `apps/mobile/src/android/release-pipeline.test.ts` |
 | What the app tells Play it collects, and what holds that answer to the manifest the app ships | `apps/mobile/src/android/data-safety.ts` §`locationClaimFaults`, [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §4 |
