@@ -2326,8 +2326,17 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   inside an ADR table cell.
 - **ADRs**: `docs/adr/NNNN-kebab-case.md`, with **Status, Context, Decision, Consequences**. Numbers
   are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. **Every number from 0001 to 0020 is
-  now written and the next free number is 0021** — there is no live reservation. ⚠️ **0020 is
+  **and which are claimed by open issues** before you pick one. **The next free number is 0023.**
+  ⚠️ This sentence said *"every number from 0001 to 0020 is now written and the next free number is
+  0021 — there is no live reservation"*, and a reviewer who remembers that is reading the old file:
+  **0021 is a live reservation**, claimed by
+  [#330](https://github.com/openzigs/onyourleft/issues/330) for the ghost-racing ADR and not yet
+  written. **0022 is [ADR 0022](docs/adr/0022-game-scenery-model-pack.md)**, taken by
+  [#340](https://github.com/openzigs/onyourleft/issues/340) for the game's CC0 model pack — it took
+  0022 rather than 0021 precisely because this paragraph was stale, and a written ADR cannot be
+  renumbered without breaking citations, so the `ADR001` collision would have landed on #330. The
+  *check* this bullet asks for is `docs/architecture.md`'s reservation table, not this sentence; a
+  claim that never reaches that table is a claim nobody can check. ⚠️ **0020 is
   [ADR 0020](docs/adr/0020-display-units.md)**, taken by
   [#238](https://github.com/openzigs/onyourleft/issues/238) for the display-unit switch; a reviewer
   who remembers this paragraph offering 0018, 0019 or 0020 is reading an old one. **0019 is
@@ -2620,6 +2629,7 @@ top of an issue **supersedes its body**.
 | Which aspect ratio the cull is stated against, and why a test cannot re-derive it | `apps/web/src/game/three-renderer.ts` §`WORST_CASE_ASPECT`, `apps/web/src/design/theme.css` §`.oyl-game__world` |
 | Why scenery beyond 400 m to the side is dropped however wide the view is | `apps/web/src/game/three-renderer.ts` §`FOGGED_OUT_METRES`, `apps/web/src/game/world.ts` §`MINIMUM_VIEW_END_OCCLUSION` |
 | Why the scenery is a hash of where you are rather than a generator that walks forward | `apps/web/src/game/scatter.ts` §`scatterAt`, §`scatterSeed` |
+| Why the scenery's shapes will come from a pack when its placement does not, and which one kind is excluded | [ADR 0022](docs/adr/0022-game-scenery-model-pack.md) D-3, D-4 |
 | Where the tree line, the boreal latitude and the steep-pitch threshold came from | `apps/web/src/game/scatter.ts` §Provenance, `apps/web/src/game/world.ts` §`treeLineMetres` |
 | Why a full budget thins the far view instead of cutting it off, and what a wall across the road looks like | `apps/web/src/game/scatter.ts` §`thin`, §`SCATTER_NEAR_BIAS` |
 | What stops a loop shorter than the view from being drawn twice, and what else that bound buys | `apps/web/src/game/scatter.ts` §`scatterAt`, and the `cellCount` cap beside it |
