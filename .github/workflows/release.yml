@@ -90,8 +90,10 @@ jobs:
           # ⚠️ Deleting the secret is the operative half. The runner masks every
           # secret in the job's map whether this file references it or not, so
           # moving the reference alone changes nothing until
-          # `ANDROID_KEY_ALIAS` is gone from the repository's secrets —
-          # measured, not assumed; `apps/mobile/RELEASE.md` §9 records both runs.
+          # `ANDROID_KEY_ALIAS` is gone from the repository's secrets. ⚠️ That
+          # last part is read off GitHub's documented behaviour and has NOT been
+          # measured here: `apps/mobile/RELEASE.md` §10 is the procedure that
+          # would, and its result cells are empty.
           KEY_ALIAS: ${{ vars.ANDROID_KEY_ALIAS }}
           REF: ${{ github.ref }}
         run: |
@@ -115,7 +117,7 @@ jobs:
           # broken rename would present.
           if [ -z "${KEY_ALIAS}" ]; then
             echo "::error::ANDROID_KEYSTORE_BASE64 is set and the ANDROID_KEY_ALIAS variable is empty."
-            echo "::error::The alias is a repository VARIABLE, not a secret; see apps/mobile/RELEASE.md section 9."
+            echo "::error::The alias is a repository VARIABLE, not a secret; see apps/mobile/RELEASE.md section 10."
             exit 1
           fi
           # Written outside the workspace so REL001 cannot be satisfied by
