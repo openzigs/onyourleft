@@ -869,21 +869,31 @@ describe('GameView — a hot phone sheds scenery before frame rate (#245)', () =
   it('tells the renderer a leaner rung, and stops placing what it stops drawing', async () => {
     const frames = await startRiding({ pacer: false });
     const atTheTop = frames[frames.length - 1] as SceneFrame;
-    // Non-vacuity, and the one thing about this fixture that could quietly make
-    // the whole test meaningless: a route too sparse to exceed a lower rung's
-    // budget would satisfy every assertion below with no reduction at all.
-    expect(atTheTop.scatter.length).toBeGreaterThan(
-      QUALITY_LADDER[1]?.scatterItems ?? Number.POSITIVE_INFINITY,
-    );
-
-    // Sustained slow frames, which is what `nextQuality` reads as a hot phone.
-    await pump(SUSTAINED_SAMPLES + 5);
+    // ⚠️ **Two sustained windows, not one, and #348 is why** — a reviewer who
+    // remembers a single `pump` here is reading the old file. The scenery is
+    // clustered now, so a 460 m view of this fixture carries about 140 items
+    // rather than the three hundred it carried before: rung 1's budget of 160
+    // does not bind on it at all, and a test that stopped there would watch the
+    // view hand the renderer a smaller number and shed nothing. Two windows
+    // reach a rung that does bind, which is what makes the equality below an
+    // assertion rather than a coincidence.
+    await pump(2 * (SUSTAINED_SAMPLES + 5));
     const told = rungs[rungs.length - 1];
     const drawn = frames[frames.length - 1] as SceneFrame;
 
     expect(told).toBeDefined();
     expect(told?.scatterItems).toBeLessThan(qualitySettings(0).scatterItems);
-    expect(drawn.scatter.length).toBeLessThanOrEqual(told?.scatterItems ?? 0);
+    // Non-vacuity, and the one thing about this fixture that could quietly make
+    // the whole test meaningless: a route too sparse to exceed the rung it
+    // settles on would satisfy every assertion below with no reduction at all.
+    // ⚠️ Measured against the rung it *reached* rather than against a rung
+    // index written down here, so a ladder that grows a rung cannot leave this
+    // guard comparing against the wrong one.
+    expect(atTheTop.scatter.length).toBeGreaterThan(told?.scatterItems ?? 0);
+    // **The budget bound.** `toBeLessThanOrEqual` alone is satisfied by a world
+    // with nothing in it, which is exactly the shape the clustering can now
+    // produce on a stretch of open road.
+    expect(drawn.scatter.length).toBe(told?.scatterItems ?? 0);
     expect(drawn.scatter.length).toBeLessThan(atTheTop.scatter.length);
     // The rung it settled on is one of the ladder's, not a number this view
     // invented — `quality.ts` is where a scenery decision is taken.
@@ -924,8 +934,13 @@ describe('GameView — a hot phone sheds scenery before frame rate (#245)', () =
     const drawn = frames[frames.length - 1] as SceneFrame;
 
     expect(rungs.every((rung) => rung.scatterItems === qualitySettings(0).scatterItems)).toBe(true);
+    // ⚠️ Against rung **2** since #348, for the reason the test above gives:
+    // this fixture's view no longer clears rung 1's budget of 160, so a
+    // comparison against that one would be red on a view that is behaving
+    // perfectly. What it still catches is the failure it was written for — a
+    // view that thinned on every frame would fall under this.
     expect(drawn.scatter.length).toBeGreaterThan(
-      QUALITY_LADDER[1]?.scatterItems ?? Number.POSITIVE_INFINITY,
+      QUALITY_LADDER[2]?.scatterItems ?? Number.POSITIVE_INFINITY,
     );
   });
 });

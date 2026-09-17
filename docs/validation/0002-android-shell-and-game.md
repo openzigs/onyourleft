@@ -523,6 +523,78 @@ least silhouette."* On the table above that is `shrub` first and `building` last
 
 ---
 
+## Part I — does the scenery still read as a village? ([#348](https://github.com/openzigs/onyourleft/issues/348))
+
+**#348 is the one item in this file whose acceptance criterion is a sentence rather than a number**,
+and the issue says so itself: *"This is judged by eye, on the device. The numbers said the models
+were free and they were — what they could not say is that the result looks like a village."* So this
+part is deliberately half a look and half a counter read-back, and the look comes first.
+
+Nobody in the loop that wrote #348 has an Android device, so the tables below are empty in the same
+way every other table in this file is.
+
+### What changed, and what it predicts
+
+| | Before #348 | After |
+|---|--:|--:|
+| Grid period | 10 m | 20 m |
+| Things per cell, per side | 4 | 7 |
+| Nearest thing to the centreline | 5 m | 9.5 m |
+| Furthest | 21 m | 44.5 m |
+| Jitter along the cell | 1.25 m | 14 m |
+| Stretches with nothing beside them | none | about a quarter of a route |
+| `SCATTER_MAX_ITEMS` | 240 | **240 — unchanged, and #348 forbids changing it** |
+
+Measured on the synthetic fixtures in `scatter.test.ts` rather than on a device: a 460 m view of a
+sea-level temperate route carried **about 330** items on every stretch of road; it now carries
+**between 13 and 255** depending on where the clustering falls, with a median near 140.
+
+⚠️ **What that predicts for the GPU column is "nothing, or a little less", and the reasoning is
+arithmetic rather than hopeful.** A frame can never carry more than `SCATTER_MAX_ITEMS`, which did
+not move, so the worst case is exactly what it was; the typical case is roughly half of it. Working
+against that, the cull now submits a **larger share** of what it is handed — 100 % of a straight
+route's scenery where it submitted 98.3 %, because `SCATTER_LATERAL_METRES` grew with the band — so
+the per-frame instance count is bounded above by the same 240 and is usually well below it. **If the
+GPU or frame column moves at all, that is the finding**, exactly as #348 says.
+
+| Step | What to do | What to record |
+|---|---|---|
+| I1 | ⚠️ **Ride the route and look at it.** Before touching a counter | Does it read as open road with things beside it, or as a continuous village? One sentence in your own words |
+| I2 | Look at the verge specifically — how close does the nearest thing come as it passes? | Whether anything is close enough to feel like a hedge |
+| I3 | Ride until a bare stretch and then a wooded one | Whether the change between them reads as a place changing or as a bug |
+| I4 | Ride a tight bend, if the route has one | ⚠️ Whether anything is standing **in the road**. This is the one that is a defect rather than a taste |
+| I5 | Reset the counters, ride a 12-second window, read them back | every row of the table below |
+| I6 | Repeat I5 on a stretch that is *wooded*, where the budget binds | the same rows again |
+
+```bash
+adb shell dumpsys gfxinfo dev.openzigs.onyourleft reset
+# ... ride for 12 s with the game visible and the rider pedalling ...
+adb shell dumpsys gfxinfo dev.openzigs.onyourleft | grep -iE "Total frames|Janky|percentile|Missed Vsync|GPU"
+```
+
+### I results
+
+| | I5 (ordinary stretch) | I6 (wooded stretch) |
+|---|---|---|
+| Total frames rendered | | |
+| **Janky frames (legacy, > 16 ms)** | | |
+| Frame time 50th / 90th / 95th / 99th | | |
+| GPU time 50th / 90th | | |
+| Missed Vsync | | |
+
+**Does it still read as a village (I1)?** ______________
+
+**Is anything standing in the road on a bend (I4)?** ______________
+
+**Phone (OEM, model, Android):** ______________  **Build:** ______________
+
+⚠️ **A screenshot before and after belongs on the pull request**, and #348 asks for one. Neither was
+taken: this environment has no device and no emulator, and a desktop browser at a different aspect
+ratio is not the thing the owner looked at. The pair to take is the same stretch of the same route,
+at the same point, on the same phone.
+
+---
+
 ## After the session
 
 1. **Fill the tables in this file and commit it.** An empty table in `main` is the honest state; a

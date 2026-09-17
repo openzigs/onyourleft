@@ -28,6 +28,11 @@
  * change describes the change rather than guarding against it, which is this
  * repository's §5 trap in its purest form.
  *
+ * ⚠️ **#348 moved it, deliberately, and every number here was re-taken after
+ * that change** — so for #348 and for #348 alone they are a record rather than
+ * a guard. The assertion below says so where somebody reading a red run will
+ * be, and says what discharges #348 instead.
+ *
  * ⚠️ **A digest alone can be satisfied by an empty world**, so the counts and
  * three fully written-out items sit beside it: a frame that stopped placing
  * anything, a kind that stopped appearing, or a thinning that started returning
@@ -61,11 +66,23 @@ const LATITUDE_DEGREES = 51.5;
 const METRES_PER_DEGREE_LATITUDE = 111_320;
 
 /**
- * A 3 km route that bends one way the whole time and climbs then descends.
+ * A 3 km route that bends one way the whole time, runs level, then climbs and
+ * descends.
  *
  * Deliberately not straight and not level: `scatter.ts` reads the route's own
  * latitude and altitude for the tree line, and a flat straight fixture would
  * leave both of those unexercised while looking like a thorough one.
+ *
+ * ⚠️ **The first 500 m are level, and #348 is why** — a reviewer who remembers
+ * a route that climbed from the start line is reading the old file. Every
+ * metre of the old fixture was on a 4 % gradient, so nothing on it ever met
+ * `kindWeights`' settlement test and the only buildings it produced were the
+ * handful of cells either side of the summit where the gradient passes through
+ * zero. #348 roughly halved how much scenery a stretch carries, and those few
+ * cells stopped producing one at all — which turned *"still uses every kind"*
+ * below into a test that could not be satisfied. A level valley floor is the
+ * place a building belongs, and putting one in the fixture is a better repair
+ * than weakening the assertion to five kinds.
  */
 function bendingRoute(): RoutePoint[] {
   const points: RoutePoint[] = [];
@@ -82,7 +99,9 @@ function bendingRoute(): RoutePoint[] {
             east / (METRES_PER_DEGREE_LATITUDE * Math.cos((LATITUDE_DEGREES * Math.PI) / 180)),
         ),
       ),
-      elevation: altitudeMetres(along <= 1500 ? along * 0.04 : (3000 - along) * 0.04),
+      elevation: altitudeMetres(
+        along <= 500 ? 0 : along <= 1750 ? (along - 500) * 0.04 : (3000 - along) * 0.04,
+      ),
     });
   }
   return points;
@@ -142,19 +161,37 @@ describe('the arrangement a route produces — #341', () => {
   const placed = sweep();
 
   it('places the same scenery it placed before the models landed', () => {
-    // ⚠️ **Computed on `main` on 2026-09-17, before #341 changed anything, and
-    // pasted here unchanged.** If this goes red on a #341-shaped change, the
-    // placement moved — which D-4 names as a defect rather than a difference,
-    // whatever the world looks like afterwards.
-    expect(digest(placed.map(serialise))).toBe('70b89108');
+    // ⚠️ **Regenerated for #348, and that issue is the one kind of change this
+    // number is allowed to move for.** The original was computed on `main`
+    // before a line of #341 was written, which is what made it evidence about
+    // #341; this one was computed *after* #348's own change, so it is **not**
+    // evidence about #348. It cannot be: #348 exists to move the arrangement,
+    // and a golden cannot both permit a change and guard against it.
+    //
+    // What discharges #348 instead is `scatter.test.ts`, which asserts the
+    // properties that must survive the move — determinism, call-order
+    // independence, the seam, the carriageway, the separation — and does it
+    // without naming a coordinate. **This digest goes back to being what it was
+    // written for the moment the next change arrives**: the next model swap,
+    // renderer change or refactor that says it leaves placement alone is
+    // measured against it, and D-4's *"a different arrangement is a defect"*
+    // applies to that one exactly as it applied to #341.
+    expect(digest(placed.map(serialise))).toBe('a26bf6c0');
   });
 
   it('places a world at all, so the digest is not over an empty sweep', () => {
-    // 7 680 items over 32 frames, standing in 1 233 distinct places — an item
-    // is placed again in every frame that can still see it, which is what makes
+    // 6 291 items over 32 frames, standing in 839 distinct places — an item is
+    // placed again in every frame that can still see it, which is what makes
     // this a sweep rather than a snapshot.
-    expect(placed.length).toBe(7680);
-    expect(new Set(placed.map((item) => `${item.x},${item.z}`)).size).toBe(1233);
+    //
+    // ⚠️ **It was 7 680 in 1 233 places before #348**, and the drop is that
+    // issue's whole content: the scenery is placed on a twenty-metre grid
+    // instead of a ten-metre one, clustered so that stretches of road are bare,
+    // and spread through a band more than twice as deep. This pair is what
+    // stops the digest above being satisfied by a world that emptied out
+    // entirely, so it moves with the change rather than being loosened.
+    expect(placed.length).toBe(6291);
+    expect(new Set(placed.map((item) => `${item.x},${item.z}`)).size).toBe(839);
   });
 
   it('still uses every kind `scatter.ts` can place', () => {
@@ -171,13 +208,13 @@ describe('the arrangement a route produces — #341', () => {
     const last = placed[placed.length - 1];
 
     expect(first === undefined ? '' : serialise(first)).toBe(
-      'tree-conifer 73.898 10.647 256.351 5.361 1.179',
+      'tree-conifer 28.285 0.000 66.744 1.776 1.196',
     );
     expect(middle === undefined ? '' : serialise(middle)).toBe(
-      'tree-conifer 551.927 31.250 377.649 0.226 1.127',
+      'tree-conifer 659.504 15.413 345.435 3.174 0.895',
     );
     expect(last === undefined ? '' : serialise(last)).toBe(
-      'tree-conifer 551.709 50.728 -376.770 0.244 0.995',
+      'tree-conifer 444.835 46.233 -438.977 5.300 0.938',
     );
   });
 });
