@@ -54,6 +54,16 @@
  * changed the size with the rule. Removing the class asks the shipping
  * stylesheet the question instead.
  *
+ * ## The ninth field, and why it is here at its widest — #335
+ *
+ * The wind reading is the first field added to this panel since the gate
+ * existed, and #335's own sketch says a ninth field *"is a layout change that
+ * gate will have an opinion about"*. It is a magnitude and a unit like the
+ * speed beside it, so it carries no `oyl-hud__value--word` and the control
+ * panels are unaffected — but its **widest** value is one a rider can reach by
+ * typing, which is why {@link STATE} carries the bound rather than an ordinary
+ * breeze. @see the comment there.
+ *
  * ## What this page does NOT prove
  *
  * That the HUD looks right. There is no reference image and ADR 0009 forbids
@@ -80,6 +90,7 @@ import {
   routeProfile,
   seconds,
   watts,
+  MAXIMUM_WIND_SPEED_METRES_PER_SECOND,
   type RoutePoint,
   type RouteProfile,
 } from '@onyourleft/domain';
@@ -217,6 +228,16 @@ const STATE: GameState = {
   ridden: seconds(1_200),
   grade: gradeAt(PROFILE, RIDDEN),
   input: { power: watts(342), live: true },
+  // ⚠️ **The one field here that is deliberately extreme, against the rule
+  // stated above it** — #335. Every other value is an ordinary one because the
+  // widest number a field could ever hold is arithmetic nobody will see; the
+  // wind is different, because the widest one is a number a rider can *type*.
+  // `MAXIMUM_WIND_SPEED_METRES_PER_SECOND` is the bound `route/wind.ts`
+  // enforces, so this is the widest wind reading the product can ever produce
+  // — 144 km/h, five glyphs where the speed beside it has four. Read from the
+  // constant rather than written out, so the harness cannot drift from the
+  // bound it is measuring.
+  headwindMetresPerSecond: MAXIMUM_WIND_SPEED_METRES_PER_SECOND,
 };
 
 /** The bot, up the road — a live gap, which is the field's other shape. */

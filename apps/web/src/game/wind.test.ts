@@ -30,6 +30,7 @@ import {
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
+  headwindOnRoute,
   kilograms,
   routeProfile,
   watts,
@@ -82,6 +83,36 @@ function outAndBack(legMetres: number): SimulationSetup {
   }
   for (let along = legMetres - 10; along >= 0; along -= 10) {
     points.push(at(along));
+  }
+  return { profile: routeProfile(points), conditions: CONDITIONS };
+}
+
+/**
+ * A road that curves continuously — a quarter of a circle about 300 m across.
+ *
+ * ⚠️ **Here because a straight road cannot tell two implementations apart.**
+ * `headingOnRoute` is piecewise constant over the profile's grid, so the
+ * heading at the start of a 0.05 s step and at the end of it are the same
+ * number on every road in this file except at the one point where
+ * {@link outAndBack} turns. On an arc the heading changes cell by cell, which
+ * is what gives the assertion something to be wrong about.
+ */
+function curvingRoad(): SimulationSetup {
+  const radiusMetres = 300;
+  const points: RoutePoint[] = [];
+  for (let step = 0; step <= 120; step += 1) {
+    const angle = (step / 120) * (Math.PI / 2);
+    const north = radiusMetres * Math.sin(angle);
+    const east = radiusMetres * (1 - Math.cos(angle));
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(51.5 + north / METRES_PER_DEGREE_LATITUDE),
+        degreesLongitude(
+          -0.12 + east / (METRES_PER_DEGREE_LATITUDE * Math.cos((51.5 * Math.PI) / 180)),
+        ),
+      ),
+      elevation: altitudeMetres(20),
+    });
   }
   return { profile: routeProfile(points), conditions: CONDITIONS };
 }
@@ -271,5 +302,115 @@ describe('the bot pacer rides the same wind as the rider', () => {
     const blown = ride({ ...northRoad(4000), wind: northerly(12) }, 0, 60);
     expect(blown.state.ride.distance).toBe(0);
     expect(blown.state.ride.speed).toBe(0);
+  });
+});
+
+/**
+ * #335: the wind carried out on the state, where a rider can be shown it.
+ *
+ * Everything above is about the wind reaching the **physics**. This block is
+ * about it reaching the **screen**, and the two are separate claims: every
+ * assertion above stayed green throughout the months in which a rider who set
+ * a wind was given no indication that one was in effect. `hud/fields.ts`
+ * §`windReading` is the consumer; what is asserted here is that the number it
+ * reads is the one the tick actually used, resolved where the rider actually
+ * is.
+ */
+describe('the ride carries its headwind out where the HUD can read it (#335)', () => {
+  it('reports no headwind at all on a ride in still air, rather than a nought', () => {
+    // ⚠️ The criterion, and the reason it is `undefined` rather than `0`:
+    // "nobody set a wind" and "the wind is across you right now" are different
+    // facts and the HUD renders them differently. A zero here would make the
+    // second unsayable.
+    const before = ride(northRoad(4000), 220, 30);
+    expect(before.state.headwindMetresPerSecond).toBeUndefined();
+    // And on the first frame too, before any step has run.
+    expect(new GameSimulation(northRoad(4000)).state.headwindMetresPerSecond).toBeUndefined();
+  });
+
+  it('reports the headwind from the first frame, before a step has run', () => {
+    // `GameView` renders the HUD from `simulation.state` before its loop has
+    // ticked once. A field populated only in `advanceTo` would show a rider a
+    // dash for the wind they had just set, on the frame they most expect it.
+    const simulation = new GameSimulation({ ...northRoad(4000), wind: northerly(6) });
+    expect(simulation.state.headwindMetresPerSecond).toBeCloseTo(6, 6);
+  });
+
+  it('is positive into a headwind and negative with a tailwind', () => {
+    // The sign convention `packages/physics` uses, carried out unchanged: the
+    // HUD turns it into a word, and a field that reported a magnitude would
+    // have thrown away the only part a rider cannot infer.
+    const into = ride({ ...northRoad(4000), wind: northerly(6) }, 220, 30);
+    const behind = ride({ ...northRoad(4000), wind: southerly(6) }, 220, 30);
+
+    expect(into.state.headwindMetresPerSecond as number).toBeGreaterThan(0);
+    expect(behind.state.headwindMetresPerSecond as number).toBeLessThan(0);
+  });
+
+  it('is the wind resolved at the rider’s OWN distance, not at the one the step began at', () => {
+    // ⚠️ **The assertion that pins *where* it is read, and the counter beside
+    // it is what makes it one.** `headingOnRoute` is piecewise constant over
+    // the profile's grid, so on a straight road the distance a step started
+    // from and the distance it ended at give the *same* headwind and the
+    // comparison is vacuous — measured, by mutating the implementation to read
+    // `previousRide.distance` and watching an out-and-back version of this
+    // stay green. On a curving road the two disagree whenever a step crosses a
+    // grid cell, so the loop asserts the invariant on every step and counts
+    // the steps that could have told the difference.
+    //
+    // Which distance is the right one is settled by the field beside it:
+    // `grade` on the state is read at the post-step distance, and a headwind a
+    // step behind it would describe a different piece of road on the same HUD.
+    const route = curvingRoad();
+    const air = northerly(6);
+    const simulation = new GameSimulation({ ...route, wind: air });
+    const startMs = 1_000_000;
+    const input = { power: watts(220), live: true };
+    simulation.advanceTo(startMs, input);
+
+    let discriminating = 0;
+    for (let frame = 1; frame <= 600; frame += 1) {
+      const began = simulation.state.ride.distance;
+      simulation.advanceTo(startMs + frame * SIMULATION_STEP_SECONDS * 1000, input);
+      const ended = simulation.state.ride.distance;
+      expect(simulation.state.headwindMetresPerSecond as number).toBeCloseTo(
+        headwindOnRoute(route.profile, ended, air),
+        9,
+      );
+      if (
+        headwindOnRoute(route.profile, began, air) !== headwindOnRoute(route.profile, ended, air)
+      ) {
+        discriminating += 1;
+      }
+    }
+
+    // The steps on which the two candidate distances actually disagree. Without
+    // this the loop above is 600 tautologies.
+    expect(discriminating).toBeGreaterThan(5);
+  });
+
+  it('turns from a headwind into a tailwind when the rider turns round', () => {
+    // The whole reason the number is worth putting on a screen: one unchanging
+    // wind is two different things to a rider, and which one it is now is not
+    // something they can read off the picker.
+    const route = outAndBack(600);
+    const air = northerly(6);
+    const outbound = ride({ ...route, wind: air }, 220, 30);
+    const homeward = ride({ ...route, wind: air }, 220, 150);
+
+    expect(outbound.state.ride.distance).toBeLessThan(600);
+    expect(homeward.state.ride.distance).toBeGreaterThan(700);
+    expect(outbound.state.headwindMetresPerSecond as number).toBeGreaterThan(0);
+    expect(homeward.state.headwindMetresPerSecond as number).toBeLessThan(0);
+  });
+
+  it('reports a crosswind as a number, which is not the same as no wind', () => {
+    // A westerly on a northward road: the wind is real, and its component
+    // along the road is nothing. The field is present and reads zero, where a
+    // still-air ride has no field at all.
+    const across = ride({ ...northRoad(4000), wind: wind(9, 270) }, 220, 30);
+
+    expect(across.state.headwindMetresPerSecond).toBeDefined();
+    expect(across.state.headwindMetresPerSecond as number).toBeCloseTo(0, 9);
   });
 });

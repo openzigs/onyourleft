@@ -77,6 +77,24 @@
  * claim `hud-value-size.test.ts` makes arithmetically and this file makes by
  * asking a browser.
  *
+ * ## The ninth field, and why a magnitude is a different question — #335
+ *
+ * The wind reading is the first field this panel has gained since the gate was
+ * written, and it is measured here at the **widest value the product can
+ * produce**: `route/wind.ts` bounds a wind at 40 m/s, which is `144 km/h`.
+ * Measured through this harness at 2.5 rem it is **113.5 px against the 118 px
+ * landscape track**, on one line, in both orientations.
+ *
+ * ⚠️ **And it could not have overflowed anyway, which is worth writing down
+ * rather than discovering twice.** A value that is a magnitude is a number,
+ * a space and a unit — so it has a **break opportunity**, and a track too
+ * narrow for it wraps the unit onto a second line instead of spilling
+ * sideways. That is measurable here: `45.0 km/h` occupies 122.5 px on one line
+ * in the 159 px portrait track and wraps to 82.6 px in the 118 px landscape
+ * one, and neither is an overflow. #259's three words had no space in them,
+ * which is the whole of why they behaved differently. The assertion above is
+ * therefore about the field being *rendered*, not about a risk it carries.
+ *
  * ## What it does not prove
  *
  * That the HUD looks right. There is no reference image, and ADR 0009 forbids
@@ -271,6 +289,23 @@ for (const viewport of VIEWPORTS) {
           .every((value) => value.word),
       ).toBe(true);
       expect(control(measured).every((value) => !value.word)).toBe(true);
+    });
+
+    test('renders the wind field, at the widest reading a rider can produce', async ({ page }) => {
+      const measured = await measure(page, viewport);
+
+      // #335's ninth field. Without this the overflow assertion below would be
+      // satisfied by a panel that had stopped rendering it at all — the same
+      // reason the three outcome words are asserted present above.
+      const wind = shipping(measured).filter((value) => value.label === 'Wind');
+      expect(wind.length).toBeGreaterThan(0);
+      // The bound `route/wind.ts` enforces, 40 m/s, in the harness's metric
+      // default: five glyphs against the four the speed beside it carries, and
+      // the widest this field can ever be. @see hud-harness.tsx §`STATE`
+      expect(wind.every((value) => value.text.startsWith('144 km/h'))).toBe(true);
+      // A magnitude and not a word, so #259's rule is not on it and the
+      // control panels below are unchanged by its arrival.
+      expect(wind.every((value) => !value.word)).toBe(true);
     });
 
     test('fits every value inside its own grid track', async ({ page }) => {

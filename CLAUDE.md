@@ -244,7 +244,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         into a refusal (#326) — and the answer to that issue's
                         fifth criterion, which is that the source is
                         **rider-entered**. Anything external is #248 and is not
-                        attempted here
+                        attempted here. ⚠️ **It is the ONLY place a wind is
+                        chosen**: #335 settled that it cannot be changed
+                        mid-ride, and `simulation.ts` §`SimulationSetup.wind`
+                        is where that is written down
     src/game/hud/       the ride HUD (#94) — the eight fields, the dropped
                         sensor that is not a zero, and the wake lock; and since
                         #285 the route in plan with the rider on it — north-up,
@@ -255,7 +258,12 @@ apps/                 AGPL-3.0-or-later, without exception
                         already holds. ⚠️ **Since #287 the elevation strip
                         shares that wrapped fraction** — it used to clamp, and
                         a reviewer who remembers the two deliberately
-                        disagreeing is reading the old file
+                        disagreeing is reading the old file. ⚠️ **Since #335
+                        there are NINE fields on a ride the rider set a wind
+                        for and eight on one they did not** — the wind reading
+                        is last and absent rather than nought in still air, on
+                        the `NO_READING` precedent, and "nine" is safe only
+                        because the wind cannot change mid-ride
     src/game/sensors.ts the four metric states the ride controller reports,
                         mapped to the three things a HUD renders
     src/game/ghost-source.ts
@@ -2548,6 +2556,8 @@ top of an issue **supersedes its body**.
 | How a route a rider imported becomes a loop at all, and why it is a tick box rather than the geometry | `apps/web/src/routes/import-form.ts`, `apps/web/src/game/loop-from-import.test.tsx` |
 | What a rider is told when the file they marked as a loop does not close | `apps/web/src/routes/save.ts` §`loopRefusalText` |
 | Why the HUD's "To go" counts down to the end of the lap rather than to the route's length | `apps/web/src/game/hud/fields.ts` §`hudReadings` |
+| What a rider is told about the wind while they are riding, and why still air shows nothing rather than a nought | `apps/web/src/game/hud/fields.ts` §`windReading`, `apps/web/src/game/simulation.ts` §`GameState.headwindMetresPerSecond` |
+| Whether the wind can be changed mid-ride, and what would have to change for it to be | `apps/web/src/game/simulation.ts` §`SimulationSetup.wind`, [#335](https://github.com/openzigs/onyourleft/issues/335) |
 | Where a route's heights came from, and why an absent source is never substituted | `packages/store/src/records.ts` §`RouteRecord.elevation`, `apps/web/src/routing/elevation.ts` |
 | Why only two legs are re-routed when a waypoint moves, and what a change-detector gets wrong | `apps/web/src/routing/draft.ts` §`moveWaypoint`, §`insertWaypoint` |
 | Why undo stores whole drafts, and why an engine's answer is not a history step | `apps/web/src/routing/history.ts` §`record`, §`settle` |
@@ -2730,4 +2740,4 @@ top of an issue **supersedes its body**.
 | What an erase does to the unit preference, and what has to be told | `apps/web/src/transfer/erase-device.ts` §`eraseDevice`, `apps/web/src/transfer/TransferView.tsx` §`onUnitsReset` |
 | Which way a payload faces, and why an export is deliberately not trimmed | `apps/web/src/privacy/boundaries.ts`, [#35](https://github.com/openzigs/onyourleft/issues/35) |
 
-<!-- Last updated: 2026-09-15 by delivery:code-issue resolving #307 (elevation, the type scale's ratio, and the capability queries) -->
+<!-- Last updated: 2026-09-17 by delivery:code-issue resolving #335 (the wind on the ride screen, and that it cannot be changed mid-ride) -->
