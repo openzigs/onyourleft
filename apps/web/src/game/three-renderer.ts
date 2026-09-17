@@ -254,7 +254,7 @@ const GROUND_BELOW_ROAD_METRES = 0.25;
 const UNSET_COLOUR = 0x000000;
 
 /**
- * How far from the road's centreline `scatter.ts` can put anything: **39.5 m**.
+ * How far from the road's centreline `scatter.ts` can put anything: **44.5 m**.
  *
  * Derived from that file's own three numbers rather than restated here, so the
  * cull below cannot go on describing a band that has moved. ⚠️ **It was 21 m
@@ -334,7 +334,7 @@ export const FRUSTUM_SPREAD =
 export const FOGGED_OUT_METRES = VIEW_AHEAD_METRES;
 
 /**
- * How far to the side of the *camera itself* a scatter item may stand: 79 m.
+ * How far to the side of the *camera itself* a scatter item may stand: 89 m.
  *
  * ⚠️ **42 m until #348**, for the reason {@link SCATTER_BAND_REACH_METRES}
  * gives. Widening the floor can only make the cull keep *more*, so every
@@ -359,8 +359,8 @@ export const FOGGED_OUT_METRES = VIEW_AHEAD_METRES;
  * - **The camera is pitched down** by `atan(3 / 33) ≈ 5.2°`, so an item's depth
  *   along the view axis is `0.996 · d − 0.090 · (itemHeight − cameraHeight)`
  *   rather than `d`. Ignoring that overstates depth for anything *below* the
- *   camera, and the margin covers it for a drop of `79 / (FRUSTUM_SPREAD ·
- *   0.090) ≈ 253 m` inside the 400 m view — a sustained 63 % descent, which no
+ *   camera, and the margin covers it for a drop of `89 / (FRUSTUM_SPREAD ·
+ *   0.090) ≈ 285 m` inside the 400 m view — a sustained 71 % descent, which no
  *   road is.
  * - **An instance is placed at a point and drawn with a size**: the tallest
  *   kind is about 7 m and the widest a little over 3 m across, so an item whose
@@ -399,7 +399,7 @@ export const SCATTER_LATERAL_METRES = 2 * SCATTER_BAND_REACH_METRES;
  *
  * ⚠️ **The share dropped at R = 100 m roughly doubled, and that is the wider
  * band rather than a worse cull.** #348 took the placement band from 21 m to
- * 39.5 m from the centreline, and on a hairpin the far half of that band folds
+ * 44.5 m from the centreline, and on a hairpin the far half of that band folds
  * behind the rider. **None of it is inside the frustum**: that is asserted over
  * every item of every frame at ten radii rather than argued for, in
  * `three-renderer.test.ts` §"never drops an item that is on screen and not yet

@@ -803,8 +803,8 @@ describe('the cull against what `scene.ts` actually hands it', () => {
    *
    * ⚠️ **Re-measured for #348, and the share it drops roughly doubled** — a
    * reviewer who remembers "a fifth" here is reading the old file. That issue
-   * took the scenery band from 16 m deep to 30 m and pushed the verge back, so
-   * an item may now stand 39.5 m from the centreline rather than 21 m, and on a
+   * took the scenery band from 16 m deep to 35 m and pushed the verge back, so
+   * an item may now stand 44.5 m from the centreline rather than 21 m, and on a
    * 100 m hairpin the far half of that band folds behind the rider. The
    * assertion that matters is unchanged and still holds: **none of what was
    * dropped was on screen.**

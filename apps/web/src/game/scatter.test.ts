@@ -591,14 +591,84 @@ describe('a bend does not fold the scenery into the road — #348', () => {
     );
   };
 
-  it.each([10, 12, 15, 20, 25, 40, 80, 200, 600])(
-    'stands nothing inside the verge on a bend of %d m radius',
+  /** Every item a circuit of this radius carries. */
+  const itemsOn = (radiusMetres: number): readonly ScatterItem[] => {
+    const profile = circuit(radiusMetres);
+    return place(profile, 0, profile.totalDistance);
+  };
+
+  // ⚠️ **Split in two, and the split is the whole of the assertion.** Every
+  // radius under about 24 m is refused outright, so a single sweep across both
+  // halves reads `Infinity` for the tight ones and passes over an empty set —
+  // which is a case that stays green if a later change empties every radius
+  // there is. Under the mutation that removes the bend cap entirely, 15 m was
+  // the one radius of nine that did **not** go red for exactly that reason.
+  // Each half now says which claim it is making.
+  it.each([25, 40, 80, 200, 600])(
+    'stands nothing inside the verge on a bend of %d m radius, and stands something',
     (radiusMetres) => {
-      // `Infinity` when a bend carries nothing at all, which is the answer the
-      // next test is about and is not a violation of this one.
+      expect(itemsOn(radiusMetres).length).toBeGreaterThan(0);
       expect(nearestToTheRoad(radiusMetres)).toBeGreaterThan(9);
     },
   );
+
+  /** Every radius in `[from, to)`, a quarter of a metre apart. */
+  const radiiFrom = (from: number, to: number): readonly number[] => {
+    const radii: number[] = [];
+    for (let radiusMetres = from; radiusMetres < to; radiusMetres += 0.25) {
+      radii.push(radiusMetres);
+    }
+    return radii;
+  };
+
+  // ⚠️ **Swept rather than sampled at four round radii, and that is the
+  // difference between this assertion and a vacuous one.** A circuit of 15 m is
+  // a 94 m loop, and the clustering can leave the whole of one bare on its own
+  // — so a single radius asserted to be empty may be empty for a reason that
+  // has nothing to do with the bend. Measured: with the cap removed altogether,
+  // 10, 12 and 20 go red and **15 does not**. Over the whole range no such
+  // accident can carry it, because the uncapped code plants somewhere in it.
+  it('carries nothing at any radius too tight for the first band', () => {
+    for (const radiusMetres of radiiFrom(9.75, 24)) {
+      expect({ radiusMetres, items: itemsOn(radiusMetres) }).toEqual({ radiusMetres, items: [] });
+    }
+  });
+
+  // ⚠️ **Below 9.55 m, and this is where the guard used to stop being
+  // absolute.** @see AMBIGUOUS_TURN_RADIUS_METRES. `curvatureAt` wraps its turn
+  // into `(-π, π]`, and a 30 m chord subtends more than π once the radius falls
+  // under `30 / π`; the wrap then reported a *small* curvature, `bandsAt` read
+  // the road as open, and every band was placed on a road folding hard.
+  // Measured on this fixture before the chord reading was added: 4.75 m stood
+  // three things, the nearest **5.00 m** from the centreline, and 5.25 m stood
+  // thirteen with the nearest at **4.66 m** — outside the 3.5 m carriageway, so
+  // #243's hard rule held, and well inside the 9.5 m verge #348 promises.
+  //
+  // The step is a quarter of a metre rather than a round metre because the
+  // failure was not a band of radii: it was 4.00, 4.50, 4.75, 5.00, 5.25 and
+  // 5.50 and nothing in between, since which multiple of the sampling step the
+  // turn lands on is what decides whether the wrapped angle comes out small.
+  it('carries nothing on a bend too tight for its own turn to be measured', () => {
+    for (const radiusMetres of radiiFrom(1, 9.75)) {
+      expect({ radiusMetres, items: itemsOn(radiusMetres) }).toEqual({ radiusMetres, items: [] });
+    }
+  });
+
+  // ⚠️ **A `NaN` here is invisible rather than loud**, which is why it is
+  // asserted over the sweep rather than left to the eye: `three-renderer.ts`
+  // makes the same argument about a degenerate look-at — a `NaN` in a vertex
+  // buffer draws a black screen, not a visible fault. Circuits of 1.25 m to
+  // 2.25 m radius — loops of eight to fourteen metres, which is a broken import
+  // rather than a road — emitted twelve such items at 2 m before the chord
+  // reading refused them, and six on the code this issue started from.
+  it('never emits a coordinate that is not a number, however short the loop', () => {
+    for (let radiusMetres = 1; radiusMetres <= 40; radiusMetres += 0.25) {
+      const rogue = itemsOn(radiusMetres).filter(
+        (item) => !Number.isFinite(item.x) || !Number.isFinite(item.y) || !Number.isFinite(item.z),
+      );
+      expect({ radiusMetres, rogue }).toEqual({ radiusMetres, rogue: [] });
+    }
+  });
 
   it('places nothing where a bend is too tight to hold a verge, rather than placing it in the road', () => {
     // ⚠️ **The non-vacuity for the sweep above**, and the assertion that goes

@@ -57,6 +57,7 @@
  * | {@link SETTLEMENT_TREE_LINE_FRACTION}, {@link SETTLEMENT_GRADE_PERCENT} | **This repository's own.** People build on the valley floor and not on the pitch |
  * | {@link SCATTER_VERGE_METRES}, {@link SCATTER_BAND_METRES} | **This repository's own**, and the verge is a requirement rather than a taste — see the criterion it discharges on {@link SCATTER_VERGE_METRES} |
  * | {@link BEND_INNER_SHARE} | **Derived, not chosen.** Its two bounds come from the geometry of placing by a local normal and from {@link MINIMUM_SCATTER_SEPARATION_METRES}; the measurement that shows why it is needed is on the constant |
+ * | {@link AMBIGUOUS_TURN_RADIUS_METRES}, {@link AMBIGUOUS_CHORD_SHARE} | **Derived, not chosen.** The radius at which a {@link CURVATURE_WINDOW_METRES} chord subtends more than π is `30 / π`; the first is a margin below it and the second is `\|sin θ\| / θ` at that radius, computed rather than written down |
  * | {@link SCATTER_CELL_METRES}, {@link CELL_FILL}, {@link CLUSTER_SPAN_METRES}, {@link OPEN_GROUND_SHARE} | **This repository's own**, and judged by eye on the device rather than measured — #348, whose whole content is that the numbers said the scenery was fine and it looked like a village |
  * | The weights and densities | **This repository's own**, chosen so that each of the three named places — valley floor, above the trees, a steep pitch — reads as a different place, which is what `scatter.test.ts` asserts |
  * | {@link fmix32} | MurmurHash3's 32-bit finaliser, Austin Appleby, **placed in the public domain by its author**. Arithmetic, and the one piece of this file that is anybody else's idea |
@@ -275,7 +276,7 @@ export const BAND_FILL = 0.55;
  * side of the road. Measured against the committed code on a circular fixture,
  * a 10 m radius put items **1.0 m** from the centreline — inside a 3.5 m
  * half-carriageway — and a 12 m radius put them 1.3 m. The band was 21 m then;
- * at 39.5 m the same fold reaches radii up to about 21 m.
+ * at 44.5 m the same fold reaches radii up to about 21 m.
  *
  * Two bounds, and {@link bandsAt} takes the smaller:
  *
@@ -386,6 +387,50 @@ export const TIGHT_BEND_RADIANS_PER_METRE = 1 / 50;
 
 /** How far either side of a point the bend is measured over, in metres. */
 export const CURVATURE_WINDOW_METRES = 30;
+
+/**
+ * The tightest radius {@link curvatureAt} will name rather than measure: **12 m**.
+ *
+ * ⚠️ **This is what makes {@link bandsAt}'s guard absolute rather than
+ * absolute-above-a-radius**, and it closes a hole the first version of #348
+ * left. `curvatureAt` reads a turn as an angle between two chord directions and
+ * wraps it into `(-π, π]`, which it must — a bend either side of due north is
+ * not a U-turn. But the angle a {@link CURVATURE_WINDOW_METRES} chord subtends
+ * on a circle of radius `R` is `30 / R`, and that passes π at
+ * `R = 30 / π ≈ 9.55 m`. Below that the wrap reports a *small* curvature for a
+ * road that folds hard, `bandsAt` reads it as open and places every band, and
+ * scenery lands well inside the verge: measured on circular fixtures, radii of
+ * 4.75 m to 5.5 m stood things **4.7 m** from the centreline against a promised
+ * 9.5 m. #243's hard rule — nothing in the 3.5 m carriageway — still held, and
+ * #348's verge rule did not.
+ *
+ * Two directions cannot tell a turn of `θ` from one of `θ + 2π`, so the repair
+ * is not a better angle; it is a **second reading that does not wrap**. The
+ * straight-line distance between the two ends of the window is `2R·sin(θ)`
+ * against a straight road's `2 · CURVATURE_WINDOW_METRES`, so their ratio is
+ * `|sin θ| / θ` — and that is below {@link AMBIGUOUS_CHORD_SHARE} for **every**
+ * `θ > π`, with no ambiguity of its own: `|sin θ| / θ` is monotone decreasing
+ * on `(0, π]` and its largest value anywhere above π is 0.217, at `θ ≈ 4.49`.
+ * So a road the wrap could misreport is always caught here.
+ *
+ * ⚠️ **What it reports is a bound, not a measurement**, and it is honest about
+ * the direction: below the threshold the only true statement is *"at least this
+ * tight"*. 12 m is far inside the ~24 m radius {@link bandsAt} already refuses,
+ * so a road caught here was going to be refused anyway and this only stops it
+ * being refused for the wrong reason.
+ */
+export const AMBIGUOUS_TURN_RADIUS_METRES = 12;
+
+/**
+ * The share of a straight road's window span a chord may close to before the
+ * reading is ambiguous.
+ *
+ * ⚠️ **Derived from {@link AMBIGUOUS_TURN_RADIUS_METRES}, not written down**,
+ * so the two cannot come to disagree about which radius the threshold names.
+ */
+export const AMBIGUOUS_CHORD_SHARE =
+  Math.abs(Math.sin(CURVATURE_WINDOW_METRES / AMBIGUOUS_TURN_RADIUS_METRES)) /
+  (CURVATURE_WINDOW_METRES / AMBIGUOUS_TURN_RADIUS_METRES);
 
 /**
  * Below this, the road has no direction at all: **a micrometre**.
@@ -764,10 +809,24 @@ function bandWidthMetres(): number {
  * roundabout; `CURVATURE_WINDOW_METRES` smooths anything shorter than 60 m of
  * arc, so a single tight corner on an otherwise open road keeps its scenery.
  *
+ * ⚠️ **That smoothing is also where this guard could stop being absolute, and
+ * it is the reason {@link AMBIGUOUS_TURN_RADIUS_METRES} exists.** This function
+ * is only ever as good as the curvature it is handed, and a window measured as
+ * an angle cannot read a road that turns through more than half a circle inside
+ * it. Below about 9.55 m of radius the reading used to come back *small*, the
+ * straight-road branch was taken, and all seven bands were placed on a road
+ * folding hard — measured, 4.7 m from the centreline where 9.5 m is promised.
+ * `curvatureAt` now reports a bound rather than a wrapped angle there, so the
+ * refusal holds at every radius; `scatter.test.ts` sweeps 1 m to 24 m in
+ * quarter-metre steps rather than sampling four round radii, because the
+ * failure fell on particular radii and not on a band of them.
+ *
  * ⚠️ Written as `!(curvature > 0)` rather than `curvature <= 0` so a `NaN`
  * takes the straight-road branch instead of falling through it into a `NaN`
  * band count, which would make the loop below run zero times on a route that
- * merely has a hole in its positions.
+ * merely has a hole in its positions. ⚠️ **{@link curvatureAt} no longer hands
+ * one over** — the chord reading catches a hole before the angle is taken — so
+ * this is now a guard against a second caller rather than against the only one.
  */
 function bandsAt(curvature: number): number {
   if (!(curvature > 0)) {
@@ -870,6 +929,22 @@ function curvatureAt(profile: RouteProfile, origin: CorridorOrigin, at: number):
   const here = sample(at);
   const after = sample(at + CURVATURE_WINDOW_METRES);
 
+  // ⚠️ **Read before the angle is, because below a radius of about 9.55 m the
+  // angle cannot be read at all.** @see AMBIGUOUS_TURN_RADIUS_METRES for why
+  // the wrap below has to lie there, why a chord cannot, and why the answer is
+  // a bound rather than a number.
+  //
+  // ⚠️ Written as `!(spanned > …)` rather than `spanned <= …` for the reason
+  // `normalAt` gives below, and **that half is a form rather than a guarantee**:
+  // rewriting it the other way round leaves every test in this repository green,
+  // measured rather than assumed. A `RouteProfile`'s positions are validated
+  // before it exists, so nothing here can reach a `NaN` chord to assert on — do
+  // not read the negated form as evidence one is handled.
+  const spanned = Math.hypot(after.x - before.x, after.z - before.z);
+  if (!(spanned > AMBIGUOUS_CHORD_SHARE * 2 * CURVATURE_WINDOW_METRES)) {
+    return 1 / AMBIGUOUS_TURN_RADIUS_METRES;
+  }
+
   const incoming = Math.atan2(after.z - here.z, after.x - here.x);
   const outgoing = Math.atan2(here.z - before.z, here.x - before.x);
   let turn = incoming - outgoing;
@@ -929,10 +1004,18 @@ function normalAt(
   let dx = ahead.x - here.x;
   let dz = ahead.z - here.z;
   // ⚠️ Written as `!(length > …)` rather than `length <= …` so that a `NaN`
-  // takes this branch too instead of falling through it into a `NaN` coordinate,
-  // which reaches a vertex buffer and draws a black screen rather than a visible
-  // fault — the argument `scene.ts` §`cameraPose` makes about a degenerate
-  // look-at.
+  // takes this branch too instead of falling through it. **It catches a `NaN`
+  // input and not a degenerate fallback**, and that distinction is not academic:
+  // the backward difference has a length of its own, and on a loop shorter than
+  // two grid steps it is zero as well, so `0 / 0` leaves with the item. Circuits
+  // of 1.25 m to 2.25 m radius did exactly that — twelve `NaN` coordinates at
+  // 2 m — and a `NaN` in a vertex buffer draws a black screen rather than a
+  // visible fault, the argument `scene.ts` §`cameraPose` makes about a
+  // degenerate look-at. What closes it is upstream and absolute rather than a
+  // third difference here: a loop that short reads as tighter than
+  // {@link AMBIGUOUS_TURN_RADIUS_METRES}, so {@link bandsAt} places nothing on
+  // it and this function is never reached. `scatter.test.ts` §"never emits a
+  // coordinate that is not a number" sweeps every radius up to 40 m for it.
   if (!(Math.hypot(dx, dz) > DEGENERATE_TANGENT_METRES)) {
     const behind = localGroundPosition(
       origin,
