@@ -4,19 +4,23 @@
 
 ## 1. What has and has **not** been done
 
-⚠️ **Nothing in this document has been executed.** There is no Android SDK in the
-environment this was written in and `dl.google.com` is refused by the egress
-proxy, which is the same limitation [`README.md`](README.md) §4 records for #87.
-So:
+⚠️ **This table used to open "nothing in this document has been executed", and a
+reader who remembers that sentence is reading the old file.** The pipeline has
+been run; the account has not been registered and no phone has installed
+anything. Those are different kinds of outstanding and the table says which is
+which.
 
 | Piece | State |
 | --- | --- |
 | `REL001` — no committed key material | **Enforced and tested.** `scripts/check-repo-rules.sh`, six fixtures, runs on every pull request |
-| `REL002` — target API floor | **Enforced and tested.** Five fixtures, including one that goes red below 36 |
-| `.github/workflows/release.yml` | **Written, never run.** No tag has been pushed and no signed build exists |
+| `REL002` — target API floor | **Enforced and tested.** Eleven fixtures. ⚠️ Since #95 it reads **every** Gradle file under `android/`, not `variables.gradle` alone — §7 says what it used to miss |
+| `.github/workflows/release.yml` | **Run, and green.** Two `workflow_dispatch` runs on 2026-09-16 assembled a **signed release APK** on a GitHub-hosted runner — [35160018484](https://github.com/openzigs/onyourleft/actions/runs/35160018484) and, with the verification step below, [35162828363](https://github.com/openzigs/onyourleft/actions/runs/35162828363). ⚠️ **Never run on a tag**: there is no `v*` tag and no GitHub Release |
+| The signing key | **In CI secrets, and used.** Four secrets — `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` — set 2026-09-16. Nothing about the key is in this repository, which is `REL001`'s whole job |
 | The Play account decision | **Not taken.** It is an owner decision and §3 is what it needs |
-| A published privacy policy | **Not written.** §4 |
-| A signed build installed on a device | **Not done.** This is #95's definition of done and it is outstanding |
+| A published privacy policy | **Written and linked.** [`docs/privacy-policy.md`](../../docs/privacy-policy.md), reachable from the app's About page. §4 |
+| The Health apps declaration | **Not filed.** It is a Play Console form and needs an account, which is §3 |
+| The Data Safety form | **Answered, not filed.** The answers are `src/android/data-safety.ts` and the "no location" one is asserted against the merged manifest. §4 |
+| A signed build installed on a device | **Not done.** This is #95's definition of done and it is outstanding. §8 says how to get the APK now that a dispatch run keeps one |
 
 CLAUDE.md §4a's rule — that a documented command nobody has run is the most
 expensive kind of wrong — is why that table is first rather than last.
@@ -38,9 +42,9 @@ has no telling name at all.
 
 Google Play, verbatim from `support.google.com/googleplay/android-developer/answer/14151465`:
 
-> *"If you have a newly created personal developer account, you must run a closed
+> _"If you have a newly created personal developer account, you must run a closed
 > test for your app with a minimum of 12 testers who have been opted-in for at
-> least the last 14 days continuously."*
+> least the last 14 days continuously."_
 
 Testers who opt in, test for under 14 days and opt out **do not count**, and the
 14 days must be consecutive. For a pre-release open-source project, finding 12
@@ -52,68 +56,181 @@ under the `openzigs` GitHub organization, so registering the Play account as an
 organization sidesteps it — but D-U-N-S verification itself takes time, which is
 why #95 was filed now rather than at release.
 
+Re-checked **2026-09-16**, and nothing has moved: the rule still applies to
+personal accounts created on or after 2023-11-13, the tester minimum is still 12
+(reduced from 20 in December 2024), and an organization account verified against
+a legal entity is still exempt.
+
 ⚠️ **This decision has not been taken and cannot be taken from here.** #95's
-third criterion is that either the org account is registered *or* this file
-records the fallback **with named testers**. Neither has happened. Whoever takes
-it writes the outcome and the date below this line.
+third criterion is that either the org account is registered _or_ this file
+records the fallback **with named testers**. Neither has happened, and no code
+change can make either happen — it needs somebody with a card and a company
+number. Whoever takes it writes the outcome and the date below this line.
 
-## 4. Health policy, and the one thing #87 already bought
+<!-- The Play account decision goes here: what was registered, by whom, on what
+     date. If it is a personal account, the twelve testers go here by name with
+     the date each opted in, because the 14 days are consecutive and a list
+     nobody wrote down is a list that restarts. -->
 
-Play's Health Content and Services policy covers apps that are *not primarily*
+## 4. Health policy, the privacy policy, and the Data Safety form
+
+Play's Health Content and Services policy covers apps that are _not primarily_
 health apps:
 
-> *"If your app is not primarily a health app, but has health-related features
+> _"If your app is not primarily a health app, but has health-related features
 > and accesses health data, it is still in scope of the Health App policy… (for
 > example… games apps that collect a user's activity data as a way to advance
-> game play)."*
+> game play)."_
 
 That example is this app: heart rate and power are health data and they advance
-gameplay. So the Health apps declaration and a published privacy policy are
-required, and neither exists yet.
+gameplay.
 
-The good news is structural rather than a promise. #87 asserts `neverForLocation`
-on the Bluetooth scan permission and caps `ACCESS_FINE_LOCATION` at API 30, so
-the Data Safety form can honestly declare **no location collection** — which
-avoids the much harder location-policy review. ⚠️ #95's fifth criterion asks for
-a reviewer to confirm the **merged** manifest supports that claim, and #87's
-README records that the merged manifest has never been produced. That
-confirmation is outstanding, and it is the same outstanding item in both issues.
+**The privacy policy exists**, at [`docs/privacy-policy.md`](../../docs/privacy-policy.md).
+⚠️ Play requires an app in scope of the health policy to carry the policy link
+**inside the app** as well as in the store listing, and requires the two to be
+the same URL. `apps/web/src/privacy/policy.ts` is the single place that URL is
+written down; the About page renders it and `AboutView.test.tsx` fails if it
+stops matching. The URL to paste into Play Console is `PRIVACY_POLICY_URL` from
+that file, not one typed out by hand.
 
-## 5. Android developer verification — checked 2026-09-08
+**The Data Safety answers are `src/android/data-safety.ts`**, written down as
+data rather than left in a screenshot of a console — a form nobody can read from
+the repository is a form nobody can review. Every row is "not collected", which
+is a statement about the product: there is no server (owner decision D6), no
+analytics, and no outbound request in the client at all.
 
-From `developer.android.com/developer-verification` as summarised in #95: developer
-APIs and limited-distribution accounts launched **August 2026**; regional
-enforcement in Brazil, Indonesia, Singapore and Thailand from **2026-09-30**;
-global rollout **2027 and beyond**. Google's stated position:
+#95's fifth criterion asks a reviewer to confirm the **merged** manifest supports
+the "no location collection" claim. That is now done twice over:
 
-> *"Starting in September 2026, Android will require all apps to be registered by
-> verified developers in order to be installed on certified Android devices."*
+- [#318](https://github.com/openzigs/onyourleft/issues/318) established what the
+  merged manifest carries and reviewed each entry, and
+- `data-safety.test.ts` runs `locationClaimFaults` over that merged manifest, so
+  an injected or unbounded location permission is a red test rather than a
+  review nobody repeats. The bound is the whole safety: `ACCESS_FINE_LOCATION`
+  at `maxSdkVersion="30"` grants nothing on Android 12 or later, and the same
+  permission unbounded is a runtime grant everywhere.
 
-F-Droid's open letter (2026-02-24) calls this existential and states that apps
-from unregistered developers will simply fail to install. **This threatens
-F-Droid and direct-APK distribution, which is otherwise the natural home for an
-AGPL app.**
+⚠️ **Two limits on that, stated rather than implied.** The assertions skip
+loudly where no Gradle build has been run, which includes CI — CLAUDE.md §4c —
+so they are a local gate rather than a pull-request one. And only the **debug**
+variant's merge has ever been produced; `merged-manifest.ts` looks for the
+release variant too and has never found one.
 
-⚠️ **This section is a dated observation, not a live status.** It was checked on
-**2026-09-08** against #95's own summary rather than against the primary source,
-because `developer.android.com` was not reachable from this environment. The
-regional enforcement date above is three weeks after that check. Re-read the
-primary source before relying on any of it.
+## 5. Android developer verification — re-checked 2026-09-16
 
-This issue does not solve that problem. It records it, so a distribution channel
-closing is not a surprise.
+⚠️ **This section used to be dated 2026-09-08 and to say the primary source was
+unreachable. It was read directly this time**, from
+`developer.android.com/developer-verification`.
+
+> _"These protections begin for users installing apps from participating stores
+> (Google Play, HONOR App Market, OPPO App Market, Galaxy Store, Palm Store,
+> V-Appstore, GetApps) in Brazil, Indonesia, Singapore, and Thailand, on
+> certified devices running Android 7+. In 2027, we'll expand this globally to
+> all apps on certified devices."_
+
+| Milestone | What |
+| --- | --- |
+| August 2026 | developer APIs, limited-distribution accounts and the power-user "advanced flow" launched |
+| **2026-09-30** | regional enforcement in Brazil, Indonesia, Singapore and Thailand |
+| 2027 and beyond | global, on all certified devices |
+
+Two things the 2026-09-08 note did not have, both of which matter to the
+direct-APK route:
+
+- **Limited distribution accounts exist and are small.** Google's own wording is
+  that students, teachers and hobbyists can "share apps with up to 20 devices
+  without a government-issued ID or registration fee". Twenty devices is a test
+  group, not a distribution channel.
+- **There is an Android Developer Console for apps distributed only outside
+  Play**, and an "advanced flow" so that "power users can sideload apps from
+  unverified developers". Neither has been exercised by anybody here.
+
+F-Droid's open letter (2026-02-24) calls the requirement existential and states
+that apps from unregistered developers will simply fail to install. **This
+threatens F-Droid and direct-APK distribution, which is otherwise the natural
+home for an AGPL app.**
+
+⚠️ **This is a dated observation, not a live status**, and the regional
+enforcement date above is a fortnight after the check. Re-read the primary
+source before relying on any of it. This issue does not solve the problem; it
+records it, so a distribution channel closing is not a surprise.
 
 ## 6. The release workflow
 
 [`.github/workflows/release.yml`](../../.github/workflows/release.yml), triggered
-by a `v*` tag.
+by a `v*` tag and by `workflow_dispatch`.
 
 Deliberately a **separate workflow** from `rules.yml` rather than a job inside
 it. CLAUDE.md §4c's warning — that a second job reports under a different context
-and cannot block a merge — is about *gates*, and this is not a gate: it runs on a
+and cannot block a merge — is about _gates_, and this is not a gate: it runs on a
 tag, after review, and blocking a merge is not its purpose. Adding it to
 `rules.yml` would run an Android build on every pull request, which is minutes of
 runner time for a check nothing depends on.
 
 It builds unsigned unless `ANDROID_KEYSTORE_BASE64` is present, so a fork can run
-it and get an installable debug artefact without holding any secret.
+it and get an installable debug artefact without holding any secret — **except on
+a tag, where a missing secret is now a hard failure.** Without that clause a tag
+pushed after the secret had been rotated or dropped built `assembleDebug` and
+published `app-debug.apk` as the release: signed with the debug key whose private
+half is in every Android SDK on earth, under a version number, with every step
+green.
+
+⚠️ **The step that reads the artefact is the one worth knowing about.**
+`assembleRelease` exiting 0 does not mean the APK is signed — injected signing
+properties AGP ignores produce `app-release-unsigned.apk` and a successful build
+— so the workflow verifies the packaged file with `apksigner` and refuses an
+APK that is unsigned or carries the Android debug certificate. It reads the
+target API level out of the same file with `aapt2`, which is the only copy of
+that number Play ever sees.
+
+`apksigner` rather than `jarsigner`: `minSdkVersion` is 24, so AGP may sign with
+the v2 and v3 schemes alone, and `jarsigner` reports an unsigned jar for a
+perfectly signed APK.
+
+Every run uploads the APK as a workflow artefact, so the pipeline can be
+exercised and the result installed **without cutting a tag** — which is what §8
+is for. The GitHub Release step still runs only on a tag.
+
+## 7. The target API level, and where the floor is stated
+
+Google Play requires new apps and updates to target **Android 16 (API 36)**.
+#95 recorded that sources disagreed on the date; checked 2026-09-16, the date is
+**2026-08-31** for new apps and updates, with an extension available to
+2026-11-01. It is already past, which is why the floor is not negotiable.
+
+The number is stated in three places and `release-pipeline.test.ts` asserts they
+agree:
+
+| Where | How |
+| --- | --- |
+| `android/variables.gradle` | `targetSdkVersion = 36` — what the build applies |
+| `scripts/check-repo-rules.sh` | `MINIMUM_TARGET_SDK=36` — `REL002`, on a bare clone |
+| `.github/workflows/release.yml` | `MINIMUM_TARGET_SDK: '36'` — read back out of the packaged APK |
+
+⚠️ **`REL002` used to read `variables.gradle` alone, take the first match in it,
+and pass silently if the file was absent.** That is the #142 shape (CLAUDE.md
+§4e): a selector asserted to exist rather than discovered. Four regressions were
+green under it and each is now a fixture — deleting `variables.gradle` and
+inlining the values, a literal in `app/build.gradle` overriding the ext
+property, a lower value appended below a compliant one, and AGP's current
+`targetSdk` spelling.
+
+## 8. Getting an APK, and cutting a release
+
+**To exercise the pipeline without releasing anything:**
+
+```bash
+gh workflow run release.yml --ref <branch>
+gh run list --workflow=release.yml --limit 1
+gh run download <run-id> --name android-apk    # the APK, signed if the secrets are set
+adb install -r <the .apk>
+```
+
+That is the path to #95's definition of done. It needs no tag, creates no
+release, and the artefact is the same file a tag would publish.
+
+**To cut a release:** push a `v*` tag. The same job runs, and the GitHub Release
+step publishes the APK as a release asset — the AGPL-native distribution path,
+independent of any store (#95's sixth criterion), and the one §5 says is under
+threat. ⚠️ Nobody has done this yet, so the release step itself is the one part
+of this workflow that has never executed.

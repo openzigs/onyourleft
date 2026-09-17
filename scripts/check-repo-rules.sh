@@ -615,23 +615,89 @@ check_no_key_material
 # Console is authoritative for the account.
 #
 # ⚠️ Checked here rather than in Gradle, and that is the point of the criterion.
-# A Gradle assertion fails for whoever runs a build -- and nobody in this
-# environment can run one, because there is no Android SDK and dl.google.com is
-# refused by the egress proxy (apps/mobile/README.md section 4). A rule that only
-# fires inside a build nobody can run is a rule that never fires. This one runs
-# on a bare clone, in the same CI step as every other repository rule.
+# A Gradle assertion fails for whoever runs a build -- and CI does not build
+# Android at all (CLAUDE.md section 4c). A rule that only fires inside a build
+# nobody runs is a rule that never fires. This one runs on a bare clone, in the
+# same CI step as every other repository rule.
+#
+# ⚠️ It reads every Gradle file under the Android project, not variables.gradle
+# alone, and #95 is where that changed. The rule used to open ONE file, take the
+# FIRST `targetSdkVersion` in it, and `return 0` the moment that file was
+# absent -- which is the #142 shape (CLAUDE.md section 4e): a selector ASSERTED
+# to exist rather than discovered, failing closed against editing the value it
+# names and open against every other way the number reaches the build. Three
+# regressions were green under it, and each is now a fixture:
+#
+#   * deleting variables.gradle and inlining the values into app/build.gradle --
+#     a supported Capacitor layout -- removed the floor while looking like
+#     tidying;
+#   * a literal beside `targetSdkVersion` in app/build.gradle OVERRIDES the ext
+#     property, so variables.gradle could say 36 while the shipped app targeted
+#     33;
+#   * `head -1` read the first assignment and Gradle applies the last, so a
+#     lower value appended below a compliant one was invisible.
+#
+# The floor therefore follows the VALUE rather than a filename: a project that
+# declares a compliant level anywhere passes, one that declares none at all
+# fails, and every numeric declaration has to clear the floor.
 MINIMUM_TARGET_SDK=36
 
+# Every numeric target-API declaration in one Gradle file, as "<spelling> <n>".
+#
+# ⚠️ `targetSdk` as well as `targetSdkVersion`: the short spelling is the
+# current Android Gradle Plugin DSL and sets the same thing, so a rule that knew
+# only the old one would be switched off by a routine Gradle modernisation.
+#
+# ⚠️ A NUMERIC declaration. `targetSdkVersion rootProject.ext.targetSdkVersion`
+# is the shipped app/build.gradle and is not a declaration of a level at all; a
+# sweep that flagged it would be reverted within a day and the rule would go
+# with it. Line comments are stripped first for the same reason -- a Gradle file
+# is allowed to say what it used to target. A block comment is NOT stripped, so
+# a commented-out literal inside one is a false positive: a loud one, which is
+# the side to fail on.
+target_sdk_declarations() {
+  sed 's|//.*||' "$1" \
+    | grep -oE '(^|[^A-Za-z0-9_])targetSdk(Version)?[[:space:]]*(=|\()?[[:space:]]*[0-9]+' \
+    | grep -oE 'targetSdk(Version)?[[:space:]]*(=|\()?[[:space:]]*[0-9]+' \
+    | sed -E 's/[[:space:]]*(=|\()?[[:space:]]*([0-9]+)$/ \2/'
+}
+
 check_android_target_sdk() {
-  variables="${ROOT}/apps/mobile/android/variables.gradle"
-  [ -f "${variables}" ] || return 0
-  target="$(grep -oE 'targetSdkVersion[[:space:]]*=[[:space:]]*[0-9]+' "${variables}" | grep -oE '[0-9]+$' | head -1)"
-  if [ -z "${target}" ]; then
-    report REL002 "apps/mobile/android/variables.gradle: declares no targetSdkVersion (#95)"
-    return 0
-  fi
-  if [ "${target}" -lt "${MINIMUM_TARGET_SDK}" ]; then
-    report REL002 "apps/mobile/android/variables.gradle: targetSdkVersion ${target} is below the required ${MINIMUM_TARGET_SDK} (#95)"
+  local android="${ROOT}/apps/mobile/android"
+  local file relative declaration spelling level found=0 gradle_files=0
+  # A clone with no Android project is not a violation: this rule is about
+  # apps/mobile and must not fail every other tree.
+  [ -d "${android}" ] || return 0
+
+  while IFS= read -r file; do
+    # `find` printing nothing still yields one empty line through a here-doc,
+    # and passing that to `sed` reports a missing file rather than iterating
+    # zero times.
+    [ -n "${file}" ] || continue
+    gradle_files=$((gradle_files + 1))
+    relative="${file#"${ROOT}"/}"
+    while IFS= read -r declaration; do
+      [ -n "${declaration}" ] || continue
+      found=1
+      spelling="${declaration% *}"
+      level="${declaration##* }"
+      if [ "${level}" -lt "${MINIMUM_TARGET_SDK}" ]; then
+        report REL002 "${relative}: ${spelling} ${level} is below the required ${MINIMUM_TARGET_SDK} (#95)"
+      fi
+    done <<EOF
+$(target_sdk_declarations "${file}")
+EOF
+  done <<EOF
+$(find "${android}" \( "${GENERATED[@]}" \) -prune -o \
+    -type f \( -name '*.gradle' -o -name '*.gradle.kts' \) -print | sort)
+EOF
+
+  # ⚠️ "No Gradle file at all" is not "no target level": a directory named
+  # android/ that holds no build script is not an Android project, and a
+  # fixture tree built for some other rule is exactly that. The violation is a
+  # project that HAS build scripts and declares no level in any of them.
+  if [ "${gradle_files}" -gt 0 ] && [ "${found}" -eq 0 ]; then
+    report REL002 "apps/mobile/android: declares no targetSdkVersion in any Gradle file, so nothing sets the target API level (#95)"
   fi
 }
 

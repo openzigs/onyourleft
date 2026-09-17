@@ -97,7 +97,11 @@ apps/                 AGPL-3.0-or-later, without exception
     src/privacy/        the boundaries where data leaves the athlete's control
                         (#34) — the two directions a payload can face, the walk
                         that finds a coordinate in a field nobody declared, and
-                        the registry checked against the files on disk
+                        the registry checked against the files on disk; and
+                        since #95 the one place the published privacy policy's
+                        URL is written down, derived from its path rather than
+                        typed beside it, because Play requires the listing and
+                        the in-app link to be the same URL
     src/routes/         saved routes (#73) — the store port and its read budget,
                         the edit decision and its concurrency token, what a
                         shared copy of a route contains, the export a rider
@@ -274,7 +278,15 @@ apps/                 AGPL-3.0-or-later, without exception
                         ships: which file is the artefact, the reviewed list the
                         three injected permissions are checked against, and the
                         loud skip where nobody has run Gradle — which is CI and
-                        every clean clone
+                        every clean clone. Since #95 it also holds the Data
+                        Safety answers filed on Play, written down as data, and
+                        the rule that says whether "no location collection" is
+                        still true of a permission list — run against fixtures,
+                        against the reviewed list and against the merged
+                        manifest itself; plus the two facts about a
+                        tag-triggered workflow no pull request could otherwise
+                        check, the target API floor being one number in three
+                        languages and every action being pinned to a commit
     src/index.ts        what the shell offers the client that runs inside it —
                         the reason this package is no longer an island (§4h)
     src/ble/            the Capacitor transport against #39's interface,
@@ -791,7 +803,7 @@ npm view typescript-eslint peerDependencies.typescript
 | `ADR002` | an ADR filename is not `NNNN-kebab-case.md` |
 | `ADR003` | an ADR's `## Amendments` section is followed by **any** heading, or there are two of them, or an entry does not open with a bold ISO date, or an entry is dated **before the one above it**, or an **unclosed code fence** would hide any of those — see §7 and [ADR 0013](docs/adr/0013-adr-amendments.md) |
 | `REL001` | signing key material is committed anywhere — by name (`.jks`, `.keystore`, `.p12`, `.pfx`, `.key`, `keystore.properties`) **or** by content (a `PRIVATE KEY` block in a file with an innocent name). #95, and the one rule here whose violation cannot be undone by fixing it. ⚠️ Since #229 both halves walk the **same** prune list every other rule walks: it used to keep its own, which excluded `fixtures` and kept `coverage`, so a `.jks` under `packages/fit/fixtures/` was invisible while a PEM beside it was reported |
-| `REL002` | `apps/mobile/android/variables.gradle` targets below API **36**, or declares no `targetSdkVersion` at all. Checked here rather than in Gradle because nobody in this environment can run a Gradle build — a rule that only fires inside a build nobody runs never fires |
+| `REL002` | any Gradle file under `apps/mobile/android` declares a target API level below **36**, or the project declares none at all. Checked here rather than in Gradle because CI does not build Android — a rule that only fires inside a build nobody runs never fires. ⚠️ Since #95 it reads **every** Gradle file and follows the value rather than the filename: it used to open `variables.gradle`, take the first match and pass silently when that file was absent, so deleting it, overriding the ext property with a literal in `app/build.gradle`, appending a lower value below a compliant one, and AGP's current `targetSdk` spelling were four green regressions |
 | `XML001` | `--` appears inside an XML comment in a non-generated `.xml` file, which XML 1.0 §2.5 forbids and no parser accepts. #225 — the rule exists because `AndroidManifest.xml` shipped in #87 with three of them and passed every gate here for months, until the first Gradle build ever run failed on it |
 | `XML002` | an XML comment is never closed — the `DOC002` failure mode in XML, where the scanner's state sticks, everything after it is silently skipped, and a parser drops every element that follows |
 | `XML003` | a `<![CDATA[` section is never closed. #229, and it is the rule that keeps the two above honest: before it, an unclosed CDATA set the scanner's state and nothing cleared it, so **`XML001` and `XML002` went silent for the rest of the file and it reported clean** — `DOC002`'s own failure mode inside the rule written because of `DOC002`. Closure is now decided where a region opens, so the section is reported **and** the scan carries on |
@@ -1147,14 +1159,30 @@ rule is that CI must not accumulate knowledge this file does not carry.
 |---|---|
 | Triggers | a pushed tag matching `v*`, and `workflow_dispatch` |
 | Job | `Build and publish the APK` |
-| What it does | decodes an upload key **if this repository has one**, assembles, publishes a GitHub Release, and removes the key before anything else runs |
+| What it does | decodes an upload key **if this repository has one**, assembles, **verifies the packaged APK**, uploads it as a workflow artefact, publishes a GitHub Release on a tag, and removes the key before anything else runs |
 | Permissions | ⚠️ `contents: write` — **the only workflow here that is not read-only**, because writing a Release needs it |
 
-⚠️ **It has never run.** There is no `v*` tag and no release has been cut;
-[`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §1 says so, and `workflow_dispatch` is on the
-trigger list precisely so the pipeline can be exercised before there is anything to release.
-[#95](https://github.com/openzigs/onyourleft/issues/95) owns that. Treat every claim about its
-behaviour as untested.
+⚠️ **It has run, and this paragraph used to say it never had** — a reviewer who remembers "treat
+every claim about its behaviour as untested" is reading the old file.
+[#95](https://github.com/openzigs/onyourleft/issues/95) exercised it: two `workflow_dispatch` runs on
+2026-09-16 assembled a **signed release APK** on a GitHub-hosted runner
+([35160018484](https://github.com/openzigs/onyourleft/actions/runs/35160018484),
+[35162828363](https://github.com/openzigs/onyourleft/actions/runs/35162828363)), and the four
+`ANDROID_*` secrets are set. ⚠️ **It has still never run on a tag**, so the GitHub Release step
+alone is untested, and no phone has installed the result —
+[`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §1 is the table of which is which.
+
+⚠️ **A green `assembleRelease` is not a signed APK, and until #95 nothing here noticed the
+difference.** Injected signing properties AGP ignores produce `app-release-unsigned.apk` and a
+successful build, which `fail_on_unmatched_files` accepted — so a tag would have published an
+uninstallable artefact with every step green. The `Verify the artefact` step reads the packaged file
+with `apksigner` and `aapt2` instead: signed, not the Android debug certificate, and targeting at
+least the same API level `REL002` names. It was demonstrated to go red by deleting the injected
+properties on a throwaway branch
+([35163073011](https://github.com/openzigs/onyourleft/actions/runs/35163073011), `DOES NOT VERIFY`).
+⚠️ And a **tag** with no `ANDROID_KEYSTORE_BASE64` now fails rather than falling through to
+`assembleDebug`: the fork-friendly fallback is right for a manual run and wrong for the one path
+that publishes.
 
 ⚠️ **It is not a required check and cannot block a merge**, which is right for a tag-triggered job
 and is also why its action pins drifted behind `rules.yml`'s without anything noticing —
@@ -2630,6 +2658,12 @@ top of an issue **supersedes its body**.
 | Which manifest the app actually ships, and why an injected permission is not automatically wrong | `apps/mobile/src/android/merged-manifest.ts` §`REVIEWED_PERMISSIONS`, [#318](https://github.com/openzigs/onyourleft/issues/318) |
 | What the merged-manifest gate says on a machine that has never run Gradle, and why it is not a CI gate | `apps/mobile/src/android/merged-manifest.ts` §`mergedManifestAbsence`, `merged-manifest.test.ts` §`shipped` |
 | What is enforced about Android signing keys, and what is merely written down | [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §1, `scripts/check-repo-rules.sh` §`REL001` |
+| Why a green `assembleRelease` is not a signed APK, and what reads the packaged file instead | [`.github/workflows/release.yml`](.github/workflows/release.yml) §"Verify the artefact", §4c |
+| How to get an installable APK without cutting a tag | [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §8 |
+| Where the target API floor is stated, and the four regressions that used to pass the rule | [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §7, `apps/mobile/src/android/release-pipeline.test.ts` |
+| What the app tells Play it collects, and what holds that answer to the manifest the app ships | `apps/mobile/src/android/data-safety.ts` §`locationClaimFaults`, [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §4 |
+| What the published privacy policy says, and why the URL is written down exactly once | [`docs/privacy-policy.md`](docs/privacy-policy.md), `apps/web/src/privacy/policy.ts` |
+| What is known about Android developer verification and what it does to the APK route | [`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §5 |
 | Why ADR 0008's rendering gate was waived, and what that does not cancel | [ADR 0008](docs/adr/0008-mobile-client-architecture.md) §Amendments, 2026-09-08 |
 | Which platform the next client is built on, and why there is no desktop one | [ADR 0018](docs/adr/0018-native-client-platform.md) |
 | What a person does with a real trainer, in what order, and why the dangerous step is last | [`docs/validation/0001-trainer-and-sensors.md`](docs/validation/0001-trainer-and-sensors.md) |

@@ -235,6 +235,16 @@ patent grant.
 
 Reasoning, and what the choice forecloses: [`docs/adr/0001-licence.md`](docs/adr/0001-licence.md).
 
+## Privacy
+
+Nothing is collected. There is no account, no server, no analytics and no code in the client that
+transmits a ride, a heart rate or a position anywhere — which is checkable rather than a promise,
+because the whole thing is here.
+
+The published policy is [`docs/privacy-policy.md`](docs/privacy-policy.md). It is the one the Android
+app links to from its About page and the one the Play listing points at; `apps/web/src/privacy/policy.ts`
+is where that URL is written down, once.
+
 ## Self-hosting, and what "free" actually means
 
 Self-hosting is a first-class, supported goal, not an afterthought — the architecture is one small

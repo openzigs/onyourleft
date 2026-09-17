@@ -1268,6 +1268,85 @@ assert_clean "a targetSdkVersion above the floor passes, rather than being pinne
 new_fixture
 assert_clean "a tree with no android/ directory is not a REL002 violation"
 
+# --- REL002, the three ways it used to pass over a regression (#95) ----------
+#
+# The rule read ONE file for ONE value and took the FIRST match in it. That
+# fails closed against editing that value and open against every other way the
+# number reaches the build, which is the #142 shape: a selector asserted to
+# exist rather than discovered. All three cases below were GREEN before #95.
+
+# An Android project that declares no target level ANYWHERE. The rule returned
+# 0 the moment variables.gradle was missing, so deleting that one file removed
+# the floor entirely and the checker said the tree was clean.
+new_fixture
+mkdir -p "${fixture_root}/apps/mobile/android/app"
+printf '// SPDX-License-Identifier: AGPL-3.0-or-later\nandroid {\n    namespace = "dev.openzigs.onyourleft"\n}\n' \
+  > "${fixture_root}/apps/mobile/android/app/build.gradle"
+assert_violation "an Android project that declares no target level at all is rejected" REL002 \
+  "declares no targetSdkVersion"
+
+# The other side of that: the floor follows the VALUE, not the filename. A
+# project that inlines a compliant level and has no variables.gradle is
+# compliant, and a rule that insisted on the file would be a rule about layout.
+new_fixture
+mkdir -p "${fixture_root}/apps/mobile/android/app"
+printf '// SPDX-License-Identifier: AGPL-3.0-or-later\nandroid {\n    defaultConfig {\n        targetSdkVersion 36\n    }\n}\n' \
+  > "${fixture_root}/apps/mobile/android/app/build.gradle"
+assert_clean "a compliant level inlined in build.gradle passes without a variables.gradle"
+
+# The override. variables.gradle says 36 and the build does not read it: the
+# value the Android Gradle Plugin actually applies is the literal beside
+# `targetSdkVersion` in app/build.gradle, and the shipped app targets 33.
+new_fixture
+mkdir -p "${fixture_root}/apps/mobile/android/app"
+printf '// SPDX-License-Identifier: AGPL-3.0-or-later\next {\n    targetSdkVersion = 36\n}\n' \
+  > "${fixture_root}/apps/mobile/android/variables.gradle"
+printf '// SPDX-License-Identifier: AGPL-3.0-or-later\nandroid {\n    defaultConfig {\n        targetSdkVersion 33\n    }\n}\n' \
+  > "${fixture_root}/apps/mobile/android/app/build.gradle"
+assert_violation "a build.gradle literal below the floor is rejected, whatever variables.gradle says" \
+  REL002 "targetSdkVersion 33"
+
+# The second line. `head -1` read the first match and Gradle applies the last
+# assignment, so a lower value appended below a compliant one was invisible.
+new_fixture
+mkdir -p "${fixture_root}/apps/mobile/android"
+printf '// SPDX-License-Identifier: AGPL-3.0-or-later\next {\n    targetSdkVersion = 36\n    targetSdkVersion = 30\n}\n' \
+  > "${fixture_root}/apps/mobile/android/variables.gradle"
+assert_violation "a second, lower targetSdkVersion below a compliant one is rejected" REL002 \
+  "targetSdkVersion 30"
+
+# The AGP DSL spelling. `targetSdk` without the `Version` suffix is the current
+# one and sets the same thing; a rule that knows only the old spelling is a rule
+# a routine Gradle modernisation switches off.
+new_fixture
+mkdir -p "${fixture_root}/apps/mobile/android/app"
+printf '// SPDX-License-Identifier: AGPL-3.0-or-later\next {\n    targetSdkVersion = 36\n}\n' \
+  > "${fixture_root}/apps/mobile/android/variables.gradle"
+printf '// SPDX-License-Identifier: AGPL-3.0-or-later\nandroid {\n    defaultConfig {\n        targetSdk = 34\n    }\n}\n' \
+  > "${fixture_root}/apps/mobile/android/app/build.gradle"
+assert_violation "the targetSdk spelling is checked too" REL002 "targetSdk 34"
+
+# ⚠️ The two cases that keep the sweep from being a rule nobody can live with.
+#
+# The shipped app/build.gradle reads the ext property rather than a literal, and
+# a sweep that flagged it would be reverted within a day. And a Gradle file is
+# allowed to talk about API levels in a comment.
+new_fixture
+mkdir -p "${fixture_root}/apps/mobile/android/app"
+printf '// SPDX-License-Identifier: AGPL-3.0-or-later\next {\n    targetSdkVersion = 36\n}\n' \
+  > "${fixture_root}/apps/mobile/android/variables.gradle"
+printf '// SPDX-License-Identifier: AGPL-3.0-or-later\nandroid {\n    defaultConfig {\n        targetSdkVersion rootProject.ext.targetSdkVersion\n    }\n}\n' \
+  > "${fixture_root}/apps/mobile/android/app/build.gradle"
+assert_clean "a build.gradle that reads the ext property is not a literal and passes"
+
+new_fixture
+mkdir -p "${fixture_root}/apps/mobile/android/app"
+printf '// SPDX-License-Identifier: AGPL-3.0-or-later\next {\n    targetSdkVersion = 36\n}\n' \
+  > "${fixture_root}/apps/mobile/android/variables.gradle"
+printf '// SPDX-License-Identifier: AGPL-3.0-or-later\n// We used to set targetSdkVersion 30 here; see #95.\nandroid {\n}\n' \
+  > "${fixture_root}/apps/mobile/android/app/build.gradle"
+assert_clean "a line comment naming an old target level is prose, not a declaration"
+
 # --- XML001 / XML002: an XML comment a parser will accept (#225) -------------
 #
 # The defect these exist for is real and shipped: `AndroidManifest.xml` landed in

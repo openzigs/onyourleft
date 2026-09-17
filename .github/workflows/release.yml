@@ -62,12 +62,28 @@ jobs:
       # this workflow and get an installable unsigned artefact without holding
       # any secret at all. A hard requirement here would make the pipeline
       # untestable by anyone but the owner, which is how a release pipeline rots.
+      #
+      # ⚠️ Conditional on a TAG, though. Without that clause a tag pushed in a
+      # repository whose secret had expired, been rotated or been dropped built
+      # `assembleDebug` and published `app-debug.apk` to a GitHub Release, under
+      # a version number, as the artefact people install — debug-signed, with a
+      # key whose private half is in every Android SDK on earth. Every step went
+      # green. The fork-friendly fallback is right for a manual run and wrong
+      # for the one path that publishes.
       - name: Decode the upload key, if this repository has one
         id: signing
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          REF: ${{ github.ref }}
         run: |
           if [ -z "${KEYSTORE_BASE64}" ]; then
+            case "${REF}" in
+              refs/tags/*)
+                echo "::error::${REF} is a release tag and ANDROID_KEYSTORE_BASE64 is not set."
+                echo "::error::Refusing to publish a debug-signed APK as a release; see apps/mobile/RELEASE.md."
+                exit 1
+                ;;
+            esac
             echo "signed=false" >> "$GITHUB_OUTPUT"
             echo "::notice::No ANDROID_KEYSTORE_BASE64 secret; building unsigned."
             exit 0
@@ -98,6 +114,97 @@ jobs:
       - name: Remove the key before anything else runs
         if: always()
         run: rm -f "${RUNNER_TEMP}/upload.jks"
+
+      # ⚠️ The step that reads the ARTEFACT rather than the build script.
+      #
+      # `assembleRelease` exiting 0 does not mean the APK is signed. Injected
+      # signing properties that AGP ignores — a renamed property, a signing
+      # block added to build.gradle that takes precedence, a Gradle major
+      # version — produce `app-release-unsigned.apk` and a successful build, and
+      # the publish step below would upload it with `fail_on_unmatched_files`
+      # satisfied. An unsigned APK installs nowhere and Play refuses it, so the
+      # failure surfaces at the worst possible moment: after the tag exists.
+      #
+      # The target level is read here for the same reason. REL002 reads the
+      # Gradle sources on a bare clone (CLAUDE.md §4a); this reads what the
+      # manifest inside the packaged APK actually says, which is the only number
+      # Play ever sees.
+      - name: Verify the artefact is signed and targets the required API level
+        env:
+          SIGNED: ${{ steps.signing.outputs.signed }}
+          # Kept in one place with REL002's floor, which is the other half of
+          # #95's second criterion. The two are asserted against each other in
+          # apps/mobile/src/android/release-pipeline.test.ts.
+          MINIMUM_TARGET_SDK: '36'
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "${sdk}" ]; then
+            echo "::error::Neither ANDROID_HOME nor ANDROID_SDK_ROOT is set; cannot verify the APK."
+            exit 1
+          fi
+          # Newest build-tools present. `sort -V` rather than `sort`, or 9.0.0
+          # sorts above 36.0.0.
+          tools="$(find "${sdk}/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          if [ -z "${tools}" ] || [ ! -x "${tools}/apksigner" ]; then
+            echo "::error::No apksigner under ${sdk}/build-tools; cannot verify the APK."
+            exit 1
+          fi
+
+          apk="$(find apps/mobile/android/app/build/outputs/apk -name '*.apk' -type f | sort | head -1)"
+          if [ -z "${apk}" ]; then
+            echo "::error::Assemble produced no APK."
+            exit 1
+          fi
+          echo "Verifying ${apk} with ${tools##*/}"
+
+          # apksigner, not jarsigner: minSdk is 24, so AGP may sign with the v2
+          # and v3 schemes alone and jarsigner reports an unsigned jar for a
+          # perfectly signed APK.
+          "${tools}/apksigner" verify --print-certs "${apk}" > "${RUNNER_TEMP}/certs.txt"
+          cat "${RUNNER_TEMP}/certs.txt"
+
+          if [ "${SIGNED}" = "true" ]; then
+            case "${apk}" in
+              *unsigned*)
+                echo "::error::Signing was requested and AGP produced ${apk}."
+                exit 1
+                ;;
+            esac
+            # The debug certificate is shipped inside every Android SDK, so an
+            # APK carrying it is signed and worthless. This is what a silently
+            # ignored injected signing config looks like when AGP falls back.
+            if grep -q 'CN=Android Debug' "${RUNNER_TEMP}/certs.txt"; then
+              echo "::error::The release APK is signed with the Android debug certificate."
+              exit 1
+            fi
+          fi
+
+          target="$("${tools}/aapt2" dump badging "${apk}" \
+            | sed -n "s/.*targetSdkVersion:'\([0-9]*\)'.*/\1/p" | head -1)"
+          if [ -z "${target}" ]; then
+            echo "::error::The packaged manifest declares no targetSdkVersion."
+            exit 1
+          fi
+          if [ "${target}" -lt "${MINIMUM_TARGET_SDK}" ]; then
+            echo "::error::The packaged APK targets API ${target}, below the required ${MINIMUM_TARGET_SDK}."
+            exit 1
+          fi
+          echo "Signed as required, targeting API ${target}."
+
+      # ⚠️ Not the same thing as the release below, and not redundant with it.
+      # The release step only runs on a tag, so before #95 a `workflow_dispatch`
+      # run built an APK and threw it away — which made #95's definition of done
+      # ("a signed build is installable from CI output on a real device")
+      # reachable only by cutting a tag. An artefact is downloadable from the
+      # run page, so the pipeline can be exercised and the result installed
+      # before anything is tagged.
+      #   gh api repos/actions/upload-artifact/commits/v7.0.1 --jq .sha
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: android-apk
+          path: apps/mobile/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
 
       # The AGPL-native distribution path, independent of any store — #95's sixth
       # criterion. It matters more than usual here: RELEASE.md §5 records that
