@@ -283,9 +283,26 @@ describe('placement is a stateless hash of where you are', () => {
     // The budget is deliberately not binding here: the budget is applied per
     // call, so two half-span calls are budgeted twice, and that is about
     // thinning rather than about placement. @see scatter.ts §thin
-    const whole = place(profile, 0, 400);
-    const halves = [...place(profile, 0, 200), ...place(profile, 200, 400)];
+    //
+    // ⚠️ **Compared as a SET since #351, and the ordered version of this was
+    // green by luck.** `scatterAt` emits cell by cell and, within a cell, band
+    // by band — and a band's position along its cell is now drawn from a stream
+    // of its own, so one cell's items are not in order along the road. When the
+    // split at 200 m falls *inside* a cell, the whole call interleaves that
+    // cell's near and far items where the two half-calls separate them: the
+    // same items, a different order. The split only ever fell on a cell
+    // boundary because the fixture is 2 000 m and the nominal cell was 20 m;
+    // at 12 m the span is 11.98 m and it does not. The property #243 states is
+    // that two adjacent queries **partition** the world, which is about which
+    // items come back and not about the order an array happens to carry.
+    const key = (item: ScatterItem): string =>
+      `${item.kind} ${item.x.toFixed(6)} ${item.y.toFixed(6)} ${item.z.toFixed(6)}`;
+    const whole = place(profile, 0, 400).map(key).sort();
+    const halves = [...place(profile, 0, 200), ...place(profile, 200, 400)].map(key).sort();
 
+    // Non-vacuity: two empty arrays are equal as sets.
+    expect(whole.length).toBeGreaterThan(100);
+    expect(new Set(whole).size).toBe(whole.length);
     expect(halves).toEqual(whole);
   });
 
@@ -463,7 +480,10 @@ describe('the scenery is not a hedge — #348', () => {
 
   it('places enough to measure, so nothing below is green over an empty world', () => {
     expect(sweep.length).toBeGreaterThan(400);
-    expect(cellSpanMetres(profile)).toBeCloseTo(20, 1);
+    // ⚠️ 20 m until #351, which brought the grid back to 12 m. @see
+    // SCATTER_CELL_METRES — the cell is what sets the density of the
+    // foreground, and doubling it is what emptied it.
+    expect(cellSpanMetres(profile)).toBeCloseTo(12, 1);
   });
 
   it('leaves open ground between the road and the nearest thing standing on it', () => {
@@ -477,11 +497,19 @@ describe('the scenery is not a hedge — #348', () => {
     // #348's second bullet. Sixteen metres shared between four depths put the
     // middle half of everything inside a 9 m spread and almost nothing beyond
     // 20 m, which is what made the scenery read as a wall at a fixed distance.
+    //
+    // ⚠️ **The two figures moved for #351 and the claim did not.** That issue
+    // narrowed the band from 35 m to 25 m, because 35 m put the median item
+    // 27 m from the centreline — the far field — and the bound has to follow
+    // the band or it pins a number the change was filed to move. What it still
+    // excludes is the shape it was written against: measured, the pre-#348
+    // arrangement has an interquartile spread of 8.9 m and reaches 19.3 m, so
+    // both assertions go red on it with room to spare.
     const quarter = lateral[Math.floor(lateral.length * 0.25)] as number;
     const threeQuarters = lateral[Math.floor(lateral.length * 0.75)] as number;
 
-    expect(threeQuarters - quarter).toBeGreaterThan(14);
-    expect(lateral[lateral.length - 1] as number).toBeGreaterThan(35);
+    expect(threeQuarters - quarter).toBeGreaterThan(10);
+    expect(lateral[lateral.length - 1] as number).toBeGreaterThan(30);
   });
 
   it('leaves whole stretches of road with nothing beside them', () => {
@@ -529,23 +557,50 @@ describe('the scenery is not a hedge — #348', () => {
     // them and nothing kept clear at the cell boundary. It now falls anywhere
     // in the middle 70 %, which is both a wider range and a *connected* one.
     //
-    // Ten bins rather than a range, because a range is satisfied by two
+    // Twenty bins rather than a range, because a range is satisfied by two
     // extremes with a hole between them — which is precisely the old shape.
+    //
+    // ⚠️ **Written against the shape rather than against the bin indices since
+    // #351**, which moved `CELL_FILL` from 0.7 to 0.55 to pay for a smaller
+    // cell. Bins 1 to 8 of ten were the occupied range at 0.7 and are not at
+    // 0.55, so spelling them out pinned a constant instead of the property. The
+    // three claims below are the property: the occupied stretch is **one run**
+    // with no hole in it, it covers **half the cell or more**, and there is a
+    // clear **margin in metres** at each end.
     const span = cellSpanMetres(profile);
-    const bins = Array.from({ length: 10 }, () => 0);
+    const bins = Array.from({ length: 20 }, () => 0);
     for (const item of sweep) {
       const along = routeDistanceOf(profile, item.x);
-      const at = Math.floor(((((along % span) + span) % span) / span) * 10);
-      bins[Math.min(9, at)] = (bins[Math.min(9, at)] as number) + 1;
+      const at = Math.floor(((((along % span) + span) % span) / span) * 20);
+      bins[Math.min(19, at)] = (bins[Math.min(19, at)] as number) + 1;
     }
 
+    const occupied = bins.map((count) => count > 0);
+    const first = occupied.indexOf(true);
+    const last = occupied.lastIndexOf(true);
+
+    // ⚠️ **The connectedness is the assertion that excludes the old shape**,
+    // and the width below is not: four stations spanning `[0.06, 0.94]` are
+    // 0.88 of the cell wide and would pass a width test comfortably. What they
+    // cannot do is fill the bins between them.
+    expect(occupied.slice(first, last + 1).filter((full) => !full)).toEqual([]);
+    // Wide as well as connected, so a fill that collapsed to a single bin in
+    // the middle of the cell — a rhythm again, with a shorter period — is not
+    // a pass.
+    expect((last + 1 - first) / 20).toBeGreaterThan(0.5);
+
     // The margin at each end of the cell, which is what separates two items in
-    // one band in adjacent cells. @see MINIMUM_SCATTER_SEPARATION_METRES
-    expect(bins[0]).toBe(0);
-    expect(bins[9]).toBe(0);
-    // And no gap anywhere in between — a *range* would be satisfied by the four
-    // stations with three holes between them, which is exactly the old shape.
-    expect(bins.slice(1, 9).filter((count) => count === 0)).toEqual([]);
+    // one band in adjacent cells. @see MINIMUM_SCATTER_SEPARATION_METRES: the
+    // bend compression takes 60 % of it, so 5 m is the floor that keeps 2 m.
+    // Measured off the items rather than off the bins, because a bin is 0.6 m
+    // wide here and the margin is 2.7 m at each end.
+    const fractions = sweep.map((item) => {
+      const along = routeDistanceOf(profile, item.x);
+      return (((along % span) + span) % span) / span;
+    });
+    const gap = (Math.min(...fractions) + (1 - Math.max(...fractions))) * span;
+
+    expect(gap).toBeGreaterThan(5);
   });
 
   it('does not tie how deep a thing stands to where it stands along the road', () => {
@@ -561,6 +616,119 @@ describe('the scenery is not a hedge — #348', () => {
     });
 
     expect(Math.abs(correlation(pairs))).toBeLessThan(0.1);
+  });
+});
+
+/**
+ * #351 — #348's direction was right and its magnitude was not, and the world
+ * came out as an empty plain.
+ *
+ * ⚠️ **This is the gate that did not exist**, and its absence is the whole
+ * reason #348 could ship a reasonable set of changes and empty the world.
+ * Every assertion the previous issue left behind is about the *shape* of the
+ * arrangement — the verge, the spread of removes, the absence of a rhythm —
+ * and an arrangement with almost nothing in it satisfies all of them. #348's
+ * own criterion was *"judged by eye, on the device"*, and nobody looked after
+ * the merge.
+ *
+ * ⚠️ **What is measured here is a PROXY and not the device.** It is how much
+ * scenery stands in the part of the view a rider actually looks at — the
+ * nearest 60 m of road, about seven seconds at 30 km/h — and how often that is
+ * none at all. A number cannot say the world looks right. It can say the world
+ * is not empty, which is the failure that got through.
+ *
+ * The frames are the ones `scene.ts` asks for: the corridor's own span behind
+ * and ahead of the rider, at {@link SCATTER_MAX_ITEMS}. Asking `scatterAt` for
+ * an unbounded span instead would measure a world no renderer is ever handed.
+ */
+describe('the scenery is not an empty plain — #351', () => {
+  /**
+   * Twelve kilometres of level valley floor: the densest thing a route can be.
+   *
+   * ⚠️ **Long enough that every frame below is inside it**, which a 6 km one is
+   * not. A non-loop route is clamped to its own cells, so a frame past the end
+   * is legitimately empty — and a ride that ran off the end would measure that
+   * clamp instead of the density, at a 51-in-100 bare rate that looks exactly
+   * like the defect. Found by writing it that way first.
+   */
+  const profile = eastRoute({ latitude: 45, altitude: 0, points: 1200 });
+
+  interface Frame {
+    /** Items standing in the nearest {@link NEAR_FIELD_METRES} of road. */
+    readonly near: number;
+    /** How many the placement offered before the budget was applied. */
+    readonly supply: number;
+  }
+
+  /** How far ahead of the rider counts as the foreground. */
+  const NEAR_FIELD_METRES = 60;
+  /** What `terrain.ts` builds and `scene.ts` therefore asks for. */
+  const VIEW_BEHIND = 60;
+  const VIEW_AHEAD = 400;
+
+  const ride = (): readonly Frame[] => {
+    const frames: Frame[] = [];
+    for (let step = 0; step < 100; step += 1) {
+      const rider = 500 + step * 100;
+      const budget: ScatterBudget = { maxItems: SCATTER_MAX_ITEMS, riderMetres: rider };
+      const drawn = place(profile, rider - VIEW_BEHIND, rider + VIEW_AHEAD, budget);
+      frames.push({
+        near: drawn.filter((item) => {
+          const along = routeDistanceOf(profile, item.x);
+          return along >= rider && along < rider + NEAR_FIELD_METRES;
+        }).length,
+        supply: place(profile, rider - VIEW_BEHIND, rider + VIEW_AHEAD).length,
+      });
+    }
+    return frames;
+  };
+
+  const frames = ride();
+
+  it('keeps the foreground populated rather than putting everything on the horizon', () => {
+    // ⚠️ **The measurement #351 was filed on.** With #348's constants this
+    // averages **21.3** items in the nearest 60 m; before #348 it was 42.9,
+    // which is the density the issue reports as "a continuous village". The
+    // floor is set between the two and nearer the low end, because the fix for
+    // an overcorrection is not the thing that was overcorrected from.
+    const mean = frames.reduce((total, frame) => total + frame.near, 0) / frames.length;
+
+    expect(mean).toBeGreaterThan(28);
+  });
+
+  it('leaves the near field empty only occasionally, not one ride in seven', () => {
+    // ⚠️ **The literal "empty plain".** A frame with nothing at all in the
+    // nearest 60 m is a rider looking at bare ground with a house on the
+    // horizon. #348's clustering is *meant* to produce some of these — see
+    // OPEN_GROUND_SHARE — and at its own values it produced 15 in 100, on top
+    // of a world that was half as dense everywhere else.
+    const bare = frames.filter((frame) => frame.near === 0).length;
+
+    // Non-vacuity in the other direction: a world that never opens out at all
+    // has lost what #348's third bullet asked for, and this is the assertion
+    // that would go red if the clustering were simply deleted.
+    expect(bare).toBeGreaterThan(0);
+    expect(bare).toBeLessThan(10);
+  });
+
+  it('offers the budget more than it will take on most frames, so the thinning is live', () => {
+    // ⚠️ **The quiet half of #348, and it is not in that issue's table.**
+    // `thin` returns its input untouched when the supply is inside the budget,
+    // so SCATTER_NEAR_BIAS — the whole of #243's sixth criterion — does nothing
+    // at all below it. Measured with #348's constants, this ride supplied
+    // **161.9** items a frame on average against a budget of 240 and
+    // oversubscribed on **11** frames in 100: the near bias was doing nothing
+    // on the other 89, and no test could tell.
+    //
+    // ⚠️ **Counted over the ride rather than taken at its busiest frame, and
+    // the difference is the whole assertion.** #348's world still had a
+    // 299-item frame in it — one stretch of valley floor at the top of the
+    // clustering field — so a `max` comparison is green on the arrangement this
+    // issue exists to replace. Measured: 62 frames in 100 oversubscribe now, 11
+    // did then.
+    const oversubscribed = frames.filter((frame) => frame.supply > SCATTER_MAX_ITEMS).length;
+
+    expect(oversubscribed).toBeGreaterThan(40);
   });
 });
 

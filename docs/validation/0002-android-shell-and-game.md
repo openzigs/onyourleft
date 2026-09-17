@@ -595,6 +595,96 @@ at the same point, on the same phone.
 
 ---
 
+## Part J — is there anything standing beside the road at all? ([#351](https://github.com/openzigs/onyourleft/issues/351))
+
+**Part I was never run, and #351 is what happened instead.** #348 merged, the owner rode it on the
+tablet, and the scenery was *gone*: one house and one tree, both on the horizon, over an otherwise
+empty plain. Part I's predictions above are a record of what #348 expected and are **superseded** by
+this part — they are left standing because a prediction that turned out wrong is worth more than a
+prediction quietly corrected.
+
+⚠️ **Read Part I's own last paragraph first.** It says a screenshot before and after belongs on the
+pull request and that neither was taken. That is the gap #351 names in one sentence: *"the gap was
+that no screenshot was taken after merging, only before."* This environment still has no device and
+no emulator, so the same gap is still open, and this part is still the thing that closes it.
+
+### What changed, and what it predicts
+
+| | Before #348 | #348 | **#351** |
+|---|--:|--:|--:|
+| Grid period | 10 m | 20 m | **12 m** |
+| Things per cell, per side | 4 | 7 | **5** |
+| Nearest thing to the centreline | 5 m | 9.5 m | **9.5 m — kept** |
+| Furthest | 21 m | 44.5 m | **34.5 m** |
+| Jitter along the cell | 1.25 m | 14 m | **6.6 m** |
+| Stretches with nothing beside them | none | about a quarter | **about a seventh** |
+| `SCATTER_MAX_ITEMS` | 240 | 240 | **240 — unchanged, and #351 says so too** |
+
+Measured on the synthetic fixtures in `scatter.test.ts` rather than on a device — a 12 km level
+temperate route, ridden at 100 positions 100 m apart, each frame the 460 m span `scene.ts` asks for:
+
+| | Before #348 | #348 | **#351** |
+|---|--:|--:|--:|
+| Items in the nearest **60 m** of road | 42.9 | 21.3 | **32.3** |
+| Frames with **nothing** in that 60 m | 0 in 100 | 15 in 100 | **6 in 100** |
+| Items offered per frame, before the budget | ~330 | 161.9 | **245.2** |
+| Frames where the budget actually binds | every one | 11 in 100 | **62 in 100** |
+| Median distance from the centreline | 12.0 m | 27.2 m | **21.6 m** |
+
+⚠️ **The fourth row is the one nobody was watching.** `thin` returns its input untouched when the
+supply is inside the budget, so between #348 and #351 `SCATTER_NEAR_BIAS` — the thing that keeps the
+*near* half of the view populated when there is more world than budget — did nothing on 89 frames in
+100. Density and that bias are not independent: below the budget there is no bias.
+
+⚠️ **What this predicts for the GPU column is "a little more than #348, no more than before it"**,
+and the reasoning is the same arithmetic Part I used. A frame still cannot carry more than
+`SCATTER_MAX_ITEMS`, which still has not moved, so the worst case is unchanged for the third time;
+what moved is how often the worst case is reached, from "every frame" to "one in nine" to "three in
+five". Working the other way, the cull now submits a slightly *smaller* share of what it is handed
+on a hairpin — 55.1 % where #348 submitted 43.9 % — because the band is shallower, so fewer
+instances are built per frame than the raw count suggests. **If the GPU or frame column moves at
+all, that is the finding.**
+
+| Step | What to do | What to record |
+|---|---|---|
+| J1 | ⚠️ **Ride the route and look at it.** Before touching a counter | Is there anything beside the road in the foreground, or is it an empty plain with things on the horizon? One sentence in your own words |
+| J2 | Compare against the screenshot taken before #348, if one survives | Whether this is nearer the village or nearer the plain |
+| J3 | Ride until a bare stretch and then a wooded one | Whether the open ground reads as open ground rather than as a world that failed to load |
+| J4 | Ride a tight bend, if the route has one | ⚠️ Whether anything is standing **in the road**. Still the one that is a defect rather than a taste |
+| J5 | Reset the counters, ride a 12-second window, read them back | every row of the table below |
+| J6 | Repeat J5 on a stretch that is *wooded*, where the budget binds | the same rows again |
+
+```bash
+adb shell dumpsys gfxinfo dev.openzigs.onyourleft reset
+# ... ride for 12 s with the game visible and the rider pedalling ...
+adb shell dumpsys gfxinfo dev.openzigs.onyourleft | grep -iE "Total frames|Janky|percentile|Missed Vsync|GPU"
+```
+
+### J results
+
+| | J5 (ordinary stretch) | J6 (wooded stretch) |
+|---|---|---|
+| Total frames rendered | | |
+| **Janky frames (legacy, > 16 ms)** | | |
+| Frame time 50th / 90th / 95th / 99th | | |
+| GPU time 50th / 90th | | |
+| Missed Vsync | | |
+
+**Is there scenery in the foreground (J1)?** ______________
+
+**Nearer the village or nearer the plain (J2)?** ______________
+
+**Is anything standing in the road on a bend (J4)?** ______________
+
+**Phone (OEM, model, Android):** ______________  **Build:** ______________
+
+⚠️ **The screenshot pair is still owed, and #351 says which one is missing: the "after" has to be
+the merged state.** Take it on the phone, on the same stretch of the same route, once this has
+merged — not from the pull request's branch and not from a desktop browser, which is a different
+aspect ratio and a different distance from the eye.
+
+---
+
 ## After the session
 
 1. **Fill the tables in this file and commit it.** An empty table in `main` is the honest state; a
