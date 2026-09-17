@@ -801,14 +801,21 @@ describe('the cull against what `scene.ts` actually hands it', () => {
    * comment has to be re-measured in the same change rather than left
    * describing a cull that has moved.
    *
-   * ⚠️ **Re-measured for #348 and again for #351** — a reviewer who remembers
-   * "a fifth" here, or 0.4390, is reading an older file. #348 took the scenery
-   * band from 16 m deep to 35 m and pushed the verge back, so an item stood up
-   * to 44.5 m from the centreline rather than 21 m and the share dropped on a
-   * hairpin roughly doubled; #351 narrowed the band to 25 m and it came back
-   * part of the way. What is being pinned is the *band*, seen through the cull,
-   * rather than the cull itself. The assertion that matters is unchanged and
-   * still holds through both: **none of what was dropped was on screen.**
+   * ⚠️ **Re-measured for #348, again for #351 and again for #353** — a reviewer
+   * who remembers "a fifth" here, or 0.4390, is reading an older file. #348
+   * took the scenery band from 16 m deep to 35 m and pushed the verge back, so
+   * an item stood up to 44.5 m from the centreline rather than 21 m and the
+   * share dropped on a hairpin roughly doubled; #351 narrowed the band to 25 m
+   * and it came back part of the way. What is being pinned is the *band*, seen
+   * through the cull, rather than the cull itself. The assertion that matters is
+   * unchanged and still holds through all three: **none of what was dropped was
+   * on screen.**
+   *
+   * ⚠️ **#353 narrowed the band again, to 15 m, and this figure did not move at
+   * all** — measured 0.5514 either side of it. `three-renderer.ts`
+   * §`lateralReachMetres` records where the effect actually turned up instead,
+   * which is at radii tighter than this one and in the opposite direction to
+   * the one that paragraph predicted.
    *
    * #348 is also why the non-vacuity floor moved to 40. The scenery is
    * clustered now, so the emptiest frame of a sweep is genuinely emptier — 58
@@ -825,7 +832,8 @@ describe('the cull against what `scene.ts` actually hands it', () => {
     expect(items).toBeGreaterThan(40);
     expect(tightestRadius).toBeGreaterThan(99);
     expect(tightestRadius).toBeLessThan(101);
-    // 0.4390 when this was measured for #348; 0.5514 for #351.
+    // 0.4390 when this was measured for #348; 0.5514 for #351, and 0.5514
+    // again for #353.
     expect(lowest).toBeGreaterThan(0.5);
     expect(lowest).toBeLessThan(0.6);
     // The dropped half is the point: none of it was visible.
@@ -865,8 +873,9 @@ describe('the cull against what `scene.ts` actually hands it', () => {
 
     // 49 169 across the ten sweeps when this was written; **35 718** when #348
     // re-measured it, because that issue roughly halved how much scenery a
-    // stretch of road carries. The floor moved with the measurement rather than
-    // the measurement being left to describe a world that has changed.
+    // stretch of road carries; **47 871** since #353. The floor moved with the
+    // measurement rather than the measurement being left to describe a world
+    // that has changed.
     expect(clear).toBeGreaterThan(30_000);
   });
 });

@@ -40,6 +40,7 @@ import {
   CLUSTER_SPAN_METRES,
   DEGENERATE_TANGENT_METRES,
   MINIMUM_SCATTER_SEPARATION_METRES,
+  SCATTER_BAND_METRES,
   SCATTER_KINDS,
   SCATTER_MAX_ITEMS,
   SCATTER_VERGE_METRES,
@@ -498,18 +499,28 @@ describe('the scenery is not a hedge — #348', () => {
     // middle half of everything inside a 9 m spread and almost nothing beyond
     // 20 m, which is what made the scenery read as a wall at a fixed distance.
     //
-    // ⚠️ **The two figures moved for #351 and the claim did not.** That issue
-    // narrowed the band from 35 m to 25 m, because 35 m put the median item
-    // 27 m from the centreline — the far field — and the bound has to follow
-    // the band or it pins a number the change was filed to move. What it still
-    // excludes is the shape it was written against: measured, the pre-#348
-    // arrangement has an interquartile spread of 8.9 m and reaches 19.3 m, so
-    // both assertions go red on it with room to spare.
+    // ⚠️ **Both figures moved for #351 and again for #353, and the bound has to
+    // follow the band or it pins the number the change was filed to move.**
+    // 35 m put the median item 27 m out, 25 m put it at 21.9 m, and 15 m puts
+    // it at 16.9 m. Measured at 15 m: an interquartile spread of **6.7 m**
+    // reaching **23.8 m**.
+    //
+    // ⚠️ **What each half excludes is no longer the same, and #353 is where
+    // that changed.** The pre-#348 arrangement has an interquartile spread of
+    // 8.9 m and reaches 19.3 m — so the reach below still goes red on it with
+    // four metres to spare, and **the spread below no longer does**: at 15 m
+    // the band is barely wider than the 16 m this issue was filed against, and
+    // an interquartile spread cannot tell the two apart. What does is the
+    // verge, asserted in the test above this one — the old arrangement stood
+    // things 5 m from the centreline and this one stands nothing inside 10.2 m.
+    // The spread below is therefore a guard against a *wall*, which is a single
+    // row and an interquartile spread of about 1.7 m, and not against #348's
+    // own shape.
     const quarter = lateral[Math.floor(lateral.length * 0.25)] as number;
     const threeQuarters = lateral[Math.floor(lateral.length * 0.75)] as number;
 
-    expect(threeQuarters - quarter).toBeGreaterThan(10);
-    expect(lateral[lateral.length - 1] as number).toBeGreaterThan(30);
+    expect(threeQuarters - quarter).toBeGreaterThan(5);
+    expect(lateral[lateral.length - 1] as number).toBeGreaterThan(22);
   });
 
   it('leaves whole stretches of road with nothing beside them', () => {
@@ -591,7 +602,9 @@ describe('the scenery is not a hedge — #348', () => {
 
     // The margin at each end of the cell, which is what separates two items in
     // one band in adjacent cells. @see MINIMUM_SCATTER_SEPARATION_METRES: the
-    // bend compression takes 60 % of it, so 5 m is the floor that keeps 2 m.
+    // bend compression takes 60 % of it, so 5 m is the floor that keeps 2 m —
+    // and the along-separation is therefore **not** what that bound rests on
+    // since #353 narrowed the lateral one to 1.35 m.
     // Measured off the items rather than off the bins, because a bin is 0.6 m
     // wide here and the margin is 2.7 m at each end.
     const fractions = sweep.map((item) => {
@@ -733,6 +746,153 @@ describe('the scenery is not an empty plain — #351', () => {
 });
 
 /**
+ * #353 — three passes in, the scenery stood on the horizon with bare ground
+ * either side of the rider, and the band's **depth** is what was wrong.
+ *
+ * ⚠️ **This is the lateral gate, and until this issue there was none.** #348
+ * asserts that items stand at *many different removes*; #351 asserts that the
+ * near field is *populated* — but it counts along the road, over the nearest
+ * 60 m, and an item 33 m out to the side is in that count exactly as an item
+ * 10 m out is. So an arrangement that pushed everything sideways onto the
+ * horizon satisfied both, which is what shipped.
+ *
+ * ⚠️ **What is measured here is still a PROXY and not the device**, in the
+ * sense #351's block means: how far from the centreline the scenery actually
+ * stands. A number cannot say the world looks right; it can say the world is
+ * not all on the horizon, which is the failure that got through twice.
+ *
+ * ⚠️ **Written against distances from the centreline, never against
+ * `SCATTER_BAND_METRES`.** An assertion spelled as a share of the band follows
+ * the constant wherever it is tuned next and asserts nothing — the trap the
+ * `#348` block's own header names.
+ */
+describe('the scenery lines the road rather than ringing the horizon — #353', () => {
+  // The same six kilometres of level valley floor the #348 block sweeps, so the
+  // two sets of figures describe one arrangement rather than two fixtures.
+  const profile = eastRoute({ latitude: 45, altitude: 0, points: 600 });
+  const lateral = place(profile, 0, 2000)
+    .map((item) => Math.abs(item.z))
+    .sort((one, other) => one - other);
+  const quantile = (share: number): number => lateral[Math.floor(lateral.length * share)] as number;
+
+  it('stands half of everything within sight of the carriageway rather than beyond it', () => {
+    // ⚠️ **The measurement #353 was filed on.** With #351's constants the
+    // median item stood **21.9 m** from the centreline and a quarter of
+    // everything stood beyond 27.6 m — a rider looking at a ring of scenery
+    // rather than at a road with scenery beside it. Measured after this
+    // change: median **16.9 m**, upper quartile **20.4 m**.
+    //
+    // The two bounds are set between the two arrangements and nearer the new
+    // one, so the #351 world goes red on both with metres to spare.
+    expect(quantile(0.5)).toBeLessThan(19);
+    expect(quantile(0.75)).toBeLessThan(23);
+  });
+
+  it('still leaves the verge open and still reaches past the near band', () => {
+    // ⚠️ **Non-vacuity in the other direction, and the reason this pair is
+    // here rather than assumed.** Every bound above is an upper one, and an
+    // arrangement that put everything in a single row 10 m out would satisfy
+    // both of them perfectly — which is the 16 m wall #348 was filed to break.
+    // The verge below is #348's own floor and the reach is what says there is
+    // still a band behind it. Measured: 10.2 m and 23.8 m.
+    expect(lateral[0] as number).toBeGreaterThan(9);
+    expect(lateral[lateral.length - 1] as number).toBeGreaterThan(22);
+  });
+});
+
+/**
+ * #353's second finding — the band does **not** change how much is placed, and
+ * the issue's own model of its mechanism says it does.
+ *
+ * #353 asks for the oversubscription figure to be re-measured and expects it to
+ * rise: *"a narrower band raises supply per unit of road, which pushes the
+ * budget back into play… if it does not, the change did less than it appears to
+ * have."* Measured across `SCATTER_BAND_METRES` of 25, 22, 20, 18, 16, 15, 14
+ * and 12 on the #351 fixture, **every one of those figures is identical** —
+ * 245.2 items supplied a frame, 62 frames in 100 over the budget, 32.4 items in
+ * the nearest 60 m, 7 frames in 100 bare.
+ *
+ * It cannot be otherwise, and this is the assertion that says so rather than a
+ * note in a pull request. `fillCell` offers exactly one candidate per cell, per
+ * side, per band, and keeps it or drops it on a stream that reads the density
+ * and the clustering. `bandsAt` returns every band on a road that is not
+ * bending. **Nothing in that chain reads the band's depth**: the depth is spent
+ * on the *lateral offset*, which is drawn after the item has already been kept.
+ * So the band moves scenery sideways and moves nothing else, and the inference
+ * #353 offers — that an unchanged figure means the change did less than it
+ * appears to have — does not follow.
+ */
+describe('how much is placed does not depend on how deep the band is — #353', () => {
+  const profile = eastRoute({ latitude: 45, altitude: 0, points: 600 });
+  const placed = place(profile, 0, 2000);
+
+  /**
+   * Which depth band an item was drawn in, counted off the verge.
+   *
+   * ⚠️ **Read back out of the item's own position rather than carried on it**,
+   * which is what makes this a measurement of the arrangement instead of of a
+   * field the placer sets. The bands are contiguous and equal, so the index is
+   * a division — and an item outside the band entirely lands outside
+   * `[0, SCATTER_BANDS_PER_SIDE)`, which the first assertion is about.
+   *
+   * ⚠️ **This one names `SCATTER_BAND_METRES`, and the `#348` block's rule
+   * against that does not bind here.** That rule is about an assertion *bound*
+   * following the constant it is measuring; this is a bucketing, and both
+   * claims below — how many bands are occupied, and whether they are occupied
+   * equally — are deliberately scale-free. Widening the band should leave both
+   * of them green, and does.
+   */
+  const bandOf = (item: ScatterItem): number => {
+    const verge = ROAD_WIDTH_METRES / 2 + SCATTER_VERGE_METRES;
+    const width = (Math.abs(item.z) - verge) / (SCATTER_BAND_METRES / SCATTER_BANDS_PER_SIDE);
+    return Math.floor(width);
+  };
+
+  const inEachBand = Array.from(
+    { length: SCATTER_BANDS_PER_SIDE },
+    (_unused, band) => placed.filter((item) => bandOf(item) === band).length,
+  );
+
+  it('offers exactly one candidate per band and reaches no band beyond the last', () => {
+    // ⚠️ **This is the assertion that ties the supply to the band COUNT**, and
+    // a ceiling of `cells × 2 × bands` is the version of it that looks
+    // equivalent and is not: the clustering leaves the supply well under any
+    // such ceiling, so a placer that grew a sixth band would still sit inside
+    // one. Counting the bands that are actually occupied cannot be satisfied
+    // that way.
+    expect(
+      placed.filter((item) => bandOf(item) < 0 || bandOf(item) >= SCATTER_BANDS_PER_SIDE),
+    ).toEqual([]);
+    expect(inEachBand.filter((count) => count === 0)).toEqual([]);
+  });
+
+  it('keeps a far band as readily as a near one, so the band’s depth cannot change the count', () => {
+    // ⚠️ **The mechanism #353's own premise gets wrong, asserted rather than
+    // argued.** `fillCell` decides whether to keep a candidate on a stream that
+    // reads the density and the clustering, and draws the depth **afterwards**
+    // — so every band is kept equally often and the band's depth is spent on
+    // *where* the survivors stand, never on how many there are. Narrowing the
+    // band therefore moves scenery sideways and changes nothing else, which is
+    // why the oversubscription figure #353 asks to be re-measured came back
+    // identical: 62 frames in 100 at band depths of 25, 22, 20, 18, 16, 15, 14
+    // and 12 alike.
+    //
+    // ⚠️ **It is also the gate against the fix #351 proposed and this file
+    // refused** — a lateral bias toward the band's near edge. Any such bias
+    // makes the near bands fuller than the far ones and goes red here, which
+    // forces the argument to be had rather than absorbed as a tuning change.
+    //
+    // Measured: 202, 199, 207, 204, 194 — a worst deviation of 3.6 %, against
+    // a bound of 15 % that leaves room for the hash's own noise on a shorter
+    // sweep and none for a systematic lean.
+    const mean = inEachBand.reduce((total, count) => total + count, 0) / inEachBand.length;
+    const worst = Math.max(...inEachBand.map((count) => Math.abs(count - mean) / mean));
+
+    expect(worst).toBeLessThan(0.15);
+  });
+});
+
+/**
  * #348's second ⚠️ — *"making placement more random must not put one in the
  * road"* — and a defect older than the issue.
  *
@@ -766,12 +926,20 @@ describe('a bend does not fold the scenery into the road — #348', () => {
   };
 
   // ⚠️ **Split in two, and the split is the whole of the assertion.** Every
-  // radius under about 24 m is refused outright, so a single sweep across both
+  // radius under about 22 m is refused outright, so a single sweep across both
   // halves reads `Infinity` for the tight ones and passes over an empty set —
   // which is a case that stays green if a later change empties every radius
   // there is. Under the mutation that removes the bend cap entirely, 15 m was
   // the one radius of nine that did **not** go red for exactly that reason.
   // Each half now says which claim it is making.
+  //
+  // ⚠️ **"About 24 m" until #353, and the threshold moved because the band did**
+  // — a reviewer who remembers 24 is reading the old file. `bandsAt` fits whole
+  // bands into the reach a bend leaves, so a three-metre band fits inside a
+  // tighter turn than a five-metre one. It is a **loosening of what is refused,
+  // not of the verge**: the reach itself is `min(R − verge, 0.6 R)` and #353
+  // does not touch it, which is why the sweep below is joined by one over the
+  // radii that have newly started carrying a band.
   it.each([25, 40, 80, 200, 600])(
     'stands nothing inside the verge on a bend of %d m radius, and stands something',
     (radiusMetres) => {
@@ -797,8 +965,29 @@ describe('a bend does not fold the scenery into the road — #348', () => {
   // 10, 12 and 20 go red and **15 does not**. Over the whole range no such
   // accident can carry it, because the uncapped code plants somewhere in it.
   it('carries nothing at any radius too tight for the first band', () => {
-    for (const radiusMetres of radiiFrom(9.75, 24)) {
+    for (const radiusMetres of radiiFrom(9.75, 22)) {
       expect({ radiusMetres, items: itemsOn(radiusMetres) }).toEqual({ radiusMetres, items: [] });
+    }
+  });
+
+  // ⚠️ **The radii #353 newly admits, swept for the verge rather than for
+  // emptiness.** Between about 22 m and the 25 m the case above starts at,
+  // `bandsAt` now returns a band where it used to return none — so the claim
+  // that has to hold there is #348's, that nothing stands inside the verge, and
+  // *not* that something stands at all: a 140 m loop is short enough for the
+  // clustering to leave the whole of it bare, and an emptiness assertion here
+  // would be red on the seed rather than on the geometry.
+  //
+  // ⚠️ `nearestToTheRoad` reads `Infinity` over an empty circuit, so this
+  // assertion is **vacuous on its own** and the `it.each` above is what stops
+  // it being vacuous overall — that one requires a 25 m circuit to carry
+  // something.
+  it('keeps the verge at every radius that has newly started carrying a band', () => {
+    for (const radiusMetres of radiiFrom(22, 25)) {
+      expect({ radiusMetres, insideTheVerge: nearestToTheRoad(radiusMetres) <= 9 }).toEqual({
+        radiusMetres,
+        insideTheVerge: false,
+      });
     }
   });
 
