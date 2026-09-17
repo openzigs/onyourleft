@@ -794,23 +794,37 @@ describe('the cull against what `scene.ts` actually hands it', () => {
   /**
    * ⚠️ **The one place a ceiling survives, and it is the new bound's own
    * "what this gets wrong".** A 100 m hairpin folds the road back beside and
-   * behind the rider, so a fifth of the scenery a frame carries is genuinely
-   * off screen there and is genuinely dropped. That number is quoted in
-   * `three-renderer.ts` §`lateralReachMetres`, so it is pinned here the way its
-   * predecessors were: widen the bound again and this goes red, and the comment
-   * has to be re-measured in the same change rather than left describing a cull
-   * that has moved.
+   * behind the rider, so a large share of the scenery a frame carries is
+   * genuinely off screen there and is genuinely dropped. That number is quoted
+   * in `three-renderer.ts` §`lateralReachMetres`, so it is pinned here the way
+   * its predecessors were: widen the bound again and this goes red, and the
+   * comment has to be re-measured in the same change rather than left
+   * describing a cull that has moved.
+   *
+   * ⚠️ **Re-measured for #348, and the share it drops roughly doubled** — a
+   * reviewer who remembers "a fifth" here is reading the old file. That issue
+   * took the scenery band from 16 m deep to 35 m and pushed the verge back, so
+   * an item may now stand 44.5 m from the centreline rather than 21 m, and on a
+   * 100 m hairpin the far half of that band folds behind the rider. The
+   * assertion that matters is unchanged and still holds: **none of what was
+   * dropped was on screen.**
+   *
+   * The same issue is why the non-vacuity floor moved. The scenery is clustered
+   * now, so the emptiest frame of a sweep is genuinely emptier — 58 items on
+   * this radius where it used to be several hundred — and a floor of a hundred
+   * would be red on a world that is behaving as designed.
    */
   it('drops a measured share of a 100 m hairpin, all of it off screen', () => {
     const { lowest, items, tightestRadius, onScreenButCulled, onScreenAndClear } =
       keptAlongTheRoute(100);
 
-    expect(items).toBeGreaterThan(100);
+    expect(items).toBeGreaterThan(40);
     expect(tightestRadius).toBeGreaterThan(99);
     expect(tightestRadius).toBeLessThan(101);
-    expect(lowest).toBeGreaterThan(0.75);
-    expect(lowest).toBeLessThan(0.85);
-    // The dropped fifth is the point: none of it was visible.
+    // 0.4390 when this was re-measured for #348.
+    expect(lowest).toBeGreaterThan(0.4);
+    expect(lowest).toBeLessThan(0.5);
+    // The dropped half is the point: none of it was visible.
     expect(onScreenAndClear).toBeGreaterThan(1000);
     expect(onScreenButCulled).toBe(0);
   });
@@ -845,8 +859,11 @@ describe('the cull against what `scene.ts` actually hands it', () => {
       clear += sweep.onScreenAndClear;
     }
 
-    // 49 169 across the ten sweeps when this was written.
-    expect(clear).toBeGreaterThan(40_000);
+    // 49 169 across the ten sweeps when this was written; **35 718** when #348
+    // re-measured it, because that issue roughly halved how much scenery a
+    // stretch of road carries. The floor moved with the measurement rather than
+    // the measurement being left to describe a world that has changed.
+    expect(clear).toBeGreaterThan(30_000);
   });
 });
 

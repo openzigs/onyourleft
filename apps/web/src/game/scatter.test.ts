@@ -29,6 +29,7 @@ import {
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
+  positionAt,
   routeProfile,
   type GeographicPosition,
   type RoutePoint,
@@ -36,12 +37,13 @@ import {
 } from '@onyourleft/domain';
 
 import {
+  CLUSTER_SPAN_METRES,
   DEGENERATE_TANGENT_METRES,
   MINIMUM_SCATTER_SEPARATION_METRES,
   SCATTER_KINDS,
   SCATTER_MAX_ITEMS,
   SCATTER_VERGE_METRES,
-  SLOTS_PER_CELL_SIDE,
+  SCATTER_BANDS_PER_SIDE,
   SCATTER_SCALE_HIGHEST,
   SCATTER_SCALE_LOWEST,
   cellSpanMetres,
@@ -51,7 +53,7 @@ import {
   type ScatterItem,
   type ScatterKind,
 } from './scatter';
-import { ROAD_WIDTH_METRES, corridorOrigin, roadCorridor } from './terrain';
+import { ROAD_WIDTH_METRES, corridorOrigin, localGroundPosition, roadCorridor } from './terrain';
 
 /** Large enough that the budget never binds, so placement is what is measured. */
 const UNBOUNDED: ScatterBudget = { maxItems: 100_000, riderMetres: 0 };
@@ -146,6 +148,93 @@ function closestPair(items: readonly ScatterItem[]): number {
     }
   }
   return closest;
+}
+
+/**
+ * Where along `profile` a window of `span` metres carries the most scenery.
+ *
+ * ⚠️ **#348 is why this exists.** Before it, the geography was the only thing
+ * deciding how much was placed, so every stretch of one route at one altitude
+ * carried the same amount and the first window was as good as any. The
+ * clustering makes that false by design: on this fixture a 460 m window holds
+ * anywhere between about a dozen items and rather more than the budget, and
+ * which one you get depends on where you start.
+ */
+function plantedStretch(profile: RouteProfile, span: number): number {
+  let best = 0;
+  let most = -1;
+  for (let at = 0; at + span <= profile.totalDistance; at += 20) {
+    const here = place(profile, at, at + span).length;
+    if (here > most) {
+      most = here;
+      best = at;
+    }
+  }
+  return best;
+}
+
+/**
+ * Where the centre of {@link circuit}'s turn is, in the same local frame the
+ * items are placed in.
+ *
+ * ⚠️ **Computed from the fixture's own definition rather than measured off the
+ * corridor**, which is what makes the bend assertions independent of the code
+ * under test: the distance from a point to a circle is `| |P − C| − R |`, and
+ * both `C` and `R` are numbers this file chose. The alternative — walking the
+ * sampled centreline and taking the nearest vertex — overstates the distance by
+ * up to the sagitta of a ten-metre chord, which on a 10 m radius is nearly a
+ * metre and is exactly the scale being asserted.
+ */
+function circuitCentre(
+  radiusMetres: number,
+  profile: RouteProfile,
+  latitude = 45,
+): { readonly x: number; readonly z: number } {
+  const metresPerDegreeLongitude = 111_320 * Math.cos((latitude * Math.PI) / 180);
+  return localGroundPosition(
+    corridorOrigin(profile),
+    geographicPosition(
+      degreesLatitude(latitude),
+      degreesLongitude(-radiusMetres / metresPerDegreeLongitude),
+    ),
+  );
+}
+
+/**
+ * The route distance an `x` on {@link eastRoute} stands at.
+ *
+ * ⚠️ **`x` is *proportional* to route distance on that fixture, not equal to
+ * it**, and the difference matters here where it does not elsewhere. Route
+ * distance is summed along the geodesic and `localGroundPosition` projects
+ * equirectangularly, so the two differ by a constant factor of about one part
+ * in a thousand — half a metre by 400 m, three by two kilometres. That is far
+ * inside a band and far outside the 3 m margin a cell keeps at each end, so an
+ * assertion about *where in its cell* something stands has to divide it out or
+ * it is measuring the projection instead.
+ */
+function routeDistanceOf(profile: RouteProfile, x: number): number {
+  const end = localGroundPosition(
+    corridorOrigin(profile),
+    positionAt(profile, profile.totalDistance),
+  );
+  return (x * profile.totalDistance) / end.x;
+}
+
+/** Pearson's r, for saying that two of an item's properties are unrelated. */
+function correlation(pairs: readonly (readonly [number, number])[]): number {
+  const count = pairs.length;
+  const meanOf = (at: 0 | 1): number => pairs.reduce((total, pair) => total + pair[at], 0) / count;
+  const meanFirst = meanOf(0);
+  const meanSecond = meanOf(1);
+  let covariance = 0;
+  let firstSpread = 0;
+  let secondSpread = 0;
+  for (const [first, second] of pairs) {
+    covariance += (first - meanFirst) * (second - meanSecond);
+    firstSpread += (first - meanFirst) ** 2;
+    secondSpread += (second - meanSecond) ** 2;
+  }
+  return covariance / Math.sqrt(firstSpread * secondSpread);
 }
 
 /** The source of the module under test, read from disk. */
@@ -355,20 +444,282 @@ describe('nothing is placed on the road', () => {
   });
 });
 
+/**
+ * #348 — the scenery read as a continuous village, and what was done about it.
+ *
+ * ⚠️ **Every assertion here is written against a distance or a shape, never
+ * against the constant it is computed from.** `SCATTER_VERGE_METRES` moving
+ * back to 1.5 m is the defect this issue was filed for, and an assertion
+ * spelled `ROAD_WIDTH_METRES / 2 + SCATTER_VERGE_METRES` follows it there in
+ * silence. The numbers below are the issue's own requirements, and they are
+ * what go red if somebody tunes the constants back.
+ */
+describe('the scenery is not a hedge — #348', () => {
+  // Six kilometres, so the clustering is measured over many stretches rather
+  // than over whichever one the start line happens to be in.
+  const profile = eastRoute({ latitude: 45, altitude: 0, points: 600 });
+  const sweep = place(profile, 0, 2000);
+  const lateral = sweep.map((item) => Math.abs(item.z)).sort((one, other) => one - other);
+
+  it('places enough to measure, so nothing below is green over an empty world', () => {
+    expect(sweep.length).toBeGreaterThan(400);
+    expect(cellSpanMetres(profile)).toBeCloseTo(20, 1);
+  });
+
+  it('leaves open ground between the road and the nearest thing standing on it', () => {
+    // #348's first bullet: *"1.5 m is a hedge, not a verge. A rider should see
+    // open ground before the trees start."* Five metres from the centreline is
+    // what that produced; nine is the floor this issue asks for.
+    expect(lateral[0] as number).toBeGreaterThan(9);
+  });
+
+  it('stands things at many different removes rather than all at one', () => {
+    // #348's second bullet. Sixteen metres shared between four depths put the
+    // middle half of everything inside a 9 m spread and almost nothing beyond
+    // 20 m, which is what made the scenery read as a wall at a fixed distance.
+    const quarter = lateral[Math.floor(lateral.length * 0.25)] as number;
+    const threeQuarters = lateral[Math.floor(lateral.length * 0.75)] as number;
+
+    expect(threeQuarters - quarter).toBeGreaterThan(14);
+    expect(lateral[lateral.length - 1] as number).toBeGreaterThan(35);
+  });
+
+  it('leaves whole stretches of road with nothing beside them', () => {
+    // #348's third bullet — *"a stretch of open road between clusters is what
+    // makes the clusters read as clusters"*. A hundred metres is about twelve
+    // seconds of riding, and before this the geography alone decided density,
+    // so a route at one altitude on one gradient carried the same amount of
+    // scenery from end to end and no stretch was ever bare.
+    const stretches: number[] = [];
+    for (let at = 0; at + 100 <= 2000; at += 100) {
+      stretches.push(place(profile, at, at + 100).length);
+    }
+
+    expect(Math.min(...stretches)).toBe(0);
+    expect(Math.max(...stretches)).toBeGreaterThan(40);
+  });
+
+  it('never leaves a short route uniformly bare, however the clustering falls', () => {
+    // ⚠️ **What a route shorter than two clustering spans nearly shipped as.**
+    // The field is interpolated between hashed nodes, and a first draft rounded
+    // the node count down to as few as one — at which point `(0 + 1) % 1` is
+    // `0`, the field interpolates a value against itself, and a whole route
+    // takes a single openness. Roughly a third of seeds then come out with
+    // nothing beside the road from end to end, which is not a thinner world but
+    // an empty one.
+    //
+    // Eight different short routes rather than one, because a single seed that
+    // happened to land above the threshold would be green on exactly the bug
+    // this is about.
+    const shortRoutes = [40, 41, 42, 43, 44, 45, 46, 47].map((latitude) =>
+      eastRoute({ latitude, altitude: 0, points: 20 }),
+    );
+
+    for (const short of shortRoutes) {
+      expect(short.totalDistance).toBeLessThan(2 * CLUSTER_SPAN_METRES);
+      expect(place(short, 0, short.totalDistance).length).toBeGreaterThan(0);
+    }
+  });
+
+  it('puts a thing anywhere along its cell rather than at one of four stations', () => {
+    // ⚠️ #348's fourth bullet, and the assertion that names the rhythm. An item
+    // used to move within the middle half of one of four fixed sub-intervals,
+    // so its position within a cell fell in `[0.06, 0.19] ∪ [0.31, 0.44] ∪
+    // [0.56, 0.69] ∪ [0.81, 0.94]` — four bands with three visible gaps between
+    // them and nothing kept clear at the cell boundary. It now falls anywhere
+    // in the middle 70 %, which is both a wider range and a *connected* one.
+    //
+    // Ten bins rather than a range, because a range is satisfied by two
+    // extremes with a hole between them — which is precisely the old shape.
+    const span = cellSpanMetres(profile);
+    const bins = Array.from({ length: 10 }, () => 0);
+    for (const item of sweep) {
+      const along = routeDistanceOf(profile, item.x);
+      const at = Math.floor(((((along % span) + span) % span) / span) * 10);
+      bins[Math.min(9, at)] = (bins[Math.min(9, at)] as number) + 1;
+    }
+
+    // The margin at each end of the cell, which is what separates two items in
+    // one band in adjacent cells. @see MINIMUM_SCATTER_SEPARATION_METRES
+    expect(bins[0]).toBe(0);
+    expect(bins[9]).toBe(0);
+    // And no gap anywhere in between — a *range* would be satisfied by the four
+    // stations with three holes between them, which is exactly the old shape.
+    expect(bins.slice(1, 9).filter((count) => count === 0)).toEqual([]);
+  });
+
+  it('does not tie how deep a thing stands to where it stands along the road', () => {
+    // ⚠️ **The rhythm #348 is really about.** A band used to be both a depth
+    // and a position: band 0 was the nearest to the road *and* the first along
+    // the cell, band 3 the furthest *and* the last, so every ten metres drew the
+    // same receding staircase. The two are now drawn from streams of their own,
+    // and that is a property of the arrangement rather than of the diff.
+    const span = cellSpanMetres(profile);
+    const pairs = sweep.map((item) => {
+      const along = routeDistanceOf(profile, item.x);
+      return [(((along % span) + span) % span) / span, Math.abs(item.z)] as const;
+    });
+
+    expect(Math.abs(correlation(pairs))).toBeLessThan(0.1);
+  });
+});
+
+/**
+ * #348's second ⚠️ — *"making placement more random must not put one in the
+ * road"* — and a defect older than the issue.
+ *
+ * An item is placed by the road's **local normal**, so on the inside of a bend
+ * of radius `R` an offset of `d` stands `R − d` from the centre of the turn:
+ * the band folds inward, and past `d = R` it comes out the far side. Measured
+ * against the committed code before #348, a 10 m radius put scenery **1.0 m**
+ * from the centreline and a 12 m radius put it 1.3 m — inside a 3.5 m
+ * half-carriageway, on the one geometry a rider cannot avoid looking at.
+ */
+describe('a bend does not fold the scenery into the road — #348', () => {
+  /** How far the nearest item stands from the road itself. */
+  const nearestToTheRoad = (radiusMetres: number): number => {
+    const profile = circuit(radiusMetres);
+    const centre = circuitCentre(radiusMetres, profile);
+    const items = place(profile, 0, profile.totalDistance);
+    return items.reduce(
+      (nearest, item) =>
+        Math.min(
+          nearest,
+          Math.abs(Math.hypot(item.x - centre.x, item.z - centre.z) - radiusMetres),
+        ),
+      Number.POSITIVE_INFINITY,
+    );
+  };
+
+  /** Every item a circuit of this radius carries. */
+  const itemsOn = (radiusMetres: number): readonly ScatterItem[] => {
+    const profile = circuit(radiusMetres);
+    return place(profile, 0, profile.totalDistance);
+  };
+
+  // ⚠️ **Split in two, and the split is the whole of the assertion.** Every
+  // radius under about 24 m is refused outright, so a single sweep across both
+  // halves reads `Infinity` for the tight ones and passes over an empty set —
+  // which is a case that stays green if a later change empties every radius
+  // there is. Under the mutation that removes the bend cap entirely, 15 m was
+  // the one radius of nine that did **not** go red for exactly that reason.
+  // Each half now says which claim it is making.
+  it.each([25, 40, 80, 200, 600])(
+    'stands nothing inside the verge on a bend of %d m radius, and stands something',
+    (radiusMetres) => {
+      expect(itemsOn(radiusMetres).length).toBeGreaterThan(0);
+      expect(nearestToTheRoad(radiusMetres)).toBeGreaterThan(9);
+    },
+  );
+
+  /** Every radius in `[from, to)`, a quarter of a metre apart. */
+  const radiiFrom = (from: number, to: number): readonly number[] => {
+    const radii: number[] = [];
+    for (let radiusMetres = from; radiusMetres < to; radiusMetres += 0.25) {
+      radii.push(radiusMetres);
+    }
+    return radii;
+  };
+
+  // ⚠️ **Swept rather than sampled at four round radii, and that is the
+  // difference between this assertion and a vacuous one.** A circuit of 15 m is
+  // a 94 m loop, and the clustering can leave the whole of one bare on its own
+  // — so a single radius asserted to be empty may be empty for a reason that
+  // has nothing to do with the bend. Measured: with the cap removed altogether,
+  // 10, 12 and 20 go red and **15 does not**. Over the whole range no such
+  // accident can carry it, because the uncapped code plants somewhere in it.
+  it('carries nothing at any radius too tight for the first band', () => {
+    for (const radiusMetres of radiiFrom(9.75, 24)) {
+      expect({ radiusMetres, items: itemsOn(radiusMetres) }).toEqual({ radiusMetres, items: [] });
+    }
+  });
+
+  // ⚠️ **Below 9.55 m, and this is where the guard used to stop being
+  // absolute.** @see AMBIGUOUS_TURN_RADIUS_METRES. `curvatureAt` wraps its turn
+  // into `(-π, π]`, and a 30 m chord subtends more than π once the radius falls
+  // under `30 / π`; the wrap then reported a *small* curvature, `bandsAt` read
+  // the road as open, and every band was placed on a road folding hard.
+  // Measured on this fixture before the chord reading was added: 4.75 m stood
+  // three things, the nearest **5.00 m** from the centreline, and 5.25 m stood
+  // thirteen with the nearest at **4.66 m** — outside the 3.5 m carriageway, so
+  // #243's hard rule held, and well inside the 9.5 m verge #348 promises.
+  //
+  // The step is a quarter of a metre rather than a round metre because the
+  // failure was not a band of radii: it was 4.00, 4.50, 4.75, 5.00, 5.25 and
+  // 5.50 and nothing in between, since which multiple of the sampling step the
+  // turn lands on is what decides whether the wrapped angle comes out small.
+  it('carries nothing on a bend too tight for its own turn to be measured', () => {
+    for (const radiusMetres of radiiFrom(1, 9.75)) {
+      expect({ radiusMetres, items: itemsOn(radiusMetres) }).toEqual({ radiusMetres, items: [] });
+    }
+  });
+
+  // ⚠️ **A `NaN` here is invisible rather than loud**, which is why it is
+  // asserted over the sweep rather than left to the eye: `three-renderer.ts`
+  // makes the same argument about a degenerate look-at — a `NaN` in a vertex
+  // buffer draws a black screen, not a visible fault. Circuits of 1.25 m to
+  // 2.25 m radius — loops of eight to fourteen metres, which is a broken import
+  // rather than a road — emitted twelve such items at 2 m before the chord
+  // reading refused them, and six on the code this issue started from.
+  it('never emits a coordinate that is not a number, however short the loop', () => {
+    for (let radiusMetres = 1; radiusMetres <= 40; radiusMetres += 0.25) {
+      const rogue = itemsOn(radiusMetres).filter(
+        (item) => !Number.isFinite(item.x) || !Number.isFinite(item.y) || !Number.isFinite(item.z),
+      );
+      expect({ radiusMetres, rogue }).toEqual({ radiusMetres, rogue: [] });
+    }
+  });
+
+  it('places nothing where a bend is too tight to hold a verge, rather than placing it in the road', () => {
+    // ⚠️ **The non-vacuity for the sweep above**, and the assertion that goes
+    // red against the code as it was: a 12 m circuit carried 56 items then, and
+    // the nearest of them was 1.3 m from the centre of the carriageway.
+    //
+    // The pair either side of it says the refusal is a threshold rather than a
+    // rule that swallowed every bend: a 40 m radius keeps its scenery.
+    // ⚠️ **18 m as well as 12, and it is the one that catches a curvature read
+    // at half its true value** — which is what this file did until #348. A 12 m
+    // circuit is refused either way; an 18 m one reads as 36 m under the old
+    // baseline, which is open enough to carry two bands of scenery folded
+    // through the inside of a bend a rider would have to lean into.
+    const tight = circuit(12);
+    const hairpin = circuit(18);
+    const open = circuit(40);
+
+    expect(place(tight, 0, tight.totalDistance)).toEqual([]);
+    expect(place(hairpin, 0, hairpin.totalDistance)).toEqual([]);
+    expect(place(open, 0, open.totalDistance).length).toBeGreaterThan(0);
+  });
+});
+
 describe('the budget', () => {
   // Sea level at a temperate latitude: the geography argues for dense forest,
-  // which is what makes the budget bind at all.
-  const profile = eastRoute({ latitude: 45, altitude: 0 });
+  // which is what lets the budget bind at all. ⚠️ **Six kilometres of it since
+  // #348**, and the length is doing work rather than being generous: the
+  // clustering plants a stretch at a time, so the budget binds where a stretch
+  // happens to be fully planted and a two-kilometre route can run out of road
+  // before one is.
+  const profile = eastRoute({ latitude: 45, altitude: 0, points: 600 });
   const span = 460;
+  // ⚠️ **Not the first 460 m of the route, and since #348 it cannot be.** The
+  // clustering means an arbitrary stretch of road may be open ground — that is
+  // the whole point of it — so a window pinned at zero would measure a thinning
+  // that never had to happen and this whole block would be green over an empty
+  // world. The window is *found* rather than written down, so the constants can
+  // move without leaving a literal here describing where the trees used to be.
+  const from = plantedStretch(profile, span);
 
   it('is the only thing that bounds the count', () => {
-    const unbounded = place(profile, 0, span);
+    const unbounded = place(profile, from, from + span);
 
     expect(unbounded.length).toBeGreaterThan(SCATTER_MAX_ITEMS);
   });
 
   it('is never exceeded', () => {
-    const bounded = place(profile, 0, span, { maxItems: SCATTER_MAX_ITEMS, riderMetres: 60 });
+    const bounded = place(profile, from, from + span, {
+      maxItems: SCATTER_MAX_ITEMS,
+      riderMetres: from + 60,
+    });
 
     expect(bounded.length).toBe(SCATTER_MAX_ITEMS);
   });
@@ -379,17 +730,20 @@ describe('the budget', () => {
     // everything behind the rider and stops dead at whatever distance the
     // budget ran out, which reads as a wall across the road. On this fixture
     // `x` is the route distance, so the far end of the view is simply large `x`.
-    const unbounded = place(profile, 0, span);
-    const bounded = place(profile, 0, span, { maxItems: SCATTER_MAX_ITEMS, riderMetres: 60 });
+    const unbounded = place(profile, from, from + span);
+    const bounded = place(profile, from, from + span, {
+      maxItems: SCATTER_MAX_ITEMS,
+      riderMetres: from + 60,
+    });
     const furthest = (items: readonly ScatterItem[]): number =>
       items.reduce((widest, item) => Math.max(widest, item.x), 0);
 
     expect(furthest(bounded)).toBeGreaterThan(furthest(unbounded) - 20);
-    expect(bounded.filter((item) => item.x > span * 0.75).length).toBeGreaterThan(10);
+    expect(bounded.filter((item) => item.x > from + span * 0.75).length).toBeGreaterThan(10);
   });
 
   it('draws nothing at all when there is no budget to draw with', () => {
-    expect(place(profile, 0, span, { maxItems: 0, riderMetres: 60 })).toEqual([]);
+    expect(place(profile, from, from + span, { maxItems: 0, riderMetres: from + 60 })).toEqual([]);
   });
 
   it('draws nothing rather than everything when the budget is nonsense', () => {
@@ -397,7 +751,7 @@ describe('the budget', () => {
     // end, so an unclamped budget of −1 returns every item but the last. A
     // caller asking for no scenery and getting three hundred pieces of it is
     // the opposite of a budget.
-    expect(place(profile, 0, span, { maxItems: -1, riderMetres: 60 })).toEqual([]);
+    expect(place(profile, from, from + span, { maxItems: -1, riderMetres: from + 60 })).toEqual([]);
   });
 });
 
@@ -462,7 +816,7 @@ describe('a degenerate profile does not stop the ride', () => {
       );
 
       expect(tiny.totalDistance).toBeLessThan(1);
-      expect(place(tiny, -60, 400).length).toBeLessThanOrEqual(SLOTS_PER_CELL_SIDE * 2);
+      expect(place(tiny, -60, 400).length).toBeLessThanOrEqual(SCATTER_BANDS_PER_SIDE * 2);
     },
   );
 

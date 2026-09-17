@@ -213,7 +213,19 @@ apps/                 AGPL-3.0-or-later, without exception
                         #341 NOTHING here changed and that is the point: the
                         models replaced the shapes only, and
                         arrangement-unchanged.test.ts pins a route's whole
-                        arrangement to a digest taken on main before the swap
+                        arrangement to a digest taken on main before the swap.
+                        ⚠️ **#348 is the one change that moved that digest on
+                        purpose**, and a reviewer who reads the line above as
+                        "the arrangement never changes" is reading it too
+                        strongly: the grid doubled to 20 m, a band became a
+                        DEPTH rather than also a position along the road, the
+                        verge went back to 6 m, and a clustering field leaves
+                        stretches of road bare. The budget did not move and
+                        must not. Since #348 the file also caps how far
+                        scenery may stand from a BENDING road — without it a
+                        band this deep folds through the inside of a hairpin
+                        and stands in the carriageway, which the committed
+                        code did at radii under about 12 m
     src/game/scenery-models.ts
                         which file each kind's shape comes from (#341) — the
                         five ADR 0022 D-3 gives a model, the sixth it leaves
@@ -2655,6 +2667,9 @@ top of an issue **supersedes its body**.
 | Why the scenery's shapes will come from a pack when its placement does not, and which one kind is excluded | [ADR 0022](docs/adr/0022-game-scenery-model-pack.md) D-3, D-4 |
 | Where the tree line, the boreal latitude and the steep-pitch threshold came from | `apps/web/src/game/scatter.ts` §Provenance, `apps/web/src/game/world.ts` §`treeLineMetres` |
 | Why a full budget thins the far view instead of cutting it off, and what a wall across the road looks like | `apps/web/src/game/scatter.ts` §`thin`, §`SCATTER_NEAR_BIAS` |
+| Why a stretch of road has nothing beside it, and why that is a field rather than a coin | `apps/web/src/game/scatter.ts` §`clusterAt`, §`CLUSTER_SPAN_METRES`, §`OPEN_GROUND_SHARE` |
+| How far scenery may stand from a road that bends, and what the committed code used to put in the carriageway | `apps/web/src/game/scatter.ts` §`bandsAt`, §`BEND_INNER_SHARE`, [#348](https://github.com/openzigs/onyourleft/issues/348) |
+| Why a band is a depth and not also a place along the road | `apps/web/src/game/scatter.ts` §`SCATTER_BANDS_PER_SIDE`, §`CELL_FILL` |
 | What stops a loop shorter than the view from being drawn twice, and what else that bound buys | `apps/web/src/game/scatter.ts` §`scatterAt`, and the `cellCount` cap beside it |
 | Where the centre line's ten-metre period came from, and why it is not `profile.resolution` | `apps/web/src/game/terrain.ts` §`CENTRE_LINE_PERIOD_METRES` |
 | Why a dash indexed by vertex gives a rider a false speed cue, and what stops the pattern crawling | `apps/web/src/game/terrain.ts` §`writeCentreLine` |

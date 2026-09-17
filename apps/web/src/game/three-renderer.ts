@@ -254,10 +254,13 @@ const GROUND_BELOW_ROAD_METRES = 0.25;
 const UNSET_COLOUR = 0x000000;
 
 /**
- * How far from the road's centreline `scatter.ts` can put anything: **21 m**.
+ * How far from the road's centreline `scatter.ts` can put anything: **44.5 m**.
  *
  * Derived from that file's own three numbers rather than restated here, so the
- * cull below cannot go on describing a band that has moved.
+ * cull below cannot go on describing a band that has moved. ⚠️ **It was 21 m
+ * until #348**, which pushed the verge back and deepened the band; the
+ * derivation is what made that a one-line consequence here rather than a second
+ * number to remember.
  */
 const SCATTER_BAND_REACH_METRES =
   ROAD_WIDTH_METRES / 2 + SCATTER_VERGE_METRES + SCATTER_BAND_METRES;
@@ -331,7 +334,12 @@ export const FRUSTUM_SPREAD =
 export const FOGGED_OUT_METRES = VIEW_AHEAD_METRES;
 
 /**
- * How far to the side of the *camera itself* a scatter item may stand: 42 m.
+ * How far to the side of the *camera itself* a scatter item may stand: 89 m.
+ *
+ * ⚠️ **42 m until #348**, for the reason {@link SCATTER_BAND_REACH_METRES}
+ * gives. Widening the floor can only make the cull keep *more*, so every
+ * property below still holds; what it changed is the measurements, and those
+ * were re-taken rather than left standing.
  *
  * ⚠️ **This is now the near-field floor of {@link lateralReachMetres} rather
  * than the whole bound, and that is the substance of #269.** Until then it was
@@ -351,8 +359,8 @@ export const FOGGED_OUT_METRES = VIEW_AHEAD_METRES;
  * - **The camera is pitched down** by `atan(3 / 33) ≈ 5.2°`, so an item's depth
  *   along the view axis is `0.996 · d − 0.090 · (itemHeight − cameraHeight)`
  *   rather than `d`. Ignoring that overstates depth for anything *below* the
- *   camera, and the margin covers it for a drop of `42 / (FRUSTUM_SPREAD ·
- *   0.090) ≈ 134 m` inside the 400 m view — a sustained 34 % descent, which no
+ *   camera, and the margin covers it for a drop of `89 / (FRUSTUM_SPREAD ·
+ *   0.090) ≈ 285 m` inside the 400 m view — a sustained 71 % descent, which no
  *   road is.
  * - **An instance is placed at a point and drawn with a size**: the tallest
  *   kind is about 7 m and the widest a little over 3 m across, so an item whose
@@ -381,25 +389,32 @@ export const SCATTER_LATERAL_METRES = 2 * SCATTER_BAND_REACH_METRES;
  *    width, and the floor is what keeps the near band whole there.
  * 3. {@link FOGGED_OUT_METRES}, the cap.
  *
- * ⚠️ **What this gets wrong, measured the same way the box was.** Driving the
- * real `sceneFrame` through the real belt on constant-radius routes — 240 items
- * placed every frame, worst frame of a 1.5 km sweep — it submits **98.3 %** on
- * a straight route, **98.8 %** at R = 450 m, **99.2 %** at R = 200 m and
- * R = 150 m, and **79.6 %** at R = 100 m. On the same sweep the box kept
- * 98.3 %, 56.7 % and 41.3 % of the first three.
+ * ⚠️ **What this gets wrong, measured the same way the box was, and
+ * re-measured for #348** — a reviewer who remembers 98.3 / 98.8 / 99.2 / 79.6
+ * here is reading the old file. Driving the real `sceneFrame` through the real
+ * belt on constant-radius routes — worst frame of a 1.5 km sweep — it submits
+ * **100 %** on a straight route, **98.7 %** at R = 450 m, **98.7 %** at
+ * R = 200 m, **98.3 %** at R = 150 m and **43.9 %** at R = 100 m. On the same
+ * sweep the box kept 98.3 %, 56.7 % and 41.3 % of the first three.
  *
- * The dropped fifth at R = 100 m is a hairpin folding the road back beside and
- * behind the rider, and **none of it is inside the frustum**: that is asserted
- * over every item of every frame at ten radii rather than argued for, in
+ * ⚠️ **The share dropped at R = 100 m roughly doubled, and that is the wider
+ * band rather than a worse cull.** #348 took the placement band from 21 m to
+ * 44.5 m from the centreline, and on a hairpin the far half of that band folds
+ * behind the rider. **None of it is inside the frustum**: that is asserted over
+ * every item of every frame at ten radii rather than argued for, in
  * `three-renderer.test.ts` §"never drops an item that is on screen and not yet
  * fogged out".
  *
  * What it still gets wrong is the aspect ratio, and it is a cliff rather than a
  * slope: at 8 : 1 — a viewport about 107 CSS px tall, which nothing produces —
  * a 100 m hairpin starts culling items that are on screen and only 59 % faded
- * into the horizon. Past that the constant is simply the wrong instrument, and
- * the fix would be to pass the camera's live aspect in rather than to widen it
- * again.
+ * into the horizon. ⚠️ **That figure was measured at the 42 m floor and has not
+ * been re-taken**, because the probe that would take it hard-codes
+ * {@link WORST_CASE_ASPECT}; the floor has since nearly doubled, so the cliff
+ * is further out than 8 : 1 rather than nearer, and the number quoted is
+ * pessimistic rather than wrong in the direction that matters. Past that point
+ * the constant is simply the wrong instrument, and the fix would be to pass the
+ * camera's live aspect in rather than to widen it again.
  */
 export function lateralReachMetres(alongMetres: number): number {
   const aheadOfCamera = Math.max(0, alongMetres + CAMERA_BEHIND_METRES);

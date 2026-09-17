@@ -56,6 +56,9 @@
  * | {@link TIGHT_BEND_RADIANS_PER_METRE} | **This repository's own**, stated as a radius: 1/50 m⁻¹, a bend tight enough that a real road would be posted |
  * | {@link SETTLEMENT_TREE_LINE_FRACTION}, {@link SETTLEMENT_GRADE_PERCENT} | **This repository's own.** People build on the valley floor and not on the pitch |
  * | {@link SCATTER_VERGE_METRES}, {@link SCATTER_BAND_METRES} | **This repository's own**, and the verge is a requirement rather than a taste — see the criterion it discharges on {@link SCATTER_VERGE_METRES} |
+ * | {@link BEND_INNER_SHARE} | **Derived, not chosen.** Its two bounds come from the geometry of placing by a local normal and from {@link MINIMUM_SCATTER_SEPARATION_METRES}; the measurement that shows why it is needed is on the constant |
+ * | {@link AMBIGUOUS_TURN_RADIUS_METRES}, {@link AMBIGUOUS_CHORD_SHARE} | **Derived, not chosen.** The radius at which a {@link CURVATURE_WINDOW_METRES} chord subtends more than π is `30 / π`; the first is a margin below it and the second is `\|sin θ\| / θ` at that radius, computed rather than written down |
+ * | {@link SCATTER_CELL_METRES}, {@link CELL_FILL}, {@link CLUSTER_SPAN_METRES}, {@link OPEN_GROUND_SHARE} | **This repository's own**, and judged by eye on the device rather than measured — #348, whose whole content is that the numbers said the scenery was fine and it looked like a village |
  * | The weights and densities | **This repository's own**, chosen so that each of the three named places — valley floor, above the trees, a steep pitch — reads as a different place, which is what `scatter.test.ts` asserts |
  * | {@link fmix32} | MurmurHash3's 32-bit finaliser, Austin Appleby, **placed in the public domain by its author**. Arithmetic, and the one piece of this file that is anybody else's idea |
  *
@@ -159,33 +162,48 @@ export interface ScatterBudget {
 export const SCATTER_MAX_ITEMS = 240;
 
 /**
- * The nominal spacing of the placement grid, in metres: **10**.
+ * The nominal spacing of the placement grid, in metres: **20**.
  *
- * The same figure as `packages/domain`'s `PROFILE_RESOLUTION_METRES`, and for
- * the same reason `terrain.ts` gives for `CENTRE_LINE_PERIOD_METRES`: it is a
- * constant of its own and deliberately **not** a reference to
- * `profile.resolution`, which is the route's *actual* spacing and differs by up
- * to half a metre from one import to the next. Scenery whose density followed
- * that field would be a property of the file's sampling rather than of the
- * place.
+ * ⚠️ **It was 10 until #348, and the doubling is one of the four things that
+ * issue asked for.** A ten-metre grid carrying an item in nearly every slot is
+ * what made the scenery read as *"a continuous village"* on the device: the
+ * period was short enough to see, and the eye finds a repeat of ten metres at
+ * riding speed in a second or two. Doubling the period halves the items per
+ * metre of road at the same fill, and — with {@link CELL_FILL} — buys fourteen
+ * metres of jitter to hide the grid in rather than one and a quarter.
+ *
+ * It is deliberately **not** a reference to `profile.resolution`, which is the
+ * route's *actual* sample spacing and differs from one import to the next:
+ * scenery whose density followed that field would be a property of the file's
+ * sampling rather than of the place. That is the same argument `terrain.ts`
+ * gives for `CENTRE_LINE_PERIOD_METRES`. What it is no longer is
+ * `packages/domain`'s `PROFILE_RESOLUTION_METRES` — a reviewer who remembers
+ * this comment saying the two agree is reading the old one.
  *
  * ⚠️ It is nominal. {@link cellSpanMetres} stretches it so a loop tiles exactly
  * — see there for why the seam depends on it.
  */
-export const SCATTER_CELL_METRES = 10;
+export const SCATTER_CELL_METRES = 20;
 
 /**
- * How many things may stand in one cell, on one side of the road: **4**.
+ * How many things may stand in one cell, on one side of the road: **7**.
  *
- * Each slot owns its own sub-interval of the cell *and* its own lateral
- * sub-band, which is what gives {@link MINIMUM_SCATTER_SEPARATION_METRES} its
- * value: two items can never be placed on top of each other, whatever the
- * hashes say.
+ * ⚠️ **A band is a *depth*, and since #348 it is no longer also a position
+ * along the road** — which is the change that actually removes the rhythm. Each
+ * band owns its own lateral sub-band of the verge and takes its position along
+ * the cell from a stream of its own, so a near item is as likely to be at the
+ * end of a cell as at the start. Before #348 the two were the same index: band
+ * 0 was always both the nearest to the road *and* the first along it, which
+ * drew a receding staircase that repeated every ten metres.
+ *
+ * ⚠️ Must be at least two — {@link bandsAt} divides the reach by it, and the
+ * lateral separation {@link MINIMUM_SCATTER_SEPARATION_METRES} rests on is the
+ * width of one band.
  */
-export const SLOTS_PER_CELL_SIDE = 4;
+export const SCATTER_BANDS_PER_SIDE = 7;
 
 /**
- * How far from the road's edge the nearest thing may stand: **1.5 m**.
+ * How far from the road's edge the nearest thing may stand: **6 m**.
  *
  * ⚠️ **A requirement, not a taste.** #243's fifth criterion is that nothing is
  * placed on the road, and the carriageway is `ROAD_WIDTH_METRES` wide, so the
@@ -194,11 +212,30 @@ export const SLOTS_PER_CELL_SIDE = 4;
  * the defect a rider notices first, and it is the one a lateral offset drawn
  * from `[0, band)` rather than `[verge, verge + band)` would produce on about
  * one item in fifteen.
+ *
+ * ⚠️ **It was 1.5 m until #348**, which is a hedge rather than a verge: the
+ * first thing a rider saw beside the road was a trunk a metre and a half off
+ * the tarmac, for the whole ride. Six metres is far enough that there is open
+ * ground before the planting starts, which is what the owner asked for and what
+ * a real road has.
  */
-export const SCATTER_VERGE_METRES = 1.5;
+export const SCATTER_VERGE_METRES = 6;
 
-/** How wide the band scenery is scattered into is, beyond the verge: 16 m. */
-export const SCATTER_BAND_METRES = 16;
+/**
+ * How deep the band scenery is scattered into is, beyond the verge: **35 m**.
+ *
+ * ⚠️ **It was 16 m until #348.** Sixteen metres shared between four depths put
+ * everything at much the same remove, so the scenery read as a wall at a fixed
+ * distance rather than as ground with things standing on it. Thirty-five metres
+ * over seven depths is five metres a band — see {@link bandWidthMetres}, which is
+ * what {@link MINIMUM_SCATTER_SEPARATION_METRES} is derived from.
+ *
+ * ⚠️ Widening it widens `three-renderer.ts`'s `SCATTER_BAND_REACH_METRES`,
+ * which that file **derives** from this one rather than restating, so the cull
+ * follows automatically. It is also why {@link bandsAt} exists: a band this
+ * deep folds through the inside of a bend, and the cull is not what stops that.
+ */
+export const SCATTER_BAND_METRES = 35;
 
 /** The smallest an item is drawn. @see ScatterItem.scale */
 export const SCATTER_SCALE_LOWEST = 0.7;
@@ -206,32 +243,128 @@ export const SCATTER_SCALE_LOWEST = 0.7;
 /** The largest an item is drawn — so a stand of trees is not a row of clones. */
 export const SCATTER_SCALE_HIGHEST = 1.4;
 
-/** How much of its own slot an item may be placed in: the middle half. */
-export const SLOT_FILL = 0.5;
+/**
+ * How much of its cell an item may be placed along: the middle **70 %**.
+ *
+ * ⚠️ **This is the jitter**, and the margin it leaves is what separates two
+ * items in the same band in adjacent cells: `(1 − CELL_FILL) · cellSpan` = 6 m
+ * at the nominal span. Before #348 a cell was divided into four fixed
+ * sub-intervals and an item moved within the middle half of *one* of them —
+ * 1.25 m of freedom inside a 10 m cell. It is now 14 m inside a 20 m one, and
+ * the price of that freedom is paid in the cell-boundary margin above.
+ */
+export const CELL_FILL = 0.7;
+
+/**
+ * How much of its own band's depth an item may be placed across: the middle
+ * **55 %**.
+ *
+ * The lateral half of {@link CELL_FILL}, and the half
+ * {@link MINIMUM_SCATTER_SEPARATION_METRES} ultimately rests on, because a
+ * lateral separation is the one that does **not** compress on a bend.
+ */
+export const BAND_FILL = 0.55;
+
+/**
+ * How far into a bend's own radius the scenery may reach: **0.6**.
+ *
+ * ⚠️ **This is what keeps #348's "the verge rule must still hold absolutely"
+ * true at a wider band, and it repairs a defect that predates the issue.**
+ * `normalAt` places an item by the road's local normal, so on the inside of a
+ * bend of radius `R` an offset of `d` puts the item `R − d` from the centre of
+ * the turn: the whole band folds inward, and at `d > R` it comes out the other
+ * side of the road. Measured against the committed code on a circular fixture,
+ * a 10 m radius put items **1.0 m** from the centreline — inside a 3.5 m
+ * half-carriageway — and a 12 m radius put them 1.3 m. The band was 21 m then;
+ * at 44.5 m the same fold reaches radii up to about 21 m.
+ *
+ * Two bounds, and {@link bandsAt} takes the smaller:
+ *
+ * - **The verge, measured from the centre of the turn**: `R − (ROAD_WIDTH /
+ *   2 + SCATTER_VERGE_METRES)`. This says the clearance a straight road gets
+ *   is the clearance a bend gets, which is the whole content of the rule.
+ * - **This share of the radius**, which bounds how much the *along*
+ *   separations compress: an offset of `d` shrinks them by `(R − d) / R`, so
+ *   capping `d` at `0.6 R` keeps at least 40 % of the 6 m cell-boundary
+ *   margin — 2.4 m — and {@link MINIMUM_SCATTER_SEPARATION_METRES} holds at
+ *   any radius.
+ *
+ * ⚠️ **It is applied to BOTH sides of the road, and only the inside needs it.**
+ * Telling the two apart needs a *signed* curvature, and `Place.curvature` is a
+ * magnitude because that is all the kind weights ever wanted. Narrowing the
+ * outside of a bend as well costs a shallower band where the road turns, which
+ * is what a cutting looks like anyway — a cost worth paying to keep the
+ * geometry that guards the carriageway down to one number.
+ */
+export const BEND_INNER_SHARE = 0.6;
+
+/**
+ * How long a stretch of road shares one clustering, in metres: **150**.
+ *
+ * ⚠️ **#348's third bullet — "let cells be empty" — and the reason it is a
+ * field rather than a coin.** An independent per-cell chance of being empty is
+ * salt and pepper: it thins everything evenly and leaves no stretch of open
+ * road, so nothing reads as a cluster. {@link clusterAt} instead interpolates
+ * between hashed values every 150 m, which is long enough that a rider passes
+ * through open ground and then through trees rather than through a uniform
+ * thinning of both.
+ *
+ * **This repository's own**, in the sense the provenance table means: it is the
+ * distance over which the planting beside a road plausibly changes character,
+ * and nobody has measured it.
+ */
+export const CLUSTER_SPAN_METRES = 150;
+
+/**
+ * How open the ground has to read before anything is placed on it: **0.25**.
+ *
+ * {@link clusterAt}'s field runs `[0, 1)`; everything below this is bare
+ * ground. Raising it opens the road out and lowering it closes the road in.
+ */
+export const OPEN_GROUND_SHARE = 0.25;
+
+/**
+ * How closed the ground has to read before it is as planted as the geography
+ * allows: **0.6**.
+ *
+ * ⚠️ **The ramp saturates, and it has to.** A field that only reached full
+ * density at its own maximum would put almost every stretch somewhere in the
+ * middle, which is a route that is uniformly *thinner* rather than one that is
+ * sometimes open and sometimes wooded — the same "salt and pepper" failure
+ * {@link CLUSTER_SPAN_METRES} describes, arrived at from the other end. With a
+ * ceiling, a good share of a route is planted to exactly what
+ * {@link densityAt} says, which is also what keeps
+ * {@link SCATTER_MAX_ITEMS} — and with it #245's quality ladder — something
+ * that still binds somewhere rather than a cap nothing ever reaches.
+ */
+export const PLANTED_GROUND_SHARE = 0.6;
 
 /**
  * The closest two items are ever placed: **2 m**.
  *
- * Not a check performed at runtime — a **property of the slot layout**, stated
- * here so `scatter.test.ts` can assert it, and derived rather than guessed:
+ * Not a check performed at runtime — a **property of the cell layout**, stated
+ * here so `scatter.test.ts` can assert it, and derived rather than guessed.
+ * ⚠️ Since #348 the derivation is different in both halves, because a band is
+ * no longer also a position along the road — a reviewer who remembers this
+ * comment talking about slots is reading the old one.
  *
- * - Two items **in one cell on one side** differ by at least one slot, and a
- *   slot is `SCATTER_BAND_METRES / SLOTS_PER_CELL_SIDE` = 4 m of band and
- *   `cellSpan / SLOTS_PER_CELL_SIDE` ≈ 2.5 m of road. {@link inSlot} leaves
- *   `1 − SLOT_FILL` of each as margin, so the separation is at least 2 m
- *   laterally **and** 1.25 m along at the same time.
- * - Two items **in adjacent cells in the same slot** are at least
- *   `cellSpan · (1 − SLOT_FILL / SLOTS_PER_CELL_SIDE)` ≈ 8.7 m apart along.
+ * - Two items **in one cell on one side** are in different bands, so they are
+ *   at least `(1 − BAND_FILL) · bandWidthMetres()` = 2.25 m apart **laterally**.
+ *   Their positions along the road are drawn independently and may coincide,
+ *   which is exactly the point: the lateral separation is the one that holds.
+ * - Two items **in adjacent cells in the same band** are at least
+ *   `(1 − CELL_FILL) · cellSpan` = 6 m apart **along** at the nominal span.
  * - The **two sides** of the road are `ROAD_WIDTH_METRES + 2 ·
- *   SCATTER_VERGE_METRES` = 10 m apart.
+ *   SCATTER_VERGE_METRES` = 19 m apart.
  *
- * ⚠️ **The along-separations compress on the inside of a bend**, by the ratio of
- * the offset to the radius: a hairpin of 25 m radius shrinks an 8.7 m gap at the
- * outer edge of the band to about 1.4 m. What that produces is two rocks
- * touching on the inside of a hairpin — a drawing artefact for #244's cull to
- * live with — and **not** the defect this constant exists to catch, which is two
- * items at the *same* position because the loop seam placed a cell twice. The
- * lateral separations do not compress, and they are what holds at any radius.
+ * ⚠️ **The along-separations compress on the inside of a bend**, by `(R − d) /
+ * R`, and that is what {@link BEND_INNER_SHARE} bounds: the offset can never
+ * exceed 0.6 of the radius, so 6 m of cell-boundary margin never falls below
+ * 2.4 m however tight the road turns. **The lateral separations do not
+ * compress at all** — {@link bandsAt} answers a tight bend by dropping whole
+ * bands rather than by squeezing them, so a band is five metres deep at every
+ * radius. Squeezing them is the version of this that looks equivalent and is
+ * not: it would put two items eight centimetres apart on a 20 m bend.
  *
  * @unwired a bound, not a setting: `scatter.test.ts` measures the placement
  * against it and no scenery decision reads it. Wiring it into the placer would
@@ -254,6 +387,50 @@ export const TIGHT_BEND_RADIANS_PER_METRE = 1 / 50;
 
 /** How far either side of a point the bend is measured over, in metres. */
 export const CURVATURE_WINDOW_METRES = 30;
+
+/**
+ * The tightest radius {@link curvatureAt} will name rather than measure: **12 m**.
+ *
+ * ⚠️ **This is what makes {@link bandsAt}'s guard absolute rather than
+ * absolute-above-a-radius**, and it closes a hole the first version of #348
+ * left. `curvatureAt` reads a turn as an angle between two chord directions and
+ * wraps it into `(-π, π]`, which it must — a bend either side of due north is
+ * not a U-turn. But the angle a {@link CURVATURE_WINDOW_METRES} chord subtends
+ * on a circle of radius `R` is `30 / R`, and that passes π at
+ * `R = 30 / π ≈ 9.55 m`. Below that the wrap reports a *small* curvature for a
+ * road that folds hard, `bandsAt` reads it as open and places every band, and
+ * scenery lands well inside the verge: measured on circular fixtures, radii of
+ * 4.75 m to 5.5 m stood things **4.7 m** from the centreline against a promised
+ * 9.5 m. #243's hard rule — nothing in the 3.5 m carriageway — still held, and
+ * #348's verge rule did not.
+ *
+ * Two directions cannot tell a turn of `θ` from one of `θ + 2π`, so the repair
+ * is not a better angle; it is a **second reading that does not wrap**. The
+ * straight-line distance between the two ends of the window is `2R·sin(θ)`
+ * against a straight road's `2 · CURVATURE_WINDOW_METRES`, so their ratio is
+ * `|sin θ| / θ` — and that is below {@link AMBIGUOUS_CHORD_SHARE} for **every**
+ * `θ > π`, with no ambiguity of its own: `|sin θ| / θ` is monotone decreasing
+ * on `(0, π]` and its largest value anywhere above π is 0.217, at `θ ≈ 4.49`.
+ * So a road the wrap could misreport is always caught here.
+ *
+ * ⚠️ **What it reports is a bound, not a measurement**, and it is honest about
+ * the direction: below the threshold the only true statement is *"at least this
+ * tight"*. 12 m is far inside the ~24 m radius {@link bandsAt} already refuses,
+ * so a road caught here was going to be refused anyway and this only stops it
+ * being refused for the wrong reason.
+ */
+export const AMBIGUOUS_TURN_RADIUS_METRES = 12;
+
+/**
+ * The share of a straight road's window span a chord may close to before the
+ * reading is ambiguous.
+ *
+ * ⚠️ **Derived from {@link AMBIGUOUS_TURN_RADIUS_METRES}, not written down**,
+ * so the two cannot come to disagree about which radius the threshold names.
+ */
+export const AMBIGUOUS_CHORD_SHARE =
+  Math.abs(Math.sin(CURVATURE_WINDOW_METRES / AMBIGUOUS_TURN_RADIUS_METRES)) /
+  (CURVATURE_WINDOW_METRES / AMBIGUOUS_TURN_RADIUS_METRES);
 
 /**
  * Below this, the road has no direction at all: **a micrometre**.
@@ -324,6 +501,18 @@ const STREAM_ROTATION = 3;
 const STREAM_SCALE = 4;
 const STREAM_KIND = 5;
 const STREAM_RANK = 6;
+const STREAM_CLUSTER = 7;
+
+/**
+ * The cell index {@link clusterAt} hashes its nodes under.
+ *
+ * ⚠️ It is a **band** index in {@link hash}'s third argument, and the band
+ * indices a cell uses run `−SCATTER_BANDS_PER_SIDE` to `SCATTER_BANDS_PER_SIDE
+ * − 1`. Anything outside that range will do; this one is far enough outside it
+ * that widening the band count can never reach it, because a collision would
+ * correlate a stretch's openness with one item's own draws inside it.
+ */
+const CLUSTER_KEY = 0x1_0000;
 
 /** An odd multiplier, so that `stream` reaches a different part of the hash. */
 const STREAM_STRIDE = 0x9e37_79b1;
@@ -431,7 +620,13 @@ export function scatterAt(
   for (let step = 0; step < cells; step += 1) {
     const cell = firstCell + step;
     const wrapped = ((cell % cellCount) + cellCount) % cellCount;
-    fillCell(profile, origin, seed, { cell, wrapped, span, fromMetres, toMetres }, found);
+    fillCell(
+      profile,
+      origin,
+      seed,
+      { cell, wrapped, cellCount, span, fromMetres, toMetres },
+      found,
+    );
   }
 
   return thin(found, budget);
@@ -480,12 +675,14 @@ interface Cell {
   readonly cell: number;
   /** Wrapped onto the route. What the hash and the geography are read at. */
   readonly wrapped: number;
+  /** How many cells the whole route has. @see clusterAt */
+  readonly cellCount: number;
   readonly span: number;
   readonly fromMetres: number;
   readonly toMetres: number;
 }
 
-/** Every slot of one cell that falls inside the span, appended to `found`. */
+/** Every band of one cell that falls inside the span, appended to `found`. */
 function fillCell(
   profile: RouteProfile,
   origin: CorridorOrigin,
@@ -502,30 +699,37 @@ function fillCell(
   // that lap two reads the same hill. The hash below is a different matter — it
   // goes through nothing, and `wrapped` there is the whole seam.
   const centreOfCell = (cell.wrapped + 0.5) * cell.span;
-  const place = placeAt(profile, centreOfCell);
-  const density = densityAt(place);
+  const place = placeAt(profile, origin, centreOfCell);
+  // ⚠️ **Two independent reasons a cell can be empty, and they multiply.** The
+  // geography says how much grows here; the clustering says whether this
+  // stretch of road is planted at all. Before #348 there was only the first,
+  // and a route at one altitude on one gradient had the same density from end
+  // to end — every cell filled to the same fraction, which is what makes a
+  // hashed placement still read as a grid.
+  const density = densityAt(place) * clusterAt(seed, cell);
   const weights = kindWeights(place);
+  // ⚠️ **Whole bands, dropped rather than squeezed.** @see MINIMUM_SCATTER_SEPARATION_METRES
+  const bands = bandsAt(place.curvature);
 
   for (const side of [-1, 1]) {
-    for (let slot = 0; slot < SLOTS_PER_CELL_SIDE; slot += 1) {
+    for (let band = 0; band < bands; band += 1) {
       // ⚠️ Hashed on the WRAPPED cell, so the same place on lap two is the same
       // place. Hashing the unwrapped cell would reseed the whole world every lap.
-      const base = hash(seed, cell.wrapped, side * SLOTS_PER_CELL_SIDE + slot);
+      const base = hash(seed, cell.wrapped, side * SCATTER_BANDS_PER_SIDE + band);
       if (uniform(base, STREAM_KEEP) >= density) {
         continue;
       }
 
-      // Each slot owns a sub-interval of the cell and a sub-band of the verge,
-      // and fills the middle {@link SLOT_FILL} of each — which is what makes
-      // MINIMUM_SCATTER_SEPARATION_METRES a property of the layout rather than a
-      // runtime check. @see MINIMUM_SCATTER_SEPARATION_METRES
-      const alongInCell =
-        (inSlot(slot, uniform(base, STREAM_ALONG)) / SLOTS_PER_CELL_SIDE) * cell.span;
-      const lateralBand = SCATTER_BAND_METRES / SLOTS_PER_CELL_SIDE;
+      // ⚠️ **Two draws from two streams, and nothing ties them together** —
+      // which is the whole of #348's "jitter within the cell". The position
+      // along the road is anywhere in the middle {@link CELL_FILL} of the cell;
+      // the depth into the verge is the band's own, filled to
+      // {@link BAND_FILL}. @see MINIMUM_SCATTER_SEPARATION_METRES
+      const alongInCell = inCell(uniform(base, STREAM_ALONG)) * cell.span;
       const lateral =
         ROAD_WIDTH_METRES / 2 +
         SCATTER_VERGE_METRES +
-        inSlot(slot, uniform(base, STREAM_LATERAL)) * lateralBand;
+        (band + inBand(uniform(base, STREAM_LATERAL))) * bandWidthMetres();
 
       const along = cell.cell * cell.span + alongInCell;
       // ⚠️ **Admitted on its own `along`, half-open, rather than by which cell
@@ -560,34 +764,142 @@ function fillCell(
 }
 
 /**
- * Where in slot `slot` a uniform number `unit` puts something.
+ * Where along its cell a uniform number `unit` puts something, as a fraction.
  *
- * ⚠️ **The middle {@link SLOT_FILL} of the slot, not the whole of it**, and that
- * is what {@link MINIMUM_SCATTER_SEPARATION_METRES} rests on. Slots that filled
- * their whole interval would *touch*: the top of slot 0's band is the bottom of
- * slot 1's, so two items could be placed a millimetre apart and the separation
- * guarantee would be worth nothing. Leaving a margin at each end of every slot
- * turns "different slots" into "separated by at least the margin".
+ * ⚠️ **The middle {@link CELL_FILL} of the cell, not the whole of it.** A cell
+ * that filled its whole interval would *touch* the next one: the top of cell
+ * `k` is the bottom of cell `k + 1`, so two items in the same band could be
+ * placed a millimetre apart and the separation guarantee would be worth
+ * nothing. Leaving a margin at each end turns "different cells" into "separated
+ * by at least the margin".
  */
-function inSlot(slot: number, unit: number): number {
-  return slot + (1 - SLOT_FILL) / 2 + unit * SLOT_FILL;
+function inCell(unit: number): number {
+  return (1 - CELL_FILL) / 2 + unit * CELL_FILL;
+}
+
+/** Where across its own band a uniform number puts something, as a fraction. */
+function inBand(unit: number): number {
+  return (1 - BAND_FILL) / 2 + unit * BAND_FILL;
+}
+
+/**
+ * How deep one band is, in metres.
+ *
+ * ⚠️ **A constant of the band, never of the reach.** {@link bandsAt} answers a
+ * bend by returning fewer bands, so this stays five metres at every radius —
+ * and the lateral separation {@link MINIMUM_SCATTER_SEPARATION_METRES} rests on
+ * stays what it says. Deriving it from the reach instead is the version that
+ * looks equivalent and silently puts two items eight centimetres apart on a
+ * 20 m bend.
+ */
+function bandWidthMetres(): number {
+  return SCATTER_BAND_METRES / SCATTER_BANDS_PER_SIDE;
+}
+
+/**
+ * How many bands a place with this curvature may carry, nearest first.
+ *
+ * @see BEND_INNER_SHARE for the two bounds and why they are both needed, and
+ * for the measurement of what the committed code did on a 10 m bend before
+ * this function existed.
+ *
+ * ⚠️ A bend too tight to hold even the first band gets **nothing** — the
+ * honest answer, rather than something inside the carriageway. At the values
+ * here that is a radius under about 24 m, which is a switchback or a
+ * roundabout; `CURVATURE_WINDOW_METRES` smooths anything shorter than 60 m of
+ * arc, so a single tight corner on an otherwise open road keeps its scenery.
+ *
+ * ⚠️ **That smoothing is also where this guard could stop being absolute, and
+ * it is the reason {@link AMBIGUOUS_TURN_RADIUS_METRES} exists.** This function
+ * is only ever as good as the curvature it is handed, and a window measured as
+ * an angle cannot read a road that turns through more than half a circle inside
+ * it. Below about 9.55 m of radius the reading used to come back *small*, the
+ * straight-road branch was taken, and all seven bands were placed on a road
+ * folding hard — measured, 4.7 m from the centreline where 9.5 m is promised.
+ * `curvatureAt` now reports a bound rather than a wrapped angle there, so the
+ * refusal holds at every radius; `scatter.test.ts` sweeps 1 m to 24 m in
+ * quarter-metre steps rather than sampling four round radii, because the
+ * failure fell on particular radii and not on a band of them.
+ *
+ * ⚠️ Written as `!(curvature > 0)` rather than `curvature <= 0` so a `NaN`
+ * takes the straight-road branch instead of falling through it into a `NaN`
+ * band count, which would make the loop below run zero times on a route that
+ * merely has a hole in its positions. ⚠️ **{@link curvatureAt} no longer hands
+ * one over** — the chord reading catches a hole before the angle is taken — so
+ * this is now a guard against a second caller rather than against the only one.
+ */
+function bandsAt(curvature: number): number {
+  if (!(curvature > 0)) {
+    return SCATTER_BANDS_PER_SIDE;
+  }
+  const radius = 1 / curvature;
+  const verge = ROAD_WIDTH_METRES / 2 + SCATTER_VERGE_METRES;
+  const reach = Math.min(radius - verge, radius * BEND_INNER_SHARE);
+  return Math.max(
+    0,
+    Math.min(SCATTER_BANDS_PER_SIDE, Math.floor((reach - verge) / bandWidthMetres())),
+  );
+}
+
+/**
+ * How planted this stretch of road is, from 0 (bare) to 1 (as the geography
+ * allows).
+ *
+ * ⚠️ **A smooth field along the route, not a per-cell coin** — see
+ * {@link CLUSTER_SPAN_METRES} for why that distinction is the whole of the
+ * effect. Values are hashed at nodes about {@link CLUSTER_SPAN_METRES} apart
+ * and interpolated between them, then the bottom {@link OPEN_GROUND_SHARE} of
+ * the range is flattened to nothing so that some stretches are genuinely empty
+ * rather than merely thinner.
+ *
+ * ⚠️ **Nodes are counted in cells and wrapped on the node count, which is what
+ * keeps the loop seam invisible.** The route is divided into a whole number of
+ * nodes exactly as {@link cellSpanMetres} divides it into a whole number of
+ * cells, and the node after the last is the first — so a rider crossing the
+ * start of a loop rides out of the same planting they rode into. Interpolating
+ * against an unwrapped node index would put a visible step at the seam, on a
+ * route where every other property is continuous across it.
+ */
+function clusterAt(seed: number, cell: Cell): number {
+  // ⚠️ **At least two**, and one is what a first draft had. A single node makes
+  // the field constant — `(0 + 1) % 1` is `0`, so it interpolates a value
+  // against itself — and a route shorter than two cluster spans then comes out
+  // uniformly planted or **uniformly bare**, one seed in three. A route is
+  // divided into a whole number of nodes for the reason {@link cellSpanMetres}
+  // divides it into a whole number of cells: so the last node's neighbour is
+  // the first, and the seam has no step in it.
+  const nodes = Math.max(2, Math.round((cell.cellCount * cell.span) / CLUSTER_SPAN_METRES));
+  const at = (cell.wrapped / cell.cellCount) * nodes;
+  const node = Math.floor(at);
+  const from = nodeOpenness(seed, node % nodes);
+  const to = nodeOpenness(seed, (node + 1) % nodes);
+  const ramp = at - node;
+  // Smoothstep, so the field has no corner at a node — a linear ramp between
+  // hashed values reads as a run of straight lines, which is its own rhythm.
+  const openness = from + (to - from) * ramp * ramp * (3 - 2 * ramp);
+  return clamp01((openness - OPEN_GROUND_SHARE) / (PLANTED_GROUND_SHARE - OPEN_GROUND_SHARE));
+}
+
+/** How open one node of the clustering field is, in `[0, 1)`. */
+function nodeOpenness(seed: number, node: number): number {
+  return uniform(hash(seed, node, CLUSTER_KEY), STREAM_CLUSTER);
 }
 
 /**
  * What the route says about one point on it.
  *
- * Read once per cell rather than once per item: the geography of a ten-metre
- * cell is one answer, and asking for it eight times would make the cost of a
- * frame eight times what it needs to be for no change in the result.
+ * Read once per cell rather than once per item: the geography of one cell is one
+ * answer, and asking for it ten times would make the cost of a frame ten times
+ * what it needs to be for no change in the result.
  */
-function placeAt(profile: RouteProfile, at: number): Place {
+function placeAt(profile: RouteProfile, origin: CorridorOrigin, at: number): Place {
   const latitude = Math.abs(positionAt(profile, at).latitude);
   return {
     altitude: elevationAt(profile, at),
     treeLine: treeLineMetres(latitude),
     latitude,
     steepness: Math.abs(gradeAt(profile, at)),
-    curvature: curvatureAt(profile, at),
+    curvature: curvatureAt(profile, origin, at),
   };
 }
 
@@ -599,19 +911,57 @@ function placeAt(profile: RouteProfile, at: number): Place {
  * two ten-metre chords is mostly the file's own sampling noise. `RouteProfile`
  * has no bearing channel, so this is computed from the positions — which is why
  * it is here and not in `packages/domain`: one consumer.
+ *
+ * ⚠️ **In local metres, and until #348 it was in degrees** — a reviewer who
+ * remembers `atan2` over a latitude and a longitude here is reading the old
+ * file. A degree of longitude is `cos(latitude)` of a degree of latitude, so a
+ * bearing taken in degree space is sheared: at 45° the same circular bend read
+ * as a radius anywhere between 13 m and 26 m depending on which way it happened
+ * to be pointing. That was a curiosity while the only consumer was a weight for
+ * signposts, and it is not one now — {@link bandsAt} decides how far scenery
+ * may stand from a bending road from this number, and a bend that reads as
+ * half again its radius puts scenery correspondingly too far in.
  */
-function curvatureAt(profile: RouteProfile, at: number): number {
-  const before = positionAt(profile, distanceOnRoute(profile, at - CURVATURE_WINDOW_METRES));
-  const here = positionAt(profile, at);
-  const after = positionAt(profile, distanceOnRoute(profile, at + CURVATURE_WINDOW_METRES));
+function curvatureAt(profile: RouteProfile, origin: CorridorOrigin, at: number): number {
+  const sample = (metres: number): { readonly x: number; readonly z: number } =>
+    localGroundPosition(origin, positionAt(profile, distanceOnRoute(profile, metres)));
+  const before = sample(at - CURVATURE_WINDOW_METRES);
+  const here = sample(at);
+  const after = sample(at + CURVATURE_WINDOW_METRES);
 
-  const incoming = Math.atan2(after.latitude - here.latitude, after.longitude - here.longitude);
-  const outgoing = Math.atan2(here.latitude - before.latitude, here.longitude - before.longitude);
+  // ⚠️ **Read before the angle is, because below a radius of about 9.55 m the
+  // angle cannot be read at all.** @see AMBIGUOUS_TURN_RADIUS_METRES for why
+  // the wrap below has to lie there, why a chord cannot, and why the answer is
+  // a bound rather than a number.
+  //
+  // ⚠️ Written as `!(spanned > …)` rather than `spanned <= …` for the reason
+  // `normalAt` gives below, and **that half is a form rather than a guarantee**:
+  // rewriting it the other way round leaves every test in this repository green,
+  // measured rather than assumed. A `RouteProfile`'s positions are validated
+  // before it exists, so nothing here can reach a `NaN` chord to assert on — do
+  // not read the negated form as evidence one is handled.
+  const spanned = Math.hypot(after.x - before.x, after.z - before.z);
+  if (!(spanned > AMBIGUOUS_CHORD_SHARE * 2 * CURVATURE_WINDOW_METRES)) {
+    return 1 / AMBIGUOUS_TURN_RADIUS_METRES;
+  }
+
+  const incoming = Math.atan2(after.z - here.z, after.x - here.x);
+  const outgoing = Math.atan2(here.z - before.z, here.x - before.x);
   let turn = incoming - outgoing;
   // Into (-π, π], so a bend either side of due north is not read as a U-turn.
   while (turn > Math.PI) turn -= Math.PI * 2;
   while (turn <= -Math.PI) turn += Math.PI * 2;
-  return Math.abs(turn) / (CURVATURE_WINDOW_METRES * 2);
+  // ⚠️ **Over `CURVATURE_WINDOW_METRES`, not twice it, and it was twice it
+  // until #348** — a reviewer who remembers the doubled baseline is reading the
+  // old file. Each chord's direction is the tangent at its own **midpoint**, so
+  // the two midpoints are one window apart along the road and not two: dividing
+  // by the whole baseline reported exactly **half** the true curvature, and a
+  // circular fixture of 40 m radius read as 79.7 m. That was invisible while
+  // the only consumer was {@link TIGHT_BEND_RADIANS_PER_METRE} — signposts
+  // merely appeared on bends twice as open as that constant's own comment
+  // claims — and it stopped being invisible when {@link bandsAt} started
+  // deciding how far scenery may stand from a bending road.
+  return Math.abs(turn) / CURVATURE_WINDOW_METRES;
 }
 
 /**
@@ -654,10 +1004,18 @@ function normalAt(
   let dx = ahead.x - here.x;
   let dz = ahead.z - here.z;
   // ⚠️ Written as `!(length > …)` rather than `length <= …` so that a `NaN`
-  // takes this branch too instead of falling through it into a `NaN` coordinate,
-  // which reaches a vertex buffer and draws a black screen rather than a visible
-  // fault — the argument `scene.ts` §`cameraPose` makes about a degenerate
-  // look-at.
+  // takes this branch too instead of falling through it. **It catches a `NaN`
+  // input and not a degenerate fallback**, and that distinction is not academic:
+  // the backward difference has a length of its own, and on a loop shorter than
+  // two grid steps it is zero as well, so `0 / 0` leaves with the item. Circuits
+  // of 1.25 m to 2.25 m radius did exactly that — twelve `NaN` coordinates at
+  // 2 m — and a `NaN` in a vertex buffer draws a black screen rather than a
+  // visible fault, the argument `scene.ts` §`cameraPose` makes about a
+  // degenerate look-at. What closes it is upstream and absolute rather than a
+  // third difference here: a loop that short reads as tighter than
+  // {@link AMBIGUOUS_TURN_RADIUS_METRES}, so {@link bandsAt} places nothing on
+  // it and this function is never reached. `scatter.test.ts` §"never emits a
+  // coordinate that is not a number" sweeps every radius up to 40 m for it.
   if (!(Math.hypot(dx, dz) > DEGENERATE_TANGENT_METRES)) {
     const behind = localGroundPosition(
       origin,
