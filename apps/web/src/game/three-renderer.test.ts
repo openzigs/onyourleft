@@ -801,18 +801,22 @@ describe('the cull against what `scene.ts` actually hands it', () => {
    * comment has to be re-measured in the same change rather than left
    * describing a cull that has moved.
    *
-   * ⚠️ **Re-measured for #348, and the share it drops roughly doubled** — a
-   * reviewer who remembers "a fifth" here is reading the old file. That issue
-   * took the scenery band from 16 m deep to 35 m and pushed the verge back, so
-   * an item may now stand 44.5 m from the centreline rather than 21 m, and on a
-   * 100 m hairpin the far half of that band folds behind the rider. The
-   * assertion that matters is unchanged and still holds: **none of what was
-   * dropped was on screen.**
+   * ⚠️ **Re-measured for #348 and again for #351** — a reviewer who remembers
+   * "a fifth" here, or 0.4390, is reading an older file. #348 took the scenery
+   * band from 16 m deep to 35 m and pushed the verge back, so an item stood up
+   * to 44.5 m from the centreline rather than 21 m and the share dropped on a
+   * hairpin roughly doubled; #351 narrowed the band to 25 m and it came back
+   * part of the way. What is being pinned is the *band*, seen through the cull,
+   * rather than the cull itself. The assertion that matters is unchanged and
+   * still holds through both: **none of what was dropped was on screen.**
    *
-   * The same issue is why the non-vacuity floor moved. The scenery is clustered
-   * now, so the emptiest frame of a sweep is genuinely emptier — 58 items on
-   * this radius where it used to be several hundred — and a floor of a hundred
-   * would be red on a world that is behaving as designed.
+   * #348 is also why the non-vacuity floor moved to 40. The scenery is
+   * clustered now, so the emptiest frame of a sweep is genuinely emptier — 58
+   * items on this radius then, 142 since #351 put the density back — and a
+   * floor of a hundred would have been red on a world behaving as designed.
+   * The floor stays at 40 rather than being raised to match today's number:
+   * it is a guard against a vacuous ratio, not a second density assertion, and
+   * `scatter.test.ts` §"#351" is where density is measured.
    */
   it('drops a measured share of a 100 m hairpin, all of it off screen', () => {
     const { lowest, items, tightestRadius, onScreenButCulled, onScreenAndClear } =
@@ -821,9 +825,9 @@ describe('the cull against what `scene.ts` actually hands it', () => {
     expect(items).toBeGreaterThan(40);
     expect(tightestRadius).toBeGreaterThan(99);
     expect(tightestRadius).toBeLessThan(101);
-    // 0.4390 when this was re-measured for #348.
-    expect(lowest).toBeGreaterThan(0.4);
-    expect(lowest).toBeLessThan(0.5);
+    // 0.4390 when this was measured for #348; 0.5514 for #351.
+    expect(lowest).toBeGreaterThan(0.5);
+    expect(lowest).toBeLessThan(0.6);
     // The dropped half is the point: none of it was visible.
     expect(onScreenAndClear).toBeGreaterThan(1000);
     expect(onScreenButCulled).toBe(0);

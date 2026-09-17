@@ -28,10 +28,10 @@
  * change describes the change rather than guarding against it, which is this
  * repository's §5 trap in its purest form.
  *
- * ⚠️ **#348 moved it, deliberately, and every number here was re-taken after
- * that change** — so for #348 and for #348 alone they are a record rather than
- * a guard. The assertion below says so where somebody reading a red run will
- * be, and says what discharges #348 instead.
+ * ⚠️ **#348 moved it, deliberately, and #351 moved it back — every number here
+ * was re-taken after each** — so for those two issues and for those two alone
+ * they are a record rather than a guard. The assertion below says so where
+ * somebody reading a red run will be, and says what discharges them instead.
  *
  * ⚠️ **A digest alone can be satisfied by an empty world**, so the counts and
  * three fully written-out items sit beside it: a frame that stopped placing
@@ -161,37 +161,46 @@ describe('the arrangement a route produces — #341', () => {
   const placed = sweep();
 
   it('places the same scenery it placed before the models landed', () => {
-    // ⚠️ **Regenerated for #348, and that issue is the one kind of change this
-    // number is allowed to move for.** The original was computed on `main`
-    // before a line of #341 was written, which is what made it evidence about
-    // #341; this one was computed *after* #348's own change, so it is **not**
-    // evidence about #348. It cannot be: #348 exists to move the arrangement,
-    // and a golden cannot both permit a change and guard against it.
+    // ⚠️ **Regenerated for #348 and again for #351, and a scenery-tuning issue
+    // is the one kind of change this number is allowed to move for.** The
+    // original was computed on `main` before a line of #341 was written, which
+    // is what made it evidence about #341; this one was computed *after* #351's
+    // own change, so it is **not** evidence about #351. It cannot be: #351
+    // exists to move the arrangement, and a golden cannot both permit a change
+    // and guard against it.
     //
-    // What discharges #348 instead is `scatter.test.ts`, which asserts the
+    // What discharges #351 instead is `scatter.test.ts`, which asserts the
     // properties that must survive the move — determinism, call-order
-    // independence, the seam, the carriageway, the separation — and does it
-    // without naming a coordinate. **This digest goes back to being what it was
-    // written for the moment the next change arrives**: the next model swap,
-    // renderer change or refactor that says it leaves placement alone is
-    // measured against it, and D-4's *"a different arrangement is a defect"*
-    // applies to that one exactly as it applied to #341.
-    expect(digest(placed.map(serialise))).toBe('a26bf6c0');
+    // independence, the seam, the carriageway, the separation, and since #351
+    // how much of the world stands in the near field — and does it without
+    // naming a coordinate. **This digest goes back to being what it was written
+    // for the moment the next change arrives**: the next model swap, renderer
+    // change or refactor that says it leaves placement alone is measured
+    // against it, and D-4's *"a different arrangement is a defect"* applies to
+    // that one exactly as it applied to #341.
+    expect(digest(placed.map(serialise))).toBe('b6852089');
   });
 
   it('places a world at all, so the digest is not over an empty sweep', () => {
-    // 6 291 items over 32 frames, standing in 839 distinct places — an item is
+    // 7 680 items over 32 frames, standing in 1 120 distinct places — an item is
     // placed again in every frame that can still see it, which is what makes
     // this a sweep rather than a snapshot.
     //
-    // ⚠️ **It was 7 680 in 1 233 places before #348**, and the drop is that
-    // issue's whole content: the scenery is placed on a twenty-metre grid
-    // instead of a ten-metre one, clustered so that stretches of road are bare,
-    // and spread through a band more than twice as deep. This pair is what
-    // stops the digest above being satisfied by a world that emptied out
-    // entirely, so it moves with the change rather than being loosened.
-    expect(placed.length).toBe(6291);
-    expect(new Set(placed.map((item) => `${item.x},${item.z}`)).size).toBe(839);
+    // ⚠️ **7 680 in 1 233 places before #348, 6 291 in 839 after it, and 7 680
+    // in 1 120 since #351.** The drop was #348's whole content and the recovery
+    // is #351's: the grid went from ten metres to twenty and back to twelve, a
+    // clustering that left half the route bare was brought back to a quarter of
+    // it, and the band went from 16 m to 35 m to 25 m.
+    //
+    // ⚠️ **The item count is 7 680 again for a reason that is not a
+    // coincidence, and reading it as one would be the trap here.** It is
+    // 32 × 240: the budget binds on every frame of this sweep, exactly as it
+    // did before #348 and did **not** between the two. Two arrangements that
+    // both saturate the budget agree on this number and on nothing else, which
+    // is why the count of distinct *places* sits beside it — 1 233, 839, 1 120
+    // are three different worlds.
+    expect(placed.length).toBe(7680);
+    expect(new Set(placed.map((item) => `${item.x},${item.z}`)).size).toBe(1120);
   });
 
   it('still uses every kind `scatter.ts` can place', () => {
@@ -208,13 +217,13 @@ describe('the arrangement a route produces — #341', () => {
     const last = placed[placed.length - 1];
 
     expect(first === undefined ? '' : serialise(first)).toBe(
-      'tree-conifer 28.285 0.000 66.744 1.776 1.196',
+      'building 81.252 0.000 222.919 0.895 1.142',
     );
     expect(middle === undefined ? '' : serialise(middle)).toBe(
-      'tree-conifer 659.504 15.413 345.435 3.174 0.895',
+      'tree-conifer 706.810 17.759 304.418 1.009 0.837',
     );
     expect(last === undefined ? '' : serialise(last)).toBe(
-      'tree-conifer 444.835 46.233 -438.977 5.300 0.938',
+      'tree-conifer 703.376 42.691 -298.788 0.240 1.178',
     );
   });
 });

@@ -58,7 +58,7 @@
  * | {@link SCATTER_VERGE_METRES}, {@link SCATTER_BAND_METRES} | **This repository's own**, and the verge is a requirement rather than a taste — see the criterion it discharges on {@link SCATTER_VERGE_METRES} |
  * | {@link BEND_INNER_SHARE} | **Derived, not chosen.** Its two bounds come from the geometry of placing by a local normal and from {@link MINIMUM_SCATTER_SEPARATION_METRES}; the measurement that shows why it is needed is on the constant |
  * | {@link AMBIGUOUS_TURN_RADIUS_METRES}, {@link AMBIGUOUS_CHORD_SHARE} | **Derived, not chosen.** The radius at which a {@link CURVATURE_WINDOW_METRES} chord subtends more than π is `30 / π`; the first is a margin below it and the second is `\|sin θ\| / θ` at that radius, computed rather than written down |
- * | {@link SCATTER_CELL_METRES}, {@link CELL_FILL}, {@link CLUSTER_SPAN_METRES}, {@link OPEN_GROUND_SHARE} | **This repository's own**, and judged by eye on the device rather than measured — #348, whose whole content is that the numbers said the scenery was fine and it looked like a village |
+ * | {@link SCATTER_CELL_METRES}, {@link CELL_FILL}, {@link CLUSTER_SPAN_METRES}, {@link OPEN_GROUND_SHARE}, {@link PLANTED_GROUND_SHARE} | **This repository's own**, and judged by eye on the device rather than measured — #348, whose whole content is that the numbers said the scenery was fine and it looked like a village. ⚠️ Since **#351** they also carry a *proxy* measurement, because #348 overshot far enough to empty the world and nothing here could see it: how many items stand in the nearest 60 m of road, and how often that is none. A proxy is not the device, and #351's own criterion is still by eye |
  * | The weights and densities | **This repository's own**, chosen so that each of the three named places — valley floor, above the trees, a steep pitch — reads as a different place, which is what `scatter.test.ts` asserts |
  * | {@link fmix32} | MurmurHash3's 32-bit finaliser, Austin Appleby, **placed in the public domain by its author**. Arithmetic, and the one piece of this file that is anybody else's idea |
  *
@@ -158,19 +158,37 @@ export interface ScatterBudget {
  * the run that would settle it, so a number that claimed to be tuned would be
  * claiming a measurement nobody has made. The same warning covers the three
  * figures #245 wrote below it.
+ *
+ * ⚠️ **#351 left it at 240, per that issue, and changed whether it binds.**
+ * Between #348 and #351 a planted stretch supplied about 162 items into this
+ * budget, so the cap never came into play and {@link SCATTER_NEAR_BIAS} did
+ * nothing at all. A budget nothing reaches is not a cheaper world; it is a
+ * quality ladder whose top rung has quietly stopped being a rung.
  */
 export const SCATTER_MAX_ITEMS = 240;
 
 /**
- * The nominal spacing of the placement grid, in metres: **20**.
+ * The nominal spacing of the placement grid, in metres: **12**.
  *
- * ⚠️ **It was 10 until #348, and the doubling is one of the four things that
- * issue asked for.** A ten-metre grid carrying an item in nearly every slot is
- * what made the scenery read as *"a continuous village"* on the device: the
- * period was short enough to see, and the eye finds a repeat of ten metres at
- * riding speed in a second or two. Doubling the period halves the items per
- * metre of road at the same fill, and — with {@link CELL_FILL} — buys fourteen
- * metres of jitter to hide the grid in rather than one and a quarter.
+ * ⚠️ **10 before #348, 20 in #348, and 12 since #351** — a reviewer who
+ * remembers this comment defending a doubling is reading the old one. #348 took
+ * it to 20 to break a ten-metre rhythm the eye could find in a second or two,
+ * and that half was right; what it cost is the half #351 was filed for.
+ *
+ * ⚠️ **This is the one constant that sets the density of the *foreground*, and
+ * {@link SCATTER_BANDS_PER_SIDE} is not.** The nearest band gets exactly one
+ * candidate position per cell per side, so what stands in the first few metres
+ * of the verge is `2 / SCATTER_CELL_METRES` per metre of road **whatever the
+ * band count is**. Doubling the cell halved it, and no other number could put
+ * it back: adding depth bands only adds items further away.
+ *
+ * ⚠️ **It is not free to shrink**, and {@link CELL_FILL} is where the price is
+ * paid: the margin that separates two items in one band in adjacent cells is
+ * `(1 − CELL_FILL) · cellSpan`, so a smaller cell needs a smaller fill to keep
+ * {@link MINIMUM_SCATTER_SEPARATION_METRES}. At 12 m and a fill of 0.55 that
+ * margin is 5.4 m and the jitter is 6.6 m — five times the 1.25 m an item had
+ * before #348, and still enough of a margin that the bend compression cannot
+ * take it under two metres.
  *
  * It is deliberately **not** a reference to `profile.resolution`, which is the
  * route's *actual* sample spacing and differs from one import to the next:
@@ -183,10 +201,18 @@ export const SCATTER_MAX_ITEMS = 240;
  * ⚠️ It is nominal. {@link cellSpanMetres} stretches it so a loop tiles exactly
  * — see there for why the seam depends on it.
  */
-export const SCATTER_CELL_METRES = 20;
+export const SCATTER_CELL_METRES = 12;
 
 /**
- * How many things may stand in one cell, on one side of the road: **7**.
+ * How many things may stand in one cell, on one side of the road: **5**.
+ *
+ * ⚠️ **Seven until #351**, which asked whether seven depths is more variation
+ * than a rider can perceive at speed behind a fixed camera (ADR 0008 D-5). It
+ * is: what the extra two bought was two more removes past 25 m, where an item
+ * is a few pixels wide. They are not what a band count costs, though — see
+ * {@link SCATTER_CELL_METRES} — so dropping them is nearly free in the
+ * foreground and pays for a narrower {@link SCATTER_BAND_METRES} at an
+ * unchanged band width.
  *
  * ⚠️ **A band is a *depth*, and since #348 it is no longer also a position
  * along the road** — which is the change that actually removes the rhythm. Each
@@ -200,10 +226,15 @@ export const SCATTER_CELL_METRES = 20;
  * lateral separation {@link MINIMUM_SCATTER_SEPARATION_METRES} rests on is the
  * width of one band.
  */
-export const SCATTER_BANDS_PER_SIDE = 7;
+export const SCATTER_BANDS_PER_SIDE = 5;
 
 /**
  * How far from the road's edge the nearest thing may stand: **6 m**.
+ *
+ * ⚠️ **#351 kept it.** That issue reverses three of #348's four numbers and
+ * says of this one *"keep the 6 m verge — that part solved the reported
+ * problem"*. Open ground before the planting starts is what the owner asked
+ * for; what #348 got wrong was everything behind the verge, not the verge.
  *
  * ⚠️ **A requirement, not a taste.** #243's fifth criterion is that nothing is
  * placed on the road, and the carriageway is `ROAD_WIDTH_METRES` wide, so the
@@ -222,20 +253,24 @@ export const SCATTER_BANDS_PER_SIDE = 7;
 export const SCATTER_VERGE_METRES = 6;
 
 /**
- * How deep the band scenery is scattered into is, beyond the verge: **35 m**.
+ * How deep the band scenery is scattered into is, beyond the verge: **25 m**.
  *
- * ⚠️ **It was 16 m until #348.** Sixteen metres shared between four depths put
- * everything at much the same remove, so the scenery read as a wall at a fixed
- * distance rather than as ground with things standing on it. Thirty-five metres
- * over seven depths is five metres a band — see {@link bandWidthMetres}, which is
- * what {@link MINIMUM_SCATTER_SEPARATION_METRES} is derived from.
+ * ⚠️ **16 m before #348, 35 m in #348, and 25 m since #351.** Sixteen metres
+ * shared between four depths put everything at much the same remove, so the
+ * scenery read as a wall at a fixed distance; thirty-five put the *median* item
+ * 27.2 m from the centreline, which is the far field — measured over a 12 km
+ * level fixture, a quarter of everything stood beyond 41.5 m. Twenty-five metres over
+ * five depths brings that median back to 22 m while leaving the band five
+ * metres deep — see {@link bandWidthMetres}, which is what
+ * {@link MINIMUM_SCATTER_SEPARATION_METRES} is derived from, and which is
+ * therefore **unchanged by #351**.
  *
  * ⚠️ Widening it widens `three-renderer.ts`'s `SCATTER_BAND_REACH_METRES`,
  * which that file **derives** from this one rather than restating, so the cull
  * follows automatically. It is also why {@link bandsAt} exists: a band this
  * deep folds through the inside of a bend, and the cull is not what stops that.
  */
-export const SCATTER_BAND_METRES = 35;
+export const SCATTER_BAND_METRES = 25;
 
 /** The smallest an item is drawn. @see ScatterItem.scale */
 export const SCATTER_SCALE_LOWEST = 0.7;
@@ -244,16 +279,23 @@ export const SCATTER_SCALE_LOWEST = 0.7;
 export const SCATTER_SCALE_HIGHEST = 1.4;
 
 /**
- * How much of its cell an item may be placed along: the middle **70 %**.
+ * How much of its cell an item may be placed along: the middle **55 %**.
  *
  * ⚠️ **This is the jitter**, and the margin it leaves is what separates two
- * items in the same band in adjacent cells: `(1 − CELL_FILL) · cellSpan` = 6 m
- * at the nominal span. Before #348 a cell was divided into four fixed
+ * items in the same band in adjacent cells: `(1 − CELL_FILL) · cellSpan` =
+ * 5.4 m at the nominal span. Before #348 a cell was divided into four fixed
  * sub-intervals and an item moved within the middle half of *one* of them —
- * 1.25 m of freedom inside a 10 m cell. It is now 14 m inside a 20 m one, and
- * the price of that freedom is paid in the cell-boundary margin above.
+ * 1.25 m of freedom inside a 10 m cell. It is now 6.6 m inside a 12 m one.
+ *
+ * ⚠️ **It was 0.7 until #351, and it moved because the cell did.** The two are
+ * not independent: what {@link MINIMUM_SCATTER_SEPARATION_METRES} needs is the
+ * *margin in metres*, and the bend compression can take 40 % of it, so the
+ * margin has to stay above 5 m. A 12 m cell at 0.7 leaves 3.6 m, which is
+ * 1.44 m on the tightest bend this file will plant on — under the two metres
+ * the separation promises. Shrinking the cell without this is the mistake that
+ * looks like it only affects density.
  */
-export const CELL_FILL = 0.7;
+export const CELL_FILL = 0.55;
 
 /**
  * How much of its own band's depth an item may be placed across: the middle
@@ -276,7 +318,7 @@ export const BAND_FILL = 0.55;
  * side of the road. Measured against the committed code on a circular fixture,
  * a 10 m radius put items **1.0 m** from the centreline — inside a 3.5 m
  * half-carriageway — and a 12 m radius put them 1.3 m. The band was 21 m then;
- * at 44.5 m the same fold reaches radii up to about 21 m.
+ * at 34.5 m the same fold reaches radii up to about 17 m.
  *
  * Two bounds, and {@link bandsAt} takes the smaller:
  *
@@ -286,7 +328,7 @@ export const BAND_FILL = 0.55;
  * - **This share of the radius**, which bounds how much the *along*
  *   separations compress: an offset of `d` shrinks them by `(R − d) / R`, so
  *   capping `d` at `0.6 R` keeps at least 40 % of the 6 m cell-boundary
- *   margin — 2.4 m — and {@link MINIMUM_SCATTER_SEPARATION_METRES} holds at
+ *   margin — 2.16 m — and {@link MINIMUM_SCATTER_SEPARATION_METRES} holds at
  *   any radius.
  *
  * ⚠️ **It is applied to BOTH sides of the road, and only the inside needs it.**
@@ -316,16 +358,34 @@ export const BEND_INNER_SHARE = 0.6;
 export const CLUSTER_SPAN_METRES = 150;
 
 /**
- * How open the ground has to read before anything is placed on it: **0.25**.
+ * How open the ground has to read before anything is placed on it: **0.15**.
  *
  * {@link clusterAt}'s field runs `[0, 1)`; everything below this is bare
  * ground. Raising it opens the road out and lowering it closes the road in.
+ *
+ * ⚠️ **0.25 until #351, and this pair is the multiplier that issue's own table
+ * does not list.** #348 added the clustering, and a ramp from 0.25 to 0.6
+ * leaves the field at **zero** over roughly a quarter of a route and at about
+ * 0.57 on average — so it scaled *every* cell's density by a little over a
+ * half, on top of the grid change. Measured over a 12 km fixture at 100 rider
+ * positions, 15 frames in 100 had **nothing at all** in the nearest 60 m of
+ * road, which is the literal *"empty plain"* #351 was filed about. The ramp
+ * from 0.15 to {@link PLANTED_GROUND_SHARE} leaves 6 frames in 100 bare, which
+ * is open ground a rider rides through rather than a world that failed to
+ * arrive.
  */
-export const OPEN_GROUND_SHARE = 0.25;
+export const OPEN_GROUND_SHARE = 0.15;
 
 /**
  * How closed the ground has to read before it is as planted as the geography
- * allows: **0.6**.
+ * allows: **0.45**.
+ *
+ * ⚠️ **0.6 until #351.** @see OPEN_GROUND_SHARE for the measurement. Bringing
+ * the top of the ramp down is what makes a planted stretch actually planted:
+ * with a 12 m cell a fully planted valley floor now carries 0.75 items per
+ * metre of road, which is *more* than the 0.72 a stretch carried before #348 —
+ * so the woods are woods, and the open ground is open, instead of everything
+ * being uniformly thin.
  *
  * ⚠️ **The ramp saturates, and it has to.** A field that only reached full
  * density at its own maximum would put almost every stretch somewhere in the
@@ -337,7 +397,7 @@ export const OPEN_GROUND_SHARE = 0.25;
  * {@link SCATTER_MAX_ITEMS} — and with it #245's quality ladder — something
  * that still binds somewhere rather than a cap nothing ever reaches.
  */
-export const PLANTED_GROUND_SHARE = 0.6;
+export const PLANTED_GROUND_SHARE = 0.45;
 
 /**
  * The closest two items are ever placed: **2 m**.
@@ -352,15 +412,17 @@ export const PLANTED_GROUND_SHARE = 0.6;
  *   at least `(1 − BAND_FILL) · bandWidthMetres()` = 2.25 m apart **laterally**.
  *   Their positions along the road are drawn independently and may coincide,
  *   which is exactly the point: the lateral separation is the one that holds.
+ *   ⚠️ #351 narrowed the band and dropped two of its depths **together**, so
+ *   this figure is unchanged.
  * - Two items **in adjacent cells in the same band** are at least
- *   `(1 − CELL_FILL) · cellSpan` = 6 m apart **along** at the nominal span.
+ *   `(1 − CELL_FILL) · cellSpan` = 5.4 m apart **along** at the nominal span.
  * - The **two sides** of the road are `ROAD_WIDTH_METRES + 2 ·
  *   SCATTER_VERGE_METRES` = 19 m apart.
  *
  * ⚠️ **The along-separations compress on the inside of a bend**, by `(R − d) /
  * R`, and that is what {@link BEND_INNER_SHARE} bounds: the offset can never
- * exceed 0.6 of the radius, so 6 m of cell-boundary margin never falls below
- * 2.4 m however tight the road turns. **The lateral separations do not
+ * exceed 0.6 of the radius, so 5.4 m of cell-boundary margin never falls below
+ * 2.16 m however tight the road turns. **The lateral separations do not
  * compress at all** — {@link bandsAt} answers a tight bend by dropping whole
  * bands rather than by squeezing them, so a band is five metres deep at every
  * radius. Squeezing them is the version of this that looks equivalent and is
@@ -459,6 +521,25 @@ export const SETTLEMENT_GRADE_PERCENT = 3;
  * and the rank is *inflated* by how far the item is from the rider: a far item
  * is three times less likely to survive than a near one, and is never simply
  * excluded. See {@link thin}.
+ *
+ * ⚠️ **It is a bias along the ROAD, not across the verge**, and #351 reads it
+ * as the second. *"Narrow the band, or bias placement toward its near edge —
+ * `SCATTER_NEAR_BIAS` already exists for this"*: it does not. Nothing here
+ * biases an item's **lateral** offset, which is uniform across the band it is
+ * drawn in, and a constant that did would change *where* things are placed —
+ * which {@link ScatterBudget} exists to say this one cannot. So #351's third
+ * bullet is discharged by its first alternative, a narrower
+ * {@link SCATTER_BAND_METRES}.
+ *
+ * ⚠️ **And it is inert whenever the supply is under the budget**, which is the
+ * quiet half of what #348 did. {@link thin} returns everything it was given
+ * when `found.length <= maxItems`, so a world that supplies 161.9 items a frame
+ * into a budget of 240 — measured, over a 12 km fixture, with #348's constants
+ * — never sorts, never ranks and never concentrates anything near the rider.
+ * It oversubscribed on 11 frames in 100 and now does on 62. Density and this
+ * bias are therefore not independent knobs: below the budget there is no bias
+ * at all, and `scatter.test.ts` §"#351" counts how often the budget binds
+ * rather than whether it ever does.
  */
 export const SCATTER_NEAR_BIAS = 2;
 

@@ -210,6 +210,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         budget that thins the far view instead of truncating
                         it. ⚠️ It PLACES and draws nothing; #244 draws it, so
                         SceneFrame.scatter ships unread until then. ⚠️ Since
+                        #351 the density of the FOREGROUND is a measured
+                        property rather than a taste — #348 tuned four of these
+                        constants in one change and emptied the world, and
+                        every gate here stayed green, so scatter.test.ts §"#351"
+                        counts what stands in the nearest 60 m. ⚠️ Since
                         #341 NOTHING here changed and that is the point: the
                         models replaced the shapes only, and
                         arrangement-unchanged.test.ts pins a route's whole
@@ -2667,6 +2672,7 @@ top of an issue **supersedes its body**.
 | Why the scenery's shapes will come from a pack when its placement does not, and which one kind is excluded | [ADR 0022](docs/adr/0022-game-scenery-model-pack.md) D-3, D-4 |
 | Where the tree line, the boreal latitude and the steep-pitch threshold came from | `apps/web/src/game/scatter.ts` §Provenance, `apps/web/src/game/world.ts` §`treeLineMetres` |
 | Why a full budget thins the far view instead of cutting it off, and what a wall across the road looks like | `apps/web/src/game/scatter.ts` §`thin`, §`SCATTER_NEAR_BIAS` |
+| What stops the scenery being tuned into an empty plain, and why the near bias does nothing below the budget | `apps/web/src/game/scatter.test.ts` §"the scenery is not an empty plain — #351", `apps/web/src/game/scatter.ts` §`SCATTER_CELL_METRES`, §`SCATTER_NEAR_BIAS` |
 | Why a stretch of road has nothing beside it, and why that is a field rather than a coin | `apps/web/src/game/scatter.ts` §`clusterAt`, §`CLUSTER_SPAN_METRES`, §`OPEN_GROUND_SHARE` |
 | How far scenery may stand from a road that bends, and what the committed code used to put in the carriageway | `apps/web/src/game/scatter.ts` §`bandsAt`, §`BEND_INNER_SHARE`, [#348](https://github.com/openzigs/onyourleft/issues/348) |
 | Why a band is a depth and not also a place along the road | `apps/web/src/game/scatter.ts` §`SCATTER_BANDS_PER_SIDE`, §`CELL_FILL` |
@@ -2788,4 +2794,4 @@ top of an issue **supersedes its body**.
 | What an erase does to the unit preference, and what has to be told | `apps/web/src/transfer/erase-device.ts` §`eraseDevice`, `apps/web/src/transfer/TransferView.tsx` §`onUnitsReset` |
 | Which way a payload faces, and why an export is deliberately not trimmed | `apps/web/src/privacy/boundaries.ts`, [#35](https://github.com/openzigs/onyourleft/issues/35) |
 
-<!-- Last updated: 2026-09-17 by delivery:code-issue resolving #335 (the wind on the ride screen, and that it cannot be changed mid-ride) -->
+<!-- Last updated: 2026-09-17 by delivery:code-issue resolving #351 (the scenery density, and the near-field measurement that had been missing) -->
