@@ -10,11 +10,20 @@
  *
  * ⚠️ **Nothing here is derived from another product.** #19 and ADR 0009 forbid
  * taking a world asset, course geometry, texture or model from anywhere, and
- * this file loads none: every vertex comes from `terrain.ts`, which computes
+ * nothing here is: every road vertex comes from `terrain.ts`, which computes
  * them from the rider's own imported GPX, and the three markers are primitives
- * three.js generates from numbers. There is no texture, no model file and no
- * asset directory in this epic — which #91 records as the reason it can ship
- * without an art budget rather than as a shortcut.
+ * three.js generates from numbers.
+ *
+ * ⚠️ **This section used to go on to say "there is no texture, no model file
+ * and no asset directory in this epic". A reviewer who remembers that sentence
+ * is reading the old file.** #341 loads five, from the CC0 pack
+ * [ADR 0022](../../../../docs/adr/0022-game-scenery-model-pack.md) names, and that ADR
+ * exists because the sentence was #240's founding premise rather than an
+ * incidental fact. What replaces it is narrower and stronger: every model is a
+ * general-purpose CC0 asset, committed byte for byte from the archive its
+ * author publishes, with its pack, its URL, its licence, the date its terms
+ * were read and a SHA-256 in `ASSETS.toml` — ADR 0022 D-5 and D-6, and
+ * `scenery-models.ts` is where the table lives.
  *
  * ## The world is three objects, and since #286 it has a sun
  *
@@ -77,9 +86,15 @@
  * #244 draws what `scatter.ts` placed. **One `InstancedMesh` per kind**, six of
  * them, built once and reused — five hundred trees is six draw calls rather
  * than five hundred, which is the budget #240's NFR-2 says actually matters.
- * Every shape is a three primitive built from numbers in {@link SCATTER_STYLE};
- * as with the markers and the road, no model, texture or asset file is loaded
- * and nothing is derived from any other product.
+ *
+ * ⚠️ **Five of the six shapes are models since #341, and the sixth is not.**
+ * {@link SCATTER_STYLE} still builds a primitive for every kind, because that
+ * is what `post` is drawn with (ADR 0022 D-3), what a kind whose model failed
+ * to load falls back to, and — through {@link sceneryFitMetres} — what decides
+ * how big a model is allowed to be. What a model supplies is the **geometry**
+ * and nothing else: the colour on the next line is this file's, not the pack's.
+ * {@link loadSceneryModels} is the whole of the loading, and
+ * `scenery-models.ts` is what a model is allowed to reach for.
  *
  * ⚠️ **And it is the first object in this file that three is allowed to cull.**
  * `frustumCulled = false` is right for the road and for the ground — one
@@ -105,6 +120,7 @@
 
 import {
   AmbientLight,
+  Box3,
   BoxGeometry,
   BufferAttribute,
   BufferGeometry,
@@ -117,6 +133,7 @@ import {
   FogExp2,
   InstancedBufferAttribute,
   InstancedMesh,
+  LoadingManager,
   Matrix4,
   Mesh,
   MeshBasicMaterial,
@@ -130,9 +147,19 @@ import {
   Vector3,
   WebGLRenderer,
   type Material,
+  type Object3D,
 } from 'three';
+// ⚠️ **Both of these ship inside `three@0.185.1` itself** — MIT, zero runtime
+// dependencies — reached through the package's own `./addons/*` export. ADR
+// 0022 §Consequences turns on that: #341 adds no npm dependency, so `DEP001` is
+// not engaged and the lockfile does not move. And the specifier still matches
+// `three-seam.test.ts`'s `['"]three(?:\/[^'"]*)?['"]`, so a loader imported
+// anywhere but here is a red test with no change to that rule.
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 import type { QualitySettings } from './quality';
+import { SCENERY_MODEL_FILES, sceneryResourceUrl } from './scenery-models';
 import { CAMERA_BEHIND_METRES } from './port';
 import type { CameraPose, GameRenderer, GameView, RiderMarker, SceneFrame } from './port';
 import {
@@ -402,17 +429,26 @@ export const SCATTER_INSTANCE_CAPACITY = SCATTER_MAX_ITEMS;
  * What each kind is made of, and what colour it is.
  *
  * ⚠️ **Provenance, per #240's BR-1 and ADR 0009 L2.** Every entry is built from
- * three's own geometry classes out of numbers typed here; **no model, texture,
- * asset file or course geometry is loaded, and none of it was derived from
- * another product, including "for reference"**. The dimensions are ordinary
- * roadside sizes — a conifer about 7 m tall, a marker post a little over a
- * metre, a building a few metres on a side — and the colours are plain
+ * three's own geometry classes out of numbers typed here, and none of it was
+ * derived from another product, including "for reference". The dimensions are
+ * ordinary roadside sizes — a conifer about 7 m tall, a marker post a little
+ * over a metre, a building a few metres on a side — and the colours are plain
  * vegetation, stone and paint. `scatter.ts` §"Provenance" makes the same
  * declaration for the placement.
+ *
+ * ⚠️ **Since #341 the `geometry` half of five of these entries is a fallback
+ * and a ruler rather than what a rider sees.** A model from ADR 0022's pack is
+ * drawn instead where one loaded, and this table is then read for two things:
+ * the **colour**, which stays this repository's own because #341 buys geometry
+ * and nothing else, and the **size** — {@link sceneryFitMetres} makes a model
+ * occupy the same space the solid did, so the world's scale is unchanged. The
+ * primitive is still what `post` is drawn with and what a kind whose model
+ * failed to load falls back to.
  *
  * The geometry is translated so that its **base sits at y = 0**, because a
  * {@link ScatterItem}'s `y` is the ground under it: three centres every
  * primitive on its own origin, so a cone left alone is half buried.
+ * {@link prepareSceneryGeometry} puts a model on the same footing.
  */
 const SCATTER_STYLE: Record<ScatterKind, { colour: number; geometry: () => BufferGeometry }> = {
   'tree-broadleaf': {
@@ -442,6 +478,210 @@ const SCATTER_STYLE: Record<ScatterKind, { colour: number; geometry: () => Buffe
     geometry: () => new BoxGeometry(7, 6, 9).translate(0, 3, 0),
   },
 };
+
+/**
+ * How much room a kind's shape may take up, in metres: the primitive's own.
+ *
+ * ⚠️ **Derived from {@link SCATTER_STYLE} rather than a table of sizes typed
+ * beside it, and that is what makes #341's *"only the mesh changes"* claim
+ * mechanical.** A pack's models are authored in kit tiles, not metres — a
+ * Kenney tree is 1.71 units tall — so something has to say how big one is, and
+ * anything written down twice is something that can disagree. This reads the
+ * solid the kind used to be drawn as and returns its **largest** extent.
+ *
+ * Largest rather than height, because height alone is right for a tree and
+ * badly wrong for a boulder: the stone model is 0.26 units tall and 1.02
+ * across, so matching its height to the octahedron's 1.4 m would have made it
+ * 5.5 m wide. Matching the largest extent makes the model occupy the box the
+ * solid occupied, whichever way round it is.
+ */
+export function sceneryFitMetres(kind: ScatterKind): number {
+  const solid = SCATTER_STYLE[kind].geometry();
+  solid.computeBoundingBox();
+  const size = solid.boundingBox?.getSize(new Vector3()) ?? new Vector3(1, 1, 1);
+  solid.dispose();
+  return Math.max(size.x, size.y, size.z);
+}
+
+/**
+ * One loaded model, as the single geometry the belt instances — #341.
+ *
+ * ## What is taken from the file, and what is dropped on the floor
+ *
+ * **Taken:** positions and normals, in world space, from every mesh in the
+ * file. **Dropped:** the materials, the texture coordinates and the tangents.
+ *
+ * ⚠️ Dropping the materials is not a simplification, it is the requirement.
+ * #341 replaces *"the **geometry** and nothing else"*, so every kind keeps the
+ * colour {@link SCATTER_STYLE} gives it — which is what keeps
+ * {@link LIT_COLOURS} a complete statement of the scene's palette, and what
+ * stops a pack's house style deciding what this world looks like. ADR 0022 D-7
+ * is the other half: a `MeshStandardMaterial` a loader built from a binary
+ * appears in no source file, so `three-seam.test.ts` could not see one, and it
+ * would change how the whole scene is shaded. Nothing survives to be seen.
+ *
+ * The cost is stated rather than discovered: a Kenney tree is authored with a
+ * separate trunk material, and one colour per kind spends that — the trunk is
+ * drawn in the canopy's green. It buys the silhouette, which is what #302
+ * asked for.
+ *
+ * ## One geometry, because one draw call
+ *
+ * A model is a small scene: a tree is one mesh of two primitives, because its
+ * trunk and its canopy were different materials. Instancing **each part** would
+ * multiply draw calls by the number of parts, and drawing each *item* as a
+ * loaded scene would multiply them by the item count — #240's NFR-2 is the
+ * budget that actually matters here, and it is the one thing a model is most
+ * likely to spend without anybody noticing. So the parts are merged, once, at
+ * load, into a single indexed geometry.
+ *
+ * ## And then it is made to fit
+ *
+ * Scaled so its largest extent is {@link sceneryFitMetres}, centred on x and z,
+ * and translated so its **base sits at y = 0** — a {@link ScatterItem}'s `y` is
+ * the ground under it, so a model left on its own origin is half buried exactly
+ * as a cone would be. The order matters: the box is recomputed after the scale,
+ * because scaling a geometry does not move the box it already cached.
+ */
+export function prepareSceneryGeometry(source: Object3D, kind: ScatterKind): BufferGeometry {
+  source.updateWorldMatrix(false, true);
+  const parts: BufferGeometry[] = [];
+  source.traverse((node) => {
+    const mesh = node as Partial<Mesh>;
+    if (mesh.isMesh !== true || mesh.geometry === undefined) {
+      return;
+    }
+    const part = mesh.geometry.clone().applyMatrix4(node.matrixWorld);
+    // Everything but position and normal, gone before the merge rather than
+    // after it: `mergeGeometries` refuses a set of parts whose attributes
+    // disagree, and a UV kept for a texture that is never loaded is a third of
+    // a vertex buffer uploaded to a phone for nothing.
+    for (const name of Object.keys(part.attributes)) {
+      if (name !== 'position' && name !== 'normal') {
+        part.deleteAttribute(name);
+      }
+    }
+    if (part.getAttribute('normal') === undefined) {
+      part.computeVertexNormals();
+    }
+    parts.push(part);
+  });
+  if (parts.length === 0) {
+    throw new Error(`${kind}: the model holds no mesh`);
+  }
+  // `mergeGeometries` needs every part to agree about being indexed, and a
+  // file is free to mix the two. Levelling down rather than up: generating an
+  // index is a de-duplication pass over a vertex buffer, and this runs on a
+  // phone.
+  const indexed = parts.every((part) => part.index !== null);
+  const ready = indexed
+    ? parts
+    : parts.map((part) => (part.index === null ? part : part.toNonIndexed()));
+  const merged = parts.length === 1 ? (ready[0] ?? null) : mergeGeometries(ready);
+  if (merged === null) {
+    throw new Error(`${kind}: the model's parts could not be merged into one geometry`);
+  }
+  for (const part of new Set([...parts, ...ready])) {
+    if (part !== merged) {
+      part.dispose();
+    }
+  }
+
+  // One helper rather than the same guard written three times: `boundingBox`
+  // is nullable because a geometry may have no positions, and the box has to be
+  // read twice — before the scale to size it, and after, because scaling a
+  // geometry does not move the box it already cached.
+  const boundsOf = (geometry: BufferGeometry): Box3 => {
+    geometry.computeBoundingBox();
+    const box = geometry.boundingBox;
+    if (box === null) {
+      throw new Error(`${kind}: the model has no extent`);
+    }
+    return box;
+  };
+
+  const size = boundsOf(merged).getSize(new Vector3());
+  const largest = Math.max(size.x, size.y, size.z);
+  if (!(largest > 0)) {
+    throw new Error(`${kind}: the model has no extent`);
+  }
+  const factor = sceneryFitMetres(kind) / largest;
+  merged.scale(factor, factor, factor);
+  const fitted = boundsOf(merged);
+  const centre = fitted.getCenter(new Vector3());
+  merged.translate(-centre.x, -fitted.min.y, -centre.z);
+  return merged;
+}
+
+/**
+ * The shapes the belt draws, or an empty map before anything has been loaded.
+ *
+ * ⚠️ **Module state, because what has to outlive a view is not the view's.**
+ * `GameRenderer.create` is synchronous — `port.ts` fixes that, and a renderer
+ * that could not be built without awaiting something would push a `Promise`
+ * into every caller of it — while reading a file is not. So the loading is a
+ * separate step the caller runs once, before it creates anything, and what it
+ * produces is held here. The same shape `segments/sweep.ts` uses, for the same
+ * reason.
+ *
+ * ⚠️ **This is the write half of this program's named defect shape**, one layer
+ * below a store: a `loadSceneryModels` that resolved without filling this, or a
+ * belt built before it resolved, is a world of primitives that every gate here
+ * calls a success. So the read is asserted through the belt a real view builds
+ * — `three-renderer.test.ts` §"the shapes the models bring" — and the browser
+ * gate counts the vertices that actually reached a driver.
+ */
+let sceneryGeometries: ReadonlyMap<ScatterKind, BufferGeometry> = new Map();
+
+/** Reads one model's scene out of its file. Replaced in tests; @see loadSceneryModels. */
+async function readModelScene(url: string): Promise<Object3D> {
+  // ⚠️ The manager is what makes `sceneryResourceUrl` binding rather than
+  // advisory: `GLTFLoader` resolves every external URI a file declares through
+  // it, so this is the one place a model could reach the network and the one
+  // place that is refused. `scenery-models.ts` says what it answers with.
+  const manager = new LoadingManager();
+  manager.setURLModifier(sceneryResourceUrl);
+  return (await new GLTFLoader(manager).loadAsync(url)).scene;
+}
+
+/**
+ * Loads the scenery models. Called once, before the first view is created.
+ *
+ * ⚠️ **A kind whose model cannot be read keeps its primitive, and says nothing
+ * about it.** That is a deliberate trade and it is the risky half of this
+ * change: a rider mid-ride should lose a tree's shape rather than the ride, and
+ * #240's FR-5 already says the same about losing the GL context entirely. What
+ * it costs is that a model this repository stopped shipping would look exactly
+ * like the world did before #341 — so the gate that says every one of them
+ * actually loaded is `game.browser.spec.ts`, where a real engine fetches real
+ * bytes, and not anything in the fast suite.
+ *
+ * `load` is a seam and not a convenience: jsdom can neither construct a GL
+ * context nor serve a file, so the only way to assert what this does with a
+ * scene is to hand it one.
+ */
+export async function loadSceneryModels(
+  load: (url: string) => Promise<Object3D> = readModelScene,
+): Promise<void> {
+  const loaded = new Map<ScatterKind, BufferGeometry>();
+  await Promise.all(
+    SCATTER_KINDS.map(async (kind) => {
+      const url = SCENERY_MODEL_FILES[kind];
+      if (url === undefined) {
+        return;
+      }
+      try {
+        loaded.set(kind, prepareSceneryGeometry(await load(url), kind));
+      } catch {
+        // Keep the primitive. @see the note above.
+      }
+    }),
+  );
+  for (const geometry of sceneryGeometries.values()) {
+    geometry.dispose();
+  }
+  sceneryGeometries = loaded;
+}
 
 /**
  * Every colour in this file that a lit material carries — #286.
@@ -658,12 +898,25 @@ export class ScatterBelt {
    */
   #budget = Number.POSITIVE_INFINITY;
 
-  constructor() {
+  /**
+   * @param models the shapes to draw, by kind. Defaults to whatever
+   * {@link loadSceneryModels} has loaded, which is what the shipped client
+   * gets; a kind with no entry is drawn as {@link SCATTER_STYLE}'s primitive,
+   * which is `post` always and any other kind whose file could not be read.
+   */
+  constructor(models: ReadonlyMap<ScatterKind, BufferGeometry> = sceneryGeometries) {
     for (const kind of SCATTER_KINDS) {
       const materials = shadedMaterials(SCATTER_STYLE[kind].colour);
       this.#materials.set(kind, materials);
+      const model = models.get(kind);
       const mesh = new InstancedMesh(
-        SCATTER_STYLE[kind].geometry(),
+        // ⚠️ **A copy of the model, not the model.** {@link dispose} releases
+        // every geometry the belt is wearing, and the loaded ones are shared
+        // by every belt this tab ever builds — a view that released them on
+        // teardown would leave the next ride's world made of primitives, with
+        // nothing to say why. A copy costs about 30 kB for the largest kind,
+        // once per view.
+        model === undefined ? SCATTER_STYLE[kind].geometry() : model.clone(),
         // ⚠️ **Lit since #286, and this is the file's biggest change of mind.**
         // It used to say *"no lighting means no light budget"* here, which was
         // a performance claim with no measurement behind it — #286's own

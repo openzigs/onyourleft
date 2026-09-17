@@ -209,7 +209,23 @@ apps/                 AGPL-3.0-or-later, without exception
                         verge that keeps a tree out of the carriageway, and the
                         budget that thins the far view instead of truncating
                         it. ⚠️ It PLACES and draws nothing; #244 draws it, so
-                        SceneFrame.scatter ships unread until then
+                        SceneFrame.scatter ships unread until then. ⚠️ Since
+                        #341 NOTHING here changed and that is the point: the
+                        models replaced the shapes only, and
+                        arrangement-unchanged.test.ts pins a route's whole
+                        arrangement to a digest taken on main before the swap
+    src/game/scenery-models.ts
+                        which file each kind's shape comes from (#341) — the
+                        five ADR 0022 D-3 gives a model, the sixth it leaves
+                        alone, and the one rule that says what a model may
+                        fetch. ⚠️ **The geometry is bought and nothing else**:
+                        every kind keeps three-renderer.ts's own colour, so
+                        LIT_COLOURS stays a complete statement of the palette
+    src/game/models/    the committed .glb files — Kenney CC0, upstream bytes,
+                        one ASSETS.toml row each (ADR 0022 D-5). ⚠️ The first
+                        binaries in this repository that anything SHIPS, so
+                        they land under apps/ and could not land under
+                        packages/: ASSET004 admits CC0-1.0 under apps/ only
     src/game/three-seam.test.ts
                         what keeps that true, and which illumination classes the
                         scene is allowed — a grep over apps/ and packages/
@@ -2624,6 +2640,13 @@ top of an issue **supersedes its body**.
 | What happens to a ride when the phone is backgrounded for five minutes | `apps/web/src/game/simulation.ts` §`MAXIMUM_STEPS_PER_ADVANCE` |
 | Why the ghost does not gain road while the phone is backgrounded, and which clock it is raced against | `apps/web/src/game/simulation.ts` §`ghostClock`, §`GameState.ridden` |
 | Why the road is a corridor rather than a world, and where its vertices come from | `apps/web/src/game/terrain.ts`, [ADR 0008](docs/adr/0008-mobile-client-architecture.md) D-5 |
+| Why the scenery is models at all, which pack, and which kind deliberately stays a cylinder | [ADR 0022](docs/adr/0022-game-scenery-model-pack.md) D-1, D-2, D-3, `apps/web/src/game/scenery-models.ts` |
+| What a model file is allowed to fetch, and why a texture nobody draws still had to be refused | `apps/web/src/game/scenery-models.ts` §`sceneryResourceUrl`, `apps/web/browser/game.browser.spec.ts` §"fetches the five committed models and nothing else" |
+| Why a model keeps this repository's colour rather than the pack's, and what that costs a tree's trunk | `apps/web/src/game/three-renderer.ts` §`prepareSceneryGeometry`, [ADR 0022](docs/adr/0022-game-scenery-model-pack.md) D-7 |
+| How big a model is allowed to be, and why the rule is the largest extent rather than the height | `apps/web/src/game/three-renderer.ts` §`sceneryFitMetres` |
+| Why the models are loaded before a view exists rather than inside one | `apps/web/src/game/three-renderer.ts` §`sceneryGeometries`, `apps/web/src/main.tsx` §`loadGameRenderer` |
+| What proves a route's scenery did not move when its shapes changed | `apps/web/src/game/arrangement-unchanged.test.ts` |
+| What the scenery models cost the GPU, and why that number is published rather than bounded | [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part H, `apps/web/browser/game.browser.spec.ts` |
 | Why the scenery is one mesh per kind, and the only thing this renderer culls | `apps/web/src/game/three-renderer.ts` §`ScatterBelt`, §`lateralReachMetres` |
 | Why the scenery cull is a cone rather than a box, and what it still throws away on a bend | `apps/web/src/game/three-renderer.ts` §`lateralReachMetres`, §`SCATTER_LATERAL_METRES`, `apps/web/src/game/three-renderer.test.ts` §"the cull against what `scene.ts` actually hands it" |
 | Which aspect ratio the cull is stated against, and why a test cannot re-derive it | `apps/web/src/game/three-renderer.ts` §`WORST_CASE_ASPECT`, `apps/web/src/design/theme.css` §`.oyl-game__world` |

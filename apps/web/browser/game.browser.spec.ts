@@ -83,8 +83,15 @@ interface GameHarnessResult {
   readonly frameMsNoise: number;
   readonly litDrawCalls: number;
   readonly flatDrawCalls: number;
+  readonly sceneryIndicesModelled: Readonly<Record<string, number>>;
+  readonly sceneryIndicesPlain: Readonly<Record<string, number>>;
+  readonly sceneryInstances: Readonly<Record<string, number>>;
   readonly errors: readonly string[];
 }
+
+/** The five kinds ADR 0022 D-3 gives a model, and the one it leaves alone. */
+const MODELLED_KINDS = ['tree-broadleaf', 'tree-conifer', 'shrub', 'rock', 'building'] as const;
+const PROCEDURAL_KIND = 'post';
 
 /** How many frames the harness drives. Mirrors `FRAMES` in `game-harness.ts`. */
 const FRAMES = 100;
@@ -143,8 +150,11 @@ const CHANNELS = ['red', 'green', 'blue'] as const;
 
 async function harness(page: import('@playwright/test').Page): Promise<GameHarnessResult> {
   await page.goto(`${HARNESS_ORIGIN}/game.html`);
-  // The harness publishes synchronously at the end of `run()`, so waiting on the
-  // property existing is waiting on the module having executed — not on a timer.
+  // The harness publishes at the end of `run()` and nowhere else, so waiting on
+  // the property existing is waiting on the run having finished — not on a
+  // timer. ⚠️ Since #341 that run is **asynchronous**: it awaits the scenery
+  // models before it creates anything, exactly as `main.tsx` does, so the
+  // property appears a few hundred milliseconds later than it used to.
   await page.waitForFunction(() => window.__oylGameHarness !== undefined);
   return page.evaluate(() => window.__oylGameHarness as GameHarnessResult);
 }
@@ -742,5 +752,120 @@ test.describe('the world is lit, and can stop being — #286', () => {
     // nobody re-runs, which is the failure #286 quotes #244's review about.
     // The list reporter prints a test's stdout beside its own line.
     console.log(`frame cost of the lighting — ${measured}`);
+  });
+});
+
+/**
+ * The scenery is models, and they came from the files this repository commits —
+ * #341, and ADR 0022 D-3 and D-7.
+ *
+ * ## Why this cannot be asserted anywhere else
+ *
+ * Nothing in the Vitest suite can open a `.glb` with a loader: `GLTFLoader`
+ * reads a file over the network and hands its result to a `BufferGeometry`, and
+ * jsdom has neither a server nor a GL context. `three-renderer.test.ts` asserts
+ * what `prepareSceneryGeometry` does to a scene it is *handed* — the fit, the
+ * base, the merge, the fallback — and every one of those assertions is green
+ * against a build whose five committed models fail to parse, because a kind
+ * that cannot be read keeps its primitive **on purpose**. That graceful
+ * fallback is the right behaviour for a rider mid-ride and it is exactly what
+ * makes a silent failure invisible, so this is where it is caught.
+ */
+test.describe('the scenery is models, not solids — #341', () => {
+  test('draws more geometry for every kind ADR 0022 gives a model', async ({ page }, testInfo) => {
+    const result = await harness(page);
+
+    // ⚠️ **Non-vacuity first.** A kind with no items in the probe frame draws
+    // nothing under either condition, and "0 is not greater than 0" would read
+    // as a model that failed to load rather than as a frame with no buildings
+    // in it. Every kind has to be present before the comparison means anything.
+    for (const kind of [...MODELLED_KINDS, PROCEDURAL_KIND]) {
+      expect(result.sceneryInstances[kind], `${kind} in the probe frame`).toBeGreaterThan(0);
+      expect(result.sceneryIndicesPlain[kind], `${kind} as a solid`).toBeGreaterThan(0);
+    }
+
+    for (const kind of MODELLED_KINDS) {
+      expect(
+        result.sceneryIndicesModelled[kind],
+        `${kind} draws more geometry as a model than as a solid`,
+      ).toBeGreaterThan(result.sceneryIndicesPlain[kind] ?? 0);
+    }
+
+    // ⚠️ **Published rather than bounded**, the same posture #286's shading
+    // measurement takes: what a model costs the GPU is the number ADR 0022
+    // §"What this costs" says is unmeasured, and the honest thing to do with a
+    // figure taken from a software rasteriser on a desktop is to print it. A
+    // ceiling written from it would be a device-floor claim this machine
+    // cannot make — that is #247, and validation 0002 Part E.
+    const measured = [...MODELLED_KINDS, PROCEDURAL_KIND]
+      .map(
+        (kind) =>
+          `${kind} ${String(result.sceneryIndicesPlain[kind])} → ` +
+          `${String(result.sceneryIndicesModelled[kind])}`,
+      )
+      .join(', ');
+    const note = `vertex indices for one instance, as a solid → as a model: ${measured}`;
+    testInfo.annotations.push({ type: 'geometry cost of the scenery models', description: note });
+    console.log(`geometry cost of the scenery models — ${note}`);
+  });
+
+  test('leaves `post` exactly as it was, because a post has no silhouette to buy', async ({
+    page,
+  }) => {
+    // ADR 0022 D-3, in the one place it can be observed rather than read: a
+    // marker post 1.1 m tall and 14 cm across is the same handful of pixels
+    // whether it is modelled or extruded, and a model would cost a manifest
+    // row, bundle bytes inside the APK and a share of #245's instance budget.
+    const result = await harness(page);
+
+    expect(result.sceneryIndicesModelled[PROCEDURAL_KIND]).toBe(
+      result.sceneryIndicesPlain[PROCEDURAL_KIND],
+    );
+  });
+
+  test('still costs one draw call a kind, however much geometry a model carries', async ({
+    page,
+  }) => {
+    // ⚠️ **#341's own warning, and the thing this change is most likely to
+    // break without anybody seeing it**: *"Six packs of individually-drawn
+    // models would multiply draw calls by the item count and undo #245's
+    // budget entirely."* The belt merges every part of a model into one
+    // geometry for exactly this, and the number below is #244's, unchanged.
+    const result = await harness(page);
+
+    expect(result.drawCallsWithScatter - result.drawCallsWithoutScatter).toBe(
+      result.scatterKindCount,
+    );
+  });
+
+  test('fetches the five committed models and nothing else', async ({ page }) => {
+    // ⚠️ **#240's NFR-5 — *"makes no network request"* — was true until #341
+    // because there was no file to declare one.** A glTF may name an external
+    // resource by URI, and `building-type-h.glb` names exactly one: the colour
+    // atlas its pack paints every building from. `scenery-models.ts` answers
+    // every resource that is not one of the five models with 68 bytes of
+    // transparent PNG held in the bundle, and this is the only place that
+    // policy can be observed from outside the code that implements it.
+    //
+    // The request list is collected before the page is opened rather than
+    // after, because a request made during the load is one that is over by the
+    // time a `page.evaluate` could look.
+    const requested: string[] = [];
+    page.on('request', (request) => requested.push(request.url()));
+
+    await page.goto(`${HARNESS_ORIGIN}/game.html`);
+    await page.waitForFunction(() => window.__oylGameHarness !== undefined);
+
+    // ⚠️ **Distinct URLs, because the harness deliberately loads twice**: once
+    // for the measurement and once more to restore the models after the
+    // control run that clears them. What is being asserted is *which* files a
+    // page reaches for, not how many times it asks.
+    const models = new Set(requested.filter((url) => url.endsWith('.glb')));
+
+    expect(models.size).toBe(5);
+    expect(requested.filter((url) => url.includes('colormap'))).toEqual([]);
+    // And nothing at all off this origin — the stronger statement, and the one
+    // that survives somebody renaming the atlas.
+    expect(requested.filter((url) => !url.startsWith(HARNESS_ORIGIN))).toEqual([]);
   });
 });

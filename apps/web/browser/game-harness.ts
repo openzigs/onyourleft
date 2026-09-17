@@ -73,7 +73,8 @@ import type { WorldStyle } from '../src/game/world';
 import { sceneFrame } from '../src/game/scene';
 import { corridorOrigin } from '../src/game/terrain';
 import { qualitySettings } from '../src/game/quality';
-import { threeGameRenderer } from '../src/game/three-renderer';
+import { loadSceneryModels, threeGameRenderer } from '../src/game/three-renderer';
+import { SCATTER_KINDS, type ScatterKind } from '../src/game/scatter';
 import { atStartLine } from '../src/game/simulation';
 
 /** One read-back pixel, as four bytes. */
@@ -309,6 +310,24 @@ declare global {
        */
       readonly litDrawCalls: number;
       readonly flatDrawCalls: number;
+      /**
+       * How many vertex indices the **scenery** submitted for one frame of each
+       * kind, with #341's models loaded — the whole point of the change, read
+       * off the driver rather than off a geometry the harness built itself.
+       *
+       * ⚠️ **Its partner below is what makes it evidence.** A number on its own
+       * says nothing: a world of primitives submits indices too. So the same
+       * frame is measured twice — once with the models and once with them
+       * cleared, which is the only control available for "did the committed
+       * `.glb` files actually parse in a real engine" — and the five kinds
+       * ADR 0022 D-3 gives a model must draw **more** than they did, while
+       * `post`, which it deliberately leaves alone, must draw exactly the same.
+       */
+      readonly sceneryIndicesModelled: Readonly<Record<string, number>>;
+      /** The same measurement with the models cleared. @see sceneryIndicesModelled */
+      readonly sceneryIndicesPlain: Readonly<Record<string, number>>;
+      /** How many items of each kind that frame held, so neither is vacuous. */
+      readonly sceneryInstances: Readonly<Record<string, number>>;
       readonly errors: readonly string[];
     };
   }
@@ -449,6 +468,104 @@ function countingDrawCalls(body: (calls: () => number) => void): void {
       (gl as unknown as Record<string, unknown>)[name] = originals.get(name);
     }
   }
+}
+
+/**
+ * Runs `body` with a count of the **vertex indices** every draw call submitted.
+ *
+ * ⚠️ **Indices rather than draw calls, because #341 changes one and must not
+ * change the other.** The belt draws one instanced call per kind whatever a
+ * kind's shape is, so a call count is exactly the wrong instrument for asking
+ * whether a model reached the driver — it is the number that has to stay
+ * *unchanged*, and `drawCallsWithScatter` is where that is asserted. What a
+ * model does change is how much geometry each of those calls carries.
+ *
+ * `count` is the element count of one instance, so an instanced call submits
+ * `count × instanceCount`. The same prototype patch `countingDrawCalls` uses,
+ * for the reason recorded there.
+ */
+function countingIndices(body: (indices: () => number) => void): void {
+  const gl = WebGL2RenderingContext.prototype;
+  const originals = new Map<string, (...args: never[]) => unknown>();
+  let indices = 0;
+  const submitted: Record<string, (args: readonly number[]) => number> = {
+    // (mode, count, type, offset)
+    drawElements: (args) => args[1] ?? 0,
+    // (mode, count, type, offset, instanceCount)
+    drawElementsInstanced: (args) => (args[1] ?? 0) * (args[4] ?? 0),
+    // (mode, first, count)
+    drawArrays: (args) => args[2] ?? 0,
+    // (mode, first, count, instanceCount)
+    drawArraysInstanced: (args) => (args[2] ?? 0) * (args[3] ?? 0),
+  };
+  for (const [name, count] of Object.entries(submitted)) {
+    // Unbound on purpose and re-bound with `.apply` below, exactly as
+    // `countingDrawCalls` does. Read through a `Record` index rather than by
+    // property name, which is why no `unbound-method` exemption is needed here
+    // and one is needed there.
+    const original = (gl as unknown as Record<string, (...args: never[]) => unknown>)[name];
+    if (original === undefined) {
+      continue;
+    }
+    originals.set(name, original);
+    (gl as unknown as Record<string, unknown>)[name] = function patched(
+      this: WebGL2RenderingContext,
+      ...args: never[]
+    ): unknown {
+      indices += count(args);
+      return original.apply(this, args);
+    };
+  }
+  try {
+    body(() => indices);
+  } finally {
+    for (const name of Object.keys(submitted)) {
+      (gl as unknown as Record<string, unknown>)[name] = originals.get(name);
+    }
+  }
+}
+
+/**
+ * How much geometry the scenery submits for one frame, kind by kind.
+ *
+ * ⚠️ **On a canvas of its own**, not the harness's: `GameView.destroy` releases
+ * the context's resources, and building a second view over the wreckage of the
+ * first is a way to measure something other than what is being asked about.
+ *
+ * Each kind is rendered alone, with the markers removed and the road left in —
+ * the road draws the same indices every frame, so it cancels when the baseline
+ * below is subtracted, and removing it would change the depth buffer the
+ * scenery is drawn against. Each frame is drawn **twice** and only the second
+ * is counted: three uploads a buffer the first time it draws a geometry, and
+ * the upload is not a draw call but the shader compile that comes with it can
+ * fail a frame outright.
+ */
+function sceneryIndicesByKind(frame: SceneFrame): Record<string, number> {
+  const canvas = document.createElement('canvas');
+  canvas.width = 600;
+  canvas.height = 400;
+  const counts: Record<string, number> = {};
+  countingIndices((indices) => {
+    const view = threeGameRenderer.create(canvas, qualitySettings(0));
+    view.resize(600, 400);
+    const only = (kind: ScatterKind | null): SceneFrame => ({
+      ...frame,
+      markers: [],
+      scatter: kind === null ? [] : frame.scatter.filter((item) => item.kind === kind),
+    });
+    const drawnBy = (kind: ScatterKind | null): number => {
+      view.render(only(kind));
+      const before = indices();
+      view.render(only(kind));
+      return indices() - before;
+    };
+    const road = drawnBy(null);
+    for (const kind of SCATTER_KINDS) {
+      counts[kind] = drawnBy(kind) - road;
+    }
+    view.destroy();
+  });
+  return counts;
 }
 
 /** Where the road fills the frame, as fractions of its height. @see findCentreLine */
@@ -780,9 +897,14 @@ function sweep(
   return drawn;
 }
 
-function run(): void {
+async function run(): Promise<void> {
   const canvas = document.querySelector<HTMLCanvasElement>('#world');
   const errors: string[] = [];
+  // ⚠️ **Before anything is created, because `GameRenderer.create` is
+  // synchronous** — `port.ts` fixes that, and `main.tsx` awaits this in exactly
+  // the same place and for exactly the same reason. A harness that skipped it
+  // would draw the primitive world and every assertion below would pass.
+  await loadSceneryModels();
   if (canvas === null) {
     window.__oylGameHarness = {
       created: false,
@@ -827,6 +949,9 @@ function run(): void {
       frameMsNoise: 0,
       litDrawCalls: 0,
       flatDrawCalls: 0,
+      sceneryIndicesModelled: {},
+      sceneryIndicesPlain: {},
+      sceneryInstances: {},
       errors: ['no canvas'],
     };
     return;
@@ -873,6 +998,11 @@ function run(): void {
   let frameMsNoise = 0;
   let litDrawCalls = 0;
   let flatDrawCalls = 0;
+  let sceneryIndicesModelled: Record<string, number> = {};
+  let sceneryIndicesPlain: Record<string, number> = {};
+  const sceneryInstances: Record<string, number> = {};
+  /** The frame the model comparison is measured on. @see sceneryIndicesByKind */
+  let probeFrame: SceneFrame | null = null;
 
   try {
     const profile = harnessRoute();
@@ -895,6 +1025,37 @@ function run(): void {
         view.resize(600, 400);
 
         const frame = frameAt(0);
+        // ⚠️ **The #341 probe's scenery is built, not placed, and that is a
+        // finding rather than a shortcut.** The comparison measures each kind
+        // on its own, so a kind this route's frames happen not to hold draws
+        // nothing under **both** conditions and reads exactly like a model that
+        // failed to load. No frame of this route holds all six — the harness
+        // route was searched, 25 m at a time for 1.5 km, and buildings and
+        // conifers never share one. So the probe carries one item of each,
+        // placed in front of the camera by the same `along`/`across` frame the
+        // belt culls in, which also makes each number below the index count of
+        // exactly one instance.
+        //
+        // ⚠️ Nothing about **placement** may be read off this: the belt is
+        // handed a `SceneFrame` and does not know who built it, which is the
+        // property being used here. Where `scatter.ts` really puts things is
+        // `arrangement-unchanged.test.ts`, on the real route, in jsdom.
+        const pose = frame.camera;
+        probeFrame = {
+          ...frame,
+          scatter: SCATTER_KINDS.map((kind, at) => {
+            const along = 40 + at * 15;
+            const across = 8;
+            return {
+              kind,
+              x: pose.x + along * pose.headingX + across * pose.headingZ,
+              y: pose.y,
+              z: pose.z + along * pose.headingZ - across * pose.headingX,
+              rotation: 0,
+              scale: 1,
+            };
+          }),
+        };
         world = frame.world;
         quadCount = frame.corridor.quadCount;
         vertexCount = frame.corridor.vertices.length;
@@ -1137,6 +1298,32 @@ function run(): void {
     errors.push(error instanceof Error ? error.message : String(error));
   }
 
+  // ------------------------------------------------ the models — #341
+  //
+  // ⚠️ **Outside the block above, and on its own canvas, because it has to
+  // `await`.** The counters up there are prototype patches held for the length
+  // of a synchronous body; suspending inside one would leave every other
+  // script on the page counted into it. And the second half of the comparison
+  // needs the models *cleared*, which is asynchronous by the same signature
+  // the loading is.
+  try {
+    if (probeFrame !== null) {
+      const frame: SceneFrame = probeFrame;
+      for (const item of frame.scatter) {
+        sceneryInstances[item.kind] = (sceneryInstances[item.kind] ?? 0) + 1;
+      }
+      sceneryIndicesModelled = sceneryIndicesByKind(frame);
+      // The control. Clearing the models is what a kind whose file could not be
+      // read gets, so this measures the world as it stood before #341 — in the
+      // same browser, on the same frame, through the same view.
+      await loadSceneryModels(() => Promise.reject(new Error('cleared for the control')));
+      sceneryIndicesPlain = sceneryIndicesByKind(frame);
+      await loadSceneryModels();
+    }
+  } catch (error: unknown) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
+
   window.__oylGameHarness = {
     created,
     hasContext,
@@ -1180,8 +1367,11 @@ function run(): void {
     frameMsNoise,
     litDrawCalls,
     flatDrawCalls,
+    sceneryIndicesModelled,
+    sceneryIndicesPlain,
+    sceneryInstances,
     errors,
   };
 }
 
-run();
+void run();
