@@ -557,6 +557,25 @@ route's scenery where it submitted 98.3 %, because `SCATTER_LATERAL_METRES` grew
 the per-frame instance count is bounded above by the same 240 and is usually well below it. **If the
 GPU or frame column moves at all, that is the finding**, exactly as #348 says.
 
+⚠️ **The table above describes #348 and three issues have moved it since, so read it as dated
+rather than as current.** #351, #353 and #355 each moved one of its rows: the grid is back to 12 m,
+a cell holds 5 rather than 7, and since [#355](https://github.com/openzigs/onyourleft/issues/355)
+the nearest thing to the centreline is **6.5 m** rather than 9.5 m and the furthest **21.5 m**
+rather than 44.5 m. **I2 is the step that reads on the changed number**, and it is the one to take
+most carefully: #355 narrowed the verge *because* a 6 m one puts the near band outside the camera's
+own cone, so the question it asks — whether anything is close enough to feel like a hedge — is now
+the question the change could plausibly have got wrong.
+
+⚠️ **#355's own verification asks for the frame budget against #246's baseline, and the section
+above records that that baseline is not in this repository.** What can be said without a device:
+the number of instances drawn per frame **did not move at all**, because
+`SCATTER_MAX_ITEMS` still binds on every frame of the digest sweep in
+`arrangement-unchanged.test.ts` — 7 680 items over 32 frames, before and after — and the cull
+submits *less* of a hairpin than it did rather than more (52.4 % against 55.1 %, measured in
+`three-renderer.test.ts`). The issue's worry that more items survive the cull is therefore the
+opposite of what was measured. **That is an argument and not a measurement**, and I5 and I6 remain
+the measurement.
+
 | Step | What to do | What to record |
 |---|---|---|
 | I1 | ⚠️ **Ride the route and look at it.** Before touching a counter | Does it read as open road with things beside it, or as a continuous village? One sentence in your own words |

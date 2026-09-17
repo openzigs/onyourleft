@@ -254,14 +254,20 @@ const GROUND_BELOW_ROAD_METRES = 0.25;
 const UNSET_COLOUR = 0x000000;
 
 /**
- * How far from the road's centreline `scatter.ts` can put anything: **24.5 m**.
+ * How far from the road's centreline `scatter.ts` can put anything: **21.5 m**.
  *
  * Derived from that file's own three numbers rather than restated here, so the
  * cull below cannot go on describing a band that has moved. ⚠️ **21 m before
- * #348, 44.5 m after it, 34.5 m in #351 and 24.5 m since #353**, each of which
- * narrowed the band because the one before it left the median item too far out;
- * the derivation is what made all three a one-line consequence here rather than
- * a number to remember separately.
+ * #348, 44.5 m after it, 34.5 m in #351, 24.5 m in #353 and 21.5 m since
+ * #355**, each of which brought the scenery in because the one before it left
+ * the median item too far out; the derivation is what made all four a one-line
+ * consequence here rather than a number to remember separately.
+ *
+ * ⚠️ **#355 is the first of the four to move the VERGE rather than the band**,
+ * and it lands here identically because this sum reads all three of them. What
+ * is not identical is why: the band was narrowed to bring the median item in,
+ * and the verge because a 6 m one puts the near band outside the camera's own
+ * cone — `scatter.ts` §`SCATTER_VERGE_METRES` carries that arithmetic.
  */
 const SCATTER_BAND_REACH_METRES =
   ROAD_WIDTH_METRES / 2 + SCATTER_VERGE_METRES + SCATTER_BAND_METRES;
@@ -315,6 +321,50 @@ export const FRUSTUM_SPREAD =
   WORST_CASE_ASPECT * Math.tan((CAMERA_FIELD_OF_VIEW_DEGREES / 2) * (Math.PI / 180));
 
 /**
+ * The **narrowest** the world canvas can be for its height: **16 : 9**.
+ *
+ * ⚠️ **{@link WORST_CASE_ASPECT}'s opposite, and it answers the opposite
+ * question.** That one bounds the cull, so it has to be the *widest* frame a
+ * rider can produce — a cull written against a narrower one would throw away
+ * scenery somebody can see. This one bounds what a rider is **shown**, so it
+ * has to be the *narrowest*: the near field is bare on the worst frame there
+ * is, not on the average one.
+ *
+ * Read out of `design/theme.css` exactly as its sibling is, and from the same
+ * rule. `.oyl-game__world` is `aspect-ratio: 16 / 9`, and the only thing that
+ * moves it is `max-height: 60vh` clamping the height — which can only make the
+ * canvas **wider**. So 16 : 9 is a floor rather than an estimate, and the
+ * horizontal half-angle at it is `atan(1.778 · tan 30°)` ≈ 45.8°.
+ *
+ * ⚠️ **What follows from it is the whole of #355**, and three passes of
+ * constant-tuning went by without anyone computing it: the cone is this narrow
+ * near the camera, so an item standing `across` metres from the centreline is
+ * off the side of the screen until it is `across / (16/9 · tan 30°)` metres
+ * ahead of the **camera** — which sits {@link CAMERA_BEHIND_METRES} behind the
+ * rider. `scatter.ts` §{@link SCATTER_VERGE_METRES} carries the consequence at
+ * the constant that decides it, and `three-renderer.test.ts` §"the verge stands
+ * inside the near cone — #355" is the gate rather than the note.
+ *
+ * @unwired the narrow frame is what a rider gets and not what the renderer
+ * computes against, so nothing in the client reads it: three takes the live
+ * aspect from the canvas every frame, and the cull deliberately uses the wide
+ * bound above. It is a bound `three-renderer.test.ts` asserts the placement
+ * against.
+ */
+export const NARROWEST_ASPECT = 16 / 9;
+
+/**
+ * The tangent of the camera's horizontal half-angle, at {@link NARROWEST_ASPECT}
+ * — how far to the side of the view axis a rider can see, per metre of depth,
+ * on the narrowest frame there is. 1.778 × tan 30° ≈ 1.026.
+ *
+ * @unwired {@link NARROWEST_ASPECT}'s reason applies unchanged; this is that
+ * constant put into the units every claim about the near field is made in.
+ */
+export const NEAR_CONE_SPREAD =
+  NARROWEST_ASPECT * Math.tan((CAMERA_FIELD_OF_VIEW_DEGREES / 2) * (Math.PI / 180));
+
+/**
  * The depth past which everything is at least three-quarters fogged: **400 m**.
  *
  * ⚠️ **Derived from `world.ts`, not from the corridor it happens to equal.**
@@ -335,10 +385,10 @@ export const FRUSTUM_SPREAD =
 export const FOGGED_OUT_METRES = VIEW_AHEAD_METRES;
 
 /**
- * How far to the side of the *camera itself* a scatter item may stand: 49 m.
+ * How far to the side of the *camera itself* a scatter item may stand: 43 m.
  *
- * ⚠️ **42 m before #348, 89 m after it, 69 m in #351 and 49 m since #353**, for
- * the reason {@link SCATTER_BAND_REACH_METRES} gives. Widening the floor can
+ * ⚠️ **42 m before #348, 89 m after it, 69 m in #351, 49 m in #353 and 43 m
+ * since #355**, for the reason {@link SCATTER_BAND_REACH_METRES} gives. Widening the floor can
  * only make the cull keep *more*; narrowing it can only make it keep less, and
  * what bounds that is the property below rather than this number — which is why
  * #351 and #353 each re-took every measurement here rather than reasoning that
@@ -363,10 +413,10 @@ export const FOGGED_OUT_METRES = VIEW_AHEAD_METRES;
  *   along the view axis is `0.996 · d − 0.090 · (itemHeight − cameraHeight)`
  *   rather than `d`. Ignoring that overstates depth for anything *below* the
  *   camera, and the margin covers it for a drop of `49 / (FRUSTUM_SPREAD ·
- *   0.090) ≈ 157 m` inside the 400 m view — a sustained 39 % descent, which no
- *   road is. ⚠️ **220 m until #353**, which narrowed the floor: the margin is
- *   smaller and the claim it supports is the same one, re-derived rather than
- *   carried over.
+ *   0.090) ≈ 138 m` inside the 400 m view — a sustained 35 % descent, which no
+ *   road is. ⚠️ **220 m until #353 and 157 m until #355**, each of which
+ *   narrowed the floor: the margin is smaller every time and the claim it
+ *   supports is the same one, re-derived rather than carried over.
  * - **An instance is placed at a point and drawn with a size**: the tallest
  *   kind is about 7 m and the widest a little over 3 m across, so an item whose
  *   centre is just outside the cone can still have a branch inside it.
@@ -395,12 +445,12 @@ export const SCATTER_LATERAL_METRES = 2 * SCATTER_BAND_REACH_METRES;
  * 3. {@link FOGGED_OUT_METRES}, the cap.
  *
  * ⚠️ **What this gets wrong, measured the same way the box was, and
- * re-measured for #351 and again for #353** — a reviewer who remembers
+ * re-measured for #351, #353 and #355** — a reviewer who remembers
  * 100 / 98.7 / 98.7 / 98.3 / 43.9 here is reading the #348 file, and
  * 98.3 / 98.8 / 99.2 / 79.6 the one before that. Driving the real `sceneFrame`
  * through the real belt on constant-radius routes — worst frame of a 1.5 km
  * sweep — it submits **99.6 %** on a straight route, **98.8 %** at R = 450 m,
- * **98.8 %** at R = 200 m, **98.3 %** at R = 150 m and **55.1 %** at
+ * **99.2 %** at R = 200 m, **98.8 %** at R = 150 m and **52.4 %** at
  * R = 100 m. On the same sweep the box kept 98.3 %, 56.7 % and 41.3 % of the
  * first three.
  *
@@ -418,28 +468,53 @@ export const SCATTER_LATERAL_METRES = 2 * SCATTER_BAND_REACH_METRES;
  * *upwards*, because `scatter.ts`'s `bandsAt` fits whole bands into the reach a
  * bend leaves and a three-metre band fits where a five-metre one did not. So a
  * narrower band places **more** on a hairpin, not less, and more of that is
- * behind the fold. **None of it is inside the frustum**: that is asserted over
+ * behind the fold.
+ *
+ * ⚠️ **#355 moved all three of those, and by the same mechanism** — a 6.5 m
+ * verge leaves reach on a bend where a 9.5 m one left none, so `bandsAt` admits
+ * radii down to about 16 m rather than about 22 m. Re-measured: **47.6 %**
+ * dropped at R = 100 m against 44.9 % before, **40.0 %** at R = 75 m against
+ * 35.8 %, and **32.1 %** at R = 50 m against 30.4 %. The direction is the one
+ * the paragraph above describes, so this change is the first in the chain whose
+ * effect on a hairpin matches the model of it.
+ *
+ * **None of it is inside the frustum**: that is asserted over
  * every item of every frame at ten radii rather than argued for, in
  * `three-renderer.test.ts` §"never drops an item that is on screen and not yet
- * fogged out", and that assertion is what carries the claim through all four
+ * fogged out", and that assertion is what carries the claim through all five
  * of these re-measurements.
  *
  * What it still gets wrong is the aspect ratio, and it is a cliff rather than a
  * slope: at 8 : 1 — a viewport about 107 CSS px tall, which nothing produces —
  * a 100 m hairpin starts culling items that are on screen and only 59 % faded
- * into the horizon. ⚠️ **That figure was measured at the 42 m floor and has not
- * been re-taken**, because the probe that would take it hard-codes
- * {@link WORST_CASE_ASPECT}; the floor is 49 m rather than 42 m, so the cliff
- * is further out than 8 : 1 rather than nearer, and the number quoted is
- * pessimistic rather than wrong in the direction that matters. ⚠️ #351
- * narrowed the floor from 89 m to 69 m and #353 from 69 m to 49 m; that
- * direction is **towards** the measured figure rather than away from it, so it
- * stays pessimistic — but 49 m is only 1.17 times the floor it was measured at,
- * where 69 m was 1.6 times it, so the margin this paragraph rests on is now
- * thin. A further narrowing is the point at which the probe has to be re-run
- * rather than reasoned about. Past that point
- * the constant is simply the wrong instrument, and the fix would be to pass the
- * camera's live aspect in rather than to widen it again.
+ * into the horizon.
+ *
+ * ⚠️ **#355 is the further narrowing this paragraph said would oblige somebody
+ * to re-run the probe, and it has been re-run rather than reasoned about** — a
+ * reviewer who remembers this paragraph carrying a figure it called
+ * "pessimistic rather than wrong" is reading the old file. The three sentences
+ * it used to carry rested on the floor being comfortably above the 42 m the
+ * cliff was measured at; at 43 m that ratio is 1.02 and the argument had
+ * nothing left in it.
+ *
+ * Measured on the current constants, by sweeping the aspect ratio through the
+ * same 1.5 km sweep and counting items that are on screen at that aspect, less
+ * than {@link MINIMUM_VIEW_END_OCCLUSION} faded, and dropped:
+ *
+ * | aspect | R = 100 m | R = 75 m | R = 50 m |
+ * |---|--:|--:|--:|
+ * | 6 : 1 ({@link WORST_CASE_ASPECT}) | 0 | 0 | 0 |
+ * | 7 : 1 | 0 | 0 | 0 |
+ * | 8 : 1 | **8** | 0 | 0 |
+ * | 9 : 1 | 69 | **17** | 0 |
+ * | 10 : 1 | 111 | 46 | **2** |
+ *
+ * So the cliff is still at **8 : 1** on a 100 m hairpin, and further out on
+ * tighter ones. The quoted figure survives its own re-measurement, and the two
+ * rungs of margin above {@link WORST_CASE_ASPECT} are now a measurement rather
+ * than an inference. ⚠️ Past 8 : 1 the constant is simply the wrong instrument,
+ * and the fix would be to pass the camera's live aspect in rather than to widen
+ * it again.
  */
 export function lateralReachMetres(alongMetres: number): number {
   const aheadOfCamera = Math.max(0, alongMetres + CAMERA_BEHIND_METRES);

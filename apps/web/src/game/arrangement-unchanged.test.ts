@@ -161,25 +161,27 @@ describe('the arrangement a route produces — #341', () => {
   const placed = sweep();
 
   it('places the same scenery it placed before the models landed', () => {
-    // ⚠️ **Regenerated for #348, again for #351 and again for #353, and a
-    // scenery-tuning issue is the one kind of change this number is allowed to
-    // move for.** The original was computed on `main` before a line of #341 was
-    // written, which is what made it evidence about #341; this one was computed
-    // *after* #353's own change, so it is **not** evidence about #353. It
-    // cannot be: #353 exists to move the arrangement, and a golden cannot both
-    // permit a change and guard against it.
+    // ⚠️ **Regenerated for #348, #351, #353 and now #355, and a scenery-tuning
+    // issue is the one kind of change this number is allowed to move for.** The
+    // original was computed on `main` before a line of #341 was written, which
+    // is what made it evidence about #341; this one was computed *after* #355's
+    // own change, so it is **not** evidence about #355. It cannot be: #355
+    // exists to move the arrangement, and a golden cannot both permit a change
+    // and guard against it.
     //
-    // What discharges #353 instead is `scatter.test.ts`, which asserts the
+    // What discharges #355 instead is `scatter.test.ts`, which asserts the
     // properties that must survive the move — determinism, call-order
     // independence, the seam, the carriageway, the separation, how much of the
     // world stands in the near field, and since #353 how far from the
-    // centreline it stands — and does it without naming a coordinate. **This
-    // digest goes back to being what it was written for the moment the next
-    // change arrives**: the next model swap, renderer change or refactor that
-    // says it leaves placement alone is measured against it, and D-4's *"a
-    // different arrangement is a defect"* applies to that one exactly as it
-    // applied to #341.
-    expect(digest(placed.map(serialise))).toBe('b8ec5156');
+    // centreline it stands — together with `three-renderer.test.ts` §"the verge
+    // stands inside the near cone — #355", which is the one property this
+    // chain of four issues never had: that the scenery is where the camera can
+    // see it. None of them names a coordinate. **This digest goes back to being
+    // what it was written for the moment the next change arrives**: the next
+    // model swap, renderer change or refactor that says it leaves placement
+    // alone is measured against it, and D-4's *"a different arrangement is a
+    // defect"* applies to that one exactly as it applied to #341.
+    expect(digest(placed.map(serialise))).toBe('e80be45a');
   });
 
   it('places a world at all, so the digest is not over an empty sweep', () => {
@@ -201,6 +203,13 @@ describe('the arrangement a route produces — #341', () => {
     // frames, and only the digest above moves. The issue's own expectation was
     // the opposite; `scatter.test.ts` §"how much is placed does not depend on
     // how deep the band is — #353" is where that is asserted.
+    //
+    // ⚠️ **#355 took the verge from 6 m to 3 m and moved neither of them
+    // either**, for the same reason and with the same value as evidence: the
+    // verge is where the band *starts*, so like its depth it is spent on the
+    // lateral offset after an item has already been kept. Two constants have
+    // now been moved in turn with these two numbers unchanged, which is a
+    // stronger statement about `fillCell` than either change made alone.
     //
     // ⚠️ **The item count is 7 680 again for a reason that is not a
     // coincidence, and reading it as one would be the trap here.** It is
@@ -227,13 +236,13 @@ describe('the arrangement a route produces — #341', () => {
     const last = placed[placed.length - 1];
 
     expect(first === undefined ? '' : serialise(first)).toBe(
-      'building 80.760 0.000 223.265 0.895 1.142',
+      'building 78.305 0.000 224.990 0.895 1.142',
     );
     expect(middle === undefined ? '' : serialise(middle)).toBe(
-      'tree-conifer 700.338 17.759 298.028 1.009 0.837',
+      'tree-conifer 698.203 17.759 295.920 1.009 0.837',
     );
     expect(last === undefined ? '' : serialise(last)).toBe(
-      'tree-conifer 698.805 42.691 -294.119 0.240 1.178',
+      'tree-conifer 696.706 42.691 -291.975 0.240 1.178',
     );
   });
 });

@@ -236,12 +236,54 @@ export const SCATTER_CELL_METRES = 12;
 export const SCATTER_BANDS_PER_SIDE = 5;
 
 /**
- * How far from the road's edge the nearest thing may stand: **6 m**.
+ * How far from the road's edge the nearest thing may stand: **3 m**.
  *
- * ⚠️ **#351 kept it.** That issue reverses three of #348's four numbers and
- * says of this one *"keep the 6 m verge — that part solved the reported
- * problem"*. Open ground before the planting starts is what the owner asked
- * for; what #348 got wrong was everything behind the verge, not the verge.
+ * ⚠️ **THE VERGE IS ALSO A VISIBILITY CONSTANT, and that is the whole of
+ * #355.** A perspective camera's cone has an apex, so what a rider can see to
+ * the side grows with depth and is *nothing* at the camera. An item standing
+ * `across` metres from the centreline is off the side of the screen until it is
+ * `across / NEAR_CONE_SPREAD` metres ahead of the **camera** — where
+ * `NEAR_CONE_SPREAD` ≈ 1.026 is `three-renderer.ts`'s horizontal half-angle
+ * tangent on the narrowest frame `theme.css` permits, 16 : 9 — and the camera
+ * sits `CAMERA_BEHIND_METRES` = 8 m behind the rider. So, in one line a future
+ * change to any of the four numbers has to read:
+ *
+ * > **an item at the verge is invisible until `(ROAD_WIDTH_METRES / 2 +
+ * > SCATTER_VERGE_METRES) / NEAR_CONE_SPREAD − CAMERA_BEHIND_METRES` metres
+ * > ahead of the rider.** Negative means it is already in shot beside them.
+ *
+ * At six metres that was **+1.26 m**: the nearest row of scenery entered the
+ * frame only ahead of the rider and nothing at the verge was ever beside them.
+ * At three it is **−1.67 m**, so the near band is in shot from the rider's own
+ * position. The break-even verge is about **4.7 m**. ⚠️ Widening the verge,
+ * narrowing `CAMERA_FIELD_OF_VIEW_DEGREES` or moving the camera nearer the
+ * rider all push it the wrong way, and **all three are gated** in
+ * `three-renderer.test.ts` §"the verge stands inside the near cone — #355"
+ * rather than left to this paragraph — because the geometry was already
+ * written down on `WORST_CASE_ASPECT` and `lateralReachMetres` and three
+ * tuning passes went by without anyone computing it.
+ *
+ * ⚠️ **What #355's own arithmetic overstates, measured rather than repeated.**
+ * That issue says roughly fifteen items fall in the first 25 m and *"are simply
+ * not in frame"*. On a 12 km level fixture at the 6 m verge, **13.7** items a
+ * frame stood in the first 25 m of road and **9.3** of them were already in a
+ * 16 : 9 frame; this change takes that to 10.6. So the near field was never
+ * bare by geometry — a bit under a third of it was off the side of the screen,
+ * and a bit under a quarter still is. ⚠️ **The frames that carry nothing in
+ * shot in the near field are NOT this**: 14 in 100, identical at verges of 6,
+ * 5, 4, 3, 2 and 1.5 m, because thirteen of them have nothing *placed* there
+ * at all. That is {@link OPEN_GROUND_SHARE} doing what #348 asked for, and it
+ * is the fifth candidate cause in this chain rather than a sixth.
+ *
+ * ⚠️ **1.5 m until #348, 6 m from #348 to #355, and 3 m since** — a reviewer
+ * who remembers this comment quoting #351's *"keep the 6 m verge — that part
+ * solved the reported problem"* is reading the old one, and #355 is explicit
+ * that the claim was wrong and that #353 repeated it. One and a half metres is
+ * a hedge: the first thing a rider saw beside the road was a trunk a metre and
+ * a half off the tarmac, for the whole ride. Three is far enough that there is
+ * open ground before the planting starts, which is what the owner asked for,
+ * and near enough to be inside the cone, which is what the owner was not
+ * getting.
  *
  * ⚠️ **A requirement, not a taste.** #243's fifth criterion is that nothing is
  * placed on the road, and the carriageway is `ROAD_WIDTH_METRES` wide, so the
@@ -249,15 +291,20 @@ export const SCATTER_BANDS_PER_SIDE = 5;
  * `ROAD_WIDTH_METRES / 2 + SCATTER_VERGE_METRES`. A tree in the carriageway is
  * the defect a rider notices first, and it is the one a lateral offset drawn
  * from `[0, band)` rather than `[verge, verge + band)` would produce on about
- * one item in fifteen.
+ * one item in fifteen. **That is unaffected by the number above** — three
+ * metres of verge is still three metres of open ground, and `scatter.test.ts`
+ * asserts the carriageway against the constant rather than against a literal.
  *
- * ⚠️ **It was 1.5 m until #348**, which is a hedge rather than a verge: the
- * first thing a rider saw beside the road was a trunk a metre and a half off
- * the tarmac, for the whole ride. Six metres is far enough that there is open
- * ground before the planting starts, which is what the owner asked for and what
- * a real road has.
+ * ⚠️ **It moves how much is placed not at all**, the same property
+ * {@link SCATTER_BAND_METRES} has and for the same reason: nothing in
+ * {@link fillCell} reads it. Measured either side of this change, the supply is
+ * 245.2 items a frame, the budget binds on 62 frames in 100, the nearest 60 m
+ * carries 32.3 items and 6 frames in 100 are bare — identical figures. What
+ * moves is where everything stands: the median item is **13.9 m** from the
+ * centreline rather than 16.9 m, and the whole arrangement slides three metres
+ * toward the road with its spread untouched at 6.7 m.
  */
-export const SCATTER_VERGE_METRES = 6;
+export const SCATTER_VERGE_METRES = 3;
 
 /**
  * How deep the band scenery is scattered into is, beyond the verge: **15 m**.
@@ -301,7 +348,10 @@ export const SCATTER_VERGE_METRES = 6;
  * tighter turn than a five-metre one, so the radius below which a bend carries
  * nothing at all falls from about 24 m to about 22 m. The verge bound that
  * function takes is untouched, so the guard is exactly as absolute as it was —
- * `scatter.test.ts` sweeps both sides of the new threshold.
+ * `scatter.test.ts` sweeps both sides of the new threshold. ⚠️ **#355 loosened
+ * it again and from the other term**, to about 16 m: `bandsAt` measures its
+ * reach off {@link SCATTER_VERGE_METRES} twice over, so narrowing the verge
+ * moves that threshold as surely as narrowing this does.
  */
 export const SCATTER_BAND_METRES = 15;
 
@@ -464,7 +514,9 @@ export const PLANTED_GROUND_SHARE = 0.45;
  * - Two items **in adjacent cells in the same band** are at least
  *   `(1 − CELL_FILL) · cellSpan` = 5.4 m apart **along** at the nominal span.
  * - The **two sides** of the road are `ROAD_WIDTH_METRES + 2 ·
- *   SCATTER_VERGE_METRES` = 19 m apart.
+ *   SCATTER_VERGE_METRES` = 13 m apart. ⚠️ **19 m until #355**, which narrowed
+ *   the verge; it is still an order of magnitude clear of the bound above, so
+ *   the separation is decided by the two cases before it exactly as it was.
  *
  * ⚠️ **The along-separations compress on the inside of a bend**, by `(R − d) /
  * R`, and that is what {@link BEND_INNER_SHARE} bounds: the offset can never
@@ -510,8 +562,9 @@ export const CURVATURE_WINDOW_METRES = 30;
  * road that folds hard, `bandsAt` reads it as open and places every band, and
  * scenery lands well inside the verge: measured on circular fixtures, radii of
  * 4.75 m to 5.5 m stood things **4.7 m** from the centreline against a promised
- * 9.5 m. #243's hard rule — nothing in the 3.5 m carriageway — still held, and
- * #348's verge rule did not.
+ * 9.5 m — 6.5 m since #355, which the measurement is still inside. #243's hard
+ * rule — nothing in the 3.5 m carriageway — still held, and #348's verge rule
+ * did not.
  *
  * Two directions cannot tell a turn of `θ` from one of `θ + 2π`, so the repair
  * is not a better angle; it is a **second reading that does not wrap**. The
@@ -943,11 +996,12 @@ function bandWidthMetres(): number {
  * an angle cannot read a road that turns through more than half a circle inside
  * it. Below about 9.55 m of radius the reading used to come back *small*, the
  * straight-road branch was taken, and all seven bands were placed on a road
- * folding hard — measured, 4.7 m from the centreline where 9.5 m is promised.
- * `curvatureAt` now reports a bound rather than a wrapped angle there, so the
- * refusal holds at every radius; `scatter.test.ts` sweeps 1 m to 24 m in
- * quarter-metre steps rather than sampling four round radii, because the
- * failure fell on particular radii and not on a band of them.
+ * folding hard — measured, 4.7 m from the centreline where 9.5 m was promised
+ * and 6.5 m is promised since #355. `curvatureAt` now reports a bound rather
+ * than a wrapped angle there, so the refusal holds at every radius;
+ * `scatter.test.ts` sweeps 1 m to 25 m in quarter-metre steps rather than
+ * sampling four round radii, because the failure fell on particular radii and
+ * not on a band of them.
  *
  * ⚠️ Written as `!(curvature > 0)` rather than `curvature <= 0` so a `NaN`
  * takes the straight-road branch instead of falling through it into a `NaN`
