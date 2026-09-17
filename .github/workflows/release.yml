@@ -2,10 +2,12 @@
 #
 # Android release (#95).
 #
-# ⚠️ NEVER RUN. No tag has been pushed and no signed build exists — the
-# environment this was written in has no Android SDK and cannot reach
-# dl.google.com. `apps/mobile/RELEASE.md` §1 is the table of what is enforced and
-# what is merely written, and this file is in the second column.
+# ⚠️ This header used to open "NEVER RUN", and a reader who remembers that
+# sentence is reading the old file. Two `workflow_dispatch` runs on 2026-09-16
+# assembled a signed release APK on a GitHub-hosted runner — 35160018484 and
+# 35162828363. ⚠️ It has still never run on a **tag**, so the GitHub Release
+# step at the bottom is the one part of this file nothing has executed.
+# `apps/mobile/RELEASE.md` §1 is the table of which is which.
 #
 # ⚠️ Deliberately NOT a job inside `rules.yml`. CLAUDE.md §4c's rule that a
 # second job cannot block a merge is about *gates*; this is not one. It runs on a
@@ -74,6 +76,25 @@ jobs:
         id: signing
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          # ⚠️ `vars`, not `secrets`, and #338 is the whole reason. Actions
+          # redacts every occurrence of a secret's VALUE from the log, so an
+          # alias that is an ordinary English word blanks that word out of every
+          # line it appears in — this step rendered as "Decode the *** key" and
+          # the pinned `actions/upload-artifact` rendered as
+          # `actions/***-artifact`, in the logs somebody reads because a release
+          # went wrong. The alias is a label inside the keystore, not a
+          # credential: it opens nothing without the store and key passwords,
+          # which are still secrets. Masking that fires on a non-secret trains
+          # people to ignore masking.
+          #
+          # ⚠️ Deleting the secret is the operative half. The runner masks every
+          # secret in the job's map whether this file references it or not, so
+          # moving the reference alone changes nothing until
+          # `ANDROID_KEY_ALIAS` is gone from the repository's secrets. ⚠️ That
+          # last part is read off GitHub's documented behaviour and has NOT been
+          # measured here: `apps/mobile/RELEASE.md` §10 is the procedure that
+          # would, and its result cells are empty.
+          KEY_ALIAS: ${{ vars.ANDROID_KEY_ALIAS }}
           REF: ${{ github.ref }}
         run: |
           if [ -z "${KEYSTORE_BASE64}" ]; then
@@ -88,6 +109,17 @@ jobs:
             echo "::notice::No ANDROID_KEYSTORE_BASE64 secret; building unsigned."
             exit 0
           fi
+          # ⚠️ A keystore with no alias to open it is a misconfiguration, and
+          # the one thing it must NOT do is fall through to the unsigned branch.
+          # That branch exits 0, so a repository that had lost its alias would
+          # build `assembleDebug`, pass every step, and look exactly like a
+          # successful signed run — which is #338's own warning about how a
+          # broken rename would present.
+          if [ -z "${KEY_ALIAS}" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 is set and the ANDROID_KEY_ALIAS variable is empty."
+            echo "::error::The alias is a repository VARIABLE, not a secret; see apps/mobile/RELEASE.md section 10."
+            exit 1
+          fi
           # Written outside the workspace so REL001 cannot be satisfied by
           # accident on a runner and, more importantly, so nothing can commit it.
           printf '%s' "${KEYSTORE_BASE64}" | base64 -d > "${RUNNER_TEMP}/upload.jks"
@@ -98,7 +130,8 @@ jobs:
         env:
           SIGNED: ${{ steps.signing.outputs.signed }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          # A variable rather than a secret — the signing step above says why.
+          ANDROID_KEY_ALIAS: ${{ vars.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           if [ "${SIGNED}" = "true" ]; then

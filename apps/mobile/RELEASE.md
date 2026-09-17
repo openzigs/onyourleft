@@ -15,7 +15,8 @@ which.
 | `REL001` — no committed key material | **Enforced and tested.** `scripts/check-repo-rules.sh`, six fixtures, runs on every pull request |
 | `REL002` — target API floor | **Enforced and tested.** Eleven fixtures. ⚠️ Since #95 it reads **every** Gradle file under `android/`, not `variables.gradle` alone — §7 says what it used to miss |
 | `.github/workflows/release.yml` | **Run, and green.** Two `workflow_dispatch` runs on 2026-09-16 assembled a **signed release APK** on a GitHub-hosted runner — [35160018484](https://github.com/openzigs/onyourleft/actions/runs/35160018484) and, with the verification step below, [35162828363](https://github.com/openzigs/onyourleft/actions/runs/35162828363). ⚠️ **Never run on a tag**: there is no `v*` tag and no GitHub Release |
-| The signing key | **In CI secrets, and used.** Four secrets — `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` — set 2026-09-16. Nothing about the key is in this repository, which is `REL001`'s whole job |
+| The signing key | **In CI secrets, and used.** Nothing about the key is in this repository, which is `REL001`'s whole job |
+| The key alias | ⚠️ **The workflow reads a repository VARIABLE that is not set yet.** `release.yml` stopped reading `secrets.ANDROID_KEY_ALIAS` in [#338](https://github.com/openzigs/onyourleft/issues/338) — a secret's value is redacted from every log line that contains it and this one is the word `upload`. **Until somebody runs §10's two commands the next release run fails**, loudly and on purpose, rather than falling through to an unsigned build. §9 is why, §10 is the procedure |
 | The Play account decision | **Not taken.** It is an owner decision and §3 is what it needs |
 | A published privacy policy | **Written and linked.** [`docs/privacy-policy.md`](../../docs/privacy-policy.md), reachable from the app's About page. §4 |
 | The Health apps declaration | **Not filed.** It is a Play Console form and needs an account, which is §3 |
@@ -187,6 +188,10 @@ that number Play ever sees.
 the v2 and v3 schemes alone, and `jarsigner` reports an unsigned jar for a
 perfectly signed APK.
 
+⚠️ **Three of its four signing inputs are secrets and the fourth deliberately is
+not.** The key alias is a repository variable; §9 is why, and what happens to a
+build whose alias is missing.
+
 Every run uploads the APK as a workflow artefact, so the pipeline can be
 exercised and the result installed **without cutting a tag** — which is what §8
 is for. The GitHub Release step still runs only on a tag.
@@ -234,3 +239,144 @@ step publishes the APK as a release asset — the AGPL-native distribution path,
 independent of any store (#95's sixth criterion), and the one §5 says is under
 threat. ⚠️ Nobody has done this yet, so the release step itself is the one part
 of this workflow that has never executed.
+
+## 9. Why the key alias is a repository variable and not a secret
+
+[#338](https://github.com/openzigs/onyourleft/issues/338).
+
+`ANDROID_KEY_ALIAS` was an Actions secret whose value is the ordinary English
+word **`upload`**. Actions redacts every occurrence of a secret's *value* from a
+workflow log, so that word was blanked out of every line of every release run
+that contained it. Read from
+[35162828363](https://github.com/openzigs/onyourleft/actions/runs/35162828363),
+the second run there has ever been:
+
+```
+Decode the *** key, if this repository has one
+Run actions/***-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+```
+
+The second line is the one worth staring at. CLAUDE.md §8 requires every action
+to be pinned to a commit **so that a reader can audit what runs**, and the
+masking took the action's own name out of the audit trail. "Upload" is one of
+the commonest words in a release pipeline's vocabulary — `upload-artifact`,
+"uploading", "failed to upload the asset" — and every one of those renders with
+a hole in it, in the log somebody is reading *because the release went wrong*.
+
+⚠️ There is a second cost and it is the larger one: a reader who sees `***`
+reasonably assumes a real credential was nearly leaked there. **Masking that
+fires on a non-secret trains people to ignore masking.**
+
+**The alias is not a credential.** It names an entry inside the keystore. It
+opens nothing without the store and key passwords, which are still secrets and
+stay that way. So it is now a repository **variable**, which Actions does not
+redact, and `release-pipeline.test.ts` asserts that `release.yml` reads exactly
+three `secrets.*` and takes the alias from `vars.*`.
+
+### Moving the reference is not the fix on its own
+
+⚠️ **The runner masks every secret in the job's map whether the workflow
+references it or not.** A workflow that has stopped reading
+`secrets.ANDROID_KEY_ALIAS` still gets its logs redacted while that secret
+exists, so **deleting it is the operative step**.
+
+⚠️ **That claim is reasoned from GitHub's documented behaviour and has NOT been
+measured here**, which is what §10 is for: it is a procedure with empty result
+cells, in the shape `docs/validation/` uses, because the change that proves it
+is a change to this repository's Actions settings and no pull request can make
+it. §10 is also where the migration itself is written down.
+
+### What happens to a build with no alias
+
+A keystore present and an empty alias is now a **hard failure** in the signing
+step. It deliberately does not fall through to the unsigned branch: that branch
+exits 0, so a repository that had lost its alias would build `assembleDebug`,
+pass every step and look exactly like a successful signed run. #338 warns about
+that shape in its own acceptance criteria, and it is the reason the signing
+step's script is lifted out of the workflow and **executed** in
+`release-pipeline.test.ts` rather than read as text — a guard that cannot fire
+greps the same as one that can.
+
+### The key itself is untouched
+
+#338 proposed renaming the alias in the keystore with `keytool -changealias`.
+Under a variable there is nothing to rename: the word is no longer a redaction
+trigger anywhere, so the cheapest fix got cheaper still. **Nothing in this
+change opens the keystore**, and §10 proves it from the artefact rather than
+asserting it.
+
+⚠️ If the alias is ever renamed anyway, it is `keytool -changealias` and
+**never** a regenerated keystore. Under direct-APK distribution the key *is* the
+app's identity: Android refuses an update signed by a different key, so a new
+key means every existing installation must be uninstalled first — and in a
+local-first app that is the rider's whole ride history.
+
+## 10. The alias migration — procedure, **not yet run**
+
+**Status:** written 2026-09-17 with [#338](https://github.com/openzigs/onyourleft/issues/338).
+Every result cell is empty on purpose. **Not an ADR and not a spike**; it decides
+nothing, and it ages.
+
+⚠️ **`release.yml` on `main` reads a variable that does not exist yet, so the
+next release run fails at the signing step** with `ANDROID_KEYSTORE_BASE64 is
+set and the ANDROID_KEY_ALIAS variable is empty`. That is the guard doing its
+job — the alternative was a fall-through to `assembleDebug`, which exits 0 and
+looks like a successful signed run. Running step 1 below clears it.
+
+Needs somebody who can write the repository's Actions settings. It is two
+commands and a workflow run.
+
+### 1. Move the alias out of the secret store
+
+```bash
+# The alias inside the keystore, UNCHANGED. `keytool -list -keystore <the .jks>`
+# prints it if nobody remembers; do not open the keystore for any other reason.
+gh variable set ANDROID_KEY_ALIAS --body '<the alias>'
+gh secret delete ANDROID_KEY_ALIAS
+```
+
+⚠️ **Both**, in that order. The variable alone leaves the logs redacted — the
+runner masks every secret in the job's map whether the workflow reads it or not
+— and the deletion alone breaks signing.
+
+### 2. Run the pipeline and read the log
+
+```bash
+gh workflow run release.yml --ref main
+gh run list --workflow=release.yml --limit 1
+gh run view <run-id> --log | grep -nE '\*\*\*|signed=|SHA-256'
+```
+
+| What to read | Expected | Result |
+| --- | --- | --- |
+| The signing step's name in the job list | `Decode the upload key, if this repository has one`, with no `***` | |
+| The artefact step's name | `actions/upload-artifact@043fb46d…`, with no `***` | |
+| `signed=` in the signing step | `signed=true`, **not** `signed=false` | |
+| The `Verify the artefact` step | `Signed as required, targeting API 36` | |
+| Run id | | |
+
+⚠️ **The `signed=true` line is the one that cannot be skipped.** The unsigned
+fallback also exits 0 and also uploads an APK, so a run that quietly stopped
+signing is green and looks identical in the run list.
+
+### 3. Compare the certificate, before and after
+
+Nothing in #338 opens the keystore, so the key cannot have changed — but the
+proof is free, because the workflow already prints it. `apksigner
+verify --print-certs` runs on every build and its digest is a property of the
+key, not of the pipeline.
+
+| Run | Certificate SHA-256 |
+| --- | --- |
+| Before — [35162828363](https://github.com/openzigs/onyourleft/actions/runs/35162828363), 2026-09-16 | `1e9206a0b8836da33abc98a484a282e8f4f416afbeefa5c5c8c87bc5f8ad9369` |
+| After — step 2 above | |
+
+A certificate fingerprint is public by design: it travels inside every APK
+signed with the key. It is the password and the keystore that are secret, and
+neither is here.
+
+⚠️ **A different digest means the key changed**, which under direct-APK
+distribution means every existing installation can no longer be updated in
+place — §9's last paragraph. Stop and work out what touched the keystore before
+publishing anything.
+
