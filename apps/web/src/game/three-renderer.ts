@@ -254,14 +254,14 @@ const GROUND_BELOW_ROAD_METRES = 0.25;
 const UNSET_COLOUR = 0x000000;
 
 /**
- * How far from the road's centreline `scatter.ts` can put anything: **34.5 m**.
+ * How far from the road's centreline `scatter.ts` can put anything: **24.5 m**.
  *
  * Derived from that file's own three numbers rather than restated here, so the
  * cull below cannot go on describing a band that has moved. ⚠️ **21 m before
- * #348, 44.5 m after it, and 34.5 m since #351**, which narrowed the band
- * again because 35 m of it put the median item in the far field; the derivation
- * is what made both of those a one-line consequence here rather than a second
- * number to remember.
+ * #348, 44.5 m after it, 34.5 m in #351 and 24.5 m since #353**, each of which
+ * narrowed the band because the one before it left the median item too far out;
+ * the derivation is what made all three a one-line consequence here rather than
+ * a number to remember separately.
  */
 const SCATTER_BAND_REACH_METRES =
   ROAD_WIDTH_METRES / 2 + SCATTER_VERGE_METRES + SCATTER_BAND_METRES;
@@ -335,14 +335,14 @@ export const FRUSTUM_SPREAD =
 export const FOGGED_OUT_METRES = VIEW_AHEAD_METRES;
 
 /**
- * How far to the side of the *camera itself* a scatter item may stand: 69 m.
+ * How far to the side of the *camera itself* a scatter item may stand: 49 m.
  *
- * ⚠️ **42 m before #348, 89 m after it, 69 m since #351**, for the reason
- * {@link SCATTER_BAND_REACH_METRES} gives. Widening the floor can only make the
- * cull keep *more*; narrowing it can only make it keep less, and what bounds
- * that is the property below rather than this number — which is why #351
- * re-took every measurement here rather than reasoning that a narrower band is
- * safe because a wider one was.
+ * ⚠️ **42 m before #348, 89 m after it, 69 m in #351 and 49 m since #353**, for
+ * the reason {@link SCATTER_BAND_REACH_METRES} gives. Widening the floor can
+ * only make the cull keep *more*; narrowing it can only make it keep less, and
+ * what bounds that is the property below rather than this number — which is why
+ * #351 and #353 each re-took every measurement here rather than reasoning that
+ * a narrower band is safe because a wider one was.
  *
  * ⚠️ **This is now the near-field floor of {@link lateralReachMetres} rather
  * than the whole bound, and that is the substance of #269.** Until then it was
@@ -362,9 +362,11 @@ export const FOGGED_OUT_METRES = VIEW_AHEAD_METRES;
  * - **The camera is pitched down** by `atan(3 / 33) ≈ 5.2°`, so an item's depth
  *   along the view axis is `0.996 · d − 0.090 · (itemHeight − cameraHeight)`
  *   rather than `d`. Ignoring that overstates depth for anything *below* the
- *   camera, and the margin covers it for a drop of `69 / (FRUSTUM_SPREAD ·
- *   0.090) ≈ 220 m` inside the 400 m view — a sustained 55 % descent, which no
- *   road is.
+ *   camera, and the margin covers it for a drop of `49 / (FRUSTUM_SPREAD ·
+ *   0.090) ≈ 157 m` inside the 400 m view — a sustained 39 % descent, which no
+ *   road is. ⚠️ **220 m until #353**, which narrowed the floor: the margin is
+ *   smaller and the claim it supports is the same one, re-derived rather than
+ *   carried over.
  * - **An instance is placed at a point and drawn with a size**: the tallest
  *   kind is about 7 m and the widest a little over 3 m across, so an item whose
  *   centre is just outside the cone can still have a branch inside it.
@@ -393,35 +395,49 @@ export const SCATTER_LATERAL_METRES = 2 * SCATTER_BAND_REACH_METRES;
  * 3. {@link FOGGED_OUT_METRES}, the cap.
  *
  * ⚠️ **What this gets wrong, measured the same way the box was, and
- * re-measured for #351** — a reviewer who remembers 100 / 98.7 / 98.7 / 98.3 /
- * 43.9 here is reading the #348 file, and 98.3 / 98.8 / 99.2 / 79.6 the one
- * before that. Driving the real `sceneFrame` through the real belt on
- * constant-radius routes — worst frame of a 1.5 km sweep — it submits
- * **99.6 %** on a straight route, **98.8 %** at R = 450 m, **98.3 %** at
- * R = 200 m, **98.3 %** at R = 150 m and **55.1 %** at R = 100 m. On the same
- * sweep the box kept 98.3 %, 56.7 % and 41.3 % of the first three.
+ * re-measured for #351 and again for #353** — a reviewer who remembers
+ * 100 / 98.7 / 98.7 / 98.3 / 43.9 here is reading the #348 file, and
+ * 98.3 / 98.8 / 99.2 / 79.6 the one before that. Driving the real `sceneFrame`
+ * through the real belt on constant-radius routes — worst frame of a 1.5 km
+ * sweep — it submits **99.6 %** on a straight route, **98.8 %** at R = 450 m,
+ * **98.8 %** at R = 200 m, **98.3 %** at R = 150 m and **55.1 %** at
+ * R = 100 m. On the same sweep the box kept 98.3 %, 56.7 % and 41.3 % of the
+ * first three.
  *
- * ⚠️ **The share dropped at R = 100 m tracks the band's depth, and is not a
+ * ⚠️ **The share dropped on a bend tracks the band's depth, and is not a
  * property of the cull.** #348 took the placement band from 21 m to 44.5 m from
- * the centreline and the share dropped there roughly doubled; #351 brought it
- * to 34.5 m and the share dropped fell back from 56.1 % to 44.9 %. On a hairpin
- * the far part of that band folds behind the rider, so a deeper band is more of
- * it. **None of it is inside the frustum**: that is asserted over every item of
- * every frame at ten radii rather than argued for, in
+ * the centreline and the share dropped at R = 100 m roughly doubled; #351
+ * brought it to 34.5 m and it fell back from 56.1 % to 44.9 %. On a hairpin the
+ * far part of that band folds behind the rider, so a deeper band is more of it.
+ *
+ * ⚠️ **#353 took it to 24.5 m and the figure at R = 100 m did NOT move**, which
+ * is worth stating because the sentence above predicts it should have. Measured
+ * either side of that change: 44.9 % dropped at R = 100 m both times. What did
+ * move is **tighter** than that — 35.8 % dropped at R = 75 m against 64.2 %
+ * kept before, and 30.4 % at R = 50 m against 75.2 % kept — and it moved
+ * *upwards*, because `scatter.ts`'s `bandsAt` fits whole bands into the reach a
+ * bend leaves and a three-metre band fits where a five-metre one did not. So a
+ * narrower band places **more** on a hairpin, not less, and more of that is
+ * behind the fold. **None of it is inside the frustum**: that is asserted over
+ * every item of every frame at ten radii rather than argued for, in
  * `three-renderer.test.ts` §"never drops an item that is on screen and not yet
- * fogged out".
+ * fogged out", and that assertion is what carries the claim through all four
+ * of these re-measurements.
  *
  * What it still gets wrong is the aspect ratio, and it is a cliff rather than a
  * slope: at 8 : 1 — a viewport about 107 CSS px tall, which nothing produces —
  * a 100 m hairpin starts culling items that are on screen and only 59 % faded
  * into the horizon. ⚠️ **That figure was measured at the 42 m floor and has not
  * been re-taken**, because the probe that would take it hard-codes
- * {@link WORST_CASE_ASPECT}; the floor is 69 m rather than 42 m, so the cliff
+ * {@link WORST_CASE_ASPECT}; the floor is 49 m rather than 42 m, so the cliff
  * is further out than 8 : 1 rather than nearer, and the number quoted is
  * pessimistic rather than wrong in the direction that matters. ⚠️ #351
- * narrowed the floor from 89 m to 69 m and that direction is **towards** the
- * measured figure rather than away from it, so it stays pessimistic — 69 m is
- * still 1.6 times the floor it was measured at. Past that point
+ * narrowed the floor from 89 m to 69 m and #353 from 69 m to 49 m; that
+ * direction is **towards** the measured figure rather than away from it, so it
+ * stays pessimistic — but 49 m is only 1.17 times the floor it was measured at,
+ * where 69 m was 1.6 times it, so the margin this paragraph rests on is now
+ * thin. A further narrowing is the point at which the probe has to be re-run
+ * rather than reasoned about. Past that point
  * the constant is simply the wrong instrument, and the fix would be to pass the
  * camera's live aspect in rather than to widen it again.
  */

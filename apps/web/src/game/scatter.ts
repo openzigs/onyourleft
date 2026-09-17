@@ -210,9 +210,16 @@ export const SCATTER_CELL_METRES = 12;
  * than a rider can perceive at speed behind a fixed camera (ADR 0008 D-5). It
  * is: what the extra two bought was two more removes past 25 m, where an item
  * is a few pixels wide. They are not what a band count costs, though — see
- * {@link SCATTER_CELL_METRES} — so dropping them is nearly free in the
- * foreground and pays for a narrower {@link SCATTER_BAND_METRES} at an
+ * {@link SCATTER_CELL_METRES} — so dropping them was nearly free in the
+ * foreground and paid for a narrower {@link SCATTER_BAND_METRES} at an
  * unchanged band width.
+ *
+ * ⚠️ **#353 narrowed the band and left this at five**, which is the half of
+ * #351's trade that no longer holds: a band is three metres deep now rather
+ * than five, and {@link MINIMUM_SCATTER_SEPARATION_METRES} followed it down.
+ * Dropping a depth instead of narrowing the band would have kept the
+ * separation and left the far items exactly where #353 was filed to move them
+ * from, which is why the issue names this one as settled at five.
  *
  * ⚠️ **A band is a *depth*, and since #348 it is no longer also a position
  * along the road** — which is the change that actually removes the rhythm. Each
@@ -253,24 +260,50 @@ export const SCATTER_BANDS_PER_SIDE = 5;
 export const SCATTER_VERGE_METRES = 6;
 
 /**
- * How deep the band scenery is scattered into is, beyond the verge: **25 m**.
+ * How deep the band scenery is scattered into is, beyond the verge: **15 m**.
  *
- * ⚠️ **16 m before #348, 35 m in #348, and 25 m since #351.** Sixteen metres
- * shared between four depths put everything at much the same remove, so the
- * scenery read as a wall at a fixed distance; thirty-five put the *median* item
- * 27.2 m from the centreline, which is the far field — measured over a 12 km
- * level fixture, a quarter of everything stood beyond 41.5 m. Twenty-five metres over
- * five depths brings that median back to 22 m while leaving the band five
- * metres deep — see {@link bandWidthMetres}, which is what
- * {@link MINIMUM_SCATTER_SEPARATION_METRES} is derived from, and which is
- * therefore **unchanged by #351**.
+ * ⚠️ **16 m before #348, 35 m in #348, 25 m in #351, and 15 m since #353** — a
+ * reviewer who remembers this comment defending twenty-five is reading the old
+ * one. Sixteen metres shared between four depths put everything at much the
+ * same remove, so the scenery read as a wall at a fixed distance; thirty-five
+ * put the *median* item 27.2 m from the centreline, which is the far field.
+ * Twenty-five brought that median to 21.9 m and #353's verdict on it was
+ * *"clusters on the horizon with empty ground either side of the rider"*.
+ * Fifteen over five depths puts the median at **16.9 m** and the upper quartile
+ * at **20.4 m**, measured over a 6 km level fixture, and leaves the band three
+ * metres deep.
+ *
+ * ⚠️ **This is the ONLY constant #353 moves, and the reason it is the only one
+ * that could be** — quoted from this file's own answer to #351, which #353
+ * quotes back: nothing here biases an item's *lateral* offset, so narrowing the
+ * band is the whole of the mechanism. {@link ScatterBudget} exists to keep it
+ * that way.
+ *
+ * ⚠️ **It changes where scenery stands and NOT how much of it there is**, and
+ * #353's own model of its mechanism says otherwise — *"a narrower band raises
+ * supply per unit of road, which pushes the budget back into play"*. It does
+ * not. {@link fillCell} offers one candidate per cell, per side, per band and
+ * keeps it on a stream that reads {@link densityAt} and {@link clusterAt};
+ * {@link bandsAt} returns every band on a road that is not bending; the depth
+ * is spent on the lateral offset, **after** the item has been kept. Measured on
+ * the #351 fixture at band depths of 25, 22, 20, 18, 16, 15, 14 and 12, the
+ * supply is 245.2 items a frame and the budget binds on 62 frames in 100 at
+ * every one of them. `scatter.test.ts` §"how much is placed does not depend on
+ * how deep the band is — #353" is where that is asserted rather than recorded.
+ * The consolation is that this change structurally **cannot** empty the world
+ * the way #348 did.
  *
  * ⚠️ Widening it widens `three-renderer.ts`'s `SCATTER_BAND_REACH_METRES`,
  * which that file **derives** from this one rather than restating, so the cull
  * follows automatically. It is also why {@link bandsAt} exists: a band this
  * deep folds through the inside of a bend, and the cull is not what stops that.
+ * ⚠️ Narrowing it **loosens** {@link bandsAt}: a three-metre band fits inside a
+ * tighter turn than a five-metre one, so the radius below which a bend carries
+ * nothing at all falls from about 24 m to about 22 m. The verge bound that
+ * function takes is untouched, so the guard is exactly as absolute as it was —
+ * `scatter.test.ts` sweeps both sides of the new threshold.
  */
-export const SCATTER_BAND_METRES = 25;
+export const SCATTER_BAND_METRES = 15;
 
 /** The smallest an item is drawn. @see ScatterItem.scale */
 export const SCATTER_SCALE_LOWEST = 0.7;
@@ -400,7 +433,7 @@ export const OPEN_GROUND_SHARE = 0.15;
 export const PLANTED_GROUND_SHARE = 0.45;
 
 /**
- * The closest two items are ever placed: **2 m**.
+ * The closest two items are ever placed: **1.3 m**.
  *
  * Not a check performed at runtime — a **property of the cell layout**, stated
  * here so `scatter.test.ts` can assert it, and derived rather than guessed.
@@ -408,12 +441,26 @@ export const PLANTED_GROUND_SHARE = 0.45;
  * no longer also a position along the road — a reviewer who remembers this
  * comment talking about slots is reading the old one.
  *
+ * ⚠️ **2 m until #353, and it moved because it is a measurement rather than a
+ * setting** — a reviewer who remembers two metres is reading the old file.
+ * #351 narrowed the band and dropped two of its depths *together*, which left
+ * a band five metres deep and this figure untouched; #353 narrows the band
+ * alone, so the band is three metres deep and the lateral separation below
+ * follows it to 1.35 m. Nothing in the placer reads this constant — it carries
+ * `@unwired` for that reason — so re-deriving it changes where nothing stands.
+ * ⚠️ **What it costs is real and is stated rather than glossed**: two items in
+ * adjacent bands at the same point along the road can now stand 1.35 m apart
+ * where they stood 2.25 m apart, and the widest kind is a little over three
+ * metres across, so a pair of them can overlap. That is a copse rather than a
+ * duplicate, and #243's fourth criterion is about the same item being placed
+ * twice at the loop seam, which is unaffected. Measured over a 12 km fixture,
+ * the closest pair anywhere is **1.49 m**; the worst case is rare because the
+ * two items' positions *along* the road are drawn independently over 6.6 m.
+ *
  * - Two items **in one cell on one side** are in different bands, so they are
- *   at least `(1 − BAND_FILL) · bandWidthMetres()` = 2.25 m apart **laterally**.
+ *   at least `(1 − BAND_FILL) · bandWidthMetres()` = 1.35 m apart **laterally**.
  *   Their positions along the road are drawn independently and may coincide,
  *   which is exactly the point: the lateral separation is the one that holds.
- *   ⚠️ #351 narrowed the band and dropped two of its depths **together**, so
- *   this figure is unchanged.
  * - Two items **in adjacent cells in the same band** are at least
  *   `(1 − CELL_FILL) · cellSpan` = 5.4 m apart **along** at the nominal span.
  * - The **two sides** of the road are `ROAD_WIDTH_METRES + 2 ·
@@ -424,7 +471,7 @@ export const PLANTED_GROUND_SHARE = 0.45;
  * exceed 0.6 of the radius, so 5.4 m of cell-boundary margin never falls below
  * 2.16 m however tight the road turns. **The lateral separations do not
  * compress at all** — {@link bandsAt} answers a tight bend by dropping whole
- * bands rather than by squeezing them, so a band is five metres deep at every
+ * bands rather than by squeezing them, so a band is three metres deep at every
  * radius. Squeezing them is the version of this that looks equivalent and is
  * not: it would put two items eight centimetres apart on a 20 m bend.
  *
@@ -432,7 +479,7 @@ export const PLANTED_GROUND_SHARE = 0.45;
  * against it and no scenery decision reads it. Wiring it into the placer would
  * make the test assert the code against itself.
  */
-export const MINIMUM_SCATTER_SEPARATION_METRES = 2;
+export const MINIMUM_SCATTER_SEPARATION_METRES = 1.3;
 
 /**
  * The latitude by which conifer has entirely displaced broadleaf: **60°**.
@@ -867,7 +914,7 @@ function inBand(unit: number): number {
  * How deep one band is, in metres.
  *
  * ⚠️ **A constant of the band, never of the reach.** {@link bandsAt} answers a
- * bend by returning fewer bands, so this stays five metres at every radius —
+ * bend by returning fewer bands, so this stays three metres at every radius —
  * and the lateral separation {@link MINIMUM_SCATTER_SEPARATION_METRES} rests on
  * stays what it says. Deriving it from the reach instead is the version that
  * looks equivalent and silently puts two items eight centimetres apart on a

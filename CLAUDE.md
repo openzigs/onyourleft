@@ -230,7 +230,19 @@ apps/                 AGPL-3.0-or-later, without exception
                         scenery may stand from a BENDING road — without it a
                         band this deep folds through the inside of a hairpin
                         and stands in the carriageway, which the committed
-                        code did at radii under about 12 m
+                        code did at radii under about 12 m. ⚠️ Since #353 the
+                        band is 15 m rather than 25 m, and the measurement that
+                        change produced is the one to read before tuning
+                        anything here: SCATTER_BAND_METRES moves scenery
+                        SIDEWAYS and moves no density figure at all — supply a
+                        frame, frames over budget, items in the nearest 60 m
+                        and the digest's 1 120 distinct places are identical at
+                        band depths of 25, 22, 20, 18, 16, 15, 14 and 12. #353's
+                        own body predicts the opposite. Density lives in
+                        SCATTER_CELL_METRES and the clustering pair, and
+                        MINIMUM_SCATTER_SEPARATION_METRES followed the band
+                        down from 2 m to 1.3 m because it is a measurement of
+                        the layout rather than a setting
     src/game/scenery-models.ts
                         which file each kind's shape comes from (#341) — the
                         five ADR 0022 D-3 gives a model, the sixth it leaves
@@ -2676,6 +2688,8 @@ top of an issue **supersedes its body**.
 | Why a stretch of road has nothing beside it, and why that is a field rather than a coin | `apps/web/src/game/scatter.ts` §`clusterAt`, §`CLUSTER_SPAN_METRES`, §`OPEN_GROUND_SHARE` |
 | How far scenery may stand from a road that bends, and what the committed code used to put in the carriageway | `apps/web/src/game/scatter.ts` §`bandsAt`, §`BEND_INNER_SHARE`, [#348](https://github.com/openzigs/onyourleft/issues/348) |
 | Why a band is a depth and not also a place along the road | `apps/web/src/game/scatter.ts` §`SCATTER_BANDS_PER_SIDE`, §`CELL_FILL` |
+| Which scenery constant moves density and which one only moves scenery sideways, measured rather than reasoned about | `apps/web/src/game/scatter.ts` §`SCATTER_BAND_METRES`, `apps/web/src/game/scatter.test.ts` §"how much is placed does not depend on how deep the band is — #353" |
+| What the closest two scenery items may be, why it is a measurement rather than a setting, and what #353 cost it | `apps/web/src/game/scatter.ts` §`MINIMUM_SCATTER_SEPARATION_METRES` |
 | What stops a loop shorter than the view from being drawn twice, and what else that bound buys | `apps/web/src/game/scatter.ts` §`scatterAt`, and the `cellCount` cap beside it |
 | Where the centre line's ten-metre period came from, and why it is not `profile.resolution` | `apps/web/src/game/terrain.ts` §`CENTRE_LINE_PERIOD_METRES` |
 | Why a dash indexed by vertex gives a rider a false speed cue, and what stops the pattern crawling | `apps/web/src/game/terrain.ts` §`writeCentreLine` |
