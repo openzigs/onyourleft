@@ -1,0 +1,326 @@
+# ASSETS.toml — provenance, licence and integrity for every committed binary.
+#
+# Enforced by `scripts/check-repo-rules.sh` rules ASSET001-ASSET005, which run
+# on a bare clone with bash and coreutils and no install. #339.
+#
+# ## Why this file exists
+#
+# Every other licence gate in this repository reads text. `LIC001`/`LIC002`
+# want an SPDX identifier in a file's first five lines, and a binary has no
+# such thing. `DEP001` reads npm's own resolution of the lockfile, and a
+# committed file is in no dependency closure at all. So a `.glb` model, a
+# launcher icon or a fixture could land here with no licence recorded, no
+# source recorded and nothing that would notice it being replaced — and every
+# gate would have been green about it.
+#
+# This file is the record those gates cannot make. One entry per committed
+# binary; five keys, all required:
+#
+#   path     repository-relative, exact — no globs, the style `.spdx-exempt`
+#            uses, and for the same reason
+#   source   which pack, which generator, which URL. CC0 requires no
+#            attribution; that is not a reason to record nothing
+#   licence  checked against where the file lands — permissive anywhere, weak
+#            (CC0-1.0 and friends) under `apps/` only, mirroring ADR 0015 D-2's
+#            distributed-closure table. Anything else fails closed
+#   read     the date the source and its terms were read, per this repository's
+#            habit of dating every figure that drifts
+#   sha256   of the committed bytes
+#
+# ⚠️ An unrecognised key is REFUSED rather than ignored (ASSET005), the choice
+# ADR 0017 D-4 made for the workout file and for the same reason: a key nobody
+# reads is a claim about an asset that silently has no effect.
+#
+# ⚠️ **What a recorded digest does and does not prove.** It pins what is
+# committed, so a substitution is visible in review and in CI. It does NOT
+# establish that the bytes are the upstream artefact they name — nothing that
+# runs without the network can. `apps/mobile/README.md` §4 records
+# `gradle-wrapper.jar` as exactly such a file, and that is still true; what has
+# changed is that its bytes can no longer be swapped without a diff.
+#
+# ⚠️ **The FIT corpus is generated, and its digests move when the generator
+# does.** That is a cost and it is deliberate: CLAUDE.md §4a says
+# `fixtures:generate` "is DETERMINISTIC: running it on a clean tree leaves
+# `git status` clean", and these twelve digests are the only thing that makes
+# that claim checkable by something other than a person remembering to look.
+# Regenerate the corpus and update them in the same commit.
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/drawable-land-hdpi/splash.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "08cc34ad7713fe7ed58bceaa37b2387b670c53cd60264b4bd6442db3098e75dc"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/drawable-land-mdpi/splash.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "5cf98b4451bd99b20df26f9e608a46946118be6b0ae90762f9ca1786a30c76ff"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/drawable-land-xhdpi/splash.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "22f87e1e3bc89aa01a7dbc39c9a4db058cd0bf4ad3fe9f55712bf69eb997f4bf"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/drawable-land-xxhdpi/splash.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "42aa26392546fcdee1b8d3ac6d4b41bfcceb41dc6a4f3a3c30c24a8a8f4db862"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/drawable-land-xxxhdpi/splash.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "60393ce8636fd263e4e1fea3fd4ab2de948c6295e898fda9b50ac4e5283be809"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/drawable-port-hdpi/splash.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "c5015f4ba3628392b538386c5e210f0b94f352a3160adab934fd0311972137ca"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/drawable-port-mdpi/splash.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "07fa579e1c83e04ba7f9cbcbfcf41b68e15fe3638f2c44a04e58b809103e6b69"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/drawable-port-xhdpi/splash.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "b73049cb37fe76d6c11b87a796766bf6af0c85483b31eb6a921657b0d764a4b9"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/drawable-port-xxhdpi/splash.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "0c7f1212f25b7b90e9a6e1d320013e4ff3d3e03e634cbb07b7b7981cac51627f"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/drawable-port-xxxhdpi/splash.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "3db071a03b2f8ffe0dfd4170fc59842d53cd15bba5e88af59401d58efabf7827"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/drawable/splash.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "5cf98b4451bd99b20df26f9e608a46946118be6b0ae90762f9ca1786a30c76ff"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "32baa10d2632a4417454a579f992bd640e0a3cec79321423559b2c9940de58a9"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "bfcc1b0fa931b14bb241372c76ab4f04374b67d02363c98d9cb12edfdacdf5f3"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-hdpi/ic_launcher.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "72b71c3581ca3b5a23b1c168d69b9d855b3f184fa079902a01f088eb4f0607d5"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "58e78a618778926b1f6d9472a6468de878de8530970934e94aab5ba4ba08cc00"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "0166fc333074c373fbd0ce6b5defd71552166165ac778121ca9c9dff6b83f0fc"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-mdpi/ic_launcher.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "27ed3603010ebc278f64f8645741ab132ff517abb5308eb9df6c8e42a48956b2"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "6f88083b8166cc559102f7044688de7525287632ebe09ac45d001ac8bf4b3eae"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "40911a00922868686854a4804b93fd6e56b503664696de03f450bff690affb6d"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-xhdpi/ic_launcher.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "d35dbfff175b83c13ef59cf924abfc810f7b6a158595d7417c5498ea8c7c7ed1"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "4a82bc1e9923576275869998925ce0ae021a79aa18b24a0dd87ad6b61ca85053"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "1ee4cd9ff371dcb2e3938097e434f6fb8731688ed7165e61fc63693ad5b2f455"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "ed346eb1e3f0280f15709393705899b3ff55c20b88f4e0308006b3c33cf5fe14"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "bd24fd383253bf8d43f0a81f11c071d76d1d555114376dd647cd9fb38fa0a9da"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "ab93096331e7cd8ec379f73f1e9adcaaa9ee1115c9f4ff10411a811fb9700174"
+
+[[asset]]
+path = "apps/mobile/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png"
+source = "@capacitor/cli 8.5.1 Android template, written verbatim by `npx cap add android` — https://github.com/ionic-team/capacitor"
+licence = "MIT"
+read = "2026-09-16"
+sha256 = "87cb2f2ffe992652bb4fa768c73719a37b5852ab17fbf8e170e888f7a42b0761"
+
+[[asset]]
+path = "apps/mobile/android/gradle/wrapper/gradle-wrapper.jar"
+source = "Gradle 8.14.3 wrapper, supplied with the same `npx cap add android` template — https://services.gradle.org/distributions/gradle-8.14.3-all.zip"
+licence = "Apache-2.0"
+read = "2026-09-16"
+sha256 = "7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172"
+
+[[asset]]
+path = "packages/fit/fixtures/corpus/antimeridian-crossing.fit"
+source = "This repository, #107 — written by `pnpm --filter @onyourleft/fit run fixtures:generate` from packages/fit/tools/fixture-corpus, deterministically"
+licence = "Apache-2.0"
+read = "2026-09-16"
+sha256 = "660f170013ee979519be7a4becde90ba8a494a24d4c21f5636f4a7b7326481bb"
+
+[[asset]]
+path = "packages/fit/fixtures/corpus/developer-fields.fit"
+source = "This repository, #107 — written by `pnpm --filter @onyourleft/fit run fixtures:generate` from packages/fit/tools/fixture-corpus, deterministically"
+licence = "Apache-2.0"
+read = "2026-09-16"
+sha256 = "88d04a33bc2ef59f8ef968227a554051f0bae32138b740649a80b3b3395c8e16"
+
+[[asset]]
+path = "packages/fit/fixtures/corpus/event-timestamp-1024-wrap.fit"
+source = "This repository, #107 — written by `pnpm --filter @onyourleft/fit run fixtures:generate` from packages/fit/tools/fixture-corpus, deterministically"
+licence = "Apache-2.0"
+read = "2026-09-16"
+sha256 = "406ee9247cd23a2c7024866d6d85cd4aee94270058876b408f185a73da350c4a"
+
+[[asset]]
+path = "packages/fit/fixtures/corpus/header-only.fit"
+source = "This repository, #107 — written by `pnpm --filter @onyourleft/fit run fixtures:generate` from packages/fit/tools/fixture-corpus, deterministically"
+licence = "Apache-2.0"
+read = "2026-09-16"
+sha256 = "c7d9db4012d96b45c3d5d94414771a53188b9e5b3b9af040bdbd3ffa3e8da103"
+
+[[asset]]
+path = "packages/fit/fixtures/corpus/heart-rate-16-bit.fit"
+source = "This repository, #107 — written by `pnpm --filter @onyourleft/fit run fixtures:generate` from packages/fit/tools/fixture-corpus, deterministically"
+licence = "Apache-2.0"
+read = "2026-09-16"
+sha256 = "83b5dbbdec1d9487cd0ed623f921f6cb7a46ac555497a2dcad34b072da408546"
+
+[[asset]]
+path = "packages/fit/fixtures/corpus/indoor-trainer-no-position.fit"
+source = "This repository, #107 — written by `pnpm --filter @onyourleft/fit run fixtures:generate` from packages/fit/tools/fixture-corpus, deterministically"
+licence = "Apache-2.0"
+read = "2026-09-16"
+sha256 = "2ee0b2aaaaa9d8cc5b596fbd5d4dec04a33243e7bb85bfb96fe485c408a6918f"
+
+[[asset]]
+path = "packages/fit/fixtures/corpus/nominal-outdoor-ride.fit"
+source = "This repository, #107 — written by `pnpm --filter @onyourleft/fit run fixtures:generate` from packages/fit/tools/fixture-corpus, deterministically"
+licence = "Apache-2.0"
+read = "2026-09-16"
+sha256 = "88732452f9af031238c79b3ff7c3cf76b3d90807b768839eb9bbf14974b99836"
+
+[[asset]]
+path = "packages/fit/fixtures/corpus/paused-laps.fit"
+source = "This repository, #107 — written by `pnpm --filter @onyourleft/fit run fixtures:generate` from packages/fit/tools/fixture-corpus, deterministically"
+licence = "Apache-2.0"
+read = "2026-09-16"
+sha256 = "d819bd15ebad8be535f042bc45ceaecbf2e14374e114909ae4c5224c2dbdd605"
+
+[[asset]]
+path = "packages/fit/fixtures/corpus/point-nemo-southern-western.fit"
+source = "This repository, #107 — written by `pnpm --filter @onyourleft/fit run fixtures:generate` from packages/fit/tools/fixture-corpus, deterministically"
+licence = "Apache-2.0"
+read = "2026-09-16"
+sha256 = "27ff693d91fc5e909c6f1854950969f95622080c1d52dd485e242d6eff7e6456"
+
+[[asset]]
+path = "packages/fit/fixtures/corpus/sensor-dropout-30s.fit"
+source = "This repository, #107 — written by `pnpm --filter @onyourleft/fit run fixtures:generate` from packages/fit/tools/fixture-corpus, deterministically"
+licence = "Apache-2.0"
+read = "2026-09-16"
+sha256 = "cfd00456f07a183adadcf9ae128ea20ac90863efc2011d8b2df93be39560651c"
+
+[[asset]]
+path = "packages/fit/fixtures/corpus/timestamp-epoch-boundary.fit"
+source = "This repository, #107 — written by `pnpm --filter @onyourleft/fit run fixtures:generate` from packages/fit/tools/fixture-corpus, deterministically"
+licence = "Apache-2.0"
+read = "2026-09-16"
+sha256 = "06fbd1a4546459d8b6853c53b178c9b161b3096325f07749bda4c5d81f6da18f"
+
+[[asset]]
+path = "packages/fit/fixtures/corpus/truncated-mid-record.fit"
+source = "This repository, #107 — written by `pnpm --filter @onyourleft/fit run fixtures:generate` from packages/fit/tools/fixture-corpus, deterministically"
+licence = "Apache-2.0"
+read = "2026-09-16"
+sha256 = "374b4245739016d462c66ad9e972b985d10c8709ff828e4df413b95409abe0c1"
+
+[[asset]]
+path = "packages/fit/fixtures/corpus/zero-length.fit"
+source = "This repository, #107 — written by `pnpm --filter @onyourleft/fit run fixtures:generate` from packages/fit/tools/fixture-corpus, deterministically"
+licence = "Apache-2.0"
+read = "2026-09-16"
+sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"

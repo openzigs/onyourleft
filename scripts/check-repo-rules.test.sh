@@ -22,6 +22,14 @@ fixture_root=""
 new_fixture() {
   fixture_root="$(mktemp -d)"
   mkdir -p "${fixture_root}/docs/adr"
+  # ASSET005 requires the asset manifest to be PRESENT, the way
+  # check-env-example.sh requires `.env.example` to be: a record that is not
+  # there documents nothing, and ASSET001-ASSET004 would all pass vacuously
+  # over an absent file. Every fixture therefore starts with one, carrying no
+  # entries because a fixture has no binaries until a case writes one. The
+  # case that deletes it again is below, under ASSET005.
+  printf '# Committed binary assets. See scripts/check-repo-rules.sh ASSET001.\n' \
+    > "${fixture_root}/ASSETS.toml"
 }
 
 cleanup_fixture() {
@@ -153,6 +161,36 @@ assert_violations() {
     fail=$((fail + 1))
     printf 'FAIL %s\n     nothing reported for%s; got exit %s\n%s\n' \
       "${name}" "${missing:- (none missing)}" "${status}" "${out}"
+  fi
+  cleanup_fixture
+}
+
+# assert_violation_and_silence <name> <rule> <needle> <silent-rule>
+#
+# assert_violation, plus the requirement that a SECOND rule reported nothing at
+# all.
+#
+# #339 needs it and no existing helper can ask for it. When `ASSETS.toml` does
+# not parse, the entry list this checker built from it is partial -- so walking
+# the tree against that list would report every asset whose entry sat after the
+# bad line as one the manifest does not name. Each of those lines is a FALSE
+# statement, and the one real finding arrives buried under consequences of
+# itself. The checker therefore reports the parse error and stops, and
+# "ASSET005 fires" on its own passes equally well against a checker that emits
+# the avalanche as well. This is what asks for the absence.
+assert_violation_and_silence() {
+  local name="$1" rule="$2" needle="$3" silent="$4" out status
+  out="$(bash "${CHECKER}" "${fixture_root}" 2>&1)"
+  status=$?
+  if [ "${status}" -ne 0 ] \
+     && printf '%s' "${out}" | grep "^${rule}: " | grep -qF -- "${needle}" \
+     && ! printf '%s' "${out}" | grep -q "^${silent}: "; then
+    pass=$((pass + 1))
+    printf 'ok   %s\n' "${name}"
+  else
+    fail=$((fail + 1))
+    printf 'FAIL %s\n     expected exit != 0, a "%s: " line containing "%s", and no "%s: " line at all; got exit %s\n%s\n' \
+      "${name}" "${rule}" "${needle}" "${silent}" "${status}" "${out}"
   fi
   cleanup_fixture
 }
@@ -1699,6 +1737,388 @@ printf '<?xml version="1.0" encoding="utf-8"?>\n<!-- SPDX-License-Identifier: AG
   > "${fixture_root}/apps/mobile/android/app/src/main/res/xml/file_paths.xml"
 assert_violation "the same defect one file across from the pruned one still fails" XML001 \
   "apps/mobile/android/app/src/main/res/xml/file_paths.xml:3"
+
+# --- ASSET001..ASSET005: provenance for every committed binary ----------------
+#
+# #339. The gate has to exist before the first `.glb` does, because the moment
+# one lands this repository is carrying an artefact nothing it owns can check.
+#
+# ⚠️ Every case below that asserts a violation has a GREEN complement, and the
+# reason is the failure mode the rule itself exists for: "no findings" and "the
+# walk found nothing to have findings about" are indistinguishable from an exit
+# code. The clean case immediately after each red one is what says the binary
+# was seen at all.
+
+# A file the NUL sniff classifies as binary: a real glTF binary header, which is
+# also the format #302 is about. Deliberately NOT written with an extension the
+# checker could be keying on -- that is what the "unheard-of extension" case
+# below turns into an assertion.
+write_binary_asset() {
+  local rel="$1"
+  mkdir -p "$(dirname "${fixture_root}/${rel}")"
+  printf 'glTF\002\000\000\000\100\000\000\000payload' > "${fixture_root}/${rel}"
+}
+
+fixture_digest() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "${fixture_root}/$1" | cut -d' ' -f1
+  else
+    sha256sum "${fixture_root}/$1" | cut -d' ' -f1
+  fi
+}
+
+# append_asset_entry <path> <licence> <sha256>
+append_asset_entry() {
+  printf '\n[[asset]]\npath = "%s"\nsource = "Some Pack, https://example.invalid/pack"\nlicence = "%s"\nread = "2026-09-16"\nsha256 = "%s"\n' \
+    "$1" "$2" "$3" >> "${fixture_root}/ASSETS.toml"
+}
+
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+append_asset_entry apps/web/public/models/rider.glb CC0-1.0 \
+  "$(fixture_digest apps/web/public/models/rider.glb)"
+assert_clean "a named binary asset with a matching digest and a permitted licence passes"
+
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+assert_violation "a binary asset the manifest does not name is rejected" ASSET001 \
+  "apps/web/public/models/rider.glb: a committed binary that ASSETS.toml does not name"
+
+# ⚠️ The case the whole design turns on, and #142's lesson stated as a test.
+# An extension allowlist fails closed against DELETING a format and OPEN against
+# adding one: a gate that knows about `.glb` is blind to the `.gltf-binary`
+# beside it, and blind to a file with no extension at all. Discovery reads the
+# file instead, so a format nobody has thought of is covered on the day it
+# arrives rather than on the day somebody remembers to add it to a list.
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/tree.gltf-binary
+assert_violation "a binary with an extension no rule has ever heard of is still found" ASSET001 \
+  "apps/web/public/models/tree.gltf-binary: a committed binary"
+
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider
+assert_violation "a binary with no extension at all is still found" ASSET001 \
+  "apps/web/public/models/rider: a committed binary"
+
+# The complement of the three above: a TEXT file nobody named is not an asset.
+# Without this, "the walk reports every unnamed binary" would also be satisfied
+# by a walk that reported every unnamed file, which would make the rule
+# unusable and would have been caught in review rather than by a gate.
+new_fixture
+write_good_app web
+mkdir -p "${fixture_root}/apps/web/public"
+printf '{ "scene": 0 }\n' > "${fixture_root}/apps/web/public/model.gltf"
+assert_clean "a text file the manifest does not name is not an asset"
+
+# --- ASSET002: the manifest names a file that is not there --------------------
+
+new_fixture
+write_good_app web
+append_asset_entry apps/web/public/models/absent.glb CC0-1.0 \
+  0000000000000000000000000000000000000000000000000000000000000000
+assert_violation "an entry naming a file that is not there is rejected" ASSET002 \
+  "apps/web/public/models/absent.glb: no such file"
+
+new_fixture
+write_good_app web
+mkdir -p "${fixture_root}/apps/web/public/models"
+append_asset_entry apps/web/public/models CC0-1.0 \
+  0000000000000000000000000000000000000000000000000000000000000000
+assert_violation "an entry naming a directory is rejected" ASSET002 \
+  "apps/web/public/models: no such file"
+
+# A glob is reported as ASSET002 rather than as a syntax error, deliberately and
+# unlike `.spdx-exempt`'s LIC006: the lookup is string equality, so a pattern
+# names no file and "no such file" is the true statement about it. The case is
+# here so that the difference between the two lists is asserted rather than
+# assumed.
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+append_asset_entry 'apps/web/public/models/*.glb' CC0-1.0 \
+  0000000000000000000000000000000000000000000000000000000000000000
+assert_violations "a glob in an entry names no file" \
+  ASSET002 "apps/web/public/models/*.glb: no such file" \
+  ASSET001 "apps/web/public/models/rider.glb: a committed binary"
+
+# --- ASSET003: the bytes are not the bytes that were recorded -----------------
+
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+append_asset_entry apps/web/public/models/rider.glb CC0-1.0 \
+  0000000000000000000000000000000000000000000000000000000000000000
+assert_violation "a digest that does not reproduce is rejected" ASSET003 \
+  "apps/web/public/models/rider.glb: SHA-256 is"
+
+# The substitution this rule is actually for: the entry stays, the file is
+# swapped. Nothing else in this repository would notice.
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+append_asset_entry apps/web/public/models/rider.glb CC0-1.0 \
+  "$(fixture_digest apps/web/public/models/rider.glb)"
+printf 'glTF\002\000\000\000\100\000\000\000SOMETHING ELSE' \
+  > "${fixture_root}/apps/web/public/models/rider.glb"
+assert_violation "an asset replaced under an unchanged entry is rejected" ASSET003 \
+  "apps/web/public/models/rider.glb: SHA-256 is"
+
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+printf '\n[[asset]]\npath = "apps/web/public/models/rider.glb"\nsource = "Some Pack, https://example.invalid/pack"\nlicence = "CC0-1.0"\nread = "2026-09-16"\n' \
+  >> "${fixture_root}/ASSETS.toml"
+assert_violation "an entry with no sha256 at all is rejected" ASSET003 \
+  "apps/web/public/models/rider.glb: no SHA-256 recorded"
+
+# A named file need not be binary, and ASSET003 still verifies it. That is what
+# lets `packages/fit/fixtures/corpus/zero-length.fit` -- zero bytes, therefore
+# text by the NUL rule and therefore invisible to ASSET001 -- be covered at all.
+new_fixture
+write_good_app web
+printf 'not a binary\n' > "${fixture_root}/apps/web/public-note.txt"
+append_asset_entry apps/web/public-note.txt MIT \
+  0000000000000000000000000000000000000000000000000000000000000000
+assert_violation "a manifest may name a text file, and its digest is still checked" ASSET003 \
+  "apps/web/public-note.txt: SHA-256 is"
+
+# --- ASSET004: the licence, judged against where the file lands ---------------
+
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+append_asset_entry apps/web/public/models/rider.glb GPL-3.0-only \
+  "$(fixture_digest apps/web/public/models/rider.glb)"
+assert_violation "a licence on neither list is rejected, because the gate fails closed" ASSET004 \
+  "apps/web/public/models/rider.glb: licence GPL-3.0-only is not permitted"
+
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+append_asset_entry apps/web/public/models/rider.glb CC-BY-4.0 \
+  "$(fixture_digest apps/web/public/models/rider.glb)"
+assert_violation "a licence nobody has ruled on is rejected rather than assumed benign" ASSET004 \
+  "licence CC-BY-4.0 is not permitted"
+
+# ⚠️ The path half of the rule. ADR 0015 D-2 admits CC0-1.0 in a DISTRIBUTED
+# closure under `apps/` only, because an Apache-2.0 leaf package exists to be
+# droppable into someone else's project. #339 says as much: "where the asset
+# lands is already constrained, and the manifest is what makes that checkable".
+# The pair of cases is what makes it a rule about the path rather than a rule
+# about the licence -- one of them alone passes against a checker that ignores
+# the path entirely.
+new_fixture
+write_good_package domain
+write_binary_asset packages/domain/fixtures/rider.glb
+append_asset_entry packages/domain/fixtures/rider.glb CC0-1.0 \
+  "$(fixture_digest packages/domain/fixtures/rider.glb)"
+assert_violation "a weak-copyleft licence under packages/ is rejected" ASSET004 \
+  "packages/domain/fixtures/rider.glb: licence CC0-1.0 is not permitted at this path"
+
+new_fixture
+write_good_package domain
+write_binary_asset packages/domain/fixtures/rider.glb
+append_asset_entry packages/domain/fixtures/rider.glb Apache-2.0 \
+  "$(fixture_digest packages/domain/fixtures/rider.glb)"
+assert_clean "a permissive licence under packages/ passes"
+
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+printf '\n[[asset]]\npath = "apps/web/public/models/rider.glb"\nsource = "Some Pack, https://example.invalid/pack"\nread = "2026-09-16"\nsha256 = "%s"\n' \
+  "$(fixture_digest apps/web/public/models/rider.glb)" >> "${fixture_root}/ASSETS.toml"
+assert_violation "an entry with no licence at all is rejected" ASSET004 \
+  "apps/web/public/models/rider.glb: no licence recorded"
+
+# --- ASSET005: the manifest itself ------------------------------------------
+#
+# ⚠️ This is the rule without which the four above are the vacuous pass they
+# exist to prevent. `check-env-example.sh` states the precedent in as many
+# words: "a missing .env.example also fails -- a template that is not there
+# documents nothing".
+
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+rm -f "${fixture_root}/ASSETS.toml"
+assert_violation "a manifest that is not there is a failure, not a pass" ASSET005 \
+  "ASSETS.toml: not found"
+
+# And with no assets at all, so that the failure is about the record rather than
+# about anything it would have recorded. Deleting the gate is the failure.
+new_fixture
+write_good_app web
+rm -f "${fixture_root}/ASSETS.toml"
+assert_violation "deleting the manifest fails even in a tree with no binaries" ASSET005 \
+  "ASSETS.toml: not found"
+
+new_fixture
+write_good_app web
+printf 'this line is not TOML at all\n' >> "${fixture_root}/ASSETS.toml"
+assert_violation "a line that is neither a comment, a header nor a key is rejected" ASSET005 \
+  "not a comment, an [[asset]] header or a key"
+
+new_fixture
+write_good_app web
+printf '\n[asset]\npath = "x"\n' >> "${fixture_root}/ASSETS.toml"
+assert_violation "a table header that is not [[asset]] is rejected" ASSET005 \
+  "expected an [[asset]] header"
+
+# ⚠️ An unrecognised key is REFUSED rather than ignored -- ADR 0017 D-4's choice
+# for the workout file, for the same reason: a key nobody reads is a claim about
+# an asset that silently has no effect, and this file exists so that a claim
+# about an asset is checked.
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+append_asset_entry apps/web/public/models/rider.glb CC0-1.0 \
+  "$(fixture_digest apps/web/public/models/rider.glb)"
+printf 'attribution = "not a key this file has"\n' >> "${fixture_root}/ASSETS.toml"
+assert_violation "an unrecognised key is refused rather than ignored" ASSET005 \
+  "unknown key \"attribution\""
+
+new_fixture
+write_good_app web
+printf 'path = "apps/web/stray.glb"\n' >> "${fixture_root}/ASSETS.toml"
+assert_violation "a key before any [[asset]] header is rejected" ASSET005 \
+  "appears before any [[asset]] header"
+
+new_fixture
+write_good_app web
+printf '\n[[asset]]\nsource = "Some Pack"\nlicence = "CC0-1.0"\nread = "2026-09-16"\nsha256 = "00"\n' \
+  >> "${fixture_root}/ASSETS.toml"
+assert_violation "an entry with no path is rejected" ASSET005 \
+  "the [[asset]] opened here names no path"
+
+new_fixture
+write_good_app web
+printf '\n[[asset]]\npath = "apps/web/x.glb"\nlicence = "CC0-1.0"\nread = "2026-09-16"\nsha256 = "00"\n' \
+  >> "${fixture_root}/ASSETS.toml"
+assert_violation "an entry with no source is rejected" ASSET005 \
+  "records no source"
+
+new_fixture
+write_good_app web
+printf '\n[[asset]]\npath = "apps/web/x.glb"\nsource = "Some Pack"\nlicence = "CC0-1.0"\nsha256 = "00"\n' \
+  >> "${fixture_root}/ASSETS.toml"
+assert_violation "an entry with no read date is rejected" ASSET005 \
+  "records no read date"
+
+new_fixture
+write_good_app web
+printf '\n[[asset]]\npath = "apps/web/x.glb"\nsource = "Some Pack"\nlicence = "CC0-1.0"\nread = "16th September"\nsha256 = "00"\n' \
+  >> "${fixture_root}/ASSETS.toml"
+assert_violation "a read date that is not an ISO date is rejected" ASSET005 \
+  "records no read date"
+
+new_fixture
+write_good_app web
+printf '\n[[asset]]\npath = "apps/web/x.glb"\npath = "apps/web/y.glb"\nsource = "Some Pack"\nlicence = "CC0-1.0"\nread = "2026-09-16"\nsha256 = "00"\n' \
+  >> "${fixture_root}/ASSETS.toml"
+assert_violation "a duplicated key in one entry is rejected" ASSET005 \
+  "duplicate key \"path\""
+
+new_fixture
+write_good_app web
+printf '\n[[asset]]\npath = ""\nsource = "Some Pack"\nlicence = "CC0-1.0"\nread = "2026-09-16"\nsha256 = "00"\n' \
+  >> "${fixture_root}/ASSETS.toml"
+assert_violation "a key with an empty value is rejected" ASSET005 \
+  "has an empty value"
+
+# ⚠️ A manifest that does not parse stops the walk, and the walk's SILENCE is
+# the assertion. A partially read entry list would report every asset named
+# after the bad line as unnamed -- false statements, each of them, burying the
+# one finding that is true.
+# ⚠️ The entry has to be one the parse error DESTROYS, or the case is vacuous.
+# A bad line beside an otherwise well-formed entry still leaves that entry in
+# the list, so the asset is named either way and ASSET001 is silent for a reason
+# that has nothing to do with the rule under test -- measured: that fixture is
+# green against a checker with the early return deleted. A malformed entry FOR
+# THE ASSET ITSELF is the one that goes missing.
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+printf '\n[[asset]]\npath = "apps/web/public/models/rider.glb"\nsource = "Some Pack"\nlicence = "CC0-1.0"\nread = "16th September"\nsha256 = "%s"\n' \
+  "$(fixture_digest apps/web/public/models/rider.glb)" >> "${fixture_root}/ASSETS.toml"
+assert_violation_and_silence "a manifest that does not parse stops the walk rather than burying the finding" \
+  ASSET005 "records no read date" ASSET001
+
+# ...and that helper must still be able to say no, or the case above proves
+# nothing.
+#
+# ⚠️ The guard deliberately does NOT reuse the ASSET005/ASSET001 pair. Under
+# this checker those two can never co-occur -- any ASSET005 stops the walk, which
+# is the property the case above asserts -- so a fixture built from them could
+# only ever be silent, and a helper that ignored its fourth argument entirely
+# would look correct. The pair here is one that genuinely can fire together: a
+# single entry with both a licence nobody has ruled on and a digest that does
+# not reproduce.
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+append_asset_entry apps/web/public/models/rider.glb GPL-3.0-only \
+  0000000000000000000000000000000000000000000000000000000000000000
+assert_helper_fails "assert_violation_and_silence rejects a run in which the silent rule did fire" \
+  assert_violation_and_silence "(expected to fail) ASSET003 was not silent" \
+  ASSET004 "licence GPL-3.0-only is not permitted" ASSET003
+cleanup_fixture
+
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+append_asset_entry apps/web/public/models/rider.glb GPL-3.0-only \
+  "$(fixture_digest apps/web/public/models/rider.glb)"
+assert_helper_passes "assert_violation_and_silence accepts a rule that fired with a genuinely silent second" \
+  assert_violation_and_silence "(expected to pass) ASSET003 was silent" \
+  ASSET004 "licence GPL-3.0-only is not permitted" ASSET003
+cleanup_fixture
+
+# The traversal case. An entry has to name one file inside this repository, and
+# an absolute or `..` path names something outside it -- which would also hand
+# the digest step a file the repository does not contain. LIC006 refuses both in
+# `.spdx-exempt` for the first reason; this rule has the second as well.
+new_fixture
+write_good_app web
+append_asset_entry /etc/hosts MIT \
+  0000000000000000000000000000000000000000000000000000000000000000
+assert_violation "an absolute path is rejected" ASSET005 \
+  "/etc/hosts: entries are repository-relative paths"
+
+new_fixture
+write_good_app web
+append_asset_entry ../outside/rider.glb CC0-1.0 \
+  0000000000000000000000000000000000000000000000000000000000000000
+assert_violation "a path escaping the repository is rejected" ASSET005 \
+  "../outside/rider.glb: entries are repository-relative paths"
+
+# --- The generated trees are pruned, from the SAME list every other rule uses --
+#
+# A binary under a tree this repository does not author is not its asset. The
+# complement below is what stops that case also passing against a checker that
+# pruned everything.
+#
+# ⚠️ `.claude/` is on that list since #339 and is the reason this case exists in
+# this shape: it holds git worktrees of OTHER branches, so without the prune a
+# machine with worktrees reports another branch's forty binaries as unnamed --
+# a local-only red with no fix a contributor can apply, which is the shape
+# `.prettierignore` already carries the same directory for.
+new_fixture
+write_good_app web
+write_binary_asset node_modules/somedep/blob.bin
+write_binary_asset apps/web/dist/bundle.wasm
+write_binary_asset .claude/worktrees/other-branch/apps/web/public/models/rider.glb
+write_binary_asset apps/mobile/android/.gradle/8.14.3/fileHashes/fileHashes.bin
+assert_clean "a binary in a generated, ignored or vendored tree is pruned"
+
+new_fixture
+write_good_app web
+write_binary_asset apps/web/src/models/rider.glb
+assert_violation "the same binary one directory across from a pruned one is found" ASSET001 \
+  "apps/web/src/models/rider.glb: a committed binary"
 
 # --- The real repository must pass -------------------------------------------
 
