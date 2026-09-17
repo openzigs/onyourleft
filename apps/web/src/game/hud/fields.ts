@@ -29,13 +29,21 @@
  *
  * #94's fourth criterion: *"The HUD reads from the simulation state, never
  * computes its own"*. Everything below is a **format** of a value produced
- * elsewhere — `simulation.ts` for speed, distance and gradient, `pacer/gap.ts`
- * for the gap, the sensors for cadence and heart rate. There is no arithmetic in
- * this file beyond unit conversion and rounding, and that is checked by
- * `fields.test.ts` asserting the displayed distance is the state's own number.
+ * elsewhere — `simulation.ts` for speed, distance, gradient and the headwind
+ * (#335, resolved by `route/wind.ts` on the same step the physics used it),
+ * `pacer/gap.ts` for the gap, the sensors for cadence and heart rate. There is
+ * no arithmetic in this file beyond unit conversion, rounding and taking a
+ * magnitude, and that is checked by `fields.test.ts` asserting the displayed
+ * distance is the state's own number.
  */
 
-import type { GapInput, Metres, PacerGap, RouteProfile } from '@onyourleft/domain';
+import {
+  metresPerSecond,
+  type GapInput,
+  type Metres,
+  type PacerGap,
+  type RouteProfile,
+} from '@onyourleft/domain';
 import type { UnitSystem } from '@onyourleft/store';
 
 import { formatDistance, formatSpeed, type Measurement } from '../../units/format';
@@ -185,7 +193,8 @@ export interface HudInput {
 }
 
 /**
- * The eight fields #94 names, in a fixed order.
+ * The eight fields #94 names, in a fixed order — and, since #335, a ninth for
+ * the wind on the rides that have one.
  *
  * ⚠️ The order is part of the contract, not a layout preference. #94:
  * *"Glanceable, not readable. The rider looks for one second. Numbers must be
@@ -200,6 +209,13 @@ export interface HudInput {
  * the route picker before the ride starts and neither can change while it runs,
  * so nothing moves under a rider mid-ride — which is the property the fixed
  * order exists to protect, rather than the count itself. @see gapReadings
+ *
+ * ⚠️ **The wind field is the same shape of exception and is deliberately
+ * last** — #335. It is present only on a ride the rider set a wind for, and
+ * that choice is made on the picker and held for the ride
+ * (`simulation.ts` §`SimulationSetup.wind`), so the two rides differ from each
+ * other and neither changes under anybody. Putting it after the gaps is what
+ * leaves every other field at the index it has always had. @see windReading
  */
 export function hudReadings(input: HudInput): readonly HudReading[] {
   const { state } = input;
@@ -231,6 +247,15 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
   // the last kilometre go past wants the ten-metre digit. `units/format.ts`
   // §Rounding says why the two are kept apart.
   const togo = formatDistance(remaining as Metres, units, REMAINING_DECIMALS);
+  // ⚠️ **Last, and the position is the decision rather than an afterthought.**
+  // The order above is a contract — #94 asks a rider to find a field by
+  // position rather than by reading its label — and this is the one field
+  // whose *presence* depends on a choice the rider made on the picker. Putting
+  // it last means a windless ride and a windy one agree about where every
+  // other field is, including the gaps, which already vary in number. It never
+  // appears or disappears mid-ride: `simulation.ts` §`SimulationSetup.wind`
+  // records that the wind cannot be changed once the ride has started.
+  const wind = windReading(state, units);
   return [
     reading('power', 'Power', state.input.power, 'W', state.input.live, 0, state.input.paired),
     reading(
@@ -257,6 +282,7 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
     reading('gradient', 'Gradient', state.grade, '%', true, 1),
     measured('remaining', 'To go', togo),
     ...gapReadings(input),
+    ...wind,
   ];
 }
 
@@ -380,6 +406,109 @@ const SETTLED: Readonly<Record<GhostOutcome, { value: string; detail: string }>>
 
 /** How many decimals the distance still to ride is counted down to. */
 const REMAINING_DECIMALS = 2;
+
+/**
+ * How many decimals the wind is shown to: **none**.
+ *
+ * A precision argument rather than a unit one, in `units/format.ts`'s own
+ * words. Two reasons, and neither is about width:
+ *
+ * - The number a rider typed was a round one, and what this field shows is
+ *   that number with a cosine applied. A tenth of a km/h of headwind is a
+ *   digit nobody chose and nobody can feel.
+ * - It moves continuously as the road bends, which no other field on this
+ *   panel does except the gradient. A last digit that flickers on a
+ *   bar-mounted phone is the opposite of #94's *"glanceable, not readable"*,
+ *   and the gradient's own single decimal is the same judgement one step less
+ *   far along.
+ */
+const WIND_DECIMALS = 0;
+
+/**
+ * What the wind is doing to the rider, or nothing at all — #335.
+ *
+ * ## Why this reads the state rather than resolving the wind itself
+ *
+ * `simulation.ts` §`GameState.headwindMetresPerSecond` is the **same number
+ * the physics was advanced with**, resolved once per step against the heading
+ * at the rider's own distance. This file could import `headwindOnRoute` and
+ * the profile is right there in {@link HudInput} — which is exactly the
+ * separately-computed value #94's third criterion forbids, and it would drift
+ * the moment the two disagreed about which distance to ask at.
+ *
+ * ## Why still air shows nothing rather than a nought
+ *
+ * #335's third criterion, and it is the {@link NO_READING} argument one step
+ * further on. This panel already distinguishes *a real zero* from *a sensor
+ * that dropped*; **"no wind was set" is neither of those**. A rider who chose
+ * still air and is shown `0 km/h` under a `Wind` label has been told something
+ * about the air rather than about their own choice, and a rider who chose a
+ * wind and sees the same thing cannot tell the two apart. So the field is
+ * absent, which is a state the panel already has a precedent for in
+ * `GameState.bot`: a choice made on the picker that the HUD can see.
+ *
+ * ⚠️ **And that is safe only because the choice cannot change mid-ride.** A
+ * field that appeared and disappeared while a rider was riding would move
+ * every field after it, which is the failure the fixed order exists to
+ * prevent. `simulation.ts` §`SimulationSetup.wind` is where the decision is
+ * recorded, and it is the declaration that would have to change for this to
+ * stop holding.
+ *
+ * ## Why the tangential component and not the wind the rider typed
+ *
+ * The rider typed a vector; what they *feel* is its component along the road,
+ * and that is the number that explains why the same power is worth five fewer
+ * km/h than it was a mile ago. `route/wind.ts` computes it every step for the
+ * physics; showing anything else here would be a second, easier number that
+ * did not answer the question the field exists for.
+ */
+function windReading(state: GameState, units: UnitSystem): readonly HudReading[] {
+  const headwind = state.headwindMetresPerSecond;
+  if (headwind === undefined) {
+    return [];
+  }
+  // The magnitude, with the direction carried in the word below it — the shape
+  // `gapReading` settled on, and for its reason: a minus sign is one glyph wide
+  // at arm's length and is the first thing lost.
+  const measurement = formatSpeed(metresPerSecond(Math.abs(headwind)), units, WIND_DECIMALS);
+  return [
+    {
+      key: 'wind',
+      label: 'Wind',
+      value: measurement.value,
+      unit: measurement.unit,
+      // ⚠️ Judged on the **rounded** magnitude, exactly as `gapReading`'s
+      // `LEVEL` branch is. A headwind of two tenths of a km/h displays as `0`,
+      // and `0 km/h headwind` claims a direction the digits do not support
+      // while the true direction could be either. At that magnitude the wind
+      // is across the rider, which is a thing worth saying and is why this is
+      // a third word rather than a dash.
+      detail: windWord(headwind, measurement.value),
+      // Never stale: the wind is a choice and a computation, not a sensor, so
+      // it cannot drop out — the same argument the speed and gradient fields
+      // carry at their call site.
+      stale: false,
+    },
+  ];
+}
+
+/**
+ * What the wind is called: the words a rider already has for it.
+ *
+ * A forecast and a club run both use these three, so nothing has to be learned
+ * from the screen. They go in {@link HudReading.detail} rather than in the
+ * value so that the big number stays a number (#255).
+ *
+ * @param headwind - the signed tangential component, in metres per second.
+ * @param shown - the magnitude as it will actually be **displayed**, which is
+ * what the crosswind branch is judged on. @see windReading
+ */
+function windWord(headwind: number, shown: string): string {
+  if (Number(shown) === 0) {
+    return 'crosswind';
+  }
+  return headwind > 0 ? 'headwind' : 'tailwind';
+}
 
 /**
  * A field whose value and unit were produced together by `units/format.ts`.

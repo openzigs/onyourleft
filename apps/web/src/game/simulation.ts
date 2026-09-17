@@ -253,6 +253,31 @@ export interface SimulationSetup {
    * a `MetresPerSecond` and so cannot carry a tailwind at all, and a trainer
    * given both a gradient and a wind applies its own drag model on top of the
    * one this simulation has already applied.
+   *
+   * ## It cannot be changed mid-ride, and that is a decision — #335
+   *
+   * ⚠️ **The answer is no, and it is written here because this is the
+   * declaration that would have to change for it to be yes.** #335 asks the
+   * question explicitly and asks for it to be settled either way; this is the
+   * settlement, and the reasons are not about effort:
+   *
+   * - This whole interface is *"everything the simulation needs that does not
+   *   change during a ride"*, and it is read once, in the constructor. The
+   *   rider's mass is held for the ride's length for the same reason
+   *   (`GameView.start`): a rider who is climbing when a number changes does
+   *   not have the hill they are on get heavier under them.
+   * - The ride is a fixed-tick simulation whose step count is derived from the
+   *   origin, and `simulation.test.ts`'s determinism cases rest on the
+   *   conditions being constant. A wind that moved mid-ride would make "the
+   *   same two instants produce the same distance" a claim about a history of
+   *   edits rather than about two numbers.
+   * - The only place a mid-ride control could go is the HUD, and #94 sizes
+   *   those at 72 px for a gloved, sweating rider at threshold. A speed box
+   *   and a bearing box are not that.
+   *
+   * So a rider who wants different air ends the ride and sets it on the
+   * picker. What #335 *does* deliver is that they can see the wind they set —
+   * `hud/fields.ts` §`windReading`, from {@link GameState.headwindMetresPerSecond}.
    */
   readonly wind?: Wind | undefined;
 }
@@ -372,6 +397,32 @@ export interface GameState {
    * both draw.
    */
   readonly bot?: BotTick | undefined;
+  /**
+   * The headwind the rider is riding into **at this point on the route**, in
+   * metres per second, signed the way `packages/physics` signs it — positive
+   * is a headwind, negative is a tailwind (#335).
+   *
+   * ⚠️ **The number the physics actually used, not a second one computed for
+   * the screen.** `advanceTo` resolves the wind against the heading at the
+   * rider's distance on every step and hands the result to `advance`; this
+   * field is that same resolution at the distance the ride finished the call
+   * on. #94's fourth criterion is that the HUD read from the simulation state
+   * and never compute its own, and a HUD that called `headwindOnRoute` itself
+   * would be the separately-computed value that criterion forbids — reachable
+   * only because the profile and the wind are both on hand.
+   *
+   * ⚠️ **`undefined` means no wind was set, and it is not a zero.** A ride in
+   * still air has no wind reading at all rather than one reading nought —
+   * `hud/fields.ts` §`windReading` is where that distinction is rendered and
+   * `NO_READING` is the precedent it follows. A plain `number` rather than a
+   * `MetresPerSecond` for the reason `RideConditions.headwindMetresPerSecond`
+   * is one: the brand is a non-negative magnitude and a tailwind is negative.
+   *
+   * It moves as the road bends, which is the whole of what makes it worth
+   * showing: one unchanging wind is a headwind on the way out and a tailwind
+   * on the way back. @see SimulationSetup.wind, which cannot change mid-ride.
+   */
+  readonly headwindMetresPerSecond?: number | undefined;
 }
 
 /**
@@ -438,6 +489,12 @@ export class GameSimulation {
       ...(this.#course === undefined
         ? {}
         : { bot: { state: BOT_AT_START_LINE, ...botDemand(BOT_AT_START_LINE, this.#course) } }),
+      // ⚠️ On the start line from the first frame, for the reason the bot is:
+      // `GameView` renders the HUD from `simulation.state` before the loop has
+      // run once, and a wind that appeared a tick late would show a rider a
+      // dash for the field they had just set — indistinguishable from the
+      // still-air ride they did not choose.
+      ...headwindField(this.#headwindAt(START_OF_RIDE.distance)),
     };
   }
 
@@ -608,6 +665,12 @@ export class GameSimulation {
       grade: gradeAtDistance(this.#setup.profile, ride.distance),
       input,
       ...(bot === undefined ? {} : { bot }),
+      // ⚠️ At the distance the ride ENDED this call on, which is the same
+      // distance `grade` above is read at and the one the rider is drawn at.
+      // Reporting the headwind the last step was *integrated* with would be a
+      // step behind the gradient beside it, and on a bend the two would
+      // describe different pieces of road.
+      ...headwindField(this.#headwindAt(ride.distance)),
     };
     return { steps: toRun, skippedSeconds: skippedSteps * SIMULATION_STEP_SECONDS };
   }
@@ -626,14 +689,31 @@ export class GameSimulation {
    * object is what makes "nothing moved" obvious.
    */
   #conditionsAt(distance: number): RideConditions {
-    const wind = this.#setup.wind;
-    if (wind === undefined) {
+    const headwind = this.#headwindAt(distance);
+    if (headwind === undefined) {
       return this.#setup.conditions;
     }
-    return {
-      ...this.#setup.conditions,
-      headwindMetresPerSecond: headwindOnRoute(this.#setup.profile, distance, wind),
-    };
+    return { ...this.#setup.conditions, headwindMetresPerSecond: headwind };
+  }
+
+  /**
+   * The rider's headwind at one point on the route, or `undefined` when no
+   * wind was set — #335.
+   *
+   * ⚠️ **One function feeding both the physics and the screen, deliberately.**
+   * {@link #conditionsAt} hands its answer to `advance` and
+   * {@link GameState.headwindMetresPerSecond} shows the same answer to the
+   * rider, so there is no second resolution of the same wind for the two to
+   * disagree about. #94's third criterion asks for exactly that about the
+   * elevation marker — *"rather than a separately-computed value that can
+   * drift"* — and the wind is the same shape of number.
+   */
+  #headwindAt(distance: number): number | undefined {
+    const wind = this.#setup.wind;
+    if (wind === undefined) {
+      return undefined;
+    }
+    return headwindOnRoute(this.#setup.profile, distance, wind);
   }
 
   /** The bot's course at one point on the route. @see #conditionsAt */
@@ -647,6 +727,22 @@ export class GameSimulation {
       headwindMetresPerSecond: headwindOnRoute(course.profile, distance, wind),
     };
   }
+}
+
+/**
+ * The headwind as a {@link GameState} field, present only when there is one.
+ *
+ * ⚠️ **A helper rather than the inline ternary the fields beside it use**, for
+ * one reason: the two call sites are a constructor and a hot loop, and the
+ * property name is the thing that must not drift between them. A field spelled
+ * one way on the first frame and another on every frame after it would show a
+ * rider a wind that vanished the moment they started pedalling, and both sites
+ * would typecheck.
+ */
+function headwindField(headwind: number | undefined): {
+  readonly headwindMetresPerSecond?: number;
+} {
+  return headwind === undefined ? {} : { headwindMetresPerSecond: headwind };
 }
 
 /** Linear blend between two odometer readings. @see DrawnRide */

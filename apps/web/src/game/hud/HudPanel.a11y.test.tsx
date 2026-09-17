@@ -658,3 +658,72 @@ describe('the route in plan (#285)', () => {
     expect(Math.hypot(lapTwo.x - startLine.x, lapTwo.y - startLine.y)).toBeGreaterThan(1);
   });
 });
+
+/**
+ * The wind, on the panel and in the ear — #335.
+ *
+ * `fields.ts` decides what the reading says; this is what a rider is actually
+ * told. The announced form matters here for the same reason it did in #255:
+ * the number and the word have to arrive as one reading, or `22 km/h` and
+ * `headwind` are heard as two unrelated things.
+ */
+describe('a rider riding in a wind is told so (#335)', () => {
+  function windy(headwind: number | undefined): React.ReactElement {
+    const base = props();
+    return inRideScreen(
+      <HudPanel
+        {...base}
+        state={{
+          ...base.state,
+          ...(headwind === undefined ? {} : { headwindMetresPerSecond: headwind }),
+        }}
+      />,
+    );
+  }
+
+  it('announces the magnitude, the unit and the word as one reading', async () => {
+    mounted = await mount(windy(6));
+
+    expect(announced('Wind')).toBe('Wind, 22 km/h headwind');
+  });
+
+  it('says tailwind when it is behind them', async () => {
+    mounted = await mount(windy(-6));
+
+    expect(announced('Wind')).toBe('Wind, 22 km/h tailwind');
+    expect(announced('Wind')).not.toContain('headwind');
+  });
+
+  it('has no wind field at all on a ride in still air', async () => {
+    mounted = await mount(windy(undefined));
+
+    // ⚠️ Asserted on the rendered panel rather than only on the readings,
+    // because a component that rendered a placeholder for an absent field
+    // would satisfy `fields.test.ts` and still put `Wind —` in front of a
+    // rider who chose still air.
+    const labels = [...document.querySelectorAll('.oyl-hud__label')].map((element) =>
+      text(element),
+    );
+    expect(labels).not.toContain('Wind');
+  });
+
+  it('audits clean with the extra field, which is a different tree', async () => {
+    mounted = await mount(windy(6));
+
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
+  it('does not set the wind in the smaller type a word gets', async () => {
+    // `oyl-hud__value--word` is #259's rule for a value that is a word. The
+    // wind's value is a magnitude and its word is in the detail line, so this
+    // field must not carry it — the class is what would say the big number had
+    // stopped being a number.
+    mounted = await mount(windy(6));
+
+    const field = [...document.querySelectorAll('.oyl-hud__field')].find(
+      (pair) => text(pair.querySelector('dt')) === 'Wind',
+    );
+    expect(field?.querySelector('.oyl-hud__value--word')).toBeNull();
+    expect(text(field?.querySelector('.oyl-hud__detail') ?? null)).toBe('headwind');
+  });
+});

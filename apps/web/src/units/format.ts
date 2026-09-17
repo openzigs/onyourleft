@@ -222,9 +222,21 @@ export function speedFrom(value: number, units: UnitSystem): MetresPerSecond {
  * this function at all — the same guard `formatSpeedValue` carried before
  * #238, kept because it is what stops the HUD's `* 3.6` coming back as a
  * `* 2.24`.
+ *
+ * @param decimals overrides the default precision, exactly as
+ * {@link formatDistance}'s does and for the same reason: it is a **precision**
+ * argument and not a unit one. #335's wind field is the caller —
+ * `game/hud/fields.ts` §`windReading` — and its reason is that the number
+ * arrived as a round figure a rider typed and then had a cosine applied to it,
+ * so a tenth of a km/h of headwind is a digit nobody can feel and nobody
+ * chose. The default is unchanged, so every existing caller reads as it did.
  */
-export function formatSpeed(speed: MetresPerSecond, units: UnitSystem): Measurement {
-  return { value: speedIn(speed, units).toFixed(SPEED_DECIMALS), unit: speedUnit(units) };
+export function formatSpeed(
+  speed: MetresPerSecond,
+  units: UnitSystem,
+  decimals: number = SPEED_DECIMALS,
+): Measurement {
+  return { value: speedIn(speed, units).toFixed(decimals), unit: speedUnit(units) };
 }
 
 /**

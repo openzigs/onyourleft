@@ -164,21 +164,56 @@ function hudSpeed(): number {
 }
 
 /**
+ * One HUD field as a rider sees it: the big number, its unit and the phrase
+ * under it — #335.
+ *
+ * Read off the rendered panel rather than out of the state, for `hudSpeed`'s
+ * reason: what is under test is whether a rider is ever shown this, and a
+ * number on a `GameState` nothing renders is the defect, not the feature.
+ * Returns `undefined` for a field that is not on the panel at all, which is
+ * what a ride in still air is supposed to give for the wind.
+ */
+function hudField(label: string): { readonly text: string; readonly detail: string } | undefined {
+  const field = queryAll(mounted?.container ?? document, '.oyl-hud__field').find(
+    (element) => (element.querySelector('.oyl-hud__label')?.textContent ?? '') === label,
+  );
+  if (field === undefined) {
+    return undefined;
+  }
+  const collapse = (element: Element | null): string =>
+    (element?.textContent ?? '').replace(/\s+/g, ' ').trim();
+  return {
+    // The whole `dd`, which is the magnitude, its unit and the phrase under it
+    // — what a rider reads and what a screen reader announces as one
+    // definition. `HudPanel.a11y.test.tsx` is where that form is pinned; here
+    // it is simply the cheapest thing to compare.
+    text: collapse(field.querySelector('.oyl-hud__value')),
+    detail: collapse(field.querySelector('.oyl-hud__detail')),
+  };
+}
+
+/**
  * Rides the northward route for sixty frames, optionally in a wind the rider
  * sets through the picker's own controls, and returns the speed they reached.
  */
-async function rideWith(setWind: { speed: string; fromBearing: string } | undefined): Promise<{
+async function rideWith(
+  setWind: { speed: string; fromBearing: string } | undefined,
+  units?: UnitSystem,
+): Promise<{
   readonly speed: number;
   readonly frames: number;
   readonly refused: boolean;
 }> {
   const frames: SceneFrame[] = [];
-  mounted = await mount(
+  const view = (
     <GameView
       port={pedallingPort(northRoute())}
       renderer={() => Promise.resolve(capturingRenderer(frames))}
       now={() => nowMs}
-    />,
+    />
+  );
+  mounted = await mount(
+    units === undefined ? view : <UnitsProvider units={units}>{view}</UnitsProvider>,
   );
   await settle();
 
@@ -356,5 +391,59 @@ describe("the wind box is read in the RIDER's own units (#238, #326)", () => {
     // bound restated in a unit that is on none of this rider's screens.
     expect(problemText()).toMatch(/89\.5 mph/);
     expect(problemText()).not.toMatch(/km\/h/);
+  });
+});
+
+/**
+ * #335: and the rider can see it while they are riding.
+ *
+ * ⚠️ **The gap this block closes is the same shape as the one this file
+ * opened with, one layer further on.** #326 made a rider's wind reach the
+ * physics; it left the rider with nothing on screen saying a wind was in
+ * effect, how strong it was, or which way it blew. A number carried out on
+ * `GameState` that no panel renders is exactly the *"correct, unit-tested,
+ * typechecked unit wired to nothing"* CLAUDE.md §4j is about, and neither
+ * `check:wiring` nor the typechecker can see it: `GameState.headwind‑
+ * MetresPerSecond` is optional, and an optional property nobody reads is
+ * perfectly well typed.
+ *
+ * So these assertions are driven from the picker's own boxes, through the real
+ * `GameSimulation` and the real `HudPanel`, and read off the rendered panel.
+ */
+describe('a rider riding in the wind they set can see it on the HUD (#335)', () => {
+  it('shows the wind, in the direction it is actually blowing on this road', async () => {
+    // 36 km/h from due north, on a road running due north: the whole of it is
+    // a headwind, so the field reads back the number the rider typed.
+    await rideWith({ speed: '36', fromBearing: '0' });
+
+    expect(hudField('Wind')).toEqual({ text: '36 km/h headwind', detail: 'headwind' });
+  });
+
+  it('calls it a tailwind when it is behind them', async () => {
+    await rideWith({ speed: '36', fromBearing: '180' });
+
+    expect(hudField('Wind')?.detail).toBe('tailwind');
+  });
+
+  it('shows no wind field at all to a rider who chose still air', async () => {
+    // ⚠️ The control, and the criterion. Without it every assertion above
+    // could be satisfied by a panel that always carries a wind field, which is
+    // the `0 km/h` a rider in still air must not be shown.
+    await rideWith(undefined);
+
+    expect(hudField('Wind')).toBeUndefined();
+    // And the ride really did happen, so this is not "nothing rendered".
+    expect(hudField('Speed')).toBeDefined();
+  });
+
+  it('reads it in the rider’s own units, not in the ones the box was in', async () => {
+    // The seam this file's last block is about, on the other side of the ride:
+    // an imperial rider types mph into the picker and must be shown mph on the
+    // HUD. 36 mph is 16.1 m/s, which is the same 36 back again — so the
+    // *unit* is what separates the two, and a client that converted on the way
+    // in and not on the way out would read `58 km/h`.
+    await rideWith({ speed: '36', fromBearing: '0' }, 'imperial');
+
+    expect(hudField('Wind')).toEqual({ text: '36 mph headwind', detail: 'headwind' });
   });
 });

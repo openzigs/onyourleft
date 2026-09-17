@@ -721,3 +721,110 @@ describe('the HUD follows the rider\u2019s units (#238)', () => {
     expect(fieldNamed(withGap, 'gap-bot').value).toBe('10');
   });
 });
+
+/**
+ * #335 — the wind, on the screen a rider is actually looking at.
+ *
+ * `game/wind.test.ts` proves the simulation carries the number out. This is
+ * the other half: what a rider is shown, and — the criterion that is easiest
+ * to get wrong — what a rider who set **no** wind is shown, which is nothing
+ * at all rather than a nought.
+ */
+describe('what the wind is doing to the rider (#335)', () => {
+  /** A ride mid-route, with whatever headwind the simulation is reporting. */
+  function riding(headwind: number | undefined, units?: HudInput['units']): HudInput {
+    const input = baseInput();
+    return {
+      ...input,
+      ...(units === undefined ? {} : { units }),
+      state: {
+        ...input.state,
+        ride: { speed: metresPerSecond(10), distance: metres(400) },
+        ...(headwind === undefined ? {} : { headwindMetresPerSecond: headwind }),
+      },
+    };
+  }
+
+  function windField(headwind: number | undefined, units?: HudInput['units']) {
+    return hudReadings(riding(headwind, units)).find((reading) => reading.key === 'wind');
+  }
+
+  it('shows nothing at all for a ride in still air', () => {
+    // ⚠️ The criterion in its literal form. Not a dash and not a zero: a dash
+    // is what a dropped sensor gets and a zero is what a crosswind gets, and
+    // "no wind was set" is neither of those.
+    expect(windField(undefined)).toBeUndefined();
+    expect(hudReadings(riding(undefined)).some((reading) => reading.value === NO_READING)).toBe(
+      true,
+    );
+  });
+
+  it('shows a headwind as a magnitude and the word for it', () => {
+    const wind = windField(6);
+
+    // 6 m/s is 21.6 km/h. Whole units: the rider typed a round number and a
+    // cosine happened to it, so the tenth is a digit nobody chose.
+    expect(wind?.value).toBe('22');
+    expect(wind?.unit).toBe('km/h');
+    expect(wind?.detail).toBe('headwind');
+    expect(wind?.stale).toBe(false);
+  });
+
+  it('shows a tailwind with the same magnitude and a different word', () => {
+    const tail = windField(-6);
+
+    // ⚠️ The sign is in the word rather than in a minus glyph — `gapReading`'s
+    // rule, for its reason: a minus sign is one glyph wide at arm's length and
+    // is the first thing lost.
+    expect(tail?.value).toBe('22');
+    expect(tail?.value).not.toContain('-');
+    expect(tail?.detail).toBe('tailwind');
+  });
+
+  it('calls a wind whose component rounds to nothing a crosswind, not a headwind', () => {
+    // A westerly on a northward road. `0 km/h headwind` would claim a
+    // direction the digits do not support while the true one could be either —
+    // the argument `gapReading`'s `LEVEL` branch makes about a gap.
+    const across = windField(0.02);
+
+    expect(across?.value).toBe('0');
+    expect(across?.detail).toBe('crosswind');
+  });
+
+  it('judges that on the DISPLAYED magnitude rather than on an exact zero', () => {
+    // The cheap implementation compares the headwind to 0 and calls anything
+    // else a headwind, which puts `0 km/h headwind` on the screen for every
+    // heading within a couple of degrees of square to the wind.
+    expect(windField(0.0001)?.detail).toBe('crosswind');
+    expect(windField(-0.0001)?.detail).toBe('crosswind');
+    // And a component that survives the rounding is still named.
+    expect(windField(0.2)?.detail).toBe('headwind');
+  });
+
+  it('reads the simulation’s own number rather than resolving the wind itself', () => {
+    // #94's fourth criterion. The profile is in `HudInput` and `headwindOnRoute`
+    // is one import away, so the separately-computed value is reachable — this
+    // is a headwind no route and no wind in this file could produce, and the
+    // field shows it.
+    expect(windField(11.11)?.value).toBe('40');
+  });
+
+  it('is in the rider’s own units, digits and label together', () => {
+    const imperial = windField(6, 'imperial');
+
+    // 6 m/s is 13.4 mph. The label alone would pass a relabel-without-convert.
+    expect(imperial?.value).toBe('13');
+    expect(imperial?.unit).toBe('mph');
+    expect(imperial?.value).not.toBe(windField(6, 'metric')?.value);
+  });
+
+  it('comes last, so a ride with a wind agrees with one without about every other field', () => {
+    // ⚠️ #94's fixed order. The wind is the one field whose presence depends on
+    // a choice, so it goes after the gaps and every other field keeps the index
+    // it has always had.
+    const still = hudReadings(riding(undefined)).map((reading) => reading.key);
+    const windy = hudReadings(riding(6)).map((reading) => reading.key);
+
+    expect(windy).toEqual([...still, 'wind']);
+  });
+});
