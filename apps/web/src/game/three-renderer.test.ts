@@ -37,7 +37,7 @@
  * would pass against a renderer that never set it.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   altitudeMetres,
@@ -56,6 +56,7 @@ import { corridorOrigin } from './terrain';
 import { QUALITY_LADDER, qualitySettings } from './quality';
 import { SCATTER_KINDS, SCATTER_MAX_ITEMS, type ScatterItem, type ScatterKind } from './scatter';
 import { VIEW_AHEAD_METRES, VIEW_BEHIND_METRES } from './terrain';
+import { SCENERY_MODEL_FILES } from './scenery-models';
 import {
   CAMERA_ABOVE_METRES,
   CAMERA_FIELD_OF_VIEW_DEGREES,
@@ -63,7 +64,10 @@ import {
   FOGGED_OUT_METRES,
   FRUSTUM_SPREAD,
   lateralReachMetres,
+  loadSceneryModels,
+  prepareSceneryGeometry,
   SCATTER_INSTANCE_CAPACITY,
+  sceneryFitMetres,
   SCATTER_LATERAL_METRES,
   ScatterBelt,
   threeGameRenderer,
@@ -1402,5 +1406,306 @@ describe('the scenery belt spends a budget it never sets — #245', () => {
 
     expect(submitted(scenery)).toBe(0);
     expect([...scenery.meshes.values()].every((mesh) => !mesh.visible)).toBe(true);
+  });
+});
+
+/**
+ * The shapes the models bring — #341, and ADR 0022 D-3, D-4 and D-7.
+ *
+ * ## Why every fixture here is built out of the belt's own primitives
+ *
+ * ⚠️ **This file may not import `three`.** `three-seam.test.ts` allows exactly
+ * one importer in the whole repository, and a test that reached for a
+ * `BufferGeometry` to build a fake model with would be the second — which is
+ * the erosion that rule exists to stop, arriving through the door marked "it is
+ * only a test".
+ *
+ * So a fake model's parts are real geometries taken out of a real
+ * {@link ScatterBelt}: `SCATTER_STYLE`'s own primitives, cloned and shifted
+ * with `BufferGeometry`'s own methods. That costs nothing in fidelity for what
+ * is being asserted — {@link prepareSceneryGeometry} reads `isMesh`, a
+ * geometry and a world matrix, and a cylinder is as good a stand-in for a tree
+ * as a tree is.
+ *
+ * ## What is here, and what is deliberately left to the browser
+ *
+ * Here: the fit, the base, the centring, the merge, the fallback, and the one
+ * that matters most — **that a belt a real view builds actually draws the
+ * loaded shape**, which is this program's named defect shape one layer below a
+ * store. In `game.browser.spec.ts`: that the committed `.glb` files parse in a
+ * real engine at all, that the atlas is never requested, and that the result
+ * reaches the drawing buffer. Neither is the other's superset.
+ */
+describe('the shapes the models bring — #341', () => {
+  /** A belt's own primitive for a kind, cloned so the belt keeps its own. */
+  const primitiveOf = (belt: ScatterBelt, kind: ScatterKind) => {
+    const geometry = belt.meshes.get(kind)?.geometry;
+    if (geometry === undefined) {
+      throw new Error(`no geometry for ${kind}`);
+    }
+    return geometry;
+  };
+
+  /**
+   * A stand-in for a loaded glTF scene, holding one part per geometry given.
+   *
+   * `prepareSceneryGeometry` walks a scene with `traverse` and reads `isMesh`,
+   * `geometry` and `matrixWorld` off each node. Everything else an `Object3D`
+   * has is irrelevant to it, which is why a plain object is a fair fixture
+   * rather than a mock that agrees with the implementation by construction.
+   */
+  const sceneOf = (
+    parts: readonly { geometry: unknown; matrixWorld: unknown }[],
+  ): Parameters<typeof prepareSceneryGeometry>[0] =>
+    ({
+      updateWorldMatrix: () => undefined,
+      traverse: (visit: (node: unknown) => void) => {
+        for (const part of parts) {
+          visit({ isMesh: true, ...part });
+        }
+      },
+    }) as unknown as Parameters<typeof prepareSceneryGeometry>[0];
+
+  /** The bounding box of a prepared geometry, as six plain numbers. */
+  const boxOf = (geometry: ReturnType<typeof prepareSceneryGeometry>) => {
+    geometry.computeBoundingBox();
+    const box = geometry.boundingBox;
+    if (box === null) {
+      throw new Error('no bounding box');
+    }
+    return { min: box.min, max: box.max };
+  };
+
+  /** Everything `loadSceneryModels` needs from a loader, over one fake part. */
+  const loaderFrom = (belt: ScatterBelt, donor: ScatterKind) => {
+    const mesh = belt.meshes.get(donor);
+    if (mesh === undefined) {
+      throw new Error(`no mesh for ${donor}`);
+    }
+    return () =>
+      Promise.resolve(
+        sceneOf([{ geometry: mesh.geometry.clone(), matrixWorld: mesh.matrixWorld }]),
+      );
+  };
+
+  afterEach(async () => {
+    // ⚠️ `loadSceneryModels` writes module state, which is the whole of how a
+    // synchronous `create` gets asynchronous shapes. Left set, it would leak
+    // into whatever ran next in this file and make an assertion about
+    // primitives pass or fail for a reason nobody wrote down.
+    await loadSceneryModels(() => Promise.reject(new Error('no models in this test')));
+  });
+
+  it('measures how much room a shape may take from the solid it replaces', () => {
+    // ⚠️ The numbers are the primitives' own extents, written out so that a
+    // change to `SCATTER_STYLE` — a taller conifer, a wider building — is
+    // visible here rather than silently rescaling every model with it.
+    expect(sceneryFitMetres('tree-broadleaf')).toBeCloseTo(4.4, 6);
+    expect(sceneryFitMetres('tree-conifer')).toBeCloseTo(7, 6);
+    expect(sceneryFitMetres('shrub')).toBeCloseTo(1.6, 6);
+    expect(sceneryFitMetres('rock')).toBeCloseTo(1.8, 6);
+    expect(sceneryFitMetres('post')).toBeCloseTo(1.1, 6);
+    expect(sceneryFitMetres('building')).toBeCloseTo(9, 6);
+  });
+
+  it('scales a model to the space the solid occupied, whichever way round it is', () => {
+    // The stand-in is the post's cylinder: 0.14 m across and 1.1 m tall, so its
+    // largest extent is its height. Refitted as a building it must end up 9 m
+    // in its largest dimension and no more in any other — which is the
+    // assertion a "match the height" rule would fail on a flat boulder.
+    const belt = new ScatterBelt();
+    const prepared = prepareSceneryGeometry(
+      sceneOf([
+        {
+          geometry: primitiveOf(belt, 'post').clone(),
+          matrixWorld: belt.meshes.get('post')?.matrixWorld,
+        },
+      ]),
+      'building',
+    );
+    const { min, max } = boxOf(prepared);
+
+    expect(Math.max(max.x - min.x, max.y - min.y, max.z - min.z)).toBeCloseTo(9, 5);
+    expect(max.y - min.y).toBeCloseTo(9, 5);
+    expect(max.x - min.x).toBeLessThan(9);
+    belt.dispose();
+  });
+
+  it('sits a model on the ground and centres it over its own spot', () => {
+    // A `ScatterItem`'s `y` is the ground under it, so a model left on its own
+    // origin is half buried — which is why `SCATTER_STYLE` translates every
+    // primitive and why a model has to be given the same treatment. The
+    // stand-in is deliberately off-centre and deliberately below zero: the
+    // rock's octahedron sits from −0.4 to 1.4, and it is shifted 5 m east and
+    // 3 m north before it is handed over.
+    const belt = new ScatterBelt();
+    const prepared = prepareSceneryGeometry(
+      sceneOf([
+        {
+          geometry: primitiveOf(belt, 'rock').clone().translate(5, 0, -3),
+          matrixWorld: belt.meshes.get('rock')?.matrixWorld,
+        },
+      ]),
+      'rock',
+    );
+    const { min, max } = boxOf(prepared);
+
+    expect(min.y).toBeCloseTo(0, 5);
+    expect((min.x + max.x) / 2).toBeCloseTo(0, 5);
+    expect((min.z + max.z) / 2).toBeCloseTo(0, 5);
+    belt.dispose();
+  });
+
+  it('merges a model of several parts into one geometry, because one draw call', () => {
+    // ⚠️ #341's own words: *"One geometry per kind, instanced… Six packs of
+    // individually-drawn models would multiply draw calls by the item count and
+    // undo #245's budget entirely."* A tree in this pack is two parts, because
+    // its trunk and its canopy were different materials.
+    const belt = new ScatterBelt();
+    const trunk = primitiveOf(belt, 'post').clone();
+    const canopy = primitiveOf(belt, 'shrub').clone().translate(0, 2, 0);
+    const vertices = (geometry: { getAttribute: (name: string) => { count: number } }) =>
+      geometry.getAttribute('position').count;
+    const parted = vertices(trunk) + vertices(canopy);
+
+    const prepared = prepareSceneryGeometry(
+      sceneOf([
+        { geometry: trunk, matrixWorld: belt.meshes.get('post')?.matrixWorld },
+        { geometry: canopy, matrixWorld: belt.meshes.get('shrub')?.matrixWorld },
+      ]),
+      'tree-broadleaf',
+    );
+
+    expect(vertices(prepared)).toBe(parted);
+    // Position and normal, and nothing else: a UV kept for a texture that is
+    // never loaded is a third of a vertex buffer uploaded for nothing, and an
+    // attribute set that disagrees between parts is what refuses the merge.
+    expect(Object.keys(prepared.attributes).sort()).toEqual(['normal', 'position']);
+    belt.dispose();
+  });
+
+  it('refuses a scene with no mesh in it rather than drawing nothing', () => {
+    expect(() => prepareSceneryGeometry(sceneOf([]), 'rock')).toThrow(/holds no mesh/);
+  });
+
+  it('refuses a model with no size rather than dividing by its extent', () => {
+    // A part collapsed onto its own origin has a largest extent of zero, and
+    // the fit is a division by it: without the guard every vertex comes back
+    // `NaN`, three quietly draws nothing, and the kind looks like one whose
+    // file was missing. A throw puts it back on the fallback path instead.
+    const belt = new ScatterBelt();
+    const flattened = primitiveOf(belt, 'rock').clone().scale(0, 0, 0);
+
+    expect(() =>
+      prepareSceneryGeometry(
+        sceneOf([{ geometry: flattened, matrixWorld: belt.meshes.get('rock')?.matrixWorld }]),
+        'rock',
+      ),
+    ).toThrow(/no extent/);
+    belt.dispose();
+  });
+
+  it('walks past a scene node that is not a mesh, and computes a missing normal', () => {
+    // ⚠️ Both halves are things a real file does and this file's stand-ins do
+    // not. A glTF scene's root is a group, and the pack's own trees hang their
+    // meshes under one — a walk that assumed every node was a mesh would read
+    // `undefined.geometry`. And a primitive set that ships no normals is legal
+    // glTF; a model with none would be drawn black by a lit material.
+    const belt = new ScatterBelt();
+    const bare = primitiveOf(belt, 'shrub').clone();
+    bare.deleteAttribute('normal');
+
+    const prepared = prepareSceneryGeometry(
+      {
+        updateWorldMatrix: () => undefined,
+        traverse: (visit: (node: unknown) => void) => {
+          visit({ isMesh: false, name: 'a group' });
+          visit({
+            isMesh: true,
+            geometry: bare,
+            matrixWorld: belt.meshes.get('shrub')?.matrixWorld,
+          });
+        },
+      } as unknown as Parameters<typeof prepareSceneryGeometry>[0],
+      'shrub',
+    );
+
+    expect(prepared.getAttribute('normal').count).toBe(prepared.getAttribute('position').count);
+    belt.dispose();
+  });
+
+  it('draws the loaded shape through the belt a view actually builds', () => {
+    // ⚠️ **The assertion this whole change turns on.** `loadSceneryModels`
+    // writes module state and `new ScatterBelt()` reads it, and a write that
+    // reports success where the read cannot see it is this program's named
+    // defect shape. So the read is the one the shipped client makes: no
+    // argument, no injected map, the same constructor `ThreeGameView` calls.
+    const donor = new ScatterBelt();
+    const before = donor.meshes.get('rock')?.geometry.getAttribute('position').count ?? 0;
+    const modelVertices =
+      donor.meshes.get('tree-conifer')?.geometry.getAttribute('position').count ?? 0;
+
+    return loadSceneryModels(loaderFrom(donor, 'tree-conifer')).then(() => {
+      const belt = new ScatterBelt();
+
+      // Every kind with a model in the table now draws the loaded shape…
+      for (const kind of Object.keys(SCENERY_MODEL_FILES) as ScatterKind[]) {
+        expect(belt.meshes.get(kind)?.geometry.getAttribute('position').count).toBe(modelVertices);
+      }
+      // …and `post`, which ADR 0022 D-3 leaves alone, still draws its cylinder.
+      expect(belt.meshes.get('post')?.geometry.getAttribute('position').count).toBe(
+        donor.meshes.get('post')?.geometry.getAttribute('position').count,
+      );
+      expect(modelVertices).not.toBe(before);
+      belt.dispose();
+      donor.dispose();
+    });
+  });
+
+  it('keeps the primitive for a kind whose model could not be read', () => {
+    // The risky half of this change, asserted rather than assumed: a rider
+    // mid-ride loses a tree's shape, not the ride. `game.browser.spec.ts` is
+    // what stops that graceful fallback becoming the shipped world in silence.
+    const donor = new ScatterBelt();
+    const counts = new Map(
+      SCATTER_KINDS.map((kind) => [
+        kind,
+        donor.meshes.get(kind)?.geometry.getAttribute('position').count,
+      ]),
+    );
+
+    return loadSceneryModels(() => Promise.reject(new Error('404'))).then(() => {
+      const belt = new ScatterBelt();
+
+      for (const kind of SCATTER_KINDS) {
+        expect(belt.meshes.get(kind)?.geometry.getAttribute('position').count).toBe(
+          counts.get(kind),
+        );
+      }
+      belt.dispose();
+      donor.dispose();
+    });
+  });
+
+  it('gives each belt its own copy, so a teardown does not empty the next ride', () => {
+    // ⚠️ A leak in the other direction, and the one a `dispose` written the
+    // obvious way produces: the loaded geometries are shared by every belt this
+    // tab builds, and `ScatterBelt.dispose` releases every geometry it is
+    // wearing. A belt wearing the shared model would take the model with it.
+    const donor = new ScatterBelt();
+
+    return loadSceneryModels(loaderFrom(donor, 'shrub')).then(() => {
+      const first = new ScatterBelt();
+      const worn = first.meshes.get('rock')?.geometry;
+      first.dispose();
+      const second = new ScatterBelt();
+
+      expect(second.meshes.get('rock')?.geometry).not.toBe(worn);
+      expect(second.meshes.get('rock')?.geometry.getAttribute('position').count).toBe(
+        worn?.getAttribute('position').count,
+      );
+      second.dispose();
+      donor.dispose();
+    });
   });
 });

@@ -2,7 +2,8 @@
 
 **Status:** procedure written, **not yet run**. Every result table below is empty on purpose.
 **Written:** 2026-09-09, against `main` at the merge of #224, with
-[#226](https://github.com/openzigs/onyourleft/pull/226) open.
+[#226](https://github.com/openzigs/onyourleft/pull/226) open. **Part H added 2026-09-17** by
+[#341](https://github.com/openzigs/onyourleft/issues/341), which owes the measurement in it.
 **Discharges, when run:** [#87](https://github.com/openzigs/onyourleft/issues/87) criteria 2, 3, 5
 and 6 and its two-OEM line; the Android half of
 [#85](https://github.com/openzigs/onyourleft/issues/85); and
@@ -434,6 +435,91 @@ device.
 dead promise and a "Check again" that reaches the plugin and is ignored look identical to a rider —
 both end on the same message. Only the callback id in logcat tells them apart, which is why the
 step asks for it rather than for a verdict.
+
+---
+
+## Part H — what the scenery models cost the GPU ([#341](https://github.com/openzigs/onyourleft/issues/341))
+
+**#341 replaced five generated solids with models from the CC0 pack
+[ADR 0022](../adr/0022-game-scenery-model-pack.md) names, and this is the measurement it owes and did not
+make.** Nobody in the loop that wrote it has an Android device, so the tables below are empty in the
+same way every other table in this file is: the procedure is written, the result is not claimed.
+
+⚠️ **Read this before treating a green figure as good news**, because it is the trap Part F already
+records in its own words: *"A low GPU time is not good news here. 6 ms against a 16.7 ms budget is
+what 'the renderer is waiting on a simulation with nothing new to say' looks like."* Six
+milliseconds was measured over a scene of six instanced **primitives**. The GPU column is the one
+models are most likely to move, and it is the one that has stayed flat through every change so far.
+
+### The baseline, and where it actually lives
+
+⚠️ **It is not in this repository.** ADR 0022 checked this rather than assuming it: the only real
+device measurement of the game is in a **comment on
+[#323](https://github.com/openzigs/onyourleft/issues/323)**, dated 2026-09-16, and Part F's own
+result table — the repository's record — is still empty. So #341's *"re-measured against #246's
+committed baseline"* describes a baseline that is not committed, and #302's *"GPU 7 ms median"* is a
+figure that reads **6**.
+
+| | Before #341, Pixel Tablet, 2026-09-16 |
+|---|--:|
+| Frame time 50th | 13 ms |
+| GPU time 50th | 6 ms |
+| Janky frames (legacy, > 16 ms) | 0.00 % |
+
+### What is known without a device, so that the measurement starts from something
+
+Measured in the browser gate (`game.browser.spec.ts` §"the scenery is models, not solids"), on a
+desktop software rasteriser, 2026-09-17 — **vertex indices submitted for one instance of each
+kind**, as a solid and then as a model:
+
+| Kind | As a solid | As a model | Model |
+|---|--:|--:|---|
+| `tree-broadleaf` | 108 | 342 | `tree_default.glb` |
+| `tree-conifer` | 36 | 234 | `tree_pineTallA.glb` |
+| `shrub` | 60 | 96 | `plant_bush.glb` |
+| `rock` | 24 | 240 | `stone_largeA.glb` |
+| `building` | 36 | **2 310** | `building-type-h.glb` |
+| `post` | 60 | 60 | — (ADR 0022 D-3 leaves it alone) |
+
+⚠️ **The building is the one to watch, and the worst case is arithmetic rather than a guess.**
+`SCATTER_MAX_ITEMS` is 240 and a belt reserves that for **every** kind, so a stretch of route that
+is all buildings submits 240 × 770 ≈ **185 000 triangles** a frame where it used to submit 2 880.
+The floor rung of `QUALITY_LADDER` drops to 60 items, which is a quarter of that. Nothing here says
+whether either is affordable on the device floor; that is what H2 is for.
+
+| Step | What to do | What to record |
+|---|---|---|
+| H1 | Ride the same route Part F was measured on, game visible, pedalling steadily | — |
+| H2 | Reset the counters, ride a 12-second window, read them back | every row of the table below |
+| H3 | Ride a stretch with buildings beside the road, if the route has one | the same rows again |
+| H4 | ⚠️ Look at it | Do the trees read as trees? One sentence in your own words |
+| H5 | Repeat H2 once the phone is warm — 20 minutes in | whether the rung changed, and the rows again |
+
+```bash
+adb shell dumpsys gfxinfo dev.openzigs.onyourleft reset
+# ... ride for 12 s with the game visible and the rider pedalling ...
+adb shell dumpsys gfxinfo dev.openzigs.onyourleft | grep -iE "Total frames|Janky|percentile|Missed Vsync|GPU"
+```
+
+### H results
+
+| | H2 (ordinary route) | H3 (buildings) | H5 (warm) |
+|---|---|---|---|
+| Total frames rendered | | | |
+| Janky frames (modern) | | | |
+| **Janky frames (legacy, > 16 ms)** | | | |
+| Frame time 50th / 90th / 95th / 99th | | | |
+| GPU time 50th / 90th | | | |
+| Missed Vsync | | | |
+
+**Do the trees read as trees (H4)?** ______________
+
+**Phone (OEM, model, Android):** ______________  **Build:** ______________
+
+⚠️ **What a bad result means is already decided, so nobody has to decide it while tired.** ADR 0022
+§"What would make this ADR wrong" says: *"If #341's re-measurement moves the GPU column materially
+at the floor, the answer is D-3 in reverse: fewer kinds get models, starting with the ones with
+least silhouette."* On the table above that is `shrub` first and `building` last.
 
 ---
 

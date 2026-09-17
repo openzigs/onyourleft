@@ -424,7 +424,16 @@ async function loadMapPort(): Promise<MapPort> {
  * it. `pnpm run build` shows it as its own chunk.
  */
 async function loadGameRenderer(): Promise<GameRenderer> {
-  return (await import('./game/three-renderer')).threeGameRenderer;
+  const renderer = await import('./game/three-renderer');
+  // ⚠️ **Awaited here, and this is the only place it can be.** #341's scenery
+  // models are files, and `GameRenderer.create` is synchronous because
+  // `port.ts` says it is — so the shapes have to be in hand before the first
+  // view is built, and this is the one seam between "the renderer module
+  // arrived" and "a view exists". A `create` that raced the load would draw a
+  // world of primitives and report success, which is exactly the shape
+  // `three-renderer.ts` §`sceneryGeometries` warns about.
+  await renderer.loadSceneryModels();
+  return renderer.threeGameRenderer;
 }
 
 /**

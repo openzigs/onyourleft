@@ -235,6 +235,41 @@ read = "2026-09-16"
 sha256 = "7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172"
 
 [[asset]]
+path = "apps/web/src/game/models/building-type-h.glb"
+source = "Kenney *City Kit (Suburban)*, CC0-1.0 — https://kenney.nl/assets/city-kit-suburban, downloaded as kenney_city-kit-suburban_20.zip and extracted verbatim from `Models/GLB format/`, unconverted (ADR 0022 D-1)"
+licence = "CC0-1.0"
+read = "2026-09-17"
+sha256 = "b8b8eb7a50f85fa20b4862723e133157f553d69a0daad39b850ddbd2099ebb84"
+
+[[asset]]
+path = "apps/web/src/game/models/plant_bush.glb"
+source = "Kenney *Nature Kit*, CC0-1.0 — https://kenney.nl/assets/nature-kit, downloaded as kenney_nature-kit.zip and extracted verbatim from `Models/GLTF format/`, unconverted (ADR 0022 D-1)"
+licence = "CC0-1.0"
+read = "2026-09-17"
+sha256 = "ae7b1beb39e242b13f5f29e3ec23ef21034b814f82297b8aa00a9bf4e1b09590"
+
+[[asset]]
+path = "apps/web/src/game/models/stone_largeA.glb"
+source = "Kenney *Nature Kit*, CC0-1.0 — https://kenney.nl/assets/nature-kit, downloaded as kenney_nature-kit.zip and extracted verbatim from `Models/GLTF format/`, unconverted (ADR 0022 D-1)"
+licence = "CC0-1.0"
+read = "2026-09-17"
+sha256 = "fe486a13775e833b1aca99413a89e013f300841de80f42ecd44ceaf43720f17b"
+
+[[asset]]
+path = "apps/web/src/game/models/tree_default.glb"
+source = "Kenney *Nature Kit*, CC0-1.0 — https://kenney.nl/assets/nature-kit, downloaded as kenney_nature-kit.zip and extracted verbatim from `Models/GLTF format/`, unconverted (ADR 0022 D-1)"
+licence = "CC0-1.0"
+read = "2026-09-17"
+sha256 = "562d29638c902de3c7bee465d3a53bb77117efbc392ae04ed894faf6b5dc691d"
+
+[[asset]]
+path = "apps/web/src/game/models/tree_pineTallA.glb"
+source = "Kenney *Nature Kit*, CC0-1.0 — https://kenney.nl/assets/nature-kit, downloaded as kenney_nature-kit.zip and extracted verbatim from `Models/GLTF format/`, unconverted (ADR 0022 D-1)"
+licence = "CC0-1.0"
+read = "2026-09-17"
+sha256 = "e0a56eb196d8a64ba86c7304d607136e17e6f9ad748dffcf86bd53b18b91b196"
+
+[[asset]]
 path = "packages/fit/fixtures/corpus/antimeridian-crossing.fit"
 source = "This repository, #107 — written by `pnpm --filter @onyourleft/fit run fixtures:generate` from packages/fit/tools/fixture-corpus, deterministically"
 licence = "Apache-2.0"

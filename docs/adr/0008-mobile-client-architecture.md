@@ -518,3 +518,25 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   rung themselves, neither of which has a frame time against it on any device. **Also corrected in
   [#246](https://github.com/openzigs/onyourleft/issues/246)**: `apps/web/src/game/terrain.ts`'s file
   comment made D-5's claim in its own words and now points here instead.
+- **2026-09-17** — **D-5's *"there is no world to design"* has become false of the scenery, and
+  stays true of the terrain.** D-5 argues that *"terrain generated from the route means there is no
+  world to design"*, and on the day [#341](https://github.com/openzigs/onyourleft/issues/341) merged
+  five of `scatter.ts`'s six kinds stopped being generated solids and became models from a CC0 pack
+  — [ADR 0022](0022-game-scenery-model-pack.md), taken by the repository owner on 2026-09-16 after
+  looking at the world on a tablet. [ADR 0022](0022-game-scenery-model-pack.md) itself says this
+  entry was owed and deliberately not written in advance, because an amendment recording that a
+  statement *has become* false is not written before it becomes false. ⚠️ **What is narrowed is one
+  word and no more.** The **terrain** half is untouched: the road corridor is still built from the
+  athlete's own `RouteProfile` and from nothing else, and so is every scenery **position**, density
+  and altitude band — ADR 0022 D-4 lists what stays generated and
+  `apps/web/src/game/arrangement-unchanged.test.ts` pins a whole route's arrangement to a digest
+  taken before the swap, so a placement that moved is a red test rather than a matter of opinion.
+  The route decides the world; a pack decides the shapes in it. ⚠️ **What this costs is not
+  nothing**, and D-5's own framing is where it lands: the epic that built this world was chosen
+  partly because it was *"structurally free of the licence question"*, and that is over — every
+  future asset needs a source, a licence somebody read, a date and a SHA-256, for ever.
+  `ASSETS.toml` and `scripts/check-repo-rules.sh` §`ASSET001`–`ASSET005` are what make that cost
+  mechanical rather than a matter of somebody remembering. ⚠️ **And the D-2 waiver above is
+  unchanged and is now load-bearing for a third visual change in a row**: nothing in #341 has been
+  measured on a device, the geometry a building submits went from 36 vertex indices to 2 310, and
+  `docs/validation/0002-android-shell-and-game.md` Part H is where that measurement is owed.
