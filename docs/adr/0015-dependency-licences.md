@@ -222,3 +222,16 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   rule on: a licence nobody has a dependency for is a licence nobody has read.
   **Every decision above still stands as written**; ADR 0016 extends D-2's list and changes nothing
   else, which is why it is an extension rather than a superseding ADR.
+- **2026-09-18** — **The asset gate's tables have stopped mirroring D-2's, deliberately.**
+  `scripts/check-repo-rules.sh`'s `ASSET_LICENCES_*` sets were written (#339) as this table applied
+  to a committed file, and said so where they are defined.
+  [ADR 0023](0023-cc-by-assets-and-attribution.md) admits **`CC-BY-4.0` for an asset** under `apps/`
+  — as a third class that additionally *owes* something, enforced by the new `ASSET006` — and
+  **deliberately does not add it to D-2's set or to `POLICY` in
+  `scripts/check-dependency-licences.mjs`**. ADR 0023 D-5 gives the reasoning: nothing in the tree
+  has a dependency under CC-BY, Creative Commons recommends against its licences for software, and
+  the obligation's answer is an in-app credits screen generated from `ASSETS.toml`, which a
+  transitive npm dependency has no row in. So `CC-BY-4.0` still **fails closed** under `DEP001`,
+  everywhere, and `check-dependency-licences.test.sh` now carries the case that says so.
+  **Every decision above still stands as written**; what has changed is that "the asset sets mirror
+  D-2" is no longer true, and a reader who remembers it should read ADR 0023 D-5.

@@ -1896,13 +1896,18 @@ append_asset_entry apps/web/public/models/rider.glb GPL-3.0-only \
 assert_violation "a licence on neither list is rejected, because the gate fails closed" ASSET004 \
   "apps/web/public/models/rider.glb: licence GPL-3.0-only is not permitted"
 
+# ⚠️ This case named `CC-BY-4.0` until #357, and a reviewer who remembers that is
+# reading the old file: ADR 0023 ruled on that identifier, so it is no longer an
+# example of a licence nobody has ruled on. `CC-BY-SA-4.0` is — one that is two
+# letters from an admitted one and carries a share-alike obligation nobody here
+# has read, which is exactly the shape the fail-closed branch exists for.
 new_fixture
 write_good_app web
 write_binary_asset apps/web/public/models/rider.glb
-append_asset_entry apps/web/public/models/rider.glb CC-BY-4.0 \
+append_asset_entry apps/web/public/models/rider.glb CC-BY-SA-4.0 \
   "$(fixture_digest apps/web/public/models/rider.glb)"
 assert_violation "a licence nobody has ruled on is rejected rather than assumed benign" ASSET004 \
-  "licence CC-BY-4.0 is not permitted"
+  "licence CC-BY-SA-4.0 is not permitted"
 
 # ⚠️ The path half of the rule. ADR 0015 D-2 admits CC0-1.0 in a DISTRIBUTED
 # closure under `apps/` only, because an Apache-2.0 leaf package exists to be
@@ -1933,6 +1938,99 @@ printf '\n[[asset]]\npath = "apps/web/public/models/rider.glb"\nsource = "Some P
   "$(fixture_digest apps/web/public/models/rider.glb)" >> "${fixture_root}/ASSETS.toml"
 assert_violation "an entry with no licence at all is rejected" ASSET004 \
   "apps/web/public/models/rider.glb: no licence recorded"
+
+# --- ASSET006: a licence that requires attribution, and the entry that owes it -
+#
+# #357 and [ADR 0023](../docs/adr/0023-cc-by-assets-and-attribution.md). CC-BY is
+# free and is admitted under `apps/` — and unlike every other identifier on
+# either list it carries a CONTINUING obligation: CC BY 4.0 §3(a)(1) wants the
+# creator's name, a link to the material and, under §3(a)(1)(B), an indication
+# of whether it was modified. So the manifest carries those three, and #358
+# generates the credits screen from them rather than from somebody's memory.
+#
+# ⚠️ The pairing below is what makes this a rule rather than a widened list. A
+# CC-BY entry with the attribution passes; the same entry with any one of the
+# three keys removed does not. Without the red half, adding `CC-BY-4.0` to a
+# variable would satisfy "a CC-BY asset now passes" and leave the obligation
+# entirely unchecked — which is the trade #357 says must not be made silently.
+
+# append_attributed_entry <path> <licence> <sha256> [omit]
+#
+# The five keys every entry needs, plus the three ADR 0023 D-3 requires of an
+# attribution licence. <omit> names one of the three to leave out.
+append_attributed_entry() {
+  local path="$1" licence="$2" sha="$3" omit="${4:-}"
+  {
+    printf '\n[[asset]]\npath = "%s"\n' "${path}"
+    printf 'source = "Some Pack, https://example.invalid/pack"\n'
+    printf 'licence = "%s"\nread = "2026-09-18"\nsha256 = "%s"\n' "${licence}" "${sha}"
+    [ "${omit}" = "creator" ] || printf 'creator = "A Person"\n'
+    [ "${omit}" = "url" ] || printf 'url = "https://example.invalid/pack/rider"\n'
+    [ "${omit}" = "modified" ] || printf 'modified = "no"\n'
+  } >> "${fixture_root}/ASSETS.toml"
+}
+
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+append_attributed_entry apps/web/public/models/rider.glb CC-BY-4.0 \
+  "$(fixture_digest apps/web/public/models/rider.glb)"
+assert_clean "a CC-BY asset under apps/ passes when it records the attribution it owes"
+
+for omitted in creator url modified; do
+  new_fixture
+  write_good_app web
+  write_binary_asset apps/web/public/models/rider.glb
+  append_attributed_entry apps/web/public/models/rider.glb CC-BY-4.0 \
+    "$(fixture_digest apps/web/public/models/rider.glb)" "${omitted}"
+  assert_violation "a CC-BY asset recording no ${omitted} is rejected" ASSET006 \
+    "records no ${omitted}"
+done
+
+# ⚠️ Two letters, and a world of obligation. `CC-BY-NC-4.0` is non-OSI — CLAUDE.md
+# §3 names it beside BUSL and SSPL as failing everywhere — and it is the one
+# identifier most likely to be confused for the one this ADR admits. The
+# attribution keys are present here, so this case also says that recording the
+# attribution does not rescue a licence the gate does not admit at all.
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+append_attributed_entry apps/web/public/models/rider.glb CC-BY-NC-4.0 \
+  "$(fixture_digest apps/web/public/models/rider.glb)"
+assert_violation "CC-BY-NC is still rejected, attribution recorded or not" ASSET004 \
+  "licence CC-BY-NC-4.0 is not permitted"
+
+# The path half, exactly as for the weak set: an Apache-2.0 leaf package exists
+# to be dropped into somebody else's project, and an attribution obligation is
+# the last thing that should travel inside one silently.
+new_fixture
+write_good_package domain
+write_binary_asset packages/domain/fixtures/rider.glb
+append_attributed_entry packages/domain/fixtures/rider.glb CC-BY-4.0 \
+  "$(fixture_digest packages/domain/fixtures/rider.glb)"
+assert_violation "a CC-BY asset under packages/ is rejected however complete its attribution" ASSET004 \
+  "packages/domain/fixtures/rider.glb: licence CC-BY-4.0 is not permitted at this path"
+
+# The three keys are ACCEPTED on any entry, not only on one that owes them.
+# Without this case, "creator is a known key" would be satisfied by a parser
+# that only tolerated it beside a CC-BY licence, and a contributor recording
+# more than the licence demands would be met with an ASSET005 for their trouble.
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+append_attributed_entry apps/web/public/models/rider.glb CC0-1.0 \
+  "$(fixture_digest apps/web/public/models/rider.glb)"
+assert_clean "the attribution keys are accepted on an entry whose licence does not require them"
+
+# ...and the complement, which is the one that stops ASSET006 becoming a rule
+# about every asset in the tree. A CC0 entry owes no attribution and records
+# none, and that is a clean run rather than three findings.
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+append_asset_entry apps/web/public/models/rider.glb CC0-1.0 \
+  "$(fixture_digest apps/web/public/models/rider.glb)"
+assert_clean "an asset under a licence that requires no attribution owes none"
 
 # --- ASSET005: the manifest itself ------------------------------------------
 #
@@ -2076,6 +2174,35 @@ assert_helper_passes "assert_violation_and_silence accepts a rule that fired wit
   assert_violation_and_silence "(expected to pass) ASSET003 was silent" \
   ASSET004 "licence GPL-3.0-only is not permitted" ASSET003
 cleanup_fixture
+
+# ⚠️ The record separator, which #357 moved from an exemption list to a
+# positive one. `path`, `licence` and `sha256` become fields of a "|"-separated
+# record, so a "|" in one would shift every field after it left -- the exact
+# defect the separator comment in the checker records having already been caused
+# once by a tab. That restriction is asserted here because nothing asserted it
+# before, and it is the invariant the key change had to preserve.
+new_fixture
+write_good_app web
+printf '\n[[asset]]\npath = "apps/web/a|b.glb"\nsource = "Some Pack"\nlicence = "MIT"\nread = "2026-09-18"\nsha256 = "00"\n' \
+  >> "${fixture_root}/ASSETS.toml"
+assert_violation "a separator character in a field-bearing value is rejected" ASSET005 \
+  'key "path" has a "|" or a tab in its value'
+
+# ...and the complement, which is what the positive list buys: a key whose value
+# never becomes a field may contain anything. Without this case, "the three
+# emitted keys are restricted" would be equally satisfied by restricting all of
+# them, and a creator whose name carries a pipe would be an unfixable red.
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/models/rider.glb
+{
+  printf '\n[[asset]]\npath = "apps/web/public/models/rider.glb"\n'
+  printf 'source = "Some Pack | second edition"\nlicence = "CC-BY-4.0"\nread = "2026-09-18"\n'
+  printf 'sha256 = "%s"\n' "$(fixture_digest apps/web/public/models/rider.glb)"
+  printf 'creator = "A Person | A Studio"\nurl = "https://example.invalid/a?b=1|2"\n'
+  printf 'modified = "merged to one geometry | rescaled"\n'
+} >> "${fixture_root}/ASSETS.toml"
+assert_clean "a value that never becomes a field may contain the separator"
 
 # The traversal case. An entry has to name one file inside this repository, and
 # an absolute or `..` path names something outside it -- which would also hand
