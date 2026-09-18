@@ -14,18 +14,39 @@
 # gate would have been green about it.
 #
 # This file is the record those gates cannot make. One entry per committed
-# binary; five keys, all required:
+# binary; five keys always, and three more when the licence asks for something
+# back:
 #
 #   path     repository-relative, exact — no globs, the style `.spdx-exempt`
 #            uses, and for the same reason
 #   source   which pack, which generator, which URL. CC0 requires no
 #            attribution; that is not a reason to record nothing
 #   licence  checked against where the file lands — permissive anywhere, weak
-#            (CC0-1.0 and friends) under `apps/` only, mirroring ADR 0015 D-2's
+#            (CC0-1.0 and friends) and attribution-requiring (CC-BY-4.0, ADR
+#            0023) under `apps/` only, mirroring ADR 0015 D-2's
 #            distributed-closure table. Anything else fails closed
 #   read     the date the source and its terms were read, per this repository's
 #            habit of dating every figure that drifts
 #   sha256   of the committed bytes
+#
+# and, required only when `licence` is one that requires attribution — today
+# exactly `CC-BY-4.0` — and accepted on any entry (ASSET006, #357):
+#
+#   creator  the name to credit, as the source gives it
+#   url      a link to the material, which CC BY 4.0 §3(a)(1)(A) asks for
+#            alongside the creator
+#   modified whether this repository changed it, and how. §3(a)(1)(B) requires
+#            indicating that changes were made; merging a model of several
+#            parts into one geometry is such a change, and so is rescaling one.
+#            `"no"` where nothing was changed — the key is required either way,
+#            because an absent answer and "nothing to declare" are the two
+#            things this file exists to tell apart
+#
+# ⚠️ **CC-BY is a continuing obligation and nothing else here is.** Every
+# other licence on either list is discharged the moment the row exists. This one
+# is discharged by the SHIPPED APP crediting the work, every time it ships, for
+# as long as it ships — so these three keys are the data the credits screen is
+# generated from (#358), not decoration. ADR 0023 §Consequences states the trade.
 #
 # ⚠️ An unrecognised key is REFUSED rather than ignored (ASSET005), the choice
 # ADR 0017 D-4 made for the workout file and for the same reason: a key nobody

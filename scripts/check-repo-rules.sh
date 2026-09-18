@@ -39,6 +39,8 @@
 #   ASSET003 every named file reproduces its recorded SHA-256 (#339)
 #   ASSET004 every entry's licence is permitted where the file lands (#339)
 #   ASSET005 ASSETS.toml itself is present and parses (#339)
+#   ASSET006 an entry under a licence that REQUIRES attribution records it
+#           -- creator, url and whether it was modified (#357, ADR 0023)
 #
 # Usage: scripts/check-repo-rules.sh [ROOT]   (ROOT defaults to the repo root)
 # Exit:  0 clean, 1 if any rule is violated.
@@ -1104,11 +1106,44 @@ ASSET_SNIFF_BYTES=8000
 # AGPL are deliberately absent from BOTH sets, including under `apps/`: §3
 # permits a GPL DEPENDENCY there, and whether a GPL-licensed creative asset is
 # the same question is an owner's decision rather than a side effect of writing
-# a checker. `CC-BY-4.0` is absent for the same reason -- nothing in the tree
-# needs it, and a licence nobody has an asset for is a licence nobody has read
-# (the posture ADR 0016 took towards `Zlib`).
+# a checker.
+#
+# ⚠️ **`CC-BY-4.0` was absent for the same reason and no longer is**, and a
+# reader who remembers this paragraph citing it as the example of an unruled
+# licence is reading the old file. Its condition -- "nothing in the tree needs
+# it" -- arrived with #302's better-looking scenery, and ADR 0023 ruled on it.
+# It is `ASSET_LICENCES_ATTRIBUTED` below rather than a seventh name in the weak
+# set, because it is the first identifier here that asks for something back.
+# `Zlib` and `CC-BY-SA-4.0` are still absent, on the posture ADR 0016 took
+# towards `Zlib`: a licence nobody has an asset for is a licence nobody has read.
 ASSET_LICENCES_PERMISSIVE="Apache-2.0 MIT BSD-2-Clause BSD-3-Clause ISC"
 ASSET_LICENCES_WEAK="CC0-1.0 MPL-2.0 BlueOak-1.0.0 MIT-0 0BSD Unlicense"
+
+# ADR 0023 D-1 and D-3, #357. Admitted in exactly the place the weak set is --
+# under `apps/` only -- and additionally OWING something: CC BY 4.0 §3(a)(1)
+# requires the creator's name and a link to the material whenever the work is
+# shared, and §3(a)(1)(B) requires indicating whether it was modified.
+#
+# ⚠️ Every other identifier above is discharged by the manifest row simply
+# existing. This one is not -- it is a CONTINUING obligation, and the manifest is
+# where the data that discharges it lives, because #358 generates the in-app
+# credits from these keys rather than from somebody maintaining a second list.
+# So an entry under one of these licences that records no attribution is
+# `ASSET006`, and ADR 0023 §Consequences says why widening a list alone would
+# have been the vacuous half of this change.
+#
+# ⚠️ `CC-BY-NC-4.0` is deliberately NOT here and is two letters away. It is
+# non-OSI -- CLAUDE.md §3 names it beside BUSL and SSPL as failing everywhere --
+# and every set here is matched by string EQUALITY rather than by prefix, so it
+# falls through to the branch above. ADR 0023 D-4 says so in terms, and
+# `check-repo-rules.test.sh` asserts it. `CC-BY-3.0` and `CC-BY-SA-4.0` are
+# absent too: a different version and a different suffix are different terms.
+#
+# ⚠️ The three keys such an entry must carry -- `creator`, `url` and
+# `modified` -- are named in `asset_manifest_records` below and NOT in a variable
+# here. A second list would be a second place to keep them, and the parser is the
+# only thing that can read a key at all; this half only knows which licences care.
+ASSET_LICENCES_ATTRIBUTED="CC-BY-4.0"
 
 # `shasum` is what CLAUDE.md §4a documents and what macOS ships; `sha256sum` is
 # what the GNU coreutils on the CI runner ship. The same pair, and the same
@@ -1163,11 +1198,29 @@ asset_is_binary() {
 #
 # Emits tab-separated records on stdout:
 #   E <line> <message>                     a structural problem  (ASSET005)
-#   A <line> <path> <licence> <sha256>     one entry, licence and digest
-#                                          possibly empty for ASSET004/ASSET003
+#   A <line> <path> <licence> <sha256> <absent>
+#                                          one entry; licence and digest
+#                                          possibly empty for ASSET004/ASSET003,
+#                                          and <absent> the attribution keys it
+#                                          does not carry, for ASSET006
 asset_manifest_records() {
   awk -v SEP='|' '
-    function reset() { k_path = ""; k_source = ""; k_licence = ""; k_read = ""; k_sha = "" }
+    function reset() {
+      k_path = ""; k_source = ""; k_licence = ""; k_read = ""; k_sha = ""
+      k_creator = ""; k_url = ""; k_modified = ""
+    }
+
+    # Which of the attribution keys this entry does NOT carry, as a comma-
+    # separated list. Computed for EVERY entry and judged by the caller, because
+    # awk here knows the keys and the shell knows the licence sets -- putting
+    # the licence question in both places is how two lists drift apart.
+    function absentAttribution(  missing) {
+      missing = ""
+      if (k_creator == "") missing = "creator"
+      if (k_url == "") missing = missing (missing == "" ? "" : ", ") "url"
+      if (k_modified == "") missing = missing (missing == "" ? "" : ", ") "modified"
+      return missing
+    }
 
     function flush() {
       if (!inentry) return
@@ -1189,7 +1242,7 @@ asset_manifest_records() {
         print "E" SEP startline SEP "the entry for " k_path " records no read date in the form YYYY-MM-DD"
         reset(); return
       }
-      print "A" SEP startline SEP k_path SEP k_licence SEP k_sha
+      print "A" SEP startline SEP k_path SEP k_licence SEP k_sha SEP absentAttribution()
       reset()
     }
 
@@ -1219,10 +1272,14 @@ asset_manifest_records() {
         next
       }
       if (v == "") { print "E" SEP NR SEP "key \"" k "\" has an empty value"; next }
-      # The three keys below are emitted as fields of a "|"-separated record,
-      # so neither character may appear in one. `source` is free prose and is
-      # never emitted, so it is not restricted.
-      if (k != "source" && (index(v, "|") > 0 || index(v, "\t") > 0)) {
+      # The three keys named in the pattern below are emitted as fields of a
+      # "|"-separated record, so neither character may appear in one. Every
+      # other key is free
+      # prose that is never emitted -- `source`, and since #357 `creator`, `url`
+      # and `modified` -- so the restriction names what it restricts rather than
+      # exempting what it does not, which is what stops a key added later
+      # inheriting a rule that has nothing to do with it.
+      if (k ~ /^(path|licence|sha256)$/ && (index(v, "|") > 0 || index(v, "\t") > 0)) {
         print "E" SEP NR SEP "key \"" k "\" has a \"|\" or a tab in its value"
         next
       }
@@ -1246,6 +1303,23 @@ asset_manifest_records() {
         if (k_sha != "") { print "E" SEP NR SEP "duplicate key \"sha256\" in one entry"; next }
         k_sha = v; next
       }
+      # The three keys ADR 0023 D-3 names. Accepted on ANY entry -- recording
+      # more than a licence demands is never the failure -- and REQUIRED on one
+      # whose licence is in ASSET_LICENCES_ATTRIBUTED, which only the shell
+      # knows. No apostrophe anywhere in this awk program: it is a single-quoted
+      # shell string, so one would end it.
+      if (k == "creator") {
+        if (k_creator != "") { print "E" SEP NR SEP "duplicate key \"creator\" in one entry"; next }
+        k_creator = v; next
+      }
+      if (k == "url") {
+        if (k_url != "") { print "E" SEP NR SEP "duplicate key \"url\" in one entry"; next }
+        k_url = v; next
+      }
+      if (k == "modified") {
+        if (k_modified != "") { print "E" SEP NR SEP "duplicate key \"modified\" in one entry"; next }
+        k_modified = v; next
+      }
       print "E" SEP NR SEP "unknown key \"" k "\"; an unrecognised key is refused rather than ignored, so that a claim about an asset cannot be one nothing reads (ADR 0017 D-4)"
     }
 
@@ -1264,14 +1338,26 @@ asset_licence_permitted() {
   case "${path}" in
     packages/*) return 1 ;;
   esac
-  for candidate in ${ASSET_LICENCES_WEAK}; do
+  for candidate in ${ASSET_LICENCES_WEAK} ${ASSET_LICENCES_ATTRIBUTED}; do
+    [ "${candidate}" = "${licence}" ] && return 0
+  done
+  return 1
+}
+
+# Does this licence oblige the entry to carry the attribution keys? Asked
+# WITHOUT reference to the path, deliberately: a CC-BY file under `packages/`
+# is refused by the rule above, and answering "so it owes no attribution"
+# would be the wrong reason for the right outcome.
+asset_attribution_required() {
+  local licence="$1" candidate
+  for candidate in ${ASSET_LICENCES_ATTRIBUTED}; do
     [ "${candidate}" = "${licence}" ] && return 0
   done
   return 1
 }
 
 check_assets() {
-  local record kind line rest path licence sha got relative errors=0
+  local record kind line rest path licence sha absent got relative errors=0
   local -a asset_paths=() asset_lines=()
   local i named
 
@@ -1324,7 +1410,9 @@ check_assets() {
         path="${rest%%|*}"
         rest="${rest#*|}"
         licence="${rest%%|*}"
-        sha="${rest#*|}"
+        rest="${rest#*|}"
+        sha="${rest%%|*}"
+        absent="${rest#*|}"
         asset_paths[${#asset_paths[@]}]="${path}"
         asset_lines[${#asset_lines[@]}]="${line}"
 
@@ -1346,7 +1434,15 @@ check_assets() {
         if [ -z "${licence}" ]; then
           report ASSET004 "${ASSET_MANIFEST_NAME}:${line}: ${path}: no licence recorded; an asset whose terms nobody wrote down is an asset nobody has read (#339)"
         elif ! asset_licence_permitted "${licence}" "${path}"; then
-          report ASSET004 "${ASSET_MANIFEST_NAME}:${line}: ${path}: licence ${licence} is not permitted at this path; permissive (${ASSET_LICENCES_PERMISSIVE}) anywhere, weak (${ASSET_LICENCES_WEAK}) under apps/ only, and anything else needs a decision recorded in an ADR first (ADR 0015 D-2)"
+          report ASSET004 "${ASSET_MANIFEST_NAME}:${line}: ${path}: licence ${licence} is not permitted at this path; permissive (${ASSET_LICENCES_PERMISSIVE}) anywhere, weak (${ASSET_LICENCES_WEAK}) and attribution-requiring (${ASSET_LICENCES_ATTRIBUTED}) under apps/ only, and anything else needs a decision recorded in an ADR first (ADR 0015 D-2, ADR 0023 D-1)"
+        elif asset_attribution_required "${licence}" && [ -n "${absent}" ]; then
+          # ⚠️ Reported for a PERMITTED licence, which is what makes it a rule
+          # of its own rather than a branch of ASSET004: the entry's licence is
+          # fine and the entry is not, and the fix is three keys rather than a
+          # different asset. The obligation is continuing -- if the credits
+          # screen #358 generates ever drops this asset, the app is shipping it
+          # unlicensed -- so the data it is generated FROM is checked here.
+          report ASSET006 "${ASSET_MANIFEST_NAME}:${line}: ${path}: licence ${licence} requires attribution wherever the work is shared, and this entry records no ${absent}; CC BY 4.0 §3(a)(1) wants the creator and a link to the material, §3(a)(1)(B) wants any modification indicated, and #358 generates the in-app credits from exactly these keys (ADR 0023 D-3)"
         fi
 
         if [ ! -f "${ROOT}/${path}" ]; then

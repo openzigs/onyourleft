@@ -269,7 +269,13 @@ apps/                 AGPL-3.0-or-later, without exception
                         one ASSETS.toml row each (ADR 0022 D-5). ⚠️ The first
                         binaries in this repository that anything SHIPS, so
                         they land under apps/ and could not land under
-                        packages/: ASSET004 admits CC0-1.0 under apps/ only
+                        packages/: ASSET004 admits CC0-1.0 under apps/ only.
+                        ⚠️ Since #357 it admits CC-BY-4.0 there too
+                        (ADR 0023) — but only with creator, url and modified
+                        recorded, because that obligation is continuing and a
+                        row alone does not discharge it. Nothing here is CC-BY
+                        yet, and ADR 0023 D-7 says the credits screen (#358)
+                        lands before anything is
     src/game/three-seam.test.ts
                         what keeps that true, and which illumination classes the
                         scene is allowed — a grep over apps/ and packages/
@@ -613,7 +619,9 @@ downstream issue's acceptance criteria depend on these.
 # Exits 0 clean; exits 1 listing each violation by rule id.
 bash scripts/check-repo-rules.sh
 
-# Test the checker itself. Fixture-driven; 115 cases.
+# Test the checker itself. Fixture-driven; 168 cases. ⚠️ This said 115 until
+# #357 and had been stale for some time — the number is what the suite prints,
+# so read the run rather than this line.
 bash scripts/check-repo-rules.test.sh
 
 # Verify the licence texts are byte-identical to the canonical ones, by
@@ -831,7 +839,7 @@ pnpm --filter @onyourleft/fit run uploads:generate
 # also section 4g.
 pnpm run check:licences
 
-# Its own suite. Fixture-driven; 49 cases, every policy branch with a case that
+# Its own suite. Fixture-driven; 50 cases, every policy branch with a case that
 # FAILS as well as one that passes. Needs Node, so also not in `check:repo`.
 bash scripts/check-dependency-licences.test.sh
 
@@ -886,8 +894,9 @@ npm view typescript-eslint peerDependencies.typescript
 | `ASSET001` | a committed **binary** exists that `ASSETS.toml` does not name. #339, filed before the first `.glb` exists rather than after. ⚠️ Discovery walks for binaries by **content** — a NUL byte in the first 8000, which is git's own rule — and deliberately **not** by an extension list: a list fails closed against deleting a format and **open** against adding one, which is #142's defect exactly |
 | `ASSET002` | `ASSETS.toml` names a path that is not there. A stale entry records the provenance of nothing. A glob lands here rather than being refused as syntax, unlike `.spdx-exempt`: the lookup is string equality, so a pattern truly names no file |
 | `ASSET003` | a named file's SHA-256 does not reproduce, or none is recorded. ⚠️ It pins **what is committed**, so a substitution is visible; it does **not** establish that the bytes are the upstream artefact they name, which nothing offline can — `apps/mobile/README.md` §4 still stands on `gradle-wrapper.jar` |
-| `ASSET004` | an entry's licence is absent, on neither list, or not permitted where the file lands. Permissive anywhere, weak (`CC0-1.0` and friends) under `apps/` only — ADR 0015 D-2's distributed-closure table, applied to a committed file. ⚠️ Fails **closed**: GPL, AGPL and `CC-BY-4.0` are on neither list and adding one is a decision |
+| `ASSET004` | an entry's licence is absent, on **no** list, or not permitted where the file lands. Permissive anywhere; weak (`CC0-1.0` and friends) and — since #357 — attribution-requiring (`CC-BY-4.0`) under `apps/` only. ADR 0015 D-2's distributed-closure table, applied to a committed file. ⚠️ Fails **closed**, and this row used to name `CC-BY-4.0` as an example of that: [ADR 0023](docs/adr/0023-cc-by-assets-and-attribution.md) ruled on it, so the examples are now GPL, AGPL, `CC-BY-SA-4.0` and **`CC-BY-NC-4.0`**, which is two letters from an admitted one and non-OSI |
 | `ASSET005` | `ASSETS.toml` is absent, or does not parse. ⚠️ Five ids where #339 names four, and the fifth is the reason the other four cannot pass vacuously — the same move `LIC006` made for `.spdx-exempt`. An unrecognised key is **refused rather than ignored** (ADR 0017 D-4's choice, for the same reason), and a manifest that does not parse **stops the walk** rather than reporting every entry after the bad line as unnamed |
+| `ASSET006` | an entry whose licence **requires attribution** records no `creator`, no `url` or no `modified`. #357, [ADR 0023](docs/adr/0023-cc-by-assets-and-attribution.md) D-3. ⚠️ It fires on a licence `ASSET004` has just **permitted**, which is what makes it a rule rather than a branch: CC-BY is the only identifier in either set whose obligation is **continuing** — discharged by the shipped app crediting the work every time it ships, not by the manifest row existing — so the data [#358](https://github.com/openzigs/onyourleft/issues/358) generates the credits screen from is checked where the asset enters the tree. Widening a list alone would have satisfied "a CC-BY asset now passes" and left the obligation unchecked, which is this repository's own recurring defect shape |
 
 `scripts/check-licence-hashes.sh` enforces one more, separately because it hashes files rather than
 reading paths:
@@ -2386,7 +2395,10 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   inside an ADR table cell.
 - **ADRs**: `docs/adr/NNNN-kebab-case.md`, with **Status, Context, Decision, Consequences**. Numbers
   are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. **The next free number is 0023.**
+  **and which are claimed by open issues** before you pick one. **The next free number is 0024.**
+  ⚠️ **0023 is [ADR 0023](docs/adr/0023-cc-by-assets-and-attribution.md)**, taken by
+  [#357](https://github.com/openzigs/onyourleft/issues/357) for the CC-BY asset ruling, and a reviewer who
+  remembers this sentence offering 0023 is reading the old file.
   ⚠️ This sentence said *"every number from 0001 to 0020 is now written and the next free number is
   0021 — there is no live reservation"*, and a reviewer who remembers that is reading the old file:
   **0021 is a live reservation**, claimed by
@@ -2814,6 +2826,8 @@ top of an issue **supersedes its body**.
 | Why erasing needs a typed phrase rather than a second button | `apps/web/src/transfer/erase-device.ts` §`eraseDecision` |
 | What proves no store read crosses athletes, and how a new read is caught | `packages/store/src/activity-store.scoping.test.ts` |
 | What proves an erased athlete leaves no row behind, and why the table list is derived | `packages/store/src/activity-store.erasure.test.ts`, `packages/store/src/schema.ts` §`SCHEMA_VERSIONS` |
+| Why a CC-BY asset is admitted at all, what it obliges for ever, and why the credits screen is the gate rather than the manifest row | [ADR 0023](docs/adr/0023-cc-by-assets-and-attribution.md), `scripts/check-repo-rules.sh` §`ASSET_LICENCES_ATTRIBUTED`, [#358](https://github.com/openzigs/onyourleft/issues/358) |
+| Why `CC-BY` and `CC-BY-NC` are two letters and a world apart, and why the asset gate and `DEP001` no longer agree | [ADR 0023](docs/adr/0023-cc-by-assets-and-attribution.md) D-2, D-5, `scripts/check-dependency-licences.test.sh` |
 | Which units a rider reads in, where that is decided, and what stops a new screen hard-coding one | [ADR 0020](docs/adr/0020-display-units.md), `apps/web/src/units/format.ts`, `apps/web/src/units/no-inline-units.test.ts` |
 | Where a rider enters their weight, and why the game rather than the store substitutes a default | `apps/web/src/athlete/mass.ts`, `apps/web/src/views/SettingsView.tsx` §`WeightPanel` |
 | Why the athlete's mass and the physics' `totalMass` are different numbers, and where the bicycle is added | `apps/web/src/game/rider.ts` §`BICYCLE_MASS_KILOGRAMS`, `packages/store/src/records.ts` §`AthleteRecord.mass` |

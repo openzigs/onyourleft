@@ -209,6 +209,17 @@ assert_violation "a package declaring no licence at all fails closed" \
   "$(closures "$(one_dep apps/web distributed '')")" \
   '<no licence declared>'
 
+# ⚠️ The divergence #357 deliberately created, asserted rather than left to
+# a reader of two files. `ASSET004` admits `CC-BY-4.0` for a committed ASSET
+# under `apps/` (ADR 0023 D-1); `DEP001` still does not admit it for a
+# DEPENDENCY anywhere, because nothing in the tree has one and ADR 0023 D-5
+# takes ADR 0016's posture towards a licence nobody has read in that position.
+# The two sets are now different sets, and this is the case that says so: delete
+# the divergence by adding `CC-BY-4.0` to `POLICY.weak` and this case goes red.
+assert_violation "CC-BY-4.0 still fails closed as a DEPENDENCY, though ADR 0023 admits it as an asset" \
+  "$(closures "$(one_dep apps/web build CC-BY-4.0)")" \
+  'probe is CC-BY-4.0'
+
 assert_violation "a WITH exception is not silently accepted" \
   "$(closures "$(one_dep apps/web distributed 'MIT WITH Classpath-exception-2.0')")" \
   'probe is MIT WITH Classpath-exception-2.0'
