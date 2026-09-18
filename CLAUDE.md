@@ -64,6 +64,18 @@ apps/                 AGPL-3.0-or-later, without exception
     src/analysis/       zones and duration personal bests (#78) — the port, the one
                         place a threshold default is substituted, the bounded
                         library read, and the wording
+    src/credits/        the in-app attribution, GENERATED from `ASSETS.toml` (#358)
+                        — the reader for the manifest's own TOML subset, second
+                        after the one in `check-repo-rules.sh` and written from
+                        the same list of refusals; which entries are credited
+                        because a licence asks and which as a courtesy; and the
+                        one line that inlines the manifest at build time, so
+                        there is no generated file to drift. ⚠️ For a
+                        `CC-BY-4.0` asset this screen IS the obligation
+                        (ADR 0023 D-3), and there is none in the tree yet — so a
+                        screen rendering nothing would look correct, and
+                        `CreditsView.test.tsx` renders a fixture manifest for
+                        exactly that reason
     src/design/         design tokens, theme.css and the primitives (#48), and since
                         #307 the two systems those tokens now form — the elevation
                         ramp, which is a surface COLOUR because a shadow is invisible
@@ -2839,5 +2851,9 @@ top of an issue **supersedes its body**.
 | Where the imperial length definitions live, and why the foot is not beside its caller | `packages/domain/src/length.ts` |
 | What an erase does to the unit preference, and what has to be told | `apps/web/src/transfer/erase-device.ts` §`eraseDevice`, `apps/web/src/transfer/TransferView.tsx` §`onUnitsReset` |
 | Which way a payload faces, and why an export is deliberately not trimmed | `apps/web/src/privacy/boundaries.ts`, [#35](https://github.com/openzigs/onyourleft/issues/35) |
+| Where the credits screen's rows come from, and why it is generated rather than listed | `apps/web/src/credits/credits.ts`, [ADR 0023](docs/adr/0023-cc-by-assets-and-attribution.md) D-3 |
+| Why a manifest line the client cannot read is shown to a rider rather than skipped | `apps/web/src/credits/manifest.ts`, `apps/web/src/views/CreditsView.tsx` |
+| Why the credits page has no navigation entry, and what that makes the About link | `apps/web/src/shell/routes.ts` §`CREDITS_ROUTE`, `apps/web/src/views/AboutView.tsx` |
+| What stops an empty credits screen looking exactly like a correct one | `apps/web/src/views/CreditsView.test.tsx`, [#142](https://github.com/openzigs/onyourleft/issues/142) |
 
 <!-- Last updated: 2026-09-17 by delivery:code-issue resolving #355 (the verge as a visibility constant, and the camera-cone gate that had been missing) -->

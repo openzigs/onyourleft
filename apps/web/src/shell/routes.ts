@@ -47,6 +47,7 @@ export type RouteId =
   | 'transfer'
   | 'settings'
   | 'about'
+  | 'credits'
   | 'not-found';
 
 export interface RouteDefinition {
@@ -191,6 +192,31 @@ export const ROUTE_BUILDER_ROUTE: RouteDefinition = {
 };
 
 /**
+ * Who made the artwork this app ships (#358).
+ *
+ * **Not in {@link ROUTES}**, for {@link ROUTE_BUILDER_ROUTE}'s reason: it is
+ * reached from the About page, where the licence statement already is, and a
+ * twelfth top-level link would read as a twelfth feature. It is in
+ * {@link ALL_ROUTES}, so the accessibility suite audits it without anyone
+ * editing a test.
+ *
+ * ⚠️ **It is reachable from inside the application on purpose, and that is a
+ * licence requirement rather than a courtesy** — [ADR 0023](../../../../docs/adr/0023-cc-by-assets-and-attribution.md)
+ * D-3. CC BY 4.0 §3(a)(2) lets attribution be given *"in any reasonable manner
+ * based on the medium"*, and the medium is an APK: somebody who installs this
+ * app never sees the repository, so a file in git is not reasonably
+ * discoverable by them. Deleting the link from `AboutView` would leave this
+ * page unreachable and the obligation unmet.
+ */
+export const CREDITS_ROUTE: RouteDefinition = {
+  id: 'credits',
+  path: '/about/credits',
+  navLabel: 'Credits',
+  title: 'Credits',
+  summary: 'Who made the models and artwork this app ships, and the terms they are used under.',
+};
+
+/**
  * One stored ride, in full (#50).
  *
  * **Not in {@link ROUTES}**, for the reason {@link NOT_FOUND_ROUTE} is not:
@@ -263,6 +289,7 @@ export const NOT_FOUND_ROUTE: RouteDefinition = {
 /** Every route the audit must cover, navigable or not. */
 export const ALL_ROUTES: readonly RouteDefinition[] = [
   ...ROUTES,
+  CREDITS_ROUTE,
   ROUTE_BUILDER_ROUTE,
   ACTIVITY_DETAIL_ROUTE,
   SEGMENT_DETAIL_ROUTE,

@@ -80,6 +80,12 @@ apps/                 AGPL-3.0-or-later, without exception
                         kilogram, and the narrow write that puts it on the
                         athlete row. The mass here is the ATHLETE's — the bicycle
                         is added by src/game/rider.ts and only there
+    src/credits/        the in-app attribution, generated from ASSETS.toml (#358):
+                        the reader for the manifest's own TOML subset, which
+                        entries are credited and why, and the one line that
+                        inlines the manifest at build time rather than fetching
+                        it. ADR 0023 D-3 — for a CC-BY asset this screen is the
+                        obligation, not a nicety
     src/design/         design tokens, theme.css and the primitives (#48)
     src/detail/         the ride detail view's data layer (#50): the read budget, the
                         gap-preserving downsampler, the SVG trace, and the

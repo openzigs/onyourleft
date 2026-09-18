@@ -16,6 +16,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { PRIVACY_POLICY_URL } from '../privacy/policy';
+import { hrefFor, routeById } from '../shell/routes';
 import { mount, queryAll } from '../testing/mount';
 
 import { AboutView } from './AboutView';
@@ -42,6 +43,23 @@ describe('the About page', () => {
     expect(policy?.getAttribute('target')).toBe('_blank');
     expect(policy?.getAttribute('rel') ?? '').toContain('noreferrer');
     expect(mounted.container.textContent ?? '').toContain('opens in a new tab');
+    mounted.unmount();
+  });
+
+  it('reaches the credits, which is where an attribution obligation is discharged', async () => {
+    // ⚠️ **The same shape as the privacy link above, and for a stricter
+    // reason.** ADR 0023 D-3 puts the asset attribution inside the app because
+    // CC BY 4.0 §3(a)(2) judges "a reasonable manner" by the medium, and the
+    // medium is an APK whose user never sees this repository. The credits page
+    // is deliberately not in the header navigation, so this link is the only
+    // way to it: delete it and the page is unreachable, the notice is
+    // undiscoverable, and nothing else in the suite would notice.
+    const mounted = await mount(<AboutView />);
+    const credits = queryAll<HTMLAnchorElement>(mounted.container, 'a').filter(
+      (link) => link.getAttribute('href') === hrefFor(routeById('credits')),
+    );
+    expect(credits, 'the About page does not link to the credits').toHaveLength(1);
+    expect(credits[0]?.textContent ?? '').toMatch(/credits/i);
     mounted.unmount();
   });
 });

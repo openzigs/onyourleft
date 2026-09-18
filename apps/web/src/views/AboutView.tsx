@@ -62,6 +62,15 @@ export function AboutView(): JSX.Element {
         Free and open source. This client is licensed under the GNU Affero General Public License,
         version 3 or later; the packages it is built from are Apache-2.0.
       </p>
+      {/* ⚠️ This link is the reachable half of an obligation, not a courtesy.
+          ADR 0023 D-3 puts the attribution inside the app because CC BY 4.0
+          §3(a)(2) judges "a reasonable manner" by the medium, and the medium is
+          an APK whose user never sees the repository. `AboutView.test.tsx`
+          asserts the link is here for that reason. */}
+      <p>
+        The artwork this app ships was made by other people.{' '}
+        <a href={hrefFor(routeById('credits'))}>Credits</a> says who, and under what terms.
+      </p>
     </>
   );
 }
