@@ -84,6 +84,28 @@ describe('the router', () => {
     expect(document.querySelectorAll('main a').length).toBeGreaterThan(0);
   });
 
+  it('reaches the credits from the About page, and renders the real ones', async () => {
+    // ⚠️ Two things no other test in the shell can see. The accessibility
+    // suite opens every route and checks the `h1`, so a `case 'credits'`
+    // wired to the wrong component would pass it — the heading comes from the
+    // route table, not from the view. And the credits page has no header
+    // navigation entry by design (ADR 0023 D-3 puts it beside the licence
+    // statement on About), so this link is the only way a rider reaches the
+    // attribution notice at all.
+    await open('/about');
+    const link = document.querySelector<HTMLAnchorElement>(
+      `main a[href="${hrefFor(routeById('credits'))}"]`,
+    );
+    expect(link, 'the About page does not link to the credits').not.toBeNull();
+    await activateWithKeyboard(link as HTMLAnchorElement);
+    await settle();
+
+    expect(document.querySelector('h1')?.textContent).toBe(routeById('credits').title);
+    // Generated from `ASSETS.toml`, so this is what the manifest says today
+    // rather than a string in a view.
+    expect(document.querySelector('main')?.textContent ?? '').toContain('Kenney');
+  });
+
   it('stops listening for navigation once it is unmounted', async () => {
     await open('/');
     mounted?.unmount();

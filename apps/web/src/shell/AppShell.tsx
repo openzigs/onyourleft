@@ -46,6 +46,7 @@ import { AboutView } from '../views/AboutView';
 import { ActivitiesView } from '../views/ActivitiesView';
 import { ActivityDetailView } from '../views/ActivityDetailView';
 import { AnalysisView } from '../views/AnalysisView';
+import { CreditsView } from '../views/CreditsView';
 import { DevicesView } from '../views/DevicesView';
 import { NotFoundView } from '../views/NotFoundView';
 import { RideView } from '../views/RideView';
@@ -367,6 +368,11 @@ function viewFor(
       );
     case 'about':
       return <AboutView />;
+    case 'credits':
+      // No props: the manifest is built into the bundle, so this is the one
+      // view in the shell that needs nothing passed down. `CreditsView.tsx`
+      // says why it is a build-time import rather than a port.
+      return <CreditsView />;
     case 'not-found':
       return <NotFoundView />;
   }

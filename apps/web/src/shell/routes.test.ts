@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ACTIVITY_DETAIL_ROUTE,
   ALL_ROUTES,
+  CREDITS_ROUTE,
   hrefFor,
   hrefForActivity,
   matchHash,
@@ -142,6 +143,24 @@ describe('the table itself', () => {
     // in the header would be a link to a page about a ride called ":activity".
     expect(ROUTES).not.toContain(ACTIVITY_DETAIL_ROUTE);
     expect(ALL_ROUTES).toContain(ACTIVITY_DETAIL_ROUTE);
+  });
+
+  it('keeps the credits route reachable but out of the navigation', () => {
+    // ⚠️ **The reachable half is a licence requirement**, not a preference:
+    // ADR 0023 D-3 puts the attribution inside the app because CC BY 4.0
+    // §3(a)(2) judges "a reasonable manner" by the medium, and the medium is an
+    // APK. It is out of the header because it hangs off the About page, where
+    // the licence statement already is — and it is in `ALL_ROUTES` so the
+    // accessibility suite audits it with nobody editing a test.
+    //
+    // The `routeById` half is what stops the About page's own assertion going
+    // vacuous: `routeById` falls back to the not-found route, so a test that
+    // compares one `hrefFor(routeById('credits'))` against another would pass
+    // just as happily after this entry had been deleted.
+    expect(ROUTES).not.toContain(CREDITS_ROUTE);
+    expect(ALL_ROUTES).toContain(CREDITS_ROUTE);
+    expect(routeById('credits')).toEqual(CREDITS_ROUTE);
+    expect(matchHash('#/about/credits').route).toEqual(CREDITS_ROUTE);
   });
 
   it('keeps the not-found route out of the navigation', () => {
