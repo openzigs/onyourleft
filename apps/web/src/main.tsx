@@ -29,6 +29,7 @@ import { isNativeShell, platformCapacitor } from './support/capacitor';
 import { AppShell } from './shell/AppShell';
 import { browserScreenLockSource, platformWakeLock } from './game/hud/wake-lock';
 import type { GamePort, RidableRoute } from './game/GameView';
+import { gameTrainerFrom, type GameTrainerPort } from './game/trainer-port';
 import type { GhostTrack } from '@onyourleft/domain';
 import type { GameRenderer } from './game/port';
 import { probeBrowser, type CapabilityProbe } from './support/bluetooth-support';
@@ -517,6 +518,36 @@ function buildGamePort(rideController: RideController | undefined): GamePort {
   };
 }
 
+/**
+ * The trainer the game sends the road to (#362).
+ *
+ * ⚠️ **This port is the whole of #362.** `packages/domain`'s
+ * `createSimulationDriver` and `packages/sensors/protocol`'s
+ * `createSimulationWriter` were both written for #90, both unit-tested, both
+ * green — and nothing under `apps/` named either, so the trainer game computed
+ * a gradient, drew the hill, put the number on the HUD and never told the
+ * trainer. A whole ride on Android produced 252 inbound Indoor Bike Data
+ * notifications and zero writes.
+ *
+ * ⚠️ **The SAME controller `buildGamePort` reads**, deliberately. A second
+ * transport would be a second pairing flow and a second view of which links are
+ * up against an OS-wide budget of about three connections — and the first
+ * symptom would be a gradient written to a device the transport had already
+ * seen disconnect. It is also why a rider pairs their trainer once, on the Ride
+ * screen, and the game finds it.
+ *
+ * ⚠️ **`undefined` where there is no ride controller at all** — Safari,
+ * Firefox, a page served over plain HTTP. The absence is the decision, taken
+ * here, and `trainer-port.ts` §`gameTrainerFrom` turns the four states a
+ * present controller can be in into the four sentences a rider is told.
+ */
+function buildGameTrainerPort(controller: RideController | undefined): GameTrainerPort {
+  return {
+    readTrainer: () =>
+      gameTrainerFrom(controller?.getSnapshot().trainer, controller?.simulationControl()),
+  };
+}
+
 function buildTransferPort(): TransferPort | undefined {
   if (globalThis.crypto?.subtle === undefined) {
     return undefined;
@@ -595,6 +626,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
         workouts={buildWorkoutPort()}
         efforts={buildEffortPort()}
         game={buildGamePort(rideController)}
+        gameTrainer={buildGameTrainerPort(rideController)}
         gameRenderer={loadGameRenderer}
         screenLock={browserScreenLockSource(platformWakeLock())}
         map={loadMapPort}

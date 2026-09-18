@@ -129,6 +129,17 @@ export interface AppShellProps {
    * ordinary state rather than an error.
    */
   readonly game?: import('../game/GameView').GamePort | undefined;
+  /**
+   * The trainer the game sends the road to (#362).
+   *
+   * A second port beside {@link game} rather than a method on it, for the
+   * reason every narrow store port in `main.tsx` is separate: this is the one
+   * seam in the client through which a *game* can apply physical resistance to
+   * somebody, and it carries the `-port.ts` suffix so `check:wiring`'s
+   * `WIRE003` watches it (CLAUDE.md §4j). `undefined` in every browser with no
+   * ride controller, and in the accessibility suite.
+   */
+  readonly gameTrainer?: import('../game/trainer-port').GameTrainerPort | undefined;
   readonly gameRenderer?: (() => Promise<import('../game/port').GameRenderer>) | undefined;
   readonly screenLock?: import('../game/hud/wake-lock').ScreenLockSource | undefined;
   /**
@@ -313,6 +324,7 @@ function viewFor(
       return (
         <GameView
           port={props.game}
+          {...(props.gameTrainer === undefined ? {} : { trainer: props.gameTrainer })}
           renderer={props.gameRenderer}
           screenLock={props.screenLock}
           // ⚠️ The **live** value rather than `props.riderMass`, so a rider who

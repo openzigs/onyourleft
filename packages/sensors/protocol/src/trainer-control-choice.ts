@@ -61,12 +61,22 @@ import { canonicalUuid, type GattUuid } from './uuid';
  *
  * ⚠️ Secondary-sourced. See the header for why that is tolerable for this one
  * value and for nothing else in this directory.
+ *
+ * @unwired it is only ever read by {@link chooseTrainerControl}, which has no
+ * production caller — see that function, and
+ * [#370](https://github.com/openzigs/onyourleft/issues/370).
  */
 export const WAHOO_TRAINER_CONTROL_POINT: GattUuid = canonicalUuid(
   'a026e005-0a7d-4ab3-97fa-f1500f9feb8b',
 );
 
-/** How this program will control a machine, if at all. */
+/**
+ * How this program will control a machine, if at all.
+ *
+ * @unwired the return type of {@link chooseTrainerControl}, which has no
+ * production caller — see that function, and
+ * [#370](https://github.com/openzigs/onyourleft/issues/370).
+ */
 export type TrainerControlChoice =
   | {
       readonly kind: 'fitness-machine';
@@ -102,6 +112,18 @@ export type TrainerControlChoice =
  * @throws {RangeError} from {@link canonicalUuid}, for a UUID that is neither a
  * 16-bit assigned number nor a 128-bit UUID. A silently ignored misspelling
  * would be a controllable trainer reported as uncontrollable.
+ *
+ * @unwired **no transport in this client reports the UUIDs a link resolved**,
+ * so there is nothing to hand this. `ride/trainer.ts` reaches a machine through
+ * `openFitnessMachine` / `readMachine`, both of which answer *this is a
+ * controllable trainer* or *it is not* and cannot say what else was there. The
+ * rule is written and tested against the day a transport can — the same status
+ * `apps/web/src/ride/trainer.ts` §`TRAINER_PROCEDURE_TIMEOUT` carries — and the
+ * work of feeding it is filed as
+ * [#370](https://github.com/openzigs/onyourleft/issues/370), which is what the
+ * trainer-command seam (#363) found on its first run. ⚠️ **This is an exemption
+ * with an end date, not a decision**: closing #370 deletes it and the two
+ * above.
  */
 export function chooseTrainerControl(resolved: Iterable<GattUuid | number>): TrainerControlChoice {
   const uuids = new Set<GattUuid>();

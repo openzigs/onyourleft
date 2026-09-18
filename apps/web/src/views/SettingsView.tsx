@@ -67,6 +67,7 @@ import { DEFAULT_RIDER_MASS_KILOGRAMS, massToSave, riderMassFor } from '../athle
 import type { AthleteMassPort } from '../athlete/store-port';
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
+import { hrefFor, routeById } from '../shell/routes';
 import { formatMass, massIn, massUnit, measurementText } from '../units/format';
 import type { UnitsPort } from '../units/store-port';
 
@@ -403,6 +404,19 @@ function WeightPanel({
           ? '. That is a stand-in and not a measurement, and it is wrong for almost everybody.'
           : '.'}{' '}
         A bicycle is added to it — the game rides a rider and a bike, not a rider.
+      </p>
+      {/*
+        ⚠️ #365's fifth criterion, and the half a weight box cannot carry on its
+        own: weight is most of the answer on a climb and almost none of it on
+        the flat, where what decides a rider's speed is how much air they are
+        pushing. That is chosen per ride on the game screen — `game/rider.ts`
+        §`RIDING_POSITIONS` — and a rider told only about their weight would go
+        looking for the flat-road setting here and not find one.
+      */}
+      <p className="oyl-muted">
+        On the flat it is mostly air rather than weight. How you are riding — sitting up, on the
+        hoods, in the drops — is chosen for each ride on the{' '}
+        <a href={hrefFor(routeById('game'))}>trainer game screen</a>.
       </p>
 
       {port === undefined ? (

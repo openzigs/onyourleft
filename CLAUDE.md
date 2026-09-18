@@ -313,8 +313,40 @@ apps/                 AGPL-3.0-or-later, without exception
                         refusal (#237) — the one place in the client a
                         BotPacerPlan is built, and therefore the only place the
                         rider's own mass could get into one
-    src/game/rider.ts   what the rider and their bicycle weigh together, and what
-                        air they ride through. ⚠️ **Since #325 it exports a
+    src/game/gradient.ts
+                        the gradient control loop (#362) — where #90's driver
+                        meets a real trainer, and the answer to "the game
+                        computed a hill and never told the machine". ⚠️ Both
+                        halves it composes live in `packages/` and had **no
+                        caller under `apps/`** for four milestones; a whole ride
+                        on Android produced 252 inbound notifications and zero
+                        writes. It owns the three things neither package can: a
+                        refused write restarts the driver, ending a ride sends
+                        an FTMS **Stop** rather than a flat road, and a refusal
+                        becomes a sentence. ⚠️ It sends the **grade and nothing
+                        else** — the rider's wind is out of scope and their drag
+                        area would double-count against the game's own physics
+    src/game/trainer-port.ts
+                        what the game may ask of a trainer, and the four things
+                        it is told when it may not (#362). ⚠️ A `*-port.ts` on
+                        purpose: the seam is threaded through JSX, which §4j's
+                        own §Limits say the gate cannot follow, so the suffix
+                        buys the one rule that looks at the interface instead.
+                        The control is handed over **only** in the `ready`
+                        state, which is what makes "a machine that does not
+                        offer simulation mode is not written to" a property of
+                        the construction rather than of a guard
+    src/game/rider.ts   what the rider and their bicycle weigh together, what
+                        air they ride through, and — since #365 — **how much of
+                        it they are pushing**. ⚠️ `RideConditions.coefficients`
+                        was `undefined` on every ride, so everybody was
+                        simulated as Martin's track racer: 150 W gave 20.1 mph
+                        on the flat against about 17.8 for a rider on the hoods.
+                        The three positions and the game's own `C_RR` are here
+                        and the drag area is set through `withDragArea`, never
+                        by editing one factor. ⚠️ **`packages/physics` keeps
+                        Martin's and must** — it reproduces its source paper and
+                        `martin-1998.test.ts` rests on it. ⚠️ **Since #325 it exports a
                         FUNCTION and no `RIDER_MASS_KILOGRAMS`** — the mass is
                         the athlete's own now, so a reviewer who remembers a
                         constant to assert the bot's 75 kg against is reading
@@ -744,12 +776,15 @@ bash scripts/check-a11y-suite.test.sh
 # own parser), so it is NOT part of `check:repo`. See §4j.
 pnpm run check:wiring
 
-# Its own suite. Fixture-driven; 49 assertions over 28 throwaway trees, five of
+# Its own suite. Fixture-driven; 81 assertions over 36 throwaway trees, five of
 # them #278's five defects taken from the tree as it actually was — and two of
 # those green on purpose, because they are limits this gate states rather than
 # findings it makes. Three more cover the two ways this gate could check nothing
 # and say so cheerfully: a renamed watched directory, an empty watched set, and
-# a reasonless `@unwired` on the one path that silences a whole file.
+# a reasonless `@unwired` on the one path that silences a whole file. ⚠️ Since
+# #363 it also reproduces **#362** from the tree as it was — a trainer command
+# nothing calls — and pins every entry of the trainer-command seam as
+# load-bearing, because deleting one of the five used to leave the suite green.
 bash scripts/check-wiring.test.sh
 
 # The generated-artefact gate (#299). `cap sync` writes two files this
@@ -1867,7 +1902,7 @@ well typed.**
 |---|---|
 | `WIRE001` | a watched module no production module imports |
 | `WIRE002` | an exported symbol in a watched module that no production declaration names |
-| `WIRE003` | a method declared on a `*-port.ts` interface that no production declaration calls |
+| `WIRE003` | a method declared on a `*-port.ts` interface — or on one in the **trainer-command seam** — that no production declaration calls |
 
 **The entry point is read out of `apps/*/index.html`**, so it is the page Vite actually builds
 rather than a path written down twice. ⚠️ **`apps/web/browser/` is deliberately NOT an entry
@@ -1876,21 +1911,50 @@ mistaken for the product's. Neither is a test — every one of the five defects 
 green, so a test calling something is not evidence that anything ships it.
 
 ⚠️ **The watched set is the client's own seams** — `apps/web/src/game/`, `apps/web/src/ride/` and
-every `*-port.ts` under `apps/` — **not the packages underneath**, and the cost of that line is
-stated rather than hidden: #237's `advanceBot` lived in `packages/physics` and would not be named.
-Watching the libraries would report the several dozen exports §4b records as having no production
-consumer *by design*, and a noisy rule gets an allowlist, and an allowlist that grows is how a rule
-stops firing.
+every `*-port.ts` under `apps/` — **plus five named modules in `packages/`, and nothing else there.**
+⚠️ **This paragraph used to end "not the packages underneath", full stop, and a reviewer who
+remembers that is reading the old file.**
+[#362](https://github.com/openzigs/onyourleft/issues/362) is what changed it: `createSimulationWriter`
+and #90's gradient driver both live in `packages/`, no rule here looked at them, and the trainer game
+computed a gradient, drew the hill, put it on the HUD and **never told the trainer** — 252 inbound
+notifications and zero writes over a whole ride on a real FTMS machine, on the one path in the
+program that applies physical resistance to a person. That is the second defect of this shape after
+#237's `advanceBot`, so [#363](https://github.com/openzigs/onyourleft/issues/363) stopped treating
+the limit as a hypothetical.
 
-⚠️ **Measure that set before you read a green run as a clean client: it is 41 files of the 143
-non-test sources under `apps/*/src`, 29 %.** 28 come from the two directories and 13 from the
-`*-port.ts` suffix — and the suffix is the half that found #282, not the directories:
-`segments/match-port.ts` matches `*-port.ts`, while `segments/backfill.ts`, the module that is
-actually dead, is in no watched directory and **is not reported**. The gate prints both counts for
-this reason, the watched one first; a run that says *"273 production modules"* and nothing else
-reads like coverage of a population it never checked. ⚠️ **These are counts and they age**, and
-they were 37 of 132 until #325 added `athlete/store-port.ts`; re-read them from the gate's own
-success line rather than from this paragraph.
+⚠️ **What it is NOT is "watch `packages/`", and the reason is measured rather than asserted.**
+Applying `WIRE001` and `WIRE002` to every non-test source under `packages/` on the tree at `4bfee83`
+reports **171 findings over 180 files** — 39 modules nothing imports (the whole of
+`packages/fit/tools/`, the #44 simulator, seven `vitest.config.ts`) and 132 exports nothing names,
+most of them the ones §4b records as having no production consumer *by design*. A noisy rule gets an
+allowlist, and an allowlist that grows is how a rule stops firing. So the selector is a **principle
+rather than a directory**, and the principle is §6's own — *"a smart trainer applies physical
+resistance to a person who is pedalling"*. `TRAINER_COMMAND_SEAM` is the five modules that stand
+between this program and that: what decides a setpoint (`domain/src/trainer/simulation.ts`), what the
+commands are (`protocol/src/fitness-machine-control.ts`), what paces them onto the wire
+(`simulation-writer.ts`, `erg-writer.ts`) and which control point they are addressed to
+(`trainer-control-choice.ts`). On the same tree those five report **7**, every one a real statement
+about the program — and one of them is #362.
+
+⚠️ **A watchlist, not an allowlist**, which is the distinction #363's third criterion turns on:
+adding a path adds coverage, and the only way out is an `@unwired` at the declaration carrying a
+reason a person can read, refused when reasonless, exactly as under `apps/`. Six of the seven
+findings are now such exemptions and the seventh was a real gap —
+[#370](https://github.com/openzigs/onyourleft/issues/370), `chooseTrainerControl`, which no transport
+feeds, so a rider whose trainer serves only a proprietary control point is told "no controllable
+trainer" rather than the truth. ⚠️ **The limit is narrowed and not removed**: #237's `advanceBot` is
+in `packages/physics/src/pacer.ts` and is still not named, because a bot pacer moves a shape on a
+screen rather than a brake.
+
+⚠️ **Measure that set before you read a green run as a clean client: it is 51 watched files, of which
+46 are 30 % of the 154 non-test sources under `apps/*/src` and 5 are the trainer-command seam.** The
+`*-port.ts` suffix is the half that found #282, not the directories: `segments/match-port.ts` matches
+it, while `segments/backfill.ts`, the module that was actually dead, is in no watched directory and
+**is not reported**. The gate prints both counts for this reason, the watched one first; a run that
+says *"284 production modules"* and nothing else reads like coverage of a population it never
+checked. ⚠️ **These are counts and they age**, and they were 41 of 143 until #362 added two more
+`apps/` files and #363 added the seam; re-read them from the gate's own success line rather than from
+this paragraph.
 
 ⚠️ **`WATCHED_PREFIXES` is written down in the checker rather than discovered, so it is asserted to
 exist.** A selector like that fails closed against *deleting* what it names and open against
@@ -1898,6 +1962,14 @@ exist.** A selector like that fails closed against *deleting* what it names and 
 success line claims every seam is reachable. That is #142's shape (§4e), and it is why a prefix
 naming no directory, and a watched set holding no file, are both hard failures with their own
 fixtures. Moving a watched directory means editing `check-wiring.mjs` in the same commit.
+
+⚠️ **`TRAINER_COMMAND_SEAM` is asserted the same way, with one wrinkle: it is checked
+all-or-nothing.** A tree holding none of the five is a tree with no trainer in it — which is what
+almost every fixture in `check-wiring.test.sh` is — and a tree holding *some* of them is one where a
+path has moved, which is a hard failure naming the path. ⚠️ And **every entry is load-bearing**: on
+the way in, deleting `packages/domain/src/trainer/simulation.ts` from the list left the whole suite
+green, so there is now a case that puts an unwired declaration in all five at once and names each. A
+watchlist that can be quietly shortened is an allowlist with better manners.
 
 **Where something legitimately has no production caller, say so at the declaration**: `@unwired`
 followed by a reason, in its doc comment. The tag alone is refused — an exemption nobody can read is
@@ -1933,6 +2005,13 @@ segment matcher, so no segment effort had ever been written and the effort scree
 a test filled. `apps/web/src/segments/sweep.ts` is what runs it now, and removing that wiring turns
 the gate red with four `WIRE003`s rather than nothing — measured, because a note deleted from a file
 proves only that the note is gone.
+
+⚠️ **A green seam is not a working trainer, and the two tests that say so fail for different
+reasons.** `check:wiring` asks whether any production declaration *names*
+`setSimulationParameters`; `apps/web/src/game/trainer-wiring.test.tsx` drives the real component and
+reads what a **trainer** was handed. Deleting the `sample` call inside `GameView`'s tick leaves the
+gate green — `GameView` still names `createGradientSession` — and turns three of that file's
+assertions red. Neither replaces the other.
 
 ⚠️ **Read `check-wiring.mjs` §Limits before concluding something is wired because the gate is
 green.** It cannot see a call made through a string key, a dynamic import whose specifier is not a
@@ -2817,6 +2896,14 @@ top of an issue **supersedes its body**.
 | Which stall this gets wrong, and why a paused ride is one as readily as a backgrounded phone | `apps/web/src/game/ghost-outcome.ts` §"What it still cannot get right", `apps/web/src/game/simulation.ts` §`MAXIMUM_STEPS_PER_ADVANCE` |
 | What stops one ride's result being announced on the first frame of the next | `apps/web/src/game/GameView.tsx` §`start`, and the mutation note in §`teardown` |
 | Why a HUD value that is a word is set smaller than one that is a number | `apps/web/src/game/hud/fields.ts` §`HudReading.word`, `apps/web/src/design/theme.css` §`.oyl-hud__value--word`, `apps/web/src/game/hud/hud-value-size.test.ts` |
+| How the road the game draws reaches a trainer, and what proves a ride sends one | `apps/web/src/game/gradient.ts`, `apps/web/src/game/trainer-wiring.test.tsx`, [#362](https://github.com/openzigs/onyourleft/issues/362) |
+| Why a machine that does not offer simulation mode is never written to, and what the rider is told instead | `apps/web/src/game/trainer-port.ts` §`gameTrainerFrom`, §`trainerRoadNotice` |
+| What happens to the resistance when a ride ends, and why it is a Stop rather than a flat road | `apps/web/src/game/gradient.ts` §`stop`, [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part K |
+| Why the gradient write carries no wind and no drag area | `apps/web/src/game/gradient.ts` §"What is deliberately NOT sent" |
+| Why every rider used to be simulated as a track racer, and where the drag area is chosen now | `apps/web/src/game/rider.ts` §`RIDING_POSITIONS`, [`packages/physics/README.md`](packages/physics/README.md) §2 |
+| Why the game has its own rolling resistance and does not move it with the rider's hands | `apps/web/src/game/rider.ts` §`GAME_ROLLING_RESISTANCE_COEFFICIENT` |
+| What the wiring gate can see in `packages/`, why it is five paths and not a directory, and what it still cannot | §4j, `scripts/check-wiring.mjs` §`TRAINER_COMMAND_SEAM` |
+| What a validation procedure that could not have caught the defect looks like | [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part K, [#364](https://github.com/openzigs/onyourleft/issues/364) |
 | How trainer control reaches an FTMS control point on Android | `apps/mobile/src/ble/fitness-machine-channel.ts`, `apps/web/src/ride/trainer.ts` §`openCapacitorTrainer` |
 | Why the unacknowledged write is declared on the plugin port and never called | `apps/mobile/src/ble/plugin-port.ts` §`writeWithoutResponse`, §4h |
 | What a trainer that reports no power range gets, and why | `apps/mobile/src/ble/fitness-machine.ts` |
