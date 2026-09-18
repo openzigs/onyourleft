@@ -490,8 +490,24 @@ describe('the scenery is not a hedge — #348', () => {
   it('leaves open ground between the road and the nearest thing standing on it', () => {
     // #348's first bullet: *"1.5 m is a hedge, not a verge. A rider should see
     // open ground before the trees start."* Five metres from the centreline is
-    // what that produced; nine is the floor this issue asks for.
-    expect(lateral[0] as number).toBeGreaterThan(9);
+    // what that produced; nine was the floor that issue asked for.
+    //
+    // ⚠️ **Six since #355, and the margin this assertion has against #348's own
+    // defect has mostly gone** — a reviewer who remembers nine is reading the
+    // old file. That issue narrows the verge from 6 m to 3 m because a 6 m one
+    // puts the near band outside the camera's cone, so the nearest item now
+    // stands **7.18 m** from the centreline rather than 10.18 m. The 1.5 m
+    // hedge stands things at 5.68 m, so this still goes red on it — by 0.3 m
+    // where it used to be by 3.8 m. Said plainly rather than left to be
+    // discovered: as a guard against #348's own arrangement this is now thin.
+    //
+    // ⚠️ **What replaces the margin is a bound from the other side.**
+    // `three-renderer.test.ts` §"the verge stands inside the near cone — #355"
+    // goes red on a verge past about 4.7 m and this goes red on one under about
+    // 2.5 m, so the two together pin the constant into a narrow bracket rather
+    // than only holding it up from below. Neither could do that alone, and the
+    // three passes that tuned this constant had only the floor.
+    expect(lateral[0] as number).toBeGreaterThan(6);
   });
 
   it('stands things at many different removes rather than all at one', () => {
@@ -499,11 +515,13 @@ describe('the scenery is not a hedge — #348', () => {
     // middle half of everything inside a 9 m spread and almost nothing beyond
     // 20 m, which is what made the scenery read as a wall at a fixed distance.
     //
-    // ⚠️ **Both figures moved for #351 and again for #353, and the bound has to
-    // follow the band or it pins the number the change was filed to move.**
-    // 35 m put the median item 27 m out, 25 m put it at 21.9 m, and 15 m puts
-    // it at 16.9 m. Measured at 15 m: an interquartile spread of **6.7 m**
-    // reaching **23.8 m**.
+    // ⚠️ **Both figures moved for #351, again for #353 and the reach again for
+    // #355, and the bound has to follow the band or it pins the number the
+    // change was filed to move.** 35 m put the median item 27 m out, 25 m put
+    // it at 21.9 m, and 15 m puts it at 16.9 m — 13.9 m since #355 slid the
+    // whole arrangement three metres toward the road. Measured: an
+    // interquartile spread of **6.7 m**, unchanged by #355 because a verge
+    // translates the band rather than stretching it, reaching **20.8 m**.
     //
     // ⚠️ **What each half excludes is no longer the same, and #353 is where
     // that changed.** The pre-#348 arrangement has an interquartile spread of
@@ -512,15 +530,20 @@ describe('the scenery is not a hedge — #348', () => {
     // the band is barely wider than the 16 m this issue was filed against, and
     // an interquartile spread cannot tell the two apart. What does is the
     // verge, asserted in the test above this one — the old arrangement stood
-    // things 5 m from the centreline and this one stands nothing inside 10.2 m.
+    // things 5 m from the centreline and this one stands nothing inside 7.2 m.
     // The spread below is therefore a guard against a *wall*, which is a single
     // row and an interquartile spread of about 1.7 m, and not against #348's
     // own shape.
+    //
+    // ⚠️ **The reach moved to 20 for #355 and its own margin is now 1.5 m**,
+    // for the same reason the verge floor's margin shrank: the pre-#348
+    // arrangement reaches 19.3 m and this one reaches 20.8 m. It is still the
+    // half that excludes that shape, and it is no longer the comfortable half.
     const quarter = lateral[Math.floor(lateral.length * 0.25)] as number;
     const threeQuarters = lateral[Math.floor(lateral.length * 0.75)] as number;
 
     expect(threeQuarters - quarter).toBeGreaterThan(5);
-    expect(lateral[lateral.length - 1] as number).toBeGreaterThan(22);
+    expect(lateral[lateral.length - 1] as number).toBeGreaterThan(20);
   });
 
   it('leaves whole stretches of road with nothing beside them', () => {
@@ -784,6 +807,13 @@ describe('the scenery lines the road rather than ringing the horizon — #353', 
     //
     // The two bounds are set between the two arrangements and nearer the new
     // one, so the #351 world goes red on both with metres to spare.
+    //
+    // ⚠️ **#355 moved both measurements and neither bound**, which is the
+    // useful half of that change: narrowing the verge from 6 m to 3 m slides
+    // every item three metres toward the road, so the median is **13.9 m** and
+    // the upper quartile **17.4 m** — further inside these ceilings rather than
+    // anywhere near them. A ceiling that had to be *lowered* to stay meaningful
+    // would be a different assertion; this one simply gained margin.
     expect(quantile(0.5)).toBeLessThan(19);
     expect(quantile(0.75)).toBeLessThan(23);
   });
@@ -794,9 +824,12 @@ describe('the scenery lines the road rather than ringing the horizon — #353', 
     // arrangement that put everything in a single row 10 m out would satisfy
     // both of them perfectly — which is the 16 m wall #348 was filed to break.
     // The verge below is #348's own floor and the reach is what says there is
-    // still a band behind it. Measured: 10.2 m and 23.8 m.
-    expect(lateral[0] as number).toBeGreaterThan(9);
-    expect(lateral[lateral.length - 1] as number).toBeGreaterThan(22);
+    // still a band behind it. Measured: **7.2 m and 20.8 m** since #355 took
+    // the verge to 3 m; 10.2 m and 23.8 m before it. Both bounds follow the
+    // measurement down, and the margins each of them still carries are stated
+    // on #348's own copies of them, which are the two tests above.
+    expect(lateral[0] as number).toBeGreaterThan(6);
+    expect(lateral[lateral.length - 1] as number).toBeGreaterThan(20);
   });
 });
 
@@ -933,18 +966,25 @@ describe('a bend does not fold the scenery into the road — #348', () => {
   // the one radius of nine that did **not** go red for exactly that reason.
   // Each half now says which claim it is making.
   //
-  // ⚠️ **"About 24 m" until #353, and the threshold moved because the band did**
-  // — a reviewer who remembers 24 is reading the old file. `bandsAt` fits whole
-  // bands into the reach a bend leaves, so a three-metre band fits inside a
-  // tighter turn than a five-metre one. It is a **loosening of what is refused,
-  // not of the verge**: the reach itself is `min(R − verge, 0.6 R)` and #353
-  // does not touch it, which is why the sweep below is joined by one over the
-  // radii that have newly started carrying a band.
+  // ⚠️ **"About 24 m" until #353, "about 22 m" until #355, and about 16 m now**
+  // — a reviewer who remembers either is reading the old file. `bandsAt` fits
+  // whole bands into `min(R − verge, 0.6 R) − verge`, so **both** of the two
+  // constants that have moved loosen it: a three-metre band fits inside a
+  // tighter turn than a five-metre one, and a 6.5 m verge leaves reach where a
+  // 9.5 m one left none. It is a **loosening of what is refused, not of the
+  // verge** — nothing inside the verge is placed at any radius — which is why
+  // the sweep below is joined by one over the radii that have newly started
+  // carrying a band.
   it.each([25, 40, 80, 200, 600])(
     'stands nothing inside the verge on a bend of %d m radius, and stands something',
     (radiusMetres) => {
       expect(itemsOn(radiusMetres).length).toBeGreaterThan(0);
-      expect(nearestToTheRoad(radiusMetres)).toBeGreaterThan(9);
+      // ⚠️ **Nine until #355**, which took the verge from 6 m to 3 m and the
+      // guaranteed floor from 9.5 m to 6.5 m with it. Still a literal rather
+      // than `ROAD_WIDTH_METRES / 2 + SCATTER_VERGE_METRES`, per this block's
+      // own header: a bound spelled that way follows the constant back to a
+      // hedge in silence.
+      expect(nearestToTheRoad(radiusMetres)).toBeGreaterThan(6);
     },
   );
 
@@ -965,13 +1005,17 @@ describe('a bend does not fold the scenery into the road — #348', () => {
   // 10, 12 and 20 go red and **15 does not**. Over the whole range no such
   // accident can carry it, because the uncapped code plants somewhere in it.
   it('carries nothing at any radius too tight for the first band', () => {
-    for (const radiusMetres of radiiFrom(9.75, 22)) {
+    // ⚠️ **22 until #355 and 16 since**, because `bandsAt`'s reach is measured
+    // off the verge twice over: a band needs `min(R − 6.5, 0.6 R) ≥ 9.5` where
+    // it used to need `min(R − 9.5, 0.6 R) ≥ 12.5`. Both solve on the first
+    // branch — at 16 m and at 22 m.
+    for (const radiusMetres of radiiFrom(9.75, 16)) {
       expect({ radiusMetres, items: itemsOn(radiusMetres) }).toEqual({ radiusMetres, items: [] });
     }
   });
 
-  // ⚠️ **The radii #353 newly admits, swept for the verge rather than for
-  // emptiness.** Between about 22 m and the 25 m the case above starts at,
+  // ⚠️ **The radii #353 and then #355 newly admit, swept for the verge rather
+  // than for emptiness.** Between about 16 m and the 25 m the case above starts at,
   // `bandsAt` now returns a band where it used to return none — so the claim
   // that has to hold there is #348's, that nothing stands inside the verge, and
   // *not* that something stands at all: a 140 m loop is short enough for the
@@ -982,9 +1026,26 @@ describe('a bend does not fold the scenery into the road — #348', () => {
   // assertion is **vacuous on its own** and the `it.each` above is what stops
   // it being vacuous overall — that one requires a 25 m circuit to carry
   // something.
+  //
+  // ⚠️ **The bound here is 5 m and not the 6.5 m verge, because the verge is
+  // NOT an absolute floor on a bend — and that is a property #355 made visible
+  // rather than one it introduced.** An item is placed at a cell anchor with
+  // its along-offset applied on the local tangent and its lateral offset on the
+  // local normal, and on a tight bend a tangent leaves the circle: the item's
+  // true distance from the centreline comes out short of the offset it was
+  // given. Swept from 9.75 m to 40 m of radius in quarter-metre steps, the
+  // worst case stands **5.754 m** out against a 6.5 m verge — 0.75 m inside
+  // it, at R = 18.25 m. On the arrangement this issue replaces the same sweep
+  // stood **9.033 m** out against a 9.5 m verge, so the shortfall was 0.47 m
+  // and the `> 9` bound above was already tolerating it in silence. It is
+  // worse here only because #355's verge admits tighter radii at all.
+  //
+  // ⚠️ **What is NOT eroded is #243's hard rule**: 5.754 m is still 2.25 m
+  // clear of the 3.5 m half-carriageway, and `scatter.test.ts`'s carriageway
+  // assertions are measured against the corridor rather than against a circle.
   it('keeps the verge at every radius that has newly started carrying a band', () => {
-    for (const radiusMetres of radiiFrom(22, 25)) {
-      expect({ radiusMetres, insideTheVerge: nearestToTheRoad(radiusMetres) <= 9 }).toEqual({
+    for (const radiusMetres of radiiFrom(16, 25)) {
+      expect({ radiusMetres, insideTheVerge: nearestToTheRoad(radiusMetres) <= 5 }).toEqual({
         radiusMetres,
         insideTheVerge: false,
       });
@@ -1034,13 +1095,22 @@ describe('a bend does not fold the scenery into the road — #348', () => {
     //
     // The pair either side of it says the refusal is a threshold rather than a
     // rule that swallowed every bend: a 40 m radius keeps its scenery.
-    // ⚠️ **18 m as well as 12, and it is the one that catches a curvature read
-    // at half its true value** — which is what this file did until #348. A 12 m
-    // circuit is refused either way; an 18 m one reads as 36 m under the old
-    // baseline, which is open enough to carry two bands of scenery folded
-    // through the inside of a bend a rider would have to lean into.
+    // ⚠️ **A second radius as well as 12, and it is the one that catches a
+    // curvature read at half its true value** — which is what this file did
+    // until #348. A 12 m circuit is refused either way; the second one reads as
+    // twice its radius under the old baseline, which is open enough to carry
+    // bands of scenery folded through the inside of a bend a rider would have
+    // to lean into.
+    //
+    // ⚠️ **18 m until #355 and 15 m since.** That issue's verge takes the
+    // refusal threshold from about 22 m to about 16 m, so an 18 m circuit now
+    // legitimately carries a band and asserting it empty would pin the wrong
+    // thing. Fifteen is refused on its own radius and reads as 30 m halved,
+    // which is the property this case is for; it is also above the 9.55 m at
+    // which `AMBIGUOUS_TURN_RADIUS_METRES` refuses for an unrelated reason, so
+    // the refusal being measured is still `bandsAt`'s.
     const tight = circuit(12);
-    const hairpin = circuit(18);
+    const hairpin = circuit(15);
     const open = circuit(40);
 
     expect(place(tight, 0, tight.totalDistance)).toEqual([]);

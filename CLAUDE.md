@@ -242,7 +242,22 @@ apps/                 AGPL-3.0-or-later, without exception
                         SCATTER_CELL_METRES and the clustering pair, and
                         MINIMUM_SCATTER_SEPARATION_METRES followed the band
                         down from 2 m to 1.3 m because it is a measurement of
-                        the layout rather than a setting
+                        the layout rather than a setting. ⚠️ **Since #355 the
+                        verge is 3 m rather than 6 m, and the reason is the
+                        one thing four passes of tuning never computed**: a
+                        perspective cone has an apex, so an item at the verge
+                        is off the side of a 16:9 frame until
+                        `(ROAD_WIDTH_METRES / 2 + SCATTER_VERGE_METRES) /
+                        NEAR_CONE_SPREAD − CAMERA_BEHIND_METRES` metres ahead
+                        of the rider — +1.26 m at a 6 m verge, −1.67 m at a
+                        3 m one. SCATTER_VERGE_METRES is therefore a
+                        VISIBILITY constant as well as a placement one, and
+                        three-renderer.test.ts §"the verge stands inside the
+                        near cone" is the gate rather than the note. ⚠️ #355's
+                        own arithmetic OVERSTATES the effect and the file says
+                        so: 13.7 items stood in the first 25 m and 9.3 of them
+                        were already in frame, so this moved 9.3 to 10.6 and
+                        did not fill a bare near field
     src/game/scenery-models.ts
                         which file each kind's shape comes from (#341) — the
                         five ADR 0022 D-3 gives a model, the sixth it leaves
@@ -2688,6 +2703,9 @@ top of an issue **supersedes its body**.
 | Why a stretch of road has nothing beside it, and why that is a field rather than a coin | `apps/web/src/game/scatter.ts` §`clusterAt`, §`CLUSTER_SPAN_METRES`, §`OPEN_GROUND_SHARE` |
 | How far scenery may stand from a road that bends, and what the committed code used to put in the carriageway | `apps/web/src/game/scatter.ts` §`bandsAt`, §`BEND_INNER_SHARE`, [#348](https://github.com/openzigs/onyourleft/issues/348) |
 | Why a band is a depth and not also a place along the road | `apps/web/src/game/scatter.ts` §`SCATTER_BANDS_PER_SIDE`, §`CELL_FILL` |
+| Why the verge decides whether a rider sees the near scenery at all, and the arithmetic four tuning passes never did | `apps/web/src/game/scatter.ts` §`SCATTER_VERGE_METRES`, `apps/web/src/game/three-renderer.ts` §`NARROWEST_ASPECT`, `apps/web/src/game/three-renderer.test.ts` §"the verge stands inside the near cone — #355" |
+| Why the cull uses the widest frame a rider can produce and the near-field gate uses the narrowest | `apps/web/src/game/three-renderer.ts` §`WORST_CASE_ASPECT`, §`NARROWEST_ASPECT` |
+| At what aspect ratio the scenery cull starts dropping something visible, measured rather than inferred | `apps/web/src/game/three-renderer.ts` §`lateralReachMetres`, [#355](https://github.com/openzigs/onyourleft/issues/355) |
 | Which scenery constant moves density and which one only moves scenery sideways, measured rather than reasoned about | `apps/web/src/game/scatter.ts` §`SCATTER_BAND_METRES`, `apps/web/src/game/scatter.test.ts` §"how much is placed does not depend on how deep the band is — #353" |
 | What the closest two scenery items may be, why it is a measurement rather than a setting, and what #353 cost it | `apps/web/src/game/scatter.ts` §`MINIMUM_SCATTER_SEPARATION_METRES` |
 | What stops a loop shorter than the view from being drawn twice, and what else that bound buys | `apps/web/src/game/scatter.ts` §`scatterAt`, and the `cellCount` cap beside it |
@@ -2808,4 +2826,4 @@ top of an issue **supersedes its body**.
 | What an erase does to the unit preference, and what has to be told | `apps/web/src/transfer/erase-device.ts` §`eraseDevice`, `apps/web/src/transfer/TransferView.tsx` §`onUnitsReset` |
 | Which way a payload faces, and why an export is deliberately not trimmed | `apps/web/src/privacy/boundaries.ts`, [#35](https://github.com/openzigs/onyourleft/issues/35) |
 
-<!-- Last updated: 2026-09-17 by delivery:code-issue resolving #351 (the scenery density, and the near-field measurement that had been missing) -->
+<!-- Last updated: 2026-09-17 by delivery:code-issue resolving #355 (the verge as a visibility constant, and the camera-cone gate that had been missing) -->
