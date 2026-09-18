@@ -77,6 +77,15 @@ export interface SceneInput {
    * phone doing all the arithmetic and then throwing the answer away.
    */
   readonly scatterItems?: number | undefined;
+  /**
+   * How far the rider's cranks have turned, in radians — #349.
+   *
+   * Integrated from the cadence reading by `GameView`, which is where the
+   * frame clock and the sensors both are; this file only carries it onto the
+   * rider's own marker. Optional for the reason {@link riderDistance} is: the
+   * start line and the browser harness build frames with no ride behind them.
+   */
+  readonly crankAngle?: number | undefined;
 }
 
 /** Builds one frame. */
@@ -138,13 +147,30 @@ function scatter(
  */
 export function cameraPose(corridor: RoadCorridor, atDistance: number): CameraPose {
   const here = placeOnCorridor(corridor, atDistance);
-  const from = corridor.centre[here.index] as CorridorPoint;
-  const ahead = corridor.centre[Math.min(corridor.centre.length - 1, here.index + 1)];
-  // ⚠️ The heading is taken between the two corridor POINTS either side rather
-  // than from `here` to the next one, and that is not a simplification: a
-  // camera sitting exactly on `ahead` would have a zero-length direction and
-  // fall through to the arbitrary north below, which is a camera that snaps
-  // sideways once per corridor point.
+  return { x: here.x, y: here.y, z: here.z, ...headingAt(corridor, here.index) };
+}
+
+/**
+ * Which way the road runs at a corridor point.
+ *
+ * ⚠️ **One function, because since #349 two things need it**: the camera, and
+ * every marker that has a front. A second copy would be the *"separately
+ * computed value that can drift"* #94's third criterion forbids, arrived at
+ * from the side — and it would drift by exactly the amount that puts a rider on
+ * a bicycle at an angle to the road they are on.
+ *
+ * ⚠️ The heading is taken between the two corridor POINTS either side rather
+ * than from the interpolated position to the next one, and that is not a
+ * simplification: a camera sitting exactly on `ahead` would have a zero-length
+ * direction and fall through to the arbitrary north below, which is a camera
+ * that snaps sideways once per corridor point.
+ */
+function headingAt(
+  corridor: RoadCorridor,
+  index: number,
+): { readonly headingX: number; readonly headingZ: number } {
+  const from = corridor.centre[index] as CorridorPoint;
+  const ahead = corridor.centre[Math.min(corridor.centre.length - 1, index + 1)];
   const dx = (ahead?.x ?? from.x + 1) - from.x;
   const dz = (ahead?.z ?? from.z) - from.z;
   const length = Math.hypot(dx, dz);
@@ -152,9 +178,10 @@ export function cameraPose(corridor: RoadCorridor, atDistance: number): CameraPo
   // point, so the heading would be (0, 0) and the camera would look at itself.
   // Facing north is arbitrary and is better than a degenerate look-at, which
   // three resolves to NaN and renders as a black screen.
-  const headingX = length > 0 ? dx / length : 0;
-  const headingZ = length > 0 ? dz / length : 1;
-  return { x: here.x, y: here.y, z: here.z, headingX, headingZ };
+  return {
+    headingX: length > 0 ? dx / length : 0,
+    headingZ: length > 0 ? dz / length : 1,
+  };
 }
 
 /** The rider, and whichever of the bot and the ghost are in play. */
@@ -163,7 +190,15 @@ function markers(
   input: SceneInput,
   riderDistance: number,
 ): readonly RiderMarker[] {
-  const found: RiderMarker[] = [markerAt(corridor, riderDistance, 'rider')];
+  const found: RiderMarker[] = [
+    // ⚠️ The crank angle goes on the rider and on nothing else — #349, and
+    // `port.ts` §`RiderMarker.crankAngle` says why the bot and the ghost keep
+    // their own silhouettes rather than getting a bicycle each.
+    {
+      ...markerAt(corridor, riderDistance, 'rider'),
+      ...(input.crankAngle === undefined ? {} : { crankAngle: input.crankAngle }),
+    },
+  ];
   if (input.botDistance !== undefined) {
     found.push(markerAt(corridor, input.botDistance, 'bot'));
   }
@@ -199,7 +234,9 @@ function markerAt(
   kind: RiderMarker['kind'],
 ): RiderMarker {
   const at = placeOnCorridor(corridor, atDistance);
-  return { kind, x: at.x, y: at.y, z: at.z };
+  // ⚠️ The heading is the road's at **this** marker's own distance, not the
+  // camera's — #349. @see RiderMarker.headingX
+  return { kind, x: at.x, y: at.y, z: at.z, ...headingAt(corridor, at.index) };
 }
 
 /** A position on the corridor, and the centreline point it follows. */

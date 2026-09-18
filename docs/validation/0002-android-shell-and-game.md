@@ -704,6 +704,82 @@ aspect ratio and a different distance from the eye.
 
 ---
 
+## Part K — what the rider on a bicycle costs ([#349](https://github.com/openzigs/onyourleft/issues/349))
+
+**#349's fourth acceptance criterion in its own words**: *"Re-measured on the device against #246's
+baseline (GPU 7 ms, frame 13 ms, legacy jank 0.00 %). This is the change most likely to move them,
+and a regression here is a finding, not a detail."*
+
+⚠️ **Read Part H's §"The baseline, and where it actually lives" first.** It records that #246's
+committed baseline is not in fact committed — Part F's results table is empty, and the numbers #349
+quotes come from a comment on [#323](https://github.com/openzigs/onyourleft/issues/323). They are
+repeated in Part H and are the row to compare against until somebody fills Part F in.
+
+### What changed, and what it predicts
+
+| | before #349 | after |
+|---|---|---|
+| What the rider is | one `SphereGeometry(0.9, 12, 8)` | a bicycle and a body, merged, plus a crankset and four leg segments |
+| Draw calls, whole rider | 1 | **3** |
+| Draw calls, scenery-free frame | 4 | **6** |
+| Triangles, whole rider | 192 | about 1 100 |
+| Per-frame work | none | ⚠️ two assignments, one rotation, and — **only when the cranks have moved** — four matrix composes and one instanced-buffer upload |
+| Materials | one per marker | ⚠️ one for the whole rider, because the colours are vertex data |
+
+⚠️ **What this predicts for the GPU column is "nothing measurable", and the reasoning is worth
+stating so that a surprise is a finding.** #341 added five models — one of them 2 310 vertex
+indices, instanced across dozens of items — and the frame budget did not move. The rider is **one**
+object of about 1 100 triangles at one depth, filling a small share of the frame, and two extra draw
+calls against a scene that already issues ten. The plausible cost is on the **CPU** rather than the
+GPU: four `Matrix4.compose` calls and a 256-byte buffer upload on every frame the cranks turn, which
+is every frame of every ride with a cadence sensor on it.
+
+⚠️ **The measurement that is NOT worth making here is a pixel comparison.** ADR 0009 forbids deriving
+a reference image from another product, and there is no earlier one to compare against. What a
+person can say, and what K1–K3 ask, is whether it reads as a cyclist from the chase camera.
+
+### K — the rider, by eye and by number
+
+| Step | What to do | What to record |
+|---|---|---|
+| K1 | Start a ride on any route and look at the middle of the frame | Does it read as a cyclist on a bicycle, from 8 m behind and 3 m above? |
+| K2 | Pedal with a cadence sensor connected, and watch the cranks | Do they turn at the rate the HUD's Cadence field shows? Do the legs follow them? |
+| K3 | Stop pedalling, and then disconnect the cadence sensor | Do the cranks stop, rather than carrying on at the last rate? |
+| K4 | Ride a bend | Does the bicycle stay pointed along the road, or does it face an axis? |
+| K5 | ⚠️ Ride with **no** cadence sensor paired at all — a power meter only | The cranks should not move. Is a still bicycle worse than the sphere was, or better? This is the one design decision in #349 that a person has to judge |
+| K6 | 12 s of riding with the game visible, at the target rung | the rows below |
+| K7 | Repeat K6 on the **floor** rung, if the ladder reaches it | the same rows again |
+
+```bash
+adb shell dumpsys gfxinfo dev.openzigs.onyourleft reset
+# ... ride for 12 s with the game visible and the rider pedalling ...
+adb shell dumpsys gfxinfo dev.openzigs.onyourleft | grep -iE "Total frames|Janky|percentile|Missed Vsync|GPU"
+```
+
+### K results
+
+| | #323's baseline | K6 (target rung) | K7 (floor rung) |
+|---|--:|--:|--:|
+| Total frames rendered | | | |
+| **Janky frames (legacy, > 16 ms)** | 40.63 % | | |
+| Frame time 50th | 13 ms | | |
+| GPU time 50th / 90th | 6 / 9 ms | | |
+| Missed Vsync | | | |
+
+**Does it read as a cyclist (K1)?** ______________
+
+**Do the cranks match the HUD's cadence (K2)?** ______________
+
+**What happens with no cadence sensor, and is it acceptable (K5)?** ______________
+
+**Phone (OEM, model, Android):** ______________  **Build:** ______________
+
+⚠️ **A screenshot belongs here, and it has to be of the MERGED state** — Part J's own last paragraph
+says why, and #351 is what happened when one was taken only before. Take it on the phone, on the
+same stretch of the same route, once this has merged.
+
+---
+
 ## After the session
 
 1. **Fill the tables in this file and commit it.** An empty table in `main` is the honest state; a

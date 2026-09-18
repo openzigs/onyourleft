@@ -688,3 +688,76 @@ describe('a marker slides along the road rather than snapping to a corridor poin
     expect(beyond.z).toBeCloseTo(farEnd?.z ?? Number.NaN, 6);
   });
 });
+
+/**
+ * Every marker says which way it is facing, and the rider says where its cranks
+ * are — #349.
+ *
+ * The bot and the ghost are still a cone and an octahedron, both of which look
+ * the same from every side; the rider is a bicycle, and a bicycle sideways on
+ * the road is the most obviously wrong thing this frame could carry.
+ */
+describe('a marker that has a front — #349', () => {
+  it('gives every marker the heading of the road at its own distance', () => {
+    const setup = loopRoute();
+    const frame = sceneFrame({
+      profile: setup.profile,
+      origin: corridorOrigin(setup.profile),
+      state: atStartLine(setup.profile),
+      // ⚠️ **The rider just short of the first corner of a square loop and the
+      // bot just past it**, so the two are on perpendicular sides — the one
+      // case where reading the camera's heading instead of the road's at each
+      // marker gives an answer that is not merely imprecise but ninety degrees
+      // wrong. Both are inside the built corridor, so neither is clamped.
+      riderDistance: 380,
+      botDistance: 420,
+    });
+
+    const rider = frame.markers.find((each) => each.kind === 'rider');
+    const bot = frame.markers.find((each) => each.kind === 'bot');
+    expect(rider).toBeDefined();
+    expect(bot).toBeDefined();
+    for (const marker of frame.markers) {
+      expect(Math.hypot(marker.headingX, marker.headingZ)).toBeCloseTo(1, 9);
+    }
+    // The rider faces the way the camera does, by construction: both are read
+    // at the rider's own distance.
+    expect(rider?.headingX).toBeCloseTo(frame.camera.headingX, 9);
+    expect(rider?.headingZ).toBeCloseTo(frame.camera.headingZ, 9);
+    // The bot is round the corner and faces ninety degrees away.
+    const between =
+      (rider?.headingX ?? 0) * (bot?.headingX ?? 0) + (rider?.headingZ ?? 0) * (bot?.headingZ ?? 0);
+    expect(between).toBeLessThan(0.2);
+  });
+
+  it('carries the crank angle on the rider and on nobody else', () => {
+    const setup = straightRoute();
+    const frame = sceneFrame({
+      profile: setup.profile,
+      origin: corridorOrigin(setup.profile),
+      state: atStartLine(setup.profile),
+      botDistance: 120,
+      ghost: GHOST,
+      crankAngle: 2.5,
+    });
+
+    expect(frame.markers.find((each) => each.kind === 'rider')?.crankAngle).toBe(2.5);
+    for (const marker of frame.markers.filter((each) => each.kind !== 'rider')) {
+      expect(marker.crankAngle).toBeUndefined();
+    }
+  });
+
+  it('leaves the cranks unsaid when the caller has no answer', () => {
+    // `atStartLine` and the browser harness build frames with no ride behind
+    // them, exactly as they do for the interpolated distance.
+    const setup = straightRoute();
+    const frame = sceneFrame({
+      profile: setup.profile,
+      origin: corridorOrigin(setup.profile),
+      state: atStartLine(setup.profile),
+    });
+
+    expect(frame.markers[0]?.crankAngle).toBeUndefined();
+    expect('crankAngle' in (frame.markers[0] ?? {})).toBe(false);
+  });
+});

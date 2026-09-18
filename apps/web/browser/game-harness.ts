@@ -267,6 +267,27 @@ declare global {
       readonly litMarkerBrightest: Pixel;
       readonly litMarkerDarkest: Pixel;
       /**
+       * How many of the rider's pixels change when the cranks turn — #349.
+       *
+       * ⚠️ **The one measurement that says the pedalling reaches the screen.**
+       * A crank angle carried on the frame and read by nobody, or read once and
+       * never re-read, passes every assertion in `bicycle.test.ts` and every
+       * assertion in `three-renderer.test.ts` — it is #240's named defect shape
+       * for this epic, and it has caught this repository five times. So the
+       * same frame is drawn at two crank angles a quarter turn apart and the
+       * pixels that differ are counted.
+       *
+       * {@link crankStillPixels} is its control, and without it this number
+       * means nothing: it is the same comparison between two frames drawn at
+       * the **same** angle, which must be zero. A renderer that redrew the
+       * rider slightly differently every frame — or a read-back that returned
+       * noise — would otherwise look exactly like a turning crankset.
+       */
+      readonly crankTurnPixels: number;
+      readonly crankStillPixels: number;
+      /** How many pixels the bicycle itself occupies — #349. @see crankTurnPixels */
+      readonly riderPixels: number;
+      /**
        * The relative cost of the shading, in milliseconds a frame — #286.
        *
        * ⚠️ **Same scene, same route, same drawing-buffer size; the only
@@ -943,6 +964,9 @@ async function run(): Promise<void> {
       flatMarkerSpread: 0,
       litMarkerBrightest: NOWHERE,
       litMarkerDarkest: NOWHERE,
+      crankTurnPixels: 0,
+      crankStillPixels: 0,
+      riderPixels: 0,
       litFrameMs: 0,
       flatFrameMs: 0,
       shadedFrames: SHADING_FRAMES,
@@ -989,6 +1013,9 @@ async function run(): Promise<void> {
   let sceneryRowFraction = 0;
   let litMarkerPixels = 0;
   let flatMarkerPixels = 0;
+  let crankTurnPixels = 0;
+  let crankStillPixels = 0;
+  let riderPixels = 0;
   let litMarkerSpread = 0;
   let flatMarkerSpread = 0;
   let litMarkerBrightest: Pixel = NOWHERE;
@@ -1210,16 +1237,33 @@ async function run(): Promise<void> {
         const lit = { ...qualitySettings(0), shading: 'lit' as const };
         const flat = { ...qualitySettings(0), shading: 'flat' as const };
 
-        // The rider's marker alone, and then nothing at all. The difference is
-        // one sphere's silhouette, 8 m from the camera — the one object in the
-        // frame whose whole surface is at one depth, so the only thing that
-        // can vary across it is the light on it. @see shadingAcross
+        // One marker alone, and then nothing at all. The difference is that
+        // object's silhouette, 8 m from the camera, with no road gradient, no
+        // scenery and no fog in it. @see shadingAcross
         const riderOnly: SceneFrame = {
           ...frame,
           markers: frame.markers.filter((marker) => marker.kind === 'rider'),
           scatter: [],
         };
         const noMarkers: SceneFrame = { ...riderOnly, markers: [] };
+        // ⚠️ **The rider's own position, drawn as the BOT's solid — and until
+        // #349 this was the rider itself.** The spread below is the whole of
+        // what says the world has a light direction, and it rests on the probe
+        // being **one colour**: whatever varies across it is then the light and
+        // nothing else. The rider was a sphere in one blue and is now a bicycle
+        // in four colours, which reads as a spread of 183 levels with the
+        // shading switched entirely off — a measurement that had stopped
+        // meaning anything rather than a criterion that had stopped holding.
+        //
+        // A cone carries the claim better than the sphere did, having faces at
+        // several orientations, and putting it where the rider is keeps
+        // everything else about the probe identical: same distance, same depth,
+        // same absence of fog gradient. The **bot's own** marker is 120 m up
+        // the road and about five pixels tall, so it is not an alternative.
+        const oneColourSolid: SceneFrame = {
+          ...riderOnly,
+          markers: riderOnly.markers.map((marker) => ({ ...marker, kind: 'bot' as const })),
+        };
         const wholeFrame = () =>
           gl === null ? undefined : readRegion(gl, 0, 0, canvas.width, canvas.height);
 
@@ -1229,7 +1273,7 @@ async function run(): Promise<void> {
         ] as const) {
           view.setQuality(settings);
           const beforeCalls = calls();
-          view.render(riderOnly);
+          view.render(oneColourSolid);
           const drawn = calls() - beforeCalls;
           const present = wholeFrame();
           view.render(noMarkers);
@@ -1248,6 +1292,45 @@ async function run(): Promise<void> {
               flatDrawCalls = drawn;
             }
           }
+        }
+
+        // ----------------------------------------- the pedalling — #349
+        //
+        // ⚠️ **At rung 0's own settings, and on the rider-only frame**, so the
+        // only thing that can differ between the two reads is the rider. The
+        // control is drawn first and compared against the identical frame
+        // before it, which is what makes a non-zero difference below evidence
+        // of the cranks rather than of a renderer that is never still.
+        view.setQuality(lit);
+        const cranksAt = (angle: number): SceneFrame => ({
+          ...riderOnly,
+          markers: riderOnly.markers.map((marker) => ({ ...marker, crankAngle: angle })),
+        });
+        view.render(cranksAt(0));
+        const atTopOfTheStroke = wholeFrame();
+        view.render(noMarkers);
+        const withNoRider = wholeFrame();
+        if (atTopOfTheStroke !== undefined && withNoRider !== undefined) {
+          // The bicycle's **own** silhouette, which is a different object from
+          // the one-colour solid the shading probe above uses — so the share of
+          // it the cranks move is stated against the thing that actually moved.
+          riderPixels = shadingAcross(atTopOfTheStroke, withNoRider).pixels;
+        }
+        view.render(cranksAt(0));
+        view.render(cranksAt(0));
+        const theSameAgain = wholeFrame();
+        // ⚠️ **A quarter turn, not a half.** Half a turn swaps the two crank
+        // arms, and a crankset is very nearly symmetric under that — the
+        // strongest-looking angle is the one that changes the least.
+        view.render(cranksAt(Math.PI / 2));
+        const aQuarterTurnOn = wholeFrame();
+        if (
+          atTopOfTheStroke !== undefined &&
+          theSameAgain !== undefined &&
+          aQuarterTurnOn !== undefined
+        ) {
+          crankStillPixels = shadingAcross(theSameAgain, atTopOfTheStroke).pixels;
+          crankTurnPixels = shadingAcross(aQuarterTurnOn, atTopOfTheStroke).pixels;
         }
 
         // ⚠️ **Warmed with a whole discarded sweep at each shading, not one
@@ -1355,6 +1438,9 @@ async function run(): Promise<void> {
     sceneryPixelWithout,
     sceneryColumnFraction,
     sceneryRowFraction,
+    crankTurnPixels,
+    crankStillPixels,
+    riderPixels,
     litMarkerPixels,
     flatMarkerPixels,
     litMarkerSpread,

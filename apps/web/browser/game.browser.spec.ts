@@ -77,6 +77,10 @@ interface GameHarnessResult {
   readonly flatMarkerSpread: number;
   readonly litMarkerBrightest: Pixel;
   readonly litMarkerDarkest: Pixel;
+  /** How the rider's own pixels answer a quarter turn of the cranks — #349. */
+  readonly crankTurnPixels: number;
+  readonly crankStillPixels: number;
+  readonly riderPixels: number;
   readonly litFrameMs: number;
   readonly flatFrameMs: number;
   readonly shadedFrames: number;
@@ -147,6 +151,25 @@ function channelsOf(packed: number): readonly [number, number, number] {
 
 /** The three colour channels, by the name a failure should name. */
 const CHANNELS = ['red', 'green', 'blue'] as const;
+
+/**
+ * What one frame of the harness route costs, with the scenery taken out: **6**.
+ *
+ * | | calls |
+ * |---|--:|
+ * | the ground | 1 |
+ * | the road, however many marks and edge lines it carries (#242) | 1 |
+ * | the bot's solid | 1 |
+ * | the rider's merged body and bicycle (#349) | 1 |
+ * | the rider's crankset, which turns on its own axis (#349) | 1 |
+ * | the rider's four leg segments, as one instanced mesh (#349) | 1 |
+ *
+ * ⚠️ **It was 4 before #349, when the rider was a sphere.** Written out as a
+ * sum rather than as a literal so that a red run says which term moved: the
+ * road splitting into three meshes and the rider growing a fourth mesh are very
+ * different findings and a bare `6` cannot tell them apart.
+ */
+const SCENE_DRAW_CALLS = 1 + 1 + 1 + 3;
 
 async function harness(page: import('@playwright/test').Page): Promise<GameHarnessResult> {
   await page.goto(`${HARNESS_ORIGIN}/game.html`);
@@ -486,10 +509,16 @@ test.describe('the road reads as a road — #242', () => {
     // test's name says.
     //
     // ⚠️ **Against the scenery-free frame, since #244.** `drawCallsPerFrame` is
-    // measured on a frame that now carries a scatter belt too, so the four this
-    // test is about are the ground, the road and the two markers — the same
-    // enumeration, measured where the scenery is not.
-    expect(result.drawCallsWithoutScatter).toBe(4);
+    // measured on a frame that now carries a scatter belt too, so the calls
+    // this test is about are the ground, the road and the two markers — the
+    // same enumeration, measured where the scenery is not.
+    //
+    // ⚠️ **Six rather than four, since #349, and the two extra are the
+    // rider's.** It was one sphere and is now a bicycle: a merged body, a
+    // crankset that turns, and four leg segments as one instanced mesh.
+    // {@link SCENE_DRAW_CALLS} enumerates it, and the point of writing the sum
+    // out is that a red run says which term moved.
+    expect(result.drawCallsWithoutScatter).toBe(SCENE_DRAW_CALLS);
   });
 });
 
@@ -590,8 +619,9 @@ test.describe('the scenery reaches the screen, and costs one call a kind — #24
     // removed from the second on purpose. `drawCallsPerFrame` is the **first**
     // frame the harness ever drew, of the whole scene, with no such
     // arrangement — and #268's review found it published and asserted by
-    // nothing. Four is the scenery-free scene the test above this one pins.
-    expect(result.drawCallsPerFrame).toBe(4 + result.scatterKindCount);
+    // nothing. {@link SCENE_DRAW_CALLS} is the scenery-free scene the test
+    // above this one pins.
+    expect(result.drawCallsPerFrame).toBe(SCENE_DRAW_CALLS + result.scatterKindCount);
   });
 });
 
@@ -607,19 +637,26 @@ test.describe('the scenery reaches the screen, and costs one call a kind — #24
  * this epic arriving one more time. Only a shader can say whether a face is
  * lit, and only a browser has one.
  *
- * The probe is the rider's own marker: a 0.9 m sphere eight metres from the
- * camera, rendered once with it and once without, so the pixels that changed
- * are its silhouette and nothing else. At that range the fog takes about a
- * tenth of a percent across the whole object, so a brightness range across it
- * is shading or it is nothing.
+ * The probe is a single-coloured solid at the rider's own position, eight
+ * metres from the camera, rendered once with it and once without, so the pixels
+ * that changed are its silhouette and nothing else. At that range the fog takes
+ * about a tenth of a percent across the whole object, so a brightness range
+ * across it is shading or it is nothing.
+ *
+ * ⚠️ **It WAS the rider's own marker, until #349 made the rider a bicycle.** A
+ * reviewer who remembers "a 0.9 m sphere" is reading the old file. The premise
+ * every number here rests on is that the probe is **one colour**; a bicycle in
+ * four of them reports a spread of 183 levels with the shading switched
+ * entirely off, which is a measurement that has stopped meaning anything rather
+ * than a criterion that has stopped holding. `game-harness.ts`
+ * §`oneColourSolid` records why the bot's cone at the rider's position is the
+ * substitute and why the bot's own marker, 120 m up the road, is not.
  */
 test.describe('the world is lit, and can stop being — #286', () => {
-  test('finds the rider marker at both shadings, so the spreads mean something', async ({
-    page,
-  }) => {
+  test('finds the probe at both shadings, so the spreads mean something', async ({ page }) => {
     const result = await harness(page);
 
-    // Non-vacuity first. A marker that fell off the bottom of the frame would
+    // Non-vacuity first. A probe that fell off the bottom of the frame would
     // make every assertion below a comparison of two empty sets, and a spread
     // of zero would then read as "the lit world is flat" — which is the wrong
     // conclusion from the right number.
@@ -641,7 +678,7 @@ test.describe('the world is lit, and can stop being — #286', () => {
     // The unlit scene this replaced reports a spread of about zero here, which
     // is the whole reason the number is worth reading.
     expect(result.litMarkerSpread).toBeGreaterThan(20);
-    // And the brightest and darkest pixels of the marker really are the same
+    // And the brightest and darkest pixels of the probe really are the same
     // object seen at two angles, rather than two different objects: they share
     // a hue and differ in level, which is what a diffuse light does.
     const brighter = result.litMarkerBrightest;
@@ -659,7 +696,7 @@ test.describe('the world is lit, and can stop being — #286', () => {
     // shading` at `'flat'` puts back exactly the `MeshBasicMaterial` the
     // renderer used before #286 — one colour over the whole object.
     //
-    // Not zero: the marker is drawn over a fogged road and a sky, and a couple
+    // Not zero: the probe is drawn over a fogged road and a sky, and a couple
     // of its edge pixels can land on a boundary the depth buffer resolves in
     // the object's favour. A handful of levels is that; twenty is shading.
     expect(result.flatMarkerSpread).toBeLessThan(4);
@@ -867,5 +904,68 @@ test.describe('the scenery is models, not solids — #341', () => {
     // And nothing at all off this origin — the stronger statement, and the one
     // that survives somebody renaming the atlas.
     expect(requested.filter((url) => !url.startsWith(HARNESS_ORIGIN))).toEqual([]);
+  });
+});
+
+/**
+ * The rider is a bicycle, and it pedals — #349.
+ *
+ * ⚠️ **This is the only gate in the repository that can see the pedalling
+ * reach a screen.** `bicycle.test.ts` says what the crank angle means,
+ * `three-renderer.test.ts` says the renderer writes it into a matrix, and
+ * `GameView.test.tsx` says a live cadence produces one — and all three are
+ * satisfied by a renderer that draws none of it. That is #240's named defect
+ * shape for this epic: *"geometry that is computed, asserted in jsdom, and
+ * never drawn"*.
+ *
+ * ⚠️ **What it deliberately does not claim.** Not that the bicycle *looks*
+ * right: there is no reference image, ADR 0009 forbids deriving one from
+ * another product, and the measurements below are counts of pixels that
+ * changed rather than a comparison with anything. And nothing about a phone —
+ * #349's fourth criterion asks for a re-measurement against #246's baseline on
+ * the device, and `docs/validation/0002-android-shell-and-game.md` Part K is
+ * the procedure for it, with its result table empty.
+ *
+ * ⚠️ **And it cannot tell the crankset from the legs**, which was measured
+ * rather than reasoned about: with `cranks.rotation.x` left unset — the legs
+ * still following the angle — this gate stays **green**, because the legs alone
+ * move more than enough pixels. What it says is that *the pedalling reaches the
+ * screen*, which is the claim no other file can make; that the crankset itself
+ * turns is `three-renderer.test.ts` §"turns the crankset by the angle the frame
+ * carries", where it is read straight off the mesh.
+ */
+test.describe('the rider pedals, and it reaches the screen — #349', () => {
+  test('changes what is on the screen when the cranks turn', async ({ page }, testInfo) => {
+    const result = await harness(page);
+
+    // The control first: two draws of the identical frame differ nowhere. Read
+    // before the claim, because without it every number below could be noise.
+    expect(result.crankStillPixels).toBe(0);
+    expect(result.crankTurnPixels).toBeGreaterThan(0);
+    // And it is a rider's worth of change rather than a stray pixel or two:
+    // the legs and the crankset are a real share of the silhouette the shading
+    // measurement already found.
+    expect(result.riderPixels).toBeGreaterThan(0);
+    expect(result.crankTurnPixels).toBeGreaterThan(result.riderPixels * 0.05);
+    const measured =
+      `a quarter turn moves ${String(result.crankTurnPixels)} px of a ` +
+      `${String(result.riderPixels)} px rider; the same angle twice moves ` +
+      `${String(result.crankStillPixels)}`;
+    testInfo.annotations.push({ type: 'what the pedalling moves', description: measured });
+    // ⚠️ **And printed, not only annotated**, for the reason the shading
+    // measurement above gives: an annotation reaches the JSON and HTML reports
+    // and not the log, and the log is the only artefact anybody reads on a
+    // green run.
+    console.log(`what the pedalling moves — ${measured}`);
+  });
+
+  test('costs three draw calls rather than the twenty its parts would', async ({ page }) => {
+    const result = await harness(page);
+
+    // #240's NFR-2. `bicycle.ts` describes about two dozen solids, and a mesh
+    // apiece would cost four times what all the scenery costs for the one
+    // object in the middle of the frame.
+    expect(result.drawCallsWithoutScatter).toBe(SCENE_DRAW_CALLS);
+    expect(result.markerKinds).toContain('rider');
   });
 });

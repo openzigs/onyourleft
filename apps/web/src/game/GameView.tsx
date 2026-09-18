@@ -32,6 +32,7 @@ import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import { riderMassFor } from '../athlete/mass';
 import { NO_ROUTES_YET } from '../routes/two-importers';
 import { hrefFor, routeById, ROUTE_BUILDER_ROUTE } from '../shell/routes';
+import { advanceCrank } from './bicycle';
 import { settleGhostOutcome, type GhostOutcome } from './ghost-outcome';
 import { gapAgainst, type ChasedGap } from './hud/fields';
 import { HudPanel } from './hud/HudPanel';
@@ -220,6 +221,18 @@ export function GameView(props: GameViewProps): JSX.Element {
    * in a ride.
    */
   const outcomeRef = useRef<GhostOutcome | undefined>(undefined);
+  /**
+   * How far the rider's cranks have turned, in radians — #349.
+   *
+   * ⚠️ **A ref, for the reason {@link outcomeRef} is one and then some**: this
+   * changes on every frame of every pedalling ride, so as state it would be a
+   * second render sixty times a second for a number no DOM node shows. It is
+   * the one piece of *visual* state this component carries, and it is here
+   * rather than in `GameSimulation` because cadence is not a simulation input —
+   * the physics integrates power, and a crank angle changes nothing about where
+   * the rider is.
+   */
+  const crankRef = useRef<number>(0);
   const lockRef = useRef<ScreenLock>(NO_SCREEN_LOCK);
 
   const port = props.port;
@@ -349,7 +362,19 @@ export function GameView(props: GameViewProps): JSX.Element {
         return;
       }
       const at = clock();
-      simulation.advanceTo(at, port.readSensors().rider);
+      // ⚠️ **Read once**, and both halves used: the rider's power drives the
+      // simulation and the cadence drives the cranks. Two calls would be two
+      // samples of a live sensor on one frame, which is a HUD and a pair of
+      // legs describing different instants.
+      const sensors = port.readSensors();
+      simulation.advanceTo(at, sensors.rider);
+      // ⚠️ **Before the render and from the same `at`**, so the cranks the
+      // frame draws are the cranks that belong to it. `bicycle.ts` holds the
+      // rule: they turn exactly when the HUD shows a cadence number, at exactly
+      // that number, and a rider with no cadence sensor gets still cranks
+      // rather than an invented rate.
+      const sinceLastFrame = at - lastFrameAt;
+      crankRef.current = advanceCrank(crankRef.current, sensors.cadence, sinceLastFrame / 1000);
       // ⚠️ Before `setState`, so the render it schedules already has the answer.
       // This is the production consumer `scene.ts` §`ghostFinished` did not have
       // — #259, and the third time in `game/` that something built, exported and
@@ -394,6 +419,12 @@ export function GameView(props: GameViewProps): JSX.Element {
           // *placing* the scenery it is about to stop drawing. @see
           // scatterItemsRef for why this is not read off `quality` here.
           scatterItems: scatterItemsRef.current,
+          // #349: how far the cranks have turned. `port.ts`
+          // §`RiderMarker.crankAngle` records that an optional field nobody
+          // supplies is a hole this repository's gates cannot see, which is
+          // exactly what `botDistance` was before #237 — so `GameView.test.tsx`
+          // reads this back off the frame the renderer was handed.
+          crankAngle: crankRef.current,
         }),
       );
 
@@ -409,7 +440,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       // fire at all. `thermalHeadroom` is `undefined` in the shipped app
       // (`docs/validation/0002-android-shell-and-game.md` Part E), so this was
       // the only live input to the whole policy.
-      const frameMs = at - lastFrameAt;
+      const frameMs = sinceLastFrame;
       lastFrameAt = at;
       setQuality((previous) => nextQuality(previous, { frameMs }));
       frame = requestAnimationFrame(tick);
