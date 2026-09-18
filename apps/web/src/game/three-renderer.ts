@@ -131,6 +131,7 @@ import {
   DoubleSide,
   DynamicDrawUsage,
   FogExp2,
+  Group,
   InstancedBufferAttribute,
   InstancedMesh,
   LoadingManager,
@@ -144,6 +145,7 @@ import {
   Quaternion,
   Scene,
   SphereGeometry,
+  TorusGeometry,
   Vector3,
   WebGLRenderer,
   type Material,
@@ -158,6 +160,18 @@ import {
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
+import {
+  BICYCLE_COLOURS,
+  CRANK_AXIS_Y,
+  CRANK_AXIS_Z,
+  LEG_BONE_COUNT,
+  LIMB_RADIUS_METRES,
+  RIDER_BODY_PARTS,
+  RIDER_CRANK_PARTS,
+  RIDER_PALETTE,
+  legBones,
+  type RiderPart,
+} from './bicycle';
 import type { QualitySettings } from './quality';
 import { SCENERY_MODEL_FILES, sceneryResourceUrl } from './scenery-models';
 import { CAMERA_BEHIND_METRES } from './port';
@@ -215,11 +229,29 @@ export const CAMERA_FIELD_OF_VIEW_DEGREES = 60;
  * exactly what fails in both of those conditions. `views/AnalysisView.tsx` makes
  * the same argument for the same reason.
  */
-const MARKER_STYLE: Record<RiderMarker['kind'], { colour: number; radius: number }> = {
-  rider: { colour: 0x2f6fed, radius: 0.9 },
+const MARKER_STYLE: Record<SolidMarkerKind, { colour: number; radius: number }> = {
   bot: { colour: 0xc2410c, radius: 0.8 },
   ghost: { colour: 0x64748b, radius: 0.8 },
 };
+
+/**
+ * The markers that are still a solid: the bot and the ghost.
+ *
+ * ⚠️ **The rider is no longer one of them — #349, and a reviewer who remembers
+ * `MARKER_STYLE.rider` carrying a sphere of radius 0.9 is reading the old
+ * file.** It is a bicycle now, built by {@link RiderModel} from `bicycle.ts`'s
+ * parts; its blue survives as `RIDER_PALETTE.jersey`, unchanged, because #93's
+ * third criterion is about telling the three apart and the hue is half of how a
+ * rider does that.
+ *
+ * ⚠️ **Derived by subtraction rather than typed out**, so a fourth marker kind
+ * added to `port.ts` is a compile error here — which is the question anyone
+ * adding one has to answer: does it get a silhouette of its own, or a solid?
+ */
+type SolidMarkerKind = Exclude<RiderMarker['kind'], 'rider'>;
+
+/** The two, as a list to build from. @see SolidMarkerKind */
+const SOLID_MARKER_KINDS: readonly SolidMarkerKind[] = ['ghost', 'bot'];
 
 /**
  * How far the ground plane reaches from the camera, in metres.
@@ -815,7 +847,10 @@ export async function loadSceneryModels(
  */
 export const LIT_COLOURS: readonly number[] = [
   ...SCATTER_KINDS.map((kind) => SCATTER_STYLE[kind].colour),
-  ...(['rider', 'bot', 'ghost'] as const).map((kind) => MARKER_STYLE[kind].colour),
+  ...SOLID_MARKER_KINDS.map((kind) => MARKER_STYLE[kind].colour),
+  // #349. The rider's own four, from the file that decides them, for the reason
+  // the two lines above read their tables rather than restating them.
+  ...BICYCLE_COLOURS,
 ];
 
 /**
@@ -1256,6 +1291,271 @@ export class ScatterBelt {
 }
 
 /**
+ * The rider: a bicycle, somebody on it, and cranks that turn — #349.
+ *
+ * ## Three objects, and why it is three rather than nineteen or one
+ *
+ * `bicycle.ts` describes about two dozen solids. Drawn one mesh at a time that
+ * would be two dozen draw calls for the one object in the middle of the frame,
+ * against the **six** #244 spends on all the scenery — so the parts are merged,
+ * exactly as `ScatterBelt` merges a model's own parts and `terrain.ts` merges
+ * the road's four features into one buffer. The split into three is the
+ * minimum the motion requires:
+ *
+ * | | what it is | why it is not merged into its neighbour |
+ * |---|---|---|
+ * | {@link #body} | the frame, the wheels and the rider | it never moves relative to the marker |
+ * | {@link #cranks} | the chainring, the arms and the pedals | ⚠️ it **rotates**, about its own axis |
+ * | {@link #limbs} | four leg segments, instanced | ⚠️ each moves **independently** every time the cranks do |
+ *
+ * ⚠️ **Every part carries its colour as vertex data**, which is what keeps four
+ * colours down to one material — and a material is a draw call. The same trade
+ * `terrain.ts` takes for the road's edge lines, and the reason this file's own
+ * header can go on saying the road's material names no colour.
+ *
+ * ## What is rebuilt per frame, and what deliberately is not
+ *
+ * Nothing is allocated in {@link place}. The group's position and rotation are
+ * two assignments; the cranks are one; the legs are four matrix composes into a
+ * buffer that already exists — and those four are **skipped entirely when the
+ * crank angle has not moved**, which is every frame of a ride with no cadence
+ * sensor on it. #240's NFR-3.
+ *
+ * ## Why it is a class, and why it is exported
+ *
+ * The two reasons {@link ScatterBelt} and {@link WorldLamps} are: `three` may
+ * only be named in this file, so a rider in a file of its own is not available;
+ * and something reachable only through {@link ThreeGameView} cannot be driven
+ * at all in jsdom, where a `WebGLRenderer` cannot be constructed.
+ */
+export class RiderModel {
+  readonly #group = new Group();
+  readonly #materials = vertexColouredMaterials();
+  readonly #body: Mesh;
+  readonly #cranks: Mesh;
+  readonly #limbs: InstancedMesh;
+  /**
+   * The crank angle the legs in {@link #limbs} were solved for.
+   *
+   * `undefined` until the first frame, so the first pose is always written —
+   * an `InstancedMesh` starts with identity matrices, which would put all four
+   * leg segments inside the bottom bracket.
+   */
+  #posedAt: number | undefined = undefined;
+
+  readonly #position = new Vector3();
+  readonly #turn = new Quaternion();
+  readonly #stretch = new Vector3(1, 1, 1);
+  readonly #matrix = new Matrix4();
+  readonly #acrossTheBicycle = new Vector3(1, 0, 0);
+
+  constructor() {
+    this.#body = new Mesh(mergedParts(RIDER_BODY_PARTS), this.#materials.lit);
+    this.#cranks = new Mesh(mergedParts(RIDER_CRANK_PARTS), this.#materials.lit);
+    // ⚠️ The crank geometry is written in the bottom bracket's own frame, so
+    // the mesh is *mounted* at the axis and turns about its own origin. Baking
+    // the offset into the vertices instead would make `rotation.x` swing the
+    // whole crankset round the bicycle.
+    this.#cranks.position.set(0, CRANK_AXIS_Y, CRANK_AXIS_Z);
+    this.#limbs = new InstancedMesh(limbGeometry(), this.#materials.lit, LEG_BONE_COUNT);
+    this.#limbs.instanceMatrix.setUsage(DynamicDrawUsage);
+    for (const mesh of [this.#body, this.#cranks, this.#limbs]) {
+      // The rider is eight metres in front of the camera on every frame of
+      // every ride, so there is nothing for a cull to decide. The same reason
+      // the road and the ground set it, and the opposite of the scenery belt.
+      mesh.frustumCulled = false;
+      this.#group.add(mesh);
+    }
+    this.#group.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#group);
+  }
+
+  /**
+   * What the rider is placed by. For `three-renderer.test.ts`, which cannot
+   * construct a `Scene` of its own — `three-seam.test.ts` allows exactly one
+   * file in this repository to import the rendering library, and it is this
+   * one. The same reason {@link ScatterBelt.meshes} is a getter.
+   */
+  get group(): Group {
+    return this.#group;
+  }
+
+  /** The three meshes, in draw order. @see RiderModel */
+  get meshes(): { readonly body: Mesh; readonly cranks: Mesh; readonly limbs: InstancedMesh } {
+    return { body: this.#body, cranks: this.#cranks, limbs: this.#limbs };
+  }
+
+  /** Draws no rider at all, for a frame that carries none. */
+  hide(): void {
+    this.#group.visible = false;
+  }
+
+  /** Puts the rider on the road, facing along it, with the cranks where the
+   * cadence has turned them. */
+  place(marker: RiderMarker): void {
+    this.#group.visible = true;
+    // ⚠️ **At the marker's own `y`, not lifted by a radius the way the bot and
+    // the ghost are.** `bicycle.ts` puts the wheels on zero itself, so a lift
+    // here would float the bicycle above the road.
+    this.#group.position.set(marker.x, marker.y, marker.z);
+    // The model's `+Z` is the direction of travel; a rotation about `+Y` by
+    // `atan2(headingX, headingZ)` takes `(0, 0, 1)` onto the marker's heading.
+    this.#group.rotation.y = Math.atan2(marker.headingX, marker.headingZ);
+    const angle = marker.crankAngle;
+    if (angle === undefined || angle === this.#posedAt) {
+      return;
+    }
+    this.#cranks.rotation.x = angle;
+    this.#poseLegs(angle);
+    this.#posedAt = angle;
+  }
+
+  /** @see QualitySettings.shading */
+  setShading(shading: QualitySettings['shading']): void {
+    const material = this.#materials[shading];
+    this.#body.material = material;
+    this.#cranks.material = material;
+    this.#limbs.material = material;
+  }
+
+  dispose(): void {
+    this.#body.geometry.dispose();
+    this.#cranks.geometry.dispose();
+    this.#limbs.geometry.dispose();
+    this.#limbs.dispose();
+    // Both of each pair, for the reason `ScatterBelt.dispose` gives: only one
+    // of the two is mounted, and the other would leak.
+    this.#materials.lit.dispose();
+    this.#materials.flat.dispose();
+  }
+
+  /** Where the four leg segments are, for one crank angle. @see legBones */
+  #poseLegs(crankAngle: number): void {
+    const bones = legBones(crankAngle);
+    for (let index = 0; index < LEG_BONE_COUNT; index += 1) {
+      const bone = bones[index];
+      if (bone === undefined) {
+        continue;
+      }
+      this.#position.set(bone.x, bone.y, bone.z);
+      this.#turn.setFromAxisAngle(this.#acrossTheBicycle, bone.pitch);
+      // The limb geometry is one metre long, so the bone's own length is the
+      // `y` scale and nothing has to be rebuilt when a leg changes shape.
+      this.#stretch.set(1, bone.length, 1);
+      this.#limbs.setMatrixAt(
+        index,
+        this.#matrix.compose(this.#position, this.#turn, this.#stretch),
+      );
+    }
+    // ⚠️ Without this the matrices are written and never uploaded, and the legs
+    // stay wherever the first frame put them — the half of an instanced update
+    // that is impossible to see. `ScatterBelt` says the same thing.
+    this.#limbs.instanceMatrix.needsUpdate = true;
+  }
+}
+
+/**
+ * One rider part, as geometry in the model's own frame.
+ *
+ * ⚠️ **The rotation order is X, then Y, then Z, then the translation**, and
+ * `bicycle.ts` states it at {@link RiderPart} so that its numbers can be
+ * checked without a renderer. Changing it here without changing it there would
+ * leave a test asserting a bicycle the screen does not draw.
+ */
+function riderPartGeometry(each: RiderPart): BufferGeometry {
+  const geometry = solidGeometry(each.solid);
+  paintEveryVertex(geometry, each.colour);
+  geometry.rotateX(each.pitch).rotateY(each.yaw).rotateZ(each.roll);
+  geometry.translate(each.x, each.y, each.z);
+  return geometry;
+}
+
+/** The solids `bicycle.ts` describes, at the segment counts a phone can afford. */
+function solidGeometry(solid: RiderPart['solid']): BufferGeometry {
+  switch (solid.shape) {
+    case 'box':
+      return new BoxGeometry(solid.width, solid.height, solid.depth);
+    case 'tube':
+      return new CylinderGeometry(solid.radius, solid.radius, solid.length, LIMB_SEGMENTS);
+    case 'ring':
+      return new TorusGeometry(solid.radius, solid.thickness, 5, 12);
+    case 'ball':
+      return new SphereGeometry(solid.radius, 8, 6);
+  }
+}
+
+/** How many sides a tube has. Six reads as round at eight metres and costs four
+ * triangles a segment less than eight. */
+const LIMB_SEGMENTS = 6;
+
+/** A one-metre leg segment, to be scaled to each bone's own length. */
+function limbGeometry(): BufferGeometry {
+  const geometry = new CylinderGeometry(LIMB_RADIUS_METRES, LIMB_RADIUS_METRES, 1, LIMB_SEGMENTS);
+  paintEveryVertex(geometry, RIDER_PALETTE.limb);
+  return geometry;
+}
+
+/**
+ * Bakes one colour into a geometry's own vertices.
+ *
+ * ⚠️ **Through `Color`, which converts sRGB to the linear working space the
+ * shader multiplies in.** A vertex colour written as the raw `0x22262b` bytes
+ * would be the same mistake `terrain.ts` §`RoadCorridor.colours` records for
+ * the road: visibly too bright, and wrong by a different amount per channel.
+ */
+function paintEveryVertex(geometry: BufferGeometry, colour: number): void {
+  const found = new Color(colour);
+  const vertices = geometry.getAttribute('position').count;
+  const channels = new Float32Array(vertices * 3);
+  for (let at = 0; at < vertices; at += 1) {
+    channels[at * 3] = found.r;
+    channels[at * 3 + 1] = found.g;
+    channels[at * 3 + 2] = found.b;
+  }
+  geometry.setAttribute('color', new BufferAttribute(channels, 3));
+}
+
+/**
+ * Every part of one list, as a single geometry.
+ *
+ * ⚠️ **`mergeGeometries` returns `null` rather than throwing** when the parts
+ * disagree about their attributes, and a `null` here would be a rider that is
+ * silently absent from the scene. Every solid above carries position, normal,
+ * uv and the colour {@link paintEveryVertex} adds, so it cannot happen from the
+ * parts this file builds — which is exactly why the failure has to be loud
+ * rather than left to be discovered on a phone.
+ */
+function mergedParts(parts: readonly RiderPart[]): BufferGeometry {
+  const built = parts.map(riderPartGeometry);
+  const merged = mergeGeometries(built);
+  for (const each of built) {
+    each.dispose();
+  }
+  if (merged === null) {
+    throw new Error('the rider parts could not be merged into one geometry');
+  }
+  return merged;
+}
+
+/**
+ * The pair of materials the rider wears, taking its colour from its vertices.
+ *
+ * The sibling of {@link shadedMaterials}, and built the same way and for the
+ * same reason: both up front, neither ever replaced, so a quality rung can swap
+ * them mid-ride without allocating on the frame a phone is already struggling
+ * with.
+ */
+function vertexColouredMaterials(): ShadedMaterials {
+  return {
+    lit: new MeshLambertMaterial({ vertexColors: true }),
+    flat: new MeshBasicMaterial({ vertexColors: true }),
+  };
+}
+
+/**
  * Makes room for `needed` instances, growing the matrix buffer if it has to.
  *
  * ⚠️ **The mesh is never replaced, and in practice nor is its buffer**:
@@ -1295,9 +1595,11 @@ class ThreeGameView implements GameView {
   readonly #camera = new PerspectiveCamera(CAMERA_FIELD_OF_VIEW_DEGREES, 1, 0.5, 2_000);
   readonly #roadGeometry = new BufferGeometry();
   readonly #road: Mesh;
-  readonly #markers = new Map<RiderMarker['kind'], Mesh>();
+  readonly #markers = new Map<SolidMarkerKind, Mesh>();
   /** Each marker's lit material and its unlit twin — #286. @see shadedMaterials */
-  readonly #markerMaterials = new Map<RiderMarker['kind'], ShadedMaterials>();
+  readonly #markerMaterials = new Map<SolidMarkerKind, ShadedMaterials>();
+  /** The rider — #349. Not in {@link #markers}, because it is not a solid. */
+  readonly #rider = new RiderModel();
   /**
    * The world, as three objects built once and mutated thereafter — #240's
    * NFR-3. Every one of them is a fixed instance: the sky is the `Color` the
@@ -1379,7 +1681,7 @@ class ThreeGameView implements GameView {
 
     this.#scatter.addTo(this.#scene);
 
-    for (const kind of ['ghost', 'bot', 'rider'] as const) {
+    for (const kind of SOLID_MARKER_KINDS) {
       const materials = shadedMaterials(MARKER_STYLE[kind].colour);
       this.#markerMaterials.set(kind, materials);
       // Lit since #286, like the scenery and for the same reason: a sphere, a
@@ -1391,6 +1693,9 @@ class ThreeGameView implements GameView {
       this.#markers.set(kind, marker);
       this.#scene.add(marker);
     }
+    // #349. Added here rather than in `render`, so that a frame carrying no
+    // rider draws nothing rather than adding one on the frame it appears.
+    this.#rider.addTo(this.#scene);
 
     this.#lighting.addTo(this.#scene);
 
@@ -1436,6 +1741,7 @@ class ThreeGameView implements GameView {
   #applyShading(): void {
     const { shading } = this.#quality;
     this.#scatter.setShading(shading);
+    this.#rider.setShading(shading);
     for (const [kind, marker] of this.#markers) {
       const materials = this.#markerMaterials.get(kind);
       if (materials !== undefined) {
@@ -1457,6 +1763,7 @@ class ThreeGameView implements GameView {
     disposeMaterial(this.#road.material);
     this.#scatter.dispose();
     this.#lighting.dispose();
+    this.#rider.dispose();
     for (const marker of this.#markers.values()) {
       marker.geometry.dispose();
     }
@@ -1567,12 +1874,21 @@ class ThreeGameView implements GameView {
     for (const marker of this.#markers.values()) {
       marker.visible = false;
     }
+    this.#rider.hide();
     for (const wanted of markers) {
+      if (wanted.kind === 'rider') {
+        // #349. A bicycle rather than a sphere, and the one marker with a front.
+        this.#rider.place(wanted);
+        continue;
+      }
       const mesh = this.#markers.get(wanted.kind);
       if (mesh === undefined) {
         continue;
       }
       mesh.visible = true;
+      // ⚠️ Lifted by the solid's own radius so that it sits ON the road rather
+      // than half through it. The rider is **not** lifted: `bicycle.ts` puts
+      // its wheels on zero itself.
       mesh.position.set(wanted.x, wanted.y + MARKER_STYLE[wanted.kind].radius, wanted.z);
     }
   }
@@ -1627,12 +1943,17 @@ function upload(attribute: BufferAttribute, values: Float32Array | Uint32Array):
   attribute.needsUpdate = true;
 }
 
-/** A different solid per kind — see {@link MARKER_STYLE}. */
-function markerGeometry(kind: RiderMarker['kind']): BufferGeometry {
+/**
+ * A different solid per kind — see {@link MARKER_STYLE}.
+ *
+ * ⚠️ **Two, not three, since #349.** The rider's sphere is gone;
+ * {@link RiderModel} is what draws it, and #93's third criterion is better
+ * served by a bicycle, a cone and an octahedron than it was by three balls in
+ * three colours.
+ */
+function markerGeometry(kind: SolidMarkerKind): BufferGeometry {
   const { radius } = MARKER_STYLE[kind];
   switch (kind) {
-    case 'rider':
-      return new SphereGeometry(radius, 12, 8);
     case 'bot':
       // A cone, which reads as an arrow at a glance and is not a ball.
       return new ConeGeometry(radius, radius * 2.2, 8);

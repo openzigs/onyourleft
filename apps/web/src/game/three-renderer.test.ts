@@ -63,6 +63,7 @@ import {
   type ScatterKind,
 } from './scatter';
 import { ROAD_WIDTH_METRES, VIEW_AHEAD_METRES, VIEW_BEHIND_METRES } from './terrain';
+import { BICYCLE_COLOURS, CRANK_AXIS_Y, CRANK_AXIS_Z, LEG_BONE_COUNT } from './bicycle';
 import { SCENERY_MODEL_FILES } from './scenery-models';
 import {
   CAMERA_ABOVE_METRES,
@@ -74,6 +75,7 @@ import {
   loadSceneryModels,
   NARROWEST_ASPECT,
   prepareSceneryGeometry,
+  RiderModel,
   SCATTER_INSTANCE_CAPACITY,
   sceneryFitMetres,
   SCATTER_LATERAL_METRES,
@@ -83,7 +85,7 @@ import {
   LIT_COLOURS,
   WORST_CASE_ASPECT,
 } from './three-renderer';
-import { CAMERA_BEHIND_METRES, type CameraPose, type SceneFrame } from './port';
+import { CAMERA_BEHIND_METRES, type CameraPose, type RiderMarker, type SceneFrame } from './port';
 import {
   fogFactor,
   irradianceOn,
@@ -1199,7 +1201,7 @@ function frameWithScatter(): SceneFrame {
       quadCount: 1,
     },
     camera: POSE,
-    markers: [{ kind: 'rider', x: 0, y: 0, z: 0 }],
+    markers: [{ kind: 'rider', x: 0, y: 0, z: 0, headingX: 0, headingZ: 1 }],
     world: {
       skyColour: 0x88aaff,
       groundColour: 0x557744,
@@ -1328,11 +1330,14 @@ describe('the world has a light direction — #286', () => {
   });
 
   it('covers every lit material in the scene, not a sample of them', () => {
-    // The list is derived from the two style tables rather than typed out, so
-    // this states the size it must have: one per scenery kind and one per
-    // marker. A kind added without a colour in the list would make the bound
-    // above pass vacuously for it.
-    expect(LIT_COLOURS).toHaveLength(SCATTER_KINDS.length + 3);
+    // The list is derived from the style tables rather than typed out, so this
+    // states the size it must have: one per scenery kind, one per **solid**
+    // marker, and the rider's own palette. A kind added without a colour in the
+    // list would make the bound above pass vacuously for it.
+    //
+    // ⚠️ **Two solid markers rather than three, since #349** — the rider is a
+    // bicycle now, and its four colours arrive from `bicycle.ts` instead.
+    expect(LIT_COLOURS).toHaveLength(SCATTER_KINDS.length + 2 + BICYCLE_COLOURS.length);
     expect(new Set(LIT_COLOURS).size).toBe(LIT_COLOURS.length);
   });
 });
@@ -1960,5 +1965,234 @@ describe('the shapes the models bring — #341', () => {
       second.dispose();
       donor.dispose();
     });
+  });
+});
+
+/**
+ * The rider is a bicycle, and it is drawn as one — #349.
+ *
+ * ## What this file can say about it, and what it cannot
+ *
+ * `bicycle.test.ts` owns the **shape**: where the parts are, which way round
+ * they face, where the knee goes, how far the cranks turn for a cadence. None
+ * of that needs a renderer. What needs one is everything below — that the parts
+ * become three meshes rather than twenty, that the marker's heading reaches the
+ * group, that the crank angle reaches the crankset and the legs, and that both
+ * materials are released.
+ *
+ * ⚠️ **What is still not checkable here: that {@link ThreeGameView} ever calls
+ * any of it.** A `RiderModel` the view never added, or added and never placed,
+ * satisfies every assertion below — #240's named defect shape, one more time.
+ * `game.browser.spec.ts` reads the rider's own pixels back at two crank angles
+ * for exactly that reason.
+ */
+describe('the rider is a bicycle rather than a sphere — #349', () => {
+  /** A marker on the road, facing up it. */
+  function riderAt(
+    over: { readonly x?: number; readonly y?: number; readonly z?: number } = {},
+    facing: { readonly headingX?: number; readonly headingZ?: number } = {},
+    crankAngle?: number,
+  ): RiderMarker {
+    return {
+      kind: 'rider',
+      x: over.x ?? 0,
+      y: over.y ?? 0,
+      z: over.z ?? 0,
+      headingX: facing.headingX ?? 0,
+      headingZ: facing.headingZ ?? 1,
+      ...(crankAngle === undefined ? {} : { crankAngle }),
+    };
+  }
+
+  /** Where one leg segment's instance matrix puts it. */
+  function boneAt(model: RiderModel, index: number): readonly [number, number, number] {
+    const at = index * 16;
+    const matrix = model.meshes.limbs.instanceMatrix.array;
+    return [matrix[at + 12] ?? NaN, matrix[at + 13] ?? NaN, matrix[at + 14] ?? NaN];
+  }
+
+  it('is three draw calls, not one a part', () => {
+    // #240's NFR-2: draw calls are the budget, and `bicycle.ts` describes about
+    // two dozen solids. One mesh a part would cost four times what all the
+    // scenery costs, for one object.
+    const model = new RiderModel();
+    const { body, cranks, limbs } = model.meshes;
+
+    expect(model.group.children).toHaveLength(3);
+    expect(new Set([body, cranks, limbs]).size).toBe(3);
+    // One material across all three, which is what the vertex colours buy.
+    expect(new Set([body.material, cranks.material, limbs.material]).size).toBe(1);
+    model.dispose();
+  });
+
+  it('carries a colour on every vertex, which is what keeps it one material', () => {
+    const model = new RiderModel();
+    for (const mesh of [model.meshes.body, model.meshes.cranks, model.meshes.limbs]) {
+      const colour = mesh.geometry.getAttribute('color');
+      const position = mesh.geometry.getAttribute('position');
+      expect(colour).toBeDefined();
+      expect(colour.count).toBe(position.count);
+      expect(position.count).toBeGreaterThan(20);
+    }
+    model.dispose();
+  });
+
+  it('merges the parts rather than leaving them as children', () => {
+    // A merge that silently failed would be a rider missing from the scene, and
+    // `mergeGeometries` returns `null` rather than throwing. The body carries
+    // far more vertices than any one solid could.
+    const model = new RiderModel();
+    expect(model.meshes.body.geometry.getAttribute('position').count).toBeGreaterThan(300);
+    expect(model.meshes.cranks.geometry.getAttribute('position').count).toBeGreaterThan(100);
+    model.dispose();
+  });
+
+  it('reserves one instance per leg segment before the first frame', () => {
+    const model = new RiderModel();
+    expect(model.meshes.limbs.count).toBe(LEG_BONE_COUNT);
+    model.dispose();
+  });
+
+  it('draws nothing until a frame carries a rider', () => {
+    const model = new RiderModel();
+    expect(model.group.visible).toBe(false);
+    model.place(riderAt());
+    expect(model.group.visible).toBe(true);
+    model.hide();
+    expect(model.group.visible).toBe(false);
+    model.dispose();
+  });
+
+  it("stands the bicycle at the marker's own height, unlifted", () => {
+    // ⚠️ The bot and the ghost are lifted by their own radius so a solid sits
+    // ON the road; the rider must not be, because `bicycle.ts` puts its wheels
+    // on zero itself. A lift here is a bicycle floating 90 cm up.
+    const model = new RiderModel();
+    model.place(riderAt({ x: 4, y: 12.5, z: -7 }));
+
+    expect([model.group.position.x, model.group.position.y, model.group.position.z]).toEqual([
+      4, 12.5, -7,
+    ]);
+    model.dispose();
+  });
+
+  it('faces the way the marker is heading, not along an axis', () => {
+    // A bicycle has a front; the three solids it replaced did not, which is why
+    // no marker carried a heading before #349.
+    const model = new RiderModel();
+
+    model.place(riderAt({}, { headingX: 0, headingZ: 1 }));
+    expect(model.group.rotation.y).toBeCloseTo(0, 9);
+    model.place(riderAt({}, { headingX: 1, headingZ: 0 }));
+    expect(model.group.rotation.y).toBeCloseTo(Math.PI / 2, 9);
+    model.place(riderAt({}, { headingX: 0, headingZ: -1 }));
+    expect(Math.abs(model.group.rotation.y)).toBeCloseTo(Math.PI, 9);
+    // A road running south-west, which is the case an axis-aligned guess gets
+    // wrong by 45°.
+    const root = Math.SQRT1_2;
+    model.place(riderAt({}, { headingX: -root, headingZ: -root }));
+    expect(model.group.rotation.y).toBeCloseTo(-Math.PI * 0.75, 9);
+    model.dispose();
+  });
+
+  it('turns the crankset by the angle the frame carries', () => {
+    const model = new RiderModel();
+    model.place(riderAt({}, {}, 0));
+    expect(model.meshes.cranks.rotation.x).toBe(0);
+    model.place(riderAt({}, {}, 1.75));
+    expect(model.meshes.cranks.rotation.x).toBeCloseTo(1.75, 9);
+    model.dispose();
+  });
+
+  it('keeps the crankset on its own axis rather than at the road', () => {
+    // The crank geometry is written in the bottom bracket's frame, so the mesh
+    // is mounted there. Baked into the vertices instead, `rotation.x` would
+    // swing the whole crankset round the bicycle.
+    const model = new RiderModel();
+    expect(model.meshes.cranks.position.y).toBeCloseTo(CRANK_AXIS_Y, 9);
+    expect(model.meshes.cranks.position.z).toBeCloseTo(CRANK_AXIS_Z, 9);
+    model.dispose();
+  });
+
+  it('moves every leg segment when the cranks move, and uploads them', () => {
+    // ⚠️ `instanceMatrix.needsUpdate` has a setter and no getter, so `version`
+    // is what is read — the same reason `ScatterBelt`'s own test does.
+    const model = new RiderModel();
+    model.place(riderAt({}, {}, 0));
+    const before = [0, 1, 2, 3].map((index) => boneAt(model, index));
+    const uploads = model.meshes.limbs.instanceMatrix.version;
+
+    model.place(riderAt({}, {}, Math.PI / 2));
+    const after = [0, 1, 2, 3].map((index) => boneAt(model, index));
+
+    expect(model.meshes.limbs.instanceMatrix.version).toBeGreaterThan(uploads);
+    for (const index of [0, 1, 2, 3]) {
+      expect(after[index]).not.toEqual(before[index]);
+      for (const number of after[index] as readonly number[]) {
+        expect(Number.isFinite(number)).toBe(true);
+      }
+    }
+    model.dispose();
+  });
+
+  it('poses the legs on the first frame rather than leaving them at the origin', () => {
+    // An `InstancedMesh` starts every slot at the identity matrix, which puts
+    // all four segments inside the bottom bracket.
+    const model = new RiderModel();
+    model.place(riderAt({}, {}, 0));
+
+    for (const index of [0, 1, 2, 3]) {
+      expect(Math.hypot(...boneAt(model, index))).toBeGreaterThan(0.1);
+    }
+    model.dispose();
+  });
+
+  it('does no work at all on a frame where the cranks have not turned', () => {
+    // Every frame of every ride with no cadence sensor on it, and every frame
+    // of a rider who has stopped pedalling. #240's NFR-3.
+    const model = new RiderModel();
+    model.place(riderAt({}, {}, 1.1));
+    const uploads = model.meshes.limbs.instanceMatrix.version;
+
+    model.place(riderAt({ z: 30 }, {}, 1.1));
+
+    expect(model.meshes.limbs.instanceMatrix.version).toBe(uploads);
+    // …and the rider still moved, which is what makes the line above a saving
+    // rather than a frozen bicycle.
+    expect(model.group.position.z).toBe(30);
+    model.dispose();
+  });
+
+  it('gives up its shading at the floor rung, on all three meshes', () => {
+    const model = new RiderModel();
+    model.setShading('lit');
+    const lit = [model.meshes.body.material, model.meshes.cranks.material];
+    model.setShading('flat');
+
+    expect(model.meshes.body.material).not.toBe(lit[0]);
+    expect(model.meshes.cranks.material).toBe(model.meshes.body.material);
+    expect(model.meshes.limbs.material).toBe(model.meshes.body.material);
+    model.dispose();
+  });
+
+  it('releases both materials of the pair, not the one that is mounted', () => {
+    const model = new RiderModel();
+    const released = new Set<unknown>();
+    const watch = (material: unknown) => {
+      (
+        material as { addEventListener: (type: string, listener: () => void) => void }
+      ).addEventListener('dispose', () => released.add(material));
+      return material;
+    };
+    model.setShading('lit');
+    const lit = watch(model.meshes.body.material);
+    model.setShading('flat');
+    const flat = watch(model.meshes.body.material);
+    expect(lit).not.toBe(flat);
+
+    model.dispose();
+
+    expect(released.has(lit)).toBe(true);
+    expect(released.has(flat)).toBe(true);
   });
 });

@@ -196,6 +196,18 @@ apps/                 AGPL-3.0-or-later, without exception
                         Since #237 the simulation also advances the bot pacer,
                         on the same fixed step as the rider and through
                         #92's advanceBot rather than a second integrator
+    src/game/bicycle.ts the rider, as a bicycle and somebody on it (#349) — the
+                        parts as numbers rather than an asset, the two-bone knee
+                        that puts each foot on its own pedal, and the one rule
+                        that decides whether the cranks turn: they turn exactly
+                        when the HUD shows a cadence number, at exactly that
+                        number. ⚠️ It names no model, no pack and no licence —
+                        `ASSETS.toml` gains no row, and ADR 0022 D-1's "one CC0
+                        source" is untouched, because there is no CC0 rigged
+                        cyclist to download and a pedalling clip would have had
+                        to be authored. ⚠️ The bot and the ghost deliberately
+                        do NOT get one: three silhouettes beat three bicycles in
+                        three colours for #93's third criterion
     src/game/terrain.ts the road as geometry (#91), and since #242 as a road: two
                         edge lines and a broken centre line built into the same
                         vertex buffer, and a surface tinted by signed gradient.
@@ -2742,6 +2754,12 @@ top of an issue **supersedes its body**.
 | Why the fog is solved from the view distance rather than written down, and what its floor costs | `apps/web/src/game/world.ts` §`FOG_OCCLUSION_AT_VIEW_END`, §`MINIMUM_VIEW_END_OCCLUSION` |
 | Why the ground plane writes no depth, and why an unset sky is black | `apps/web/src/game/three-renderer.ts` §`UNSET_COLOUR`, §`#updateWorld` |
 | What proves the world reaches the screen rather than only the frame | `apps/web/browser/game-harness.ts`, `apps/web/browser/game.browser.spec.ts` |
+| Why the rider is a bicycle built from numbers rather than a model somebody downloaded | `apps/web/src/game/bicycle.ts`, [#349](https://github.com/openzigs/onyourleft/issues/349) |
+| What the cranks do when nobody is reporting a cadence, and why that is better than a rate | `apps/web/src/game/bicycle.ts` §`advanceCrank` |
+| Why the knee is resolved forward rather than backward, and the clamp the fit makes reachable | `apps/web/src/game/bicycle.ts` §`legBones` |
+| Why the rider costs three draw calls where the sphere cost one | `apps/web/src/game/three-renderer.ts` §`RiderModel`, `apps/web/browser/game.browser.spec.ts` §`SCENE_DRAW_CALLS` |
+| Why every marker now carries a heading, and why it is the road's rather than the camera's | `apps/web/src/game/port.ts` §`RiderMarker.headingX`, `apps/web/src/game/scene.ts` §`headingAt` |
+| Why #286's shading probe is no longer the rider's own marker | `apps/web/browser/game-harness.ts` §`oneColourSolid` |
 | Why the HUD panel's opacity is asserted inside the accessibility gate | `apps/web/src/game/hud/hud-surface.a11y.test.ts`, `apps/web/src/design/tokens.ts` §`hudSurface` |
 | What the renderer gives up when the phone gets hot, and why recovery is not the same threshold | `apps/web/src/game/quality.ts` §`HEADROOM_RESTORE_BELOW` |
 | Where scenery sits on the quality ladder, why it goes before frame rate, and why the floor is not zero | `apps/web/src/game/quality.ts` §`QualitySettings.scatterItems` |

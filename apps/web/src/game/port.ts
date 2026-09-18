@@ -89,6 +89,41 @@ export interface RiderMarker {
   readonly x: number;
   readonly y: number;
   readonly z: number;
+  /**
+   * Which way this marker is facing, as a unit vector in the ground plane.
+   *
+   * ⚠️ **Added by #349, because a bicycle has a front and a sphere does not.**
+   * The three shapes the renderer drew before it were all rotationally
+   * symmetric about the vertical, so no marker had ever needed to say which way
+   * it was pointing; a rider on a bicycle sideways on the road is the most
+   * obviously wrong thing this frame could carry.
+   *
+   * ⚠️ Taken from the corridor by `scene.ts`, at the marker's **own** distance,
+   * rather than from {@link CameraPose.headingX} — the two agree for the rider
+   * by construction and cannot for the bot or the ghost, which are somewhere
+   * else on the road and may be round a bend. Reading the camera's heading here
+   * would be correct today and silently wrong the day anything but the rider
+   * grows a front.
+   */
+  readonly headingX: number;
+  readonly headingZ: number;
+  /**
+   * How far the cranks have turned, in radians — #349.
+   *
+   * ⚠️ **Optional, and only the rider's is read**: the bot is a cone and the
+   * ghost an octahedron, and neither has a crank to turn. `bicycle.ts` says why
+   * three silhouettes beat three bicycles for #93's third criterion.
+   *
+   * ⚠️ **An optional field nobody supplies is exactly the hole
+   * `check-wiring.mjs` §Limits says this repository's gates cannot see** — it is
+   * how `SceneInput.botDistance` shipped a pacer that drew nothing (#237). So
+   * `GameView.test.tsx` reads what the renderer was actually handed and fails if
+   * a live cadence stops moving this number, and `game.browser.spec.ts` reads
+   * the rider's own pixels back at two angles. Absent means the cranks are
+   * wherever the renderer last put them, which is what the start line and the
+   * browser harness want.
+   */
+  readonly crankAngle?: number | undefined;
 }
 
 /** One frame's worth of scene. */

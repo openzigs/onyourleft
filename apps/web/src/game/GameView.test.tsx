@@ -36,7 +36,7 @@ import {
   type QualitySettings,
 } from './quality';
 import { DEFAULT_PACER_INTENSITY } from './pacer-choice';
-import { NO_READING } from './hud/fields';
+import { NO_READING, type SensorReading } from './hud/fields';
 import { NO_SENSORS } from './sensors';
 import { NO_ROUTES_YET } from '../routes/two-importers';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
@@ -100,14 +100,25 @@ const WALKING_GHOST: GhostTrack = buildGhostTrack({
   distanceMetres: [0, 3_600],
 });
 
+/** What a rider with a cadence sensor on the bicycle is reporting. */
+const LIVE_CADENCE: SensorReading = { value: 88, live: true, paired: true };
+
 /** A rider on the trainer, pedalling steadily. */
-function pedallingPort(route: RidableRoute, ghost?: GhostTrack): GamePort {
+function pedallingPort(
+  route: RidableRoute,
+  ghost?: GhostTrack,
+  // ⚠️ Overridable since #349, because *no* cadence is the case that decides
+  // what the cranks do — and it is the case every other test in this file has.
+  // A thunk rather than a value, so a test can make a live sensor go quiet
+  // mid-ride without rebuilding the port and restarting the ride.
+  cadence: () => SensorReading = () => LIVE_CADENCE,
+): GamePort {
   return {
     listRoutes: () => Promise.resolve([route]),
     loadGhost: () => Promise.resolve(ghost),
     readSensors: () => ({
       rider: { power: watts(220), live: true, paired: true },
-      cadence: { value: 88, live: true, paired: true },
+      cadence: cadence(),
       heartRate: { value: 142, live: true, paired: true },
     }),
   };
@@ -183,6 +194,19 @@ async function clickThrough(element: HTMLElement | undefined): Promise<void> {
  */
 const FRAME_PERIOD_MS = 250;
 
+/**
+ * How much wall clock a frame covers when the cranks are what is being measured.
+ *
+ * ⚠️ Shorter than {@link FRAME_PERIOD_MS} on purpose: `bicycle.ts` bounds one
+ * step at `MAXIMUM_CRANK_STEP_SECONDS`, which is 250 ms, so a frame of exactly
+ * that length would sit on the bound and an assertion about the *rate* would be
+ * measuring the stall guard instead.
+ */
+const CRANK_FRAME_MS = 100;
+
+/** A turn, in radians. @see bicycle.ts */
+const TAU = Math.PI * 2;
+
 /** Run `count` frames, advancing the clock by a frame period each time. */
 async function pump(count: number, framePeriodMs = FRAME_PERIOD_MS): Promise<void> {
   for (let index = 0; index < count; index += 1) {
@@ -206,6 +230,8 @@ async function startRiding(options: {
   readonly ghost?: boolean;
   /** Which attempt, when the default is the wrong shape for the assertion. */
   readonly track?: GhostTrack;
+  /** What the cadence channel is reporting — #349. @see LIVE_CADENCE */
+  readonly cadence?: () => SensorReading;
 }): Promise<SceneFrame[]> {
   const route = options.ghost === true ? { ...testRoute(), attempts: 1 } : testRoute();
   const frames: SceneFrame[] = [];
@@ -214,6 +240,7 @@ async function startRiding(options: {
       port={pedallingPort(
         route,
         options.ghost === true ? (options.track ?? FAST_GHOST) : undefined,
+        options.cadence ?? (() => LIVE_CADENCE),
       )}
       renderer={() => Promise.resolve(capturingRenderer(frames))}
       now={() => nowMs}
@@ -942,5 +969,95 @@ describe('GameView — a hot phone sheds scenery before frame rate (#245)', () =
     expect(drawn.scatter.length).toBeGreaterThan(
       QUALITY_LADDER[2]?.scatterItems ?? Number.POSITIVE_INFINITY,
     );
+  });
+});
+
+/**
+ * The cadence reaches the cranks — #349.
+ *
+ * ⚠️ **This is the half no other file can see, and the reason it exists is
+ * `SceneInput.botDistance`.** That field was declared, optional, unit-tested
+ * and supplied by nobody, so a built and green bot pacer drew nothing on a real
+ * route (#237). `RiderMarker.crankAngle` is the same shape, so what is asserted
+ * here is what the renderer was actually **handed**, frame after frame, rather
+ * than what `bicycle.ts` would do with a number if somebody passed it one.
+ */
+describe('GameView — the cranks turn at the rider’s own cadence (#349)', () => {
+  /** How far the cranks had turned on each frame the renderer was given. */
+  function crankAngles(frames: readonly SceneFrame[]): readonly number[] {
+    expect(frames.length).toBeGreaterThan(4);
+    return frames.map((frame) => {
+      const rider = frame.markers.find((each) => each.kind === 'rider');
+      expect(rider).toBeDefined();
+      return rider?.crankAngle ?? Number.NaN;
+    });
+  }
+
+  /** One frame's worth of turn, unwrapped across the revolution boundary. */
+  function turnBetween(before: number, after: number): number {
+    return (((after - before) % TAU) + TAU) % TAU;
+  }
+
+  it('turns them, frame after frame, while a sensor is reporting', async () => {
+    const frames = await startRiding({ pacer: false });
+    await pump(8, CRANK_FRAME_MS);
+    const angles = crankAngles(frames).slice(-6);
+
+    for (const [index, angle] of angles.entries()) {
+      expect(Number.isFinite(angle)).toBe(true);
+      if (index > 0) {
+        expect(angle).not.toBe(angles[index - 1]);
+      }
+    }
+  });
+
+  it('turns them at the rate the sensor reports, not at one of its own', async () => {
+    // ⚠️ **88 rpm is the number the HUD is showing on the same frame**, so this
+    // is the whole of #349's second criterion: the angle *is* the integral of
+    // the cadence. A renderer given a rate of its own — a constant, or one
+    // derived from speed — passes every other assertion in this file.
+    const frames = await startRiding({ pacer: false });
+    await pump(8, CRANK_FRAME_MS);
+    expect(hudField('Cadence')).toBe('88 rpm');
+    const angles = crankAngles(frames).slice(-6);
+    const expected = ((88 * TAU) / 60) * (CRANK_FRAME_MS / 1000);
+
+    for (let index = 1; index < angles.length; index += 1) {
+      expect(turnBetween(angles[index - 1] as number, angles[index] as number)).toBeCloseTo(
+        expected,
+        6,
+      );
+    }
+  });
+
+  it('leaves them exactly where they were when nothing reports a cadence', async () => {
+    // A rider with a power meter and no cadence sensor: the HUD shows a dash,
+    // and the cranks say the same thing by not moving. `bicycle.ts`
+    // §`advanceCrank` states the trade this makes and why it is the right one.
+    const frames = await startRiding({
+      pacer: false,
+      cadence: () => ({ value: undefined, live: false, paired: false }),
+    });
+    await pump(8, CRANK_FRAME_MS);
+    expect(hudField('Cadence')).toBe(`${NO_READING} rpm`);
+    expect(new Set(crankAngles(frames))).toEqual(new Set([0]));
+  });
+
+  it('stops them when a sensor that was reporting goes quiet', async () => {
+    let reported: SensorReading = LIVE_CADENCE;
+    const frames = await startRiding({ pacer: false, cadence: () => reported });
+    await pump(8, CRANK_FRAME_MS);
+    const whilePedalling = crankAngles(frames);
+    const stoppedAt = whilePedalling[whilePedalling.length - 1] as number;
+    expect(stoppedAt).not.toBe(0);
+
+    // ⚠️ Paired and not live, which is `game/sensors.ts`'s **stale** — the case
+    // that tells a dropped sensor from one nobody owns, and the one where the
+    // cranks must stop rather than carry on at the last rate reported.
+    reported = { value: undefined, live: false, paired: true };
+    await pump(8, CRANK_FRAME_MS);
+    const afterwards = crankAngles(frames).slice(whilePedalling.length);
+    expect(afterwards.length).toBeGreaterThan(4);
+    expect(new Set(afterwards)).toEqual(new Set([stoppedAt]));
   });
 });
