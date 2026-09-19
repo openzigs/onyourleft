@@ -710,6 +710,46 @@ describe('#14 — riding a saved workout on this screen', () => {
     rig.controller.dispose();
   });
 
+  it('withholds the simulation control while a workout is running', async () => {
+    // ⚠️ **There is one control point on the machine, and a running workout
+    // owns it.** `RideSession` is mounted above the router, so `workoutTick`
+    // keeps writing ERG targets while the rider is on the game screen — and
+    // the game's own release is an FTMS Stop, after which the machine ignores
+    // setpoints until it is started again. Handing both out at once made the
+    // workout's clock run against a machine that had stopped listening while
+    // every target reported success: the silent failure `startWorkout` refuses
+    // to *start* into, reached after the guard instead.
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+
+    // Available before, which is what makes the refusal below a refusal rather
+    // than a trainer that was never controllable in this rig.
+    expect(rig.controller.simulationControl()).toBeDefined();
+
+    expect(rig.controller.startWorkout(twoIntervals(), THRESHOLD)).toBe(true);
+    expect(rig.controller.simulationControl()).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('hands the simulation control back when the workout ends', async () => {
+    // The other half, and the one that would go green on a guard that simply
+    // never returned a control again. `endWorkout` clears the session, so the
+    // game may drive the road on the next ride.
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    rig.controller.startWorkout(twoIntervals(), THRESHOLD);
+    expect(rig.controller.simulationControl()).toBeUndefined();
+
+    rig.controller.endWorkout();
+    await flushMicrotasks();
+    expect(rig.controller.simulationControl()).toBeDefined();
+    rig.controller.dispose();
+  });
+
   it('starts the workout clock at zero, not at the last tick', async () => {
     // ⚠️ The defect this test was written to find. `clock` only moves on a
     // tick, and a backgrounded tab stops ticking while the real clock does not

@@ -74,6 +74,28 @@ write() {
   cat > "${tmp}/$1"
 }
 
+# seam_stubs -- every module of TRAINER_COMMAND_SEAM, as an inert stub.
+#
+# ⚠️ The seam is checked ALL-OR-NOTHING: a tree with none of the five is a tree
+# that has no trainer in it, which is what almost every fixture here is, and a
+# tree with *some* of them is one where a path has moved and is a hard failure.
+# So a case that wants one seam file has to lay down the other four, and each
+# carries a file-level `@unwired` because nothing imports it -- which is the
+# WIRE001 path rather than the rule under test.
+seam_stubs() {
+  for path in \
+    packages/domain/src/trainer/simulation.ts \
+    packages/sensors/protocol/src/fitness-machine-control.ts \
+    packages/sensors/protocol/src/simulation-writer.ts \
+    packages/sensors/protocol/src/erg-writer.ts \
+    packages/sensors/protocol/src/trainer-control-choice.ts; do
+    write "${path}" <<'TS'
+/** @unwired a fixture stub; the case under test overrides whichever it needs. */
+export {};
+TS
+  done
+}
+
 # run_check -- output on stdout+stderr, exit code in ${code}.
 run_check() {
   out="$(node "${CHECK}" --root "${tmp}" 2>&1)"
@@ -786,6 +808,14 @@ TS
 run_check
 assert_green 'a wired tree passes'
 assert_says 'and says how many watched files it read, not only how far it walked' '2 watched files'
+# ⚠️ The seam count is REPORTED rather than asserted by the gate -- see
+# `missingSeamFiles`, which cannot make an all-absent seam a hard failure
+# without failing every fixture here that legitimately has no trainer in it. A
+# tree with none of the five must therefore SAY so, because that is the whole
+# of the protection: in the real repository, where all five exist, `0 of 5` in
+# the log is the only thing that distinguishes a seam deleted wholesale from a
+# healthy run.
+assert_says 'and says how much of the trainer-command seam it found' '0 of 5 trainer-command seam'
 
 # --- A workspace specifier resolves through the exports map ------------------
 new_fixture
@@ -815,6 +845,279 @@ export function rideLength(value: number): number {
 TS
 run_check
 assert_green 'a workspace specifier is followed through the package exports map'
+
+# --- #362: the gradient the game never wrote, as the tree actually was --------
+#
+# ⚠️ **The case #363 exists for**, and the one that could not have been written
+# before it: every rule here used to stop at `apps/`, and both halves of #90
+# live in `packages/`. The shape is read out of the tree at 4bfee83:
+#
+#   git show 4bfee83:packages/sensors/protocol/src/fitness-machine-control.ts
+#
+# `TrainerControl` is declared in a module production code imports -- through
+# the protocol barrel -- so WIRE001 is silent and WIRE002 is silent, and the
+# only rule that can see it is the one that asks whether each declared METHOD
+# has a caller. The client calls `setTargetPower` from the workout session and
+# nothing calls `setSimulationParameters`, which is exactly what `adb logcat`
+# showed: 252 inbound notifications, zero writes.
+new_fixture
+seam_stubs
+write packages/sensors/protocol/src/fitness-machine-control.ts <<'TS'
+export interface TrainerControl {
+  requestControl(): Promise<void>;
+  setTargetPower(target: number): Promise<number>;
+  setSimulationParameters(parameters: { grade: number }): Promise<void>;
+  stop(): Promise<void>;
+}
+TS
+write apps/web/src/main.tsx <<'TS'
+import { startRide } from './ride/controller';
+startRide();
+TS
+write apps/web/src/ride/controller.ts <<'TS'
+import type { TrainerControl } from '../../../../packages/sensors/protocol/src/fitness-machine-control';
+
+let held: TrainerControl | undefined;
+
+export function startRide(): void {
+  void held?.requestControl();
+  void held?.setTargetPower(200);
+  void held?.stop();
+}
+TS
+run_check
+assert_red '#362: a trainer command with no caller is reported'
+assert_says '#362: and it names the method' 'TrainerControl.setSimulationParameters'
+assert_says '#362: and the file it is declared in' 'fitness-machine-control.ts'
+assert_silent_about '#362: the commands that ARE wired are not reported' 'setTargetPower'
+
+# --- ...and green once the game actually writes one ---------------------------
+#
+# The same tree with #362's fix in it. Both halves matter: a rule that could not
+# go green on the fixed tree would be one nobody could satisfy.
+write apps/web/src/game/gradient.ts <<'TS'
+import type { TrainerControl } from '../../../../packages/sensors/protocol/src/fitness-machine-control';
+
+export function writeGradient(control: TrainerControl, grade: number): void {
+  void control.setSimulationParameters({ grade });
+}
+TS
+write apps/web/src/ride/controller.ts <<'TS'
+import type { TrainerControl } from '../../../../packages/sensors/protocol/src/fitness-machine-control';
+import { writeGradient } from '../game/gradient';
+
+let held: TrainerControl | undefined;
+
+export function startRide(): void {
+  void held?.requestControl();
+  void held?.setTargetPower(200);
+  void held?.stop();
+  if (held !== undefined) {
+    writeGradient(held, 6);
+  }
+}
+TS
+run_check
+assert_green '#362: wiring the gradient up turns it green'
+
+# --- #230's shape, one package along: a call from a method nobody calls -------
+#
+# The seam inherits WIRE003's whole rule and not only its population. A gradient
+# written inside a function the client never calls is #362 with an extra step,
+# and it is the failure mode a `grep` for `setSimulationParameters` would miss.
+new_fixture
+seam_stubs
+write packages/sensors/protocol/src/fitness-machine-control.ts <<'TS'
+export interface TrainerControl {
+  setSimulationParameters(parameters: { grade: number }): Promise<void>;
+}
+TS
+write apps/web/src/main.tsx <<'TS'
+import { startRide } from './ride/controller';
+startRide();
+TS
+write apps/web/src/ride/controller.ts <<'TS'
+import type { TrainerControl } from '../../../../packages/sensors/protocol/src/fitness-machine-control';
+
+let held: TrainerControl | undefined;
+
+// Nothing calls this, so the call inside it reaches no wire.
+function driveTheHill(): void {
+  void held?.setSimulationParameters({ grade: 6 });
+}
+
+export function startRide(): void {}
+TS
+run_check
+assert_red '#362: a gradient written from a function nobody calls is still unwired'
+assert_says '#362: and it is reported as WIRE003' 'WIRE003'
+
+# --- A seam exemption needs a reason, exactly as an apps/ one does ------------
+new_fixture
+seam_stubs
+write packages/sensors/protocol/src/fitness-machine-control.ts <<'TS'
+export interface TrainerControl {
+  /** @unwired */
+  setSimulationParameters(parameters: { grade: number }): Promise<void>;
+}
+TS
+write apps/web/src/main.tsx <<'TS'
+import { startRide } from './ride/controller';
+startRide();
+TS
+write apps/web/src/ride/controller.ts <<'TS'
+import type { TrainerControl } from '../../../../packages/sensors/protocol/src/fitness-machine-control';
+export function startRide(): void {
+  const held: TrainerControl | undefined = undefined;
+  void held;
+}
+TS
+run_check
+assert_red 'a reasonless exemption on the trainer seam is refused'
+assert_says 'and it is reported as WIRE000' 'WIRE000'
+
+write packages/sensors/protocol/src/fitness-machine-control.ts <<'TS'
+export interface TrainerControl {
+  /** @unwired no screen offers a gradient yet; #362 is the issue that wires it. */
+  setSimulationParameters(parameters: { grade: number }): Promise<void>;
+}
+TS
+run_check
+assert_green 'a reasoned exemption on the trainer seam is honoured'
+assert_says 'and a tree holding the whole seam says so' '5 of 5 trainer-command seam'
+
+# --- The seam fails closed when one of its paths has moved -------------------
+#
+# ⚠️ A path list fails closed against DELETING what it names and open against
+# RENAMING it, which is #142's shape and the reason `missingPrefixes` exists one
+# rule up. All five absent is an ordinary tree with no trainer in it; four of
+# five is a module that has moved, and the gate must not pass over it quietly.
+new_fixture
+seam_stubs
+rm "${tmp}/packages/sensors/protocol/src/simulation-writer.ts"
+write apps/web/src/main.tsx <<'TS'
+import { startRide } from './ride/controller';
+startRide();
+TS
+write apps/web/src/ride/controller.ts <<'TS'
+export function startRide(): void {}
+TS
+run_check
+assert_red 'a moved trainer-seam module is a hard failure'
+assert_says 'and it names the path that moved' 'simulation-writer.ts'
+assert_says 'and says what the list is' 'TRAINER_COMMAND_SEAM'
+
+# --- A tree with no trainer at all is not a half-missing seam ----------------
+#
+# Every other fixture in this file is one of these. If the seam were required
+# rather than all-or-nothing, none of them would exercise the rule it is about.
+new_fixture
+write apps/web/src/main.tsx <<'TS'
+import { startRide } from './ride/controller';
+startRide();
+TS
+write apps/web/src/ride/controller.ts <<'TS'
+export function startRide(): void {}
+TS
+run_check
+assert_green 'a tree with none of the seam present is not a failure'
+assert_silent_about 'and it says nothing about the seam' 'TRAINER_COMMAND_SEAM'
+
+# --- Nothing else under packages/ is watched ---------------------------------
+#
+# ⚠️ The measurement that keeps #363 honest. Watching `packages/` wholesale
+# reports 171 findings on the real tree -- CLAUDE.md §4b records most of them as
+# deliberate -- so the seam has to be the five paths and not the directory they
+# are in. A sibling of a watched file, unimported and unexported-from, must be
+# invisible here.
+new_fixture
+seam_stubs
+write packages/sensors/protocol/src/heart-rate.ts <<'TS'
+export const BODY_SENSOR_LOCATION = 0x2a38;
+export function decodeHeartRate(): number {
+  return 0;
+}
+TS
+write packages/domain/src/analysis/critical-power.ts <<'TS'
+export function fitCriticalPower(): number {
+  return 0;
+}
+TS
+write apps/web/src/main.tsx <<'TS'
+import { startRide } from './ride/controller';
+startRide();
+TS
+write apps/web/src/ride/controller.ts <<'TS'
+export function startRide(): void {}
+TS
+run_check
+assert_green 'an unconsumed packages/ module outside the seam is not reported'
+assert_silent_about 'and neither is its export' 'decodeHeartRate'
+assert_silent_about 'nor one in another package' 'fitCriticalPower'
+
+# --- Every entry of the seam is load-bearing ---------------------------------
+#
+# ⚠️ **The case that stops the watchlist shrinking.** A path list can be made
+# weaker by deleting a line, and nothing above would have noticed: removing
+# `packages/domain/src/trainer/simulation.ts` from TRAINER_COMMAND_SEAM left the
+# whole suite green, because every case up to here happens to use the protocol
+# module. So this one puts an unwired declaration in **all five** at once and
+# requires each of them to be named. Deleting any entry turns it red.
+new_fixture
+write packages/domain/src/trainer/simulation.ts <<'TS'
+export interface SimulationDriver {
+  sample(distance: number): number | undefined;
+}
+export function createSimulationDriver(): SimulationDriver {
+  return { sample: () => undefined };
+}
+TS
+write packages/sensors/protocol/src/fitness-machine-control.ts <<'TS'
+export interface TrainerControl {
+  setSimulationParameters(parameters: { grade: number }): Promise<void>;
+}
+TS
+write packages/sensors/protocol/src/simulation-writer.ts <<'TS'
+export interface SimulationWriter {
+  offerGradient(grade: number): void;
+}
+TS
+write packages/sensors/protocol/src/erg-writer.ts <<'TS'
+export interface ErgWriter {
+  offerTarget(watts: number): Promise<void>;
+}
+TS
+write packages/sensors/protocol/src/trainer-control-choice.ts <<'TS'
+export function chooseTrainerControl(): string {
+  return 'none';
+}
+TS
+write apps/web/src/main.tsx <<'TS'
+import { startRide } from './ride/controller';
+import type { TrainerControl } from '../../../packages/sensors/protocol/src/fitness-machine-control';
+import type { SimulationWriter } from '../../../packages/sensors/protocol/src/simulation-writer';
+import type { ErgWriter } from '../../../packages/sensors/protocol/src/erg-writer';
+import type { SimulationDriver } from '../../../packages/domain/src/trainer/simulation';
+// A side-effect import, so the module is in the production graph and its
+// export is still named by nobody -- WIRE002 rather than WIRE001.
+import '../../../packages/sensors/protocol/src/trainer-control-choice';
+
+// Every seam module is IMPORTED -- which is the point: WIRE001 is silent, and
+// only the method-level and export-level rules can see what is unreached.
+export type Held = TrainerControl | SimulationWriter | ErgWriter | SimulationDriver;
+startRide();
+TS
+write apps/web/src/ride/controller.ts <<'TS'
+export function startRide(): void {}
+TS
+run_check
+assert_red 'an unwired declaration in any seam module is reported'
+assert_says 'the gradient driver is watched' 'SimulationDriver.sample'
+assert_says 'the control point is watched' 'TrainerControl.setSimulationParameters'
+assert_says 'the gradient writer is watched' 'SimulationWriter.offerGradient'
+assert_says 'the ERG writer is watched' 'ErgWriter.offerTarget'
+assert_says 'the gradient driver factory is watched' 'createSimulationDriver'
+assert_says 'the control-point choice is watched' 'chooseTrainerControl'
 
 printf '\n%d passed, %d failed\n' "${pass}" "${fail}"
 [ "${fail}" -eq 0 ]

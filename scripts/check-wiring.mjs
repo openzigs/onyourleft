@@ -138,6 +138,72 @@ import ts from 'typescript';
 const WATCHED_PREFIXES = ['apps/web/src/game/', 'apps/web/src/ride/'];
 const WATCHED_SUFFIX = /-port\.ts$/;
 
+/**
+ * The trainer-command seam: the one place this gate reaches into `packages/`.
+ *
+ * ## Why the limit above could not simply stand — #363
+ *
+ * #362 is the paragraph above, shipped. `createSimulationWriter` and #90's
+ * gradient driver both live in `packages/`, so no rule here looked at them, and
+ * the trainer game computed a gradient, drew the hill, put the number on the
+ * HUD and **never told the trainer**. Measured on the wire: a whole ride on
+ * Android produced 252 inbound Indoor Bike Data notifications and zero writes.
+ * That is the second defect of this exact shape — #237's `advanceBot` was the
+ * first — and it landed on the one path in the program that applies physical
+ * resistance to a person.
+ *
+ * ## Why this is five paths and not `packages/`
+ *
+ * **Measured, on the tree as it was at `4bfee83`.** Applying WIRE001 and
+ * WIRE002 to every non-test source under `packages/` reports **171 findings**
+ * over 180 files — 39 modules nothing imports (the whole of
+ * `packages/fit/tools/`, the #44 simulator, seven `vitest.config.ts`) and 132
+ * exports nothing names. That is the noise CLAUDE.md §4b records as *by
+ * design*, it is not a population anybody can clear, and a rule nobody can
+ * clear gets an allowlist — which is how a rule stops firing.
+ *
+ * So the selector is a **principle rather than a directory**, and the principle
+ * is CLAUDE.md §6's own: *"Trainer control is a safety issue, not only a
+ * security one. A smart trainer applies physical resistance to a person who is
+ * pedalling."* These five modules are everything that stands between this
+ * program and that: what decides a setpoint, what the commands are, what paces
+ * them onto the wire, and which control point they are addressed to. On the
+ * same tree they report **7** findings, every one of which is a real statement
+ * about the program rather than a false positive — and one of them,
+ * `TrainerControl.setSimulationParameters`, is #362.
+ *
+ * ⚠️ **This is a watchlist and not an allowlist**, which is the distinction
+ * #363's third criterion turns on. Adding a path here adds coverage; nothing
+ * that is watched can be *removed* from scrutiny except by an `@unwired` at the
+ * declaration carrying a reason a person can read, which is the same mechanism
+ * and the same refusal `apps/` already gets. There is no per-symbol exemption
+ * file and a future change cannot grow one.
+ *
+ * ⚠️ **Written down here rather than discovered**, for `WATCHED_PREFIXES`'
+ * reason and with the same consequence: a path naming no file is a **hard
+ * failure**, so renaming one of these means editing this file in the same
+ * commit. Discovering them would mean asking "which module can write to a
+ * trainer", which is a question only the answer already knows.
+ *
+ * ⚠️ **What it still does not see.** #237's `advanceBot` is in
+ * `packages/physics/src/pacer.ts` and is *still* not named here — a bot pacer
+ * moves a shape on a screen, not a brake — so that limit is narrowed rather
+ * than removed, and the client half of the same wiring (`game/hud/fields.ts`
+ * §`gapAgainst`) remains what this gate would report on that tree.
+ */
+const TRAINER_COMMAND_SEAM = [
+  // What gradient to ask for, and when. #90's setpoint driver.
+  'packages/domain/src/trainer/simulation.ts',
+  // The commands themselves: every op code a trainer can be given.
+  'packages/sensors/protocol/src/fitness-machine-control.ts',
+  // What paces a gradient onto the wire without letting them pile up.
+  'packages/sensors/protocol/src/simulation-writer.ts',
+  // The same, for an ERG target.
+  'packages/sensors/protocol/src/erg-writer.ts',
+  // Which control point a machine offering two is driven through.
+  'packages/sensors/protocol/src/trainer-control-choice.ts',
+];
+
 const SOURCE_EXTENSIONS = ['.ts', '.tsx'];
 const SKIP_DIRECTORIES = new Set(['node_modules', 'dist', 'coverage', '.git', 'android']);
 
@@ -546,8 +612,23 @@ export function isWatched(relativePath) {
   if (!/\.tsx?$/.test(relativePath) || isTestSupport(relativePath)) return false;
   return (
     WATCHED_PREFIXES.some((prefix) => relativePath.startsWith(prefix)) ||
-    (relativePath.startsWith('apps/') && WATCHED_SUFFIX.test(relativePath))
+    (relativePath.startsWith('apps/') && WATCHED_SUFFIX.test(relativePath)) ||
+    TRAINER_COMMAND_SEAM.includes(relativePath)
   );
+}
+
+/**
+ * Whether a watched file's **interface methods** are checked as well as its
+ * exports — WIRE003.
+ *
+ * A `*-port.ts` under `apps/`, and every module of the trainer-command seam.
+ * The second is what makes #362 reportable at all: both of #90's halves were
+ * *imported* by production code through the protocol barrel, so WIRE001 was
+ * silent and WIRE002 was silent, and the only rule that could see it was the
+ * one that asks whether each declared **method** has a caller.
+ */
+function hasPortMethods(relativePath) {
+  return WATCHED_SUFFIX.test(relativePath) || TRAINER_COMMAND_SEAM.includes(relativePath);
 }
 
 /**
@@ -567,6 +648,37 @@ export function missingPrefixes(root) {
   return WATCHED_PREFIXES.filter((prefix) => {
     const dir = join(root, ...prefix.split('/').filter((part) => part.length > 0));
     return !existsSync(dir) || !statSync(dir).isDirectory();
+  });
+}
+
+/**
+ * The entries of {@link TRAINER_COMMAND_SEAM} that name no file in `root`.
+ *
+ * ⚠️ **A hard failure for {@link missingPrefixes}' reason**, and a sharper one:
+ * a path list fails closed against deleting what it names and **open** against
+ * renaming it, so a seam module moved to a new filename would leave this gate
+ * reporting nothing about it while the success line kept claiming a count. The
+ * five are asserted to exist so that moving one means editing this file in the
+ * same commit.
+ *
+ * ⚠️ **It is checked ALL-OR-NOTHING, and that is deliberate rather than an
+ * oversight — {@link wiringProblems} raises only when SOME of the five are
+ * absent.** A tree with none of them is a tree with no trainer in it, which is
+ * what almost every fixture in `check-wiring.test.sh` is; a tree with some of
+ * them is one where a path has moved. ⚠️ **The cost is stated rather than
+ * hidden: in this repository, where all five do exist, deleting or renaming
+ * the whole seam in one commit is NOT a hard failure**, which is asymmetric
+ * with {@link missingPrefixes}, where an all-absent watched set raises. Closing
+ * it by keying on a `packages/` directory would fail the fixture trees that
+ * legitimately build one without a seam, so the guard against it is
+ * **visibility rather than refusal**: the success line prints how many seam
+ * modules were watched, so a seam that has gone missing wholesale reads as
+ * `0 of 5` in the CI log instead of being indistinguishable from a healthy run.
+ */
+export function missingSeamFiles(root) {
+  return TRAINER_COMMAND_SEAM.filter((relative) => {
+    const file = join(root, ...relative.split('/'));
+    return !existsSync(file) || !statSync(file).isFile();
   });
 }
 
@@ -590,6 +702,12 @@ export function watchedFiles(root) {
     }
   };
   walk(join(root, 'apps'));
+  // ⚠️ The trainer-command seam lives here, and nothing else under `packages/`
+  // is watched — `isWatched` is what decides, by exact path. Walking the tree
+  // rather than reading the five paths straight off disk costs a directory
+  // scan and buys one thing: a seam file that has moved is found by
+  // `missingSeamFiles` rather than silently contributing nothing.
+  walk(join(root, 'packages'));
   return found.sort();
 }
 
@@ -719,6 +837,14 @@ export function wiringProblems(root) {
         'mode #142 shipped. Move the prefix with the directory.',
     );
   }
+  const missingSeam = missingSeamFiles(root);
+  if (missingSeam.length > 0 && missingSeam.length < TRAINER_COMMAND_SEAM.length) {
+    throw new Error(
+      `trainer-command seam missing: ${missingSeam.join(', ')}. TRAINER_COMMAND_SEAM names it ` +
+        'and nothing on disk does, so the one gate that can see #362 would pass over an absent ' +
+        'population. Move the path with the file.',
+    );
+  }
   const entries = entryPoints(root);
   if (entries.length === 0) {
     throw new Error(
@@ -785,7 +911,7 @@ export function wiringProblems(root) {
           'declaration why nothing does: `@unwired <reason>`.',
       );
     }
-    if (!WATCHED_SUFFIX.test(rel)) continue;
+    if (!hasPortMethods(rel)) continue;
     for (const method of portMethods(source)) {
       if (reached.has(`member:${method.name}`)) continue;
       const at = `${rel}:${lineOf(source, method.node)}`;
@@ -802,7 +928,15 @@ export function wiringProblems(root) {
       );
     }
   }
-  return { problems, modules: modules.size, watched: watched.length };
+  return {
+    problems,
+    modules: modules.size,
+    watched: watched.length,
+    // ⚠️ Reported rather than asserted — see `missingSeamFiles` for why an
+    // all-absent seam cannot be a hard failure here, and why it must at least
+    // be legible.
+    seam: TRAINER_COMMAND_SEAM.length - missingSeam.length,
+  };
 }
 
 // ----------------------------------------------------------------------- main
@@ -840,6 +974,8 @@ if (invoked !== undefined && import.meta.filename === realpathSync(invoked)) {
   // every module the entry point reaches.
   console.log(
     'check-wiring: every watched seam is reachable from the client’s entry point ' +
-      `(${String(result.watched)} watched files, ${String(result.modules)} production modules).`,
+      `(${String(result.watched)} watched files, ${String(result.seam)} of ` +
+      `${String(TRAINER_COMMAND_SEAM.length)} trainer-command seam modules, ` +
+      `${String(result.modules)} production modules).`,
   );
 }

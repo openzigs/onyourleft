@@ -172,6 +172,11 @@ const WIND_RESISTANCE_UNITS_PER_KILOGRAM_PER_METRE = 100;
  * advertise a maximum of 3 276.7 — and machines advertising 32 are common. The
  * *setpoint* cannot express it. Truncating the octet would set 6.4 where 32 was
  * asked for, so this client refuses instead and says why.
+ *
+ * @unwired it bounds {@link TrainerControl.setTargetResistance}, which nothing
+ * in this client calls — see that method. The bound is reached from inside this
+ * module and is exported so `fitness-machine-control.test.ts` can assert the
+ * refusal against the number rather than against a literal typed twice.
  */
 export const MAX_ENCODABLE_RESISTANCE_LEVEL = 255 / RESISTANCE_UNITS_PER_LEVEL;
 
@@ -633,11 +638,34 @@ export interface TrainerControl {
    * confirm.
    */
   setTargetPower(target: Watts): Promise<Watts>;
-  /** Set the brake level. @returns the quantised level actually written. */
+  /**
+   * Set the brake level. @returns the quantised level actually written.
+   *
+   * @unwired no screen offers one, and that is a product decision rather than
+   * an omission. This client drives a trainer two ways — an ERG target from a
+   * workout (#14) and a gradient from a route (#362) — and both are quantities
+   * a rider can reason about. A brake level means nothing except relative to
+   * the range of the machine it is written to, so a control for it would be a
+   * number with no units in front of somebody who is pedalling. It is
+   * implemented because #43's criteria are about the *protocol* being complete,
+   * and it is watched since #363 because a trainer command with no caller is
+   * exactly the shape #362 had.
+   */
   setTargetResistance(level: ResistanceLevel): Promise<ResistanceLevel>;
   /** Set the simulated course conditions. */
   setSimulationParameters(parameters: SimulationParameters): Promise<void>;
-  /** Stop the training session. The deliberate way to end resistance. */
+  /**
+   * Stop the training session.
+   *
+   * ⚠️ **This ends the SESSION. It does not necessarily end the resistance**,
+   * and this comment used to say it was "the deliberate way to end resistance"
+   * — a reviewer who remembers that sentence is reading the old file. FTMS does
+   * not require a machine to discard its target setting values on `0x08`, and
+   * on the trainer validation 0002 Part L was run against on 2026-09-19 it does
+   * not: a ride ended on a climb left the grade applied, measured against a
+   * ride ended on a descent.
+   * @see https://github.com/openzigs/onyourleft/issues/372
+   */
   stop(): Promise<void>;
   /**
    * Start or resume the training session.

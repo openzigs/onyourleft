@@ -30,6 +30,7 @@
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 
 import { riderMassFor } from '../athlete/mass';
+import { StatusMessage } from '../design/StatusMessage';
 import { NO_ROUTES_YET } from '../routes/two-importers';
 import { hrefFor, routeById, ROUTE_BUILDER_ROUTE } from '../shell/routes';
 import { advanceCrank } from './bicycle';
@@ -46,7 +47,20 @@ import {
   type WindProblemField,
 } from './wind-choice';
 import { INITIAL_QUALITY, nextQuality, qualitySettings, type QualityState } from './quality';
-import { rideConditionsFor } from './rider';
+import { createGradientSession, type GradientSession } from './gradient';
+import {
+  NO_GAME_TRAINER,
+  trainerRoadNotice,
+  type GameTrainer,
+  type GameTrainerPort,
+} from './trainer-port';
+import {
+  DEFAULT_RIDING_POSITION,
+  RIDING_POSITIONS,
+  RIDING_POSITION_ORDER,
+  rideConditionsFor,
+  type RidingPosition,
+} from './rider';
 import { sceneFrame } from './scene';
 import { GameSimulation, ghostClock, type GameState } from './simulation';
 import { corridorOrigin } from './terrain';
@@ -142,6 +156,19 @@ export interface GameViewProps {
    * half.
    */
   readonly riderMass?: Kilograms | undefined;
+  /**
+   * The trainer this ride may send the road to — #362.
+   *
+   * ⚠️ **Optional, and its absence is the ordinary browser case.** The
+   * accessibility suite renders this route with no ports at all, and a rider on
+   * a power meter has no trainer to drive; both arrive here as `undefined` and
+   * both ride a road nothing is told about. What is *not* ordinary is a rider
+   * whose trainer is paired, controllable and refusing gradients without being
+   * told — `trainer-port.ts` §`trainerRoadNotice` is the sentence for each of
+   * those, and {@link GameTrainerKind} is why there are four of them rather
+   * than a boolean.
+   */
+  readonly trainer?: GameTrainerPort | undefined;
   /** Injected so a test can drive the loop without a real animation frame. */
   readonly now?: (() => number) | undefined;
 }
@@ -186,12 +213,35 @@ export function GameView(props: GameViewProps): JSX.Element {
   const [withGhost, setWithGhost] = useState(false);
   const [withPacer, setWithPacer] = useState(false);
   const [intensity, setIntensity] = useState(String(DEFAULT_PACER_INTENSITY));
+  /**
+   * Where the rider said their hands are — #365.
+   *
+   * ⚠️ **Per ride rather than on the athlete row**, like the pacer and the
+   * wind beside it and unlike the weight. A rider changes position half a dozen
+   * times in an hour and picks a different one for a hilly route than for a
+   * flat one; a stored preference would be a setting they had to remember to
+   * change. It is also the cheaper answer honestly: persisting it is a store
+   * migration, and #365 asks for a rider-facing choice rather than for a saved
+   * one.
+   */
+  const [position, setPosition] = useState<RidingPosition>(DEFAULT_RIDING_POSITION);
   const [withWind, setWithWind] = useState(false);
   const [windSpeed, setWindSpeed] = useState('');
   const [windFrom, setWindFrom] = useState(String(DEFAULT_WIND_FROM_BEARING));
   const [phase, setPhase] = useState<Phase>('choosing');
   const [state, setState] = useState<GameState | undefined>(undefined);
   const [quality, setQuality] = useState<QualityState>(INITIAL_QUALITY);
+  /**
+   * What the trainer could be told when this ride started — #362.
+   *
+   * ⚠️ **Read once, at the start of the ride, and held for its length**, which
+   * is the rule `rideConditionsFor` and the wind already follow and is stated at
+   * `GameTrainerPort.readTrainer`. Control lost mid-ride therefore arrives as a
+   * *refused write* rather than as a silent change of state, which is the
+   * honest shape: the rider is told the hills stopped reaching the trainer,
+   * with the reason the machine gave.
+   */
+  const [trainer, setTrainer] = useState<GameTrainer>(NO_GAME_TRAINER);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const simulationRef = useRef<GameSimulation | undefined>(undefined);
@@ -234,6 +284,21 @@ export function GameView(props: GameViewProps): JSX.Element {
    */
   const crankRef = useRef<number>(0);
   const lockRef = useRef<ScreenLock>(NO_SCREEN_LOCK);
+  /**
+   * The gradient control loop, while one is running — #362.
+   *
+   * ⚠️ **A ref rather than state, and the reason is the same as
+   * {@link outcomeRef}'s and then some**: it is written in the tick, sixty times
+   * a second, and nothing about the *object* changes. What a screen renders is
+   * its `state()`, read during render, which is fresh because the tick's
+   * `setState` is what scheduled that render.
+   *
+   * `undefined` whenever the trainer is not `ready`, which is every ride in a
+   * browser with no trainer paired — and that absence is what makes "a machine
+   * that does not offer simulation mode is not written to" a property of the
+   * construction rather than of a guard somebody has to keep.
+   */
+  const gradientRef = useRef<GradientSession | undefined>(undefined);
 
   const port = props.port;
 
@@ -263,6 +328,15 @@ export function GameView(props: GameViewProps): JSX.Element {
    * battery with nothing on screen to explain it.
    */
   const teardown = useCallback(() => {
+    // ⚠️ **First**, and before anything else can throw. #362's second half is
+    // that a ride which ends on a 9 % wall must not leave the flywheel loaded
+    // against whoever gets on the trainer next — `gradient.ts` §`stop` records
+    // why that is an FTMS Stop rather than a gradient of zero. `stop` is
+    // idempotent because this callback runs from the "End ride" button *and*
+    // from the effect's cleanup, and a rider who navigates away has ended the
+    // ride just as surely as one who pressed the button.
+    gradientRef.current?.stop();
+    gradientRef.current = undefined;
     void lockRef.current.release();
     lockRef.current = NO_SCREEN_LOCK;
     viewRef.current?.destroy();
@@ -286,6 +360,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       ghost: boolean,
       pacer: BotPacerPlan | undefined,
       air: Wind | undefined,
+      sitting: RidingPosition,
     ): Promise<void> => {
       const profile = route.profile;
       ghostRef.current = ghost && port !== undefined ? await port.loadGhost(route.id) : undefined;
@@ -307,7 +382,13 @@ export function GameView(props: GameViewProps): JSX.Element {
       // different claim if its conditions could move.
       const simulation = new GameSimulation({
         profile,
-        conditions: rideConditionsFor(riderMassFor(props.riderMass).mass),
+        // ⚠️ #365: the second half of "nobody ever chose the rider". The mass
+        // arrived with #325 and `RideConditions.coefficients` stayed
+        // `undefined`, so every ride fell back to `MARTIN_1998_COEFFICIENTS`
+        // and every rider was simulated as a track racer in a wind tunnel —
+        // about 2.3 mph optimistic at 150 W on the flat. `rider.ts` holds the
+        // three positions and the arithmetic.
+        conditions: rideConditionsFor(riderMassFor(props.riderMass).mass, sitting),
         ...(pacer === undefined ? {} : { pacer }),
         // ⚠️ #326: the line that makes `packages/physics`'s entire wind model
         // reachable from a ride. `RideConditions.headwindMetresPerSecond` was
@@ -318,6 +399,20 @@ export function GameView(props: GameViewProps): JSX.Element {
         ...(air === undefined ? {} : { wind: air }),
       });
       simulationRef.current = simulation;
+      // ⚠️ #362: the line that makes #90's whole gradient path reachable from a
+      // ride. `createSimulationDriver` and `createSimulationWriter` were both
+      // written, both unit-tested and both green, and nothing under `apps/`
+      // named either — so a rider on a real trainer, on a real route, produced
+      // 252 inbound notifications and not one write. The session is built only
+      // for a `ready` trainer, so a machine that did not say it accepts
+      // simulation parameters is not written to by construction rather than by
+      // a guard inside the loop.
+      const found = props.trainer?.readTrainer() ?? NO_GAME_TRAINER;
+      setTrainer(found);
+      gradientRef.current =
+        found.control === undefined
+          ? undefined
+          : createGradientSession({ profile, control: found.control });
       // ⚠️ The simulation's own state rather than `atStartLine(profile)`, which
       // is what this used to be. The two agreed about the rider and could not
       // agree about the bot — `atStartLine` takes a profile and knows nothing
@@ -329,7 +424,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       setPhase('riding');
       lockRef.current = (await props.screenLock?.acquire()) ?? NO_SCREEN_LOCK;
     },
-    [port, props.screenLock, props.riderMass],
+    [port, props.screenLock, props.riderMass, props.trainer],
   );
 
   // The loop. Deliberately the only place `requestAnimationFrame` appears.
@@ -402,6 +497,20 @@ export function GameView(props: GameViewProps): JSX.Element {
       // latency regression a rider would feel and no assertion in this
       // repository would notice, so it is recorded here rather than claimed to
       // be guarded.
+      // ⚠️ **After `advanceTo` and before the draw**, from the state the
+      // simulation has just settled on — so the hill the trainer is told about
+      // is the hill the rider is on rather than the one they were on last
+      // frame. Offered, not awaited: `setSimulationParameters` can take four
+      // seconds on a slow machine and must not hold up a frame, and the writer
+      // coalesces onto the newest setpoint rather than queueing every one.
+      //
+      // ⚠️ `state.elapsed`, not `at`. The driver's rate limit and its
+      // not-after-the-last-write guard are both *subtractions* of instants, and
+      // `elapsed` is derived from the simulation's origin, so it is exactly
+      // monotonic and in seconds — `GradientSession.sample` is where that
+      // reasoning lives, because the conversion is there.
+      gradientRef.current?.sample(simulation.state.elapsed, simulation.state.ride.distance);
+
       const drawn = simulation.drawnAt(at);
       viewRef.current?.render(
         sceneFrame({
@@ -470,6 +579,12 @@ export function GameView(props: GameViewProps): JSX.Element {
     return (
       <RoutePicker
         routes={routes}
+        // ⚠️ Read **here** rather than reusing the ride's captured state, and
+        // that is the whole point of showing it twice: `no-control` tells the
+        // rider to take control *before they start*, which is only actionable
+        // on the screen they have not left yet. A snapshot read, so it costs a
+        // property access per render and never opens a connection.
+        trainerNotice={trainerRoadNotice(props.trainer?.readTrainer() ?? NO_GAME_TRAINER)}
         withGhost={withGhost}
         onGhost={setWithGhost}
         withPacer={withPacer}
@@ -485,12 +600,18 @@ export function GameView(props: GameViewProps): JSX.Element {
         onWindFrom={setWindFrom}
         air={windChoice(withWind, windSpeed, windFrom, units)}
         windUnit={speedUnit(units)}
+        position={position}
+        onPosition={setPosition}
         onStart={start}
       />
     );
   }
 
   const sensors = port?.readSensors() ?? NO_SENSORS;
+  // ⚠️ Read during render rather than held in state — see {@link gradientRef}.
+  // The tick's own `setState` is what schedules this render, so it is fresh.
+  const gradient = gradientRef.current?.state();
+  const roadNotice = trainerRoadNotice(trainer);
   return (
     <section className="oyl-game" aria-label="Trainer game">
       <canvas
@@ -517,6 +638,28 @@ export function GameView(props: GameViewProps): JSX.Element {
           setChosen(undefined);
         }}
       />
+      {roadNotice === undefined ? undefined : (
+        <StatusMessage tone="warning" label="The road is not reaching your trainer">
+          {roadNotice}
+        </StatusMessage>
+      )}
+      {gradient?.fault === undefined ? undefined : (
+        <StatusMessage tone="danger" label="Trainer" live>
+          {gradient.fault}
+        </StatusMessage>
+      )}
+      {gradient !== undefined && gradient.fault === undefined && gradient.asked !== undefined ? (
+        // ⚠️ **The rider-visible evidence that #362 is fixed**, and the reason
+        // it is on the screen rather than only in a test: `docs/validation/
+        // 0002-android-shell-and-game.md` Part L asks somebody with a trainer in
+        // front of them to check that the gradient tracks the road, and a step
+        // whose expected result is invisible is the empty-cell problem that
+        // issue is about. `asked` rather than "holding" — `gradient.ts`
+        // §`GradientSessionState.asked` says why those are different claims.
+        <p className="oyl-muted">
+          Trainer: simulating {gradient.asked.toFixed(1)}% ({gradient.writes} sent)
+        </p>
+      ) : undefined}
     </section>
   );
 }
@@ -592,11 +735,20 @@ function RoutePicker(props: {
   readonly air: WindChoice;
   /** The label the speed box is in, from `units/format.ts`. @see WindControls */
   readonly windUnit: string;
+  /**
+   * What the rider is told about the road not reaching their trainer, if
+   * anything — #362. `undefined` for a ready trainer and for no trainer at all.
+   */
+  readonly trainerNotice: string | undefined;
+  /** Where the rider's hands are — #365. @see RIDING_POSITIONS */
+  readonly position: RidingPosition;
+  readonly onPosition: (value: RidingPosition) => void;
   readonly onStart: (
     route: RidableRoute,
     ghost: boolean,
     pacer: BotPacerPlan | undefined,
     air: Wind | undefined,
+    position: RidingPosition,
   ) => Promise<void>;
 }): JSX.Element {
   if (props.routes === undefined) {
@@ -646,6 +798,17 @@ function RoutePicker(props: {
   return (
     <div className="oyl-game__picker">
       <h2>Choose a route</h2>
+      {props.trainerNotice === undefined ? undefined : (
+        // ⚠️ **Before the ride rather than only during it**, because one of the
+        // four sentences is *"take control on the Ride screen before you
+        // start"* — advice a rider cannot act on once they are riding. It does
+        // not block the ride: a rider who wants to ride a route with no
+        // resistance is allowed to, and #362's criterion is that they are told,
+        // not that they are stopped.
+        <StatusMessage tone="warning" label="The road will not reach your trainer">
+          {props.trainerNotice}
+        </StatusMessage>
+      )}
       <PacerControls
         withPacer={props.withPacer}
         onPacer={props.onPacer}
@@ -653,6 +816,7 @@ function RoutePicker(props: {
         onIntensity={props.onIntensity}
         problem={props.choice.problem}
       />
+      <PositionControl position={props.position} onPosition={props.onPosition} />
       <WindControls
         withWind={props.withWind}
         onWind={props.onWind}
@@ -716,6 +880,7 @@ function RoutePicker(props: {
                   props.withGhost && route.attempts > 0,
                   props.choice.plan,
                   props.air.wind,
+                  props.position,
                 );
               }}
             >
@@ -799,6 +964,54 @@ function PacerControls(props: {
           {props.problem}
         </p>
       )}
+    </div>
+  );
+}
+
+/**
+ * Where the rider's hands are — #365.
+ *
+ * ⚠️ **A `<select>` rather than three numbers**, and the labels name hands
+ * rather than square metres: a drag area is a wind-tunnel measurement nobody
+ * knows about themselves, and #365's first criterion is that the choice be
+ * rider-facing. `rider.ts` §`ridingPositionDragArea` is where each one becomes
+ * a `c_d · A`, and it says why they are the game's own numbers rather than
+ * `packages/physics`'.
+ *
+ * ⚠️ **No refusal branch, unlike the pacer and the wind beside it**, because
+ * there is nothing to refuse: every option is one of three this file rendered,
+ * so a value that is not one of them cannot come off the control. That is what
+ * `pacer-choice.ts` and `wind-choice.ts` exist for and why this has no
+ * counterpart.
+ */
+function PositionControl(props: {
+  readonly position: RidingPosition;
+  readonly onPosition: (value: RidingPosition) => void;
+}): JSX.Element {
+  return (
+    <div className="oyl-game__position">
+      <label>
+        How you are riding
+        <select
+          value={props.position}
+          onChange={(event) => {
+            // The cast is safe because every option below is a `RidingPosition`
+            // this component itself rendered; `select.value` is simply typed as
+            // `string` by the DOM.
+            props.onPosition(event.target.value as RidingPosition);
+          }}
+        >
+          {RIDING_POSITION_ORDER.map((id) => (
+            <option key={id} value={id}>
+              {RIDING_POSITIONS[id].label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="oyl-muted">
+        This sets how much air you are pushing, which is most of what decides your speed on the
+        flat. Your weight is set on the Settings screen and is most of it on a climb.
+      </p>
     </div>
   );
 }

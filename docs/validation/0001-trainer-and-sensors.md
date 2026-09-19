@@ -162,6 +162,14 @@ procedure times out after five seconds and the page reports a refusal rather tha
 assumption #43's criteria forbid, and the increment is the field that gets it wrong invisibly: a
 trainer with a 5 W step asked for 251 W does something unspecified with the 1.
 
+⚠️ **"Gradient offered: yes" is the only thing either validation document said about simulation mode
+until 2026-09-18, and it is a long way short of "a gradient was sent"**
+([#364](https://github.com/openzigs/onyourleft/issues/364)). Every step below writes an **ERG**
+target; nothing here ever drives the control point in simulation mode, which is what the trainer
+game does. [0002](0002-android-shell-and-game.md) **Part L** is the step that does, and it exists
+because [#362](https://github.com/openzigs/onyourleft/issues/362) shipped a game that computed a
+gradient, drew the hill and never told the machine — with this box ticked `yes`.
+
 ### T2 — a rejected command is reported as rejected
 
 **Read this first, because the obvious test does not work and that is a design decision, not a

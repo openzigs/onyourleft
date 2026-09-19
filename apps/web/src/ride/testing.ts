@@ -75,6 +75,7 @@ export function idleSnapshot(): RideSnapshot {
       paired: false,
       controllable: false,
       canSetPower: false,
+      canSimulate: false,
       powerRange: undefined,
       hasControl: false,
       target: { kind: 'none' },
@@ -121,6 +122,7 @@ export function ridingSnapshot(): RideSnapshot {
       paired: true,
       controllable: true,
       canSetPower: true,
+      canSimulate: true,
       powerRange: {
         minimum: 0,
         maximum: 2000,
@@ -231,6 +233,15 @@ export function stubRideController(initial: RideSnapshot = idleSnapshot()): Stub
       calls.clearTarget += 1;
       return Promise.resolve();
     },
+    /**
+     * ⚠️ **Always `undefined`, and a test that needs a gradient written drives
+     * `game/gradient.ts` against its own double instead** (#362). A stub that
+     * handed out a control object here would be a second implementation of the
+     * rule `gameTrainerFrom` exists to enforce — the one that decides whether a
+     * machine may be written to at all — and `RideView` has no gradient
+     * control, so nothing on the screen this stub is for reads it.
+     */
+    simulationControl: () => undefined,
     startWorkout: (record) => {
       calls.startWorkout.push(record.name);
       // ⚠️ Answers `true` unconditionally, and a test that needs the refusal
