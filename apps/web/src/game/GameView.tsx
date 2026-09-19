@@ -651,7 +651,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       {gradient !== undefined && gradient.fault === undefined && gradient.asked !== undefined ? (
         // ⚠️ **The rider-visible evidence that #362 is fixed**, and the reason
         // it is on the screen rather than only in a test: `docs/validation/
-        // 0002-android-shell-and-game.md` Part I asks somebody with a trainer in
+        // 0002-android-shell-and-game.md` Part L asks somebody with a trainer in
         // front of them to check that the gradient tracks the road, and a step
         // whose expected result is invisible is the empty-cell problem that
         // issue is about. `asked` rather than "holding" — `gradient.ts`
@@ -969,25 +969,6 @@ function PacerControls(props: {
 }
 
 /**
- * Whether there is a wind, how strong, and where from — #326.
- *
- * Once above the list, beside {@link PacerControls} and for its reason: a wind
- * belongs to the ride rather than to a route, and three identically-labelled
- * controls per route would be a worse page for anybody using a screen reader
- * than one set that plainly governs the whole list.
- *
- * ⚠️ **The speed's unit label arrives as a prop and is not written here.**
- * #238's fifth criterion and `units/no-inline-units.ts`: this client has
- * exactly one place a number becomes a unit, and a `km/h` typed into a label
- * on this screen is the defect that rule was written after finding in the HUD.
- *
- * ⚠️ **The direction is a bearing in degrees rather than a compass point.**
- * A "north-west" picker would need a name-to-bearing table that nothing else
- * in this program has, and the game screen is not where a new vocabulary
- * should be introduced; a number box maps one-for-one onto `DegreesBearing`
- * and onto what a forecast quotes.
- */
-/**
  * Where the rider's hands are — #365.
  *
  * ⚠️ **A `<select>` rather than three numbers**, and the labels name hands
@@ -1035,6 +1016,25 @@ function PositionControl(props: {
   );
 }
 
+/**
+ * Whether there is a wind, how strong, and where from — #326.
+ *
+ * Once above the list, beside {@link PacerControls} and for its reason: a wind
+ * belongs to the ride rather than to a route, and three identically-labelled
+ * controls per route would be a worse page for anybody using a screen reader
+ * than one set that plainly governs the whole list.
+ *
+ * ⚠️ **The speed's unit label arrives as a prop and is not written here.**
+ * #238's fifth criterion and `units/no-inline-units.ts`: this client has
+ * exactly one place a number becomes a unit, and a `km/h` typed into a label
+ * on this screen is the defect that rule was written after finding in the HUD.
+ *
+ * ⚠️ **The direction is a bearing in degrees rather than a compass point.**
+ * A "north-west" picker would need a name-to-bearing table that nothing else
+ * in this program has, and the game screen is not where a new vocabulary
+ * should be introduced; a number box maps one-for-one onto `DegreesBearing`
+ * and onto what a forecast quotes.
+ */
 function WindControls(props: {
   readonly withWind: boolean;
   readonly onWind: (value: boolean) => void;

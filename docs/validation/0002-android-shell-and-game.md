@@ -6,9 +6,13 @@ filled in say which session filled them.
 **Written:** 2026-09-09, against `main` at the merge of #224, with
 [#226](https://github.com/openzigs/onyourleft/pull/226) open. **Part H added 2026-09-17** by
 [#341](https://github.com/openzigs/onyourleft/issues/341), which owes the measurement in it.
-**Part K added 2026-09-18** by [#364](https://github.com/openzigs/onyourleft/issues/364), which is
+**Part L added 2026-09-18** by [#364](https://github.com/openzigs/onyourleft/issues/364), which is
 the part that would have caught [#362](https://github.com/openzigs/onyourleft/issues/362) and did
-not exist to.
+not exist to. ⚠️ **It is `L` rather than the `K` it was drafted as**, because #349's Part K was
+already here and a part letter in this file is a safety control rather than a label: the ordering
+rule, the power-switch instruction and the do-not-clip-in instruction below are all keyed to it, so
+two parts sharing a letter makes each of those instructions ambiguous even when every sentence in it
+is individually correct.
 **Discharges, when run:** [#87](https://github.com/openzigs/onyourleft/issues/87) criteria 2, 3, 5
 and 6 and its two-OEM line; the Android half of
 [#85](https://github.com/openzigs/onyourleft/issues/85); and
@@ -39,20 +43,21 @@ behaviour; this establishes that Android reproduces it.
 The same rule as 0001, for the same reason — CLAUDE.md §6: *a smart trainer applies physical
 resistance to a person who is pedalling*.
 
-1. **Parts A, B, C and E to J write nothing that changes resistance.** They run first.
-2. ⚠️ **Parts K and D are last, in that order**, and they are the only two that change what a rider
-   feels. **K (simulation mode) before D (ERG)**, because K's resistance follows a road the rider can
+1. **Parts A, B, C and E to K write nothing that changes resistance.** They run first.
+2. ⚠️ **Parts L and D are last, in that order**, and they are the only two that change what a rider
+   feels. **L (simulation mode) before D (ERG)**, because L's resistance follows a road the rider can
    see coming and D's is a number somebody typed — and D's own steps are ordered so the one that
    leaves the trainer in an unknown state (D4, a mid-ERG disconnect) is the last thing done all day.
    ⚠️ **This list used to read "Part D is last" and name four parts as safe; a reviewer who
-   remembers that is reading the old file.** Part K is new
+   remembers that is reading the old file.** Part L is new
    ([#364](https://github.com/openzigs/onyourleft/issues/364)) and the whole document had no
    simulation-mode step before it — which is why an afternoon spent filling in Part D truthfully
    would have left every cell green and the game sending nothing (#362).
-3. **Have the trainer's power switch within reach for Parts K and D.**
-4. **Do not clip in for D4, and do not clip in for K5.** Flat pedals or bare feet, or stand beside
-   the bike.
-5. ⚠️ **K3 asks for the steepest section of the route.** Ride it seated and in a low gear, and
+3. **Have the trainer's power switch within reach for Parts L and D.**
+4. **Do not clip in for D4, and do not clip in for L5.** Flat pedals or bare feet, or stand beside
+   the bike. ⚠️ **`L5`, not `K5`** — Part K is #349's rendering measurement and its own K5 asks for
+   a ride with no cadence sensor, which changes no resistance at all.
+5. ⚠️ **L3 asks for the steepest section of the route.** Ride it seated and in a low gear, and
    choose a route whose maximum gradient you already know — `RouteProfile` carries it, the route
    screen shows it, and a 20 % wall arriving under a rider who expected 6 % is the failure mode this
    ordering exists for.
@@ -84,14 +89,14 @@ the same log holds **252 inbound notifications and zero writes**. Nothing was ev
 trainer. That is [#362](https://github.com/openzigs/onyourleft/issues/362) — the game computed a
 gradient, drew the hill, put the number on the HUD and never told the machine — and **no step in
 either validation document would have caught it**, because Part D is four ERG steps and 0001's T1
-records only whether the feature bits *offer* gradient. **Part K is that step.**
+records only whether the feature bits *offer* gradient. **Part L is that step.**
 
 **Not established, and previously easy to read as established:**
 
 | What | Why not |
 |---|---|
 | **Part B, every step** | ⚠️ The session exercised **one** peripheral — the trainer. B1–B4 are all about *two* links, overlapping writes and 40 connect/disconnect cycles, and none of them was run. B's results table is still empty and is not made less empty by a ride that worked |
-| Anything written to the trainer | Zero writes. Part D and Part K are both unrun |
+| Anything written to the trainer | Zero writes. Part D and Part L are both unrun |
 | The two-OEM line | One phone |
 | Background recording, the thermal run, the scenery parts | Not attempted |
 
@@ -854,7 +859,7 @@ same stretch of the same route, once this has merged.
 
 ---
 
-## Part K — simulation mode over the Capacitor path ⚠️ run last but one, before Part D
+## Part L — simulation mode over the Capacitor path ⚠️ run last but one, before Part D
 
 Added 2026-09-18 by [#364](https://github.com/openzigs/onyourleft/issues/364). **This is the part
 whose absence let [#362](https://github.com/openzigs/onyourleft/issues/362) ship.**
@@ -881,8 +886,18 @@ arriving in a procedure rather than in a gate.
 - **`adb logcat` is the independent check**, and it is the one that found the defect. Filter for
   `BluetoothLe` and look for **writes**, not notifications — 252 of the latter and none of the former
   is what a whole ride produced before this was wired.
-- **A trainer that does not offer simulation mode is not a failed run.** It is K1's finding, and the
+- **A trainer that does not offer simulation mode is not a failed run.** It is L1's finding, and the
   rider is supposed to be *told*. Write down which it was before doing anything else.
+- ⚠️ **End any workout before you start, and this is a safety instruction rather than tidiness.**
+  There is one control point on the machine. A workout started on the Ride screen keeps running
+  while the rider is on the game screen — `RideSession` is mounted above the router — so the game is
+  **refused** the trainer while one is in progress and the notice reads *"A workout is driving your
+  trainer…"*. That refusal is the correct behaviour and is worth seeing once: start a workout, open
+  the game, and confirm the notice appears and the trainer line shows no count. ⚠️ **If a gradient
+  IS written while a workout is running, stop the session.** Two writers on one control point is
+  the defect, and the sharp end of it is that ending the game ride sends an FTMS Stop, after which
+  the machine ignores the workout's targets while the workout's clock runs on and every one of them
+  reports success.
 
 ```bash
 # Watch what actually reaches the machine. ⚠️ The write lines are what matter;
@@ -893,40 +908,40 @@ adb logcat | grep -i "BluetoothLe"
 
 | Step | What to do | What should happen |
 |---|---|---|
-| K1 | On the Ride screen, pair the trainer and **take control**. Then open the game and choose a route | If the machine does not offer simulation mode, the picker says so in words about the **road** — *"does not offer simulation mode … the road on screen is real; the resistance under you is not"* — and **nothing is written**. If control was not taken, it says to take it on the Ride screen. Either way, record which and stop here |
-| K2 | ⚠️ **On the bike, low gear, seated.** Start the ride on a route with a gentle climb and pedal | Within a second or two the HUD's trainer line reads `Trainer: simulating …%` with a **non-zero** count beside it, and the resistance increases as the climb starts |
-| K3 | Ride through the steepest section of the route you chose | The percentage on that line **tracks the route's own gradient** — compare it against the gradient field on the HUD, which is read from the same profile. They should agree to a tenth or so |
-| K4 | Ride over the crest and onto the descent | The percentage goes **negative** and the resistance drops away. A sign lost between the profile and the control point shows up here and nowhere else |
-| K5 | ⚠️ **Off the bike.** Press *End ride* | The trainer is **released** — an FTMS Stop, not a gradient of zero — and the resistance goes away. Confirm by turning the cranks by hand |
-| K6 | Read the logcat you have been collecting | There are **write** lines, not only `Notifying listeners`. Count them and compare with the `(n sent)` figure the HUD showed |
-| K7 | Start a second ride on the same route, then navigate away from the game screen mid-ride | The trainer is released again. This is the cleanup path rather than the button, and it is a different line of code |
+| L1 | On the Ride screen, pair the trainer and **take control**. Then open the game and choose a route | If the machine does not offer simulation mode, the picker says so in words about the **road** — *"does not offer simulation mode … the road on screen is real; the resistance under you is not"* — and **nothing is written**. If control was not taken, it says to take it on the Ride screen. Either way, record which and stop here |
+| L2 | ⚠️ **On the bike, low gear, seated.** Start the ride on a route with a gentle climb and pedal | Within a second or two the HUD's trainer line reads `Trainer: simulating …%` with a **non-zero** count beside it, and the resistance increases as the climb starts |
+| L3 | Ride through the steepest section of the route you chose | The percentage on that line **tracks the route's own gradient** — compare it against the gradient field on the HUD, which is read from the same profile. They should agree to a tenth or so |
+| L4 | Ride over the crest and onto the descent | The percentage goes **negative** and the resistance drops away. A sign lost between the profile and the control point shows up here and nowhere else |
+| L5 | ⚠️ **Off the bike.** Press *End ride* | The trainer is **released** — an FTMS Stop, not a gradient of zero — and the resistance goes away. Confirm by turning the cranks by hand |
+| L6 | Read the logcat you have been collecting | There are **write** lines, not only `Notifying listeners`. Count them and compare with the `(n sent)` figure the HUD showed |
+| L7 | Start a second ride on the same route, then navigate away from the game screen mid-ride | The trainer is released again. This is the cleanup path rather than the button, and it is a different line of code |
 
-⚠️ **K3 is the step that distinguishes "a gradient was written" from "the right gradient was
+⚠️ **L3 is the step that distinguishes "a gradient was written" from "the right gradient was
 written".** A driver fed the wrong distance writes a perfectly plausible number that has nothing to
 do with the hill under the rider, and every other step here would pass.
 
-⚠️ **K5 and K7 are the same claim by two paths and both are needed.** FTMS simulation parameters
+⚠️ **L5 and L7 are the same claim by two paths and both are needed.** FTMS simulation parameters
 **persist on the machine until they are changed**, so a ride ended on a 9 % wall leaves the flywheel
 loaded against whoever gets on next. `apps/web/src/game/gradient.ts` §`stop` records why the release
 is a Stop rather than a flat road.
 
-### K results
+### L results
 
 | Step | Result | Notes |
 |---|---|---|
-| K1 | does the machine offer simulation mode? | |
-| K2 | first gradient seen / writes reported: | |
-| K3 | HUD gradient vs trainer line: | |
-| K4 | negative on the descent? | |
-| K5 | released on *End ride*? | |
-| K6 | write lines in logcat: | notifications for comparison: |
-| K7 | released on navigating away? | |
+| L1 | does the machine offer simulation mode? | |
+| L2 | first gradient seen / writes reported: | |
+| L3 | HUD gradient vs trainer line: | |
+| L4 | negative on the descent? | |
+| L5 | released on *End ride*? | |
+| L6 | write lines in logcat: | notifications for comparison: |
+| L7 | released on navigating away? | |
 
 **Did the hills feel like hills (in your own words)?** ______________
 
 **Phone (OEM, model, Android):** ______________  **Build:** ______________  **Trainer:** ____________
 
-⚠️ **If K2's count is zero, stop and write that down as the result.** It is #362, and the useful
+⚠️ **If L2's count is zero, stop and write that down as the result.** It is #362, and the useful
 information is the exact state — which of the four things `trainer-port.ts` §`GameTrainerKind` can
 say the screen was reporting at the time.
 
@@ -959,7 +974,7 @@ say the screen was reporting at the time.
 - **Anything about a release build.** This is a debug APK. #95 owns signing and distribution.
 - **That two OEMs are enough.** It is what #87 asks for. Android BLE stacks vary by chipset as much
   as by vendor, and two is a floor rather than coverage.
-- **That the gradient a trainer applies is the gradient it was asked for.** Part K establishes that
+- **That the gradient a trainer applies is the gradient it was asked for.** Part L establishes that
   a value was sent and that it tracks the road; what the machine does with it — its own ramp rate,
   its own interpretation of `c_d · A` and `C_RR`, whether it clamps — is the trainer's and is not
   observable from here. `apps/web/src/game/gradient.ts` §"What is deliberately NOT sent" records

@@ -327,7 +327,7 @@ apps/                 AGPL-3.0-or-later, without exception
                         else** — the rider's wind is out of scope and their drag
                         area would double-count against the game's own physics
     src/game/trainer-port.ts
-                        what the game may ask of a trainer, and the four things
+                        what the game may ask of a trainer, and the five things
                         it is told when it may not (#362). ⚠️ A `*-port.ts` on
                         purpose: the seam is threaded through JSX, which §4j's
                         own §Limits say the gate cannot follow, so the suffix
@@ -335,7 +335,19 @@ apps/                 AGPL-3.0-or-later, without exception
                         The control is handed over **only** in the `ready`
                         state, which is what makes "a machine that does not
                         offer simulation mode is not written to" a property of
-                        the construction rather than of a guard
+                        the construction rather than of a guard. ⚠️ **The fifth
+                        state is `workout`, and it is a SAFETY state rather than
+                        a fifth flavour of "not available"**: there is one
+                        control point on the machine and a running workout owns
+                        it, `RideSession` is mounted above the router so
+                        `workoutTick` keeps driving ERG targets while the rider
+                        is in the game, and the game's own release is an FTMS
+                        **Stop** — after which the machine ignores setpoints
+                        until it is started again, so ending a game ride would
+                        have left the workout's clock running against a machine
+                        that had stopped listening while every target reported
+                        success. `ride/controller.ts` §`simulationControl`
+                        refuses the handle and this supplies the sentence
     src/game/rider.ts   what the rider and their bicycle weigh together, what
                         air they ride through, and — since #365 — **how much of
                         it they are pushing**. ⚠️ `RideConditions.coefficients`
@@ -1933,16 +1945,29 @@ resistance to a person who is pedalling"*. `TRAINER_COMMAND_SEAM` is the five mo
 between this program and that: what decides a setpoint (`domain/src/trainer/simulation.ts`), what the
 commands are (`protocol/src/fitness-machine-control.ts`), what paces them onto the wire
 (`simulation-writer.ts`, `erg-writer.ts`) and which control point they are addressed to
-(`trainer-control-choice.ts`). On the same tree those five report **7**, every one a real statement
-about the program — and one of them is #362.
+(`trainer-control-choice.ts`).
+
+⚠️ **Two numbers, on two trees, and they are easy to conflate — this paragraph did.** On `4bfee83`
+those five report **26** findings (17 `WIRE002`, 9 `WIRE003`), and
+`TrainerControl.setSimulationParameters` is one of them: that is #362, reported by this gate on the
+tree it actually shipped from, which is #363's whole claim. On `main` after #362's wiring landed the
+residual is **7** — measured by stripping the `@unwired` tags from those five files in a throwaway
+worktree and re-running, which is the only way to read a residual rather than a count of
+exemptions. ⚠️ **A sentence here read "on the same tree those five report 7" and was wrong**: 7 is
+the post-fix residual and 26 is the pre-fix finding, and #362 is in the 26 and not in the 7. The
+design conclusion is unchanged either way — 26 against `packages/`-wide's 171 is the ratio the
+selector is chosen on — but the label mattered enough to correct, because this file is where the
+next person reads what was measured.
 
 ⚠️ **A watchlist, not an allowlist**, which is the distinction #363's third criterion turns on:
 adding a path adds coverage, and the only way out is an `@unwired` at the declaration carrying a
-reason a person can read, refused when reasonless, exactly as under `apps/`. Six of the seven
-findings are now such exemptions and the seventh was a real gap —
-[#370](https://github.com/openzigs/onyourleft/issues/370), `chooseTrainerControl`, which no transport
-feeds, so a rider whose trainer serves only a proprietary control point is told "no controllable
-trainer" rather than the truth. ⚠️ **The limit is narrowed and not removed**: #237's `advanceBot` is
+reason a person can read, refused when reasonless, exactly as under `apps/`. All seven of the
+residual findings now carry such a reason, and **three of them are one real gap** —
+[#370](https://github.com/openzigs/onyourleft/issues/370), `chooseTrainerControl` and the two
+declarations only it reads, which no transport feeds, so a rider whose trainer serves only a
+proprietary control point is told "no controllable trainer" rather than the truth. ⚠️ An
+`@unwired` on a genuine gap is not the gap being waved through: the reason has to name the issue
+that owns it, and these three do. ⚠️ **The limit is narrowed and not removed**: #237's `advanceBot` is
 in `packages/physics/src/pacer.ts` and is still not named, because a bot pacer moves a shape on a
 screen rather than a brake.
 
@@ -1950,9 +1975,14 @@ screen rather than a brake.
 46 are 30 % of the 154 non-test sources under `apps/*/src` and 5 are the trainer-command seam.** The
 `*-port.ts` suffix is the half that found #282, not the directories: `segments/match-port.ts` matches
 it, while `segments/backfill.ts`, the module that was actually dead, is in no watched directory and
-**is not reported**. The gate prints both counts for this reason, the watched one first; a run that
-says *"284 production modules"* and nothing else reads like coverage of a population it never
-checked. ⚠️ **These are counts and they age**, and they were 41 of 143 until #362 added two more
+**is not reported**. The gate prints all three counts for this reason, the watched one first; a run
+that says *"284 production modules"* and nothing else reads like coverage of a population it never
+checked. ⚠️ **The third count is the seam's own — `5 of 5 trainer-command seam modules` — and it is
+REPORTED rather than asserted.** `missingSeamFiles` raises when *some* of the five are absent and
+deliberately not when *all* are, because a tree with none of them is a tree with no trainer in it,
+which is what almost every fixture in `check-wiring.test.sh` is. In this repository, where all five
+do exist, that leaves deleting the whole seam in one commit a silent pass — so `0 of 5` in the log
+is what distinguishes it from a healthy run, and two fixtures pin both ends of that count. ⚠️ **These are counts and they age**, and they were 41 of 143 until #362 added two more
 `apps/` files and #363 added the seam; re-read them from the gate's own success line rather than from
 this paragraph.
 
@@ -2898,12 +2928,13 @@ top of an issue **supersedes its body**.
 | Why a HUD value that is a word is set smaller than one that is a number | `apps/web/src/game/hud/fields.ts` §`HudReading.word`, `apps/web/src/design/theme.css` §`.oyl-hud__value--word`, `apps/web/src/game/hud/hud-value-size.test.ts` |
 | How the road the game draws reaches a trainer, and what proves a ride sends one | `apps/web/src/game/gradient.ts`, `apps/web/src/game/trainer-wiring.test.tsx`, [#362](https://github.com/openzigs/onyourleft/issues/362) |
 | Why a machine that does not offer simulation mode is never written to, and what the rider is told instead | `apps/web/src/game/trainer-port.ts` §`gameTrainerFrom`, §`trainerRoadNotice` |
-| What happens to the resistance when a ride ends, and why it is a Stop rather than a flat road | `apps/web/src/game/gradient.ts` §`stop`, [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part K |
+| Why the game is refused the trainer while a workout is running, and what an FTMS Stop would have done to that workout | `apps/web/src/ride/controller.ts` §`simulationControl`, `apps/web/src/game/trainer-port.ts` §`GameTrainerKind` member `workout` |
+| What happens to the resistance when a ride ends, and why it is a Stop rather than a flat road | `apps/web/src/game/gradient.ts` §`stop`, [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part L |
 | Why the gradient write carries no wind and no drag area | `apps/web/src/game/gradient.ts` §"What is deliberately NOT sent" |
 | Why every rider used to be simulated as a track racer, and where the drag area is chosen now | `apps/web/src/game/rider.ts` §`RIDING_POSITIONS`, [`packages/physics/README.md`](packages/physics/README.md) §2 |
 | Why the game has its own rolling resistance and does not move it with the rider's hands | `apps/web/src/game/rider.ts` §`GAME_ROLLING_RESISTANCE_COEFFICIENT` |
 | What the wiring gate can see in `packages/`, why it is five paths and not a directory, and what it still cannot | §4j, `scripts/check-wiring.mjs` §`TRAINER_COMMAND_SEAM` |
-| What a validation procedure that could not have caught the defect looks like | [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part K, [#364](https://github.com/openzigs/onyourleft/issues/364) |
+| What a validation procedure that could not have caught the defect looks like | [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part L, [#364](https://github.com/openzigs/onyourleft/issues/364) |
 | How trainer control reaches an FTMS control point on Android | `apps/mobile/src/ble/fitness-machine-channel.ts`, `apps/web/src/ride/trainer.ts` §`openCapacitorTrainer` |
 | Why the unacknowledged write is declared on the plugin port and never called | `apps/mobile/src/ble/plugin-port.ts` §`writeWithoutResponse`, §4h |
 | What a trainer that reports no power range gets, and why | `apps/mobile/src/ble/fitness-machine.ts` |

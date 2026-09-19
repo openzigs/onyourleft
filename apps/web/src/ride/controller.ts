@@ -381,6 +381,25 @@ export interface RideController {
    * `workout/session.ts` narrows `WorkoutTrainer`: `reset()` revokes this
    * client's control and `requestControl()` is a thing the rider does, and a
    * method that is not on the returned type cannot be called by a later edit.
+   *
+   * ⚠️ **`undefined` while a workout is in progress, however controllable the
+   * trainer is.** There is exactly one control point on the machine and a
+   * running workout already owns it: `RideSession` is mounted above the router
+   * (`shell/AppShell.tsx`), so `workoutTick` keeps driving ERG targets while
+   * the rider is on the game screen, and handing the game a control here made
+   * two writers of one characteristic at about 1 Hz each. Worse than
+   * interleaved setpoints, the game's own release is an FTMS **Stop** — after
+   * which, per `packages/sensors/protocol`'s
+   * `fitness-machine-control.ts`, the machine ignores setpoints until it is
+   * started again — so ending a game ride silently stopped the workout's
+   * trainer while the workout's clock ran on and every target reported
+   * success. That is the same silent failure {@link RideController.startWorkout}
+   * refuses to start into; this is the other end of it, and CLAUDE.md §6 puts
+   * trainer control in the safety class.
+   *
+   * The rider is **told** rather than left with a flat-feeling road:
+   * {@link RideSnapshot.workout} is what `game/trainer-port.ts`
+   * §`gameTrainerFrom` reads to say which of its states this is.
    */
   simulationControl(): Pick<TrainerControl, 'setSimulationParameters' | 'stop'> | undefined;
 
@@ -1145,6 +1164,14 @@ export function createRideController(options: RideControllerOptions): RideContro
     },
 
     simulationControl(): Pick<TrainerControl, 'setSimulationParameters' | 'stop'> | undefined {
+      // ⚠️ The workout owns the control point while it exists — see the
+      // declaration for what two writers on one characteristic did. Checked
+      // here rather than only in `gameTrainerFrom` because this is the method
+      // that hands out the object: a caller that never asked the snapshot
+      // still cannot get one.
+      if (workout !== undefined) {
+        return undefined;
+      }
       return control();
     },
 

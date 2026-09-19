@@ -660,6 +660,20 @@ export function missingPrefixes(root) {
  * reporting nothing about it while the success line kept claiming a count. The
  * five are asserted to exist so that moving one means editing this file in the
  * same commit.
+ *
+ * ⚠️ **It is checked ALL-OR-NOTHING, and that is deliberate rather than an
+ * oversight — {@link wiringProblems} raises only when SOME of the five are
+ * absent.** A tree with none of them is a tree with no trainer in it, which is
+ * what almost every fixture in `check-wiring.test.sh` is; a tree with some of
+ * them is one where a path has moved. ⚠️ **The cost is stated rather than
+ * hidden: in this repository, where all five do exist, deleting or renaming
+ * the whole seam in one commit is NOT a hard failure**, which is asymmetric
+ * with {@link missingPrefixes}, where an all-absent watched set raises. Closing
+ * it by keying on a `packages/` directory would fail the fixture trees that
+ * legitimately build one without a seam, so the guard against it is
+ * **visibility rather than refusal**: the success line prints how many seam
+ * modules were watched, so a seam that has gone missing wholesale reads as
+ * `0 of 5` in the CI log instead of being indistinguishable from a healthy run.
  */
 export function missingSeamFiles(root) {
   return TRAINER_COMMAND_SEAM.filter((relative) => {
@@ -914,7 +928,15 @@ export function wiringProblems(root) {
       );
     }
   }
-  return { problems, modules: modules.size, watched: watched.length };
+  return {
+    problems,
+    modules: modules.size,
+    watched: watched.length,
+    // ⚠️ Reported rather than asserted — see `missingSeamFiles` for why an
+    // all-absent seam cannot be a hard failure here, and why it must at least
+    // be legible.
+    seam: TRAINER_COMMAND_SEAM.length - missingSeam.length,
+  };
 }
 
 // ----------------------------------------------------------------------- main
@@ -952,6 +974,8 @@ if (invoked !== undefined && import.meta.filename === realpathSync(invoked)) {
   // every module the entry point reaches.
   console.log(
     'check-wiring: every watched seam is reachable from the client’s entry point ' +
-      `(${String(result.watched)} watched files, ${String(result.modules)} production modules).`,
+      `(${String(result.watched)} watched files, ${String(result.seam)} of ` +
+      `${String(TRAINER_COMMAND_SEAM.length)} trainer-command seam modules, ` +
+      `${String(result.modules)} production modules).`,
   );
 }

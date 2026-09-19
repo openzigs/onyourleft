@@ -55,7 +55,7 @@ export type GradientTrainer = Pick<TrainerControl, 'setSimulationParameters' | '
 /**
  * What the paired trainer can be told about the road, right now.
  *
- * Five states rather than a boolean, because four of them are things a rider
+ * Six states rather than a boolean, because five of them are things a rider
  * can act on and they call for different sentences. #362's fourth criterion is
  * that a machine which does not offer simulation mode *"is **not** written to,
  * and the rider is told rather than left believing the road is flat"* — a
@@ -64,6 +64,20 @@ export type GradientTrainer = Pick<TrainerControl, 'setSimulationParameters' | '
 export type GameTrainerKind =
   /** No trainer is paired at all. A ride from a power meter is the ordinary case. */
   | 'none'
+  /**
+   * A workout is in progress, and it already owns the machine's control point.
+   *
+   * ⚠️ **Not a variation on `not-controllable`.** The trainer is controllable;
+   * something else is controlling it. `RideSession` is mounted above the router
+   * (`shell/AppShell.tsx`), so a workout started on the Ride screen keeps
+   * ticking while the rider is in the game — and a game ride that also wrote
+   * would put two writers about 1 Hz each on one characteristic, then release
+   * it with an FTMS **Stop** that leaves the workout's clock running against a
+   * machine which has stopped listening. `ride/controller.ts`
+   * §`simulationControl` refuses the handle; this is the sentence that goes
+   * with the refusal.
+   */
+  | 'workout'
   /**
    * Paired, and it serves no control point or reported no power range.
    *
@@ -137,6 +151,12 @@ export function trainerRoadNotice(trainer: GameTrainer): string | undefined {
     case 'ready':
     case 'none':
       return undefined;
+    case 'workout':
+      return (
+        'A workout is driving your trainer, so the hills on this route are not being sent to it — ' +
+        'two things cannot set the resistance at once. End the workout on the Ride screen to ' +
+        'feel the road instead.'
+      );
     case 'not-controllable':
       return (
         'Your trainer is paired but cannot be controlled, so the hills on this route will not ' +
@@ -172,6 +192,8 @@ export function trainerRoadNotice(trainer: GameTrainer): string | undefined {
  * @param control the narrowed control, or `undefined`. Supplied separately
  * because {@link GameTrainer.control} is deliberately absent unless every gate
  * above it passed, and a snapshot cannot carry an object with methods on it.
+ * @param workoutRunning whether a workout already owns the control point. See
+ * the `workout` member of {@link GameTrainerKind}.
  */
 export function gameTrainerFrom(
   snapshot:
@@ -183,9 +205,19 @@ export function gameTrainerFrom(
       }
     | undefined,
   control: GradientTrainer | undefined,
+  workoutRunning: boolean,
 ): GameTrainer {
   if (snapshot === undefined || !snapshot.paired) {
     return NO_GAME_TRAINER;
+  }
+  // ⚠️ **Before the `control === undefined` test, and that ordering is the
+  // whole point.** `ride/controller.ts` §`simulationControl` already returns
+  // `undefined` while a workout runs, so without this the very refusal that
+  // keeps the rider safe would be reported as *"your trainer cannot be
+  // controlled"* — a sentence that is false, and that sends the rider to
+  // re-pair a trainer which is working perfectly.
+  if (workoutRunning) {
+    return { kind: 'workout', control: undefined };
   }
   if (!snapshot.controllable || control === undefined) {
     return { kind: 'not-controllable', control: undefined };

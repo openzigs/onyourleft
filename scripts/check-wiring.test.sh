@@ -808,6 +808,14 @@ TS
 run_check
 assert_green 'a wired tree passes'
 assert_says 'and says how many watched files it read, not only how far it walked' '2 watched files'
+# ⚠️ The seam count is REPORTED rather than asserted by the gate -- see
+# `missingSeamFiles`, which cannot make an all-absent seam a hard failure
+# without failing every fixture here that legitimately has no trainer in it. A
+# tree with none of the five must therefore SAY so, because that is the whole
+# of the protection: in the real repository, where all five exist, `0 of 5` in
+# the log is the only thing that distinguishes a seam deleted wholesale from a
+# healthy run.
+assert_says 'and says how much of the trainer-command seam it found' '0 of 5 trainer-command seam'
 
 # --- A workspace specifier resolves through the exports map ------------------
 new_fixture
@@ -976,6 +984,7 @@ export interface TrainerControl {
 TS
 run_check
 assert_green 'a reasoned exemption on the trainer seam is honoured'
+assert_says 'and a tree holding the whole seam says so' '5 of 5 trainer-command seam'
 
 # --- The seam fails closed when one of its paths has moved -------------------
 #

@@ -119,6 +119,7 @@ function trainerPort(
     readonly hasControl: boolean;
   },
   commands: Commands,
+  workoutRunning = false,
 ): GameTrainerPort {
   const control: GradientTrainer = {
     setSimulationParameters: async (parameters) => {
@@ -130,7 +131,7 @@ function trainerPort(
       return Promise.resolve();
     },
   };
-  return { readTrainer: () => gameTrainerFrom(snapshot, control) };
+  return { readTrainer: () => gameTrainerFrom(snapshot, control, workoutRunning) };
 }
 
 const READY = {
@@ -275,6 +276,44 @@ describe('the road the game draws reaches the trainer', () => {
     const commands: Commands = { written: [], stops: [] };
     await ride(trainerPort({ ...READY, hasControl: false }, commands));
     expect(commands.written).toHaveLength(0);
+  });
+
+  it('writes nothing to a trainer a workout is already driving', async () => {
+    // ⚠️ The hazard the review of #362 found, ridden end to end rather than
+    // argued at the pure function. `RideSession` is mounted above the router,
+    // so a workout started on the Ride screen keeps writing ERG targets to the
+    // one control point while the rider is in the game. A second writer at
+    // about 1 Hz is the mild half; the sharp half is the release below.
+    const commands: Commands = { written: [], stops: [] };
+    const { drawn } = await ride(trainerPort(READY, commands, true));
+    expect(drawn.length).toBeGreaterThan(10);
+    expect(commands.written).toHaveLength(0);
+  });
+
+  it('sends no FTMS Stop when a workout holds the trainer', async () => {
+    // ⚠️ **The assertion that is really about safety.** An FTMS Stop makes the
+    // machine ignore setpoints until it is started again, so a game ride that
+    // ended while a workout was running would leave the workout's clock going
+    // and every one of its targets reporting success against a machine that
+    // had stopped listening — the silent failure `startWorkout` refuses to
+    // start into, arriving after the guard.
+    const commands: Commands = { written: [], stops: [] };
+    await ride(trainerPort(READY, commands, true));
+    await act(async () => {
+      mounted?.unmount();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    mounted = undefined;
+    expect(commands.stops).toHaveLength(0);
+  });
+
+  it('tells the rider the workout has the trainer, not that the trainer is broken', async () => {
+    const commands: Commands = { written: [], stops: [] };
+    await ride(trainerPort(READY, commands, true));
+    const text = mounted?.container.textContent ?? '';
+    expect(text).toContain('workout is driving your trainer');
+    expect(text).not.toContain('cannot be controlled');
   });
 
   it('tells the rider, rather than leaving them to believe the road is flat', async () => {

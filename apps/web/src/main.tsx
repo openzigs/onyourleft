@@ -538,13 +538,26 @@ function buildGamePort(rideController: RideController | undefined): GamePort {
  *
  * ⚠️ **`undefined` where there is no ride controller at all** — Safari,
  * Firefox, a page served over plain HTTP. The absence is the decision, taken
- * here, and `trainer-port.ts` §`gameTrainerFrom` turns the four states a
- * present controller can be in into the four sentences a rider is told.
+ * here, and `trainer-port.ts` §`gameTrainerFrom` turns the states a present
+ * controller can be in into the sentences a rider is told.
+ *
+ * ⚠️ **The snapshot's `workout` is read here too**, because a workout already
+ * holds the one control point the machine has. `simulationControl()` refuses
+ * the handle and this supplies the sentence that goes with the refusal; see
+ * `trainer-port.ts` §`GameTrainerKind` member `workout`.
  */
 function buildGameTrainerPort(controller: RideController | undefined): GameTrainerPort {
   return {
-    readTrainer: () =>
-      gameTrainerFrom(controller?.getSnapshot().trainer, controller?.simulationControl()),
+    readTrainer: () => {
+      // One snapshot read for both answers, so the workout state and the
+      // trainer state cannot be a tick apart.
+      const snapshot = controller?.getSnapshot();
+      return gameTrainerFrom(
+        snapshot?.trainer,
+        controller?.simulationControl(),
+        snapshot?.workout !== undefined,
+      );
+    },
   };
 }
 
