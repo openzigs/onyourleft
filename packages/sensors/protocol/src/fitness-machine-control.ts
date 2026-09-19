@@ -654,7 +654,18 @@ export interface TrainerControl {
   setTargetResistance(level: ResistanceLevel): Promise<ResistanceLevel>;
   /** Set the simulated course conditions. */
   setSimulationParameters(parameters: SimulationParameters): Promise<void>;
-  /** Stop the training session. The deliberate way to end resistance. */
+  /**
+   * Stop the training session.
+   *
+   * ⚠️ **This ends the SESSION. It does not necessarily end the resistance**,
+   * and this comment used to say it was "the deliberate way to end resistance"
+   * — a reviewer who remembers that sentence is reading the old file. FTMS does
+   * not require a machine to discard its target setting values on `0x08`, and
+   * on the trainer validation 0002 Part L was run against on 2026-09-19 it does
+   * not: a ride ended on a climb left the grade applied, measured against a
+   * ride ended on a descent.
+   * @see https://github.com/openzigs/onyourleft/issues/372
+   */
   stop(): Promise<void>;
   /**
    * Start or resume the training session.

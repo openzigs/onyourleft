@@ -249,7 +249,9 @@ describe('0x01 Reset is never sent mid-session', () => {
       }
       await writer.idle();
     }
-    // The deliberate way to end resistance, which is Stop and not Reset.
+    // Stop and not Reset. ⚠️ Stop ends the session; whether it ends the
+    // resistance is the machine's business and on at least one trainer it does
+    // not — #372. This asserts which op code is sent, nothing more.
     await trainer.control.stop();
 
     expect(opCodesWritten(trainer.wire)).not.toContain(FTMS_OP_CODE.reset);

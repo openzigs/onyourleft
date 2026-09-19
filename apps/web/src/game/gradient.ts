@@ -37,13 +37,35 @@
  * failure for as long as the road stays similar. `SimulationDriver.restart`
  * exists for exactly this and says so; this is its production caller.
  *
- * **Two: ending a ride releases the trainer.** `stop()` on the control, not a
- * gradient of zero — FTMS simulation parameters persist on the machine until
- * they are changed, so a rider who ends a ride on a 9 % wall and walks away
- * would leave the flywheel loaded against whoever gets on next. A 0 % gradient
- * is still a statement about the road; `stop()` is the op code that means *stop*
- * (`TrainerControl.stop`: "the deliberate way to end resistance"). It is the
- * same choice `workout/session.ts` makes for a release and for the same reason.
+ * **Two: ending a ride sends a Stop — and ⚠️ THAT DOES NOT REMOVE THE
+ * RESISTANCE.** This paragraph used to claim it did, and a reviewer who
+ * remembers it saying `stop()` is "the deliberate way to end resistance" is
+ * reading the old file. [#372](https://github.com/openzigs/onyourleft/issues/372)
+ * is why.
+ *
+ * The hazard the old wording described is real and is unchanged: FTMS
+ * simulation parameters persist on the machine until they are changed, so a
+ * rider who ends a ride on a 9 % wall and walks away leaves the flywheel loaded
+ * against whoever gets on next. What was wrong was the remedy. `stop()` was
+ * assumed to end resistance; it ends the training **session**. Nothing in FTMS
+ * requires a machine to discard its target setting values on `0x08`, and on the
+ * trainer validation 0002 Part L was run against, it does not.
+ *
+ * Measured on hardware 2026-09-19, by the one test that can tell a cleared
+ * setpoint from a trainer's own baseline drag — end a ride on a steep climb and
+ * turn the cranks by hand, then do it again on a steep descent. **Climb heavy,
+ * descent easy: the grade is still applied.** A single hand-turn cannot show
+ * this, because a direct-drive trainer always has drag and because simulation
+ * resistance nearly vanishes at zero speed anyway.
+ *
+ * ⚠️ No gate here can catch it. Every test asserts that `stop()` was called,
+ * and it is: 402 control-point writes over that ride, 402 acknowledged, the
+ * Stop among them. The defect is in what the machine does next.
+ *
+ * ⚠️ `workout/session.ts` §`release` makes the same choice on the same
+ * reasoning, so a finished workout may likewise leave a target applied. That is
+ * **not established** and must not be assumed either way — #372 carries it as a
+ * separate hardware question.
  *
  * **Three: a rider is told when a write is refused.** A caller offering a
  * gradient every second has nowhere to catch a rejection that arrives four
