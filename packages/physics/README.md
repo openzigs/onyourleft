@@ -75,6 +75,35 @@ is what every source of a drag area does. Splitting at all is a concession to #8
 criterion, which names `c_d` and `A` as separate tunables. **Only the product is ever read.** Tune
 it with `withDragArea(0.264)` and treat a single factor as meaningless.
 
+### ⚠️ The trainer game does not ride the paper's rider, and these defaults are not it
+
+Added by [#365](https://github.com/openzigs/onyourleft/issues/365). **Nothing in the table above
+moved and nothing in it may**: `MARTIN_1998_COEFFICIENTS` reproduces its source, `DEFAULT_COEFFICIENTS`
+aliases it, and `martin-1998.test.ts` reproduces the paper's own worked example against both. That
+reproduction is what this package is for.
+
+What #365 found is that the *game* had never chosen a rider. `apps/web/src/game/rider.ts`
+§`rideConditionsFor` set a mass and an air density and left `RideConditions.coefficients`
+`undefined`, so every ride in the trainer game fell through to these defaults — which describe
+experienced cyclists in a **time-trial position** on a **track** on **20 mm clinchers at nine
+atmospheres**, and are the fast end of Kyle's `C_RR` range on asphalt chosen to be smooth. Measured
+from the committed constants at 80 kg total, 150 W on the flat gave 32.4 km/h (20.1 mph) against
+about 28.6 km/h (17.8 mph) for a rider on the hoods: roughly 2.3 mph optimistic, which a rider
+reported from a live session before anyone looked.
+
+| | Here (Martin) | `apps/web/src/game/rider.ts` |
+|---|---|---|
+| `c_d · A` | 0.264 m² | 0.42 / **0.36** / 0.31 m², chosen by the rider: sitting up, on the hoods, in the drops |
+| `C_RR` | 0.0032 | 0.005 — a road bike on ordinary tarmac rather than ten high-pressure clinchers on smooth asphalt |
+
+Two things follow, and both are decisions rather than details. The game sets its drag area through
+**`withDragArea`** and never by editing `dragCoefficient` or `frontalAreaSquareMetres` alone, for the
+reason stated above this line: the split is invented and a single factor is meaningless. And the
+game's numbers are **defaults and not measurements** — a class figure for a hand position is not a
+rider, because frontal area scales with body size — which is exactly the status this table's own
+⚠️ rows carry, one layer up. `apps/web/src/game/rider.ts` is where they are written down and
+argued.
+
 ### ⚠️ The paper states its chain efficiency twice, and the two disagree
 
 Results says "the efficiency of the chain drive system (E_C) was 97.698 %". Appendix I computes

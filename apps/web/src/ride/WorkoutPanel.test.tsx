@@ -41,20 +41,28 @@ const record = (name = 'Sweet spot'): WorkoutRecord => ({
   updatedAt: unixSeconds(1),
 });
 
-const trainer = (overrides: Partial<TrainerSnapshot> = {}): TrainerSnapshot =>
-  ({
-    paired: true,
-    controllable: true,
-    canSetPower: true,
-    canSimulate: false,
-    powerRange: undefined,
-    hasControl: true,
-    target: { kind: 'none' },
-    requested: undefined,
-    lost: undefined,
-    refusal: undefined,
-    ...overrides,
-  }) as TrainerSnapshot;
+/**
+ * ⚠️ **The `as TrainerSnapshot` this used to carry is gone, and its removal is
+ * a finding rather than tidying** (#362). `canSimulate` was already in this
+ * literal before `TrainerSnapshot` had the field — the assertion suppressed the
+ * excess-property check, so a fixture describing a field the type did not have
+ * compiled silently. Giving the snapshot its real field made the assertion
+ * unnecessary, which is what `@typescript-eslint/no-unnecessary-type-assertion`
+ * then said out loud.
+ */
+const trainer = (overrides: Partial<TrainerSnapshot> = {}): TrainerSnapshot => ({
+  paired: true,
+  controllable: true,
+  canSetPower: true,
+  canSimulate: false,
+  powerRange: undefined,
+  hasControl: true,
+  target: { kind: 'none' },
+  requested: undefined,
+  lost: undefined,
+  refusal: undefined,
+  ...overrides,
+});
 
 const running = (overrides: Partial<RideWorkoutSnapshot> = {}): RideWorkoutSnapshot => ({
   name: 'Sweet spot',

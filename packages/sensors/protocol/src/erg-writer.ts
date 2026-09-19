@@ -111,7 +111,16 @@ export interface ErgWriter {
   /** How many writes were actually attempted. */
   attempted(): number;
   busy(): boolean;
-  /** Resolves once nothing is in flight and nothing is waiting. */
+  /**
+   * Resolves once nothing is in flight and nothing is waiting.
+   *
+   * @unwired a diagnostic, and a teardown hook nothing in the client takes.
+   * `apps/web/src/workout/session.ts` §`settled` exposes it, and the only
+   * callers of *that* are tests: ending a workout closes the writer and stops
+   * the trainer, and waiting for a hung write before doing so would leave
+   * resistance on a rider who has finished. Watched since #363 because this
+   * module is on the trainer-command seam.
+   */
   idle(): Promise<void>;
   /**
    * Refuse everything after this, and empty the waiting slot.
