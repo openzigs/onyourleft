@@ -663,6 +663,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const platform = await buildPlatform(capabilities);
   const rideController = platform.rideController;
   const registered = await workerRegistration;
+  // Read once: two calls would be two reads of a global for one prop.
+  const storage = platformStorage();
   const update = buildUpdateWatcher(registered, rideController);
   if (registered.kind === 'registered') {
     // ⚠️ **Only once a worker registered, and ADR 0024 D-5 is why**: Chrome
@@ -676,14 +678,14 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
     //
     // Not awaited: a rider waits for no permission before the first paint, and
     // `requestPersistence` resolves on every path rather than rejecting.
-    void requestPersistenceOnce(platformStorage());
+    void requestPersistenceOnce(storage);
   }
   createRoot(container).render(
     <StrictMode>
       <AppShell
         capabilities={capabilities}
         {...(update === undefined ? {} : { update })}
-        {...(platformStorage() === undefined ? {} : { storage: platformStorage() })}
+        {...(storage === undefined ? {} : { storage })}
         {...(platform.shell === undefined ? {} : { shell: platform.shell })}
         settings={buildUnitsPort()}
         athleteMass={buildAthleteMassPort()}
@@ -718,17 +720,6 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
 }
 
 /**
- * Establish this device's athlete row, then render (#184).
- *
- * The ordering, the swallowed failure and the reasons for both are in
- * `local-athlete.ts` §{@link renderAfterAthlete}, which is where they can be
- * tested — this file is the composition root and has no test, which is exactly
- * how #184 survived four milestones.
- *
- * It awaits one read and at most one write on a connection `buildLibraryPort`
- * opens anyway, so it adds no failure this start-up did not already have.
- */
-/**
  * Register the service worker, so a cold start with the network off renders
  * the app (#406).
  *
@@ -761,6 +752,17 @@ const workerRegistration = registerServiceWorker({
   scope: import.meta.env.BASE_URL,
 });
 
+/**
+ * Establish this device's athlete row, then render (#184).
+ *
+ * The ordering, the swallowed failure and the reasons for both are in
+ * `local-athlete.ts` §{@link renderAfterAthlete}, which is where they can be
+ * tested — this file is the composition root and has no test, which is exactly
+ * how #184 survived four milestones.
+ *
+ * It awaits one read and at most one write on a connection `buildLibraryPort`
+ * opens anyway, so it adds no failure this start-up did not already have.
+ */
 void renderAfterAthlete(
   async () => ensureLocalAthlete(localStore(), unixSeconds(Math.floor(Date.now() / 1000))),
   render,
