@@ -200,7 +200,7 @@ async function start(): Promise<void> {
         return;
       }
       try {
-        const connection = await openTrainer(first);
+        const { connection } = await openTrainer(first);
         if (connection === undefined) {
           report(
             'opening the trainer',

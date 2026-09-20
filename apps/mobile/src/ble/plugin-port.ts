@@ -73,8 +73,14 @@ export interface PluginDeviceRequest {
   readonly namePrefix?: string | undefined;
 }
 
+/** One service the link resolved, and the characteristics inside it. */
+export interface PluginService {
+  readonly uuid: string;
+  readonly characteristics: readonly { readonly uuid: string }[];
+}
+
 /**
- * The eleven plugin calls this adapter makes.
+ * The twelve plugin calls this adapter makes.
  *
  * Every one returns a promise, including the ones the plugin documents as
  * fire-and-forget, because `SensorTransport`'s contract is that nothing throws
@@ -124,6 +130,29 @@ export interface CapacitorBlePort {
   getDevices(ids: readonly string[]): Promise<readonly PluginDevice[]>;
 
   connect(deviceId: string, onDisconnect: (deviceId: string) => void): Promise<void>;
+
+  /**
+   * Everything the link resolved: services, and the characteristics in each.
+   *
+   * ⚠️ **Added by [#370](https://github.com/openzigs/onyourleft/issues/370),
+   * and it is the ONE call on this port that reads nothing and writes
+   * nothing.** It exists so that a rider whose trainer serves only its
+   * manufacturer's control point is told *"this trainer records fine but
+   * cannot be controlled"* rather than *"no controllable trainer"* — the
+   * distinction `packages/sensors/protocol`'s `chooseTrainerControl` has always
+   * been able to make and had nothing to feed it.
+   *
+   * The plugin's `getServices` reads a table the Android stack already
+   * discovered on connect, so this is not a round trip to the device.
+   *
+   * ⚠️ **The shapes are the plugin's**, like everything else on this port: the
+   * UUIDs come back as lowercase 128-bit strings and are turned into this
+   * program's vocabulary in exactly one place. The plugin's own
+   * `BleCharacteristic` carries properties and descriptors too; only the UUID
+   * is named here, because a control point this program will not write to has
+   * no properties anybody needs to read.
+   */
+  getServices(deviceId: string): Promise<readonly PluginService[]>;
 
   disconnect(deviceId: string): Promise<void>;
 

@@ -95,6 +95,13 @@ export default defineConfig({
         // sticky header taking 70% of a 320×256 viewport passed every gate.
         // `shell-harness.tsx` says what it does and does not prove.
         shell: 'browser/shell.html',
+        // #373. The ride screen's own layout — the trainer status line, which
+        // is the only rider-visible evidence that a gradient is reaching the
+        // machine, and which fell outside the viewport in landscape while every
+        // gate here stayed green. `ride-harness.tsx` says what it does and does
+        // not prove, and why its control is what makes a green run mean
+        // anything.
+        ride: 'browser/ride.html',
         // Not a gate the way the other two are: `capture.html` is the tool a
         // person opens with a trainer in front of them (#111), and a headless
         // runner has no Bluetooth adapter. It is built and loaded here so that

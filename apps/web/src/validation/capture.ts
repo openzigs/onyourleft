@@ -223,6 +223,14 @@ function wrapService(service: Service, capture: Capture): Service {
     uuid: service.uuid,
     getCharacteristic: async (uuid) =>
       wrapCharacteristic(await service.getCharacteristic(uuid), capture),
+    // #370's enumeration. Wrapped rather than passed through so that a
+    // characteristic reached this way is recorded exactly as a named one is —
+    // a capture that missed the reads on half its handles would be a capture
+    // nobody could replay.
+    getCharacteristics: async () =>
+      (await service.getCharacteristics()).map((characteristic) =>
+        wrapCharacteristic(characteristic, capture),
+      ),
   };
 }
 

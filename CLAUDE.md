@@ -53,7 +53,12 @@ apps/                 AGPL-3.0-or-later, without exception
                         performs none and nothing here had ever laid out a
                         header. Since #316 that page also carries the button
                         specimens the touch-target measurement needs, because a
-                        shell handed no ports renders no control at all
+                        shell handed no ports renders no control at all. Since
+                        #373 it also holds ride.html and ride-harness.tsx — the
+                        ride screen's own layout in both orientations, which is
+                        where the trainer status line is and where the
+                        measurement that the HUD does not fit a landscape phone
+                        came from
     public/             what Vite copies verbatim into `dist` (#405) — the web app
                         manifest and the three icons it names. A `.webmanifest`
                         is on neither LIC001's nor LIC002's extension list and
@@ -766,9 +771,9 @@ downstream issue's acceptance criteria depend on these.
 # Exits 0 clean; exits 1 listing each violation by rule id.
 bash scripts/check-repo-rules.sh
 
-# Test the checker itself. Fixture-driven; 168 cases. ⚠️ This said 115 until
-# #357 and had been stale for some time — the number is what the suite prints,
-# so read the run rather than this line.
+# Test the checker itself. Fixture-driven; 182 cases. ⚠️ This said 115 until
+# #357 and 168 until #416, and had been stale for some time — the number is what
+# the suite prints, so read the run rather than this line.
 bash scripts/check-repo-rules.test.sh
 
 # Verify the licence texts are byte-identical to the canonical ones, by
@@ -1064,6 +1069,7 @@ npm view typescript-eslint peerDependencies.typescript
 | `ADR001` | two ADRs share a number |
 | `ADR002` | an ADR filename is not `NNNN-kebab-case.md` |
 | `ADR003` | an ADR's `## Amendments` section is followed by **any** heading, or there are two of them, or an entry does not open with a bold ISO date, or an entry is dated **before the one above it**, or an **unclosed code fence** would hide any of those — see §7 and [ADR 0013](docs/adr/0013-adr-amendments.md) |
+| `ADR004` | an ADR under `docs/adr/` declares no **Status**, **Context**, **Decision** or **Consequences** — §7's sentence, which nothing enforced until [#416](https://github.com/openzigs/onyourleft/issues/416). ⚠️ The matcher is **two spellings and no more**, decided rather than guessed: a level-2 heading whose text is the word (`## Decision` and `## Decision: what was chosen` count, `## Decisions` does not), and — for **Status** alone, because it is metadata rather than prose — a bold label opening a line (`- **Status**:` or `**Status**:`). A rule accepting any line that *contains* the word would pass every ADR here without reading one, since each discusses its own consequences in a sentence. Fences are blanked first, so a quoted example is an example; an **unclosed** fence is `ADR003`'s finding and deliberately not a second, misleading one here |
 | `REL001` | signing key material is committed anywhere — by name (`.jks`, `.keystore`, `.p12`, `.pfx`, `.key`, `keystore.properties`) **or** by content (a `PRIVATE KEY` block in a file with an innocent name). #95, and the one rule here whose violation cannot be undone by fixing it. ⚠️ Since #229 both halves walk the **same** prune list every other rule walks: it used to keep its own, which excluded `fixtures` and kept `coverage`, so a `.jks` under `packages/fit/fixtures/` was invisible while a PEM beside it was reported |
 | `REL002` | any Gradle file under `apps/mobile/android` declares a target API level below **36**, or the project declares none at all. Checked here rather than in Gradle because CI does not build Android — a rule that only fires inside a build nobody runs never fires. ⚠️ Since #95 it reads **every** Gradle file and follows the value rather than the filename: it used to open `variables.gradle`, take the first match and pass silently when that file was absent, so deleting it, overriding the ext property with a literal in `app/build.gradle`, appending a lower value below a compliant one, and AGP's current `targetSdk` spelling were four green regressions |
 | `XML001` | `--` appears inside an XML comment in a non-generated `.xml` file, which XML 1.0 §2.5 forbids and no parser accepts. #225 — the rule exists because `AndroidManifest.xml` shipped in #87 with three of them and passed every gate here for months, until the first Gradle build ever run failed on it |
@@ -1638,6 +1644,8 @@ browser runs**.
 | `shell.html`, `shell-harness.tsx` | since #307's review, the app **shell**: the **real** `shell/AppShell.tsx` with the **real** `ROUTES` table under the **real** `design/theme.css`. The second `.tsx` here. ⚠️ Its spacer goes **inside `.oyl-main`** and the file says why at length — after `.oyl-shell` the header scrolls out of its own sticky containing block and measures 0 px, and inside `.oyl-shell` `main` stays shorter than the viewport so a focus scroll never consults `scroll-margin-top`. Each mistake made a different assertion pass over nothing. ⚠️ Since #316 it also renders the **real** `design/Button.tsx` in both variants, with `RideView`'s own labels, because a shell handed no ports renders **zero** controls on all eleven routes and a size assertion over an empty list passes |
 | `shell.browser.spec.ts` | its spec — how much of the viewport persistent chrome still covers after a scroll, where a fragment jump lands the `h1`, whether the focused skip link is the topmost thing at its own centre (hit-tested, not read off a `z-index`), and no horizontal scrolling at 320 px. ⚠️ Since #316 it also measures the **touch target** three ways, and the three fail for different reasons — see below |
 | `offline.browser.spec.ts` | since #408, the offline claim — against **`apps/web/dist`**, in a **persistent** context closed and reopened, with **two controls**. The only spec here that does not drive a harness page, and the first use of `setOffline` in this repository |
+| `ride.html`, `ride-harness.tsx` | since [#373](https://github.com/openzigs/onyourleft/issues/373), the **ride screen's own layout**: the **real** `AppShell` at the **real** game route, with the **real** `HudPanel` inside the `section.oyl-game` `GameView` gives it. The third `.tsx` here. ⚠️ It renders **no WebGL** — the canvas is the shipping `.oyl-game__world` element, and its `aspect-ratio` and `max-height` are what decide this layout. ⚠️ The shell's own view child is **hidden, not removed**: removing it threw inside React, unmounted the whole shell, and set the ready flag anyway — a 0 px document reporting success, which is the vacuous harness its control exists to catch |
+| `ride.browser.spec.ts` | its spec — where the trainer status line is, measured in both orientations. ⚠️ **What it established is bigger than #373**: `.oyl-hud` is **572 px** tall and a landscape phone viewport is 390, so the panel does not fit on screen at all and *Pause* and *End ride* are below the fold at every viewport measured (844×390, 390×844, 1280×800, 768×1024). No placement of one line changes that and shrinking the world cannot either, so what is asserted is the property that does hold — a rider who reaches the controls has the line on screen. Filed as [#419](https://github.com/openzigs/onyourleft/issues/419). Its control is the same sentence in the pre-#373 position, which must still be off screen at that point |
 | `../playwright.config.ts` | Chromium only, no retries, the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all — and since #408 **two `webServer` entries**, because the product and the harness are different builds |
 | `../vite.browser.config.ts` | the harness build. A second Vite config, so the harness cannot reach a shipped bundle |
 
@@ -1765,8 +1773,10 @@ command and its own CI step.
 ⚠️ **`vite.browser.config.ts` names every entry explicitly, and must.** Vite's multi-page mode
 discovers only `index.html`; a page added without a line in `build.rollupOptions.input` is simply
 not built, and the failure is a 404 while the spec runs rather than a build error — which reads
-like a server fault and sends the next person to `playwright.config.ts`. There are **four** entries
-today, not two: the map, the game, the HUD and the capture tool. #266 confirmed the trap by
+like a server fault and sends the next person to `playwright.config.ts`. There are **six** entries
+today, not two — the map, the game, the HUD, the app shell, the ride screen's layout (#373) and
+the capture tool — and this sentence said *four* until #373, so read
+`build.rollupOptions.input` rather than this line. #266 confirmed the trap by
 deleting its own line — the run died sixty seconds later inside `waitForFunction` with no mention
 of the config, which is why `hud.browser.spec.ts` now checks the response status and names
 `build.rollupOptions.input` in the failure.
@@ -2696,8 +2706,11 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   happened; reopening leaves a mostly-done issue open for something that is really separate
   work. Prose that merely *mentions* a keyword counts too: #29 was closed by `Resolves #29`
   inside an ADR table cell.
-- **ADRs**: `docs/adr/NNNN-kebab-case.md`, with **Status, Context, Decision, Consequences**. Numbers
-  are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
+- **ADRs**: `docs/adr/NNNN-kebab-case.md`, with **Status, Context, Decision, Consequences** —
+  and since [#416](https://github.com/openzigs/onyourleft/issues/416) that is `ADR004` rather than
+  prose. ⚠️ A reviewer who remembers this sentence being unenforced is reading the old file:
+  deleting an ADR's `- **Status**: Accepted` line used to leave `check-repo-rules.sh` reporting
+  clean at exit 0. Numbers are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
   **and which are claimed by open issues** before you pick one. **The next free number is 0025.**
   ⚠️ **0024 is [ADR 0024](docs/adr/0024-offline-and-caching-posture.md)**, taken by
   [#403](https://github.com/openzigs/onyourleft/issues/403) for the offline and caching posture; a
@@ -2862,6 +2875,7 @@ top of an issue **supersedes its body**.
 | Why a link inside a code fence is not a broken link, and what an unclosed fence does | `scripts/check-doc-links.sh` |
 | Why a manifest no parser accepts passed every gate for months, and what the XML rule deliberately does not check | `scripts/check-repo-rules.sh` §`XML001`, [#225](https://github.com/openzigs/onyourleft/issues/225) |
 | Why an unclosed CDATA section used to switch the XML rules off, and what the scan costs per line | `scripts/check-repo-rules.sh` §`XML003`, [#229](https://github.com/openzigs/onyourleft/issues/229) |
+| Why an ADR with no Status used to pass every gate, and which two spellings of a section the rule accepts | `scripts/check-repo-rules.sh` §`ADR004`, [#416](https://github.com/openzigs/onyourleft/issues/416) |
 | What records the licence and provenance of a file no SPDX header can reach, and why discovery reads the file rather than its extension | [`ASSETS.toml`](ASSETS.toml), `scripts/check-repo-rules.sh` §`ASSET001`, [#339](https://github.com/openzigs/onyourleft/issues/339) |
 | What a recorded asset digest proves, and the thing it deliberately does not | `scripts/check-repo-rules.sh` §Limits above `ASSET_MANIFEST_NAME`, [`apps/mobile/README.md`](apps/mobile/README.md) §4 |
 | Why the repository walk prunes `.claude`, and what that cost REL001 | `scripts/check-repo-rules.sh` §`GENERATED`, [`.prettierignore`](.prettierignore) |
@@ -3071,6 +3085,7 @@ top of an issue **supersedes its body**.
 | How far a `<select>` may be styled before it stops being one | `apps/web/src/design/theme.css` §`select`, [#305](https://github.com/openzigs/onyourleft/issues/305) |
 | Why the button's 44 px touch target is declared rather than emergent, and why a floor is not enough on its own | `apps/web/src/design/theme.css` §`.oyl-button`, `apps/web/browser/shell.browser.spec.ts` §`TOUCH_TARGET_PIXELS` |
 | When the header sticks, when it deliberately does not, and the measurement that decides | `apps/web/src/design/theme.css` §`@media (min-width: 64rem) and (min-height: 40rem)`, `apps/web/browser/shell.browser.spec.ts` |
+| Where the trainer status line is, why it is in the HUD rather than under it, and what that measurement found about the whole panel | `apps/web/src/game/hud/fields.ts` §`TrainerLine`, `apps/web/browser/ride.browser.spec.ts`, [#373](https://github.com/openzigs/onyourleft/issues/373) |
 | What stops persistent chrome eating a small viewport, and why no other gate can see it | `apps/web/browser/shell.browser.spec.ts` §`PERSISTENT_CHROME_BUDGET`, §4f |
 | Why the harness spacer's position is load-bearing, and the two places it must not go | `apps/web/browser/shell-harness.tsx` §`SPACER_PIXELS` |
 | What floor the HUD's labels and its dropped-sensor mark sit on | `apps/web/src/game/hud/hud-value-size.test.ts` §"the HUD’s supporting text has a floor" |

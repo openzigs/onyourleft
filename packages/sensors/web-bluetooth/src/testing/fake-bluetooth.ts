@@ -53,6 +53,7 @@ export type FakeGattOperation =
   | 'connect'
   | 'getPrimaryService'
   | 'getCharacteristic'
+  | 'getCharacteristics'
   | 'readValue'
   | 'startNotifications'
   | 'stopNotifications'
@@ -613,6 +614,19 @@ export function createFakeBluetooth(options: FakeBluetoothOptions): FakeBluetoot
 
   const makeService = (state: DeviceState, serviceUuid: GattUuid): GattServicePort => ({
     uuid: serviceUuid,
+    /**
+     * Everything this service resolved — #370.
+     *
+     * Through `perform` like every other call, so it is held, abandoned and
+     * timed out exactly as the named lookup beside it is. A fake that answered
+     * this one synchronously would make `resolvedUuids` the single GATT call in
+     * the adapter that a dropped link could not interrupt.
+     */
+    getCharacteristics() {
+      return perform(state.id, 'getCharacteristics', serviceUuid, () => {
+        requireLink(state);
+      }).then(() => [...(state.services.get(serviceUuid)?.values() ?? [])].map((c) => c.port));
+    },
     getCharacteristic(uuid) {
       const wanted = canonicalUuid(uuid);
       return perform(state.id, 'getCharacteristic', wanted, () => {

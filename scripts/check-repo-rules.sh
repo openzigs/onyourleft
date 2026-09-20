@@ -27,6 +27,8 @@
 #   ADR002  every ADR filename is NNNN-kebab-case.md
 #   ADR003  an ADR's "## Amendments" section is single, last, dated, and in
 #           date order -- and no unclosed fence hides it
+#   ADR004  an ADR declares Status, Context, Decision and Consequences --
+#           CLAUDE.md section 7's sentence, which nothing enforced (#416)
 #   REL001  no signing key material is committed anywhere (#95)
 #   REL002  the Android build targets at least API 36 (#95)
 #   XML001  no "--" inside an XML comment (#225)
@@ -569,6 +571,125 @@ check_adr_amendments() {
 
 if [ -d "${ROOT}/docs/adr" ]; then
   check_adr_amendments
+fi
+
+# --- ADR004: an ADR declares the four sections CLAUDE.md section 7 requires ---
+#
+# CLAUDE.md section 7: *"ADRs: docs/adr/NNNN-kebab-case.md, with **Status,
+# Context, Decision, Consequences**"*. Until #416 that sentence was enforced by
+# nothing. ADR001 checks numbers, ADR002 checks filenames and ADR003 checks the
+# shape of an Amendments section -- all three are about numbering and
+# amendments, and none of them reads the document's own required structure.
+# Measured on 2026-09-20: deleting the `- **Status**: Accepted` line from
+# docs/adr/0024-offline-and-caching-posture.md left this script reporting clean
+# at exit 0.
+#
+# That is the "a rule that cannot fire" shape this file already carries five
+# instances of (DOC002, XML002, XML003, XML004, LIC006's stale entry) -- sitting
+# this time INSIDE the rule written because of it. ADR003 exists to stop an
+# amendment section being malformed, and the document around it could be
+# missing every section the convention names.
+#
+# Status is the one that costs something. It is how a reader knows whether a
+# decision is Accepted, Proposed or Superseded, and this repository's whole
+# practice rests on it: section 7 says an ADR is amended by a NEW ADR that
+# supersedes it and that Status does not change on an amendment, so a document
+# with no Status cannot be read against that rule at all.
+#
+# ## The matcher, decided deliberately (#416's fourth criterion)
+#
+# Section 7's wording is prose; the documents on disk are not. All 23 ADRs in
+# the tree write Status as a bold label line -- `- **Status**: Accepted` -- and
+# the other three as level-2 headings. A rule accepting only one of those
+# spellings rejects a valid document; a rule accepting any line that CONTAINS
+# the word passes a document that merely mentions it, which is most of them
+# (every ADR here discusses its own consequences in prose). So:
+#
+#   Context, Decision, Consequences   a level-2 heading whose text is the word,
+#                                     as a WHOLE word: `## Decision` and
+#                                     `## Decision: what was chosen` both count,
+#                                     `## Decisions` and a sentence containing
+#                                     "the decision" do not.
+#   Status                            the same heading form, OR a bold label at
+#                                     the start of a line, with or without a
+#                                     list bullet: `- **Status**:` and
+#                                     `**Status**:` both count. It is metadata
+#                                     rather than a section of prose, which is
+#                                     why it alone gets the second form -- and
+#                                     why the other three deliberately do not:
+#                                     a `- **Decision**: yes` line would be a
+#                                     summary, not the section section 7 asks
+#                                     for.
+#
+# Level 2 exactly, not `#{1,6}`: `## ` is what every ADR here uses and what
+# ADR003 anchors its own matching on, and a `### Decision` inside a Context
+# section is a sub-heading rather than the decision.
+#
+# ## What it deliberately does not check
+#
+# Whether the Decision section says anything sensible. This is a shape rule, and
+# #416 says so in as many words. It also does not reach docs/spikes/ or
+# docs/validation/: section 7 scopes the ADR00* rules to docs/adr/ and says a
+# spike "is not an ADR and does not decide anything".
+#
+# ⚠️ Fences are blanked first, for ADR003's reason and with the same
+# consequence. ADR 0013 shows the shape it prescribes inside a fence, and #416's
+# own successor would want to quote `## Decision` in one; a fenced example is an
+# example, not a section. An UNCLOSED fence would blank the rest of the file and
+# make every section after it vanish -- so this rule would fire on a document
+# that is fine, blaming the wrong thing. ADR003 already reports an odd fence
+# count and the build is red either way, so this skips the file and says so
+# rather than reporting a second, misleading finding. `check-repo-rules.test.sh`
+# carries the case that proves the build still goes red there.
+ADR_REQUIRED_SECTIONS="Status Context Decision Consequences"
+
+# Appended to the message for Status alone, which is the one section with a
+# second accepted spelling and therefore the one whose failure message would
+# otherwise send an author to add a heading no ADR in the tree has.
+ADR_STATUS_HINT=" (or a '- **Status**:' line)"
+
+check_adr_sections() {
+  local adr base body fences section hint
+  while IFS= read -r adr; do
+    [ -n "${adr}" ] || continue
+    base="$(basename "${adr}")"
+
+    fences="$(grep -c '^[[:space:]]*```' "${adr}")"
+    if [ $((fences % 2)) -ne 0 ]; then
+      # ADR003 owns this one. See the note above.
+      continue
+    fi
+
+    body="$(strip_fences "${adr}")"
+
+    # ⚠️ A HERE-STRING rather than `printf ... | grep -q`, and this one cost a
+    # red CI run. `grep -q` exits at the first match and closes the pipe; an ADR
+    # here is hundreds of lines, so it exceeds the pipe buffer and the producer
+    # gets EPIPE. This script runs under `set -o pipefail`, so the PIPELINE then
+    # reports the producer's failure -- and the `if` reads as "no match" for a
+    # document that matched. It is invisible on macOS, where `printf` is a
+    # builtin that does not fail the same way; on the Ubuntu runner it reported
+    # `printf: write error: Broken pipe` and then said six ADRs with a Status
+    # line had none. The two other `| grep -q` pipelines in this file are safe
+    # only because they pipe a FILENAME, which the buffer absorbs whole.
+    for section in ${ADR_REQUIRED_SECTIONS}; do
+      hint=""
+      if grep -qE "^##[[:space:]]+${section}([[:space:]]*$|[[:space:]]|:)" <<< "${body}"; then
+        continue
+      fi
+      if [ "${section}" = "Status" ]; then
+        if grep -qE '^-?[[:space:]]*\*\*Status\*\*[[:space:]]*:' <<< "${body}"; then
+          continue
+        fi
+        hint="${ADR_STATUS_HINT}"
+      fi
+      report ADR004 "docs/adr/${base}: no '${section}' section; CLAUDE.md section 7 requires Status, Context, Decision and Consequences in every ADR, as a '## ${section}' heading${hint}"
+    done
+  done < <(find "${ROOT}/docs/adr" -type f -name '*.md' | sort)
+}
+
+if [ -d "${ROOT}/docs/adr" ]; then
+  check_adr_sections
 fi
 
 # --- REL001: no signing key material, anywhere ---------------------------------

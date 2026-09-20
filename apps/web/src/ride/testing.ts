@@ -74,6 +74,7 @@ export function idleSnapshot(): RideSnapshot {
     trainer: {
       paired: false,
       controllable: false,
+      controlChoice: { kind: 'none' },
       canSetPower: false,
       canSimulate: false,
       powerRange: undefined,
@@ -121,6 +122,7 @@ export function ridingSnapshot(): RideSnapshot {
     trainer: {
       paired: true,
       controllable: true,
+      controlChoice: { kind: 'none' },
       canSetPower: true,
       canSimulate: true,
       powerRange: {

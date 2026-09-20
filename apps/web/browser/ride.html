@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      The viewport meta the product ships, for `shell.html`'s reason: leaving it
+      out would make this page differ from `apps/web/index.html` in exactly the
+      dimension being measured.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>On Your Left — ride layout browser harness</title>
+    <!--
+      No styles of this page's own. The harness imports `src/design/theme.css`,
+      which is the stylesheet under test.
+    -->
+  </head>
+  <body>
+    <div id="shell"></div>
+    <script type="module" src="./ride-harness.tsx"></script>
+  </body>
+</html>

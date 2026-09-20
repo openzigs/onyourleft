@@ -30,9 +30,12 @@
 import { seconds, type Seconds } from '@onyourleft/domain';
 import type { DeviceId } from '@onyourleft/sensors';
 import {
+  chooseTrainerControl,
   createTrainerControl,
+  type GattUuid,
   type SupportedPowerRange,
   type TrainerControl,
+  type TrainerControlChoice,
   type FitnessMachineChannel,
   type FitnessMachineFeatures,
   type SupportedResistanceLevelRange,
@@ -51,13 +54,76 @@ export interface TrainerConnection {
 }
 
 /**
- * Open trainer control on a connected device.
+ * What a paired trainer turned out to be — #370.
  *
- * @returns `undefined` when the device is not a controllable trainer — no
- * Fitness Machine Service, or no Supported Power Range. Not a rejection: a
- * heart rate strap failing this is the ordinary case, not an error to show.
+ * ⚠️ **Two fields rather than one, because "can this app drive it" and "what
+ * does the machine offer" are different questions and this used to answer only
+ * the first.** `openWebBluetoothTrainer` returned `TrainerConnection |
+ * undefined`, so a trainer whose only control point is its manufacturer's — a
+ * pre-FTMS Wahoo, say — was indistinguishable from a heart rate strap, and the
+ * screen said *"no controllable trainer"*. It is one, it records power and
+ * cadence perfectly well, and this program has decided not to drive it. That is
+ * a different sentence and a rider can act on it.
  */
-export type OpenTrainer = (id: DeviceId) => Promise<TrainerConnection | undefined>;
+export interface TrainerAttachment {
+  /**
+   * Which control point this machine offers, from everything the link resolved.
+   *
+   * `none` also covers *"the transport could not say"*, which is the honest
+   * reading: an empty answer is no information rather than a claim about the
+   * device. @see the note on {@link controlChoice}.
+   */
+  readonly choice: TrainerControlChoice;
+  /**
+   * `undefined` when this app will not drive the machine — no Fitness Machine
+   * Service, no Supported Power Range, or a vendor-only control point. Not a
+   * rejection: a heart rate strap failing this is the ordinary case, not an
+   * error to show.
+   */
+  readonly connection: TrainerConnection | undefined;
+}
+
+/** Open trainer control on a connected device. */
+export type OpenTrainer = (id: DeviceId) => Promise<TrainerAttachment>;
+
+/**
+ * Nothing known about the machine.
+ *
+ * Shared with `controller.ts` so that "no trainer paired" and "a trainer whose
+ * control surface could not be read" are one value rather than two literals
+ * that can drift apart.
+ */
+export const NO_TRAINER_CONTROL: TrainerControlChoice = { kind: 'none' };
+
+/**
+ * `chooseTrainerControl` over whatever the transport could say.
+ *
+ * ⚠️ **Every failure here answers `none`, and that is deliberate in a place
+ * where swallowing an error usually is not.** This call exists to make a
+ * message *more* specific; a rider whose transport could not enumerate its
+ * services must end up exactly where they were before #370 — with the general
+ * sentence — rather than with a trainer that stopped working. The same reason
+ * `openWebBluetoothTrainer` has never treated "not a fitness machine" as an
+ * error.
+ *
+ * ⚠️ It catches `chooseTrainerControl`'s documented `RangeError` too, which is
+ * the one judgement call in the file. That function refuses a malformed UUID
+ * rather than ignoring it, because *"a silently ignored misspelling would be a
+ * controllable trainer reported as uncontrollable"* — but the UUIDs reaching it
+ * here come from a platform that normalises them, and letting one bad string
+ * out of this function would surface as a pairing failure for the whole device.
+ * A device is untrusted input (CLAUDE.md §6); losing a rider's trainer to it is
+ * a worse outcome than a less specific message.
+ */
+async function controlChoice(
+  read: () => Promise<readonly GattUuid[]>,
+): Promise<TrainerControlChoice> {
+  try {
+    return chooseTrainerControl(await read());
+  } catch {
+    return NO_TRAINER_CONTROL;
+  }
+}
 
 /**
  * A one-shot timer for `packages/sensors/protocol`, which may not have one.
@@ -87,31 +153,45 @@ export function openWebBluetoothTrainer(
 ): OpenTrainer {
   const scheduleTimeout = options.scheduleTimeout ?? browserTimeouts;
   return async (id) => {
+    const choice = await controlChoice(async () => transport.resolvedUuids(id));
+    if (choice.kind === 'vendor-not-implemented') {
+      // ⚠️ The Fitness Machine Service was not in what the link resolved, so
+      // `openFitnessMachine` would reject — there is nothing to gain from
+      // asking and a GATT round trip to lose. Returning here is also what makes
+      // this the one branch `chooseTrainerControl` genuinely decides: every
+      // other answer, `none` included, falls through to the path below exactly
+      // as it did before #370, so a transport that cannot enumerate services
+      // never costs a rider a trainer that works.
+      return { choice, connection: undefined };
+    }
     let machine;
     try {
       machine = await transport.openFitnessMachine(id);
     } catch {
       // Not a fitness machine. Every heart rate strap and power meter takes
       // this path, so it is not an error and is not reported as one.
-      return undefined;
+      return { choice, connection: undefined };
     }
     const powerRange = machine.powerRange;
     if (powerRange === undefined) {
-      return undefined;
+      return { choice, connection: undefined };
     }
     return {
-      control: createTrainerControl(machine.channel, {
+      choice,
+      connection: {
+        control: createTrainerControl(machine.channel, {
+          powerRange,
+          deviceId: id,
+          scheduleTimeout,
+          ...(machine.resistanceRange === undefined
+            ? {}
+            : { resistanceRange: machine.resistanceRange }),
+          ...(machine.features === undefined ? {} : { features: machine.features }),
+        }),
+        canSetPower: machine.features?.targetSetting.powerTarget ?? true,
+        canSimulate: machine.features?.targetSetting.indoorBikeSimulationParameters ?? true,
         powerRange,
-        deviceId: id,
-        scheduleTimeout,
-        ...(machine.resistanceRange === undefined
-          ? {}
-          : { resistanceRange: machine.resistanceRange }),
-        ...(machine.features === undefined ? {} : { features: machine.features }),
-      }),
-      canSetPower: machine.features?.targetSetting.powerTarget ?? true,
-      canSimulate: machine.features?.targetSetting.indoorBikeSimulationParameters ?? true,
-      powerRange,
+      },
     };
   };
 }
@@ -126,6 +206,15 @@ export interface CapacitorTrainerPorts {
   }>;
   /** Builds a control point channel over the plugin. */
   openChannel(deviceId: string): FitnessMachineChannel;
+  /**
+   * Every service and characteristic UUID the link resolved (#370).
+   *
+   * The Android half of {@link WebBluetoothTransport.resolvedUuids}, and the
+   * reason #370's second criterion is met on **both** platforms rather than on
+   * one with a note about the other: the plugin's `getServices` reads a table
+   * the Android stack discovered on connect.
+   */
+  resolvedUuids(deviceId: string): Promise<readonly GattUuid[]>;
 }
 
 /**
@@ -152,31 +241,38 @@ export function openCapacitorTrainer(
 ): OpenTrainer {
   const scheduleTimeout = options.scheduleTimeout ?? browserTimeouts;
   return async (id) => {
+    const choice = await controlChoice(async () => ports.resolvedUuids(id));
+    if (choice.kind === 'vendor-not-implemented') {
+      return { choice, connection: undefined };
+    }
     let machine;
     try {
       machine = await ports.readMachine(id);
     } catch {
       // Not a fitness machine, or not reachable. Every heart rate strap takes
       // this path, so it is the ordinary case rather than an error to show.
-      return undefined;
+      return { choice, connection: undefined };
     }
     const powerRange = machine.powerRange;
     if (powerRange === undefined) {
-      return undefined;
+      return { choice, connection: undefined };
     }
     return {
-      control: createTrainerControl(ports.openChannel(id), {
+      choice,
+      connection: {
+        control: createTrainerControl(ports.openChannel(id), {
+          powerRange,
+          deviceId: id,
+          scheduleTimeout,
+          ...(machine.resistanceRange === undefined
+            ? {}
+            : { resistanceRange: machine.resistanceRange }),
+          ...(machine.features === undefined ? {} : { features: machine.features }),
+        }),
+        canSetPower: machine.features?.targetSetting.powerTarget ?? true,
+        canSimulate: machine.features?.targetSetting.indoorBikeSimulationParameters ?? true,
         powerRange,
-        deviceId: id,
-        scheduleTimeout,
-        ...(machine.resistanceRange === undefined
-          ? {}
-          : { resistanceRange: machine.resistanceRange }),
-        ...(machine.features === undefined ? {} : { features: machine.features }),
-      }),
-      canSetPower: machine.features?.targetSetting.powerTarget ?? true,
-      canSimulate: machine.features?.targetSetting.indoorBikeSimulationParameters ?? true,
-      powerRange,
+      },
     };
   };
 }

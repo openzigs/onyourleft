@@ -11,7 +11,14 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { NO_READING, gapAgainst, hudReadings, profileReading, type HudInput } from './fields';
+import {
+  NO_READING,
+  gapAgainst,
+  hudReadings,
+  profileReading,
+  trainerLine,
+  type HudInput,
+} from './fields';
 import { atStartLine } from '../simulation';
 import {
   altitudeMetres,
@@ -826,5 +833,32 @@ describe('what the wind is doing to the rider (#335)', () => {
     const windy = hudReadings(riding(6)).map((reading) => reading.key);
 
     expect(windy).toEqual([...still, 'wind']);
+  });
+});
+
+describe('the trainer status line — #373', () => {
+  it('says simulating, with the gradient to a tenth and the write count', () => {
+    expect(trainerLine({ gradePercent: -3.42, writes: 17 })).toBe(
+      'Trainer: simulating -3.4% (17 sent)',
+    );
+  });
+
+  /**
+   * ⚠️ **The count is the half that catches #362**, where a gradient was
+   * computed and never sent. A line that dropped it would read as evidence of
+   * something that had not happened.
+   */
+  it('keeps a zero count visible rather than tidying it away', () => {
+    expect(trainerLine({ gradePercent: 4, writes: 0 })).toContain('(0 sent)');
+  });
+
+  /**
+   * `simulating`, never `holding`. `game/gradient.ts`
+   * §`GradientSessionState.asked` is explicit that the two are different
+   * claims: the write resolves on the machine's indication, so a screen saying
+   * "holding" would be about a second ahead of the trainer.
+   */
+  it('does not claim the trainer is holding the gradient', () => {
+    expect(trainerLine({ gradePercent: 7.5, writes: 3 })).not.toContain('olding');
   });
 });

@@ -254,6 +254,20 @@ FENCE='```'
 DOLLAR='$'
 
 # A minimal well-formed Apache-2.0 leaf package.
+# The four sections CLAUDE.md section 7 requires, which ADR004 checks for
+# (#416). Fourteen lines, ending in a blank one.
+#
+# Every fixture below that has to pass carries them, because ADR004 reads every
+# file under docs/adr/ and a fixture written for ADR001 or ADR003 is not exempt
+# from the rest of the checker -- the same reason `new_fixture` writes an
+# ASSETS.toml. One helper rather than a dozen copies, so that a change to the
+# required set is one edit here; and the LINE COUNT is fixed, which is what the
+# ADR003 cases below quote line numbers against.
+adr_sections() {
+  printf -- '- **Status**: Accepted\n\n## Context\n\nSomething was true.\n\n'
+  printf '## Decision\n\nDo the thing.\n\n## Consequences\n\nThe thing is done.\n\n'
+}
+
 write_good_package() {
   local name="$1"
   mkdir -p "${fixture_root}/packages/${name}/src"
@@ -355,8 +369,11 @@ assert_violation "ANT+ reference in a source tree is rejected" SCOPE001 \
 
 new_fixture
 write_good_package sensors
-printf 'ANT+ is out of scope permanently; see ADR 0005.\n' \
-  > "${fixture_root}/docs/adr/0003-platform-support.md"
+{
+  printf '# ADR 0003: Platform support\n\n'
+  adr_sections
+  printf 'ANT+ is out of scope permanently; see ADR 0005.\n'
+} > "${fixture_root}/docs/adr/0003-platform-support.md"
 assert_clean "ANT+ named in docs/ to explain its exclusion is allowed"
 
 # ⚠️ **A dependency, which is the word #15's fifth criterion uses and the one
@@ -389,8 +406,9 @@ assert_violation "two ADRs sharing a number are rejected" ADR001 \
   "share ADR number 0005"
 
 new_fixture
-printf '# ADR 0005\n' > "${fixture_root}/docs/adr/0005-tech-stack.md"
-printf '# ADR 0006\n' > "${fixture_root}/docs/adr/0006-fit-codec-licensing.md"
+{ printf '# ADR 0005\n\n'; adr_sections; } > "${fixture_root}/docs/adr/0005-tech-stack.md"
+{ printf '# ADR 0006\n\n'; adr_sections; } \
+  > "${fixture_root}/docs/adr/0006-fit-codec-licensing.md"
 assert_clean "distinct ADR numbers pass"
 
 # --- ADR001 regressions found in #118 ----------------------------------------
@@ -595,11 +613,14 @@ assert_violation "ADR filename that is not kebab-case is rejected" ADR002 \
 # an append is a property of the diff, not of the file, and is not checked here.
 
 # The shape ADR 0013 prescribes, which must pass.
+#
+# Lines: the title is 1, `adr_sections` runs 3-16, '## Amendments' is 17 and
+# the first entry is 19. The ADR003 cases below quote those numbers.
 write_amended_adr() {
   local path="$1"
   {
-    printf '# ADR 0011: Stream storage\n\n- **Status**: Accepted\n\n'
-    printf '## Context\n\nSomething was true.\n\n'
+    printf '# ADR 0011: Stream storage\n\n'
+    adr_sections
     printf '## Amendments\n\n'
     printf -- '- **2026-09-05** — Decision H: the sentence is no longer true (#147).\n'
   } > "${path}"
@@ -615,7 +636,7 @@ new_fixture
 write_amended_adr "${fixture_root}/docs/adr/0011-stream-storage.md"
 printf '\n## Notes\n\nStill here.\n' >> "${fixture_root}/docs/adr/0011-stream-storage.md"
 assert_violation "a section after ## Amendments is rejected" ADR003 \
-  "docs/adr/0011-stream-storage.md: '## Amendments' (line 9) must be the last section"
+  "docs/adr/0011-stream-storage.md: '## Amendments' (line 17) must be the last section"
 
 # The offending heading is named, for the same reason ADR001 names both
 # colliding files: a message that says only "something follows it" sends the
@@ -624,7 +645,7 @@ new_fixture
 write_amended_adr "${fixture_root}/docs/adr/0011-stream-storage.md"
 printf '\n## Notes\n\nStill here.\n' >> "${fixture_root}/docs/adr/0011-stream-storage.md"
 assert_violation "the section that follows ## Amendments is named, with its line" ADR003 \
-  "'## Notes' follows it at line 13"
+  "'## Notes' follows it at line 21"
 
 # Two sections rather than two entries. Appending a second heading each time is
 # the shape that turns an append-only log into a pile.
@@ -643,7 +664,7 @@ new_fixture
 write_amended_adr "${fixture_root}/docs/adr/0011-stream-storage.md"
 printf -- '- Decision C drifted too.\n' >> "${fixture_root}/docs/adr/0011-stream-storage.md"
 assert_violation_all "an amendment entry without a date is rejected, and its line named" ADR003 \
-  "line 12: amendment entry must open with a bold ISO date" \
+  "line 20: amendment entry must open with a bold ISO date" \
   "- Decision C drifted too."
 
 # The same fixture through `assert_violation`, with the hyphen-leading needle
@@ -664,10 +685,10 @@ assert_violation "the undated entry is quoted back, hyphen and all" ADR003 \
 
 # An empty section records nothing while looking like it records something.
 new_fixture
-printf '# ADR 0011\n\n## Context\n\nA thing.\n\n## Amendments\n' \
+{ printf '# ADR 0011\n\n'; adr_sections; printf '## Amendments\n'; } \
   > "${fixture_root}/docs/adr/0011-stream-storage.md"
 assert_violation "an empty ## Amendments section is rejected" ADR003 \
-  "docs/adr/0011-stream-storage.md: '## Amendments' (line 7) has no entries"
+  "docs/adr/0011-stream-storage.md: '## Amendments' (line 17) has no entries"
 
 # Over-strictness guard: an entry is a paragraph, not a line. A continuation
 # line is indented and carries no date of its own, and must not be read as a
@@ -689,7 +710,8 @@ assert_clean "an indented continuation line or sub-bullet is not a second entry"
 # not the section and must not be checked as one.
 new_fixture
 {
-  printf '# ADR 0013\n\n## Decision\n\n### Amendments\n\nHow the section works.\n\n'
+  printf '# ADR 0013\n\n- **Status**: Accepted\n\n## Context\n\nA convention.\n\n'
+  printf '## Decision\n\n### Amendments\n\nHow the section works.\n\n'
   printf '## Consequences\n\nIt is enforced.\n'
 } > "${fixture_root}/docs/adr/0013-adr-amendments.md"
 assert_clean "a level-3 Amendments heading in a body is not the section"
@@ -700,7 +722,8 @@ assert_clean "a level-3 Amendments heading in a body is not the section"
 # as the real thing, with '## Consequences' then "following" it.
 new_fixture
 {
-  printf '# ADR 0013\n\n## Decision\n\nAppend a section shaped like this:\n\n'
+  printf '# ADR 0013\n\n- **Status**: Accepted\n\n## Context\n\nA convention.\n\n'
+  printf '## Decision\n\nAppend a section shaped like this:\n\n'
   printf '%smarkdown\n## Amendments\n\n- **2026-09-05** — What became false (#147).\n%s\n\n' "${FENCE}" "${FENCE}"
   printf '## Consequences\n\nIt is enforced.\n'
 } > "${fixture_root}/docs/adr/0013-adr-amendments.md"
@@ -752,7 +775,9 @@ cleanup_fixture
 # that "ADR003 validates dates" is never claimed on this rule's behalf.
 new_fixture
 {
-  printf '# ADR 0011\n\n## Amendments\n\n'
+  printf '# ADR 0011\n\n'
+  adr_sections
+  printf '## Amendments\n\n'
   printf -- '- **2026-13-99** — a date that does not exist, and is accepted.\n'
 } > "${fixture_root}/docs/adr/0011-stream-storage.md"
 assert_clean "an impossible-but-well-shaped date is accepted; the rule checks shape"
@@ -770,13 +795,13 @@ new_fixture
 write_amended_adr "${fixture_root}/docs/adr/0011-stream-storage.md"
 printf '\n# Appendix\n\nStill here.\n' >> "${fixture_root}/docs/adr/0011-stream-storage.md"
 assert_violation "a LEVEL-1 heading after ## Amendments is rejected too" ADR003 \
-  "'# Appendix' follows it at line 13"
+  "'# Appendix' follows it at line 21"
 
 new_fixture
 write_amended_adr "${fixture_root}/docs/adr/0011-stream-storage.md"
 printf '\n### Postscript\n\nStill here.\n' >> "${fixture_root}/docs/adr/0011-stream-storage.md"
 assert_violation "a level-3 heading after ## Amendments is rejected too" ADR003 \
-  "'### Postscript' follows it at line 13"
+  "'### Postscript' follows it at line 21"
 
 # Over-strictness guard for the same change: a SETEXT heading is deliberately
 # not matched, because a row of hyphens at column one is also a horizontal rule
@@ -803,7 +828,7 @@ write_amended_adr "${fixture_root}/docs/adr/0011-stream-storage.md"
 printf -- '-\tno date, tab after the hyphen.\n' \
   >> "${fixture_root}/docs/adr/0011-stream-storage.md"
 assert_violation "a tab-bulleted entry with no date is still rejected" ADR003 \
-  "line 12: amendment entry must open with a bold ISO date"
+  "line 20: amendment entry must open with a bold ISO date"
 
 # D-4 makes the section an append-only log, and an append never puts an older
 # date below a newer one. This is the only part of "it was an append" that is
@@ -814,7 +839,7 @@ write_amended_adr "${fixture_root}/docs/adr/0011-stream-storage.md"
 printf -- '- **2026-09-04** — dated before the entry above it.\n' \
   >> "${fixture_root}/docs/adr/0011-stream-storage.md"
 assert_violation "an entry dated before the one above it is rejected" ADR003 \
-  "line 12: amendment entry dated 2026-09-04 follows one dated 2026-09-05"
+  "line 20: amendment entry dated 2026-09-04 follows one dated 2026-09-05"
 
 # Two entries on the SAME day are an append, not a reordering.
 new_fixture
@@ -865,12 +890,191 @@ cleanup_fixture
 # one with several of them.
 new_fixture
 {
-  printf '# ADR 0011\n\n## Context\n\n'
+  printf '# ADR 0011\n\n'
+  adr_sections
   printf '%ssh\necho one\n%s\n\n' "${FENCE}" "${FENCE}"
   printf '%sts\nconst x = 1;\n%s\n\n' "${FENCE}" "${FENCE}"
   printf '## Amendments\n\n- **2026-09-05** — fine (#147).\n'
 } > "${fixture_root}/docs/adr/0011-stream-storage.md"
 assert_clean "balanced fences are not reported, however many"
+
+# --- ADR004: the four sections CLAUDE.md section 7 requires (#416) -----------
+#
+# The rule exists because that sentence was enforced by nothing: deleting
+# `- **Status**: Accepted` from a real ADR left the checker reporting clean at
+# exit 0 on 2026-09-20. One fixture per missing section, each going red, is
+# #416's second acceptance criterion -- and the two guards after them are the
+# other half, because a rule that accepted any line containing the word would
+# pass every ADR in the tree without reading one of them.
+
+# The shape every ADR in the tree has, which must pass. `adr_sections` writes
+# it, so this case is also what says that helper is not itself the reason the
+# eleven fixtures above went green.
+new_fixture
+{ printf '# ADR 0011: Stream storage\n\n'; adr_sections; } \
+  > "${fixture_root}/docs/adr/0011-stream-storage.md"
+assert_clean "an ADR carrying all four required sections passes"
+
+# The defect as it was measured: Context, Decision and Consequences all there,
+# and no Status at all.
+new_fixture
+{
+  printf '# ADR 0011: Stream storage\n\n## Context\n\nSomething.\n\n'
+  printf '## Decision\n\nDo it.\n\n## Consequences\n\nDone.\n'
+} > "${fixture_root}/docs/adr/0011-stream-storage.md"
+assert_violation_all "an ADR with no Status is rejected" ADR004 \
+  "docs/adr/0011-stream-storage.md" "no 'Status' section"
+
+new_fixture
+{
+  printf '# ADR 0011: Stream storage\n\n- **Status**: Accepted\n\n'
+  printf '## Decision\n\nDo it.\n\n## Consequences\n\nDone.\n'
+} > "${fixture_root}/docs/adr/0011-stream-storage.md"
+assert_violation_all "an ADR with no Context is rejected" ADR004 \
+  "docs/adr/0011-stream-storage.md" "no 'Context' section"
+
+new_fixture
+{
+  printf '# ADR 0011: Stream storage\n\n- **Status**: Accepted\n\n'
+  printf '## Context\n\nSomething.\n\n## Consequences\n\nDone.\n'
+} > "${fixture_root}/docs/adr/0011-stream-storage.md"
+assert_violation_all "an ADR with no Decision is rejected" ADR004 \
+  "docs/adr/0011-stream-storage.md" "no 'Decision' section"
+
+new_fixture
+{
+  printf '# ADR 0011: Stream storage\n\n- **Status**: Accepted\n\n'
+  printf '## Context\n\nSomething.\n\n## Decision\n\nDo it.\n'
+} > "${fixture_root}/docs/adr/0011-stream-storage.md"
+assert_violation_all "an ADR with no Consequences is rejected" ADR004 \
+  "docs/adr/0011-stream-storage.md" "no 'Consequences' section"
+
+# ⚠️ The guard that makes the four above mean something. A rule matching any
+# line that CONTAINS the word would pass this file, which names all four in
+# prose and has none of them as a section. Every ADR in the tree discusses its
+# own consequences in a sentence, so this is the shape the rule would otherwise
+# be permanently green against.
+new_fixture
+{
+  printf '# ADR 0011: Stream storage\n\n'
+  printf 'The status of this is settled. In this context the decision was taken,\n'
+  printf 'and the consequences are recorded below.\n'
+} > "${fixture_root}/docs/adr/0011-stream-storage.md"
+assert_violation_all "the four words in prose are not the four sections" ADR004 \
+  "docs/adr/0011-stream-storage.md" "no 'Decision' section"
+
+# Over-strictness guard: Status is METADATA and has a second accepted spelling.
+# `## Status` is the form ADR practice outside this repository uses, and a rule
+# that rejected it would reject a valid document -- #416's fourth criterion.
+new_fixture
+{
+  printf '# ADR 0011: Stream storage\n\n## Status\n\nAccepted\n\n'
+  printf '## Context\n\nSomething.\n\n## Decision\n\nDo it.\n\n## Consequences\n\nDone.\n'
+} > "${fixture_root}/docs/adr/0011-stream-storage.md"
+assert_clean "Status as a level-2 heading is accepted"
+
+# ...and without the list bullet, which is the other way the label is written.
+new_fixture
+{
+  printf '# ADR 0011: Stream storage\n\n**Status**: Accepted\n\n'
+  printf '## Context\n\nSomething.\n\n## Decision\n\nDo it.\n\n## Consequences\n\nDone.\n'
+} > "${fixture_root}/docs/adr/0011-stream-storage.md"
+assert_clean "a bold Status label with no bullet is accepted"
+
+# Over-strictness guard: a heading may say more than the word. ADR 0007 already
+# writes 'Accepted -- on the strength of D4' after its Status label, and a
+# heading qualified the same way is a valid document.
+new_fixture
+{
+  printf '# ADR 0011: Stream storage\n\n- **Status**: Accepted\n\n'
+  printf '## Context\n\nSomething.\n\n## Decision: what was chosen\n\nDo it.\n\n'
+  printf '## Consequences for everything else\n\nDone.\n'
+} > "${fixture_root}/docs/adr/0011-stream-storage.md"
+assert_clean "a required heading may carry trailing words"
+
+# ...and the matcher is a WHOLE word, which is what stops the line above
+# widening into "any heading starting with those letters".
+new_fixture
+{
+  printf '# ADR 0011: Stream storage\n\n- **Status**: Accepted\n\n'
+  printf '## Context\n\nSomething.\n\n## Decisions\n\nDo it.\n\n## Consequences\n\nDone.\n'
+} > "${fixture_root}/docs/adr/0011-stream-storage.md"
+assert_violation_all "'## Decisions' is not the '## Decision' section" ADR004 \
+  "docs/adr/0011-stream-storage.md" "no 'Decision' section"
+
+# A FENCED heading is an example, not a section -- ADR003's rule, which this one
+# inherits by sharing `strip_fences`. An ADR documenting this convention has to
+# be able to show the shape it prescribes.
+new_fixture
+{
+  printf '# ADR 0011: Stream storage\n\n- **Status**: Accepted\n\n'
+  printf '## Context\n\nSomething.\n\n## Decision\n\nAn ADR looks like this:\n\n'
+  printf '%smarkdown\n## Consequences\n\nWhat follows.\n%s\n' "${FENCE}" "${FENCE}"
+} > "${fixture_root}/docs/adr/0011-stream-storage.md"
+assert_violation_all "a fenced ## Consequences is an example, not the section" ADR004 \
+  "docs/adr/0011-stream-storage.md" "no 'Consequences' section"
+
+# ⚠️ An UNCLOSED fence blanks everything after it, so every section below one
+# would read as absent. ADR003 already reports the fence and the build is red;
+# a second ADR004 finding would blame the sections instead, and send the author
+# to add headings that are already there. This asserts BOTH halves: the build
+# goes red, and no ADR004 line is printed.
+new_fixture
+{
+  printf '# ADR 0011: Stream storage\n\n'
+  printf '%ssh\necho never closed\n\n' "${FENCE}"
+  printf -- '- **Status**: Accepted\n\n## Context\n\nSomething.\n\n'
+  printf '## Decision\n\nDo it.\n\n## Consequences\n\nDone.\n'
+} > "${fixture_root}/docs/adr/0011-stream-storage.md"
+out="$(bash "${CHECKER}" "${fixture_root}" 2>&1)"
+status=$?
+if [ "${status}" -ne 0 ] \
+   && printf '%s' "${out}" | grep -q '^ADR003: ' \
+   && ! printf '%s' "${out}" | grep -q '^ADR004: '; then
+  pass=$((pass + 1))
+  printf 'ok   an unclosed fence is ADR003 alone, not a misleading ADR004\n'
+else
+  fail=$((fail + 1))
+  printf 'FAIL an unclosed fence is ADR003 alone, not a misleading ADR004\n     exit %s\n%s\n' \
+    "${status}" "${out}"
+fi
+cleanup_fixture
+
+# ⚠️ A LONG ADR, which is the case a red CI run produced and this suite could
+# not have found on the machine it was written on.
+#
+# The first version of ADR004 asked `printf '%s\n' "${body}" | grep -q ...`.
+# `grep -q` exits at the first match and closes the pipe; a document bigger than
+# the pipe buffer then gives the producer EPIPE, and this script runs under
+# `set -o pipefail`, so the whole pipeline reports a failure for a document that
+# MATCHED. On the Ubuntu runner that printed `printf: write error: Broken pipe`
+# and reported six real ADRs as having no Status. On macOS, where `printf` is a
+# builtin that does not fail the same way, every case here stayed green --
+# including "this repository passes its own rules", over the very ADRs that
+# failed in CI.
+#
+# So this fixture is deliberately larger than a 64 KiB pipe buffer, and it is
+# honest about what it can do: on Linux it is what turns that mistake red, and
+# on macOS it passes either way. The checker uses a here-string now.
+new_fixture
+{
+  printf '# ADR 0002: A long one\n\n- **Status**: Accepted\n\n## Context\n\n'
+  index=0
+  while [ "${index}" -lt 3000 ]; do
+    printf 'Padding line %s, which exists only to make this document big.\n' "${index}"
+    index=$((index + 1))
+  done
+  printf '\n## Decision\n\nDo the thing.\n\n## Consequences\n\nThe thing is done.\n'
+} > "${fixture_root}/docs/adr/0002-a-long-one.md"
+assert_clean "an ADR larger than a pipe buffer passes"
+
+# The rule is scoped to docs/adr/. A spike decides nothing and CLAUDE.md
+# section 7 says so, so it has no sections to be missing.
+new_fixture
+mkdir -p "${fixture_root}/docs/spikes"
+printf '# Spike 0001\n\nA dated measurement.\n' \
+  > "${fixture_root}/docs/spikes/0001-segment-matching.md"
+assert_clean "a spike write-up is not held to the ADR sections"
 
 # --- SCOPE001 regressions found in review of PR #98 --------------------------
 #

@@ -875,12 +875,23 @@ arriving in a procedure rather than in a gate.
 
 ### ⚠️ Read this before starting
 
-- **The rider-visible readout is the line under the HUD.** While a ride is running against a trainer
-  that granted control, `GameView` shows `Trainer: simulating −3.4% (17 sent)`. That is what
-  `apps/web/src/game/gradient.ts` §`GradientSessionState` reports: the gradient last *asked for* and
-  how many writes have been attempted. **A step whose expected result is invisible is an empty
-  cell**, which is what #364 is about, so every step below names something on the screen or in the
-  log.
+- **The rider-visible readout is a line inside the HUD panel, just above *Pause* and *End ride*.**
+  While a ride is running against a trainer that granted control, the panel shows
+  `Trainer: simulating −3.4% (17 sent)`. That is what `apps/web/src/game/gradient.ts`
+  §`GradientSessionState` reports: the gradient last *asked for* and how many writes have been
+  attempted. **A step whose expected result is invisible is an empty cell**, which is what #364 is
+  about, so every step below names something on the screen or in the log.
+- ⚠️ **It used to be *under* the panel, and in landscape it was off the bottom of the screen** —
+  [#373](https://github.com/openzigs/onyourleft/issues/373), reported from a tablet during the
+  2026-09-19 run of this part. A rider could not perform L2, L3 or L4 in the orientation a
+  handlebar-mounted phone is most likely to be in. It is inside the panel now, above the controls,
+  so reaching *Pause* means passing it.
+- ⚠️ **You will still have to scroll, in either orientation, and that is a separate finding.**
+  Measured in the pinned Chromium (`apps/web/browser/ride.browser.spec.ts` carries the table): the
+  HUD panel is **572 px** tall and a landscape phone viewport is 390, so *Pause* and *End ride* are
+  below the fold at every viewport measured — 844×390, 390×844, 1280×800 and 768×1024. Scroll to
+  the controls and the trainer line is on screen with them. That is
+  [#419](https://github.com/openzigs/onyourleft/issues/419) and it is not fixed here.
 - **The count is the half that catches #362.** A gradient rendered in that line with `(0 sent)`
   beside it is exactly the defect: the number was computed and never written.
 - **`adb logcat` is the independent check**, and it is the one that found the defect. Filter for
@@ -909,7 +920,7 @@ adb logcat | grep -i "BluetoothLe"
 | Step | What to do | What should happen |
 |---|---|---|
 | L1 | On the Ride screen, pair the trainer and **take control**. Then open the game and choose a route | If the machine does not offer simulation mode, the picker says so in words about the **road** — *"does not offer simulation mode … the road on screen is real; the resistance under you is not"* — and **nothing is written**. If control was not taken, it says to take it on the Ride screen. Either way, record which and stop here |
-| L2 | ⚠️ **On the bike, low gear, seated.** Start the ride on a route with a gentle climb and pedal | Within a second or two the HUD's trainer line reads `Trainer: simulating …%` with a **non-zero** count beside it, and the resistance increases as the climb starts |
+| L2 | ⚠️ **On the bike, low gear, seated.** Start the ride on a route with a gentle climb and pedal. Scroll the HUD down until *Pause* is on screen | Within a second or two the HUD's trainer line — just above the controls — reads `Trainer: simulating …%` with a **non-zero** count beside it, and the resistance increases as the climb starts. ⚠️ Do this in **landscape as well as portrait** and say which orientations you read it in; that is what #373 was about |
 | L3 | Ride through the steepest section of the route you chose | The percentage on that line **tracks the route's own gradient** — compare it against the gradient field on the HUD, which is read from the same profile. They should agree to a tenth or so |
 | L4 | Ride over the crest and onto the descent | The percentage goes **negative** and the resistance drops away. A sign lost between the profile and the control point shows up here and nowhere else |
 | L5 | ⚠️ **Off the bike.** Press *End ride* | The trainer is **released** — an FTMS Stop, not a gradient of zero — and the resistance goes away. Confirm by turning the cranks by hand |
@@ -930,7 +941,7 @@ is a Stop rather than a flat road.
 | Step | Result | Notes |
 |---|---|---|
 | L1 | does the machine offer simulation mode? | |
-| L2 | first gradient seen / writes reported: | |
+| L2 | first gradient seen / writes reported: | orientation(s) read in: |
 | L3 | HUD gradient vs trainer line: | |
 | L4 | negative on the descent? | |
 | L5 | released on *End ride*? | |
@@ -1116,6 +1127,65 @@ adb shell dumpsys gfxinfo dev.openzigs.onyourleft | grep -iE "Total frames|Janky
 §`RIDER_TINTS` is one table; a tint that suppresses blue would give the ghost a hue of its own, and a
 distance-dependent fallback is a rung on `quality.ts`'s ladder rather than a change to `bicycle.ts`.
 Record what was seen before deciding which.
+
+---
+
+## Part O — a trainer that serves only its manufacturer's control point ([#370](https://github.com/openzigs/onyourleft/issues/370))
+
+Added 2026-09-20 by #370, and ⚠️ **it is the one part of this document nobody in the loop can run.**
+The owner's machine serves FTMS. This part exists so that the first person who *does* have a
+pre-FTMS trainer — a Wahoo KICKR or SNAP from before the Fitness Machine Service, a CompuTrainer, a
+Tacx of that era — has a script in front of them rather than a bug report to write from memory.
+
+⚠️ **Nothing here asks anybody to control such a trainer, and nothing in the app will try.** #370's
+fourth criterion is that the vendor characteristic is never written to, and
+`packages/sensors/protocol/src/fitness-machine-control.ts` §"What is deliberately not implemented"
+is why: two independent open-source implementations of the Wahoo characteristic disagree by a
+**factor of ten** on the rolling-resistance scaling, and CLAUDE.md §6 puts writing an unverifiable
+scaling to a brake in the safety class. **This part is about a sentence on a screen.**
+
+### ⚠️ Read this before starting
+
+- **What changed is a message, not a capability.** Before #370 such a trainer was told *"this
+  trainer does not offer a Fitness Machine control point, or did not report the power range"* — a
+  sentence whose second half is a guess and which reads as *"your trainer is not a trainer"*.
+- **The read that makes the difference is an enumeration**, and it happens on pairing:
+  `WebBluetoothTransport.resolvedUuids` in a browser, the plugin's `getServices` in the shell. If
+  the enumeration fails the rider gets the old, general sentence and a working trainer — which is
+  the deliberate fallback, and O4 is how you tell the two apart.
+- **`adb logcat` is the independent check**, filtered for `BluetoothLe`. What must **not** appear is
+  a **write** to `a026e005-…`.
+
+```bash
+adb logcat -c
+adb logcat | grep -i "BluetoothLe"
+```
+
+| Step | What to do | What should happen |
+|---|---|---|
+| O1 | Pair the trainer on the Ride screen | It pairs, and power and cadence appear. A vendor-only machine is still a sensor |
+| O2 | Read the trainer panel | *"Records, but cannot be controlled"* — **"This trainer records fine but cannot be controlled from here"**. ⚠️ If it says *"does not offer a control point this app recognises"*, the enumeration did not find the vendor characteristic: record the model and go to O4 |
+| O3 | Ride for a minute, then read the logcat | Notifications, and **no write at all** to `a026e005-0a7d-4ab3-97fa-f1500f9feb8b`. A write here is a stop-the-session defect |
+| O4 | ⚠️ Only if O2 gave the general sentence. In `chrome://bluetooth-internals` (or from the logcat), list the characteristics inside `0x1818` | If a vendor control point is there and the app did not see it, that is a finding about the enumeration or about the UUID — `trainer-control-choice.ts` records that the Wahoo value is **secondary-sourced** and has never been checked against hardware. This step is the check |
+| O5 | Open the game and choose a route | The picker says the road is not reaching the trainer, in words about the **road**. Nothing is written |
+
+⚠️ **O4 is the step this part is really for.** `WAHOO_TRAINER_CONTROL_POINT` was corroborated from
+community documentation and open-source implementations, read and never copied, and **has not been
+checked against a device**. The whole failure mode of a wrong transcription is O2 giving the general
+sentence instead of the specific one — which is why it is safe to ship unverified, and why the first
+person with the hardware is being asked to look.
+
+### O results
+
+| Step | Result | Notes |
+|---|---|---|
+| O1 | trainer model: | paired? |
+| O2 | which sentence? | |
+| O3 | writes to the vendor characteristic: | expected: none |
+| O4 | characteristics inside 0x1818: | |
+| O5 | what the picker said: | |
+
+**Was the sentence the one you would have wanted to read (in your own words)?** ______________
 
 ---
 

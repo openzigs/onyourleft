@@ -26,7 +26,12 @@
  * transport does for it in production.
  */
 
-import type { CapacitorBlePort, PluginDevice, PluginDeviceRequest } from './plugin-port';
+import type {
+  CapacitorBlePort,
+  PluginDevice,
+  PluginDeviceRequest,
+  PluginService,
+} from './plugin-port';
 
 /** What the scripted stack should do. Every field has a working default. */
 export interface ScriptedStack {
@@ -59,6 +64,18 @@ export interface ScriptedStack {
   readonly connectRejectsWith?: unknown;
   /** Characteristic reads, keyed `service|characteristic`. */
   readonly reads?: Readonly<Record<string, DataView>>;
+  /**
+   * What `getServices()` answers — the services and characteristics the link
+   * resolved (#370).
+   *
+   * Absent means an **empty** table rather than a rejection, which is the
+   * ordinary state of a device nothing has asked about. `servicesRejectWith`
+   * is the other one, and both matter: `readCapacitorResolvedUuids` turns
+   * either into the empty list, and a double that could only do one of them
+   * would leave the branch that catches untested.
+   */
+  readonly services?: readonly PluginService[];
+  readonly servicesRejectWith?: unknown;
 }
 
 export interface ScriptedPort extends CapacitorBlePort {
@@ -209,6 +226,17 @@ export function scriptedPort(stack: ScriptedStack = {}): ScriptedPort {
         return notInitialized();
       }
       return Promise.resolve();
+    },
+
+    async getServices(deviceId) {
+      calls.push(`getServices:${deviceId}`);
+      if (!started) {
+        return notInitialized();
+      }
+      if (stack.servicesRejectWith !== undefined) {
+        return reject(stack.servicesRejectWith);
+      }
+      return stack.services ?? [];
     },
 
     async read(_deviceId, service, characteristic) {

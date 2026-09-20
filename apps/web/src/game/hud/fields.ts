@@ -605,3 +605,54 @@ export function gapAgainst(state: GameState, theirDistance: number): GapInput {
     referenceSpeed: state.ride.speed,
   };
 }
+
+/**
+ * What the trainer is being asked to do — the line #373 moved into the HUD.
+ *
+ * ## Why this is a sentence and not a tenth field
+ *
+ * It was `GameView`'s own `<p>` **below** the panel until #373, where it was
+ * the only rider-visible evidence that a gradient is reaching the trainer —
+ * `docs/validation/0002-android-shell-and-game.md` Part L is built around
+ * reading it — and in **landscape on a tablet it was off the bottom of the
+ * viewport with no indication it existed**. A rider running that procedure on a
+ * handlebar-mounted phone could not perform the step.
+ *
+ * #373 asks for the placement to be decided deliberately, so: it belongs **in**
+ * the HUD, and **not** in {@link hudReadings}. The grid is a glance table where
+ * a field is found by POSITION rather than by reading, and three things follow
+ * from that:
+ *
+ * - A conditional tenth field would move the wind field (#335) depending on
+ *   whether a trainer happened to be connected, which is exactly what the
+ *   fixed-length list exists to prevent.
+ * - This is a verb and two quantities, not a magnitude. `2.5 rem` in a track
+ *   whose `7rem` is a floor rather than an `auto` is #259's overflow defect
+ *   with a longer string in it.
+ * - A rider does not glance at it. They read it once, while checking that the
+ *   hills are real.
+ *
+ * So it is a row of the panel's own flex column, immediately above the
+ * controls — which ties its reachability to a control that must already be
+ * reachable rather than to a rule of its own.
+ *
+ * ⚠️ **`simulating`, not `holding`.** `game/gradient.ts`
+ * §`GradientSessionState.asked` is explicit that the two are different claims:
+ * `setSimulationParameters` resolves on the machine's indication, so the value
+ * here did land, but the screen would be about a second ahead of the trainer if
+ * it said so.
+ *
+ * ⚠️ **The count is the half that catches #362**, where a gradient was computed
+ * and never sent. A percentage with `(0 sent)` beside it is the defect.
+ */
+export interface TrainerLine {
+  /** The gradient last asked for, as a signed percentage. */
+  readonly gradePercent: number;
+  /** How many writes have been attempted. */
+  readonly writes: number;
+}
+
+/** {@link TrainerLine} as the one sentence the HUD renders. */
+export function trainerLine(line: TrainerLine): string {
+  return `Trainer: simulating ${line.gradePercent.toFixed(1)}% (${String(line.writes)} sent)`;
+}
