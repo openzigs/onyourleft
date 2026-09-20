@@ -20,6 +20,11 @@
     // reads `include` — and is never typechecked, which is the half of the gate
     // that catches a prop the panel no longer takes.
     "browser/**/*.tsx",
+    // #405's icon generator and its test. Authoring-time code that produces a
+    // committed artefact, the shape `packages/fit/tools` already has — in the
+    // program so ESLint's project service can resolve it, and out of the
+    // coverage report, which is `apps/*/src/**`.
+    "tools/**/*.ts",
     "vite.config.ts",
     "vite.browser.config.ts",
     "playwright.config.ts",

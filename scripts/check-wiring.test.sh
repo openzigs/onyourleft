@@ -45,15 +45,44 @@ tmp=""
 cleanup() { [ -n "${tmp}" ] && rm -rf "${tmp}"; }
 trap cleanup EXIT
 
+# Every path WATCHED_PREFIXES names, read from the checker rather than copied.
+#
+# ⚠️ **Read rather than written down**, which is `check-a11y-suite.mjs`'s rule
+# about `test:a11y`'s selector applied to this one. A copy here drifts from the
+# real list, and #406 is what that costs: it added `apps/web/src/offline/` and
+# every one of these fixtures went red at once, because a prefix naming no
+# directory is a hard failure and `new_fixture` created two directories BY NAME.
+# Deriving them makes adding a prefix a one-line change in one file, which is
+# what it should always have been.
+#
+# ⚠️ Resolved **here**, at the top, and not inside `new_fixture`: a derivation
+# that returned nothing would otherwise leave every case below exercising the
+# missing-directory rule instead of the one it is about — 86 confusing failures
+# instead of one clear one — and an `exit` inside a process substitution exits
+# the subshell rather than this script.
+WATCHED_DIRECTORIES="$(
+  sed -n 's/^const WATCHED_PREFIXES = \[\(.*\)\];$/\1/p' "${CHECK}" |
+    tr ',' '\n' |
+    sed -e "s/[[:space:]]//g" -e "s/'//g" |
+    grep .
+)"
+if [ -z "${WATCHED_DIRECTORIES}" ]; then
+  printf 'check-wiring.test: could not read WATCHED_PREFIXES out of %s\n' "${CHECK}" >&2
+  exit 1
+fi
+
 # new_fixture -- a repository with one app, its page, and an empty entry module.
 #
-# ⚠️ Both watched directories are created even when a case writes into neither:
-# since #283 a WATCHED_PREFIXES entry naming a directory that is not there is a
-# hard failure, so a fixture without them would exercise that rule instead of
-# the one it is about. The case that DOES exercise it removes one deliberately.
+# ⚠️ Every watched directory is created even when a case writes into none of
+# them: since #283 a WATCHED_PREFIXES entry naming a directory that is not there
+# is a hard failure, so a fixture without them would exercise that rule instead
+# of the one it is about. The case that DOES exercise it removes one
+# deliberately.
 new_fixture() {
   tmp="$(mktemp -d)"
-  mkdir -p "${tmp}/apps/web/src/game" "${tmp}/apps/web/src/ride"
+  while IFS= read -r watched; do
+    mkdir -p "${tmp}/${watched}"
+  done <<< "${WATCHED_DIRECTORIES}"
   printf '{"name":"onyourleft","private":true}' > "${tmp}/package.json"
   printf '{"name":"@onyourleft/web","private":true}' > "${tmp}/apps/web/package.json"
   cat > "${tmp}/apps/web/index.html" <<'HTML'
@@ -757,6 +786,38 @@ TS
 run_check
 assert_red 'no entry point is a failure rather than a clean run'
 assert_says 'and says why' 'would pass vacuously'
+
+# --- #406: the offline seam is watched, and its directory is derived ---------
+#
+# The third watched prefix, and the first added for a seam that did not exist
+# yet rather than after a defect. A registration module nothing calls is a
+# client that silently has no service worker -- correct, unit-tested,
+# typechecked and wired to nothing, which is this gate's population exactly.
+#
+# ⚠️ It is also what caught the drift this suite had: `new_fixture` created the
+# two watched directories BY NAME, so adding a third turned all 83 cases red at
+# once. `watched_directories` reads them out of the checker now.
+new_fixture
+write apps/web/src/main.tsx <<'TS'
+export {};
+TS
+write apps/web/src/offline/register.ts <<'TS'
+export function registerServiceWorker(): void {}
+TS
+run_check
+assert_red 'an offline module the entry point cannot reach is reported'
+assert_says 'and names it' 'WIRE001 apps/web/src/offline/register.ts'
+
+new_fixture
+write apps/web/src/main.tsx <<'TS'
+import { registerServiceWorker } from './offline/register';
+registerServiceWorker();
+TS
+write apps/web/src/offline/register.ts <<'TS'
+export function registerServiceWorker(): void {}
+TS
+run_check
+assert_green 'and is green once main.tsx calls it'
 
 # --- The watched set itself fails closed ------------------------------------
 # #142's shape, one gate later: WATCHED_PREFIXES is written down rather than

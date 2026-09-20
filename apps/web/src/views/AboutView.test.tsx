@@ -80,26 +80,26 @@ describe('the About page', () => {
   });
 });
 
-describe('what the About page claims about the network — #404', () => {
+describe('what the About page claims about the network — #404, then #408', () => {
   /**
-   * The wording measured on 2026-09-19 and shipped by #404, quoted here rather
-   * than imported. Two halves, and the issue's acceptance criteria require
-   * both: a page that dropped the paragraph entirely would satisfy the
-   * correction and lose the claim that is actually true.
+   * ⚠️ **This block used to forbid the strong claim and now requires it.**
+   *
+   * #404 measured the shipped build failing offline and replaced *"the app
+   * works with no network at all"* with *"your data is local; the app is
+   * not"*, and this suite pinned the retreat. #408 built the gate that makes
+   * the strong claim checkable — `apps/web/browser/offline.browser.spec.ts`,
+   * in the pinned Chromium, with `setOffline(true)`, in a reopened browsing
+   * context, and with a control that must fail in the same run — so the page
+   * says it again.
+   *
+   * ⚠️ The rule #404 wrote is unchanged and is what makes this legitimate: the
+   * gate landed **first**, in the same pull request. A future edit that
+   * strengthens this copy further needs the same order.
    */
   const DATA_IS_LOCAL = 'they leave this device only when you export them';
-  const APP_NEEDS_THE_NETWORK_TO_START = 'it needs a connection to start';
-
-  /**
-   * The family the retracted sentence belongs to, not the sentence alone.
-   *
-   * ⚠️ Matching only the literal `works with no network at all` would be
-   * defeated by re-typing it as "works without a network" or "no network is
-   * needed", which is the same false claim. The pattern is deliberately loose
-   * and the replacement wording was written to stay clear of it.
-   */
-  const CLAIMS_NO_NETWORK_IS_NEEDED =
-    /(?:work|run|start|open|load)s?[^.]{0,40}(?:with no network|without a network|no network at all)/i;
+  const FIRST_VISIT_NEEDS_A_CONNECTION = 'The first visit needs a connection';
+  const AFTERWARDS_IT_WORKS_OFFLINE = 'with the network off works';
+  const THE_MAP_IS_THE_EXCEPTION = 'background imagery';
 
   async function aboutText(): Promise<string> {
     const mounted = await mount(<AboutView />);
@@ -108,31 +108,31 @@ describe('what the About page claims about the network — #404', () => {
     return text;
   }
 
-  it('does not claim the app works with no network, because it does not', async () => {
-    // Measured 2026-09-19 against `vite preview` over `apps/web/dist`, in this
-    // repository's own pinned Chromium: an offline reload of a loaded tab and
-    // an offline cold start in a fresh context both return
-    // `net::ERR_INTERNET_DISCONNECTED` and a blank page. No service worker, no
-    // Cache Storage, no web app manifest. #402 is the epic that changes that;
-    // #408 re-states the claim once a gate can prove it.
+  it('says the app keeps its own copy and opens with the network off', async () => {
     const text = await aboutText();
-    expect(
-      text,
-      'the About page claims the app needs no network, which the shipped browser build does not honour (#404)',
-    ).not.toMatch(CLAIMS_NO_NETWORK_IS_NEEDED);
+    expect(text).toContain(AFTERWARDS_IT_WORKS_OFFLINE);
   });
 
-  it('says instead that a cold start needs a connection', async () => {
-    // The negative above passes against a page with the paragraph deleted, and
-    // against a page that says nothing at all. This is the half that does not.
+  it('says the first visit still needs a connection, which is the honest limit', async () => {
+    // The positive claim above is true only after a first load. A page that
+    // said "works offline" flat would be the #404 sentence again with better
+    // machinery behind it.
     const text = await aboutText();
-    expect(text).toContain(APP_NEEDS_THE_NETWORK_TO_START);
+    expect(text).toContain(FIRST_VISIT_NEEDS_A_CONNECTION);
   });
 
-  it('still makes the claim that IS true: the data is local and leaves only on export', async () => {
-    // #404's second criterion. The correction must not be taken by deleting the
-    // paragraph — "your rides are on this device" is the whole point of ADR
-    // 0002 and it is true, unlike the sentence that used to sit beside it.
+  it('names the map as the one thing that is not offline — ADR 0024 D-2', async () => {
+    // The basemap is a ~19 GB archive on object storage and is deliberately not
+    // precached. A rider in a basement gets the trainer game and not the map,
+    // and being told that is the difference between a limit and a bug report.
+    const text = await aboutText();
+    expect(text).toContain(THE_MAP_IS_THE_EXCEPTION);
+  });
+
+  it('still makes the claim that was always true: the data is local', async () => {
+    // #404's second criterion, unchanged. "Your rides are on this device" is
+    // the whole point of ADR 0002 and must not be lost to a rewrite of the
+    // sentence beside it.
     const text = await aboutText();
     expect(text).toContain(DATA_IS_LOCAL);
     expect(text).toContain('nothing is uploaded');

@@ -22,7 +22,7 @@
 
 import { useEffect, useSyncExternalStore } from 'react';
 
-import type { RideController, RideSnapshot } from './controller';
+import { rideInProgress, type RideController, type RideSnapshot } from './controller';
 
 /** How often the screen advances its clock. The 1 Hz grid FIT expects. */
 export const TICK_INTERVAL_MILLISECONDS = 1000;
@@ -48,10 +48,7 @@ export function useRideSnapshot(controller: RideController): RideSnapshot {
  * and the athlete gets no second chance to say "not yet" once the tab is gone.
  */
 export function useRideInProgress(controller: RideController): boolean {
-  const read = (): boolean => {
-    const { phase } = controller.getSnapshot();
-    return phase === 'recording' || phase === 'paused';
-  };
+  const read = (): boolean => rideInProgress(controller.getSnapshot().phase);
   return useSyncExternalStore((onChange) => controller.subscribe(onChange), read, read);
 }
 

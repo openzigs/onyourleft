@@ -12,28 +12,35 @@ import { hrefFor, routeById } from '../shell/routes';
  * meets it. This page carries the two things that are true everywhere: there is
  * no account and no server, and the data is on this device only.
  *
- * ⚠️ **This page used to say "it is why the app works with no network at all",
- * and a reviewer who remembers that sentence is reading the old file**
- * ([#404](https://github.com/openzigs/onyourleft/issues/404)). It was false of
- * the shipped browser build and was measured to be so on 2026-09-19, in this
- * repository's own pinned Chromium: an offline reload of a loaded tab and an
- * offline cold start in a fresh context both return
- * `net::ERR_INTERNET_DISCONNECTED` and a blank page, because there is no
- * service worker, no Cache Storage entry and no web app manifest.
+ * ⚠️ **This page has now said three different things about the network, and a
+ * reviewer who remembers either of the first two is reading an old file.**
  *
- * The distinction that sentence flattened is the one this page now draws, and
- * it is the useful one: **the DATA is local and the APP is not.** Nothing in
- * `apps/web/src`, and nothing in any leaf package's source tree, calls `fetch`
- * or `XMLHttpRequest` at all, so recording, storing, analysing and riding
- * genuinely need no network — but the client is still handed its HTML and its
- * bundle by a server, so a cold start needs one.
+ * 1. It said *"it is why the app works with no network at all"*. That was
+ *    **false of the shipped browser build**, measured on 2026-09-19 in this
+ *    repository's own pinned Chromium: an offline reload of a loaded tab and an
+ *    offline cold start in a fresh context both returned
+ *    `net::ERR_INTERNET_DISCONNECTED` and a blank page, because there was no
+ *    service worker, no Cache Storage entry and no web app manifest
+ *    ([#404](https://github.com/openzigs/onyourleft/issues/404)).
+ * 2. #404 replaced it with *"your data is local; the app is not"* — accurate,
+ *    and a retreat.
+ * 3. ⚠️ **Since #408 it says the strong thing again, and this time a gate
+ *    proves it.** `apps/web/browser/offline.browser.spec.ts` loads
+ *    `apps/web/dist` in the pinned Chromium with
+ *    `BrowserContext.setOffline(true)`, in a browsing context that was closed
+ *    and reopened, and asserts the app renders — **with a control**: a resource
+ *    outside the precache must fail in the same run, and every offline response
+ *    must report `fromServiceWorker`. Without those two a green run would be
+ *    indistinguishable from the network never having been switched off.
  *
- * ⚠️ **Do not re-strengthen this without a gate that proves it.** Making the
- * old sentence true is epic
- * [#402](https://github.com/openzigs/onyourleft/issues/402) and several pull
- * requests of work; restoring the claim first is how it went unnoticed the
- * first time. `AboutView.test.tsx` pins both halves of the replacement by
- * string for exactly that reason.
+ * ⚠️ **What has NOT changed is the rule.** #404's header is still the one to
+ * obey: *"do not re-strengthen this without a gate that proves it — restoring
+ * the claim first is how it went unnoticed the first time."* This was
+ * re-strengthened **after** the gate landed and in the same pull request as it,
+ * and `AboutView.test.tsx` pins every half of the new wording by string,
+ * including the limits: the first visit needs a connection, and the map's
+ * background imagery is fetched when it is looked at (ADR 0024 D-2
+ * deliberately does not precache a ~19 GB archive).
  *
  * ⚠️ **The privacy policy link is a Play requirement, not a courtesy**
  * ([#95](https://github.com/openzigs/onyourleft/issues/95)). Play's Health
@@ -52,9 +59,11 @@ export function AboutView(): JSX.Element {
         when you export them yourself. That is a deliberate choice rather than a missing feature.
       </p>
       <p>
-        Your data is local; the app is not. In a browser it is served over the web like any other
-        page, so it needs a connection to start — opening it in a fresh tab, or reloading it, will
-        not work with the network off. Once it has loaded, recording a ride does not need one.
+        Your data is local, and so is the app. The first visit needs a connection, because that is
+        when the browser fetches it; after that it keeps its own copy, and opening it in a fresh tab
+        with the network off works — recording a ride, riding the trainer game and reading your
+        history all do. The exception is the map&rsquo;s background imagery, which is fetched from
+        the web when you look at it.
       </p>
       <p>
         The consequence is the honest one: clearing this browser&rsquo;s site data removes your

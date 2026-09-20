@@ -32,6 +32,11 @@ export default defineConfig({
     // the root config, and deliberately: a fixture generator's coverage mixed
     // into a client's denominator is the thing #110 decided against for
     // `packages/fit/tools`.
-    include: ['src/**/*.test.{ts,tsx}', 'browser/**/*.test.{ts,tsx}'],
+    //
+    // ⚠️ And `tools/` since #405, which is the same kind of file again: the
+    // web app manifest's icons are committed binaries drawn by
+    // `tools/icons/generate-icons.ts`, and the test beside it is what says the
+    // committed bytes are still that drawing.
+    include: ['src/**/*.test.{ts,tsx}', 'browser/**/*.test.{ts,tsx}', 'tools/**/*.test.{ts,tsx}'],
   },
 });

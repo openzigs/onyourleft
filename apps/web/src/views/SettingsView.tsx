@@ -67,6 +67,8 @@ import { DEFAULT_RIDER_MASS_KILOGRAMS, massToSave, riderMassFor } from '../athle
 import type { AthleteMassPort } from '../athlete/store-port';
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
+import { PersistenceNotice } from '../support/PersistenceNotice';
+import type { StorageManagerLike } from '../support/persistent-storage';
 import { hrefFor, routeById } from '../shell/routes';
 import { formatMass, massIn, massUnit, measurementText } from '../units/format';
 import type { UnitsPort } from '../units/store-port';
@@ -191,6 +193,17 @@ export interface SettingsViewProps {
    * does not hold.
    */
   readonly onRiderMassChange: (mass: Kilograms | undefined) => void;
+  /**
+   * `navigator.storage`, for the panel that says whether this browser may throw
+   * a rider's history away (#409).
+   *
+   * `undefined` is a legitimate state and not only a test's: a browser with no
+   * Storage API says nothing, which is what `PersistenceNotice` renders. Passed
+   * in for the reason every other port here is — the accessibility suite
+   * renders this route on a machine that is none of the three browsers this has
+   * to be right for.
+   */
+  readonly storage?: StorageManagerLike | undefined;
 }
 
 export function SettingsView({
@@ -200,6 +213,7 @@ export function SettingsView({
   mass,
   riderMass,
   onRiderMassChange,
+  storage,
 }: SettingsViewProps): JSX.Element {
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
 
@@ -312,6 +326,14 @@ export function SettingsView({
         {...(riderMass === undefined ? {} : { riderMass })}
         onRiderMassChange={onRiderMassChange}
       />
+
+      {/*
+        #409. Last, because it is the one panel a rider reads rather than
+        acts on — and it is on this screen rather than About because About is
+        prose about the product and this is a fact about *this browser* that
+        can change between visits.
+      */}
+      <PersistenceNotice {...(storage === undefined ? {} : { storage })} />
     </>
   );
 }
@@ -384,6 +406,17 @@ function WeightPanel({
   readonly units: UnitSystem;
   readonly riderMass?: Kilograms | undefined;
   readonly onRiderMassChange: (mass: Kilograms | undefined) => void;
+  /**
+   * `navigator.storage`, for the panel that says whether this browser may throw
+   * a rider's history away (#409).
+   *
+   * `undefined` is a legitimate state and not only a test's: a browser with no
+   * Storage API says nothing, which is what `PersistenceNotice` renders. Passed
+   * in for the reason every other port here is — the accessibility suite
+   * renders this route on a machine that is none of the three browsers this has
+   * to be right for.
+   */
+  readonly storage?: StorageManagerLike | undefined;
 }): JSX.Element {
   const current = riderMassFor(riderMass);
   // ⚠️ Here rather than in `WeightField`, which is remounted by a save. See the

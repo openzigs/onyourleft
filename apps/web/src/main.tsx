@@ -21,11 +21,22 @@ import {
 } from '@onyourleft/store';
 
 import './design/theme.css';
-import { browserClock, createRideController, type RideController } from './ride/controller';
+import {
+  browserClock,
+  createRideController,
+  rideInProgress,
+  type RideController,
+} from './ride/controller';
 import { openCapacitorTrainer, openWebBluetoothTrainer } from './ride/trainer';
 import { gameSensors } from './game/sensors';
 import { fastestAttempt, ghostFromSpeed } from './game/ghost-source';
 import { isNativeShell, platformCapacitor } from './support/capacitor';
+import { platformServiceWorkerContainer, registerServiceWorker } from './offline/register';
+import {
+  createUpdateWatcher,
+  platformControllerChanges,
+  type UpdateWatcher,
+} from './offline/update';
 import { AppShell } from './shell/AppShell';
 import { browserScreenLockSource, platformWakeLock } from './game/hud/wake-lock';
 import type { GamePort, RidableRoute } from './game/GameView';
@@ -34,6 +45,7 @@ import type { GhostTrack } from '@onyourleft/domain';
 import type { GameRenderer } from './game/port';
 import { probeBrowser, type CapabilityProbe } from './support/bluetooth-support';
 import { capacitorShellSupport } from './support/shell-support';
+import { platformStorage, requestPersistenceOnce } from './support/persistent-storage';
 import type { ShellSupportPort } from './support/shell-support-port';
 import { saveWithAnchor, webCryptoDigest } from './transfer/browser';
 import { browserDraftStorage } from './routing/draft-storage';
@@ -609,13 +621,71 @@ function buildAthleteMassPort(): AthleteMassPort {
   return { store: localStore(), athleteId: LOCAL_ATHLETE };
 }
 
+/**
+ * Watch for a new version of the app, or not (#407).
+ *
+ * `undefined` wherever `registerServiceWorker` did not register one — inside
+ * the Android shell (ADR 0024 D-4), and in any browser without a
+ * `serviceWorker` — because there is no worker that could ever be waiting and
+ * a watcher over nothing would be a control that can never fire.
+ *
+ * ⚠️ **The ride controller is handed in as the interlock**, which is the whole
+ * of ADR 0024 D-3 rule 3: activation ends in a page reload, and a ride is the
+ * one thing in this app a rider cannot redo. `rideInProgress` is the one place
+ * that decides what "in progress" means, so the unload guard and this cannot
+ * disagree about a paused ride.
+ */
+function buildUpdateWatcher(
+  registered: Awaited<ReturnType<typeof registerServiceWorker>>,
+  rideController: RideController | undefined,
+): UpdateWatcher | undefined {
+  const changes = platformControllerChanges();
+  if (registered.kind !== 'registered' || changes === undefined) {
+    return undefined;
+  }
+  return createUpdateWatcher({
+    registration: registered.registration,
+    controllerChanges: changes,
+    recording:
+      rideController === undefined
+        ? undefined
+        : {
+            inProgress: () => rideInProgress(rideController.getSnapshot().phase),
+            subscribe: (listener) => rideController.subscribe(listener),
+          },
+    reload: () => {
+      globalThis.location.reload();
+    },
+  });
+}
+
 async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const platform = await buildPlatform(capabilities);
   const rideController = platform.rideController;
+  const registered = await workerRegistration;
+  // Read once: two calls would be two reads of a global for one prop.
+  const storage = platformStorage();
+  const update = buildUpdateWatcher(registered, rideController);
+  if (registered.kind === 'registered') {
+    // ⚠️ **Only once a worker registered, and ADR 0024 D-5 is why**: Chrome
+    // grants persistence silently on a heuristic that includes the site having
+    // been installed, which needs the manifest (#405) AND this worker (#406) —
+    // so the request is made at the moment it has a chance of being granted
+    // rather than on every load of every browser. In a browser that has no
+    // service worker at all, `persist()` is a permission prompt arriving out of
+    // nowhere, and the rides there stay on the best-effort tier with the
+    // Settings panel saying so.
+    //
+    // Not awaited: a rider waits for no permission before the first paint, and
+    // `requestPersistence` resolves on every path rather than rejecting.
+    void requestPersistenceOnce(storage);
+  }
   createRoot(container).render(
     <StrictMode>
       <AppShell
         capabilities={capabilities}
+        {...(update === undefined ? {} : { update })}
+        {...(storage === undefined ? {} : { storage })}
         {...(platform.shell === undefined ? {} : { shell: platform.shell })}
         settings={buildUnitsPort()}
         athleteMass={buildAthleteMassPort()}
@@ -648,6 +718,39 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
     </StrictMode>,
   );
 }
+
+/**
+ * Register the service worker, so a cold start with the network off renders
+ * the app (#406).
+ *
+ * ⚠️ **A literal import and a direct call, on purpose.** `check:wiring` cannot
+ * see a call made through a string key or a non-literal dynamic import
+ * (`scripts/check-wiring.mjs` §Limits), so routing this through either and
+ * reading a green gate as proof it is wired would be exactly the false pass
+ * #278 exists to catch. Deleting this call turns `check:wiring` red.
+ *
+ * ⚠️ **Started here and awaited only inside `render`**, which is already
+ * asynchronous. The app has worked with no worker since it existed and must
+ * carry on doing so — registration is an improvement to a *later* visit, never
+ * a precondition for this one — and `registerServiceWorker` resolves on every
+ * path rather than rejecting, so awaiting it cannot fail a start-up. What the
+ * outcome is needed for is #407: a registration is what an update watcher
+ * watches, and `RegistrationOutcome.failed` is what a future notice would
+ * read.
+ *
+ * `import.meta.env.BASE_URL` rather than `/`: the worker's scope is the base
+ * path this build was compiled for, so a deployment under a subdirectory
+ * registers a worker that controls its own subtree and not the whole origin.
+ */
+const workerRegistration = registerServiceWorker({
+  container: platformServiceWorkerContainer(),
+  // ⚠️ ADR 0024 D-4. Asked through the one function in this client that
+  // answers it, so the worker and the BLE transport cannot disagree about
+  // which platform this is.
+  nativeShell: isNativeShell(platformCapacitor()),
+  script: `${import.meta.env.BASE_URL}sw.js`,
+  scope: import.meta.env.BASE_URL,
+});
 
 /**
  * Establish this device's athlete row, then render (#184).

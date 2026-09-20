@@ -149,3 +149,65 @@ describe('the client', () => {
     ).toEqual([]);
   });
 });
+
+/**
+ * ⚠️ **Since #406 this client contains exactly one thing that can reach a
+ * network, and this is where it is written down.**
+ *
+ * `NETWORK_PRIMITIVES` above does not fire on a member call: its lookbehind
+ * excludes a preceding `.`, so `store.fetchRides()` is not a hit and neither is
+ * the service worker's `scope.fetch(event.request)`. That exclusion was right
+ * when nothing in the client called `fetch` on anything; it is no longer the
+ * whole story, and leaving it at that would have added a network call to this
+ * program under a gate written to notice exactly that.
+ *
+ * So the worker's call is pinned rather than excused. What keeps the policy
+ * true is **not** that the call is absent — it is that it can only ever reach
+ * the origin the app itself was served from:
+ *
+ * - `worker-core.ts` §`decideFetch` returns `untouched` for every origin but
+ *   the worker's own scope, and `untouched` means `respondWith` is never
+ *   called, so the request is the page's and the worker never sees it;
+ * - the only requests the worker *does* answer are the app's own precached
+ *   assets and its own shell, and the fallback re-issues a request the page
+ *   had already made;
+ * - nothing about a ride, an athlete or a coordinate is in any of them.
+ *
+ * `worker-core.test.ts` §"does not touch a request to any other origin" is the
+ * assertion; this is the accounting.
+ */
+describe('the service worker’s one network call', () => {
+  /** A `fetch(` reached through an object, which the scan above deliberately skips. */
+  const MEMBER_FETCH = /(?<=[\w$])\s*\.\s*fetch\s*\(/g;
+
+  function memberFetchesIn(source: string): number {
+    const stripped = stripComments(source);
+    MEMBER_FETCH.lastIndex = 0;
+    return [...stripped.matchAll(MEMBER_FETCH)].length;
+  }
+
+  it('is the only one in the whole client, and it is in the worker', () => {
+    const elsewhere: string[] = [];
+    let inTheWorker = 0;
+    for (const file of scannable()) {
+      const count = memberFetchesIn(readFileSync(file, 'utf8'));
+      if (count === 0) {
+        continue;
+      }
+      if (relative(SOURCE_ROOT, file) === join('offline', 'worker-core.ts')) {
+        inTheWorker += count;
+        continue;
+      }
+      elsewhere.push(`${relative(SOURCE_ROOT, file)} — ${String(count)}`);
+    }
+    expect(
+      elsewhere,
+      'a second place in this client can now reach a network; docs/privacy-policy.md and the Data Safety form are what must be re-read',
+    ).toEqual([]);
+    // Exactly one: the cache-miss fallback. A second inside the worker is as
+    // much of a change to think about as one outside it, and the number going
+    // to nought would mean the fallback was deleted and this whole block is
+    // describing something that is not there.
+    expect(inTheWorker).toBe(1);
+  });
+});

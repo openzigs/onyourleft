@@ -49,6 +49,26 @@ import { defineConfig, devices } from '@playwright/test';
 const PORT = 4319;
 
 /**
+ * The **product** build's port, which is a different server (#408).
+ *
+ * ⚠️ The one above previews `browser/` — the harness — and an offline claim
+ * about the product has to be measured against `apps/web/dist`, which that
+ * server does not serve. So there are two `webServer` entries, not two
+ * Playwright projects and emphatically not two CI jobs: `main` requires a
+ * status check whose context is exactly `Repository rules`, and a second job
+ * reports under a different context and could not block a merge (CLAUDE.md
+ * §4c).
+ *
+ * ⚠️ **The product server serves a single-page app**, with Vite's default
+ * `appType`. That is deliberate and is the opposite of the harness's `'mpa'`:
+ * a static host serving this client rewrites an unknown path to `index.html`,
+ * and #408's control depends on knowing which server answers what. The control
+ * is a `fetch()` rather than a navigation for exactly that reason — see
+ * `offline.browser.spec.ts`.
+ */
+const PRODUCT_PORT = 4320;
+
+/**
  * The bind address, written down once.
  *
  * ⚠️ **`vite preview` defaults to `localhost`, and that is not the same thing
@@ -70,6 +90,28 @@ const PORT = 4319;
  */
 const HOST = '127.0.0.1';
 export const HARNESS_ORIGIN = `http://${HOST}:${String(PORT)}`;
+/** Where `apps/web/dist` is served from. The product, not the gate's own pages. */
+export const PRODUCT_ORIGIN = `http://${HOST}:${String(PRODUCT_PORT)}`;
+
+/**
+ * The flags every browser this gate launches is given.
+ *
+ * Written down once and exported because `offline.browser.spec.ts` launches its
+ * **own** persistent context — a service-worker registration and a Cache
+ * Storage entry live in a profile directory, and `browser.newContext()` gives
+ * each context its own empty one, so "come back tomorrow with no network" is
+ * not expressible without one. A second copy of these flags is a second
+ * browser configuration that can drift from this one silently.
+ */
+export const LAUNCH_ARGS = [
+  '--use-gl=angle',
+  '--use-angle=swiftshader',
+  '--enable-unsafe-swiftshader',
+  // No sandbox: the CI runner and this container both run as root, where
+  // Chromium's sandbox refuses to start. It is a test browser loading a
+  // page from the loopback interface with no credentials of any kind.
+  '--no-sandbox',
+];
 
 export default defineConfig({
   testDir: './browser',
@@ -88,32 +130,35 @@ export default defineConfig({
   outputDir: './browser/dist/test-results',
   use: {
     baseURL: HARNESS_ORIGIN,
-    launchOptions: {
-      args: [
-        '--use-gl=angle',
-        '--use-angle=swiftshader',
-        '--enable-unsafe-swiftshader',
-        // No sandbox: the CI runner and this container both run as root, where
-        // Chromium's sandbox refuses to start. It is a test browser loading a
-        // page from the loopback interface with no credentials of any kind.
-        '--no-sandbox',
-      ],
+    launchOptions: { args: LAUNCH_ARGS },
+  },
+  webServer: [
+    {
+      // `vite preview` over the harness build. The build is a separate step in
+      // `test:browser`, so a failure to compile is reported as a build failure
+      // rather than as a server that would not start.
+      command: `pnpm exec vite preview --config vite.browser.config.ts --host ${HOST} --port ${String(PORT)} --strictPort`,
+      url: HARNESS_ORIGIN,
+      reuseExistingServer: false,
+      timeout: 60_000,
+      // Playwright ignores a web server's stdout by default, so a server that
+      // starts and is simply not where the poller is looking produces a timeout
+      // with no output at all — the whole of what the first CI run told us. Vite
+      // prints the address it bound to; pipe it, so the next failure of this
+      // shape arrives with its own diagnosis attached.
+      stdout: 'pipe',
     },
-  },
-  webServer: {
-    // `vite preview` over the harness build. The build is a separate step in
-    // `test:browser`, so a failure to compile is reported as a build failure
-    // rather than as a server that would not start.
-    command: `pnpm exec vite preview --config vite.browser.config.ts --host ${HOST} --port ${String(PORT)} --strictPort`,
-    url: HARNESS_ORIGIN,
-    reuseExistingServer: false,
-    timeout: 60_000,
-    // Playwright ignores a web server's stdout by default, so a server that
-    // starts and is simply not where the poller is looking produces a timeout
-    // with no output at all — the whole of what the first CI run told us. Vite
-    // prints the address it bound to; pipe it, so the next failure of this
-    // shape arrives with its own diagnosis attached.
-    stdout: 'pipe',
-  },
+    {
+      // The product (#408). `vite preview` with no `--config` reads
+      // `vite.config.ts` and serves `dist`, which `test:browser` now builds
+      // first — an offline claim about the product cannot be measured against
+      // the harness.
+      command: `pnpm exec vite preview --host ${HOST} --port ${String(PRODUCT_PORT)} --strictPort`,
+      url: PRODUCT_ORIGIN,
+      reuseExistingServer: false,
+      timeout: 60_000,
+      stdout: 'pipe',
+    },
+  ],
   projects: [{ name: 'chromium', use: devices['Desktop Chrome'] }],
 });

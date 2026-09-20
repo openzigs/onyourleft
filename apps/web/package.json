@@ -7,11 +7,12 @@
   "description": "Browser client — the Phase 1 product.",
   "scripts": {
     "dev": "vite",
+    "icons:generate": "node tools/icons/generate-icons.ts",
     "build": "tsc --noEmit --project tsconfig.json && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "test": "vitest run",
-    "test:browser": "vite build --config vite.browser.config.ts && playwright test"
+    "test:browser": "vite build && vite build --config vite.browser.config.ts && playwright test"
   },
   "dependencies": {
     "@onyourleft/domain": "workspace:*",
