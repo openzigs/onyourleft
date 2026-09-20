@@ -701,3 +701,38 @@ Read first-hand for this ADR on **2026-09-03** unless stated otherwise.
 - Not legal advice, as stated at the top. The two questions where a lawyer adds value rather than
   confirms the obvious are named under "Where outside expertise would genuinely help"; ADR 0001 and
   ADR 0006 each name their own pair in the same form.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-09-19** — **"No network" is true of the data and, in the browser build, not yet true of
+  the app.** Four statements of fact in the body describe a property the shipped browser artefact
+  does not have: the header's *"Phase 1 has no server, no account and no network"* (line 7), the
+  same sentence quoted from owner decision D6 (line 71), *"No account, no network, no upload"*
+  (line 304) and the leaderboard table's *"Works in Phase 1 with no network"* (line 441). Measured
+  **2026-09-19** with this repository's own pinned Playwright (`@playwright/test` 1.63.0, Chromium
+  revision 1243) against `vite preview` over `apps/web/dist`: an **offline reload of an
+  already-loaded tab** and an **offline cold start in a fresh context** both return
+  `net::ERR_INTERNET_DISCONNECTED` and a blank page. `navigator.serviceWorker.getRegistrations()`
+  is `0`, `caches.keys()` is `[]`, and there is no web app manifest —
+  `apps/web/vite.config.ts` is `plugins: [react()]` and emits neither.
+  **The decision is unaffected and none of it was wrong.** The distinction the body's wording
+  flattens is between the **data**, which is local — `grep` for `fetch(` and `XMLHttpRequest` over
+  non-test `apps/web/src` and every `packages/*/src` returns **zero hits**, so recording, the
+  store, BLE, trainer control, the game, the library, analysis and import/export genuinely need no
+  network — and the **app**, which is still handed its HTML and its bundle by a server like any
+  other web page. Once a tab has loaded, offline hash navigation between `#/analysis`,
+  `#/activities` and `#/game` renders with **zero** failed requests; a lazy chunk not yet fetched
+  (`three-renderer`, `maplibre`, the eleven `.glb` models) does not. ⚠️ **This says nothing about
+  the Android shell**, which serves the same build from the APK's own assets over
+  `https://localhost` and is reasoned but **not measured** to cold-start offline — that is
+  [#410](https://github.com/openzigs/onyourleft/issues/410), and conflating the two is the mistake
+  this entry exists to prevent. `apps/web/src/views/AboutView.tsx` carried the same claim in the
+  app's own voice and no longer does; its wording is now pinned by string in
+  `AboutView.test.tsx`. Closing the gap is epic
+  [#402](https://github.com/openzigs/onyourleft/issues/402), and
+  [#408](https://github.com/openzigs/onyourleft/issues/408) is where the body's wording becomes
+  true of the browser build and checkable in the browser gate.
+  ([#404](https://github.com/openzigs/onyourleft/issues/404), findings issue
+  [#391](https://github.com/openzigs/onyourleft/issues/391))
