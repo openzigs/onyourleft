@@ -53,7 +53,12 @@ apps/                 AGPL-3.0-or-later, without exception
                         performs none and nothing here had ever laid out a
                         header. Since #316 that page also carries the button
                         specimens the touch-target measurement needs, because a
-                        shell handed no ports renders no control at all
+                        shell handed no ports renders no control at all. Since
+                        #373 it also holds ride.html and ride-harness.tsx — the
+                        ride screen's own layout in both orientations, which is
+                        where the trainer status line is and where the
+                        measurement that the HUD does not fit a landscape phone
+                        came from
     public/             what Vite copies verbatim into `dist` (#405) — the web app
                         manifest and the three icons it names. A `.webmanifest`
                         is on neither LIC001's nor LIC002's extension list and
@@ -1639,6 +1644,8 @@ browser runs**.
 | `shell.html`, `shell-harness.tsx` | since #307's review, the app **shell**: the **real** `shell/AppShell.tsx` with the **real** `ROUTES` table under the **real** `design/theme.css`. The second `.tsx` here. ⚠️ Its spacer goes **inside `.oyl-main`** and the file says why at length — after `.oyl-shell` the header scrolls out of its own sticky containing block and measures 0 px, and inside `.oyl-shell` `main` stays shorter than the viewport so a focus scroll never consults `scroll-margin-top`. Each mistake made a different assertion pass over nothing. ⚠️ Since #316 it also renders the **real** `design/Button.tsx` in both variants, with `RideView`'s own labels, because a shell handed no ports renders **zero** controls on all eleven routes and a size assertion over an empty list passes |
 | `shell.browser.spec.ts` | its spec — how much of the viewport persistent chrome still covers after a scroll, where a fragment jump lands the `h1`, whether the focused skip link is the topmost thing at its own centre (hit-tested, not read off a `z-index`), and no horizontal scrolling at 320 px. ⚠️ Since #316 it also measures the **touch target** three ways, and the three fail for different reasons — see below |
 | `offline.browser.spec.ts` | since #408, the offline claim — against **`apps/web/dist`**, in a **persistent** context closed and reopened, with **two controls**. The only spec here that does not drive a harness page, and the first use of `setOffline` in this repository |
+| `ride.html`, `ride-harness.tsx` | since [#373](https://github.com/openzigs/onyourleft/issues/373), the **ride screen's own layout**: the **real** `AppShell` at the **real** game route, with the **real** `HudPanel` inside the `section.oyl-game` `GameView` gives it. The third `.tsx` here. ⚠️ It renders **no WebGL** — the canvas is the shipping `.oyl-game__world` element, and its `aspect-ratio` and `max-height` are what decide this layout. ⚠️ The shell's own view child is **hidden, not removed**: removing it threw inside React, unmounted the whole shell, and set the ready flag anyway — a 0 px document reporting success, which is the vacuous harness its control exists to catch |
+| `ride.browser.spec.ts` | its spec — where the trainer status line is, measured in both orientations. ⚠️ **What it established is bigger than #373**: `.oyl-hud` is **572 px** tall and a landscape phone viewport is 390, so the panel does not fit on screen at all and *Pause* and *End ride* are below the fold at every viewport measured (844×390, 390×844, 1280×800, 768×1024). No placement of one line changes that and shrinking the world cannot either, so what is asserted is the property that does hold — a rider who reaches the controls has the line on screen. Filed as [#419](https://github.com/openzigs/onyourleft/issues/419). Its control is the same sentence in the pre-#373 position, which must still be off screen at that point |
 | `../playwright.config.ts` | Chromium only, no retries, the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all — and since #408 **two `webServer` entries**, because the product and the harness are different builds |
 | `../vite.browser.config.ts` | the harness build. A second Vite config, so the harness cannot reach a shipped bundle |
 
@@ -1766,8 +1773,10 @@ command and its own CI step.
 ⚠️ **`vite.browser.config.ts` names every entry explicitly, and must.** Vite's multi-page mode
 discovers only `index.html`; a page added without a line in `build.rollupOptions.input` is simply
 not built, and the failure is a 404 while the spec runs rather than a build error — which reads
-like a server fault and sends the next person to `playwright.config.ts`. There are **four** entries
-today, not two: the map, the game, the HUD and the capture tool. #266 confirmed the trap by
+like a server fault and sends the next person to `playwright.config.ts`. There are **six** entries
+today, not two — the map, the game, the HUD, the app shell, the ride screen's layout (#373) and
+the capture tool — and this sentence said *four* until #373, so read
+`build.rollupOptions.input` rather than this line. #266 confirmed the trap by
 deleting its own line — the run died sixty seconds later inside `waitForFunction` with no mention
 of the config, which is why `hud.browser.spec.ts` now checks the response status and names
 `build.rollupOptions.input` in the failure.
@@ -3076,6 +3085,7 @@ top of an issue **supersedes its body**.
 | How far a `<select>` may be styled before it stops being one | `apps/web/src/design/theme.css` §`select`, [#305](https://github.com/openzigs/onyourleft/issues/305) |
 | Why the button's 44 px touch target is declared rather than emergent, and why a floor is not enough on its own | `apps/web/src/design/theme.css` §`.oyl-button`, `apps/web/browser/shell.browser.spec.ts` §`TOUCH_TARGET_PIXELS` |
 | When the header sticks, when it deliberately does not, and the measurement that decides | `apps/web/src/design/theme.css` §`@media (min-width: 64rem) and (min-height: 40rem)`, `apps/web/browser/shell.browser.spec.ts` |
+| Where the trainer status line is, why it is in the HUD rather than under it, and what that measurement found about the whole panel | `apps/web/src/game/hud/fields.ts` §`TrainerLine`, `apps/web/browser/ride.browser.spec.ts`, [#373](https://github.com/openzigs/onyourleft/issues/373) |
 | What stops persistent chrome eating a small viewport, and why no other gate can see it | `apps/web/browser/shell.browser.spec.ts` §`PERSISTENT_CHROME_BUDGET`, §4f |
 | Why the harness spacer's position is load-bearing, and the two places it must not go | `apps/web/browser/shell-harness.tsx` §`SPACER_PIXELS` |
 | What floor the HUD's labels and its dropped-sensor mark sit on | `apps/web/src/game/hud/hud-value-size.test.ts` §"the HUD’s supporting text has a floor" |

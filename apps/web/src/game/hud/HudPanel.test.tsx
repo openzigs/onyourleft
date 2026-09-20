@@ -129,3 +129,70 @@ describe('a value that is a word rather than a number (#259)', () => {
     expect(marked).toHaveLength(0);
   });
 });
+
+/**
+ * The trainer status line, which #373 moved **into** this panel.
+ *
+ * ⚠️ **jsdom does no layout, so nothing here is a claim about where it is on
+ * the screen** — `apps/web/browser/ride.browser.spec.ts` measures that, in the
+ * pinned Chromium, in both orientations. What this pins is the wiring and the
+ * words: that the prop reaches an element inside `.oyl-hud` rather than
+ * anywhere else, that it is above the controls, and that an absent reading
+ * renders nothing rather than a nought.
+ *
+ * It is the assertion that would have caught the regression #373 reports if it
+ * had existed: `trainer-wiring.test.tsx` checks the sentence is somewhere in
+ * the container, which was true of the placement that put it off screen.
+ */
+describe('the trainer status line (#373)', () => {
+  const profile = route();
+  const base = {
+    profile,
+    state: atStartLine(profile),
+    cadence: { value: 88, live: true },
+    heartRate: { value: 150, live: true },
+    chases: [],
+    onPause: () => undefined,
+    onEnd: () => undefined,
+    paused: false,
+  };
+
+  it('renders the sentence inside the HUD panel', async () => {
+    mounted = await mount(<HudPanel {...base} trainer={{ gradePercent: -3.4, writes: 17 }} />);
+
+    const panel = mounted.container.querySelector('.oyl-hud');
+    const line = panel?.querySelector('.oyl-hud__trainer');
+    expect(line?.textContent).toBe('Trainer: simulating -3.4% (17 sent)');
+  });
+
+  /**
+   * ⚠️ The order is the property, not the presence. Above the controls means a
+   * rider who reaches *Pause* has passed it — see `fields.ts` §`TrainerLine`.
+   * `compareDocumentPosition` rather than an index, because the panel's
+   * children are not a flat list of the two.
+   */
+  it('puts it before the ride controls', async () => {
+    mounted = await mount(<HudPanel {...base} trainer={{ gradePercent: 0, writes: 1 }} />);
+
+    const line = mounted.container.querySelector('.oyl-hud__trainer');
+    const controls = mounted.container.querySelector('.oyl-hud__controls');
+    expect(line).not.toBeNull();
+    expect(controls).not.toBeNull();
+    expect(
+      (line?.compareDocumentPosition(controls as Node) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeGreaterThan(0);
+  });
+
+  /**
+   * Absent rather than a nought, on `fields.ts` §`NO_READING`'s precedent: a
+   * rider with no trainer is not told a gradient of zero was sent to one.
+   */
+  it('renders nothing at all when no gradient is being asked for', async () => {
+    mounted = await mount(<HudPanel {...base} />);
+
+    expect(mounted.container.querySelector('.oyl-hud__trainer')).toBeNull();
+    // The control: the panel rendered, so the assertion above is about an
+    // absent line rather than an absent panel.
+    expect(mounted.container.querySelector('.oyl-hud')).not.toBeNull();
+  });
+});

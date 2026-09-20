@@ -1140,6 +1140,26 @@ select option {
   color: var(--oyl-color-hud-ink-muted);
 }
 
+/* #373. What the trainer is being asked for, inside the panel.
+
+   ⚠️ It lived on the page background as `.oyl-muted` until #373, BELOW this
+   panel, where two things were wrong with it: in landscape it fell outside the
+   viewport with no indication it existed, and its colour pair was never one
+   `contrast.a11y.test.ts` checks — `--oyl-color-ink-muted` on
+   `--oyl-color-bg`, over a panel whose own surface is a different token
+   entirely. Inside `.oyl-hud` it inherits the opaque HUD surface, so the pair
+   that is measured is the pair a rider sees.
+
+   `--oyl-font-size-md` rather than the 2.5 rem a value gets: this is a sentence
+   read once, not a magnitude glanced at, and `hud-value-size.test.ts` carries
+   the floor that keeps it above the label beside it. */
+.oyl-hud__trainer {
+  margin: 0;
+  color: var(--oyl-color-hud-ink-muted);
+  font-size: var(--oyl-font-size-md);
+  font-variant-numeric: tabular-nums;
+}
+
 .oyl-hud__controls {
   display: flex;
   gap: var(--oyl-space-md);

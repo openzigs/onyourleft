@@ -35,7 +35,7 @@ import { NO_ROUTES_YET } from '../routes/two-importers';
 import { hrefFor, routeById, ROUTE_BUILDER_ROUTE } from '../shell/routes';
 import { advanceCrank } from './bicycle';
 import { settleGhostOutcome, type GhostOutcome } from './ghost-outcome';
-import { gapAgainst, type ChasedGap } from './hud/fields';
+import { gapAgainst, type ChasedGap, type TrainerLine } from './hud/fields';
 import { HudPanel } from './hud/HudPanel';
 import { NO_SCREEN_LOCK, type ScreenLock, type ScreenLockSource } from './hud/wake-lock';
 import { DEFAULT_PACER_INTENSITY, pacerChoice, type PacerChoice } from './pacer-choice';
@@ -47,7 +47,7 @@ import {
   type WindProblemField,
 } from './wind-choice';
 import { INITIAL_QUALITY, nextQuality, qualitySettings, type QualityState } from './quality';
-import { createGradientSession, type GradientSession } from './gradient';
+import { createGradientSession, type GradientSession, type GradientSessionState } from './gradient';
 import {
   NO_GAME_TRAINER,
   trainerRoadNotice,
@@ -629,6 +629,21 @@ export function GameView(props: GameViewProps): JSX.Element {
         heartRate={sensors.heartRate}
         chases={chasedGaps(state, ghostRef.current, outcomeRef.current)}
         paused={phase === 'paused'}
+        // ⚠️ **The rider-visible evidence that #362 is fixed**, and the reason
+        // it is on the screen rather than only in a test: `docs/validation/
+        // 0002-android-shell-and-game.md` Part L asks somebody with a trainer in
+        // front of them to check that the gradient tracks the road, and a step
+        // whose expected result is invisible is the empty-cell problem that
+        // issue is about. `asked` rather than "holding" — `gradient.ts`
+        // §`GradientSessionState.asked` says why those are different claims.
+        //
+        // ⚠️ **It is a HUD prop rather than a `<p>` after this panel, and that
+        // is #373.** In landscape it used to fall outside the viewport with
+        // nothing to say it existed — so the one step Part L is built around
+        // could not be performed in the orientation a handlebar-mounted phone
+        // is most likely to be in. `hud/fields.ts` §`TrainerLine` argues the
+        // placement and `browser/ride.browser.spec.ts` measures it.
+        trainer={trainerReading(gradient)}
         onPause={() => {
           setPhase((current) => (current === 'paused' ? 'riding' : 'paused'));
         }}
@@ -648,20 +663,23 @@ export function GameView(props: GameViewProps): JSX.Element {
           {gradient.fault}
         </StatusMessage>
       )}
-      {gradient !== undefined && gradient.fault === undefined && gradient.asked !== undefined ? (
-        // ⚠️ **The rider-visible evidence that #362 is fixed**, and the reason
-        // it is on the screen rather than only in a test: `docs/validation/
-        // 0002-android-shell-and-game.md` Part L asks somebody with a trainer in
-        // front of them to check that the gradient tracks the road, and a step
-        // whose expected result is invisible is the empty-cell problem that
-        // issue is about. `asked` rather than "holding" — `gradient.ts`
-        // §`GradientSessionState.asked` says why those are different claims.
-        <p className="oyl-muted">
-          Trainer: simulating {gradient.asked.toFixed(1)}% ({gradient.writes} sent)
-        </p>
-      ) : undefined}
     </section>
   );
+}
+
+/**
+ * The gradient session as the HUD's trainer row, or nothing at all.
+ *
+ * ⚠️ **A fault suppresses it rather than colouring it.** A fault is a thing to
+ * act on and gets a `StatusMessage` of its own above; a stale "simulating
+ * −3.4%" beside it would be describing a write that did not happen. Absent
+ * rather than a nought, on `fields.ts` §`NO_READING`'s precedent.
+ */
+function trainerReading(gradient: GradientSessionState | undefined): TrainerLine | undefined {
+  if (gradient === undefined || gradient.fault !== undefined || gradient.asked === undefined) {
+    return undefined;
+  }
+  return { gradePercent: gradient.asked, writes: gradient.writes };
 }
 
 /**

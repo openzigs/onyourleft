@@ -35,8 +35,10 @@ import {
   NO_READING,
   hudReadings,
   profileReading,
+  trainerLine,
   type HudInput,
   type ProfileReading,
+  type TrainerLine,
 } from './fields';
 import { PlanTrace } from './PlanTrace';
 
@@ -67,6 +69,20 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
   readonly onEnd: () => void;
   /** Whether the ride is currently paused, so the control says which it does. */
   readonly paused: boolean;
+  /**
+   * What the trainer is being asked for, or `undefined` when nothing is (#373).
+   *
+   * ⚠️ **Absent rather than a nought**, on the `NO_READING` precedent: a rider
+   * with no trainer, or one whose machine does not offer simulation mode, is
+   * not told a gradient of zero was sent to it. `GameView` supplies this only
+   * once a gradient session has written something and has no fault to report —
+   * a fault is a `StatusMessage`, because it is a thing to act on rather than a
+   * thing to read.
+   *
+   * `fields.ts` §{@link TrainerLine} records why this is a row of the panel
+   * rather than a tenth grid field.
+   */
+  readonly trainer?: TrainerLine | undefined;
 }
 
 export function HudPanel(props: HudPanelProps): JSX.Element {
@@ -141,6 +157,22 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
         recorded why the plan view could not read its number.
       */}
       <PlanTrace profile={props.profile} distance={props.state.ride.distance} />
+
+      {/*
+        ⚠️ **Inside the panel, and above the controls** — #373. It used to be a
+        `<p className="oyl-muted">` that `GameView` rendered *after* this
+        component, on the page background, and in landscape it fell outside the
+        viewport with nothing to say it was there. `fields.ts`
+        §{@link TrainerLine} argues the placement; `browser/ride.browser.spec.ts`
+        is what measures it, in both orientations, in the pinned Chromium.
+
+        Above the controls rather than below them so that a rider who can reach
+        *Pause* can see this line — which makes its reachability a consequence
+        of something that must already be true, rather than a second rule.
+      */}
+      {props.trainer === undefined ? null : (
+        <p className="oyl-hud__trainer">{trainerLine(props.trainer)}</p>
+      )}
 
       <div className="oyl-hud__controls">
         <button
