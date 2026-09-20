@@ -1064,6 +1064,14 @@ per-instance tint can only darken the shared palette towards itself and the ride
 which is why the pair is separated by **value** rather than by hue, and why N2 below is the question
 this part is really asking.
 
+⚠️ **And the value separation is real, measured rather than asserted.** Taking the harness's own
+`0.2126R + 0.7152G + 0.0722B` over those three means gives **bot 14, ghost 27, rider 69** — three
+levels no two of which are within a factor of 1.8 of each other, so a rider who cannot resolve the
+hues at 200 m still has a light one, a mid one and a dark one to work with. ⚠️ That is a headless
+Chromium on a desktop at 600 × 400 with no sunlight on it, which is precisely what N4 and N5 exist
+to contradict; it bounds what *can* be told apart in principle and says nothing about a phone on a
+handlebar. If N4's answer is no, this row is what says the remedy is hue rather than value.
+
 ### N — the three, by eye
 
 | Step | What to do | What to record |

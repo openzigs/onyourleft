@@ -293,6 +293,25 @@ declare global {
       /** How many pixels the bicycle itself occupies — #349. @see crankTurnPixels */
       readonly riderPixels: number;
       /**
+       * How many pixels differ between the same rider, in the same place, at
+       * the same crank angle, arrived at two ways — #366–#368's review.
+       *
+       * **It must be zero**, and it is the one number here that goes non-zero
+       * for a defect no other probe on this page can see. One of the two reads
+       * moves the rider there without its crank angle changing; the other
+       * arrives at an angle that then changes back, so no pose cache can serve
+       * it. A renderer holding its leg matrices in world space and caching them
+       * on the crank angle alone draws the first with its legs
+       * {@link RIDER_MOVE_METRES} behind, which is every frame of every ride
+       * with no cadence sensor on it.
+       *
+       * {@link riderMovePixels} is its control: the rider genuinely moved, so a
+       * zero above is a renderer that followed rather than a probe that varied
+       * nothing.
+       */
+      readonly riderLeftBehindPixels: number;
+      readonly riderMovePixels: number;
+      /**
        * The relative cost of the shading, in milliseconds a frame — #286.
        *
        * ⚠️ **Same scene, same route, same drawing-buffer size; the only
@@ -1255,6 +1274,19 @@ const SHADING_FRAMES = 60;
 const SHADING_ROUNDS = 4;
 
 /**
+ * How far the rider is moved, across the road, to check its legs come with it:
+ * **1 m** — #366–#368's review. @see riderLeftBehindPixels
+ *
+ * ⚠️ **Across rather than along**, so the rider stays at the same depth and
+ * the same size: a move along the road changes the silhouette by perspective,
+ * which would make the control non-zero for a reason that has nothing to do
+ * with the legs. A metre is under half the road's own half-width, so the
+ * rider is still over tarmac and entirely in frame, and it is several times a
+ * leg's own width, so a leg left behind does not overlap the one that moved.
+ */
+const RIDER_MOVE_METRES = 1;
+
+/**
  * Blocks until everything asked of the GPU has actually happened.
  *
  * ⚠️ **`readPixels` and not `finish()`, and the difference was measured.**
@@ -1376,6 +1408,8 @@ async function run(): Promise<void> {
       crankTurnPixels: 0,
       crankStillPixels: 0,
       riderPixels: 0,
+      riderLeftBehindPixels: 0,
+      riderMovePixels: 0,
       litFrameMs: 0,
       flatFrameMs: 0,
       shadedFrames: SHADING_FRAMES,
@@ -1436,6 +1470,8 @@ async function run(): Promise<void> {
   let crankTurnPixels = 0;
   let crankStillPixels = 0;
   let riderPixels = 0;
+  let riderLeftBehindPixels = 0;
+  let riderMovePixels = 0;
   let litMarkerSpread = 0;
   let flatMarkerSpread = 0;
   let litMarkerBrightest: Pixel = NOWHERE;
@@ -1779,6 +1815,50 @@ async function run(): Promise<void> {
           crankTurnPixels = shadingAcross(aQuarterTurnOn, atTopOfTheStroke).pixels;
         }
 
+        // ------------- the legs come with the rider — #366–#368's review
+        //
+        // ⚠️ **The defect this measures is invisible to every probe above**,
+        // and that is the point: each of them holds the rider's position fixed
+        // and varies the crank angle, which is exactly the half a pose cache
+        // keyed on the angle gets right. A rider who is *moving and not
+        // pedalling* — every frame of every power-only ride — is what leaves
+        // world-space leg matrices behind.
+        //
+        // The two reads below are **the same rider in the same place at the
+        // same angle**, reached two ways: once by moving there without the
+        // angle changing, and once by arriving at an angle that then changes
+        // back, which no cache can serve. A renderer that carries its legs
+        // draws the identical frame; one that does not draws a pair of legs a
+        // metre to one side.
+        const HELD_ANGLE = 1.1;
+        /** Across the road rather than along it: same depth, most pixels. */
+        const movedAcross = (across: number, angle: number): SceneFrame => ({
+          ...riderOnly,
+          markers: riderOnly.markers.map((marker) => ({
+            ...marker,
+            x: marker.x + marker.headingZ * across,
+            z: marker.z - marker.headingX * across,
+            crankAngle: angle,
+          })),
+        });
+        view.render(movedAcross(0, HELD_ANGLE));
+        const beforeTheMove = wholeFrame();
+        view.render(movedAcross(RIDER_MOVE_METRES, HELD_ANGLE));
+        const movedWithoutPedalling = wholeFrame();
+        view.render(movedAcross(RIDER_MOVE_METRES, HELD_ANGLE + 0.4));
+        view.render(movedAcross(RIDER_MOVE_METRES, HELD_ANGLE));
+        const posedWhereItStands = wholeFrame();
+        if (
+          beforeTheMove !== undefined &&
+          movedWithoutPedalling !== undefined &&
+          posedWhereItStands !== undefined
+        ) {
+          // The control: the rider really did move, so the zero below is a
+          // renderer that followed rather than a probe that changed nothing.
+          riderMovePixels = shadingAcross(movedWithoutPedalling, beforeTheMove).pixels;
+          riderLeftBehindPixels = shadingAcross(movedWithoutPedalling, posedWhereItStands).pixels;
+        }
+
         // ⚠️ **Warmed with a whole discarded sweep at each shading, not one
         // frame.** three compiles a program the first time it draws a
         // material, and the flat one has just been drawn for the first time —
@@ -1921,6 +2001,8 @@ async function run(): Promise<void> {
     crankTurnPixels,
     crankStillPixels,
     riderPixels,
+    riderLeftBehindPixels,
+    riderMovePixels,
     litMarkerPixels,
     flatMarkerPixels,
     litMarkerSpread,

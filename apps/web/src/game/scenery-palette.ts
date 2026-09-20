@@ -39,10 +39,17 @@
  * that then exceeds white is clamped, which turns a shaded model into a flat
  * white patch and takes away exactly the form #286 added. For a colour somebody
  * typed, the answer is to type a darker one. **For a colour that arrives out of
- * a pack there is nobody to ask**, and two of the five committed models carry
- * one that does not clear it — `woodBark` at 0.886 and `stone` at 0.910, both
- * against a ceiling of {@link MAXIMUM_LIT_CHANNEL}. So {@link tonedForTheSun}
- * applies the rule instead of checking it.
+ * a pack there is nobody to ask**, and it is not a handful: measured with
+ * `model-bytes-testing.ts`' own reader over the committed bytes on 2026-09-19,
+ * **13 of the 110 distinct colours the eleven models carry, in 7 of those 11
+ * models**, are over the {@link MAXIMUM_LIT_CHANNEL} ceiling of 0.8830. Every
+ * building's atlas peaks at 0.9734, `stone` is 0.9098 and `woodBark` 0.8863.
+ * ⚠️ **This paragraph said "two of the five committed models" and named those
+ * last two**, which was a spot check of the `baseColorFactor` models and missed
+ * every atlas colour in the tree; a reviewer who remembers that sentence is
+ * reading the old file. Nothing about the rule changes — {@link tonedForTheSun}
+ * applies it to every colour rather than checking it, and the count is a
+ * statement about the pack rather than about the gate.
  *
  * ⚠️ **This file rather than `three-renderer.ts`, because that file must never
  * name a sun constant.** `LIT_COLOURS`' own comment states it: *"the two halves

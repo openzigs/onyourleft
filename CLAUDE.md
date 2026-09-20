@@ -2881,8 +2881,8 @@ top of an issue **supersedes its body**.
 | Why the bot and the ghost are bicycles now, and what tells the three apart without a silhouette | `apps/web/src/game/three-renderer.ts` §`RIDER_TINTS`, `apps/web/src/game/bicycle.ts`, [#368](https://github.com/openzigs/onyourleft/issues/368) |
 | Why a simulated rider's cranks come from its odometer rather than from a cadence | `apps/web/src/game/bicycle.ts` §`simulatedCrankAngle`, `apps/web/src/game/scene.ts` §`pedalling` |
 | At what distances three bicycles were actually told apart, and what happens if they were not | [validation 0002](docs/validation/0002-android-shell-and-game.md) Part N |
-| What a model file is allowed to fetch, and why a texture nobody draws still had to be refused | `apps/web/src/game/scenery-models.ts` §`sceneryResourceUrl`, `apps/web/browser/game.browser.spec.ts` §"fetches the five committed models and nothing else" |
-| Why a model keeps this repository's colour rather than the pack's, and what that costs a tree's trunk | `apps/web/src/game/three-renderer.ts` §`prepareSceneryGeometry`, [ADR 0022](docs/adr/0022-game-scenery-model-pack.md) D-7 |
+| What a model file is allowed to fetch, and which one of them is allowed an atlas | `apps/web/src/game/scenery-models.ts` §`sceneryResourceUrl`, `apps/web/browser/game.browser.spec.ts` §"fetches the committed models and its one atlas, and nothing else" |
+| Why a model's colour is its own since #366, and what it used to be | `apps/web/src/game/three-renderer.ts` §`prepareSceneryGeometry`, [ADR 0022](docs/adr/0022-game-scenery-model-pack.md) D-7 and its 2026-09-18 amendment |
 | How big a model is allowed to be, and why the rule is the largest extent rather than the height | `apps/web/src/game/three-renderer.ts` §`sceneryFitMetres` |
 | Why the models are loaded before a view exists rather than inside one | `apps/web/src/game/three-renderer.ts` §`sceneryGeometries`, `apps/web/src/main.tsx` §`loadGameRenderer` |
 | What proves a route's scenery did not move when its shapes changed | `apps/web/src/game/arrangement-unchanged.test.ts` |

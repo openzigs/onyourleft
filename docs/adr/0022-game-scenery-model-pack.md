@@ -403,9 +403,12 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
     future model declaring a host cannot reach one. No texture reaches the GPU —
     `game.browser.spec.ts` counts `gl.createTexture` against a baseline rather than taking that on
     trust.
-  - **Two of the pack's own colours clip.** `woodBark` at 0.886 and `stone` at 0.910 exceed the
-    ceiling `three-renderer.test.ts` §"lights no colour past white" imposes, and for a colour out of
-    a pack there is nobody to ask for a darker one. `scenery-palette.ts` §`tonedForTheSun` applies
+  - **A pack's colours clip, and more of them than a spot check suggests.** Measured with
+    `model-bytes-testing.ts`' own reader over the committed bytes on 2026-09-19: **13 of the 110
+    distinct colours the eleven models carry, in 7 of those 11 models**, exceed the ceiling
+    `three-renderer.test.ts` §"lights no colour past white" imposes, which is **0.8830**. Every
+    building's atlas peaks at 0.9734; `woodBark` is 0.8863 and `stone` 0.9098. For a colour out of a
+    pack there is nobody to ask for a darker one, so `scenery-palette.ts` §`tonedForTheSun` applies
     the rule instead of checking it, scaling a colour uniformly so hue and channel ratios survive
     and only lightness moves.
 

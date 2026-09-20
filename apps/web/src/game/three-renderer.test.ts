@@ -2474,19 +2474,86 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
     belt.dispose();
   });
 
-  it('does no leg work at all on a frame where a rider has not pedalled', () => {
-    // Every frame of every ride with no cadence sensor on it, and every frame
-    // of a rider who has stopped pedalling. #240's NFR-3.
+  it('does no leg work at all on a frame where nothing about a rider moved', () => {
+    // A stationary bot, or a rider on a paused ride: the same place, the same
+    // heading and the same crank angle twice. #240's NFR-3.
+    //
+    // ⚠️ **The rider is held STILL here, and until #366–#368's review it was
+    // moved** — this assertion used to be made across a frame that put the
+    // rider 30 m further up the road, which is the defect the test below
+    // covers rather than a saving. A reviewer who remembers this case moving
+    // the rider is reading the old file.
     const belt = new RiderBelt();
-    belt.place([riderAt({}, {}, 1.1)]);
+    belt.place([riderAt({ z: 30 }, {}, 1.1)]);
     const uploads = belt.meshes.limbs.instanceMatrix.version;
 
     belt.place([riderAt({ z: 30 }, {}, 1.1)]);
 
     expect(belt.meshes.limbs.instanceMatrix.version).toBe(uploads);
-    // …and the rider still moved, which is what makes the line above a saving
-    // rather than a frozen bicycle.
+    // …and something was drawn, which is what makes the line above a saving
+    // rather than an empty belt.
     expect(originOf(belt.meshes.bodies, 0)[2]).toBe(30);
+    belt.dispose();
+  });
+
+  it('carries the legs with a rider who is moving and not pedalling', () => {
+    // ⚠️ **The most common frame there is, and the one no gate could see.**
+    // `advanceCrank` returns the angle unchanged when no cadence is being
+    // reported, and `GameView` supplies that angle every frame — so this is
+    // every frame of every power-only ride, and every frame after a rider
+    // stops pedalling. The legs' matrices are composed in **world** space
+    // (`#rider` times the bone's own local transform), so a cache keyed on the
+    // crank angle alone leaves them where the first frame put them and the
+    // screen shows a legless bicycle riding away from a pair of legs.
+    //
+    // On `main` the limbs sat in a `Group` carrying the world transform and
+    // the skip was sound; the belt writes world matrices now, and
+    // `POSE_KEY` is what makes the cache agree with that.
+    const belt = new RiderBelt();
+    belt.place([riderAt({ z: 0 }, {}, 1.1)]);
+
+    belt.place([riderAt({ z: 100 }, {}, 1.1)]);
+
+    for (const index of [0, 1, 2, 3]) {
+      // Within a bicycle's length of the rider, rather than 100 m behind it.
+      expect(boneAt(belt, 0, index)[2]).toBeCloseTo(100, 0);
+    }
+    // And re-uploaded: writing the matrices without raising the flag is the
+    // half of an instanced update that cannot be seen from the buffer.
+    expect(belt.meshes.limbs.instanceMatrix.version).toBeGreaterThan(0);
+    belt.dispose();
+  });
+
+  it('draws a rider whose frame carries no crank angle at all', () => {
+    // ⚠️ **`crankAngle` is optional on `RiderMarker`**, so a slot's first frame
+    // can arrive with nothing to hold over from. The held angle is `NaN` until
+    // a slot has been posed, and a `NaN` reaching a matrix is not a wrong
+    // bicycle but no bicycle: three drops a mesh whose instance matrix is not
+    // finite, silently.
+    const belt = new RiderBelt();
+
+    belt.place([riderAt({ z: 12 })]);
+
+    for (const origin of [originOf(belt.meshes.cranksets, 0), boneAt(belt, 0, 0)]) {
+      for (const number of origin) {
+        expect(Number.isFinite(number)).toBe(true);
+      }
+    }
+    belt.dispose();
+  });
+
+  it('carries the legs with a rider who turns without pedalling', () => {
+    // The other half of the world transform. A rider freewheeling round a bend
+    // keeps their crank angle and their position for a frame and changes only
+    // their heading; a key holding the place and not the heading would leave
+    // the legs facing the way they came.
+    const belt = new RiderBelt();
+    belt.place([riderAt({}, { headingX: 0, headingZ: 1 }, 1.1)]);
+    const before = [0, 1, 2, 3].map((index) => boneAt(belt, 0, index));
+
+    belt.place([riderAt({}, { headingX: 1, headingZ: 0 }, 1.1)]);
+
+    expect([0, 1, 2, 3].map((index) => boneAt(belt, 0, index))).not.toEqual(before);
     belt.dispose();
   });
 

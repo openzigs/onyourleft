@@ -81,6 +81,8 @@ interface GameHarnessResult {
   readonly crankTurnPixels: number;
   readonly crankStillPixels: number;
   readonly riderPixels: number;
+  readonly riderLeftBehindPixels: number;
+  readonly riderMovePixels: number;
   readonly litFrameMs: number;
   readonly flatFrameMs: number;
   readonly shadedFrames: number;
@@ -1038,6 +1040,34 @@ test.describe('the rider pedals, and it reaches the screen — #349', () => {
     // and not the log, and the log is the only artefact anybody reads on a
     // green run.
     console.log(`what the pedalling moves — ${measured}`);
+  });
+
+  test('carries its legs with it when it moves without pedalling', async ({ page }, testInfo) => {
+    // ⚠️ **The gate the test above is blind to by construction**, and the
+    // reason it is here is worth stating: every other probe on this page holds
+    // the rider's position fixed and varies its crank angle, which is the half
+    // a pose cache keyed on the angle gets right. The leg matrices are written
+    // in **world** space, so they go stale when the rider moves as readily as
+    // when the cranks turn — and `advanceCrank` returns the angle unchanged
+    // whenever no cadence is being reported, which is every frame of every
+    // power-only ride. Caught in review of #366–#368 after the limbs moved out
+    // of a `Group` carrying the world transform and into an `InstancedMesh`
+    // that does not.
+    const result = await harness(page);
+
+    // The control first, for the reason the crank control is read first: the
+    // rider genuinely moved, so the zero below is a renderer that followed.
+    expect(result.riderMovePixels).toBeGreaterThan(0);
+    expect(result.riderLeftBehindPixels).toBe(0);
+    const measured =
+      `moving the rider 1 m across the road without pedalling moves ` +
+      `${String(result.riderMovePixels)} px, and leaves ` +
+      `${String(result.riderLeftBehindPixels)} px behind`;
+    testInfo.annotations.push({
+      type: 'what a move without pedalling moves',
+      description: measured,
+    });
+    console.log(`what a move without pedalling moves — ${measured}`);
   });
 
   test('costs three draw calls rather than the twenty its parts would', async ({ page }) => {

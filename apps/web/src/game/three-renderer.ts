@@ -278,6 +278,19 @@ const RIDER_TINTS: Record<RiderMarker['kind'], number> = {
 const RIDDEN_KINDS = Object.keys(RIDER_TINTS) as readonly RiderMarker['kind'][];
 
 /**
+ * Everything one rider's leg pose depends on, in the order {@link RiderBelt}
+ * stores it — five numbers a slot.
+ *
+ * ⚠️ **The four before the angle are the rider's own world transform**, and
+ * leaving them out is the defect #366–#368's review found: a leg segment's
+ * matrix is composed in world space, so it goes stale when the rider moves as
+ * readily as when the cranks turn. Written out rather than left implicit
+ * because the reason the position belongs in an *animation* cache is not
+ * obvious from the call site. The scale is not here: every rider is drawn at 1.
+ */
+const POSE_KEY = ['x', 'y', 'z', 'yaw', 'crankAngle'] as const;
+
+/**
  * The tints that are not white: the bot's and the ghost's.
  *
  * Only these go into {@link LIT_COLOURS}. The rider's is white and would fail
@@ -729,11 +742,12 @@ export function sceneryFitMetres(kind: ScatterKind): number {
  * and `game.browser.spec.ts` counts the textures the renderer actually holds
  * rather than taking this paragraph's word for it.
  *
- * ⚠️ Every colour goes through `tonedForTheSun` on the way in. Two of the
- * pack's own values clip under `world.ts`'s peak irradiance and there is nobody
- * to ask for a darker one; `scenery-palette.ts` §`tonedForTheSun` is where that
- * is argued, and it is in that file because this one must never name a sun
- * constant.
+ * ⚠️ Every colour goes through `tonedForTheSun` on the way in. Thirteen of the
+ * hundred and ten values the pack carries clip under `world.ts`'s peak
+ * irradiance — seven of the eleven models hold at least one — and there is
+ * nobody to ask for a darker one; `scenery-palette.ts` §`tonedForTheSun` is
+ * where that is argued and where the measurement is recorded, and it is in that
+ * file because this one must never name a sun constant.
  *
  * ## One geometry, because one draw call
  *
@@ -1707,9 +1721,12 @@ export class ScatterBelt {
  *
  * Nothing is allocated in {@link place}: every rider is two matrix composes
  * into buffers that already exist, and its legs are four more — and those four
- * are **skipped when that rider's crank angle and slot have both not moved**,
- * which is every frame of a ride with no cadence sensor on the rider and a
- * stationary bot. #240's NFR-3.
+ * are **skipped when nothing that rider's legs were solved for has changed**,
+ * which is {@link POSE_KEY}: its place, its heading and its crank angle. A
+ * stationary bot, or a rider on a paused ride, costs nothing. ⚠️ A rider who
+ * is *moving* and not pedalling does not: the legs are in world space and have
+ * to come with them. #240's NFR-3, with the correction #366–#368's review
+ * made to it.
  *
  * ⚠️ **Slots are filled in the order the frame's markers arrive**, so the
  * tints are rewritten each frame rather than once at construction: a frame
@@ -1734,18 +1751,33 @@ export class RiderBelt {
   readonly #limbs: InstancedMesh;
 
   /**
-   * The crank angle each occupied slot's legs were solved for.
+   * What each occupied slot's legs were last solved *for*: five numbers a slot,
+   * laid out as {@link POSE_KEY}.
    *
-   * `undefined` until a slot has been posed, so its first frame always writes —
-   * an `InstancedMesh` starts with identity matrices, which would put all four
-   * leg segments inside the bottom bracket.
+   * ⚠️ **The crank angle is one of the five and on its own it is not enough**,
+   * which is the whole reason this is a key rather than a number. `#poseLegs`
+   * writes a **world** matrix — `this.#rider` times the bone's own local
+   * transform — so a leg is stale the moment the *rider* moves, whether or not
+   * the cranks turned. Keyed on the angle alone, a rider whose cadence sensor
+   * reports nothing (`advanceCrank` returns the angle unchanged, which is every
+   * frame of every power-only ride) is drawn as a bicycle with its legs left
+   * behind at the place the first frame put them. It was keyed on the angle
+   * alone until #366–#368's review, and it was sound before that only because
+   * the limbs then sat in a `Group` carrying the world transform, so their
+   * matrices were in the model's own frame and a move did not touch them.
+   *
+   * Filled with `NaN`, and `NaN !== NaN`, so a slot that has never been posed
+   * always writes — an `InstancedMesh` starts with identity matrices, which
+   * would put all four leg segments inside the bottom bracket.
    *
    * ⚠️ **Per slot rather than per kind, and cleared when the layout changes.**
    * A slot that held the bot last frame and the ghost this frame is a different
-   * rider at the same index, and a cache keyed on the angle alone would leave
-   * the ghost's legs wherever the bot's were.
+   * rider at the same index, and a cache that did not clear would leave the
+   * ghost's legs wherever the bot's were. The position is now in the key too,
+   * so that case is caught twice over — the clear stays because two riders can
+   * swap slots at the same place on the same frame.
    */
-  readonly #posedAt: (number | undefined)[] = RIDDEN_KINDS.map(() => undefined);
+  readonly #posed = new Float64Array(RIDDEN_KINDS.length * POSE_KEY.length).fill(Number.NaN);
   /** Which kind is in which slot, as one string, so a change is one compare. */
   #layout = '';
 
@@ -1833,7 +1865,7 @@ export class RiderBelt {
     const layout = drawn.map((marker) => marker.kind).join(',');
     if (layout !== this.#layout) {
       this.#layout = layout;
-      this.#posedAt.fill(undefined);
+      this.#posed.fill(Number.NaN);
     }
     let slot = 0;
     let posed = false;
@@ -1854,7 +1886,7 @@ export class RiderBelt {
     this.#limbs.count = slot * LEG_BONE_COUNT;
     // ⚠️ **Only when a leg actually moved, which is what makes the skip a
     // saving.** Without the flag the matrices are re-uploaded on every frame of
-    // every ride whether or not anybody pedalled, and the `#posedAt` cache
+    // every ride whether or not anybody pedalled, and the `#posed` cache
     // below saves the arithmetic and none of the bandwidth. Without the line at
     // all the matrices are written and never uploaded, and the legs stay
     // wherever the first frame put them — the half of an instanced update that
@@ -1907,7 +1939,8 @@ export class RiderBelt {
     this.#position.set(marker.x, marker.y, marker.z);
     // The model's `+Z` is the direction of travel; a rotation about `+Y` by
     // `atan2(headingX, headingZ)` takes `(0, 0, 1)` onto the marker's heading.
-    this.#turn.setFromAxisAngle(this.#up, Math.atan2(marker.headingX, marker.headingZ));
+    const yaw = Math.atan2(marker.headingX, marker.headingZ);
+    this.#turn.setFromAxisAngle(this.#up, yaw);
     this.#stretch.setScalar(1);
     this.#rider.compose(this.#position, this.#turn, this.#stretch);
     this.#bodies.setMatrixAt(slot, this.#rider);
@@ -1917,7 +1950,13 @@ export class RiderBelt {
     // the crankset is *mounted* at the axis and turns about its own origin.
     // Baking the offset into the vertices instead would make the rotation swing
     // the whole crankset round the bicycle.
-    const angle = marker.crankAngle ?? this.#posedAt[slot] ?? 0;
+    // ⚠️ **A frame that carries no angle holds the one this slot already had**,
+    // which is what stops a bot's cranks snapping to top dead centre. `NaN` is
+    // "never posed", and it has to become `0` rather than being carried into a
+    // matrix — a `NaN` angle composes a `NaN` crankset and three loses the
+    // whole mesh.
+    const held = this.#posed[slot * POSE_KEY.length + 4] ?? Number.NaN;
+    const angle = marker.crankAngle ?? (Number.isNaN(held) ? 0 : held);
     this.#position.set(0, CRANK_AXIS_Y, CRANK_AXIS_Z);
     this.#turn.setFromAxisAngle(this.#acrossTheBicycle, angle);
     this.#local.compose(this.#position, this.#turn, this.#stretch);
@@ -1927,11 +1966,31 @@ export class RiderBelt {
     for (let bone = 0; bone < LEG_BONE_COUNT; bone += 1) {
       this.#limbs.setColorAt(slot * LEG_BONE_COUNT + bone, this.#tint);
     }
-    if (angle === this.#posedAt[slot]) {
+    // ⚠️ **All five, not the angle alone.** `#poseLegs` writes world matrices,
+    // so the rider's own place and heading are part of what a pose was solved
+    // for; see {@link POSE_KEY}. A `NaN` in the cache never equals anything,
+    // which is how a slot's first frame always writes.
+    //
+    // ⚠️ **Written out rather than compared through an array**, because a
+    // tuple built here would be one allocation per rider per frame and this
+    // class's own contract is that {@link place} allocates nothing.
+    const at = slot * POSE_KEY.length;
+    const posed = this.#posed;
+    const unmoved =
+      posed[at] === marker.x &&
+      posed[at + 1] === marker.y &&
+      posed[at + 2] === marker.z &&
+      posed[at + 3] === yaw &&
+      posed[at + 4] === angle;
+    if (unmoved) {
       return false;
     }
     this.#poseLegs(slot, angle);
-    this.#posedAt[slot] = angle;
+    posed[at] = marker.x;
+    posed[at + 1] = marker.y;
+    posed[at + 2] = marker.z;
+    posed[at + 3] = yaw;
+    posed[at + 4] = angle;
     return true;
   }
 

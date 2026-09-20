@@ -263,7 +263,7 @@ read = "2026-09-17"
 sha256 = "b8b8eb7a50f85fa20b4862723e133157f553d69a0daad39b850ddbd2099ebb84"
 creator = "Kenney"
 url = "https://kenney.nl/assets/city-kit-suburban"
-modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file’s own material gives it, toned down uniformly where a channel would clip under the scene’s peak irradiance (apps/web/src/game/scenery-palette.ts)"
+modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
 
 [[asset]]
 path = "apps/web/src/game/models/plant_bush.glb"
@@ -273,7 +273,7 @@ read = "2026-09-17"
 sha256 = "ae7b1beb39e242b13f5f29e3ec23ef21034b814f82297b8aa00a9bf4e1b09590"
 creator = "Kenney"
 url = "https://kenney.nl/assets/nature-kit"
-modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file’s own material gives it, toned down uniformly where a channel would clip under the scene’s peak irradiance (apps/web/src/game/scenery-palette.ts)"
+modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
 
 [[asset]]
 path = "apps/web/src/game/models/stone_largeA.glb"
@@ -283,7 +283,7 @@ read = "2026-09-17"
 sha256 = "fe486a13775e833b1aca99413a89e013f300841de80f42ecd44ceaf43720f17b"
 creator = "Kenney"
 url = "https://kenney.nl/assets/nature-kit"
-modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file’s own material gives it, toned down uniformly where a channel would clip under the scene’s peak irradiance (apps/web/src/game/scenery-palette.ts)"
+modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
 
 [[asset]]
 path = "apps/web/src/game/models/tree_default.glb"
@@ -293,7 +293,7 @@ read = "2026-09-17"
 sha256 = "562d29638c902de3c7bee465d3a53bb77117efbc392ae04ed894faf6b5dc691d"
 creator = "Kenney"
 url = "https://kenney.nl/assets/nature-kit"
-modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file’s own material gives it, toned down uniformly where a channel would clip under the scene’s peak irradiance (apps/web/src/game/scenery-palette.ts)"
+modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
 
 [[asset]]
 path = "apps/web/src/game/models/tree_pineTallA.glb"
@@ -303,7 +303,7 @@ read = "2026-09-17"
 sha256 = "e0a56eb196d8a64ba86c7304d607136e17e6f9ad748dffcf86bd53b18b91b196"
 creator = "Kenney"
 url = "https://kenney.nl/assets/nature-kit"
-modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file’s own material gives it, toned down uniformly where a channel would clip under the scene’s peak irradiance (apps/web/src/game/scenery-palette.ts)"
+modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
 
 [[asset]]
 path = "apps/web/src/game/models/building-type-i.glb"
@@ -313,7 +313,7 @@ read = "2026-09-19"
 sha256 = "798bb0f1eb644b64a19584e6765da23750f04a86c3703704ce56bc63e5512b39"
 creator = "Kenney"
 url = "https://kenney.nl/assets/city-kit-suburban"
-modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file’s own material gives it, toned down uniformly where a channel would clip under the scene’s peak irradiance (apps/web/src/game/scenery-palette.ts)"
+modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
 
 [[asset]]
 path = "apps/web/src/game/models/building-type-k.glb"
@@ -323,7 +323,7 @@ read = "2026-09-19"
 sha256 = "c1b819a526bbcf9663bc40c98e22337cded7fff7c50c14679132d5d98d75f583"
 creator = "Kenney"
 url = "https://kenney.nl/assets/city-kit-suburban"
-modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file’s own material gives it, toned down uniformly where a channel would clip under the scene’s peak irradiance (apps/web/src/game/scenery-palette.ts)"
+modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
 
 [[asset]]
 path = "apps/web/src/game/models/colormap.png"
@@ -333,7 +333,7 @@ read = "2026-09-19"
 sha256 = "9b5de86078c25ef02351a80d35ff3c978693a1044565b73eedd9ae9b5b80665d"
 creator = "Kenney"
 url = "https://kenney.nl/assets/city-kit-suburban"
-modified = "The file is committed byte for byte; it is never uploaded to the GPU. It is sampled once at load, at each building vertex’s own texture coordinate, and the result is written into a COLOR_0 attribute before the image is discarded (apps/web/src/game/three-renderer.ts §prepareSceneryGeometry, #366)"
+modified = "The file is committed byte for byte; it is never uploaded to the GPU. It is sampled once at load, at each building vertex's own texture coordinate, and the result is written into a COLOR_0 attribute before the image is discarded (apps/web/src/game/three-renderer.ts §prepareSceneryGeometry, #366)"
 
 [[asset]]
 path = "apps/web/src/game/models/plant_bushLargeTriangle.glb"
@@ -343,7 +343,7 @@ read = "2026-09-19"
 sha256 = "098af3618e20e5a2cb5f6e24a7c67c0a80663f989137d86430bc9e2b1b2d52e4"
 creator = "Kenney"
 url = "https://kenney.nl/assets/nature-kit"
-modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file’s own material gives it, toned down uniformly where a channel would clip under the scene’s peak irradiance (apps/web/src/game/scenery-palette.ts)"
+modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
 
 [[asset]]
 path = "apps/web/src/game/models/stone_largeC.glb"
@@ -353,7 +353,7 @@ read = "2026-09-19"
 sha256 = "f78e984f04f2c9d3a242d42b1c8f65b8a095b9ccf9f74ac55a97b7cdd1c4668c"
 creator = "Kenney"
 url = "https://kenney.nl/assets/nature-kit"
-modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file’s own material gives it, toned down uniformly where a channel would clip under the scene’s peak irradiance (apps/web/src/game/scenery-palette.ts)"
+modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
 
 [[asset]]
 path = "apps/web/src/game/models/tree_oak.glb"
@@ -363,7 +363,7 @@ read = "2026-09-19"
 sha256 = "d7fd8773674928c50c11b66d12c636d49bdcc15a8b1c7fbb98e6f63a3439a3f3"
 creator = "Kenney"
 url = "https://kenney.nl/assets/nature-kit"
-modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file’s own material gives it, toned down uniformly where a channel would clip under the scene’s peak irradiance (apps/web/src/game/scenery-palette.ts)"
+modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
 
 [[asset]]
 path = "apps/web/src/game/models/tree_pineRoundD.glb"
@@ -373,7 +373,7 @@ read = "2026-09-19"
 sha256 = "a5051944fbfae7900cef8314c4a5d977b6b29bcd4e4ae5dea9d80980e65a411a"
 creator = "Kenney"
 url = "https://kenney.nl/assets/nature-kit"
-modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file’s own material gives it, toned down uniformly where a channel would clip under the scene’s peak irradiance (apps/web/src/game/scenery-palette.ts)"
+modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
 
 [[asset]]
 path = "packages/fit/fixtures/corpus/antimeridian-crossing.fit"
