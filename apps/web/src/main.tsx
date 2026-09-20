@@ -26,6 +26,7 @@ import { openCapacitorTrainer, openWebBluetoothTrainer } from './ride/trainer';
 import { gameSensors } from './game/sensors';
 import { fastestAttempt, ghostFromSpeed } from './game/ghost-source';
 import { isNativeShell, platformCapacitor } from './support/capacitor';
+import { platformServiceWorkerContainer, registerServiceWorker } from './offline/register';
 import { AppShell } from './shell/AppShell';
 import { browserScreenLockSource, platformWakeLock } from './game/hud/wake-lock';
 import type { GamePort, RidableRoute } from './game/GameView';
@@ -660,6 +661,38 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
  * It awaits one read and at most one write on a connection `buildLibraryPort`
  * opens anyway, so it adds no failure this start-up did not already have.
  */
+/**
+ * Register the service worker, so a cold start with the network off renders
+ * the app (#406).
+ *
+ * ⚠️ **A literal import and a direct call, on purpose.** `check:wiring` cannot
+ * see a call made through a string key or a non-literal dynamic import
+ * (`scripts/check-wiring.mjs` §Limits), so routing this through either and
+ * reading a green gate as proof it is wired would be exactly the false pass
+ * #278 exists to catch. Deleting this call turns `check:wiring` red.
+ *
+ * ⚠️ **Not awaited, and nothing downstream waits for it.** The app has worked
+ * with no worker since it existed and must carry on doing so: registration is
+ * an improvement to a *later* visit, never a precondition for this one. The
+ * outcome is deliberately ignored here rather than swallowed inside
+ * `register.ts`, which returns it — `RegistrationOutcome.failed` is what a
+ * future notice would read, and there is no honest thing to tell a rider about
+ * it today.
+ *
+ * `import.meta.env.BASE_URL` rather than `/`: the worker's scope is the base
+ * path this build was compiled for, so a deployment under a subdirectory
+ * registers a worker that controls its own subtree and not the whole origin.
+ */
+void registerServiceWorker({
+  container: platformServiceWorkerContainer(),
+  // ⚠️ ADR 0024 D-4. Asked through the one function in this client that
+  // answers it, so the worker and the BLE transport cannot disagree about
+  // which platform this is.
+  nativeShell: isNativeShell(platformCapacitor()),
+  script: `${import.meta.env.BASE_URL}sw.js`,
+  scope: import.meta.env.BASE_URL,
+});
+
 void renderAfterAthlete(
   async () => ensureLocalAthlete(localStore(), unixSeconds(Math.floor(Date.now() / 1000))),
   render,

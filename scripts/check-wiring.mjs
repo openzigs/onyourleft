@@ -134,8 +134,20 @@ import ts from 'typescript';
  * than hidden: #237's `advanceBot` lived in `packages/physics/src/pacer.ts` and
  * is not named here. What this gate reports on that tree is the client half of
  * the same missing wiring, `game/hud/fields.ts` §`gapAgainst`.
+ *
+ * ⚠️ **`apps/web/src/offline/` since #406**, and it is the first prefix added
+ * here for a seam that did not yet exist rather than after a defect. The reason
+ * is the same principle: a service worker is a cache in front of the whole
+ * application, and a registration module nothing calls is a client that
+ * silently has no worker — correct, unit-tested, typechecked and wired to
+ * nothing, which is exactly this gate's population. Adding it costs two
+ * `@unwired` tags, on `sw.ts` and `worker-core.ts`, and those are honest: a
+ * service worker is a **second entry point**, so it is structurally unreachable
+ * from the graph this gate walks. What the prefix buys is that deleting
+ * `main.tsx`'s call to `registerServiceWorker` is a red build — measured, both
+ * ways round, in #406.
  */
-const WATCHED_PREFIXES = ['apps/web/src/game/', 'apps/web/src/ride/'];
+const WATCHED_PREFIXES = ['apps/web/src/game/', 'apps/web/src/ride/', 'apps/web/src/offline/'];
 const WATCHED_SUFFIX = /-port\.ts$/;
 
 /**

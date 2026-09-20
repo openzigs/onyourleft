@@ -62,6 +62,9 @@ apps/                 AGPL-3.0-or-later, without exception
                         is `CC0-1.0` rather than this tree's own
                         `AGPL-3.0-or-later`, which `ASSET004` admits at no path
                         at all (ADR 0024 D-5)
+    tools/precache/     what the worker precaches, as a pure function over the
+                        build's output (#406) — build-time code, so it lives
+                        beside the icon generator rather than in `src/`
     tools/icons/        the drawing those icons are committed FROM (#405) — two
                         chevrons from arithmetic, nothing downloaded and nothing
                         traced (ADR 0009). Authoring-time code, the shape
@@ -119,6 +122,19 @@ apps/                 AGPL-3.0-or-later, without exception
                         wiring (#49), and since #14 the workout lifecycle — one
                         clock for the ride and the workout, and the panel that
                         will not offer a control the trainer would refuse
+    src/offline/        the service worker and whether it is registered at all
+                        (#406, #407) — the one cache strategy, the four handlers
+                        over an injected scope so they can be tested without a
+                        browser, and ⚠️ the refusal to register inside the
+                        Android shell (ADR 0024 D-4), where every asset is
+                        already in the APK. The precache is DERIVED from the
+                        build's own output and never written down: a new model
+                        or a new lazy route is cached with no edit here, which
+                        is #142's failure mode inverted. ⚠️ Two `@unwired` tags
+                        live here and both are structural — a service worker is
+                        a second entry point, so `check:wiring` cannot reach it
+                        from `index.html`; what the prefix buys is that deleting
+                        `main.tsx`'s registration call is a red build
     src/privacy/        the boundaries where data leaves the athlete's control
                         (#34) — the two directions a payload can face, the walk
                         that finds a coordinate in a field nobody declared, and
@@ -2106,6 +2122,15 @@ reasons.** `check:wiring` asks whether any production declaration *names*
 reads what a **trainer** was handed. Deleting the `sample` call inside `GameView`'s tick leaves the
 gate green — `GameView` still names `createGradientSession` — and turns three of that file's
 assertions red. Neither replaces the other.
+
+⚠️ **`apps/web/src/offline/sw.ts` and `worker-core.ts` carry the two newest tags, and they are the
+first pair here that is STRUCTURAL rather than a decision or a defect** ([#406](https://github.com/openzigs/onyourleft/issues/406)). A
+service worker is a **second entry point**: Rollup builds it in its own pass into `dist/sw.js`, and
+the browser reaches it through a URL rather than an import, so nothing in the graph this gate walks
+from `index.html` can ever import it. What the prefix buys instead is `register.ts`, which
+`main.tsx` **does** import — measured both ways round: deleting the call from `main.tsx` is a red
+`WIRE001` naming `register.ts`, and restoring it is green. A future worker module needs a tag of the
+same shape, and that is the cost the prefix was added with its eyes open to.
 
 ⚠️ **Read `check-wiring.mjs` §Limits before concluding something is wired because the gate is
 green.** It cannot see a call made through a string key, a dynamic import whose specifier is not a
