@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-or-later",
-  "description": "Browser client \u2014 the Phase 1 product.",
+  "description": "Browser client — the Phase 1 product.",
   "scripts": {
     "dev": "vite",
     "icons:generate": "node tools/icons/generate-icons.ts",
