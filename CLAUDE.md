@@ -174,6 +174,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         to outlive the screen is not the screen's
     src/shell/          the hash route table, the router hook and AppShell (#48)
     src/support/        browser-capability detection and its notice (#48), and
+                        since #409 whether this browser may throw a rider's
+                        history away — the one place `persist()` is asked for,
+                        once per session, and the panel that says what
+                        persistence does AND does not protect against, and
                         since #85 the one question that decides which BLE
                         transport this build uses (§4h), and since #284 the
                         OTHER answer that question decides — the Devices
@@ -913,8 +917,13 @@ bash scripts/check-cost-model.test.sh
 # from, so run this before claiming a change compiles.
 pnpm run build
 
-# The browser gate (#63). Builds `apps/web/browser/` and drives it in a real
-# headless Chromium through Playwright. This is the ONLY place in the
+# The browser gate (#63). Builds `apps/web/` AND `apps/web/browser/` and drives
+# them in a real headless Chromium through Playwright. ⚠️ **Two builds and two
+# preview servers since #408**: an offline claim about the PRODUCT cannot be
+# measured against the harness, so `playwright.config.ts` serves `dist` on 4320
+# beside `browser/dist` on 4319. One Playwright project and one CI job, because
+# a second job reports under a different context and could not block a merge.
+# This is the ONLY place in the
 # repository where a browser runs: jsdom implements no WebGL, so MapLibre
 # cannot be constructed in the Vitest suite at all, and three things are
 # checkable nowhere else — that MapLibre initialises against the style we
@@ -925,7 +934,9 @@ pnpm run build
 #
 # Since #266 it also runs the HUD page, which is here for a DIFFERENT reason
 # than WebGL: jsdom performs no layout, so nothing in the Vitest suite can say
-# whether a value fits its grid track. See §4f.
+# whether a value fits its grid track. And since #408 it runs the PRODUCT with
+# the network off, which is a third reason again: jsdom has no service worker,
+# no Cache Storage and no network stack to switch off. See §4f.
 #
 # Needs the pinned browser present. In a container that already has one (
 # `PLAYWRIGHT_BROWSERS_PATH` set, revision matching) it runs as-is; on a bare
@@ -1615,7 +1626,8 @@ browser runs**.
 | `hud.browser.spec.ts` | its spec — no `.oyl-hud__value` overflows its grid track at a phone viewport in either orientation, read back from the browser's own layout. Its **control panels** are the half that makes a green run mean something |
 | `shell.html`, `shell-harness.tsx` | since #307's review, the app **shell**: the **real** `shell/AppShell.tsx` with the **real** `ROUTES` table under the **real** `design/theme.css`. The second `.tsx` here. ⚠️ Its spacer goes **inside `.oyl-main`** and the file says why at length — after `.oyl-shell` the header scrolls out of its own sticky containing block and measures 0 px, and inside `.oyl-shell` `main` stays shorter than the viewport so a focus scroll never consults `scroll-margin-top`. Each mistake made a different assertion pass over nothing. ⚠️ Since #316 it also renders the **real** `design/Button.tsx` in both variants, with `RideView`'s own labels, because a shell handed no ports renders **zero** controls on all eleven routes and a size assertion over an empty list passes |
 | `shell.browser.spec.ts` | its spec — how much of the viewport persistent chrome still covers after a scroll, where a fragment jump lands the `h1`, whether the focused skip link is the topmost thing at its own centre (hit-tested, not read off a `z-index`), and no horizontal scrolling at 320 px. ⚠️ Since #316 it also measures the **touch target** three ways, and the three fail for different reasons — see below |
-| `../playwright.config.ts` | Chromium only, no retries, and the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all |
+| `offline.browser.spec.ts` | since #408, the offline claim — against **`apps/web/dist`**, in a **persistent** context closed and reopened, with **two controls**. The only spec here that does not drive a harness page, and the first use of `setOffline` in this repository |
+| `../playwright.config.ts` | Chromium only, no retries, the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all — and since #408 **two `webServer` entries**, because the product and the harness are different builds |
 | `../vite.browser.config.ts` | the harness build. A second Vite config, so the harness cannot reach a shipped bundle |
 
 **Why it exists at all**, given that #48's suite already renders every route: **jsdom implements no
@@ -1677,6 +1689,56 @@ tokens starts below the target with nothing saying so. ⚠️ **44×44 is SC 2.5
 (Enhanced), AAA), not SC 2.5.8, which is the AA criterion and is 24×24.** Both `theme.css` and the
 spec carry that correction because an earlier comment in this repository had it the wrong way round;
 do not "fix" a failure here by citing 2.5.8.
+
+⚠️ **Since #408 this gate also runs the PRODUCT build, and it is there for a third reason again.**
+jsdom has no service worker, no Cache Storage and no network stack to switch off, so the offline
+claim ADR 0002 makes and [#404](https://github.com/openzigs/onyourleft/issues/404) had to retract
+is checkable nowhere else. `playwright.config.ts` therefore serves `apps/web/dist` on a **second**
+`webServer`; `test:browser` builds it first. ⚠️ **It is not a second CI job and must not become
+one** — `main` requires a status check whose context is exactly `Repository rules`, and a second
+job could not block a merge.
+
+⚠️ **It launches its own persistent context, and that is load-bearing.** A service-worker
+registration and a Cache Storage entry live in a **profile directory**, and `browser.newContext()`
+gives every context an empty one — so a "fresh context" made that way has no worker and could never
+load offline, and the assertion would be about a browser that was never going to work.
+`chromium.launchPersistentContext` over a directory the spec owns is what makes "close the tab,
+come back tomorrow with no network" expressible.
+
+⚠️ **Two controls, and they fail for different reasons.** A green *"it loads offline"* is
+indistinguishable from `setOffline(true)` not taking effect, from the page coming out of Chromium's
+own HTTP cache, from an empty page that "loaded", and from the harness serving a different build.
+So (1) a resource deliberately outside the precache must **fail** in the same run — a `fetch()` and
+not a navigation, because the worker serves the precached shell for *every* navigation — and (2)
+every offline response must report `fromServiceWorker`. Measured both ways round: deleting
+`setOffline(true)` turns the control red by **succeeding**, and making the worker answer nothing
+turns the two serving assertions red while leaving the control's expectation untouched.
+
+⚠️ **Two traps this gate found that are worth not rediscovering.** `page.waitForFunction` with an
+**async** predicate resolves on its first poll, because the `Promise` it returns is truthy — the
+first version of the precache wait was a wait that could not fail, and the assertion after it read
+an empty cache. `expect.poll` awaits what its callback returns. And the worker's precache list
+cannot be regexed out of `dist/sw.js`: the minifier rewrites every string literal as a template
+literal, so `["a","b"]` ships as `` [`a`,`b`] ``. The spec reads **Cache Storage** instead, which is
+the stronger claim anyway — a list the build injected is an intention, a cache the browser filled is
+what a rider has.
+
+⚠️ **What `persisted()` cannot tell you in this browser, measured 2026-09-20.** It mirrors the
+`durableStorage` permission and nothing else: granted over CDP it is `true` **before** anything
+called `persist()` and `true` in a session where nothing ever asked, and a CDP grant does not
+survive the browser process, so there is no profile state to read back. #409's "read it back from a
+fresh context" is therefore **not decidable here**, and asserting it would be green for a reason
+unrelated to this client. What the spec asserts instead is the **call** — an init script wraps
+`navigator.storage.persist` before any application module runs, and the shipped bundle must call it
+exactly once — plus the refusal path, in the shipped build rather than against a stub.
+
+⚠️ **What the offline half does NOT prove.** Nothing about a real phone; nothing about the Android
+APK ([#410](https://github.com/openzigs/onyourleft/issues/410), which needs a device); nothing about
+the basemap, which ADR 0024 D-2 deliberately does not precache; nothing about install prompting,
+because `beforeinstallprompt` is behind an engagement heuristic no automated run satisfies; and
+nothing about a whole offline **ride** — the trainer game needs a saved route in IndexedDB before it
+loads its renderer at all, so what is asserted is that the renderer chunk and all twelve scenery
+assets are served by the worker with the network off and that the module still imports.
 
 ⚠️ **The browser gate does not subsume `styleOrigins`, and it is easy to assume it does.** Adding a
 third-party `glyphs` URL to `basemapStyle` turns the **jsdom** check red and leaves the **browser**
