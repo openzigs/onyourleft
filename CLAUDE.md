@@ -771,7 +771,7 @@ downstream issue's acceptance criteria depend on these.
 # Exits 0 clean; exits 1 listing each violation by rule id.
 bash scripts/check-repo-rules.sh
 
-# Test the checker itself. Fixture-driven; 181 cases. ⚠️ This said 115 until
+# Test the checker itself. Fixture-driven; 182 cases. ⚠️ This said 115 until
 # #357 and 168 until #416, and had been stale for some time — the number is what
 # the suite prints, so read the run rather than this line.
 bash scripts/check-repo-rules.test.sh

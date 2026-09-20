@@ -662,14 +662,23 @@ check_adr_sections() {
 
     body="$(strip_fences "${adr}")"
 
+    # ⚠️ A HERE-STRING rather than `printf ... | grep -q`, and this one cost a
+    # red CI run. `grep -q` exits at the first match and closes the pipe; an ADR
+    # here is hundreds of lines, so it exceeds the pipe buffer and the producer
+    # gets EPIPE. This script runs under `set -o pipefail`, so the PIPELINE then
+    # reports the producer's failure -- and the `if` reads as "no match" for a
+    # document that matched. It is invisible on macOS, where `printf` is a
+    # builtin that does not fail the same way; on the Ubuntu runner it reported
+    # `printf: write error: Broken pipe` and then said six ADRs with a Status
+    # line had none. The two other `| grep -q` pipelines in this file are safe
+    # only because they pipe a FILENAME, which the buffer absorbs whole.
     for section in ${ADR_REQUIRED_SECTIONS}; do
       hint=""
-      if printf '%s\n' "${body}" \
-        | grep -qE "^##[[:space:]]+${section}([[:space:]]*$|[[:space:]]|:)"; then
+      if grep -qE "^##[[:space:]]+${section}([[:space:]]*$|[[:space:]]|:)" <<< "${body}"; then
         continue
       fi
       if [ "${section}" = "Status" ]; then
-        if printf '%s\n' "${body}" | grep -qE '^-?[[:space:]]*\*\*Status\*\*[[:space:]]*:'; then
+        if grep -qE '^-?[[:space:]]*\*\*Status\*\*[[:space:]]*:' <<< "${body}"; then
           continue
         fi
         hint="${ADR_STATUS_HINT}"

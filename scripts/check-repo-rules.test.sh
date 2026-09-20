@@ -1040,6 +1040,34 @@ else
 fi
 cleanup_fixture
 
+# ⚠️ A LONG ADR, which is the case a red CI run produced and this suite could
+# not have found on the machine it was written on.
+#
+# The first version of ADR004 asked `printf '%s\n' "${body}" | grep -q ...`.
+# `grep -q` exits at the first match and closes the pipe; a document bigger than
+# the pipe buffer then gives the producer EPIPE, and this script runs under
+# `set -o pipefail`, so the whole pipeline reports a failure for a document that
+# MATCHED. On the Ubuntu runner that printed `printf: write error: Broken pipe`
+# and reported six real ADRs as having no Status. On macOS, where `printf` is a
+# builtin that does not fail the same way, every case here stayed green --
+# including "this repository passes its own rules", over the very ADRs that
+# failed in CI.
+#
+# So this fixture is deliberately larger than a 64 KiB pipe buffer, and it is
+# honest about what it can do: on Linux it is what turns that mistake red, and
+# on macOS it passes either way. The checker uses a here-string now.
+new_fixture
+{
+  printf '# ADR 0002: A long one\n\n- **Status**: Accepted\n\n## Context\n\n'
+  index=0
+  while [ "${index}" -lt 3000 ]; do
+    printf 'Padding line %s, which exists only to make this document big.\n' "${index}"
+    index=$((index + 1))
+  done
+  printf '\n## Decision\n\nDo the thing.\n\n## Consequences\n\nThe thing is done.\n'
+} > "${fixture_root}/docs/adr/0002-a-long-one.md"
+assert_clean "an ADR larger than a pipe buffer passes"
+
 # The rule is scoped to docs/adr/. A spike decides nothing and CLAUDE.md
 # section 7 says so, so it has no sections to be missing.
 new_fixture
