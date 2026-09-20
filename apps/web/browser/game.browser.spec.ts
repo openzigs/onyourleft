@@ -90,6 +90,17 @@ interface GameHarnessResult {
   readonly sceneryIndicesModelled: Readonly<Record<string, number>>;
   readonly sceneryIndicesPlain: Readonly<Record<string, number>>;
   readonly sceneryInstances: Readonly<Record<string, number>>;
+  readonly texturesCreated: number;
+  readonly texturesBaseline: number;
+  readonly treeRedPixels: number;
+  readonly treeGreenPixels: number;
+  readonly buildingGreenPixels: number;
+  readonly buildingBluePixels: number;
+  readonly sceneryCallsByVariants: readonly number[];
+  readonly variantIndices: Readonly<Record<string, readonly number[]>>;
+  readonly riderMeanColour: Readonly<Record<string, Pixel>>;
+  readonly riderSilhouettePixels: Readonly<Record<string, number>>;
+  readonly botCrankPixels: number;
   readonly errors: readonly string[];
 }
 
@@ -159,17 +170,45 @@ const CHANNELS = ['red', 'green', 'blue'] as const;
  * |---|--:|
  * | the ground | 1 |
  * | the road, however many marks and edge lines it carries (#242) | 1 |
- * | the bot's solid | 1 |
- * | the rider's merged body and bicycle (#349) | 1 |
- * | the rider's crankset, which turns on its own axis (#349) | 1 |
- * | the rider's four leg segments, as one instanced mesh (#349) | 1 |
+ * | every rider's merged body and bicycle, instanced (#349, #368) | 1 |
+ * | every rider's crankset, which turns on its own axis (#349, #368) | 1 |
+ * | every rider's four leg segments, as one instanced mesh (#349, #368) | 1 |
  *
- * ⚠️ **It was 4 before #349, when the rider was a sphere.** Written out as a
- * sum rather than as a literal so that a red run says which term moved: the
- * road splitting into three meshes and the rider growing a fourth mesh are very
- * different findings and a bare `6` cannot tell them apart.
+ * ⚠️ **It was 4 before #349 and 6 between #349 and #368, and it is 5 now** —
+ * which is the direction nobody expects a change that gives two more objects a
+ * bicycle each to move a draw-call count in. #349 drew one bicycle in three
+ * calls and left the bot a cone and the ghost an octahedron at one apiece;
+ * #368 instances all three riders into the same three meshes, so the two
+ * solids' calls are gone and no new ones arrive. The frame this is measured on
+ * carries a rider and a bot; a ghost would add **no** call at all.
+ *
+ * Written out as a sum rather than as a literal so that a red run says which
+ * term moved: the road splitting into three meshes and the riders growing a
+ * fourth mesh are very different findings and a bare `5` cannot tell them
+ * apart.
  */
-const SCENE_DRAW_CALLS = 1 + 1 + 1 + 3;
+const SCENE_DRAW_CALLS = 1 + 1 + 3;
+
+/**
+ * The most meshes the scenery belt may ever hold: **12**.
+ *
+ * | kind | shapes |
+ * |---|--:|
+ * | `tree-broadleaf`, `tree-conifer`, `shrub`, `rock` | 2 each |
+ * | `building` | 3 |
+ * | `post`, which ADR 0022 D-3 leaves procedural | 1 |
+ *
+ * ⚠️ **A ceiling rather than the count, and #367's sixth criterion asks for
+ * exactly that**: *"a budget that says how many variants may exist at all, so
+ * this cannot be grown later without meeting the same gate."* The gate is this
+ * file — a thirteenth mesh is a red run here, and going green again means
+ * re-measuring what the draw calls cost and publishing the number in
+ * `docs/validation/0002-android-shell-and-game.md` Part M the way Part H
+ * publishes the geometry cost.
+ *
+ * ⚠️ **It was 6 before #367**, one mesh a kind, which is what #244 spent.
+ */
+const SCATTER_MESH_CEILING = 4 * 2 + 3 + 1;
 
 async function harness(page: import('@playwright/test').Page): Promise<GameHarnessResult> {
   await page.goto(`${HARNESS_ORIGIN}/game.html`);
@@ -609,11 +648,18 @@ test.describe('the scenery reaches the screen, and costs one call a kind — #24
     expect(result.scatterKindCount).toBeGreaterThan(0);
     expect(result.scatterKindCount).toBeLessThanOrEqual(6);
     // The ratio is the point. A per-item mesh reads here as
-    // `scatterItemCount` extra calls rather than `scatterKindCount`.
+    // `scatterItemCount` extra calls rather than a handful.
     expect(result.scatterItemCount).toBeGreaterThan(result.scatterKindCount * 4);
-    expect(result.drawCallsWithScatter - result.drawCallsWithoutScatter).toBe(
-      result.scatterKindCount,
-    );
+    // ⚠️ **A bound rather than an identity, since #367**, and a reviewer who
+    // remembers `=== scatterKindCount` is reading the old file. A kind is drawn
+    // across up to three meshes now, so the calls a frame spends on the scenery
+    // are between the kinds it holds and {@link SCATTER_MESH_CEILING} — which
+    // is still a constant, and is still a very long way below the item count.
+    // The exact width of the belt is measured at each rung further down.
+    const sceneryCalls = result.drawCallsWithScatter - result.drawCallsWithoutScatter;
+
+    expect(sceneryCalls).toBeGreaterThanOrEqual(result.scatterKindCount);
+    expect(sceneryCalls).toBeLessThanOrEqual(SCATTER_MESH_CEILING);
     // ⚠️ **The same ratio on a frame that was not prepared for it.** The two
     // counts above are measured back to back late in the run, with the scenery
     // removed from the second on purpose. `drawCallsPerFrame` is the **first**
@@ -621,7 +667,7 @@ test.describe('the scenery reaches the screen, and costs one call a kind — #24
     // arrangement — and #268's review found it published and asserted by
     // nothing. {@link SCENE_DRAW_CALLS} is the scenery-free scene the test
     // above this one pins.
-    expect(result.drawCallsPerFrame).toBe(SCENE_DRAW_CALLS + result.scatterKindCount);
+    expect(result.drawCallsPerFrame).toBe(SCENE_DRAW_CALLS + sceneryCalls);
   });
 });
 
@@ -869,20 +915,29 @@ test.describe('the scenery is models, not solids — #341', () => {
     // budget entirely."* The belt merges every part of a model into one
     // geometry for exactly this, and the number below is #244's, unchanged.
     const result = await harness(page);
+    const sceneryCalls = result.drawCallsWithScatter - result.drawCallsWithoutScatter;
 
-    expect(result.drawCallsWithScatter - result.drawCallsWithoutScatter).toBe(
-      result.scatterKindCount,
-    );
+    expect(sceneryCalls).toBeGreaterThanOrEqual(result.scatterKindCount);
+    expect(sceneryCalls).toBeLessThanOrEqual(SCATTER_MESH_CEILING);
   });
 
-  test('fetches the five committed models and nothing else', async ({ page }) => {
+  test('fetches the committed models and its one atlas, and nothing else', async ({ page }) => {
     // ⚠️ **#240's NFR-5 — *"makes no network request"* — was true until #341
     // because there was no file to declare one.** A glTF may name an external
-    // resource by URI, and `building-type-h.glb` names exactly one: the colour
-    // atlas its pack paints every building from. `scenery-models.ts` answers
-    // every resource that is not one of the five models with 68 bytes of
+    // resource by URI, and every City Kit building names exactly one: the
+    // colour atlas its pack paints every building from. `scenery-models.ts`
+    // answers every resource that is not one of ours with 68 bytes of
     // transparent PNG held in the bundle, and this is the only place that
     // policy can be observed from outside the code that implements it.
+    //
+    // ⚠️ **The atlas is now FETCHED where it used to be refused, and this
+    // assertion changed shape with it — #366.** A reviewer who remembers
+    // `expect(requested.filter(url => url.includes('colormap'))).toEqual([])`
+    // is reading the old file. The buildings' colour is in that image, it is
+    // sampled once at load and thrown away, and *"no texture reaches the GPU"*
+    // is asserted further down against `gl.createTexture` rather than against
+    // this request list. What has not changed at all is the claim that
+    // actually protects a rider: nothing off this origin.
     //
     // The request list is collected before the page is opened rather than
     // after, because a request made during the load is one that is over by the
@@ -898,12 +953,38 @@ test.describe('the scenery is models, not solids — #341', () => {
     // control run that clears them. What is being asserted is *which* files a
     // page reaches for, not how many times it asks.
     const models = new Set(requested.filter((url) => url.endsWith('.glb')));
+    const atlases = new Set(requested.filter((url) => url.includes('colormap')));
 
-    expect(models.size).toBe(5);
-    expect(requested.filter((url) => url.includes('colormap'))).toEqual([]);
+    // Eleven since #367 — two shapes for each of the four natural kinds and
+    // three buildings. {@link SCATTER_MESH_CEILING} is the same arithmetic from
+    // the renderer's end.
+    expect(models.size).toBe(11);
+    // One atlas, shared by all three buildings, served from this origin.
+    expect(atlases.size).toBe(1);
+    for (const atlas of atlases) {
+      expect(atlas.startsWith(HARNESS_ORIGIN)).toBe(true);
+    }
     // And nothing at all off this origin — the stronger statement, and the one
     // that survives somebody renaming the atlas.
     expect(requested.filter((url) => !url.startsWith(HARNESS_ORIGIN))).toEqual([]);
+  });
+
+  test('uploads no texture to the GPU, however the colour got there — #366', async ({ page }) => {
+    // ⚠️ **#366's fourth criterion, and the only way to make it.** The atlas is
+    // fetched above; a renderer that kept the `Texture` and bound it would draw
+    // an identical frame, at an identical draw-call count, with an identical
+    // vertex buffer, and every other assertion in this file would stay green.
+    // `gl.createTexture` is the one thing it could not avoid.
+    const result = await harness(page);
+
+    // ⚠️ **The instrument first.** A zero that was always going to be a zero is
+    // not evidence: a counter patched onto the wrong prototype, or a probe body
+    // that never ran, reports the same difference. three allocates four
+    // textures of its own before it draws anything at all — one for each
+    // sampler kind its default uniforms declare — so that is what a working
+    // counter sees, and it is subtracted rather than asserted against.
+    expect(result.texturesBaseline).toBeGreaterThan(0);
+    expect(result.texturesCreated).toBe(0);
   });
 });
 
@@ -967,5 +1048,234 @@ test.describe('the rider pedals, and it reaches the screen — #349', () => {
     // object in the middle of the frame.
     expect(result.drawCallsWithoutScatter).toBe(SCENE_DRAW_CALLS);
     expect(result.markerKinds).toContain('rider');
+  });
+});
+
+/**
+ * The scenery is painted in the colours its own models carry — #366.
+ *
+ * ⚠️ **This is the only gate that can see the colours reach a screen.**
+ * `scenery-palette.test.ts` says what colours the committed bytes hold, and it
+ * says it with a reader that shares no line with the renderer — which is what
+ * makes it evidence about the *files*. It is satisfied in full by a renderer
+ * that parses every one of them and then draws the world in one flat colour a
+ * kind, because nothing in jsdom can construct a `WebGLRenderer` at all. What
+ * is asserted below is what a driver actually put on the screen.
+ *
+ * ⚠️ **What it deliberately does not claim.** Not that the world looks *right*:
+ * there is no reference image and ADR 0009 forbids deriving one from another
+ * product. The assertions are about which channel leads in a pixel, which is a
+ * property a flat-coloured world provably cannot have and a correct one
+ * provably must.
+ */
+test.describe('the scenery carries its own colours — #366', () => {
+  test('draws a broadleaf tree with a trunk that is not its canopy', async ({ page }, testInfo) => {
+    // ⚠️ **The red count is the whole criterion.** One colour per kind was the
+    // world before #366 and for a broadleaf tree that colour was `0x3f6b33`, a
+    // green: every pixel of every tree was green-dominant and no arrangement of
+    // lighting could make one lead on red. `woodBark` is (0.886, 0.514, 0.341),
+    // which is red-dominant — so a trunk drawn from the model's own values
+    // cannot be missed and a trunk drawn from ours cannot be mistaken for one.
+    const result = await harness(page);
+
+    expect(result.treeGreenPixels).toBeGreaterThan(0);
+    expect(result.treeRedPixels).toBeGreaterThan(0);
+    // A trunk rather than a stray pixel of dither at the silhouette's edge.
+    expect(result.treeRedPixels).toBeGreaterThan(20);
+    const measured =
+      `a broadleaf tree covers ${String(result.treeRedPixels)} red-leading px ` +
+      `and ${String(result.treeGreenPixels)} green-leading px`;
+    testInfo.annotations.push({ type: 'the tree the pack draws', description: measured });
+    console.log(`the tree the pack draws — ${measured}`);
+  });
+
+  test('draws a building in the colours its atlas carries', async ({ page }, testInfo) => {
+    // #366's second criterion. The atlas gives it a green roof (66, 172, 124)
+    // and slate walls (95, 100, 124), so both a green-leading and a
+    // blue-leading pixel exist. The flat colour it had before #366 is
+    // `0xa8968a`, which is red-leading, so **neither** does — and a building
+    // drawn in that colour fails both of these at once rather than one.
+    const result = await harness(page);
+
+    expect(result.buildingGreenPixels).toBeGreaterThan(20);
+    expect(result.buildingBluePixels).toBeGreaterThan(20);
+    const measured =
+      `a building covers ${String(result.buildingGreenPixels)} green-leading px ` +
+      `and ${String(result.buildingBluePixels)} blue-leading px`;
+    testInfo.annotations.push({ type: 'the building the atlas paints', description: measured });
+    console.log(`the building the atlas paints — ${measured}`);
+  });
+});
+
+/**
+ * Each kind is drawn as several shapes, and what that costs — #367.
+ *
+ * ⚠️ **The measurement half of the issue, and it is the half the issue is
+ * actually about.** *"Draw calls go from 5 to roughly 15–20. That is #240's
+ * NFR-2… So this issue is not 'add as many variants as look nice'. It is: pick
+ * a number, measure what it costs on the device floor, and put the number where
+ * the ladder can see it."*
+ *
+ * The number is picked in `scenery-models.ts` §`MAXIMUM_SCENERY_VARIANTS`, the
+ * ladder sees it in `quality.ts` §`QualitySettings.sceneryVariants`, and what
+ * the belt actually submits is measured here and printed. ⚠️ **The device floor
+ * is still not this**: `docs/validation/0002-android-shell-and-game.md` Part M
+ * is the procedure for that, with its result table empty, exactly as Part H's
+ * was left by #341.
+ */
+test.describe('a kind is drawn as several shapes, and it is measured — #367', () => {
+  test('draws each of a kind’s variants as a different shape', async ({ page }) => {
+    // ⚠️ **Per variant, which no other measurement here can say.** A belt that
+    // had quietly collapsed every variant onto one geometry would hold the
+    // right number of meshes, spend the right number of draw calls and draw the
+    // world #367 exists to replace. Two equal index counts are two variants
+    // drawing the same thing.
+    const result = await harness(page);
+
+    for (const [kind, counts] of Object.entries(result.variantIndices)) {
+      if (kind === 'post') {
+        // ADR 0022 D-3 leaves it a cylinder, so every slot is the same shape.
+        continue;
+      }
+      const drawn = counts.filter((count) => count > 0);
+
+      expect(drawn.length, `${kind} slots drawn`).toBeGreaterThan(0);
+      expect(new Set(drawn).size, `${kind} distinct shapes`).toBeGreaterThan(1);
+    }
+  });
+
+  test('spends a bounded number of draw calls, and fewer as the ladder drops', async ({
+    page,
+  }, testInfo) => {
+    const result = await harness(page);
+    const [atThree, atTwo, atOne] = result.sceneryCallsByVariants;
+
+    // The ceiling first, which is the budget this issue is required to state.
+    expect(atThree).toBeGreaterThan(0);
+    expect(atThree).toBeLessThanOrEqual(SCATTER_MESH_CEILING);
+    // ⚠️ **And it is a real ceiling rather than a generous one**: the frame
+    // measured carries an item in every slot of every kind, so this IS the
+    // whole belt rather than whatever one stretch of road happened to hold.
+    expect(atThree).toBe(SCATTER_MESH_CEILING);
+    // The ladder does something, and it never goes back up.
+    //
+    // ⚠️ **This is evidence about the BELT and about `setQuality`'s call to it,
+    // and not about `QUALITY_LADDER`'s own numbers.** The harness sets
+    // `sceneryVariants` directly at each of three counts rather than reading a
+    // rung, which was measured rather than assumed: changing the ladder's
+    // middle rung to the ceiling leaves this test green, and deleting
+    // `setQuality`'s `setVariants` call turns it red. The ladder's own table is
+    // `quality.test.ts` §"gives one up on the same rung as the first scenery
+    // step", and the two together are the claim.
+    expect(atTwo).toBeLessThan(atThree ?? 0);
+    expect(atOne).toBeLessThan(atTwo ?? 0);
+    // One shape a kind is what #244 spent, which is the floor rung's cost.
+    expect(atOne).toBe(6);
+
+    const measured =
+      `scenery draw calls at 3, 2 and 1 shapes a kind: ` +
+      `${String(atThree)}, ${String(atTwo)}, ${String(atOne)}; the rest of the scene is ` +
+      `${String(SCENE_DRAW_CALLS)}`;
+    testInfo.annotations.push({ type: 'what the variants cost', description: measured });
+    // ⚠️ **Printed as well as annotated**, for the reason the shading
+    // measurement gives: an annotation reaches the JSON and HTML reports and
+    // not the log, and the log is the only artefact anybody reads on a green
+    // run.
+    console.log(`what the variants cost — ${measured}`);
+  });
+});
+
+/**
+ * The bot and the ghost are bicycles, and a rider can still tell them apart —
+ * #368.
+ *
+ * ⚠️ **What this gate can say about #93's third criterion, and what it
+ * cannot.** It can say that the three are drawn in measurably different
+ * colours, at the same place, in the same frame — which is the property that
+ * had to be *re-established* once the shape stopped doing the work. It cannot
+ * say that a rider glancing at a handlebar-mounted phone in sunlight tells them
+ * apart, which is what that criterion is actually about:
+ * `docs/validation/0002-android-shell-and-game.md` Part N is the procedure, at
+ * 10 m, 50 m and 200 m, and its result table is empty.
+ */
+test.describe('the pacer and the ghost are bicycles — #368', () => {
+  test('costs no draw call at all for the two that were solids', async ({ page }) => {
+    // ⚠️ **The direction nobody expects.** #349 drew one bicycle in three calls
+    // and left the bot a cone and the ghost an octahedron at one apiece; #368
+    // instances all three riders into the same three meshes. So the frame is
+    // five calls where it was six, and a ghost would add none.
+    const result = await harness(page);
+
+    expect(result.drawCallsWithoutScatter).toBe(SCENE_DRAW_CALLS);
+    expect(result.markerKinds).toContain('rider');
+    expect(result.markerKinds).toContain('bot');
+  });
+
+  test('draws each of the three in its own colour', async ({ page }, testInfo) => {
+    // ⚠️ **Each drawn alone, at the same place, on the same frame**, so the
+    // only thing that can differ between the three is the tint. Drawing them
+    // together would measure whichever happened to be in front.
+    const result = await harness(page);
+    const { rider, bot, ghost } = result.riderMeanColour;
+
+    for (const [kind, pixels] of Object.entries(result.riderSilhouettePixels)) {
+      // Non-vacuity: a mean over nothing is `NOWHERE`, and three of those are
+      // identical — which would satisfy nothing below and is worth saying so.
+      expect(pixels, `${kind} silhouette`).toBeGreaterThan(50);
+    }
+    const key = (pixel: Pixel | undefined) => (pixel ?? []).slice(0, 3).join(',');
+    const measured = `mean silhouette colour — rider ${key(rider)}, bot ${key(bot)}, ghost ${key(ghost)}`;
+    // ⚠️ **Printed before the assertions rather than after them**, so a red run
+    // reports the colours it actually read. Every other measurement in this
+    // file logs on the way out, and every one of them is silent on the run
+    // where somebody most wants the number.
+    testInfo.annotations.push({ type: 'telling the three apart', description: measured });
+    console.log(`telling the three apart — ${measured}`);
+
+    expect(new Set([key(rider), key(bot), key(ghost)]).size).toBe(3);
+
+    // ⚠️ **Three of them being different is not the claim; each PAIR being
+    // told apart is, and the two pairs are told apart by different
+    // properties.** That is a finding rather than a design, and it falls out of
+    // `instanceColor` multiplying: a tint can only ever darken the rider's own
+    // palette towards itself, so no tint can wash a mostly-blue palette out
+    // into a pale grey. What is available is hue and value, and they land on
+    // the two pairs differently.
+    //
+    // **Bot against the other two: HUE.** Its orange is the only tint that
+    // suppresses blue, so it is the only one of the three whose red channel
+    // leads. Stated as an ordering for the reason the rest of this file uses
+    // them — every step between a colour and a read-back byte is monotone per
+    // channel, so an ordering survives where a value does not.
+    expect(bot?.[0] ?? 0).toBeGreaterThan(bot?.[2] ?? 255);
+    expect(rider?.[2] ?? 0).toBeGreaterThan(rider?.[0] ?? 255);
+    expect(ghost?.[2] ?? 0).toBeGreaterThan(ghost?.[0] ?? 255);
+
+    // **Rider against ghost: VALUE.** Both lead on blue, because the rider's
+    // jersey is blue and the ghost's cool grey cannot take that away. What
+    // separates them is that the ghost is a great deal darker — a shadow of
+    // the attempt rather than a second rider — and the margin is stated as a
+    // ratio because an absolute difference in bytes says nothing about a scene
+    // whose exposure nobody has fixed.
+    const luminance = (pixel: Pixel | undefined) =>
+      0.2126 * (pixel?.[0] ?? 0) + 0.7152 * (pixel?.[1] ?? 0) + 0.0722 * (pixel?.[2] ?? 0);
+
+    expect(luminance(rider)).toBeGreaterThan(luminance(ghost) * 1.8);
+    expect(luminance(rider)).toBeGreaterThan(luminance(bot) * 1.8);
+  });
+
+  test('turns the pacer’s own cranks, from its own odometer', async ({ page }) => {
+    // ⚠️ **The claim no jsdom test can make**: `scene.ts` derives the angle,
+    // `three-renderer.ts` writes it into an instance matrix, and all of it is
+    // satisfied by a renderer that draws none of it — #240's named defect shape
+    // for this epic. The two frames differ only in the bot's crank angle.
+    const result = await harness(page);
+
+    expect(result.botCrankPixels).toBeGreaterThan(0);
+    // A pedalling bot's worth of change rather than a stray pixel, against its
+    // own silhouette.
+    expect(result.botCrankPixels).toBeGreaterThan(
+      (result.riderSilhouettePixels['bot'] ?? 0) * 0.02,
+    );
   });
 });

@@ -33,6 +33,17 @@
  * they are a record rather than a guard. The assertion below says so where
  * somebody reading a red run will be, and says what discharges them instead.
  *
+ * ⚠️ **#367 did NOT move it, and that is what makes this file evidence again.**
+ * That issue gives every item a `variant`, and its own fourth criterion asks
+ * for this digest to be *"confronted deliberately: variants change what stands
+ * somewhere, not where"*. Nothing here was re-taken for it — the number is the
+ * one #355 left behind — because a variant is drawn from a hash stream of its
+ * own and reads a part of the slot hash none of the other seven quantities
+ * reads. `serialise` deliberately does **not** carry the variant, so the digest
+ * stays a statement about the arrangement; that the variants exist at all is
+ * asserted separately below, because a field that was always zero would leave
+ * this equally unmoved.
+ *
  * ⚠️ **A digest alone can be satisfied by an empty world**, so the counts and
  * three fully written-out items sit beside it: a frame that stopped placing
  * anything, a kind that stopped appearing, or a thinning that started returning
@@ -60,7 +71,7 @@ import {
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
 import { corridorOrigin } from './terrain';
-import { SCATTER_KINDS, type ScatterItem } from './scatter';
+import { SCATTER_KINDS, SCATTER_VARIANT_SLOTS, type ScatterItem } from './scatter';
 
 const LATITUDE_DEGREES = 51.5;
 const METRES_PER_DEGREE_LATITUDE = 111_320;
@@ -220,6 +231,30 @@ describe('the arrangement a route produces — #341', () => {
     // are three different worlds.
     expect(placed.length).toBe(7680);
     expect(new Set(placed.map((item) => `${item.x},${item.z}`)).size).toBe(1120);
+  });
+
+  it('changes WHAT stands somewhere and not WHERE — #367', () => {
+    // ⚠️ **The digest above is the evidence for this, and it did not move.**
+    // #367's fourth criterion asks for `arrangement-unchanged.test.ts` to be
+    // *"confronted deliberately"*, and the confrontation came out the best way
+    // it could: a variant is drawn from a hash stream of its own, so adding it
+    // read a part of the slot hash that none of the seven quantities above it
+    // reads and changed none of their answers. `e80be45a` is the number #355
+    // left behind, unchanged by #367 — so unlike #348, #351, #353 and #355,
+    // **this issue is one the digest is evidence about** rather than one it
+    // merely records.
+    //
+    // What follows is the other half: the variants are really there. A field
+    // that existed and was always zero would leave the digest equally unmoved
+    // and would be the world #367 exists to replace.
+    const slots = new Set(placed.map((item) => item.variant));
+
+    expect(slots.size).toBe(SCATTER_VARIANT_SLOTS);
+    for (const kind of SCATTER_KINDS) {
+      const ofKind = placed.filter((item) => item.kind === kind);
+
+      expect(new Set(ofKind.map((item) => item.variant)).size, kind).toBeGreaterThan(1);
+    }
   });
 
   it('still uses every kind `scatter.ts` can place', () => {

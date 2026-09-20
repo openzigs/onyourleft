@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Which file each scenery kind's shape comes from, and what a model is allowed
- * to reach for — #341.
+ * Which files each scenery kind's shapes come from, and what a model is
+ * allowed to reach for — #341, #366, #367.
  *
  * ## Why this is a file of its own rather than a table in the renderer
  *
@@ -20,7 +20,7 @@
  * its own words: *"A shape with no silhouette to buy is not worth buying."* A
  * marker post is 1.1 m tall and 14 cm across, and at the distances fog leaves
  * visible a model of one and a cylinder are the same handful of pixels. So
- * {@link SCENERY_MODEL_FILES} is a `Partial` record on purpose, and
+ * {@link SCENERY_MODELS} is a `Partial` record on purpose, and
  * `scenery-models.test.ts` asserts which key is missing rather than letting an
  * omission look like an oversight.
  *
@@ -28,6 +28,23 @@
  * available is not a reason to place a seventh kind — that is a `scatter.ts`
  * change with its own placement question, and ADR 0022 D-3 says it arrives as
  * its own issue.
+ *
+ * ## ⚠️ Each kind now has SEVERAL shapes, and that is #367
+ *
+ * A reviewer who remembers this file mapping one `.glb` to each kind is reading
+ * the old one. Every building in the world used to be the same building, and so
+ * was every tree; each kind carries a **list** now, and which entry an item
+ * gets is a function of where it stands — `scatter.ts` §`ScatterItem.variant`,
+ * drawn from the same seeded hash that already decided the kind, so a rider
+ * riding the same road twice sees the same village.
+ *
+ * ⚠️ **{@link MAXIMUM_SCENERY_VARIANTS} is the budget, and it is the whole
+ * decision.** A variant is a distinct merged geometry and therefore a distinct
+ * `InstancedMesh`, and an `InstancedMesh` is a draw call — #240's NFR-2, the
+ * budget `three-renderer.ts` calls *"the one thing a model is most likely to
+ * spend without anybody noticing"*. So the number of variants a kind may have
+ * is capped in source and asserted, rather than being however many files
+ * somebody felt like adding.
  *
  * ## Provenance
  *
@@ -41,21 +58,25 @@
  *
  * ## What is bought, and what is not
  *
- * ⚠️ **The geometry, and nothing else.** #341 is explicit — *"Each currently
- * renders as a generated solid in `three-renderer.ts`. This issue replaces the
- * **geometry** and nothing else"* — so a model's own materials never reach the
- * scene. Every kind keeps the colour `three-renderer.ts` §`SCATTER_STYLE`
- * already gave it, which is what keeps `LIT_COLOURS` a complete statement of
- * the palette and keeps the world's colours a function of this repository
- * rather than of a pack's house style.
+ * ⚠️ **Since #366 the colour is bought too, and that is this file's other
+ * change of mind.** It used to say *"the geometry, and nothing else"*, and that
+ * every kind kept the colour `three-renderer.ts` §`SCATTER_STYLE` gave it —
+ * *"which is what keeps `LIT_COLOURS` a complete statement of the palette"*. A
+ * reviewer who remembers that paragraph is reading the old file. The cost it
+ * stated was real and visible: a Kenney tree is authored with a separate trunk
+ * material, so the trunk was drawn in the canopy's green, and a building whose
+ * colour lives entirely in an atlas was drawn in one flat beige. #366 bakes
+ * each part's own colour into a `COLOR_0` attribute at load, which keeps one
+ * merged geometry, one material and one draw call per mesh.
  *
- * The visible cost is stated rather than left to be discovered: a Kenney tree
- * is authored with a separate trunk material, and one colour per kind spends
- * that — the trunk is drawn in the canopy's green. It buys the silhouette,
- * which is what #302 asked for, and it keeps the belt at **one material and one
- * draw call per kind**.
- *
- * {@link sceneryResourceUrl} is the enforcement half of the same sentence.
+ * What D-7 was protecting is not given up with it: `scenery-palette.ts`
+ * §`SCENERY_PALETTE` records every colour the committed models contribute and
+ * `scenery-palette.test.ts` reproduces it from the bytes, so the palette is
+ * still enumerable and still asserted — by a gate rather than by a table
+ * somebody has to keep up to date. **Nothing else is bought**: a model's own
+ * `MeshStandardMaterial` still never reaches the scene, which is the half of
+ * D-7 that `three-seam.test.ts` cannot see and that {@link sceneryResourceUrl}
+ * and `prepareSceneryGeometry` together enforce.
  */
 
 import type { ScatterKind } from './scatter';
@@ -74,71 +95,194 @@ import type { ScatterKind } from './scatter';
  * pipeline. {@link sceneryResourceUrl} compares against them by identity for
  * exactly that reason.
  */
-import buildingUrl from './models/building-type-h.glb?url';
-import shrubUrl from './models/plant_bush.glb?url';
-import rockUrl from './models/stone_largeA.glb?url';
-import broadleafUrl from './models/tree_default.glb?url';
-import coniferUrl from './models/tree_pineTallA.glb?url';
+import atlasUrl from './models/colormap.png?url';
+import buildingHUrl from './models/building-type-h.glb?url';
+import buildingIUrl from './models/building-type-i.glb?url';
+import buildingKUrl from './models/building-type-k.glb?url';
+import bushUrl from './models/plant_bush.glb?url';
+import bushTriangleUrl from './models/plant_bushLargeTriangle.glb?url';
+import stoneAUrl from './models/stone_largeA.glb?url';
+import stoneCUrl from './models/stone_largeC.glb?url';
+import oakUrl from './models/tree_oak.glb?url';
+import pineRoundUrl from './models/tree_pineRoundD.glb?url';
+import pineTallUrl from './models/tree_pineTallA.glb?url';
+import treeDefaultUrl from './models/tree_default.glb?url';
+
+/** One shape a kind may be drawn as. */
+export interface SceneryModel {
+  /**
+   * The file's own name, without its extension.
+   *
+   * ⚠️ **Not derivable from {@link SceneryModel.url}**, which Vite hashes, and
+   * that is why it is written down: `scenery-palette.ts` §`SCENERY_PALETTE` is
+   * keyed on it, and `scenery-models.test.ts` asserts the two tables name the
+   * same set. A model added without a palette entry — or a palette entry left
+   * behind by a model that was removed — is a red build rather than a colour
+   * nobody recorded.
+   */
+  readonly name: string;
+  readonly url: string;
+}
 
 /**
- * The shape each kind is drawn with, by kind.
+ * The most shapes one kind may be drawn as: **3**.
+ *
+ * ⚠️ **A budget rather than an observation, and #367's sixth criterion.** Each
+ * variant is one more merged geometry, one more `InstancedMesh` and therefore
+ * one more draw call — #240's NFR-2. Twelve meshes is what the tables below
+ * come to, against six before #367, and `game.browser.spec.ts` measures what
+ * that actually costs a frame and prints it rather than reasoning about it.
+ *
+ * Raising this number means meeting that gate again: a measurement on the
+ * device, published in `docs/validation/0002-android-shell-and-game.md` the way
+ * Part H publishes the geometry cost. It is deliberately not a number the
+ * renderer derives from however many files a table happens to hold, because
+ * then adding a file would raise the budget silently, which is the growth this
+ * constant exists to stop.
+ *
+ * ⚠️ It is also the ceiling the **quality ladder** works down from:
+ * `quality.ts` §`QualitySettings.sceneryVariants` lets a throttling phone draw
+ * fewer distinct shapes before it starts losing items, which is #367's own
+ * suggestion and is why this is a maximum rather than a fixed count.
+ */
+export const MAXIMUM_SCENERY_VARIANTS = 3;
+
+/**
+ * The shapes each kind is drawn with, by kind.
  *
  * ⚠️ **`Partial`, and `post` is the key that is missing** — ADR 0022 D-3. A
  * kind with no entry keeps the primitive `SCATTER_STYLE` builds for it, which
  * is also what a kind whose model fails to load falls back to.
+ *
+ * ⚠️ **Order is load-bearing.** `ScatterItem.variant` indexes into these lists,
+ * so reordering one changes which shape stands where along every route — which
+ * is a change to the world and is the kind of thing
+ * `arrangement-unchanged.test.ts` exists to make visible. Adding an entry at
+ * the **end** moves the least.
+ *
+ * The three buildings are the pack's cheapest distinct silhouettes — a long low
+ * one, an L-shaped one and a two-storey one, at 770, 800 and 1 024 triangles
+ * against the 1 174 to 2 062 of the rest of the kit. The natural kinds take a
+ * second shape each rather than a second *size*: `sceneryFitMetres` normalises
+ * every model to the space its primitive occupied, so a "small" rock and a
+ * "large" one are the same rock at this scale and buy nothing.
  */
-export const SCENERY_MODEL_FILES: Partial<Record<ScatterKind, string>> = {
-  'tree-broadleaf': broadleafUrl,
-  'tree-conifer': coniferUrl,
-  shrub: shrubUrl,
-  rock: rockUrl,
-  building: buildingUrl,
+export const SCENERY_MODELS: Partial<Record<ScatterKind, readonly SceneryModel[]>> = {
+  'tree-broadleaf': [
+    { name: 'tree_default', url: treeDefaultUrl },
+    { name: 'tree_oak', url: oakUrl },
+  ],
+  'tree-conifer': [
+    { name: 'tree_pineTallA', url: pineTallUrl },
+    { name: 'tree_pineRoundD', url: pineRoundUrl },
+  ],
+  shrub: [
+    { name: 'plant_bush', url: bushUrl },
+    { name: 'plant_bushLargeTriangle', url: bushTriangleUrl },
+  ],
+  rock: [
+    { name: 'stone_largeA', url: stoneAUrl },
+    { name: 'stone_largeC', url: stoneCUrl },
+  ],
+  building: [
+    { name: 'building-type-h', url: buildingHUrl },
+    { name: 'building-type-i', url: buildingIUrl },
+    { name: 'building-type-k', url: buildingKUrl },
+  ],
 };
+
+/**
+ * The colour atlas the City Kit paints every building from — #366.
+ *
+ * ⚠️ **Committed, and that is a change from #341.** The buildings' colour is
+ * not in their `.glb` at all: each declares one external resource,
+ * `Textures/colormap.png`, and until #366 that resource was refused and the
+ * building was drawn in one flat colour of this repository's own. #366 samples
+ * it once at load, writes the result into `COLOR_0` and throws the image away,
+ * so the atlas is **fetched** where it was previously refused and still never
+ * reaches the GPU. It is 11 784 bytes and one request, shared by all three
+ * buildings.
+ *
+ * ⚠️ It is the same Kenney *City Kit (Suburban)* archive as the buildings, so
+ * `ASSETS.toml` gains a row and nothing else changes: `ASSET004` admits
+ * `CC0-1.0` under `apps/`, and ADR 0022 D-2's *"one source and one house
+ * style"* is untouched.
+ */
+export const SCENERY_ATLAS: SceneryModel = { name: 'colormap', url: atlasUrl };
+
+/**
+ * The name the models' own glTF declares the atlas under.
+ *
+ * Read from the committed files: every City Kit `.glb` names
+ * `Textures/colormap.png`. Matched on the final path segment because the URI is
+ * resolved against wherever the bundler put the model, so the directory part is
+ * not knowable here.
+ */
+const ATLAS_DECLARED_FILE = 'colormap.png';
 
 /**
  * A 1 × 1 transparent PNG, as a `data:` URI. 68 bytes.
  *
- * What {@link sceneryResourceUrl} answers a model's own texture with. Not a
- * placeholder that might one day be replaced by the real thing: the point is
+ * What {@link sceneryResourceUrl} answers a resource nobody asked for with. Not
+ * a placeholder that might one day be replaced by the real thing: the point is
  * that it is never fetched and never drawn.
  */
 const NOTHING_IMAGE =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNgAAIAAAUAAen63NgAAAAASUVORK5CYII=';
 
+/** Every URL this repository is willing to let a model reach. */
+const OWN_URLS = new Set<string>([
+  ...Object.values(SCENERY_MODELS).flatMap((models) => models.map((model) => model.url)),
+  SCENERY_ATLAS.url,
+]);
+
 /**
- * What a model is allowed to fetch: its own bytes, and nothing else.
+ * What a model is allowed to fetch: bytes this repository committed, and
+ * nothing else.
  *
  * ## The hole this closes, which is not hypothetical
  *
  * A glTF may declare an **external** resource — a texture, a buffer — by URI,
- * and a loader will fetch whatever it finds there. `building-type-h.glb`
+ * and a loader will fetch whatever it finds there. Every City Kit building
  * declares exactly one: `Textures/colormap.png`, the shared atlas its pack
  * paints every building from. #240's NFR-5 says this epic *"makes no network
  * request"*, and until #341 that was true because there was no file to declare
  * one. A committed model turns it into something that has to be **enforced**,
  * because the answer is now inside a binary nobody reads in review.
  *
- * So the loader is handed this as its URL modifier, and every resource that is
- * not one of {@link SCENERY_MODEL_FILES}' own values is answered with
- * {@link NOTHING_IMAGE} — 68 bytes of transparent PNG that is already in the
- * bundle. Two things follow, and the second is the one worth having:
+ * So the loader is handed this as its URL modifier, and **every answer it gives
+ * is a URL of ours**:
  *
- * - The atlas is not fetched, which is correct rather than merely cheap: the
- *   materials it paints are discarded on the next line anyway, because this
- *   change buys geometry and not colour. A model that arrived with its own PBR
- *   material and kept it would change how the **whole scene** is shaded with no
- *   gate going red — ADR 0022 D-7 is about precisely that, and it is a hole
- *   `three-seam.test.ts` cannot see because a `MeshStandardMaterial` built by a
- *   loader from a binary appears in no source file.
- * - **A model cannot reach a third party.** A future asset whose glTF names
- *   `https://…` gets the same 68 bytes, and the world is drawn without it —
- *   rather than a rider's ride quietly contacting a host nobody chose.
+ * - one of {@link SCENERY_MODELS}' own values, matched by identity;
+ * - {@link SCENERY_ATLAS}' own value, for a resource whose last path segment is
+ *   the name the pack declares its atlas under;
+ * - {@link NOTHING_IMAGE} for everything else — 68 bytes of transparent PNG
+ *   that is already in the bundle.
  *
- * ⚠️ **A resource is matched by identity against the table, not by extension
- * or by prefix.** `endsWith('.glb')` would admit any `.glb` a model referenced,
- * which is the same mistake in a new place, and a path prefix cannot be written
- * at all because Vite chooses where these land.
+ * ⚠️ **The atlas case is a redirection and not an admission, and that is the
+ * property worth stating.** A future model declaring
+ * `https://example.invalid/colormap.png` is answered with *our* committed
+ * atlas, not with that host's; one declaring anything else is answered with 68
+ * bytes. So **a model cannot reach a third party** — the claim is about the
+ * function's range rather than about its conditions, which is what
+ * `scenery-models.test.ts` asserts over a list of hostile inputs, and it is a
+ * stronger statement than the identity-only rule this function carried before
+ * #366.
+ *
+ * ⚠️ **A model is still matched by identity, never by extension or by prefix.**
+ * `endsWith('.glb')` would admit any `.glb` a model referenced, which is the
+ * same mistake in a new place, and a path prefix cannot be written at all
+ * because Vite chooses where these land.
  */
 export function sceneryResourceUrl(url: string): string {
-  return Object.values(SCENERY_MODEL_FILES).includes(url) ? url : NOTHING_IMAGE;
+  if (OWN_URLS.has(url)) {
+    return url;
+  }
+  return lastSegment(url) === ATLAS_DECLARED_FILE ? SCENERY_ATLAS.url : NOTHING_IMAGE;
+}
+
+/** The part after the last `/`, with any query or fragment taken off. */
+function lastSegment(url: string): string {
+  const path = url.split('#')[0]?.split('?')[0] ?? '';
+  return path.slice(path.lastIndexOf('/') + 1);
 }

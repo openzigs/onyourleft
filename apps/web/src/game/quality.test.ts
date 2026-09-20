@@ -31,6 +31,7 @@ import {
   type QualitySample,
   type QualityState,
 } from './quality';
+import { MAXIMUM_SCENERY_VARIANTS } from './scenery-models';
 import { SCATTER_MAX_ITEMS } from './scatter';
 
 /** Feeds the same measurement `count` times, as a sustained condition would. */
@@ -323,5 +324,53 @@ describe('the scenery budget is a rung on the ladder — #245', () => {
     const unchanged = sustain(INITIAL_QUALITY, broken, SUSTAINED_SAMPLES * 3);
 
     expect(qualitySettings(unchanged.level).scatterItems).toBe(SCATTER_MAX_ITEMS);
+  });
+});
+
+/**
+ * How many distinct shapes the scenery may take, per rung — #367.
+ *
+ * ⚠️ **The one thing on this ladder whose cost is paid in draw calls**, which
+ * is #240's NFR-2's first term. `scatterItems` decides how many instances are
+ * submitted; this decides how many meshes they are spread over.
+ */
+describe('the scenery gives up its variety before it gives up its items — #367', () => {
+  it('draws every shape the pack gives a kind at the target rung', () => {
+    // The ceiling is `scenery-models.ts`'s own constant rather than a copy of
+    // it, for the reason the top rung takes `SCATTER_MAX_ITEMS`.
+    expect(qualitySettings(0).sceneryVariants).toBe(MAXIMUM_SCENERY_VARIANTS);
+  });
+
+  it('never falls below one, which is a shape rather than none', () => {
+    // ⚠️ `ScatterBelt` takes an item's variant modulo this, so a zero would be
+    // a division by zero and a world with nothing standing beside the road.
+    for (const level of [0, 1, 2, 3] as const) {
+      expect(qualitySettings(level).sceneryVariants).toBeGreaterThanOrEqual(1);
+      expect(Number.isInteger(qualitySettings(level).sceneryVariants)).toBe(true);
+    }
+  });
+
+  it('gives one up on the same rung as the first scenery step, never before it', () => {
+    // The ordering argument, as a property of the ladder rather than as prose:
+    // the first rung that draws fewer shapes is the first rung that draws fewer
+    // items, and neither happens at the target.
+    const variants = QUALITY_LADDER.map((rung) => rung.sceneryVariants);
+    const items = QUALITY_LADDER.map((rung) => rung.scatterItems);
+    const firstDrop = (values: readonly number[]) =>
+      values.findIndex((value, at) => at > 0 && value < (values[at - 1] ?? value));
+
+    expect(firstDrop(variants)).toBe(firstDrop(items));
+    expect(firstDrop(variants)).toBe(1);
+  });
+
+  it('never goes back up as the ladder goes down', () => {
+    // A rung that restored a shape on the way down would be a hotter phone
+    // drawing more meshes, which is the ladder failing at its one job.
+    for (let level = 1; level < QUALITY_LADDER.length; level += 1) {
+      expect(QUALITY_LADDER[level]?.sceneryVariants ?? 0).toBeLessThanOrEqual(
+        QUALITY_LADDER[level - 1]?.sceneryVariants ?? 0,
+      );
+    }
+    expect(QUALITY_LADDER[QUALITY_LADDER.length - 1]?.sceneryVariants).toBe(1);
   });
 });

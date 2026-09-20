@@ -10,6 +10,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { SIMULATED_DEVELOPMENT_METRES, simulatedCrankAngle } from './bicycle';
 import { gapAgainst } from './hud/fields';
 import type { RiderMarker, SceneFrame } from './port';
 import { qualitySettings } from './quality';
@@ -677,7 +678,12 @@ describe('a marker slides along the road rather than snapping to a corridor poin
     const beyond = botAt(5_000);
     const further = botAt(50_000);
 
-    expect(beyond).toEqual(further);
+    // ⚠️ **Position by position rather than whole marker, since #368.** The two
+    // are drawn at the same place and their cranks are at different angles,
+    // because a crank angle is taken from the odometer the clamp discarded —
+    // which is the point of `scene.ts` §`pedalling` and is asserted there.
+    expect([beyond.x, beyond.y, beyond.z]).toEqual([further.x, further.y, further.z]);
+    expect([beyond.headingX, beyond.headingZ]).toEqual([further.headingX, further.headingZ]);
     const base = atStartLine(setup.profile);
     const frame = sceneFrame({
       profile: setup.profile,
@@ -693,9 +699,11 @@ describe('a marker slides along the road rather than snapping to a corridor poin
  * Every marker says which way it is facing, and the rider says where its cranks
  * are — #349.
  *
- * The bot and the ghost are still a cone and an octahedron, both of which look
- * the same from every side; the rider is a bicycle, and a bicycle sideways on
- * the road is the most obviously wrong thing this frame could carry.
+ * ⚠️ **All three are bicycles since #368**, and this note used to say the bot
+ * and the ghost were *"still a cone and an octahedron, both of which look the
+ * same from every side"*. A reviewer who remembers that is reading the old
+ * file: every marker now has a front, and a bicycle sideways on the road is the
+ * most obviously wrong thing this frame could carry.
  */
 describe('a marker that has a front — #349', () => {
   it('gives every marker the heading of the road at its own distance', () => {
@@ -730,7 +738,11 @@ describe('a marker that has a front — #349', () => {
     expect(between).toBeLessThan(0.2);
   });
 
-  it('carries the crank angle on the rider and on nobody else', () => {
+  it("takes the rider's crank angle from the caller and nobody else's — #368", () => {
+    // ⚠️ **This used to assert that the bot and the ghost carried none, and a
+    // reviewer who remembers that is reading the old file.** All three pedal
+    // since #368; what is still true is that only the rider's angle comes from
+    // outside this file, because only the rider has a cadence to integrate.
     const setup = straightRoute();
     const frame = sceneFrame({
       profile: setup.profile,
@@ -743,8 +755,54 @@ describe('a marker that has a front — #349', () => {
 
     expect(frame.markers.find((each) => each.kind === 'rider')?.crankAngle).toBe(2.5);
     for (const marker of frame.markers.filter((each) => each.kind !== 'rider')) {
-      expect(marker.crankAngle).toBeUndefined();
+      expect(marker.crankAngle).toBeTypeOf('number');
+      expect(marker.crankAngle).not.toBe(2.5);
     }
+  });
+
+  it("turns a simulated rider's cranks from its own odometer — #368", () => {
+    // ⚠️ **From the odometer and not from the clamped position**, which is the
+    // one way this could be wrong and still look right: `markerAt` clamps a bot
+    // far up the road to the corridor's far end, so cranks taken from where it
+    // is drawn would freeze the moment it passed the horizon — a claim that a
+    // bot beyond the view has stopped pedalling.
+    const setup = straightRoute();
+    const origin = corridorOrigin(setup.profile);
+    const state = atStartLine(setup.profile);
+    const botAt = (distance: number) =>
+      sceneFrame({ profile: setup.profile, origin, state, botDistance: distance }).markers.find(
+        (each) => each.kind === 'bot',
+      );
+
+    // Half a development apart, so the two angles differ by π.
+    const near = botAt(60);
+    const alsoNear = botAt(60 + SIMULATED_DEVELOPMENT_METRES / 2);
+
+    expect(near?.crankAngle).toBe(simulatedCrankAngle(60));
+    expect(Math.abs((alsoNear?.crankAngle ?? 0) - (near?.crankAngle ?? 0))).toBeCloseTo(Math.PI, 6);
+
+    // And past the corridor's end, where the two markers are drawn at the same
+    // place and the cranks must not be.
+    const beyond = botAt(5_000);
+    const further = botAt(5_000 + SIMULATED_DEVELOPMENT_METRES / 4);
+
+    expect(beyond?.z).toBeCloseTo(further?.z ?? Number.NaN, 6);
+    expect(beyond?.crankAngle).not.toBe(further?.crankAngle);
+  });
+
+  it("stops a simulated rider's cranks when it stops — #368", () => {
+    // The honesty half, and it falls out of the derivation rather than being
+    // enforced: a bot that has not moved has not turned its cranks.
+    const setup = straightRoute();
+    const origin = corridorOrigin(setup.profile);
+    const state = atStartLine(setup.profile);
+    const angleAt = (distance: number) =>
+      sceneFrame({ profile: setup.profile, origin, state, botDistance: distance }).markers.find(
+        (each) => each.kind === 'bot',
+      )?.crankAngle;
+
+    expect(angleAt(90)).toBe(angleAt(90));
+    expect(angleAt(0)).toBe(0);
   });
 
   it('leaves the cranks unsaid when the caller has no answer', () => {

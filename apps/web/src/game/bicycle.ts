@@ -61,9 +61,12 @@
  * so which side `+X` is does not need deciding.
  *
  * ⚠️ **Every part's `y` is at or above zero**, which is why the renderer places
- * the rider at the marker's own `y` and not lifted by a radius the way the bot
- * and the ghost still are. A model that floated would be invisible at a glance
- * from a chase camera and obvious to nobody.
+ * a rider at the marker's own `y` and lifts nothing. That used to be said of the
+ * rider alone, *"not lifted by a radius the way the bot and the ghost still
+ * are"*; since #368 all three are bicycles and none of them is lifted, because
+ * there is no solid left whose centre sits at its own origin. A model that
+ * floated would be invisible at a glance from a chase camera and obvious to
+ * nobody.
  *
  * ## What this deliberately does not do
  *
@@ -73,11 +76,31 @@
  * - **No steering, and no pitch on a gradient.** Both are below what a 1.6 m
  *   object 8 m from the camera resolves, and both would need state this file
  *   does not have.
- * - **Nothing for the bot or the ghost.** They keep their cone and their
- *   octahedron, which is #93 criterion 3 taken seriously: **three different
- *   silhouettes beat three bicycles in three colours**, and the per-frame cost
- *   of the pedalling stays at one rider rather than three. #349 asks the
- *   question and this is the answer.
+ *
+ * ⚠️ **This list used to end with a fourth bullet and it is gone — #368.** It
+ * read: *"Nothing for the bot or the ghost. They keep their cone and their
+ * octahedron, which is #93 criterion 3 taken seriously: three different
+ * silhouettes beat three bicycles in three colours."* A reviewer who remembers
+ * that sentence is reading the old file, and it is **replaced rather than
+ * deleted** because it was an argument and not an oversight.
+ *
+ * What overturned it is the owner's judgement of 2026-09-18, in #368's own
+ * words: *"a sphere is not something you race"*. The criterion it was serving
+ * is unchanged and is still binding — a rider glancing at a bar-mounted phone
+ * must tell the three apart instantly — so distinctness was **re-established**
+ * rather than assumed:
+ *
+ * - Colour carries it, which is what the old bullet's own phrasing conceded
+ *   ("three bicycles in three colours"). `three-renderer.ts` §`RIDER_TINTS`
+ *   multiplies {@link RIDER_PALETTE} per instance, so the bot is an orange
+ *   machine and the ghost a colourless one against the rider's blue and
+ *   silver — a whole-vehicle hue rather than one patch of one.
+ * - The **cost** argument is reversed rather than merely accepted:
+ *   `RiderBelt` instances all three, so three bicycles cost three draw calls
+ *   where one bicycle and two solids cost five.
+ * - Their cranks turn from their **odometer** and not from a cadence — see
+ *   {@link simulatedCrankAngle}, which is the honest answer to the question
+ *   {@link advanceCrank} settles for the rider.
  */
 
 import type { SensorReading } from './hud/fields';
@@ -624,4 +647,76 @@ function wrapped(angle: number): number {
     return 0;
   }
   return ((angle % TAU) + TAU) % TAU;
+}
+
+/**
+ * How far a simulated rider's bicycle rolls in one turn of the cranks: **6.2 m**.
+ *
+ * ⚠️ **Provenance, and it is arithmetic rather than a preference.** A 700 × 25c
+ * wheel rolls 2.105 m per revolution (ISO 622 mm rim plus two 25 mm tyres gives
+ * a 672 mm diameter, and the rolling circumference of that is 2.111 m; 2.105 is
+ * the measured figure the standard chart carries for 25 mm). A 50 × 17 gear
+ * turns the wheel 2.94 times per crank revolution, so the development is
+ * 6.19 m, which is rounded here.
+ *
+ * What that buys is a plausible cadence across the speeds this game produces:
+ * 20 km/h reads as 54 rpm, 30 as 81, and 40 as 108. A rider grinding up a
+ * climb and a rider sprinting look different, which is the whole of what the
+ * cranks are for.
+ *
+ * ⚠️ **One gear, and never a change of one.** Modelling a gearbox would mean
+ * deciding when a simulated rider shifts, which is a second simulation with no
+ * input and nothing to check it against — and every one of its answers would be
+ * invented. A fixed development is visibly a convention.
+ */
+export const SIMULATED_DEVELOPMENT_METRES = 6.2;
+
+/**
+ * Where a simulated rider's cranks are, from how far they have ridden — #368.
+ *
+ * ## Why this exists rather than reusing {@link advanceCrank}
+ *
+ * #368's second criterion is the interesting one: *"neither has a cadence, so
+ * `advanceCrank`'s honesty rule does not apply as written. Decide and record:
+ * either derive a cadence from their speed and a fixed gear… or leave them
+ * still. Do not invent a rate and call it a reading."*
+ *
+ * **The decision is to derive, and to derive from distance rather than from
+ * speed**, which is a third option and is better than either the issue offers.
+ * {@link advanceCrank} integrates a *rate* over a frame's elapsed time, and its
+ * honesty rule is that it will not integrate a rate nobody measured — a rider
+ * whose cadence channel is unpaired gets still cranks, because *"a made-up rate
+ * is worse than a sphere, because it claims something false"*.
+ *
+ * The bot and the ghost have no cadence and never will: the bot's power comes
+ * from `packages/domain`'s pacing rule and the ghost is a replay of recorded
+ * distance. But they both have an **odometer**, which is a measurement of
+ * theirs, and a crank angle taken from it claims exactly one thing — that the
+ * wheels turned this far and the cranks turned with them at a fixed gear. That
+ * is a statement about a bicycle rather than about a person, it is true by
+ * construction, and it is falsifiable: a bot that is not moving has still
+ * cranks, and one that speeds up pedals faster, with no clock and no state
+ * anywhere in the derivation.
+ *
+ * ⚠️ **So nothing here is a reading and nothing here pretends to be.** The
+ * HUD's cadence field is untouched and still says `—` for a rider with no
+ * sensor; `hud/fields.ts` never sees this number, and the bot and the ghost
+ * have no HUD field of their own to contradict.
+ *
+ * ## Why it is a pure function of distance and not an integrator
+ *
+ * There is no angle to carry between frames, so there is no state to get wrong
+ * across a pause, a backgrounded phone or a restart — which is the whole of
+ * what {@link MAXIMUM_CRANK_STEP_SECONDS} exists to bound for the rider. A bot
+ * that was 400 m up the road before the phone slept is at the same crank angle
+ * when it wakes, because it is at the same place.
+ *
+ * Wrapped into `[0, 2π)`, like {@link advanceCrank}'s, so a long ride does not
+ * hand a rotation matrix a number with no precision left in it.
+ */
+export function simulatedCrankAngle(distanceMetres: number): number {
+  if (!Number.isFinite(distanceMetres)) {
+    return 0;
+  }
+  return wrapped((distanceMetres / SIMULATED_DEVELOPMENT_METRES) * TAU);
 }

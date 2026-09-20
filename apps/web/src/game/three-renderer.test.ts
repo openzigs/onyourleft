@@ -64,7 +64,8 @@ import {
 } from './scatter';
 import { ROAD_WIDTH_METRES, VIEW_AHEAD_METRES, VIEW_BEHIND_METRES } from './terrain';
 import { BICYCLE_COLOURS, CRANK_AXIS_Y, CRANK_AXIS_Z, LEG_BONE_COUNT } from './bicycle';
-import { SCENERY_MODEL_FILES } from './scenery-models';
+import { MAXIMUM_SCENERY_VARIANTS, SCENERY_MODELS } from './scenery-models';
+import { MAXIMUM_LIT_CHANNEL } from './scenery-palette';
 import {
   CAMERA_ABOVE_METRES,
   CAMERA_FIELD_OF_VIEW_DEGREES,
@@ -75,7 +76,7 @@ import {
   loadSceneryModels,
   NARROWEST_ASPECT,
   prepareSceneryGeometry,
-  RiderModel,
+  RiderBelt,
   SCATTER_INSTANCE_CAPACITY,
   sceneryFitMetres,
   SCATTER_LATERAL_METRES,
@@ -98,7 +99,26 @@ import {
 const POSE: CameraPose = { x: 0, y: 0, z: 0, headingX: 0, headingZ: 1 };
 
 function item(overrides: Partial<ScatterItem> = {}): ScatterItem {
-  return { kind: 'shrub', x: 3, y: 0, z: 10, rotation: 0, scale: 1, ...overrides };
+  return { kind: 'shrub', x: 3, y: 0, z: 10, rotation: 0, scale: 1, variant: 0, ...overrides };
+}
+
+/**
+ * The mesh one kind's variant is drawn by — #367.
+ *
+ * ⚠️ **`ScatterBelt.meshes` is keyed by kind AND variant since #367**, where it
+ * used to be keyed by kind alone, so nearly every assertion in this file goes
+ * through here. A belt built with no models has one shape a kind, which is what
+ * makes variant 0 the right default for everything that is not about variants.
+ */
+function meshFor(
+  belt: ScatterBelt,
+  kind: ScatterKind,
+  variant = 0,
+): ReturnType<ScatterBelt['meshesOf']>[number] | undefined {
+  // ⚠️ The type is read off the belt rather than named: `three-seam.test.ts`
+  // allows exactly one file in this repository to import the rendering
+  // library, and a test that spelt `InstancedMesh` would be a second.
+  return belt.meshesOf(kind)[variant];
 }
 
 /** A short level route at an altitude, for the one question the fog floor answers. */
@@ -139,7 +159,7 @@ function instancePosition(
   kind: ScatterKind,
   index: number,
 ): readonly [number, number, number] {
-  const mesh = belt.meshes.get(kind);
+  const mesh = meshFor(belt, kind);
   if (mesh === undefined) {
     throw new Error(`no mesh for ${kind}`);
   }
@@ -178,13 +198,21 @@ describe('the scenery belt is one mesh per kind, not one per item', () => {
     const belt = new ScatterBelt();
 
     for (const kind of SCATTER_KINDS) {
-      expect(belt.meshes.get(kind)).toBeDefined();
+      expect(meshFor(belt, kind)).toBeDefined();
     }
   });
 
-  it('gives each kind its own geometry and its own material', () => {
-    // Two kinds sharing a mesh would draw a conifer as a rock, and two kinds
-    // sharing a material would make the colour of one depend on the other.
+  it('gives each kind its own geometry and the whole belt one material', () => {
+    // Two kinds sharing a mesh would draw a conifer as a rock.
+    //
+    // ⚠️ **One material for all of them since #366, where it used to be one
+    // each** — a reviewer who remembers this asserting six materials is
+    // reading the old file. Every vertex carries its own colour now, so a
+    // material holds none and there is nothing left for a kind to have its own
+    // of; the old reason for six ("two kinds sharing a material would make the
+    // colour of one depend on the other") has no content once no material has
+    // a colour. What it buys is that twelve meshes cost two materials rather
+    // than twelve, and a shading swap is one assignment a mesh.
     const belt = new ScatterBelt();
     const geometries = new Set<unknown>();
     const materials = new Set<unknown>();
@@ -194,8 +222,25 @@ describe('the scenery belt is one mesh per kind, not one per item', () => {
       materials.add(mesh.material);
     }
 
-    expect(geometries.size).toBe(SCATTER_KINDS.length);
-    expect(materials.size).toBe(SCATTER_KINDS.length);
+    expect(geometries.size).toBe(belt.meshes.size);
+    expect(materials.size).toBe(1);
+  });
+
+  it('paints its primitives on their vertices, which is what makes that safe — #366', () => {
+    // ⚠️ **The half of the sentence above that is load-bearing.** One material
+    // for every kind is only harmless because no kind's colour is in it: a
+    // primitive that arrived without a `color` attribute would be drawn in
+    // whatever the shared material's default is — black — for `post` always
+    // and for any kind whose model failed to load.
+    const belt = new ScatterBelt();
+
+    for (const kind of SCATTER_KINDS) {
+      const geometry = meshFor(belt, kind)?.geometry;
+      const colour = geometry?.getAttribute('color');
+
+      expect(colour, kind).toBeDefined();
+      expect(colour?.count).toBe(geometry?.getAttribute('position').count);
+    }
   });
 
   it('submits nothing before a frame has arrived', () => {
@@ -220,7 +265,7 @@ describe('the belt is reused rather than reallocated', () => {
       );
 
     belt.update(frame(0), POSE);
-    const conifer = belt.meshes.get('tree-conifer');
+    const conifer = meshFor(belt, 'tree-conifer');
     const meshAtFirstFrame = conifer;
     const attributeAtFirstFrame = conifer?.instanceMatrix;
     const bufferAtFirstFrame = conifer?.instanceMatrix.array;
@@ -230,12 +275,12 @@ describe('the belt is reused rather than reallocated', () => {
       belt.update(frame(index), POSE);
     }
 
-    expect(belt.meshes.get('tree-conifer')).toBe(meshAtFirstFrame);
-    expect(belt.meshes.get('tree-conifer')?.instanceMatrix).toBe(attributeAtFirstFrame);
-    expect(belt.meshes.get('tree-conifer')?.instanceMatrix.array).toBe(bufferAtFirstFrame);
+    expect(meshFor(belt, 'tree-conifer')).toBe(meshAtFirstFrame);
+    expect(meshFor(belt, 'tree-conifer')?.instanceMatrix).toBe(attributeAtFirstFrame);
+    expect(meshFor(belt, 'tree-conifer')?.instanceMatrix.array).toBe(bufferAtFirstFrame);
     // Non-vacuity: the count has to have moved, or the three lines above are a
     // claim about a belt that was handed the same frame a hundred times.
-    expect(belt.meshes.get('tree-conifer')?.count).not.toBe(countAtFirstFrame);
+    expect(meshFor(belt, 'tree-conifer')?.count).not.toBe(countAtFirstFrame);
   });
 
   it('reserves room for every kind before the first frame, not when a kind appears', () => {
@@ -247,7 +292,7 @@ describe('the belt is reused rather than reallocated', () => {
     const belt = new ScatterBelt();
 
     for (const kind of SCATTER_KINDS) {
-      expect(belt.meshes.get(kind)?.instanceMatrix.count).toBe(SCATTER_INSTANCE_CAPACITY);
+      expect(meshFor(belt, kind)?.instanceMatrix.count).toBe(SCATTER_INSTANCE_CAPACITY);
     }
   });
 
@@ -261,12 +306,12 @@ describe('the belt is reused rather than reallocated', () => {
       item({ kind: 'rock', x: (at % 21) - 10, z: at % 300 }),
     );
 
-    const before = belt.meshes.get('rock');
+    const before = meshFor(belt, 'rock');
     belt.update(items, POSE);
 
-    expect(belt.meshes.get('rock')).toBe(before);
-    expect(belt.meshes.get('rock')?.instanceMatrix.count).toBeGreaterThanOrEqual(tooMany);
-    expect(belt.meshes.get('rock')?.count).toBe(tooMany);
+    expect(meshFor(belt, 'rock')).toBe(before);
+    expect(meshFor(belt, 'rock')?.instanceMatrix.count).toBeGreaterThanOrEqual(tooMany);
+    expect(meshFor(belt, 'rock')?.count).toBe(tooMany);
   });
 
   it('grows geometrically, so a caller one over the budget does not reallocate every frame', () => {
@@ -284,13 +329,13 @@ describe('the belt is reused rather than reallocated', () => {
       );
 
     belt.update(rocks(SCATTER_INSTANCE_CAPACITY + 1), POSE);
-    const grown = belt.meshes.get('rock')?.instanceMatrix;
+    const grown = meshFor(belt, 'rock')?.instanceMatrix;
     expect(grown?.count).toBeGreaterThanOrEqual(SCATTER_INSTANCE_CAPACITY * 2);
 
     // One more item, and the buffer is the same object: the growth already
     // made room. Sized to `needed`, this would be a second allocation.
     belt.update(rocks(SCATTER_INSTANCE_CAPACITY + 2), POSE);
-    expect(belt.meshes.get('rock')?.instanceMatrix).toBe(grown);
+    expect(meshFor(belt, 'rock')?.instanceMatrix).toBe(grown);
   });
 });
 
@@ -303,7 +348,7 @@ describe('the matrices that are written are the matrices that are uploaded', () 
     // and the screen never changes.
     const belt = new ScatterBelt();
     belt.update([item({ kind: 'rock', x: 4, z: 20 })], POSE);
-    const rock = belt.meshes.get('rock');
+    const rock = meshFor(belt, 'rock');
     const versionBefore = rock?.instanceMatrix.version ?? -1;
 
     belt.update([item({ kind: 'rock', x: 4, z: 30 })], POSE);
@@ -324,7 +369,7 @@ describe('the matrices that are written are the matrices that are uploaded', () 
       POSE,
     );
 
-    const post = belt.meshes.get('post');
+    const post = meshFor(belt, 'post');
     expect(instancePosition(belt, 'post', 0)).toEqual([-6, 2, 40]);
     // Column-major: the first column is the rotated, scaled x axis. A quarter
     // turn about y sends it to (0, 0, -scale).
@@ -351,7 +396,7 @@ describe('the matrices that are written are the matrices that are uploaded', () 
       POSE,
     );
 
-    expect(belt.meshes.get('shrub')?.count).toBe(2);
+    expect(meshFor(belt, 'shrub')?.count).toBe(2);
     expect(instancePosition(belt, 'shrub', 0)).toEqual([1, 0, 50]);
     expect(instancePosition(belt, 'shrub', 1)).toEqual([2, 0, 60]);
   });
@@ -373,7 +418,7 @@ describe('the cull, which is the thing this renderer has never had to do', () =>
       POSE,
     );
 
-    expect(belt.meshes.get('shrub')?.count).toBe(1);
+    expect(meshFor(belt, 'shrub')?.count).toBe(1);
     expect(instancePosition(belt, 'shrub', 0)[2]).toBe(50);
   });
 
@@ -391,7 +436,7 @@ describe('the cull, which is the thing this renderer has never had to do', () =>
       POSE,
     );
 
-    expect(belt.meshes.get('shrub')?.count).toBe(2);
+    expect(meshFor(belt, 'shrub')?.count).toBe(2);
   });
 
   it('drops what is far off the road to the side', () => {
@@ -411,7 +456,7 @@ describe('the cull, which is the thing this renderer has never had to do', () =>
     );
 
     expect(lateralReachMetres(10)).toBeLessThan(200);
-    expect(belt.meshes.get('rock')?.count).toBe(1);
+    expect(meshFor(belt, 'rock')?.count).toBe(1);
     expect(instancePosition(belt, 'rock', 0)[0]).toBe(10);
   });
 
@@ -424,10 +469,10 @@ describe('the cull, which is the thing this renderer has never had to do', () =>
     const aside = SCATTER_LATERAL_METRES + 48;
 
     belt.update([item({ kind: 'rock', x: aside, z: 0 })], POSE);
-    expect(belt.meshes.get('rock')?.count).toBe(0);
+    expect(meshFor(belt, 'rock')?.count).toBe(0);
 
     belt.update([item({ kind: 'rock', x: aside, z: 20 })], POSE);
-    expect(belt.meshes.get('rock')?.count).toBe(1);
+    expect(meshFor(belt, 'rock')?.count).toBe(1);
   });
 
   it('keeps the whole placement band beside a rider the cone has not opened for', () => {
@@ -448,7 +493,7 @@ describe('the cull, which is the thing this renderer has never had to do', () =>
     );
 
     expect(lateralReachMetres(-VIEW_BEHIND_METRES)).toBe(SCATTER_LATERAL_METRES);
-    expect(belt.meshes.get('rock')?.count).toBe(2);
+    expect(meshFor(belt, 'rock')?.count).toBe(2);
   });
 
   it('caps the bound where the fog has taken everything anyway', () => {
@@ -468,7 +513,7 @@ describe('the cull, which is the thing this renderer has never had to do', () =>
     );
 
     expect(lateralReachMetres(350)).toBe(FOGGED_OUT_METRES);
-    expect(belt.meshes.get('rock')?.count).toBe(1);
+    expect(meshFor(belt, 'rock')?.count).toBe(1);
     expect(instancePosition(belt, 'rock', 0)[0]).toBe(FOGGED_OUT_METRES - 1);
   });
 
@@ -521,7 +566,7 @@ describe('the cull, which is the thing this renderer has never had to do', () =>
       POSE,
     );
 
-    expect(belt.meshes.get('rock')?.count).toBe(3);
+    expect(meshFor(belt, 'rock')?.count).toBe(3);
   });
 
   it("measures along the rider's heading rather than along an axis", () => {
@@ -540,7 +585,7 @@ describe('the cull, which is the thing this renderer has never had to do', () =>
       facingWest,
     );
 
-    expect(belt.meshes.get('shrub')?.count).toBe(1);
+    expect(meshFor(belt, 'shrub')?.count).toBe(1);
     expect(instancePosition(belt, 'shrub', 0)[0]).toBe(-300);
   });
 
@@ -564,9 +609,9 @@ describe('the cull, which is the thing this renderer has never had to do', () =>
     const belt = new ScatterBelt();
 
     belt.update([item({ kind: 'rock', x: 0, z: 20 })], POSE);
-    const first = belt.meshes.get('rock')?.boundingSphere?.center.z ?? NaN;
+    const first = meshFor(belt, 'rock')?.boundingSphere?.center.z ?? NaN;
     belt.update([item({ kind: 'rock', x: 0, z: 300 })], POSE);
-    const second = belt.meshes.get('rock')?.boundingSphere?.center.z ?? NaN;
+    const second = meshFor(belt, 'rock')?.boundingSphere?.center.z ?? NaN;
 
     expect(first).toBeCloseTo(20, 1);
     expect(second).toBeCloseTo(300, 1);
@@ -579,11 +624,11 @@ describe('the cull, which is the thing this renderer has never had to do', () =>
     const belt = new ScatterBelt();
 
     belt.update([item({ kind: 'shrub', z: 20 })], POSE);
-    expect(belt.meshes.get('shrub')?.visible).toBe(true);
+    expect(meshFor(belt, 'shrub')?.visible).toBe(true);
 
     belt.update([item({ kind: 'rock', z: 20 })], POSE);
-    expect(belt.meshes.get('shrub')?.visible).toBe(false);
-    expect(belt.meshes.get('shrub')?.count).toBe(0);
+    expect(meshFor(belt, 'shrub')?.visible).toBe(false);
+    expect(meshFor(belt, 'shrub')?.count).toBe(0);
   });
 });
 
@@ -1376,34 +1421,48 @@ describe('the scenery can lose its shading — #286', () => {
     // construction, so going down and back up has to return the *same objects*
     // rather than equivalent ones.
     const belt = new ScatterBelt();
-    const first = belt.meshes.get('tree-conifer')?.material;
+    const first = meshFor(belt, 'tree-conifer')?.material;
     belt.setShading('flat');
-    const flat = belt.meshes.get('tree-conifer')?.material;
+    const flat = meshFor(belt, 'tree-conifer')?.material;
     belt.setShading('lit');
 
     expect(flat).not.toBe(first);
-    expect(belt.meshes.get('tree-conifer')?.material).toBe(first);
+    expect(meshFor(belt, 'tree-conifer')?.material).toBe(first);
     belt.setShading('flat');
-    expect(belt.meshes.get('tree-conifer')?.material).toBe(flat);
+    expect(meshFor(belt, 'tree-conifer')?.material).toBe(flat);
   });
 
   it('keeps the colour it was given, whichever material is on', () => {
     // The rung gives up the *shading*, not the palette: a flat conifer is the
     // colour a lit conifer averages around, which is what `three-renderer.ts`
     // drew before #286 at all.
+    //
+    // ⚠️ **Read off the GEOMETRY since #366, where it used to be read off the
+    // material's `color`.** A reviewer who remembers `material.color.getHex()`
+    // here is reading the old file — a vertex-coloured material holds white,
+    // and asserting that white survives a shading swap would be a test that
+    // cannot fail. The palette is in the vertices now, and swapping a material
+    // does not touch them.
     const belt = new ScatterBelt();
     const colourOf = () => {
-      const material = belt.meshes.get('rock')?.material;
-      return material !== undefined && !Array.isArray(material)
-        ? (material as unknown as { color: { getHex: () => number } }).color.getHex()
-        : -1;
+      const colour = meshFor(belt, 'rock')?.geometry.getAttribute('color');
+      return colour === undefined ? [] : [colour.getX(0), colour.getY(0), colour.getZ(0)];
     };
     belt.setShading('lit');
     const lit = colourOf();
     belt.setShading('flat');
 
-    expect(colourOf()).toBe(lit);
-    expect(lit).toBeGreaterThan(0);
+    expect(colourOf()).toEqual(lit);
+    expect(Math.max(...lit)).toBeGreaterThan(0);
+    // …and both materials take their colour from there rather than holding one.
+    for (const shading of ['lit', 'flat'] as const) {
+      belt.setShading(shading);
+      const material = meshFor(belt, 'rock')?.material;
+
+      expect((material as unknown as { vertexColors: boolean } | undefined)?.vertexColors).toBe(
+        true,
+      );
+    }
   });
 
   it('releases both materials of every pair, not the one that is mounted', () => {
@@ -1427,7 +1486,12 @@ describe('the scenery can lose its shading — #286', () => {
     belt.setShading('flat');
     const flat = [...belt.meshes.values()].map((mesh) => watch(mesh.material));
 
-    expect(new Set([...lit, ...flat]).size).toBe(SCATTER_KINDS.length * 2);
+    // ⚠️ **Two rather than twelve, since #366** — one pair for the whole belt
+    // instead of one a kind. The leak this guards is unchanged in kind and
+    // smaller in size: whichever material is mounted is the one a `dispose`
+    // written the obvious way releases, and the other's program is stranded in
+    // the driver for the life of the context.
+    expect(new Set([...lit, ...flat]).size).toBe(2);
     belt.dispose();
 
     for (const material of [...lit, ...flat]) {
@@ -1453,7 +1517,7 @@ describe('the scenery can lose its shading — #286', () => {
  * not import `three` — `three-seam.test.ts` is what says so.
  */
 function materialTypeOf(belt: ScatterBelt, kind: ScatterKind): string {
-  const material = belt.meshes.get(kind)?.material;
+  const material = meshFor(belt, kind)?.material;
   if (material === undefined || Array.isArray(material)) {
     return 'none';
   }
@@ -1549,7 +1613,7 @@ describe('the scenery belt spends a budget it never sets — #245', () => {
     // notifications arrive on.
     const scenery = new ScatterBelt();
     const frame = belt(SCATTER_MAX_ITEMS + 60, 'tree-conifer');
-    const mesh = scenery.meshes.get('tree-conifer');
+    const mesh = meshFor(scenery, 'tree-conifer');
     scenery.setBudget(qualitySettings(0).scatterItems);
     scenery.update(frame, POSE);
     const attributeAtTheTop = mesh?.instanceMatrix;
@@ -1565,9 +1629,9 @@ describe('the scenery belt spends a budget it never sets — #245', () => {
     // Non-vacuity: the counts have to have actually moved, or the three
     // identity assertions below are a claim about a belt nobody disturbed.
     expect(new Set(counts).size).toBe(QUALITY_LADDER.length);
-    expect(scenery.meshes.get('tree-conifer')).toBe(mesh);
-    expect(scenery.meshes.get('tree-conifer')?.instanceMatrix).toBe(attributeAtTheTop);
-    expect(scenery.meshes.get('tree-conifer')?.instanceMatrix.array).toBe(bufferAtTheTop);
+    expect(meshFor(scenery, 'tree-conifer')).toBe(mesh);
+    expect(meshFor(scenery, 'tree-conifer')?.instanceMatrix).toBe(attributeAtTheTop);
+    expect(meshFor(scenery, 'tree-conifer')?.instanceMatrix.array).toBe(bufferAtTheTop);
   });
 
   it('never grows a buffer for scenery a rung has already refused', () => {
@@ -1579,15 +1643,15 @@ describe('the scenery belt spends a budget it never sets — #245', () => {
     // buffer on the floor rung, which is a per-frame allocation on the one
     // device that has already said it is short of resources. NFR-3.
     const scenery = new ScatterBelt();
-    const mesh = scenery.meshes.get('rock');
+    const mesh = meshFor(scenery, 'rock');
     const attributeBefore = mesh?.instanceMatrix;
     scenery.setBudget(qualitySettings(3).scatterItems);
 
     scenery.update(belt(SCATTER_INSTANCE_CAPACITY + 60, 'rock'), POSE);
 
     expect(submitted(scenery)).toBe(qualitySettings(3).scatterItems);
-    expect(scenery.meshes.get('rock')?.instanceMatrix).toBe(attributeBefore);
-    expect(scenery.meshes.get('rock')?.instanceMatrix.count).toBe(SCATTER_INSTANCE_CAPACITY);
+    expect(meshFor(scenery, 'rock')?.instanceMatrix).toBe(attributeBefore);
+    expect(meshFor(scenery, 'rock')?.instanceMatrix.count).toBe(SCATTER_INSTANCE_CAPACITY);
   });
 
   it('takes the frame in the order it was given rather than choosing for itself', () => {
@@ -1624,8 +1688,8 @@ describe('the scenery belt spends a budget it never sets — #245', () => {
 
     scenery.update(mixed, POSE);
 
-    expect(scenery.meshes.get('rock')?.count).toBe(4);
-    expect(scenery.meshes.get('post')?.count).toBe(3);
+    expect(meshFor(scenery, 'rock')?.count).toBe(4);
+    expect(meshFor(scenery, 'post')?.count).toBe(3);
     expect(instancePosition(scenery, 'rock', 3)[2]).toBe(12);
     expect(instancePosition(scenery, 'post', 2)[2]).toBe(10);
   });
@@ -1697,7 +1761,7 @@ describe('the scenery belt spends a budget it never sets — #245', () => {
 describe('the shapes the models bring — #341', () => {
   /** A belt's own primitive for a kind, cloned so the belt keeps its own. */
   const primitiveOf = (belt: ScatterBelt, kind: ScatterKind) => {
-    const geometry = belt.meshes.get(kind)?.geometry;
+    const geometry = meshFor(belt, kind)?.geometry;
     if (geometry === undefined) {
       throw new Error(`no geometry for ${kind}`);
     }
@@ -1713,7 +1777,7 @@ describe('the shapes the models bring — #341', () => {
    * rather than a mock that agrees with the implementation by construction.
    */
   const sceneOf = (
-    parts: readonly { geometry: unknown; matrixWorld: unknown }[],
+    parts: readonly { geometry: unknown; matrixWorld: unknown; material?: unknown }[],
   ): Parameters<typeof prepareSceneryGeometry>[0] =>
     ({
       updateWorldMatrix: () => undefined,
@@ -1736,7 +1800,7 @@ describe('the shapes the models bring — #341', () => {
 
   /** Everything `loadSceneryModels` needs from a loader, over one fake part. */
   const loaderFrom = (belt: ScatterBelt, donor: ScatterKind) => {
-    const mesh = belt.meshes.get(donor);
+    const mesh = meshFor(belt, donor);
     if (mesh === undefined) {
       throw new Error(`no mesh for ${donor}`);
     }
@@ -1776,7 +1840,7 @@ describe('the shapes the models bring — #341', () => {
       sceneOf([
         {
           geometry: primitiveOf(belt, 'post').clone(),
-          matrixWorld: belt.meshes.get('post')?.matrixWorld,
+          matrixWorld: meshFor(belt, 'post')?.matrixWorld,
         },
       ]),
       'building',
@@ -1801,7 +1865,7 @@ describe('the shapes the models bring — #341', () => {
       sceneOf([
         {
           geometry: primitiveOf(belt, 'rock').clone().translate(5, 0, -3),
-          matrixWorld: belt.meshes.get('rock')?.matrixWorld,
+          matrixWorld: meshFor(belt, 'rock')?.matrixWorld,
         },
       ]),
       'rock',
@@ -1828,17 +1892,118 @@ describe('the shapes the models bring — #341', () => {
 
     const prepared = prepareSceneryGeometry(
       sceneOf([
-        { geometry: trunk, matrixWorld: belt.meshes.get('post')?.matrixWorld },
-        { geometry: canopy, matrixWorld: belt.meshes.get('shrub')?.matrixWorld },
+        { geometry: trunk, matrixWorld: meshFor(belt, 'post')?.matrixWorld },
+        { geometry: canopy, matrixWorld: meshFor(belt, 'shrub')?.matrixWorld },
       ]),
       'tree-broadleaf',
     );
 
     expect(vertices(prepared)).toBe(parted);
-    // Position and normal, and nothing else: a UV kept for a texture that is
-    // never loaded is a third of a vertex buffer uploaded for nothing, and an
-    // attribute set that disagrees between parts is what refuses the merge.
-    expect(Object.keys(prepared.attributes).sort()).toEqual(['normal', 'position']);
+    // Position, normal and — since #366 — the colour baked off each part's own
+    // material, and nothing else. ⚠️ A reviewer who remembers this expecting
+    // two attributes is reading the old file: the third is #366's whole
+    // change. A **UV** kept for a texture that is never uploaded is still a
+    // third of a vertex buffer uploaded for nothing, and an attribute set that
+    // disagrees between parts is still what refuses the merge.
+    expect(Object.keys(prepared.attributes).sort()).toEqual(['color', 'normal', 'position']);
+    expect(prepared.getAttribute('color').count).toBe(parted);
+    belt.dispose();
+  });
+
+  it("bakes a part's own material colour onto vertices that had none — #366", () => {
+    // ⚠️ **The assertion #366 actually turns on, and the one the merge test
+    // above CANNOT make.** That fixture clones a belt's own primitives, and a
+    // primitive already carries a `color` attribute since #366 — so it would
+    // report three attributes whether or not this function added one, which
+    // was measured rather than reasoned about: deleting the call to
+    // `paintFromMaterial` leaves it green. A part with no colour of its own,
+    // and a material that has one, is the only shape that can tell them apart.
+    const belt = new ScatterBelt();
+    const bare = primitiveOf(belt, 'rock').clone();
+    bare.deleteAttribute('color');
+
+    const prepared = prepareSceneryGeometry(
+      sceneOf([
+        {
+          geometry: bare,
+          matrixWorld: meshFor(belt, 'rock')?.matrixWorld,
+          // Mid-grey in the linear space a glTF's `baseColorFactor` is defined
+          // in, which is what three's loader puts on `material.color`. Well
+          // under the ceiling, so the toning leaves it exactly alone.
+          material: { color: { r: 0.25, g: 0.5, b: 0.125 } },
+        },
+      ]),
+      'rock',
+    );
+    const colour = prepared.getAttribute('color');
+
+    expect(colour).toBeDefined();
+    expect(colour.count).toBe(prepared.getAttribute('position').count);
+    // Straight through with no conversion: a `baseColorFactor` is linear and so
+    // is a `COLOR_0`. A hex triple taking three's `Color` path would land at
+    // about 0.05, 0.21 and 0.015 instead.
+    expect([colour.getX(0), colour.getY(0), colour.getZ(0)]).toEqual([0.25, 0.5, 0.125]);
+    expect([colour.getX(colour.count - 1), colour.getY(colour.count - 1)]).toEqual([0.25, 0.5]);
+    belt.dispose();
+  });
+
+  it('samples a textured part at each vertex, once, and keeps no image — #366', () => {
+    // ⚠️ **The building's whole colour arrives this way**, and the three things
+    // that could go wrong are all invisible from outside: sampling the wrong
+    // texel, sampling once for the whole part, and keeping the image. The first
+    // two are here; the third is `game.browser.spec.ts`, which counts
+    // `gl.createTexture`.
+    const belt = new ScatterBelt();
+    const bare = primitiveOf(belt, 'rock').clone();
+    bare.deleteAttribute('color');
+    // One `u` per vertex, spread across a two-texel image, so a sampler that
+    // read one texel for the part gives every vertex the same answer.
+    const vertices = bare.getAttribute('position').count;
+    const uv = new Float32Array(vertices * 2);
+    for (let at = 0; at < vertices; at += 1) {
+      uv[at * 2] = at % 2 === 0 ? 0.25 : 0.75;
+      uv[at * 2 + 1] = 0.5;
+    }
+    bare.setAttribute(
+      'uv',
+      new (
+        bare.getAttribute('position').constructor as new (
+          array: Float32Array,
+          size: number,
+        ) => never
+      )(uv, 2),
+    );
+
+    const prepared = prepareSceneryGeometry(
+      sceneOf([
+        {
+          geometry: bare,
+          matrixWorld: meshFor(belt, 'rock')?.matrixWorld,
+          material: { color: { r: 1, g: 1, b: 1 }, map: { image: { width: 2, height: 1 } } },
+        },
+      ]),
+      'rock',
+      // Two texels: pure red, then pure blue.
+      () => ({
+        width: 2,
+        height: 1,
+        data: new Uint8ClampedArray([255, 0, 0, 255, 0, 0, 255, 255]),
+      }),
+    );
+    const colour = prepared.getAttribute('color');
+    const channelsAt = (at: number) => [colour.getX(at), colour.getY(at), colour.getZ(at)];
+
+    // The left texel for the even vertices and the right one for the odd, both
+    // brought under the ceiling by the toning — which is what a pure channel
+    // needs and is why neither reads as exactly one.
+    expect(channelsAt(0)[0]).toBeCloseTo(MAXIMUM_LIT_CHANNEL, 6);
+    expect(channelsAt(0)[2]).toBe(0);
+    expect(channelsAt(1)[2]).toBeCloseTo(MAXIMUM_LIT_CHANNEL, 6);
+    expect(channelsAt(1)[0]).toBe(0);
+    // ⚠️ And the UV is gone, which is the half that costs a phone something: a
+    // texture coordinate kept for an image that is never uploaded is a third of
+    // a vertex buffer sent for nothing.
+    expect(Object.keys(prepared.attributes).sort()).toEqual(['color', 'normal', 'position']);
     belt.dispose();
   });
 
@@ -1856,7 +2021,7 @@ describe('the shapes the models bring — #341', () => {
 
     expect(() =>
       prepareSceneryGeometry(
-        sceneOf([{ geometry: flattened, matrixWorld: belt.meshes.get('rock')?.matrixWorld }]),
+        sceneOf([{ geometry: flattened, matrixWorld: meshFor(belt, 'rock')?.matrixWorld }]),
         'rock',
       ),
     ).toThrow(/no extent/);
@@ -1881,7 +2046,7 @@ describe('the shapes the models bring — #341', () => {
           visit({
             isMesh: true,
             geometry: bare,
-            matrixWorld: belt.meshes.get('shrub')?.matrixWorld,
+            matrixWorld: meshFor(belt, 'shrub')?.matrixWorld,
           });
         },
       } as unknown as Parameters<typeof prepareSceneryGeometry>[0],
@@ -1899,20 +2064,20 @@ describe('the shapes the models bring — #341', () => {
     // defect shape. So the read is the one the shipped client makes: no
     // argument, no injected map, the same constructor `ThreeGameView` calls.
     const donor = new ScatterBelt();
-    const before = donor.meshes.get('rock')?.geometry.getAttribute('position').count ?? 0;
+    const before = meshFor(donor, 'rock')?.geometry.getAttribute('position').count ?? 0;
     const modelVertices =
-      donor.meshes.get('tree-conifer')?.geometry.getAttribute('position').count ?? 0;
+      meshFor(donor, 'tree-conifer')?.geometry.getAttribute('position').count ?? 0;
 
     return loadSceneryModels(loaderFrom(donor, 'tree-conifer')).then(() => {
       const belt = new ScatterBelt();
 
       // Every kind with a model in the table now draws the loaded shape…
-      for (const kind of Object.keys(SCENERY_MODEL_FILES) as ScatterKind[]) {
-        expect(belt.meshes.get(kind)?.geometry.getAttribute('position').count).toBe(modelVertices);
+      for (const kind of Object.keys(SCENERY_MODELS) as ScatterKind[]) {
+        expect(meshFor(belt, kind)?.geometry.getAttribute('position').count).toBe(modelVertices);
       }
       // …and `post`, which ADR 0022 D-3 leaves alone, still draws its cylinder.
-      expect(belt.meshes.get('post')?.geometry.getAttribute('position').count).toBe(
-        donor.meshes.get('post')?.geometry.getAttribute('position').count,
+      expect(meshFor(belt, 'post')?.geometry.getAttribute('position').count).toBe(
+        meshFor(donor, 'post')?.geometry.getAttribute('position').count,
       );
       expect(modelVertices).not.toBe(before);
       belt.dispose();
@@ -1928,7 +2093,7 @@ describe('the shapes the models bring — #341', () => {
     const counts = new Map(
       SCATTER_KINDS.map((kind) => [
         kind,
-        donor.meshes.get(kind)?.geometry.getAttribute('position').count,
+        meshFor(donor, kind)?.geometry.getAttribute('position').count,
       ]),
     );
 
@@ -1936,9 +2101,7 @@ describe('the shapes the models bring — #341', () => {
       const belt = new ScatterBelt();
 
       for (const kind of SCATTER_KINDS) {
-        expect(belt.meshes.get(kind)?.geometry.getAttribute('position').count).toBe(
-          counts.get(kind),
-        );
+        expect(meshFor(belt, kind)?.geometry.getAttribute('position').count).toBe(counts.get(kind));
       }
       belt.dispose();
       donor.dispose();
@@ -1954,12 +2117,12 @@ describe('the shapes the models bring — #341', () => {
 
     return loadSceneryModels(loaderFrom(donor, 'shrub')).then(() => {
       const first = new ScatterBelt();
-      const worn = first.meshes.get('rock')?.geometry;
+      const worn = meshFor(first, 'rock')?.geometry;
       first.dispose();
       const second = new ScatterBelt();
 
-      expect(second.meshes.get('rock')?.geometry).not.toBe(worn);
-      expect(second.meshes.get('rock')?.geometry.getAttribute('position').count).toBe(
+      expect(meshFor(second, 'rock')?.geometry).not.toBe(worn);
+      expect(meshFor(second, 'rock')?.geometry.getAttribute('position').count).toBe(
         worn?.getAttribute('position').count,
       );
       second.dispose();
@@ -1969,32 +2132,33 @@ describe('the shapes the models bring — #341', () => {
 });
 
 /**
- * The rider is a bicycle, and it is drawn as one — #349.
+ * The riders are bicycles, and they are drawn as such — #349, #368.
  *
  * ## What this file can say about it, and what it cannot
  *
  * `bicycle.test.ts` owns the **shape**: where the parts are, which way round
  * they face, where the knee goes, how far the cranks turn for a cadence. None
  * of that needs a renderer. What needs one is everything below — that the parts
- * become three meshes rather than twenty, that the marker's heading reaches the
- * group, that the crank angle reaches the crankset and the legs, and that both
- * materials are released.
+ * become three meshes rather than twenty *however many riders a frame carries*,
+ * that each marker's heading reaches its own instance, that the crank angle
+ * reaches the crankset and the legs, and that both materials are released.
  *
  * ⚠️ **What is still not checkable here: that {@link ThreeGameView} ever calls
- * any of it.** A `RiderModel` the view never added, or added and never placed,
+ * any of it.** A `RiderBelt` the view never added, or added and never placed,
  * satisfies every assertion below — #240's named defect shape, one more time.
- * `game.browser.spec.ts` reads the rider's own pixels back at two crank angles
- * for exactly that reason.
+ * `game.browser.spec.ts` reads the riders' own pixels back for exactly that
+ * reason.
  */
-describe('the rider is a bicycle rather than a sphere — #349', () => {
+describe('the riders are bicycles rather than solids — #349, #368', () => {
   /** A marker on the road, facing up it. */
   function riderAt(
     over: { readonly x?: number; readonly y?: number; readonly z?: number } = {},
     facing: { readonly headingX?: number; readonly headingZ?: number } = {},
     crankAngle?: number,
+    kind: RiderMarker['kind'] = 'rider',
   ): RiderMarker {
     return {
-      kind: 'rider',
+      kind,
       x: over.x ?? 0,
       y: over.y ?? 0,
       z: over.z ?? 0,
@@ -2004,179 +2168,357 @@ describe('the rider is a bicycle rather than a sphere — #349', () => {
     };
   }
 
-  /** Where one leg segment's instance matrix puts it. */
-  function boneAt(model: RiderModel, index: number): readonly [number, number, number] {
+  /** The translation one instance matrix carries. */
+  function originOf(
+    mesh: { readonly instanceMatrix: { readonly array: ArrayLike<number> } },
+    index: number,
+  ): readonly [number, number, number] {
     const at = index * 16;
-    const matrix = model.meshes.limbs.instanceMatrix.array;
+    const matrix = mesh.instanceMatrix.array;
     return [matrix[at + 12] ?? NaN, matrix[at + 13] ?? NaN, matrix[at + 14] ?? NaN];
   }
 
-  it('is three draw calls, not one a part', () => {
-    // #240's NFR-2: draw calls are the budget, and `bicycle.ts` describes about
-    // two dozen solids. One mesh a part would cost four times what all the
-    // scenery costs, for one object.
-    const model = new RiderModel();
-    const { body, cranks, limbs } = model.meshes;
+  /** Where one rider's leg segment's instance matrix puts it. */
+  function boneAt(belt: RiderBelt, slot: number, index: number): readonly [number, number, number] {
+    return originOf(belt.meshes.limbs, slot * LEG_BONE_COUNT + index);
+  }
 
-    expect(model.group.children).toHaveLength(3);
-    expect(new Set([body, cranks, limbs]).size).toBe(3);
+  /** The instance tint one slot wears, as three numbers. */
+  function tintOf(
+    mesh: { readonly instanceColor: { readonly array: ArrayLike<number> } | null },
+    slot: number,
+  ): readonly [number, number, number] {
+    const channels = mesh.instanceColor?.array;
+    if (channels === undefined) {
+      return [NaN, NaN, NaN];
+    }
+    return [
+      channels[slot * 3] ?? NaN,
+      channels[slot * 3 + 1] ?? NaN,
+      channels[slot * 3 + 2] ?? NaN,
+    ];
+  }
+
+  it('is three draw calls for three riders, not three each', () => {
+    // #240's NFR-2: draw calls are the budget, and `bicycle.ts` describes about
+    // two dozen solids. #368's whole affordability argument is that the bot and
+    // the ghost are two more instances in buffers that already exist.
+    const belt = new RiderBelt();
+    const { bodies, cranksets, limbs } = belt.meshes;
+
+    expect(belt.group.children).toHaveLength(3);
+    expect(new Set([bodies, cranksets, limbs]).size).toBe(3);
     // One material across all three, which is what the vertex colours buy.
-    expect(new Set([body.material, cranks.material, limbs.material]).size).toBe(1);
-    model.dispose();
+    expect(new Set([bodies.material, cranksets.material, limbs.material]).size).toBe(1);
+    belt.place([riderAt(), riderAt({ z: 40 }, {}, 0, 'bot'), riderAt({ z: 80 }, {}, 0, 'ghost')]);
+    // …and still three after a frame carrying all three.
+    expect(belt.group.children).toHaveLength(3);
+    belt.dispose();
   });
 
   it('carries a colour on every vertex, which is what keeps it one material', () => {
-    const model = new RiderModel();
-    for (const mesh of [model.meshes.body, model.meshes.cranks, model.meshes.limbs]) {
+    const belt = new RiderBelt();
+    for (const mesh of [belt.meshes.bodies, belt.meshes.cranksets, belt.meshes.limbs]) {
       const colour = mesh.geometry.getAttribute('color');
       const position = mesh.geometry.getAttribute('position');
       expect(colour).toBeDefined();
       expect(colour.count).toBe(position.count);
       expect(position.count).toBeGreaterThan(20);
     }
-    model.dispose();
+    belt.dispose();
   });
 
   it('merges the parts rather than leaving them as children', () => {
     // A merge that silently failed would be a rider missing from the scene, and
     // `mergeGeometries` returns `null` rather than throwing. The body carries
     // far more vertices than any one solid could.
-    const model = new RiderModel();
-    expect(model.meshes.body.geometry.getAttribute('position').count).toBeGreaterThan(300);
-    expect(model.meshes.cranks.geometry.getAttribute('position').count).toBeGreaterThan(100);
-    model.dispose();
+    const belt = new RiderBelt();
+    expect(belt.meshes.bodies.geometry.getAttribute('position').count).toBeGreaterThan(300);
+    expect(belt.meshes.cranksets.geometry.getAttribute('position').count).toBeGreaterThan(100);
+    belt.dispose();
   });
 
-  it('reserves one instance per leg segment before the first frame', () => {
-    const model = new RiderModel();
-    expect(model.meshes.limbs.count).toBe(LEG_BONE_COUNT);
-    model.dispose();
+  it('reserves every rider and every leg segment before the first frame', () => {
+    // ⚠️ **Read off the buffers rather than off `count`**, which is rewound to
+    // zero so that a belt drawn before its first frame draws nothing. A belt
+    // that grew its buffers on the frame a ghost appeared would allocate in the
+    // render loop, which is #240's NFR-3.
+    const belt = new RiderBelt();
+    expect(belt.meshes.bodies.instanceMatrix.count).toBe(3);
+    expect(belt.meshes.limbs.instanceMatrix.count).toBe(3 * LEG_BONE_COUNT);
+    expect(belt.meshes.bodies.count).toBe(0);
+    belt.dispose();
+  });
+
+  it('allocates a colour buffer wide enough for every rider', () => {
+    // ⚠️ **The trap this is here for.** three sizes `instanceColor` from
+    // `count` at the moment it is first written, and the constructor rewinds
+    // `count` to zero — so writing the tints after the rewind gives every mesh
+    // a zero-length colour buffer and silently drops all three.
+    const belt = new RiderBelt();
+    for (const mesh of [belt.meshes.bodies, belt.meshes.cranksets]) {
+      expect(mesh.instanceColor?.count).toBe(3);
+    }
+    expect(belt.meshes.limbs.instanceColor?.count).toBe(3 * LEG_BONE_COUNT);
+    belt.dispose();
   });
 
   it('draws nothing until a frame carries a rider', () => {
-    const model = new RiderModel();
-    expect(model.group.visible).toBe(false);
-    model.place(riderAt());
-    expect(model.group.visible).toBe(true);
-    model.hide();
-    expect(model.group.visible).toBe(false);
-    model.dispose();
+    const belt = new RiderBelt();
+    expect(belt.group.visible).toBe(false);
+    belt.place([riderAt()]);
+    expect(belt.group.visible).toBe(true);
+    expect(belt.meshes.bodies.count).toBe(1);
+    belt.hide();
+    expect(belt.group.visible).toBe(false);
+    expect(belt.meshes.bodies.count).toBe(0);
+    belt.dispose();
   });
 
-  it("stands the bicycle at the marker's own height, unlifted", () => {
-    // ⚠️ The bot and the ghost are lifted by their own radius so a solid sits
-    // ON the road; the rider must not be, because `bicycle.ts` puts its wheels
-    // on zero itself. A lift here is a bicycle floating 90 cm up.
-    const model = new RiderModel();
-    model.place(riderAt({ x: 4, y: 12.5, z: -7 }));
+  it('draws one instance per marker the frame carries — #368', () => {
+    const belt = new RiderBelt();
 
-    expect([model.group.position.x, model.group.position.y, model.group.position.z]).toEqual([
-      4, 12.5, -7,
+    belt.place([riderAt(), riderAt({ z: 40 }, {}, 0, 'bot')]);
+    expect(belt.meshes.bodies.count).toBe(2);
+    expect(belt.meshes.limbs.count).toBe(2 * LEG_BONE_COUNT);
+
+    belt.place([riderAt(), riderAt({ z: 40 }, {}, 0, 'bot'), riderAt({ z: 80 }, {}, 0, 'ghost')]);
+    expect(belt.meshes.bodies.count).toBe(3);
+    expect(belt.meshes.cranksets.count).toBe(3);
+    belt.dispose();
+  });
+
+  it('draws no rider for a kind the tint table does not hold', () => {
+    // ⚠️ **`RIDER_TINTS` is an object literal, so `in` reaches its
+    // prototype** — `'toString' in RIDER_TINTS` is true, and a marker that got
+    // past a membership test on that basis would be handed `setHex(undefined)`
+    // and drawn in a `NaN` colour, which three resolves to black or to nothing
+    // at all depending on the driver. The cast is what a frame built from
+    // parsed data could produce and what `port.ts`'s three-value union stops
+    // anybody writing by hand.
+    const belt = new RiderBelt();
+
+    belt.place([{ ...riderAt(), kind: 'toString' as RiderMarker['kind'] }, riderAt()]);
+
+    expect(belt.meshes.bodies.count).toBe(1);
+    expect(tintOf(belt.meshes.bodies, 0)).toEqual([1, 1, 1]);
+    belt.dispose();
+  });
+
+  it("stands each bicycle at its marker's own height, unlifted", () => {
+    // ⚠️ **None of the three is lifted, and until #368 two of them were.** The
+    // bot and the ghost were solids centred on their own origin and had to be
+    // raised by their radius; `bicycle.ts` puts its wheels on zero itself, so a
+    // lift here is a bicycle floating 80 cm above the road.
+    const belt = new RiderBelt();
+    belt.place([
+      riderAt({ x: 4, y: 12.5, z: -7 }),
+      riderAt({ x: 1, y: 9, z: 3 }, {}, 0, 'bot'),
+      riderAt({ x: -2, y: 6, z: 11 }, {}, 0, 'ghost'),
     ]);
-    model.dispose();
+
+    expect(originOf(belt.meshes.bodies, 0)).toEqual([4, 12.5, -7]);
+    expect(originOf(belt.meshes.bodies, 1)).toEqual([1, 9, 3]);
+    expect(originOf(belt.meshes.bodies, 2)).toEqual([-2, 6, 11]);
+    belt.dispose();
   });
 
-  it('faces the way the marker is heading, not along an axis', () => {
-    // A bicycle has a front; the three solids it replaced did not, which is why
-    // no marker carried a heading before #349.
-    const model = new RiderModel();
+  it('tells the three apart by the tint on their own instance — #368', () => {
+    // ⚠️ **#93's third criterion, at the one place it can be checked without a
+    // browser.** The shape no longer distinguishes them, so what does is this:
+    // three different multipliers on one shared palette. The rider's is white,
+    // which is no tint at all and is what keeps `bicycle.ts`'s palette the
+    // literal thing a rider sees.
+    const belt = new RiderBelt();
+    belt.place([riderAt(), riderAt({ z: 40 }, {}, 0, 'bot'), riderAt({ z: 80 }, {}, 0, 'ghost')]);
 
-    model.place(riderAt({}, { headingX: 0, headingZ: 1 }));
-    expect(model.group.rotation.y).toBeCloseTo(0, 9);
-    model.place(riderAt({}, { headingX: 1, headingZ: 0 }));
-    expect(model.group.rotation.y).toBeCloseTo(Math.PI / 2, 9);
-    model.place(riderAt({}, { headingX: 0, headingZ: -1 }));
-    expect(Math.abs(model.group.rotation.y)).toBeCloseTo(Math.PI, 9);
-    // A road running south-west, which is the case an axis-aligned guess gets
-    // wrong by 45°.
+    const tints = [0, 1, 2].map((slot) => tintOf(belt.meshes.bodies, slot));
+
+    expect(tints[0]).toEqual([1, 1, 1]);
+    expect(new Set(tints.map((tint) => tint.join(','))).size).toBe(3);
+    // The bot leads on red and the ghost is very nearly neutral, which is the
+    // direction `game.browser.spec.ts` reads back off the screen.
+    const spread = (tint: readonly number[]) => Math.max(...tint) - Math.min(...tint);
+
+    expect(tints[1]?.[0] ?? 0).toBeGreaterThan(tints[1]?.[2] ?? 1);
+    // ⚠️ **Stated as a comparison rather than as a threshold.** The ghost is
+    // not neutral — `0x64748b` is a cool grey and leads on blue — and a fixed
+    // bound on how far from neutral it may be would be a number nobody could
+    // defend. What is true and is the claim #93 needs is that it is *far* less
+    // saturated than the bot, which is what a rider reads as colourless.
+    expect(spread(tints[2] ?? [])).toBeLessThan(spread(tints[1] ?? []) / 2);
+    belt.dispose();
+  });
+
+  it('gives a rider the tint of the kind it is, not of the slot it landed in', () => {
+    // ⚠️ **The defect a fixed slot per kind would have hidden and compaction
+    // makes possible.** A frame with a ghost and no bot puts the ghost in slot
+    // 1, which is where the bot's tint was on the frame before.
+    const belt = new RiderBelt();
+    belt.place([riderAt(), riderAt({ z: 40 }, {}, 0, 'bot')]);
+    const botTint = tintOf(belt.meshes.bodies, 1);
+
+    belt.place([riderAt(), riderAt({ z: 80 }, {}, 0, 'ghost')]);
+
+    expect(tintOf(belt.meshes.bodies, 1)).not.toEqual(botTint);
+    belt.dispose();
+  });
+
+  it('faces each rider the way its own marker is heading', () => {
+    // A bicycle has a front; the solids it replaced did not, which is why no
+    // marker carried a heading before #349. Two riders on a bend face
+    // different ways, which is what `scene.ts` takes each marker's own heading
+    // from the corridor for.
+    const belt = new RiderBelt();
     const root = Math.SQRT1_2;
-    model.place(riderAt({}, { headingX: -root, headingZ: -root }));
-    expect(model.group.rotation.y).toBeCloseTo(-Math.PI * 0.75, 9);
-    model.dispose();
+    belt.place([
+      riderAt({}, { headingX: 1, headingZ: 0 }),
+      riderAt({ z: 40 }, { headingX: -root, headingZ: -root }, 0, 'bot'),
+    ]);
+
+    // A rotation about +Y by `atan2(headingX, headingZ)` takes (0,0,1) onto the
+    // heading, so the model's own forward axis lands there. Read out of the
+    // matrix rather than off a rotation, because an instance has no Euler.
+    const forward = (slot: number): readonly [number, number] => {
+      const at = slot * 16;
+      const matrix = belt.meshes.bodies.instanceMatrix.array;
+      return [matrix[at + 8] ?? NaN, matrix[at + 10] ?? NaN];
+    };
+
+    // ⚠️ **Six places, not nine.** An instance matrix is a `Float32Array`, so
+    // the value read back has been through single precision and agrees with a
+    // double to about seven significant figures. A `RiderModel` read its
+    // rotation off a `Matrix4`'s own Euler and could afford nine.
+    expect(forward(0)[0]).toBeCloseTo(1, 6);
+    expect(forward(0)[1]).toBeCloseTo(0, 6);
+    expect(forward(1)[0]).toBeCloseTo(-root, 6);
+    expect(forward(1)[1]).toBeCloseTo(-root, 6);
+    belt.dispose();
   });
 
-  it('turns the crankset by the angle the frame carries', () => {
-    const model = new RiderModel();
-    model.place(riderAt({}, {}, 0));
-    expect(model.meshes.cranks.rotation.x).toBe(0);
-    model.place(riderAt({}, {}, 1.75));
-    expect(model.meshes.cranks.rotation.x).toBeCloseTo(1.75, 9);
-    model.dispose();
+  it('turns each crankset by the angle its own marker carries', () => {
+    // ⚠️ **Read as a displacement rather than as a rotation.** The crankset is
+    // an instance now, so there is no `rotation.x` to look at — and the thing
+    // that would break is exactly what this checks: the crank geometry is
+    // written in the bottom bracket's frame, so its instance is *mounted* there
+    // and turns about its own origin. Baked into the vertices instead, the
+    // rotation would swing the whole crankset round the bicycle.
+    const belt = new RiderBelt();
+
+    belt.place([riderAt({}, {}, 0)]);
+    const atTop = originOf(belt.meshes.cranksets, 0);
+    belt.place([riderAt({}, {}, Math.PI / 2)]);
+    const quarterOn = originOf(belt.meshes.cranksets, 0);
+
+    // The axis itself does not move: the offset is a rotation about it.
+    expect(atTop).toEqual(quarterOn);
+    // Six places, for the reason the heading assertion above gives.
+    expect(atTop[1]).toBeCloseTo(CRANK_AXIS_Y, 6);
+    expect(atTop[2]).toBeCloseTo(CRANK_AXIS_Z, 6);
+    belt.dispose();
   });
 
-  it('keeps the crankset on its own axis rather than at the road', () => {
-    // The crank geometry is written in the bottom bracket's frame, so the mesh
-    // is mounted there. Baked into the vertices instead, `rotation.x` would
-    // swing the whole crankset round the bicycle.
-    const model = new RiderModel();
-    expect(model.meshes.cranks.position.y).toBeCloseTo(CRANK_AXIS_Y, 9);
-    expect(model.meshes.cranks.position.z).toBeCloseTo(CRANK_AXIS_Z, 9);
-    model.dispose();
+  it('gives each rider its own crank angle', () => {
+    // The rider's comes from a cadence and the other two from their odometers,
+    // so on any real frame all three differ. A belt that wrote one angle to
+    // every slot would be three riders pedalling in lockstep.
+    const belt = new RiderBelt();
+    belt.place([riderAt({}, {}, 0), riderAt({ z: 40 }, {}, Math.PI / 2, 'bot')]);
+
+    expect(boneAt(belt, 0, 0)).not.toEqual(boneAt(belt, 1, 0));
+    belt.dispose();
   });
 
   it('moves every leg segment when the cranks move, and uploads them', () => {
     // ⚠️ `instanceMatrix.needsUpdate` has a setter and no getter, so `version`
     // is what is read — the same reason `ScatterBelt`'s own test does.
-    const model = new RiderModel();
-    model.place(riderAt({}, {}, 0));
-    const before = [0, 1, 2, 3].map((index) => boneAt(model, index));
-    const uploads = model.meshes.limbs.instanceMatrix.version;
+    const belt = new RiderBelt();
+    belt.place([riderAt({}, {}, 0)]);
+    const before = [0, 1, 2, 3].map((index) => boneAt(belt, 0, index));
+    const uploads = belt.meshes.limbs.instanceMatrix.version;
 
-    model.place(riderAt({}, {}, Math.PI / 2));
-    const after = [0, 1, 2, 3].map((index) => boneAt(model, index));
+    belt.place([riderAt({}, {}, Math.PI / 2)]);
+    const after = [0, 1, 2, 3].map((index) => boneAt(belt, 0, index));
 
-    expect(model.meshes.limbs.instanceMatrix.version).toBeGreaterThan(uploads);
+    expect(belt.meshes.limbs.instanceMatrix.version).toBeGreaterThan(uploads);
     for (const index of [0, 1, 2, 3]) {
       expect(after[index]).not.toEqual(before[index]);
       for (const number of after[index] as readonly number[]) {
         expect(Number.isFinite(number)).toBe(true);
       }
     }
-    model.dispose();
+    belt.dispose();
   });
 
   it('poses the legs on the first frame rather than leaving them at the origin', () => {
     // An `InstancedMesh` starts every slot at the identity matrix, which puts
     // all four segments inside the bottom bracket.
-    const model = new RiderModel();
-    model.place(riderAt({}, {}, 0));
+    const belt = new RiderBelt();
+    belt.place([riderAt({ x: 100, z: 200 }, {}, 0)]);
 
     for (const index of [0, 1, 2, 3]) {
-      expect(Math.hypot(...boneAt(model, index))).toBeGreaterThan(0.1);
+      const bone = boneAt(belt, 0, index);
+      // ⚠️ **Two claims, and the second is the one that was measured rather
+      // than assumed.** Away from the bottom bracket, so the identity matrix an
+      // `InstancedMesh` starts with has been overwritten — and *carried to
+      // where the rider is*, because a leg written in the model's own frame and
+      // never multiplied by the rider's transform lands at the world origin.
+      // A bound of "further than nothing from the rider" is satisfied by both,
+      // which is what a mutation of the multiply showed: it stayed green.
+      expect(Math.hypot(bone[1] - 0.4, bone[2] - 200)).toBeGreaterThan(0.1);
+      expect(Math.abs(bone[0] - 100)).toBeLessThan(0.5);
+      expect(Math.abs(bone[2] - 200)).toBeLessThan(0.8);
+      expect(bone[1]).toBeGreaterThan(0);
+      expect(bone[1]).toBeLessThan(1.2);
     }
-    model.dispose();
+    belt.dispose();
   });
 
-  it('does no work at all on a frame where the cranks have not turned', () => {
+  it('does no leg work at all on a frame where a rider has not pedalled', () => {
     // Every frame of every ride with no cadence sensor on it, and every frame
     // of a rider who has stopped pedalling. #240's NFR-3.
-    const model = new RiderModel();
-    model.place(riderAt({}, {}, 1.1));
-    const uploads = model.meshes.limbs.instanceMatrix.version;
+    const belt = new RiderBelt();
+    belt.place([riderAt({}, {}, 1.1)]);
+    const uploads = belt.meshes.limbs.instanceMatrix.version;
 
-    model.place(riderAt({ z: 30 }, {}, 1.1));
+    belt.place([riderAt({ z: 30 }, {}, 1.1)]);
 
-    expect(model.meshes.limbs.instanceMatrix.version).toBe(uploads);
+    expect(belt.meshes.limbs.instanceMatrix.version).toBe(uploads);
     // …and the rider still moved, which is what makes the line above a saving
     // rather than a frozen bicycle.
-    expect(model.group.position.z).toBe(30);
-    model.dispose();
+    expect(originOf(belt.meshes.bodies, 0)[2]).toBe(30);
+    belt.dispose();
+  });
+
+  it('re-poses a slot whose occupant changed, even at the same angle', () => {
+    // ⚠️ **What the saving above would otherwise cost.** A slot that held the
+    // bot last frame and the ghost this frame is a different rider at the same
+    // index; a cache keyed on the angle alone would leave the ghost's legs
+    // where the bot's were, which is a ride's worth of wrong legs.
+    const belt = new RiderBelt();
+    belt.place([riderAt(), riderAt({ z: 40 }, {}, 1.1, 'bot')]);
+    const uploads = belt.meshes.limbs.instanceMatrix.version;
+
+    belt.place([riderAt(), riderAt({ z: 80 }, {}, 1.1, 'ghost')]);
+
+    expect(belt.meshes.limbs.instanceMatrix.version).toBeGreaterThan(uploads);
+    belt.dispose();
   });
 
   it('gives up its shading at the floor rung, on all three meshes', () => {
-    const model = new RiderModel();
-    model.setShading('lit');
-    const lit = [model.meshes.body.material, model.meshes.cranks.material];
-    model.setShading('flat');
+    const belt = new RiderBelt();
+    belt.setShading('lit');
+    const lit = [belt.meshes.bodies.material, belt.meshes.cranksets.material];
+    belt.setShading('flat');
 
-    expect(model.meshes.body.material).not.toBe(lit[0]);
-    expect(model.meshes.cranks.material).toBe(model.meshes.body.material);
-    expect(model.meshes.limbs.material).toBe(model.meshes.body.material);
-    model.dispose();
+    expect(belt.meshes.bodies.material).not.toBe(lit[0]);
+    expect(belt.meshes.cranksets.material).toBe(belt.meshes.bodies.material);
+    expect(belt.meshes.limbs.material).toBe(belt.meshes.bodies.material);
+    belt.dispose();
   });
 
   it('releases both materials of the pair, not the one that is mounted', () => {
-    const model = new RiderModel();
+    const belt = new RiderBelt();
     const released = new Set<unknown>();
     const watch = (material: unknown) => {
       (
@@ -2184,15 +2526,197 @@ describe('the rider is a bicycle rather than a sphere — #349', () => {
       ).addEventListener('dispose', () => released.add(material));
       return material;
     };
-    model.setShading('lit');
-    const lit = watch(model.meshes.body.material);
-    model.setShading('flat');
-    const flat = watch(model.meshes.body.material);
+    belt.setShading('lit');
+    const lit = watch(belt.meshes.bodies.material);
+    belt.setShading('flat');
+    const flat = watch(belt.meshes.bodies.material);
     expect(lit).not.toBe(flat);
 
-    model.dispose();
+    belt.dispose();
 
     expect(released.has(lit)).toBe(true);
     expect(released.has(flat)).toBe(true);
+  });
+});
+
+/**
+ * The belt draws a kind as several shapes, and the ladder can take them away —
+ * #367.
+ *
+ * ⚠️ **What this file can say, and what it cannot.** It can say how many meshes
+ * the belt holds, which one an item lands in, and that the count moves with the
+ * rung. It cannot say what any of them **cost**, which is the number #367 is
+ * actually about — `game.browser.spec.ts` measures the draw calls in a driver
+ * and prints them, because a count of `Map` entries is not a claim about a GPU.
+ */
+describe('a kind is drawn as several shapes — #367', () => {
+  /** The geometry a belt draws one kind's variant with. */
+  type Shape = NonNullable<ReturnType<typeof meshFor>>['geometry'];
+
+  /** Distinct geometries, one per variant, so a belt can tell them apart. */
+  function shapesFor(kind: ScatterKind, count: number): ReadonlyMap<ScatterKind, readonly Shape[]> {
+    const donor = new ScatterBelt();
+    const built: Shape[] = [];
+    for (let at = 0; at < count; at += 1) {
+      // A different primitive per variant, so the geometries differ in vertex
+      // count and an item drawn by the wrong one is visible as a number.
+      const geometry = meshFor(
+        donor,
+        SCATTER_KINDS[at % SCATTER_KINDS.length] as ScatterKind,
+      )?.geometry;
+      if (geometry === undefined) {
+        throw new Error('no geometry to clone');
+      }
+      built.push(geometry.clone());
+    }
+    donor.dispose();
+    return new Map([[kind, built]]);
+  }
+
+  it('holds one mesh per variant, and one per kind for the rest', () => {
+    const belt = new ScatterBelt(shapesFor('rock', 3));
+
+    expect(belt.meshesOf('rock')).toHaveLength(3);
+    expect(belt.meshesOf('shrub')).toHaveLength(1);
+    // Six kinds, of which one has three shapes.
+    expect(belt.meshes.size).toBe(SCATTER_KINDS.length + 2);
+    belt.dispose();
+  });
+
+  it('refuses to hold more shapes than the budget allows', () => {
+    // ⚠️ **The guard half of #367's sixth criterion.** `scenery-models.test.ts`
+    // is the gate a pull request has to get past; this is what stops a table
+    // that got past it spending draw calls on a rider's phone.
+    const belt = new ScatterBelt(shapesFor('rock', MAXIMUM_SCENERY_VARIANTS + 4));
+
+    expect(belt.meshesOf('rock')).toHaveLength(MAXIMUM_SCENERY_VARIANTS);
+    belt.dispose();
+  });
+
+  it('draws an item with the shape its own variant names', () => {
+    const belt = new ScatterBelt(shapesFor('rock', 3));
+    const vertices = (variant: number) =>
+      meshFor(belt, 'rock', variant)?.geometry.getAttribute('position').count ?? -1;
+
+    belt.update(
+      [item({ kind: 'rock', variant: 0 }), item({ kind: 'rock', x: -3, variant: 1 })],
+      POSE,
+    );
+
+    expect(meshFor(belt, 'rock', 0)?.count).toBe(1);
+    expect(meshFor(belt, 'rock', 1)?.count).toBe(1);
+    expect(meshFor(belt, 'rock', 2)?.count).toBe(0);
+    // Non-vacuity: three meshes that were all the same shape would satisfy the
+    // counts above and would be the world #367 exists to replace.
+    expect(new Set([vertices(0), vertices(1), vertices(2)]).size).toBe(3);
+    belt.dispose();
+  });
+
+  it('folds a slot past the end onto a shape that exists', () => {
+    // `scatter.ts` draws a variant from six slots and knows nothing about how
+    // many shapes a kind has, which is the whole of that seam. A belt that
+    // indexed straight into its list would draw nothing at all for four items
+    // in six.
+    const belt = new ScatterBelt(shapesFor('rock', 2));
+
+    belt.update(
+      [0, 1, 2, 3, 4, 5].map((variant) => item({ kind: 'rock', x: variant - 3, variant })),
+      POSE,
+    );
+
+    expect(meshFor(belt, 'rock', 0)?.count).toBe(3);
+    expect(meshFor(belt, 'rock', 1)?.count).toBe(3);
+    belt.dispose();
+  });
+
+  it('draws fewer shapes when the rung says so, and still draws every item', () => {
+    // ⚠️ **#367's own suggestion, and the ordering it implies**: a throttling
+    // phone falls back toward fewer distinct meshes *before* it loses items.
+    // So the second assertion is the one that matters — the items are all still
+    // there, in fewer meshes.
+    const belt = new ScatterBelt(shapesFor('rock', 3));
+    const items = [0, 1, 2, 3, 4, 5].map((variant) =>
+      item({ kind: 'rock', x: variant - 3, variant }),
+    );
+
+    belt.setVariants(1);
+    belt.update(items, POSE);
+
+    expect(meshFor(belt, 'rock', 0)?.count).toBe(6);
+    expect(meshFor(belt, 'rock', 1)?.count).toBe(0);
+    expect(meshFor(belt, 'rock', 2)?.count).toBe(0);
+    // …and back up, without anything being rebuilt.
+    const mesh = meshFor(belt, 'rock', 1);
+    belt.setVariants(3);
+    belt.update(items, POSE);
+
+    expect(meshFor(belt, 'rock', 1)).toBe(mesh);
+    expect(meshFor(belt, 'rock', 1)?.count).toBe(2);
+    belt.dispose();
+  });
+
+  it('draws an item whose variant is not a number, rather than dropping it', () => {
+    // ⚠️ **`NaN % 2` is `NaN`, which names no mesh, which drops the item** —
+    // scenery a caller placed and the screen never showed, which is #240's
+    // named defect shape for this epic. `scatter.ts` cannot produce one; a
+    // caller that built a frame some other way can.
+    const belt = new ScatterBelt(shapesFor('rock', 2));
+
+    belt.update([item({ kind: 'rock', variant: Number.NaN })], POSE);
+
+    expect(meshFor(belt, 'rock', 0)?.count).toBe(1);
+    belt.dispose();
+  });
+
+  it('never divides by a rung of zero', () => {
+    // `quality.ts` floors its own figure at one, and so does this: a belt asked
+    // for no shapes at all would be a world with nothing beside the road.
+    const belt = new ScatterBelt(shapesFor('rock', 2));
+
+    belt.setVariants(0);
+    belt.update([item({ kind: 'rock', variant: 3 })], POSE);
+
+    expect(meshFor(belt, 'rock', 0)?.count).toBe(1);
+    belt.dispose();
+  });
+
+  it('sizes each variant its own instance buffer up front', () => {
+    // #244's allocation discipline, per mesh rather than per kind: a belt that
+    // sized only the first variant would grow a buffer on the frame the second
+    // shape first appeared, which is 400 m into a ride.
+    const belt = new ScatterBelt(shapesFor('rock', 3));
+
+    for (const mesh of belt.meshesOf('rock')) {
+      expect(mesh.instanceMatrix.count).toBe(SCATTER_INSTANCE_CAPACITY);
+    }
+    belt.dispose();
+  });
+
+  it('keeps every variant on one material, whichever shading is mounted', () => {
+    const belt = new ScatterBelt(shapesFor('rock', 3));
+
+    for (const shading of ['lit', 'flat'] as const) {
+      belt.setShading(shading);
+
+      expect(new Set(belt.meshesOf('rock').map((mesh) => mesh.material)).size).toBe(1);
+    }
+    belt.dispose();
+  });
+
+  it('keeps the primitive for a kind whose second file failed, rather than a hole', () => {
+    // ⚠️ **What `loadSceneryModels` filtering out the holes buys.** A kind left
+    // holding `[geometry, undefined]` would have its variant-1 items drawn by
+    // nothing at all — every other item on the road gone — where losing the
+    // *variety* is the documented trade.
+    const belt = new ScatterBelt(shapesFor('rock', 1));
+
+    belt.update(
+      [0, 1, 2, 3, 4, 5].map((variant) => item({ kind: 'rock', x: variant - 3, variant })),
+      POSE,
+    );
+
+    expect(belt.meshesOf('rock')).toHaveLength(1);
+    expect(meshFor(belt, 'rock', 0)?.count).toBe(6);
+    belt.dispose();
   });
 });
