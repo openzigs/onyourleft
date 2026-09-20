@@ -2568,7 +2568,10 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   inside an ADR table cell.
 - **ADRs**: `docs/adr/NNNN-kebab-case.md`, with **Status, Context, Decision, Consequences**. Numbers
   are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. **The next free number is 0024.**
+  **and which are claimed by open issues** before you pick one. **The next free number is 0025.**
+  ⚠️ **0024 is [ADR 0024](docs/adr/0024-offline-and-caching-posture.md)**, taken by
+  [#403](https://github.com/openzigs/onyourleft/issues/403) for the offline and caching posture; a
+  reviewer who remembers this sentence offering 0024 is reading the old file.
   ⚠️ **0023 is [ADR 0023](docs/adr/0023-cc-by-assets-and-attribution.md)**, taken by
   [#357](https://github.com/openzigs/onyourleft/issues/357) for the CC-BY asset ruling, and a reviewer who
   remembers this sentence offering 0023 is reading the old file.
