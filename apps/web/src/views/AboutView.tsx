@@ -2,7 +2,7 @@
 
 import type { JSX } from 'react';
 
-import { PRIVACY_POLICY_URL } from '../privacy/policy';
+import { PRIVACY_POLICY_URL, SOURCE_CODE_URL } from '../privacy/policy';
 import { hrefFor, routeById } from '../shell/routes';
 
 /**
@@ -98,6 +98,17 @@ export function AboutView(): JSX.Element {
       <p>
         Free and open source. This client is licensed under the GNU Affero General Public License,
         version 3 or later; the packages it is built from are Apache-2.0.
+      </p>
+      {/* ⚠️ Not a courtesy: AGPL-3.0 section 6 requires whoever conveys object
+          code to say where the source is, and ADR 0025 D-7 makes this link a
+          CONDITION of the permission a store build ships under. A rider who
+          installed from a store has never seen the repository — the same fact
+          the Credits link below rests on. `AboutView.test.tsx` pins it. */}
+      <p>
+        <a href={SOURCE_CODE_URL} target="_blank" rel="noreferrer">
+          Get the source code of this app
+        </a>{' '}
+        (opens in a new tab). You may copy, change and share it under that licence.
       </p>
       {/* ⚠️ This link is the reachable half of an obligation, not a courtesy.
           ADR 0023 D-3 puts the attribution inside the app because CC BY 4.0

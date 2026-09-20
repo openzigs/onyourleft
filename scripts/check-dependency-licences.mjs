@@ -70,9 +70,15 @@
  * failing branch — a permissive licence this list does not name costs one line
  * in ADR 0015 and a reviewer's attention, which is the intended price.
  *
- * Rule:
+ * Rules:
  *   DEP001  a dependency's licence is not permitted in the closure and path
  *           where it was found
+ *   DEP002  third-party copyleft in the DISTRIBUTED closure of an application.
+ *           ADR 0025 D-5: an app ships through an app store under this
+ *           project's own additional permission, which cannot cover anybody
+ *           else's GPL, LGPL or AGPL code. ⚠️ Until ADR 0025 this was
+ *           permitted, and a reviewer who remembers "GPL is fine under apps/"
+ *           is remembering the build-time half, which still is
  *
  * Usage: node scripts/check-dependency-licences.mjs [--root <dir>]
  *                                                   [--closures <file>]
@@ -122,8 +128,12 @@ const POLICY = {
   weak: ['MPL-2.0', 'BlueOak-1.0.0', 'CC0-1.0', 'MIT-0', '0BSD', 'Unlicense'],
 
   /**
-   * Strong copyleft. Permitted under `apps/` only — the application is
-   * AGPL-3.0-or-later, so GPL-family code is compatible there.
+   * Strong copyleft. Permitted under `apps/` only, and ⚠️ since ADR 0025 D-5
+   * only in its BUILD-TIME closure. The application is AGPL-3.0-or-later, so
+   * GPL-family code is *licence-compatible* there — but what an app
+   * distributes ships through an app store under an additional permission
+   * this project's copyright holders grant, which cannot reach a third
+   * party's copyleft. Compatible is not the same as shippable. @see admitted
    *
    * ⚠️ Forbidden under `packages/` in **both** closures, deliberately. That is
    * stricter than the distributed-artefact argument alone would require, and
@@ -155,9 +165,15 @@ const POLICY = {
 function admitted(tree, closure) {
   const app = tree === 'apps';
   if (closure === 'distributed') {
-    return app
-      ? [...POLICY.permissive, ...POLICY.weak, ...POLICY.copyleft]
-      : [...POLICY.permissive];
+    // ⚠️ No `POLICY.copyleft` here since ADR 0025 D-5, and until then there
+    // was. What an app distributes ships through an app store under this
+    // project's OWN additional permission (COPYRIGHT §"Additional permission"),
+    // and a permission its copyright holders grant cannot cover anybody
+    // else's copyleft: one GPL-family dependency in this closure is one third
+    // party able to do to this project what a single VLC copyright holder did
+    // to VLC in 2011. Copyleft stays admitted at BUILD time below — a tool
+    // that is not distributed conveys nothing. @see storeShipped
+    return app ? [...POLICY.permissive, ...POLICY.weak] : [...POLICY.permissive];
   }
   // Build-time only: nothing here is distributed, so the weak set is admitted
   // under either path. Copyleft still is not, under `packages/`, per D-3.
@@ -336,6 +352,24 @@ function collectClosures(root, packages) {
   return closures;
 }
 
+/**
+ * Whether a refused dependency was refused by ADR 0025 D-5 rather than by
+ * ADR 0015: it sits in an app's DISTRIBUTED closure, and re-admitting the
+ * copyleft set would have let it through.
+ *
+ * It exists for the MESSAGE. `admitted` already refuses the dependency; this
+ * says which decision refused it, so a reader is sent to the ADR that can
+ * actually be argued with. A GPL dependency refused under `packages/` is
+ * ADR 0015 D-3's and stays `DEP001`.
+ */
+function storeShipped(tree, closure, licence, allowed) {
+  return (
+    tree === 'apps' &&
+    closure === 'distributed' &&
+    expressionAdmitted(licence, [...allowed, ...POLICY.copyleft])
+  );
+}
+
 /** Apply the policy. Returns a list of human-readable findings. */
 export function findViolations(closures) {
   const findings = [];
@@ -345,8 +379,18 @@ export function findViolations(closures) {
       const allowed = admitted(tree, which);
       for (const dependency of closure[which] ?? []) {
         if (expressionAdmitted(dependency.license, allowed)) continue;
+        if (storeShipped(tree, which, dependency.license, allowed)) {
+          findings.push(
+            `DEP002: ${packageName} (${closure.directory}): ${dependency.name} is ` +
+              `${dependency.license}, which is third-party copyleft in the distributed closure ` +
+              'of an application that ships through an app store. The additional permission ' +
+              "in COPYRIGHT is granted by this project's copyright holders and cannot cover " +
+              'it -- docs/adr/0025-app-store-additional-permission.md D-5',
+          );
+          continue;
+        }
         findings.push(
-          `${packageName} (${closure.directory}): ${dependency.name} is ` +
+          `DEP001: ${packageName} (${closure.directory}): ${dependency.name} is ` +
             `${dependency.license || '<no licence declared>'}, which is not permitted in the ` +
             `${which === 'distributed' ? 'distributed' : 'build-time'} closure of ` +
             `${tree === 'apps' ? 'an AGPL-3.0-or-later application' : 'an Apache-2.0 package'}`,
@@ -399,7 +443,8 @@ function main(argv) {
 
   const findings = findViolations(closures);
   for (const finding of findings) {
-    process.stderr.write(`DEP001: ${finding}\n`);
+    // Each finding carries its own rule id since ADR 0025 added DEP002.
+    process.stderr.write(`${finding}\n`);
   }
   if (findings.length > 0) {
     process.stderr.write(

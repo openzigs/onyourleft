@@ -1035,7 +1035,7 @@ pnpm --filter @onyourleft/fit run uploads:generate
 # also section 4g.
 pnpm run check:licences
 
-# Its own suite. Fixture-driven; 50 cases, every policy branch with a case that
+# Its own suite. Fixture-driven; 56 cases, every policy branch with a case that
 # FAILS as well as one that passes. Needs Node, so also not in `check:repo`.
 bash scripts/check-dependency-licences.test.sh
 
@@ -1122,6 +1122,7 @@ dependency graph rather than the repository:
 | Rule | Fails when |
 |---|---|
 | `DEP001` | a dependency's own licence is not permitted in the closure and path where it was found — including a licence in none of [ADR 0015](docs/adr/0015-dependency-licences.md)'s tables, which fails closed |
+| `DEP002` | **third-party copyleft in the *distributed* closure of an application.** [ADR 0025](docs/adr/0025-app-store-additional-permission.md) D-5: an app ships through an app store under an additional permission this project's copyright holders grant (`COPYRIGHT`), and that permission cannot cover anybody else's GPL, LGPL or AGPL code. ⚠️ **Until ADR 0025 this was permitted**, and a reviewer who remembers *"GPL is fine under `apps/`"* is remembering the **build-time** half, which still is. One such dependency is one third party able to have the app removed from a store, which is what a single copyright holder did to VLC in 2011 |
 
 The stack the workspace is built on is decided in ADR 0005 and is not open:
 
@@ -1917,7 +1918,7 @@ distributed:
 
 | | `packages/*` (Apache-2.0) | `apps/*` (AGPL-3.0-or-later) |
 |---|---|---|
-| **Distributed** (`--prod`) | permissive only | permissive + weak + GPL/LGPL/AGPL |
+| **Distributed** (`--prod`) | permissive only | permissive + weak — ⚠️ **no copyleft since [ADR 0025](docs/adr/0025-app-store-additional-permission.md) D-5**, reported as `DEP002` |
 | **Build-time only** | permissive + weak | permissive + weak + GPL/LGPL/AGPL |
 
 where *weak* is ADR 0015 D-2's set — `MPL-2.0`, `BlueOak-1.0.0`, `CC0-1.0`, `MIT-0`, `0BSD` — plus
@@ -1929,6 +1930,17 @@ more than MIT does and still sits in *weak* rather than *permissive*, because th
 argument alone would permit a GPL build-time tool there; ADR 0015 D-3 deliberately does not go
 there, because §3 states the rule with no exemption and reversing it is an owner's decision rather
 than a side effect of writing a checker.
+
+⚠️ **And since ADR 0025 they are forbidden in what an *app* ships, too — which this section used to
+say the opposite of.** The table above read *"permissive + weak + GPL/LGPL/AGPL"* in both `apps/*`
+rows, on the argument that GPL-family code is licence-compatible with an AGPL application. It is.
+But an app reaches its users through the Apple App Store and Google Play under a GNU AGPL §7
+**additional permission** in [`COPYRIGHT`](COPYRIGHT), and a permission this project's copyright
+holders grant cannot reach a third party's copyleft. **Compatible is not the same as shippable.**
+Measured 2026-09-20, nothing copyleft ships: `pnpm licenses list --prod` over `apps/web` and
+`apps/mobile` is MIT, ISC, BSD-2/3, one `(MIT OR Apache-2.0)` and 0BSD. `DEP002` keeps it that way.
+⚠️ **It cannot see native dependencies** — CocoaPods, Swift packages, Gradle — so whoever generates
+the iOS project owes the same check by hand; ADR 0025 §Consequences says so.
 
 ⚠️ **It fails closed.** A licence in none of the tables is a violation, not a pass — the gate exists
 for the licence nobody has considered yet. A perfectly fine but unnamed licence (`Zlib`, say) will
@@ -1955,8 +1967,9 @@ this layer would catch that — which is why `packages/fit`'s clean-room posture
 separately rather than being subsumed here.
 
 **Not part of `pnpm run check:repo`**: it needs an install, the same reason `check:a11y-suite` is
-not. Its own suite is `bash scripts/check-dependency-licences.test.sh` — 49 cases, and every policy
-branch has a case that goes **red** as well as one that passes.
+not. Its own suite is `bash scripts/check-dependency-licences.test.sh` — 56 cases, and every policy
+branch has a case that goes **red** as well as one that passes. ⚠️ That said 49 here while §4a said
+50; the number is what the suite prints, so read the run rather than either line.
 
 ### 4i. Route planning has an interface and no engine, deliberately
 
@@ -2723,7 +2736,9 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   prose. ⚠️ A reviewer who remembers this sentence being unenforced is reading the old file:
   deleting an ADR's `- **Status**: Accepted` line used to leave `check-repo-rules.sh` reporting
   clean at exit 0. Numbers are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. **The next free number is 0025.**
+  **and which are claimed by open issues** before you pick one. **The next free number is 0026.**
+  ⚠️ **0025 is [ADR 0025](docs/adr/0025-app-store-additional-permission.md)**, taken by
+  [#432](https://github.com/openzigs/onyourleft/issues/432) for the app-store additional permission.
   ⚠️ **0024 is [ADR 0024](docs/adr/0024-offline-and-caching-posture.md)**, taken by
   [#403](https://github.com/openzigs/onyourleft/issues/403) for the offline and caching posture; a
   reviewer who remembers this sentence offering 0024 is reading the old file.
@@ -2769,7 +2784,7 @@ Never open a public issue with vulnerability details — use GitHub private vuln
 |---|---|
 | `LICENSE` | Byte-identical AGPL-3.0 text. Editing licence text is itself a licensing problem. SHA-256 recorded in ADR 0001. |
 | `LICENSES/Apache-2.0.txt` | Same, for Apache-2.0. |
-| `COPYRIGHT` | Copyright is held by "The On Your Left contributors", each retaining their own. |
+| `COPYRIGHT` | Copyright is held by "The On Your Left contributors", each retaining their own. ⚠️ Since [ADR 0025](docs/adr/0025-app-store-additional-permission.md) it also carries the **GNU AGPL §7 additional permission** for the Apple App Store and Google Play. That paragraph is a licence grant in the copyright holders' name: **rewording it is a legal act, not an edit**, and widening it needs every contributor's consent. |
 | `docs/adr/*.md` | An ADR is amended by a **new** ADR that supersedes it, not by editing it in place — **with one narrow exception, [ADR 0013](docs/adr/0013-adr-amendments.md)**: a dated entry may be **appended** to an `## Amendments` section at the end of the file, recording that a statement of fact in the body has become false. The body is still never edited, `Status` does not change, and **reversing a decision still needs a superseding ADR**. Rule `ADR003` checks the shape; it cannot check that the change was an append, so a reviewer reading a `docs/adr/` diff asks the one question that matters — **does any hunk touch a line that already existed?** |
 
 `.gitignore` un-ignores `.env.example` while ignoring `.env` and `.env.*`. Honour that: a committed
@@ -2941,6 +2956,10 @@ top of an issue **supersedes its body**.
 | Where the basemap the browser gate renders comes from, and what it deliberately does not contain | `apps/web/browser/pmtiles-fixture.ts`, §4f |
 | What a cold load costs the client, what that number leaves out, and who owns the rest | `apps/web/browser/map.browser.spec.ts` §"a real archive, rendered and timed", [#53](https://github.com/openzigs/onyourleft/issues/53) |
 | Whether a dependency's licence is allowed where it lands, and which licences are ruled on | §4g, [ADR 0015](docs/adr/0015-dependency-licences.md), `scripts/check-dependency-licences.mjs` §`POLICY` |
+| Whether an AGPL app may be conveyed through the App Store and Google Play, and why the answer had a clock on it | [ADR 0025](docs/adr/0025-app-store-additional-permission.md), [`COPYRIGHT`](COPYRIGHT) §"Additional permission" |
+| Why a GPL dependency may be built with and never shipped by an app | [ADR 0025](docs/adr/0025-app-store-additional-permission.md) D-5, `scripts/check-dependency-licences.mjs` §`storeShipped`, §4g |
+| Why the About screen links to the source, and why that link is a condition rather than a courtesy | `apps/web/src/privacy/policy.ts` §`SOURCE_CODE_URL`, [ADR 0025](docs/adr/0025-app-store-additional-permission.md) D-7 |
+| What a contribution under `apps/` is licensed under, exactly | [`CONTRIBUTING.md`](CONTRIBUTING.md) §"Licensing of contributions", [ADR 0025](docs/adr/0025-app-store-additional-permission.md) D-6 |
 | Where the basemap URL is configured, and why nothing is configured today | `.env.example` §`VITE_BASEMAP_PMTILES_URL`, [#53](https://github.com/openzigs/onyourleft/issues/53) |
 | Which segment-matching approach was chosen, what it measured, and which of its numbers no longer describe the shipped code | [`docs/spikes/0001-segment-matching.md`](docs/spikes/0001-segment-matching.md) and its 2026-09-08 retirement note |
 | Why a fixed endpoint radius detects nothing above a 1 s recording interval, and why widening it alone makes things worse | `packages/domain/src/segment/segment.ts` §`endpointReachRadius`, §`nearestEndpointSample`, `docs/spikes/0001-segment-matching.md` §1 |

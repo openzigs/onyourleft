@@ -221,6 +221,10 @@ Two licences, split along a deliberate boundary:
 | The application — instance server, web app, deployed product | [`AGPL-3.0-or-later`](LICENSE) |
 | Reusable leaf packages — domain types, FIT/GPX/TCX codec, BLE sensor layer | [`Apache-2.0`](LICENSES/Apache-2.0.txt) |
 
+The AGPL parts also carry a GNU AGPL §7 **additional permission** — in [`COPYRIGHT`](COPYRIGHT) — to
+convey store builds through the Apple App Store and Google Play. The source stays AGPL;
+[ADR 0025](docs/adr/0025-app-store-additional-permission.md) says why it exists and what it does not do.
+
 Anything not explicitly marked Apache-2.0 is AGPL-3.0-or-later.
 
 The boundary is **structural**: everything under `packages/` is Apache-2.0 and everything under

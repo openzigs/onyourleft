@@ -24,3 +24,30 @@ and for which packages these are.
 
 No contributor assigns copyright. Each retains their own, and contributions are
 made under the Developer Certificate of Origin 1.1 (see CONTRIBUTING.md).
+
+---
+
+Additional permission under GNU AGPL version 3 section 7
+
+Provided that you are otherwise in compliance with the GNU Affero General
+Public License, version 3 or (at your option) any later version, for each
+covered work you convey (including without limitation making the Corresponding
+Source available in compliance with section 6 of that License), the copyright
+holders of On Your Left grant you the additional permission to convey, through
+the Apple App Store and through Google Play, non-source executable versions of
+the Program as incorporated into each applicable covered work, as executable
+versions only, under the Mozilla Public License, version 2.0
+(https://www.mozilla.org/MPL/2.0/).
+
+This permission covers the parts of this program that are licensed
+AGPL-3.0-or-later. The Apache-2.0 leaf packages need no such permission. It
+does not, and cannot, extend to code whose copyright is held by anybody else.
+It changes nothing about the source code, which remains under the GNU Affero
+General Public License as stated above, and you may remove it from any copy you
+convey, as section 7 of that License provides.
+
+Contributions to the AGPL-3.0-or-later parts of this program are made under
+that License together with this additional permission (see CONTRIBUTING.md).
+The reasoning, the two stores it names and why it names no others, and the
+questions it leaves for a lawyer are in
+docs/adr/0025-app-store-additional-permission.md.

@@ -228,3 +228,13 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   remain blocked on it. **The ODbL question itself is not decided here and is still #64's**, which
   [ADR 0010](0010-map-tiles-and-routing.md) records in its own *Notes* and deliberately does not
   touch. (#119, #147)
+- **2026-09-20** — **The application's licence now carries an additional permission, and the
+  *Contributor terms* section does not mention it.** That section says contributions are made under
+  the project's licence with DCO sign-off and no CLA; all of that stands. What has changed is what
+  "the project's licence" is for the AGPL parts: since [ADR 0025](0025-app-store-additional-permission.md)
+  it is `AGPL-3.0-or-later` **together with** a GNU AGPL §7 additional permission, in `COPYRIGHT`, to
+  convey store executables through the Apple App Store and Google Play. **No decision above is
+  reversed** — the application stays AGPL, there is still no CLA, and relicensing is still
+  "effectively impossible", which is exactly why the permission was adopted while there was one
+  copyright holder rather than later. A reader who remembers this ADR as the whole of the licence
+  story for `apps/` should read ADR 0025 as well. (#432)
