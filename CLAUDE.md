@@ -54,6 +54,19 @@ apps/                 AGPL-3.0-or-later, without exception
                         header. Since #316 that page also carries the button
                         specimens the touch-target measurement needs, because a
                         shell handed no ports renders no control at all
+    public/             what Vite copies verbatim into `dist` (#405) — the web app
+                        manifest and the three icons it names. A `.webmanifest`
+                        is on neither LIC001's nor LIC002's extension list and
+                        a JSON document has nowhere to put a header, so what
+                        records the icons is `ASSETS.toml`, and ⚠️ their licence
+                        is `CC0-1.0` rather than this tree's own
+                        `AGPL-3.0-or-later`, which `ASSET004` admits at no path
+                        at all (ADR 0024 D-5)
+    tools/icons/        the drawing those icons are committed FROM (#405) — two
+                        chevrons from arithmetic, nothing downloaded and nothing
+                        traced (ADR 0009). Authoring-time code, the shape
+                        `packages/fit/tools` has: in the typecheck, in the test
+                        run, and out of the coverage report
     src/a11y/           the accessibility gate: rules, routes, contrast (#48) — see §4e
     src/athlete/        what the rider weighs (#325) — the one place a missing
                         mass is substituted, the one place a typed weight
@@ -922,6 +935,17 @@ pnpm --filter @onyourleft/sensors run test
 pnpm --filter @onyourleft/store run test
 pnpm --filter @onyourleft/physics run test
 pnpm --filter @onyourleft/web run test
+
+# Redraw the web app manifest's icons (#405). They are COMMITTED bytes, not a
+# build step -- ADR 0024 D-5 and §3a between them say why a generated file
+# cannot land under `apps/` without an `.spdx-exempt` entry that §3a would
+# refuse. So this is provenance rather than a build, and
+# `tools/icons/generate-icons.test.ts` is what keeps the committed bytes and
+# this generator from drifting: it compares decoded PIXELS, not bytes, because
+# zlib's compressed form is not stable across versions of the library.
+# Re-run it after changing the drawing, then update the three ASSETS.toml
+# digests in the same commit.
+pnpm --filter @onyourleft/web run icons:generate
 
 # Regenerate the #29 synthetic FIT fixture corpus from its generator. It is
 # DETERMINISTIC: running it on a clean tree leaves `git status` clean, which is

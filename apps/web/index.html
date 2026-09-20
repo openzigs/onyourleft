@@ -4,6 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>On Your Left</title>
+    <!-- #405. The manifest is a static file in `public/`, copied verbatim into
+         `dist` by Vite, so it carries no SPDX header: `.webmanifest` is on
+         neither LIC001's nor LIC002's scanned extension list and a JSON
+         document has nowhere to put a comment. Its icons are binaries and
+         `ASSETS.toml` is what records those. `src/offline/manifest.test.ts`
+         asserts this link and the colour below against the manifest and the
+         design tokens, in both directions. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#0b5c55" />
   </head>
   <body>
     <div id="root"></div>

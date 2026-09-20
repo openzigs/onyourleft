@@ -376,6 +376,27 @@ url = "https://kenney.nl/assets/nature-kit"
 modified = "The file is committed byte for byte; when drawn, each instance is scaled between 0.7 and 1.4, and since #366 each vertex carries the colour the file's own material gives it, toned down uniformly where a channel would clip under the scene's peak irradiance (apps/web/src/game/scenery-palette.ts)"
 
 [[asset]]
+path = "apps/web/public/icon-192.png"
+source = "This repository, #405 — two left-pointing chevrons drawn from arithmetic by `pnpm --filter @onyourleft/web run icons:generate` (apps/web/tools/icons/generate-icons.ts); the 192x192 Chrome requires. Nothing was downloaded, traced or derived from another product's appearance (ADR 0009)"
+licence = "CC0-1.0"
+read = "2026-09-20"
+sha256 = "07291e61d4b35bfed32f250425b60c65baf89032d4af708ca16708ce39d3d5f1"
+
+[[asset]]
+path = "apps/web/public/icon-512.png"
+source = "This repository, #405 — two left-pointing chevrons drawn from arithmetic by `pnpm --filter @onyourleft/web run icons:generate` (apps/web/tools/icons/generate-icons.ts); the 512x512 Chrome requires. Nothing was downloaded, traced or derived from another product's appearance (ADR 0009)"
+licence = "CC0-1.0"
+read = "2026-09-20"
+sha256 = "df69993b815580a71e3b198987fce7cded27baf09564a3798166b1c35d212ec6"
+
+[[asset]]
+path = "apps/web/public/icon-maskable-512.png"
+source = "This repository, #405 — two left-pointing chevrons drawn from arithmetic by `pnpm --filter @onyourleft/web run icons:generate` (apps/web/tools/icons/generate-icons.ts); the maskable variant, the same drawing scaled to 80% about the centre so a launcher may crop it to any shape. Nothing was downloaded, traced or derived from another product's appearance (ADR 0009)"
+licence = "CC0-1.0"
+read = "2026-09-20"
+sha256 = "dbcfb32cf6ef664874625ae5b42d563e9d74eed601933e37f37223fa7b2debb8"
+
+[[asset]]
 path = "packages/fit/fixtures/corpus/antimeridian-crossing.fit"
 source = "This repository, #107 — written by `pnpm --filter @onyourleft/fit run fixtures:generate` from packages/fit/tools/fixture-corpus, deterministically"
 licence = "Apache-2.0"
