@@ -195,13 +195,24 @@ The comments now use the em dash the rest of this repository's prose uses.
 | 7 | #39's interface satisfied **unchanged** | ✅ **met.** `git diff` shows no change under `packages/sensors`, and `createCapacitorTransport` is annotated `SensorTransport` |
 | 8 | denying a permission produces an explanatory screen | ⚠️ **half, and this row used to read "✅ met for the decision".** `permissionNotice` is pure, total over `TransportAvailability` and tested — and **nothing calls it**, because nothing in `apps/web` calls `availability()`. [#230](https://github.com/openzigs/onyourleft/issues/230) is what that cost: a denied permission was rendered as *"no device was chosen"*. The pairing path now reports `not-permitted` as itself, so the rider is told something true; the explanatory *screen* still has no consumer, and wiring one is outstanding |
 
-Still open from the Definition of Done: **tested on at least two OEMs**, and the `adb` commands run
-by somebody. ⚠️ **A build is not a run** — and this paragraph used to end *"The APK exists and has
+⚠️ **A build is not a run** — and this paragraph used to end *"The APK exists and has
 been installed on nothing"*, which is no longer true: it has been installed on a Pixel Tablet
 (`tangorpro`, Android 17 / SDK 37) and launched, which is how
-[#230](https://github.com/openzigs/onyourleft/issues/230) was found. That is the whole of what a
-device has established so far; `docs/validation/0002-android-shell-and-game.md`'s result tables are
-still empty in this repository, so nothing in them may be quoted as a result yet.
+[#230](https://github.com/openzigs/onyourleft/issues/230) was found.
+
+⚠️ **This paragraph used to end "`docs/validation/0002-android-shell-and-game.md`'s result tables
+are still empty in this repository, so nothing in them may be quoted as a result yet". A reviewer
+who remembers that sentence is reading the old file.** Two sessions have filled tables there, and
+what each did and did not establish is stated in that document rather than summarised here:
+
+| Session | What it filled | ⚠️ What it did **not** establish |
+|---|---|---|
+| 2026-09-18 | Part F, and the §"What the 2026-09-18 session established" table — one real ride against a real FTMS trainer | Part B, every step: one peripheral, no overlapping writes, no 40-cycle run. **Zero writes to the trainer**, which is [#362](https://github.com/openzigs/onyourleft/issues/362) |
+| 2026-09-20 | **Part P** — the APK cold-starts with no network, measured four ways ([#410](https://github.com/openzigs/onyourleft/issues/410)) | Nothing about a **release** APK, a second OEM, BLE while offline, or frame rate. Part P's own §"What Part P cannot establish" is the list |
+
+Still open from the Definition of Done: **tested on at least two OEMs**, and the rest of the `adb`
+procedure run by somebody. ⚠️ **A build is not a run, and a part that has been run is not this whole
+document.**
 
 ## 6. What the shipped manifest actually contains
 
