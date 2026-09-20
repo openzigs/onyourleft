@@ -10,14 +10,20 @@
  *
  * ⚠️ **The three markers are placed here and told apart in the renderer.** This
  * file decides *where* each is; `three-renderer.ts` decides what each looks
- * like, and gives each a different shape as well as a different colour. #93's
- * third criterion — that a rider glancing at a bar-mounted phone can tell them
- * apart instantly — needs both halves, and splitting them this way means neither
- * can be satisfied by accident.
+ * like. #93's third criterion — that a rider glancing at a bar-mounted phone
+ * can tell them apart instantly — needs both halves, and splitting them this
+ * way means neither can be satisfied by accident.
+ *
+ * ⚠️ **This paragraph used to say the renderer gives each "a different shape as
+ * well as a different colour", and since #368 it does not** — all three are
+ * bicycles and colour is what tells them apart. `bicycle.ts` carries the
+ * replaced argument and `three-renderer.ts` §`RIDER_TINTS` carries the
+ * replacement.
  */
 
 import { ghostDistanceAt, ghostHasFinished, type GhostTrack } from '@onyourleft/domain';
 
+import { simulatedCrankAngle } from './bicycle';
 import type { CameraPose, RiderMarker, SceneFrame } from './port';
 import { SCATTER_MAX_ITEMS, scatterAt, scatterSeed, type ScatterItem } from './scatter';
 import { ghostClock, type GameState } from './simulation';
@@ -191,16 +197,18 @@ function markers(
   riderDistance: number,
 ): readonly RiderMarker[] {
   const found: RiderMarker[] = [
-    // ⚠️ The crank angle goes on the rider and on nothing else — #349, and
-    // `port.ts` §`RiderMarker.crankAngle` says why the bot and the ghost keep
-    // their own silhouettes rather than getting a bicycle each.
+    // ⚠️ **The rider's crank angle is the only one that comes from outside this
+    // file — #349, #368.** It is the integral of a cadence *reading*, which
+    // needs a clock and the sensors, and `GameView` is where both are. The
+    // other two are derived below from their own odometers, which this file
+    // already has, because a simulated rider has no cadence to read.
     {
       ...markerAt(corridor, riderDistance, 'rider'),
       ...(input.crankAngle === undefined ? {} : { crankAngle: input.crankAngle }),
     },
   ];
   if (input.botDistance !== undefined) {
-    found.push(markerAt(corridor, input.botDistance, 'bot'));
+    found.push(pedalling(markerAt(corridor, input.botDistance, 'bot'), input.botDistance));
   }
   if (input.ghost !== undefined) {
     // ⚠️ The ghost is placed at where it had ridden **at this point in the
@@ -214,9 +222,27 @@ function markers(
     // bot covered ten seconds of it. `simulation.ts` §`ghostClock` states the
     // rule beside the bound that creates the difference.
     const at = ghostDistanceAt(input.ghost, ghostClock(input.state));
-    found.push(markerAt(corridor, at, 'ghost'));
+    found.push(pedalling(markerAt(corridor, at, 'ghost'), at));
   }
   return found;
+}
+
+/**
+ * A simulated rider's marker, with its cranks where its own odometer puts them
+ * — #368.
+ *
+ * ⚠️ **The marker's odometer, not the position it was clamped to.**
+ * {@link markerAt} clamps a bot or a ghost far up the road to the corridor's
+ * far end, so its drawn position stops moving while the rider it belongs to
+ * keeps riding — and cranks taken from that position would freeze with it,
+ * which is a claim that a bot beyond the horizon has stopped pedalling. The
+ * unwrapped distance is what actually moved.
+ *
+ * `bicycle.ts` §`simulatedCrankAngle` is where the one thing this asserts — a
+ * fixed gear, and no invented rate — is argued.
+ */
+function pedalling(marker: RiderMarker, atDistance: number): RiderMarker {
+  return { ...marker, crankAngle: simulatedCrankAngle(atDistance) };
 }
 
 /**

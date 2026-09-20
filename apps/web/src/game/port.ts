@@ -80,10 +80,17 @@ export interface RiderMarker {
    * criterion is that the ghost be *"visually distinct from the bot pacer and
    * from the rider"* at a glance on a bar-mounted phone. A renderer that took a
    * colour would let a caller pass the same one twice; taking the kind means the
-   * distinction is the renderer's to guarantee, and `three-renderer.ts` gives
-   * each a different **shape as well as** a different colour — colour alone
-   * fails a rider with a colour-vision deficiency and washes out in sunlight,
-   * which is the same argument `views/AnalysisView.tsx` makes for its labels.
+   * distinction is the renderer's to guarantee.
+   *
+   * ⚠️ **What the renderer guarantees with it changed in #368**, and this note
+   * used to say it gave each *"a different shape as well as a different
+   * colour"*. All three are bicycles now, so colour carries the distinction
+   * alone — which is a weaker position than the old one and was taken with that
+   * stated: #368's own framing is that a solid is not something you race.
+   * `bicycle.ts` carries the replaced argument, and the distances at which it
+   * was actually checked are in
+   * `docs/validation/0002-android-shell-and-game.md` Part N rather than in
+   * anybody's assertion here.
    */
   readonly kind: 'rider' | 'bot' | 'ghost';
   readonly x: number;
@@ -108,11 +115,16 @@ export interface RiderMarker {
   readonly headingX: number;
   readonly headingZ: number;
   /**
-   * How far the cranks have turned, in radians — #349.
+   * How far the cranks have turned, in radians — #349, #368.
    *
-   * ⚠️ **Optional, and only the rider's is read**: the bot is a cone and the
-   * ghost an octahedron, and neither has a crank to turn. `bicycle.ts` says why
-   * three silhouettes beat three bicycles for #93's third criterion.
+   * ⚠️ **All three carry one now, and this note used to say only the rider's
+   * was read** — *"the bot is a cone and the ghost an octahedron, and neither
+   * has a crank to turn"*. A reviewer who remembers that is reading the old
+   * file. What is still true is that only the rider's comes from a **cadence**:
+   * the bot's and the ghost's are derived from their own odometers at a fixed
+   * gear by `scene.ts`, because a simulated rider has no sensor and
+   * `bicycle.ts` §`simulatedCrankAngle` will not invent a rate and call one a
+   * reading.
    *
    * ⚠️ **An optional field nobody supplies is exactly the hole
    * `check-wiring.mjs` §Limits says this repository's gates cannot see** — it is

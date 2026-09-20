@@ -366,3 +366,79 @@ document's.
 
 ⚠️ **No competitor's product, asset, screenshot or source was consulted**, and no asset was
 downloaded, converted or committed in the course of writing this. ADR 0009 L2 and R2 are untouched.
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-09-19** — **D-7's first argument has become false, and what replaced it is a gate.** That
+  decision kept a glTF's own materials out of the scene for two reasons, and only one of them still
+  holds. The one that does is unchanged and is the one that mattered: *"a `MeshStandardMaterial`
+  constructed by `GLTFLoader` from a glTF's own material block is not in any source file, carries no
+  `Light` in its name, and would change how the whole scene is shaded without a single gate going
+  red"* — no loader-built material reaches the scene, `prepareSceneryGeometry` discards every one of
+  them at load, and `three-renderer.ts` still constructs the two the belt wears.
+
+  What has changed is D-4's *"only the **geometry** is bought"*, and with it the claim in
+  `three-renderer.ts` that `LIT_COLOURS` is *"a complete statement of the scene's palette"*. It is
+  not: [#366](https://github.com/openzigs/onyourleft/issues/366) bakes each part's own colour into a
+  `COLOR_0` attribute at load, because the cost D-4 stated was real and visible — a Kenney tree is
+  authored with a separate trunk material, so every trunk was drawn in the canopy's green, and a
+  building whose whole colour lives in a texture atlas was drawn in one flat beige. ⚠️ **The palette
+  is still enumerable and still asserted**, by `apps/web/src/game/scenery-palette.ts`
+  §`SCENERY_PALETTE` — a table in source recording, per model, how many distinct colours it
+  contributes, the brightest of them and a digest of the set, reproduced from the committed bytes by
+  a reader that shares no line with the renderer. A pack swap, a re-export or an edited table is a
+  red build, which is what D-7 was protecting and is strictly more than a comment could.
+
+  Two consequences worth recording, because neither is obvious from the change:
+
+  - **The atlas is fetched where it was refused.** `sceneryResourceUrl` used to answer
+    `Textures/colormap.png` with 68 bytes of transparent PNG. The image is now committed
+    (`ASSETS.toml`, CC0-1.0, the same City Kit archive) and that request is answered with **our** copy
+    of it. The refusal is therefore a *redirection*, and the property it now states is stronger and
+    is about the function's range: every answer it gives is a URL of this repository's own, so a
+    future model declaring a host cannot reach one. No texture reaches the GPU —
+    `game.browser.spec.ts` counts `gl.createTexture` against a baseline rather than taking that on
+    trust.
+  - **A pack's colours clip, and more of them than a spot check suggests.** Measured with
+    `model-bytes-testing.ts`' own reader over the committed bytes on 2026-09-19: **13 of the 110
+    distinct colours the eleven models carry, in 7 of those 11 models**, exceed the ceiling
+    `three-renderer.test.ts` §"lights no colour past white" imposes, which is **0.8830**. Every
+    building's atlas peaks at 0.9734; `woodBark` is 0.8863 and `stone` 0.9098. For a colour out of a
+    pack there is nobody to ask for a darker one, so `scenery-palette.ts` §`tonedForTheSun` applies
+    the rule instead of checking it, scaling a colour uniformly so hue and channel ratios survive
+    and only lightness moves.
+
+  D-1, D-2, D-3, D-5 and D-6 are untouched.
+  ([#366](https://github.com/openzigs/onyourleft/issues/366))
+
+- **2026-09-19** — **D-3's *"the set stays at six"* is unchanged; D-2's "one pack" now supplies
+  eleven files rather than five.** [#367](https://github.com/openzigs/onyourleft/issues/367) gives
+  each kind several shapes — three buildings and two of each natural kind — because every building
+  in the world was the same building and so was every tree. ⚠️ **No new licence surface**: the files
+  come from the same two CC0 Kenney archives `ASSETS.toml` already records, so `ASSET004` admits
+  them as they are and ADR 0023's attribution obligation is not engaged. **The number of *kinds* is
+  still six**, and D-3's rule that a seventh arrives as its own issue with its own placement
+  question is untouched.
+
+  What this decision did not anticipate, and what the issue is really about, is the **draw-call**
+  cost: a variant is a distinct merged geometry, therefore a distinct `InstancedMesh`, therefore a
+  draw call — #240's NFR-2, which `three-renderer.ts` calls *"the one thing a model is most likely
+  to spend without anybody noticing"*. So the count is capped in source
+  (`scenery-models.ts` §`MAXIMUM_SCENERY_VARIANTS`, three), it is a rung on the quality ladder
+  (`quality.ts` §`QualitySettings.sceneryVariants`, 3 → 2 → 1 → 1) so a throttling phone draws fewer
+  distinct shapes before it loses items, and what the belt actually submits is **measured in a
+  driver and printed** rather than reasoned about. Measured on 2026-09-19 in the pinned Chromium:
+  **12 scenery draw calls at three shapes a kind, 11 at two and 6 at one**, against a scenery-free
+  scene of 5. ⚠️ That is a desktop software rasteriser and not the device floor;
+  [`docs/validation/0002-android-shell-and-game.md`](../validation/0002-android-shell-and-game.md)
+  Part M is the procedure for the floor and its result table is empty, exactly as Part H's was left
+  by #341.
+
+  ⚠️ **D-4's *"a different arrangement of scenery is a defect"* survives intact and was checked**:
+  `arrangement-unchanged.test.ts`' digest did not move, because a variant is drawn from a hash
+  stream of its own. Variants change what stands somewhere, never where.
+  ([#367](https://github.com/openzigs/onyourleft/issues/367))

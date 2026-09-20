@@ -173,7 +173,13 @@ import {
   type RiderPart,
 } from './bicycle';
 import type { QualitySettings } from './quality';
-import { SCENERY_MODEL_FILES, sceneryResourceUrl } from './scenery-models';
+import {
+  MAXIMUM_SCENERY_VARIANTS,
+  SCENERY_MODELS,
+  sceneryResourceUrl,
+  type SceneryModel,
+} from './scenery-models';
+import { atlasColourAt, tonedForTheSun, type AtlasImage, type LinearRgb } from './scenery-palette';
 import { CAMERA_BEHIND_METRES } from './port';
 import type { CameraPose, GameRenderer, GameView, RiderMarker, SceneFrame } from './port';
 import {
@@ -220,38 +226,79 @@ export const CAMERA_TARGET_AHEAD_METRES = 25;
 export const CAMERA_FIELD_OF_VIEW_DEGREES = 60;
 
 /**
- * Colours, and the shapes that carry the same distinction without them.
+ * What tells the three riders apart — #368.
  *
- * ⚠️ Each marker differs in **shape as well as colour**, which is #93's third
- * criterion taken seriously rather than satisfied with three hues. A rider
- * glancing at a bar-mounted phone in sunlight, possibly with a colour-vision
- * deficiency, has to tell these apart in about a second — and colour alone is
- * exactly what fails in both of those conditions. `views/AnalysisView.tsx` makes
- * the same argument for the same reason.
+ * ⚠️ **All three are bicycles now, and a reviewer who remembers this table
+ * carrying a `radius` and a solid apiece is reading the old file.** #349 gave
+ * the rider a bicycle and left the bot a cone and the ghost an octahedron, on
+ * the ground that *"three silhouettes beat three bicycles in three colours"* for
+ * #93's third criterion. #368 reverses that half: the owner's judgement on
+ * 2026-09-18 is that the trade came out wrong, because *a solid is not
+ * something you race*. `bicycle.ts` carries the replaced note.
+ *
+ * ## What is left to tell them apart, since the shape no longer does
+ *
+ * A **multiplier** on the rider's own four colours, applied per instance. The
+ * bot's orange and the ghost's grey are the hues #93 already settled on and
+ * they are unchanged; what changed is that they now tint a whole bicycle
+ * instead of filling a solid, so the bot reads as an orange machine and the
+ * ghost as a colourless one against the rider's blue-and-silver.
+ *
+ * ⚠️ **The rider's entry is white, which is no tint at all**, and that is what
+ * keeps `bicycle.ts`'s palette the literal thing a rider sees. It is written
+ * down rather than special-cased so that {@link RiderBelt} has one code path
+ * for three riders.
+ *
+ * ⚠️ **A tint rather than a second geometry, because a geometry is a draw
+ * call.** The rider's colours are baked into its vertices, so three bicycles in
+ * three palettes would be three geometries, three materials and nine draw
+ * calls. Multiplying per instance keeps all three riders inside **one**
+ * `InstancedMesh` per moving part — three calls for the lot, which is fewer
+ * than the five #349 left behind. `game.browser.spec.ts` measures it.
+ *
+ * ⚠️ **Translucency was considered for the ghost and rejected**, which #368
+ * raises directly: a transparent mesh needs depth sorting, cannot share an
+ * opaque material, and would therefore cost the ghost a draw call of its own
+ * and put a sorted object into a scene that has none. A desaturated grey reads
+ * as a ghost at every distance measured and costs nothing.
  */
-const MARKER_STYLE: Record<SolidMarkerKind, { colour: number; radius: number }> = {
-  bot: { colour: 0xc2410c, radius: 0.8 },
-  ghost: { colour: 0x64748b, radius: 0.8 },
+const RIDER_TINTS: Record<RiderMarker['kind'], number> = {
+  rider: 0xffffff,
+  bot: 0xc2410c,
+  ghost: 0x64748b,
 };
 
 /**
- * The markers that are still a solid: the bot and the ghost.
+ * The three, in the order {@link RiderBelt} reserves instance slots for.
  *
- * ⚠️ **The rider is no longer one of them — #349, and a reviewer who remembers
- * `MARKER_STYLE.rider` carrying a sphere of radius 0.9 is reading the old
- * file.** It is a bicycle now, built by {@link RiderModel} from `bicycle.ts`'s
- * parts; its blue survives as `RIDER_PALETTE.jersey`, unchanged, because #93's
- * third criterion is about telling the three apart and the hue is half of how a
- * rider does that.
- *
- * ⚠️ **Derived by subtraction rather than typed out**, so a fourth marker kind
- * added to `port.ts` is a compile error here — which is the question anyone
- * adding one has to answer: does it get a silhouette of its own, or a solid?
+ * ⚠️ **Derived from the tints rather than typed out**, so a fourth marker kind
+ * added to `port.ts` lands here automatically and gets a tint or a compile
+ * error rather than being silently undrawn.
  */
-type SolidMarkerKind = Exclude<RiderMarker['kind'], 'rider'>;
+const RIDDEN_KINDS = Object.keys(RIDER_TINTS) as readonly RiderMarker['kind'][];
 
-/** The two, as a list to build from. @see SolidMarkerKind */
-const SOLID_MARKER_KINDS: readonly SolidMarkerKind[] = ['ghost', 'bot'];
+/**
+ * Everything one rider's leg pose depends on, in the order {@link RiderBelt}
+ * stores it — five numbers a slot.
+ *
+ * ⚠️ **The four before the angle are the rider's own world transform**, and
+ * leaving them out is the defect #366–#368's review found: a leg segment's
+ * matrix is composed in world space, so it goes stale when the rider moves as
+ * readily as when the cranks turn. Written out rather than left implicit
+ * because the reason the position belongs in an *animation* cache is not
+ * obvious from the call site. The scale is not here: every rider is drawn at 1.
+ */
+const POSE_KEY = ['x', 'y', 'z', 'yaw', 'crankAngle'] as const;
+
+/**
+ * The tints that are not white: the bot's and the ghost's.
+ *
+ * Only these go into {@link LIT_COLOURS}. The rider's is white and would fail
+ * the brightness bound on its own, which is correct and says nothing: white
+ * multiplied by a palette is that palette, and every colour of it is already in
+ * the list through `BICYCLE_COLOURS`.
+ */
+const TINTED_KINDS: readonly RiderMarker['kind'][] = ['bot', 'ghost'];
 
 /**
  * How far the ground plane reaches from the camera, in metres.
@@ -651,26 +698,56 @@ export function sceneryFitMetres(kind: ScatterKind): number {
 }
 
 /**
- * One loaded model, as the single geometry the belt instances — #341.
+ * One loaded model, as the single geometry the belt instances — #341, #366.
  *
  * ## What is taken from the file, and what is dropped on the floor
  *
  * **Taken:** positions and normals, in world space, from every mesh in the
- * file. **Dropped:** the materials, the texture coordinates and the tangents.
+ * file, and — since #366 — each part's own **colour**, baked into a `COLOR_0`
+ * attribute. **Dropped:** the materials themselves, the texture coordinates,
+ * the tangents and any texture.
  *
- * ⚠️ Dropping the materials is not a simplification, it is the requirement.
- * #341 replaces *"the **geometry** and nothing else"*, so every kind keeps the
- * colour {@link SCATTER_STYLE} gives it — which is what keeps
- * {@link LIT_COLOURS} a complete statement of the scene's palette, and what
- * stops a pack's house style deciding what this world looks like. ADR 0022 D-7
- * is the other half: a `MeshStandardMaterial` a loader built from a binary
- * appears in no source file, so `three-seam.test.ts` could not see one, and it
- * would change how the whole scene is shaded. Nothing survives to be seen.
+ * ⚠️ **The colour used to be dropped too, and a reviewer who remembers this
+ * comment saying so is reading the old file.** It said that keeping it would
+ * cost `LIT_COLOURS` its completeness, and it stated the price of not keeping
+ * it: *"a Kenney tree is authored with a separate trunk material, and one
+ * colour per kind spends that — the trunk is drawn in the canopy's green"*. It
+ * also drew every building in one flat beige, because a building's whole colour
+ * lives in an atlas. #366 keeps the colour and replaces the completeness claim
+ * with a gate — `scenery-palette.ts` §`SCENERY_PALETTE`, reproduced from the
+ * committed bytes by a reader that shares no code with this file.
  *
- * The cost is stated rather than discovered: a Kenney tree is authored with a
- * separate trunk material, and one colour per kind spends that — the trunk is
- * drawn in the canopy's green. It buys the silhouette, which is what #302
- * asked for.
+ * ⚠️ **Dropping the materials is still the requirement, and it is a different
+ * requirement.** ADR 0022 D-7: a `MeshStandardMaterial` a loader built from a
+ * binary appears in no source file, so `three-seam.test.ts` could not see one,
+ * and it would change how the **whole scene** is shaded. What survives here is
+ * three numbers a vertex carries; the material every mesh wears is still
+ * constructed in this file and is still the one D-7 asked for.
+ *
+ * ## Where a colour comes from, and the two cases
+ *
+ * - **A `baseColorFactor`.** Four of the committed models carry their colour
+ *   this way, one constant per material, and three's `GLTFLoader` has already
+ *   put it on `material.color` in the linear working space. Every vertex of the
+ *   part gets it.
+ * - **A texture atlas.** The buildings carry theirs in one, so each vertex is
+ *   sampled at its own `TEXCOORD_0` — **once, here, at load** — and the image
+ *   is then thrown away. `scenery-palette.ts` §`atlasColourAt` owns the
+ *   sampling rule and the orientation trap inside it.
+ *
+ * ⚠️ **No texture ever reaches the GPU.** The atlas is decoded into bytes with
+ * a 2D canvas and dropped; nothing downstream of this function holds a
+ * `Texture`, the material the belt wears has no `map`, and the `TEXCOORD_0` the
+ * sampling needed is deleted before the merge. That is #366's fourth criterion,
+ * and `game.browser.spec.ts` counts the textures the renderer actually holds
+ * rather than taking this paragraph's word for it.
+ *
+ * ⚠️ Every colour goes through `tonedForTheSun` on the way in. Thirteen of the
+ * hundred and ten values the pack carries clip under `world.ts`'s peak
+ * irradiance — seven of the eleven models hold at least one — and there is
+ * nobody to ask for a darker one; `scenery-palette.ts` §`tonedForTheSun` is
+ * where that is argued and where the measurement is recorded, and it is in that
+ * file because this one must never name a sun constant.
  *
  * ## One geometry, because one draw call
  *
@@ -690,7 +767,11 @@ export function sceneryFitMetres(kind: ScatterKind): number {
  * as a cone would be. The order matters: the box is recomputed after the scale,
  * because scaling a geometry does not move the box it already cached.
  */
-export function prepareSceneryGeometry(source: Object3D, kind: ScatterKind): BufferGeometry {
+export function prepareSceneryGeometry(
+  source: Object3D,
+  kind: ScatterKind,
+  readImage: (image: unknown) => AtlasImage | undefined = readImagePixels,
+): BufferGeometry {
   source.updateWorldMatrix(false, true);
   const parts: BufferGeometry[] = [];
   source.traverse((node) => {
@@ -699,12 +780,15 @@ export function prepareSceneryGeometry(source: Object3D, kind: ScatterKind): Buf
       return;
     }
     const part = mesh.geometry.clone().applyMatrix4(node.matrixWorld);
-    // Everything but position and normal, gone before the merge rather than
-    // after it: `mergeGeometries` refuses a set of parts whose attributes
-    // disagree, and a UV kept for a texture that is never loaded is a third of
-    // a vertex buffer uploaded to a phone for nothing.
+    // ⚠️ **Read before the attributes are stripped**, because the sampling
+    // needs the `TEXCOORD_0` that is about to go.
+    paintFromMaterial(part, mesh.material, readImage);
+    // Everything but position, normal and the colour just baked, gone before
+    // the merge rather than after it: `mergeGeometries` refuses a set of parts
+    // whose attributes disagree, and a UV kept for a texture that is never
+    // uploaded is a third of a vertex buffer uploaded to a phone for nothing.
     for (const name of Object.keys(part.attributes)) {
-      if (name !== 'position' && name !== 'normal') {
+      if (name !== 'position' && name !== 'normal' && name !== 'color') {
         part.deleteAttribute(name);
       }
     }
@@ -761,6 +845,115 @@ export function prepareSceneryGeometry(source: Object3D, kind: ScatterKind): Buf
 }
 
 /**
+ * Bakes one model part's own colour into its vertices — #366.
+ *
+ * ⚠️ **Called before the attributes are stripped**, because the atlas case
+ * needs the `uv` the strip is about to delete. Both cases write the same
+ * attribute, so the merge downstream sees one shape whichever a part took.
+ *
+ * ⚠️ **A part with more than one material throws rather than painting its
+ * first.** three's `GLTFLoader` splits a multi-primitive glTF mesh into one
+ * `Mesh` per material, so it cannot happen for the committed files — which is
+ * exactly why it has to be loud: a future pack that did it would otherwise
+ * paint a whole building in its door's colour, and
+ * {@link loadSceneryModels}'s own fallback would leave the primitive in place
+ * where `game.browser.spec.ts` can see it.
+ */
+function paintFromMaterial(
+  geometry: BufferGeometry,
+  material: Material | Material[] | undefined,
+  readImage: (image: unknown) => AtlasImage | undefined,
+): void {
+  if (Array.isArray(material)) {
+    throw new Error('a model part declares more than one material');
+  }
+  const position = geometry.getAttribute('position') as BufferAttribute | undefined;
+  const vertices = position?.count ?? 0;
+  const surface = material as
+    Partial<{ color: Color; map: { image?: unknown } | null }> | undefined;
+  const map = surface?.map ?? undefined;
+  // ⚠️ `readImage` is a seam and not a convenience: jsdom implements no 2D
+  // context, so the only way to assert what this does with an atlas is to hand
+  // it one. The same shape {@link loadSceneryModels}'s `load` takes.
+  const atlas = map === undefined ? undefined : readImage(map.image);
+  const uv = geometry.getAttribute('uv') as BufferAttribute | undefined;
+  const channels = new Float32Array(vertices * 3);
+  if (atlas !== undefined && uv !== undefined) {
+    for (let at = 0; at < vertices; at += 1) {
+      writeChannels(channels, at, tonedForTheSun(atlasColourAt(atlas, uv.getX(at), uv.getY(at))));
+    }
+  } else {
+    // ⚠️ **White when there is no material at all, which is glTF's own default
+    // rather than a guess** — §3.7.2.1 gives a primitive with no `material` a
+    // base colour factor of `[1, 1, 1, 1]`. It is also what a **textured** part
+    // falls back to when the image could not be read on a platform with no 2D
+    // context, because `GLTFLoader` leaves such a material white: the building
+    // is drawn in one pale grey rather than not at all, which is the same trade
+    // {@link loadSceneryModels} makes for a model that will not load — lose the
+    // detail, keep the ride. Pale rather than white because the toning brings
+    // it under the ceiling.
+    const found = surface?.color;
+    // ⚠️ **Straight off the material with no conversion**, because three's
+    // `GLTFLoader` has already read `baseColorFactor` as linear and a `COLOR_0`
+    // is consumed as linear. `scenery-palette.ts` §`LinearRgb` is where that is
+    // argued, and `bicycle.ts`'s hand-typed hex triples take the other path for
+    // the opposite reason.
+    //
+    const flat = tonedForTheSun(found === undefined ? [1, 1, 1] : [found.r, found.g, found.b]);
+    for (let at = 0; at < vertices; at += 1) {
+      writeChannels(channels, at, flat);
+    }
+  }
+  geometry.setAttribute('color', new BufferAttribute(channels, 3));
+}
+
+function writeChannels(into: Float32Array, at: number, colour: LinearRgb): void {
+  into[at * 3] = colour[0];
+  into[at * 3 + 1] = colour[1];
+  into[at * 3 + 2] = colour[2];
+}
+
+/**
+ * An image three loaded, as the bytes {@link atlasColourAt} needs.
+ *
+ * ⚠️ **The one place a `Texture`'s pixels are read, and the one moment they
+ * exist at all.** The image is drawn into a throwaway 2D canvas, copied out,
+ * and dropped; nothing keeps the canvas, nothing keeps the image, and the
+ * `Texture` the loader built is disposed by {@link loadSceneryModels} before a
+ * frame is ever drawn. So the atlas is **fetched** — one request, 11 784 bytes,
+ * shared by three buildings — and never uploaded.
+ *
+ * `undefined` for anything that cannot be read: a platform with no 2D context,
+ * an image that has not decoded, a canvas the browser refuses to read back.
+ * {@link paintFromMaterial} answers that with the material's own flat colour
+ * rather than failing the model.
+ */
+function readImagePixels(image: unknown): AtlasImage | undefined {
+  const source = image as { width?: number; height?: number } | null | undefined;
+  const width = source?.width ?? 0;
+  const height = source?.height ?? 0;
+  if (!(width > 0) || !(height > 0)) {
+    return undefined;
+  }
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (context === null) {
+      return undefined;
+    }
+    context.drawImage(image as CanvasImageSource, 0, 0);
+    return { width, height, data: context.getImageData(0, 0, width, height).data };
+  } catch {
+    // A tainted canvas throws on read-back. The atlas is same-origin and
+    // bundled, so it cannot be tainted here; this is the guard that keeps a
+    // future asset from taking the ride down with it.
+    return undefined;
+  }
+}
+
+/**
  * The shapes the belt draws, or an empty map before anything has been loaded.
  *
  * ⚠️ **Module state, because what has to outlive a view is not the view's.**
@@ -778,7 +971,7 @@ export function prepareSceneryGeometry(source: Object3D, kind: ScatterKind): Buf
  * — `three-renderer.test.ts` §"the shapes the models bring" — and the browser
  * gate counts the vertices that actually reached a driver.
  */
-let sceneryGeometries: ReadonlyMap<ScatterKind, BufferGeometry> = new Map();
+let sceneryGeometries: ReadonlyMap<ScatterKind, readonly BufferGeometry[]> = new Map();
 
 /** Reads one model's scene out of its file. Replaced in tests; @see loadSceneryModels. */
 async function readModelScene(url: string): Promise<Object3D> {
@@ -809,32 +1002,102 @@ async function readModelScene(url: string): Promise<Object3D> {
  */
 export async function loadSceneryModels(
   load: (url: string) => Promise<Object3D> = readModelScene,
+  readImage: (image: unknown) => AtlasImage | undefined = readImagePixels,
 ): Promise<void> {
-  const loaded = new Map<ScatterKind, BufferGeometry>();
+  const loaded = new Map<ScatterKind, readonly BufferGeometry[]>();
   await Promise.all(
     SCATTER_KINDS.map(async (kind) => {
-      const url = SCENERY_MODEL_FILES[kind];
-      if (url === undefined) {
-        return;
-      }
-      try {
-        loaded.set(kind, prepareSceneryGeometry(await load(url), kind));
-      } catch {
-        // Keep the primitive. @see the note above.
+      const models: readonly SceneryModel[] = SCENERY_MODELS[kind] ?? [];
+      // ⚠️ **Bounded here as well as asserted in `scenery-models.test.ts`.**
+      // The test is what fails a pull request that adds a fourth shape without
+      // measuring what it costs; this is what stops a table that got past it
+      // spending draw calls on a rider's phone. One is a gate and one is a
+      // guard, and #367's own framing is that the budget must be somewhere the
+      // ladder can see.
+      const wanted = models.slice(0, MAXIMUM_SCENERY_VARIANTS);
+      const shapes = await Promise.all(
+        wanted.map(async (model) => {
+          try {
+            const scene = await load(model.url);
+            try {
+              return prepareSceneryGeometry(scene, kind, readImage);
+            } finally {
+              // ⚠️ **What makes "no texture reaches the GPU" structural rather
+              // than a claim about timing.** The loader built a
+              // `MeshStandardMaterial` and, for a building, a `Texture` holding
+              // the atlas; three allocates nothing on the device until the
+              // first draw, so neither has cost anything yet — and neither
+              // exists by the time anything could. ADR 0022 D-7 is about the
+              // material specifically, and this is where it stops being
+              // reachable at all.
+              releaseLoadedScene(scene);
+            }
+          } catch {
+            // Keep the primitive for this variant. @see the note above.
+            return undefined;
+          }
+        }),
+      );
+      // ⚠️ **Holes are dropped rather than left**, so a kind whose second file
+      // failed draws its first shape everywhere instead of drawing nothing at
+      // every other place — `ScatterBelt` takes a variant modulo this list's
+      // length, and a `[geometry, undefined]` would make every other item
+      // vanish. Losing variety is the documented trade; losing items is not.
+      const kept = shapes.filter((shape): shape is BufferGeometry => shape !== undefined);
+      if (kept.length > 0) {
+        loaded.set(kind, kept);
       }
     }),
   );
-  for (const geometry of sceneryGeometries.values()) {
-    geometry.dispose();
+  for (const shapes of sceneryGeometries.values()) {
+    for (const geometry of shapes) {
+      geometry.dispose();
+    }
   }
   sceneryGeometries = loaded;
 }
 
 /**
- * Every colour in this file that a lit material carries — #286.
+ * Releases everything a loaded glTF scene holds, once its colours are baked.
  *
- * ⚠️ **Derived from the two style tables rather than written out**, so a
- * scenery kind or a marker added without a thought for the light budget lands
+ * The geometries are clones by the time {@link prepareSceneryGeometry} is done
+ * with them, so the originals are ours to drop; the materials and the atlas are
+ * the loader's and are what ADR 0022 D-7 forbids reaching the scene.
+ */
+function releaseLoadedScene(source: Object3D): void {
+  source.traverse((node) => {
+    const mesh = node as Partial<Mesh>;
+    mesh.geometry?.dispose();
+    const material = mesh.material;
+    if (material === undefined) {
+      return;
+    }
+    for (const each of Array.isArray(material) ? material : [material]) {
+      (each as Partial<{ map: { dispose?: () => void } | null }>).map?.dispose?.();
+      each.dispose();
+    }
+  });
+}
+
+/**
+ * Every colour **this file** decides that a lit material carries — #286.
+ *
+ * ⚠️ **It is no longer the whole of the scene's palette, and that sentence used
+ * to be its entire point.** Until #366 it was, because every scenery kind was
+ * drawn in one colour from {@link SCATTER_STYLE}; a reviewer who remembers this
+ * comment claiming completeness is reading the old file. The scenery's colours
+ * come out of the models now, and what enumerates and bounds *those* is
+ * `scenery-palette.ts` §`SCENERY_PALETTE` — reproduced from the committed bytes
+ * by a reader that shares no code with this file, which is #366's fifth
+ * criterion. The two together are what D-7 protected; neither is on its own.
+ *
+ * What is left here is everything a **source file** still chooses: the
+ * primitive fallbacks, which is what `post` is always drawn as and what any
+ * kind whose model failed to load falls back to; the rider's palette; and the
+ * two tints the bot and the ghost wear.
+ *
+ * ⚠️ **Derived from the tables rather than written out**, so a scenery kind, a
+ * marker or a rider colour added without a thought for the light budget lands
  * in it automatically. `three-renderer.test.ts` §"lights no colour past white"
  * multiplies each through `world.ts`'s {@link PEAK_IRRADIANCE} in the linear
  * space the shader works in and requires the result to stay under white. That
@@ -847,7 +1110,11 @@ export async function loadSceneryModels(
  */
 export const LIT_COLOURS: readonly number[] = [
   ...SCATTER_KINDS.map((kind) => SCATTER_STYLE[kind].colour),
-  ...SOLID_MARKER_KINDS.map((kind) => MARKER_STYLE[kind].colour),
+  // #368. The bot's and the ghost's, which are **tints** on the rider's own
+  // palette rather than colours of their own since they became bicycles. Each
+  // is a conservative bound on what it produces: a tint multiplies, and both
+  // factors are at most one, so a product can only be darker than either.
+  ...TINTED_KINDS.map((kind) => RIDER_TINTS[kind]),
   // #349. The rider's own four, from the file that decides them, for the reason
   // the two lines above read their tables rather than restating them.
   ...BICYCLE_COLOURS,
@@ -873,27 +1140,19 @@ export const LIT_COLOURS: readonly number[] = [
  */
 const LAMBERT_IRRADIANCE_SCALE = Math.PI;
 
-/** A material and its unlit twin, built once. @see QualitySettings.shading */
+/**
+ * A material and its unlit twin, built once. @see QualitySettings.shading
+ *
+ * ⚠️ **There is no longer a `shadedMaterials(colour)` beside this, and a
+ * reviewer who remembers one is reading the old file.** Since #366 the scenery
+ * takes its colour from its vertices exactly as the rider already did, so no
+ * material in the scene holds a colour and there is nothing for a
+ * colour-taking constructor to do. {@link vertexColouredMaterials} is what
+ * every pair is built by now.
+ */
 interface ShadedMaterials {
   readonly lit: MeshLambertMaterial;
   readonly flat: MeshBasicMaterial;
-}
-
-/**
- * One colour, as the two materials a quality rung chooses between.
- *
- * ⚠️ **Both are built up front and neither is ever replaced**, which is what
- * makes {@link QualitySettings.shading} free to change mid-ride: swapping
- * `mesh.material` costs a program compile the first time each is drawn and
- * nothing thereafter, where building a material on the way down the ladder
- * would allocate on the frame a phone is already struggling with. #240's
- * NFR-3, applied to the one path that only runs on a hot device.
- */
-function shadedMaterials(colour: number): ShadedMaterials {
-  return {
-    lit: new MeshLambertMaterial({ color: colour }),
-    flat: new MeshBasicMaterial({ color: colour }),
-  };
 }
 
 /**
@@ -1014,19 +1273,73 @@ export class WorldLamps {
  *    what it needs in exchange is a bounding sphere that is recomputed after
  *    the matrices move, which {@link ScatterBelt.update} does.
  */
+/**
+ * A kind and a variant as one map key — #367.
+ *
+ * A string rather than a nested map because every read is by exactly that pair,
+ * and a map of maps would need a guard at each level for a lookup that can only
+ * miss in one way.
+ */
+function beltKey(kind: ScatterKind, variant: number): string {
+  return `${kind}:${String(variant)}`;
+}
+
+/**
+ * A kind's generated solid, with its own colour baked into its vertices — #366.
+ *
+ * ⚠️ **This is what lets one material serve the whole belt.** A primitive
+ * carries no colour of its own, so before #366 each kind wore a material built
+ * from {@link SCATTER_STYLE}'s entry; now that a model's vertices carry theirs,
+ * a primitive that did not would have to be the one exception and would cost a
+ * material and a draw call to be it. Painting it here puts `post` — and any
+ * kind whose model failed to load — on exactly the same footing as a model,
+ * which is the same move {@link prepareSceneryGeometry} makes from the other
+ * side.
+ *
+ * ⚠️ Through {@link paintEveryVertex}, so the hex triple goes through three's
+ * `Color` and is converted from sRGB. A model's own factor does **not** take
+ * that path, because it is linear already — `scenery-palette.ts` §`LinearRgb`.
+ */
+function paintedPrimitive(kind: ScatterKind): BufferGeometry {
+  const geometry = SCATTER_STYLE[kind].geometry();
+  paintEveryVertex(geometry, SCATTER_STYLE[kind].colour);
+  return geometry;
+}
+
 export class ScatterBelt {
-  readonly #meshes = new Map<ScatterKind, InstancedMesh>();
   /**
-   * Each kind's lit material and its unlit twin, built once — #286.
+   * One mesh per kind **per variant** — #367.
+   *
+   * ⚠️ Keyed by {@link beltKey}, which is a string rather than a nested map
+   * because every read is by exactly that pair and a map of maps would need a
+   * guard at each one.
+   */
+  readonly #meshes = new Map<string, InstancedMesh>();
+  /** Which variants each kind actually has a shape for, in order. */
+  readonly #shapes = new Map<ScatterKind, number>();
+  /**
+   * The belt's lit material and its unlit twin, built once — #286, #366.
+   *
+   * ⚠️ **One pair for the whole belt, where it used to be one pair per kind.**
+   * Since #366 every vertex carries its own colour, so a material no longer
+   * holds one and there is nothing left for a kind to have its own of — which
+   * is also what keeps twelve meshes down to two materials, and a material
+   * swap on the way down the ladder to one assignment per mesh.
    *
    * ⚠️ **Both, from the constructor, for the reason every other buffer here is
    * allocated up front:** the rung that turns the shading off is reached only
    * on a device that is already too hot, and building a material there is an
-   * allocation on the worst frame of the ride. @see shadedMaterials
+   * allocation on the worst frame of the ride. @see vertexColouredMaterials
    */
-  readonly #materials = new Map<ScatterKind, ShadedMaterials>();
-  /** Survivors of the cull, per kind, for the frame being built. */
-  readonly #counts = new Map<ScatterKind, number>();
+  readonly #materials = vertexColouredMaterials();
+  /**
+   * Survivors of the cull, per mesh, for the frame being built.
+   *
+   * ⚠️ Keyed by {@link beltKey} since #367, the same key {@link #meshes} is:
+   * the two passes below reserve and write against it, and a count kept per
+   * *kind* would size one variant's buffer for every variant's items.
+   */
+  readonly #counts = new Map<string, number>();
   /** Reused every instance of every frame — see the header's first point. */
   readonly #matrix = new Matrix4();
   readonly #position = new Vector3();
@@ -1049,51 +1362,115 @@ export class ScatterBelt {
   #budget = Number.POSITIVE_INFINITY;
 
   /**
-   * @param models the shapes to draw, by kind. Defaults to whatever
-   * {@link loadSceneryModels} has loaded, which is what the shipped client
-   * gets; a kind with no entry is drawn as {@link SCATTER_STYLE}'s primitive,
-   * which is `post` always and any other kind whose file could not be read.
+   * The most distinct shapes one kind may be drawn as this frame — #367.
+   *
+   * The quality rung's `sceneryVariants`, applied by
+   * {@link ScatterBelt.setVariants}. Starts at the ceiling for the reason
+   * {@link ScatterBelt.#budget} starts unbounded: a belt is a mechanism and a
+   * rung is a policy, and `ThreeGameView`'s constructor applies one before it
+   * draws anything.
    */
-  constructor(models: ReadonlyMap<ScatterKind, BufferGeometry> = sceneryGeometries) {
+  #variants = MAXIMUM_SCENERY_VARIANTS;
+
+  /**
+   * @param models the shapes to draw, by kind, in variant order. Defaults to
+   * whatever {@link loadSceneryModels} has loaded, which is what the shipped
+   * client gets; a kind with no entry is drawn as {@link SCATTER_STYLE}'s
+   * primitive, which is `post` always and any other kind whose files could not
+   * be read.
+   */
+  constructor(models: ReadonlyMap<ScatterKind, readonly BufferGeometry[]> = sceneryGeometries) {
     for (const kind of SCATTER_KINDS) {
-      const materials = shadedMaterials(SCATTER_STYLE[kind].colour);
-      this.#materials.set(kind, materials);
-      const model = models.get(kind);
-      const mesh = new InstancedMesh(
-        // ⚠️ **A copy of the model, not the model.** {@link dispose} releases
-        // every geometry the belt is wearing, and the loaded ones are shared
-        // by every belt this tab ever builds — a view that released them on
-        // teardown would leave the next ride's world made of primitives, with
-        // nothing to say why. A copy costs about 30 kB for the largest kind,
-        // once per view.
-        model === undefined ? SCATTER_STYLE[kind].geometry() : model.clone(),
-        // ⚠️ **Lit since #286, and this is the file's biggest change of mind.**
-        // It used to say *"no lighting means no light budget"* here, which was
-        // a performance claim with no measurement behind it — #286's own
-        // framing. It is a `MeshLambertMaterial` now, so a conifer has a
-        // sunward face and a shaded one; the `flat` twin beside it is exactly
-        // the material that used to be here, and the bottom rung of
-        // `QUALITY_LADDER` puts it back. The cost is measured in
-        // `game.browser.spec.ts` rather than argued about here.
-        materials.lit,
-        SCATTER_INSTANCE_CAPACITY,
-      );
-      // The buffer is rewritten every frame, so tell the driver that rather
-      // than letting it hint STATIC_DRAW for something that never is.
-      mesh.instanceMatrix.setUsage(DynamicDrawUsage);
-      // three's constructor fills every slot with the identity matrix and sets
-      // `count` to the capacity. A belt that drew before its first frame would
-      // draw the whole capacity stacked at the origin.
-      mesh.count = 0;
-      mesh.visible = false;
-      this.#meshes.set(kind, mesh);
+      const shapes = models.get(kind) ?? [];
+      this.#shapes.set(kind, Math.max(1, Math.min(MAXIMUM_SCENERY_VARIANTS, shapes.length)));
+      for (let variant = 0; variant < (this.#shapes.get(kind) ?? 1); variant += 1) {
+        const model = shapes[variant];
+        const mesh = new InstancedMesh(
+          // ⚠️ **A copy of the model, not the model.** {@link dispose} releases
+          // every geometry the belt is wearing, and the loaded ones are shared
+          // by every belt this tab ever builds — a view that released them on
+          // teardown would leave the next ride's world made of primitives, with
+          // nothing to say why. A copy costs about 30 kB for the largest kind,
+          // once per view.
+          model === undefined ? paintedPrimitive(kind) : model.clone(),
+          // ⚠️ **Lit since #286, and this is the file's biggest change of
+          // mind.** It used to say *"no lighting means no light budget"* here,
+          // which was a performance claim with no measurement behind it —
+          // #286's own framing. It is a `MeshLambertMaterial` now, so a conifer
+          // has a sunward face and a shaded one; the `flat` twin beside it is
+          // exactly the material that used to be here, and the bottom rung of
+          // `QUALITY_LADDER` puts it back. The cost is measured in
+          // `game.browser.spec.ts` rather than argued about here.
+          //
+          // ⚠️ **It takes its colour from the vertices since #366**, which is
+          // why it is one material for the whole belt rather than one a kind.
+          this.#materials.lit,
+          SCATTER_INSTANCE_CAPACITY,
+        );
+        // The buffer is rewritten every frame, so tell the driver that rather
+        // than letting it hint STATIC_DRAW for something that never is.
+        mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+        // three's constructor fills every slot with the identity matrix and
+        // sets `count` to the capacity. A belt that drew before its first frame
+        // would draw the whole capacity stacked at the origin.
+        mesh.count = 0;
+        mesh.visible = false;
+        this.#meshes.set(beltKey(kind, variant), mesh);
+      }
       this.#counts.set(kind, 0);
     }
   }
 
-  /** The meshes, by kind. Six of them, whatever the frame holds. */
-  get meshes(): ReadonlyMap<ScatterKind, InstancedMesh> {
+  /**
+   * The meshes, by kind and variant. Twelve of them, whatever the frame holds.
+   *
+   * ⚠️ **Keyed by {@link beltKey} since #367, where it used to be keyed by kind
+   * alone** — a reviewer who remembers `belt.meshes.get('rock')` is reading the
+   * old file. {@link ScatterBelt.meshesOf} is the accessor that still takes a
+   * kind.
+   */
+  get meshes(): ReadonlyMap<string, InstancedMesh> {
     return this.#meshes;
+  }
+
+  /** Every mesh one kind is drawn across. @see ScatterBelt.meshes */
+  meshesOf(kind: ScatterKind): readonly InstancedMesh[] {
+    const found: InstancedMesh[] = [];
+    for (let variant = 0; variant < (this.#shapes.get(kind) ?? 0); variant += 1) {
+      const mesh = this.#meshes.get(beltKey(kind, variant));
+      if (mesh !== undefined) {
+        found.push(mesh);
+      }
+    }
+    return found;
+  }
+
+  /**
+   * How many distinct shapes this rung will draw a kind as — #367.
+   *
+   * Applies a budget; never decides one, exactly as
+   * {@link ScatterBelt.setBudget} does not decide an item count. Allocates
+   * nothing: every mesh exists from the constructor and a rung below the
+   * ceiling simply leaves some of them at `count === 0`, which three's own
+   * `renderInstances` returns early on.
+   *
+   * ⚠️ **Floored at one.** {@link ScatterBelt.#keyFor} takes an item's variant
+   * modulo this, so a zero would be a division by zero and a world with nothing
+   * standing beside the road. `quality.ts` states the same floor from the other
+   * side.
+   *
+   * ⚠️ **Unlike {@link ScatterBelt.setBudget}, the LINE THAT CALLS THIS IS
+   * COVERED**, and the difference is worth stating because that method's own
+   * note records the hole. `scene.ts` thins a frame to the same item count the
+   * belt is budgeted with, so an unbudgeted belt submits exactly what a
+   * budgeted one would and deleting `setBudget`'s call site leaves the whole
+   * suite green. Nothing thins a frame by *variant*, so deleting this one's
+   * call site leaves every rung drawing every shape — which
+   * `game.browser.spec.ts` §"spends a bounded number of draw calls" counts in a
+   * driver. Measured by mutation rather than reasoned about.
+   */
+  setVariants(variants: number): void {
+    this.#variants = Math.max(1, Math.floor(variants));
   }
 
   /**
@@ -1103,11 +1480,8 @@ export class ScatterBelt {
    * geometry and no matrix. @see QualitySettings.shading
    */
   setShading(shading: QualitySettings['shading']): void {
-    for (const [kind, mesh] of this.#meshes) {
-      const materials = this.#materials.get(kind);
-      if (materials !== undefined) {
-        mesh.material = materials[shading];
-      }
+    for (const mesh of this.#meshes.values()) {
+      mesh.material = this.#materials[shading];
     }
   }
 
@@ -1190,12 +1564,13 @@ export class ScatterBelt {
    * a guard the two passes do not share is a guard that can disagree.
    */
   update(items: readonly ScatterItem[], pose: CameraPose): void {
-    for (const kind of SCATTER_KINDS) {
-      this.#counts.set(kind, 0);
+    for (const key of this.#meshes.keys()) {
+      this.#counts.set(key, 0);
     }
     let admitted = 0;
     for (const item of items) {
-      const mesh = this.#meshes.get(item.kind);
+      const key = this.#keyFor(item);
+      const mesh = this.#meshes.get(key);
       if (mesh === undefined || !this.#inView(item, pose)) {
         continue;
       }
@@ -1203,17 +1578,17 @@ export class ScatterBelt {
         break;
       }
       admitted += 1;
-      this.#counts.set(item.kind, (this.#counts.get(item.kind) ?? 0) + 1);
+      this.#counts.set(key, (this.#counts.get(key) ?? 0) + 1);
     }
-    for (const [kind, mesh] of this.#meshes) {
-      reserve(mesh, this.#counts.get(kind) ?? 0);
+    for (const [key, mesh] of this.#meshes) {
+      reserve(mesh, this.#counts.get(key) ?? 0);
       // Rewound here rather than tracked in a second map: the next loop uses
       // `mesh.count` as its write cursor and this is where it starts.
       mesh.count = 0;
     }
     admitted = 0;
     for (const item of items) {
-      const mesh = this.#meshes.get(item.kind);
+      const mesh = this.#meshes.get(this.#keyFor(item));
       if (mesh === undefined || !this.#inView(item, pose)) {
         continue;
       }
@@ -1254,14 +1629,12 @@ export class ScatterBelt {
       mesh.geometry.dispose();
       mesh.dispose();
     }
-    // ⚠️ **Both materials, not `mesh.material`** — since #286 each kind holds
-    // a lit one and an unlit one and only one of them is mounted, so disposing
-    // what the mesh happens to be wearing leaks the other's program for the
-    // life of the context. The belt owns the pair, so the belt releases it.
-    for (const materials of this.#materials.values()) {
-      materials.lit.dispose();
-      materials.flat.dispose();
-    }
+    // ⚠️ **Both materials, not `mesh.material`** — since #286 the belt holds a
+    // lit one and an unlit one and only one of them is mounted, so disposing
+    // what a mesh happens to be wearing leaks the other's program for the life
+    // of the context. The belt owns the pair, so the belt releases it.
+    this.#materials.lit.dispose();
+    this.#materials.flat.dispose();
   }
 
   /**
@@ -1278,6 +1651,28 @@ export class ScatterBelt {
    * is a **cone**, because that is what a perspective camera can see — #269,
    * and {@link lateralReachMetres} carries the derivation and the measurement.
    */
+  /**
+   * Which mesh an item is drawn by — its kind, and its variant folded into
+   * however many shapes that kind has at this rung.
+   *
+   * ⚠️ **Modulo rather than `min`**, and the difference is visible. Clamping a
+   * variant to the last shape a kind has would pile every item above the count
+   * onto one shape: at a two-shape kind with six slots that is a third-two-
+   * thirds split, and at a rung of one variant it is the same thing again from
+   * the other end. The remainder keeps whatever split the slots had — which is
+   * why `scatter.ts` §`SCATTER_VARIANT_SLOTS` is six.
+   */
+  #keyFor(item: ScatterItem): string {
+    const shapes = Math.min(this.#shapes.get(item.kind) ?? 1, this.#variants);
+    // ⚠️ **A variant that is not an integer falls back to the first shape
+    // rather than to no mesh at all.** `NaN % 2` is `NaN`, which names no key,
+    // which drops the item — and scenery a caller placed and the screen never
+    // showed is #240's named defect shape for this epic. `scatter.ts` cannot
+    // produce one; a caller that built a frame some other way can.
+    const wanted = Number.isInteger(item.variant) ? item.variant : 0;
+    return beltKey(item.kind, ((wanted % shapes) + shapes) % shapes);
+  }
+
   #inView(item: ScatterItem, pose: CameraPose): boolean {
     const dx = item.x - pose.x;
     const dz = item.z - pose.z;
@@ -1291,35 +1686,55 @@ export class ScatterBelt {
 }
 
 /**
- * The rider: a bicycle, somebody on it, and cranks that turn — #349.
+ * The riders: three bicycles, the people on them, and cranks that turn —
+ * #349, #368.
  *
- * ## Three objects, and why it is three rather than nineteen or one
+ * ## Three objects for three riders, and why it is three rather than nine
  *
  * `bicycle.ts` describes about two dozen solids. Drawn one mesh at a time that
  * would be two dozen draw calls for the one object in the middle of the frame,
- * against the **six** #244 spends on all the scenery — so the parts are merged,
- * exactly as `ScatterBelt` merges a model's own parts and `terrain.ts` merges
- * the road's four features into one buffer. The split into three is the
- * minimum the motion requires:
+ * against the **twelve** #367 spends on all the scenery — so the parts are
+ * merged, exactly as {@link ScatterBelt} merges a model's own parts and
+ * `terrain.ts` merges the road's four features into one buffer. The split into
+ * three is the minimum the motion requires:
  *
  * | | what it is | why it is not merged into its neighbour |
  * |---|---|---|
- * | {@link #body} | the frame, the wheels and the rider | it never moves relative to the marker |
- * | {@link #cranks} | the chainring, the arms and the pedals | ⚠️ it **rotates**, about its own axis |
- * | {@link #limbs} | four leg segments, instanced | ⚠️ each moves **independently** every time the cranks do |
+ * | {@link #bodies} | the frame, the wheels and the rider | it never moves relative to the marker |
+ * | {@link #cranksets} | the chainring, the arms and the pedals | ⚠️ it **rotates**, about its own axis |
+ * | {@link #limbs} | four leg segments each | ⚠️ each moves **independently** every time the cranks do |
  *
- * ⚠️ **Every part carries its colour as vertex data**, which is what keeps four
- * colours down to one material — and a material is a draw call. The same trade
- * `terrain.ts` takes for the road's edge lines, and the reason this file's own
- * header can go on saying the road's material names no colour.
+ * ⚠️ **It is three for one rider and three for all three, and that is #368's
+ * whole affordability argument.** Each of those is an `InstancedMesh` now, so
+ * the bot and the ghost cost **no draw call at all** — they are two more
+ * instances in buffers that already exist. The scene went from five calls for
+ * a bicycle and two solids to three for three bicycles.
+ *
+ * ⚠️ **What tells them apart is {@link RIDER_TINTS}, per instance.** The
+ * colours are baked into the vertices, so three palettes would be three
+ * geometries and nine calls; `instanceColor` multiplies the shared palette
+ * instead — three's own `color_vertex.glsl.js` does `vColor.rgb *=
+ * instanceColor.rgb` — which costs three floats an instance and nothing else.
+ * `bicycle.ts` carries the replaced note about why they used to be solids.
  *
  * ## What is rebuilt per frame, and what deliberately is not
  *
- * Nothing is allocated in {@link place}. The group's position and rotation are
- * two assignments; the cranks are one; the legs are four matrix composes into a
- * buffer that already exists — and those four are **skipped entirely when the
- * crank angle has not moved**, which is every frame of a ride with no cadence
- * sensor on it. #240's NFR-3.
+ * Nothing is allocated in {@link place}: every rider is two matrix composes
+ * into buffers that already exist, and its legs are four more — and those four
+ * are **skipped when nothing that rider's legs were solved for has changed**,
+ * which is {@link POSE_KEY}: its place, its heading and its crank angle. A
+ * stationary bot, or a rider on a paused ride, costs nothing. ⚠️ A rider who
+ * is *moving* and not pedalling does not: the legs are in world space and have
+ * to come with them. #240's NFR-3, with the correction #366–#368's review
+ * made to it.
+ *
+ * ⚠️ **Slots are filled in the order the frame's markers arrive**, so the
+ * tints are rewritten each frame rather than once at construction: a frame
+ * that carries a ghost and no bot puts the ghost in the slot the bot had.
+ * Writing three floats three times is cheaper than the alternative — a fixed
+ * slot per kind, with absent riders hidden by a zero scale, which submits
+ * instances that exist only to draw nothing and is the shape #240 names as a
+ * defect elsewhere in this file.
  *
  * ## Why it is a class, and why it is exported
  *
@@ -1328,39 +1743,77 @@ export class ScatterBelt {
  * and something reachable only through {@link ThreeGameView} cannot be driven
  * at all in jsdom, where a `WebGLRenderer` cannot be constructed.
  */
-export class RiderModel {
+export class RiderBelt {
   readonly #group = new Group();
   readonly #materials = vertexColouredMaterials();
-  readonly #body: Mesh;
-  readonly #cranks: Mesh;
+  readonly #bodies: InstancedMesh;
+  readonly #cranksets: InstancedMesh;
   readonly #limbs: InstancedMesh;
+
   /**
-   * The crank angle the legs in {@link #limbs} were solved for.
+   * What each occupied slot's legs were last solved *for*: five numbers a slot,
+   * laid out as {@link POSE_KEY}.
    *
-   * `undefined` until the first frame, so the first pose is always written —
-   * an `InstancedMesh` starts with identity matrices, which would put all four
-   * leg segments inside the bottom bracket.
+   * ⚠️ **The crank angle is one of the five and on its own it is not enough**,
+   * which is the whole reason this is a key rather than a number. `#poseLegs`
+   * writes a **world** matrix — `this.#rider` times the bone's own local
+   * transform — so a leg is stale the moment the *rider* moves, whether or not
+   * the cranks turned. Keyed on the angle alone, a rider whose cadence sensor
+   * reports nothing (`advanceCrank` returns the angle unchanged, which is every
+   * frame of every power-only ride) is drawn as a bicycle with its legs left
+   * behind at the place the first frame put them. It was keyed on the angle
+   * alone until #366–#368's review, and it was sound before that only because
+   * the limbs then sat in a `Group` carrying the world transform, so their
+   * matrices were in the model's own frame and a move did not touch them.
+   *
+   * Filled with `NaN`, and `NaN !== NaN`, so a slot that has never been posed
+   * always writes — an `InstancedMesh` starts with identity matrices, which
+   * would put all four leg segments inside the bottom bracket.
+   *
+   * ⚠️ **Per slot rather than per kind, and cleared when the layout changes.**
+   * A slot that held the bot last frame and the ghost this frame is a different
+   * rider at the same index, and a cache that did not clear would leave the
+   * ghost's legs wherever the bot's were. The position is now in the key too,
+   * so that case is caught twice over — the clear stays because two riders can
+   * swap slots at the same place on the same frame.
    */
-  #posedAt: number | undefined = undefined;
+  readonly #posed = new Float64Array(RIDDEN_KINDS.length * POSE_KEY.length).fill(Number.NaN);
+  /** Which kind is in which slot, as one string, so a change is one compare. */
+  #layout = '';
 
   readonly #position = new Vector3();
   readonly #turn = new Quaternion();
   readonly #stretch = new Vector3(1, 1, 1);
   readonly #matrix = new Matrix4();
+  readonly #rider = new Matrix4();
+  readonly #local = new Matrix4();
+  readonly #tint = new Color();
+  readonly #up = new Vector3(0, 1, 0);
   readonly #acrossTheBicycle = new Vector3(1, 0, 0);
 
   constructor() {
-    this.#body = new Mesh(mergedParts(RIDER_BODY_PARTS), this.#materials.lit);
-    this.#cranks = new Mesh(mergedParts(RIDER_CRANK_PARTS), this.#materials.lit);
-    // ⚠️ The crank geometry is written in the bottom bracket's own frame, so
-    // the mesh is *mounted* at the axis and turns about its own origin. Baking
-    // the offset into the vertices instead would make `rotation.x` swing the
-    // whole crankset round the bicycle.
-    this.#cranks.position.set(0, CRANK_AXIS_Y, CRANK_AXIS_Z);
-    this.#limbs = new InstancedMesh(limbGeometry(), this.#materials.lit, LEG_BONE_COUNT);
-    this.#limbs.instanceMatrix.setUsage(DynamicDrawUsage);
-    for (const mesh of [this.#body, this.#cranks, this.#limbs]) {
-      // The rider is eight metres in front of the camera on every frame of
+    const riders = RIDDEN_KINDS.length;
+    this.#bodies = new InstancedMesh(mergedParts(RIDER_BODY_PARTS), this.#materials.lit, riders);
+    this.#cranksets = new InstancedMesh(
+      mergedParts(RIDER_CRANK_PARTS),
+      this.#materials.lit,
+      riders,
+    );
+    this.#limbs = new InstancedMesh(limbGeometry(), this.#materials.lit, riders * LEG_BONE_COUNT);
+    for (const mesh of [this.#bodies, this.#cranksets, this.#limbs]) {
+      mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+      // ⚠️ **Allocates `instanceColor` while `count` is still the capacity**,
+      // because three sizes that buffer from `count` at the moment it is first
+      // written. Doing it after the rewind below would give every one of them a
+      // zero-length colour buffer and silently drop the tints.
+      for (let slot = 0; slot < mesh.count; slot += 1) {
+        mesh.setColorAt(slot, this.#tint.setHex(0xffffff));
+      }
+      // three's constructor sets `count` to the capacity and fills every slot
+      // with the identity matrix. A belt that drew before its first frame would
+      // draw three bicycles stacked at the origin.
+      mesh.count = 0;
+      // The riders are within a few metres of the camera on every frame of
       // every ride, so there is nothing for a cull to decide. The same reason
       // the road and the ground set it, and the opposite of the scenery belt.
       mesh.frustumCulled = false;
@@ -1374,7 +1827,7 @@ export class RiderModel {
   }
 
   /**
-   * What the rider is placed by. For `three-renderer.test.ts`, which cannot
+   * What the riders are drawn by. For `three-renderer.test.ts`, which cannot
    * construct a `Scene` of its own — `three-seam.test.ts` allows exactly one
    * file in this repository to import the rendering library, and it is this
    * one. The same reason {@link ScatterBelt.meshes} is a getter.
@@ -1383,57 +1836,166 @@ export class RiderModel {
     return this.#group;
   }
 
-  /** The three meshes, in draw order. @see RiderModel */
-  get meshes(): { readonly body: Mesh; readonly cranks: Mesh; readonly limbs: InstancedMesh } {
-    return { body: this.#body, cranks: this.#cranks, limbs: this.#limbs };
+  /** The three meshes, in draw order. @see RiderBelt */
+  get meshes(): {
+    readonly bodies: InstancedMesh;
+    readonly cranksets: InstancedMesh;
+    readonly limbs: InstancedMesh;
+  } {
+    return { bodies: this.#bodies, cranksets: this.#cranksets, limbs: this.#limbs };
+  }
+
+  /**
+   * Puts this frame's riders on the road, each facing along it, with the cranks
+   * where its own {@link RiderMarker.crankAngle} has turned them.
+   *
+   * ⚠️ **Every marker, in the order the frame carries them**, where this used
+   * to take one. A marker of a kind {@link RIDER_TINTS} does not name is
+   * skipped rather than drawn untinted, which cannot happen for the three
+   * `port.ts` declares and is what a fourth would hit.
+   */
+  place(markers: readonly RiderMarker[]): void {
+    // ⚠️ **`Object.hasOwn`, not `in`.** `RIDER_TINTS` is an object literal, so
+    // `'toString' in RIDER_TINTS` is true through the prototype — and a marker
+    // that got past this with a kind the table does not hold would be handed
+    // `setHex(undefined)` and drawn in a `NaN` colour. The three kinds
+    // `port.ts` declares cannot reach it; a fourth, or a frame built from
+    // parsed data, could.
+    const drawn = markers.filter((marker) => Object.hasOwn(RIDER_TINTS, marker.kind));
+    const layout = drawn.map((marker) => marker.kind).join(',');
+    if (layout !== this.#layout) {
+      this.#layout = layout;
+      this.#posed.fill(Number.NaN);
+    }
+    let slot = 0;
+    let posed = false;
+    for (const marker of drawn) {
+      if (slot >= RIDDEN_KINDS.length) {
+        break;
+      }
+      posed = this.#placeOne(slot, marker) || posed;
+      slot += 1;
+    }
+    for (const mesh of [this.#bodies, this.#cranksets]) {
+      mesh.count = slot;
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor !== null) {
+        mesh.instanceColor.needsUpdate = true;
+      }
+    }
+    this.#limbs.count = slot * LEG_BONE_COUNT;
+    // ⚠️ **Only when a leg actually moved, which is what makes the skip a
+    // saving.** Without the flag the matrices are re-uploaded on every frame of
+    // every ride whether or not anybody pedalled, and the `#posed` cache
+    // below saves the arithmetic and none of the bandwidth. Without the line at
+    // all the matrices are written and never uploaded, and the legs stay
+    // wherever the first frame put them — the half of an instanced update that
+    // is impossible to see. `ScatterBelt` says the same thing.
+    if (posed) {
+      this.#limbs.instanceMatrix.needsUpdate = true;
+    }
+    if (this.#limbs.instanceColor !== null) {
+      this.#limbs.instanceColor.needsUpdate = true;
+    }
+    this.#group.visible = slot > 0;
   }
 
   /** Draws no rider at all, for a frame that carries none. */
   hide(): void {
-    this.#group.visible = false;
-  }
-
-  /** Puts the rider on the road, facing along it, with the cranks where the
-   * cadence has turned them. */
-  place(marker: RiderMarker): void {
-    this.#group.visible = true;
-    // ⚠️ **At the marker's own `y`, not lifted by a radius the way the bot and
-    // the ghost are.** `bicycle.ts` puts the wheels on zero itself, so a lift
-    // here would float the bicycle above the road.
-    this.#group.position.set(marker.x, marker.y, marker.z);
-    // The model's `+Z` is the direction of travel; a rotation about `+Y` by
-    // `atan2(headingX, headingZ)` takes `(0, 0, 1)` onto the marker's heading.
-    this.#group.rotation.y = Math.atan2(marker.headingX, marker.headingZ);
-    const angle = marker.crankAngle;
-    if (angle === undefined || angle === this.#posedAt) {
-      return;
-    }
-    this.#cranks.rotation.x = angle;
-    this.#poseLegs(angle);
-    this.#posedAt = angle;
+    this.place([]);
   }
 
   /** @see QualitySettings.shading */
   setShading(shading: QualitySettings['shading']): void {
     const material = this.#materials[shading];
-    this.#body.material = material;
-    this.#cranks.material = material;
+    this.#bodies.material = material;
+    this.#cranksets.material = material;
     this.#limbs.material = material;
   }
 
   dispose(): void {
-    this.#body.geometry.dispose();
-    this.#cranks.geometry.dispose();
-    this.#limbs.geometry.dispose();
-    this.#limbs.dispose();
+    for (const mesh of [this.#bodies, this.#cranksets, this.#limbs]) {
+      mesh.geometry.dispose();
+      mesh.dispose();
+    }
     // Both of each pair, for the reason `ScatterBelt.dispose` gives: only one
     // of the two is mounted, and the other would leak.
     this.#materials.lit.dispose();
     this.#materials.flat.dispose();
   }
 
-  /** Where the four leg segments are, for one crank angle. @see legBones */
-  #poseLegs(crankAngle: number): void {
+  /**
+   * One rider into one slot: its body, its crankset, its tint and its legs.
+   *
+   * @returns whether its legs were re-posed, so that {@link place} uploads the
+   * limb matrices only on a frame where one of them moved.
+   */
+  #placeOne(slot: number, marker: RiderMarker): boolean {
+    // ⚠️ **At the marker's own `y`, not lifted by a radius the way the bot and
+    // the ghost used to be.** `bicycle.ts` puts the wheels on zero itself, so a
+    // lift here would float every bicycle above the road. #368 is the change
+    // that made that true of all three; before it, two of them were solids
+    // centred on their own origin and had to be raised.
+    this.#position.set(marker.x, marker.y, marker.z);
+    // The model's `+Z` is the direction of travel; a rotation about `+Y` by
+    // `atan2(headingX, headingZ)` takes `(0, 0, 1)` onto the marker's heading.
+    const yaw = Math.atan2(marker.headingX, marker.headingZ);
+    this.#turn.setFromAxisAngle(this.#up, yaw);
+    this.#stretch.setScalar(1);
+    this.#rider.compose(this.#position, this.#turn, this.#stretch);
+    this.#bodies.setMatrixAt(slot, this.#rider);
+    this.#bodies.setColorAt(slot, this.#tint.setHex(RIDER_TINTS[marker.kind]));
+
+    // ⚠️ The crank geometry is written in the bottom bracket's own frame, so
+    // the crankset is *mounted* at the axis and turns about its own origin.
+    // Baking the offset into the vertices instead would make the rotation swing
+    // the whole crankset round the bicycle.
+    // ⚠️ **A frame that carries no angle holds the one this slot already had**,
+    // which is what stops a bot's cranks snapping to top dead centre. `NaN` is
+    // "never posed", and it has to become `0` rather than being carried into a
+    // matrix — a `NaN` angle composes a `NaN` crankset and three loses the
+    // whole mesh.
+    const held = this.#posed[slot * POSE_KEY.length + 4] ?? Number.NaN;
+    const angle = marker.crankAngle ?? (Number.isNaN(held) ? 0 : held);
+    this.#position.set(0, CRANK_AXIS_Y, CRANK_AXIS_Z);
+    this.#turn.setFromAxisAngle(this.#acrossTheBicycle, angle);
+    this.#local.compose(this.#position, this.#turn, this.#stretch);
+    this.#cranksets.setMatrixAt(slot, this.#matrix.multiplyMatrices(this.#rider, this.#local));
+    this.#cranksets.setColorAt(slot, this.#tint);
+
+    for (let bone = 0; bone < LEG_BONE_COUNT; bone += 1) {
+      this.#limbs.setColorAt(slot * LEG_BONE_COUNT + bone, this.#tint);
+    }
+    // ⚠️ **All five, not the angle alone.** `#poseLegs` writes world matrices,
+    // so the rider's own place and heading are part of what a pose was solved
+    // for; see {@link POSE_KEY}. A `NaN` in the cache never equals anything,
+    // which is how a slot's first frame always writes.
+    //
+    // ⚠️ **Written out rather than compared through an array**, because a
+    // tuple built here would be one allocation per rider per frame and this
+    // class's own contract is that {@link place} allocates nothing.
+    const at = slot * POSE_KEY.length;
+    const posed = this.#posed;
+    const unmoved =
+      posed[at] === marker.x &&
+      posed[at + 1] === marker.y &&
+      posed[at + 2] === marker.z &&
+      posed[at + 3] === yaw &&
+      posed[at + 4] === angle;
+    if (unmoved) {
+      return false;
+    }
+    this.#poseLegs(slot, angle);
+    posed[at] = marker.x;
+    posed[at + 1] = marker.y;
+    posed[at + 2] = marker.z;
+    posed[at + 3] = yaw;
+    posed[at + 4] = angle;
+    return true;
+  }
+
+  /** Where one rider's four leg segments are, for one crank angle. @see legBones */
+  #poseLegs(slot: number, crankAngle: number): void {
     const bones = legBones(crankAngle);
     for (let index = 0; index < LEG_BONE_COUNT; index += 1) {
       const bone = bones[index];
@@ -1445,15 +2007,13 @@ export class RiderModel {
       // The limb geometry is one metre long, so the bone's own length is the
       // `y` scale and nothing has to be rebuilt when a leg changes shape.
       this.#stretch.set(1, bone.length, 1);
+      this.#local.compose(this.#position, this.#turn, this.#stretch);
       this.#limbs.setMatrixAt(
-        index,
-        this.#matrix.compose(this.#position, this.#turn, this.#stretch),
+        slot * LEG_BONE_COUNT + index,
+        this.#matrix.multiplyMatrices(this.#rider, this.#local),
       );
     }
-    // ⚠️ Without this the matrices are written and never uploaded, and the legs
-    // stay wherever the first frame put them — the half of an instanced update
-    // that is impossible to see. `ScatterBelt` says the same thing.
-    this.#limbs.instanceMatrix.needsUpdate = true;
+    this.#stretch.setScalar(1);
   }
 }
 
@@ -1595,11 +2155,16 @@ class ThreeGameView implements GameView {
   readonly #camera = new PerspectiveCamera(CAMERA_FIELD_OF_VIEW_DEGREES, 1, 0.5, 2_000);
   readonly #roadGeometry = new BufferGeometry();
   readonly #road: Mesh;
-  readonly #markers = new Map<SolidMarkerKind, Mesh>();
-  /** Each marker's lit material and its unlit twin — #286. @see shadedMaterials */
-  readonly #markerMaterials = new Map<SolidMarkerKind, ShadedMaterials>();
-  /** The rider — #349. Not in {@link #markers}, because it is not a solid. */
-  readonly #rider = new RiderModel();
+  /**
+   * The rider, the bot and the ghost — #349, #368.
+   *
+   * ⚠️ **One object for all three, where until #368 the rider was a
+   * `RiderModel` and the other two were a `Map` of solid `Mesh`es beside it.**
+   * A reviewer who remembers `#markers` and `#markerMaterials` is reading the
+   * old file: there are no solid markers left, so there is nothing for a
+   * second collection to hold.
+   */
+  readonly #riders = new RiderBelt();
   /**
    * The world, as three objects built once and mutated thereafter — #240's
    * NFR-3. Every one of them is a fixed instance: the sky is the `Color` the
@@ -1681,21 +2246,9 @@ class ThreeGameView implements GameView {
 
     this.#scatter.addTo(this.#scene);
 
-    for (const kind of SOLID_MARKER_KINDS) {
-      const materials = shadedMaterials(MARKER_STYLE[kind].colour);
-      this.#markerMaterials.set(kind, materials);
-      // Lit since #286, like the scenery and for the same reason: a sphere, a
-      // cone and an octahedron all have a form, and an unlit one is a flat
-      // disc of colour at any distance. @see shadedMaterials
-      const marker = new Mesh(markerGeometry(kind), materials.lit);
-      marker.frustumCulled = false;
-      marker.visible = false;
-      this.#markers.set(kind, marker);
-      this.#scene.add(marker);
-    }
-    // #349. Added here rather than in `render`, so that a frame carrying no
-    // rider draws nothing rather than adding one on the frame it appears.
-    this.#rider.addTo(this.#scene);
+    // #349, #368. Added here rather than in `render`, so that a frame carrying
+    // no rider draws nothing rather than adding one on the frame it appears.
+    this.#riders.addTo(this.#scene);
 
     this.#lighting.addTo(this.#scene);
 
@@ -1729,6 +2282,10 @@ class ThreeGameView implements GameView {
     // property of the belt between frames and the render loop takes no scenery
     // decision at all. @see ScatterBelt.setBudget
     this.#scatter.setBudget(settings.scatterItems);
+    // #367, and the same argument one line up: a rung is a property of the belt
+    // between frames, so the render loop takes no decision about how many
+    // distinct shapes it may draw. @see ScatterBelt.setVariants
+    this.#scatter.setVariants(settings.sceneryVariants);
     this.#applySize();
   }
 
@@ -1741,13 +2298,7 @@ class ThreeGameView implements GameView {
   #applyShading(): void {
     const { shading } = this.#quality;
     this.#scatter.setShading(shading);
-    this.#rider.setShading(shading);
-    for (const [kind, marker] of this.#markers) {
-      const materials = this.#markerMaterials.get(kind);
-      if (materials !== undefined) {
-        marker.material = materials[shading];
-      }
-    }
+    this.#riders.setShading(shading);
   }
 
   resize(widthCssPixels: number, heightCssPixels: number): void {
@@ -1763,18 +2314,7 @@ class ThreeGameView implements GameView {
     disposeMaterial(this.#road.material);
     this.#scatter.dispose();
     this.#lighting.dispose();
-    this.#rider.dispose();
-    for (const marker of this.#markers.values()) {
-      marker.geometry.dispose();
-    }
-    // Both of each pair, for the reason `ScatterBelt.dispose` gives: only one
-    // of the two is mounted, and `marker.material` would leak the other.
-    for (const materials of this.#markerMaterials.values()) {
-      materials.lit.dispose();
-      materials.flat.dispose();
-    }
-    this.#markers.clear();
-    this.#markerMaterials.clear();
+    this.#riders.dispose();
     // `forceContextLoss` before `dispose` because a WebGL context is not
     // garbage-collected promptly and a browser allows only a handful at once —
     // a rider starting five rides in a session would otherwise run out.
@@ -1871,26 +2411,10 @@ class ThreeGameView implements GameView {
   }
 
   #updateMarkers(markers: readonly RiderMarker[]): void {
-    for (const marker of this.#markers.values()) {
-      marker.visible = false;
-    }
-    this.#rider.hide();
-    for (const wanted of markers) {
-      if (wanted.kind === 'rider') {
-        // #349. A bicycle rather than a sphere, and the one marker with a front.
-        this.#rider.place(wanted);
-        continue;
-      }
-      const mesh = this.#markers.get(wanted.kind);
-      if (mesh === undefined) {
-        continue;
-      }
-      mesh.visible = true;
-      // ⚠️ Lifted by the solid's own radius so that it sits ON the road rather
-      // than half through it. The rider is **not** lifted: `bicycle.ts` puts
-      // its wheels on zero itself.
-      mesh.position.set(wanted.x, wanted.y + MARKER_STYLE[wanted.kind].radius, wanted.z);
-    }
+    // #368. One call for all three, and a frame that carries none draws none —
+    // `RiderBelt.place` sets every mesh's count from what it was handed, so
+    // there is no "hide the ones that went" pass left to forget.
+    this.#riders.place(markers);
   }
 
   #placeCamera(pose: CameraPose): void {
@@ -1941,26 +2465,6 @@ class ThreeGameView implements GameView {
 function upload(attribute: BufferAttribute, values: Float32Array | Uint32Array): void {
   (attribute.array as Float32Array | Uint32Array).set(values);
   attribute.needsUpdate = true;
-}
-
-/**
- * A different solid per kind — see {@link MARKER_STYLE}.
- *
- * ⚠️ **Two, not three, since #349.** The rider's sphere is gone;
- * {@link RiderModel} is what draws it, and #93's third criterion is better
- * served by a bicycle, a cone and an octahedron than it was by three balls in
- * three colours.
- */
-function markerGeometry(kind: SolidMarkerKind): BufferGeometry {
-  const { radius } = MARKER_STYLE[kind];
-  switch (kind) {
-    case 'bot':
-      // A cone, which reads as an arrow at a glance and is not a ball.
-      return new ConeGeometry(radius, radius * 2.2, 8);
-    case 'ghost':
-      // Faceted and angular, so it is not a smooth ball at any distance.
-      return new OctahedronGeometry(radius, 0);
-  }
 }
 
 function disposeMaterial(material: Material | Material[]): void {

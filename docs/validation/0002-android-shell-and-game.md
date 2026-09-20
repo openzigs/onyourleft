@@ -947,6 +947,178 @@ say the screen was reporting at the time.
 
 ---
 
+## Part M — what the scenery's colours and its variants cost ([#366](https://github.com/openzigs/onyourleft/issues/366), [#367](https://github.com/openzigs/onyourleft/issues/367))
+
+**#367's fifth acceptance criterion in its own words**: *"Draw calls are **measured** on the device,
+not reasoned about, and the number is published in `docs/validation/0002-android-shell-and-game.md`
+the way Part H publishes the model cost."*
+
+⚠️ **Read Part H's §"The baseline, and where it actually lives" first.** It records that #246's
+committed baseline is not in fact committed — Part F's results table is empty — and that the numbers
+Parts H and K compare against come from a comment on
+[#323](https://github.com/openzigs/onyourleft/issues/323). They are the row to compare against until
+somebody fills Part F in.
+
+### What changed, and what it predicts
+
+| | before | after |
+|---|---|---|
+| Where a scenery colour comes from | one constant a kind, in `three-renderer.ts` | ⚠️ the model's own `baseColorFactor`, or its atlas sampled per vertex, baked into `COLOR_0` at load |
+| Materials on the whole belt | six, one a kind | ⚠️ **two** — a lit one and its unlit twin, for every mesh |
+| Vertex buffer | position + normal | position + normal + **colour**, three floats a vertex |
+| Textures uploaded | none | ⚠️ **none**, still. The atlas is fetched once, sampled at load and thrown away |
+| Shapes a kind is drawn as | 1 | 2, or 3 for a building |
+| Meshes in the belt | 6 | **12** |
+| Scenery draw calls, measured in the pinned Chromium on 2026-09-19 | 6 | **12** at three shapes a kind, **11** at two, **6** at one |
+| Scenery-free scene | 6 calls | **5** — see Part N, which took two away |
+
+⚠️ **What this predicts for the GPU column, stated so that a surprise is a finding.** The triangle
+count does not move at all: a variant is a *different* model of about the same size, not an extra
+one, and the instance budget (`SCATTER_MAX_ITEMS`, 240) is unchanged. What moves is **draw calls**,
+from 6 to 12 — against a scene that issued eleven in total before #367 and issues seventeen now. The
+plausible cost is CPU-side state changes rather than fill rate, which is the opposite of what Part H
+measured; #240's NFR-2 names draw calls first for exactly this reason. The colour attribute adds
+about 12 bytes a vertex to a buffer uploaded **once**, at load.
+
+⚠️ **The measurement that is NOT worth making here is a pixel comparison.** ADR 0009 forbids deriving
+a reference image from another product, and there is no earlier one to compare against. What a
+person can say is whether the world reads as a place rather than as one prop repeated, which is what
+M1 and M2 ask and is the whole of what the owner reported on 2026-09-18.
+
+### M — the scenery, by eye and by number
+
+| Step | What to do | What to record |
+|---|---|---|
+| M1 | Ride 2 km of a route with buildings on it and look at them | Are they painted — a roof a different colour from the walls — or one flat shade? |
+| M2 | Ride past a stand of broadleaf trees | Do the trunks read as brown against a green canopy? |
+| M3 | Ride 2 km and watch the buildings go by | Are there visibly several different buildings, or one repeated? Same question for the trees |
+| M4 | ⚠️ Ride the **same** stretch twice | Does the same house stand in the same place both times? A variant that moved between laps is a seeded-hash defect |
+| M5 | 12 s of riding with the game visible, at the target rung | the rows below |
+| M6 | Repeat M5 on the **floor** rung, if the ladder reaches it | the same rows again, and whether the variety visibly drops |
+
+```bash
+adb shell dumpsys gfxinfo dev.openzigs.onyourleft reset
+# ... ride for 12 s with the game visible, on a stretch that has buildings on it ...
+adb shell dumpsys gfxinfo dev.openzigs.onyourleft | grep -iE "Total frames|Janky|percentile|Missed Vsync|GPU"
+```
+
+### M results
+
+| | #323's baseline | M5 (target rung) | M6 (floor rung) |
+|---|--:|--:|--:|
+| Total frames rendered | | | |
+| **Janky frames (legacy, > 16 ms)** | 40.63 % | | |
+| Frame time 50th | 13 ms | | |
+| GPU time 50th / 90th | 6 / 9 ms | | |
+| Missed Vsync | | | |
+
+**Are the buildings painted (M1)?** ______________
+
+**Do the trunks read as brown (M2)?** ______________
+
+**Is there visible variety over 2 km (M3)?** ______________
+
+**Does the same house stand in the same place on the second lap (M4)?** ______________
+
+**Does the floor rung's drop in variety read as a fault or as a setting (M6)?** ______________
+
+**Phone (OEM, model, Android):** ______________  **Build:** ______________
+
+⚠️ **If M5 or M6 regresses against #323's row, the lever is
+`quality.ts` §`QualitySettings.sceneryVariants`** — it is a rung precisely so that this measurement
+has somewhere to go, and lowering the ladder's top rung to 2 costs one mesh a building and nothing
+else. `scenery-models.ts` §`MAXIMUM_SCENERY_VARIANTS` is the budget above it, and raising **that**
+is what this part exists to gate.
+
+---
+
+## Part N — can a rider tell the three apart? ([#368](https://github.com/openzigs/onyourleft/issues/368))
+
+**#368's fourth acceptance criterion in its own words**: *"Told apart at a glance at 10 m, 50 m and
+200 m — checked on the device, not in a headless browser, because that is what #93's criterion is
+actually about."*
+
+⚠️ **This is the one part of this procedure whose result could send the change back.** #93's third
+criterion — that a rider glancing at a bar-mounted phone can tell themselves from the pacer from
+their own ghost — was previously carried by three different **silhouettes**. #368 gives all three a
+bicycle, so it is carried by colour alone, and `bicycle.ts` records that the trade was judged rather
+than assumed. **At 200 m three bicycles may genuinely be worse than three blobs, and that is a
+finding rather than a failure.**
+
+### What changed, and what it predicts
+
+| | before #368 | after |
+|---|---|---|
+| The rider | a bicycle, three draw calls | ⚠️ a bicycle, and **one instance** of three shared meshes |
+| The bot | a cone, `0xc2410c`, one call | a bicycle tinted `0xc2410c` |
+| The ghost | an octahedron, `0x64748b`, one call | a bicycle tinted `0x64748b` |
+| Draw calls, scenery-free frame | 6 | ⚠️ **5** — the two solids' calls are gone and no new ones arrive |
+| Their cranks | none to turn | from their own odometer at a fixed 6.2 m development |
+| Per-frame work | two `position.set` | three matrix composes, three tints, and — only for a rider whose cranks moved — four more composes each |
+
+⚠️ **Measured in the pinned Chromium on 2026-09-19**, each drawn alone at the same place, as the
+mean colour of its own silhouette: **rider (32, 72, 153), bot (22, 13, 6), ghost (7, 28, 81)**. So
+the bot is the only one of the three whose red channel leads, and the rider is more than twice as
+bright as either of the others. ⚠️ **The rider and the ghost lead on the same channel**, because a
+per-instance tint can only darken the shared palette towards itself and the rider's jersey is blue —
+which is why the pair is separated by **value** rather than by hue, and why N2 below is the question
+this part is really asking.
+
+⚠️ **And the value separation is real, measured rather than asserted.** Taking the harness's own
+`0.2126R + 0.7152G + 0.0722B` over those three means gives **bot 14, ghost 27, rider 69** — three
+levels no two of which are within a factor of 1.8 of each other, so a rider who cannot resolve the
+hues at 200 m still has a light one, a mid one and a dark one to work with. ⚠️ That is a headless
+Chromium on a desktop at 600 × 400 with no sunlight on it, which is precisely what N4 and N5 exist
+to contradict; it bounds what *can* be told apart in principle and says nothing about a phone on a
+handlebar. If N4's answer is no, this row is what says the remedy is hue rather than value.
+
+### N — the three, by eye
+
+| Step | What to do | What to record |
+|---|---|---|
+| N1 | Start a ride with a pacer **and** a ghost in play, and let a gap open | Can you tell all three apart at a glance — under a second, without studying the screen? |
+| N2 | ⚠️ With the gap at roughly **10 m** | Which is which? Is the ghost distinguishable from you, given it is the same blue and darker? |
+| N3 | At roughly **50 m** | The same question |
+| N4 | At roughly **200 m** | The same question. ⚠️ If the answer is no, say whether the **solids were better** — that is the finding #368 asks for |
+| N5 | Ride outdoors in direct sunlight, or with the screen at full brightness under a bright sky | Does the distinction survive? Colour alone is what washes out, which is why #93's criterion named it |
+| N6 | Watch the pacer's cranks as it changes pace | Do they turn faster when it does, and stop when it stops? |
+| N7 | 12 s of riding with all three on screen, at the target rung | the rows below |
+
+```bash
+adb shell dumpsys gfxinfo dev.openzigs.onyourleft reset
+# ... ride for 12 s with a pacer and a ghost both in play ...
+adb shell dumpsys gfxinfo dev.openzigs.onyourleft | grep -iE "Total frames|Janky|percentile|Missed Vsync|GPU"
+```
+
+### N results
+
+| | #323's baseline | N7 (target rung) |
+|---|--:|--:|
+| Total frames rendered | | |
+| **Janky frames (legacy, > 16 ms)** | 40.63 % | |
+| Frame time 50th | 13 ms | |
+| GPU time 50th / 90th | 6 / 9 ms | |
+| Missed Vsync | | |
+
+**Told apart at 10 m (N2)?** ______________
+
+**At 50 m (N3)?** ______________
+
+**At 200 m (N4)? And were the solids better?** ______________
+
+**In sunlight (N5)?** ______________
+
+**Do the pacer's cranks track its pace (N6)?** ______________
+
+**Phone (OEM, model, Android):** ______________  **Build:** ______________
+
+⚠️ **If N4 says the solids were better, the cheapest answer is not to revert.** `three-renderer.ts`
+§`RIDER_TINTS` is one table; a tint that suppresses blue would give the ghost a hue of its own, and a
+distance-dependent fallback is a rung on `quality.ts`'s ladder rather than a change to `bicycle.ts`.
+Record what was seen before deciding which.
+
+---
+
 ## After the session
 
 1. **Fill the tables in this file and commit it.** An empty table in `main` is the honest state; a

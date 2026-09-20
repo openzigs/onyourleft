@@ -110,6 +110,23 @@ export const SCATTER_KINDS: readonly ScatterKind[] = [
   'building',
 ];
 
+/**
+ * How many distinct shapes one kind's items are spread across: **6**.
+ *
+ * ⚠️ **A slot count, not a variant count — #367.** {@link ScatterItem.variant}
+ * is drawn from this range and the renderer takes it modulo however many shapes
+ * the kind actually has, so this file never has to know what
+ * `scenery-models.ts` holds and a kind with two shapes and a kind with three
+ * both get an even split. Six is the smallest number divisible by every count
+ * up to `MAXIMUM_SCENERY_VARIANTS`, which is what makes that true.
+ *
+ * ⚠️ It is deliberately **not** `MAXIMUM_SCENERY_VARIANTS`. Using the ceiling
+ * directly would give a two-shape kind a 2:1 split — two thirds of the trees
+ * one shape — and the imbalance would look like a placement bug rather than
+ * arithmetic.
+ */
+export const SCATTER_VARIANT_SLOTS = 6;
+
 /** One thing standing beside the road. */
 export interface ScatterItem {
   readonly kind: ScatterKind;
@@ -121,6 +138,26 @@ export interface ScatterItem {
   readonly rotation: number;
   /** {@link SCATTER_SCALE_LOWEST} to {@link SCATTER_SCALE_HIGHEST}. */
   readonly scale: number;
+  /**
+   * Which of its kind's shapes this one is drawn as — #367.
+   *
+   * An integer in `[0, {@link SCATTER_VARIANT_SLOTS})`, from this item's own
+   * slot hash on a stream of its own. So it is a function of **where the item
+   * stands**, exactly as its kind, rotation and scale already are: stable
+   * across frames, stable across runs, and the same on lap two as on lap one.
+   *
+   * ⚠️ **A number, never a file and never a mesh** — the same reasoning
+   * {@link ScatterKind} carries. `scenery-models.ts` decides what shape a
+   * conifer's variant 1 actually is, and this file could not name one without
+   * choosing a rendering library.
+   *
+   * ⚠️ It plays **no part in where anything is**, which is #367's own
+   * criterion: variants change what stands somewhere, not where.
+   * `arrangement-unchanged.test.ts` §"places the same scenery" is what says so,
+   * and it is unmoved by this field precisely because each quantity draws from
+   * its own hash stream.
+   */
+  readonly variant: number;
 }
 
 /**
@@ -683,6 +720,15 @@ const STREAM_SCALE = 4;
 const STREAM_KIND = 5;
 const STREAM_RANK = 6;
 const STREAM_CLUSTER = 7;
+/**
+ * #367's variant. ⚠️ **Appended, and that is what keeps the arrangement
+ * unmoved**: {@link uniform} derives each stream from the slot's base hash and
+ * the stream index alone, so a new stream reads a part of the hash none of the
+ * seven above it reads and changes none of their answers.
+ * `arrangement-unchanged.test.ts`' digest is the evidence rather than this
+ * sentence.
+ */
+const STREAM_VARIANT = 8;
 
 /**
  * The cell index {@link clusterAt} hashes its nodes under.
@@ -936,6 +982,14 @@ function fillCell(
           scale:
             SCATTER_SCALE_LOWEST +
             uniform(base, STREAM_SCALE) * (SCATTER_SCALE_HIGHEST - SCATTER_SCALE_LOWEST),
+          // ⚠️ `Math.min` rather than trusting the multiply: `uniform` returns
+          // a value in `[0, 1)` by construction, but a float at the very top of
+          // that range can floor to the slot count on some inputs, and an
+          // out-of-range variant is an item drawn as the wrong kind's shape.
+          variant: Math.min(
+            SCATTER_VARIANT_SLOTS - 1,
+            Math.floor(uniform(base, STREAM_VARIANT) * SCATTER_VARIANT_SLOTS),
+          ),
         },
         rank: uniform(base, STREAM_RANK),
         along,

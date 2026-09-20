@@ -39,6 +39,7 @@
  */
 
 import { SCATTER_MAX_ITEMS } from './scatter';
+import { MAXIMUM_SCENERY_VARIANTS } from './scenery-models';
 
 /** How hard the renderer is working. Lower is cooler. */
 export type QualityLevel = 0 | 1 | 2 | 3;
@@ -124,6 +125,51 @@ export interface QualitySettings {
    */
   readonly scatterItems: number;
   /**
+   * How many distinct shapes one scenery kind may be drawn as — #367.
+   *
+   * ⚠️ **The fifth thing a rung can give up, and the only one whose cost is
+   * paid in draw calls rather than in fragments.** {@link scatterItems} decides
+   * how many instances are submitted; this decides how many *meshes* they are
+   * spread over, and a mesh is a draw call — #240's NFR-2, which names draw
+   * calls first. Twelve meshes at the top rung against the six #244 spent, and
+   * six again at the floor.
+   *
+   * ## Why it is here and not simply fixed at the maximum
+   *
+   * #367 asks the question directly: *"`quality.ts` already has a
+   * `scatterItems` rung — variants may belong on it, so a throttling phone
+   * falls back toward fewer distinct meshes before it loses items."* It does,
+   * and the ordering argument is the one {@link scatterItems} already makes
+   * from the other end.
+   *
+   * **Losing a variant is cheaper to look at than losing an item.** An item
+   * that goes is a gap in the verge, and {@link scatterItems}' own note is that
+   * what passes the verge is the rider's only speed cue. A variant that goes is
+   * a second tree that looks like the first tree — which is exactly the world
+   * this repository shipped between #341 and #367, and nobody could tell it was
+   * a *reduction* rather than a style. So the first variant step is taken on
+   * the same rung as the first scenery step, and the floor rung is back to one
+   * shape a kind.
+   *
+   * ⚠️ **It reduces to one, never to zero.** A kind with no shape at all is a
+   * kind that is not drawn, and this number is an index bound rather than a
+   * count of things to draw: `three-renderer.ts` §`ScatterBelt.setVariants`
+   * takes an item's variant modulo it, so zero would be a division by zero and
+   * a world with nothing standing beside the road. `quality.test.ts` asserts
+   * the floor.
+   *
+   * ## ⚠️ Provenance — BR-1, and this number is not a measurement either
+   *
+   * 3 → 2 → 1 → 1, on the same footing as every other figure on this ladder:
+   * ADR 0008 D-2's rendering gate was waived rather than passed and
+   * [#247](https://github.com/openzigs/onyourleft/issues/247) is the run that
+   * would settle it. What *is* measured is the draw-call arithmetic itself —
+   * `game.browser.spec.ts` counts the meshes a frame actually submits at each
+   * of these three counts and prints the figure, which is the half that can be
+   * checked without a phone.
+   */
+  readonly sceneryVariants: number;
+  /**
    * Whether the world is shaded by a light direction, or flat — #286.
    *
    * ⚠️ **The third thing a rung can give up, and the first that is not a
@@ -170,6 +216,10 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     // it, so there is one figure for "as much scenery as this program ever
     // draws" instead of two that can drift. @see QualitySettings.scatterItems
     scatterItems: SCATTER_MAX_ITEMS,
+    // Every shape the pack gives a kind — #367. The ceiling is
+    // `scenery-models.ts`'s own constant rather than a copy of it, for the
+    // reason `scatterItems` above takes `SCATTER_MAX_ITEMS`.
+    sceneryVariants: MAXIMUM_SCENERY_VARIANTS,
     shading: 'lit',
     label: 'full',
   },
@@ -180,6 +230,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     renderScale: 0.83,
     frameCap: 30,
     scatterItems: 160,
+    sceneryVariants: 2,
     shading: 'lit',
     label: 'reduced resolution and scenery',
   },
@@ -187,6 +238,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     renderScale: 0.67,
     frameCap: 24,
     scatterItems: 100,
+    sceneryVariants: 1,
     shading: 'lit',
     label: 'reduced resolution, scenery and frame rate',
   },
@@ -200,7 +252,14 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
   // this ladder that does not go to its own floor:
   // {@link QualitySettings.scatterItems} §"Why the floor rung is sixty and not
   // zero" says what an empty verge costs a rider.
-  { renderScale: 0.5, frameCap: 20, scatterItems: 60, shading: 'flat', label: 'minimum' },
+  {
+    renderScale: 0.5,
+    frameCap: 20,
+    scatterItems: 60,
+    sceneryVariants: 1,
+    shading: 'flat',
+    label: 'minimum',
+  },
 ];
 
 /**

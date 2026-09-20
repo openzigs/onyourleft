@@ -199,15 +199,27 @@ apps/                 AGPL-3.0-or-later, without exception
     src/game/bicycle.ts the rider, as a bicycle and somebody on it (#349) — the
                         parts as numbers rather than an asset, the two-bone knee
                         that puts each foot on its own pedal, and the one rule
-                        that decides whether the cranks turn: they turn exactly
-                        when the HUD shows a cadence number, at exactly that
-                        number. ⚠️ It names no model, no pack and no licence —
+                        that decides whether the RIDER's cranks turn: they turn
+                        exactly when the HUD shows a cadence number, at exactly
+                        that number. ⚠️ It names no model, no pack and no licence —
                         `ASSETS.toml` gains no row, and ADR 0022 D-1's "one CC0
                         source" is untouched, because there is no CC0 rigged
                         cyclist to download and a pedalling clip would have had
-                        to be authored. ⚠️ The bot and the ghost deliberately
-                        do NOT get one: three silhouettes beat three bicycles in
-                        three colours for #93's third criterion
+                        to be authored. ⚠️ **Since #368 the bot and the ghost
+                        DO get one, and a reviewer who remembers "the bot and
+                        the ghost deliberately do NOT get one: three
+                        silhouettes beat three bicycles in three colours" is
+                        reading the old file.** That note is REPLACED rather
+                        than deleted, because it was an argument: all three are
+                        instanced into the same three meshes, so the two
+                        solids' draw calls are gone and the scenery-free scene
+                        costs 5 rather than 6. What tells them apart is a
+                        per-instance TINT on the shared palette, which is
+                        colour alone and is a weaker position than the old one
+                        — the distances it was checked at are validation 0002
+                        Part N. `simulatedCrankAngle` turns the other two's
+                        cranks from their own ODOMETER at a fixed gear, which
+                        is neither a reading nor a rate anybody invented
     src/game/terrain.ts the road as geometry (#91), and since #242 as a road: two
                         edge lines and a broken centre line built into the same
                         vertex buffer, and a surface tinted by signed gradient.
@@ -227,7 +239,8 @@ apps/                 AGPL-3.0-or-later, without exception
                         is solved rather than written down, and the provenance
                         of every other one. Pure, so the renderer stays the
                         only file that names three
-    src/game/scatter.ts where the scenery goes and what kind it is (#243) — a
+    src/game/scatter.ts where the scenery goes, what kind it is and — since
+                        #367 — which of that kind's shapes it wears (#243) — a
                         seeded, stateless hash of where you are rather than a
                         walk forward, the three places a route is read as, the
                         verge that keeps a tree out of the carriageway, and the
@@ -283,12 +296,34 @@ apps/                 AGPL-3.0-or-later, without exception
                         were already in frame, so this moved 9.3 to 10.6 and
                         did not fill a bare near field
     src/game/scenery-models.ts
-                        which file each kind's shape comes from (#341) — the
-                        five ADR 0022 D-3 gives a model, the sixth it leaves
-                        alone, and the one rule that says what a model may
-                        fetch. ⚠️ **The geometry is bought and nothing else**:
-                        every kind keeps three-renderer.ts's own colour, so
-                        LIT_COLOURS stays a complete statement of the palette
+                        which files each kind's shapes come from (#341, #367) —
+                        the five ADR 0022 D-3 gives a model, the sixth it leaves
+                        alone, the budget on how many shapes a kind may have,
+                        and the one rule that says what a model may fetch.
+                        ⚠️ **The "geometry and nothing else" note is GONE and a
+                        reviewer who remembers it is reading the old file**:
+                        since #366 each vertex carries the colour its own model
+                        gives it, so `LIT_COLOURS` is no longer a complete
+                        statement of the palette and `scenery-palette.ts` is
+                        what replaces that claim. ⚠️ Since #366 the
+                        resource rule is a REDIRECTION rather than a refusal —
+                        the buildings' atlas is committed and every answer the
+                        rule gives is a URL of ours, which is a stronger
+                        statement than the identity-only one it made before
+    src/game/scenery-palette.ts
+                        what colour the scenery is, now that the models decide
+                        (#366) — the linear space a `baseColorFactor` is
+                        already in, the rule for sampling an atlas and the
+                        orientation trap inside it, the ceiling a pack's own
+                        colour is brought under because there is nobody to ask
+                        for a darker one, and `SCENERY_PALETTE`: the enumeration
+                        that REPLACES `LIT_COLOURS`' completeness claim.
+                        ⚠️ Here rather than in `three-renderer.ts` because that
+                        file must never name a sun constant, and the ceiling is
+                        derived from `world.ts`'s peak irradiance.
+                        `model-bytes-testing.ts` beside it is the INDEPENDENT
+                        glTF and PNG reader the gate reproduces that table with
+                        — the same argument `identity-verifier.test.ts` makes
     src/game/models/    the committed .glb files — Kenney CC0, upstream bytes,
                         one ASSETS.toml row each (ADR 0022 D-5). ⚠️ The first
                         binaries in this repository that anything SHIPS, so
@@ -302,7 +337,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         lands before anything is
     src/game/three-seam.test.ts
                         what keeps that true, and which illumination classes the
-                        scene is allowed — a grep over apps/ and packages/
+                        scene is allowed. ⚠️ It matches a capitalised `Light`
+                        ANYWHERE in the file, prose included, so a helper called
+                        `tonedForLight` is a red test — which is why
+                        `scenery-palette.ts` calls it `tonedForTheSun` — a grep over apps/ and packages/
                         rather than a review note (#240's epic criterion).
                         ⚠️ Since #286 it allows EXACTLY an AmbientLight and a
                         DirectionalLight; until then it allowed none at all, and
@@ -1971,20 +2009,22 @@ that owns it, and these three do. ⚠️ **The limit is narrowed and not removed
 in `packages/physics/src/pacer.ts` and is still not named, because a bot pacer moves a shape on a
 screen rather than a brake.
 
-⚠️ **Measure that set before you read a green run as a clean client: it is 51 watched files, of which
-46 are 30 % of the 154 non-test sources under `apps/*/src` and 5 are the trainer-command seam.** The
+⚠️ **Measure that set before you read a green run as a clean client: it is 52 watched files, of which
+47 are 30 % of the 156 non-test sources under `apps/*/src` and 5 are the trainer-command seam.** The
 `*-port.ts` suffix is the half that found #282, not the directories: `segments/match-port.ts` matches
 it, while `segments/backfill.ts`, the module that was actually dead, is in no watched directory and
 **is not reported**. The gate prints all three counts for this reason, the watched one first; a run
-that says *"284 production modules"* and nothing else reads like coverage of a population it never
+that says *"285 production modules"* and nothing else reads like coverage of a population it never
 checked. ⚠️ **The third count is the seam's own — `5 of 5 trainer-command seam modules` — and it is
 REPORTED rather than asserted.** `missingSeamFiles` raises when *some* of the five are absent and
 deliberately not when *all* are, because a tree with none of them is a tree with no trainer in it,
 which is what almost every fixture in `check-wiring.test.sh` is. In this repository, where all five
 do exist, that leaves deleting the whole seam in one commit a silent pass — so `0 of 5` in the log
 is what distinguishes it from a healthy run, and two fixtures pin both ends of that count. ⚠️ **These are counts and they age**, and they were 41 of 143 until #362 added two more
-`apps/` files and #363 added the seam; re-read them from the gate's own success line rather than from
-this paragraph.
+`apps/` files and #363 added the seam, and 51 of 154 until #366 added `game/scenery-palette.ts`;
+re-read them from the gate's own success line rather than from this paragraph. ⚠️ **Its
+`model-bytes-testing.ts` sibling is deliberately NOT in that count**: the suffix `-testing.ts` is
+what `isTestSupport` reads, and a file that parses glTF and PNG for a gate is not product code.
 
 ⚠️ **`WATCHED_PREFIXES` is written down in the checker rather than discovered, so it is asserted to
 exist.** A selector like that fails closed against *deleting* what it names and open against
@@ -2830,8 +2870,19 @@ top of an issue **supersedes its body**.
 | Why the ghost does not gain road while the phone is backgrounded, and which clock it is raced against | `apps/web/src/game/simulation.ts` §`ghostClock`, §`GameState.ridden` |
 | Why the road is a corridor rather than a world, and where its vertices come from | `apps/web/src/game/terrain.ts`, [ADR 0008](docs/adr/0008-mobile-client-architecture.md) D-5 |
 | Why the scenery is models at all, which pack, and which kind deliberately stays a cylinder | [ADR 0022](docs/adr/0022-game-scenery-model-pack.md) D-1, D-2, D-3, `apps/web/src/game/scenery-models.ts` |
-| What a model file is allowed to fetch, and why a texture nobody draws still had to be refused | `apps/web/src/game/scenery-models.ts` §`sceneryResourceUrl`, `apps/web/browser/game.browser.spec.ts` §"fetches the five committed models and nothing else" |
-| Why a model keeps this repository's colour rather than the pack's, and what that costs a tree's trunk | `apps/web/src/game/three-renderer.ts` §`prepareSceneryGeometry`, [ADR 0022](docs/adr/0022-game-scenery-model-pack.md) D-7 |
+| What enumerates the scene's colours now that a pack decides them, and why a table in source is still a gate | `apps/web/src/game/scenery-palette.ts` §`SCENERY_PALETTE`, [ADR 0022](docs/adr/0022-game-scenery-model-pack.md) §Amendments, [#366](https://github.com/openzigs/onyourleft/issues/366) |
+| Why a pack's own colour is darkened before it is drawn, and why the rule is applied rather than checked | `apps/web/src/game/scenery-palette.ts` §`tonedForTheSun`, §`MAXIMUM_LIT_CHANNEL` |
+| Which way up a glTF's texture coordinates are, and the measurement that settled it | `apps/web/src/game/scenery-palette.ts` §`atlasColourAt`, `scenery-palette.test.ts` §"an unused black quarter" |
+| Why a building's atlas is fetched where it used to be refused, and what is still refused | `apps/web/src/game/scenery-models.ts` §`sceneryResourceUrl`, `scenery-models.test.ts` §"never answers with a URL that is not one of ours" |
+| What proves no texture reaches the GPU, and why a zero is not enough on its own | `apps/web/browser/game.browser.spec.ts` §"uploads no texture to the GPU", `game-harness.ts` §`texturesBaseline` |
+| How many shapes a scenery kind may have, what that costs in draw calls, and who may raise it | `apps/web/src/game/scenery-models.ts` §`MAXIMUM_SCENERY_VARIANTS`, `apps/web/browser/game.browser.spec.ts` §`SCATTER_MESH_CEILING`, [validation 0002](docs/validation/0002-android-shell-and-game.md) Part M |
+| Why an item's variant is drawn from six slots rather than three, and why the digest did not move | `apps/web/src/game/scatter.ts` §`SCATTER_VARIANT_SLOTS`, `apps/web/src/game/arrangement-unchanged.test.ts` §"changes WHAT stands somewhere" |
+| Which of the two scenery rungs has its call site covered, and which does not | `apps/web/src/game/three-renderer.ts` §`ScatterBelt.setVariants`, §`ScatterBelt.setBudget` |
+| Why the bot and the ghost are bicycles now, and what tells the three apart without a silhouette | `apps/web/src/game/three-renderer.ts` §`RIDER_TINTS`, `apps/web/src/game/bicycle.ts`, [#368](https://github.com/openzigs/onyourleft/issues/368) |
+| Why a simulated rider's cranks come from its odometer rather than from a cadence | `apps/web/src/game/bicycle.ts` §`simulatedCrankAngle`, `apps/web/src/game/scene.ts` §`pedalling` |
+| At what distances three bicycles were actually told apart, and what happens if they were not | [validation 0002](docs/validation/0002-android-shell-and-game.md) Part N |
+| What a model file is allowed to fetch, and which one of them is allowed an atlas | `apps/web/src/game/scenery-models.ts` §`sceneryResourceUrl`, `apps/web/browser/game.browser.spec.ts` §"fetches the committed models and its one atlas, and nothing else" |
+| Why a model's colour is its own since #366, and what it used to be | `apps/web/src/game/three-renderer.ts` §`prepareSceneryGeometry`, [ADR 0022](docs/adr/0022-game-scenery-model-pack.md) D-7 and its 2026-09-18 amendment |
 | How big a model is allowed to be, and why the rule is the largest extent rather than the height | `apps/web/src/game/three-renderer.ts` §`sceneryFitMetres` |
 | Why the models are loaded before a view exists rather than inside one | `apps/web/src/game/three-renderer.ts` §`sceneryGeometries`, `apps/web/src/main.tsx` §`loadGameRenderer` |
 | What proves a route's scenery did not move when its shapes changed | `apps/web/src/game/arrangement-unchanged.test.ts` |

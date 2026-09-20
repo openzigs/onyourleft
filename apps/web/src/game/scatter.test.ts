@@ -47,6 +47,7 @@ import {
   SCATTER_BANDS_PER_SIDE,
   SCATTER_SCALE_HIGHEST,
   SCATTER_SCALE_LOWEST,
+  SCATTER_VARIANT_SLOTS,
   cellSpanMetres,
   scatterAt,
   scatterSeed,
@@ -1323,6 +1324,119 @@ describe('a degenerate profile does not stop the ride', () => {
     expect(items.length).toBeGreaterThan(0);
     for (const item of items) {
       expect(Number.isFinite(item.x) && Number.isFinite(item.z)).toBe(true);
+    }
+  });
+});
+
+/**
+ * Which shape stands where — #367.
+ *
+ * ⚠️ **This is the half of #367 that lives on this side of the seam, and it is
+ * a small one on purpose.** `scatter.ts` decides a *number*; which model that
+ * number selects is `scenery-models.ts`'s and the renderer's, because a file
+ * that named a shape would have chosen a rendering library. What has to be true
+ * here is only that the number is a stable function of where the item stands,
+ * and that it does not disturb anything that was already true.
+ */
+describe("which of its kind's shapes an item is — #367", () => {
+  // A long level valley floor, so every kind is placed and the sample is big.
+  const route = eastRoute({ latitude: 45, altitude: 300, points: 800 });
+
+  it('gives every item a variant inside the slot range', () => {
+    const items = place(route, 0, 1_500);
+
+    expect(items.length).toBeGreaterThan(50);
+    for (const item of items) {
+      expect(Number.isInteger(item.variant)).toBe(true);
+      expect(item.variant).toBeGreaterThanOrEqual(0);
+      expect(item.variant).toBeLessThan(SCATTER_VARIANT_SLOTS);
+    }
+  });
+
+  it('uses every slot, so a kind with three shapes gets three', () => {
+    // ⚠️ **The non-vacuity of the bound above.** A `variant` that was always
+    // zero satisfies every other assertion in this block, and it is exactly
+    // what a world with no variety in it looks like — which is the world this
+    // issue exists to replace.
+    const slots = new Set(place(route, 0, 3_000).map((item) => item.variant));
+
+    expect(slots.size).toBe(SCATTER_VARIANT_SLOTS);
+  });
+
+  it('spreads the slots roughly evenly, so no shape dominates', () => {
+    // A uniform draw, so every slot should hold about a sixth. Loose bounds:
+    // the claim is that the hash is not biased, not that it is perfect.
+    const items = place(route, 0, 5_000);
+    const tally = new Map<number, number>();
+    for (const item of items) {
+      tally.set(item.variant, (tally.get(item.variant) ?? 0) + 1);
+    }
+    const expected = items.length / SCATTER_VARIANT_SLOTS;
+
+    for (const slot of Array.from({ length: SCATTER_VARIANT_SLOTS }, (_, at) => at)) {
+      expect(tally.get(slot) ?? 0).toBeGreaterThan(expected * 0.6);
+      expect(tally.get(slot) ?? 0).toBeLessThan(expected * 1.6);
+    }
+  });
+
+  it('gives the same place the same shape, on every call and every lap', () => {
+    // ⚠️ **#367's third criterion in its own words**: *"stable across frames
+    // and across runs, and a rider riding the same road twice sees the same
+    // village."* The same property `scatter.ts` already has for the kind, the
+    // rotation and the scale, and it is stated here rather than assumed
+    // because a variant drawn from anything but the slot hash — an index, a
+    // counter, a clock — would satisfy every other test in this block.
+    const once = place(route, 400, 900);
+    const again = place(route, 400, 900);
+    const overlapping = place(route, 200, 900);
+
+    expect(once.map((item) => item.variant)).toEqual(again.map((item) => item.variant));
+    const key = (item: ScatterItem) => `${item.x.toFixed(3)},${item.z.toFixed(3)}`;
+    const wider = new Map(overlapping.map((item) => [key(item), item.variant]));
+    for (const item of once) {
+      expect(wider.get(key(item))).toBe(item.variant);
+    }
+  });
+
+  it('does not correlate with the kind, the rotation or the scale', () => {
+    // ⚠️ **Each quantity draws from its own hash stream**, and the failure this
+    // catches is the one `scatter.ts` §`uniform` warns about: *"every tall tree
+    // would also be a rotated one — and the correlation is invisible in a unit
+    // test and obvious on screen."* A variant that reused the kind's draw would
+    // make every conifer the same conifer.
+    const items = place(route, 0, 5_000);
+    const perKind = new Map<ScatterKind, Set<number>>();
+    for (const item of items) {
+      const seen = perKind.get(item.kind) ?? new Set<number>();
+      seen.add(item.variant);
+      perKind.set(item.kind, seen);
+    }
+
+    for (const [kind, slots] of perKind) {
+      expect(slots.size, `${kind} slots`).toBeGreaterThan(1);
+    }
+    // And the scale, which is the correlation that would be visible as every
+    // shape coming in one size.
+    const bySlot = new Map<number, number[]>();
+    for (const item of items) {
+      bySlot.set(item.variant, [...(bySlot.get(item.variant) ?? []), item.scale]);
+    }
+    for (const [slot, scales] of bySlot) {
+      const spread = Math.max(...scales) - Math.min(...scales);
+
+      expect(spread, `slot ${String(slot)} scales`).toBeGreaterThan(
+        (SCATTER_SCALE_HIGHEST - SCATTER_SCALE_LOWEST) * 0.8,
+      );
+    }
+  });
+
+  it('is a multiple of every variant count a kind may have', () => {
+    // ⚠️ **Why six rather than `MAXIMUM_SCENERY_VARIANTS`.** The renderer takes
+    // an item's variant modulo however many shapes its kind has, so a slot
+    // count that is not a multiple of that gives a two-shape kind a two-to-one
+    // split — which reads as a placement bug rather than as arithmetic.
+    for (const shapes of [1, 2, 3]) {
+      expect(SCATTER_VARIANT_SLOTS % shapes).toBe(0);
     }
   });
 });

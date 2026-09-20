@@ -67,14 +67,19 @@ import {
   type RoutePoint,
 } from '@onyourleft/domain';
 
-import type { SceneFrame } from '../src/game/port';
+import type { CameraPose, SceneFrame } from '../src/game/port';
 import type { WorldStyle } from '../src/game/world';
 
 import { sceneFrame } from '../src/game/scene';
 import { corridorOrigin } from '../src/game/terrain';
 import { qualitySettings } from '../src/game/quality';
 import { loadSceneryModels, threeGameRenderer } from '../src/game/three-renderer';
-import { SCATTER_KINDS, type ScatterKind } from '../src/game/scatter';
+import {
+  SCATTER_KINDS,
+  SCATTER_VARIANT_SLOTS,
+  type ScatterItem,
+  type ScatterKind,
+} from '../src/game/scatter';
 import { atStartLine } from '../src/game/simulation';
 
 /** One read-back pixel, as four bytes. */
@@ -288,6 +293,25 @@ declare global {
       /** How many pixels the bicycle itself occupies — #349. @see crankTurnPixels */
       readonly riderPixels: number;
       /**
+       * How many pixels differ between the same rider, in the same place, at
+       * the same crank angle, arrived at two ways — #366–#368's review.
+       *
+       * **It must be zero**, and it is the one number here that goes non-zero
+       * for a defect no other probe on this page can see. One of the two reads
+       * moves the rider there without its crank angle changing; the other
+       * arrives at an angle that then changes back, so no pose cache can serve
+       * it. A renderer holding its leg matrices in world space and caching them
+       * on the crank angle alone draws the first with its legs
+       * {@link RIDER_MOVE_METRES} behind, which is every frame of every ride
+       * with no cadence sensor on it.
+       *
+       * {@link riderMovePixels} is its control: the rider genuinely moved, so a
+       * zero above is a renderer that followed rather than a probe that varied
+       * nothing.
+       */
+      readonly riderLeftBehindPixels: number;
+      readonly riderMovePixels: number;
+      /**
        * The relative cost of the shading, in milliseconds a frame — #286.
        *
        * ⚠️ **Same scene, same route, same drawing-buffer size; the only
@@ -349,6 +373,89 @@ declare global {
       readonly sceneryIndicesPlain: Readonly<Record<string, number>>;
       /** How many items of each kind that frame held, so neither is vacuous. */
       readonly sceneryInstances: Readonly<Record<string, number>>;
+      /**
+       * WebGL textures created across a whole sweep — #366's fourth criterion.
+       *
+       * ⚠️ **Zero is the assertion, and it is the only way to make it.** The
+       * buildings' colour comes out of a 512 × 512 atlas that is fetched,
+       * sampled once at load and thrown away, and every step of that is
+       * invisible from outside: a renderer that kept the `Texture` and bound it
+       * would draw an identical frame, at an identical draw-call count, with an
+       * identical vertex buffer. `gl.createTexture` is what it could not avoid.
+       */
+      readonly texturesCreated: number;
+      /**
+       * Textures three creates for itself, before anything of ours is drawn.
+       *
+       * ⚠️ **What makes {@link texturesCreated} more than a zero that was
+       * always going to be zero.** That figure is a difference, and a counter
+       * that had been patched onto the wrong prototype — or a `body` that never
+       * ran — would report a difference of nothing just as loudly. This is the
+       * same counter over the same run, and it is four: three allocates a 1 × 1
+       * for each of the 2D, array, 3D and cube samplers its default uniforms
+       * declare, whether or not this program has an image anywhere.
+       */
+      readonly texturesBaseline: number;
+      /**
+       * A broadleaf tree's own pixels, split by which channel leads — #366.
+       *
+       * ⚠️ **The red-dominant count is the whole of the first criterion.** One
+       * flat colour a kind was the world before #366 and the colour was
+       * `0x3f6b33`, a green: every pixel of every tree was green-dominant and
+       * no arrangement of lighting could make one red. `woodBark` is
+       * (0.886, 0.514, 0.341), which is red-dominant, so a trunk drawn from the
+       * model's own values cannot be missed and a trunk drawn from ours cannot
+       * be mistaken for one.
+       */
+      readonly treeRedPixels: number;
+      readonly treeGreenPixels: number;
+      /**
+       * A building's own pixels, likewise — #366's second criterion.
+       *
+       * The atlas gives it a green roof (66, 172, 124) and slate walls
+       * (95, 100, 124), so both a green-dominant and a blue-dominant pixel
+       * exist. The flat colour it had before #366 is `0xa8968a`, which is
+       * red-dominant, so **neither** does.
+       */
+      readonly buildingGreenPixels: number;
+      readonly buildingBluePixels: number;
+      /**
+       * Scenery draw calls at each `sceneryVariants` rung — #367.
+       *
+       * Measured on {@link variantFrame}, which carries an item in every
+       * variant slot of every kind, so this is the belt's real width rather
+       * than whatever one stretch of the harness route happened to place. The
+       * three entries are rungs 3, 2 and 1.
+       */
+      readonly sceneryCallsByVariants: readonly number[];
+      /**
+       * What each of a kind's shapes costs in vertex indices — #367.
+       *
+       * ⚠️ **Two entries that are equal mean two variants drawing the same
+       * geometry**, which is what a table whose second file failed to load
+       * produces — and it is indistinguishable from a working belt in every
+       * other measurement here, including the draw-call counts above.
+       */
+      readonly variantIndices: Readonly<Record<string, readonly number[]>>;
+      /**
+       * The mean colour of each rider's own silhouette — #368.
+       *
+       * ⚠️ **Each drawn alone at the same place**, so the only thing that can
+       * differ between the three is the tint. #93's third criterion is that a
+       * rider tells them apart at a glance, and with the shape no longer doing
+       * it this is the measurement that says the colour still can.
+       */
+      readonly riderMeanColour: Readonly<Record<string, Pixel>>;
+      /** How many pixels each rider covers, drawn alone. @see riderMeanColour */
+      readonly riderSilhouettePixels: Readonly<Record<string, number>>;
+      /**
+       * Pixels the bot's own cranks move over half a development — #368.
+       *
+       * ⚠️ **From its odometer, not from a cadence it does not have.** The two
+       * frames differ only in how far up the road the bot is said to be, which
+       * is the one input `bicycle.ts` §`simulatedCrankAngle` takes.
+       */
+      readonly botCrankPixels: number;
       readonly errors: readonly string[];
     };
   }
@@ -587,6 +694,327 @@ function sceneryIndicesByKind(frame: SceneFrame): Record<string, number> {
     view.destroy();
   });
   return counts;
+}
+
+/**
+ * One scenery item placed in front of the camera, in the rider's own frame.
+ *
+ * ⚠️ **Nothing about *placement* may be read off a frame built this way**: the
+ * belt is handed a `SceneFrame` and does not know who built it, which is the
+ * property being used here. Where `scatter.ts` really puts things is
+ * `arrangement-unchanged.test.ts`, on the real route, in jsdom.
+ */
+function placedAhead(
+  pose: CameraPose,
+  kind: ScatterKind,
+  variant: number,
+  along: number,
+  across: number,
+): ScatterItem {
+  return {
+    kind,
+    x: pose.x + along * pose.headingX + across * pose.headingZ,
+    y: pose.y,
+    z: pose.z + along * pose.headingZ - across * pose.headingX,
+    rotation: 0,
+    scale: 1,
+    variant,
+  };
+}
+
+/**
+ * Counts every WebGL texture created for the whole of `body` — #366.
+ *
+ * Narrower than {@link countingGpuResources} on purpose: that one counts
+ * buffers too, and a buffer count that moves for an unrelated reason would make
+ * *"no texture reaches the GPU"* unreadable. Patched on the prototype for the
+ * reason every counter here is — three obtains its own context and the harness
+ * never sees it.
+ */
+function countingTextures(body: (textures: () => number) => void): void {
+  const gl = WebGL2RenderingContext.prototype;
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  const real = gl.createTexture;
+  let created = 0;
+  gl.createTexture = function patchedCreateTexture(this: WebGL2RenderingContext) {
+    created += 1;
+    return real.call(this);
+  };
+  try {
+    body(() => created);
+  } finally {
+    gl.createTexture = real;
+  }
+}
+
+/** Which channel leads in each pixel of a region, counted. @see treeRedPixels */
+function channelLead(
+  present: Uint8Array,
+  absent: Uint8Array,
+): { readonly red: number; readonly green: number; readonly blue: number } {
+  let red = 0;
+  let green = 0;
+  let blue = 0;
+  for (let at = 0; at + 3 < present.length; at += 4) {
+    // Only where the object actually is: a pixel identical to the frame drawn
+    // without it is sky, ground or road, and counting those would make every
+    // count a property of the background.
+    if (
+      present[at] === absent[at] &&
+      present[at + 1] === absent[at + 1] &&
+      present[at + 2] === absent[at + 2]
+    ) {
+      continue;
+    }
+    const r = present[at] ?? 0;
+    const g = present[at + 1] ?? 0;
+    const b = present[at + 2] ?? 0;
+    // ⚠️ **A strict lead, by a margin.** A near-grey pixel has a nominal
+    // leader that is one byte of dither, and counting those would let a scene
+    // drawn entirely in one flat colour satisfy two of these three at once.
+    const margin = 8;
+    if (r >= g + margin && r >= b + margin) {
+      red += 1;
+    } else if (g >= r + margin && g >= b + margin) {
+      green += 1;
+    } else if (b >= r + margin && b >= g + margin) {
+      blue += 1;
+    }
+  }
+  return { red, green, blue };
+}
+
+/** The mean colour of the pixels an object covers, and how many there are. */
+function meanOver(
+  present: Uint8Array,
+  absent: Uint8Array,
+): { readonly mean: Pixel; readonly pixels: number } {
+  let red = 0;
+  let green = 0;
+  let blue = 0;
+  let pixels = 0;
+  for (let at = 0; at + 3 < present.length; at += 4) {
+    if (
+      present[at] === absent[at] &&
+      present[at + 1] === absent[at + 1] &&
+      present[at + 2] === absent[at + 2]
+    ) {
+      continue;
+    }
+    red += present[at] ?? 0;
+    green += present[at + 1] ?? 0;
+    blue += present[at + 2] ?? 0;
+    pixels += 1;
+  }
+  if (pixels === 0) {
+    return { mean: NOWHERE, pixels: 0 };
+  }
+  return {
+    mean: [Math.round(red / pixels), Math.round(green / pixels), Math.round(blue / pixels), 255],
+    pixels,
+  };
+}
+
+/**
+ * What each variant of each kind costs in vertex indices — #367.
+ *
+ * ⚠️ **Per variant, which is what {@link sceneryIndicesByKind} cannot say.**
+ * That one filters the frame by *kind*, so a kind with three shapes reports the
+ * sum of whatever the frame held — and a belt that had quietly collapsed every
+ * variant onto one geometry would report the same total. Filtering by the pair
+ * gives one number per mesh, and two numbers that are equal are two variants
+ * drawing the same thing.
+ */
+function variantIndicesByKind(frame: SceneFrame): Record<string, readonly number[]> {
+  const canvas = document.createElement('canvas');
+  canvas.width = 600;
+  canvas.height = 400;
+  const counts: Record<string, readonly number[]> = {};
+  countingIndices((indices) => {
+    const view = threeGameRenderer.create(canvas, qualitySettings(0));
+    view.resize(600, 400);
+    const only = (kind: ScatterKind | null, variant: number): SceneFrame => ({
+      ...frame,
+      markers: [],
+      scatter:
+        kind === null
+          ? []
+          : frame.scatter.filter((item) => item.kind === kind && item.variant === variant),
+    });
+    const drawnBy = (kind: ScatterKind | null, variant: number): number => {
+      view.render(only(kind, variant));
+      const before = indices();
+      view.render(only(kind, variant));
+      return indices() - before;
+    };
+    const road = drawnBy(null, 0);
+    for (const kind of SCATTER_KINDS) {
+      counts[kind] = Array.from(
+        { length: SCATTER_VARIANT_SLOTS },
+        (_, slot) => drawnBy(kind, slot) - road,
+      );
+    }
+    view.destroy();
+  });
+  return counts;
+}
+
+/**
+ * How many draw calls the scenery costs at each `sceneryVariants` rung — #367.
+ *
+ * ⚠️ **The difference between the frame and the same frame with no scenery**,
+ * rather than the whole frame's count, so the ground, the road and the riders
+ * are subtracted at every rung and what is left is the belt's own width. That
+ * width is the number this issue is about: #240's NFR-2 names draw calls first,
+ * and #367's own framing is that a variant is one more of them.
+ */
+function sceneryCallsAcrossRungs(frame: SceneFrame): readonly number[] {
+  const canvas = document.createElement('canvas');
+  canvas.width = 600;
+  canvas.height = 400;
+  let found: readonly number[] = [];
+  countingDrawCalls((calls) => {
+    const view = threeGameRenderer.create(canvas, qualitySettings(0));
+    view.resize(600, 400);
+    const bare: SceneFrame = { ...frame, scatter: [] };
+    found = [3, 2, 1].map((variants) => {
+      view.setQuality({ ...qualitySettings(0), sceneryVariants: variants });
+      // Drawn once first at each rung: three compiles a program and allocates
+      // an instance buffer the first time it draws a mesh, and neither is a
+      // draw call — but the rung above may have left a mesh it never touched.
+      view.render(frame);
+      view.render(bare);
+      const beforeBare = calls();
+      view.render(bare);
+      const bareCalls = calls() - beforeBare;
+      const beforeFull = calls();
+      view.render(frame);
+      return calls() - beforeFull - bareCalls;
+    });
+    view.destroy();
+  });
+  return found;
+}
+
+/** What one rider's silhouette looks like, drawn alone. @see colourProbes */
+interface RiderProbe {
+  readonly mean: Pixel;
+  readonly pixels: number;
+}
+
+/**
+ * The colour claims of #366 and #368, read back off a drawing buffer.
+ *
+ * ⚠️ **Its own canvas and its own view**, for the reason the model measurement
+ * above has one: everything here needs several renders of frames that are not
+ * the sweep's, and reusing the sweep's view would leave its counters holding
+ * them.
+ */
+function colourProbes(probe: SceneFrame): {
+  readonly texturesCreated: number;
+  readonly texturesBaseline: number;
+  readonly treeRed: number;
+  readonly treeGreen: number;
+  readonly buildingGreen: number;
+  readonly buildingBlue: number;
+  readonly riders: Readonly<Record<string, RiderProbe>>;
+  readonly botCrankPixels: number;
+} {
+  const canvas = document.createElement('canvas');
+  canvas.width = 600;
+  canvas.height = 400;
+  let treeRed = 0;
+  let treeGreen = 0;
+  let buildingGreen = 0;
+  let buildingBlue = 0;
+  let botCrankPixels = 0;
+  const riders: Record<string, RiderProbe> = {};
+  let textures = 0;
+  let baselineTextures = 0;
+  countingTextures((counted) => {
+    const view = threeGameRenderer.create(canvas, qualitySettings(0));
+    view.resize(600, 400);
+    const gl = canvas.getContext('webgl2');
+    const whole = () =>
+      gl === null ? new Uint8Array(0) : readRegion(gl, 0, 0, canvas.width, canvas.height);
+    // ⚠️ **Baselined against a frame with nothing in it, not against zero.**
+    // three allocates four textures of its own the first time it renders
+    // anything at all — a 1 × 1 for each of the 2D, array, 3D and cube
+    // samplers its default uniforms declare — and they exist whether or not
+    // this program has an image anywhere. What #366's fourth criterion is
+    // about is whether the **scenery** adds one, so the baseline is taken
+    // after the first frame and what is published is the difference.
+    view.render({ ...probe, markers: [], scatter: [] });
+    const baseline = counted();
+    baselineTextures = baseline;
+
+    // ⚠️ **One kind at a time, close enough to fill a good share of the
+    // frame.** The probe frame's own items are 40 m to 115 m up the road, which
+    // is a few hundred pixels between them; a colour read off that would be
+    // mostly fog. Each is moved to 12 m and scaled up, which changes nothing
+    // about what colour it is.
+    const pose = probe.camera;
+    const closeUp = (kind: ScatterKind): SceneFrame => ({
+      ...probe,
+      markers: [],
+      scatter: [{ ...placedAhead(pose, kind, 0, 14, 0), scale: 1.4 }],
+    });
+    const empty: SceneFrame = { ...probe, markers: [], scatter: [] };
+    view.render(empty);
+    const nothing = whole();
+    view.render(closeUp('tree-broadleaf'));
+    const tree = channelLead(whole(), nothing);
+    treeRed = tree.red;
+    treeGreen = tree.green;
+    view.render(closeUp('building'));
+    const building = channelLead(whole(), nothing);
+    buildingGreen = building.green;
+    buildingBlue = building.blue;
+
+    // ------------------------------------------------ the riders — #368
+    //
+    // ⚠️ **Each alone, at the same place, on the same frame**, so the only
+    // thing that differs between the three is the tint. Drawing them together
+    // would measure whichever happened to be in front.
+    const alone = (kind: 'rider' | 'bot' | 'ghost', at: number): SceneFrame => ({
+      ...probe,
+      scatter: [],
+      markers: [
+        {
+          kind,
+          x: pose.x + 8 * pose.headingX,
+          y: pose.y,
+          z: pose.z + 8 * pose.headingZ,
+          headingX: pose.headingX,
+          headingZ: pose.headingZ,
+          crankAngle: at,
+        },
+      ],
+    });
+    for (const kind of ['rider', 'bot', 'ghost'] as const) {
+      view.render(alone(kind, 0));
+      const found = meanOver(whole(), nothing);
+      riders[kind] = { mean: found.mean, pixels: found.pixels };
+    }
+    // Half a turn of the bot's own cranks, which is what half a development of
+    // road does to them. A quarter, for the reason the rider's probe gives.
+    view.render(alone('bot', 0));
+    const botAtTop = whole();
+    view.render(alone('bot', Math.PI / 2));
+    botCrankPixels = shadingAcross(whole(), botAtTop).pixels;
+    view.destroy();
+    textures = counted() - baseline;
+  });
+  return {
+    texturesCreated: textures,
+    texturesBaseline: baselineTextures,
+    treeRed,
+    treeGreen,
+    buildingGreen,
+    buildingBlue,
+    riders,
+    botCrankPixels,
+  };
 }
 
 /** Where the road fills the frame, as fractions of its height. @see findCentreLine */
@@ -846,6 +1274,19 @@ const SHADING_FRAMES = 60;
 const SHADING_ROUNDS = 4;
 
 /**
+ * How far the rider is moved, across the road, to check its legs come with it:
+ * **1 m** — #366–#368's review. @see riderLeftBehindPixels
+ *
+ * ⚠️ **Across rather than along**, so the rider stays at the same depth and
+ * the same size: a move along the road changes the silhouette by perspective,
+ * which would make the control non-zero for a reason that has nothing to do
+ * with the legs. A metre is under half the road's own half-width, so the
+ * rider is still over tarmac and entirely in frame, and it is several times a
+ * leg's own width, so a leg left behind does not overlap the one that moved.
+ */
+const RIDER_MOVE_METRES = 1;
+
+/**
  * Blocks until everything asked of the GPU has actually happened.
  *
  * ⚠️ **`readPixels` and not `finish()`, and the difference was measured.**
@@ -967,6 +1408,8 @@ async function run(): Promise<void> {
       crankTurnPixels: 0,
       crankStillPixels: 0,
       riderPixels: 0,
+      riderLeftBehindPixels: 0,
+      riderMovePixels: 0,
       litFrameMs: 0,
       flatFrameMs: 0,
       shadedFrames: SHADING_FRAMES,
@@ -976,6 +1419,17 @@ async function run(): Promise<void> {
       sceneryIndicesModelled: {},
       sceneryIndicesPlain: {},
       sceneryInstances: {},
+      texturesCreated: 0,
+      texturesBaseline: 0,
+      treeRedPixels: 0,
+      treeGreenPixels: 0,
+      buildingGreenPixels: 0,
+      buildingBluePixels: 0,
+      sceneryCallsByVariants: [],
+      variantIndices: {},
+      riderMeanColour: {},
+      riderSilhouettePixels: {},
+      botCrankPixels: 0,
       errors: ['no canvas'],
     };
     return;
@@ -1016,6 +1470,8 @@ async function run(): Promise<void> {
   let crankTurnPixels = 0;
   let crankStillPixels = 0;
   let riderPixels = 0;
+  let riderLeftBehindPixels = 0;
+  let riderMovePixels = 0;
   let litMarkerSpread = 0;
   let flatMarkerSpread = 0;
   let litMarkerBrightest: Pixel = NOWHERE;
@@ -1028,8 +1484,21 @@ async function run(): Promise<void> {
   let sceneryIndicesModelled: Record<string, number> = {};
   let sceneryIndicesPlain: Record<string, number> = {};
   const sceneryInstances: Record<string, number> = {};
+  let texturesCreated = 0;
+  let texturesBaseline = 0;
+  let treeRedPixels = 0;
+  let treeGreenPixels = 0;
+  let buildingGreenPixels = 0;
+  let buildingBluePixels = 0;
+  let sceneryCallsByVariants: readonly number[] = [];
+  let variantIndices: Record<string, readonly number[]> = {};
+  const riderMeanColour: Record<string, Pixel> = {};
+  const riderSilhouettePixels: Record<string, number> = {};
+  let botCrankPixels = 0;
   /** The frame the model comparison is measured on. @see sceneryIndicesByKind */
   let probeFrame: SceneFrame | null = null;
+  /** The frame the variant measurements are taken on. @see variantIndices */
+  let variantFrame: SceneFrame | null = null;
 
   try {
     const profile = harnessRoute();
@@ -1070,18 +1539,23 @@ async function run(): Promise<void> {
         const pose = frame.camera;
         probeFrame = {
           ...frame,
-          scatter: SCATTER_KINDS.map((kind, at) => {
-            const along = 40 + at * 15;
-            const across = 8;
-            return {
-              kind,
-              x: pose.x + along * pose.headingX + across * pose.headingZ,
-              y: pose.y,
-              z: pose.z + along * pose.headingZ - across * pose.headingX,
-              rotation: 0,
-              scale: 1,
-            };
-          }),
+          scatter: SCATTER_KINDS.map((kind, at) => placedAhead(pose, kind, 0, 40 + at * 15, 8)),
+        };
+        // ⚠️ **A second probe, for #367, and it is a different shape of
+        // frame.** The one above carries exactly one item of each kind, which
+        // is what makes each index count the cost of a single instance — and
+        // every one of those items is variant 0, so it would measure a world
+        // with no variety at all however many shapes a kind had. This one
+        // carries one item per **slot** per kind, so every mesh the belt owns
+        // is asked for and the draw-call count below is the belt's real width.
+        variantFrame = {
+          ...frame,
+          markers: [],
+          scatter: SCATTER_KINDS.flatMap((kind, at) =>
+            Array.from({ length: SCATTER_VARIANT_SLOTS }, (_, slot) =>
+              placedAhead(pose, kind, slot, 40 + at * 15, 8 + slot * 4),
+            ),
+          ),
         };
         world = frame.world;
         quadCount = frame.corridor.quadCount;
@@ -1246,24 +1720,32 @@ async function run(): Promise<void> {
           scatter: [],
         };
         const noMarkers: SceneFrame = { ...riderOnly, markers: [] };
-        // ⚠️ **The rider's own position, drawn as the BOT's solid — and until
-        // #349 this was the rider itself.** The spread below is the whole of
-        // what says the world has a light direction, and it rests on the probe
-        // being **one colour**: whatever varies across it is then the light and
-        // nothing else. The rider was a sphere in one blue and is now a bicycle
-        // in four colours, which reads as a spread of 183 levels with the
-        // shading switched entirely off — a measurement that had stopped
-        // meaning anything rather than a criterion that had stopped holding.
+        // ⚠️ **A marker POST at the rider's own position, and it is the third
+        // thing this probe has been.** The spread below is the whole of what
+        // says the world has a light direction, and it rests on the probe being
+        // **one colour**: whatever varies across it is then the light and
+        // nothing else.
         //
-        // A cone carries the claim better than the sphere did, having faces at
-        // several orientations, and putting it where the rider is keeps
-        // everything else about the probe identical: same distance, same depth,
-        // same absence of fog gradient. The **bot's own** marker is 120 m up
-        // the road and about five pixels tall, so it is not an alternative.
+        // It was the rider's own sphere until #349, which made the rider a
+        // bicycle in four colours — reading as a spread of 183 levels with the
+        // shading switched entirely off. #349 moved it to the **bot's** cone,
+        // and #368 has now made that a bicycle too: there is no solid marker
+        // left in this scene at all.
+        //
+        // ⚠️ So the probe is a piece of **scenery**, and `post` is the one kind
+        // ADR 0022 D-3 leaves procedural — a five-sided cylinder painted in one
+        // colour, with faces at several orientations, which is exactly what the
+        // cone was chosen for. Everything else about the probe is identical:
+        // same distance, same depth, same absence of a fog gradient. It is
+        // scaled up because a post is 1.1 m tall and the claim is about levels
+        // across a silhouette rather than about eight pixels of one.
         const oneColourSolid: SceneFrame = {
-          ...riderOnly,
-          markers: riderOnly.markers.map((marker) => ({ ...marker, kind: 'bot' as const })),
+          ...frame,
+          markers: [],
+          scatter: [{ ...placedAhead(pose, 'post', 0, 9, 0), scale: 4 }],
         };
+        /** The same frame with the probe taken out. @see oneColourSolid */
+        const withoutTheSolid: SceneFrame = { ...oneColourSolid, scatter: [] };
         const wholeFrame = () =>
           gl === null ? undefined : readRegion(gl, 0, 0, canvas.width, canvas.height);
 
@@ -1276,7 +1758,7 @@ async function run(): Promise<void> {
           view.render(oneColourSolid);
           const drawn = calls() - beforeCalls;
           const present = wholeFrame();
-          view.render(noMarkers);
+          view.render(withoutTheSolid);
           const absent = wholeFrame();
           if (present !== undefined && absent !== undefined) {
             const found = shadingAcross(present, absent);
@@ -1331,6 +1813,50 @@ async function run(): Promise<void> {
         ) {
           crankStillPixels = shadingAcross(theSameAgain, atTopOfTheStroke).pixels;
           crankTurnPixels = shadingAcross(aQuarterTurnOn, atTopOfTheStroke).pixels;
+        }
+
+        // ------------- the legs come with the rider — #366–#368's review
+        //
+        // ⚠️ **The defect this measures is invisible to every probe above**,
+        // and that is the point: each of them holds the rider's position fixed
+        // and varies the crank angle, which is exactly the half a pose cache
+        // keyed on the angle gets right. A rider who is *moving and not
+        // pedalling* — every frame of every power-only ride — is what leaves
+        // world-space leg matrices behind.
+        //
+        // The two reads below are **the same rider in the same place at the
+        // same angle**, reached two ways: once by moving there without the
+        // angle changing, and once by arriving at an angle that then changes
+        // back, which no cache can serve. A renderer that carries its legs
+        // draws the identical frame; one that does not draws a pair of legs a
+        // metre to one side.
+        const HELD_ANGLE = 1.1;
+        /** Across the road rather than along it: same depth, most pixels. */
+        const movedAcross = (across: number, angle: number): SceneFrame => ({
+          ...riderOnly,
+          markers: riderOnly.markers.map((marker) => ({
+            ...marker,
+            x: marker.x + marker.headingZ * across,
+            z: marker.z - marker.headingX * across,
+            crankAngle: angle,
+          })),
+        });
+        view.render(movedAcross(0, HELD_ANGLE));
+        const beforeTheMove = wholeFrame();
+        view.render(movedAcross(RIDER_MOVE_METRES, HELD_ANGLE));
+        const movedWithoutPedalling = wholeFrame();
+        view.render(movedAcross(RIDER_MOVE_METRES, HELD_ANGLE + 0.4));
+        view.render(movedAcross(RIDER_MOVE_METRES, HELD_ANGLE));
+        const posedWhereItStands = wholeFrame();
+        if (
+          beforeTheMove !== undefined &&
+          movedWithoutPedalling !== undefined &&
+          posedWhereItStands !== undefined
+        ) {
+          // The control: the rider really did move, so the zero below is a
+          // renderer that followed rather than a probe that changed nothing.
+          riderMovePixels = shadingAcross(movedWithoutPedalling, beforeTheMove).pixels;
+          riderLeftBehindPixels = shadingAcross(movedWithoutPedalling, posedWhereItStands).pixels;
         }
 
         // ⚠️ **Warmed with a whole discarded sweep at each shading, not one
@@ -1407,6 +1933,40 @@ async function run(): Promise<void> {
     errors.push(error instanceof Error ? error.message : String(error));
   }
 
+  // -------------------------------------------- the variants — #367
+  //
+  // Outside the synchronous block for the reason the one above it is: the
+  // counters there are prototype patches held for a synchronous body, and this
+  // needs its own view and its own frames.
+  try {
+    if (variantFrame !== null) {
+      variantIndices = variantIndicesByKind(variantFrame);
+      sceneryCallsByVariants = sceneryCallsAcrossRungs(variantFrame);
+    }
+  } catch (error: unknown) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
+
+  // ---------------------------- the colours and the riders — #366, #368
+  try {
+    if (probeFrame !== null) {
+      const found = colourProbes(probeFrame);
+      texturesCreated = found.texturesCreated;
+      texturesBaseline = found.texturesBaseline;
+      treeRedPixels = found.treeRed;
+      treeGreenPixels = found.treeGreen;
+      buildingGreenPixels = found.buildingGreen;
+      buildingBluePixels = found.buildingBlue;
+      for (const [kind, each] of Object.entries(found.riders)) {
+        riderMeanColour[kind] = each.mean;
+        riderSilhouettePixels[kind] = each.pixels;
+      }
+      botCrankPixels = found.botCrankPixels;
+    }
+  } catch (error: unknown) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
+
   window.__oylGameHarness = {
     created,
     hasContext,
@@ -1441,6 +2001,8 @@ async function run(): Promise<void> {
     crankTurnPixels,
     crankStillPixels,
     riderPixels,
+    riderLeftBehindPixels,
+    riderMovePixels,
     litMarkerPixels,
     flatMarkerPixels,
     litMarkerSpread,
@@ -1456,6 +2018,17 @@ async function run(): Promise<void> {
     sceneryIndicesModelled,
     sceneryIndicesPlain,
     sceneryInstances,
+    texturesCreated,
+    texturesBaseline,
+    treeRedPixels,
+    treeGreenPixels,
+    buildingGreenPixels,
+    buildingBluePixels,
+    sceneryCallsByVariants,
+    variantIndices,
+    riderMeanColour,
+    riderSilhouettePixels,
+    botCrankPixels,
     errors,
   };
 }

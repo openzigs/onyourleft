@@ -34,6 +34,8 @@ import {
   RIDER_BODY_PARTS,
   RIDER_CRANK_PARTS,
   RIDER_PALETTE,
+  SIMULATED_DEVELOPMENT_METRES,
+  simulatedCrankAngle,
   type LimbBone,
   type RiderPart,
 } from './bicycle';
@@ -489,5 +491,96 @@ describe('the cranks turn at the cadence, and only at the cadence', () => {
     expect(advanceCrank(1.5, { value: 90, live: true }, Number.NaN)).toBeCloseTo(1.5, 9);
     expect(advanceCrank(Number.NaN, { value: 90, live: true }, 0.1)).toBe(0);
     expect(advanceCrank(-1, { value: undefined, live: false }, 0.1)).toBeCloseTo(TAU - 1, 9);
+  });
+});
+
+/**
+ * The bot's and the ghost's cranks, which come from neither a sensor nor a
+ * clock — #368.
+ *
+ * ⚠️ **#368's second criterion is a decision to record rather than a behaviour
+ * to implement**: *"neither has a cadence, so `advanceCrank`'s honesty rule
+ * does not apply as written. Decide and record: either derive a cadence from
+ * their speed and a fixed gear… or leave them still. Do not invent a rate and
+ * call it a reading."*
+ *
+ * The decision is a **third** option, and the assertions below are what make it
+ * checkable: the angle is a pure function of the odometer at a fixed
+ * development, so nothing is integrated, nothing is a rate, and there is no
+ * state to be wrong across a pause.
+ */
+describe("a simulated rider's cranks turn because its wheels did — #368", () => {
+  it('turns exactly one revolution per development of road', () => {
+    expect(simulatedCrankAngle(0)).toBe(0);
+    expect(simulatedCrankAngle(SIMULATED_DEVELOPMENT_METRES)).toBeCloseTo(0, 9);
+    expect(simulatedCrankAngle(SIMULATED_DEVELOPMENT_METRES / 2)).toBeCloseTo(Math.PI, 9);
+    expect(simulatedCrankAngle(SIMULATED_DEVELOPMENT_METRES / 4)).toBeCloseTo(Math.PI / 2, 9);
+  });
+
+  it('stands still for a rider who is standing still', () => {
+    // ⚠️ **The honesty property, and it falls out rather than being enforced.**
+    // `advanceCrank` needs an explicit rule to stop a rider with no cadence
+    // pedalling; a bot that has not moved has not turned its cranks because
+    // there is nothing in the derivation but the distance.
+    expect(simulatedCrankAngle(137.5)).toBe(simulatedCrankAngle(137.5));
+    expect(simulatedCrankAngle(0)).toBe(0);
+  });
+
+  it('carries no state, so a five-minute stall changes nothing', () => {
+    // ⚠️ **What `MAXIMUM_CRANK_STEP_SECONDS` exists to bound for the rider does
+    // not arise here at all.** A backgrounded phone hands the next frame a gap
+    // of minutes; an integrator would spin through hundreds of revolutions on
+    // that frame, and this returns the angle for wherever the bot now is.
+    const before = simulatedCrankAngle(400);
+    const away = simulatedCrankAngle(9_999);
+
+    expect(simulatedCrankAngle(400)).toBe(before);
+    expect(away).toBe(simulatedCrankAngle(9_999));
+  });
+
+  it('wraps into one turn however long the ride', () => {
+    for (const distance of [0, 1, 6.2, 1_000, 250_000, -12]) {
+      const angle = simulatedCrankAngle(distance);
+
+      expect(angle).toBeGreaterThanOrEqual(0);
+      expect(angle).toBeLessThan(Math.PI * 2);
+    }
+  });
+
+  it('answers a distance that is not a distance with a defined angle', () => {
+    // A `NaN` reaching a rotation matrix is a rider that is not drawn at all.
+    expect(simulatedCrankAngle(Number.NaN)).toBe(0);
+    expect(simulatedCrankAngle(Number.POSITIVE_INFINITY)).toBe(0);
+  });
+
+  it('produces a plausible cadence across the speeds this game reaches', () => {
+    // ⚠️ **The one thing the gear is chosen for**, and it is stated as the
+    // range rather than as the ratio: a development that made 30 km/h read as
+    // 40 rpm or as 160 would be visibly wrong in a way no other assertion here
+    // could see. 20, 30 and 40 km/h come out at about 54, 81 and 108 rpm.
+    for (const [kilometresPerHour, low, high] of [
+      [20, 45, 65],
+      [30, 70, 95],
+      [40, 95, 125],
+    ] as const) {
+      const metresPerSecond = kilometresPerHour / 3.6;
+      const revolutionsPerMinute = (metresPerSecond * 60) / SIMULATED_DEVELOPMENT_METRES;
+
+      expect(revolutionsPerMinute).toBeGreaterThan(low);
+      expect(revolutionsPerMinute).toBeLessThan(high);
+    }
+  });
+
+  it('is not `advanceCrank` with a made-up reading', () => {
+    // ⚠️ **The claim #368 asks to be recorded, made mechanical.** If a
+    // simulated rider's angle went through `advanceCrank`, it would need a
+    // `SensorReading` this program had invented — and it would then depend on a
+    // frame's elapsed time, which is the thing that makes a stall wrong. Two
+    // riders at the same distance agree whatever happened between the frames.
+    expect(simulatedCrankAngle(613.4)).toBe(simulatedCrankAngle(613.4));
+    // And a rider whose cranks are advanced by `advanceCrank` with no reading
+    // does not move at all, which is the rule that does NOT apply here.
+    expect(advanceCrank(1.2, { live: false, value: 90 }, 1)).toBeCloseTo(1.2, 9);
+    expect(simulatedCrankAngle(SIMULATED_DEVELOPMENT_METRES / 2)).not.toBeCloseTo(0, 3);
   });
 });
