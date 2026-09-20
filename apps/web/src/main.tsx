@@ -183,15 +183,18 @@ interface ClientPlatform {
  * app could not pair with anything on Android. The `import()` is behind
  * `isNativeShell` so a browser never downloads a line of Capacitor.
  *
- * ⚠️ **Trainer control is deliberately absent on Android, and the screen says
- * so rather than pretending.** `openTrainer` is omitted for the Capacitor
- * transport because `openWebBluetoothTrainer` needs `openFitnessMachine`, which
- * is on `WebBluetoothTransport` and not on `SensorTransport` — driving an FTMS
- * control point through the Capacitor plugin is real work that #87 did not do
- * either. So on a phone a rider can pair, read power, cadence and heart rate,
- * and record; they cannot yet have the trainer's resistance driven for them.
- * `controller.ts` documents that omitting `openTrainer` makes the screen report
- * no controllable trainer, which is the honest state rather than a silent one.
+ * ⚠️ **This paragraph used to say trainer control was deliberately absent on
+ * Android and that `openTrainer` was omitted for the Capacitor transport. A
+ * reviewer who remembers that is reading the old file**, and it was wrong long
+ * before #370 noticed: `openCapacitorTrainer` is passed below, and has been
+ * since #230's work on the plugin. Found while wiring #370 and corrected here
+ * rather than left, because a comment describing the opposite of the code
+ * beneath it is worse than no comment.
+ *
+ * What is still true is the bound CLAUDE.md §4h states: the Android
+ * trainer-control path is **written and has never driven a trainer**.
+ * `docs/validation/0002-android-shell-and-game.md` Parts B–D and L are where
+ * that is settled, and their result tables are empty.
  */
 async function buildPlatform(probe: CapabilityProbe): Promise<ClientPlatform> {
   const shared = {
@@ -249,6 +252,10 @@ async function buildPlatform(probe: CapabilityProbe): Promise<ClientPlatform> {
       openTrainer: openCapacitorTrainer({
         readMachine: async (deviceId) => mobile.readCapacitorFitnessMachine(plugin, deviceId),
         openChannel: (deviceId) => mobile.createCapacitorFitnessMachineChannel(plugin, deviceId),
+        // #370. The same `plugin`, for the reason the comment above gives:
+        // asking a second one what the link resolved would be asking about a
+        // link this object does not hold.
+        resolvedUuids: async (deviceId) => mobile.readCapacitorResolvedUuids(plugin, deviceId),
       }),
     });
     return { rideController, shell };

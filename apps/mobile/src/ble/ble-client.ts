@@ -33,7 +33,12 @@
 
 import { BleClient } from '@capacitor-community/bluetooth-le';
 
-import type { CapacitorBlePort, PluginDevice, PluginDeviceRequest } from './plugin-port';
+import type {
+  CapacitorBlePort,
+  PluginDevice,
+  PluginDeviceRequest,
+  PluginService,
+} from './plugin-port';
 
 /**
  * The real plugin, behind {@link CapacitorBlePort}.
@@ -78,6 +83,20 @@ export function capacitorBlePort(): CapacitorBlePort {
 
     disconnect: async (deviceId: string): Promise<void> => {
       await BleClient.disconnect(deviceId);
+    },
+
+    getServices: async (deviceId: string): Promise<readonly PluginService[]> => {
+      const services = await BleClient.getServices(deviceId);
+      // Narrowed to the two fields the port declares, rather than handed
+      // through: the plugin's `BleCharacteristic` also carries properties and
+      // descriptors, and a shape that leaked those would invite a caller above
+      // the seam to start reading them.
+      return services.map((service) => ({
+        uuid: service.uuid,
+        characteristics: service.characteristics.map((characteristic) => ({
+          uuid: characteristic.uuid,
+        })),
+      }));
     },
 
     read: async (deviceId: string, service: string, characteristic: string): Promise<DataView> =>

@@ -53,6 +53,7 @@ const record = (name = 'Sweet spot'): WorkoutRecord => ({
 const trainer = (overrides: Partial<TrainerSnapshot> = {}): TrainerSnapshot => ({
   paired: true,
   controllable: true,
+  controlChoice: { kind: 'none' },
   canSetPower: true,
   canSimulate: false,
   powerRange: undefined,

@@ -73,6 +73,7 @@ import type {
   SupportedPowerRange,
   TargetPower,
   TrainerControl,
+  TrainerControlChoice,
 } from '@onyourleft/sensors/protocol';
 import type { ActivityId, AthleteId, RecordingSessionId, WorkoutRecord } from '@onyourleft/store';
 
@@ -94,7 +95,7 @@ import {
   type MetricState,
   type RideMetricId,
 } from './metrics';
-import type { OpenTrainer, TrainerConnection } from './trainer';
+import { NO_TRAINER_CONTROL, type OpenTrainer, type TrainerConnection } from './trainer';
 import { createWorkoutSession, type WorkoutSession } from '../workout/session';
 import { blockText } from '../workouts/library';
 
@@ -157,6 +158,21 @@ export interface TrainerSnapshot {
   readonly paired: boolean;
   /** The trainer serves a control point and reported a power range. */
   readonly controllable: boolean;
+  /**
+   * Which control point the machine offers, from everything the link resolved
+   * (#370).
+   *
+   * ⚠️ **Not the same question as {@link controllable}, and that is the whole
+   * of what #370 added.** `controllable` is *"this app will drive it"*;
+   * this is *"what is there"*. The pair that used to be impossible to tell
+   * apart is `vendor-not-implemented` — a real trainer with a real control
+   * point this program has decided not to write to — and `none`, which is a
+   * heart rate strap. `TrainerPanel` says a different sentence for each.
+   *
+   * `none` when nothing is paired, and also when the transport could not say.
+   * An empty answer is the absence of information rather than a claim.
+   */
+  readonly controlChoice: TrainerControlChoice;
   /** Target Setting bit 3. `false` hides the ERG control rather than disabling it. */
   readonly canSetPower: boolean;
   /**
@@ -439,6 +455,8 @@ interface SensorEntry {
   readonly release: Unsubscribe[];
   state: ConnectionState;
   trainer: TrainerConnection | undefined;
+  /** What the machine offers, whether or not this app will drive it (#370). */
+  controlChoice: TrainerControlChoice;
 }
 
 export function createRideController(options: RideControllerOptions): RideController {
@@ -480,6 +498,18 @@ export function createRideController(options: RideControllerOptions): RideContro
   const trainerEntry = (): SensorEntry | undefined =>
     [...sensors.values()].find((entry) => entry.trainer !== undefined);
 
+  /**
+   * The sensor the athlete paired **as a trainer**, driveable or not.
+   *
+   * ⚠️ Not {@link trainerEntry}, and the difference is exactly #370. That one
+   * selects on `entry.trainer`, which is only set when this app built a control
+   * client — so a machine offering nothing but its manufacturer's control point
+   * is invisible to it, and `TrainerSnapshot.controlChoice` read through it
+   * would be `none` on every device the new message exists for.
+   */
+  const pairedTrainerEntry = (): SensorEntry | undefined =>
+    [...sensors.values()].find((entry) => entry.role === 'trainer');
+
   const control = (): TrainerControl | undefined => trainerEntry()?.trainer?.control;
 
   /** Whether any **connected** sensor supplies this channel. */
@@ -497,6 +527,7 @@ export function createRideController(options: RideControllerOptions): RideContro
 
   const buildSnapshot = (): RideSnapshot => {
     const trainer = trainerEntry();
+    const paired = pairedTrainerEntry();
     const connection = trainer?.trainer;
     const session = recorder?.session;
     return {
@@ -525,8 +556,9 @@ export function createRideController(options: RideControllerOptions): RideContro
       })),
       workout: workoutSnapshot(),
       trainer: {
-        paired: [...sensors.values()].some((entry) => entry.role === 'trainer'),
+        paired: paired !== undefined,
         controllable: connection !== undefined,
+        controlChoice: paired?.controlChoice ?? NO_TRAINER_CONTROL,
         canSetPower: connection?.canSetPower ?? false,
         canSimulate: connection?.canSimulate ?? false,
         powerRange: connection?.powerRange,
@@ -620,6 +652,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       release: [],
       state: transport.connectionState(id),
       trainer: undefined,
+      controlChoice: NO_TRAINER_CONTROL,
     };
     sensors.set(id, entry);
     try {
@@ -667,7 +700,12 @@ export function createRideController(options: RideControllerOptions): RideContro
     }
 
     if (entry.role === 'trainer' && openTrainer !== undefined) {
-      const connection = await openTrainer(id);
+      const attachment = await openTrainer(id);
+      // ⚠️ Recorded whether or not a connection came back. It is the half that
+      // says *"this machine has a control point and this program will not use
+      // it"*, which is the one state the screen could not describe before #370.
+      entry.controlChoice = attachment.choice;
+      const connection = attachment.connection;
       if (connection !== undefined) {
         entry.trainer = connection;
         entry.release.push(
@@ -699,6 +737,7 @@ export function createRideController(options: RideControllerOptions): RideContro
     }
     entry.trainer?.control.close();
     entry.trainer = undefined;
+    entry.controlChoice = NO_TRAINER_CONTROL;
   };
 
   /**

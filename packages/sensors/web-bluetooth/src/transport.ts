@@ -355,6 +355,39 @@ export interface WebBluetoothTransport extends SensorTransport {
    * when the device serves no Fitness Machine Service.
    */
   openFitnessMachine(id: DeviceId): Promise<FitnessMachine>;
+
+  /**
+   * Every service and characteristic UUID this link resolved — #370.
+   *
+   * ⚠️ **This exists because `openFitnessMachine` can only answer two of the
+   * three states a trainer can be in.** It throws for a machine that serves no
+   * Fitness Machine Service, and `apps/web/src/ride/trainer.ts` turns that into
+   * `undefined` — so a trainer whose only control point is its manufacturer's
+   * is reported to the rider as *"no controllable trainer"*, which is wrong.
+   * `../../protocol`'s `chooseTrainerControl` has always known the difference
+   * and had nothing to read: the wiring gate reported it as three unwired
+   * exports on its first run over the trainer-command seam (#363).
+   *
+   * The answer is deliberately **flat and unsorted**: services and
+   * characteristics in one set, because that is exactly what
+   * `chooseTrainerControl` takes, and because deciding which is which is the
+   * protocol's business rather than the transport's. Nothing here names a
+   * vendor.
+   *
+   * ⚠️ **Bounded by the grant, and the bound is the point.** Only services in
+   * `DeviceRecord.granted` are reached, so this cannot enumerate a device the
+   * athlete paired for heart rate looking for a trainer — the same rule
+   * `controlCharacteristicsFor` applies, for the same reason. A service that
+   * cannot be resolved is skipped rather than reported: a machine that serves
+   * three of four is not an error, it is a machine that serves three.
+   *
+   * @returns the empty list when there is no link, which the caller reads as
+   * *"nothing known about this machine"* rather than as a refusal.
+   * @throws {SensorError} `device-not-found` for an id this transport did not
+   * issue. A silent empty answer there would be a typo reported as a trainer
+   * with no control point.
+   */
+  resolvedUuids(id: DeviceId): Promise<readonly GattUuid[]>;
 }
 
 /**
@@ -1293,6 +1326,37 @@ export function createWebBluetoothTransport(
 
   const transport: WebBluetoothTransport = {
     traits,
+
+    async resolvedUuids(id: DeviceId): Promise<readonly GattUuid[]> {
+      const record = recordFor(id);
+      const found = new Set<GattUuid>();
+      if (record.session.state !== 'connected' || record.link === undefined) {
+        return [];
+      }
+      for (const granted of record.granted) {
+        let characteristics: readonly GattCharacteristicPort[];
+        try {
+          // Two queued round trips per granted service, and the queue is what
+          // keeps them from racing the ride's own subscriptions — `queue.ts`
+          // records why a second concurrent `getPrimaryService` is a hazard on
+          // a real stack rather than a theoretical one.
+          const service = await queue.run(id, async () =>
+            server(record).getPrimaryService(granted),
+          );
+          characteristics = await queue.run(id, async () => service.getCharacteristics());
+        } catch {
+          // Not served, not granted after all, or the link went mid-walk. None
+          // of the three is an error to report: the answer is simply that this
+          // service contributed nothing.
+          continue;
+        }
+        found.add(granted);
+        for (const characteristic of characteristics) {
+          found.add(canonicalUuid(characteristic.uuid));
+        }
+      }
+      return [...found];
+    },
 
     async openFitnessMachine(id: DeviceId): Promise<FitnessMachine> {
       const record = recordFor(id);

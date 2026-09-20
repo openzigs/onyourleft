@@ -48,6 +48,54 @@ const LOSS_REASON: Readonly<Record<'permission-lost' | 'reset' | 'link-lost', st
     'The connection to the trainer dropped, and control does not survive one. Reconnect the trainer, then ask for control again.',
 };
 
+/**
+ * Why this trainer is not being driven — one sentence per state (#370).
+ *
+ * ⚠️ **There used to be one sentence for all three, and it was wrong for the
+ * middle one.** `vendor-not-implemented` is a real trainer with a real control
+ * point that this program has decided not to write to, and it was told
+ * *"this trainer does not offer a Fitness Machine control point, or did not
+ * report the power range"* — a sentence whose first half is true, whose second
+ * half is a guess, and which reads as *"your trainer is not a trainer"*. The
+ * rider's next action is different in each case: buy nothing and ride on;
+ * check for a firmware update that adds FTMS; or find out why the machine will
+ * not report its range.
+ *
+ * ⚠️ **What the vendor sentence must NOT say is "yet".** ADR-free scope, and
+ * `fitness-machine-control.ts` §"What is deliberately not implemented" is why:
+ * two independent open-source implementations of the Wahoo characteristic
+ * disagree by a factor of ten on the rolling-resistance scaling, and writing an
+ * unverifiable scaling to a brake is the safety question CLAUDE.md §6 puts this
+ * whole path in. This is a message, not a roadmap.
+ */
+const NOT_CONTROLLABLE: Readonly<
+  Record<
+    TrainerSnapshot['controlChoice']['kind'],
+    { readonly label: string; readonly text: string }
+  >
+> = {
+  'fitness-machine': {
+    label: 'No power range',
+    text:
+      'This trainer offers a Fitness Machine control point but did not report the power range a ' +
+      'target has to be bounded by, so this app will not set one. It still records power and cadence.',
+  },
+  'vendor-not-implemented': {
+    label: 'Records, but cannot be controlled',
+    text:
+      'This trainer records fine but cannot be controlled from here. Its only control point is its ' +
+      "manufacturer's own, which this app does not write to — the published descriptions of it " +
+      'disagree about how hard it would brake, and guessing is not something to do to a brake. ' +
+      'Power, cadence and speed are unaffected.',
+  },
+  none: {
+    label: 'Not controllable',
+    text:
+      'This trainer does not offer a control point this app recognises, or did not report the power ' +
+      'range a target has to be bounded by. It still records power and cadence.',
+  },
+};
+
 export interface TrainerPanelProps {
   readonly trainer: TrainerSnapshot;
   readonly onRequestControl: () => void;
@@ -75,9 +123,8 @@ export function TrainerPanel({
 
   if (!trainer.controllable) {
     return (
-      <StatusMessage tone="info" label="Not controllable">
-        This trainer does not offer a Fitness Machine control point, or did not report the power
-        range a target has to be bounded by. It still records power and cadence.
+      <StatusMessage tone="info" label={NOT_CONTROLLABLE[trainer.controlChoice.kind].label}>
+        {NOT_CONTROLLABLE[trainer.controlChoice.kind].text}
       </StatusMessage>
     );
   }
@@ -134,6 +181,25 @@ export function TrainerPanel({
   return (
     <>
       <p className="oyl-trainer__state">{targetSentence(trainer)}</p>
+
+      {/*
+        ⚠️ The observable half of the precedence rule (#370).
+
+        `chooseTrainerControl` gives the standard control point priority
+        outright, and until it had a caller that priority was applied by
+        accident — nothing looked for the vendor's characteristic, so nothing
+        could report passing it over. This is the sentence a bug report about a
+        trainer that behaves differently under two apps would want to quote, and
+        the reason `TrainerControlChoice` carries `vendorAlsoPresent` at all
+        rather than dropping it.
+      */}
+      {trainer.controlChoice.kind === 'fitness-machine' &&
+      trainer.controlChoice.vendorAlsoPresent ? (
+        <p className="oyl-muted">
+          This trainer also carries its manufacturer&rsquo;s own control point. The standard one is
+          being used.
+        </p>
+      ) : null}
 
       {trainer.lost === undefined ? null : (
         <StatusMessage tone="warning" label="Control lost" live>

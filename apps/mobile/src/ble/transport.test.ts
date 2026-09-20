@@ -326,6 +326,9 @@ describe('the scripted plugin enforces the ordering the real one has (#230)', ()
     ['getDevices', (port) => port.getDevices(['AA:BB'])],
     ['connect', (port) => port.connect('AA:BB', () => undefined)],
     ['disconnect', (port) => port.disconnect('AA:BB')],
+    // #370. It reads a table rather than the device, and it is guarded all the
+    // same: the plugin's own `assertBluetoothAdapter` fronts every call.
+    ['getServices', (port) => port.getServices('AA:BB')],
     ['read', (port) => port.read('AA:BB', 'service', 'characteristic')],
     [
       'startNotifications',

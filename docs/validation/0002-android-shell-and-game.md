@@ -1119,6 +1119,65 @@ Record what was seen before deciding which.
 
 ---
 
+## Part O — a trainer that serves only its manufacturer's control point ([#370](https://github.com/openzigs/onyourleft/issues/370))
+
+Added 2026-09-20 by #370, and ⚠️ **it is the one part of this document nobody in the loop can run.**
+The owner's machine serves FTMS. This part exists so that the first person who *does* have a
+pre-FTMS trainer — a Wahoo KICKR or SNAP from before the Fitness Machine Service, a CompuTrainer, a
+Tacx of that era — has a script in front of them rather than a bug report to write from memory.
+
+⚠️ **Nothing here asks anybody to control such a trainer, and nothing in the app will try.** #370's
+fourth criterion is that the vendor characteristic is never written to, and
+`packages/sensors/protocol/src/fitness-machine-control.ts` §"What is deliberately not implemented"
+is why: two independent open-source implementations of the Wahoo characteristic disagree by a
+**factor of ten** on the rolling-resistance scaling, and CLAUDE.md §6 puts writing an unverifiable
+scaling to a brake in the safety class. **This part is about a sentence on a screen.**
+
+### ⚠️ Read this before starting
+
+- **What changed is a message, not a capability.** Before #370 such a trainer was told *"this
+  trainer does not offer a Fitness Machine control point, or did not report the power range"* — a
+  sentence whose second half is a guess and which reads as *"your trainer is not a trainer"*.
+- **The read that makes the difference is an enumeration**, and it happens on pairing:
+  `WebBluetoothTransport.resolvedUuids` in a browser, the plugin's `getServices` in the shell. If
+  the enumeration fails the rider gets the old, general sentence and a working trainer — which is
+  the deliberate fallback, and O4 is how you tell the two apart.
+- **`adb logcat` is the independent check**, filtered for `BluetoothLe`. What must **not** appear is
+  a **write** to `a026e005-…`.
+
+```bash
+adb logcat -c
+adb logcat | grep -i "BluetoothLe"
+```
+
+| Step | What to do | What should happen |
+|---|---|---|
+| O1 | Pair the trainer on the Ride screen | It pairs, and power and cadence appear. A vendor-only machine is still a sensor |
+| O2 | Read the trainer panel | *"Records, but cannot be controlled"* — **"This trainer records fine but cannot be controlled from here"**. ⚠️ If it says *"does not offer a control point this app recognises"*, the enumeration did not find the vendor characteristic: record the model and go to O4 |
+| O3 | Ride for a minute, then read the logcat | Notifications, and **no write at all** to `a026e005-0a7d-4ab3-97fa-f1500f9feb8b`. A write here is a stop-the-session defect |
+| O4 | ⚠️ Only if O2 gave the general sentence. In `chrome://bluetooth-internals` (or from the logcat), list the characteristics inside `0x1818` | If a vendor control point is there and the app did not see it, that is a finding about the enumeration or about the UUID — `trainer-control-choice.ts` records that the Wahoo value is **secondary-sourced** and has never been checked against hardware. This step is the check |
+| O5 | Open the game and choose a route | The picker says the road is not reaching the trainer, in words about the **road**. Nothing is written |
+
+⚠️ **O4 is the step this part is really for.** `WAHOO_TRAINER_CONTROL_POINT` was corroborated from
+community documentation and open-source implementations, read and never copied, and **has not been
+checked against a device**. The whole failure mode of a wrong transcription is O2 giving the general
+sentence instead of the specific one — which is why it is safe to ship unverified, and why the first
+person with the hardware is being asked to look.
+
+### O results
+
+| Step | Result | Notes |
+|---|---|---|
+| O1 | trainer model: | paired? |
+| O2 | which sentence? | |
+| O3 | writes to the vendor characteristic: | expected: none |
+| O4 | characteristics inside 0x1818: | |
+| O5 | what the picker said: | |
+
+**Was the sentence the one you would have wanted to read (in your own words)?** ______________
+
+---
+
 ## After the session
 
 1. **Fill the tables in this file and commit it.** An empty table in `main` is the honest state; a

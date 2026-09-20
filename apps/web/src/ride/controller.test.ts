@@ -31,7 +31,10 @@ import { deviceId } from '@onyourleft/sensors';
 import {
   createTrainerControl,
   decodeSupportedPowerRange,
+  FITNESS_MACHINE_CONTROL_POINT,
+  FITNESS_MACHINE_SERVICE,
   type TrainerControl,
+  type TrainerControlChoice,
 } from '@onyourleft/sensors/protocol';
 import {
   createSimulator,
@@ -173,6 +176,15 @@ interface BenchOptions {
   readonly rideSave?: RideSavePort | undefined;
   /** Break one checkpoint-store operation, for the failure paths review found. */
   readonly checkpointStore?: Partial<RecordingCheckpointStore>;
+  /**
+   * What the machine turns out to offer, when it is not one this app drives
+   * (#370).
+   *
+   * Set it and `openTrainer` answers that choice with **no** connection, which
+   * is the vendor-only trainer: a real machine, a real control point, and
+   * nothing this program will write to it.
+   */
+  readonly trainerOffers?: TrainerControlChoice;
 }
 
 function benchWith(options: BenchOptions = {}): Bench {
@@ -190,11 +202,14 @@ function benchWith(options: BenchOptions = {}): Bench {
   const sessionIds: RecordingSessionId[] = [];
 
   const openTrainer: OpenTrainer = (id) => {
+    if (options.trainerOffers !== undefined) {
+      return Promise.resolve({ choice: options.trainerOffers, connection: undefined });
+    }
     const handle = bench.device(id);
     const controlPoint = handle.controlPoint;
     const ranges = handle.supportedRanges;
     if (controlPoint === undefined || ranges === undefined) {
-      return Promise.resolve(undefined);
+      return Promise.resolve({ choice: { kind: 'none' as const }, connection: undefined });
     }
     // Read the way a client reads it: as octets, through the package's own
     // decoder. A range constructed in the test would be the hard-coded
@@ -236,7 +251,15 @@ function benchWith(options: BenchOptions = {}): Bench {
       powerRange,
     };
     control = connection.control;
-    return Promise.resolve(connection);
+    return Promise.resolve({
+      choice: {
+        kind: 'fitness-machine' as const,
+        service: FITNESS_MACHINE_SERVICE,
+        controlPoint: FITNESS_MACHINE_CONTROL_POINT,
+        vendorAlsoPresent: false,
+      },
+      connection,
+    });
   };
 
   const controller = createRideController({
@@ -1652,6 +1675,52 @@ describe('a ride the tab died in the middle of is offered back — #212', () => 
     // ⚠️ A rider mid-ride must not be shown a control that would adopt a
     // different recording out from under the one they are riding.
     expect(rig.controller.getSnapshot().recoverable).toEqual([]);
+    rig.controller.dispose();
+  });
+});
+
+/**
+ * #370 — a paired trainer this app will not drive is still a paired trainer.
+ *
+ * ⚠️ **The wiring these two cases exist for is a one-word difference inside the
+ * controller.** `trainerEntry()` selects on `entry.trainer`, which is set only
+ * when a control client was built — so reading `controlChoice` through it would
+ * be `none` on every device the new message exists for, and the screen would go
+ * on saying what it said before. `pairedTrainerEntry()` selects on the role.
+ */
+describe('what the paired trainer turned out to offer — #370', () => {
+  const VENDOR_ONLY: TrainerControlChoice = {
+    kind: 'vendor-not-implemented',
+    controlPoint: 'a026e005-0a7d-4ab3-97fa-f1500f9feb8b',
+  };
+
+  it('reports a vendor-only machine as paired, not controllable, and not nothing', async () => {
+    const rig = benchWith({ trainerOffers: VENDOR_ONLY });
+    await rig.controller.pair('trainer');
+
+    const trainer = rig.controller.getSnapshot().trainer;
+
+    expect(trainer.paired).toBe(true);
+    expect(trainer.controllable).toBe(false);
+    expect(trainer.controlChoice).toEqual(VENDOR_ONLY);
+    rig.controller.dispose();
+  });
+
+  it('carries the standard choice through for a machine it does drive', async () => {
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+
+    const trainer = rig.controller.getSnapshot().trainer;
+
+    expect(trainer.controllable).toBe(true);
+    expect(trainer.controlChoice).toMatchObject({ kind: 'fitness-machine' });
+    rig.controller.dispose();
+  });
+
+  it('says nothing is known before anything is paired', () => {
+    const rig = benchWith();
+
+    expect(rig.controller.getSnapshot().trainer.controlChoice).toEqual({ kind: 'none' });
     rig.controller.dispose();
   });
 });

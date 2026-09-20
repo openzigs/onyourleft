@@ -129,6 +129,28 @@ export interface GattCharacteristicPort {
 export interface GattServicePort {
   readonly uuid: GattUuid;
   getCharacteristic(uuid: GattUuid): Promise<GattCharacteristicPort>;
+  /**
+   * Every characteristic this service resolved, rather than one named one.
+   *
+   * ⚠️ **Added by [#370](https://github.com/openzigs/onyourleft/issues/370) for
+   * one purpose: answering what a machine offers, without naming what is being
+   * looked for.** `chooseTrainerControl` takes *"a flat iterable of service and
+   * characteristic UUIDs together"*, and a transport that could only ask
+   * `getCharacteristic(x)` would have to already hold `x` — which would put a
+   * vendor's characteristic UUID inside the transport, on the one path that is
+   * supposed to be platform detail and nothing else. Enumerating instead keeps
+   * the decision in `../../protocol`, where it is testable and platform-free.
+   *
+   * `getCharacteristics()` is the browser's own method and takes an optional
+   * UUID; the port declares the no-argument form because that is the only call
+   * this adapter makes, and `gatt-conformance.test.ts` is what checks the real
+   * one still satisfies it.
+   *
+   * ⚠️ It is bounded by the **grant** exactly as `getCharacteristic` is: a
+   * service this origin was not granted cannot be reached at all, so this
+   * cannot enumerate a device's whole attribute table.
+   */
+  getCharacteristics(): Promise<readonly GattCharacteristicPort[]>;
 }
 
 /** The GATT server behind one device. */
