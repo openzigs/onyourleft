@@ -520,6 +520,18 @@ apps/                 AGPL-3.0-or-later, without exception
                         Android side of the FTMS control point — the write
                         that is acknowledged, and the sibling that is not
     src/permission/     what a rider is told when Bluetooth will not work (#87)
+    tools/              the one thing here that talks to a phone rather than
+                        running on one (#410) — `webview-probe.mjs` evaluates an
+                        expression inside the shell's WebView over adb, which is
+                        the only way to read the origin, `crypto.subtle` and the
+                        service-worker registration a measurement needs.
+                        ⚠️ NOT under `scripts/` and that is deliberate: that
+                        directory is the bare-clone set and this needs adb, a
+                        phone and a DEBUG build, so it could never be a
+                        repository check. ⚠️ It asks nothing — the questions
+                        live in `docs/validation/0002` Part P as expressions, so
+                        the tool has no opinion to go stale and nothing
+                        decidable to test
 
 packages/             Apache-2.0, without exception
   domain/             units, core types, validation, signing, analysis (#25)
@@ -3108,6 +3120,9 @@ top of an issue **supersedes its body**.
 | Why two deadlines in two packages have to expire in one order, and what asserts it | `apps/mobile/src/ble/transport.ts` §`INITIALIZE_ANSWER_WINDOW`, `apps/web/src/support/shell-support.test.ts` |
 | Why an unanswered `initialize()` stops being shared rather than being rejected | `apps/mobile/src/ble/transport.ts` §`INITIALIZE_ANSWER_WINDOW`, [#322](https://github.com/openzigs/onyourleft/issues/322) |
 | Which of the two causes the Android Devices-screen hang turned out to be | [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part G |
+| Whether the APK really cold-starts with no network, and the four ways that measurement goes wrongly green | [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part P, [ADR 0024](docs/adr/0024-offline-and-caching-posture.md) D-4 |
+| Why `navigator.onLine` is `true` inside the shell with no network at all, and what still reads it | [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part P §"What Part P found along the way" |
+| How to read the origin, `crypto.subtle` or a service-worker registration inside the shell's WebView | [`apps/mobile/tools/webview-probe.mjs`](apps/mobile/tools/webview-probe.mjs) |
 | Why a rider with no heart rate strap is not told their strap has dropped | `apps/web/src/game/sensors.ts`, `apps/web/src/ride/metrics.ts` |
 | Which previous attempt a ghost races, and why it is the fastest rather than the latest | `apps/web/src/game/ghost-source.ts` §`fastestAttempt` |
 | Why a corridor point carries two distances, and which one a marker is placed by | `apps/web/src/game/terrain.ts` §`CorridorPoint.along`, `apps/web/src/game/scene.ts` §`nearestPoint` |

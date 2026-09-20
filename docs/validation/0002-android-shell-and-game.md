@@ -13,6 +13,11 @@ already here and a part letter in this file is a safety control rather than a la
 rule, the power-switch instruction and the do-not-clip-in instruction below are all keyed to it, so
 two parts sharing a letter makes each of those instructions ambiguous even when every sentence in it
 is individually correct.
+**Part P added — and run — 2026-09-20** by [#410](https://github.com/openzigs/onyourleft/issues/410),
+which measured whether the APK cold-starts with no network. ⚠️ **It is the one part of this document
+whose result table was filled in by the change that added it**, so it is a dated measurement rather
+than a script waiting for an afternoon; the rest of this file is still the latter unless a part says
+otherwise.
 **Discharges, when run:** [#87](https://github.com/openzigs/onyourleft/issues/87) criteria 2, 3, 5
 and 6 and its two-OEM line; the Android half of
 [#85](https://github.com/openzigs/onyourleft/issues/85); and
@@ -43,7 +48,11 @@ behaviour; this establishes that Android reproduces it.
 The same rule as 0001, for the same reason — CLAUDE.md §6: *a smart trainer applies physical
 resistance to a person who is pedalling*.
 
-1. **Parts A, B, C and E to K write nothing that changes resistance.** They run first.
+1. **Parts A, B, C, E to K and P write nothing that changes resistance.** They run first. ⚠️ **`P`
+   is in that list and this line used to stop at `K`** — Part P
+   ([#410](https://github.com/openzigs/onyourleft/issues/410)) is an offline cold-start measurement
+   that pairs no trainer at all, and a part missing from this list is as ambiguous as two parts
+   sharing a letter.
 2. ⚠️ **Parts L and D are last, in that order**, and they are the only two that change what a rider
    feels. **L (simulation mode) before D (ERG)**, because L's resistance follows a road the rider can
    see coming and D's is a number somebody typed — and D's own steps are ordered so the one that
@@ -1186,6 +1195,229 @@ person with the hardware is being asked to look.
 | O5 | what the picker said: | |
 
 **Was the sentence the one you would have wanted to read (in your own words)?** ______________
+
+---
+
+## Part P — does the APK cold-start with no network? ([#410](https://github.com/openzigs/onyourleft/issues/410))
+
+Added **and run** on 2026-09-20 by #410, and ⚠️ **it is the first part of this document whose
+result table was filled in by the change that wrote it.** Every other part here was written for a
+future afternoon; this one is a measurement with a date on it, and the tables below say what a
+Pixel Tablet actually did rather than what it should do.
+
+⚠️ **`P`, and the letter was checked rather than assumed.** `grep '^## Part'` before adding one:
+A to O were taken, and two parts sharing a letter is [#364](https://github.com/openzigs/onyourleft/issues/364)'s
+durable finding — the ⚠️Safety list, the ordering rule and the do-not-clip-in instruction are all
+keyed to part letters, so a duplicate makes each of those ambiguous even when every sentence in it
+is right.
+
+⚠️ **Nothing here writes to a trainer and nothing changes resistance.** It belongs with the safe
+group in ⚠️Safety rule 1, not with L and D. No trainer was paired for it.
+
+### Why this part exists
+
+[ADR 0024](../adr/0024-offline-and-caching-posture.md) D-4 says the service worker registers only
+when `isNativeShell()` is false, and its argument is that inside the shell the client is *already*
+served from local storage and *already* cold-starts with no network. That argument was **read from
+source and never executed** — `capacitor.config.ts` sets `webDir: '../web/dist'`, `cap sync` copies
+the tree into the APK, therefore. ADR 0024's own §"What would make this ADR wrong" names the
+failure: *"The Android shell turns out not to cold-start offline. D-4 rests on it; #410 measures
+it, and a negative result reopens D-4 rather than this whole ADR."*
+
+So a **negative** result here was a valid outcome and would have been the more valuable one. It is
+not what happened, and the tables say so with numbers rather than with the word "pass".
+
+### ⚠️ Four ways to measure this and get a wrong green
+
+1. **A stale APK.** `./gradlew assembleDebug` prints `BUILD SUCCESSFUL` in about a second with
+   almost every task up to date, and a debug APK carrying last week's bundle measures last week.
+   **Compare the hashed `index-*.js` name inside the APK against `apps/web/dist/assets/` before
+   measuring anything** — step P1, and it is first for that reason.
+2. **"Offline" as a setting rather than as a fact.** Aeroplane mode, Wi-Fi off and mobile data off
+   are three switches, not one, and none of them is the claim being made. ⚠️ On this tablet
+   `svc data disable` answers `Can't find service: phone` — there is no cellular radio — so that
+   command proves nothing at all here and its silence is not evidence. The claim that matters is
+   *the WebView cannot reach a host*, and P2 establishes it from inside the WebView with something
+   that would fail.
+3. **A process that was never stopped.** Cold means not running: `am force-stop` first, and
+   `am start -W` must answer `LaunchState: COLD`. A warm start re-uses a live WebView and measures
+   nothing.
+4. **A warm cache.** A profile that has been online would pass where a fresh install would not, so
+   P3 is a **fresh install that has never had a network**, and P10 is the other end of it —
+   `pm clear`, which wipes app data **and** every cache.
+
+### The tooling, and where it is
+
+Four of #410's questions are invisible from outside the WebView: the origin, whether
+`crypto.subtle` is reachable, whether a service worker is registered, and which assets a render
+fetched. `adb logcat` answers only the last, and only for what Capacitor's local server logs.
+
+[`apps/mobile/tools/webview-probe.mjs`](../../apps/mobile/tools/webview-probe.mjs) evaluates one
+expression inside the running WebView over the DevTools protocol through an adb forward, and prints
+what it returned. ⚠️ **It asks nothing** — the questions are the expressions in this document, so
+the tool has no opinion to go stale.
+
+⚠️ **It is not under `scripts/`, deliberately.** That directory is the bare-clone set — bash and
+coreutils, no install, no network, no device (CLAUDE.md §2, §4a) — and this needs `adb`, a phone
+with developer options on and a **debug** build. It could never be a repository check, and
+`check:repo` does not call it. It lives beside the Android project whose WebView it talks to.
+
+⚠️ **It only attaches to a debug build.** Capacitor enables WebView contents debugging for debug
+and not for release, so this cannot be pointed at a shipped APK — which is a limit of Part P, not
+only of the tool. See §"What this cannot establish".
+
+```bash
+ADB=/path/to/platform-tools/adb          # not on PATH in a Homebrew cmdline-tools install
+export ANDROID_HOME=/path/to/android-commandlinetools
+
+pnpm run build                                   # apps/web -> apps/web/dist
+( cd apps/mobile && pnpm exec cap sync android ) # dist -> android/app/src/main/assets/public
+pnpm run check:capacitor                         # cap sync regenerates two committed files (§4k)
+( cd apps/mobile/android && ./gradlew assembleDebug )
+
+# P1 — the APK has to carry the bundle you just built.
+unzip -l apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk |
+  grep 'assets/public/assets/index-'
+ls apps/web/dist/assets/index-*.js
+
+# The probe, once the app is running.
+PID=$("$ADB" shell pidof dev.openzigs.onyourleft)
+"$ADB" forward tcp:9222 localabstract:webview_devtools_remote_"$PID"
+node apps/mobile/tools/webview-probe.mjs 'location.origin'
+```
+
+⚠️ **`adb shell svc power stayon true` before you start, and `false` when you finish.** A tablet
+that dozes suspends the WebView's network silently, which has already cost this project a debugging
+session — and leaving the screen pinned on afterwards is a different kind of rude.
+
+### The procedure
+
+| Step | What to do | What should happen |
+|---|---|---|
+| P1 | Build, sync, assemble, and compare the hashed bundle name inside the APK with `apps/web/dist/assets/` | The same `index-*.js`. If not, nothing below means anything |
+| P2 | Aeroplane mode on, Wi-Fi off, then verify with something that would fail: `ping` an IP, `ping` a name, `dumpsys connectivity`, and from inside the WebView a `fetch` of an external origin | `Network is unreachable`, `unknown host`, `Active default network: none`, and a rejected fetch |
+| P3 | `adb uninstall`, `adb install -r` (over USB — not a network), then `am start -W`. **The profile has never been online** | `LaunchState: COLD`, and the app renders |
+| P4 | Probe `location.origin`, `isSecureContext`, and a real `crypto.subtle.digest` | `https://localhost`, secure, and the right digest. A non-secure origin would break identity and import, which is a bigger problem than offline |
+| P5 | Probe `navigator.serviceWorker.getRegistrations()` and `caches.keys()`, **and** list `app_webview/Default/` on disk with `run-as` | Nothing registered, no caches, and no `Service Worker` directory. This is the baseline a future registration would be visible against (ADR 0024 D-4) |
+| P6 | Import a route while offline, from `packages/fit/fixtures/corpus/planned-loop-route.gpx` | It saves, and the saved-routes table lists it. `#/game` needs a route and there is no other way to get one |
+| P7 | Ride it. Count the scenery assets the renderer fetched and their status codes; read `adb logcat` for what served them | Eleven `.glb` and the shared atlas, all 200, all answered by Capacitor's local server. This is the path with the most runtime-fetched assets and the one the browser build needs a worker for |
+| P8 | `am force-stop`, relaunch, still offline | `COLD` again, renders, and the route is still there — the read is through the rider's own screen after a process death |
+| P9 | Reboot the device. Confirm it is still offline. Launch, and ride again | `COLD`, renders, twelve assets again |
+| P10 | `pm clear` — app data **and** every cache — then launch, still offline | `COLD`, renders. The route is gone, which is what `pm clear` means and is how you know it did what it says |
+
+### P context
+
+| | |
+|---|---|
+| Date | **2026-09-20** |
+| Device | **Pixel Tablet** (`tangorpro`), build `CP2A.260705.006` |
+| Android | **17** (SDK 37) |
+| WebView | **`com.google.android.webview` 151.0.7922.199** (versionCode 792219903), the current provider per `dumpsys webviewupdate` |
+| Capacitor | **`@capacitor/android` 8.5.2** with `@capacitor/core` 8.5.2, read from `capacitor.settings.gradle`; one plugin, `@capacitor-community/bluetooth-le` 8.3.0 |
+| APK | debug, built **2026-09-20**, 5 643 897 bytes, `versionName=1.0`, `versionCode=1`, `minSdk=24`, `targetSdk=36` |
+| Bundle | `assets/index-CqoY0sjQ.js`, 742 590 B, SHA-256 `3a3c89d3c96ba618…` |
+| Branch | `feature/issue-410-android-cold-start-offline`, off `main` at `072245c` |
+
+### P results
+
+| Step | Result | What was actually observed |
+|---|---|---|
+| P1 | **same bundle** | `assets/public/assets/index-CqoY0sjQ.js` inside the APK; `apps/web/dist/assets/index-CqoY0sjQ.js` on disk. The build also emitted `sw.js` precaching 27 files, 3.07 MiB, as `338cdb0fcc3fafe8` — see P5 |
+| P2 | **offline, established four ways** | `settings get global airplane_mode_on` → `1`; `dumpsys wifi` → `Wi-Fi is disabled`; `ping -c 2 -W 2 1.1.1.1` → `connect: Network is unreachable`; `ping example.com` → `unknown host`; `dumpsys connectivity` → `Active default network: none`. ⚠️ `svc data disable` → `Can't find service: phone` (no cellular radio) and proves nothing. **From inside the WebView**: `fetch('https://example.com/')` → `REJECTED TypeError: Failed to fetch`. Google Play services logged `net::ERR_INTERNET_DISCONNECTED` from its own process while this ran |
+| P3 | **it cold-starts** | `pm list packages` → 0 matches after uninstall. Installed over USB, launched: `LaunchState: COLD`, `TotalTime: 595` ms. `h1` = **"Ride"**, all eleven nav entries present. First launch of a profile that had never existed, with no network of any kind |
+| P4 | **`https://localhost`, secure, `crypto.subtle` live** | `location.href` = `https://localhost/`; `isSecureContext` = `true`; `crypto.subtle.digest('SHA-256', [1,2,3])` returned `039058c6…`, which is the right answer. Capacitor logged `Loading app at https://localhost` |
+| P5 | **no worker, no caches, no directory** | `getRegistrations()` → `[]`, `navigator.serviceWorker.controller` → `null`, `caches.keys()` → `[]` on every one of the four launches. Independently, `run-as … ls app_webview/Default/` has **no `Service Worker` entry and no Cache Storage entry at all**. ⚠️ `sw.js` and `manifest.webmanifest` **do ship inside the APK** — they are part of `dist` — and nothing registers the first. That pair is the baseline |
+| P6 | **imported offline** | `✓ Done: Saved "Synthetic fixture loop". It is private.` The saved-routes table then listed it at **5.0 km / 60 m**, read back through the rider's own screen |
+| P7 | **`#/game` rendered, twelve assets, all local** | **12 distinct** scenery assets — eleven `.glb` and `colormap-*.png` — in **14 requests**, every one `responseStatus 200`; `three-renderer-*.js` 200; a live canvas at 1158×652; the HUD reading `— W`, `— rpm`, `— bpm`, `0.0 km/h`, `1.9 %`, `5.03 km`, `—`. `adb logcat` carries one `D Capacitor: Handling local request: https://localhost/assets/<file>` per request and **no network line at all**. The screenshot shows road, centre line, trees, buildings, bushes, rocks and the rider on a bicycle, with the aeroplane-mode icon in the status bar |
+| P8 | **cold again, state intact** | pid empty after `am force-stop`; `LaunchState: COLD`, `TotalTime: 452` ms; renders; the route is still in the list after a process death |
+| P9 | **cold after a reboot** | Still offline after the reboot (`airplane_mode_on` 1, Wi-Fi disabled, `Network is unreachable`). `LaunchState: COLD`, `TotalTime: 468` ms; renders; the route survived; the ride re-fetched **12 distinct assets in 14 requests, all 200** |
+| P10 | **cold with nothing warm at all** | `pm clear` emptied the data directory (`ls` showed only `.` and `..`). `LaunchState: COLD`, `TotalTime: 421` ms; the app rendered; the route count was **0**, which is what `pm clear` means and is how you know it happened |
+
+**Does the Android APK cold-start with no network?** **Yes.** Four cold starts — first-ever on a
+fresh install, after a force-stop, after a reboot, and after `pm clear` — all offline, 421 to
+595 ms to activity launch, the full client every time, and the game's twelve scenery assets served
+from the APK by Capacitor's own local server.
+
+**ADR 0024 D-4's premise is therefore measured rather than reasoned, and it held.** No amendment to
+ADR 0024 is owed by this result. ⚠️ That is a statement about D-4's **premise** and nothing wider:
+it says the shell is already local, not that a worker there would be harmless, which is D-4's
+separate argument about an APK update racing Cache Storage.
+
+### ⚠️ The control — what stops this being a vacuous green
+
+Every headline answer in P5 and P2 is an **absence**: no registration, no cache, a rejected fetch.
+An expression that always answers that way would produce exactly the same table, which is this
+repository's recurring defect shape. So each absence has a positive control, and all three were
+run.
+
+| Claim | The control | What it answered |
+|---|---|---|
+| `getRegistrations()` → `[]` is a real answer | ⚠️ **The same expression, against the same `dist`, in a browser**: `vite preview` on `http://localhost:4173` (a secure context) in the pinned headless Chromium | `["http://localhost:4173/"]`, with `caches.keys()` → `["oyl-precache-338cdb0fcc3fafe8"]` — and `338cdb0fcc3fafe8` is the precache hash this same build printed. The expression distinguishes, and this is [ADR 0024](../adr/0024-offline-and-caching-posture.md) D-4's branch observed from **both** sides |
+| the shell really has no worker | A second, independent layer: `run-as … ls app_webview/Default/` | No `Service Worker` directory and no Cache Storage directory at all. Nothing in the WebView profile, not merely nothing the page can see |
+| `fetch` rejecting means "offline" | The same fetch expression with a network | `RESOLVED opaque`. So `REJECTED TypeError: Failed to fetch` in P2 is an answer about the network rather than about the expression |
+
+⚠️ **Where the numbers came from, precisely.** The device numbers above were taken through the
+DevTools protocol with the probe's prototype attached to the tablet; the committed
+[`webview-probe.mjs`](../../apps/mobile/tools/webview-probe.mjs) is that prototype tidied, and it
+was exercised end to end — value printed and exit 0, an expression that throws reported and exit 1,
+no endpoint exit 1, no argument exit 2, `OYL_DEVTOOLS_PORT` honoured — against the pinned Chromium
+rather than against the phone, because the tablet dropped off USB before the file was finished.
+**Nobody has yet run the committed file against an Android WebView.** It is the same four protocol
+calls and the next person to run Part P will find out; recording it is cheaper than letting a
+reader assume it.
+
+### What Part P found along the way
+
+Five observations, none of which is a defect in this client and all of which would have been
+invisible from a table that only said "pass".
+
+1. ⚠️ **`navigator.onLine` is `true` with no network whatsoever.** Aeroplane mode, Wi-Fi off, every
+   `ping` unreachable, and the WebView's own `fetch` rejecting — and `navigator.onLine` still
+   reports `true`, because the page is served from a local scheme. **Nothing in `apps/` or
+   `packages/` reads it** (checked), so it costs nothing today. It is a trap for the first thing
+   that does, and this is where it is written down.
+2. **The WebView asks for `/favicon.ico` by itself and gets a 404.** `apps/web/dist` ships none and
+   `index.html` references none, so this is the browser's own request answered locally by the
+   Capacitor server. It was observed only on the first launch of a fresh profile. No network was
+   attempted.
+3. **The shared texture atlas is fetched once per building model**, so twelve distinct assets
+   arrive in fourteen requests. All three are answered from the APK. It costs nothing measurable
+   here and it is recorded because P7 counts requests and the two numbers differ.
+4. ⚠️ **`PerformanceResourceTiming` reports `transferSize` and `decodedBodySize` of `0` for every
+   locally-served asset**, so resource timing cannot measure bytes inside the shell and a reader
+   cannot tell a served file from a cached one that way. The evidence that a file arrived is
+   `responseStatus === 200` plus Capacitor's own `Handling local request` line. This is the same
+   shape as the opaque cross-origin timing recorded in CLAUDE.md §4f, arriving from the other
+   direction.
+5. ⚠️ **`E Capacitor/Console: Error injecting safe area CSS: TypeError: Cannot read properties of
+   null (reading 'style')`**, intermittently at startup — once in four offline launches and once in
+   three **online** ones, so it is not an offline symptom. It is `@capacitor/android` 8.5.2's own
+   `SystemBars` plugin (`SystemBars.java`) setting `--safe-area-inset-*` on
+   `document.documentElement` before there is one, and when it loses that race the four custom
+   properties are simply not set. **Nothing in `apps/` reads `--safe-area-inset-*`**, so it is inert
+   here and no issue was filed for it. It stops being inert the day this client honours a display
+   cutout — which is why it is recorded rather than dropped.
+
+### What Part P cannot establish
+
+- **Anything about a release APK.** This is a debug build, and the probe works *because* it is:
+  Capacitor enables WebView contents debugging for debug and not for release. The web bundle is the
+  same one either build ships, but no measurement here was taken through a signed package. #95 owns
+  that.
+- **Anything about a second OEM, or a phone.** One tablet, one WebView build, one screen size.
+  #87's two-OEM line is untouched.
+- **Anything about BLE while offline.** No trainer was paired; aeroplane mode left `bluetooth_on`
+  at `2`. Parts B, D and L own the trainer and their tables are still empty.
+- **Anything about the browser build**, which is a different client with a different answer and is
+  [#408](https://github.com/openzigs/onyourleft/issues/408)'s.
+- **Anything about frame rate, thermals or battery.** Parts E, F and H own those, and ADR 0008
+  D-2's gate is still waived.
+- **That the asset tree inside the APK is what a clean clone would produce.** The copied tree is
+  gitignored by design; `pnpm run check:capacitor` is the gate on the two generated files that are
+  committed, and it was run.
+- **That a worker inside the shell would be harmful.** It establishes only that one would be
+  unnecessary. D-4's second argument — an APK update racing a registration holding the previous
+  build — is untested and would need a worker to exist inside the shell to test.
 
 ---
 
