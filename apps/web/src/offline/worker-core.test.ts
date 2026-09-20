@@ -3,14 +3,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { FakeWorkerScope, navigationRequest } from './testing';
-import {
-  attachWorker,
-  CACHE_PREFIX,
-  cacheNameFor,
-  decideFetch,
-  SKIP_WAITING_MESSAGE,
-  staleCaches,
-} from './worker-core';
+import { SKIP_WAITING_MESSAGE } from './protocol';
+import { attachWorker, CACHE_PREFIX, cacheNameFor, decideFetch, staleCaches } from './worker-core';
 
 const SCOPE = 'https://rider.example/';
 const PRECACHE = ['index.html', 'assets/index-abc.js', 'assets/tree_oak-mno.glb'];

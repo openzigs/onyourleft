@@ -21,12 +21,22 @@ import {
 } from '@onyourleft/store';
 
 import './design/theme.css';
-import { browserClock, createRideController, type RideController } from './ride/controller';
+import {
+  browserClock,
+  createRideController,
+  rideInProgress,
+  type RideController,
+} from './ride/controller';
 import { openCapacitorTrainer, openWebBluetoothTrainer } from './ride/trainer';
 import { gameSensors } from './game/sensors';
 import { fastestAttempt, ghostFromSpeed } from './game/ghost-source';
 import { isNativeShell, platformCapacitor } from './support/capacitor';
 import { platformServiceWorkerContainer, registerServiceWorker } from './offline/register';
+import {
+  createUpdateWatcher,
+  platformControllerChanges,
+  type UpdateWatcher,
+} from './offline/update';
 import { AppShell } from './shell/AppShell';
 import { browserScreenLockSource, platformWakeLock } from './game/hud/wake-lock';
 import type { GamePort, RidableRoute } from './game/GameView';
@@ -610,13 +620,53 @@ function buildAthleteMassPort(): AthleteMassPort {
   return { store: localStore(), athleteId: LOCAL_ATHLETE };
 }
 
+/**
+ * Watch for a new version of the app, or not (#407).
+ *
+ * `undefined` wherever `registerServiceWorker` did not register one — inside
+ * the Android shell (ADR 0024 D-4), and in any browser without a
+ * `serviceWorker` — because there is no worker that could ever be waiting and
+ * a watcher over nothing would be a control that can never fire.
+ *
+ * ⚠️ **The ride controller is handed in as the interlock**, which is the whole
+ * of ADR 0024 D-3 rule 3: activation ends in a page reload, and a ride is the
+ * one thing in this app a rider cannot redo. `rideInProgress` is the one place
+ * that decides what "in progress" means, so the unload guard and this cannot
+ * disagree about a paused ride.
+ */
+function buildUpdateWatcher(
+  registered: Awaited<ReturnType<typeof registerServiceWorker>>,
+  rideController: RideController | undefined,
+): UpdateWatcher | undefined {
+  const changes = platformControllerChanges();
+  if (registered.kind !== 'registered' || changes === undefined) {
+    return undefined;
+  }
+  return createUpdateWatcher({
+    registration: registered.registration,
+    controllerChanges: changes,
+    recording:
+      rideController === undefined
+        ? undefined
+        : {
+            inProgress: () => rideInProgress(rideController.getSnapshot().phase),
+            subscribe: (listener) => rideController.subscribe(listener),
+          },
+    reload: () => {
+      globalThis.location.reload();
+    },
+  });
+}
+
 async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const platform = await buildPlatform(capabilities);
   const rideController = platform.rideController;
+  const update = buildUpdateWatcher(await workerRegistration, rideController);
   createRoot(container).render(
     <StrictMode>
       <AppShell
         capabilities={capabilities}
+        {...(update === undefined ? {} : { update })}
         {...(platform.shell === undefined ? {} : { shell: platform.shell })}
         settings={buildUnitsPort()}
         athleteMass={buildAthleteMassPort()}
@@ -671,19 +721,20 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
  * reading a green gate as proof it is wired would be exactly the false pass
  * #278 exists to catch. Deleting this call turns `check:wiring` red.
  *
- * ⚠️ **Not awaited, and nothing downstream waits for it.** The app has worked
- * with no worker since it existed and must carry on doing so: registration is
- * an improvement to a *later* visit, never a precondition for this one. The
- * outcome is deliberately ignored here rather than swallowed inside
- * `register.ts`, which returns it — `RegistrationOutcome.failed` is what a
- * future notice would read, and there is no honest thing to tell a rider about
- * it today.
+ * ⚠️ **Started here and awaited only inside `render`**, which is already
+ * asynchronous. The app has worked with no worker since it existed and must
+ * carry on doing so — registration is an improvement to a *later* visit, never
+ * a precondition for this one — and `registerServiceWorker` resolves on every
+ * path rather than rejecting, so awaiting it cannot fail a start-up. What the
+ * outcome is needed for is #407: a registration is what an update watcher
+ * watches, and `RegistrationOutcome.failed` is what a future notice would
+ * read.
  *
  * `import.meta.env.BASE_URL` rather than `/`: the worker's scope is the base
  * path this build was compiled for, so a deployment under a subdirectory
  * registers a worker that controls its own subtree and not the whole origin.
  */
-void registerServiceWorker({
+const workerRegistration = registerServiceWorker({
   container: platformServiceWorkerContainer(),
   // ⚠️ ADR 0024 D-4. Asked through the one function in this client that
   // answers it, so the worker and the BLE transport cannot disagree about

@@ -122,7 +122,8 @@ apps/                 AGPL-3.0-or-later, without exception
                         wiring (#49), and since #14 the workout lifecycle — one
                         clock for the ride and the workout, and the panel that
                         will not offer a control the trainer would refuse
-    src/offline/        the service worker and whether it is registered at all
+    src/offline/        the service worker, whether it is registered at all, and
+                        when a new one may take over
                         (#406, #407) — the one cache strategy, the four handlers
                         over an injected scope so they can be tested without a
                         browser, and ⚠️ the refusal to register inside the
@@ -134,7 +135,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         live here and both are structural — a service worker is
                         a second entry point, so `check:wiring` cannot reach it
                         from `index.html`; what the prefix buys is that deleting
-                        `main.tsx`'s registration call is a red build
+                        `main.tsx`'s registration call is a red build. Since
+                        #407 it also holds the update path: no `skipWaiting()`
+                        on install, an offer the rider acts on, one reload on
+                        `controllerchange` — and ⚠️ the interlock that refuses
+                        to activate while a ride is recording OR PAUSED, which
+                        lives in the watcher rather than in the button, because
+                        a refusal in a view is one `disabled` attribute away
+                        from being no refusal at all
     src/privacy/        the boundaries where data leaves the athlete's control
                         (#34) — the two directions a payload can face, the walk
                         that finds a coordinate in a field nobody declared, and

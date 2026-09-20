@@ -78,6 +78,9 @@ import type { SegmentPort } from '../segments/store-port';
 import type { RoutePort } from '../routes/store-port';
 import type { WorkoutPort } from '../workouts/store-port';
 
+import { UpdateOffer } from '../offline/UpdateOffer';
+import type { UpdateWatcher } from '../offline/update';
+
 import { hrefFor, ROUTES, type RouteMatch } from './routes';
 import { useRoute } from './useRoute';
 
@@ -108,6 +111,15 @@ export interface AppShellProps {
    * rendered by the accessibility suite on a machine that is not a phone.
    */
   readonly shell?: ShellSupportPort | undefined;
+  /**
+   * A new version of the app waiting to take over (#407).
+   *
+   * `undefined` in every browser with no service worker, inside the Android
+   * shell (ADR 0024 D-4), and in the accessibility suite — which renders
+   * `UpdateOffer` directly instead, because a component that built its own
+   * watcher would need a `ServiceWorkerRegistration` to be audited.
+   */
+  readonly update?: UpdateWatcher | undefined;
   /**
    * The live ride screen's state machine (#49), built by `main.tsx` from the
    * transport and the store.
@@ -440,6 +452,15 @@ export function AppShell(props: AppShellProps): JSX.Element {
         <a className="oyl-skip-link" href={`#${MAIN_ID}`} onClick={skipToContent}>
           Skip to main content
         </a>
+
+        {/*
+          Between the skip link and the header, so that a rider who skips to
+          content is not sent past it — and outside `main`, because an update
+          belongs to the app rather than to whichever page is on screen, the
+          same reasoning `RideSession` above carries. It renders `null` unless
+          something is actually waiting.
+        */}
+        {props.update === undefined ? null : <UpdateOffer watcher={props.update} />}
 
         <header className="oyl-header">
           <p className="oyl-wordmark">On Your Left</p>

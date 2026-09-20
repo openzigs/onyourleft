@@ -201,6 +201,22 @@ export interface RideMetric {
 export type RidePhase = 'idle' | 'recording' | 'paused' | 'stopped';
 
 /**
+ * Whether a ride is under way — recording or paused, and in either case not yet
+ * saved.
+ *
+ * A **paused** ride counts. It is unsaved in exactly the way a recording one
+ * is, and a rider gets no second chance once the page has gone.
+ *
+ * Here rather than inlined at each caller because there are now three: the
+ * unload guard (#49), the ride session, and since #407 the service worker's
+ * update interlock — which must refuse to reload the page over a ride that is
+ * merely paused as firmly as over one that is recording.
+ */
+export function rideInProgress(phase: RidePhase): boolean {
+  return phase === 'recording' || phase === 'paused';
+}
+
+/**
  * A structured workout being ridden, as the screen reads it (#14).
  *
  * `undefined` on {@link RideSnapshot} when no workout is loaded, which is the

@@ -254,6 +254,25 @@ h3:first-child {
   text-underline-offset: 4px;
 }
 
+/*
+ * The service worker's update offer (#407).
+ *
+ * Elevation 1: it sits on the page, above the header in document order, and it
+ * is not chrome — it is there for as long as one update is unapplied and then
+ * gone. No `position` at all, deliberately: `shell.browser.spec.ts` budgets how
+ * much of a small viewport persistent chrome may cover, and a banner that
+ * pinned itself would be spending that budget on something transient.
+ */
+.oyl-update {
+  padding: var(--oyl-space-sm) var(--oyl-space-md);
+  background: var(--oyl-color-surface);
+  border-bottom: 1px solid var(--oyl-color-border);
+}
+
+.oyl-update__actions {
+  margin: var(--oyl-space-sm) 0 0;
+}
+
 .oyl-main {
   flex: 1;
   padding: var(--oyl-space-lg) var(--oyl-space-md);

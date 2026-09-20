@@ -43,6 +43,8 @@
  * consequence of the structure rather than a rule layered on top of it.
  */
 
+import { SKIP_WAITING_MESSAGE } from './protocol';
+
 /** The half of `ExtendableEvent` this worker uses. */
 export interface ExtendableEventLike {
   waitUntil(promise: Promise<unknown>): void;
@@ -83,9 +85,6 @@ export interface WorkerScope {
  * everything or deleting nothing.
  */
 export const CACHE_PREFIX = 'oyl-precache-';
-
-/** The message a page sends to ask a waiting worker to take over (#407). */
-export const SKIP_WAITING_MESSAGE = 'OYL_SKIP_WAITING';
 
 export function cacheNameFor(version: string): string {
   return `${CACHE_PREFIX}${version}`;
