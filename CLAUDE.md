@@ -766,9 +766,9 @@ downstream issue's acceptance criteria depend on these.
 # Exits 0 clean; exits 1 listing each violation by rule id.
 bash scripts/check-repo-rules.sh
 
-# Test the checker itself. Fixture-driven; 168 cases. ⚠️ This said 115 until
-# #357 and had been stale for some time — the number is what the suite prints,
-# so read the run rather than this line.
+# Test the checker itself. Fixture-driven; 181 cases. ⚠️ This said 115 until
+# #357 and 168 until #416, and had been stale for some time — the number is what
+# the suite prints, so read the run rather than this line.
 bash scripts/check-repo-rules.test.sh
 
 # Verify the licence texts are byte-identical to the canonical ones, by
@@ -1064,6 +1064,7 @@ npm view typescript-eslint peerDependencies.typescript
 | `ADR001` | two ADRs share a number |
 | `ADR002` | an ADR filename is not `NNNN-kebab-case.md` |
 | `ADR003` | an ADR's `## Amendments` section is followed by **any** heading, or there are two of them, or an entry does not open with a bold ISO date, or an entry is dated **before the one above it**, or an **unclosed code fence** would hide any of those — see §7 and [ADR 0013](docs/adr/0013-adr-amendments.md) |
+| `ADR004` | an ADR under `docs/adr/` declares no **Status**, **Context**, **Decision** or **Consequences** — §7's sentence, which nothing enforced until [#416](https://github.com/openzigs/onyourleft/issues/416). ⚠️ The matcher is **two spellings and no more**, decided rather than guessed: a level-2 heading whose text is the word (`## Decision` and `## Decision: what was chosen` count, `## Decisions` does not), and — for **Status** alone, because it is metadata rather than prose — a bold label opening a line (`- **Status**:` or `**Status**:`). A rule accepting any line that *contains* the word would pass every ADR here without reading one, since each discusses its own consequences in a sentence. Fences are blanked first, so a quoted example is an example; an **unclosed** fence is `ADR003`'s finding and deliberately not a second, misleading one here |
 | `REL001` | signing key material is committed anywhere — by name (`.jks`, `.keystore`, `.p12`, `.pfx`, `.key`, `keystore.properties`) **or** by content (a `PRIVATE KEY` block in a file with an innocent name). #95, and the one rule here whose violation cannot be undone by fixing it. ⚠️ Since #229 both halves walk the **same** prune list every other rule walks: it used to keep its own, which excluded `fixtures` and kept `coverage`, so a `.jks` under `packages/fit/fixtures/` was invisible while a PEM beside it was reported |
 | `REL002` | any Gradle file under `apps/mobile/android` declares a target API level below **36**, or the project declares none at all. Checked here rather than in Gradle because CI does not build Android — a rule that only fires inside a build nobody runs never fires. ⚠️ Since #95 it reads **every** Gradle file and follows the value rather than the filename: it used to open `variables.gradle`, take the first match and pass silently when that file was absent, so deleting it, overriding the ext property with a literal in `app/build.gradle`, appending a lower value below a compliant one, and AGP's current `targetSdk` spelling were four green regressions |
 | `XML001` | `--` appears inside an XML comment in a non-generated `.xml` file, which XML 1.0 §2.5 forbids and no parser accepts. #225 — the rule exists because `AndroidManifest.xml` shipped in #87 with three of them and passed every gate here for months, until the first Gradle build ever run failed on it |
@@ -2696,8 +2697,11 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   happened; reopening leaves a mostly-done issue open for something that is really separate
   work. Prose that merely *mentions* a keyword counts too: #29 was closed by `Resolves #29`
   inside an ADR table cell.
-- **ADRs**: `docs/adr/NNNN-kebab-case.md`, with **Status, Context, Decision, Consequences**. Numbers
-  are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
+- **ADRs**: `docs/adr/NNNN-kebab-case.md`, with **Status, Context, Decision, Consequences** —
+  and since [#416](https://github.com/openzigs/onyourleft/issues/416) that is `ADR004` rather than
+  prose. ⚠️ A reviewer who remembers this sentence being unenforced is reading the old file:
+  deleting an ADR's `- **Status**: Accepted` line used to leave `check-repo-rules.sh` reporting
+  clean at exit 0. Numbers are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
   **and which are claimed by open issues** before you pick one. **The next free number is 0025.**
   ⚠️ **0024 is [ADR 0024](docs/adr/0024-offline-and-caching-posture.md)**, taken by
   [#403](https://github.com/openzigs/onyourleft/issues/403) for the offline and caching posture; a
@@ -2862,6 +2866,7 @@ top of an issue **supersedes its body**.
 | Why a link inside a code fence is not a broken link, and what an unclosed fence does | `scripts/check-doc-links.sh` |
 | Why a manifest no parser accepts passed every gate for months, and what the XML rule deliberately does not check | `scripts/check-repo-rules.sh` §`XML001`, [#225](https://github.com/openzigs/onyourleft/issues/225) |
 | Why an unclosed CDATA section used to switch the XML rules off, and what the scan costs per line | `scripts/check-repo-rules.sh` §`XML003`, [#229](https://github.com/openzigs/onyourleft/issues/229) |
+| Why an ADR with no Status used to pass every gate, and which two spellings of a section the rule accepts | `scripts/check-repo-rules.sh` §`ADR004`, [#416](https://github.com/openzigs/onyourleft/issues/416) |
 | What records the licence and provenance of a file no SPDX header can reach, and why discovery reads the file rather than its extension | [`ASSETS.toml`](ASSETS.toml), `scripts/check-repo-rules.sh` §`ASSET001`, [#339](https://github.com/openzigs/onyourleft/issues/339) |
 | What a recorded asset digest proves, and the thing it deliberately does not | `scripts/check-repo-rules.sh` §Limits above `ASSET_MANIFEST_NAME`, [`apps/mobile/README.md`](apps/mobile/README.md) §4 |
 | Why the repository walk prunes `.claude`, and what that cost REL001 | `scripts/check-repo-rules.sh` §`GENERATED`, [`.prettierignore`](.prettierignore) |
