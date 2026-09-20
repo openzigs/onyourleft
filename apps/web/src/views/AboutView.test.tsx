@@ -31,7 +31,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { PRIVACY_POLICY_URL } from '../privacy/policy';
+import { PRIVACY_POLICY_URL, SOURCE_CODE_URL } from '../privacy/policy';
 import { hrefFor, routeById } from '../shell/routes';
 import { mount, queryAll } from '../testing/mount';
 
@@ -60,6 +60,30 @@ describe('the About page', () => {
     expect(policy?.getAttribute('rel') ?? '').toContain('noreferrer');
     expect(mounted.container.textContent ?? '').toContain('opens in a new tab');
     mounted.unmount();
+  });
+
+  // ADR 0025 D-7. AGPL-3.0 section 6 obliges whoever conveys object code to say
+  // where the source is, and the app-store additional permission in COPYRIGHT is
+  // conditional on exactly that. Until ADR 0025 this screen named the licence
+  // and never said where the source was — which a store user cannot guess.
+  it('says where the source code is — the condition a store build ships under', async () => {
+    const mounted = await mount(<AboutView />);
+    const source = queryAll<HTMLAnchorElement>(mounted.container, 'a').filter(
+      (link) => link.getAttribute('href') === SOURCE_CODE_URL,
+    );
+    expect(source, `no link to ${SOURCE_CODE_URL}`).toHaveLength(1);
+    expect(source[0]?.textContent ?? '').toMatch(/source code/i);
+    expect(source[0]?.getAttribute('target')).toBe('_blank');
+    expect(source[0]?.getAttribute('rel') ?? '').toContain('noreferrer');
+    mounted.unmount();
+  });
+
+  it('points the source link at the repository itself, not at a page inside it', () => {
+    // The privacy policy's URL is derived from the same constant, so a test
+    // that only compared the link against the export would pass if both were
+    // wrong together. This one states the address.
+    expect(SOURCE_CODE_URL).toBe('https://github.com/openzigs/onyourleft');
+    expect(PRIVACY_POLICY_URL.startsWith(`${SOURCE_CODE_URL}/`)).toBe(true);
   });
 
   it('reaches the credits, which is where an attribution obligation is discharged', async () => {

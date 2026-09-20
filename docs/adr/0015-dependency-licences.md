@@ -235,3 +235,13 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   everywhere, and `check-dependency-licences.test.sh` now carries the case that says so.
   **Every decision above still stands as written**; what has changed is that "the asset sets mirror
   D-2" is no longer true, and a reader who remembers it should read ADR 0023 D-5.
+- **2026-09-20** — **One cell of the closure table is superseded: an application's *distributed*
+  closure no longer admits GPL, LGPL or AGPL.** D-1's table gives `apps/*` "permissive + weak +
+  GPL/LGPL/AGPL" in **both** rows. [ADR 0025](0025-app-store-additional-permission.md) D-5 supersedes
+  the *Distributed* one: what an app distributes ships through an app store under an additional
+  permission this project's copyright holders grant, and that permission cannot cover a third
+  party's copyleft. The reasoning above was about licence **compatibility** and is still right;
+  compatible turned out not to be the same as shippable. **The build-time row stands as written**, as
+  does D-3's refusal under `packages/`. The checker reports the new refusal as **`DEP002`** so that
+  a reader is sent to the ADR that can be argued with, and `check-dependency-licences.test.sh` carries
+  the cases — two of which were `assert_clean` under this ADR and are now violations. (#432)

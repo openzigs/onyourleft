@@ -35,3 +35,21 @@ const REPOSITORY = 'https://github.com/openzigs/onyourleft';
  * history is the change log — the document says so.
  */
 export const PRIVACY_POLICY_URL = `${REPOSITORY}/blob/main/${PRIVACY_POLICY_PATH}`;
+
+/**
+ * Where the Corresponding Source of the running app is.
+ *
+ * ⚠️ **This is an obligation, not a courtesy, and ADR 0025 makes it a
+ * CONDITION.** AGPL-3.0 section 6 requires whoever conveys object code to say
+ * where the source is, and a rider who installed from an app store has never
+ * seen the repository. The additional permission that lets this project be
+ * conveyed through those stores at all (COPYRIGHT, ADR 0025 D-4) is granted
+ * only *"provided that you are otherwise in compliance… including without
+ * limitation making the Corresponding Source available in compliance with
+ * section 6"* — so a build that ships without this link on its About screen
+ * has not met the condition of the permission it is shipping under.
+ *
+ * The same constant as the privacy policy's, for the reason that module
+ * exists: the repository is written down once.
+ */
+export const SOURCE_CODE_URL = REPOSITORY;

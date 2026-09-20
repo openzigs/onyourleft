@@ -11,6 +11,15 @@ This project uses two licences, split along a deliberate boundary:
 
 Anything **not** explicitly marked Apache-2.0 is AGPL-3.0-or-later.
 
+⚠️ **A contribution under `apps/` is made under `AGPL-3.0-or-later` *together with* the additional
+permission in [`COPYRIGHT`](COPYRIGHT)** — a GNU AGPL §7 permission to convey store executables
+through the Apple App Store and Google Play. Your `Signed-off-by:` line covers it. This is not a
+courtesy notice: §7 says a permission reaches later material only if *its contributor* places it
+there, and an AGPL app whose contributors had not could be removed from a store on any one
+contributor's notice, which is what happened to VLC in 2011.
+[ADR 0025](docs/adr/0025-app-store-additional-permission.md) has the reasoning. It changes nothing
+about your source, which stays AGPL, and nothing about `packages/`, which is Apache-2.0.
+
 **The boundary is a path.** Everything under `packages/` is Apache-2.0 and everything under
 `apps/` is AGPL-3.0-or-later, without exception — so the directory your change lands in
 answers the licence question, and you do not have to ask. This is stricter than ADR 0001

@@ -120,11 +120,54 @@ assert_violation "LGPL in an Apache-2.0 package is a violation" \
   "$(closures "$(one_dep packages/fit distributed LGPL-3.0-only)")" \
   'probe is LGPL-3.0-only'
 
-assert_clean "GPL in the AGPL application is permitted" \
-  "$(closures "$(one_dep apps/web distributed GPL-3.0-only)")"
+# --- ADR 0025 D-5: third-party copyleft may be BUILT with, never SHIPPED ------
+#
+# ⚠️ The first two cases here were `assert_clean` until ADR 0025, named "GPL in
+# the AGPL application is permitted" and "AGPL in the AGPL application is
+# permitted". They were right about licence COMPATIBILITY and the rule they
+# pinned is gone: an app ships through an app store under an additional
+# permission this project's copyright holders grant (COPYRIGHT), and that
+# permission cannot cover anybody else's copyleft.
 
-assert_clean "AGPL in the AGPL application is permitted" \
-  "$(closures "$(one_dep apps/web distributed AGPL-3.0-or-later)")"
+assert_violation "GPL SHIPPED by an application is a store violation" \
+  "$(closures "$(one_dep apps/web distributed GPL-3.0-only)")" \
+  'DEP002: @onyourleft/probe (apps/web): probe is GPL-3.0-only, which is third-party copyleft'
+
+assert_violation "AGPL SHIPPED by an application is a store violation too" \
+  "$(closures "$(one_dep apps/web distributed AGPL-3.0-or-later)")" \
+  'DEP002:'
+
+# LGPL is in the set on purpose: its relinking requirement is no easier to
+# honour inside a signed store binary than the GPL's terms are.
+assert_violation "LGPL SHIPPED by the mobile shell is a store violation" \
+  "$(closures "$(one_dep apps/mobile distributed LGPL-3.0-only)")" \
+  'DEP002:'
+
+# The half that did NOT change, and the case that stops DEP002 being read as
+# "no copyleft under apps/": a tool that is not distributed conveys nothing.
+assert_clean "GPL at BUILD time in an application is still permitted" \
+  "$(closures "$(one_dep apps/web build GPL-3.0-only)")"
+
+# A dual licence lets the recipient choose, so one shippable option is enough.
+assert_clean "a dual-licensed (MIT OR GPL) dependency ships, under its MIT option" \
+  "$(closures "$(one_dep apps/web distributed '(MIT OR GPL-3.0-only)')")"
+
+# ...and a conjunction imposes both at once, so it does not.
+assert_violation "a conjunctive (MIT AND GPL) dependency does not ship" \
+  "$(closures "$(one_dep apps/web distributed '(MIT AND GPL-3.0-only)')")" \
+  'DEP002:'
+
+# The rule ids must not blur. A GPL dependency under packages/ is ADR 0015
+# D-3's refusal and stays DEP001 -- DEP002 is about stores, not about leaves.
+assert_violation "GPL under packages/ is still DEP001, not the store rule" \
+  "$(closures "$(one_dep packages/domain distributed GPL-3.0-only)")" \
+  'DEP001: @onyourleft/probe (packages/domain)'
+
+# ...and a licence in NO table, shipped by an app, is ADR 0015's fail-closed
+# branch rather than the store rule: re-admitting copyleft would not save it.
+assert_violation "an unknown licence shipped by an app is DEP001, not DEP002" \
+  "$(closures "$(one_dep apps/web distributed Zlib)")" \
+  'DEP001: @onyourleft/probe (apps/web)'
 
 # --- The set ADR 0015 D-2 rules on: build-time yes, shipped-from-a-leaf no ---
 #
