@@ -45,6 +45,7 @@ import type { GhostTrack } from '@onyourleft/domain';
 import type { GameRenderer } from './game/port';
 import { probeBrowser, type CapabilityProbe } from './support/bluetooth-support';
 import { capacitorShellSupport } from './support/shell-support';
+import { platformStorage, requestPersistenceOnce } from './support/persistent-storage';
 import type { ShellSupportPort } from './support/shell-support-port';
 import { saveWithAnchor, webCryptoDigest } from './transfer/browser';
 import { browserDraftStorage } from './routing/draft-storage';
@@ -661,12 +662,28 @@ function buildUpdateWatcher(
 async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const platform = await buildPlatform(capabilities);
   const rideController = platform.rideController;
-  const update = buildUpdateWatcher(await workerRegistration, rideController);
+  const registered = await workerRegistration;
+  const update = buildUpdateWatcher(registered, rideController);
+  if (registered.kind === 'registered') {
+    // ⚠️ **Only once a worker registered, and ADR 0024 D-5 is why**: Chrome
+    // grants persistence silently on a heuristic that includes the site having
+    // been installed, which needs the manifest (#405) AND this worker (#406) —
+    // so the request is made at the moment it has a chance of being granted
+    // rather than on every load of every browser. In a browser that has no
+    // service worker at all, `persist()` is a permission prompt arriving out of
+    // nowhere, and the rides there stay on the best-effort tier with the
+    // Settings panel saying so.
+    //
+    // Not awaited: a rider waits for no permission before the first paint, and
+    // `requestPersistence` resolves on every path rather than rejecting.
+    void requestPersistenceOnce(platformStorage());
+  }
   createRoot(container).render(
     <StrictMode>
       <AppShell
         capabilities={capabilities}
         {...(update === undefined ? {} : { update })}
+        {...(platformStorage() === undefined ? {} : { storage: platformStorage() })}
         {...(platform.shell === undefined ? {} : { shell: platform.shell })}
         settings={buildUnitsPort()}
         athleteMass={buildAthleteMassPort()}

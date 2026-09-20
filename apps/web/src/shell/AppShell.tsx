@@ -121,6 +121,15 @@ export interface AppShellProps {
    */
   readonly update?: UpdateWatcher | undefined;
   /**
+   * `navigator.storage`, for the Settings panel that says whether this browser
+   * may evict a rider's history (#409).
+   *
+   * `undefined` where the Storage API is absent, and in the accessibility
+   * suite — which is also how that branch of `PersistenceNotice` is reached
+   * from a test at all.
+   */
+  readonly storage?: import('../support/persistent-storage').StorageManagerLike | undefined;
+  /**
    * The live ride screen's state machine (#49), built by `main.tsx` from the
    * transport and the store.
    *
@@ -388,6 +397,7 @@ function viewFor(
           mass={props.athleteMass}
           riderMass={riderMass}
           onRiderMassChange={onMassChange}
+          {...(props.storage === undefined ? {} : { storage: props.storage })}
         />
       );
     case 'about':
