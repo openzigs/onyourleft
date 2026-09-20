@@ -867,7 +867,18 @@ bash scripts/check-a11y-suite.test.sh
 # own parser), so it is NOT part of `check:repo`. See §4j.
 pnpm run check:wiring
 
-# Its own suite. Fixture-driven; 81 assertions over 36 throwaway trees, five of
+# Its own suite. Fixture-driven; the count is what the run prints and it ages —
+# 86 as of #406, and the line below said 81 until then.
+#
+# ⚠️ Since #406 the fixture builder **reads `WATCHED_PREFIXES` out of the
+# checker** rather than naming the directories itself, which is the move
+# `check-a11y-suite.mjs` already makes about `test:a11y`'s selector. It used to
+# `mkdir` the two by name, so adding a third prefix turned all 83 cases red at
+# once — a prefix naming no directory is a hard failure, by design. The
+# derivation is resolved once at the top and hard-fails if it reads nothing,
+# because an `exit` inside a process substitution exits the subshell.
+#
+# 81 assertions over 36 throwaway trees before that, five of
 # them #278's five defects taken from the tree as it actually was — and two of
 # those green on purpose, because they are limits this gate states rather than
 # findings it makes. Three more cover the two ways this gate could check nothing
