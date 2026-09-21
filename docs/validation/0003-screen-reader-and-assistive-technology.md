@@ -338,7 +338,7 @@ with the step that produces it. TalkBack on throughout.
 | G3 | On the Ride screen, with a trainer granted control, start the saved workout with *Say a workout's next block* at **10 seconds** | About ten seconds before each block changes: the next block as a share of threshold, never in watts. At the change: *"Now: …"* |
 | G4 | Pause the ride across a block boundary | Nothing is said about the next block while paused |
 | G5 | Set *Say a workout's next block* to **never** and ride a boundary | No lookahead sentence. *"Now: …"* **is** still said — it is the visible line made audible, not a setting (#394) |
-| G6 | Switch the trainer off mid-ride on the Ride screen | *"Control lost"* on the Trainer panel is announced (#394). ⚠️ Off the bike for this step |
+| G6 | Switch the trainer off mid-ride on the Ride screen | *"Control lost"* on the Trainer panel is announced (#394) — since #445 by the Ride screen's one region; Part J is the step that checks it is said once. ⚠️ Off the bike for this step |
 | G7 | In the game, ride with a trainer that cannot take simulation mode (or none) | *"The road is not reaching your trainer"*, once, when it appears |
 
 ### G results
@@ -445,6 +445,35 @@ I12 checks both.
 | I12 | | | |
 
 **Could the rider tell the three sounds apart while riding hard? In their words:**
+
+---
+
+## Part J — one voice while riding ([#445](https://github.com/openzigs/onyourleft/issues/445))
+
+Before #445, *"Control lost"*, *"Not released"*, a workout fault, the game's road notice and a
+refused gradient write were each spoken by a live region of their own, beside the announcer's
+throttle — so a routine power sentence could be spoken in the same second as *"Control lost"*, and
+the HUD carried three regions while a notice stood. Since #445 each goes through the announcer into
+the screen's **one** region, in `apps/web/src/game/hud/announce.ts`'s order, and the visible
+message stays where it was. ⚠️ Steps J1 and J4 are with announcements **off**, the default: those
+sentences are spoken whatever the rider chose (`announce.ts` §`ALWAYS_SPOKEN`). ⚠️ Off the bike
+for J1–J3.
+
+| Step | What to do | What should be seen, and said |
+|---|---|---|
+| J1 | Announcements **off**. On the Ride screen, with a trainer granted control, switch the trainer off | **Seen**: *"Control lost"* on the Trainer panel. **Said**: *"Control lost: …"* **once** — not twice, and not a second time when you move TalkBack's focus onto the panel's own message (reading it by touch is expected; an unprompted repeat is the defect) |
+| J2 | Announcements **on**, power every **15 s**. Start a saved workout, then switch the trainer off | *"Control lost: …"* is said, and **no** power sentence is said in the same breath. The workout fault, if one follows, may be dropped — that is the order working, not a fault |
+| J3 | In the game, on a trainer that refuses a gradient (or take control away mid-ride on another app) | **Seen**: the *Trainer* notice on the HUD. **Said**: *"Trainer: …"* once |
+| J4 | Announcements **off**. Ride the game with a trainer that cannot take simulation mode | **Seen**: *"The road is not reaching your trainer"*. **Said**: the same, once, as the ride starts |
+
+### J results
+
+| Step | Seen? | Said? How many times? | Word for word | Notes |
+|---|---|---|---|---|
+| J1 | | | | |
+| J2 | | | | |
+| J3 | | | | |
+| J4 | | | | |
 
 ---
 

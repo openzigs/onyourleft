@@ -329,7 +329,7 @@ describe('a workout — #400', () => {
   }
 
   const workoutRegion = (): string =>
-    document.querySelector('[data-oyl-announcer="workout"]')?.textContent ?? '';
+    document.querySelector('[data-oyl-announcer="ride"]')?.textContent ?? '';
 
   it('resumes audio in the press on a workout’s Ride button, and not before', async () => {
     chooseSounds();

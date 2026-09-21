@@ -133,9 +133,9 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    *
    * ⚠️ **Collapsed is visually hidden by clip, never removed.** The sentence
    * stays in the document where it was, so a screen-reader user who has not
-   * reached it yet still can, and so a live region on it is not re-inserted
-   * (an element moved between containers is a new element, and a new live
-   * region is announced unreliably or twice). What collapsing gives back is
+   * reached it yet still can. (It is no longer a live region — since #445 the
+   * HUD's one region speaks it — but it is still a sentence somebody may be
+   * reading with their finger.) What collapsing gives back is
    * the grid cell: on a phone the notice takes the route panel's, and a
    * collapsed one takes none — `theme.css` §"WHERE THERE IS NO FREE CELL".
    *
@@ -295,8 +295,14 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
         (`oyl-visually-hidden`) — never `display: none`, `hidden` or
         `aria-hidden`, because no live region announces while hidden — and
         rendered from the first frame, EMPTY, so that the first sentence is a
-        change to it rather than the region's arrival. Before the notices in
-        the document, which are event messages of their own (#394).
+        change to it rather than the region's arrival.
+
+        ⚠️ **The notices below are NOT live regions since #445**, and a
+        reviewer who remembers "event messages of their own (#394)" here is
+        reading the old file: each was a second voice beside this one, and the
+        HUD carried three while a notice stood. `GameView` feeds both into the
+        announcer as rank-1 events, so this is the only thing on the stage that
+        speaks by itself.
       */}
       <p className="oyl-visually-hidden" role="status" data-oyl-announcer="hud">
         {props.announcement}

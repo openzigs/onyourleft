@@ -105,16 +105,29 @@ function panel(workout: RideWorkoutSnapshot | undefined, failingLibrary = false)
 }
 
 const announcer = (): HTMLElement | null =>
-  document.querySelector<HTMLElement>('[data-oyl-announcer="workout"]');
+  document.querySelector<HTMLElement>('[data-oyl-announcer="ride"]');
 
-describe('a workout fault is announced when it appears', () => {
-  it('is a live region carrying the fault', async () => {
-    mounted = await mount(panel(running({ fault: 'The trainer refused that target.' })));
+describe('a workout fault is announced when it appears — through the one region since #445', () => {
+  it('is said in the ride region when it APPEARS, and stays visible without a live region of its own', async () => {
+    mounted = await mount(panel(running()));
     await settle();
-    const fault = [...document.querySelectorAll('[role="status"]')].find((element) =>
+    expect(announcer()?.textContent).toBe('');
+
+    await mounted.rerender(panel(running({ fault: 'The trainer refused that target.' })));
+    await settle();
+    expect(announcer()?.textContent).toBe('Heads up: The trainer refused that target.');
+    // A sighted rider still reads it — only its announcement moved (#445).
+    const shown = [...document.querySelectorAll('.oyl-status')].find((element) =>
       (element.textContent ?? '').includes('The trainer refused that target.'),
     );
-    expect(fault, 'the workout fault is not in a live region').toBeDefined();
+    expect(shown, 'the fault is no longer on the screen').toBeDefined();
+    expect(shown?.getAttribute('role'), 'the fault is a second voice').toBeNull();
+  });
+
+  it('is not said again for a fault that was already standing when the panel appeared', async () => {
+    mounted = await mount(panel(running({ fault: 'The trainer refused that target.' })));
+    await settle();
+    expect(announcer()?.textContent).toBe('');
   });
 });
 
@@ -158,8 +171,8 @@ describe('the block being ridden is announced when it CHANGES — not when it fi
   });
 });
 
-describe('no message depends on interrupting another — #394', () => {
-  it('uses status regions only, in source order, and no alert', async () => {
+describe('no message depends on interrupting another — #394, #445', () => {
+  it('is ONE status region while riding, with a fault standing, and no alert', async () => {
     mounted = await mount(panel(running({ fault: 'The trainer refused that target.' })));
     await settle();
     await mounted.rerender(
@@ -168,14 +181,12 @@ describe('no message depends on interrupting another — #394', () => {
     await settle();
     // TalkBack ignores politeness, so nothing here may lean on `alert`.
     expect(document.querySelectorAll('[role="alert"], [aria-live="assertive"]')).toHaveLength(0);
-    const regions = [...document.querySelectorAll('[role="status"]')].map(
-      (element) => element.textContent ?? '',
-    );
-    // The block, then the fault: the order they are in the document is the
-    // order a screen reader meets them.
-    expect(regions.findIndex((text) => text.startsWith('Now:'))).toBeLessThan(
-      regions.findIndex((text) => text.includes('refused')),
-    );
+    // ⚠️ #445: this used to assert the ORDER of two regions — the block, then
+    // the fault — because there were two. There is one, and the order is the
+    // announcer's rather than the document's.
+    const regions = document.querySelectorAll('[role="status"], [aria-live]');
+    expect(regions).toHaveLength(1);
+    expect(regions[0]?.textContent).toBe('Now: 5 min at 95%');
   });
 });
 
