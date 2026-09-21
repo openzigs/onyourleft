@@ -22,7 +22,7 @@ import {
 } from '@onyourleft/domain';
 
 import { createGradientSession } from './gradient';
-import { terrainHeightAt } from './landform';
+import { TERRAIN_COLUMN_OFFSETS, VERGE_DROP_METRES, terrainHeightAt } from './landform';
 import {
   circuitRoute,
   hillRoute,
@@ -40,6 +40,7 @@ import type { GradientTrainer } from './trainer-port';
 import {
   BRIDGE_CLEARANCE_METRES,
   BRIDGE_HALF_SPAN_METRES,
+  CHANNEL_BANK_METRES,
   PARAPET_HEIGHT_METRES,
   STREAM_DEPTH_METRES,
   bridgeParts,
@@ -206,6 +207,58 @@ describe('the bridge — #459', () => {
     expect((abutment?.y ?? 0) - tallest / 2).toBeLessThan(water - STREAM_DEPTH_METRES);
     // Nothing is placed in view of a corridor that cannot see the bridge.
     expect(bridgeParts(profile, origin, roadCorridor(profile, origin, 2_600), ways)).toEqual([]);
+  });
+
+  it('never leaves the road over an open trench beyond the abutments — #468 review B2', () => {
+    // The channel lowers the ground at the road's edge for CHANNEL_BANK_METRES
+    // either side of the stream; the bridge spans BRIDGE_HALF_SPAN_METRES. On
+    // #468's first head the road stood 3.7 m over the ground 10 m out and
+    // 1.9 m at 20 m, with nothing under it. So: wherever the DRAWN ground at
+    // the foot of the verge is below the road by more than the verge's own
+    // drop, and it is not the bridge's opening, some part must stand there
+    // from the road down to that ground, under the road's edge.
+    const columns = TERRAIN_COLUMN_OFFSETS.length;
+    const roadEdge = TERRAIN_COLUMN_OFFSETS[1] as number;
+    let open = 0;
+    let held = 0;
+    // The corridor's rows slide with the rider, so ask from several places.
+    for (let rider = crossing - 80; rider <= crossing - 50; rider += 3) {
+      const frame = frameAt(profile, rider);
+      const ground = frame.terrain.mesh;
+      const parts = frame.water.bridges;
+      frame.corridor.centre.forEach((point, row) => {
+        const u = Math.abs(point.along - crossing);
+        if (u > CHANNEL_BANK_METRES + 10) return;
+        for (let side = 0; side < 2; side += 1) {
+          const y = ground.vertices[(row * columns * 2 + side * columns + 1) * 3 + 1] as number;
+          if (y >= point.y - VERGE_DROP_METRES - 0.05) continue;
+          if (u <= BRIDGE_HALF_SPAN_METRES) {
+            open += 1;
+            continue;
+          }
+          // The route runs north, so along the road is z and across it is x.
+          // A part that follows the road's slope is higher at one end: read
+          // its top and bottom where this row is, not at its middle.
+          const holding = parts.some((part) => {
+            if (Math.abs(part.z - point.z) > part.length / 2 + 1e-6) return false;
+            const rise = part.axisZ === 0 ? 0 : ((point.z - part.z) * part.axisY) / part.axisZ;
+            return (
+              part.width / 2 >= roadEdge &&
+              part.y + rise + part.height / 2 >= point.y - 0.1 &&
+              part.y + rise - part.height / 2 <= y + 0.05
+            );
+          });
+          expect(holding, `the road ${u.toFixed(1)} m from the stream, side ${String(side)}`).toBe(
+            true,
+          );
+          held += 1;
+        }
+      });
+    }
+    // Non-vacuity: the channel really is under the opening, and really does
+    // lower the ground at the road's edge past the abutments.
+    expect(open).toBeGreaterThan(10);
+    expect(held).toBeGreaterThan(10);
   });
 
   it('tells the trainer the route’s gradient at the bridge, not a level deck’s', async () => {

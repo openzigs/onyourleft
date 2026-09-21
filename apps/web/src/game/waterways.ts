@@ -28,7 +28,9 @@
  * ## The bridge, and what it must not change
  *
  * **The road deck is the road, unchanged.** A bridge here is parapets, a slab
- * under the road and two abutments — {@link bridgeParts} — standing beside and
+ * under the road, two abutments and — since #468's review — a solid approach
+ * from each abutment to where the channel's bank meets the road again
+ * — {@link bridgeParts} — standing beside and
  * under a ribbon `terrain.ts` built exactly as it builds every other stretch,
  * and the channel `landform.ts` cuts in the ground beneath it. ⚠️ **The grade
  * a trainer is sent at a bridge is the route's**: nothing here reads or writes
@@ -562,7 +564,8 @@ export const MAXIMUM_BRIDGE_PARTS = 128;
 
 /**
  * The bridges in view of this frame's corridor: parapets along both edges of
- * the road over the span, a slab under the deck, and an abutment at each end.
+ * the road over the span, a slab under the deck, an abutment at each end, and
+ * the approach beyond each abutment out to {@link CHANNEL_BANK_METRES}.
  *
  * ⚠️ **The deck is the road**, drawn by `terrain.ts` exactly as everywhere
  * else: every part here stands beside or under it, at the road's own height
@@ -656,6 +659,43 @@ export function bridgeParts(
           width: ROAD_WIDTH_METRES + PARAPET_THICKNESS_METRES * 4,
           height: top - bottom,
         });
+        // ⚠️ **The approach: solid under the road from the abutment to where
+        // the bank meets it.** #468's review, B2. The channel lowers the ground
+        // at the road's edge for {@link CHANNEL_BANK_METRES} either side of the
+        // stream, and the bridge spans only {@link BRIDGE_HALF_SPAN_METRES} of
+        // that: on the first head the road was 3.7 m over the ground 10 m out
+        // and 1.9 m at 20 m, a strip of tarmac over an open trench for fifteen
+        // metres past each abutment. Pieces that follow the road's slope, as
+        // the deck's do, from the deck's top down into the bed — a causeway
+        // with stone sides, which is what carries a lane down to a small bridge.
+        const approach = CHANNEL_BANK_METRES - BRIDGE_HALF_SPAN_METRES;
+        const steps = Math.ceil(approach / BRIDGE_PIECE_METRES);
+        for (let piece = 0; piece < steps; piece += 1) {
+          const near = roadAt(
+            centre + end * (BRIDGE_HALF_SPAN_METRES + (piece * approach) / steps),
+          );
+          const far = roadAt(
+            centre + end * (BRIDGE_HALF_SPAN_METRES + ((piece + 1) * approach) / steps),
+          );
+          const ex = far.x - near.x;
+          const ey = far.y - near.y;
+          const ez = far.z - near.z;
+          const length = Math.hypot(ex, ey, ez);
+          if (!(length > 0)) continue;
+          const middle = (near.y + far.y) / 2;
+          const height = middle - 0.03 - bottom;
+          parts.push({
+            x: (near.x + far.x) / 2,
+            y: middle - 0.03 - height / 2,
+            z: (near.z + far.z) / 2,
+            axisX: ex / length,
+            axisY: ey / length,
+            axisZ: ez / length,
+            length,
+            width: ROAD_WIDTH_METRES + PARAPET_THICKNESS_METRES * 4,
+            height,
+          });
+        }
       }
       if (parts.length >= MAXIMUM_BRIDGE_PARTS) {
         return parts.slice(0, MAXIMUM_BRIDGE_PARTS);
