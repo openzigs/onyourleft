@@ -100,7 +100,7 @@ function capturingRenderer(frames: SceneFrame[]): GameRenderer {
 /** Everything a trainer was told this test. */
 interface Commands {
   readonly written: SimulationParameters[];
-  readonly stops: number[];
+  readonly releases: number[];
 }
 
 /**
@@ -117,6 +117,7 @@ function trainerPort(
     readonly controllable: boolean;
     readonly canSimulate: boolean;
     readonly hasControl: boolean;
+    readonly releaseFault?: string | undefined;
   },
   commands: Commands,
   workoutRunning = false,
@@ -126,9 +127,10 @@ function trainerPort(
       commands.written.push(parameters);
       return Promise.resolve();
     },
-    stop: async () => {
-      commands.stops.push(commands.written.length);
-      return Promise.resolve();
+    // #372: a release, which is a Reset — `stop` is no longer on the type.
+    release: async () => {
+      commands.releases.push(commands.written.length);
+      return Promise.resolve({ kind: 'reset' as const });
     },
   };
   return { readTrainer: () => gameTrainerFrom(snapshot, control, workoutRunning) };
@@ -224,7 +226,7 @@ async function ride(
 
 describe('the road the game draws reaches the trainer', () => {
   it('writes the route’s gradient while the rider is riding', async () => {
-    const commands: Commands = { written: [], stops: [] };
+    const commands: Commands = { written: [], releases: [] };
     const { drawn } = await ride(trainerPort(READY, commands));
 
     // The renderer really was driven, or "no gradient" could be "no ride".
@@ -236,7 +238,7 @@ describe('the road the game draws reaches the trainer', () => {
   });
 
   it('sends the grade at the rider’s distance, climbing', async () => {
-    const commands: Commands = { written: [], stops: [] };
+    const commands: Commands = { written: [], releases: [] };
     await ride(trainerPort(READY, commands));
 
     // Every write is on the first kilometre at 300 W, which is the climb — so
@@ -257,7 +259,7 @@ describe('the road the game draws reaches the trainer', () => {
   });
 
   it('does not write faster than the driver allows', async () => {
-    const commands: Commands = { written: [], stops: [] };
+    const commands: Commands = { written: [], releases: [] };
     await ride(trainerPort(READY, commands), 60);
     // Thirty seconds of road at one write a second, and a deadband on top —
     // never sixty, which is what a tick with no rate limit would produce.
@@ -266,14 +268,14 @@ describe('the road the game draws reaches the trainer', () => {
 
   it('writes nothing to a trainer that does not offer simulation mode', async () => {
     // #362's fourth criterion. The one case no trainer in this loop can make.
-    const commands: Commands = { written: [], stops: [] };
+    const commands: Commands = { written: [], releases: [] };
     const { drawn } = await ride(trainerPort({ ...READY, canSimulate: false }, commands));
     expect(drawn.length).toBeGreaterThan(10);
     expect(commands.written).toHaveLength(0);
   });
 
   it('writes nothing to a trainer that has not granted control', async () => {
-    const commands: Commands = { written: [], stops: [] };
+    const commands: Commands = { written: [], releases: [] };
     await ride(trainerPort({ ...READY, hasControl: false }, commands));
     expect(commands.written).toHaveLength(0);
   });
@@ -284,20 +286,20 @@ describe('the road the game draws reaches the trainer', () => {
     // so a workout started on the Ride screen keeps writing ERG targets to the
     // one control point while the rider is in the game. A second writer at
     // about 1 Hz is the mild half; the sharp half is the release below.
-    const commands: Commands = { written: [], stops: [] };
+    const commands: Commands = { written: [], releases: [] };
     const { drawn } = await ride(trainerPort(READY, commands, true));
     expect(drawn.length).toBeGreaterThan(10);
     expect(commands.written).toHaveLength(0);
   });
 
-  it('sends no FTMS Stop when a workout holds the trainer', async () => {
-    // ⚠️ **The assertion that is really about safety.** An FTMS Stop makes the
-    // machine ignore setpoints until it is started again, so a game ride that
-    // ended while a workout was running would leave the workout's clock going
-    // and every one of its targets reporting success against a machine that
-    // had stopped listening — the silent failure `startWorkout` refuses to
+  it('sends no release when a workout holds the trainer', async () => {
+    // ⚠️ **The assertion that is really about safety.** A release is an FTMS
+    // Reset since #372 (a Stop before it), and either makes the machine stop
+    // listening to this client — so a game ride that ended while a workout was
+    // running would leave the workout's clock going and every one of its
+    // targets refused or ignored — the silent failure `startWorkout` refuses to
     // start into, arriving after the guard.
-    const commands: Commands = { written: [], stops: [] };
+    const commands: Commands = { written: [], releases: [] };
     await ride(trainerPort(READY, commands, true));
     await act(async () => {
       mounted?.unmount();
@@ -305,11 +307,11 @@ describe('the road the game draws reaches the trainer', () => {
       await Promise.resolve();
     });
     mounted = undefined;
-    expect(commands.stops).toHaveLength(0);
+    expect(commands.releases).toHaveLength(0);
   });
 
   it('tells the rider the workout has the trainer, not that the trainer is broken', async () => {
-    const commands: Commands = { written: [], stops: [] };
+    const commands: Commands = { written: [], releases: [] };
     await ride(trainerPort(READY, commands, true));
     const text = mounted?.container.textContent ?? '';
     expect(text).toContain('workout is driving your trainer');
@@ -317,7 +319,7 @@ describe('the road the game draws reaches the trainer', () => {
   });
 
   it('tells the rider, rather than leaving them to believe the road is flat', async () => {
-    const commands: Commands = { written: [], stops: [] };
+    const commands: Commands = { written: [], releases: [] };
     await ride(trainerPort({ ...READY, canSimulate: false }, commands));
     const text = mounted?.container.textContent ?? '';
     expect(text).toContain('does not offer simulation mode');
@@ -325,7 +327,7 @@ describe('the road the game draws reaches the trainer', () => {
 
   it('warns before the ride starts, where the advice can still be taken', async () => {
     // "Take control on the Ride screen" is only actionable on the picker.
-    const commands: Commands = { written: [], stops: [] };
+    const commands: Commands = { written: [], releases: [] };
     mounted = await mount(
       <GameView
         port={pedallingPort(hillRoute())}
@@ -338,9 +340,44 @@ describe('the road the game draws reaches the trainer', () => {
     expect(mounted.container.textContent ?? '').toContain('Ride screen');
   });
 
+  it('tells the rider on the picker when the last release was not confirmed — #372', async () => {
+    // A game ride ends on the picker, not on the Ride screen, and a trainer
+    // that refused the Reset may still be holding the hill.
+    const commands: Commands = { written: [], releases: [] };
+    mounted = await mount(
+      <GameView
+        port={pedallingPort(hillRoute())}
+        trainer={trainerPort(
+          { ...READY, releaseFault: 'The trainer may still be holding resistance.' },
+          commands,
+        )}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+    const text = mounted.container.textContent ?? '';
+    expect(text).toContain('Not released');
+    expect(text).toContain('may still be holding resistance');
+  });
+
+  it('says nothing about a release when there is nothing to say', async () => {
+    const commands: Commands = { written: [], releases: [] };
+    mounted = await mount(
+      <GameView
+        port={pedallingPort(hillRoute())}
+        trainer={trainerPort(READY, commands)}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+    expect(mounted.container.textContent ?? '').not.toContain('Not released');
+  });
+
   it('says nothing about the road when there is no trainer at all', async () => {
     // A rider on a power meter has not asked to be driven and is not nagged.
-    const commands: Commands = { written: [], stops: [] };
+    const commands: Commands = { written: [], releases: [] };
     await ride(trainerPort({ ...READY, paired: false }, commands));
     const text = mounted?.container.textContent ?? '';
     expect(text).not.toContain('will not reach your trainer');
@@ -357,28 +394,29 @@ describe('the road the game draws reaches the trainer', () => {
   it('shows the rider what the trainer is being told', async () => {
     // The rider-visible evidence `docs/validation/0002` Part I asks somebody
     // with a trainer in front of them to read.
-    const commands: Commands = { written: [], stops: [] };
+    const commands: Commands = { written: [], releases: [] };
     await ride(trainerPort(READY, commands));
     expect(mounted?.container.textContent ?? '').toContain('Trainer: simulating');
   });
 
   it('releases the trainer when the rider ends the ride', async () => {
-    const commands: Commands = { written: [], stops: [] };
+    const commands: Commands = { written: [], releases: [] };
     await ride(trainerPort(READY, commands));
-    expect(commands.stops).toHaveLength(0);
+    expect(commands.releases).toHaveLength(0);
 
     await clickThrough(buttonStarting('End ride'));
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(commands.stops).toHaveLength(1);
+    expect(commands.releases).toHaveLength(1);
   });
 
   it('releases the trainer when the rider navigates away mid-ride', async () => {
-    // The effect's cleanup path. A leaked simulation setpoint is resistance
-    // left on a machine with nothing on screen to explain it.
-    const commands: Commands = { written: [], stops: [] };
+    // The effect's cleanup path — validation 0002 L7, a different line of code
+    // making the same claim as End ride. A leaked simulation setpoint is
+    // resistance left on a machine with nothing on screen to explain it.
+    const commands: Commands = { written: [], releases: [] };
     await ride(trainerPort(READY, commands));
     await act(async () => {
       mounted?.unmount();
@@ -386,6 +424,6 @@ describe('the road the game draws reaches the trainer', () => {
       await Promise.resolve();
     });
     mounted = undefined;
-    expect(commands.stops).toHaveLength(1);
+    expect(commands.releases).toHaveLength(1);
   });
 });

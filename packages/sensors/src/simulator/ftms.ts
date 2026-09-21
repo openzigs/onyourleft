@@ -262,6 +262,23 @@ export interface FtmsOptions {
   readonly supportsSimulation?: boolean;
   /** Which Indoor Bike Data fields to carry. Defaults to speed, cadence, power. */
   readonly fields?: ReadonlySet<IndoorBikeDataField>;
+  /**
+   * Whether a Stop leaves the machine's target settings where they were.
+   *
+   * Defaults to `false` — a Stop drops them, which is what this simulator has
+   * always done and what FTMS permits. Built `true`, it is the trainer #372 was
+   * measured on: an acknowledged `0x08` left both a grade and an ERG target
+   * applied. ⚠️ A double modelling one machine's behaviour, not evidence about
+   * any other; it exists so a client that "releases" with a Stop is a red test
+   * rather than a green one.
+   */
+  readonly retainsTargetsThroughStop?: boolean;
+  /**
+   * Whether this machine answers Reset at all. Defaults to `true`. Built
+   * `false`, a Reset is answered `0x02` Op Code Not Supported — the case a
+   * release's fallback exists for.
+   */
+  readonly supportsReset?: boolean;
 }
 
 export const DEFAULT_MIN_TARGET_POWER: Watts = watts(0);
@@ -310,6 +327,8 @@ export function createFtmsMachine(
     resistanceIncrement: options.resistanceIncrement ?? DEFAULT_RESISTANCE_INCREMENT,
   };
   const supportsSimulation = options.supportsSimulation ?? true;
+  const retainsTargetsThroughStop = options.retainsTargetsThroughStop ?? false;
+  const supportsReset = options.supportsReset ?? true;
   let fields = options.fields ?? DEFAULT_INDOOR_BIKE_DATA_FIELDS;
 
   let controlHeld = false;
@@ -334,6 +353,9 @@ export function createFtmsMachine(
       case 'reset':
         if (!controlHeld) {
           return 'control-not-permitted';
+        }
+        if (!supportsReset) {
+          return 'op-code-not-supported';
         }
         // 4.16.2.1: a Reset returns the machine to its defaults *and* resets
         // the control permission — the client that asked for it loses it.
@@ -390,7 +412,7 @@ export function createFtmsMachine(
           return 'control-not-permitted';
         }
         stopped = true;
-        if (request.stop) {
+        if (request.stop && !retainsTargetsThroughStop) {
           // A stop ends the session, so the setpoints go with it. A pause holds
           // them — which is the whole difference the parameter octet carries.
           targetPower = undefined;

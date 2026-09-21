@@ -86,9 +86,10 @@ export interface SimulationWriter {
    *
    * @unwired no production caller waits for it, deliberately.
    * `apps/web/src/game/gradient.ts` §`settled` exposes it and only tests take
-   * it: ending a ride closes this writer and sends an FTMS Stop straight away,
-   * because a Stop delayed behind a write the machine has stopped answering is
-   * resistance left on a rider who has finished. Watched since #363 because
+   * it: ending a ride closes this writer and releases the trainer straight
+   * away — an FTMS Reset since #372, a Stop before it — because a release
+   * delayed behind a write the machine has stopped answering is resistance left
+   * on a rider who has finished. Watched since #363 because
    * this module is on the trainer-command seam.
    */
   idle(): Promise<void>;

@@ -37,35 +37,49 @@
  * failure for as long as the road stays similar. `SimulationDriver.restart`
  * exists for exactly this and says so; this is its production caller.
  *
- * **Two: ending a ride sends a Stop — and ⚠️ THAT DOES NOT REMOVE THE
- * RESISTANCE.** This paragraph used to claim it did, and a reviewer who
- * remembers it saying `stop()` is "the deliberate way to end resistance" is
- * reading the old file. [#372](https://github.com/openzigs/onyourleft/issues/372)
- * is why.
+ * **Two: ending a ride releases the trainer, and since #372 that is an FTMS
+ * Reset (`0x01`), NOT a Stop.** ⚠️ This paragraph has now been wrong twice, and
+ * a reviewer who remembers either earlier version is reading an old file.
+ * First it said `stop()` was "the deliberate way to end resistance"; then it
+ * said, correctly, that a Stop does not remove the resistance, and left the
+ * remedy open. [#372](https://github.com/openzigs/onyourleft/issues/372) chose
+ * it, and {@link GradientSession.stop} now calls `control.release()`.
  *
- * The hazard the old wording described is real and is unchanged: FTMS
- * simulation parameters persist on the machine until they are changed, so a
- * rider who ends a ride on a 9 % wall and walks away leaves the flywheel loaded
- * against whoever gets on next. What was wrong was the remedy. `stop()` was
- * assumed to end resistance; it ends the training **session**. Nothing in FTMS
- * requires a machine to discard its target setting values on `0x08`, and on the
- * trainer validation 0002 Part L was run against, it does not.
+ * The hazard is unchanged: FTMS simulation parameters persist on the machine
+ * until they are changed, so a rider who ends a ride on a 9 % wall and walks
+ * away leaves the flywheel loaded against whoever gets on next. What a Stop
+ * does about it was measured on hardware on 2026-09-19 — end a ride on a steep
+ * climb and turn the cranks by hand, then do it again on a steep descent:
+ * **climb heavy, descent easy, so the grade was still applied** after an
+ * acknowledged `0x08`. (A single hand-turn cannot show this, because a
+ * direct-drive trainer always has drag and simulation resistance nearly
+ * vanishes at zero speed; validation 0002 L5 now uses the pedal-through test,
+ * which judges by the trainer's own power reading instead.)
  *
- * Measured on hardware 2026-09-19, by the one test that can tell a cleared
- * setpoint from a trainer's own baseline drag — end a ride on a steep climb and
- * turn the cranks by hand, then do it again on a steep descent. **Climb heavy,
- * descent easy: the grade is still applied.** A single hand-turn cannot show
- * this, because a direct-drive trainer always has drag and because simulation
- * resistance nearly vanishes at zero speed anyway.
+ * Why a Reset, and why the Reset trap does not forbid it: FTMS §4.16.2.1 makes
+ * Reset return the machine to its defaults — the specification's own way to
+ * clear a target setting — and revoke this client's control. The trap is a
+ * client that keeps writing after that. This session writes nothing after
+ * `stop()` (the `stopped` flag and the writer's `close()` both say so), and if
+ * anything did, `TrainerControl` would refuse it for want of control rather
+ * than send it into a machine that has stopped listening.
  *
- * ⚠️ No gate here can catch it. Every test asserts that `stop()` was called,
- * and it is: 402 control-point writes over that ride, 402 acknowledged, the
- * Stop among them. The defect is in what the machine does next.
+ * ⚠️ **What follows for the next ride, decided rather than left to happen:**
+ * after a release this client holds no control, so the next game ride's
+ * `gameTrainerFrom` reports `no-control` and tells the rider to take control on
+ * the Ride screen. That is kept. Re-requesting control at the start of the next
+ * ride would be the screen deciding to apply resistance to somebody, which
+ * `trainer-port.ts` rules out for the game and `ride/controller.ts`'s rule 2
+ * rules out everywhere: taking control is a thing the rider does.
  *
- * ⚠️ `workout/session.ts` §`release` makes the same choice on the same
- * reasoning, so a finished workout may likewise leave a target applied. That is
- * **not established** and must not be assumed either way — #372 carries it as a
- * separate hardware question.
+ * ⚠️ If the machine refuses the Reset, `release()` writes a flat road and a Stop
+ * and resolves `incomplete`, and the rider is told the trainer may still be
+ * holding resistance — by the ride controller, which every release goes
+ * through, on the Ride screen and on this game's route picker.
+ *
+ * ⚠️ No gate here can prove a real trainer lets go. Every test asserts what was
+ * sent; the #44 simulator clears its targets on a Reset because it was written
+ * to. Validation 0002 Part L is the only evidence that counts.
  *
  * **Three: a rider is told when a write is refused.** A caller offering a
  * gradient every second has nowhere to catch a rejection that arrives four
@@ -159,11 +173,12 @@ export interface GradientSession {
    */
   sample(at: Seconds, distance: number): void;
   /**
-   * End the ride and let the trainer go.
+   * End the ride and let the trainer go — `control.release()`, an FTMS Reset
+   * (#372). @see the module note, "Two".
    *
    * Idempotent: `GameView` tears down from the "End ride" button and from the
    * effect's cleanup, and a rider who navigates away has ended the ride just as
-   * surely as one who pressed the button.
+   * surely as one who pressed the button — validation 0002 L7 checks the second.
    */
   stop(): void;
   /** Resolves once no write is outstanding. For a test, and for a clean teardown. */
@@ -235,16 +250,31 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
       // Empties the waiting slot so nothing new reaches the wire; a write
       // already in flight is on the wire and cannot be recalled.
       writer.close();
-      void control.stop().catch((error: unknown) => {
-        fault = faultText(error);
-        changed();
-      });
+      void control.release().then(
+        (outcome) => {
+          if (outcome.kind === 'incomplete') {
+            fault = RELEASE_INCOMPLETE_ROAD;
+            changed();
+          }
+        },
+        (error: unknown) => {
+          fault = faultText(error);
+          changed();
+        },
+      );
       changed();
     },
 
     settled: () => writer.idle(),
   };
 }
+
+/**
+ * What a rider is told when the end of a ride could not be confirmed as a
+ * release — the Reset was refused and a flat road and a Stop were sent instead.
+ */
+const RELEASE_INCOMPLETE_ROAD =
+  'The trainer did not confirm it let go of the road. It may still be holding resistance — ease off before you get off.';
 
 /**
  * What a rider is told about a refused gradient.

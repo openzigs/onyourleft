@@ -26,7 +26,7 @@ import {
 function silentControl(): GradientTrainer {
   return {
     setSimulationParameters: vi.fn(async () => Promise.resolve()),
-    stop: vi.fn(async () => Promise.resolve()),
+    release: vi.fn(async () => Promise.resolve({ kind: 'reset' as const })),
   };
 }
 
@@ -41,6 +41,23 @@ describe('gameTrainerFrom', () => {
   it('hands over a control only when every gate has passed', () => {
     const control = silentControl();
     expect(gameTrainerFrom(PAIRED_AND_READY, control, false)).toEqual({ kind: 'ready', control });
+  });
+
+  it('carries an unconfirmed release to the picker, in whatever state it leaves the trainer — #372', () => {
+    const fault = 'The trainer may still be holding resistance.';
+    // A refused Reset leaves control held, so the trainer is still `ready`…
+    expect(
+      gameTrainerFrom({ ...PAIRED_AND_READY, releaseFault: fault }, silentControl(), false)
+        .releaseFault,
+    ).toBe(fault);
+    // …and a release refused outright may leave it without control.
+    expect(
+      gameTrainerFrom(
+        { ...PAIRED_AND_READY, hasControl: false, releaseFault: fault },
+        silentControl(),
+        false,
+      ),
+    ).toEqual({ kind: 'no-control', control: undefined, releaseFault: fault });
   });
 
   it('is `none` where there is no ride controller at all', () => {

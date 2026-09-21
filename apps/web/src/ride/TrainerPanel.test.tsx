@@ -42,6 +42,7 @@ const snapshot = (overrides: Partial<TrainerSnapshot> = {}): TrainerSnapshot => 
   requested: undefined,
   lost: undefined,
   refusal: undefined,
+  releaseFault: undefined,
   ...overrides,
 });
 
@@ -157,5 +158,42 @@ describe('the precedence rule, made observable — #370', () => {
     // The control: the ERG form is there, so the assertion above ran over a
     // panel that rendered something.
     expect(text).toContain('ERG target');
+  });
+});
+
+describe('after a release — #372', () => {
+  const driven = {
+    controllable: true,
+    canSetPower: true,
+    controlChoice: {
+      kind: 'fitness-machine' as const,
+      service: '00001826-0000-1000-8000-00805f9b34fb',
+      controlPoint: '00002ad9-0000-1000-8000-00805f9b34fb',
+      vendorAlsoPresent: false,
+    },
+  };
+
+  it('offers control again, as the ordinary state rather than a warning', async () => {
+    // What the controller leaves behind a confirmed release: no control, and
+    // no loss. `controller.test.ts` asserts the controller gets there; this is
+    // what the rider then reads.
+    const text = await render(snapshot({ ...driven, hasControl: false }));
+
+    expect(text).toContain('Ask the trainer for control');
+    expect(text).not.toContain('Control lost');
+    expect(text).not.toContain('Not released');
+  });
+
+  it('says so when the trainer did not confirm it let go', async () => {
+    const text = await render(
+      snapshot({
+        ...driven,
+        hasControl: true,
+        releaseFault: 'It may still be holding resistance.',
+      }),
+    );
+
+    expect(text).toContain('Not released');
+    expect(text).toContain('It may still be holding resistance.');
   });
 });

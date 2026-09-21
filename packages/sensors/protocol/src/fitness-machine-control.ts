@@ -40,6 +40,34 @@
  *    §4.16.2.1). The third is the trap for a workout player that resets between
  *    intervals and keeps sending targets.
  *
+ * ## Letting the trainer go is a Reset, not a Stop — #372
+ *
+ * ⚠️ **This file used to say that `stop()` was "the deliberate way to end
+ * resistance", and a reviewer who remembers that is reading the old file.**
+ * On the one trainer this program has been measured against, an acknowledged
+ * `0x08` Stop released NOTHING, of either kind: a ride ended on a climb left
+ * the grade applied (validation 0002 Part L, 2026-09-19), and for 36 s after an
+ * acknowledged Stop an ERG target of 200 W was still being chased — power rose
+ * from 99 W to 175 W while cadence fell from 55 to 46 rpm, which a passive
+ * brake cannot do (#372, 2026-09-21). FTMS `Stop` ends the training *session*;
+ * nothing in the specification requires a machine to discard its target
+ * settings on it.
+ *
+ * So {@link TrainerControl.release} sends `0x01` **Reset**, which FTMS
+ * §4.16.2.1 defines as returning the machine to its default state — the
+ * specification's own instrument for clearing target settings — and which
+ * revokes this client's control. That second half is what the Reset trap above
+ * is about, and it does not forbid this: the trap is a player that resets
+ * *between intervals and keeps sending*. A release is **terminal**. Nothing is
+ * written after it, losing control is the intent, and a later write is not
+ * lost into the void either — {@link TrainerControl.hasControl} is false, so
+ * `requireControl` refuses it out loud.
+ *
+ * ⚠️ **What no test here can prove is that a real trainer releases on a
+ * Reset.** The #44 simulator clears its targets on one because it was written
+ * to; that is a statement about a double. Validation 0002 Part L's pedal-through
+ * step is the only evidence that counts.
+ *
  * ## Two failure vocabularies, deliberately not conflated
  *
  * A write can fail as an **ATT error** — the write itself is rejected, no
@@ -83,6 +111,7 @@
  */
 
 import {
+  gradePercent,
   metresPerSecond,
   resistanceLevel,
   watts,
@@ -232,6 +261,9 @@ export interface SimulationParameters {
   /** Cw, in kg/m. Defaults to 0.51 — a rider on the hoods. */
   readonly windResistanceCoefficient?: number | undefined;
 }
+
+/** The release fallback's road: level, in still air. @see TrainerControl.release */
+const FLAT_ROAD: GradePercent = gradePercent(0);
 
 const DEFAULT_ROLLING_RESISTANCE_COEFFICIENT = 0.004;
 const DEFAULT_WIND_RESISTANCE_COEFFICIENT = 0.51;
@@ -520,6 +552,37 @@ export interface FitnessMachineChannel {
   writeControlPoint(value: Uint8Array): Promise<void>;
 }
 
+/**
+ * What a {@link TrainerControl.release} achieved, as far as the machine said.
+ *
+ * Two outcomes rather than a boolean, because the second is a real and
+ * different thing to tell a rider: the trainer answered, and what it answered
+ * does not establish that the resistance is gone. The whole of #372 is a
+ * command that was acknowledged and did not do what it claimed, so nothing but
+ * a Reset answered with success is reported as a release.
+ */
+export type TrainerRelease =
+  /**
+   * `0x01` Reset, answered with success. The machine has been told to return to
+   * its defaults, and this client no longer holds control.
+   */
+  | { readonly kind: 'reset' }
+  /**
+   * The Reset was refused or went unanswered, so the fallback was written: a
+   * flat road in still air (where the machine offers simulation), then Stop.
+   * ⚠️ **Not a confirmed release.** A flat road takes a trainer out of ERG into
+   * the gentlest simulation there is, which is the most this client can ask
+   * for without a Reset — and on a machine that retains targets through a
+   * Stop, it is also what is left applied.
+   */
+  | {
+      readonly kind: 'incomplete';
+      /** Why the Reset did not do it. */
+      readonly resetRefusal: SensorError;
+      /** Whether the flat road was written and acknowledged. */
+      readonly flattened: boolean;
+    };
+
 /** Why this client stopped holding control. */
 export type ControlLossReason =
   /** Another client took it, or the machine revoked it. */
@@ -655,18 +718,45 @@ export interface TrainerControl {
   /** Set the simulated course conditions. */
   setSimulationParameters(parameters: SimulationParameters): Promise<void>;
   /**
-   * Stop the training session.
+   * Stop the training session — `0x08` with control information `0x01`.
    *
-   * ⚠️ **This ends the SESSION. It does not necessarily end the resistance**,
-   * and this comment used to say it was "the deliberate way to end resistance"
-   * — a reviewer who remembers that sentence is reading the old file. FTMS does
-   * not require a machine to discard its target setting values on `0x08`, and
-   * on the trainer validation 0002 Part L was run against on 2026-09-19 it does
-   * not: a ride ended on a climb left the grade applied, measured against a
-   * ride ended on a descent.
+   * ⚠️ **This ends the SESSION. It does not end the resistance, and it is NOT
+   * how this program lets a trainer go.** This comment used to say it was "the
+   * deliberate way to end resistance" — a reviewer who remembers that sentence
+   * is reading the old file. FTMS does not require a machine to discard its
+   * target setting values on `0x08`, and the trainer #372 was measured on keeps
+   * both kinds through an acknowledged Stop: a grade (2026-09-19) and an ERG
+   * target it went on chasing (2026-09-21). {@link release} is the release.
+   *
+   * It stays for the non-terminal cases — a workout's free-ride block, a pause
+   * — where this client will write again and must keep control to do it.
    * @see https://github.com/openzigs/onyourleft/issues/372
    */
   stop(): Promise<void>;
+  /**
+   * Let the trainer go at the end of a ride, a workout or an ERG session — the
+   * one place in the program that decides what a release sends (#372).
+   *
+   * Sends `0x01` **Reset**. On success the machine has been told to return to
+   * its defaults and this client **no longer holds control** — by design, and
+   * silently: a release is not a loss, so {@link onControlLost} is NOT told,
+   * and a `0xFF` Control Permission Lost that follows it is not re-acquired
+   * against. The caller that released owns what happens next; taking control
+   * again is {@link requestControl}, which is a thing the rider does.
+   *
+   * If the machine refuses the Reset or does not answer it, and control is
+   * still held, the fallback is written: Set Indoor Bike Simulation Parameters
+   * at 0 % in still air — skipped where the Feature characteristic says the
+   * machine has no simulation mode — then Stop. That resolves `incomplete`,
+   * never `reset`.
+   *
+   * @throws {SensorError} `control-not-held` or `not-connected` when there is
+   * nothing this client can send — including a Reset answered Control Not
+   * Permitted, which is an involuntary loss and IS reported as one — and
+   * whatever the fallback's Stop was refused with. A rejection means the
+   * trainer may still be holding whatever it held.
+   */
+  release(): Promise<TrainerRelease>;
   /**
    * Start or resume the training session.
    *
@@ -675,7 +765,13 @@ export interface TrainerControl {
    * player can find every target it sends going nowhere.
    */
   start(): Promise<void>;
-  /** Reset the machine to its defaults. ⚠️ Revokes this client's control. */
+  /**
+   * Reset the machine to its defaults. ⚠️ Revokes this client's control, and
+   * tells {@link onControlLost} so with the reason `reset`.
+   *
+   * The bare procedure. A release at the end of a ride is {@link release},
+   * which sends the same op code and is not reported as a loss.
+   */
   reset(): Promise<void>;
   /** Told whenever control is lost, with the reason. */
   onControlLost(listener: Listener<ControlLossReason>): Unsubscribe;
@@ -723,6 +819,14 @@ export function createTrainerControl(
   const reacquireControl = options.reacquireControl ?? true;
 
   let held = false;
+  /**
+   * Set by a successful {@link TrainerControl.release}, cleared by the next
+   * granted Request Control. While it is set a `0xFF` Control Permission Lost
+   * is the machine confirming what this client asked for, and neither a loss
+   * to report nor a control to take back — re-acquiring here would be the
+   * silent re-grab the release exists to rule out.
+   */
+  let released = false;
   let indicationsEnabled = false;
   let linkUp = true;
   let closed = false;
@@ -792,6 +896,9 @@ export function createTrainerControl(
       return;
     }
     if (status.kind === 'control-permission-lost') {
+      if (released) {
+        return;
+      }
       target = { kind: 'none' };
       loseControl('permission-lost');
       if (reacquireControl && linkUp && !closed) {
@@ -915,6 +1022,7 @@ export function createTrainerControl(
     return enqueue(async () => {
       await runProcedure({ opCode: 'request-control' });
       held = true;
+      released = false;
     });
   }
 
@@ -1109,6 +1217,58 @@ export function createTrainerControl(
       return enqueue(async () => {
         requireControl();
         await runProcedure({ opCode: 'start-or-resume' });
+      });
+    },
+
+    release(): Promise<TrainerRelease> {
+      return enqueue(async (): Promise<TrainerRelease> => {
+        requireControl();
+        let resetRefusal: SensorError;
+        try {
+          await runProcedure({ opCode: 'reset' });
+          // FTMS §4.16.2.1: control ends with the client's own Reset. Dropped
+          // here WITHOUT `loseControl` — a release is not a loss, and the one
+          // listener that matters (the ride screen) would otherwise show a
+          // "Control lost" warning and pause a workout that is ending.
+          target = { kind: 'none' };
+          held = false;
+          released = true;
+          return { kind: 'reset' };
+        } catch (error) {
+          if (!(error instanceof SensorError)) {
+            throw error;
+          }
+          resetRefusal = error;
+        }
+        // ⚠️ Re-checked: a Reset answered Control Not Permitted has already
+        // dropped control through `runProcedure`, and a link that went during
+        // it is down. Either way there is nothing left to send, and the caller
+        // is told so rather than handed an outcome.
+        requireControl();
+        let flattened = false;
+        if (features?.targetSetting.indoorBikeSimulationParameters !== false) {
+          try {
+            await runProcedure({
+              opCode: 'set-simulation-parameters',
+              parameters: { grade: FLAT_ROAD, windSpeed: metresPerSecond(0) },
+            });
+            flattened = true;
+          } catch {
+            // Reported by `flattened` staying false. The Stop is still worth
+            // sending, and a refusal of it is what rejects this release.
+          }
+        }
+        await runProcedure({ opCode: 'stop' });
+        // A flat road replaced any ERG target; without one this client cannot
+        // say what the machine still holds, and "none" would be a claim.
+        target =
+          flattened || target.kind === 'none'
+            ? { kind: 'none' }
+            : {
+                kind: 'unknown',
+                attempted: target.kind === 'confirmed' ? target.target : target.attempted,
+              };
+        return { kind: 'incomplete', resetRefusal, flattened };
       });
     },
 

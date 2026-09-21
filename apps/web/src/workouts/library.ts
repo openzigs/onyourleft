@@ -88,10 +88,11 @@ export function blockText(block: WorkoutBlock): string {
         `${durationText(block.easySeconds)} at ${String(percentOf(block.easyTarget))}%`
       );
     case 'free-ride':
-      // ⚠️ Not "at 0%". A free ride is the trainer being RELEASED, which is a
+      // ⚠️ Not "at 0%". A free ride is the trainer being eased off, which is a
       // different instruction from a target of zero — `session.ts` sends
-      // `stop()` for it — and a row that said 0% would be describing the one
-      // thing the player is careful never to do.
+      // `stop()` for it (a pause, not the end-of-workout Reset, #372) — and a
+      // row that said 0% would be describing the one thing the player is
+      // careful never to do.
       return `${durationText(block.seconds)} free riding`;
     default: {
       const unhandled: never = block;

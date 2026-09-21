@@ -62,10 +62,19 @@ resistance to a person who is pedalling*.
    ([#364](https://github.com/openzigs/onyourleft/issues/364)) and the whole document had no
    simulation-mode step before it — which is why an afternoon spent filling in Part D truthfully
    would have left every cell green and the game sending nothing (#362).
-3. **Have the trainer's power switch within reach for Parts L and D.**
-4. **Do not clip in for D4, and do not clip in for L5.** Flat pedals or bare feet, or stand beside
-   the bike. ⚠️ **`L5`, not `K5`** — Part K is #349's rendering measurement and its own K5 asks for
-   a ride with no cadence sensor, which changes no resistance at all.
+   ⚠️ **Part R ([#372](https://github.com/openzigs/onyourleft/issues/372)) runs between them: L, then
+   R, then D.** R is the ERG half of the release test and it needs a target set, so it is not a
+   no-resistance part — but every step of it ends by *removing* resistance, which is why it goes
+   before D and D4 stays the last thing done all day.
+3. **Have the trainer's power switch within reach for Parts L, R and D.**
+4. **Do not clip in for D4, and use flat pedals for L5, L7 and Part R.** D4: flat pedals or bare
+   feet, or stand beside the bike. ⚠️ **L5, L7 and R are ridden**, and this item used to say not to
+   clip in for L5 because L5 was *"off the bike, turn the cranks by hand"* — a reviewer who remembers
+   that is reading the old procedure. Since #372 those steps release the trainer **while you are
+   still pedalling**, because that is the only way to see whether it let go (L5 says why). The
+   release is the thing under test and it may not happen, so be able to stop pedalling and step off
+   at once. ⚠️ **`L5`, not `K5`** — Part K is #349's rendering measurement and its own K5 asks for a
+   ride with no cadence sensor, which changes no resistance at all.
 5. ⚠️ **L3 asks for the steepest section of the route.** Ride it seated and in a low gear, and
    choose a route whose maximum gradient you already know — `RouteProfile` carries it, the route
    screen shows it, and a 20 % wall arriving under a rider who expected 6 % is the failure mode this
@@ -921,9 +930,9 @@ arriving in a procedure rather than in a gate.
   trainer…"*. That refusal is the correct behaviour and is worth seeing once: start a workout, open
   the game, and confirm the notice appears and the trainer line shows no count. ⚠️ **If a gradient
   IS written while a workout is running, stop the session.** Two writers on one control point is
-  the defect, and the sharp end of it is that ending the game ride sends an FTMS Stop, after which
-  the machine ignores the workout's targets while the workout's clock runs on and every one of them
-  reports success.
+  the defect, and the sharp end of it is that ending the game ride releases the trainer — an FTMS
+  Reset since [#372](https://github.com/openzigs/onyourleft/issues/372), a Stop before it — after
+  which the machine stops listening to the workout while the workout's clock runs on.
 
 ```bash
 # Watch what actually reaches the machine. ⚠️ The write lines are what matter;
@@ -938,9 +947,9 @@ adb logcat | grep -i "BluetoothLe"
 | L2 | ⚠️ **On the bike, low gear, seated.** Start the ride on a route with a gentle climb and pedal. Scroll the HUD down until *Pause* is on screen | Within a second or two the HUD's trainer line — just above the controls — reads `Trainer: simulating …%` with a **non-zero** count beside it, and the resistance increases as the climb starts. ⚠️ Do this in **landscape as well as portrait** and say which orientations you read it in; that is what #373 was about |
 | L3 | Ride through the steepest section of the route you chose | The percentage on that line **tracks the route's own gradient** — compare it against the gradient field on the HUD, which is read from the same profile. They should agree to a tenth or so |
 | L4 | Ride over the crest and onto the descent | The percentage goes **negative** and the resistance drops away. A sign lost between the profile and the control point shows up here and nowhere else |
-| L5 | ⚠️ **Off the bike.** Press *End ride* | The trainer is **released** — an FTMS Stop, not a gradient of zero — and the resistance goes away. Confirm by turning the cranks by hand |
+| L5 | ⚠️ **The pedal-through test — flat pedals, low gear, seated.** Ride a steady climb at a steady cadence and watch the HUD's power. **While still pedalling**, press *End ride*. Keep pedalling in the same gear for ten seconds, then let your cadence fall — 80, 70, 60, 50 rpm — and read the trainer's own power on the Ride screen or in logcat as you do | **Released:** power **falls** as cadence falls, and the climb's weight is gone. **Still holding:** power stays up or **rises** as cadence falls. In logcat the release is **one `0x01` Reset** answered `80 01 01` — and **no `0x08`**. The Ride screen afterwards shows *Ask the trainer for control*, not *Control lost*. If it shows **Not released**, the trainer refused the Reset: write down exactly what logcat shows after the `0x01` |
 | L6 | Read the logcat you have been collecting | There are **write** lines, not only `Notifying listeners`. Count them and compare with the `(n sent)` figure the HUD showed |
-| L7 | Start a second ride on the same route, then navigate away from the game screen mid-ride | The trainer is released again. This is the cleanup path rather than the button, and it is a different line of code |
+| L7 | Take control again on the Ride screen (the release gave it up — see below). Start a second ride on the same route, climb, and **while still pedalling navigate away from the game screen** with the system Back gesture. Then the same cadence ramp as L5 | The same as L5: power **falls** with cadence, one `0x01` and no `0x08`. This is the cleanup path rather than the button, and it is a different line of code making the same claim |
 
 ⚠️ **L3 is the step that distinguishes "a gradient was written" from "the right gradient was
 written".** A driver fed the wrong distance writes a perfectly plausible number that has nothing to
@@ -949,7 +958,24 @@ do with the hill under the rider, and every other step here would pass.
 ⚠️ **L5 and L7 are the same claim by two paths and both are needed.** FTMS simulation parameters
 **persist on the machine until they are changed**, so a ride ended on a 9 % wall leaves the flywheel
 loaded against whoever gets on next. `apps/web/src/game/gradient.ts` §`stop` records why the release
-is a Stop rather than a flat road.
+is an FTMS **Reset** (`0x01`) — since [#372](https://github.com/openzigs/onyourleft/issues/372); it
+was a Stop, and on the trainer this part was run against on 2026-09-19 a Stop left the grade
+applied.
+
+⚠️ **Why L5 is a pedal-through test and not "turn the cranks by hand" — do not simplify it back.**
+L5's old expected result was *"confirm by turning the cranks by hand"*, and that **cannot tell a
+released trainer from one still holding a grade**: a direct-drive trainer always has drag, and
+simulation resistance nearly vanishes at walking pace anyway. The 2026-09-19 run needed a
+*differential* to see anything — a ride ended on a climb felt heavy, one ended on a descent felt
+easy. The pedal-through judges by the trainer's **own power reading** and needs no comparison: in a
+fixed gear, a released trainer is a free resistance curve, where less cadence can only mean less
+power. A trainer still holding a target keeps power up — and one still in ERG **raises** it as
+cadence falls, which is exactly what #372's ERG measurement saw after an acknowledged Stop.
+
+⚠️ **After a release this client has no control of the trainer, by design.** A Reset revokes it
+(FTMS §4.16.2.1). The next game ride's picker says to take control on the Ride screen, and that is
+deliberate rather than a regression: taking control is a thing the rider does. L7 starts by doing
+it.
 
 ### L results
 
@@ -959,9 +985,9 @@ is a Stop rather than a flat road.
 | L2 | first gradient seen / writes reported: | orientation(s) read in: |
 | L3 | HUD gradient vs trainer line: | |
 | L4 | negative on the descent? | |
-| L5 | released on *End ride*? | |
+| L5 | pedal-through on *End ride*: power as cadence fell (rpm → W): | `0x01` seen? `0x08` seen? screen said: |
 | L6 | write lines in logcat: | notifications for comparison: |
-| L7 | released on navigating away? | |
+| L7 | pedal-through on navigating away: power as cadence fell (rpm → W): | `0x01` seen? `0x08` seen? |
 
 **Did the hills feel like hills (in your own words)?** ______________
 
@@ -1489,7 +1515,7 @@ and this part is where they say it.**
 | Q3 | Rotate to **portrait** mid-ride | Does the layout follow? Does the world redraw at the new shape without stretching — are the wheels still round? ⚠️ This is the orientation that was already working and must not have regressed. ⚠️ Then **pause, rotate back, and look before resuming**: the paused frame is **expected to be stretched** until *Resume* — a known limit, `apps/web/src/game/GameView.tsx` says why — so what to record is whether it corrects itself on the first frame after resuming, and whether it is bad enough to matter when re-seating a tablet on the bars |
 | Q4 | Both orientations | ⚠️ Is any panel under the **status bar**, the **gesture bar** or a camera cut-out? Is any panel's edge clipped? |
 | Q5 | Press *End ride* | Does the header come back? Then start another ride and leave with the **system Back** gesture instead | 
-| Q6 | ⚠️ **The Ride screen, landscape, trainer paired and control granted.** Start a recording first. Are ***Pause* and *Stop*** visible **without scrolling**, and is *Ride a workout*? ⚠️ By measurement *Pause* / *Stop* are the lowest ride controls on this screen, not the workout — they are what a short WebView loses first. Then **record the WebView's size** — see below. Then start a saved workout, ride 60 s, end it | Did the trainer's resistance change when the workout started? ⚠️ **Did it release when the workout ended?** — this is #372. Capture `adb logcat` filtered for `BluetoothLe`: there must be `0x04` Set Target Power writes this time |
+| Q6 | ⚠️ **The Ride screen, landscape, trainer paired and control granted.** Start a recording first. Are ***Pause* and *Stop*** visible **without scrolling**, and is *Ride a workout*? ⚠️ By measurement *Pause* / *Stop* are the lowest ride controls on this screen, not the workout — they are what a short WebView loses first. Then **record the WebView's size** — see below. Then start a saved workout, ride 60 s, end it | Did the trainer's resistance change when the workout started? ⚠️ **Did it release when the workout ended?** — this is #372, and Part R2 is how to tell. Capture `adb logcat` filtered for `BluetoothLe`: there must be **`0x05`** Set Target Power writes this time |
 
 ⚠️ **Q6's number, and why one line of output matters.** The browser gate measures the Ride screen at
 1280×800 — the tablet's *display* — and, since #436's review, at **1280×720, which is a guess** at
@@ -1551,7 +1577,14 @@ adb shell dumpsys gfxinfo dev.openzigs.onyourleft | grep -iE "Total frames|Janky
 
 **The WebView, landscape — `innerWidth` × `innerHeight`, pixel ratio, and where the first ride control ends (Q6):** ______________
 
-**⚠️ Workout visible, started, and RELEASED on the Ride screen (Q6)? `0x04` writes seen?** ______________
+**⚠️ Workout visible, started, and RELEASED on the Ride screen (Q6)? `0x05` writes seen?** ______________
+
+⚠️ **Q6 and the line above used to say `0x04`, and a reviewer who remembers `0x04` is reading the old
+file.** Set Target Power is **`0x05`** — `packages/sensors/protocol/src/fitness-machine-control.ts`
+§`FTMS_OP_CODE`; `0x04` is Set Target *Resistance Level*, which nothing in this client sends. A tester
+looking for `0x04` would see none, conclude that no ERG target was sent, and be wrong: the
+false-negative shape #372 exists because of, arriving through a procedure. See the correction on
+[#422](https://github.com/openzigs/onyourleft/issues/422).
 
 **Rider prominent; speed reads as speed (Q7)?** ______________
 
@@ -1569,6 +1602,73 @@ of the first 25 m of roadside in shot with the camera this close; narrow it and 
 which is the gate doing its job. The honest options are a camera further back — which makes the
 rider smaller, by the law in that file's header — or accepting a lower near-field share, which is a
 decision to record rather than a constant to nudge.
+
+---
+
+## Part R — does ending ERG let the trainer go? ([#372](https://github.com/openzigs/onyourleft/issues/372)) ⚠️ run after L, before D
+
+**What was measured on 2026-09-21, and is the reason this part exists:** on the owner's trainer
+(`EB:71:8D:AA:0E:3C`), `0x05` Set Target Power 200 W was acknowledged, then *End ERG* sent `0x08`
+Stop, acknowledged `80 08 01`, while the rider kept pedalling. For 36 s the trainer held 195–201 W at
+66–69 rpm; then as cadence **fell** 55 → 54 → 52 → 50 → 46 rpm, power **rose** 99 → 131 → 148 → 171
+→ 175 W. Power rising while cadence falls cannot come from a passive brake in a fixed gear: it was an
+ERG loop still chasing 200 W after an acknowledged Stop. The same trainer kept a grade through a Stop
+on 2026-09-19 (Part L). **On this machine Stop releases nothing, of either kind.**
+
+Since #372 every release — *End ERG*, the end of a workout, *End ride* on either screen, navigating
+away from a game ride — sends **`0x01` Reset** instead, which FTMS §4.16.2.1 defines as returning the
+machine to its defaults and which revokes this client's control. **No test in the repository can
+prove a real trainer lets go on it**: every test asserts what is *sent*, and the #44 simulator clears
+its targets on a Reset because it was written to. These steps are the proof, and until they are
+filled in #372 is not fixed.
+
+### ⚠️ Read this before starting
+
+- **The method is the pedal-through test** — L5 says at length why turning the cranks by hand is not
+  evidence. Set a target, ride steadily, release **while still pedalling**, keep the gear, then let
+  cadence fall. **Released: power falls with cadence. Still in ERG: power holds or rises.**
+- Flat pedals, low gear, seated, and the trainer's power switch within reach — Safety item 4. The
+  release is the thing under test and it may not happen.
+- **Read power from the trainer**, on the Ride screen's power reading or in logcat's Indoor Bike Data
+  — not from a separate power meter, which reports what the rider does rather than what the brake
+  does.
+- After each release the Trainer panel should read *Ask the trainer for control* and **not** *Control
+  lost*: ending ERG gives control up by design. Take control again before the next step.
+- If a panel reads **Not released**, the trainer refused the Reset and the client sent a flat road and
+  a Stop instead. Write down exactly what logcat shows after the `0x01`, and treat the trainer as
+  **still holding** until the pedal-through says otherwise.
+
+```bash
+adb logcat -c
+adb logcat | grep -i "BluetoothLe"
+```
+
+| Step | What to do | What should happen |
+|---|---|---|
+| R1 | Ride screen, control taken. Set an ERG target of **200 W** and ride 60 s at a steady cadence. **While still pedalling**, press ***End ERG***. Keep the gear for ten seconds, then let cadence fall — 80, 70, 60, 50 rpm | Power **falls** with cadence. In logcat: one **`0x01`** answered `80 01 01`, and **no `0x08`** after the `0x05`. The panel reads *Ask the trainer for control* |
+| R2 | Take control again. Start a **saved workout** with a long steady block (≥ 150 W). Ride 60 s. **While still pedalling**, end the workout (*End workout*). Then the same cadence ramp | Power **falls** with cadence. `0x05` writes during the workout, then one `0x01`, no `0x08` after the last `0x05`. The workout **ends** — it is not shown paused, and there is no *Control lost* |
+| R3 | Take control again. Start the same workout, ride 60 s, and **while still pedalling** press *Stop* twice to end the **recording** | The same as R2. The workout's release and the ride's are one release, so there is **exactly one** `0x01` |
+| R4 | Take control again. Start a workout whose **last block is a free ride**, and ride it to the end | During the free ride there is a `0x08` — that is a pause inside the workout, and on this trainer it may not ease the target (see below). At the end of the workout there is one `0x01`, and the pedal-through after it shows power falling with cadence |
+
+⚠️ **R4's `0x08` is a known gap, not this part's finding to fix.** A free-ride block, a paused ride and
+the ERG spiral-of-death easing all still send Stop, because the workout writes again afterwards and a
+Reset would give up the control it writes through. On a trainer that keeps its ERG target through a
+Stop, those do not ease the target either. It is recorded as its own issue; what R4 checks is that
+the **end** of such a workout is a Reset regardless — the case the old code skipped, because a Stop
+had already been sent.
+
+### R results
+
+| Step | Power as cadence fell (rpm → W) | `0x01` answered? | `0x08` after the last target? | Panel afterwards |
+|---|---|---|---|---|
+| R1 | | | | |
+| R2 | | | | |
+| R3 | | how many? | | |
+| R4 | | | | |
+
+**Did the trainer let go, in your own words?** ______________
+
+**Trainer (make, model, firmware, address):** ______________  **Build:** ______________
 
 ---
 

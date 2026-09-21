@@ -202,8 +202,9 @@ export interface GameViewProps {
    * *Pause* is beside it for everything short of leaving. The platform's own
    * Back — the browser's button, Android's gesture — still works and is an
    * unmount, which {@link teardown} already treats exactly as *End ride*: the
-   * trainer is sent an FTMS Stop, the screen lock is released and the GL
-   * context is destroyed.
+   * trainer is released (an FTMS Reset since #372 — it said "Stop" here, and
+   * a Stop did not release real hardware), the screen lock is released and
+   * the GL context is destroyed.
    *
    * ⚠️ **None of this touches a recording or a workout.** `RideSession` is
    * mounted in `AppShell` *above* the router for exactly this reason, and the
@@ -370,10 +371,11 @@ export function GameView(props: GameViewProps): JSX.Element {
     // ⚠️ **First**, and before anything else can throw. #362's second half is
     // that a ride which ends on a 9 % wall must not leave the flywheel loaded
     // against whoever gets on the trainer next — `gradient.ts` §`stop` records
-    // why that is an FTMS Stop rather than a gradient of zero. `stop` is
+    // why that is an FTMS Reset (#372) rather than a Stop, which this comment
+    // used to name and which real hardware showed releases nothing. `stop` is
     // idempotent because this callback runs from the "End ride" button *and*
     // from the effect's cleanup, and a rider who navigates away has ended the
-    // ride just as surely as one who pressed the button.
+    // ride just as surely as one who pressed the button — validation 0002 L7.
     gradientRef.current?.stop();
     gradientRef.current = undefined;
     void lockRef.current.release();
@@ -686,6 +688,7 @@ export function GameView(props: GameViewProps): JSX.Element {
         // on the screen they have not left yet. A snapshot read, so it costs a
         // property access per render and never opens a connection.
         trainerNotice={trainerRoadNotice(props.trainer?.readTrainer() ?? NO_GAME_TRAINER)}
+        releaseNotice={props.trainer?.readTrainer().releaseFault}
         withGhost={withGhost}
         onGhost={setWithGhost}
         withPacer={withPacer}
@@ -871,6 +874,11 @@ function RoutePicker(props: {
    * anything — #362. `undefined` for a ready trainer and for no trainer at all.
    */
   readonly trainerNotice: string | undefined;
+  /**
+   * The last release the trainer did not confirm — #372. `undefined` almost
+   * always. @see GameTrainer.releaseFault
+   */
+  readonly releaseNotice: string | undefined;
   /** Where the rider's hands are — #365. @see RIDING_POSITIONS */
   readonly position: RidingPosition;
   readonly onPosition: (value: RidingPosition) => void;
@@ -929,6 +937,13 @@ function RoutePicker(props: {
   return (
     <div className="oyl-game__picker">
       <h2>Choose a route</h2>
+      {props.releaseNotice === undefined ? undefined : (
+        // #372: first, because it is about the machine under the rider now
+        // rather than the road they are about to choose.
+        <StatusMessage tone="danger" label="Not released" live>
+          {props.releaseNotice}
+        </StatusMessage>
+      )}
       {props.trainerNotice === undefined ? undefined : (
         // ⚠️ **Before the ride rather than only during it**, because one of the
         // four sentences is *"take control on the Ride screen before you

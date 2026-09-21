@@ -83,6 +83,7 @@ export function idleSnapshot(): RideSnapshot {
       requested: undefined,
       lost: undefined,
       refusal: undefined,
+      releaseFault: undefined,
     },
     storage: 'ok',
     pairingError: undefined,
@@ -135,6 +136,7 @@ export function ridingSnapshot(): RideSnapshot {
       requested: undefined,
       lost: undefined,
       refusal: undefined,
+      releaseFault: undefined,
     },
   };
 }

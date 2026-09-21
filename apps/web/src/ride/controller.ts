@@ -28,6 +28,13 @@
  * 2. **Control that has been lost is said out loud.** `onControlLost` sets
  *    {@link TrainerSnapshot.lost}, and every path that could quietly clear it
  *    goes through `requestTrainerControl`, which is a thing the rider does.
+ *    ⚠️ Since #372 control is also given up **on purpose**: every release —
+ *    the end of a ride, of a workout, of manual ERG, of a game ride — is an
+ *    FTMS Reset through {@link releaseTrainer}, and a Reset revokes control.
+ *    That is not a loss and is not reported as one (no warning, and a workout
+ *    ends rather than pausing); nor does anything take control back
+ *    afterwards. The screen returns to *Ask the trainer for control*, which is
+ *    still the rider's to press.
  * 3. **A silent channel reads as unavailable, never as its last number.** The
  *    controller keeps the last reading only to compute *how long ago* it was;
  *    `metrics.ts` is what decides what the screen may say, and it has no
@@ -74,6 +81,7 @@ import type {
   TargetPower,
   TrainerControl,
   TrainerControlChoice,
+  TrainerRelease,
 } from '@onyourleft/sensors/protocol';
 import type { ActivityId, AthleteId, RecordingSessionId, WorkoutRecord } from '@onyourleft/store';
 
@@ -96,7 +104,7 @@ import {
   type RideMetricId,
 } from './metrics';
 import { NO_TRAINER_CONTROL, type OpenTrainer, type TrainerConnection } from './trainer';
-import { createWorkoutSession, type WorkoutSession } from '../workout/session';
+import { createWorkoutSession, RELEASE_INCOMPLETE, type WorkoutSession } from '../workout/session';
 import { blockText } from '../workouts/library';
 
 /** Which channel each metric on the screen reads from. */
@@ -204,6 +212,17 @@ export interface TrainerSnapshot {
   readonly requested: Watts | undefined;
   /** Set when control was lost, and cleared only by asking for it again. */
   readonly lost: ControlLossReason | undefined;
+  /**
+   * Set when the last release could not be confirmed — the trainer refused the
+   * Reset, or refused everything (#372). Words a rider can act on: the trainer
+   * may still be holding resistance.
+   *
+   * ⚠️ A separate field from {@link refusal} because it is a different claim
+   * about a different moment: a refusal is about a setpoint the rider asked
+   * for, this is about a machine they may be about to step off. Cleared by the
+   * next confirmed release and by taking control again.
+   */
+  readonly releaseFault: string | undefined;
   /** Why the last setpoint was refused, for a screen that says more than "failed". */
   readonly refusal: string | undefined;
 }
@@ -396,10 +415,19 @@ export interface RideController {
   endWorkout(): void;
   requestTrainerControl(): Promise<void>;
   setTargetPower(target: Watts): Promise<void>;
-  /** End ERG. The deliberate way to stop the trainer holding a target. */
+  /**
+   * End ERG — release the trainer (#372): an FTMS Reset, which clears the
+   * target and gives control up, so the panel returns to *Ask the trainer for
+   * control*. The ride carries on.
+   */
   clearTargetPower(): Promise<void>;
   /**
    * The paired trainer, narrowed to the two commands the game may give it (#362).
+   *
+   * ⚠️ **Its `release` is this controller's, not the protocol client's** (#372).
+   * It goes through the one release every other path uses, so a game ride that
+   * ends is joined with any release already in flight, and an incomplete one is
+   * reported on {@link TrainerSnapshot.releaseFault} like every other.
    *
    * ⚠️ **`undefined` says only "there is no controllable trainer".** It says
    * nothing about whether the machine offers simulation mode or has granted
@@ -410,9 +438,9 @@ export interface RideController {
    * no Bluetooth adapter.
    *
    * ⚠️ **Narrowed rather than returning `TrainerControl`**, for the reason
-   * `workout/session.ts` narrows `WorkoutTrainer`: `reset()` revokes this
-   * client's control and `requestControl()` is a thing the rider does, and a
-   * method that is not on the returned type cannot be called by a later edit.
+   * `workout/session.ts` narrows `WorkoutTrainer`: `requestControl()` is a
+   * thing the rider does, and a method that is not on the returned type cannot
+   * be called by a later edit.
    *
    * ⚠️ **`undefined` while a workout is in progress, however controllable the
    * trainer is.** There is exactly one control point on the machine and a
@@ -420,12 +448,13 @@ export interface RideController {
    * (`shell/AppShell.tsx`), so `workoutTick` keeps driving ERG targets while
    * the rider is on the game screen, and handing the game a control here made
    * two writers of one characteristic at about 1 Hz each. Worse than
-   * interleaved setpoints, the game's own release is an FTMS **Stop** — after
+   * interleaved setpoints, the game's own release was an FTMS **Stop** — after
    * which, per `packages/sensors/protocol`'s
    * `fitness-machine-control.ts`, the machine ignores setpoints until it is
    * started again — so ending a game ride silently stopped the workout's
    * trainer while the workout's clock ran on and every target reported
-   * success. That is the same silent failure {@link RideController.startWorkout}
+   * success. Since #372 that release is a Reset, which revokes control
+   * outright, so the refusal matters more rather than less. That is the same silent failure {@link RideController.startWorkout}
    * refuses to start into; this is the other end of it, and CLAUDE.md §6 puts
    * trainer control in the safety class.
    *
@@ -433,7 +462,7 @@ export interface RideController {
    * {@link RideSnapshot.workout} is what `game/trainer-port.ts`
    * §`gameTrainerFrom` reads to say which of its states this is.
    */
-  simulationControl(): Pick<TrainerControl, 'setSimulationParameters' | 'stop'> | undefined;
+  simulationControl(): Pick<TrainerControl, 'setSimulationParameters' | 'release'> | undefined;
 
   /** Advance the clock: staleness, auto-pause and the checkpoint schedule. */
   tick(now: UnixSeconds): Promise<void>;
@@ -481,6 +510,9 @@ export function createRideController(options: RideControllerOptions): RideContro
   let controlLost: ControlLossReason | undefined;
   let workout: WorkoutInProgress | undefined;
   let refusal: string | undefined;
+  let releaseFault: string | undefined;
+  /** The release on the wire, if one is. @see releaseTrainer */
+  let releasing: Promise<TrainerRelease> | undefined;
   let clock: UnixSeconds = now();
   let snapshot: RideSnapshot | undefined;
   let disposed = false;
@@ -511,6 +543,52 @@ export function createRideController(options: RideControllerOptions): RideContro
     [...sensors.values()].find((entry) => entry.role === 'trainer');
 
   const control = (): TrainerControl | undefined => trainerEntry()?.trainer?.control;
+
+  /**
+   * Let the trainer go — **the one release in the client** (#372).
+   *
+   * Every path that ends a ride, a workout, manual ERG or a game ride reaches
+   * the trainer through this, and it sends `TrainerControl.release()`: an FTMS
+   * Reset, with a flat-road-and-Stop fallback when the machine refuses one.
+   * Four callers and one decision, because the defect #372 found was one
+   * decision (a Stop) copied into three places, each correct by its own tests.
+   *
+   * ⚠️ **Joined, not repeated.** Ending a ride ends its workout first and then
+   * releases the trainer, and both reach here within the same microtask; a
+   * second Reset queued behind the first would find control already given up
+   * and report *"not granted control"* as a fault on a release that worked.
+   *
+   * ⚠️ **An intended release is told apart from a loss HERE, by the call, not
+   * by a reason string.** `release()` does not raise `onControlLost`, so the
+   * listener in `wire` — which shows "Control lost" and pauses a workout — is
+   * never reached from a path that meant to let go. Nothing re-requests
+   * control after this either: rule 2 at the top of the file.
+   */
+  const releaseTrainer = (client: TrainerControl): Promise<TrainerRelease> => {
+    if (releasing !== undefined) {
+      return releasing;
+    }
+    const attempt = client.release().then(
+      (outcome) => {
+        releaseFault = outcome.kind === 'reset' ? undefined : RELEASE_INCOMPLETE;
+        // A setpoint the rider asked for can no longer be answered.
+        requested = undefined;
+        return outcome;
+      },
+      (error: unknown) => {
+        releaseFault = `${RELEASE_INCOMPLETE} (${describe(error)})`;
+        throw error;
+      },
+    );
+    releasing = attempt;
+    void attempt
+      .finally(() => {
+        releasing = undefined;
+        changed();
+      })
+      .catch(() => undefined);
+    return attempt;
+  };
 
   /** Whether any **connected** sensor supplies this channel. */
   const isPaired = (capability: MeasurementCapability): boolean =>
@@ -567,6 +645,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         requested,
         lost: controlLost,
         refusal,
+        releaseFault,
       },
       storage: recorder?.storageState ?? 'ok',
       saveState,
@@ -921,11 +1000,21 @@ export function createRideController(options: RideControllerOptions): RideContro
     workout.session.tick(rideSeconds(at));
   };
 
-  const endWorkoutSession = (): void => {
+  /**
+   * End the workout. Its session releases the trainer on the way out — an FTMS
+   * Reset, through {@link releaseTrainer} — unless another workout is taking
+   * the trainer over, in which case it is `supersede`d: a Reset there would
+   * revoke the control the replacement is about to write through.
+   */
+  const endWorkoutSession = (handover: 'release' | 'replace' = 'release'): void => {
     if (workout === undefined) {
       return;
     }
-    workout.session.stop();
+    if (handover === 'replace') {
+      workout.session.supersede();
+    } else {
+      workout.session.stop();
+    }
     workout = undefined;
   };
 
@@ -1158,11 +1247,17 @@ export function createRideController(options: RideControllerOptions): RideContro
       if (client === undefined || !client.hasControl()) {
         return false;
       }
-      endWorkoutSession();
+      endWorkoutSession('replace');
       const session = createWorkoutSession({
         timeline: expandWorkout(record.workout),
         thresholdPower,
-        control: client,
+        // ⚠️ `release` is this controller's, so the end of the workout is the
+        // same release as every other and is joined with the ride's own.
+        control: {
+          setTargetPower: (target) => client.setTargetPower(target),
+          stop: () => client.stop(),
+          release: () => releaseTrainer(client),
+        },
         onChange: changed,
       });
       workout = { record, session };
@@ -1191,6 +1286,9 @@ export function createRideController(options: RideControllerOptions): RideContro
       try {
         await client.requestControl();
         controlLost = undefined;
+        // Control is the rider's again; a notice about the last release would
+        // now be describing a machine this client is driving.
+        releaseFault = undefined;
       } catch (error) {
         refusal = describe(error);
       }
@@ -1218,7 +1316,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       }
     },
 
-    simulationControl(): Pick<TrainerControl, 'setSimulationParameters' | 'stop'> | undefined {
+    simulationControl(): Pick<TrainerControl, 'setSimulationParameters' | 'release'> | undefined {
       // ⚠️ The workout owns the control point while it exists — see the
       // declaration for what two writers on one characteristic did. Checked
       // here rather than only in `gameTrainerFrom` because this is the method
@@ -1227,19 +1325,18 @@ export function createRideController(options: RideControllerOptions): RideContro
       if (workout !== undefined) {
         return undefined;
       }
-      return control();
+      const client = control();
+      if (client === undefined) {
+        return undefined;
+      }
+      return {
+        setSimulationParameters: (parameters) => client.setSimulationParameters(parameters),
+        release: () => releaseTrainer(client),
+      };
     },
 
     async clearTargetPower(): Promise<void> {
-      const client = control();
-      if (client === undefined) {
-        return;
-      }
-      try {
-        await client.stop();
-      } catch (error) {
-        refusal = describe(error);
-      }
+      await stopTrainer();
       changed();
     },
 
@@ -1290,23 +1387,29 @@ export function createRideController(options: RideControllerOptions): RideContro
   };
 
   /**
-   * Take the trainer out of ERG, best effort.
+   * Let the trainer go, best effort — an FTMS Reset through
+   * {@link releaseTrainer} (#372). ⚠️ It used to send a Stop, and on the
+   * trainer #372 was measured on a Stop left the ERG target applied.
    *
    * Failures are swallowed on purpose: this runs while the ride is being
-   * stopped, and a rejection here must not leave the recording unstopped. The
-   * machine is left holding its last target, which is what a trainer does when
-   * a client simply goes away — and the screen no longer claims otherwise,
-   * because the phase is `stopped`.
+   * stopped, and a rejection here must not leave the recording unstopped.
+   * {@link TrainerSnapshot.releaseFault} says what the rider needs to know —
+   * that the machine may still be holding resistance.
+   *
+   * ⚠️ Joins a release already on the wire — the workout's, when a ride with a
+   * workout in it stops — rather than skipping because control looks gone or
+   * sending a second one. `hasControl()` is still `true` while that Reset is
+   * outstanding.
    */
   async function stopTrainer(): Promise<void> {
     const client = control();
-    if (client === undefined || !client.hasControl()) {
+    if (client === undefined || (releasing === undefined && !client.hasControl())) {
       return;
     }
     try {
-      await client.stop();
-    } catch (error) {
-      refusal = describe(error);
+      await releaseTrainer(client);
+    } catch {
+      // Recorded on `releaseFault` by `releaseTrainer`.
     }
   }
 
