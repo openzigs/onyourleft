@@ -397,6 +397,79 @@ describe('a loop', () => {
   });
 });
 
+describe('the start of a loop — #440', () => {
+  /**
+   * A 400 m square ridden from the middle of its south side, whose recorded
+   * end is 10 m short of the start and 12 m across the road from it — inside
+   * `LOOP_CLOSURE_METRES`, and the untidy closure a recorded GPX loop has.
+   */
+  function untidyLoopPoints(): RoutePoint[] {
+    const perLongitude = 111_320 * Math.cos((51.5 * Math.PI) / 180);
+    const path: Array<readonly [number, number]> = [];
+    for (let s = 0; s <= 200; s += 10) path.push([s, 0]);
+    for (let s = 10; s <= 400; s += 10) path.push([200, s]);
+    for (let s = 190; s >= -200; s -= 10) path.push([s, 400]);
+    for (let s = 390; s >= 12; s -= 10) path.push([-200, s]);
+    for (let s = -190; s <= -10; s += 10) path.push([s, 12]);
+    return path.map(([east, north]) => ({
+      position: geographicPosition(
+        degreesLatitude(51.5 + north / 111_320),
+        degreesLongitude(-0.12 + east / perLongitude),
+      ),
+      elevation: altitudeMetres(10 + east * 0.01 + north * 0.02),
+    }));
+  }
+
+  /** The longest step between consecutive centreline points, in 3D metres. */
+  function longestStep(corridor: RoadCorridor): number {
+    let longest = 0;
+    for (let index = 1; index < corridor.centre.length; index += 1) {
+      const a = corridor.centre[index - 1];
+      const b = corridor.centre[index];
+      if (a === undefined || b === undefined) continue;
+      longest = Math.max(longest, Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z));
+    }
+    return longest;
+  }
+
+  it('draws the road through the start with no step longer than the grid', () => {
+    // The corridor reaches 60 m behind the rider, so at distance 0 it runs
+    // through the wrap. Every step is one grid step of road, and the wrap is
+    // not special.
+    const profile = routeProfile(untidyLoopPoints(), { loop: true });
+    const corridor = roadCorridor(profile, corridorOrigin(profile), 0);
+    expect(longestStep(corridor)).toBeLessThanOrEqual(profile.resolution * 1.05);
+  });
+
+  it('the control — the same loop as a pre-#440 build stored it steps across the gap', () => {
+    // ⚠️ Without this, "no step longer than the grid" is equally true of a
+    // corridor that never reached the wrap. This is the profile a route saved
+    // before #440 still carries: the line, marked as a loop after the fact.
+    const stored: RouteProfile = { ...routeProfile(untidyLoopPoints()), loop: true };
+    const corridor = roadCorridor(stored, corridorOrigin(stored), 0);
+    expect(longestStep(corridor)).toBeGreaterThan(stored.resolution * 1.5);
+  });
+
+  it('puts NOTHING behind the start of a point-to-point route', () => {
+    // #440's other half: behind the start of a route that is not a loop there
+    // is no road, deliberately. The corridor clamps every point behind 0 onto
+    // the start, and those quads must have no area — a wedge of road there
+    // would be the ribbon turning from a default cross-section to the real one.
+    const line = routeProfile(untidyLoopPoints().slice(0, 30));
+    const corridor = roadCorridor(line, corridorOrigin(line), 0);
+    const behind = corridor.centre.filter((point) => point.along < 0).length;
+    expect(behind).toBeGreaterThan(2);
+    const start = corridor.centre.findIndex((point) => point.along >= 0) - 1;
+    for (let row = 0; row < start; row += 1) {
+      for (let column = 0; column < ROAD_COLUMNS; column += 1) {
+        expect(surfaceVertex(corridor, row, column)).toEqual(
+          surfaceVertex(corridor, start, column),
+        );
+      }
+    }
+  });
+});
+
 describe('the centre line is periodic in route distance — #242', () => {
   /**
    * ⚠️ **The defect this catches is a dash indexed by vertex.** It passes a

@@ -1585,6 +1585,7 @@ The two numbers must be **equal**. On 2026-09-21, before #439, they were `800 86
 | Q9 | A pacer **and** a ghost, at roughly 10 m, 50 m and 200 m | #93's third criterion, re-asked: can all three still be told apart? At 10 m on a dead-straight road the pacer's wheels are behind the rider by design — is that a problem in practice? |
 | Q10 | Anywhere | ⚠️ Is the 70° lens comfortable? Does anything at the edge of the screen look stretched enough to notice? Would you ride an hour with it? |
 | Q11 | 12 s of riding at the target rung, tablet in landscape | the rows below. ⚠️ A lower camera draws more near scenery at a larger size, and the canvas is now the whole screen: this is **fill rate**, which the draw-call counts in the browser gate cannot see |
+| Q12 | ⚠️ **Re-import the loop route first** — a route saved before [#440](https://github.com/openzigs/onyourleft/issues/440) keeps the gap in its stored profile. Then start a ride on it and look at the road at 0 % before pedalling; then do the same on a **point-to-point** route | On the loop: the road runs **straight on down the middle of the screen**, with no diagonal white line and no cut edge. Whatever the loop's own closing kink looks like behind the rider is real geometry. On the point-to-point route: **nothing** behind the start line — no wedge of road. If the loop is still broken after a re-import, record the loop's closing gap (the route screen's *not a loop* refusal names it if it is over 25 m) |
 
 ```bash
 adb shell dumpsys gfxinfo dev.openzigs.onyourleft reset
@@ -1621,6 +1622,8 @@ adb shell dumpsys gfxinfo dev.openzigs.onyourleft | grep -iE "Total frames|Janky
 **#439 — `innerHeight scrollHeight` with a game ride on the stage, landscape / upright (equal = fixed):** ______________ / ______________
 
 **#439 — the safe-area insets upright, `top right bottom left`:** ______________
+
+**#440 — the start of a re-imported loop, and of a point-to-point route (Q12):** ______________
 
 **⚠️ Workout visible, started, and RELEASED on the Ride screen (Q6)? `0x05` writes seen?** ______________
 
