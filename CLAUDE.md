@@ -1645,7 +1645,7 @@ percentage.
 
 | File | What it decides |
 |---|---|
-| `audit.ts` | fourteen structural rules over a rendered DOM — an unnamed control, a control not in the tab order, a broken heading order, a dangling ARIA reference, a positive `tabindex`, and so on. `tabbableElements` is the tab-order model the keyboard tests rest on |
+| `audit.ts` | fifteen structural rules over a rendered DOM (it said fourteen until #394; `landmarks-are-distinguishable` is the fifteenth — count `ACCESSIBILITY_RULES` rather than this cell) — an unnamed control, a control not in the tab order, a broken heading order, a dangling ARIA reference, a positive `tabindex`, and so on. `tabbableElements` is the tab-order model the keyboard tests rest on |
 | `audit.a11y.test.ts` | a violating fixture for **every** rule, plus an assertion that every rule in `ACCESSIBILITY_RULES` has one. A rule added without a failing fixture fails the build |
 | `routes.a11y.test.tsx` | renders every entry in `shell/routes.ts` and audits it. A route added to the table is audited without anyone editing this file |
 | `contrast.a11y.test.ts` | WCAG 2.2 AA contrast for every declared token pair, and that every token appears in a pair |

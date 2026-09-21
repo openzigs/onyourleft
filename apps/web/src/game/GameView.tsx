@@ -797,7 +797,10 @@ export function GameView(props: GameViewProps): JSX.Element {
             ? undefined
             : {
                 content: (
-                  <StatusMessage tone="warning" label="The road is not reaching your trainer">
+                  // #394: announced when it appears — it is absent until a
+                  // ride starts on a trainer the road cannot reach, which is
+                  // the case `live` exists for.
+                  <StatusMessage tone="warning" label="The road is not reaching your trainer" live>
                     {roadNotice}
                   </StatusMessage>
                 ),

@@ -19,13 +19,33 @@
  * The panel says so in a sentence instead of rendering a control that would
  * fail, which is `TrainerPanel.tsx`'s rule about disabled buttons applied here.
  *
+ * ## What is announced, and when — #394
+ *
+ * A workout fault and a library that could not be read are `live`: each is
+ * absent until something goes wrong, which is exactly the case
+ * `StatusMessage`'s `live` exists for, and a rider who cannot see the screen
+ * must hear that the targets have stopped.
+ *
+ * ⚠️ **The block being ridden is announced when it CHANGES, never when it is
+ * first rendered.** `Now: …` is on the screen for as long as a workout runs,
+ * so a `live` on it would read the block out the moment the panel mounted and
+ * then interrupt with it. So the visible line stays a plain `<p>`, and a
+ * separate region — visually hidden by clip, never `display: none`, because a
+ * hidden region announces nothing — is empty until the value differs from the
+ * one the panel was first drawn with ({@link useAnnouncedChange}).
+ *
+ * ⚠️ **Nothing here pre-empts by politeness.** Every region is `role="status"`;
+ * TalkBack treats all of them alike (assertive on one Android, polite on
+ * another — Roselli, 2026-01-14), so ordering is decided before a sentence is
+ * written, not by the role it is written into.
+ *
  * ## Colour carries nothing
  *
  * The status is a word and the block is a sentence, for `AnalysisView.tsx`'s
  * reason. A progress bar may sit beside them later; it may not replace them.
  */
 
-import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 
 import type { Watts } from '@onyourleft/domain';
 import type { WorkoutRecord } from '@onyourleft/store';
@@ -109,13 +129,16 @@ export function WorkoutPanel({
           {durationText(workout.totalSeconds)}
         </p>
         {workout.nowRiding === undefined ? null : <p>Now: {workout.nowRiding}</p>}
+        <WorkoutAnnouncer nowRiding={workout.nowRiding} />
         <p>
           {workout.holdingWatts === undefined
             ? 'The trainer has not confirmed a target yet.'
             : `Holding ${String(workout.holdingWatts)} W.`}
         </p>
         {workout.fault === undefined ? null : (
-          <StatusMessage tone="warning">{workout.fault}</StatusMessage>
+          <StatusMessage tone="warning" live>
+            {workout.fault}
+          </StatusMessage>
         )}
         <Button type="button" onClick={onEnd}>
           End workout
@@ -127,7 +150,11 @@ export function WorkoutPanel({
   return (
     <section>
       <h3>Ride a workout</h3>
-      {loadFault === undefined ? null : <StatusMessage tone="warning">{loadFault}</StatusMessage>}
+      {loadFault === undefined ? null : (
+        <StatusMessage tone="warning" live>
+          {loadFault}
+        </StatusMessage>
+      )}
       {!trainer.hasControl ? (
         <p>
           Ask the trainer for control first. A workout sets targets on the trainer, and it will
@@ -166,4 +193,43 @@ export function WorkoutPanel({
       )}
     </section>
   );
+}
+
+/**
+ * The workout's one announcement region — #394.
+ *
+ * Empty until the block changes; then the new block, once. Visually hidden by
+ * the CLIP technique (`oyl-visually-hidden`), which keeps it in the
+ * accessibility tree — the three things that do not (`display: none`,
+ * `hidden`, `aria-hidden`) would make it silent.
+ */
+function WorkoutAnnouncer({ nowRiding }: { readonly nowRiding: string | undefined }): JSX.Element {
+  const said = useAnnouncedChange(nowRiding);
+  return (
+    <p className="oyl-visually-hidden" role="status" data-oyl-announcer="workout">
+      {said === undefined ? '' : `Now: ${said}`}
+    </p>
+  );
+}
+
+/**
+ * A value, but only once it has CHANGED from the one first rendered — #394.
+ *
+ * The first render remembers the value and says nothing. Each later render
+ * whose value differs says the new one. `undefined` when there is nothing
+ * new, which the region renders as empty.
+ */
+function useAnnouncedChange(value: string | undefined): string | undefined {
+  const previous = useRef(value);
+  const [said, setSaid] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (value === previous.current) {
+      return;
+    }
+    previous.current = value;
+    if (value !== undefined) {
+      setSaid(value);
+    }
+  }, [value]);
+  return said;
 }
