@@ -126,7 +126,11 @@ describe('a reading speaks when it crosses its threshold, not before', () => {
       readings: [power('150')],
       acknowledgedTarget: 200,
     }));
-    const { said } = run(calls, { ...ON, powerEverySeconds: 'never' });
+    // The longest cadence, so the only sentence in these fifteen seconds is
+    // the off-target one. ⚠️ This used to pass `powerEverySeconds: 'never'`
+    // and expect the sentence anyway — pinning the very behaviour PR #444's
+    // review found: "never" on the power row did not silence power.
+    const { said } = run(calls, { ...ON, powerEverySeconds: 300 });
     expect(said).toEqual([
       undefined,
       undefined,
@@ -153,6 +157,10 @@ describe('never means never — for every announceable reading', () => {
         calls.push({
           now: second,
           remaining: { value: 100 - second / 10, unit: 'kilometres' },
+          // 200 W against an acknowledged 300 W, the whole time: power's
+          // SECOND trigger, which "never" has to silence as well as the
+          // cadence (PR #444's review).
+          acknowledgedTarget: 300,
         });
       }
       const other = { powerEverySeconds: 'never', distanceEvery: 'never' } as const;

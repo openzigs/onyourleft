@@ -29,6 +29,17 @@
  * | 5 | distance to go | a distance tick | attested |
  * | 6 | power | a time cadence | attested |
  *
+ * ⚠️ **Ranks 1, 2 and 4 have no production source yet, and the order above is
+ * therefore not what a rider hears today** (PR #444's review). The two callers
+ * are `GameView` — a gradient ride, so there is no ERG target to be off and no
+ * workout to fault, and it feeds power and distance only — and
+ * `ride/WorkoutPanel.tsx`, which feeds `interval-ahead` only. A lost trainer
+ * link and a workout fault ARE spoken, but by #394's own event regions, which
+ * this throttle does not see: a reading here can be said in the same second
+ * as one of those. Feeding them in means taking them out of #394's regions in
+ * the same change, or each is said twice — which is follow-up work, not
+ * something to half-do here.
+ *
  * **Not announceable in this cut**, each for #395's reason: cadence and heart
  * rate (inferred only — nothing attested asks for them), the pacer and ghost
  * gaps (inferred; and when they are added the word describes the PACER, #255),
@@ -181,12 +192,22 @@ export function announce(state: AnnouncerState, input: AnnounceInput): Announcem
   const readable = input.readings.filter((reading) => ANNOUNCEABLE_READINGS.includes(reading.key));
   const power = readable.find((reading) => reading.key === 'power');
 
-  // Power off an acknowledged target, held for a while.
+  // Power off an acknowledged target, held for a while. ⚠️ It is the POWER
+  // row's second trigger — #395's "a time cadence, or a threshold in ERG" — so
+  // the power row's "never" silences it too. Until PR #444's review it did not,
+  // and a rider who had switched power off still heard "Power 150 watts, under
+  // the 200 watt target"; a reviewer who remembers a test pinning that is
+  // reading the old file.
   let offTargetSince = state.offTargetSince;
   let offTargetSaid = state.offTargetSaid;
   const target = input.acknowledgedTarget;
   const watts = power === undefined || power.stale ? Number.NaN : Number(power.value);
-  if (target !== undefined && target > 0 && Number.isFinite(watts)) {
+  if (
+    preference.powerEverySeconds !== 'never' &&
+    target !== undefined &&
+    target > 0 &&
+    Number.isFinite(watts)
+  ) {
     if (Math.abs(watts - target) / target >= OFF_TARGET_SHARE) {
       offTargetSince ??= now;
       if (!offTargetSaid && now - offTargetSince >= OFF_TARGET_SECONDS) {
