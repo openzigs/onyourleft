@@ -477,6 +477,13 @@ declare global {
       /** How many pixels each rider covers, drawn alone. @see riderMeanColour */
       readonly riderSilhouettePixels: Readonly<Record<string, number>>;
       /**
+       * The rider's silhouette drawn where `alone` put it before #455 — at the
+       * camera pose's height, 0.4 m under the tarmac 8 m up a 5 % road. The
+       * CONTROL for {@link riderSilhouettePixels}: the placement fix is what
+       * made the probe see the whole bicycle, and this says by how much.
+       */
+      readonly riderBuriedPixels: number;
+      /**
        * Pixels the bot's own cranks move over half a development — #368.
        *
        * ⚠️ **From its odometer, not from a cadence it does not have.** The two
@@ -1103,6 +1110,7 @@ function colourProbes(probe: SceneFrame): {
   readonly buildingGreen: number;
   readonly buildingBlue: number;
   readonly riders: Readonly<Record<string, RiderProbe>>;
+  readonly riderBuriedPixels: number;
   readonly botCrankPixels: number;
   readonly contactShadowPixels: Readonly<Record<string, number>>;
   readonly contactShadowLuminance: Readonly<Record<string, readonly [number, number]>>;
@@ -1116,6 +1124,7 @@ function colourProbes(probe: SceneFrame): {
   let buildingGreen = 0;
   let buildingBlue = 0;
   let botCrankPixels = 0;
+  let riderBuriedPixels = 0;
   const riders: Record<string, RiderProbe> = {};
   let textures = 0;
   let baselineTextures = 0;
@@ -1170,6 +1179,16 @@ function colourProbes(probe: SceneFrame): {
     // ⚠️ **Each alone, at the same place, on the same frame**, so the only
     // thing that differs between the three is the tint. Drawing them together
     // would measure whichever happened to be in front.
+    //
+    // ⚠️ **At the road's own height 8 m up it — #455.** This used the camera
+    // pose's `y`, the road height at the RIDER, and the harness route climbs
+    // at 5 %: 8 m on, the tarmac is 0.4 m higher, so every rider this probe
+    // drew stood with its wheels and the lower half of its frame inside the
+    // road. #448 moved the shadow probe below onto the tarmac and left the
+    // colour probes measuring half-buried bicycles; this puts all of them on
+    // it. `game.browser.spec.ts` §"draws each of the three in its own colour"
+    // publishes the silhouette sizes, which grew when this landed.
+    const onTarmac = onTheRoad(probe, 8, 0);
     const alone = (kind: 'rider' | 'bot' | 'ghost', at: number): SceneFrame => ({
       ...probe,
       scatter: [],
@@ -1177,7 +1196,7 @@ function colourProbes(probe: SceneFrame): {
         {
           kind,
           x: pose.x + 8 * pose.headingX,
-          y: pose.y,
+          y: onTarmac.y,
           z: pose.z + 8 * pose.headingZ,
           headingX: pose.headingX,
           headingZ: pose.headingZ,
@@ -1190,6 +1209,10 @@ function colourProbes(probe: SceneFrame): {
       const found = meanOver(whole(), nothing);
       riders[kind] = { mean: found.mean, pixels: found.pixels };
     }
+    // The control for #455: the rider where `alone` used to stand it.
+    const buried = alone('rider', 0);
+    view.render({ ...buried, markers: buried.markers.map((each) => ({ ...each, y: pose.y })) });
+    riderBuriedPixels = meanOver(whole(), nothing).pixels;
     // Half a turn of the bot's own cranks, which is what half a development of
     // road does to them. A quarter, for the reason the rider's probe gives.
     view.render(alone('bot', 0));
@@ -1205,16 +1228,13 @@ function colourProbes(probe: SceneFrame): {
     // ⚠️ And inside the texture count on purpose: the soft edge is a vertex
     // ALPHA, and #366's "no texture reaches the GPU" is asserted over this.
     //
-    // ⚠️ **At the road's own height 8 m up it**, where `alone` above uses the
-    // camera pose's: the harness route climbs at 5 %, so `alone`'s rider stands
-    // 0.4 m under the tarmac — invisible to a colour mean, and fatal to a blob
-    // that is depth-tested against that tarmac. The first version of this probe
-    // read 0 px for all three for exactly that reason.
-    const onTarmac = onTheRoad(probe, 8, 0);
-    const grounded = (kind: 'rider' | 'bot' | 'ghost'): SceneFrame => {
-      const frame = alone(kind, 0);
-      return { ...frame, markers: frame.markers.map((each) => ({ ...each, y: onTarmac.y })) };
-    };
+    // ⚠️ **On the tarmac, as `alone` now is for every probe — #455.** Until
+    // then this was the only probe that put its rider there: `alone` used the
+    // camera pose's height and stood the riders 0.4 m under the road, which is
+    // invisible to a colour mean and fatal to a blob depth-tested against that
+    // road. The first version of this probe read 0 px for all three for
+    // exactly that reason.
+    const grounded = (kind: 'rider' | 'bot' | 'ghost'): SceneFrame => alone(kind, 0);
     for (const kind of ['rider', 'bot', 'ghost'] as const) {
       view.setQuality(NO_RIDER_SHADOWS);
       view.render(grounded(kind));
@@ -1239,6 +1259,7 @@ function colourProbes(probe: SceneFrame): {
     buildingGreen,
     buildingBlue,
     riders,
+    riderBuriedPixels,
     botCrankPixels,
     contactShadowPixels,
     contactShadowLuminance,
@@ -1911,6 +1932,7 @@ async function run(): Promise<void> {
       variantIndices: {},
       riderMeanColour: {},
       riderSilhouettePixels: {},
+      riderBuriedPixels: 0,
       botCrankPixels: 0,
       contactShadowPixels: {},
       contactShadowLuminance: {},
@@ -1982,6 +2004,7 @@ async function run(): Promise<void> {
   let variantIndices: Record<string, readonly number[]> = {};
   const riderMeanColour: Record<string, Pixel> = {};
   const riderSilhouettePixels: Record<string, number> = {};
+  let riderBuriedPixels = 0;
   let botCrankPixels = 0;
   let contactShadowPixels: Record<string, number> = {};
   let contactShadowLuminance: Record<string, readonly [number, number]> = {};
@@ -2473,6 +2496,7 @@ async function run(): Promise<void> {
         riderSilhouettePixels[kind] = each.pixels;
       }
       botCrankPixels = found.botCrankPixels;
+      riderBuriedPixels = found.riderBuriedPixels;
       contactShadowPixels = found.contactShadowPixels;
       contactShadowLuminance = found.contactShadowLuminance;
       contactShadowNoise = found.contactShadowNoise;
@@ -2550,6 +2574,7 @@ async function run(): Promise<void> {
     variantIndices,
     riderMeanColour,
     riderSilhouettePixels,
+    riderBuriedPixels,
     botCrankPixels,
     contactShadowPixels,
     contactShadowLuminance,

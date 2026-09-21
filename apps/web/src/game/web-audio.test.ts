@@ -81,6 +81,11 @@ function fakeContext(state: 'suspended' | 'running' = 'suspended') {
   };
 }
 
+/** Lets every promise the output chained on a platform call run to its end. */
+async function settled(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 describe('the Web Audio output', () => {
   it('makes no context before the first resume(), and does nothing without one', () => {
     let made = 0;
@@ -185,12 +190,51 @@ describe('letting the audio stop after a ride — #447', () => {
     expect(output.isRunning(), 'a context asked to sleep still reports running').toBe(false);
   });
 
-  it('does not suspend a context that is not running', () => {
+  it('does not suspend a context that is not running', async () => {
     const fake = fakeContext('suspended');
     const output = webAudioOutput(() => fake.context);
     output.resume();
+    // ⚠️ Once the resume has been ANSWERED — #455. Before that it is a resume
+    // in flight, which a suspend must follow; the case below is that one. The
+    // fake leaves `state` suspended, which is a platform that refused it.
+    await settled();
     output.suspend();
     expect(fake.suspended()).toBe(0);
+  });
+
+  it('honours a suspend asked for while a resume is still in flight — #455', async () => {
+    // ⚠️ The race #448's review found. `state` is still `suspended` until the
+    // platform has resumed, so a suspend in that window used to read
+    // "not running", do nothing — and the resume then landed and left the
+    // audio running after the ride had ended.
+    const fake = fakeContext('suspended');
+    let land: () => void = () => undefined;
+    const pending = new Promise<void>((resolve) => {
+      land = () => {
+        (fake.context as { state: string }).state = 'running';
+        resolve();
+      };
+    });
+    const context = fake.context as unknown as { resume: () => Promise<void> };
+    const resumeOnce = context.resume;
+    context.resume = () => {
+      void resumeOnce();
+      return pending;
+    };
+    const output = webAudioOutput(() => fake.context);
+    output.resume();
+    output.suspend();
+    expect(fake.suspended(), 'asked for, in the order the platform applies them').toBe(1);
+    expect(output.isRunning()).toBe(false);
+    land();
+    await settled();
+    // The platform now says running — the resume landed first, and the
+    // suspend asked after it is still ahead of it in the platform's queue.
+    expect(output.isRunning(), 'asleep, whatever the platform says in between').toBe(false);
+    // And the next press wakes it, exactly as after any other suspend.
+    output.resume();
+    expect(fake.resumed()).toBe(2);
+    expect(output.isRunning()).toBe(true);
   });
 
   it('resumes on the next press even while the platform still says running', () => {

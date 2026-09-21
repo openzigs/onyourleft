@@ -183,17 +183,112 @@ describe('the rendering seam', () => {
     // BEHAVIOUR (the belt never casts; the riders cast on the map rung only) is
     // `three-renderer.test.ts`'s, which this cannot see.
     const renderer = readFileSync(join(repositoryRoot, THE_SEAM), 'utf8');
-    expect(renderer.match(/\.castShadow\s*=/g) ?? []).toHaveLength(2);
-    expect(renderer.match(/\.receiveShadow\s*=/g) ?? []).toHaveLength(1);
-    expect(renderer.match(/shadowMap\.enabled\s*=/g) ?? []).toHaveLength(1);
+    expect(shadowState(renderer)).toEqual({
+      castShadow: { mentions: 2, assignments: 2 },
+      receiveShadow: { mentions: 1, assignments: 1 },
+      shadowMap: { mentions: 1, assignments: 1 },
+    });
 
     const elsewhere = files
       .filter((file) => file !== THE_SEAM && file !== THIS_FILE)
-      .filter((file) =>
-        /\.(?:castShadow|receiveShadow)\s*=|shadowMap\.enabled\s*=/.test(
-          readFileSync(join(repositoryRoot, file), 'utf8'),
-        ),
-      );
+      .filter((file) => writesShadowState(file, readFileSync(join(repositoryRoot, file), 'utf8')));
     expect(elsewhere).toEqual([]);
   });
+
+  it('would notice shadow state written any other way — #455', () => {
+    // ⚠️ **#448's review found the count above matched ASSIGNMENTS only**, so
+    // `Object.assign(mesh, { castShadow: true })` or `mesh['castShadow'] = true`
+    // was a third caster the test could not see. It now counts every MENTION of
+    // the three names in the file's code — comments stripped, strings kept —
+    // and requires each to be one of the assignments. So this states the
+    // property over copies of the file with a write in each spelling, the move
+    // `would notice a third lamp` makes for the lamps.
+    const renderer = readFileSync(join(repositoryRoot, THE_SEAM), 'utf8');
+    const clean = shadowState(renderer);
+    for (const spelling of [
+      'Object.assign(mesh, { castShadow: true });',
+      "mesh['castShadow'] = true;",
+      'const { receiveShadow } = mesh;',
+      "renderer['shadowMap'].enabled = true;",
+      'Object.assign(renderer.shadowMap, { enabled: true });',
+    ]) {
+      expect(shadowState(`${renderer}\n${spelling}\n`), spelling).not.toEqual(clean);
+    }
+    // ⚠️ And in any other file, where production code may not write it at all.
+    for (const spelling of [
+      'Object.assign(mesh, { castShadow: true });',
+      "mesh['receiveShadow'] = true;",
+      'renderer.shadowMap.enabled = true;',
+      "renderer['shadowMap'].enabled = true;",
+      'Object.assign(renderer.shadowMap, { enabled: true });',
+    ]) {
+      expect(writesShadowState('apps/web/src/game/scene.ts', spelling), spelling).toBe(true);
+    }
+    // A test READING the flag is not a write.
+    expect(writesShadowState('x.test.ts', 'expect(mesh.castShadow).toBe(true);')).toBe(false);
+  });
 });
+
+/**
+ * How often each piece of shadow state is MENTIONED in a file's code, and how
+ * often as a plain assignment — #455.
+ *
+ * ⚠️ **Mentions, not assignments, are what fail closed.** A mention that is
+ * not one of the counted assignments is a write in some other spelling —
+ * `Object.assign`, a computed key, a destructure feeding one — or a read, and
+ * either is a change to this file somebody should look at. Comments are
+ * stripped first so that prose may name the flags; strings are NOT, because a
+ * computed key is a string.
+ *
+ * ⚠️ **What it still cannot see, stated rather than hidden:** a name built at
+ * run time (`'cast' + 'Shadow'`), and a write made through a helper imported
+ * from another file — which `writesShadowState` below catches only when that
+ * file spells the name.
+ */
+function shadowState(text: string): Record<string, { mentions: number; assignments: number }> {
+  const code = withoutComments(text);
+  const count = (pattern: RegExp): number => code.match(pattern)?.length ?? 0;
+  return {
+    castShadow: {
+      mentions: count(/\bcastShadow\b/g),
+      assignments: count(/\.castShadow\s*=(?!=)/g),
+    },
+    receiveShadow: {
+      mentions: count(/\breceiveShadow\b/g),
+      assignments: count(/\.receiveShadow\s*=(?!=)/g),
+    },
+    shadowMap: {
+      mentions: count(/\bshadowMap\b/g),
+      assignments: count(/\.shadowMap\.enabled\s*=(?!=)/g),
+    },
+  };
+}
+
+/**
+ * Whether a file other than the seam writes shadow state in any spelling.
+ *
+ * ⚠️ A test file may READ the flags — `contact-shadow.test.ts` does, through a
+ * type literal whose `castShadow: boolean` is shaped exactly like an
+ * `Object.assign` payload — so the object-literal and computed-key spellings
+ * are held against production code only. The plain assignment is held against
+ * every file, as it was before #455.
+ */
+function writesShadowState(file: string, text: string): boolean {
+  const code = withoutComments(text);
+  if (/\.(?:castShadow|receiveShadow)\s*=(?!=)|\.shadowMap\.enabled\s*=(?!=)/.test(code)) {
+    return true;
+  }
+  if (/\.test\.tsx?$/.test(file)) {
+    return false;
+  }
+  // `['shadowMap']` only where `enabled` follows: `Window['__oylGameHarness']
+  // ['shadowMap']` is a TYPE in the browser harness, and names a measurement.
+  return /\b(?:castShadow|receiveShadow)\s*:|\[\s*['"`](?:castShadow|receiveShadow)['"`]\s*\]|\[\s*['"`]shadowMap['"`]\s*\]\s*(?:\.|\[\s*['"`])enabled\b|shadowMap\s*,\s*\{\s*enabled\b/.test(
+    code,
+  );
+}
+
+/** A file's text with its comments blanked. Naive about `//` inside a string, which only blanks more. */
+function withoutComments(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1');
+}

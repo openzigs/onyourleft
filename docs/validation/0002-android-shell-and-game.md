@@ -21,6 +21,17 @@ otherwise.
 **Part S added 2026-09-21** by [#441](https://github.com/openzigs/onyourleft/issues/441): whether a
 struggling rider in ERG is actually eased, now that the ease is a lower target rather than a Stop.
 Checked with `grep '^## Part'` for a duplicate letter first — S was free.
+**Parts U to Y added 2026-09-21** by one pull request for
+[#455](https://github.com/openzigs/onyourleft/issues/455),
+[#458](https://github.com/openzigs/onyourleft/issues/458),
+[#459](https://github.com/openzigs/onyourleft/issues/459),
+[#460](https://github.com/openzigs/onyourleft/issues/460) and the no-asset half of
+[#425](https://github.com/openzigs/onyourleft/issues/425) — one part each, in that order, every
+result cell empty. Checked with `grep '^## Part'` for a duplicate letter first — T was the last, and
+U to Y were free. ⚠️ **V to Y are looks and frame times, and they need a ride**: ride them with the
+trainer **not** handed to the game (a power meter, or a trainer with control not granted), so they
+change no resistance and stay in rule 1's group below. A rider who gives the game the trainer for
+them is running Part L as well, and runs them after it.
 **Discharges, when run:** [#87](https://github.com/openzigs/onyourleft/issues/87) criteria 2, 3, 5
 and 6 and its two-OEM line; the Android half of
 [#85](https://github.com/openzigs/onyourleft/issues/85); and
@@ -51,7 +62,9 @@ behaviour; this establishes that Android reproduces it.
 The same rule as 0001, for the same reason — CLAUDE.md §6: *a smart trainer applies physical
 resistance to a person who is pedalling*.
 
-1. **Parts A, B, C, E to K and P write nothing that changes resistance.** They run first. ⚠️ **`P`
+1. **Parts A, B, C, E to K, P and U to Y write nothing that changes resistance.** They run first.
+   ⚠️ **U to Y are in that list only when ridden without the trainer handed to the game** — see
+   the header. ⚠️ **`P`
    is in that list and this line used to stop at `K`** — Part P
    ([#410](https://github.com/openzigs/onyourleft/issues/410)) is an offline cold-start measurement
    that pairs no trainer at all, and a part missing from this list is as ambiguous as two parts
@@ -1868,6 +1881,37 @@ adb shell dumpsys gfxinfo dev.openzigs.onyourleft | grep -iE "Total frames|Janky
 **lands as a rung** (and on which devices it is offered), or it is recorded as **"measured, not
 worth it"** with the numbers above and the rung is removed. #426 stays open until one of the two is
 written down; it was opened with `Refs`, not `Closes`, for exactly this.
+
+---
+
+## Part U — the audio lets go even when a ride ends as it starts ([#455](https://github.com/openzigs/onyourleft/issues/455))
+
+#447 let the platform stop running the audio when a ride ends. #448's review found the one window it
+missed: a `suspend()` asked for while a `resume()` was still in flight did nothing, because the
+context still said *suspended* — and the resume then landed and left the audio running with nobody
+riding. `apps/web/src/game/web-audio.ts` §`waking` now honours the suspend in that window.
+⚠️ **Practically unreachable by hand**, which is why the fix is tested against the injected port and
+not argued from a device. What a phone can check is that the ordinary path still behaves, and that a
+fast end does not leave the audio held.
+
+Sounds **on** (Settings → Sounds). Headphones as in
+[validation 0003](0003-screen-reader-and-assistive-technology.md) Part I.
+
+| Step | What to do | What should happen |
+|---|---|---|
+| U1 | Start a game ride and press **End ride** as fast as you can after **Ride** | Nothing left sounding, and — the check — music started in another app straight afterwards is **not** ducked or interrupted |
+| U2 | Straight after U1, start another game ride | Its distance sound is heard at the first mark: the press on *Ride* woke the audio |
+| U3 | Repeat U1 five times in a row | The same every time. A single run where the music stays ducked is the finding |
+
+### U results
+
+| Step | As described? | What was heard | Headphones (wired / Bluetooth, model) |
+|---|---|---|---|
+| U1 | | | |
+| U2 | | | |
+| U3 | | | |
+
+**Phone (OEM, model, Android):** ______________  **Build:** ______________
 
 ---
 

@@ -107,6 +107,7 @@ interface GameHarnessResult {
   readonly variantIndices: Readonly<Record<string, readonly number[]>>;
   readonly riderMeanColour: Readonly<Record<string, Pixel>>;
   readonly riderSilhouettePixels: Readonly<Record<string, number>>;
+  readonly riderBuriedPixels: number;
   readonly botCrankPixels: number;
   readonly contactShadowPixels: Readonly<Record<string, number>>;
   readonly contactShadowLuminance: Readonly<Record<string, readonly [number, number]>>;
@@ -1452,7 +1453,11 @@ test.describe('the pacer and the ghost are bicycles — #368', () => {
       expect(pixels, `${kind} silhouette`).toBeGreaterThan(50);
     }
     const key = (pixel: Pixel | undefined) => (pixel ?? []).slice(0, 3).join(',');
-    const measured = `mean silhouette colour — rider ${key(rider)}, bot ${key(bot)}, ghost ${key(ghost)}`;
+    const measured = `mean silhouette colour — rider ${key(rider)}, bot ${key(bot)}, ghost ${key(ghost)}; silhouettes ${Object.entries(
+      result.riderSilhouettePixels,
+    )
+      .map(([kind, pixels]) => `${kind} ${String(pixels)} px`)
+      .join(', ')}, rider 0.4 m under the road ${String(result.riderBuriedPixels)} px`;
     // ⚠️ **Printed before the assertions rather than after them**, so a red run
     // reports the colours it actually read. Every other measurement in this
     // file logs on the way out, and every one of them is silent on the run
@@ -1461,6 +1466,17 @@ test.describe('the pacer and the ghost are bicycles — #368', () => {
     console.log(`telling the three apart — ${measured}`);
 
     expect(new Set([key(rider), key(bot), key(ghost)]).size).toBe(3);
+
+    // ⚠️ **#455: the probe stands the riders ON the road.** It used the camera
+    // pose's height, which on this 5 % route is 0.4 m under the tarmac 8 m on,
+    // so every mean below was taken over a bicycle whose wheels and lower frame
+    // were inside the road. The control is that placement, drawn in the same
+    // run: the rider on the tarmac shows clearly more of itself than the rider
+    // buried in it — which is what says the colours are the whole bicycle's.
+    expect(result.riderBuriedPixels).toBeGreaterThan(50);
+    expect(result.riderSilhouettePixels['rider'] ?? 0).toBeGreaterThan(
+      result.riderBuriedPixels * 1.1,
+    );
 
     // ⚠️ **Three of them being different is not the claim; each PAIR being
     // told apart is, and the two pairs are told apart by different

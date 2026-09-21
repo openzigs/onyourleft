@@ -85,6 +85,24 @@ export function webAudioOutput(create: (() => AudioContextLike) | undefined): Cu
    * in the order they were asked.
    */
   let asleep = false;
+  /**
+   * How many `resume()` calls the platform has not answered yet — #455.
+   *
+   * ⚠️ **The other half of the race {@link asleep} closes, and #448's review
+   * found it.** `state` stays `suspended` until a resume has LANDED, so a
+   * `suspend()` asked for in between — a ride ended in the same breath as the
+   * press that started it — read `suspended`, did nothing, and the resume then
+   * landed and left the audio running with nobody riding. So a suspend is also
+   * honoured while a resume is in flight. The platform applies the two in the
+   * order they were asked (Web Audio queues both as control messages), so
+   * asking for the suspend after the resume is enough: nothing here has to
+   * await anything, and a press is never delayed by a microtask it did not
+   * need.
+   *
+   * A count rather than a flag, because two presses can each put a resume in
+   * flight and the first to land must not clear the second.
+   */
+  let waking = 0;
 
   const setTone = (frequencyHz: number, level: number): void => {
     if (context === undefined || tone === undefined) return;
@@ -98,16 +116,24 @@ export function webAudioOutput(create: (() => AudioContextLike) | undefined): Cu
       context ??= create();
       if (context.state === 'suspended' || asleep) {
         asleep = false;
+        waking += 1;
         // Refused outside a gesture, or by the platform; either way there is
         // nothing a rider can be told that the next press will not fix.
-        context.resume().catch(() => undefined);
+        context
+          .resume()
+          .catch(() => undefined)
+          .finally(() => {
+            waking -= 1;
+          });
       }
     },
     isRunning() {
       return context?.state === 'running' && !asleep;
     },
     suspend() {
-      if (context === undefined || context.state !== 'running' || asleep) return;
+      // ⚠️ `waking > 0` is #455: a resume in flight has not moved `state` yet,
+      // and it WILL land — so `suspended` here is not a reason to do nothing.
+      if (context === undefined || asleep || (context.state !== 'running' && waking === 0)) return;
       asleep = true;
       // Refused by nothing a rider can act on; the next press resumes it anyway.
       context.suspend().catch(() => undefined);
