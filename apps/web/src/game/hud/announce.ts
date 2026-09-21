@@ -37,8 +37,8 @@
  * link and a workout fault ARE spoken, but by #394's own event regions, which
  * this throttle does not see: a reading here can be said in the same second
  * as one of those. Feeding them in means taking them out of #394's regions in
- * the same change, or each is said twice — which is follow-up work, not
- * something to half-do here.
+ * the same change, or each is said twice — which is #445, not something to
+ * half-do here.
  *
  * **Not announceable in this cut**, each for #395's reason: cadence and heart
  * rate (inferred only — nothing attested asks for them), the pacer and ghost
