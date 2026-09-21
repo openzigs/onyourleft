@@ -108,6 +108,10 @@ export default defineConfig({
         // invisible and a rider testing whether ERG releases (#372) started a
         // plain recording instead. `rideview-harness.tsx` says what it proves.
         rideview: 'browser/rideview.html',
+        // #440: the start of a loop, drawn by the real renderer at the real camera.
+        loop: 'browser/loop.html',
+        // #428: the home screen, laid out at a tablet's width and at 320 px.
+        home: 'browser/home.html',
         // Not a gate the way the other two are: `capture.html` is the tool a
         // person opens with a trainer in front of them (#111), and a headless
         // runner has no Bluetooth adapter. It is built and loaded here so that

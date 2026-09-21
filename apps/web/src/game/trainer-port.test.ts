@@ -26,7 +26,7 @@ import {
 function silentControl(): GradientTrainer {
   return {
     setSimulationParameters: vi.fn(async () => Promise.resolve()),
-    letGo: vi.fn(async () => Promise.resolve({ kind: 'reset' as const })),
+    letGo: vi.fn(async () => Promise.resolve({ kind: 'stopped' as const })),
   };
 }
 
@@ -40,8 +40,9 @@ const PAIRED_AND_READY = {
 describe('what the game may command — #372', () => {
   it('can release the trainer and cannot Reset, Stop or take control of it', () => {
     // ⚠️ `stop` was on `GradientTrainer` until #372 and `letGo` replaced it:
-    // a Stop did not release real hardware. The bare `reset` stays off, and so
-    // does `requestControl`, which is the rider's. Widen the type and TS2578
+    // both send a Stop, but `letGo` is the ride controller's ONE release. The
+    // bare `reset` stays off — it revokes control and, on the trainer
+    // measured, cleared nothing — and so does `requestControl`, the rider's. Widen the type and TS2578
     // fires on the directive that no longer has an error to expect.
     const control = silentControl();
     expect(control.letGo).toBeDefined();
@@ -64,7 +65,7 @@ describe('gameTrainerFrom', () => {
 
   it('carries an unconfirmed release to the picker, in whatever state it leaves the trainer — #372', () => {
     const fault = 'The trainer may still be holding resistance.';
-    // A refused Reset leaves control held, so the trainer is still `ready`…
+    // A refused Stop leaves control held, so the trainer is still `ready`…
     expect(
       gameTrainerFrom({ ...PAIRED_AND_READY, releaseFault: fault }, silentControl(), false)
         .releaseFault,

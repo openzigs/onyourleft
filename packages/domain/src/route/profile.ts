@@ -116,6 +116,19 @@ export const GRADIENT_WINDOW_METRES = 100;
  * whose ends are further apart than this rather than wrapping a rider from a
  * hilltop back to a valley floor. 25 m is one recording sample at 90 km/h and
  * comfortably inside the width of a road junction.
+ *
+ * ⚠️ **Within it, the gap is ridden — since #440.** A loop whose ends are
+ * 20 m apart used to be profiled up to its last point only, so
+ * {@link distanceOnRoute}'s wrap mapped the end straight onto the start: zero
+ * route distance across twenty metres of ground. Every consumer of a position
+ * crossed that gap in one step, and the game's road corridor drew it as a
+ * ribbon segment 22 m long cutting diagonally across the start — a cut road
+ * edge and a stray white edge line, the first thing a rider saw on every ride
+ * of a loop. {@link routeProfile} now closes a loop with its own first point,
+ * so the gap is part of the route's length and the last grid sample IS the
+ * first. A route saved before that keeps the gap in its stored profile until it
+ * is imported again: a stored profile is a computed artefact and nothing here
+ * rewrites one.
  */
 export const LOOP_CLOSURE_METRES = 25;
 
@@ -380,9 +393,10 @@ function accumulated(
  * because a route is a file a rider chose rather than a call a programmer made.
  */
 export function routeProfile(
-  points: readonly RoutePoint[],
+  given: readonly RoutePoint[],
   options: RouteProfileOptions = {},
 ): RouteProfile {
+  let points = given;
   const resolutionTarget = options.resolutionMetres ?? PROFILE_RESOLUTION_METRES;
   const despikeWindow = options.despikeWindowMetres ?? DESPIKE_WINDOW_METRES;
   const gradientWindow = options.gradientWindowMetres ?? GRADIENT_WINDOW_METRES;
@@ -406,22 +420,6 @@ export function routeProfile(
     );
   }
 
-  const cumulative: number[] = [0];
-  for (let index = 1; index < points.length; index += 1) {
-    const step = distanceBetween(
-      (points[index - 1] as RoutePoint).position,
-      (points[index] as RoutePoint).position,
-    );
-    cumulative.push((cumulative[index - 1] as number) + step);
-  }
-  const total = cumulative[cumulative.length - 1] as number;
-  if (total <= 0) {
-    throw new RouteError(
-      'no-distance',
-      'every point of this route is in the same place, so the route has no length',
-    );
-  }
-
   const loop = options.loop ?? false;
   if (loop) {
     const gap = distanceBetween(
@@ -437,6 +435,28 @@ export function routeProfile(
           `loop's ends must be within ${LOOP_CLOSURE_METRES} m of each other`,
       );
     }
+    if (gap > 0) {
+      // #440: close the loop with its own first point, so the closing gap is
+      // road with a length rather than a jump the wrap takes in zero metres.
+      // See LOOP_CLOSURE_METRES.
+      points = [...points, points[0] as RoutePoint];
+    }
+  }
+
+  const cumulative: number[] = [0];
+  for (let index = 1; index < points.length; index += 1) {
+    const step = distanceBetween(
+      (points[index - 1] as RoutePoint).position,
+      (points[index] as RoutePoint).position,
+    );
+    cumulative.push((cumulative[index - 1] as number) + step);
+  }
+  const total = cumulative[cumulative.length - 1] as number;
+  if (total <= 0) {
+    throw new RouteError(
+      'no-distance',
+      'every point of this route is in the same place, so the route has no length',
+    );
   }
 
   // The grid is stretched to land exactly on the end — see RouteProfile.resolution.
@@ -465,8 +485,19 @@ export function routeProfile(
     );
   }
 
+  // Heights are continuous across a closed loop's wrap without help: the last
+  // sample is the first point's own, and the median keeps an end's value
+  // because the window replicates it past the end (`clamped`) — measured by
+  // mutation, an explicit copy here changed nothing.
   const despiked = medianFilter(sampled, windowSamples(despikeWindow, resolution));
   const grades = slopes(despiked, windowSamples(gradientWindow, resolution), resolution);
+  if (loop) {
+    // #440: the gradient is NOT continuous without help — each end's slope is
+    // fitted over its own neighbourhood — and a step in the gradient at the
+    // wrap is a step in the resistance #90 writes to a trainer once a lap. The
+    // last sample of a closed loop is the first, so it takes the first's slope.
+    grades[grades.length - 1] = grades[0] as number;
+  }
 
   const { ascent, descent } = accumulated(despiked, ASCENT_THRESHOLD_METRES);
 

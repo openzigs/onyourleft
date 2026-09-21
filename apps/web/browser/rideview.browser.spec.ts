@@ -55,10 +55,17 @@
  * that bound was no longer the workout: it was `RideControls`, in the live
  * group `theme.css` §`.oyl-ride` had recorded as "taller than it was".
  *
- * ⚠️ **720 is an ASSUMPTION and the file says so.** Nobody has read
- * `window.innerHeight` off the owner's tablet; validation 0002 Part Q6 asks for
- * it. 720 is 80 px of bars, which is more than the 48–72 a stock Android tablet
- * is known to spend, chosen to err short.
+ * ⚠️ **720 was an ASSUMPTION, and it was the wrong mechanism — #439.** It has
+ * been READ OFF THE DEVICE since, and a reviewer who remembers
+ * `TABLET_IN_THE_SHELL` being 1280×720 is reading the old file. On 2026-09-21,
+ * over `apps/mobile/tools/webview-probe.mjs`, the owner's tablet reported
+ * `innerWidth × innerHeight` **1280 × 800** with safe-area insets **top 36,
+ * bottom 32**: the app targets API 36, Android enforces edge-to-edge from 35,
+ * so the WebView is the whole display and the bars are drawn OVER it. The
+ * guess was conservative — 720 is less than 800 − 36 − 32 — so the gate was
+ * safe, but it measured height where the real question is insets, and that is
+ * how #439's 68 px of scroll went unseen. `insets.ts` applies them to the
+ * engine; the fold at such a viewport is `height − bottom inset`.
  *
  * ## Why a margin, and not only a pass
  *
@@ -74,6 +81,14 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import {
+  applyInsets,
+  NO_INSETS,
+  PIXEL_TABLET_LANDSCAPE_INSETS,
+  PIXEL_TABLET_PORTRAIT_INSETS_ASSUMED,
+  resolvedInsets,
+  type Insets,
+} from './insets';
 import type { RideViewControl, RideViewMeasurement } from './rideview-harness';
 
 /** Sub-pixel layout, not slack. @see ride.browser.spec.ts */
@@ -89,7 +104,11 @@ interface Viewport {
   readonly name: string;
   readonly width: number;
   readonly height: number;
+  /** Edge-to-edge insets the engine is told about. Absent, none. @see insets.ts */
+  readonly insets?: Insets;
 }
+
+const insetsOf = (viewport: Viewport): Insets => viewport.insets ?? NO_INSETS;
 
 /**
  * How far above the fold the lowest ride control must end, in CSS pixels.
@@ -98,8 +117,8 @@ interface Viewport {
  * one metric card whose note wraps to a second line (160.6 px against 140.8);
  * a second row doing the same is 20 px. The fonts are 8 px different between
  * two machines this repository has already measured, and a third set on the
- * device. And the bar heights under {@link TABLET_IN_THE_SHELL} are assumed.
- * 50 is those three with a little left over, and a margin under it at a
+ * device. And the bar heights under {@link SMALL_TABLET_IN_THE_SHELL} are
+ * still assumed. 50 is those three with a little left over, and a margin under it at a
  * "device" viewport is unproven on that device however green the run is.
  */
 const FOLD_MARGIN_PIXELS = 50;
@@ -108,19 +127,37 @@ const FOLD_MARGIN_PIXELS = 50;
 const TABLET: Viewport = { name: 'a landscape tablet — 1280×800', width: 1280, height: 800 };
 
 /**
- * The same tablet, as the WebView sees it: the display less the system bars.
- * ⚠️ Assumed, not read off the device — @see this file's header.
+ * The same tablet, as the WebView sees it: the WHOLE display, edge-to-edge,
+ * with the system bars reported as insets. ⚠️ **Read off the device on
+ * 2026-09-21** (#439) — @see this file's header and `insets.ts`.
  */
 const TABLET_IN_THE_SHELL: Viewport = {
-  name: 'a landscape tablet inside the Android shell — 1280×720',
+  name: 'a landscape tablet inside the Android shell — 1280×800, edge-to-edge, insets 36/32',
   width: 1280,
-  height: 720,
+  height: 800,
+  insets: PIXEL_TABLET_LANDSCAPE_INSETS,
+};
+
+/**
+ * Upright. ⚠️ The size is the display turned; the insets are the landscape
+ * reading reused, NOT read off the device — @see insets.ts.
+ */
+const TABLET_UPRIGHT_IN_THE_SHELL: Viewport = {
+  name: 'a tablet upright inside the Android shell — 800×1280, edge-to-edge, insets 36/32 (assumed)',
+  width: 800,
+  height: 1280,
+  insets: PIXEL_TABLET_PORTRAIT_INSETS_ASSUMED,
 };
 
 /** A smaller one, where there is room for two columns and not three. */
 const SMALL_TABLET: Viewport = { name: 'a 4:3 tablet — 1024×768', width: 1024, height: 768 };
 
-/** And that one less its bars, which is where the old layout cleared by 3 px. */
+/**
+ * And that one less its bars, which is where the old layout cleared by 3 px.
+ * ⚠️ Still the old mechanism — a shorter viewport — and still assumed: nobody
+ * has held a 4:3 tablet running this app. Kept because it is the conservative
+ * reading of a device nobody has measured.
+ */
 const SMALL_TABLET_IN_THE_SHELL: Viewport = {
   name: 'a 4:3 tablet inside the Android shell — 1024×720',
   width: 1024,
@@ -137,6 +174,9 @@ const TABLETS: readonly Viewport[] = [
 
 async function open(page: Page, viewport: Viewport): Promise<void> {
   await page.setViewportSize({ width: viewport.width, height: viewport.height });
+  if (viewport.insets !== undefined) {
+    await applyInsets(page, viewport.insets);
+  }
   const response = await page.goto('/rideview.html');
   expect(
     response?.status(),
@@ -159,15 +199,17 @@ async function measure(page: Page): Promise<RideViewMeasurement> {
   return measured;
 }
 
+/** On the screen and clear of the bars drawn over it. */
 function onScreen(control: RideViewControl, viewport: Viewport): boolean {
   const { box } = control;
+  const insets = insetsOf(viewport);
   return (
     box.width > 0 &&
     box.height > 0 &&
-    box.left >= -SUBPIXEL_TOLERANCE &&
-    box.top >= -SUBPIXEL_TOLERANCE &&
-    box.right <= viewport.width + SUBPIXEL_TOLERANCE &&
-    box.bottom <= viewport.height + SUBPIXEL_TOLERANCE &&
+    box.left >= insets.left - SUBPIXEL_TOLERANCE &&
+    box.top >= insets.top - SUBPIXEL_TOLERANCE &&
+    box.right <= viewport.width - insets.right + SUBPIXEL_TOLERANCE &&
+    box.bottom <= viewport.height - insets.bottom + SUBPIXEL_TOLERANCE &&
     control.onTop
   );
 }
@@ -207,7 +249,10 @@ for (const viewport of TABLETS) {
 
       expect(seen.mainClass).toBe('oyl-main oyl-main--instruments');
       expect(seen.mainMaxWidth).toBe('none');
-      expect(seen.main?.width).toBe(viewport.width);
+      // Every pixel the rail (#427) leaves: from its right edge to the window's.
+      expect(seen.primaryNav?.left).toBe(0);
+      expect(seen.main?.left).toBeCloseTo(seen.primaryNav?.right ?? -1, 0);
+      expect(seen.main?.right).toBe(viewport.width);
     });
 
     /**
@@ -244,7 +289,8 @@ for (const viewport of TABLETS) {
       // clears any floor there is.
       expect(during.map((each) => each.name)).toEqual(expect.arrayContaining(['Pause', 'Stop']));
       const lowest = during.reduce((low, each) => (each.box.bottom > low.box.bottom ? each : low));
-      const margin = viewport.height - lowest.box.bottom;
+      // The fold is where the bars begin, not where the display ends (#439).
+      const margin = viewport.height - insetsOf(viewport).bottom - lowest.box.bottom;
 
       const note = `${margin.toFixed(1)} px under ${describeControl(lowest)} at ${String(
         viewport.width,
@@ -303,7 +349,7 @@ for (const viewport of TABLETS) {
       expect(seen.mainMaxWidth).not.toBe('none');
       const start = seen.controls.find((each) => each.name === STARTS_A_WORKOUT);
       expect(start?.box.height ?? 0).toBeGreaterThan(0);
-      expect(start?.box.bottom ?? 0).toBeGreaterThan(viewport.height);
+      expect(start?.box.bottom ?? 0).toBeGreaterThan(viewport.height - insetsOf(viewport).bottom);
       // And the title is stacked over its summary again, which is what makes
       // "they share a row" above a statement about the instruments layout.
       expect(seen.summary?.top ?? 0).toBeGreaterThanOrEqual(seen.title?.bottom ?? Infinity);
@@ -351,6 +397,47 @@ for (const viewport of [
         () => document.documentElement.scrollWidth - window.innerWidth,
       );
       expect(overflow).toBeLessThanOrEqual(0);
+    });
+  });
+}
+
+/**
+ * #439 on the Ride tab — `layout: 'instruments'`, a different layout from the
+ * game's, and a page that keeps its header and footer.
+ *
+ * ⚠️ **Measured, and the answer is that #439's arithmetic does NOT apply here.**
+ * The Ride tab is taller than the screen on its own content: at 1280×800 with
+ * insets 36/32 the three groups end at y = 752 and the page footer runs from
+ * 776 to 855, so the document is 887 px against an 800 px WebView — and
+ * upright it is 1556 against 1280. A shell whose `min-height` is shorter than
+ * its content never binds, so the old rule and the new one lay this page out
+ * identically. What this page scrolls by is its footer, by design; what the
+ * rider needs DURING a ride is above the fold and clear of the bars, which the
+ * cases above measure at {@link TABLET_IN_THE_SHELL} with the insets applied.
+ *
+ * So the assertion is the finding: reverting the rule changes nothing. A later
+ * change that made this page shorter than the screen would turn it red, and
+ * that is the day #439 starts to apply here.
+ */
+for (const viewport of [TABLET_IN_THE_SHELL, TABLET_UPRIGHT_IN_THE_SHELL]) {
+  test.describe(`#439 — ${viewport.name}`, () => {
+    test('the engine really has the insets', async ({ page }) => {
+      await open(page, viewport);
+      expect(await resolvedInsets(page)).toEqual(insetsOf(viewport));
+    });
+
+    test('the page is taller than the screen on its own content, so the shell height does not bind', async ({
+      page,
+    }) => {
+      await open(page, viewport);
+      const fixed = await measure(page);
+      await page.evaluate(() => {
+        window.__oylRideView?.restoreFullHeightShell();
+      });
+      const reverted = await measure(page);
+
+      expect(fixed.pageOverflow).toBeGreaterThan(0);
+      expect(reverted.pageOverflow).toBe(fixed.pageOverflow);
     });
   });
 }

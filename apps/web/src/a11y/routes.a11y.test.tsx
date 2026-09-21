@@ -37,7 +37,14 @@ import { stubSegments } from '../segments/testing';
 import type { MatchPort } from '../segments/match-port';
 import type { SegmentPort } from '../segments/store-port';
 import { AppShell } from '../shell/AppShell';
-import { ALL_ROUTES, hrefFor, ROUTES, routeById } from '../shell/routes';
+import {
+  ALL_ROUTES,
+  groupDestination,
+  hrefFor,
+  ROUTES,
+  routeById,
+  type RouteDefinition,
+} from '../shell/routes';
 import type { ActivityRecord, AthleteRecord, SegmentRecord, UnitSystem } from '@onyourleft/store';
 import { activityId, athleteId, segmentId } from '@onyourleft/store';
 
@@ -347,7 +354,7 @@ describe('criterion 4 — every route passes the automated audit', () => {
     // control that cannot work. Auditing only the mid-ride state would leave
     // the branch a quarter of visitors see unchecked, exactly as the
     // no-Bluetooth devices case above.
-    globalThis.location.hash = '#/';
+    globalThis.location.hash = '#/ride';
     mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} />);
     await settle();
 
@@ -449,14 +456,35 @@ describe('criterion 3 — everything interactive is reachable by keyboard', () =
   it('navigates between every pair of routes using the keyboard alone', async () => {
     await open('/');
     for (const destination of ROUTES) {
-      const link = document.querySelector<HTMLAnchorElement>(
-        `nav a[href="${hrefFor(destination)}"]`,
-      );
-      expect(link, `no navigation link to ${destination.id}`).not.toBeNull();
-      await activateWithKeyboard(link as HTMLAnchorElement);
+      await navigateTo(destination);
       expect(document.querySelector('h1')?.textContent).toBe(destination.title);
     }
   });
+
+  it('reaches every route from every other in at most two activations — #427', async () => {
+    // The group, then the page. What a page offers depends only on its GROUP —
+    // the primary links are the same everywhere and the second row is drawn
+    // for the current group — so walking from one page of every group covers
+    // every ordered pair without paying for 110 of them (which timed out under
+    // coverage instrumentation, measured). A route one activation from home
+    // can be two from elsewhere, and would be three if a group's link went
+    // nowhere useful.
+    await open('/');
+    const representatives = ROUTES.filter(
+      (route, index) => ROUTES.findIndex((each) => each.group === route.group) === index,
+    );
+    expect(representatives.length).toBeGreaterThanOrEqual(5);
+    for (const from of representatives) {
+      await navigateTo(from);
+      for (const to of ROUTES) {
+        if (to.id === from.id) continue;
+        const presses = await navigateTo(to);
+        expect(presses, `${from.id} → ${to.id}`).toBeLessThanOrEqual(2);
+        expect(document.querySelector('h1')?.textContent).toBe(to.title);
+        await navigateTo(from);
+      }
+    }
+  }, 30_000);
 
   it('marks the current page for assistive technology, not only with colour', async () => {
     await open('/activities');
@@ -550,10 +578,7 @@ describe('criterion 5 — focus is managed on navigation', () => {
   it('moves focus on every navigation, not only the first', async () => {
     await open('/');
     for (const destination of [routeById('activities'), routeById('about'), routeById('ride')]) {
-      const link = document.querySelector<HTMLAnchorElement>(
-        `nav a[href="${hrefFor(destination)}"]`,
-      );
-      await activateWithKeyboard(link as HTMLAnchorElement);
+      await navigateTo(destination);
       expect(document.activeElement, `focus was lost navigating to ${destination.id}`).toBe(
         document.querySelector('main'),
       );
@@ -578,10 +603,30 @@ describe('the document title follows the route', () => {
   it('names the view, so a tab strip and a screen reader both say where you are', async () => {
     await open('/activities');
     expect(document.title).toBe('Activities — On Your Left');
-    const link = document.querySelector<HTMLAnchorElement>(
-      `nav a[href="${hrefFor(routeById('about'))}"]`,
-    );
-    await activateWithKeyboard(link as HTMLAnchorElement);
+    await navigateTo(routeById('about'));
     expect(document.title).toBe('About On Your Left — On Your Left');
   });
 });
+
+/**
+ * Reach a route the way a rider does, by the keyboard: its own link if one is
+ * on the page, otherwise its group's link and then its page's — #427. Returns
+ * how many activations that took, and fails if there was no way at all.
+ */
+async function navigateTo(destination: RouteDefinition): Promise<number> {
+  const direct = document.querySelector<HTMLAnchorElement>(`nav a[href="${hrefFor(destination)}"]`);
+  if (direct !== null) {
+    await activateWithKeyboard(direct);
+    return 1;
+  }
+  expect(destination.group, `${destination.id} belongs to no group`).toBeDefined();
+  const group = document.querySelector<HTMLAnchorElement>(
+    `nav[aria-label="Primary"] a[href="${hrefFor(groupDestination(destination.group ?? 'more'))}"]`,
+  );
+  expect(group, `no primary link to ${destination.id}'s group`).not.toBeNull();
+  await activateWithKeyboard(group as HTMLAnchorElement);
+  const page = document.querySelector<HTMLAnchorElement>(`nav a[href="${hrefFor(destination)}"]`);
+  expect(page, `no link to ${destination.id} on its group's page`).not.toBeNull();
+  await activateWithKeyboard(page as HTMLAnchorElement);
+  return 2;
+}

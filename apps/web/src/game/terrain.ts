@@ -531,6 +531,8 @@ function ribbonNormals(centre: readonly CorridorPoint[]): Float64Array {
   const normals = new Float64Array(centre.length * 2);
   let normalX = 1;
   let normalZ = 0;
+  /** The first point whose normal came from a real segment, not the default. */
+  let firstReal = -1;
   for (let index = 0; index < centre.length; index += 1) {
     const here = centre[index] as CorridorPoint;
     const next = centre[index + 1];
@@ -544,10 +546,25 @@ function ribbonNormals(centre: readonly CorridorPoint[]): Float64Array {
         // banking it would put the rider's wheels off the surface.
         normalX = -dz / length;
         normalZ = dx / length;
+        if (firstReal === -1) {
+          firstReal = index;
+        }
       }
     }
     normals[index * 2] = normalX;
     normals[index * 2 + 1] = normalZ;
+  }
+  // #440: carry the first real cross-section BACK over the points before it.
+  // Those are the points a point-to-point route clamps onto its start when the
+  // corridor reaches behind distance 0 — all in one place — and with the
+  // default normal they made a quad between an east-west cross-section and the
+  // road's real one: a wedge of road at the start of every such route, drawn
+  // at whatever angle the road happened to leave at. Behind the start of a
+  // point-to-point route there is deliberately NOTHING, and these quads now
+  // have zero area.
+  for (let index = 0; index < firstReal; index += 1) {
+    normals[index * 2] = normals[firstReal * 2] as number;
+    normals[index * 2 + 1] = normals[firstReal * 2 + 1] as number;
   }
   return normals;
 }

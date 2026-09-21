@@ -66,7 +66,11 @@ import {
 } from '../../src/simulator/index';
 import type { Unsubscribe } from '../../src/subscription';
 
-import { decodeSupportedPowerRange, decodeSupportedResistanceLevelRange } from './fitness-machine';
+import {
+  decodeSupportedPowerRange,
+  decodeSupportedResistanceLevelRange,
+  type SupportedPowerRange,
+} from './fitness-machine';
 import {
   createTrainerControl,
   type FitnessMachineChannel,
@@ -181,6 +185,12 @@ export interface WireEntry {
 export interface SimulatedTrainerBench {
   readonly bench: SimulatorBench;
   readonly control: TrainerControl;
+  /**
+   * The Supported Power Range as the client decoded it from the machine's own
+   * octets — what a caller that needs the trainer's floor reads (#441), rather
+   * than a number a test types in.
+   */
+  readonly powerRange: SupportedPowerRange;
   readonly deviceId: DeviceId;
   readonly handle: () => SimulatedDevice;
   readonly powers: MeasurementFor<'power'>[];
@@ -320,6 +330,7 @@ export async function connectSimulatedTrainer(
     bench,
     deviceId: id,
     handle,
+    powerRange,
     control: createTrainerControl(channel, {
       powerRange,
       resistanceRange,

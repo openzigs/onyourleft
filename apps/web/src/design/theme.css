@@ -227,8 +227,24 @@ h3:first-child {
   border: 0;
 }
 
+/*
+ * One viewport tall LESS the insets `body` is padded by — #439.
+ *
+ * ⚠️ It was `min-height: 100vh`, and a reviewer who remembers that is reading
+ * the old file. `body` carries the safe-area insets as padding (see `body`
+ * above), so a shell one whole viewport tall plus that padding made every page
+ * exactly `top + bottom` taller than the screen. On the owner's Pixel Tablet,
+ * edge-to-edge at API 36, that was 36 + 800 + 32 = 868 in an 800 px WebView: a
+ * full-bleed ride whose document scrolled by 68 px, measured over
+ * `apps/mobile/tools/webview-probe.mjs` on 2026-09-21. On a desktop browser the
+ * insets are 0 and this is the old rule exactly.
+ *
+ * `rideview.browser.spec.ts` and `ride.browser.spec.ts` §"#439" measure it
+ * with the insets applied to the engine itself, and each carries the old rule
+ * back as a control that must scroll again.
+ */
 .oyl-shell {
-  min-height: 100vh;
+  min-height: calc(100vh - var(--oyl-safe-top) - var(--oyl-safe-bottom));
   display: flex;
   flex-direction: column;
 }
@@ -255,7 +271,81 @@ h3:first-child {
   margin: 0 0 var(--oyl-space-sm);
 }
 
+/*
+ * NAVIGATION — #427. Five destinations at most, each an icon and a word, as a
+ * BAR on a compact window and a RAIL on a medium or expanded one (Material 3's
+ * adaptive guidance, read 2026-09-20). One list in the markup; this block alone
+ * decides which it is, on the window's size.
+ *
+ * ⚠️ **Persistent chrome, so measured rather than read** — CLAUDE.md §4f.
+ * `shell.browser.spec.ts` §`PERSISTENT_CHROME_BUDGET` now counts the bar and
+ * the rail as well as the header, and the one place a pinned bar would not fit
+ * is the one #307 failed at: at 320×256 a 64 px bar is 25 % of the screen. So
+ * the bar is pinned only on a compact window at least 30 rem tall; below that
+ * it is an ordinary row at the top of the page that scrolls away, which is
+ * what the eleven links were.
+ *
+ * Every item declares its 44 px target in both axes (#316's rule: declared,
+ * not emergent) and marks the current destination with a SHAPE — a filled
+ * pill behind the icon — as well as weight and colour.
+ */
 .oyl-nav-list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oyl-space-xs);
+  margin: 0;
+  padding: 0;
+}
+
+.oyl-nav-link {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  padding: var(--oyl-space-xs) var(--oyl-space-sm);
+  color: var(--oyl-color-ink);
+  text-decoration: none;
+  font-size: var(--oyl-font-size-sm);
+  border-radius: var(--oyl-radius);
+}
+
+.oyl-nav-icon {
+  display: block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  box-sizing: content-box;
+}
+
+/*
+ * The current destination is marked three ways and only one of them is colour:
+ * `aria-current` for assistive technology, a heavier label, and a filled pill
+ * behind the icon — a shape. Criterion 4 of #427, and #48's sixth.
+ */
+.oyl-nav-link[aria-current] {
+  font-weight: 700;
+  color: var(--oyl-color-accent);
+}
+
+.oyl-nav-link[aria-current] .oyl-nav-icon {
+  background: var(--oyl-color-accent);
+  color: var(--oyl-color-accent-ink);
+}
+
+.oyl-nav-link:hover .oyl-nav-label {
+  text-decoration: underline;
+}
+
+/* The group's own pages — the secondary layer. Scrolls with the page. */
+.oyl-subnav {
+  border-bottom: 1px solid var(--oyl-color-border);
+  padding: 0 var(--oyl-space-md);
+}
+
+.oyl-subnav-list {
   list-style: none;
   display: flex;
   flex-wrap: wrap;
@@ -264,21 +354,69 @@ h3:first-child {
   padding: 0;
 }
 
-.oyl-nav-link {
+.oyl-subnav-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
   color: var(--oyl-color-accent);
   text-decoration: underline;
-  padding: var(--oyl-space-xs) 0;
 }
 
-/*
- * The current page is marked three ways and only one of them is colour: the
- * `aria-current` attribute for assistive technology, a weight change, and an
- * underline thick enough to read as a rule. Criterion 6 of #48.
- */
-.oyl-nav-link[aria-current='page'] {
+.oyl-subnav-link[aria-current='page'] {
   font-weight: 700;
   text-decoration-thickness: 3px;
   text-underline-offset: 4px;
+}
+
+/* BAR — a compact window with the height to spare for it. */
+@media (max-width: 37.49rem) and (min-height: 30rem) {
+  .oyl-nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 4;
+    background: var(--oyl-color-surface-overlay);
+    border-top: 1px solid var(--oyl-color-border);
+    padding: var(--oyl-space-xs) var(--oyl-safe-right) var(--oyl-safe-bottom) var(--oyl-safe-left);
+  }
+
+  .oyl-nav-list {
+    flex-wrap: nowrap;
+    justify-content: space-around;
+  }
+
+  /* Room under the last of the content, so the bar never covers it. */
+  .oyl-shell:has(.oyl-nav) {
+    padding-bottom: 4.5rem;
+  }
+}
+
+/* RAIL — a medium or expanded window. */
+@media (min-width: 37.5rem) {
+  .oyl-nav {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: var(--oyl-safe-left);
+    z-index: 4;
+    width: 5.5rem;
+    overflow-y: auto;
+    background: var(--oyl-color-surface-overlay);
+    border-right: 1px solid var(--oyl-color-border);
+    padding: calc(var(--oyl-space-md) + var(--oyl-safe-top)) var(--oyl-space-xs)
+      var(--oyl-safe-bottom);
+  }
+
+  .oyl-nav-list {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+  }
+
+  .oyl-shell:has(.oyl-nav) {
+    padding-left: 5.5rem;
+  }
 }
 
 /*
@@ -304,6 +442,63 @@ h3:first-child {
   flex: 1;
   padding: var(--oyl-space-lg) var(--oyl-space-md);
   max-width: var(--oyl-measure);
+}
+
+/*
+ * The home screen (#428): cards, not a column. Every other reading route keeps
+ * the measure; this one fills a landscape tablet, and on a phone the cards
+ * stack. `min(100%, 18rem)` so a 320 px window gets one column that does not
+ * overflow rather than an 18 rem track wider than it.
+ */
+.oyl-main--dashboard {
+  max-width: none;
+}
+
+.oyl-home {
+  display: grid;
+  gap: var(--oyl-space-md);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  align-items: start;
+}
+
+.oyl-home > .oyl-status {
+  grid-column: 1 / -1;
+}
+
+.oyl-home__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-home__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: var(--oyl-space-sm);
+  margin: 0;
+}
+
+.oyl-home__facts dt {
+  color: var(--oyl-color-ink-muted);
+  font-size: var(--oyl-font-size-sm);
+}
+
+.oyl-home__facts dd {
+  margin: 0;
+  font-weight: 700;
+}
+
+/*
+ * The announcement switch (#397). A browser's own checkbox is about 13 px,
+ * under WCAG 2.2 SC 2.5.8's 24×24 (Level AA — the MINIMUM criterion; 44×44 is
+ * SC 2.5.5, AAA). Declared, and `shell.browser.spec.ts` measures it with a
+ * control that strips it.
+ */
+.oyl-announce input[type='checkbox'] {
+  width: 1.5rem;
+  height: 1.5rem;
+  vertical-align: middle;
+  margin: 0;
 }
 
 /*
@@ -1800,21 +1995,22 @@ select option {
  * this is being told that it is not. On a tablet there is room for both and
  * nothing gives way.
  *
- * ⚠️ **"While a notice stands" is THE WHOLE RIDE, and this comment used to
- * read as though it were a moment** — #436's review. `GameView` reads the
- * trainer once, in `start`, and `trainer-port.ts` §`trainerRoadNotice` has a
- * sentence for four of the six states: `workout`, `not-controllable`,
- * `no-simulation` and `no-control`. Nothing dismisses it. So a rider doing a
- * structured workout in the game on a phone, or riding a trainer that
- * broadcasts power and cannot be driven, has no elevation strip and no plan
- * view from the first frame to the last.
+ * ⚠️ **Until #437, "while a notice stands" was THE WHOLE RIDE** — #436's
+ * review, and a reviewer who remembers this comment saying so is reading the
+ * old file. `GameView` reads the trainer once, in `start`, and
+ * `trainer-port.ts` §`trainerRoadNotice` has a sentence for four of the six
+ * states, and nothing dismissed it — so a structured workout in the game on a
+ * phone had no elevation strip and no plan view from the first frame to the
+ * last. And the argument above covers the strip and NOT the plan view: #285's
+ * plan says where on the road the rider is whatever the trainer is doing.
  *
- * And the argument above covers the strip and NOT the plan view. #285's plan
- * says where on the road the rider is, which is true and useful whatever the
- * trainer is doing; it goes because it shares the strip's panel, not because
- * the notice makes it moot. That is a real cost and it is
- * [#437](https://github.com/openzigs/onyourleft/issues/437)'s to remedy — a
- * notice that collapses to one line once read would give the cell back.
+ * **Since #437 the notice collapses** — by the rider's *Trainer notice*
+ * control, or on its own once it has stood for `GameView`
+ * §`STANDING_NOTICE_SECONDS` of ride — and a collapsed notice takes NO cell:
+ * `.oyl-hud__notices--collapsed` below is visually hidden by clip, so the
+ * route panel comes back. The sentence stays in the document, where a screen
+ * reader reaches it, and the control reopens it. The rule below hides the
+ * route only for a notice that is standing OPEN.
  *
  * ⚠️ `display: none`, which CLAUDE.md §4e warns about — for CONTROLS. The
  * accessibility suite loads no stylesheet, so an element hidden here still
@@ -1822,7 +2018,7 @@ select option {
  * equivalent and no control at all, so there is nothing for that to be wrong
  * about. A screen-reader user loses the route's position sentence for as long
  * as a sighted one loses the picture, which is the honest equivalence — and
- * "as long as" is, per the paragraph above, the whole ride.
+ * since #437 "as long as" is until the notice is put away, not the whole ride.
  *
  * ⚠️ **One limit, stated rather than gated.** Upright on a phone at the very
  * bottom of the column layout's range — 752 px tall — a notice of the longest
@@ -1832,7 +2028,9 @@ select option {
  */
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
   (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
-  .oyl-game--riding .oyl-hud:has(> .oyl-hud__notices) .oyl-hud__route {
+  .oyl-game--riding
+    .oyl-hud:has(> .oyl-hud__notices:not(.oyl-hud__notices--collapsed))
+    .oyl-hud__route {
     display: none;
   }
 
@@ -1848,6 +2046,25 @@ select option {
        drawn from x = 347 and this ends at x = 328. */
     max-width: min(100%, 20rem);
   }
+}
+
+/*
+ * A standing notice the rider has put away — #437. Visually hidden by clip,
+ * as `.oyl-visually-hidden` is and for its reason: `display: none` would take
+ * the sentence out of the accessibility tree, and a live region that is hidden
+ * announces nothing. Specific enough to beat the grid placement above, which
+ * would otherwise give an empty grid item the route panel's cell.
+ */
+.oyl-hud .oyl-hud__notices.oyl-hud__notices--collapsed {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 /*

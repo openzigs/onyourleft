@@ -253,6 +253,60 @@ describe('a loop', () => {
   });
 });
 
+describe('a loop whose ends are not quite the same place — #440', () => {
+  /** The square, with its last point dropped: the end is one 20 m step short. */
+  const untidy = (): RoutePoint[] => {
+    const points = squareLoop(500, 20);
+    return points.slice(0, points.length - 1);
+  };
+
+  it('rides the closing gap, so the wrap moves no distance on the ground', () => {
+    const points = untidy();
+    const line = routeProfile(points);
+    const loop = routeProfile(points, { loop: true });
+
+    // The gap (one 20 m spacing) is now part of the lap.
+    expect(loop.totalDistance - line.totalDistance).toBeCloseTo(20, 0);
+    // And the last grid sample IS the first: the wrap is a place, not a jump.
+    const first = loop.positions[0] as GeographicPosition;
+    const last = loop.positions[loop.positions.length - 1] as GeographicPosition;
+    expect(last.latitude).toBeCloseTo(first.latitude, 9);
+    expect(last.longitude).toBeCloseTo(first.longitude, 9);
+    const justBefore = positionAt(loop, loop.totalDistance - 0.001);
+    expect(justBefore.latitude).toBeCloseTo(first.latitude, 7);
+    expect(justBefore.longitude).toBeCloseTo(first.longitude, 7);
+  });
+
+  it('is continuous in height and in gradient across the wrap, as well as in plan', () => {
+    // A recorded loop's barometer drifts: the last few points come back 3 m
+    // higher than they left. The median at the closing sample sees that
+    // neighbourhood, and the first sample sees the start's.
+    const drifted = untidy().map((point, index, all) =>
+      index >= all.length - 6
+        ? { ...point, elevation: altitudeMetres((point.elevation as number) + 3) }
+        : point,
+    );
+    const loop = routeProfile(drifted, { loop: true });
+    expect(elevationAt(loop, loop.totalDistance - 0.001)).toBeCloseTo(elevationAt(loop, 0), 2);
+    expect(gradeAt(loop, loop.totalDistance - 0.001)).toBeCloseTo(gradeAt(loop, 0), 2);
+  });
+
+  it('adds nothing to a loop that already closes', () => {
+    const closed = squareLoop(500, 25);
+    expect(routeProfile(closed, { loop: true }).totalDistance).toBeCloseTo(
+      routeProfile(closed).totalDistance,
+      6,
+    );
+  });
+
+  it('adds nothing to a route that is not a loop', () => {
+    const points = untidy();
+    const line = routeProfile(points);
+    const last = line.positions[line.positions.length - 1] as GeographicPosition;
+    expect(last.latitude).not.toBeCloseTo((line.positions[0] as GeographicPosition).latitude, 6);
+  });
+});
+
 describe('a route that is not a loop', () => {
   it('clamps rather than wrapping, at both ends', () => {
     const profile = routeProfile(straightRoute(1000, 10, (distance) => distance * 0.03));

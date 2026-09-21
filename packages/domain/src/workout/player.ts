@@ -44,11 +44,45 @@
  * the checkpoints in `packages/store` — and the player deliberately cannot
  * touch it. What it guarantees is the half it owns: no state is thrown away,
  * so a reconnection resumes rather than restarts.
+ *
+ * ## A rescue ends on a whole trend window of recovery, not on one good reading
+ *
+ * #441. `assessErgCadence` decides a spiral from a rider grinding on purpose,
+ * and this file does not second-guess it. What it adds is how a rescue ENDS.
+ * The verdict is a function of the last {@link TREND_WINDOW}, so it flips back
+ * to `holding` the first tick cadence reads 50 rpm again with no fresh
+ * collapse behind it — and the full target that caused the spiral goes
+ * straight back on, cadence falls, the relief goes on again: a flapping target
+ * under a rider who is already struggling. So once a verdict has been
+ * `spiralling` or `stalled`, the relief stays applied until the verdict has
+ * been `holding` for one whole {@link TREND_WINDOW} — the same span the
+ * detector looks back over, so "recovered" means the detector itself has seen
+ * a whole window with nothing wrong in it. A grinding rider who never
+ * spiralled is never eased, because the latch is only set by a verdict.
+ *
+ * The return is therefore stepped, not a jump: a stalled rider is at the
+ * trainer's floor (`intent: release`, which the caller writes as the machine's
+ * own lowest target); starting to pedal again reads as `spiralling` below
+ * 50 rpm, so the relief target; and the full target only after a steady
+ * window.
+ *
+ * ## A rescue survives a free ride and a pause
+ *
+ * The latch is cleared by a whole window of `holding` verdicts and by
+ * {@link WorkoutPlayer.start}, and by nothing else — not by a free-ride block,
+ * where no verdict is taken, and not by a pause, where no tick runs. So a rider
+ * who spiralled, then rode a free block or paused, gets the relief target on
+ * the next ERG block for up to one {@link TREND_WINDOW} before the full one.
+ * That is deliberate, and it was implicit until PR #444's review: the pause and
+ * the free block are both likely to follow the struggle, the cost is at most
+ * eight seconds at two thirds of a target, and the error runs the safe way. A
+ * latch that a free ride cleared would put the full target that caused the
+ * spiral straight back on a rider whose legs have not been tested since.
  */
 
 import { seconds, watts, type Seconds, type Watts } from '../quantities';
 
-import { assessErgCadence, type CadenceReading } from './erg-safety';
+import { assessErgCadence, RELIEF_SHARE, TREND_WINDOW, type CadenceReading } from './erg-safety';
 import { segmentAt, targetAt, type WorkoutSegment, type WorkoutTimeline } from './timeline';
 
 export type PlayerStatus = 'idle' | 'running' | 'paused' | 'finished';
@@ -170,6 +204,13 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
   let lastWrittenAt: number | undefined;
   let lastShare: number | undefined;
   let intent: PlayerIntent = { kind: 'hold' };
+  /**
+   * Whether a spiral or a stall has been seen and not yet recovered from. See
+   * the module note: a rescue ends on a whole window of `holding`, not on one.
+   */
+  let rescuing = false;
+  /** When the current unbroken run of `holding` verdicts began, while rescuing. */
+  let steadySince: number | undefined;
 
   const snapshot = (): PlayerState => ({
     status,
@@ -200,6 +241,8 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       lastWrittenAt = undefined;
       lastShare = undefined;
       intent = { kind: 'hold' };
+      rescuing = false;
+      steadySince = undefined;
       return snapshot();
     },
 
@@ -218,11 +261,22 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
 
       const share = targetAt(timeline, seconds(elapsed));
       if (share === undefined) {
-        // A free ride. Release rather than writing a small target: ERG with a
-        // low target is the one place a rider cannot simply push harder.
+        // A free ride: the intent is `release`, not a small target of this
+        // player's choosing. ⚠️ What the caller then SENDS changed in #441: on
+        // the trainer #372 was measured on, a Stop left the previous interval's
+        // target applied, so `apps/web/src/workout/session.ts` §`ease` writes
+        // the machine's own lowest target instead. That is a trade and it is
+        // stated rather than hidden: ERG at the floor is still ERG, so pushing
+        // harder spins the rider out rather than loading them — which is a
+        // great deal better than being held at the last interval with no
+        // spiral check running at all.
+        // ⚠️ The reason said "Ride however you like" until PR #444's review.
+        // With the machine held at its floor in ERG that is not true — pushing
+        // harder spins the rider out rather than loading them — so it says
+        // only what this player knows: the block has no target of its own.
         pending = undefined;
         lastShare = undefined;
-        intent = { kind: 'release', reason: 'Ride however you like through this block.' };
+        intent = { kind: 'release', reason: 'This block sets no target of its own — ride easy.' };
         return snapshot();
       }
 
@@ -245,6 +299,19 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
           ? ({ kind: 'holding' } as const)
           : assessErgCadence(rider.cadence, now);
 
+      if (verdict.kind === 'holding') {
+        if (rescuing) {
+          steadySince ??= now;
+          if (now - steadySince >= TREND_WINDOW) {
+            rescuing = false;
+            steadySince = undefined;
+          }
+        }
+      } else {
+        rescuing = true;
+        steadySince = undefined;
+      }
+
       if (verdict.kind === 'stalled') {
         pending = undefined;
         lastShare = undefined;
@@ -252,8 +319,9 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
         return snapshot();
       }
 
-      const eased = verdict.kind === 'spiralling';
-      const effective = eased ? share * verdict.relief : share;
+      const eased = rescuing;
+      const relief = verdict.kind === 'spiralling' ? verdict.relief : RELIEF_SHARE;
+      const effective = eased ? share * relief : share;
 
       // ⚠️ While a write is outstanding the player asks for nothing more. That
       // is #14's "acknowledged before the interval is treated as begun", and it

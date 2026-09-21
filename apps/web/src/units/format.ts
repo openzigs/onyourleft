@@ -140,6 +140,17 @@ export function distanceUnit(units: UnitSystem): string {
   return units === 'imperial' ? 'mi' : 'km';
 }
 
+/**
+ * The ride-scale distance unit as it is SAID, not printed — #397's announcer.
+ *
+ * A screen reader reads `km` as "k m" or "kilometres" depending on which one
+ * it is, and `mi` as "my"; a sentence written for the ear says the word. Here,
+ * with the printed label beside it, so the two cannot be in different systems.
+ */
+export function spokenDistanceUnit(units: UnitSystem): string {
+  return units === 'imperial' ? 'miles' : 'kilometres';
+}
+
 /** The unit label a segment-scale distance or an elevation carries. */
 export function smallDistanceUnit(units: UnitSystem): string {
   return units === 'imperial' ? 'ft' : 'm';

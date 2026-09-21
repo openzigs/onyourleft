@@ -101,6 +101,7 @@ describe('a value that is a word rather than a number (#259)', () => {
     onPause: () => undefined,
     onEnd: () => undefined,
     paused: false,
+    announcement: '',
   };
 
   it.each(['beaten', 'level', 'not-beaten'] as const)(
@@ -155,6 +156,7 @@ describe('the trainer status line (#373)', () => {
     onPause: () => undefined,
     onEnd: () => undefined,
     paused: false,
+    announcement: '',
   };
 
   it('renders the sentence inside the HUD panel', async () => {
@@ -216,6 +218,7 @@ describe('the HUD is four panels (#423)', () => {
     onPause: () => undefined,
     onEnd: () => undefined,
     paused: false,
+    announcement: '',
   };
 
   function labelsIn(selector: string): (string | null)[] {

@@ -66,7 +66,15 @@ import { GameSimulation, ghostClock, type GameState } from './simulation';
 import { corridorOrigin } from './terrain';
 import type { GameRenderer, GameView as RendererView } from './port';
 import { NO_SENSORS, type GameSensors } from './sensors';
-import { speedUnit } from '../units/format';
+import { speedUnit, spokenDistanceUnit } from '../units/format';
+import { announce, INITIAL_ANNOUNCER, type AnnouncerState } from './hud/announce';
+import {
+  DEFAULT_ANNOUNCEMENTS,
+  deviceStorage,
+  readAnnouncementPreference,
+  type AnnouncementPreference,
+} from './hud/announce-preference';
+import { hudReadings } from './hud/fields';
 import { useUnits } from '../units/context';
 import {
   MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM,
@@ -202,9 +210,8 @@ export interface GameViewProps {
    * *Pause* is beside it for everything short of leaving. The platform's own
    * Back — the browser's button, Android's gesture — still works and is an
    * unmount, which {@link teardown} already treats exactly as *End ride*: the
-   * trainer is released (an FTMS Reset since #372 — it said "Stop" here, and
-   * a Stop did not release real hardware), the screen lock is released and
-   * the GL context is destroyed.
+   * trainer is released through the ride controller's one release (#372), the
+   * screen lock is released and the GL context is destroyed.
    *
    * ⚠️ **None of this touches a recording or a workout.** `RideSession` is
    * mounted in `AppShell` *above* the router for exactly this reason, and the
@@ -242,6 +249,18 @@ const PACER_PROBLEM_ID = 'oyl-game-pacer-problem';
  * to render, so the rider would be told about one problem and blocked by two.
  */
 const WIND_PROBLEM_ID = 'oyl-game-wind-problem';
+
+/**
+ * How long a standing trainer notice stays open before it gets out of the
+ * way, in seconds of RIDE — #437.
+ *
+ * Long enough to read the longest of `trainer-port.ts` §`trainerRoadNotice`'s
+ * four sentences twice at a handlebar's distance (about 30 words, so ~8 s at
+ * an ordinary reading pace), short enough that the elevation strip and the
+ * plan view are back before the first climb of any route worth riding. A
+ * judgement, stated as one; the control reopens it at any time.
+ */
+export const STANDING_NOTICE_SECONDS = 15;
 
 export function GameView(props: GameViewProps): JSX.Element {
   // ⚠️ Read here rather than inside `WindControls`, because `windChoice` is a
@@ -282,6 +301,27 @@ export function GameView(props: GameViewProps): JSX.Element {
    * with the reason the machine gave.
    */
   const [trainer, setTrainer] = useState<GameTrainer>(NO_GAME_TRAINER);
+  /**
+   * What the rider has done with the standing notice — #437. `auto` until they
+   * touch *Trainer notice*, after which it is theirs. Reset by `start`, so a
+   * second ride shows its notice open again.
+   */
+  const [noticeChoice, setNoticeChoice] = useState<'auto' | 'open' | 'closed'>('auto');
+  /**
+   * What the HUD's one live region says — #397. Written only when the
+   * announcer produces a sentence, which is on very few frames by design.
+   */
+  const [announcement, setAnnouncement] = useState('');
+  /** The announcer's carry-over, threaded frame to frame. @see announce.ts */
+  const announcerRef = useRef<AnnouncerState>(INITIAL_ANNOUNCER);
+  /**
+   * What the rider asked to hear — read from THIS DEVICE at the start of each
+   * ride (#395 decided the device, not the athlete row), off by default.
+   */
+  const announcementsRef = useRef<AnnouncementPreference>(DEFAULT_ANNOUNCEMENTS);
+  /** The rider's units, for the spoken distance, read inside the loop. */
+  const unitsRef = useRef(units);
+  unitsRef.current = units;
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const simulationRef = useRef<GameSimulation | undefined>(undefined);
@@ -371,8 +411,8 @@ export function GameView(props: GameViewProps): JSX.Element {
     // ⚠️ **First**, and before anything else can throw. #362's second half is
     // that a ride which ends on a 9 % wall must not leave the flywheel loaded
     // against whoever gets on the trainer next — `gradient.ts` §`stop` records
-    // why that is an FTMS Reset (#372) rather than a Stop, which this comment
-    // used to name and which real hardware showed releases nothing. `stop` is
+    // what that release sends and — measured on hardware, #372 — what it does
+    // not do, which is remove the resistance. `stop` is
     // idempotent because this callback runs from the "End ride" button *and*
     // from the effect's cleanup, and a rider who navigates away has ended the
     // ride just as surely as one who pressed the button — validation 0002 L7.
@@ -414,6 +454,12 @@ export function GameView(props: GameViewProps): JSX.Element {
       // that is no longer loaded: the same false congratulation that module
       // exists to prevent, arriving from the other direction.
       outcomeRef.current = undefined;
+      setNoticeChoice('auto');
+      // #397: a new ride starts silent. The last ride's sentence is not this
+      // one's, and a region carrying it at mount would announce it again.
+      announcerRef.current = INITIAL_ANNOUNCER;
+      setAnnouncement('');
+      announcementsRef.current = readAnnouncementPreference(deviceStorage());
       // ⚠️ **Read at the start of the ride and held for its length**, which is
       // what makes "changing your weight mid-session does not rewrite the ride
       // you are on" true by construction rather than by a rule somebody
@@ -583,6 +629,30 @@ export function GameView(props: GameViewProps): JSX.Element {
       );
       setState(simulation.state);
 
+      // #397: the announcer, on the RIDE's clock (`elapsed`, which does not
+      // run while the ride is paused — nor does this loop), from the same
+      // readings the HUD renders. Pure: its carry-over lives in the ref.
+      const readings = hudReadings({
+        state: simulation.state,
+        profile: chosen.profile,
+        cadence: sensors.cadence,
+        heartRate: sensors.heartRate,
+        units: unitsRef.current,
+      });
+      const togo = Number(readings.find((reading) => reading.key === 'remaining')?.value);
+      const heard = announce(announcerRef.current, {
+        now: simulation.state.elapsed,
+        readings,
+        ...(Number.isFinite(togo)
+          ? { remaining: { value: togo, unit: spokenDistanceUnit(unitsRef.current) } }
+          : {}),
+        preference: announcementsRef.current,
+      });
+      announcerRef.current = heard.state;
+      if (heard.sentence !== undefined) {
+        setAnnouncement(heard.sentence);
+      }
+
       const origin = corridorOrigin(chosen.profile);
       // ⚠️ **Where to DRAW them, which is not where the newest step left them**
       // — #323. The simulation ticks twenty times a second and this loop runs
@@ -718,6 +788,12 @@ export function GameView(props: GameViewProps): JSX.Element {
   // The tick's own `setState` is what schedules this render, so it is fresh.
   const gradient = gradientRef.current?.state();
   const roadNotice = trainerRoadNotice(trainer);
+  // #437: open for the first STANDING_NOTICE_SECONDS of ride, then out of the
+  // way unless the rider asks for it — on the RIDE's clock, so a paused ride
+  // does not put away a notice nobody has had time to read.
+  const noticeOpen =
+    noticeChoice === 'open' ||
+    (noticeChoice === 'auto' && (state?.elapsed ?? 0) < STANDING_NOTICE_SECONDS);
   return (
     // ⚠️ **`oyl-game--riding` is the stage — #423.** `theme.css` makes it fill
     // the viewport and lays the HUD over the world. It is a modifier rather
@@ -736,6 +812,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       />
       <HudPanel
         profile={chosen.profile}
+        announcement={announcement}
         state={state}
         cadence={sensors.cadence}
         heartRate={sensors.heartRate}
@@ -768,12 +845,25 @@ export function GameView(props: GameViewProps): JSX.Element {
         }}
         // #423: inside the HUD's own grid rather than after it, so a notice
         // gets a cell no panel can occupy. @see HudPanelProps.notices
+        standingNotice={
+          roadNotice === undefined
+            ? undefined
+            : {
+                content: (
+                  // #394: announced when it appears — it is absent until a
+                  // ride starts on a trainer the road cannot reach, which is
+                  // the case `live` exists for.
+                  <StatusMessage tone="warning" label="The road is not reaching your trainer" live>
+                    {roadNotice}
+                  </StatusMessage>
+                ),
+                expanded: noticeOpen,
+                onToggle: () => {
+                  setNoticeChoice(noticeOpen ? 'closed' : 'open');
+                },
+              }
+        }
         notices={[
-          roadNotice === undefined ? undefined : (
-            <StatusMessage key="road" tone="warning" label="The road is not reaching your trainer">
-              {roadNotice}
-            </StatusMessage>
-          ),
           gradient?.fault === undefined ? undefined : (
             <StatusMessage key="fault" tone="danger" label="Trainer" live>
               {gradient.fault}

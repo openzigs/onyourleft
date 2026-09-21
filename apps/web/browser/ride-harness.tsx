@@ -168,6 +168,10 @@ declare global {
       readonly unstage: () => void;
       /** What Capacitor's Android shell injects. @see theme.css §--oyl-safe-top */
       readonly setSafeArea: (pixels: number) => void;
+      /** #439's control: the shell's old `min-height: 100vh`. @see restoreFullHeightShell */
+      readonly restoreFullHeightShell: () => void;
+      /** #437's control: a notice takes the route cell even collapsed. */
+      readonly restoreNoticeTakesTheRoute: () => void;
     };
   }
 }
@@ -226,7 +230,7 @@ const TRAINER: GameTrainerPort = {
           kind: 'ready',
           control: {
             setSimulationParameters: async () => Promise.resolve(),
-            letGo: async () => Promise.resolve({ kind: 'reset' as const }),
+            letGo: async () => Promise.resolve({ kind: 'stopped' as const }),
           },
         },
 };
@@ -322,7 +326,10 @@ function measure(): StageMeasurement {
     viewport: { width: window.innerWidth, height: window.innerHeight },
     stage: stage === null ? undefined : boxOf(stage),
     world: world === null ? undefined : boxOf(world),
-    panels: [...document.querySelectorAll('.oyl-hud > *')].map((each) =>
+    // The grid items a rider SEES. Since #397 the HUD also holds its one live
+    // region, visually hidden by clip — a 1 px box that is not a panel and
+    // must not be counted as one.
+    panels: [...document.querySelectorAll('.oyl-hud > :not([data-oyl-announcer])')].map((each) =>
       item(each.className, each),
     ),
     items,
@@ -356,6 +363,31 @@ function setSafeArea(pixels: number): void {
   for (const edge of ['top', 'right', 'bottom', 'left']) {
     document.documentElement.style.setProperty(`--safe-area-inset-${edge}`, `${String(pixels)}px`);
   }
+}
+
+/**
+ * #439's control — put back the rule the shell had before: one whole viewport
+ * tall, on top of a `body` padded by the insets. With edge-to-edge insets the
+ * document must scroll again by their sum; without that, "the ride does not
+ * scroll" is equally true of a page that rendered no shell at all.
+ */
+function restoreFullHeightShell(): void {
+  const style = document.createElement('style');
+  style.textContent = '.oyl-shell { min-height: 100vh; }';
+  document.head.append(style);
+}
+
+/**
+ * #437's control — put back the rule before it: a notice, open or not, hides
+ * the route panel on a phone. With the notice put away the strip and the plan
+ * view must be gone again; without that, "the plan view is on screen after the
+ * notice is put away" is equally true of a harness whose notice never rendered.
+ */
+function restoreNoticeTakesTheRoute(): void {
+  const style = document.createElement('style');
+  style.textContent =
+    '.oyl-game--riding .oyl-hud:has(> .oyl-hud__notices) .oyl-hud__route { display: none; }';
+  document.head.append(style);
 }
 
 async function run(): Promise<void> {
@@ -406,10 +438,26 @@ async function run(): Promise<void> {
   // ⚠️ Before anything is measured. @see hud-harness.tsx
   await document.fonts.ready;
 
-  window.__oylRide = { ready: true, errors, measure, unstage, setSafeArea };
+  window.__oylRide = {
+    ready: true,
+    errors,
+    measure,
+    unstage,
+    setSafeArea,
+    restoreFullHeightShell,
+    restoreNoticeTakesTheRoute,
+  };
 }
 
 run().catch((error: unknown) => {
   errors.push(error instanceof Error ? error.message : String(error));
-  window.__oylRide = { ready: false, errors, measure, unstage, setSafeArea };
+  window.__oylRide = {
+    ready: false,
+    errors,
+    measure,
+    unstage,
+    setSafeArea,
+    restoreFullHeightShell,
+    restoreNoticeTakesTheRoute,
+  };
 });

@@ -9,7 +9,14 @@
  * would fail — which is #48's rule and, for a trainer, a safety one.
  */
 
-import { seconds, thresholdShare, unixSeconds, watts, type WorkoutBlock } from '@onyourleft/domain';
+import {
+  expandWorkout,
+  seconds,
+  thresholdShare,
+  unixSeconds,
+  watts,
+  type WorkoutBlock,
+} from '@onyourleft/domain';
 import { athleteId as toAthleteId, workoutId, type WorkoutRecord } from '@onyourleft/store';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -74,6 +81,7 @@ const running = (overrides: Partial<RideWorkoutSnapshot> = {}): RideWorkoutSnaps
   holdingWatts: 150,
   nowRiding: '10 min at 60%',
   fault: undefined,
+  timeline: expandWorkout({ name: 'Sweet spot', blocks }),
   ...overrides,
 });
 

@@ -66,7 +66,7 @@ function recordingTrainer(
     },
     letGo: async () => {
       releases.push(written.length);
-      return Promise.resolve(options.release ?? { kind: 'reset' });
+      return Promise.resolve(options.release ?? { kind: 'stopped' });
     },
   };
   return { control, written, releases };
@@ -218,7 +218,7 @@ describe('a gradient session drives a trainer from a route', () => {
     const control: GradientTrainer = {
       setSimulationParameters: async () =>
         failing ? Promise.reject(new Error('boom')) : undefined,
-      letGo: async () => Promise.resolve({ kind: 'reset' as const }),
+      letGo: async () => Promise.resolve({ kind: 'stopped' as const }),
     };
     const session = createGradientSession({ profile: hill(), control });
     session.sample(seconds(0), 500);
@@ -236,10 +236,12 @@ describe('a gradient session drives a trainer from a route', () => {
     // and `docs/validation/0002` Part L5. FTMS simulation parameters persist on
     // the machine until they are changed, so a ride ended on a wall would leave
     // the flywheel loaded against whoever gets on next. ⚠️ Since #372 the
-    // release is `letGo()` — an FTMS Reset — because a Stop, which this test
-    // used to count, did not remove the grade on real hardware. `stop` is not
-    // on `GradientTrainer` any more, so reverting to it is a compile error; the
-    // octets a release sends are asserted in `fitness-machine-control.test.ts`.
+    // release is `letGo()`, the ride controller's one release, so a game ride
+    // is joined with any other and a refused one is reported like every other.
+    // `stop` is not on `GradientTrainer` any more, so reverting to it is a
+    // compile error; the octets a release sends are asserted in
+    // `fitness-machine-control.test.ts`, and what a real trainer does with
+    // them is validation 0002 L5 — on the one measured, nothing.
     const trainer = recordingTrainer();
     const session = createGradientSession({ profile: hill(), control: trainer.control });
     session.sample(seconds(0), 500);
@@ -291,15 +293,12 @@ describe('a gradient session drives a trainer from a route', () => {
     expect(session.state().fault).toContain('not granted control');
   });
 
-  it('tells the rider when the trainer refused the Reset and the release is not confirmed', async () => {
-    // #372: a release that resolved `incomplete` was acknowledged and still
-    // does not establish that the hill has gone. Nothing but a Reset answered
-    // with success may read as released.
+  it('tells the rider when the trainer refused the release', async () => {
+    // #372: a release the machine refused or did not answer is said out loud.
     const trainer = recordingTrainer({
       release: {
         kind: 'incomplete',
-        resetRefusal: new SensorError('control-rejected', 'op-code-not-supported'),
-        flattened: true,
+        refusal: new SensorError('control-rejected', 'operation-failed'),
       },
     });
     const session = createGradientSession({ profile: hill(), control: trainer.control });
@@ -312,7 +311,7 @@ describe('a gradient session drives a trainer from a route', () => {
     expect(session.state().fault).toContain('may still be holding resistance');
   });
 
-  it('says nothing is wrong when the Reset was confirmed', async () => {
+  it('says nothing is wrong when the Stop was acknowledged', async () => {
     const trainer = recordingTrainer();
     const session = createGradientSession({ profile: hill(), control: trainer.control });
     session.sample(seconds(0), 500);
@@ -350,7 +349,7 @@ describe('a gradient session drives a trainer from a route', () => {
         written.push(parameters);
         return new Promise<void>(() => undefined);
       },
-      letGo: async () => Promise.resolve({ kind: 'reset' as const }),
+      letGo: async () => Promise.resolve({ kind: 'stopped' as const }),
     };
     const session = createGradientSession({ profile: hill(), control });
     for (let at = 0; at < 30; at += 1) {

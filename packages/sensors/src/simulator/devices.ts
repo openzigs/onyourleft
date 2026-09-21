@@ -172,6 +172,5 @@ function ftmsOptionsOf(options: FtmsOptions): FtmsOptions {
     ...(options.retainsTargetsThroughStop === undefined
       ? {}
       : { retainsTargetsThroughStop: options.retainsTargetsThroughStop }),
-    ...(options.supportsReset === undefined ? {} : { supportsReset: options.supportsReset }),
   };
 }

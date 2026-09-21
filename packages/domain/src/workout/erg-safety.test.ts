@@ -109,7 +109,9 @@ describe('a rider who has stopped is a different answer', () => {
     const verdict = assessErgCadence(history(10, [30, 20, 12, 8]), seconds(10));
     expect(verdict.kind).toBe('stalled');
     if (verdict.kind !== 'stalled') throw new Error('unreachable');
-    expect(verdict.reason).toContain('released');
+    // #441: eased to the trainer's lowest target, not "released" — a Stop did
+    // not release the trainer it was measured on.
+    expect(verdict.reason).toContain('lowest');
   });
 
   it('draws the line at STOPPED_CADENCE, which is not derived from STALLING_CADENCE', () => {

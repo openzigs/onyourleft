@@ -33,6 +33,7 @@
 
 /** The identity of a view. Stable; the path is not. */
 export type RouteId =
+  | 'home'
   | 'ride'
   | 'activities'
   | 'activity-detail'
@@ -83,11 +84,70 @@ export type RouteId =
  * ⚠️ **The measure is NOT removed globally and must not be.** It is correct for
  * every other route here.
  *
+ * - `dashboard` drops it too, for a grid of cards rather than one column —
+ *   the home screen (#428), which a landscape tablet should fill.
+ *
  * ⚠️ The trainer game is `prose` and that is not an oversight: its *picker* is
  * a form and wants the measure, and its *ride* is a fixed full-bleed stage
  * (#423) which no `max-width` on an ancestor can bound.
  */
-export type RouteLayout = 'prose' | 'instruments';
+export type RouteLayout = 'prose' | 'instruments' | 'dashboard';
+
+/**
+ * Which of the primary destinations a route belongs to — #427.
+ *
+ * ## The grouping, and where it was decided
+ *
+ * Eleven text links in a row became **four groups**, the proposal on #427,
+ * adopted as it stood:
+ *
+ * | group | holds |
+ * |---|---|
+ * | **Ride** | Ride, Trainer game, Workouts |
+ * | **History** | Activities, Analysis, Segments |
+ * | **Routes** | Routes (and the builder) |
+ * | **More** | Devices, Files, Settings, About |
+ *
+ * Material 3's adaptive guidance — read for #427 on 2026-09-20 — puts three to
+ * five destinations in primary navigation and the rest in a secondary layer:
+ * a bar on a compact width and a rail on a medium or expanded one. So a group
+ * is a destination: its link goes to the FIRST route listed in it, and on any
+ * route of a group with more than one member the shell draws the group's own
+ * pages as a second row of links. Every route is therefore at most two
+ * activations away — the group, then the page — which `routes.a11y.test.tsx`
+ * walks rather than asserts.
+ *
+ * ⚠️ **A field on each route, not a second table.** The accessibility gate
+ * renders every entry of {@link ROUTES} (#48), and a grouping kept beside it
+ * could name a route that is not there or miss one that is. {@link NAV_GROUPS}
+ * holds only what a group IS — its label and its icon — and membership is
+ * read off this table, in this table's order.
+ *
+ * **Home is a fifth destination since #428**, which is where the app opens:
+ * a group of one page, first. Five is Material 3's ceiling for a bar, and the
+ * reason Home is not folded into Ride is that it is not about riding — it is
+ * the rider's own state and where to start.
+ */
+export type NavGroupId = 'home' | 'ride' | 'history' | 'routes' | 'more';
+
+/** The icons the navigation draws. Inline SVG authored here — `NavIcon.tsx`. */
+export type NavIconName = 'home' | 'ride' | 'history' | 'routes' | 'more';
+
+export interface NavGroup {
+  readonly id: NavGroupId;
+  /** Shown under the icon, always — an icon-only rail would need its name elsewhere. */
+  readonly label: string;
+  readonly icon: NavIconName;
+}
+
+/** The primary destinations, in the order the bar and the rail draw them. @see NavGroupId */
+export const NAV_GROUPS: readonly NavGroup[] = [
+  { id: 'home', label: 'Home', icon: 'home' },
+  { id: 'ride', label: 'Ride', icon: 'ride' },
+  { id: 'history', label: 'History', icon: 'history' },
+  { id: 'routes', label: 'Routes', icon: 'routes' },
+  { id: 'more', label: 'More', icon: 'more' },
+];
 
 export interface RouteDefinition {
   readonly id: RouteId;
@@ -107,21 +167,66 @@ export interface RouteDefinition {
   readonly summary: string;
   /** @see RouteLayout */
   readonly layout: RouteLayout;
+  /**
+   * Which primary destination this route belongs to. @see NavGroupId
+   *
+   * Absent only on the not-found page, which belongs to nothing.
+   */
+  readonly group?: NavGroupId;
 }
 
-/** Every navigable route, in the order they appear in the header. */
+/**
+ * Every navigable route, grouped and in group order — #427. A group's link
+ * goes to its first entry here, and its pages are listed in this order.
+ */
 export const ROUTES: readonly RouteDefinition[] = [
   {
-    id: 'ride',
-    layout: 'instruments',
+    id: 'home',
+    group: 'home',
+    layout: 'dashboard',
+    // ⚠️ `/` since #428 — the app opens here. The Ride screen was `/` until
+    // then, and a reviewer who remembers `#/` meaning the Ride screen is
+    // reading the old file: it is `#/ride`.
     path: '/',
+    navLabel: 'Home',
+    title: 'Home',
+    summary: 'Your rides on this device, and where to start.',
+  },
+  {
+    id: 'ride',
+    group: 'ride',
+    layout: 'instruments',
+    path: '/ride',
     navLabel: 'Ride',
     title: 'Ride',
     summary:
       'Record a ride from the sensors paired on this device. Everything stays on this device.',
   },
   {
+    id: 'game',
+    group: 'ride',
+    layout: 'prose',
+    path: '/game',
+    navLabel: 'Trainer game',
+    title: 'Trainer game',
+    summary:
+      'Ride a saved route against a pacer that will not wait for you, or against your own ' +
+      'previous attempt. Solo, offline, and no leaderboard of any kind.',
+  },
+  {
+    id: 'workouts',
+    group: 'ride',
+    layout: 'prose',
+    path: '/workouts',
+    navLabel: 'Workouts',
+    title: 'Workouts',
+    summary:
+      'Structured sessions built from blocks. Targets are a share of your own threshold, so the ' +
+      'same workout works whatever shape you are in.',
+  },
+  {
     id: 'activities',
+    group: 'history',
     layout: 'prose',
     path: '/activities',
     navLabel: 'Activities',
@@ -130,6 +235,7 @@ export const ROUTES: readonly RouteDefinition[] = [
   },
   {
     id: 'analysis',
+    group: 'history',
     layout: 'prose',
     path: '/analysis',
     navLabel: 'Analysis',
@@ -139,6 +245,7 @@ export const ROUTES: readonly RouteDefinition[] = [
   },
   {
     id: 'segments',
+    group: 'history',
     layout: 'prose',
     path: '/segments',
     navLabel: 'Segments',
@@ -149,6 +256,7 @@ export const ROUTES: readonly RouteDefinition[] = [
   },
   {
     id: 'routes',
+    group: 'routes',
     layout: 'prose',
     path: '/routes',
     navLabel: 'Routes',
@@ -158,27 +266,8 @@ export const ROUTES: readonly RouteDefinition[] = [
       'otherwise, and one that starts inside a privacy zone cannot be shared at all.',
   },
   {
-    id: 'workouts',
-    layout: 'prose',
-    path: '/workouts',
-    navLabel: 'Workouts',
-    title: 'Workouts',
-    summary:
-      'Structured sessions built from blocks. Targets are a share of your own threshold, so the ' +
-      'same workout works whatever shape you are in.',
-  },
-  {
-    id: 'game',
-    layout: 'prose',
-    path: '/game',
-    navLabel: 'Trainer game',
-    title: 'Trainer game',
-    summary:
-      'Ride a saved route against a pacer that will not wait for you, or against your own ' +
-      'previous attempt. Solo, offline, and no leaderboard of any kind.',
-  },
-  {
     id: 'devices',
+    group: 'more',
     layout: 'prose',
     path: '/devices',
     navLabel: 'Devices',
@@ -187,6 +276,7 @@ export const ROUTES: readonly RouteDefinition[] = [
   },
   {
     id: 'transfer',
+    group: 'more',
     layout: 'prose',
     path: '/transfer',
     // "Files", not "Import", because the page is both directions and because
@@ -199,6 +289,7 @@ export const ROUTES: readonly RouteDefinition[] = [
   },
   {
     id: 'settings',
+    group: 'more',
     layout: 'prose',
     path: '/settings',
     navLabel: 'Settings',
@@ -209,6 +300,7 @@ export const ROUTES: readonly RouteDefinition[] = [
   },
   {
     id: 'about',
+    group: 'more',
     layout: 'prose',
     path: '/about',
     navLabel: 'About',
@@ -235,6 +327,7 @@ export const ROUTES: readonly RouteDefinition[] = [
  */
 export const ROUTE_BUILDER_ROUTE: RouteDefinition = {
   id: 'route-builder',
+  group: 'routes',
   layout: 'prose',
   path: '/routes/new',
   navLabel: 'Draw a route',
@@ -263,6 +356,7 @@ export const ROUTE_BUILDER_ROUTE: RouteDefinition = {
  */
 export const CREDITS_ROUTE: RouteDefinition = {
   id: 'credits',
+  group: 'more',
   layout: 'prose',
   path: '/about/credits',
   navLabel: 'Credits',
@@ -285,6 +379,7 @@ export const CREDITS_ROUTE: RouteDefinition = {
  */
 export const ACTIVITY_DETAIL_ROUTE: RouteDefinition = {
   id: 'activity-detail',
+  group: 'history',
   layout: 'prose',
   path: '/activities/:activity',
   navLabel: 'Ride details',
@@ -312,6 +407,7 @@ export const ACTIVITY_DETAIL_ROUTE: RouteDefinition = {
  */
 export const SEGMENT_DETAIL_ROUTE: RouteDefinition = {
   id: 'segment-detail',
+  group: 'history',
   layout: 'prose',
   path: '/segments/:segment',
   navLabel: 'Segment',
@@ -505,4 +601,17 @@ export function hrefForActivity(id: string): string {
 /** The link to one segment's effort history (#67). */
 export function hrefForSegment(id: string): string {
   return hrefFor(SEGMENT_DETAIL_ROUTE, id);
+}
+
+/** The navigable routes of one group, in {@link ROUTES} order. */
+export function routesInGroup(group: NavGroupId): readonly RouteDefinition[] {
+  return ROUTES.filter((route) => route.group === group);
+}
+
+/**
+ * Where a group's link goes: its first route. Total, for the reason
+ * {@link routeById} is — a group nothing belongs to lands on not-found.
+ */
+export function groupDestination(group: NavGroupId): RouteDefinition {
+  return routesInGroup(group)[0] ?? NOT_FOUND_ROUTE;
 }

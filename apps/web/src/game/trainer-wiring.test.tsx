@@ -34,7 +34,7 @@
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { GameView, type GamePort, type RidableRoute } from './GameView';
+import { GameView, STANDING_NOTICE_SECONDS, type GamePort, type RidableRoute } from './GameView';
 import { gameTrainerFrom, type GameTrainerPort, type GradientTrainer } from './trainer-port';
 import type { GameRenderer, SceneFrame } from './port';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
@@ -127,10 +127,10 @@ function trainerPort(
       commands.written.push(parameters);
       return Promise.resolve();
     },
-    // #372: a release, which is a Reset — `stop` is no longer on the type.
+    // #372: the controller's one release — `stop` is no longer on the type.
     letGo: async () => {
       commands.releases.push(commands.written.length);
-      return Promise.resolve({ kind: 'reset' as const });
+      return Promise.resolve({ kind: 'stopped' as const });
     },
   };
   return { readTrainer: () => gameTrainerFrom(snapshot, control, workoutRunning) };
@@ -294,11 +294,10 @@ describe('the road the game draws reaches the trainer', () => {
 
   it('sends no release when a workout holds the trainer', async () => {
     // ⚠️ **The assertion that is really about safety.** A release is an FTMS
-    // Reset since #372 (a Stop before it), and either makes the machine stop
-    // listening to this client — so a game ride that ended while a workout was
-    // running would leave the workout's clock going and every one of its
-    // targets refused or ignored — the silent failure `startWorkout` refuses to
-    // start into, arriving after the guard.
+    // Stop, which makes the machine stop listening to this client — so a game
+    // ride that ended while a workout was running would leave the workout's
+    // clock going and every one of its targets refused or ignored — the silent
+    // failure `startWorkout` refuses to start into, arriving after the guard.
     const commands: Commands = { written: [], releases: [] };
     await ride(trainerPort(READY, commands, true));
     await act(async () => {
@@ -342,7 +341,7 @@ describe('the road the game draws reaches the trainer', () => {
 
   it('tells the rider on the picker when the last release was not confirmed — #372', async () => {
     // A game ride ends on the picker, not on the Ride screen, and a trainer
-    // that refused the Reset may still be holding the hill.
+    // that refused the Stop may still be holding the hill.
     const commands: Commands = { written: [], releases: [] };
     mounted = await mount(
       <GameView
@@ -425,5 +424,116 @@ describe('the road the game draws reaches the trainer', () => {
     });
     mounted = undefined;
     expect(commands.releases).toHaveLength(1);
+  });
+});
+
+describe('a standing notice gives the route panel back once it has been read — #437', () => {
+  // `FRAME_MS` is half a second of ride per pumped frame.
+  const framesFor = (seconds: number): number => Math.ceil((seconds * 1000) / FRAME_MS);
+
+  function noticeParts() {
+    const container = mounted?.container ?? document;
+    const wrapper = container.querySelector<HTMLElement>('.oyl-hud__notices');
+    const toggle = queryAll<HTMLButtonElement>(container, 'button').find(
+      (button) => button.textContent === 'Trainer notice',
+    );
+    return { wrapper, toggle };
+  }
+
+  it('stands open at the start of a ride, with a control that says so', async () => {
+    await ride(trainerPort(READY, { written: [], releases: [] }, true), 4);
+    const { wrapper, toggle } = noticeParts();
+
+    expect(wrapper?.classList.contains('oyl-hud__notices--collapsed')).toBe(false);
+    expect(wrapper?.textContent).toContain('workout is driving your trainer');
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle?.getAttribute('aria-controls')).toBe(
+      wrapper?.querySelector('[id]')?.getAttribute('id'),
+    );
+  });
+
+  it(`puts itself away after ${String(STANDING_NOTICE_SECONDS)} s of ride — and the sentence is still there to be read`, async () => {
+    await ride(
+      trainerPort(READY, { written: [], releases: [] }, true),
+      framesFor(STANDING_NOTICE_SECONDS) + 4,
+    );
+    const { wrapper, toggle } = noticeParts();
+
+    expect(wrapper?.classList.contains('oyl-hud__notices--collapsed')).toBe(true);
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+    // ⚠️ Collapsed is visually hidden by CLIP, never removed: a screen-reader
+    // user who has not reached the sentence yet still can. None of the three
+    // things that would take it out of the accessibility tree is present.
+    expect(wrapper?.textContent).toContain('workout is driving your trainer');
+    // Every element from the sentence up to the wrapper — the status glyph is
+    // `aria-hidden` on purpose and is not the sentence.
+    const sentence = wrapper?.querySelector('p');
+    const chain: Element[] = [];
+    for (let at: Element | null | undefined = sentence; at && at !== wrapper?.parentElement;) {
+      chain.push(at);
+      at = at.parentElement;
+    }
+    expect(chain.length).toBeGreaterThanOrEqual(3);
+    for (const element of chain) {
+      expect(element.hasAttribute('hidden')).toBe(false);
+      expect(element.getAttribute('aria-hidden')).not.toBe('true');
+      expect((element as HTMLElement).style.display).not.toBe('none');
+    }
+  });
+
+  it('is the rider’s to open and close, whatever the clock says', async () => {
+    await ride(
+      trainerPort(READY, { written: [], releases: [] }, true),
+      framesFor(STANDING_NOTICE_SECONDS) + 4,
+    );
+    await clickThrough(noticeParts().toggle);
+    expect(noticeParts().toggle?.getAttribute('aria-expanded')).toBe('true');
+    expect(noticeParts().wrapper?.classList.contains('oyl-hud__notices--collapsed')).toBe(false);
+
+    await pump(20);
+    // Opened by the rider, it stays open: the clock only decides for a rider
+    // who has not chosen.
+    expect(noticeParts().toggle?.getAttribute('aria-expanded')).toBe('true');
+
+    await clickThrough(noticeParts().toggle);
+    expect(noticeParts().wrapper?.classList.contains('oyl-hud__notices--collapsed')).toBe(true);
+  });
+
+  // #437's first criterion names the four noticed trainer states, and each has
+  // its own sentence in `trainer-port.ts` §`trainerRoadNotice`.
+  for (const [state, snapshot, workoutRunning] of [
+    ['workout', READY, true],
+    ['not-controllable', { ...READY, controllable: false }, false],
+    ['no-simulation', { ...READY, canSimulate: false }, false],
+    ['no-control', { ...READY, hasControl: false }, false],
+  ] as const) {
+    it(`gives the route panel back in the ${state} state`, async () => {
+      await ride(
+        trainerPort(snapshot, { written: [], releases: [] }, workoutRunning),
+        framesFor(STANDING_NOTICE_SECONDS) + 4,
+      );
+      const { wrapper, toggle } = noticeParts();
+      expect(toggle).toBeDefined();
+      expect(wrapper?.classList.contains('oyl-hud__notices--collapsed')).toBe(true);
+      expect(mounted?.container.querySelector('.oyl-hud__route')).not.toBeNull();
+    });
+  }
+
+  it('stands open again at the start of the next ride', async () => {
+    // A rider who put the notice away on one ride has not read the next one's.
+    await ride(trainerPort(READY, { written: [], releases: [] }, true), 4);
+    await clickThrough(noticeParts().toggle);
+    expect(noticeParts().toggle?.getAttribute('aria-expanded')).toBe('false');
+
+    await clickThrough(buttonStarting('End ride'));
+    await clickThrough(buttonStarting('Ride '));
+    await pump(2);
+    expect(noticeParts().toggle?.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('offers no toggle when there is nothing standing', async () => {
+    await ride(trainerPort(READY, { written: [], releases: [] }), 4);
+    expect(noticeParts().toggle).toBeUndefined();
+    expect(noticeParts().wrapper).toBeNull();
   });
 });

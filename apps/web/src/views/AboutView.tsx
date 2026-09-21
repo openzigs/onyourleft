@@ -3,6 +3,7 @@
 import type { JSX } from 'react';
 
 import { PRIVACY_POLICY_URL, SOURCE_CODE_URL } from '../privacy/policy';
+import { MAX_DATA_LOSS_SECONDS } from '../recording/recorder';
 import { hrefFor, routeById } from '../shell/routes';
 
 /**
@@ -42,6 +43,22 @@ import { hrefFor, routeById } from '../shell/routes';
  * background imagery is fetched when it is looked at (ADR 0024 D-2
  * deliberately does not precache a ~19 GB archive).
  *
+ * ## If the app closes mid-ride — #411
+ *
+ * `README.md` §"If the tab closes mid-ride" has stated the bound and the
+ * recovery offer since #46 and #212, and no screen said any of it to a rider.
+ * This section does, and it states nothing the README does not.
+ *
+ * ⚠️ **The number is {@link MAX_DATA_LOSS_SECONDS}, imported rather than
+ * typed**, because two documents stating one number is how a stale claim
+ * ships; `AboutView.test.tsx` also reads the README's sentence and asserts it
+ * names the same number, so the third place it is written cannot drift either.
+ * ⚠️ **"Up to" is load-bearing** — `recording/recovery.ts` §"What this
+ * deliberately does not read": the offered length is start to last checkpoint,
+ * read from one small row, so a recording with a hole recovers less. And it
+ * claims nothing about any other product (ADR 0009 L1), nothing that needs a
+ * server (D6), and never that a ride "cannot be lost".
+ *
  * ⚠️ **The privacy policy link is a Play requirement, not a courtesy**
  * ([#95](https://github.com/openzigs/onyourleft/issues/95)). Play's Health
  * Content and Services policy puts an app in scope when health data advances
@@ -68,6 +85,26 @@ export function AboutView(): JSX.Element {
       <p>
         The consequence is the honest one: clearing this browser&rsquo;s site data removes your
         rides, and there is no copy anywhere else to restore from.
+      </p>
+
+      <h2>If the app closes mid-ride</h2>
+      <p>
+        A ride is written to this device&rsquo;s storage as it happens, not when you press Stop. If
+        the tab is closed, the laptop goes to sleep or the browser discards the page, what was
+        recorded up to then is still here.
+      </p>
+      <p>
+        At most {String(MAX_DATA_LOSS_SECONDS)} seconds of a ride can be lost to a crash: the
+        recorder saves a checkpoint every few seconds, and the moments since the last one may not
+        have been written yet.
+      </p>
+      <p>
+        The next time you open the Ride screen it lists the rides this device is still holding and
+        offers each one back: continue it, save what there is to your activities, or discard it.
+        Each is offered as up to a length — the time from its start to its last checkpoint — because
+        a recording with a gap in it recovers a little less than that. A ride you had already
+        finished is offered save and discard but not continue: a finished ride still on this device
+        is one whose save failed, and you ended it on purpose.
       </p>
 
       <h2>Sensors</h2>

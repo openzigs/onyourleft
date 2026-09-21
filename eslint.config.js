@@ -534,6 +534,39 @@ export default tseslint.config(
     },
   },
 
+  // --- The announcer's core is pure: time arrives as a parameter -------------
+  // #396. `apps/web/src/game/hud/announce.ts` decides whether a rider hears a
+  // sentence, and its whole test suite drives it with a fake clock — which is
+  // only meaningful while it reads no real one. `Date`, the timers and
+  // `performance` would couple it to wall time the way #88 forbids for
+  // physics; `speechSynthesis` is refused because it is silent in the Android
+  // WebView (Chromium bug 40417848), so a reader built on it would pass every
+  // desktop test and say nothing in the shipped app.
+  {
+    files: ['apps/web/src/game/hud/announce.ts'],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        ...['Date', 'setTimeout', 'setInterval', 'performance', 'requestAnimationFrame'].map(
+          (name) => ({
+            name,
+            message:
+              'announce.ts is pure (#396): `now` arrives as a parameter. A clock here makes every fake-clock test a statement about nothing.',
+          }),
+        ),
+        {
+          name: 'speechSynthesis',
+          message:
+            'No text-to-speech (#392): speechSynthesis is unsupported in the Android WebView, so it would be silent in the shipped app. Write the sentence into the live region.',
+        },
+        {
+          name: 'window',
+          message: 'announce.ts is pure (#396) and names no platform object.',
+        },
+      ],
+    },
+  },
+
   // --- Repository tooling ----------------------------------------------------
   // `scripts/` is not a package: it sits outside both licence trees, it ships in
   // no artefact, and it genuinely runs on Node. Without this block `eslint .`

@@ -58,6 +58,8 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { applyInsets, PIXEL_TABLET_LANDSCAPE_INSETS, resolvedInsets } from './insets';
+
 import { riderFrameBox } from '../src/game/camera';
 
 import type { Box, StageItem, StageMeasurement } from './ride-harness';
@@ -520,6 +522,84 @@ test.describe('a ride with a standing notice', () => {
 });
 
 /**
+ * #437 — once the notice is put away, the route panel is back.
+ *
+ * On a phone the open notice takes the route panel's cell (above), which used
+ * to be for the whole ride. The rider's *Trainer notice* control puts it away
+ * — so does the ride's clock, which the fast suite covers — and then the
+ * elevation strip and the plan view must be on screen, whole, over no other
+ * panel and not over the rider, with the sentence still in the document.
+ */
+test.describe('a ride with a standing notice, once it is put away — #437', () => {
+  const QUERY = '?trainer=workout';
+  const PHONES = OVERLAY_VIEWPORTS.filter(
+    (each) => Math.min(each.width, each.height) < 480 && each.height !== 752,
+  );
+
+  for (const viewport of PHONES) {
+    test(`shows the strip and the plan view again — ${viewport.name}`, async ({ page }) => {
+      await openRide(page, viewport, QUERY);
+      const open = await measure(page);
+      // The apparatus: while the notice stands open the route panel is gone —
+      // the state #437 started from — so "it is back" below is a change.
+      expect(open.items.some((each) => each.name === 'the plan view' && each.box.height > 0)).toBe(
+        false,
+      );
+
+      await page.getByRole('button', { name: 'Trainer notice' }).click();
+      const put = await measure(page);
+
+      for (const name of ['the elevation strip', 'the plan view']) {
+        const item = named(put.items, name);
+        expect(item.box.height, describeItem(item)).toBeGreaterThan(0);
+        expect(inside(item.box, viewport), describeItem(item)).toBe(true);
+      }
+      const laidOut = put.panels.filter((each) => each.box.height > 1);
+      expect(laidOut).toHaveLength(4);
+      const collisions: string[] = [];
+      laidOut.forEach((a, index) => {
+        for (const b of laidOut.slice(index + 1)) {
+          if (overlap(a.box, b.box)) {
+            collisions.push(`${describeItem(a)} × ${describeItem(b)}`);
+          }
+        }
+      });
+      expect(collisions).toEqual([]);
+      expect(
+        laidOut.filter((each) => overlap(each.box, riderBox(viewport))).map(describeItem),
+      ).toEqual([]);
+      // The sentence is still there for a screen reader, clipped rather than
+      // removed — `display: none` would take it out of the accessibility tree.
+      const hidden = await page.evaluate(() => {
+        const wrapper = document.querySelector('.oyl-hud__notices');
+        return {
+          text: wrapper?.textContent ?? '',
+          display: wrapper === null ? '' : window.getComputedStyle(wrapper).display,
+          visibility: wrapper === null ? '' : window.getComputedStyle(wrapper).visibility,
+        };
+      });
+      expect(hidden.text).toContain('workout is driving your trainer');
+      expect(hidden.display).not.toBe('none');
+      expect(hidden.visibility).not.toBe('hidden');
+    });
+
+    test(`the control — the old rule hides the route even when the notice is put away — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openRide(page, viewport, QUERY);
+      await page.getByRole('button', { name: 'Trainer notice' }).click();
+      await page.evaluate(() => {
+        window.__oylRide?.restoreNoticeTakesTheRoute();
+      });
+      const seen = await measure(page);
+      expect(seen.items.some((each) => each.name === 'the plan view' && each.box.height > 0)).toBe(
+        false,
+      );
+    });
+  }
+});
+
+/**
  * `game/camera.ts` §`WORST_CASE_ASPECT` — the scenery cull is safe up to a
  * frame 6 : 1 and drops visible scenery on a hairpin from 8 : 1. Until #423 that
  * was an argument about how short a window anybody would make; the world is
@@ -585,4 +665,39 @@ test.describe('safe areas', () => {
     expect(after.world?.width).toBe(TABLET.width);
     expect(after.world?.height).toBe(TABLET.height);
   });
+});
+
+/**
+ * #439 — the full-bleed ride must not scroll, with edge-to-edge insets applied
+ * to the ENGINE (`insets.ts`), not to the page.
+ *
+ * Measured on the owner's tablet: `scrollHeight` 868 in an 800 px WebView,
+ * insets 36 + 32. The stage is `position: fixed`, so a rider did not see the
+ * page move — but a drag that missed a control scrolled the document under the
+ * HUD. Every viewport the ride is laid out at, with the tablet's own insets:
+ * a phone's are different numbers, and the arithmetic that failed is the same.
+ */
+test.describe('#439 — a ride with edge-to-edge insets does not scroll', () => {
+  for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
+    test(`scrollHeight === innerHeight — ${viewport.name}`, async ({ page }) => {
+      await applyInsets(page, PIXEL_TABLET_LANDSCAPE_INSETS);
+      await openRide(page, viewport);
+      // The apparatus: the insets are really there, or "does not scroll" is a
+      // statement about a desktop browser.
+      expect(await resolvedInsets(page)).toEqual(PIXEL_TABLET_LANDSCAPE_INSETS);
+
+      const seen = await measure(page);
+      expect(seen.pageOverflow).toBe(0);
+
+      // ⚠️ The control: the shell's old `min-height: 100vh`. The same page must
+      // scroll again, by exactly the two insets — which is #439's 68 px.
+      await page.evaluate(() => {
+        window.__oylRide?.restoreFullHeightShell();
+      });
+      const reverted = await measure(page);
+      expect(reverted.pageOverflow).toBe(
+        PIXEL_TABLET_LANDSCAPE_INSETS.top + PIXEL_TABLET_LANDSCAPE_INSETS.bottom,
+      );
+    });
+  }
 });

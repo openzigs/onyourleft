@@ -209,15 +209,35 @@ for (const viewport of VIEWPORTS) {
 
       const covered = await page.evaluate(() => {
         const header = document.querySelector('.oyl-header');
-        if (header === null) throw new Error('no .oyl-header');
-        const box = header.getBoundingClientRect();
-        // How much of the viewport the header still covers: zero when it has
-        // scrolled away, its own height when it is pinned to the top.
-        const visible = Math.max(
-          0,
-          Math.min(box.bottom, window.innerHeight) - Math.max(box.top, 0),
-        );
-        return { visible, viewport: window.innerHeight, scrollY: window.scrollY };
+        const nav = document.querySelector('nav[aria-label="Primary"]');
+        if (header === null || nav === null) throw new Error('no .oyl-header or no Primary nav');
+        // ⚠️ Since #427 the header is not the only chrome: the navigation is a
+        // bar pinned to the bottom or a rail pinned to the side. So what is
+        // measured is AREA — how much of the viewport the header and the
+        // navigation still cover between them — and a height share is the
+        // special case of it the header alone used to be.
+        const clip = (box: DOMRect) => ({
+          left: Math.max(box.left, 0),
+          top: Math.max(box.top, 0),
+          right: Math.min(box.right, window.innerWidth),
+          bottom: Math.min(box.bottom, window.innerHeight),
+        });
+        const area = (box: { left: number; top: number; right: number; bottom: number }) =>
+          Math.max(0, box.right - box.left) * Math.max(0, box.bottom - box.top);
+        const a = clip(header.getBoundingClientRect());
+        const b = clip(nav.getBoundingClientRect());
+        const both = {
+          left: Math.max(a.left, b.left),
+          top: Math.max(a.top, b.top),
+          right: Math.min(a.right, b.right),
+          bottom: Math.min(a.bottom, b.bottom),
+        };
+        const visible = area(a) + area(b) - area(both);
+        return {
+          visible,
+          viewport: window.innerWidth * window.innerHeight,
+          scrollY: window.scrollY,
+        };
       });
 
       expect(covered.scrollY, 'the page did not scroll, so this measures nothing').toBeGreaterThan(
@@ -227,9 +247,9 @@ for (const viewport of VIEWPORTS) {
       const share = covered.visible / covered.viewport;
       expect(
         share,
-        `the header still covers ${covered.visible.toFixed(0)}px of a ${String(
+        `the header and the navigation still cover ${covered.visible.toFixed(0)} px² of a ${String(
           covered.viewport,
-        )}px viewport — ${(share * 100).toFixed(1)}%. Persistent chrome on a small viewport is ` +
+        )} px² viewport — ${(share * 100).toFixed(1)}%. Persistent chrome on a small viewport is ` +
           'the #307 regression: at 320×256, the viewport SC 1.4.10 names, a sticky eleven-link ' +
           'header left 78px for the content. theme.css bounds this with a media query; see the ' +
           'block below .oyl-main',
@@ -703,5 +723,228 @@ test.describe('the touch target is declared rather than emergent', () => {
           'it. Move the token back, or decide here that this button leans on its floor',
       ).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
     }
+  });
+});
+
+/**
+ * #427 — the navigation is a BAR on a compact window and a RAIL on a wider
+ * one, and every destination in it is a 44×44 target by the same three
+ * measurements #316 made for `.oyl-button`.
+ *
+ * The three viewports #427 names: the SC 1.4.10 one, a phone, and a landscape
+ * tablet — plus an upright tablet, which is the width the switch is for.
+ */
+const NAVIGATION_VIEWPORTS = [
+  { name: '320×256', width: 320, height: 256, expect: 'row' },
+  { name: '375×667 — a phone', width: 375, height: 667, expect: 'bar' },
+  { name: '768×1024 — a tablet upright', width: 768, height: 1024, expect: 'rail' },
+  { name: '1280×800 — a landscape tablet', width: 1280, height: 800, expect: 'rail' },
+] as const;
+
+/** How many primary destinations #427 allows at most. */
+const MOST_DESTINATIONS = 5;
+
+interface NavLinkBox {
+  readonly label: string;
+  readonly width: number;
+  readonly height: number;
+  readonly minWidth: number;
+  readonly minHeight: number;
+  readonly current: string | null;
+  readonly iconBackground: string;
+}
+
+async function navLinks(page: Page): Promise<readonly NavLinkBox[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll('nav[aria-label="Primary"] a')].map((link) => {
+      const box = link.getBoundingClientRect();
+      const style = getComputedStyle(link);
+      const icon = link.querySelector('svg');
+      return {
+        label: (link.textContent ?? '').trim(),
+        width: box.width,
+        height: box.height,
+        minWidth: Number.parseFloat(style.minWidth),
+        minHeight: Number.parseFloat(style.minHeight),
+        current: link.getAttribute('aria-current'),
+        iconBackground: icon === null ? '' : getComputedStyle(icon).backgroundColor,
+      };
+    }),
+  );
+}
+
+for (const viewport of NAVIGATION_VIEWPORTS) {
+  test.describe(`#427 — the navigation at ${viewport.name}`, () => {
+    test.use({ viewport: { width: viewport.width, height: viewport.height } });
+
+    test(`is a ${viewport.expect}`, async ({ page }) => {
+      await openShell(page);
+      const nav = await page.evaluate(() => {
+        const element = document.querySelector('nav[aria-label="Primary"]');
+        if (element === null) throw new Error('no Primary nav');
+        const box = element.getBoundingClientRect();
+        return {
+          position: getComputedStyle(element).position,
+          left: box.left,
+          top: box.top,
+          bottom: box.bottom,
+          width: box.width,
+          height: box.height,
+          innerWidth: window.innerWidth,
+          innerHeight: window.innerHeight,
+        };
+      });
+      switch (viewport.expect) {
+        case 'row':
+          // Too short for a pinned bar inside the chrome budget: an ordinary
+          // row that scrolls away with the header.
+          expect(nav.position).toBe('static');
+          break;
+        case 'bar':
+          expect(nav.position).toBe('fixed');
+          expect(nav.bottom).toBeCloseTo(nav.innerHeight, 0);
+          expect(nav.width).toBeCloseTo(nav.innerWidth, 0);
+          expect(nav.height).toBeLessThan(nav.innerHeight / 5);
+          break;
+        case 'rail':
+          expect(nav.position).toBe('fixed');
+          expect(nav.left).toBe(0);
+          expect(nav.top).toBe(0);
+          expect(nav.height).toBeCloseTo(nav.innerHeight, 0);
+          expect(nav.width).toBeLessThan(nav.innerWidth / 5);
+          break;
+      }
+    });
+
+    test('holds at most five destinations, each a 44×44 target as Chromium lays it out', async ({
+      page,
+    }) => {
+      await openShell(page);
+      const links = await navLinks(page);
+      // The apparatus: an empty list passes every loop below.
+      expect(links.length).toBeGreaterThan(2);
+      expect(links.length).toBeLessThanOrEqual(MOST_DESTINATIONS);
+      for (const link of links) {
+        expect(
+          link.height,
+          `“${link.label}” is ${link.height.toFixed(1)}px tall`,
+        ).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+        expect(
+          link.width,
+          `“${link.label}” is ${link.width.toFixed(1)}px wide`,
+        ).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+      }
+    });
+
+    test('marks where you are with a shape, not only a colour', async ({ page }) => {
+      await openShell(page);
+      const links = await navLinks(page);
+      const current = links.filter((link) => link.current !== null);
+      const others = links.filter((link) => link.current === null);
+      expect(current).toHaveLength(1);
+      // A filled pill behind the current icon, where the others have none.
+      expect(current[0]?.iconBackground).not.toBe('rgba(0, 0, 0, 0)');
+      for (const link of others) {
+        expect(link.iconBackground).toBe('rgba(0, 0, 0, 0)');
+      }
+    });
+  });
+}
+
+test.describe('#427 — a navigation target is declared rather than emergent', () => {
+  test.use({ viewport: { width: 375, height: 667 } });
+
+  test('the minimum is a declaration, in both axes', async ({ page }) => {
+    await openShell(page);
+    const links = await navLinks(page);
+    expect(links.length).toBeGreaterThan(2);
+    for (const link of links) {
+      expect(link.minHeight, `“${link.label}” declares no 44px min-height`).toBeGreaterThanOrEqual(
+        TOUCH_TARGET_PIXELS,
+      );
+      expect(link.minWidth, `“${link.label}” declares no 44px min-width`).toBeGreaterThanOrEqual(
+        TOUCH_TARGET_PIXELS,
+      );
+    }
+  });
+
+  test('the icon, the label and the padding reach the target on their own', async ({ page }) => {
+    // #316's third measurement: strip the floor and measure again, so the
+    // declaration above cannot hide a token that moved under it.
+    await openShell(page);
+    const stripped = await page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>('nav[aria-label="Primary"] a')].map((link) => {
+        const before = link.style.cssText;
+        link.style.minHeight = '0px';
+        link.style.minWidth = '0px';
+        const box = link.getBoundingClientRect();
+        const measured = {
+          label: (link.textContent ?? '').trim(),
+          height: box.height,
+          width: box.width,
+          neutralised: getComputedStyle(link).minHeight,
+        };
+        link.style.cssText = before;
+        return measured;
+      }),
+    );
+    expect(stripped.length).toBeGreaterThan(2);
+    for (const link of stripped) {
+      expect(link.neutralised).toBe('0px');
+      expect(
+        link.height,
+        `“${link.label}” is ${link.height.toFixed(1)}px tall unfloored`,
+      ).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+      expect(
+        link.width,
+        `“${link.label}” is ${link.width.toFixed(1)}px wide unfloored`,
+      ).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+    }
+  });
+});
+
+/**
+ * #397 — the announcement controls on Settings clear WCAG 2.2 SC 2.5.8's
+ * 24×24 CSS px (Level AA). ⚠️ Not 44: that is SC 2.5.5 (AAA), and CLAUDE.md
+ * §4f records this repository getting the two the wrong way round once.
+ */
+const MINIMUM_TARGET_PIXELS = 24;
+
+test.describe('#397 — the announcement controls', () => {
+  test.use({ viewport: { width: 375, height: 667 } });
+
+  async function controls(page: Page) {
+    return page.evaluate(() =>
+      [...document.querySelectorAll('.oyl-announce input, .oyl-announce select')].map((each) => {
+        const box = each.getBoundingClientRect();
+        return { name: each.tagName, width: box.width, height: box.height };
+      }),
+    );
+  }
+
+  test('every control is at least 24×24', async ({ page }) => {
+    await page.goto('/shell.html#/settings');
+    await page.waitForSelector('html[data-oyl-shell-ready]');
+    const seen = await controls(page);
+    expect(seen.length).toBe(4);
+    for (const control of seen) {
+      expect(control.width, control.name).toBeGreaterThanOrEqual(MINIMUM_TARGET_PIXELS);
+      expect(control.height, control.name).toBeGreaterThanOrEqual(MINIMUM_TARGET_PIXELS);
+    }
+  });
+
+  test('the control — without the declared size the switch is under 24', async ({ page }) => {
+    await page.goto('/shell.html#/settings');
+    await page.waitForSelector('html[data-oyl-shell-ready]');
+    await page.evaluate(() => {
+      const box = document.querySelector<HTMLInputElement>('.oyl-announce input');
+      if (box !== null) {
+        box.style.width = 'auto';
+        box.style.height = 'auto';
+      }
+    });
+    const seen = await controls(page);
+    const input = seen.find((each) => each.name === 'INPUT');
+    expect(input?.height ?? Infinity).toBeLessThan(MINIMUM_TARGET_PIXELS);
   });
 });

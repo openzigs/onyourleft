@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { revolutionsPerMinute, seconds, watts, type Seconds } from '../quantities';
 
-import { COLLAPSE_RPM, RELIEF_SHARE, type CadenceReading } from './erg-safety';
+import { COLLAPSE_RPM, RELIEF_SHARE, TREND_WINDOW, type CadenceReading } from './erg-safety';
 import { createWorkoutPlayer, REFRESH_SECONDS, type PlayerIntent } from './player';
 import { expandWorkout } from './timeline';
 import { thresholdShare, type Workout, type WorkoutBlock } from './workout';
@@ -290,18 +290,163 @@ describe('the ERG spiral is broken by easing the target, not by ending the inter
     expect(wroteWatts(subject.tick(seconds(10)).intent)).toBe(150);
   });
 
-  it('restores the full target once cadence recovers', () => {
+  it('restores the full target once cadence has held for a whole trend window — #441', () => {
+    // ⚠️ This used to restore the full target on the FIRST good reading, and a
+    // reviewer who remembers that is reading the old file. The full target is
+    // what caused the spiral, so putting it straight back flapped the target
+    // under a rider who was already struggling (see the next case).
     const subject = player();
     subject.start(seconds(0));
     const eased = subject.tick(seconds(10), { cadence: falling(70, 45, 10) });
     subject.acknowledge(watts(wroteWatts(eased.intent)));
-    const recovered: readonly CadenceReading[] = [
-      { at: seconds(14), cadence: revolutionsPerMinute(80) },
-      { at: seconds(20), cadence: revolutionsPerMinute(85) },
-    ];
-    const state = subject.tick(seconds(20), { cadence: recovered });
+    const steadyAt = (from: number, to: number): readonly CadenceReading[] =>
+      Array.from({ length: to - from + 1 }, (_, index) => ({
+        at: seconds(from + index),
+        cadence: revolutionsPerMinute(82),
+      }));
+
+    // Recovered, but not for a whole window yet: still eased.
+    const early = subject.tick(seconds(20), { cadence: steadyAt(14, 20) });
+    expect(early.intent).toMatchObject({ eased: true });
+    subject.acknowledge(watts(wroteWatts(early.intent)));
+    const almost = subject.tick(seconds(20 + TREND_WINDOW - 1), { cadence: steadyAt(20, 27) });
+    expect(almost.intent).toMatchObject({ eased: true });
+    subject.acknowledge(watts(wroteWatts(almost.intent)));
+
+    // A whole window of `holding`: the full target, and only now.
+    const state = subject.tick(seconds(20 + TREND_WINDOW), { cadence: steadyAt(21, 28) });
     expect(wroteWatts(state.intent)).toBe(150);
     expect(state.intent).toMatchObject({ eased: false });
+  });
+
+  it('does not flap the target when cadence hovers either side of the stalling line — #441', () => {
+    // 48 rpm is `spiralling` (below 50), 52 rpm a moment later is `holding` by
+    // the verdict alone. Without the latch that is full → eased → full → eased
+    // at 1 Hz. With it, the target stays eased the whole time.
+    const subject = player(twoBlocks(), 1);
+    subject.start(seconds(0));
+    const written: boolean[] = [];
+    for (let second = 10; second <= 30; second += 1) {
+      const cadence = second % 2 === 0 ? 48 : 52;
+      const state = subject.tick(seconds(second), {
+        cadence: [
+          { at: seconds(second - 1), cadence: revolutionsPerMinute(cadence) },
+          { at: seconds(second), cadence: revolutionsPerMinute(cadence) },
+        ],
+      });
+      if (state.intent.kind === 'write-target') {
+        written.push(state.intent.eased);
+        subject.acknowledge(state.intent.watts);
+      }
+    }
+    expect(written.length).toBeGreaterThan(5);
+    expect(written.every((eased) => eased)).toBe(true);
+  });
+
+  it('never eases a rider grinding low on purpose who has not spiralled', () => {
+    // The latch is set by a verdict and by nothing else, so `assessErgCadence`
+    // stays the one judge of a spiral — a steady 55 rpm is not one.
+    const subject = player();
+    subject.start(seconds(0));
+    const grinding: readonly CadenceReading[] = [
+      { at: seconds(4), cadence: revolutionsPerMinute(56) },
+      { at: seconds(10), cadence: revolutionsPerMinute(55) },
+    ];
+    expect(subject.tick(seconds(10), { cadence: grinding }).intent).toMatchObject({
+      eased: false,
+    });
+  });
+
+  // PR #444's review: the latch outlives a free-ride block and a pause, and
+  // that was neither written down nor tested. It is a decision now — see the
+  // module note §"A rescue survives a free ride and a pause" — so it is pinned.
+  const steadyCadence = (from: number, to: number): readonly CadenceReading[] =>
+    Array.from({ length: to - from + 1 }, (_, index) => ({
+      at: seconds(from + index),
+      cadence: revolutionsPerMinute(82),
+    }));
+
+  it('carries a rescue across a free-ride block: the next target starts eased — #441', () => {
+    const subject = player(
+      expandWorkout(workout([steady(20, 0.6), freeRide(30), steady(60, 0.6)])),
+    );
+    subject.start(seconds(0));
+    const eased = subject.tick(seconds(10), { cadence: falling(70, 45, 10) });
+    expect(eased.intent).toMatchObject({ eased: true });
+    subject.acknowledge(watts(wroteWatts(eased.intent)));
+
+    expect(subject.tick(seconds(30), { cadence: steadyCadence(23, 30) }).intent.kind).toBe(
+      'release',
+    );
+
+    // The next ERG block, with a rested rider at 82 rpm: still the relief
+    // target, for one whole trend window, and then the full one.
+    const resumed = subject.tick(seconds(55), { cadence: steadyCadence(48, 55) });
+    expect(resumed.intent).toMatchObject({ eased: true, share: 0.6 });
+    expect(wroteWatts(resumed.intent)).toBe(Math.round(150 * RELIEF_SHARE));
+    subject.acknowledge(watts(wroteWatts(resumed.intent)));
+    const recovered = subject.tick(seconds(55 + TREND_WINDOW), {
+      cadence: steadyCadence(56, 55 + TREND_WINDOW),
+    });
+    expect(recovered.intent).toMatchObject({ eased: false });
+    expect(wroteWatts(recovered.intent)).toBe(150);
+  });
+
+  it('carries a rescue across a pause: the target that comes back on resume is eased — #441', () => {
+    const subject = player(expandWorkout(workout([steady(600, 0.6)])));
+    subject.start(seconds(0));
+    const eased = subject.tick(seconds(10), { cadence: falling(70, 45, 10) });
+    subject.acknowledge(watts(wroteWatts(eased.intent)));
+    subject.pause(seconds(12));
+    subject.resume(seconds(100));
+
+    const resumed = subject.tick(seconds(100), { cadence: steadyCadence(93, 100) });
+    expect(resumed.intent).toMatchObject({ eased: true });
+    subject.acknowledge(watts(wroteWatts(resumed.intent)));
+    expect(
+      subject.tick(seconds(100 + TREND_WINDOW), { cadence: steadyCadence(101, 100 + TREND_WINDOW) })
+        .intent,
+    ).toMatchObject({ eased: false });
+  });
+
+  it('steps back up from a stall: floor, then relief, then the full target — #441', () => {
+    const subject = player();
+    subject.start(seconds(0));
+    const stall = subject.tick(seconds(10), {
+      cadence: [
+        { at: seconds(4), cadence: revolutionsPerMinute(30) },
+        { at: seconds(10), cadence: revolutionsPerMinute(4) },
+      ],
+    });
+    // The caller writes the machine's own lowest target for this.
+    expect(stall.intent.kind).toBe('release');
+
+    // Pedalling again, at 35 rpm: the relief target, not the full one.
+    const restarting = subject.tick(seconds(14), {
+      cadence: [
+        { at: seconds(10), cadence: revolutionsPerMinute(4) },
+        { at: seconds(14), cadence: revolutionsPerMinute(35) },
+      ],
+    });
+    expect(restarting.intent).toMatchObject({ eased: true });
+    subject.acknowledge(watts(wroteWatts(restarting.intent)));
+
+    // Steady at 80 rpm from 15 s: eased until a whole window has passed.
+    const steady80 = (at: number): readonly CadenceReading[] => [
+      { at: seconds(at - 1), cadence: revolutionsPerMinute(80) },
+      { at: seconds(at), cadence: revolutionsPerMinute(80) },
+    ];
+    // The window still holds the 35 rpm reading at 15-21 s, so `spiralling`
+    // (below 50) or `holding` — either way the latch keeps it eased.
+    expect(subject.tick(seconds(24), { cadence: steady80(24) }).intent).toMatchObject({
+      eased: true,
+    });
+    subject.acknowledge(watts(Math.round(150 * RELIEF_SHARE)));
+    expect(
+      wroteWatts(
+        subject.tick(seconds(24 + TREND_WINDOW), { cadence: steady80(24 + TREND_WINDOW) }).intent,
+      ),
+    ).toBe(150);
   });
 });
 

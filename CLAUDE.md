@@ -120,6 +120,11 @@ apps/                 AGPL-3.0-or-later, without exception
     src/detail/         the ride detail view's data layer (#50) — the read budget, the
                         gap-preserving downsampler, the SVG trace and the
                         privacy-zone trim that says what a shared copy contains
+    src/home/           where the app opens (#428) — one bounded store read
+                        and no stream decode on every launch, the week and the
+                        fitness line carried to today, and the empty state a
+                        new rider sees first. ⚠️ `#/` is Home since #428 and
+                        the Ride screen is `#/ride`
     src/library/        the activity library's row model, its port and its stub (#62)
     src/map/            the ride map (#63) — the basemap configuration and the proof
                         it reaches no other origin, the GeoJSON conversion, the
@@ -185,7 +190,12 @@ apps/                 AGPL-3.0-or-later, without exception
                         match checkpoint; and since #294 the one sweep this tab
                         runs, which is module state because the state that has
                         to outlive the screen is not the screen's
-    src/shell/          the hash route table, the router hook and AppShell (#48)
+    src/shell/          the hash route table, the router hook and AppShell (#48),
+                        and since #427 the navigation: four groups recorded on
+                        the route table itself (`routes.ts` §`NavGroupId`), a
+                        bar on a compact window and a rail on a wider one, and
+                        the icons, authored here as inline SVG rather than
+                        installed — no icon set is a dependency
     src/support/        browser-capability detection and its notice (#48), and
                         since #409 whether this browser may throw a rider's
                         history away — the one place `persist()` is asked for,
@@ -441,10 +451,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         writes. It owns the three things neither package can: a
                         refused write restarts the driver, ending a ride
                         releases the trainer, and a refusal becomes a sentence.
-                        ⚠️ **The release is an FTMS Reset (`0x01`) since #372,
-                        and a reviewer who remembers "an FTMS Stop rather than a
-                        flat road" is reading the old file**: on real hardware
-                        an acknowledged Stop left the grade applied. §4h. ⚠️ It sends the **grade and nothing
+                        ⚠️ **The release is an FTMS Stop through the ride
+                        controller's ONE release, and on the one trainer
+                        measured it does NOT remove the grade — nor did the
+                        Reset PR #442 tried** (#372, §4h). ⚠️ It sends the **grade and nothing
                         else** — the rider's wind is out of scope and their drag
                         area would double-count against the game's own physics
     src/game/trainer-port.ts
@@ -462,11 +472,12 @@ apps/                 AGPL-3.0-or-later, without exception
                         control point on the machine and a running workout owns
                         it, `RideSession` is mounted above the router so
                         `workoutTick` keeps driving ERG targets while the rider
-                        is in the game, and the game's own release — an FTMS
-                        Reset since #372, a Stop before it — makes the machine
-                        stop listening to this client, so ending a game ride
-                        would have left the workout's clock running against a
-                        machine that had stopped listening. `ride/controller.ts` §`simulationControl`
+                        is in the game, and the game's own release is an FTMS
+                        **Stop** — after which the machine ignores setpoints
+                        until it is started again, so ending a game ride would
+                        have left the workout's clock running against a machine
+                        that had stopped listening while every target reported
+                        success. `ride/controller.ts` §`simulationControl`
                         refuses the handle and this supplies the sentence
     src/game/rider.ts   what the rider and their bicycle weigh together, what
                         air they ride through, and — since #365 — **how much of
@@ -502,7 +513,13 @@ apps/                 AGPL-3.0-or-later, without exception
                         chosen**: #335 settled that it cannot be changed
                         mid-ride, and `simulation.ts` §`SimulationSetup.wind`
                         is where that is written down
-    src/game/hud/       the ride HUD (#94) — the eight fields, the dropped
+    src/game/hud/       the ride HUD (#94) — and since #396/#397 its ONE live
+                        region: `announce.ts` is the pure core (one sentence per
+                        window, priority by ORDER never by politeness, lower
+                        items dropped not queued, no clock, no speechSynthesis —
+                        all lint-enforced) and `announce-preference.ts` keeps
+                        the rider's choice on the DEVICE, off by default. The
+                        eight fields, the dropped
                         sensor that is not a zero, and the wake lock. ⚠️ Since
                         #423 it is an OVERLAY: four small OPAQUE panels over a
                         full-bleed world, in two tiers — power, cadence and
@@ -1634,7 +1651,7 @@ percentage.
 
 | File | What it decides |
 |---|---|
-| `audit.ts` | fourteen structural rules over a rendered DOM — an unnamed control, a control not in the tab order, a broken heading order, a dangling ARIA reference, a positive `tabindex`, and so on. `tabbableElements` is the tab-order model the keyboard tests rest on |
+| `audit.ts` | fifteen structural rules over a rendered DOM (it said fourteen until #394; `landmarks-are-distinguishable` is the fifteenth — count `ACCESSIBILITY_RULES` rather than this cell) — an unnamed control, a control not in the tab order, a broken heading order, a dangling ARIA reference, a positive `tabindex`, and so on. `tabbableElements` is the tab-order model the keyboard tests rest on |
 | `audit.a11y.test.ts` | a violating fixture for **every** rule, plus an assertion that every rule in `ACCESSIBILITY_RULES` has one. A rule added without a failing fixture fails the build |
 | `routes.a11y.test.tsx` | renders every entry in `shell/routes.ts` and audits it. A route added to the table is audited without anyone editing this file |
 | `contrast.a11y.test.ts` | WCAG 2.2 AA contrast for every declared token pair, and that every token appears in a pair |
@@ -1706,12 +1723,14 @@ browser runs**.
 | `hud.html`, `hud-harness.tsx` | since #266, the ride HUD: the **real** `game/hud/HudPanel.tsx` under the **real** `design/theme.css`, on the **real** stage `GameView` gives it, with every field populated and all three of #259's settled outcome words. ⚠️ **Until #423 that was the `oyl-shell` → `oyl-main` → `oyl-game` chain, and a reviewer who remembers it is reading the old file**: the HUD is laid over a `position: fixed` stage now, so its containing block is the viewport whatever is above it, and the old chain would have gone on measuring a stacked layout a rider only gets at 320×256. One thing on this page is the harness's own and it says so: each stage is `position: relative` and `100vh` tall, because six fixed stages are six panels on top of one another. A **`.tsx`**, and the first React in this directory |
 | `hud.browser.spec.ts` | its spec — no `.oyl-hud__value` overflows its grid track at a phone in either orientation, at **360 px** (where #423's first layout ran the third primary reading off the screen) and at a landscape tablet, read back from the browser's own layout. Its **control panels** are the half that makes a green run mean something; ⚠️ since #423 the control moves the words into the primary list as well as stripping #259's class, because every word is a secondary reading now and at 1.5 rem it would spill by under three pixels, which is not a control |
 | `shell.html`, `shell-harness.tsx` | since #307's review, the app **shell**: the **real** `shell/AppShell.tsx` with the **real** `ROUTES` table under the **real** `design/theme.css`. The second `.tsx` here. ⚠️ Its spacer goes **inside `.oyl-main`** and the file says why at length — after `.oyl-shell` the header scrolls out of its own sticky containing block and measures 0 px, and inside `.oyl-shell` `main` stays shorter than the viewport so a focus scroll never consults `scroll-margin-top`. Each mistake made a different assertion pass over nothing. ⚠️ Since #316 it also renders the **real** `design/Button.tsx` in both variants, with `RideView`'s own labels, because a shell handed no ports renders **zero** controls on all eleven routes and a size assertion over an empty list passes |
-| `shell.browser.spec.ts` | its spec — how much of the viewport persistent chrome still covers after a scroll, where a fragment jump lands the `h1`, whether the focused skip link is the topmost thing at its own centre (hit-tested, not read off a `z-index`), and no horizontal scrolling at 320 px. ⚠️ Since #316 it also measures the **touch target** three ways, and the three fail for different reasons — see below |
+| `shell.browser.spec.ts` | its spec — how much of the viewport persistent chrome still covers after a scroll, where a fragment jump lands the `h1`, whether the focused skip link is the topmost thing at its own centre (hit-tested, not read off a `z-index`), and no horizontal scrolling at 320 px. ⚠️ Since #316 it also measures the **touch target** three ways, and the three fail for different reasons — see below ⚠️ **Since #427 `PERSISTENT_CHROME_BUDGET` is an AREA** — the header and the navigation bar or rail together — and the spec also measures the bar/rail switch and each destination's 44×44 target the three ways #316 measures a button |
 | `offline.browser.spec.ts` | since #408, the offline claim — against **`apps/web/dist`**, in a **persistent** context closed and reopened, with **two controls**. The only spec here that does not drive a harness page, and the first use of `setOffline` in this repository |
 | `ride.html`, `ride-harness.tsx` | since [#373](https://github.com/openzigs/onyourleft/issues/373), the trainer game's ride, and since [#423](https://github.com/openzigs/onyourleft/issues/423) its **stage**. ⚠️ **It RIDES now, and a reviewer who remembers it rendering `<HudPanel>` by hand is reading the old file**: the real `AppShell` at the real game route is handed a game port, and the page ticks the picker's own checkboxes and presses its own *Ride* — so a `GameView` that stopped putting `oyl-game--riding` on its root, or a shell that stopped listening, fails here rather than passing over a fixture that still does both. The fixture is the WIDEST ride the picker can start (a pacer, a ghost and a wind). It renders **no WebGL**. `?trainer=workout` is the same ride with the longest standing notice there is |
 | `ride.browser.spec.ts` | its spec — at **eight overlay viewports, a landscape tablet among them, which no gate had ever measured**: the world fills the viewport, the chrome is absent, every reading and control is on screen at `scrollY === 0` and hit-tested uncovered, no panel is over another or over the RIDER (`game/camera.ts` §`riderFrameBox`), and a safe-area inset moves every panel. ⚠️ **#373 called landscape solved and it was not**: it moved the trainer line into a panel that was itself 572 px tall in a 390 px viewport (#419), confirmed on hardware in #422. ⚠️ Its **control** takes `oyl-game--riding` off the live element and requires *End ride* to fall below the fold again; without it every assertion here is true of a page that rendered nothing. The case that asserted #419's premise — *"the HUD panel is taller than a landscape phone viewport"* — is **removed**, as that issue asked, rather than loosened |
 | `rideview.html`, `rideview-harness.tsx` | since [#422](https://github.com/openzigs/onyourleft/issues/422), the **Ride SCREEN** — `views/RideView.tsx` at `#/`, which is not the game. On the owner's tablet in landscape a prose reading measure cut it off at the ride controls with `WorkoutPanel` below the fold, and a rider testing whether ERG releases (#372) started a plain recording instead: **a layout defect produced a false answer to a safety question.** The fixture is the screen at its fullest — control granted, a saved workout, a threshold — because the control the owner could not see only renders then |
-| `rideview.browser.spec.ts` | its spec — every ride control on screen with no scrolling at 1280×800 and 1024×768, the trainer BESIDE the live metrics, and nothing wider than a phone. Its control puts the measure and the single column back and requires the workout to be below the fold again, which is the defect itself. ⚠️ **Since #436's review it also measures at 1280×720 and 1024×720, and a reviewer who remembers two tablet viewports is reading the old file**: 1280×800 is the tablet's *display*, the Android shell configures no fullscreen mode, and the WebView is shorter by the system bars — at 728 px *Pause* / *Stop* were below the fold behind a green gate. ⚠️ **720 is assumed, not read off the device**; validation 0002 Q6 asks for `window.innerHeight`. Every tablet case now **publishes its margin to the fold** and holds it to a 50 px floor rather than to zero, because a control that clears by 3 px in this Chromium's fonts has not been shown to clear anywhere else. **The rule it leaves behind: a browser-gate "device" viewport is the display's CSS size, not the WebView's — report the margin, and treat one under about 50 px as unproven on that device** |
+| `rideview.browser.spec.ts` | its spec — every ride control on screen with no scrolling at 1280×800 and 1024×768, the trainer BESIDE the live metrics, and nothing wider than a phone. Its control puts the measure and the single column back and requires the workout to be below the fold again, which is the defect itself. ⚠️ **Since #436's review it also measures at 1280×720 and 1024×720, and a reviewer who remembers two tablet viewports is reading the old file**: 1280×800 is the tablet's *display*, the Android shell configures no fullscreen mode, and the WebView is shorter by the system bars — at 728 px *Pause* / *Stop* were below the fold behind a green gate. ⚠️ **720 was assumed, and was the wrong mechanism — since #439 `TABLET_IN_THE_SHELL` is 1280×800 with edge-to-edge insets 36/32, read off the device, and applied to the ENGINE through `browser/insets.ts`** (`Emulation.setSafeAreaInsetsOverride`, so `env()` itself reports them): at API 35+ the bars are drawn over the WebView rather than taken off it, and the fold is `height − bottom inset`. The upright insets are the landscape ones reused, and say so. Every tablet case now **publishes its margin to the fold** and holds it to a 50 px floor rather than to zero, because a control that clears by 3 px in this Chromium's fonts has not been shown to clear anywhere else. **The rule it leaves behind: a browser-gate "device" viewport is the display's CSS size, not the WebView's — report the margin, and treat one under about 50 px as unproven on that device** |
+| `loop.html`, `loop-harness.ts`, `loop.browser.spec.ts` | since #440, the start of a LOOP drawn by the real renderer at the real chase camera, with the road isolated by rendering each frame with and without its index list. It asserts the far road converges on the middle of the frame — the camera looks down the road it is on — and its **control is a profile exactly as a pre-#440 build stored one** (the line, marked `loop` afterwards), which must look across the road instead. ⚠️ The cause was in `packages/domain`'s `routeProfile`, not the camera: see §9 |
+| `insets.ts` | since #439, edge-to-edge safe-area insets applied to the ENGINE through `Emulation.setSafeAreaInsetsOverride`, so `env()` itself reports them, plus the one inset reading taken off the owner's tablet. Every #439 case also reads the insets back, so a Playwright bump that drops the protocol call fails rather than measuring a page with none |
 | `../playwright.config.ts` | Chromium only, no retries, the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all — and since #408 **two `webServer` entries**, because the product and the harness are different builds |
 | `../vite.browser.config.ts` | the harness build. A second Vite config, so the harness cannot reach a shipped bundle |
 
@@ -2142,25 +2161,25 @@ comment warns they are "not necessarily" the same. `fitness-machine-channel.test
 assumption, because if it ever breaks the symptom is a control point write addressed to a device the
 plugin has never heard of, on the one path that applies physical resistance to somebody.
 
-⚠️ **Letting a trainer go is an FTMS Reset (`0x01`), not a Stop (`0x08`), since
-[#372](https://github.com/openzigs/onyourleft/issues/372)** — and a reviewer who remembers
-`stop()` being "the deliberate way to end resistance" is reading the old file. On the one trainer
-measured, an acknowledged Stop released nothing: a grade stayed applied (2026-09-19) and an ERG
-target was still being chased, power rising as cadence fell (2026-09-21). So
-`TrainerControl.letGo()` in `packages/sensors/protocol` is the **one** place that decides what a
-release sends, and every release goes through `ride/controller.ts` §`releaseTrainer` — *End ERG*, the
-end of a workout, stopping a ride, and a game ride ending by button or by navigating away. Three
-things about it are decisions, not details: a Reset **revokes control** (FTMS §4.16.2.1), which is
-the intent for a terminal release and why nothing is written after one; it is **not reported as a
-loss** — no "Control lost", and a workout ends rather than pausing — and nothing takes control back
-afterwards, so the next game ride tells the rider to take control on the Ride screen; and a machine
-that refuses the Reset gets a flat road and a Stop, reported as **Not released**, never as released.
-⚠️ `ErgSink` still cannot reach `reset` or `letGo` — the session that owns the writer releases,
-never the writer — and a **pause inside a workout** (a free-ride block, a paused ride, the ERG spiral
-easing) is still a Stop, because the workout writes again afterwards; on the measured trainer that
-does not ease an ERG target either, which is [#441](https://github.com/openzigs/onyourleft/issues/441). ⚠️ **No test here proves a real trainer
-lets go on a Reset** — the #44 simulator clears its targets on one because it was written to.
-Validation 0002 L5, L7 and Part R are the proof, and #372 closes on them.
+⚠️ **Letting a trainer go goes through ONE method, and on the one trainer measured nothing it could
+send releases anything** ([#372](https://github.com/openzigs/onyourleft/issues/372)). A reviewer
+who remembers `stop()` being "the deliberate way to end resistance", **or** PR #442's "a release is
+an FTMS Reset", is reading an old file. On the owner's trainer an acknowledged `0x08` Stop kept a grade
+(2026-09-19) and an ERG target (2026-09-21), and an acknowledged `0x01` Reset kept the ERG target too
+(2026-09-21) — while also revoking control. The owner **accepted end-of-ride retention** on the
+condition, measured and met, that the app can take control again. So `TrainerControl.letGo()` in
+`packages/sensors/protocol` sends a **Stop** and keeps control, and every release goes through
+`ride/controller.ts` §`releaseTrainer` — *End ERG*, the end of a workout, stopping a ride, and a game
+ride ending by button or by navigating away. What survives from #442 is structural: one release; it
+is **not reported as a loss** (no "Control lost", and a workout ends rather than pausing); nothing
+takes control back after one; and a refused Stop is reported as **Not released**.
+⚠️ **Easing a rider DURING a workout is a different command**
+([#441](https://github.com/openzigs/onyourleft/issues/441)): this trainer honours `0x05` Set Target
+Power to within ±2 W, so a free-ride block, a stalled rider and a paused ride write the machine's own
+Supported Power Range **minimum** through the ERG writer — never a Stop — and `ErgSink` stays
+`Pick<TrainerControl, 'setTargetPower'>`, which is all that needs. ⚠️ **No test here proves a real
+trainer lets go or eases** — every test asserts what is sent. Validation 0002 L5, L7, Part R and
+Part S are the hardware steps.
 
 ### 4j. The wiring gate
 
@@ -3052,6 +3071,7 @@ top of an issue **supersedes its body**.
 | Which time basis a segment board ranks by, and why moving time is not it | `packages/domain/src/segment/effort.ts` §`RANKING_BASIS` |
 | How two efforts recorded at different rates are compared without truncating either | `packages/domain/src/segment/comparison.ts`, §`overlayEfforts` |
 | Why an effort stores no sample indices, and where they come from instead | `apps/web/src/efforts/load.ts` §`sampleIndexAt` |
+| Why a loop's closing gap is part of the lap, and what a route saved before that still carries | `packages/domain/src/route/profile.ts` §`LOOP_CLOSURE_METRES`, `apps/web/browser/loop-harness.ts`, [#440](https://github.com/openzigs/onyourleft/issues/440) |
 | Why a route's gradient is three windows rather than one smoothing pass, and what each costs | `packages/domain/src/route/profile.ts`, [`docs/architecture.md`](docs/architecture.md) §"The route profile" |
 | Why a lone bad elevation reading never reaches the trainer, and the case where two do | `packages/domain/src/route/profile.ts` §`DESPIKE_WINDOW_METRES`, `profile.test.ts` §"where the despike stage stops working" |
 | Why total ascent is accumulated by run rather than by step, and what a median cannot fix | `packages/domain/src/route/profile.ts` §`ASCENT_THRESHOLD_METRES` |
@@ -3092,7 +3112,7 @@ top of an issue **supersedes its body**.
 | Why a quantised acknowledgement is not a change, and the busy loop that follows from reading it as one | `packages/domain/src/workout/player.ts` §`acknowledge` |
 | Which single place rebases the workout offset after a pause, and why the other two do not | `packages/domain/src/workout/player.ts` §`resume` |
 | Why a workout player cannot send an FTMS Reset even by mistake | `packages/sensors/protocol/src/erg-writer.ts` §`ErgSink` |
-| Why the end of a workout is a Reset, a pause inside one is still a Stop, neither is a target of zero, and which object may reach for them | `apps/web/src/workout/session.ts` §`finish`, §`ease`, §`WorkoutTrainer`, §4h |
+| What the end of a workout sends, what an ease inside one sends, and which object may reach for each | `apps/web/src/workout/session.ts` §`finish`, §`ease`, §`WorkoutTrainer`, §4h |
 | Why a lost trainer link does not close the ERG writer, and what closing it cost | `apps/web/src/workout/session.ts` §`linkLost` |
 | Why the session assumes the trainer is already holding something when a workout starts | `apps/web/src/workout/session.ts` §`released` |
 | What the #44 simulator proves about the control loop that neither package can prove alone | `apps/web/src/workout/session.test.ts` |
@@ -3251,9 +3271,9 @@ top of an issue **supersedes its body**.
 | How the road the game draws reaches a trainer, and what proves a ride sends one | `apps/web/src/game/gradient.ts`, `apps/web/src/game/trainer-wiring.test.tsx`, [#362](https://github.com/openzigs/onyourleft/issues/362) |
 | Why a machine that does not offer simulation mode is never written to, and what the rider is told instead | `apps/web/src/game/trainer-port.ts` §`gameTrainerFrom`, §`trainerRoadNotice` |
 | Why the game is refused the trainer while a workout is running, and what the game's release would have done to that workout | `apps/web/src/ride/controller.ts` §`simulationControl`, `apps/web/src/game/trainer-port.ts` §`GameTrainerKind` member `workout` |
-| What happens to the resistance when a ride ends, and why it is a Reset rather than a Stop or a flat road | `apps/web/src/game/gradient.ts` §`stop`, `packages/sensors/protocol/src/fitness-machine-control.ts` §`letGo`, [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part L, Part R, [#372](https://github.com/openzigs/onyourleft/issues/372) |
+| What happens to the resistance when a ride ends, and why neither a Stop nor a Reset removed it on the trainer measured | `apps/web/src/game/gradient.ts` §`stop`, `packages/sensors/protocol/src/fitness-machine-control.ts` §`letGo`, [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part L, Part R, [#372](https://github.com/openzigs/onyourleft/issues/372) |
 | Where every release in the client goes through, why one is joined rather than repeated, and why it is not a loss of control | `apps/web/src/ride/controller.ts` §`releaseTrainer` |
-| Why a workout replaced by another does not Reset the trainer | `apps/web/src/workout/session.ts` §`supersede`, `apps/web/src/ride/controller.ts` §`endWorkoutSession` |
+| Why a workout replaced by another is handed over with a bare Stop rather than the release | `apps/web/src/workout/session.ts` §`supersede`, `apps/web/src/ride/controller.ts` §`endWorkoutSession` |
 | Why the simulator can be built to keep its targets through a Stop, and what that does not prove | `packages/sensors/src/simulator/ftms.ts` §`FtmsOptions.retainsTargetsThroughStop` |
 | Why the gradient write carries no wind and no drag area | `apps/web/src/game/gradient.ts` §"What is deliberately NOT sent" |
 | Why every rider used to be simulated as a track racer, and where the drag area is chosen now | `apps/web/src/game/rider.ts` §`RIDING_POSITIONS`, [`packages/physics/README.md`](packages/physics/README.md) §2 |

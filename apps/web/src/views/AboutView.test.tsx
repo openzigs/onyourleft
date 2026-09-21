@@ -31,7 +31,12 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { PRIVACY_POLICY_URL, SOURCE_CODE_URL } from '../privacy/policy';
+import { MAX_DATA_LOSS_SECONDS } from '../recording/recorder';
 import { hrefFor, routeById } from '../shell/routes';
 import { mount, queryAll } from '../testing/mount';
 
@@ -160,5 +165,76 @@ describe('what the About page claims about the network — #404, then #408', () 
     const text = await aboutText();
     expect(text).toContain(DATA_IS_LOCAL);
     expect(text).toContain('nothing is uploaded');
+  });
+});
+
+describe('what the About page says about a ride the app closed on — #411', () => {
+  /**
+   * The same discipline as the block above: the sentences are pinned as
+   * literals, because a test that rendered a shared constant could not tell a
+   * true sentence from a false one. The NUMBER is the exception, and it is
+   * the point of #411's second criterion — it is derived from the recorder's
+   * own constant in the view, and this file then checks the README says the
+   * same number, so the three places it is written agree or the build is red.
+   */
+  const README = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', 'README.md');
+  const WORDS: Record<string, number> = {
+    five: 5,
+    six: 6,
+    seven: 7,
+    eight: 8,
+    nine: 9,
+    ten: 10,
+    eleven: 11,
+    twelve: 12,
+  };
+
+  async function aboutText(): Promise<string> {
+    const mounted = await mount(<AboutView />);
+    const text = mounted.container.textContent ?? '';
+    mounted.unmount();
+    return text;
+  }
+
+  it('says a ride is written as it happens, and survives the tab closing', async () => {
+    const text = await aboutText();
+    expect(text).toContain('A ride is written to this device’s storage as it happens');
+    expect(text).toContain('what was recorded up to then is still here');
+  });
+
+  it('states the bound, and it is the recorder’s own number', async () => {
+    const text = await aboutText();
+    expect(text).toContain(
+      `At most ${String(MAX_DATA_LOSS_SECONDS)} seconds of a ride can be lost to a crash`,
+    );
+    // The literal, too: moving the recorder's cadence is a decision this
+    // sentence has to be read against, not a number that slides silently.
+    expect(text).toContain('At most 8 seconds of a ride can be lost to a crash');
+  });
+
+  it('agrees with the README, which states the same bound in words', () => {
+    const readme = readFileSync(README, 'utf8');
+    const stated = /At most (\w+) seconds of a ride can be lost to a crash/.exec(readme)?.[1];
+    expect(stated, 'README.md no longer states the bound in the sentence this reads').toBeDefined();
+    expect(WORDS[stated ?? '']).toBe(MAX_DATA_LOSS_SECONDS);
+  });
+
+  it('keeps the “up to”, which the recovery read insists on', async () => {
+    const text = await aboutText();
+    expect(text).toContain('offered as up to a length');
+    expect(text).toContain('to its last checkpoint');
+  });
+
+  it('says a finished ride is offered save and discard but not continue, and why', async () => {
+    const text = await aboutText();
+    expect(text).toContain('offered save and discard but not continue');
+    expect(text).toContain('whose save failed, and you ended it on purpose');
+  });
+
+  it('claims nothing it cannot support', async () => {
+    const text = (await aboutText()).toLowerCase();
+    expect(text).not.toContain('cannot be lost');
+    expect(text).not.toContain('backup');
+    expect(text).not.toContain('cloud');
   });
 });

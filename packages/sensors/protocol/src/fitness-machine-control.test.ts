@@ -57,8 +57,6 @@ interface ScriptedMachine {
   answer(opCode: number, result: number): void;
   /** Answer nothing at all, so the procedure never completes. */
   goSilent(): void;
-  /** Start answering again after {@link goSilent}. */
-  answerAgain(): void;
   /**
    * Hold the CCCD write open, and return the release.
    *
@@ -144,9 +142,6 @@ function scriptedMachine(): ScriptedMachine {
     },
     goSilent() {
       silent = true;
-    },
-    answerAgain() {
-      silent = false;
     },
     holdIndicationEnable() {
       enableGate = new Promise<void>((resolve) => {
@@ -822,7 +817,11 @@ describe('the link dropping mid-ERG', () => {
   // belief, and says nothing about the resistance: on the trainer #372 was
   // measured on, a Stop released neither a grade nor an ERG target. The
   // release is `letGo()`, tested under its own heading below.
-  it('sends Stop as 0x08 0x01 and forgets its own target — which is not a release (#372)', async () => {
+  // ⚠️ And until PR #444's review it was called "… and forgets its own
+  // target", asserting `none`. The measured trainer kept holding the target
+  // through an acknowledged Stop, so `none` was this client claiming something
+  // the machine had not done.
+  it('sends Stop as 0x08 0x01 and no longer vouches for its target — which is not a release (#372)', async () => {
     const trainer = control();
     await trainer.requestControl();
     await trainer.setTargetPower(watts(250));
@@ -830,7 +829,7 @@ describe('the link dropping mid-ERG', () => {
     await trainer.stop();
 
     expect([...(machine.writes.at(-1) ?? [])]).toStrictEqual([0x08, 0x01]);
-    expect(trainer.targetPower()).toStrictEqual({ kind: 'none' });
+    expect(trainer.targetPower()).toStrictEqual({ kind: 'unknown', attempted: 250 });
   });
 
   it('refuses to write at all until the transport says a new link is up', async () => {
@@ -1418,13 +1417,14 @@ describe('closing the client', () => {
 // --- Letting the trainer go — #372 ------------------------------------------
 
 describe('releasing the trainer at the end of a ride — #372', () => {
-  const featuresWith = (targetBits: number) =>
-    decodeFitnessMachineFeature(createPayloadWriter().u32(0).u32(targetBits).view());
+  // ⚠️ This block asserted a Reset until #442 was re-scoped, and a reviewer who
+  // remembers `{ kind: 'reset' }` here is reading the old file. On the owner's
+  // trainer a Reset was acknowledged and the ERG target stayed applied, exactly
+  // as after a Stop — and the Reset revoked control as well. So what is asserted
+  // is what reaches the wire, read off the machine's own record of its writes,
+  // and nothing here says the trainer let go.
 
-  it('sends 0x01 Reset — and the release does NOT consist of a 0x08 Stop', async () => {
-    // The hardware finding this whole block rests on: an acknowledged `0x08`
-    // left both a grade and an ERG target applied. So what is asserted is what
-    // reaches the wire, read off the machine's own record of its writes.
+  it('sends 0x08 Stop — and never a 0x01 Reset', async () => {
     const trainer = control();
     await trainer.requestControl();
     await trainer.setTargetPower(watts(200));
@@ -1432,218 +1432,70 @@ describe('releasing the trainer at the end of a ride — #372', () => {
 
     const outcome = await trainer.letGo();
 
-    expect(outcome).toStrictEqual({ kind: 'reset' });
+    expect(outcome).toStrictEqual({ kind: 'stopped' });
     const sent = machine.writes.slice(before).map((write) => [...write]);
-    expect(sent).toStrictEqual([[FTMS_OP_CODE.reset]]);
-    expect(sent.some((write) => write[0] === FTMS_OP_CODE.stopOrPause)).toBe(false);
+    expect(sent).toStrictEqual([[FTMS_OP_CODE.stopOrPause, 0x01]]);
+    expect(sent.some((write) => write[0] === FTMS_OP_CODE.reset)).toBe(false);
   });
 
-  it('gives up control, and refuses a later write out loud rather than losing it', async () => {
-    // The Reset trap, closed structurally: a write after a release is not sent
-    // into a machine that is ignoring this client, it is refused before it is
-    // written.
+  it('keeps control, so the next ride needs no fresh Request Control', async () => {
+    // The whole cost of the Reset #442 first sent: every ride ended with the
+    // rider asking for control again, for a release the trainer ignored.
     const trainer = control();
     await trainer.requestControl();
     await trainer.letGo();
-    const before = machine.writes.length;
 
-    expect(trainer.hasControl()).toBe(false);
+    expect(trainer.hasControl()).toBe(true);
+    // No target was ever written, so a Stop cannot have left one behind.
     expect(trainer.targetPower()).toStrictEqual({ kind: 'none' });
-    await expect(trainer.setTargetPower(watts(150))).rejects.toThrow(
-      /has not been granted control/,
-    );
-    await expect(trainer.setSimulationParameters({ grade: gradePercent(3) })).rejects.toThrow(
-      SensorError,
-    );
-    expect(machine.writes).toHaveLength(before);
-  });
-
-  it('does NOT report a release as a loss of control', async () => {
-    // ⚠️ The ride screen pauses a workout and shows "Control lost" on a loss.
-    // Ending a workout must not do either, so a release is silent here — and
-    // the bare `reset()`, which a release is not, still says `reset`.
-    const reasons: ControlLossReason[] = [];
-    const trainer = control();
-    trainer.onControlLost((reason) => reasons.push(reason));
-    await trainer.requestControl();
-
-    await trainer.letGo();
-
-    expect(reasons).toStrictEqual([]);
-  });
-
-  it('does not re-acquire control when the machine confirms the release with 0xFF', async () => {
-    // A machine may well follow its own Reset with Control Permission Lost.
-    // With `reacquireControl` on — the default — that used to mean a silent
-    // Request Control straight back, which would undo the release without the
-    // rider doing anything.
-    const reasons: ControlLossReason[] = [];
-    const trainer = control();
-    trainer.onControlLost((reason) => reasons.push(reason));
-    await trainer.requestControl();
-    await trainer.letGo();
-
-    machine.status(Uint8Array.from([0xff]));
-    await inFlight();
-
+    await expect(trainer.setTargetPower(watts(150))).resolves.toBe(150);
+    expect(trainer.targetPower()).toStrictEqual({ kind: 'confirmed', target: 150 });
     expect(machine.writes.map((write) => write[0])).toStrictEqual([
       FTMS_OP_CODE.requestControl,
-      FTMS_OP_CODE.reset,
-    ]);
-    expect(reasons).toStrictEqual([]);
-    expect(trainer.hasControl()).toBe(false);
-  });
-
-  it('treats a 0xFF as a loss again once the rider has taken control back', async () => {
-    // The flag is the release's, not the client's for ever.
-    const reasons: ControlLossReason[] = [];
-    const trainer = control({ reacquireControl: false });
-    trainer.onControlLost((reason) => reasons.push(reason));
-    await trainer.requestControl();
-    await trainer.letGo();
-    await trainer.requestControl();
-
-    machine.status(Uint8Array.from([0xff]));
-
-    expect(reasons).toStrictEqual(['permission-lost']);
-  });
-
-  it('falls back to a flat road and a Stop when the Reset is refused, and says so', async () => {
-    const trainer = control();
-    await trainer.requestControl();
-    await trainer.setTargetPower(watts(200));
-    machine.answer(FTMS_OP_CODE.reset, FTMS_RESULT_CODE.opCodeNotSupported);
-    const before = machine.writes.length;
-
-    const outcome = await trainer.letGo();
-
-    expect(outcome.kind).toBe('incomplete');
-    expect(outcome.kind === 'incomplete' && outcome.flattened).toBe(true);
-    expect(machine.writes.slice(before).map((write) => [...write])).toStrictEqual([
-      [FTMS_OP_CODE.reset],
-      // 0x11: wind 0, grade 0, then the client's documented defaults.
-      [FTMS_OP_CODE.setIndoorBikeSimulationParameters, 0, 0, 0, 0, 40, 51],
-      [FTMS_OP_CODE.stopOrPause, 0x01],
-    ]);
-    // Control is still held — the machine refused the one command that ends it.
-    expect(trainer.hasControl()).toBe(true);
-    expect(trainer.targetPower()).toStrictEqual({ kind: 'none' });
-  });
-
-  it('skips the flat road on a machine that says it has no simulation mode', async () => {
-    const trainer = control({ features: featuresWith(1 << 3) });
-    await trainer.requestControl();
-    await trainer.setTargetPower(watts(200));
-    machine.answer(FTMS_OP_CODE.reset, FTMS_RESULT_CODE.operationFailed);
-    const before = machine.writes.length;
-
-    const outcome = await trainer.letGo();
-
-    expect(outcome.kind === 'incomplete' && !outcome.flattened).toBe(true);
-    expect(machine.writes.slice(before).map((write) => write[0])).toStrictEqual([
-      FTMS_OP_CODE.reset,
       FTMS_OP_CODE.stopOrPause,
+      FTMS_OP_CODE.setTargetPower,
     ]);
-    // An ERG target nothing replaced is not "none": nobody confirmed it went.
+  });
+
+  it('says the target it had confirmed is now unknown, never none — PR #444 review', async () => {
+    // ⚠️ The finding: after an acknowledged Stop this client recorded `none`,
+    // and the ride screen said "No target set. The trainer is following your
+    // effort." — while the measured trainer held 200 W with nothing watching
+    // the rider's cadence. The machine acknowledged a Stop; it did not say it
+    // let go, and on #372's trainer it did not.
+    const trainer = control();
+    await trainer.requestControl();
+    await trainer.setTargetPower(watts(200));
+
+    expect(await trainer.letGo()).toStrictEqual({ kind: 'stopped' });
+
     expect(trainer.targetPower()).toStrictEqual({ kind: 'unknown', attempted: 200 });
+    expect(trainer.hasControl()).toBe(true);
   });
 
-  it('keeps a target it could not confirm as unknown, rather than promoting it to none', async () => {
-    // A target that timed out may or may not be on the machine; a fallback that
-    // replaced nothing cannot have cleared it either.
-    const timers: Array<() => void> = [];
+  it('keeps an UNKNOWN target unknown through an acknowledged Stop — it does not become none', async () => {
+    // The other half of the same finding: a target that timed out may be on
+    // the machine, and a Stop the machine answered does not settle that.
+    const fire: Array<() => void> = [];
     const trainer = control({
-      features: featuresWith(1 << 3),
       scheduleTimeout: (_after, run) => {
-        timers.push(run);
-        return () => undefined;
+        fire.push(run);
+        return () => {
+          fire.splice(fire.indexOf(run), 1);
+        };
       },
     });
     await trainer.requestControl();
     machine.goSilent();
-    const unanswered = trainer.setTargetPower(watts(180));
+    const setting = trainer.setTargetPower(watts(240));
     await inFlight();
-    timers.at(-1)?.();
-    await expect(unanswered).rejects.toThrow(SensorError);
-    expect(trainer.targetPower()).toStrictEqual({ kind: 'unknown', attempted: 180 });
-
-    machine.answerAgain();
-    machine.answer(FTMS_OP_CODE.reset, FTMS_RESULT_CODE.opCodeNotSupported);
-    const outcome = await trainer.letGo();
-
-    expect(outcome.kind).toBe('incomplete');
-    expect(trainer.targetPower()).toStrictEqual({ kind: 'unknown', attempted: 180 });
-  });
-
-  it('still sends the Stop, and still says incomplete, when the flat road is refused', async () => {
-    const trainer = control();
-    await trainer.requestControl();
-    machine.answer(FTMS_OP_CODE.reset, FTMS_RESULT_CODE.opCodeNotSupported);
-    machine.answer(
-      FTMS_OP_CODE.setIndoorBikeSimulationParameters,
-      FTMS_RESULT_CODE.invalidParameter,
-    );
-
-    const outcome = await trainer.letGo();
-
-    expect(outcome.kind === 'incomplete' && !outcome.flattened).toBe(true);
-    expect(machine.writes.at(-1)?.[0]).toBe(FTMS_OP_CODE.stopOrPause);
-  });
-
-  it('rejects rather than reporting anything when the fallback Stop is refused too', async () => {
-    const trainer = control();
-    await trainer.requestControl();
-    machine.answer(FTMS_OP_CODE.reset, FTMS_RESULT_CODE.opCodeNotSupported);
-    machine.answer(FTMS_OP_CODE.stopOrPause, FTMS_RESULT_CODE.operationFailed);
-
-    await expect(trainer.letGo()).rejects.toThrow(SensorError);
-  });
-
-  it('rejects, and writes nothing more, when the Reset is answered Control Not Permitted', async () => {
-    // Somebody else has the machine. That is an involuntary loss, reported as
-    // one, and there is nothing this client may send after it.
-    const reasons: ControlLossReason[] = [];
-    const trainer = control({ reacquireControl: false });
-    trainer.onControlLost((reason) => reasons.push(reason));
-    await trainer.requestControl();
-    machine.answer(FTMS_OP_CODE.reset, FTMS_RESULT_CODE.controlNotPermitted);
-    const before = machine.writes.length;
-
-    await expect(trainer.letGo()).rejects.toThrow(SensorError);
-
-    expect(machine.writes.slice(before).map((write) => write[0])).toStrictEqual([
-      FTMS_OP_CODE.reset,
-    ]);
-    expect(reasons).toStrictEqual(['permission-lost']);
-  });
-
-  it('falls back when the Reset goes unanswered, because it may not have happened', async () => {
-    const timers: Array<() => void> = [];
-    const trainer = control({
-      scheduleTimeout: (_after, run) => {
-        timers.push(run);
-        return () => undefined;
-      },
+    fire.forEach((run) => {
+      run();
     });
-    await trainer.requestControl();
-    machine.goSilent();
+    await setting.catch(() => undefined);
+    expect(trainer.targetPower()).toStrictEqual({ kind: 'unknown', attempted: 240 });
 
     const pending = trainer.letGo();
-    await inFlight();
-    // The machine comes back for everything after the Reset.
-    const silentReset = timers.at(-1);
-    silentReset?.();
-    machine.writes.length = 0;
-    await inFlight();
-
-    // Silence persists in the scripted machine, so answer the fallback by hand.
-    machine.indicate(
-      Uint8Array.from([
-        FTMS_OP_CODE.responseCode,
-        FTMS_OP_CODE.setIndoorBikeSimulationParameters,
-        FTMS_RESULT_CODE.success,
-      ]),
-    );
     await inFlight();
     machine.indicate(
       Uint8Array.from([
@@ -1653,176 +1505,156 @@ describe('releasing the trainer at the end of a ride — #372', () => {
       ]),
     );
 
-    const outcome = await pending;
+    expect(await pending).toStrictEqual({ kind: 'stopped' });
+    expect(trainer.targetPower()).toStrictEqual({ kind: 'unknown', attempted: 240 });
+  });
+
+  it('does NOT report a release as a loss of control', async () => {
+    // ⚠️ The ride screen pauses a workout and shows "Control lost" on a loss.
+    // Ending a workout must not do either.
+    const reasons: ControlLossReason[] = [];
+    const trainer = control();
+    trainer.onControlLost((reason) => reasons.push(reason));
+    await trainer.requestControl();
+
+    await trainer.letGo();
+
+    expect(reasons).toStrictEqual([]);
+  });
+
+  it('does not take control back on a 0xFF after the release', async () => {
+    // With `reacquireControl` on — the default — a 0xFF during a ride means a
+    // Request Control straight back. After the ride has ended that would be the
+    // app taking the trainer without the rider doing anything.
+    const reasons: ControlLossReason[] = [];
+    const trainer = control();
+    trainer.onControlLost((reason) => reasons.push(reason));
+    await trainer.requestControl();
+    await trainer.letGo();
+
+    machine.status(Uint8Array.from([0xff]));
+    await inFlight();
+
+    expect(machine.writes.map((write) => write[0])).toStrictEqual([
+      FTMS_OP_CODE.requestControl,
+      FTMS_OP_CODE.stopOrPause,
+    ]);
+    expect(reasons).toStrictEqual([]);
+    expect(trainer.hasControl()).toBe(false);
+  });
+
+  it('treats a 0xFF that arrives BEFORE the Stop is answered as part of the release', async () => {
+    // PR #442's review: a status and an answer on two characteristics arrive in
+    // no fixed order, and a flag set only on the answer read the 0xFF as a loss.
+    const reasons: ControlLossReason[] = [];
+    const trainer = control();
+    trainer.onControlLost((reason) => reasons.push(reason));
+    await trainer.requestControl();
+    machine.goSilent();
+
+    const pending = trainer.letGo();
+    await inFlight();
+    machine.status(Uint8Array.from([0xff]));
+    await inFlight();
+    machine.indicate(
+      Uint8Array.from([
+        FTMS_OP_CODE.responseCode,
+        FTMS_OP_CODE.stopOrPause,
+        FTMS_RESULT_CODE.success,
+      ]),
+    );
+
+    expect(await pending).toStrictEqual({ kind: 'stopped' });
+    await inFlight();
+    expect(reasons).toStrictEqual([]);
+    expect(machine.writes.map((write) => write[0])).toStrictEqual([
+      FTMS_OP_CODE.requestControl,
+      FTMS_OP_CODE.stopOrPause,
+    ]);
+  });
+
+  it('treats a 0xFF as a loss again as soon as the next ride writes — no Request Control needed', async () => {
+    // ⚠️ The half that a Stop-based release makes necessary. Control is KEPT,
+    // so the next ride writes with no Request Control in between; a flag
+    // cleared only by Request Control would silence a genuine loss mid-ride.
+    const reasons: ControlLossReason[] = [];
+    const trainer = control({ reacquireControl: false });
+    trainer.onControlLost((reason) => reasons.push(reason));
+    await trainer.requestControl();
+    await trainer.letGo();
+    await trainer.setTargetPower(watts(180));
+
+    machine.status(Uint8Array.from([0xff]));
+
+    expect(reasons).toStrictEqual(['permission-lost']);
+  });
+
+  it('treats a 0xFF as a loss again once the rider has taken control back', async () => {
+    const reasons: ControlLossReason[] = [];
+    const trainer = control({ reacquireControl: false });
+    trainer.onControlLost((reason) => reasons.push(reason));
+    await trainer.requestControl();
+    await trainer.letGo();
+    await trainer.requestControl();
+
+    machine.status(Uint8Array.from([0xff]));
+
+    expect(reasons).toStrictEqual(['permission-lost']);
+  });
+
+  it('says incomplete when the Stop is refused, and keeps what it believed about the target', async () => {
+    const trainer = control();
+    await trainer.requestControl();
+    await trainer.setTargetPower(watts(200));
+    machine.answer(FTMS_OP_CODE.stopOrPause, FTMS_RESULT_CODE.operationFailed);
+    const before = machine.writes.length;
+
+    const outcome = await trainer.letGo();
+
     expect(outcome.kind).toBe('incomplete');
     expect(
-      outcome.kind === 'incomplete' && isSensorError(outcome.resetRefusal, 'control-timed-out'),
+      outcome.kind === 'incomplete' && isSensorError(outcome.refusal, 'control-rejected'),
+    ).toBe(true);
+    // One write, and nothing sent after the refusal — no Reset, no flat road.
+    expect(machine.writes.slice(before).map((write) => [...write])).toStrictEqual([
+      [FTMS_OP_CODE.stopOrPause, 0x01],
+    ]);
+    expect(trainer.hasControl()).toBe(true);
+    expect(trainer.targetPower()).toStrictEqual({ kind: 'confirmed', target: 200 });
+  });
+
+  it('says incomplete when the Stop goes unanswered', async () => {
+    const timers: Array<() => void> = [];
+    const trainer = control({
+      scheduleTimeout: (_after, run) => {
+        timers.push(run);
+        return () => undefined;
+      },
+    });
+    await trainer.requestControl();
+    machine.goSilent();
+
+    const pending = trainer.letGo();
+    await inFlight();
+    timers.at(-1)?.();
+    const outcome = await pending;
+
+    expect(
+      outcome.kind === 'incomplete' && isSensorError(outcome.refusal, 'control-timed-out'),
     ).toBe(true);
   });
 
-  // --- A status and an answer on two characteristics arrive in no fixed order.
-  //
-  // PR #442's review: the flag that marked a release used to be set only on the
-  // Reset's `80 01 01`. A `0xFF` notified FIRST was read as an involuntary loss
-  // — "Control lost", a finished workout paused, and a Request Control queued
-  // behind the Reset. Each case below delivers the status BETWEEN the write and
-  // its answer, which the synchronous default of `scriptedMachine` never does.
-
-  const answerReset = () =>
-    machine.indicate(
-      Uint8Array.from([FTMS_OP_CODE.responseCode, FTMS_OP_CODE.reset, FTMS_RESULT_CODE.success]),
-    );
-
-  it('treats a 0xFF that arrives BEFORE the Reset is answered as part of the release', async () => {
+  it('rejects, and reports the loss, when the Stop is answered Control Not Permitted', async () => {
+    // Somebody else has the machine. That is an involuntary loss, reported as
+    // one — not folded into an outcome that reads like a release.
     const reasons: ControlLossReason[] = [];
-    const trainer = control();
+    const trainer = control({ reacquireControl: false });
     trainer.onControlLost((reason) => reasons.push(reason));
     await trainer.requestControl();
-    await trainer.setTargetPower(watts(200));
-    machine.goSilent();
+    machine.answer(FTMS_OP_CODE.stopOrPause, FTMS_RESULT_CODE.controlNotPermitted);
 
-    const pending = trainer.letGo();
-    await inFlight();
-    machine.status(Uint8Array.from([0xff]));
-    await inFlight();
-    answerReset();
-    const outcome = await pending;
-    await inFlight();
-
-    expect(outcome).toStrictEqual({ kind: 'reset' });
-    expect(reasons).toStrictEqual([]);
-    expect(trainer.hasControl()).toBe(false);
-    // No 0x00 after the 0x01: nothing took control back on the rider's behalf.
-    expect(machine.writes.map((write) => write[0])).toStrictEqual([
-      FTMS_OP_CODE.requestControl,
-      FTMS_OP_CODE.setTargetPower,
-      FTMS_OP_CODE.reset,
-    ]);
-  });
-
-  it('says incomplete, sends nothing more and reports no loss when a 0xFF lands in a Reset that times out', async () => {
-    // Most likely the machine executed the Reset and its answer was lost. A
-    // 0xFF cannot say whose action it was, so this is not a confirmed release —
-    // and there is nothing left this client may send.
-    const timers: Array<() => void> = [];
-    const reasons: ControlLossReason[] = [];
-    const trainer = control({
-      scheduleTimeout: (_after, run) => {
-        timers.push(run);
-        return () => undefined;
-      },
-    });
-    trainer.onControlLost((reason) => reasons.push(reason));
-    await trainer.requestControl();
-    await trainer.setTargetPower(watts(200));
-    machine.goSilent();
-
-    const pending = trainer.letGo();
-    await inFlight();
-    machine.status(Uint8Array.from([0xff]));
-    timers.at(-1)?.();
-    const outcome = await pending;
-    await inFlight();
-
-    expect(outcome.kind === 'incomplete' && !outcome.flattened).toBe(true);
-    expect(reasons).toStrictEqual([]);
-    expect(trainer.hasControl()).toBe(false);
-    expect(trainer.targetPower()).toStrictEqual({ kind: 'unknown', attempted: 200 });
-    expect(machine.writes.map((write) => write[0])).toStrictEqual([
-      FTMS_OP_CODE.requestControl,
-      FTMS_OP_CODE.setTargetPower,
-      FTMS_OP_CODE.reset,
-    ]);
-  });
-
-  it('reads Control Not Permitted on the flat road, after a Reset that timed out, as the release and not a loss', async () => {
-    // The review's second finding: the Reset ran, its answer was lost, and the
-    // fallback's 0x11 was refused because this client no longer had control.
-    // That used to show "Control lost" beside "Not released", and a later 0xFF
-    // then took control back.
-    const timers: Array<() => void> = [];
-    const reasons: ControlLossReason[] = [];
-    const trainer = control({
-      scheduleTimeout: (_after, run) => {
-        timers.push(run);
-        return () => undefined;
-      },
-    });
-    trainer.onControlLost((reason) => reasons.push(reason));
-    await trainer.requestControl();
-    machine.goSilent();
-
-    const pending = trainer.letGo();
-    await inFlight();
-    timers.at(-1)?.();
-    await inFlight();
-    machine.indicate(
-      Uint8Array.from([
-        FTMS_OP_CODE.responseCode,
-        FTMS_OP_CODE.setIndoorBikeSimulationParameters,
-        FTMS_RESULT_CODE.controlNotPermitted,
-      ]),
-    );
-    const outcome = await pending;
-    machine.answerAgain();
-    machine.status(Uint8Array.from([0xff]));
-    await inFlight();
-
-    expect(outcome.kind === 'incomplete' && !outcome.flattened).toBe(true);
-    expect(reasons).toStrictEqual([]);
-    expect(trainer.hasControl()).toBe(false);
-    // No Stop into a machine that has just refused us, and no Request Control.
-    expect(machine.writes.map((write) => write[0])).toStrictEqual([
-      FTMS_OP_CODE.requestControl,
-      FTMS_OP_CODE.reset,
-      FTMS_OP_CODE.setIndoorBikeSimulationParameters,
-    ]);
-  });
-
-  it('does not take control back on a late 0xFF after an incomplete release', async () => {
-    const reasons: ControlLossReason[] = [];
-    const trainer = control();
-    trainer.onControlLost((reason) => reasons.push(reason));
-    await trainer.requestControl();
-    machine.answer(FTMS_OP_CODE.reset, FTMS_RESULT_CODE.opCodeNotSupported);
-    const outcome = await trainer.letGo();
-    const before = machine.writes.length;
-
-    machine.status(Uint8Array.from([0xff]));
-    await inFlight();
-
-    expect(outcome.kind).toBe('incomplete');
-    expect(reasons).toStrictEqual([]);
-    expect(machine.writes).toHaveLength(before);
-    expect(trainer.hasControl()).toBe(false);
-  });
-
-  it("still reports a loss when the Reset's own answer is Control Not Permitted after a 0xFF", async () => {
-    // Somebody else had the machine first; the Reset was not ours to send.
-    const reasons: ControlLossReason[] = [];
-    const trainer = control();
-    trainer.onControlLost((reason) => reasons.push(reason));
-    await trainer.requestControl();
-    machine.goSilent();
-
-    const pending = trainer.letGo();
-    await inFlight();
-    machine.status(Uint8Array.from([0xff]));
-    machine.indicate(
-      Uint8Array.from([
-        FTMS_OP_CODE.responseCode,
-        FTMS_OP_CODE.reset,
-        FTMS_RESULT_CODE.controlNotPermitted,
-      ]),
-    );
-
-    await expect(pending).rejects.toThrow(SensorError);
-    await inFlight();
+    await expect(trainer.letGo()).rejects.toThrow(SensorError);
     expect(reasons).toStrictEqual(['permission-lost']);
-    expect(machine.writes.map((write) => write[0])).toStrictEqual([
-      FTMS_OP_CODE.requestControl,
-      FTMS_OP_CODE.reset,
-    ]);
   });
 
   it('refuses to release a machine it holds no control of, and writes nothing', async () => {

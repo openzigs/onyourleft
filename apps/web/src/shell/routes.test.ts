@@ -32,8 +32,11 @@ describe('normaliseHash', () => {
 });
 
 describe('routeForHash', () => {
-  it('resolves an empty hash to the ride view, which is the first thing anyone sees', () => {
-    expect(routeForHash('').id).toBe('ride');
+  it('resolves an empty hash to the home screen, which is the first thing anyone sees — #428', () => {
+    // ⚠️ It was the Ride screen until #428, and a reviewer who remembers this
+    // test saying so is reading the old file.
+    expect(routeForHash('').id).toBe('home');
+    expect(routeForHash('#/ride').id).toBe('ride');
   });
 
   it.each(ROUTES)('round-trips $id through its own href', (route) => {
@@ -183,9 +186,15 @@ describe('which routes are read and which are operated (#422)', () => {
     expect(ALL_ROUTES.length - operated.length).toBeGreaterThan(10);
   });
 
-  it('gives every route one of the two, so the shell never writes a class naming no rule', () => {
+  it('gives every route one of the three, so the shell never writes a class naming no rule', () => {
     for (const route of ALL_ROUTES) {
-      expect(['prose', 'instruments'], route.id).toContain(route.layout);
+      expect(['prose', 'instruments', 'dashboard'], route.id).toContain(route.layout);
     }
+  });
+
+  it('lays out the home screen as cards, and nothing else — #428', () => {
+    expect(ALL_ROUTES.filter((route) => route.layout === 'dashboard').map((r) => r.id)).toEqual([
+      'home',
+    ]);
   });
 });

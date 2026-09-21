@@ -35,14 +35,14 @@
  * resistance to somebody, which CLAUDE.md §6 rules out and
  * `RideController.startWorkout` already rules out for the workout path.
  *
- * ⚠️ **`stop` was on this type until #372, and `letGo` replaced it.** A Stop
- * did not remove the resistance on real hardware; `letGo` sends a Reset,
- * which does per FTMS and which revokes control. The game must not be able to
- * Reset mid-ride, and the type alone cannot say "only at the end" — so the
- * guarantee is two things together: `gradient.ts` calls `letGo` from its
- * `stop` alone, once, after which it writes nothing; and a write that somehow
- * followed would be refused by `TrainerControl` for want of control rather
- * than sent. The bare `reset()` stays off this type.
+ * ⚠️ **`stop` was on this type until #372, and `letGo` replaced it** — not
+ * because it sends something different (both are an FTMS Stop, since #442 was
+ * re-scoped away from a Reset) but because `letGo` is the ride controller's ONE
+ * release, so a game ride that ends is joined with any release already in
+ * flight and a refused one is reported like every other. `gradient.ts` calls it
+ * from its `stop` alone, once, after which it writes nothing. The bare
+ * `reset()` stays off this type: it revokes control, and on the trainer
+ * measured it cleared nothing a Stop did not.
  *
  * ⚠️ **`setTargetPower` is absent too, and that is not an oversight.** ERG and
  * simulation are two different things the same machine can be told; the game
@@ -79,9 +79,8 @@ export type GameTrainerKind =
    * (`shell/AppShell.tsx`), so a workout started on the Ride screen keeps
    * ticking while the rider is in the game — and a game ride that also wrote
    * would put two writers about 1 Hz each on one characteristic, then release
-   * it — with an FTMS Stop until #372, a Reset since, and the Reset is worse:
-   * it revokes the control the workout is writing through — leaving the
-   * workout's clock running against a machine which has stopped listening.
+   * it with an FTMS **Stop** that leaves the workout's clock running against a
+   * machine which has stopped listening.
    * `ride/controller.ts`
    * §`simulationControl` refuses the handle; this is the sentence that goes
    * with the refusal.
@@ -129,7 +128,7 @@ export interface GameTrainer {
    *
    * ⚠️ Here because the game is where a ride that ends on a climb ends: a rider
    * who presses *End ride* lands on the picker, not on the Ride screen, and a
-   * trainer that refused the Reset may still be holding the hill. Optional,
+   * trainer that refused the Stop may still be holding the hill. Optional,
    * and absent in every state but the one that needs saying.
    */
   readonly releaseFault?: string | undefined;
