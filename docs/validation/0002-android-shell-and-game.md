@@ -1803,7 +1803,7 @@ adb logcat | grep -i "BluetoothLe"
 | | on by default? | what it costs, by construction | where it is measured |
 |---|---|---|---|
 | **Contact shadows** — a soft blob under the rider and the pacer, placed from `world.ts`'s own sun | **yes, on every rung** | one transparent instanced draw call for all of them (the scenery-free frame is 6 calls, from 5) | `game.browser.spec.ts` §"draws each of the three in its own colour" reads it back, with the shadows off as its control |
-| **A shadow map** for the riders only, caught by a shadow-catching plane under them | **no** — `quality.ts` §`RIDER_SHADOW_MAP_RUNG`, above the ladder, and the first thing the ladder gives up | a shadow pass of the three rider meshes into a 512² depth map, plus the catcher | the pinned Chromium publishes a frame time on a software rasteriser, which says nothing about a phone. **This part is the measurement #426 closes on** |
+| **A shadow map** for the riders only, caught by a shadow-catching plane under them | **no** — `quality.ts` §`RIDER_SHADOW_MAP_RUNG`, above the ladder, and the first thing the ladder gives up — for the rest of the ride, `quality.ts` §`keepsShadowMap` | a shadow pass of the three rider meshes into a 512² depth map, plus the catcher | the pinned Chromium publishes a frame time on a software rasteriser, which says nothing about a phone. **This part is the measurement #426 closes on** |
 
 ⚠️ **The ghost casts neither, on purpose** (`contact-shadow.ts` §`CASTS_CONTACT_SHADOW`): a bicycle
 with no shadow reads as *not really here*, which is #93's at-a-glance criterion. T2 asks whether it
@@ -1836,7 +1836,7 @@ the same with `localStorage.removeItem("oyl.game.riderShadowMap")`, which prints
 | T2 | Ride the same route racing a ghost | The ghost has **no** shadow. Does that read as *"not really here"*, or as a rendering fault? |
 | T3 | Shadow map **off**. 12 s of riding, target rung, the `dumpsys` block below | the **off** column |
 | T4 | Switch the shadow map **on** (above), start a new ride, and repeat T3 | the **on** column. And by eye: is the real shadow worth having over the blob? |
-| T5 | With it **on**, ride for **20 minutes** and note whether the ladder stepped down — the HUD's quality line, or `dumpsys` frame times rising | whether it left the map rung, and after how long. The first step down takes the map away (`quality.ts` §`rungFor`) |
+| T5 | With it **on**, ride for **20 minutes** and note whether the ladder stepped down — the HUD's quality line, or `dumpsys` frame times rising | whether it left the map rung, and after how long. The first step down takes the map away **for the rest of that ride** (`quality.ts` §`keepsShadowMap`): a phone that cools and climbs back to level 0 does **not** get the map back, so the shadow under the rider should change from the real shadow to the blob once and never change back. If it comes back mid-ride, that is a defect — record it rather than the frame times. To measure the map again after a step down, start a **new** ride |
 
 ```bash
 adb shell dumpsys gfxinfo dev.openzigs.onyourleft reset
@@ -1860,7 +1860,7 @@ adb shell dumpsys gfxinfo dev.openzigs.onyourleft | grep -iE "Total frames|Janky
 
 **Is the real shadow worth having over the blob, by eye (T4)?** ______________
 
-**Did the ladder leave the map rung in 20 minutes, and when (T5)?** ______________
+**Did the ladder leave the map rung in 20 minutes, and when (T5)? Did the map ever come back in the same ride?** ______________
 
 **Phone (OEM, model, Android):** ______________  **Build:** ______________
 

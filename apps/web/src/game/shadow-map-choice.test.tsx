@@ -4,7 +4,8 @@
 /**
  * Which way a ride grounds its riders, as `GameView` hands it to the renderer —
  * #426. `quality.ts` decides the rungs; this is the wiring: the shadow map is
- * off unless THIS device asked for it, and it goes with the first step down.
+ * off unless THIS device asked for it, and it goes with the first step down
+ * and does not come back that ride (`quality.ts` §`keepsShadowMap`).
  */
 
 import { act } from 'react';
@@ -24,7 +25,14 @@ import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import type { GameRenderer } from './port';
-import { RIDER_SHADOW_MAP_STORAGE_KEY, type QualitySettings } from './quality';
+import {
+  FRAME_MS_REDUCE_ABOVE,
+  RIDER_SHADOW_MAP_RUNG,
+  RIDER_SHADOW_MAP_STORAGE_KEY,
+  SUSTAINED_SAMPLES,
+  qualitySettings,
+  type QualitySettings,
+} from './quality';
 
 function flatRoute(): RidableRoute {
   const points: RoutePoint[] = [];
@@ -74,6 +82,7 @@ let mounted: Mounted | undefined;
 beforeEach(() => {
   pending = [];
   told = [];
+  clock = 0;
   localStorage.clear();
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
     pending.push(callback);
@@ -89,8 +98,13 @@ afterEach(() => {
   localStorage.clear();
 });
 
+/** The loop's clock, which the latch test moves by hand to make frames slow or fast. */
+let clock = 0;
+
 async function ride(): Promise<void> {
-  mounted = await mount(<GameView port={PORT} renderer={() => Promise.resolve(RENDERER)} />);
+  mounted = await mount(
+    <GameView port={PORT} renderer={() => Promise.resolve(RENDERER)} now={() => clock} />,
+  );
   await settle();
   const button = queryAll<HTMLButtonElement>(document.body, 'button').find((each) =>
     (each.textContent ?? '').startsWith('Ride '),
@@ -119,5 +133,34 @@ describe('how a ride grounds its riders — #426', () => {
     await ride();
     expect(told.length).toBeGreaterThan(0);
     expect(told.every((each) => each.riderShadows === 'map')).toBe(true);
+  });
+
+  it('does not come back when the ladder climbs back to level 0 — the latch, wired', async () => {
+    localStorage.setItem(RIDER_SHADOW_MAP_STORAGE_KEY, 'on');
+    await ride();
+    /** Frames of `ms` each, enough of them to move the ladder one rung. */
+    const frames = async (ms: number): Promise<void> => {
+      for (let index = 0; index < SUSTAINED_SAMPLES + 2; index += 1) {
+        clock += ms;
+        await act(async () => {
+          pending.shift()?.(clock);
+          await Promise.resolve();
+        });
+      }
+      await settle();
+    };
+    await frames(FRAME_MS_REDUCE_ABOVE + 10);
+    await frames(5);
+    await frames(FRAME_MS_REDUCE_ABOVE + 10);
+    await frames(5);
+    // The renderer was told: the map, then a step down, then back to level 0
+    // twice — each time WITHOUT the map.
+    expect(told).toEqual([
+      RIDER_SHADOW_MAP_RUNG,
+      qualitySettings(1),
+      qualitySettings(0),
+      qualitySettings(1),
+      qualitySettings(0),
+    ]);
   });
 });

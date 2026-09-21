@@ -27,6 +27,7 @@ import {
   RIDER_SHADOW_MAP_RUNG,
   RIDER_SHADOW_MAP_STORAGE_KEY,
   SUSTAINED_SAMPLES,
+  keepsShadowMap,
   nextQuality,
   qualitySettings,
   readShadowMapChoice,
@@ -413,6 +414,25 @@ describe('the riders’ shadows on the ladder — #426', () => {
     for (const level of [1, 2, 3] as const) {
       expect(rungFor(level, true)).toBe(qualitySettings(level));
     }
+  });
+
+  it('stays given up for the rest of the ride once the ladder has stepped down — the latch', () => {
+    // A device that asked, cooling and heating in turn: 0 → 1 → 0 → 1 → 0.
+    // Without the latch the rung is re-entered on every return to 0, and each
+    // entry rebuilds shader programs mid-ride (#448's review).
+    let state: QualityState = INITIAL_QUALITY;
+    let wanted = true;
+    const drawn: string[] = [];
+    for (const frameMs of [5, FRAME_MS_REDUCE_ABOVE + 10, 5, FRAME_MS_REDUCE_ABOVE + 10, 5]) {
+      state = sustain(state, { frameMs }, SUSTAINED_SAMPLES);
+      wanted = keepsShadowMap(wanted, state.level);
+      drawn.push(`${String(state.level)}:${rungFor(state.level, wanted).riderShadows}`);
+    }
+    expect(drawn).toEqual(['0:map', '1:contact', '0:contact', '1:contact', '0:contact']);
+    // And nothing but the latch's own input brings it back: a new ride re-reads
+    // the device's choice, which is `true` again.
+    expect(keepsShadowMap(true, 0)).toBe(true);
+    expect(keepsShadowMap(false, 0)).toBe(false);
   });
 
   it('reads the choice off this device, and any failure to read it is "no"', () => {

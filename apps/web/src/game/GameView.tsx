@@ -48,6 +48,7 @@ import {
 } from './wind-choice';
 import {
   INITIAL_QUALITY,
+  keepsShadowMap,
   nextQuality,
   qualitySettings,
   readShadowMapChoice,
@@ -876,6 +877,11 @@ export function GameView(props: GameViewProps): JSX.Element {
   }, [phase, chosen, port, props.renderer, props.now]);
 
   useEffect(() => {
+    // #426, the latch: a step down takes the shadow map away for the rest of
+    // the ride, and climbing back to level 0 does not return it. Only the next
+    // ride's start re-reads the device's choice. `quality.ts` §`keepsShadowMap`
+    // says why a rung that came back would flap.
+    shadowMapRef.current = keepsShadowMap(shadowMapRef.current, quality.level);
     const settings = rungFor(quality.level, shadowMapRef.current);
     // ⚠️ Both halves of the rung, from one place. The renderer stops submitting
     // the instances and `sceneFrame` stops placing them — #245, and

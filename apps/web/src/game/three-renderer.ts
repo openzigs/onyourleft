@@ -2582,8 +2582,12 @@ class ThreeGameView implements GameView {
    * ⚠️ **`shadowMap.enabled` is renderer state that three bakes into every lit
    * material's program**, so turning it on or off after the first frame needs
    * those programs rebuilt — the rider's two materials and the catcher. Done
-   * only when the value CHANGES, which on the ladder is at most once a ride
-   * (the map rung is above it, and the first step down leaves it).
+   * only when the value CHANGES. The map is turned on at most once a ride and
+   * off at most once: the map rung is above the ladder, the first step down
+   * leaves it, and `quality.ts` §`keepsShadowMap` is the latch that stops a
+   * climb back to level 0 re-entering it. Without that latch this rebuild ran
+   * on every 0 → 1 → 0 round trip, and the stall it causes is itself a
+   * frame-time spike that can push the ladder down again.
    */
   #applyRiderShadows(): void {
     const { riderShadows } = this.#quality;

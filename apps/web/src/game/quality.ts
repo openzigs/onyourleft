@@ -407,9 +407,31 @@ export const RIDER_SHADOW_MAP_RUNG: QualitySettings = {
  * The settings a ride draws with at a level — {@link qualitySettings}, except
  * that a rider who asked for the shadow map gets {@link RIDER_SHADOW_MAP_RUNG}
  * in place of level 0, and loses it the moment the ladder steps down.
+ * Whether it ever comes back that ride is {@link keepsShadowMap}'s: it does not.
  */
 export function rungFor(level: QualityLevel, shadowMap: boolean): QualitySettings {
   return level === 0 && shadowMap ? RIDER_SHADOW_MAP_RUNG : qualitySettings(level);
+}
+
+/**
+ * Whether a ride that wanted the shadow map still wants it at this level —
+ * the LATCH that makes "the first thing given up" stay given up.
+ *
+ * ⚠️ **{@link rungFor} alone would flap, and did until #448's review.** The
+ * ladder climbs back to level 0 whenever the device cools, and `rungFor(0,
+ * true)` is the map rung, so every 0 → 1 → 0 round trip turned the map off and
+ * on again. Each change rebuilds the riders' and the catcher's shader programs
+ * (`three-renderer.ts` §`applyRiderShadows`), which is a stall; a stall is a
+ * frame-time spike; and a frame-time spike is what pushes the ladder down
+ * again. So once any step down has been seen, the answer is `false` for the
+ * rest of the ride, whatever the level does next.
+ *
+ * Fed its own previous answer on every level change — `GameView` holds it in
+ * a ref and re-reads the device's choice only when a ride STARTS, which is
+ * what resets the latch. Pure: the state is the caller's.
+ */
+export function keepsShadowMap(wanted: boolean, level: QualityLevel): boolean {
+  return wanted && level === 0;
 }
 
 /**
