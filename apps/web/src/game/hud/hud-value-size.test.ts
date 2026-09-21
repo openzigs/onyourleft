@@ -83,9 +83,20 @@ const declarations = themeCss.replace(/\/\*[\s\S]*?\*\//g, '');
  * rule with no `font-size` in `rem`, returns `undefined` so the caller can fail
  * rather than compare against a default nobody chose.
  */
+/**
+ * ⚠️ **The WHOLE selector, since #423, and not merely its tail.** This used to
+ * match `selector` wherever it was followed by `,` or `{` — which was exact
+ * while no rule was written as a descendant of another. #423 added
+ * `.oyl-hud__fields--secondary .oyl-hud__value`, whose tail *is*
+ * `.oyl-hud__value`, so the old pattern read the secondary tier's 1.5 rem as
+ * the primary magnitude and every comparison below was made against the wrong
+ * number. The lookbehind requires the selector to OPEN its rule: start of
+ * file, or straight after a `}`, a `{` (the first rule in a media block) or a
+ * `,`.
+ */
 function fontSizeRem(selector: string): number | undefined {
   const occurrences = new RegExp(
-    `${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s*[,{])`,
+    `(?<=(?:^|[{},])\\s*)${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s*[,{])`,
     'g',
   );
   let found: number | undefined;
@@ -103,17 +114,39 @@ function fontSizeRem(selector: string): number | undefined {
   return found;
 }
 
-/**
- * The narrowest a HUD field can be, in CSS pixels.
- *
- * `grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr))`. The `7rem` is a
- * **floor** rather than an `auto`, so the track never grows to fit its content
- * — which is the whole reason a word overflows one at all.
- */
-const NARROWEST_TRACK_PIXELS = 112;
+/** The root font size every rem here resolves against at the default zoom. */
+const ROOT_PIXELS = 16;
+
+/** The secondary tier's own selectors — `theme.css`, and `fields.ts` §`ReadingTier`. */
+const SECONDARY_VALUE = '.oyl-hud__fields--secondary .oyl-hud__value';
+const SECONDARY_WORD = '.oyl-hud__fields--secondary .oyl-hud__value--word';
 
 /**
- * How wide the widest of the three settled words is at 2.5 rem, in CSS pixels.
+ * The narrowest a track of the SECONDARY tier can be, in CSS pixels — read out
+ * of the stylesheet rather than typed here.
+ *
+ * `grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr))`. The floor is
+ * a **floor** rather than an `auto`, so the track never grows to fit its
+ * content — which is the whole reason a word overflows one at all.
+ *
+ * ⚠️ **Re-derived for #423 rather than carried over**, and a reviewer who
+ * remembers `NARROWEST_TRACK_PIXELS = 112` is reading the old file. That was
+ * the `7rem` floor of the single grid every field used to share. The only
+ * values that are ever words are the gap outcomes, every gap is a secondary
+ * reading now, and the secondary tier has its own, narrower floor — so a hand
+ * copy of `112` would have gone on passing against a track that no longer
+ * holds a word. Parsed, so moving the floor in `theme.css` moves this bound in
+ * the same edit.
+ */
+function narrowestSecondaryTrackPixels(): number | undefined {
+  const rule = /\.oyl-hud__fields--secondary\s*\{([^}]*)\}/.exec(declarations)?.[1];
+  const floor = /minmax\(\s*([\d.]+)rem\s*,/.exec(rule ?? '')?.[1];
+  return floor === undefined ? undefined : Number(floor) * ROOT_PIXELS;
+}
+
+/**
+ * How wide the widest of the three settled words is, in CSS pixels, **at the
+ * size it was measured at** — {@link MEASURED_AT_REM}.
  *
  * Measured in the repository's pinned Chromium (`@playwright/test` 1.63.0)
  * against this stylesheet at a 390 px viewport: `Matched` 151 px, `Finished`
@@ -123,29 +156,79 @@ const NARROWEST_TRACK_PIXELS = 112;
  */
 const WIDEST_WORD_PIXELS = 151;
 
+/**
+ * The type size {@link WIDEST_WORD_PIXELS} was taken at.
+ *
+ * ⚠️ A constant rather than `fontSizeRem('.oyl-hud__value')`, which is what the
+ * scaling used to divide by. The two were the same number — 2.5 — and meant
+ * different things: one is where a measurement was taken and the other is a
+ * declaration somebody may change, and scaling by the declaration makes the
+ * bound move when the primary tier's size does, which has nothing to do with
+ * how wide a word is.
+ */
+const MEASURED_AT_REM = 2.5;
+
+/**
+ * How much larger a primary reading must be than a secondary one — #423.
+ *
+ * *"Primary readings are visibly larger than secondary ones"* is the criterion,
+ * and "visibly" is a ratio or it is nothing: 2.5 rem over 2.4 rem satisfies
+ * *larger*. One and a half is a step and a bit on a major-third scale, which is
+ * the smallest difference this design system treats as a change of level at
+ * all (`design/tokens.ts` §`TYPE_SCALE_RATIO` is 1.25).
+ */
+const MINIMUM_TIER_RATIO = 1.5;
+
+describe('the HUD is a hierarchy, not a grid of equals (#423)', () => {
+  it('declares both tiers, so the ratio below is not taken over nothing', () => {
+    expect(fontSizeRem('.oyl-hud__value')).toBeDefined();
+    expect(fontSizeRem(SECONDARY_VALUE)).toBeDefined();
+  });
+
+  it('sets a primary reading visibly larger than a secondary one', () => {
+    const primary = fontSizeRem('.oyl-hud__value') ?? 0;
+    const secondary = fontSizeRem(SECONDARY_VALUE) ?? Number.POSITIVE_INFINITY;
+
+    expect(primary / secondary).toBeGreaterThanOrEqual(MINIMUM_TIER_RATIO);
+  });
+});
+
 describe('a HUD value that is a word is set small enough for its track (#259)', () => {
   it('declares the word rule at all, so the comparisons below are not vacuous', () => {
     // A renamed or deleted selector would otherwise make every assertion here
     // pass over nothing — the failure shape this repository has shipped
     // repeatedly, and the one `hud-surface.a11y.test.ts` opens with too.
     expect(fontSizeRem('.oyl-hud__value--word')).toBeDefined();
-    expect(fontSizeRem('.oyl-hud__value')).toBeDefined();
+    expect(fontSizeRem(SECONDARY_WORD)).toBeDefined();
+    expect(fontSizeRem(SECONDARY_VALUE)).toBeDefined();
+    expect(narrowestSecondaryTrackPixels()).toBeDefined();
   });
 
   it('sets a word smaller than the magnitude it replaces', () => {
-    const word = fontSizeRem('.oyl-hud__value--word') ?? 0;
-    const magnitude = fontSizeRem('.oyl-hud__value') ?? 0;
+    // ⚠️ The SECONDARY magnitude, since #423: every value that can be a word is
+    // a gap, and every gap is a secondary reading. Comparing against the
+    // primary 2.5 rem would pass for a word set LARGER than the numbers beside
+    // it.
+    const word = fontSizeRem(SECONDARY_WORD) ?? 0;
+    const magnitude = fontSizeRem(SECONDARY_VALUE) ?? 0;
 
     expect(word).toBeLessThan(magnitude);
   });
 
+  it('sets the word the same size wherever the class lands', () => {
+    // One declaration serves both selectors today. If they are ever split, a
+    // word outside the secondary list must not be the larger of the two — that
+    // is the one that would be laid out unchecked.
+    expect(fontSizeRem('.oyl-hud__value--word')).toBe(fontSizeRem(SECONDARY_WORD));
+  });
+
   it('sets it small enough that the widest of the three fits the narrowest track', () => {
-    const word = fontSizeRem('.oyl-hud__value--word') ?? 0;
-    const magnitude = fontSizeRem('.oyl-hud__value') ?? 0;
+    const word = fontSizeRem(SECONDARY_WORD) ?? Number.POSITIVE_INFINITY;
+    const track = narrowestSecondaryTrackPixels() ?? 0;
 
     // Type scales linearly, so the measured width does too: the word's width at
-    // `word` rem is `WIDEST_WORD_PIXELS × word / magnitude`.
-    expect((WIDEST_WORD_PIXELS * word) / magnitude).toBeLessThanOrEqual(NARROWEST_TRACK_PIXELS);
+    // `word` rem is `WIDEST_WORD_PIXELS × word / MEASURED_AT_REM`.
+    expect((WIDEST_WORD_PIXELS * word) / MEASURED_AT_REM).toBeLessThanOrEqual(track);
   });
 
   it('does not break the word instead, which would read as a different word', () => {
@@ -154,41 +237,17 @@ describe('a HUD value that is a word is set small enough for its track (#259)', 
     // words, on a panel #94 requires a rider to read in one glance. Containment
     // is the wrong repair here and this is what says so.
     const block = /\.oyl-hud__value(?:--word)?\s*\{([^}]*)\}/g;
+    let seen = 0;
     for (const [, body] of declarations.matchAll(block)) {
+      seen += 1;
       expect(body).not.toMatch(/\b(overflow-wrap|word-break|hyphens)\s*:/);
     }
+    // Four since #423: the value, the word, and each again under the secondary
+    // tier. A loop over nothing asserts nothing.
+    expect(seen).toBeGreaterThanOrEqual(4);
   });
 });
 
-/**
- * The floor under the HUD's *supporting* text — #307's review.
- *
- * ## Why this did not exist and had to
- *
- * Everything above is about the HUD's big numbers. The small text beside them
- * had no floor of any kind, and #307 moved it: adopting a 1.25 type scale took
- * `--oyl-font-size-sm` from 0.875 rem (14px) to 0.8 rem (12.8px), which is step
- * −1 of the stated ratio. That token is what `.oyl-hud__label`,
- * `.oyl-hud__stale`, `.oyl-hud__detail` and `.oyl-hud__profile-text` are all
- * set in, so every one of them shrank, and nothing in the repository said so —
- * `hud.browser.spec.ts` measures overflow, and overflow only gets *easier* as
- * text shrinks, so the browser gate goes greener rather than redder.
- *
- * ⚠️ `.oyl-hud__stale` is the one that matters most. It is the mark that tells
- * a rider a sensor has **dropped** rather than read zero — `game/hud/fields.ts`
- * §`NO_READING` — and it is read at arm's length on a handlebar. A size it can
- * be reduced to without anything noticing is the wrong arrangement for that
- * particular piece of text.
- *
- * ## What the floor is, and what it is not
- *
- * It is the size that ships, so this test is a ratchet rather than a
- * retrospective judgement: the 14px → 12.8px step is recorded as the deliberate
- * cost of putting the scale on a ratio (#307's second acceptance criterion),
- * and a *further* reduction is a red build. It is not a claim that 12.8px is
- * the right size for a handlebar — nobody in the loop has ridden with this, and
- * `docs/validation/0001-trainer-and-sensors.md` is where that would be settled.
- */
 describe('the HUD’s supporting text has a floor (#307 review)', () => {
   /**
    * The smallest a HUD label, detail or staleness mark may be set, in rem.
@@ -206,6 +265,9 @@ describe('the HUD’s supporting text has a floor (#307 review)', () => {
     '.oyl-hud__stale',
     '.oyl-hud__detail',
     '.oyl-hud__profile-text',
+    // #423. The secondary tier sets its units smaller so that `144 km/h` fits a
+    // 5.5 rem track, and "smaller" is exactly what this floor is for.
+    '.oyl-hud__fields--secondary .oyl-hud__unit',
   ];
 
   /**
@@ -225,7 +287,7 @@ describe('the HUD’s supporting text has a floor (#307 review)', () => {
       return literal;
     }
     const occurrences = new RegExp(
-      `${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s*[,{])`,
+      `(?<=(?:^|[{},])\\s*)${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s*[,{])`,
       'g',
     );
     let found: number | undefined;

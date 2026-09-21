@@ -1,107 +1,148 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The ride screen's layout, measured by a real engine — #373.
+ * The ride's stage, measured by a real engine — #373, #419, #422 and #423.
  *
- * `GameView` renders `Trainer: simulating −0.4% (352 sent)`, which is the
- * **only** rider-visible evidence that a gradient is reaching the trainer and
- * the thing every step of `docs/validation/0002-android-shell-and-game.md`
- * Part L is built around reading. Observed on a tablet on 2026-09-19: visible
- * in portrait, outside the viewport in landscape with no indication it existed.
+ * ## What was wrong, as three people measured it
  *
- * ## ⚠️ What the first run of this harness established, and it is bigger than #373
+ * - **#373**, a tablet, 2026-09-19: `Trainer: simulating −0.4% (352 sent)` —
+ *   the only rider-visible evidence a gradient is reaching the trainer — was
+ *   outside the viewport in landscape.
+ * - **#419**, this harness's own first run: the HUD panel was **572 px** tall
+ *   under a canvas, so *Pause* and *End ride* sat at y = 958 of a 390 px
+ *   viewport, y = 1112 of an 844 px one, and y = 1092 on a 1280×800 tablet.
+ *   Below the fold at every viewport tried.
+ * - **#422**, the owner's Pixel Tablet in landscape, 2026-09-20: the same, on
+ *   hardware, beside a display that was about 53 % blank. ⚠️ #373 had moved the
+ *   line *into* the panel and called landscape solved; the panel itself ran off
+ *   the bottom, so it was not.
  *
- * Measured in the lockfile-pinned Chromium, on this harness, with the line
- * still in its old place (`.oyl-main` padding included, `scrollY === 0`):
+ * #423 fixes all three by design rather than by moving things: while a ride
+ * runs the world is full-bleed, the page chrome is absent, and the HUD is four
+ * small opaque panels laid over the world's corners.
  *
- * | viewport | header | world | `.oyl-hud` | controls at | old line at |
- * |---|---|---|---|---|---|
- * | 844×390 (phone, landscape) | 97 | 234 | **572** | 958 | 1062 |
- * | 390×844 (phone, portrait) | 178 | 201 | **628** | 1112 | 1216 |
- * | 1280×800 (tablet, landscape) | 97 | 367 | **572** | 1092 | 1196 |
- * | 768×1024 (tablet, portrait) | 138 | 367 | **572** | 1132 | 1236 |
+ * ## ⚠️ A reviewer who remembers this file is reading the old one
  *
- * **The panel is 572 px tall and a landscape phone viewport is 390.** So the
- * HUD does not fit on screen in landscape *at all*, and neither do **Pause**
- * and **End ride** — at every one of the four viewports above, both controls
- * are below the fold. No placement of one 25 px line can change that, and
- * shrinking the world cannot either: the panel alone exceeds the viewport with
- * the canvas at zero.
+ * It used to assert that **reaching the ride controls** — by scrolling —
+ * brought the trainer line on screen, and it carried a case named *"the HUD
+ * panel is taller than a landscape phone viewport"* which asserted #419's
+ * premise and said of itself that it would go red when #419 was fixed and
+ * should then be **removed rather than loosened**. It has been: there is no
+ * panel taller than a viewport any more, and nothing here scrolls to anything.
+ * Every assertion below is taken at `scrollY === 0`.
  *
- * That is a finding about the ride screen rather than about this line, it is
- * filed as [#419](https://github.com/openzigs/onyourleft/issues/419), and
- * **this file does not pretend to fix it**. What #373 is
- * about is the line being *lost* — on the page background, after the panel,
- * with nothing to say it existed. What is asserted below is therefore the
- * property that actually holds and that actually helps: **a rider who reaches
- * the ride controls has the trainer line on screen.** They reach the controls
- * because they must, which is what makes it reachable *"without the rider
- * having to know it is there"*.
+ * ## The viewports, and the one that was missing
+ *
+ * `shell.browser.spec.ts` measures at 320×256 and `hud.browser.spec.ts` at a
+ * phone. **Nothing measured a ride screen at a landscape-tablet viewport**,
+ * which is the single most likely way this app is used — clamped to the bars,
+ * wide — and is where both defects were found. 1280×800 is the Pixel Tablet's
+ * own CSS viewport (2560×1600 at a device pixel ratio of 2).
+ *
+ * ## The control, and the vacuous pass it is there to prevent
+ *
+ * ⚠️ "Every control is inside the viewport" is satisfied by a page that
+ * rendered nothing, a stylesheet that failed to load, and a ride that never
+ * started. So each layout is measured **twice**: as shipped, and again after
+ * `unstage()` has taken `oyl-game--riding` off the live element — the same DOM
+ * under the same stylesheet at the same viewport, minus the one class #423
+ * added. The second measurement is required to **fail**: *Pause* below the
+ * fold again, which is #419's own finding. `ride-harness.tsx` says why React
+ * does not put the class back.
  *
  * ⚠️ **Read `ride-harness.tsx`'s header before reading a number here**, and in
- * particular the paragraph about the control. Every assertion below is taken
- * from the browser — `getBoundingClientRect`, `innerHeight`, `scrollY` — after
- * Chromium has laid the shipping markup out under the shipping stylesheet.
+ * particular what the page does not prove.
  */
 
 import { expect, test, type Page } from '@playwright/test';
 
-/**
- * The orientations, and why these two.
- *
- * ⚠️ **Landscape is the one that matters and portrait is the one that must not
- * regress.** #373 was observed on a tablet in landscape, which is also the
- * orientation a handlebar-mounted phone is most likely to be in; portrait is
- * where the old placement was visible, so a change that helped one and hurt the
- * other would be no change at all.
- *
- * 844×390 is an iPhone 14 on its side and 390×844 is the same device upright,
- * which is the pair `hud.browser.spec.ts` already measures the grid at.
- */
-const ORIENTATIONS = [
-  { name: 'landscape — 844×390', width: 844, height: 390 },
-  { name: 'portrait — 390×844', width: 390, height: 844 },
-] as const;
+import { riderFrameBox } from '../src/game/camera';
+
+import type { Box, StageItem, StageMeasurement } from './ride-harness';
 
 /**
- * How far past the bottom edge a box may measure and still count as on screen.
+ * How far past an edge a box may measure and still count as inside it.
  *
- * ⚠️ One pixel, and it is `scrollIntoView` rather than slack. Chromium scrolls
- * to a fractional offset — measured here, `.oyl-hud__controls` lands at
- * `bottom: 844.390625` in an 844 px viewport after
- * `scrollIntoView({ block: 'end' })`, because the element's own box is
- * fractional. A strict comparison makes this gate fail on arithmetic rather
- * than on layout, and widening it further would let a whole line of text hide.
+ * ⚠️ One pixel, and it is sub-pixel layout rather than slack: a panel whose
+ * height comes from `1.05` line-heights and `0.8rem` labels has a fractional
+ * box, and a strict comparison fails this gate on arithmetic rather than on
+ * layout. Widening it further would let a whole line of text hide.
  */
 const SUBPIXEL_TOLERANCE = 1;
 
-interface Box {
-  readonly top: number;
-  readonly bottom: number;
+/**
+ * `hud-value-size.test.ts` §`MINIMUM_TIER_RATIO`, as the engine resolves it.
+ *
+ * Restated rather than imported: that file reads the stylesheet as text, and
+ * this reads what Chromium made of it — a rule overridden by a later one, or
+ * by a media query, satisfies the first and not the second.
+ */
+const MINIMUM_TIER_RATIO = 1.5;
+
+/** `theme.css` §`--oyl-color-hud-surface`, as `getComputedStyle` spells it. */
+const HUD_SURFACE = 'rgb(16, 22, 28)';
+
+interface Viewport {
+  readonly name: string;
+  readonly width: number;
   readonly height: number;
+  /**
+   * Whether the same DOM **without the stage** puts *End ride* below the fold
+   * here — i.e. whether this viewport can carry the control.
+   *
+   * ⚠️ Not every viewport can, and pretending otherwise would be asserting the
+   * opposite of the bug: upright on a tall screen the stacked page FITS, exactly
+   * as #373's old placement was visible in portrait. The control runs wherever
+   * the pre-#423 page fails — every landscape viewport, and the smallest
+   * upright one — which is at least one viewport for each of the three layouts.
+   */
+  readonly unstagedFails: boolean;
 }
 
-interface RideMeasurement {
-  readonly viewport: { readonly width: number; readonly height: number };
-  /** The shipped line, inside the HUD panel. `undefined` means it did not render. */
-  readonly trainer: Box | undefined;
-  /** The same sentence in its pre-#373 position. @see ride-harness.tsx */
-  readonly control: Box | undefined;
-  /** The panel itself, so a failure says whether the HUD or the line moved. */
-  readonly hud: Box | undefined;
-  /** The two mid-ride controls — the thing a rider has to reach. */
-  readonly controls: Box | undefined;
-  /** The world canvas, which is what decides how much room is left. */
-  readonly world: Box | undefined;
-  /** The route's own heading, so a failure says whether the chrome is real. */
-  readonly heading: Box | undefined;
-  /** What `theme.css` resolved `.oyl-hud__trainer`'s colour to, as a load check. */
-  readonly trainerColour: string;
-  readonly scrollY: number;
-}
+/**
+ * Where the HUD is an OVERLAY — `theme.css` §`.oyl-game--riding`.
+ *
+ * ⚠️ Both layouts and both of their edges: the smallest viewport each admits as
+ * well as the ordinary ones, because a layout is most likely to overflow at
+ * the bottom of the range it claims.
+ */
+const OVERLAY_VIEWPORTS: readonly Viewport[] = [
+  {
+    name: 'a landscape tablet — 1280×800, the owner’s',
+    width: 1280,
+    height: 800,
+    unstagedFails: true,
+  },
+  { name: 'a 4:3 tablet in landscape — 1024×768', width: 1024, height: 768, unstagedFails: true },
+  { name: 'a tablet upright — 800×1280', width: 800, height: 1280, unstagedFails: false },
+  { name: 'a phone in landscape — 844×390', width: 844, height: 390, unstagedFails: true },
+  { name: 'the smallest corners layout — 736×360', width: 736, height: 360, unstagedFails: true },
+  { name: 'a phone upright — 390×844', width: 390, height: 844, unstagedFails: false },
+  {
+    name: 'a narrow Android phone upright, in the app — 360×800',
+    width: 360,
+    height: 800,
+    unstagedFails: false,
+  },
+  { name: 'the smallest column layout — 320×704', width: 320, height: 704, unstagedFails: true },
+];
 
-async function openRide(page: Page): Promise<void> {
-  const response = await page.goto('/ride.html');
+/**
+ * Where it is not — `theme.css` §`.oyl-game--riding` says why each is here.
+ *
+ * 320×256 is SC 1.4.10's viewport, which is a 1280×1024 window at 400 %.
+ * 390×664 is a phone upright in a browser with the browser's own bars showing:
+ * too short for three panels to clear the rider's helmet, by measurement.
+ */
+const STACKED_VIEWPORTS: readonly Viewport[] = [
+  { name: 'reflow — 320×256', width: 320, height: 256, unstagedFails: true },
+  { name: 'a small phone on its side — 640×360', width: 640, height: 360, unstagedFails: true },
+  { name: 'a phone upright in a browser — 390×664', width: 390, height: 664, unstagedFails: false },
+];
+
+async function openRide(page: Page, viewport: Viewport, query = ''): Promise<void> {
+  await page.setViewportSize({ width: viewport.width, height: viewport.height });
+  const response = await page.goto(`/ride.html${query}`);
   // ⚠️ A page missing from `vite.browser.config.ts`'s `build.rollupOptions.input`
   // is simply not built, and the failure is a 404 sixty seconds later inside
   // `waitForFunction` with no mention of the config — the trap #266 confirmed
@@ -110,183 +151,423 @@ async function openRide(page: Page): Promise<void> {
     response?.status(),
     'ride.html did not load — is it named in vite.browser.config.ts build.rollupOptions.input?',
   ).toBe(200);
-  await page.waitForFunction(() => document.documentElement.hasAttribute('data-oyl-ride-ready'));
+  await page.waitForFunction(() => window.__oylRide !== undefined);
+  const published = await page.evaluate(() => ({
+    ready: window.__oylRide?.ready,
+    errors: window.__oylRide?.errors,
+  }));
+  // The harness rides for real, so "ready" means the picker offered a route,
+  // the ride started, the stage appeared and the trainer line was written.
+  expect(published.errors, 'the ride harness reported an error').toEqual([]);
+  expect(published.ready).toBe(true);
 }
 
-async function measure(page: Page): Promise<RideMeasurement> {
-  return page.evaluate(() => {
-    const boxOf = (selector: string): Box | undefined => {
-      const element = document.querySelector(selector);
-      if (element === null) {
-        return undefined;
-      }
-      const rect = element.getBoundingClientRect();
-      return { top: rect.top, bottom: rect.bottom, height: rect.height };
-    };
-    const trainer = document.querySelector('.oyl-hud__trainer');
-    return {
-      viewport: { width: window.innerWidth, height: window.innerHeight },
-      trainer: boxOf('.oyl-hud__trainer'),
-      control: boxOf('[data-oyl-trainer-control]'),
-      hud: boxOf('.oyl-hud'),
-      controls: boxOf('.oyl-hud__controls'),
-      world: boxOf('.oyl-game__world'),
-      heading: boxOf('.oyl-main h1'),
-      trainerColour: trainer === null ? '' : window.getComputedStyle(trainer).color,
-      scrollY: window.scrollY,
-    };
-  });
+async function measure(page: Page): Promise<StageMeasurement> {
+  const measured = await page.evaluate(() => window.__oylRide?.measure());
+  if (measured === undefined) {
+    throw new Error('the ride harness published no measurement');
+  }
+  return measured;
 }
 
-/** Put the ride controls on screen, the way a rider reaching for *Pause* does. */
-async function reachTheControls(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    document.querySelector('.oyl-hud__controls')?.scrollIntoView({ block: 'end' });
-  });
-  await page.evaluate(
-    async () =>
-      new Promise<void>((resolve) => {
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            resolve();
-          });
-        });
-      }),
+function inside(box: Box, viewport: Viewport): boolean {
+  return (
+    box.left >= -SUBPIXEL_TOLERANCE &&
+    box.top >= -SUBPIXEL_TOLERANCE &&
+    box.right <= viewport.width + SUBPIXEL_TOLERANCE &&
+    box.bottom <= viewport.height + SUBPIXEL_TOLERANCE &&
+    box.width > 0 &&
+    box.height > 0
   );
 }
 
-for (const orientation of ORIENTATIONS) {
-  test.describe(orientation.name, () => {
-    test.use({ viewport: { width: orientation.width, height: orientation.height } });
+function overlap(a: Box, b: Box): boolean {
+  return (
+    a.left < b.right - SUBPIXEL_TOLERANCE &&
+    b.left < a.right - SUBPIXEL_TOLERANCE &&
+    a.top < b.bottom - SUBPIXEL_TOLERANCE &&
+    b.top < a.bottom - SUBPIXEL_TOLERANCE
+  );
+}
 
+function describeItem(item: StageItem): string {
+  const { box } = item;
+  return (
+    `${item.name} [${box.left.toFixed(0)},${box.top.toFixed(0)} → ` +
+    `${box.right.toFixed(0)},${box.bottom.toFixed(0)}]${item.onTop ? '' : ' COVERED'}`
+  );
+}
+
+/**
+ * `game/camera.ts` §`riderFrameBox`, in this viewport's pixels.
+ *
+ * ⚠️ Non-vacuous by construction rather than by luck: it throws on a box too
+ * small to overlap anything, because "no panel overlaps a rectangle of no
+ * size" is true of every layout there is.
+ */
+function riderBox(viewport: Viewport): Box {
+  const rider = riderFrameBox(viewport.width / viewport.height);
+  const box: Box = {
+    left: rider.left * viewport.width,
+    right: rider.right * viewport.width,
+    top: rider.top * viewport.height,
+    bottom: rider.bottom * viewport.height,
+    width: (rider.right - rider.left) * viewport.width,
+    height: (rider.bottom - rider.top) * viewport.height,
+  };
+  if (box.width < 10 || box.height < 40 || !inside(box, viewport)) {
+    throw new Error(`the rider's frame box is not a usable rectangle: ${JSON.stringify(box)}`);
+  }
+  return box;
+}
+
+function named(items: readonly StageItem[], name: string): StageItem {
+  const found = items.find((each) => each.name === name);
+  if (found === undefined) {
+    throw new Error(`the stage has no "${name}" — found: ${items.map((i) => i.name).join(', ')}`);
+  }
+  return found;
+}
+
+for (const viewport of OVERLAY_VIEWPORTS) {
+  test.describe(viewport.name, () => {
     /**
-     * ⚠️ The apparatus check, and it is not ceremony. A harness whose stylesheet
-     * failed to load, whose panel rendered nothing, or whose `.oyl-main` view
-     * was hidden by taking out the wrong node would make every assertion below
-     * vacuous in the direction that passes — which is not hypothetical: the
-     * first version of `ride-harness.tsx` unmounted the whole shell and set its
-     * ready flag anyway.
+     * ⚠️ The apparatus check, and it is not ceremony. Every case below is a
+     * statement about a list, and a list of nothing satisfies all of them. The
+     * first version of `ride-harness.tsx` (#373) unmounted the whole shell and
+     * set its ready flag anyway; this is what a harness like that fails.
      */
-    test('the harness rendered the shell, the panel and both copies of the line', async ({
-      page,
-    }) => {
-      await openRide(page);
+    test('the harness is on the stage, with the widest HUD a rider can start', async ({ page }) => {
+      await openRide(page, viewport);
       const seen = await measure(page);
 
-      expect(seen.viewport).toEqual({ width: orientation.width, height: orientation.height });
-      expect(seen.heading?.height ?? 0).toBeGreaterThan(0);
-      expect(seen.world?.height ?? 0).toBeGreaterThan(0);
-      expect(seen.hud?.height ?? 0).toBeGreaterThan(0);
-      expect(seen.controls?.height ?? 0).toBeGreaterThan(0);
-      expect(seen.trainer?.height ?? 0).toBeGreaterThan(0);
-      expect(seen.control?.height ?? 0).toBeGreaterThan(0);
-      // The stylesheet resolved: `--oyl-color-hud-ink-muted` rather than the
-      // browser's default black. A page with no CSS lays out too, and lays out
-      // differently.
-      expect(seen.trainerColour).not.toBe('rgb(0, 0, 0)');
+      expect(seen.viewport).toEqual({ width: viewport.width, height: viewport.height });
+      // The stylesheet resolved: the token rather than `rgba(0, 0, 0, 0)`.
+      expect(seen.panelBackground).toBe(HUD_SURFACE);
+      expect(seen.primary).toEqual(['Power', 'Cadence', 'Heart rate']);
+      // A pacer, a ghost AND a wind — six, where an ordinary ride has four.
+      expect(seen.secondary).toEqual(['Speed', 'Gradient', 'To go', 'Pacer', 'Your best', 'Wind']);
+      expect(seen.panels).toHaveLength(4);
+      // Nine readings, the strip, the plan view, the trainer line, two controls.
+      expect(seen.items).toHaveLength(14);
+    });
+
+    test('the world fills the viewport', async ({ page }) => {
+      await openRide(page, viewport);
+      const seen = await measure(page);
+
+      for (const box of [seen.stage, seen.world]) {
+        expect(box?.left).toBe(0);
+        expect(box?.top).toBe(0);
+        expect(box?.width).toBe(viewport.width);
+        expect(box?.height).toBe(viewport.height);
+      }
+    });
+
+    test('the page chrome is absent', async ({ page }) => {
+      await openRide(page, viewport);
+      const seen = await measure(page);
+
+      expect(seen.chrome).toEqual({
+        header: false,
+        navigation: false,
+        summary: false,
+        footer: false,
+        skipLink: false,
+      });
     });
 
     /**
-     * Where the line is, structurally. This is the half that a stylesheet
-     * cannot drift away from: the element is *inside* the panel's box, and the
-     * copy in its old position is not.
+     * #419, #422 and #423's second criterion, in one assertion: **every**
+     * reading, the strip, the plan view, the trainer line, *Pause* and *End
+     * ride*, wholly inside the viewport, uncovered, with nothing scrolled —
+     * and nothing scrollable, so there is no second position to be wrong at.
      */
-    test('the trainer line is inside the HUD panel, and the old placement is not', async ({
-      page,
-    }) => {
-      await openRide(page);
+    test('every reading and every control is on screen with no scrolling', async ({ page }) => {
+      await openRide(page, viewport);
       const seen = await measure(page);
 
-      expect(seen.trainer?.top ?? 0).toBeGreaterThanOrEqual(seen.hud?.top ?? 0);
-      expect(seen.trainer?.bottom ?? 0).toBeLessThanOrEqual(seen.hud?.bottom ?? 0);
-      expect(seen.control?.top ?? 0).toBeGreaterThan(seen.hud?.bottom ?? 0);
+      expect(seen.scrollY).toBe(0);
+      expect(seen.stageScrollTop).toBe(0);
+      expect(seen.pageOverflow).toBeLessThanOrEqual(0);
+      const lost = seen.items.filter((each) => !inside(each.box, viewport) || !each.onTop);
+      expect(lost.map(describeItem)).toEqual([]);
     });
 
     /**
-     * ⚠️ **Above the controls, which is what ties its reachability to something
-     * that must already be true.** A rider has to reach *Pause* and *End ride*;
-     * anything above them is passed on the way. Below them it would be one more
-     * thing after the last thing a rider looks for.
+     * ⚠️ The stage is `overflow: hidden` in the overlay layouts, so a panel that
+     * outgrew its cell would be CLIPPED — and a clipped panel still has a box,
+     * which is why this asks about the panels as well as about what is in them.
      */
-    test('the trainer line comes before the ride controls', async ({ page }) => {
-      await openRide(page);
+    test('every panel is whole, and no panel is laid over another', async ({ page }) => {
+      await openRide(page, viewport);
       const seen = await measure(page);
 
-      expect(seen.trainer?.bottom ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
-        seen.controls?.top ?? 0,
+      expect(seen.panels.filter((each) => !inside(each.box, viewport)).map(describeItem)).toEqual(
+        [],
       );
+      const collisions: string[] = [];
+      seen.panels.forEach((a, index) => {
+        for (const b of seen.panels.slice(index + 1)) {
+          if (overlap(a.box, b.box)) {
+            collisions.push(`${describeItem(a)} × ${describeItem(b)}`);
+          }
+        }
+      });
+      expect(collisions).toEqual([]);
     });
 
     /**
-     * #373's first acceptance criterion, in the form the measurement supports:
-     * *"reachable … without the rider having to know it is there"*.
+     * The centre is clear — where the rider IS, rather than where a diagram
+     * says the middle is.
      *
-     * ⚠️ The panel does not fit a landscape phone viewport at all — see this
-     * file's header for the four measurements — so "visible at `scrollY === 0`"
-     * is not a property any placement of this line can have. What it can have,
-     * and now does, is being on screen at the moment the rider is looking at the
-     * controls.
+     * `camera.ts` §`riderFrameBox` is the rectangle the rider's bicycle is
+     * drawn into, as fractions of the frame, derived from the camera's own
+     * constants; `game.browser.spec.ts` checks that arithmetic against pixels
+     * the real renderer drew. A panel over that box is a panel over the one
+     * thing #424 exists to make prominent.
      */
-    test('reaching the ride controls brings the trainer line on screen', async ({ page }) => {
-      await openRide(page);
-      await reachTheControls(page);
+    test('no panel is laid over the rider', async ({ page }) => {
+      await openRide(page, viewport);
       const seen = await measure(page);
 
-      // The control for this whole case: if the page did not scroll, the
-      // assertions below are about the initial layout and say nothing.
-      expect(seen.scrollY).toBeGreaterThan(0);
-      expect(seen.controls?.bottom ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
-        seen.viewport.height + SUBPIXEL_TOLERANCE,
+      const box = riderBox(viewport);
+      expect(seen.panels.filter((each) => overlap(each.box, box)).map(describeItem)).toEqual([]);
+    });
+
+    test('a primary reading is visibly larger than a secondary one', async ({ page }) => {
+      await openRide(page, viewport);
+      const seen = await measure(page);
+
+      expect(seen.secondaryValuePixels).toBeGreaterThan(0);
+      expect(seen.primaryValuePixels / seen.secondaryValuePixels).toBeGreaterThanOrEqual(
+        MINIMUM_TIER_RATIO,
       );
-      expect(seen.trainer?.top ?? -1).toBeGreaterThanOrEqual(0);
-      expect(seen.trainer?.bottom ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
-        seen.viewport.height + SUBPIXEL_TOLERANCE,
-      );
+    });
+
+    /**
+     * #373's property, kept: the line is above the controls **in the panel the
+     * controls are in**, so a rider who can see *Pause* can see it.
+     */
+    test('the trainer line is above the ride controls, in their panel', async ({ page }) => {
+      await openRide(page, viewport);
+      const seen = await measure(page);
+
+      const line = named(seen.items, 'the trainer line').box;
+      const pause = named(seen.items, 'control: Pause').box;
+      const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'))?.box;
+      expect(actions).toBeDefined();
+      expect(line.bottom).toBeLessThanOrEqual(pause.top);
+      for (const box of [line, pause]) {
+        expect(box.top).toBeGreaterThanOrEqual(actions?.top ?? Number.POSITIVE_INFINITY);
+        expect(box.bottom).toBeLessThanOrEqual(actions?.bottom ?? 0);
+      }
+    });
+
+    /**
+     * ⚠️ **The control.** See this file's header. Same DOM, same stylesheet,
+     * same viewport, without the stage: *End ride* must not be reachable
+     * without scrolling, or every case above passes over anything.
+     */
+    test('the control — without the stage, End ride is below the fold again', async ({ page }) => {
+      test.skip(!viewport.unstagedFails, 'the stacked page fits here — see Viewport.unstagedFails');
+      await openRide(page, viewport);
+      await page.evaluate(() => {
+        window.__oylRide?.unstage();
+      });
+      const seen = await measure(page);
+
+      expect(seen.stage).toBeUndefined();
+      const end = named(seen.items, 'control: End ride');
+      expect(end.box.height).toBeGreaterThan(0);
+      expect(end.box.bottom).toBeGreaterThan(viewport.height + SUBPIXEL_TOLERANCE);
     });
   });
 }
 
 /**
- * ⚠️ **The control, and the reason the run above means anything.**
+ * Where four panels cannot share the screen with a world.
  *
- * The same sentence in its pre-#373 position — after the panel, on the page
- * background — must **still be off screen** with the ride controls in view. If
- * it is not, then the viewport is taller than the page, the stylesheet did not
- * load, or the panel rendered nothing; in every one of those the case above
- * passes while measuring nothing, which is the vacuous pass this repository has
- * shipped five separate times.
- *
- * It is landscape-only because that is where #373 was reported: in portrait the
- * old placement was visible, so requiring it to overflow there would be
- * asserting the opposite of the bug.
+ * The stage becomes one scrolling column and the actions panel is pinned to
+ * its bottom edge, so *Pause*, *End ride* and the trainer line are on screen
+ * without a rider scrolling for them — which is #419's first criterion at the
+ * viewports least able to meet it. The READINGS pass beneath and are scrolled
+ * to; that is the cost, it is `theme.css` §`.oyl-game--riding`'s to argue, and
+ * it is why this block does not assert what the overlay blocks assert.
  */
-test.describe('the control — the old placement, landscape', () => {
-  test.use({ viewport: { width: 844, height: 390 } });
+for (const viewport of STACKED_VIEWPORTS) {
+  test.describe(viewport.name, () => {
+    test('the harness is on the stage, stacked', async ({ page }) => {
+      await openRide(page, viewport);
+      const seen = await measure(page);
 
-  test('is still below the fold when the controls are in view', async ({ page }) => {
-    await openRide(page);
-    await reachTheControls(page);
+      expect(seen.panelBackground).toBe(HUD_SURFACE);
+      expect(seen.items).toHaveLength(14);
+      expect(seen.stage?.width).toBe(viewport.width);
+      expect(seen.stage?.height).toBe(viewport.height);
+      // Stacked: the world is a letterbox at the top, not the whole stage.
+      expect(seen.world?.height ?? 0).toBeLessThan(viewport.height / 2);
+      expect(seen.world?.height ?? 0).toBeGreaterThan(0);
+    });
+
+    test('Pause, End ride and the trainer line are on screen with no scrolling', async ({
+      page,
+    }) => {
+      await openRide(page, viewport);
+      const seen = await measure(page);
+
+      expect(seen.scrollY).toBe(0);
+      expect(seen.stageScrollTop).toBe(0);
+      // ⚠️ The PAGE cannot scroll even here. One scroller — the stage — and not
+      // the scroll region inside a scrolling page that #419 rules out.
+      expect(seen.pageOverflow).toBeLessThanOrEqual(0);
+      for (const name of ['the trainer line', 'control: Pause', 'control: End ride']) {
+        const item = named(seen.items, name);
+        expect(inside(item.box, viewport), describeItem(item)).toBe(true);
+        expect(item.onTop, describeItem(item)).toBe(true);
+      }
+    });
+
+    test('nothing is wider than the viewport', async ({ page }) => {
+      // SC 1.4.10 is about scrolling in TWO dimensions. 320 px is the width at
+      // which #423's first layout ran the heart rate off the right-hand edge.
+      await openRide(page, viewport);
+      const seen = await measure(page);
+
+      const wide = [...seen.items, ...seen.panels].filter(
+        (each) => each.box.right > viewport.width + SUBPIXEL_TOLERANCE || each.box.left < 0,
+      );
+      expect(wide.map(describeItem)).toEqual([]);
+    });
+
+    test('the control — without the stage, End ride is below the fold again', async ({ page }) => {
+      await openRide(page, viewport);
+      await page.evaluate(() => {
+        window.__oylRide?.unstage();
+      });
+      const seen = await measure(page);
+
+      const end = named(seen.items, 'control: End ride');
+      expect(end.box.bottom).toBeGreaterThan(viewport.height + SUBPIXEL_TOLERANCE);
+    });
+  });
+}
+
+/**
+ * A ride with something to say — `ride-harness.tsx` §`WITH_A_NOTICE`.
+ *
+ * *"The road is not reaching your trainer"* stands for the whole ride, it is
+ * the HUD's fifth grid item, and it is the one with the most room to land on
+ * the rider: the four panels are sized by their content and this is sized by a
+ * sentence — the longest of the four `trainer-port.ts` can produce.
+ *
+ * ⚠️ On a phone the notice takes the route panel's cell, so there are FOUR grid
+ * items there and five on a tablet. Both are asserted, because "the notice is
+ * whole" is otherwise satisfied by a notice that was never laid out.
+ */
+test.describe('a ride with a standing notice', () => {
+  const QUERY = '?trainer=workout';
+
+  // Every overlay viewport but the smallest column one, which `theme.css`
+  // §"WHERE THERE IS NO FREE CELL" records as a limit rather than a pass.
+  for (const viewport of OVERLAY_VIEWPORTS.filter((each) => each.width > 320)) {
+    test(`is whole, over no panel and not over the rider — ${viewport.name}`, async ({ page }) => {
+      await openRide(page, viewport, QUERY);
+      const seen = await measure(page);
+
+      // The apparatus: the notice is laid out, and it is a sentence.
+      const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
+      expect(notice?.box.height ?? 0).toBeGreaterThan(40);
+      const laidOut = seen.panels.filter((each) => each.box.height > 0);
+      const onAPhone = Math.min(viewport.width, viewport.height) < 480;
+      expect(laidOut).toHaveLength(onAPhone ? 4 : 5);
+
+      expect(laidOut.filter((each) => !inside(each.box, viewport)).map(describeItem)).toEqual([]);
+      const collisions: string[] = [];
+      laidOut.forEach((a, index) => {
+        for (const b of laidOut.slice(index + 1)) {
+          if (overlap(a.box, b.box)) {
+            collisions.push(`${describeItem(a)} × ${describeItem(b)}`);
+          }
+        }
+      });
+      expect(collisions).toEqual([]);
+      expect(
+        laidOut.filter((each) => overlap(each.box, riderBox(viewport))).map(describeItem),
+      ).toEqual([]);
+      // And the controls are still where a rider can press them.
+      for (const name of ['control: Pause', 'control: End ride']) {
+        const item = named(seen.items, name);
+        expect(inside(item.box, viewport) && item.onTop, describeItem(item)).toBe(true);
+      }
+    });
+  }
+});
+
+/**
+ * `game/camera.ts` §`WORST_CASE_ASPECT` — the scenery cull is safe up to a
+ * frame 6 : 1 and drops visible scenery on a hairpin from 8 : 1. Until #423 that
+ * was an argument about how short a window anybody would make; the world is
+ * full-bleed now, so it is a `max-width` instead, and this measures it.
+ */
+test.describe('the world is never wider than the cull allows', () => {
+  test('pillarboxes a 6.5 : 1 window at 6 : 1', async ({ page }) => {
+    const wide: Viewport = { name: '2600×400', width: 2600, height: 400, unstagedFails: true };
+    await openRide(page, wide);
     const seen = await measure(page);
 
-    expect(seen.control?.top ?? 0).toBeGreaterThan(seen.viewport.height);
+    expect(seen.stage?.width).toBe(wide.width);
+    expect(seen.world?.height).toBe(wide.height);
+    expect(seen.world?.width).toBe(6 * wide.height);
+    // Centred, so the pillars are equal.
+    expect(seen.world?.left).toBe((wide.width - 6 * wide.height) / 2);
   });
 
-  /**
-   * And the measurement this harness exists to have on record: the panel is
-   * taller than the viewport, so the world canvas is not what is pushing the
-   * controls off screen and shrinking it would not bring them back.
-   *
-   * ⚠️ Asserted rather than written in a comment, because it is the premise the
-   * case above rests on. If a later change makes the panel fit, this goes red
-   * and the *"reaching the controls"* framing should be revisited — which is
-   * the outcome to want, not a failure, and is
-   * [#419](https://github.com/openzigs/onyourleft/issues/419)'s fourth
-   * criterion: it is **removed** there rather than loosened.
-   */
-  test('the HUD panel is taller than a landscape phone viewport', async ({ page }) => {
-    await openRide(page);
+  test('the control — an ordinary window is not pillarboxed', async ({ page }) => {
+    const tablet = OVERLAY_VIEWPORTS[0] as Viewport;
+    await openRide(page, tablet);
     const seen = await measure(page);
 
-    expect(seen.hud?.height ?? 0).toBeGreaterThan(seen.viewport.height);
+    expect(seen.world?.width).toBe(tablet.width);
+    expect(seen.world?.left).toBe(0);
+  });
+});
+
+/**
+ * Safe areas — a notch, a gesture bar, a status bar.
+ *
+ * ⚠️ A headless Chromium reports zero for every `env(safe-area-inset-*)`, so
+ * this sets the custom properties Capacitor's Android shell injects
+ * (`theme.css` §`--oyl-safe-top` is the chain) and measures the panels moving.
+ * It proves the stylesheet honours an inset it is given. It does **not** prove
+ * the owner's tablet gives it one — `docs/validation/0002-android-shell-and-
+ * game.md` is where that is recorded, by somebody holding the tablet.
+ */
+test.describe('safe areas', () => {
+  const TABLET = OVERLAY_VIEWPORTS[0] as Viewport;
+  const INSET = 48;
+
+  test('holds every panel clear of an inset, and runs the world under it', async ({ page }) => {
+    await openRide(page, TABLET);
+    const before = await measure(page);
+    await page.evaluate((pixels) => {
+      window.__oylRide?.setSafeArea(pixels);
+    }, INSET);
+    const after = await measure(page);
+
+    // The control: without an inset the panels sit on the stage's own 8 px
+    // padding, so "clear of 48 px" below is a thing that changed.
+    expect(Math.min(...before.panels.map((each) => each.box.top))).toBeLessThan(INSET);
+
+    for (const panel of after.panels) {
+      expect(panel.box.left, describeItem(panel)).toBeGreaterThanOrEqual(INSET);
+      expect(panel.box.top, describeItem(panel)).toBeGreaterThanOrEqual(INSET);
+      expect(panel.box.right, describeItem(panel)).toBeLessThanOrEqual(TABLET.width - INSET);
+      expect(panel.box.bottom, describeItem(panel)).toBeLessThanOrEqual(TABLET.height - INSET);
+    }
+    // Full-bleed means under the bars: the world is decorative and a world with
+    // a bar cut out of it is not full-bleed.
+    expect(after.world?.width).toBe(TABLET.width);
+    expect(after.world?.height).toBe(TABLET.height);
   });
 });

@@ -39,7 +39,32 @@
  * elements at 390 px, and only the control panels in landscape told the two
  * situations apart. That is why the control exists; see the next section.
  *
- * ## Which orientation is the binding one
+ * ## ⚠️ Since #423 — read this before the section under it
+ *
+ * **The next section describes a layout a rider no longer gets**, and it is
+ * left standing because it is the record of how the binding case was found; a
+ * reviewer who takes its table for today's numbers is reading the old file.
+ * The HUD is an overlay on a full-bleed stage now, in two tiers, and
+ * `.oyl-main`'s `68ch` cap — which is what made "landscape" and "1280 px" the
+ * same case — bounds nothing, because the stage is `position: fixed`. Measured
+ * through this harness on the stage, 2026-09-20:
+ *
+ * | viewport | layout | primary track | secondary track | control words over |
+ * |---|---|--:|--:|---|
+ * | 360 × 800 | column | 103 px | 103 px | all 3 |
+ * | 390 × 844 | column | 113 px | 113 px | all 3 |
+ * | 844 × 390 | corners | 117 px | 94 px | all 3 |
+ * | 1280 × 800 | corners | 117 px | 94 px | all 3 |
+ *
+ * Two things follow. **There is no "binding orientation" any more**: the
+ * control spills at every viewport, because `hud-harness.tsx` now lays its
+ * words out in a PRIMARY track at the primary 2.5 rem — that file says why
+ * stripping #259's class alone stopped being a control. And **the narrowest
+ * track is 103 px, at 360 px wide**, where the first version of #423's layout
+ * ran the third primary reading off the right-hand edge of the screen; that
+ * viewport is measured here for that reason.
+ *
+ * ## Which orientation WAS the binding one, before #423
  *
  * ⚠️ **Landscape, and #266's own table says portrait — which is a fact about
  * the container rather than a disagreement about arithmetic.** That table
@@ -152,6 +177,13 @@ interface PlanMeasurement {
 const VIEWPORTS = [
   { name: 'portrait', width: 390, height: 844, controlOverflows: false },
   { name: 'landscape', width: 844, height: 390, controlOverflows: true },
+  // #423. The commonest Android width there is, and the one at which the first
+  // version of the overlay ran the third primary reading off the right-hand
+  // edge: three 7 rem tracks do not fit in 360 px. `theme.css`
+  // §`.oyl-hud__fields--primary` is what that measurement changed.
+  { name: 'a narrow phone upright', width: 360, height: 800, controlOverflows: false },
+  // #422. The owner's tablet on the bars — the viewport no gate measured.
+  { name: 'a landscape tablet', width: 1280, height: 800, controlOverflows: false },
 ] as const;
 
 /**

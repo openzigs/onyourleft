@@ -25,9 +25,37 @@
  * that policy gives up. The a11y gate can audit it, so #94's contrast criterion
  * is checkable at all. And a screen reader can read it, which nothing drawn into
  * a canvas can offer.
+ *
+ * ## Since #423 it is an OVERLAY, and that changes its shape and not its nature
+ *
+ * The world is full-bleed while a ride runs and this component is laid over it.
+ * So it is no longer one panel: it is **four small solid panels and the gap
+ * between them**, because a single panel over a full-bleed world is a panel
+ * over the road. `theme.css` §`.oyl-game--riding .oyl-hud` places them; what
+ * this file decides is what is *in* each, and the DOM order, which is the order
+ * a screen reader and the tab key meet them in and is unchanged from before:
+ *
+ * | panel | holds | corner (landscape) |
+ * |---|---|---|
+ * | `primary` | power, cadence, heart rate — `fields.ts` §`ReadingTier` | top, start |
+ * | `secondary` | every other reading | top, end |
+ * | `route` | the elevation strip and the plan view | bottom, start |
+ * | `actions` | the trainer line, then Pause and End ride | bottom, end |
+ *
+ * ⚠️ **Every panel is OPAQUE and the container paints nothing.** `.oyl-hud`
+ * used to carry the surface; it now spans the whole world and must not, so the
+ * surface moved to `.oyl-hud__panel` and `hud-surface.a11y.test.ts` moved with
+ * it. The frosted-glass look the genre uses is **not available here,
+ * deliberately** — `design/tokens.ts` §`hudSurface` says why, and #423 says
+ * that changing it is an ADR rather than a CSS edit.
+ *
+ * ⚠️ **Nothing here assumes what is BEHIND it.** The panels are positioned
+ * against the stage, not against the `<canvas>`, and nothing reads the canvas's
+ * box. #433 wants a native renderer beneath a transparent WebView; this layer
+ * is the prerequisite for that and would not need to change for it.
  */
 
-import type { JSX } from 'react';
+import type { JSX, ReactNode } from 'react';
 
 import { useUnits } from '../../units/context';
 
@@ -35,9 +63,12 @@ import {
   NO_READING,
   hudReadings,
   profileReading,
+  readingTier,
   trainerLine,
   type HudInput,
+  type HudReading,
   type ProfileReading,
+  type ReadingTier,
   type TrainerLine,
 } from './fields';
 import { PlanTrace } from './PlanTrace';
@@ -83,6 +114,19 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * rather than a tenth grid field.
    */
   readonly trainer?: TrainerLine | undefined;
+  /**
+   * Anything the ride has to *say* — a fault, a road that is not reaching the
+   * trainer — laid out by the HUD so that it cannot land on a panel (#423).
+   *
+   * ⚠️ **A slot rather than a sibling of this component**, and the reason is
+   * geometry: over a full-bleed world everything is positioned against the
+   * stage, and two things positioned independently against one box overlap the
+   * day either grows. Inside the HUD's own grid a notice gets a cell nothing
+   * else can occupy. `GameView` still decides *what* is said; the markup it
+   * passes is its own `StatusMessage`s, which are opaque and carry token pairs
+   * `contrast.a11y.test.ts` already checks.
+   */
+  readonly notices?: ReactNode;
 }
 
 export function HudPanel(props: HudPanelProps): JSX.Element {
@@ -100,99 +144,156 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
         association was decorative and a screen reader would have read seven
         orphaned numbers. `dt`/`dd` carries the same association in HTML, with
         no ARIA at all.
+
+        ⚠️ **Two lists since #423, in the order there was one.** The primary
+        three were already first, so splitting the list at the tier boundary
+        moves nothing: a screen reader meets the same readings in the same
+        order, and a sighted rider finds each where `fields.ts` §`ReadingTier`
+        says it is.
       */}
-      <dl className="oyl-hud__fields">
-        {readings.map((reading) => (
-          <div
-            key={reading.key}
-            className={reading.stale ? 'oyl-hud__field oyl-hud__field--stale' : 'oyl-hud__field'}
-          >
-            <dt className="oyl-hud__label">{reading.label}</dt>
-            <dd
-              className={
-                // #259. A word does not fit the slot a number fits — the class
-                // is what sets it smaller, and `fields.ts` §`HudReading.word`
-                // is the measurement behind it.
-                reading.word === true ? 'oyl-hud__value oyl-hud__value--word' : 'oyl-hud__value'
-              }
-            >
-              {reading.value}
-              {reading.unit === '' ? null : <span className="oyl-hud__unit"> {reading.unit}</span>}
-              {reading.detail === undefined ? null : (
-                // ⚠️ Inside the `dd`, not beside it. A screen reader announces
-                // one definition per term, so a phrase in a sibling element
-                // would be read as loose text after the reading rather than as
-                // part of it — and #255's first defect is precisely that the
-                // number and the words describing it were heard as one thing
-                // while meaning another. `fields.ts` §`HudReading.detail` says
-                // why the phrase is not folded into the value instead.
-                <span className="oyl-hud__detail"> {reading.detail}</span>
-              )}
-              {reading.stale ? (
-                // ⚠️ Words, not only a tint. #94's second criterion is that a
-                // dropped sensor be distinguishable from a zero — and a rider
-                // who cannot see the tint, or is looking at a screen washed out
-                // by sunlight, gets the distinction from this line and from the
-                // dash beside it. The colour is the third signal, not the only
-                // one.
-                <span className="oyl-hud__stale"> Sensor lost</span>
-              ) : null}
-            </dd>
-          </div>
-        ))}
-      </dl>
+      <FieldList tier="primary" readings={readings} />
+      <FieldList tier="secondary" readings={readings} />
 
-      <ElevationStrip reading={elevation} profile={props.profile} />
+      <div className="oyl-hud__panel oyl-hud__route">
+        <ElevationStrip reading={elevation} profile={props.profile} />
 
-      {/*
-        #285 — the other axis. The strip above says how far is left; this says
-        where on the road that is. It is handed the ride's own odometer and
-        nothing else, for the reason `ElevationStrip` is handed
-        {@link profileReading}: there is no second value in existence for it
-        to drift from. ⚠️ **The odometer rather than the strip's fraction**,
-        which is already wrapped — this component needs the unwrapped one,
-        because `riderMark` composes `distanceOnRoute` itself and wrapping twice
-        is not the same as wrapping once. Since #287 both panels wrap through
-        `plan.ts` §`planProgress`; before it, the strip clamped and this comment
-        recorded why the plan view could not read its number.
-      */}
-      <PlanTrace profile={props.profile} distance={props.state.ride.distance} />
-
-      {/*
-        ⚠️ **Inside the panel, and above the controls** — #373. It used to be a
-        `<p className="oyl-muted">` that `GameView` rendered *after* this
-        component, on the page background, and in landscape it fell outside the
-        viewport with nothing to say it was there. `fields.ts`
-        §{@link TrainerLine} argues the placement; `browser/ride.browser.spec.ts`
-        is what measures it, in both orientations, in the pinned Chromium.
-
-        Above the controls rather than below them so that a rider who can reach
-        *Pause* can see this line — which makes its reachability a consequence
-        of something that must already be true, rather than a second rule.
-      */}
-      {props.trainer === undefined ? null : (
-        <p className="oyl-hud__trainer">{trainerLine(props.trainer)}</p>
-      )}
-
-      <div className="oyl-hud__controls">
-        <button
-          type="button"
-          className="oyl-hud__control"
-          onClick={props.onPause}
-          style={{ minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS }}
-        >
-          {props.paused ? 'Resume' : 'Pause'}
-        </button>
-        <button
-          type="button"
-          className="oyl-hud__control"
-          onClick={props.onEnd}
-          style={{ minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS }}
-        >
-          End ride
-        </button>
+        {/*
+          #285 — the other axis. The strip above says how far is left; this says
+          where on the road that is. It is handed the ride's own odometer and
+          nothing else, for the reason `ElevationStrip` is handed
+          {@link profileReading}: there is no second value in existence for it
+          to drift from. ⚠️ **The odometer rather than the strip's fraction**,
+          which is already wrapped — this component needs the unwrapped one,
+          because `riderMark` composes `distanceOnRoute` itself and wrapping
+          twice is not the same as wrapping once. Since #287 both panels wrap
+          through `plan.ts` §`planProgress`; before it, the strip clamped and
+          this comment recorded why the plan view could not read its number.
+        */}
+        <PlanTrace profile={props.profile} distance={props.state.ride.distance} />
       </div>
+
+      <div className="oyl-hud__panel oyl-hud__actions">
+        {/*
+          ⚠️ **Inside a panel, and above the controls** — #373. It used to be a
+          `<p className="oyl-muted">` that `GameView` rendered *after* this
+          component, on the page background, and in landscape it fell outside
+          the viewport with nothing to say it was there. `fields.ts`
+          §{@link TrainerLine} argues the placement.
+
+          ⚠️ **#373 did not make it visible in landscape, and a reviewer who
+          remembers this comment saying it did is reading the old file.** It
+          moved the line into a panel that was itself 572 px tall in a 390 px
+          viewport, so the line went from lost below the panel to lost at the
+          bottom of it — confirmed on a tablet on 2026-09-20 (#422). What makes
+          it visible is #423: it shares a panel with *Pause* and *End ride*,
+          that panel is pinned to a corner of the stage, and
+          `browser/ride.browser.spec.ts` measures all three inside the viewport
+          with no scrolling at a phone and a landscape-tablet viewport.
+
+          Above the controls rather than below them so that a rider who can see
+          *Pause* can see this line — which makes its reachability a consequence
+          of something that must already be true, rather than a second rule.
+        */}
+        {props.trainer === undefined ? null : (
+          <p className="oyl-hud__trainer">{trainerLine(props.trainer)}</p>
+        )}
+
+        <div className="oyl-hud__controls">
+          <button
+            type="button"
+            className="oyl-hud__control"
+            onClick={props.onPause}
+            style={{ minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS }}
+          >
+            {props.paused ? 'Resume' : 'Pause'}
+          </button>
+          <button
+            type="button"
+            className="oyl-hud__control"
+            onClick={props.onEnd}
+            style={{ minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS }}
+          >
+            End ride
+          </button>
+        </div>
+      </div>
+
+      {/*
+        Last in the document and placed by the grid, not by this position: a
+        notice is an exception, and an exception read out after the instruments
+        is the order the screen had before #423 too.
+
+        ⚠️ **The wrapper is rendered only when there is something in it.** An
+        empty grid item is still a grid item, and this one would sit across the
+        middle of the stage — the part of the screen the whole layout exists to
+        keep clear — catching pointer events over nothing.
+      */}
+      {hasContent(props.notices) ? <div className="oyl-hud__notices">{props.notices}</div> : null}
     </section>
+  );
+}
+
+/**
+ * Whether a slot was handed anything React will render.
+ *
+ * `GameView` builds its notices as an array of *conditionals*, so "nothing to
+ * say" arrives as `[undefined, undefined]` rather than as `undefined` — and
+ * both have to mean the wrapper is not rendered.
+ */
+function hasContent(node: ReactNode): boolean {
+  if (Array.isArray(node)) {
+    return (node as readonly ReactNode[]).some(hasContent);
+  }
+  return node !== undefined && node !== null && node !== false && node !== '';
+}
+
+/** One tier's readings, as the description list `HudPanel` explains. */
+function FieldList(props: {
+  readonly tier: ReadingTier;
+  readonly readings: readonly HudReading[];
+}): JSX.Element {
+  const mine = props.readings.filter((reading) => readingTier(reading) === props.tier);
+  return (
+    <dl className={`oyl-hud__panel oyl-hud__fields oyl-hud__fields--${props.tier}`}>
+      {mine.map((reading) => (
+        <div
+          key={reading.key}
+          className={reading.stale ? 'oyl-hud__field oyl-hud__field--stale' : 'oyl-hud__field'}
+        >
+          <dt className="oyl-hud__label">{reading.label}</dt>
+          <dd
+            className={
+              // #259. A word does not fit the slot a number fits — the class
+              // is what sets it smaller, and `fields.ts` §`HudReading.word`
+              // is the measurement behind it.
+              reading.word === true ? 'oyl-hud__value oyl-hud__value--word' : 'oyl-hud__value'
+            }
+          >
+            {reading.value}
+            {reading.unit === '' ? null : <span className="oyl-hud__unit"> {reading.unit}</span>}
+            {reading.detail === undefined ? null : (
+              // ⚠️ Inside the `dd`, not beside it. A screen reader announces
+              // one definition per term, so a phrase in a sibling element
+              // would be read as loose text after the reading rather than as
+              // part of it — and #255's first defect is precisely that the
+              // number and the words describing it were heard as one thing
+              // while meaning another. `fields.ts` §`HudReading.detail` says
+              // why the phrase is not folded into the value instead.
+              <span className="oyl-hud__detail"> {reading.detail}</span>
+            )}
+            {reading.stale ? (
+              // ⚠️ Words, not only a tint. #94's second criterion is that a
+              // dropped sensor be distinguishable from a zero — and a rider
+              // who cannot see the tint, or is looking at a screen washed out
+              // by sunlight, gets the distinction from this line and from the
+              // dash beside it. The colour is the third signal, not the only
+              // one.
+              <span className="oyl-hud__stale"> Sensor lost</span>
+            ) : null}
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 

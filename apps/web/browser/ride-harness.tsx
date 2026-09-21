@@ -1,103 +1,91 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The page the ride-layout half of the browser gate drives — #373.
+ * The page the ride-layout half of the browser gate drives — #373, and since
+ * #423 the stage.
  *
- * It renders the **real** `shell/AppShell.tsx` at the **real** game route, and
- * puts the **real** `game/hud/HudPanel.tsx` inside the `section.oyl-game`
- * `GameView` gives it, under the **real** `design/theme.css`. Nothing about the
- * geometry is this file's.
+ * It renders the **real** `shell/AppShell.tsx` at the **real** game route,
+ * hands it a game port with one route on it, and then **rides**: it ticks the
+ * picker's own checkboxes, types a wind speed and presses the picker's own
+ * *Ride* button. What is on the page after that is what a rider has — the real
+ * `GameView` on the real stage, the real `HudPanel` over it, the shell with its
+ * chrome absent because `GameView` told it so — under the **real**
+ * `design/theme.css`. Nothing about the geometry is this file's.
+ *
+ * ## ⚠️ A reviewer who remembers this file rendering `<HudPanel>` by hand is
+ * reading the old one, and the difference is the point of #423
+ *
+ * Until #423 this page hid the shell's view and mounted a **copy of
+ * `GameView`'s markup** beside it — a `section.oyl-game` with a canvas and a
+ * panel, typed out here. That was honest about the box model and blind to
+ * everything #423 is: whether the stage class is on the element, whether the
+ * shell stops rendering its header when a ride starts, whether the notices are
+ * inside the HUD's grid. A harness that re-types the product's markup measures
+ * its own typing (#236 is what that costs). So the ride is now started the way
+ * a rider starts it, and a `GameView` that stopped putting `oyl-game--riding`
+ * on its root, or a shell that stopped listening, fails here rather than
+ * passing over a fixture that still does both.
  *
  * ## What it exists to catch, and why no other gate could
  *
- * `GameView` renders `Trainer: simulating −0.4% (352 sent)` — the **only**
- * rider-visible evidence that a gradient is reaching the trainer, and the thing
- * `docs/validation/0002-android-shell-and-game.md` Part L's steps are built
- * around reading. Observed on a tablet on 2026-09-19: in **portrait** it is
- * visible; in **landscape** the page ends at the elevation strip and the line
- * is outside the viewport with no indication it exists. A rider running Part L
- * in the orientation a handlebar-mounted phone is most likely to be in cannot
- * perform the step.
+ * Measured on a Pixel Tablet, landscape, on 2026-09-20 (#422): canvas, HUD
+ * fields, elevation strip and plan view visible; **Pause, End ride and the
+ * trainer line below the fold**; about 53 % of the display blank. #419 had
+ * already measured the same thing in this harness at four viewports. Every
+ * gate was green, because `test:a11y` renders into jsdom, which performs no
+ * layout (CLAUDE.md §4e); `shell.browser.spec.ts` measures chrome at 320×256
+ * and never renders a HUD; `hud.browser.spec.ts` measures grid tracks and never
+ * asks where the panel is on the page; and **nothing measured any ride screen
+ * at a landscape-tablet viewport at all**.
  *
- * Every gate here was green:
+ * ## The fixture is the WIDEST ride the picker can start
  *
- * - `trainer-wiring.test.tsx` asserts the sentence is in the container, in
- *   **jsdom**, which performs no layout at all (CLAUDE.md §4e). A string in the
- *   DOM and a string on the screen are the same observation there.
- * - `shell.browser.spec.ts` measures persistent chrome at 320×256 and
- *   `hud.browser.spec.ts` measures the HUD's own grid tracks in both
- *   orientations — and **neither renders this line**, because it was
- *   `GameView`'s and those harnesses mount `AppShell` and `HudPanel`.
- *
- * ## Why `.oyl-main`'s view child is replaced
- *
- * ⚠️ The measurement is *where something is in the viewport*, so everything
- * above it has to be the product's: the sticky-or-not header, the route's `h1`,
- * the route's summary paragraph. `AppShell` renders all three and then renders
- * a view — and handed no `game` port that view is `GameView`'s route picker,
- * which is **not** what is being measured and whose height would push the panel
- * down by an amount the product never has.
- *
- * So the shell is rendered at `#/game`, its view child is **hidden**, and the
- * ride content is mounted after it. What is laid out inside `main` is then
- * exactly what the product's game route puts there: the `h1`, the summary, and
- * one `section.oyl-game`.
- *
- * ⚠️ **Hidden, not removed, and that is a measured distinction rather than a
- * preference.** `region.lastElementChild?.remove()` was the first version:
- * React owns that node, and the next commit threw
- * `NotFoundError: Failed to execute 'removeChild' on 'Node'` — which unmounted
- * the entire shell, leaving `<div id="shell"></div>`, a document 0 px tall,
- * and {@link READY_ATTRIBUTE} set on it all the same. That is precisely the
- * vacuous harness this file's control exists to catch, and it is why the spec
- * asserts what it found before it measures any of it. Setting an attribute
- * touches no child list, and nothing here re-renders — there is no state change
- * and the spec changes no route — so React never reconciles it away.
+ * A pacer **and** a ghost **and** a wind, so the secondary tier carries six
+ * fields rather than four, and a trainer that accepts gradients, so the trainer
+ * line is there. A HUD that fits with four fields and clips with six is the
+ * failure this would otherwise miss, and every one of those is a checkbox a
+ * rider can tick.
  *
  * ## The control, and why a green run would otherwise mean nothing
  *
- * ⚠️ A **second** copy of the line is rendered in its pre-#373 position — a
- * `<p className="oyl-muted">` after the panel, inside `.oyl-game`, on the page
- * background. The spec requires the shipped one to be inside the viewport in
- * both orientations **and the control to be outside it in landscape**. Without
- * that second requirement a viewport taller than the whole page, a stylesheet
- * that failed to load and a panel that rendered nothing would all report "the
- * line is visible", and the gate would be green over a measurement it never
- * made.
+ * ⚠️ `window.__oylRide.unstage()` takes `oyl-game--riding` **off the live
+ * element** — the same DOM, the same stylesheet, the same viewport, without the
+ * one class #423 added. The spec requires *Pause* to be **below the fold**
+ * again at a landscape phone, which is #419's own measurement. Without it a
+ * stylesheet that failed to load, a ride that never started and a HUD that
+ * rendered nothing would all report "every control is on screen".
+ *
+ * React does not put the class back: `className` is a constant string in
+ * `GameView`, so no later render has a changed prop to write.
  *
  * ## What this page does NOT prove
  *
- * That the ride screen looks right — there is no reference image and ADR 0009
- * forbids deriving one from another product. It renders **no WebGL**: the
- * canvas is the shipping `.oyl-game__world` element with the shipping
- * `aspect-ratio` and `max-height`, and those are what decide the layout, so the
- * scene inside it is irrelevant here and `game.html` owns it. And it says
- * nothing about a real phone: a 844×390 viewport in a headless Chromium is not
- * a handlebar in the rain.
+ * That the ride screen **looks right** — there is no reference image and ADR
+ * 0009 forbids deriving one from another product. It renders **no WebGL**: no
+ * renderer is handed to the shell, so the canvas is the shipping element with
+ * the shipping box and nothing drawn in it; `game.html` owns the scene. And it
+ * says nothing about a real tablet: 1280×800 in a headless Chromium has no
+ * status bar, no gesture bar and no thumb.
  */
 
-import { StrictMode, type JSX } from 'react';
+import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 
 import {
   altitudeMetres,
+  buildGhostTrack,
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
-  gradeAt,
-  metres,
-  metresPerSecond,
   routeProfile,
-  seconds,
   watts,
   type RoutePoint,
   type RouteProfile,
 } from '@onyourleft/domain';
 
-import { trainerLine, type TrainerLine } from '../src/game/hud/fields';
-import { HudPanel } from '../src/game/hud/HudPanel';
-import type { GameState } from '../src/game/simulation';
+import type { GamePort } from '../src/game/GameView';
+import type { GameTrainerPort } from '../src/game/trainer-port';
 import { AppShell } from '../src/shell/AppShell';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
 
@@ -107,19 +95,86 @@ import '../src/design/theme.css';
 /** A browser with no Bluetooth, which is what a headless Chromium is. */
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
 
-/** The attribute the spec waits on. @see shell-harness.tsx */
-const READY_ATTRIBUTE = 'data-oyl-ride-ready';
+/** The class #423 added, and the one thing the control removes. */
+const STAGE_CLASS = 'oyl-game--riding';
 
-/**
- * What the trainer line says, at its widest.
- *
- * A negative gradient — the minus sign is a glyph — and a four-digit count,
- * which is about what an hour at this driver's rate limit produces. A narrow
- * fixture would measure a line nobody rides.
- */
-const TRAINER: TrainerLine = { gradePercent: -12.4, writes: 1284 };
+/** How long the harness waits for the product to get somewhere, in milliseconds. */
+const PATIENCE_MS = 10_000;
 
-/** A rolling route, so the gradient field has a real number with a sign. */
+export interface Box {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** One thing a rider has to be able to see or press. */
+export interface StageItem {
+  /** What it is, for a failure message a person can act on. */
+  readonly name: string;
+  readonly box: Box;
+  /**
+   * Whether the element is the topmost thing at its own centre.
+   *
+   * ⚠️ Hit-tested rather than inferred from a box, which is
+   * `shell.browser.spec.ts`'s posture toward the skip link: two panels can
+   * each be wholly inside the viewport and one of them be underneath the
+   * other, and a rectangle cannot say which.
+   */
+  readonly onTop: boolean;
+}
+
+export interface StageMeasurement {
+  readonly viewport: { readonly width: number; readonly height: number };
+  /** The stage, or `undefined` once the control has taken the class off. */
+  readonly stage: Box | undefined;
+  readonly world: Box | undefined;
+  /** Every direct child of `.oyl-hud` — the panels, and the notice slot if any. */
+  readonly panels: readonly StageItem[];
+  /** Every reading, the strip, the plan view, the trainer line and both controls. */
+  readonly items: readonly StageItem[];
+  /** The labels of the readings, in document order, per tier. */
+  readonly primary: readonly string[];
+  readonly secondary: readonly string[];
+  /** Type sizes in CSS pixels, so "visibly larger" is read off the engine. */
+  readonly primaryValuePixels: number;
+  readonly secondaryValuePixels: number;
+  /** Whether each piece of page chrome is in the document at all. */
+  readonly chrome: {
+    readonly header: boolean;
+    readonly navigation: boolean;
+    readonly summary: boolean;
+    readonly footer: boolean;
+    readonly skipLink: boolean;
+  };
+  /** How far anything has been scrolled. A reachable control needs all three at 0. */
+  readonly scrollY: number;
+  readonly stageScrollTop: number;
+  /** How far the document COULD scroll: `scrollHeight − innerHeight`. */
+  readonly pageOverflow: number;
+  /** What `theme.css` resolved a panel's background to, as a load check. */
+  readonly panelBackground: string;
+}
+
+declare global {
+  interface Window {
+    __oylRide?: {
+      readonly ready: boolean;
+      readonly errors: readonly string[];
+      readonly measure: () => StageMeasurement;
+      /** The control. @see this file's header */
+      readonly unstage: () => void;
+      /** What Capacitor's Android shell injects. @see theme.css §--oyl-safe-top */
+      readonly setSafeArea: (pixels: number) => void;
+    };
+  }
+}
+
+const errors: string[] = [];
+
+/** A rolling route, so the gradient field and the trainer line carry a sign. */
 function route(): RouteProfile {
   const points: RoutePoint[] = [];
   const spacing = 100;
@@ -136,96 +191,225 @@ function route(): RouteProfile {
   return routeProfile(points);
 }
 
-const PROFILE = route();
-const RIDDEN = metres(5_000);
-
-/** Mid-ride, with every channel reporting. @see hud-harness.tsx */
-const STATE: GameState = {
-  ride: { speed: metresPerSecond(12.5), distance: RIDDEN },
-  elapsed: seconds(1_200),
-  ridden: seconds(1_200),
-  grade: gradeAt(PROFILE, RIDDEN),
-  input: { power: watts(342), live: true },
+const GAME: GamePort = {
+  // `attempts: 1`, so the picker offers the ghost — see this file's header.
+  listRoutes: () =>
+    Promise.resolve([{ id: 'harness', name: 'Harness hills', profile: route(), attempts: 1 }]),
+  loadGhost: () =>
+    Promise.resolve(buildGhostTrack({ elapsedSeconds: [0, 3_600], distanceMetres: [0, 36_000] })),
+  readSensors: () => ({
+    rider: { power: watts(342), live: true, paired: true },
+    cadence: { value: 92, live: true, paired: true },
+    heartRate: { value: 168, live: true, paired: true },
+  }),
 };
 
 /**
- * The ride screen's own markup, as `GameView` renders it.
+ * `ride.html?trainer=workout` — a ride with something to SAY.
  *
- * ⚠️ The canvas carries the shipping class and `aria-hidden`, exactly as
- * `GameView` writes it, and is never given a context. Its box comes from
- * `.oyl-game__world`'s `aspect-ratio` and `max-height`, which is the half of
- * this layout that decides how much room the HUD gets.
+ * A trainer a workout is already driving produces `GameView`'s standing
+ * warning, *"The road is not reaching your trainer"*, for the whole ride — and
+ * of the four sentences `trainer-port.ts` §`trainerRoadNotice` can produce it
+ * is the longest, which is the one a layout has to survive. That is the HUD's fifth grid item, it is the one most likely to land
+ * on the rider, and the default fixture never renders it — a trainer that
+ * accepts gradients has nothing to warn about. The two are mutually exclusive
+ * by construction (`GameView` §`trainerReading`), so they are two fixtures.
  */
-function Ride(): JSX.Element {
-  return (
-    <section className="oyl-game" aria-label="Trainer game">
-      <canvas className="oyl-game__world" aria-hidden="true" />
-      <HudPanel
-        profile={PROFILE}
-        state={STATE}
-        cadence={{ value: 92, live: true }}
-        heartRate={{ value: 168, live: true }}
-        chases={[]}
-        paused={false}
-        trainer={TRAINER}
-        onPause={() => undefined}
-        onEnd={() => undefined}
-      />
-      {/*
-        ⚠️ The control. This is where the line was before #373 — after the
-        panel, on the page background — and the spec requires it to be OUT of
-        the viewport in landscape. See this file's header for what a green
-        control would mean.
-      */}
-      <p className="oyl-muted" data-oyl-trainer-control="true">
-        {trainerLine(TRAINER)}
-      </p>
-    </section>
+const WITH_A_NOTICE = new URLSearchParams(window.location.search).get('trainer') === 'workout';
+
+/** A trainer that accepts every gradient, so the trainer line is on the screen. */
+const TRAINER: GameTrainerPort = {
+  readTrainer: () =>
+    WITH_A_NOTICE
+      ? { kind: 'workout', control: undefined }
+      : {
+          kind: 'ready',
+          control: {
+            setSimulationParameters: async () => Promise.resolve(),
+            stop: async () => Promise.resolve(),
+          },
+        },
+};
+
+async function until<T>(what: string, look: () => T | undefined | null): Promise<T> {
+  const deadline = performance.now() + PATIENCE_MS;
+  for (;;) {
+    const found = look();
+    if (found !== undefined && found !== null) {
+      return found;
+    }
+    if (performance.now() > deadline) {
+      throw new Error(`ride harness: gave up waiting for ${what}`);
+    }
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        resolve();
+      });
+    });
+  }
+}
+
+function labelled<T extends HTMLElement>(selector: string, text: string): T | undefined {
+  return [...document.querySelectorAll<T>(selector)].find((each) =>
+    (each.closest('label')?.textContent ?? each.textContent ?? '').includes(text),
   );
 }
 
-function main(): void {
+/** Type into a React-controlled input the way a keyboard does. */
+function type(input: HTMLInputElement, value: string): void {
+  // React tracks a controlled input's value through its own setter, so
+  // assigning `input.value` is invisible to it; the prototype's setter is not.
+  // `testing/mount.tsx` §`typeInto` is the same move, in jsdom.
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+  if (descriptor?.set === undefined) {
+    throw new Error('ride harness: this browser has no HTMLInputElement value setter');
+  }
+  descriptor.set.call(input, value);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function boxOf(element: Element): Box {
+  const rect = element.getBoundingClientRect();
+  return {
+    left: rect.left,
+    top: rect.top,
+    right: rect.right,
+    bottom: rect.bottom,
+    width: rect.width,
+    height: rect.height,
+  };
+}
+
+function item(name: string, element: Element): StageItem {
+  const box = boxOf(element);
+  const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+  return { name, box, onTop: hit !== null && (hit === element || element.contains(hit)) };
+}
+
+function textOf(element: Element | null): string {
+  return (element?.textContent ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function fontPixels(selector: string): number {
+  const element = document.querySelector(selector);
+  return element === null ? 0 : Number.parseFloat(window.getComputedStyle(element).fontSize);
+}
+
+function measure(): StageMeasurement {
+  const stage = document.querySelector(`.${STAGE_CLASS}`);
+  const world = document.querySelector('.oyl-game__world');
+  const items: StageItem[] = [];
+  for (const field of document.querySelectorAll('.oyl-hud__field')) {
+    items.push(item(`reading: ${textOf(field.querySelector('dt'))}`, field));
+  }
+  for (const [name, selector] of [
+    ['the elevation strip', '.oyl-hud__profile-svg'],
+    ['the plan view', '.oyl-hud__plan-svg'],
+    ['the trainer line', '.oyl-hud__trainer'],
+  ] as const) {
+    const element = document.querySelector(selector);
+    if (element !== null) {
+      items.push(item(name, element));
+    }
+  }
+  for (const control of document.querySelectorAll('.oyl-hud__control')) {
+    items.push(item(`control: ${textOf(control)}`, control));
+  }
+  const labels = (selector: string): string[] =>
+    [...document.querySelectorAll(`${selector} dt`)].map(textOf);
+  const panel = document.querySelector('.oyl-hud__panel');
+  return {
+    viewport: { width: window.innerWidth, height: window.innerHeight },
+    stage: stage === null ? undefined : boxOf(stage),
+    world: world === null ? undefined : boxOf(world),
+    panels: [...document.querySelectorAll('.oyl-hud > *')].map((each) =>
+      item(each.className, each),
+    ),
+    items,
+    primary: labels('.oyl-hud__fields--primary'),
+    secondary: labels('.oyl-hud__fields--secondary'),
+    primaryValuePixels: fontPixels('.oyl-hud__fields--primary .oyl-hud__value'),
+    secondaryValuePixels: fontPixels('.oyl-hud__fields--secondary .oyl-hud__value'),
+    chrome: {
+      header: document.querySelector('header.oyl-header') !== null,
+      navigation: document.querySelector('nav[aria-label="Primary"]') !== null,
+      summary: document.querySelector('main > p.oyl-muted') !== null,
+      footer: document.querySelector('footer.oyl-footer') !== null,
+      skipLink: document.querySelector('.oyl-skip-link') !== null,
+    },
+    scrollY: window.scrollY,
+    stageScrollTop: stage?.scrollTop ?? 0,
+    pageOverflow: document.documentElement.scrollHeight - window.innerHeight,
+    panelBackground: panel === null ? '' : window.getComputedStyle(panel).backgroundColor,
+  };
+}
+
+function unstage(): void {
+  const stage = document.querySelector(`.${STAGE_CLASS}`);
+  if (stage === null) {
+    throw new Error('ride harness: there is no stage to take the class off');
+  }
+  stage.classList.remove(STAGE_CLASS);
+}
+
+function setSafeArea(pixels: number): void {
+  for (const edge of ['top', 'right', 'bottom', 'left']) {
+    document.documentElement.style.setProperty(`--safe-area-inset-${edge}`, `${String(pixels)}px`);
+  }
+}
+
+async function run(): Promise<void> {
   const host = document.querySelector('#shell');
   if (host === null) {
     throw new Error('ride harness: #shell is missing from ride.html');
   }
-
-  // The real route, so the `h1` and the summary above the panel are the ones a
-  // rider actually has above it.
+  // The real route, so the shell renders the real view.
   window.location.hash = '#/game';
 
   flushSync(() => {
     createRoot(host).render(
       <StrictMode>
-        <AppShell capabilities={NO_BLUETOOTH} />
+        <AppShell capabilities={NO_BLUETOOTH} game={GAME} gameTrainer={TRAINER} />
       </StrictMode>,
     );
   });
 
-  const region = document.querySelector('.oyl-main');
-  if (region === null) {
-    throw new Error('ride harness: AppShell rendered no .oyl-main');
+  // The picker, once `listRoutes` has resolved. Everything below is what a
+  // rider does with it — see "The fixture is the WIDEST ride" above.
+  const ride = await until('the picker to offer a ride', () =>
+    labelled<HTMLButtonElement>('button', 'Ride '),
+  );
+  for (const text of ['pacer', 'Race your', 'Ride in a wind']) {
+    const box = labelled<HTMLInputElement>('input[type="checkbox"]', text);
+    if (box === undefined || box.disabled) {
+      throw new Error(`ride harness: the picker offers no usable "${text}" checkbox`);
+    }
+    box.click();
   }
-  // See the header: the view the shell rendered is not what is being measured,
-  // and its height is not one the product's game route has. ⚠️ Hidden rather
-  // than removed — removing it threw inside React and unmounted the shell.
-  const view = region.lastElementChild;
-  if (view === null) {
-    throw new Error('ride harness: AppShell rendered no view inside .oyl-main');
-  }
-  view.setAttribute('hidden', '');
+  const speed = await until('the wind speed box', () =>
+    labelled<HTMLInputElement>('input[type="number"]', 'Wind speed'),
+  );
+  type(speed, '40');
+  // A frame, so React has committed the wind before the button reads it.
+  await until('the ride button to be usable', () =>
+    ride.getAttribute('aria-disabled') === 'true' ? undefined : ride,
+  );
+  ride.click();
 
-  const mountPoint = document.createElement('div');
-  region.append(mountPoint);
-  flushSync(() => {
-    createRoot(mountPoint).render(
-      <StrictMode>
-        <Ride />
-      </StrictMode>,
-    );
-  });
+  await until('the ride to take the stage', () => document.querySelector(`.${STAGE_CLASS}`));
+  // The trainer line appears once the gradient session has written once, which
+  // is a frame or two in. Waiting for it is what makes it part of every
+  // measurement rather than of whichever ones happened to run late.
+  await until(WITH_A_NOTICE ? 'the notice' : 'the trainer line', () =>
+    document.querySelector(WITH_A_NOTICE ? '.oyl-hud__notices' : '.oyl-hud__trainer'),
+  );
+  // ⚠️ Before anything is measured. @see hud-harness.tsx
+  await document.fonts.ready;
 
-  document.documentElement.setAttribute(READY_ATTRIBUTE, 'true');
+  window.__oylRide = { ready: true, errors, measure, unstage, setSafeArea };
 }
 
-main();
+run().catch((error: unknown) => {
+  errors.push(error instanceof Error ? error.message : String(error));
+  window.__oylRide = { ready: false, errors, measure, unstage, setSafeArea };
+});

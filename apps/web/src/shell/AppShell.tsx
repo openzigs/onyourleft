@@ -310,6 +310,7 @@ function viewFor(
   onUnitsChange: (units: UnitSystem) => void,
   riderMass: Kilograms | undefined,
   onMassChange: (mass: Kilograms | undefined) => void,
+  onImmersive: (immersive: boolean) => void,
 ): JSX.Element {
   switch (match.route.id) {
     case 'ride':
@@ -353,6 +354,8 @@ function viewFor(
           // reload. `GameViewProps.riderMass` says why this is threaded rather
           // than read from the store.
           riderMass={riderMass}
+          // #423. A ride takes the screen over; this is how the shell hears.
+          onImmersive={onImmersive}
         />
       );
     case 'segment-detail':
@@ -423,6 +426,34 @@ export function AppShell(props: AppShellProps): JSX.Element {
   // default belongs to `athlete/mass.ts`, so what the shell holds is the honest
   // `undefined`. See `AppShellProps.riderMass`.
   const [riderMass, setRiderMass] = useState<Kilograms | undefined>(props.riderMass);
+  /**
+   * Whether a ride has the screen — #423.
+   *
+   * While it does, the world is full-bleed and everything that frames a *page*
+   * is **not rendered**: the skip link, the update offer, the header and its
+   * navigation, the route's summary, the footer. `GameViewProps.onImmersive`
+   * records why they are absent rather than hidden, and how a rider leaves.
+   *
+   * ⚠️ **Three things are deliberately still here**, and each is a way this
+   * could have been got wrong:
+   *
+   * - **`RideSession`.** It is above the router so that a recording and a
+   *   workout outlive whichever page is on screen, and "no page chrome" is the
+   *   most page-shaped state there is. Its clock and its unload guard run on.
+   * - **`main` and its `h1`.** `main` is labelled by the `h1`, and a landmark
+   *   whose label has gone is a landmark a screen reader announces as nothing.
+   *   The heading stays in the document and leaves the *screen* — the same
+   *   `oyl-visually-hidden` the rest of this client uses, which removes no
+   *   control from the tab order because a heading was never in it.
+   * - **The route.** The hash does not change, so a reload mid-ride lands on
+   *   the game's picker rather than on a stage with no ride behind it.
+   *
+   * ⚠️ **State here rather than a class the stylesheet reads with `:has()`.**
+   * That would be less code, and it would hide the header with CSS — which is
+   * the one thing CLAUDE.md §4e says makes the accessibility suite wrong rather
+   * than the control safe.
+   */
+  const [immersive, setImmersive] = useState(false);
   const mainRef = useRef<HTMLElement>(null);
   const previousRouteId = useRef<string | null>(null);
 
@@ -459,9 +490,12 @@ export function AppShell(props: AppShellProps): JSX.Element {
           <RideSession controller={props.rideController} />
         )}
 
-        <a className="oyl-skip-link" href={`#${MAIN_ID}`} onClick={skipToContent}>
-          Skip to main content
-        </a>
+        {/* #423: nothing to skip past while a ride has the screen. @see immersive */}
+        {immersive ? null : (
+          <a className="oyl-skip-link" href={`#${MAIN_ID}`} onClick={skipToContent}>
+            Skip to main content
+          </a>
+        )}
 
         {/*
           Between the skip link and the header, so that a rider who skips to
@@ -470,48 +504,62 @@ export function AppShell(props: AppShellProps): JSX.Element {
           same reasoning `RideSession` above carries. It renders `null` unless
           something is actually waiting.
         */}
-        {props.update === undefined ? null : <UpdateOffer watcher={props.update} />}
+        {/*
+          ⚠️ #423: not offered mid-ride, and not lost either. Applying an update
+          reloads the page, which ends the ride — and the offer is state the
+          *watcher* holds rather than state this component does, so it is back
+          the moment the ride is over.
+        */}
+        {props.update === undefined || immersive ? null : <UpdateOffer watcher={props.update} />}
 
-        <header className="oyl-header">
-          <p className="oyl-wordmark">On Your Left</p>
-          <nav aria-label="Primary">
-            <ul className="oyl-nav-list">
-              {ROUTES.map((entry) => (
-                <li key={entry.id}>
-                  <a
-                    className="oyl-nav-link"
-                    href={hrefFor(entry)}
-                    // The current page is marked for assistive technology as well
-                    // as visually. `aria-current` is the half that survives the
-                    // colour and the underline being unavailable — criterion 6.
-                    aria-current={entry.id === route.id ? 'page' : undefined}
-                  >
-                    {entry.navLabel}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </nav>
-        </header>
+        {immersive ? null : (
+          <header className="oyl-header">
+            <p className="oyl-wordmark">On Your Left</p>
+            <nav aria-label="Primary">
+              <ul className="oyl-nav-list">
+                {ROUTES.map((entry) => (
+                  <li key={entry.id}>
+                    <a
+                      className="oyl-nav-link"
+                      href={hrefFor(entry)}
+                      // The current page is marked for assistive technology as well
+                      // as visually. `aria-current` is the half that survives the
+                      // colour and the underline being unavailable — criterion 6.
+                      aria-current={entry.id === route.id ? 'page' : undefined}
+                    >
+                      {entry.navLabel}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          </header>
+        )}
 
         <main
           id={MAIN_ID}
-          className="oyl-main"
+          // `oyl-main--<layout>` is #422: which routes are prose and which are
+          // instruments. `routes.ts` §`RouteLayout` is where that is decided.
+          className={`oyl-main oyl-main--${route.layout}`}
           ref={mainRef}
           tabIndex={-1}
           aria-labelledby={VIEW_TITLE_ID}
         >
-          <h1 id={VIEW_TITLE_ID}>{route.title}</h1>
-          <p className="oyl-muted">{route.summary}</p>
-          {viewFor(match, props, units, setUnits, riderMass, setRiderMass)}
+          <h1 id={VIEW_TITLE_ID} className={immersive ? 'oyl-visually-hidden' : undefined}>
+            {route.title}
+          </h1>
+          {immersive ? null : <p className="oyl-muted">{route.summary}</p>}
+          {viewFor(match, props, units, setUnits, riderMass, setRiderMass, setImmersive)}
         </main>
 
-        <footer className="oyl-footer">
-          <p>
-            On Your Left — free and open source. No account, no server: everything here stays on
-            this device.
-          </p>
-        </footer>
+        {immersive ? null : (
+          <footer className="oyl-footer">
+            <p>
+              On Your Left — free and open source. No account, no server: everything here stays on
+              this device.
+            </p>
+          </footer>
+        )}
       </div>
     </UnitsProvider>
   );

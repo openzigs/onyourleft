@@ -196,3 +196,109 @@ describe('the trainer status line (#373)', () => {
     expect(mounted.container.querySelector('.oyl-hud')).not.toBeNull();
   });
 });
+
+/**
+ * #423 — four panels where there was one.
+ *
+ * jsdom lays nothing out, so none of this says where a panel IS; that is
+ * `browser/ride.browser.spec.ts`. What it says is what `theme.css` is given to
+ * place, because a stylesheet that positions `.oyl-hud__actions` cannot help a
+ * control that was rendered somewhere else.
+ */
+describe('the HUD is four panels (#423)', () => {
+  const profile = route();
+  const base = {
+    profile,
+    state: atStartLine(profile),
+    cadence: { value: 88, live: true },
+    heartRate: { value: 150, live: true },
+    chases: [{ to: 'bot' as const, gap: GAP }],
+    onPause: () => undefined,
+    onEnd: () => undefined,
+    paused: false,
+  };
+
+  function labelsIn(selector: string): (string | null)[] {
+    return queryAll(mounted?.container ?? document, `${selector} dt`).map(
+      (each) => each.textContent,
+    );
+  }
+
+  it('renders the two tiers as two lists, in the order there was one', async () => {
+    mounted = await mount(<HudPanel {...base} />);
+
+    expect(labelsIn('.oyl-hud__fields--primary')).toEqual(['Power', 'Cadence', 'Heart rate']);
+    expect(labelsIn('.oyl-hud__fields--secondary')).toEqual([
+      'Speed',
+      'Gradient',
+      'To go',
+      'Pacer',
+    ]);
+    // Document order is the order a screen reader meets them in, and it is
+    // the order `hudReadings` returns: primary first.
+    expect(labelsIn('.oyl-hud')).toEqual([
+      ...labelsIn('.oyl-hud__fields--primary'),
+      ...labelsIn('.oyl-hud__fields--secondary'),
+    ]);
+  });
+
+  it('paints every group as a panel, and not the container that spans the world', async () => {
+    mounted = await mount(<HudPanel {...base} trainer={{ gradePercent: 1, writes: 1 }} />);
+
+    const panels = queryAll(mounted.container, '.oyl-hud > .oyl-hud__panel');
+    expect(panels.map((each) => each.className.replace('oyl-hud__panel ', ''))).toEqual([
+      'oyl-hud__fields oyl-hud__fields--primary',
+      'oyl-hud__fields oyl-hud__fields--secondary',
+      'oyl-hud__route',
+      'oyl-hud__actions',
+    ]);
+    expect(mounted.container.querySelector('.oyl-hud')?.classList.contains('oyl-hud__panel')).toBe(
+      false,
+    );
+  });
+
+  it('keeps the trainer line in the panel the ride controls are in', async () => {
+    // ⚠️ #373's whole argument: being able to see the line follows from being
+    // able to reach *Pause*. That is only true while they share a panel — two
+    // panels are placed independently, and one of them can be clipped.
+    mounted = await mount(<HudPanel {...base} trainer={{ gradePercent: 1, writes: 1 }} />);
+
+    const actions = mounted.container.querySelector('.oyl-hud__actions');
+    expect(actions?.querySelector('.oyl-hud__trainer')).not.toBeNull();
+    expect(queryAll(actions ?? document, 'button').map((each) => each.textContent)).toEqual([
+      'Pause',
+      'End ride',
+    ]);
+  });
+
+  it('puts the strip and the plan view in one panel', async () => {
+    mounted = await mount(<HudPanel {...base} />);
+
+    const routePanel = mounted.container.querySelector('.oyl-hud__route');
+    expect(routePanel?.querySelector('.oyl-hud__profile-svg')).not.toBeNull();
+    expect(routePanel?.querySelector('.oyl-hud__plan-svg')).not.toBeNull();
+  });
+
+  it('renders a notice in its own slot, after everything else', async () => {
+    mounted = await mount(<HudPanel {...base} notices={<p id="said">Trainer lost</p>} />);
+
+    const slot = mounted.container.querySelector('.oyl-hud > .oyl-hud__notices');
+    expect(slot?.querySelector('#said')?.textContent).toBe('Trainer lost');
+    expect(mounted.container.querySelector('.oyl-hud')?.lastElementChild).toBe(slot);
+  });
+
+  it.each([
+    ['nothing', undefined],
+    ['a list of nothing', [undefined, undefined]],
+    ['a false conditional', false],
+  ])('renders no slot when it is handed %s', async (_, notices) => {
+    // ⚠️ `GameView` builds its notices as an array of conditionals, so "nothing
+    // to say" arrives as `[undefined, undefined]`. An empty grid item across
+    // the middle of the stage is the one part of the screen the layout exists
+    // to keep clear.
+    mounted = await mount(<HudPanel {...base} notices={notices} />);
+
+    expect(mounted.container.querySelector('.oyl-hud__notices')).toBeNull();
+    expect(mounted.container.querySelector('.oyl-hud')).not.toBeNull();
+  });
+});
