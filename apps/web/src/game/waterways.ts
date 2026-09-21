@@ -695,11 +695,13 @@ function occurrences(
   }
   const total = profile.totalDistance;
   const found: number[] = [];
-  for (
-    let lap = Math.floor((from - margin - wrapped) / total);
-    lap <= Math.ceil((to + margin - wrapped) / total);
-    lap += 1
-  ) {
+  const firstLap = Math.floor((from - margin - wrapped) / total);
+  // ⚠️ **At most two laps' worth**: every caller uses one occurrence, and a
+  // loop a few metres round — a hostile file's — would otherwise be walked a
+  // lap at a time across the whole view, every frame. @see settlements.ts's
+  // own bound, and `scatter.ts` §`scatterAt`'s.
+  const lastLap = Math.min(Math.ceil((to + margin - wrapped) / total), firstLap + 2);
+  for (let lap = firstLap; lap <= lastLap; lap += 1) {
     const odometer = wrapped + lap * total;
     if (odometer >= from - margin && odometer <= to + margin) {
       found.push(odometer);

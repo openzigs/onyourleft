@@ -195,7 +195,19 @@ export function structuresAt(
   for (const edge of edges) {
     found.push(edge.item);
   }
-  return found.slice(0, Math.max(0, budget.maxItems));
+  // ⚠️ **One of every place.** A loop shorter than the view comes round again
+  // inside it, and the second lap's field or site is the same one standing in
+  // the same place — `scatter.ts` §`scatterAt` makes the same promise for the
+  // scenery. Two copies of one wall at one place would be two instances drawn
+  // into the same pixels.
+  const seen = new Set<string>();
+  const once = found.filter((item) => {
+    const key = `${item.kind} ${item.x.toFixed(3)} ${item.z.toFixed(3)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return once.slice(0, Math.max(0, budget.maxItems));
 }
 
 /** Where on the route something is, and which way the road runs there. */
@@ -299,7 +311,12 @@ function settlementsAt(
   const span = total / sites;
   const reach = VILLAGE_METRES / 2 + PLOT_METRES;
   const first = Math.floor((fromMetres - reach) / span);
-  const last = Math.floor((toMetres + reach) / span);
+  // ⚠️ **Never more sites than the route has** — `scatter.ts` §`scatterAt`'s
+  // own bound, for its reason: a loop a few metres round, imported from a
+  // hostile file, has a site span to match, and a 460 m view over it would be
+  // tens of thousands of sites a frame — every one of them the same few,
+  // placed again on top of themselves.
+  const last = Math.min(Math.floor((toMetres + reach) / span), first + sites + 1);
   for (let site = first; site <= last; site += 1) {
     if (!profile.loop && (site < 0 || site >= sites)) continue;
     const wrappedSite = ((site % sites) + sites) % sites;
@@ -400,7 +417,8 @@ function fieldEdgesAt(
   const fields = Math.max(1, Math.round(total / span));
   const ways = waterways(profile, seed);
   const first = Math.floor(fromMetres / span) - 1;
-  const last = Math.floor(toMetres / span);
+  // Never more fields than the route has. @see settlementsAt's bound.
+  const last = Math.min(Math.floor(toMetres / span), first + fields + 1);
   const inVillage = (along: number): boolean =>
     villages.some(([from, to]) => along >= from && along <= to);
   for (let field = first; field <= last; field += 1) {

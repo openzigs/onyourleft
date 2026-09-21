@@ -243,6 +243,24 @@ describe('the same place on every lap, whoever asks — #460', () => {
   });
 });
 
+describe('a hostile route costs no more than a real one — #460', () => {
+  it('places each field and site of a loop a few metres round once, not once a lap', () => {
+    // A loop nineteen metres round seen across a 460 m view is two dozen laps of
+    // it. Without the bound every lap placed its one field's walls again, on
+    // top of themselves — a frame's worth of work and of instances for each.
+    const tiny = circuitRoute(3, () => 20);
+    const items = built(tiny, 0, 460);
+    const plan = new Set(
+      items.map((item) => `${item.kind} ${item.x.toFixed(3)} ${item.z.toFixed(3)}`),
+    );
+    // Non-vacuity: this loop's one field IS enclosed — without the bound it
+    // came back as 98 hedges, one lap's worth over and over.
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.length).toBe(plan.size);
+    expect(items.length).toBeLessThan(40);
+  });
+});
+
 describe('the scenery keeps out of the gardens — #460', () => {
   it('stands no tree within reach of a building', () => {
     const origin = corridorOrigin(farmland);
