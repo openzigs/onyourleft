@@ -1442,7 +1442,7 @@ describe('a release is a Reset, and it is not a loss — #372', () => {
     await handle?.setSimulationParameters({ grade: gradePercent(6) });
     const before = rig.written.length;
 
-    const outcome = await handle?.release();
+    const outcome = await handle?.letGo();
     await flushMicrotasks(20);
 
     expect(outcome).toStrictEqual({ kind: 'reset' });

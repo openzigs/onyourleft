@@ -128,7 +128,7 @@ function trainerPort(
       return Promise.resolve();
     },
     // #372: a release, which is a Reset — `stop` is no longer on the type.
-    release: async () => {
+    letGo: async () => {
       commands.releases.push(commands.written.length);
       return Promise.resolve({ kind: 'reset' as const });
     },

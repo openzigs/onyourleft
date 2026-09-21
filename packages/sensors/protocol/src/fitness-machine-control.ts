@@ -53,7 +53,7 @@
  * nothing in the specification requires a machine to discard its target
  * settings on it.
  *
- * So {@link TrainerControl.release} sends `0x01` **Reset**, which FTMS
+ * So {@link TrainerControl.letGo} sends `0x01` **Reset**, which FTMS
  * §4.16.2.1 defines as returning the machine to its default state — the
  * specification's own instrument for clearing target settings — and which
  * revokes this client's control. That second half is what the Reset trap above
@@ -262,7 +262,7 @@ export interface SimulationParameters {
   readonly windResistanceCoefficient?: number | undefined;
 }
 
-/** The release fallback's road: level, in still air. @see TrainerControl.release */
+/** The release fallback's road: level, in still air. @see TrainerControl.letGo */
 const FLAT_ROAD: GradePercent = gradePercent(0);
 
 const DEFAULT_ROLLING_RESISTANCE_COEFFICIENT = 0.004;
@@ -553,7 +553,7 @@ export interface FitnessMachineChannel {
 }
 
 /**
- * What a {@link TrainerControl.release} achieved, as far as the machine said.
+ * What a {@link TrainerControl.letGo} achieved, as far as the machine said.
  *
  * Two outcomes rather than a boolean, because the second is a real and
  * different thing to tell a rider: the trainer answered, and what it answered
@@ -726,7 +726,7 @@ export interface TrainerControl {
    * is reading the old file. FTMS does not require a machine to discard its
    * target setting values on `0x08`, and the trainer #372 was measured on keeps
    * both kinds through an acknowledged Stop: a grade (2026-09-19) and an ERG
-   * target it went on chasing (2026-09-21). {@link release} is the release.
+   * target it went on chasing (2026-09-21). {@link letGo} is the release.
    *
    * It stays for the non-terminal cases — a workout's free-ride block, a pause
    * — where this client will write again and must keep control to do it.
@@ -736,6 +736,12 @@ export interface TrainerControl {
   /**
    * Let the trainer go at the end of a ride, a workout or an ERG session — the
    * one place in the program that decides what a release sends (#372).
+   *
+   * ⚠️ **Named `letGo` rather than `release` on purpose.** CLAUDE.md §4j's
+   * `WIRE003` credits a call by member name, and production already calls a
+   * `release()` on the screen wake lock and the map protocol — so a method
+   * called `release` stayed green in that gate with every one of its own
+   * callers deleted. Measured, not assumed.
    *
    * Sends `0x01` **Reset**. On success the machine has been told to return to
    * its defaults and this client **no longer holds control** — by design, and
@@ -756,7 +762,7 @@ export interface TrainerControl {
    * whatever the fallback's Stop was refused with. A rejection means the
    * trainer may still be holding whatever it held.
    */
-  release(): Promise<TrainerRelease>;
+  letGo(): Promise<TrainerRelease>;
   /**
    * Start or resume the training session.
    *
@@ -769,7 +775,7 @@ export interface TrainerControl {
    * Reset the machine to its defaults. ⚠️ Revokes this client's control, and
    * tells {@link onControlLost} so with the reason `reset`.
    *
-   * The bare procedure. A release at the end of a ride is {@link release},
+   * The bare procedure. A release at the end of a ride is {@link letGo},
    * which sends the same op code and is not reported as a loss.
    */
   reset(): Promise<void>;
@@ -820,7 +826,7 @@ export function createTrainerControl(
 
   let held = false;
   /**
-   * Set by a successful {@link TrainerControl.release}, cleared by the next
+   * Set by a successful {@link TrainerControl.letGo}, cleared by the next
    * granted Request Control. While it is set a `0xFF` Control Permission Lost
    * is the machine confirming what this client asked for, and neither a loss
    * to report nor a control to take back — re-acquiring here would be the
@@ -1220,7 +1226,7 @@ export function createTrainerControl(
       });
     },
 
-    release(): Promise<TrainerRelease> {
+    letGo(): Promise<TrainerRelease> {
       return enqueue(async (): Promise<TrainerRelease> => {
         requireControl();
         let resetRefusal: SensorError;

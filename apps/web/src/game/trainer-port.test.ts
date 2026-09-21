@@ -26,7 +26,7 @@ import {
 function silentControl(): GradientTrainer {
   return {
     setSimulationParameters: vi.fn(async () => Promise.resolve()),
-    release: vi.fn(async () => Promise.resolve({ kind: 'reset' as const })),
+    letGo: vi.fn(async () => Promise.resolve({ kind: 'reset' as const })),
   };
 }
 
@@ -36,6 +36,25 @@ const PAIRED_AND_READY = {
   canSimulate: true,
   hasControl: true,
 } as const;
+
+describe('what the game may command — #372', () => {
+  it('can release the trainer and cannot Reset, Stop or take control of it', () => {
+    // ⚠️ `stop` was on `GradientTrainer` until #372 and `letGo` replaced it:
+    // a Stop did not release real hardware. The bare `reset` stays off, and so
+    // does `requestControl`, which is the rider's. Widen the type and TS2578
+    // fires on the directive that no longer has an error to expect.
+    const control = silentControl();
+    expect(control.letGo).toBeDefined();
+    // @ts-expect-error the bare Reset is not the game's to send.
+    expect(control.reset).toBeUndefined();
+    // @ts-expect-error nor is a Stop, since #372.
+    expect(control.stop).toBeUndefined();
+    // @ts-expect-error nor is taking control.
+    expect(control.requestControl).toBeUndefined();
+    // @ts-expect-error nor is an ERG target, which is the workout's.
+    expect(control.setTargetPower).toBeUndefined();
+  });
+});
 
 describe('gameTrainerFrom', () => {
   it('hands over a control only when every gate has passed', () => {

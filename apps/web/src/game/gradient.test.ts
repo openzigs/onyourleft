@@ -64,7 +64,7 @@ function recordingTrainer(
       }
       return Promise.resolve();
     },
-    release: async () => {
+    letGo: async () => {
       releases.push(written.length);
       return Promise.resolve(options.release ?? { kind: 'reset' });
     },
@@ -218,7 +218,7 @@ describe('a gradient session drives a trainer from a route', () => {
     const control: GradientTrainer = {
       setSimulationParameters: async () =>
         failing ? Promise.reject(new Error('boom')) : undefined,
-      release: async () => Promise.resolve({ kind: 'reset' as const }),
+      letGo: async () => Promise.resolve({ kind: 'reset' as const }),
     };
     const session = createGradientSession({ profile: hill(), control });
     session.sample(seconds(0), 500);
@@ -231,12 +231,12 @@ describe('a gradient session drives a trainer from a route', () => {
     expect(session.state().fault).toBeUndefined();
   });
 
-  it('releases the trainer when the ride ends, through release() rather than a flat road', async () => {
+  it('releases the trainer when the ride ends, through letGo() rather than a flat road', async () => {
     // #362's "what happens to the applied resistance when the ride is stopped",
     // and `docs/validation/0002` Part L5. FTMS simulation parameters persist on
     // the machine until they are changed, so a ride ended on a wall would leave
     // the flywheel loaded against whoever gets on next. ⚠️ Since #372 the
-    // release is `release()` — an FTMS Reset — because a Stop, which this test
+    // release is `letGo()` — an FTMS Reset — because a Stop, which this test
     // used to count, did not remove the grade on real hardware. `stop` is not
     // on `GradientTrainer` any more, so reverting to it is a compile error; the
     // octets a release sends are asserted in `fitness-machine-control.test.ts`.
@@ -278,10 +278,10 @@ describe('a gradient session drives a trainer from a route', () => {
   it('tells the rider when the release itself is refused', async () => {
     // ⚠️ The path a rider most needs to be told about, because its consequence
     // is resistance left on a machine after they have got off. The write
-    // succeeded, so the failure arrives only from `release()`.
+    // succeeded, so the failure arrives only from `letGo()`.
     const control: GradientTrainer = {
       setSimulationParameters: async () => Promise.resolve(),
-      release: async () => Promise.reject(new Error('control-not-held')),
+      letGo: async () => Promise.reject(new Error('control-not-held')),
     };
     const session = createGradientSession({ profile: hill(), control });
     session.sample(seconds(0), 500);
@@ -350,7 +350,7 @@ describe('a gradient session drives a trainer from a route', () => {
         written.push(parameters);
         return new Promise<void>(() => undefined);
       },
-      release: async () => Promise.resolve({ kind: 'reset' as const }),
+      letGo: async () => Promise.resolve({ kind: 'reset' as const }),
     };
     const session = createGradientSession({ profile: hill(), control });
     for (let at = 0; at < 30; at += 1) {

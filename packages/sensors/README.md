@@ -738,7 +738,7 @@ The three ways control is lost, all of which this client watches for:
 
 ### Letting the trainer go is a Reset — #372
 
-`release()` is how a ride, a workout or an ERG session ends, and it sends **`0x01` Reset**, not
+`letGo()` is how a ride, a workout or an ERG session ends, and it sends **`0x01` Reset**, not
 `0x08` Stop. ⚠️ Until [#372](https://github.com/openzigs/onyourleft/issues/372) this client released
 with `stop()`, and on the one trainer measured an acknowledged Stop released nothing: a grade stayed
 applied, and an ERG target was still being chased 36 s later, power rising as cadence fell. A Reset

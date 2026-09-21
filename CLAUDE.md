@@ -2147,7 +2147,7 @@ plugin has never heard of, on the one path that applies physical resistance to s
 `stop()` being "the deliberate way to end resistance" is reading the old file. On the one trainer
 measured, an acknowledged Stop released nothing: a grade stayed applied (2026-09-19) and an ERG
 target was still being chased, power rising as cadence fell (2026-09-21). So
-`TrainerControl.release()` in `packages/sensors/protocol` is the **one** place that decides what a
+`TrainerControl.letGo()` in `packages/sensors/protocol` is the **one** place that decides what a
 release sends, and every release goes through `ride/controller.ts` §`releaseTrainer` — *End ERG*, the
 end of a workout, stopping a ride, and a game ride ending by button or by navigating away. Three
 things about it are decisions, not details: a Reset **revokes control** (FTMS §4.16.2.1), which is
@@ -2155,7 +2155,7 @@ the intent for a terminal release and why nothing is written after one; it is **
 loss** — no "Control lost", and a workout ends rather than pausing — and nothing takes control back
 afterwards, so the next game ride tells the rider to take control on the Ride screen; and a machine
 that refuses the Reset gets a flat road and a Stop, reported as **Not released**, never as released.
-⚠️ `ErgSink` still cannot reach `reset` or `release` — the session that owns the writer releases,
+⚠️ `ErgSink` still cannot reach `reset` or `letGo` — the session that owns the writer releases,
 never the writer — and a **pause inside a workout** (a free-ride block, a paused ride, the ERG spiral
 easing) is still a Stop, because the workout writes again afterwards; on the measured trainer that
 does not ease an ERG target either, which is its own issue. ⚠️ **No test here proves a real trainer
@@ -3251,7 +3251,7 @@ top of an issue **supersedes its body**.
 | How the road the game draws reaches a trainer, and what proves a ride sends one | `apps/web/src/game/gradient.ts`, `apps/web/src/game/trainer-wiring.test.tsx`, [#362](https://github.com/openzigs/onyourleft/issues/362) |
 | Why a machine that does not offer simulation mode is never written to, and what the rider is told instead | `apps/web/src/game/trainer-port.ts` §`gameTrainerFrom`, §`trainerRoadNotice` |
 | Why the game is refused the trainer while a workout is running, and what the game's release would have done to that workout | `apps/web/src/ride/controller.ts` §`simulationControl`, `apps/web/src/game/trainer-port.ts` §`GameTrainerKind` member `workout` |
-| What happens to the resistance when a ride ends, and why it is a Reset rather than a Stop or a flat road | `apps/web/src/game/gradient.ts` §`stop`, `packages/sensors/protocol/src/fitness-machine-control.ts` §`release`, [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part L, Part R, [#372](https://github.com/openzigs/onyourleft/issues/372) |
+| What happens to the resistance when a ride ends, and why it is a Reset rather than a Stop or a flat road | `apps/web/src/game/gradient.ts` §`stop`, `packages/sensors/protocol/src/fitness-machine-control.ts` §`letGo`, [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part L, Part R, [#372](https://github.com/openzigs/onyourleft/issues/372) |
 | Where every release in the client goes through, why one is joined rather than repeated, and why it is not a loss of control | `apps/web/src/ride/controller.ts` §`releaseTrainer` |
 | Why a workout replaced by another does not Reset the trainer | `apps/web/src/workout/session.ts` §`supersede`, `apps/web/src/ride/controller.ts` §`endWorkoutSession` |
 | Why the simulator can be built to keep its targets through a Stop, and what that does not prove | `packages/sensors/src/simulator/ftms.ts` §`FtmsOptions.retainsTargetsThroughStop` |

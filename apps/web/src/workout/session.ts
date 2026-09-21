@@ -36,7 +36,7 @@
  * do. So there are now two paths, and they send different things:
  *
  * - **The end of the workout** — it finished, or the rider ended it, or the
- *   ride stopped — is {@link TrainerControl.release}: FTMS `0x01` Reset, which
+ *   ride stopped — is {@link TrainerControl.letGo}: FTMS `0x01` Reset, which
  *   returns the machine to its defaults and gives this client's control up.
  *   Terminal on purpose: nothing is written after it, so the Reset trap (a
  *   player that resets between intervals and keeps sending into a machine that
@@ -78,14 +78,14 @@ export const CADENCE_HISTORY_SECONDS = 30;
 /**
  * What the session needs from a trainer.
  *
- * `setTargetPower`, `stop` and `release` and nothing else — in particular
+ * `setTargetPower`, `stop` and `letGo` and nothing else — in particular
  * **not** the bare `reset`, and not `requestControl`, which the ride screen has
  * already done by the time a workout starts. Narrowed for the same reason
  * `ErgSink` is: a method that is not on the type cannot be called by a later
- * edit. `release` is here since #372 and is called from exactly one place,
+ * edit. `letGo` is here since #372 and is called from exactly one place,
  * {@link createWorkoutSession}'s `finish`, which runs once per session.
  */
-export type WorkoutTrainer = Pick<TrainerControl, 'setTargetPower' | 'stop' | 'release'>;
+export type WorkoutTrainer = Pick<TrainerControl, 'setTargetPower' | 'stop' | 'letGo'>;
 
 export interface WorkoutSessionOptions {
   readonly timeline: WorkoutTimeline;
@@ -215,7 +215,7 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
   };
 
   /**
-   * Let the trainer go for good — FTMS Reset, through `control.release()`.
+   * Let the trainer go for good — FTMS Reset, through `control.letGo()`.
    *
    * ⚠️ **Deliberately NOT guarded by `released`.** A workout whose last block
    * was a free ride has already sent a Stop, and on the trainer #372 was
@@ -229,7 +229,7 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
     }
     finished = true;
     released = true;
-    void control.release().then(
+    void control.letGo().then(
       (outcome) => {
         if (outcome.kind === 'incomplete') {
           lastFault = RELEASE_INCOMPLETE;

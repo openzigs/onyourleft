@@ -424,7 +424,7 @@ export interface RideController {
   /**
    * The paired trainer, narrowed to the two commands the game may give it (#362).
    *
-   * ⚠️ **Its `release` is this controller's, not the protocol client's** (#372).
+   * ⚠️ **Its `letGo` is this controller's, not the protocol client's** (#372).
    * It goes through the one release every other path uses, so a game ride that
    * ends is joined with any release already in flight, and an incomplete one is
    * reported on {@link TrainerSnapshot.releaseFault} like every other.
@@ -462,7 +462,7 @@ export interface RideController {
    * {@link RideSnapshot.workout} is what `game/trainer-port.ts`
    * §`gameTrainerFrom` reads to say which of its states this is.
    */
-  simulationControl(): Pick<TrainerControl, 'setSimulationParameters' | 'release'> | undefined;
+  simulationControl(): Pick<TrainerControl, 'setSimulationParameters' | 'letGo'> | undefined;
 
   /** Advance the clock: staleness, auto-pause and the checkpoint schedule. */
   tick(now: UnixSeconds): Promise<void>;
@@ -548,7 +548,7 @@ export function createRideController(options: RideControllerOptions): RideContro
    * Let the trainer go — **the one release in the client** (#372).
    *
    * Every path that ends a ride, a workout, manual ERG or a game ride reaches
-   * the trainer through this, and it sends `TrainerControl.release()`: an FTMS
+   * the trainer through this, and it sends `TrainerControl.letGo()`: an FTMS
    * Reset, with a flat-road-and-Stop fallback when the machine refuses one.
    * Four callers and one decision, because the defect #372 found was one
    * decision (a Stop) copied into three places, each correct by its own tests.
@@ -559,7 +559,7 @@ export function createRideController(options: RideControllerOptions): RideContro
    * and report *"not granted control"* as a fault on a release that worked.
    *
    * ⚠️ **An intended release is told apart from a loss HERE, by the call, not
-   * by a reason string.** `release()` does not raise `onControlLost`, so the
+   * by a reason string.** `letGo()` does not raise `onControlLost`, so the
    * listener in `wire` — which shows "Control lost" and pauses a workout — is
    * never reached from a path that meant to let go. Nothing re-requests
    * control after this either: rule 2 at the top of the file.
@@ -568,7 +568,7 @@ export function createRideController(options: RideControllerOptions): RideContro
     if (releasing !== undefined) {
       return releasing;
     }
-    const attempt = client.release().then(
+    const attempt = client.letGo().then(
       (outcome) => {
         releaseFault = outcome.kind === 'reset' ? undefined : RELEASE_INCOMPLETE;
         // A setpoint the rider asked for can no longer be answered.
@@ -1251,12 +1251,12 @@ export function createRideController(options: RideControllerOptions): RideContro
       const session = createWorkoutSession({
         timeline: expandWorkout(record.workout),
         thresholdPower,
-        // ⚠️ `release` is this controller's, so the end of the workout is the
+        // ⚠️ `letGo` is this controller's, so the end of the workout is the
         // same release as every other and is joined with the ride's own.
         control: {
           setTargetPower: (target) => client.setTargetPower(target),
           stop: () => client.stop(),
-          release: () => releaseTrainer(client),
+          letGo: () => releaseTrainer(client),
         },
         onChange: changed,
       });
@@ -1316,7 +1316,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       }
     },
 
-    simulationControl(): Pick<TrainerControl, 'setSimulationParameters' | 'release'> | undefined {
+    simulationControl(): Pick<TrainerControl, 'setSimulationParameters' | 'letGo'> | undefined {
       // ⚠️ The workout owns the control point while it exists — see the
       // declaration for what two writers on one characteristic did. Checked
       // here rather than only in `gameTrainerFrom` because this is the method
@@ -1331,7 +1331,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       }
       return {
         setSimulationParameters: (parameters) => client.setSimulationParameters(parameters),
-        release: () => releaseTrainer(client),
+        letGo: () => releaseTrainer(client),
       };
     },
 
@@ -1397,13 +1397,13 @@ export function createRideController(options: RideControllerOptions): RideContro
    * that the machine may still be holding resistance.
    *
    * ⚠️ Joins a release already on the wire — the workout's, when a ride with a
-   * workout in it stops — rather than skipping because control looks gone or
-   * sending a second one. `hasControl()` is still `true` while that Reset is
-   * outstanding.
+   * workout in it stops — rather than sending a second one. That works because
+   * `hasControl()` is still `true` while that Reset is queued, so this reaches
+   * {@link releaseTrainer}, which returns the one in flight.
    */
   async function stopTrainer(): Promise<void> {
     const client = control();
-    if (client === undefined || (releasing === undefined && !client.hasControl())) {
+    if (client === undefined || !client.hasControl()) {
       return;
     }
     try {

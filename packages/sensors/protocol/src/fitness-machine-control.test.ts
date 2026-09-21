@@ -816,7 +816,7 @@ describe('the link dropping mid-ERG', () => {
   // before a rider unclips". It asserts the octets and this client's own
   // belief, and says nothing about the resistance: on the trainer #372 was
   // measured on, a Stop released neither a grade nor an ERG target. The
-  // release is `release()`, tested under its own heading below.
+  // release is `letGo()`, tested under its own heading below.
   it('sends Stop as 0x08 0x01 and forgets its own target — which is not a release (#372)', async () => {
     const trainer = control();
     await trainer.requestControl();
@@ -1425,7 +1425,7 @@ describe('releasing the trainer at the end of a ride — #372', () => {
     await trainer.setTargetPower(watts(200));
     const before = machine.writes.length;
 
-    const outcome = await trainer.release();
+    const outcome = await trainer.letGo();
 
     expect(outcome).toStrictEqual({ kind: 'reset' });
     const sent = machine.writes.slice(before).map((write) => [...write]);
@@ -1439,7 +1439,7 @@ describe('releasing the trainer at the end of a ride — #372', () => {
     // written.
     const trainer = control();
     await trainer.requestControl();
-    await trainer.release();
+    await trainer.letGo();
     const before = machine.writes.length;
 
     expect(trainer.hasControl()).toBe(false);
@@ -1462,7 +1462,7 @@ describe('releasing the trainer at the end of a ride — #372', () => {
     trainer.onControlLost((reason) => reasons.push(reason));
     await trainer.requestControl();
 
-    await trainer.release();
+    await trainer.letGo();
 
     expect(reasons).toStrictEqual([]);
   });
@@ -1476,7 +1476,7 @@ describe('releasing the trainer at the end of a ride — #372', () => {
     const trainer = control();
     trainer.onControlLost((reason) => reasons.push(reason));
     await trainer.requestControl();
-    await trainer.release();
+    await trainer.letGo();
 
     machine.status(Uint8Array.from([0xff]));
     await inFlight();
@@ -1495,7 +1495,7 @@ describe('releasing the trainer at the end of a ride — #372', () => {
     const trainer = control({ reacquireControl: false });
     trainer.onControlLost((reason) => reasons.push(reason));
     await trainer.requestControl();
-    await trainer.release();
+    await trainer.letGo();
     await trainer.requestControl();
 
     machine.status(Uint8Array.from([0xff]));
@@ -1510,7 +1510,7 @@ describe('releasing the trainer at the end of a ride — #372', () => {
     machine.answer(FTMS_OP_CODE.reset, FTMS_RESULT_CODE.opCodeNotSupported);
     const before = machine.writes.length;
 
-    const outcome = await trainer.release();
+    const outcome = await trainer.letGo();
 
     expect(outcome.kind).toBe('incomplete');
     expect(outcome.kind === 'incomplete' && outcome.flattened).toBe(true);
@@ -1532,7 +1532,7 @@ describe('releasing the trainer at the end of a ride — #372', () => {
     machine.answer(FTMS_OP_CODE.reset, FTMS_RESULT_CODE.operationFailed);
     const before = machine.writes.length;
 
-    const outcome = await trainer.release();
+    const outcome = await trainer.letGo();
 
     expect(outcome.kind === 'incomplete' && !outcome.flattened).toBe(true);
     expect(machine.writes.slice(before).map((write) => write[0])).toStrictEqual([
@@ -1552,7 +1552,7 @@ describe('releasing the trainer at the end of a ride — #372', () => {
       FTMS_RESULT_CODE.invalidParameter,
     );
 
-    const outcome = await trainer.release();
+    const outcome = await trainer.letGo();
 
     expect(outcome.kind === 'incomplete' && !outcome.flattened).toBe(true);
     expect(machine.writes.at(-1)?.[0]).toBe(FTMS_OP_CODE.stopOrPause);
@@ -1564,7 +1564,7 @@ describe('releasing the trainer at the end of a ride — #372', () => {
     machine.answer(FTMS_OP_CODE.reset, FTMS_RESULT_CODE.opCodeNotSupported);
     machine.answer(FTMS_OP_CODE.stopOrPause, FTMS_RESULT_CODE.operationFailed);
 
-    await expect(trainer.release()).rejects.toThrow(SensorError);
+    await expect(trainer.letGo()).rejects.toThrow(SensorError);
   });
 
   it('rejects, and writes nothing more, when the Reset is answered Control Not Permitted', async () => {
@@ -1577,7 +1577,7 @@ describe('releasing the trainer at the end of a ride — #372', () => {
     machine.answer(FTMS_OP_CODE.reset, FTMS_RESULT_CODE.controlNotPermitted);
     const before = machine.writes.length;
 
-    await expect(trainer.release()).rejects.toThrow(SensorError);
+    await expect(trainer.letGo()).rejects.toThrow(SensorError);
 
     expect(machine.writes.slice(before).map((write) => write[0])).toStrictEqual([
       FTMS_OP_CODE.reset,
@@ -1596,7 +1596,7 @@ describe('releasing the trainer at the end of a ride — #372', () => {
     await trainer.requestControl();
     machine.goSilent();
 
-    const pending = trainer.release();
+    const pending = trainer.letGo();
     await inFlight();
     // The machine comes back for everything after the Reset.
     const silentReset = timers.at(-1);
@@ -1631,7 +1631,7 @@ describe('releasing the trainer at the end of a ride — #372', () => {
   it('refuses to release a machine it holds no control of, and writes nothing', async () => {
     const trainer = control();
 
-    await expect(trainer.release()).rejects.toThrow(/has not been granted control/);
+    await expect(trainer.letGo()).rejects.toThrow(/has not been granted control/);
     expect(machine.writes).toHaveLength(0);
   });
 });

@@ -43,7 +43,7 @@
  * First it said `stop()` was "the deliberate way to end resistance"; then it
  * said, correctly, that a Stop does not remove the resistance, and left the
  * remedy open. [#372](https://github.com/openzigs/onyourleft/issues/372) chose
- * it, and {@link GradientSession.stop} now calls `control.release()`.
+ * it, and {@link GradientSession.stop} now calls `control.letGo()`.
  *
  * The hazard is unchanged: FTMS simulation parameters persist on the machine
  * until they are changed, so a rider who ends a ride on a 9 % wall and walks
@@ -72,7 +72,7 @@
  * `trainer-port.ts` rules out for the game and `ride/controller.ts`'s rule 2
  * rules out everywhere: taking control is a thing the rider does.
  *
- * ⚠️ If the machine refuses the Reset, `release()` writes a flat road and a Stop
+ * ⚠️ If the machine refuses the Reset, `letGo()` writes a flat road and a Stop
  * and resolves `incomplete`, and the rider is told the trainer may still be
  * holding resistance — by the ride controller, which every release goes
  * through, on the Ride screen and on this game's route picker.
@@ -173,7 +173,7 @@ export interface GradientSession {
    */
   sample(at: Seconds, distance: number): void;
   /**
-   * End the ride and let the trainer go — `control.release()`, an FTMS Reset
+   * End the ride and let the trainer go — `control.letGo()`, an FTMS Reset
    * (#372). @see the module note, "Two".
    *
    * Idempotent: `GameView` tears down from the "End ride" button and from the
@@ -250,7 +250,7 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
       // Empties the waiting slot so nothing new reaches the wire; a write
       // already in flight is on the wire and cannot be recalled.
       writer.close();
-      void control.release().then(
+      void control.letGo().then(
         (outcome) => {
           if (outcome.kind === 'incomplete') {
             fault = RELEASE_INCOMPLETE_ROAD;

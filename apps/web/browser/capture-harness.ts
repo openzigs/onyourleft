@@ -253,11 +253,11 @@ async function start(): Promise<void> {
         return;
       }
       try {
-        // `release()` — the shipping client's one release, an FTMS Reset
+        // `letGo()` — the shipping client's one release, an FTMS Reset
         // (#372). ⚠️ This used to send `stop()`, and on the trainer #372 was
         // measured on an acknowledged Stop left the target applied. Never a
         // target of zero either: zero watts is a setpoint the machine holds.
-        const outcome = await control.control.release();
+        const outcome = await control.control.letGo();
         log(
           outcome.kind === 'reset'
             ? '✓ released with Reset — control is given up'

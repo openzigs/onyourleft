@@ -27,7 +27,7 @@
  *
  * ## What the game may command, and what it deliberately may not
  *
- * {@link GradientTrainer} is `setSimulationParameters` and `release` and
+ * {@link GradientTrainer} is `setSimulationParameters` and `letGo` and
  * nothing else — narrowed for exactly the reason `workout/session.ts` narrows
  * `WorkoutTrainer`: **a method that is not on the type cannot be called by a
  * later edit**. `requestControl()` is a thing the *rider* does — a game screen
@@ -35,11 +35,11 @@
  * resistance to somebody, which CLAUDE.md §6 rules out and
  * `RideController.startWorkout` already rules out for the workout path.
  *
- * ⚠️ **`stop` was on this type until #372, and `release` replaced it.** A Stop
- * did not remove the resistance on real hardware; `release` sends a Reset,
+ * ⚠️ **`stop` was on this type until #372, and `letGo` replaced it.** A Stop
+ * did not remove the resistance on real hardware; `letGo` sends a Reset,
  * which does per FTMS and which revokes control. The game must not be able to
  * Reset mid-ride, and the type alone cannot say "only at the end" — so the
- * guarantee is two things together: `gradient.ts` calls `release` from its
+ * guarantee is two things together: `gradient.ts` calls `letGo` from its
  * `stop` alone, once, after which it writes nothing; and a write that somehow
  * followed would be refused by `TrainerControl` for want of control rather
  * than sent. The bare `reset()` stays off this type.
@@ -55,9 +55,9 @@ import type { TrainerControl } from '@onyourleft/sensors/protocol';
  * The trainer, narrowed to the two commands a ride in the game may give it.
  *
  * @see the module note for why the other methods of `TrainerControl` are
- * unreachable from here, and why `release` rather than `stop` (#372).
+ * unreachable from here, and why `letGo` rather than `stop` (#372).
  */
-export type GradientTrainer = Pick<TrainerControl, 'setSimulationParameters' | 'release'>;
+export type GradientTrainer = Pick<TrainerControl, 'setSimulationParameters' | 'letGo'>;
 
 /**
  * What the paired trainer can be told about the road, right now.

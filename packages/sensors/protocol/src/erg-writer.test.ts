@@ -206,5 +206,8 @@ describe('the Reset trap is closed by the type', () => {
     expect(sink.stop).toBeUndefined();
     // @ts-expect-error nor is `requestControl`.
     expect(sink.requestControl).toBeUndefined();
+    // @ts-expect-error nor is `letGo` — since #372 it sends the same Reset, and
+    // the session that OWNS this writer releases the trainer, never the writer.
+    expect(sink.letGo).toBeUndefined();
   });
 });
