@@ -21,7 +21,7 @@ import {
   type ContactShadow,
 } from './contact-shadow';
 import type { RiderMarker } from './port';
-import { ContactShadowBelt, RiderBelt, ScatterBelt } from './three-renderer';
+import { ContactShadowBelt, RiderBelt, ScatterBelt, WorldLamps } from './three-renderer';
 import type { SunStyle } from './world';
 
 const blank = (): ContactShadow => ({ x: 0, y: 0, z: 0, yaw: 0, halfAlong: 0, halfAcross: 0 });
@@ -250,5 +250,50 @@ describe('the shadow MAP casters — #426, the map rung only', () => {
       expect((mesh as unknown as { castShadow: boolean }).castShadow).toBe(false);
       expect((mesh as unknown as { receiveShadow: boolean }).receiveShadow).toBe(false);
     }
+  });
+});
+
+describe('the sun as the shadow map’s camera — #426, the map rung only', () => {
+  const sun: SunStyle = { ...SUN, ambient: 0.4, direct: 0.6 / SUN.y };
+
+  it('casts only when asked, from a frame around the rider rather than the whole world', () => {
+    const lamps = new WorldLamps();
+    const [ambient, directional] = lamps.lamps;
+    expect(directional.castShadow).toBe(false);
+    lamps.setCasting(true);
+    expect(directional.castShadow).toBe(true);
+    expect(ambient.castShadow).toBe(false);
+    const frame = directional.shadow.camera;
+    expect([frame.left, frame.right, frame.top, frame.bottom]).toEqual([-6, 6, 6, -6]);
+    expect(directional.shadow.mapSize.x).toBe(512);
+    lamps.setCasting(false);
+    expect(directional.castShadow).toBe(false);
+  });
+
+  it('moves both ends to the rider and keeps the ONE sun’s direction', () => {
+    const lamps = new WorldLamps();
+    const directional = lamps.lamps[1];
+    lamps.apply(sun);
+    lamps.aimShadowAt(100, 7, -40, sun);
+    const along = [
+      directional.position.x - directional.target.position.x,
+      directional.position.y - directional.target.position.y,
+      directional.position.z - directional.target.position.z,
+    ];
+    const length = Math.hypot(...along);
+    expect([directional.target.position.x, directional.target.position.y]).toEqual([100, 7]);
+    expect(along.map((each) => each / length)).toEqual([
+      expect.closeTo(sun.x, 9),
+      expect.closeTo(sun.y, 9),
+      expect.closeTo(sun.z, 9),
+    ]);
+    // …and `apply` on the next frame of a rung WITHOUT the map puts the target
+    // back at the origin, so the direction it documents is the one it has.
+    lamps.apply(sun);
+    expect([
+      directional.target.position.x,
+      directional.target.position.y,
+      directional.target.position.z,
+    ]).toEqual([0, 0, 0]);
   });
 });
