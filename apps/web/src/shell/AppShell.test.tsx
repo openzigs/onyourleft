@@ -67,7 +67,7 @@ describe('the router', () => {
   });
 
   it('follows a link rendered inside a view, not only one in the header', async () => {
-    await open('/');
+    await open('/ride');
     const link = document.querySelector<HTMLAnchorElement>(
       `main a[href="${hrefFor(routeById('devices'))}"]`,
     );
@@ -125,16 +125,23 @@ describe('the header', () => {
     expect(document.querySelector('nav')?.getAttribute('aria-label')).toBe('Primary');
   });
 
-  it('offers four destinations, each an icon and a word — #427', async () => {
+  it('offers five destinations, each an icon and a word — #427, #428', async () => {
     await open('/');
     const primary = [...document.querySelectorAll('nav[aria-label="Primary"] a')];
     expect(primary.map((a) => a.getAttribute('href'))).toEqual([
       '#/',
+      '#/ride',
       '#/activities',
       '#/routes',
       '#/devices',
     ]);
-    expect(primary.map((a) => a.textContent)).toEqual(['Ride', 'History', 'Routes', 'More']);
+    expect(primary.map((a) => a.textContent)).toEqual([
+      'Home',
+      'Ride',
+      'History',
+      'Routes',
+      'More',
+    ]);
     for (const link of primary) {
       // The icon is decoration; the word is the name.
       expect(link.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
@@ -142,9 +149,9 @@ describe('the header', () => {
   });
 
   it('lists the current group’s pages, and only that group’s', async () => {
-    await open('/');
+    await open('/ride');
     const pages = [...document.querySelectorAll('nav[aria-label="Ride pages"] a')];
-    expect(pages.map((a) => a.getAttribute('href'))).toEqual(['#/', '#/game', '#/workouts']);
+    expect(pages.map((a) => a.getAttribute('href'))).toEqual(['#/ride', '#/game', '#/workouts']);
     expect(document.querySelector('nav[aria-label="History pages"]')).toBeNull();
   });
 

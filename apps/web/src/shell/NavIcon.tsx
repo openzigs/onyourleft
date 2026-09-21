@@ -5,7 +5,7 @@
  *
  * ## Why they are drawn here and not installed
  *
- * Four glyphs. An icon SET as a dependency would be a
+ * Five glyphs. An icon SET as a dependency would be a
  * licence answer in both of this repository's gates — `DEP001` for the
  * package's own licence, and since ADR 0025 `DEP002`, which admits no copyleft
  * in an app's distributed closure — and a bundle cost, for five shapes. So
@@ -50,6 +50,8 @@ const SHAPES: Record<NavIconName, JSX.Element> = {
       <path d="M18 3.5a2.5 2.5 0 0 1 2.5 2.5c0 2-2.5 4.5-2.5 4.5S15.5 8 15.5 6A2.5 2.5 0 0 1 18 3.5z" />
     </>
   ),
+  // A roof and a door (#428).
+  home: <path d="M4 11l8-7 8 7M6 9.5V20h4.5v-5h3v5H18V9.5" />,
   // Three dots: everything else.
   more: (
     <>

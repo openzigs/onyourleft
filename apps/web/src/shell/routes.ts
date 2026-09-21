@@ -33,6 +33,7 @@
 
 /** The identity of a view. Stable; the path is not. */
 export type RouteId =
+  | 'home'
   | 'ride'
   | 'activities'
   | 'activity-detail'
@@ -83,11 +84,14 @@ export type RouteId =
  * ⚠️ **The measure is NOT removed globally and must not be.** It is correct for
  * every other route here.
  *
+ * - `dashboard` drops it too, for a grid of cards rather than one column —
+ *   the home screen (#428), which a landscape tablet should fill.
+ *
  * ⚠️ The trainer game is `prose` and that is not an oversight: its *picker* is
  * a form and wants the measure, and its *ride* is a fixed full-bleed stage
  * (#423) which no `max-width` on an ancestor can bound.
  */
-export type RouteLayout = 'prose' | 'instruments';
+export type RouteLayout = 'prose' | 'instruments' | 'dashboard';
 
 /**
  * Which of the primary destinations a route belongs to — #427.
@@ -118,11 +122,16 @@ export type RouteLayout = 'prose' | 'instruments';
  * could name a route that is not there or miss one that is. {@link NAV_GROUPS}
  * holds only what a group IS — its label and its icon — and membership is
  * read off this table, in this table's order.
+ *
+ * **Home is a fifth destination since #428**, which is where the app opens:
+ * a group of one page, first. Five is Material 3's ceiling for a bar, and the
+ * reason Home is not folded into Ride is that it is not about riding — it is
+ * the rider's own state and where to start.
  */
-export type NavGroupId = 'ride' | 'history' | 'routes' | 'more';
+export type NavGroupId = 'home' | 'ride' | 'history' | 'routes' | 'more';
 
 /** The icons the navigation draws. Inline SVG authored here — `NavIcon.tsx`. */
-export type NavIconName = 'ride' | 'history' | 'routes' | 'more';
+export type NavIconName = 'home' | 'ride' | 'history' | 'routes' | 'more';
 
 export interface NavGroup {
   readonly id: NavGroupId;
@@ -133,6 +142,7 @@ export interface NavGroup {
 
 /** The primary destinations, in the order the bar and the rail draw them. @see NavGroupId */
 export const NAV_GROUPS: readonly NavGroup[] = [
+  { id: 'home', label: 'Home', icon: 'home' },
   { id: 'ride', label: 'Ride', icon: 'ride' },
   { id: 'history', label: 'History', icon: 'history' },
   { id: 'routes', label: 'Routes', icon: 'routes' },
@@ -171,10 +181,22 @@ export interface RouteDefinition {
  */
 export const ROUTES: readonly RouteDefinition[] = [
   {
+    id: 'home',
+    group: 'home',
+    layout: 'dashboard',
+    // ⚠️ `/` since #428 — the app opens here. The Ride screen was `/` until
+    // then, and a reviewer who remembers `#/` meaning the Ride screen is
+    // reading the old file: it is `#/ride`.
+    path: '/',
+    navLabel: 'Home',
+    title: 'Home',
+    summary: 'Your rides on this device, and where to start.',
+  },
+  {
     id: 'ride',
     group: 'ride',
     layout: 'instruments',
-    path: '/',
+    path: '/ride',
     navLabel: 'Ride',
     title: 'Ride',
     summary:

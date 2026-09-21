@@ -300,7 +300,7 @@ describe('#62 — the local activity library', () => {
     const hrefs = queryAll<HTMLAnchorElement>(document.body, 'a').map((link) =>
       link.getAttribute('href'),
     );
-    expect(hrefs).toContain('#/');
+    expect(hrefs).toContain('#/ride');
     expect(hrefs).toContain('#/transfer');
   });
 

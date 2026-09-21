@@ -354,7 +354,7 @@ describe('criterion 4 — every route passes the automated audit', () => {
     // control that cannot work. Auditing only the mid-ride state would leave
     // the branch a quarter of visitors see unchecked, exactly as the
     // no-Bluetooth devices case above.
-    globalThis.location.hash = '#/';
+    globalThis.location.hash = '#/ride';
     mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} />);
     await settle();
 

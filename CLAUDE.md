@@ -120,6 +120,11 @@ apps/                 AGPL-3.0-or-later, without exception
     src/detail/         the ride detail view's data layer (#50) — the read budget, the
                         gap-preserving downsampler, the SVG trace and the
                         privacy-zone trim that says what a shared copy contains
+    src/home/           where the app opens (#428) — one bounded store read
+                        and no stream decode on every launch, the week and the
+                        fitness line carried to today, and the empty state a
+                        new rider sees first. ⚠️ `#/` is Home since #428 and
+                        the Ride screen is `#/ride`
     src/library/        the activity library's row model, its port and its stub (#62)
     src/map/            the ride map (#63) — the basemap configuration and the proof
                         it reaches no other origin, the GeoJSON conversion, the

@@ -275,7 +275,7 @@ async function run(): Promise<void> {
   if (host === null) {
     throw new Error('rideview harness: #shell is missing from rideview.html');
   }
-  window.location.hash = '#/';
+  window.location.hash = '#/ride';
 
   flushSync(() => {
     createRoot(host).render(

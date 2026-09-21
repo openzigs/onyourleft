@@ -43,6 +43,7 @@ import type { Kilograms } from '@onyourleft/domain';
 
 import { GameView } from '../game/GameView';
 import { AboutView } from '../views/AboutView';
+import { HomeView } from '../views/HomeView';
 import { ActivitiesView } from '../views/ActivitiesView';
 import { ActivityDetailView } from '../views/ActivityDetailView';
 import { AnalysisView } from '../views/AnalysisView';
@@ -321,6 +322,8 @@ function viewFor(
   onImmersive: (immersive: boolean) => void,
 ): JSX.Element {
   switch (match.route.id) {
+    case 'home':
+      return <HomeView analysis={props.analysis} controller={props.rideController} />;
     case 'ride':
       return (
         <RideView

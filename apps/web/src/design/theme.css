@@ -445,6 +445,50 @@ h3:first-child {
 }
 
 /*
+ * The home screen (#428): cards, not a column. Every other reading route keeps
+ * the measure; this one fills a landscape tablet, and on a phone the cards
+ * stack. `min(100%, 18rem)` so a 320 px window gets one column that does not
+ * overflow rather than an 18 rem track wider than it.
+ */
+.oyl-main--dashboard {
+  max-width: none;
+}
+
+.oyl-home {
+  display: grid;
+  gap: var(--oyl-space-md);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  align-items: start;
+}
+
+.oyl-home > .oyl-status {
+  grid-column: 1 / -1;
+}
+
+.oyl-home__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-home__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: var(--oyl-space-sm);
+  margin: 0;
+}
+
+.oyl-home__facts dt {
+  color: var(--oyl-color-ink-muted);
+  font-size: var(--oyl-font-size-sm);
+}
+
+.oyl-home__facts dd {
+  margin: 0;
+  font-weight: 700;
+}
+
+/*
  * A route that is operated rather than read (#422).
  *
  * `--oyl-measure` is a READING measure and it is right for every route that is
