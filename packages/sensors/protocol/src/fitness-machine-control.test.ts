@@ -817,7 +817,11 @@ describe('the link dropping mid-ERG', () => {
   // belief, and says nothing about the resistance: on the trainer #372 was
   // measured on, a Stop released neither a grade nor an ERG target. The
   // release is `letGo()`, tested under its own heading below.
-  it('sends Stop as 0x08 0x01 and forgets its own target — which is not a release (#372)', async () => {
+  // ⚠️ And until PR #444's review it was called "… and forgets its own
+  // target", asserting `none`. The measured trainer kept holding the target
+  // through an acknowledged Stop, so `none` was this client claiming something
+  // the machine had not done.
+  it('sends Stop as 0x08 0x01 and no longer vouches for its target — which is not a release (#372)', async () => {
     const trainer = control();
     await trainer.requestControl();
     await trainer.setTargetPower(watts(250));
@@ -825,7 +829,7 @@ describe('the link dropping mid-ERG', () => {
     await trainer.stop();
 
     expect([...(machine.writes.at(-1) ?? [])]).toStrictEqual([0x08, 0x01]);
-    expect(trainer.targetPower()).toStrictEqual({ kind: 'none' });
+    expect(trainer.targetPower()).toStrictEqual({ kind: 'unknown', attempted: 250 });
   });
 
   it('refuses to write at all until the transport says a new link is up', async () => {
@@ -1442,13 +1446,67 @@ describe('releasing the trainer at the end of a ride — #372', () => {
     await trainer.letGo();
 
     expect(trainer.hasControl()).toBe(true);
+    // No target was ever written, so a Stop cannot have left one behind.
     expect(trainer.targetPower()).toStrictEqual({ kind: 'none' });
     await expect(trainer.setTargetPower(watts(150))).resolves.toBe(150);
+    expect(trainer.targetPower()).toStrictEqual({ kind: 'confirmed', target: 150 });
     expect(machine.writes.map((write) => write[0])).toStrictEqual([
       FTMS_OP_CODE.requestControl,
       FTMS_OP_CODE.stopOrPause,
       FTMS_OP_CODE.setTargetPower,
     ]);
+  });
+
+  it('says the target it had confirmed is now unknown, never none — PR #444 review', async () => {
+    // ⚠️ The finding: after an acknowledged Stop this client recorded `none`,
+    // and the ride screen said "No target set. The trainer is following your
+    // effort." — while the measured trainer held 200 W with nothing watching
+    // the rider's cadence. The machine acknowledged a Stop; it did not say it
+    // let go, and on #372's trainer it did not.
+    const trainer = control();
+    await trainer.requestControl();
+    await trainer.setTargetPower(watts(200));
+
+    expect(await trainer.letGo()).toStrictEqual({ kind: 'stopped' });
+
+    expect(trainer.targetPower()).toStrictEqual({ kind: 'unknown', attempted: 200 });
+    expect(trainer.hasControl()).toBe(true);
+  });
+
+  it('keeps an UNKNOWN target unknown through an acknowledged Stop — it does not become none', async () => {
+    // The other half of the same finding: a target that timed out may be on
+    // the machine, and a Stop the machine answered does not settle that.
+    const fire: Array<() => void> = [];
+    const trainer = control({
+      scheduleTimeout: (_after, run) => {
+        fire.push(run);
+        return () => {
+          fire.splice(fire.indexOf(run), 1);
+        };
+      },
+    });
+    await trainer.requestControl();
+    machine.goSilent();
+    const setting = trainer.setTargetPower(watts(240));
+    await inFlight();
+    fire.forEach((run) => {
+      run();
+    });
+    await setting.catch(() => undefined);
+    expect(trainer.targetPower()).toStrictEqual({ kind: 'unknown', attempted: 240 });
+
+    const pending = trainer.letGo();
+    await inFlight();
+    machine.indicate(
+      Uint8Array.from([
+        FTMS_OP_CODE.responseCode,
+        FTMS_OP_CODE.stopOrPause,
+        FTMS_RESULT_CODE.success,
+      ]),
+    );
+
+    expect(await pending).toStrictEqual({ kind: 'stopped' });
+    expect(trainer.targetPower()).toStrictEqual({ kind: 'unknown', attempted: 240 });
   });
 
   it('does NOT report a release as a loss of control', async () => {

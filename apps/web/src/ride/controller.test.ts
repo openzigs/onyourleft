@@ -78,6 +78,7 @@ import {
 import { gameTrainerFrom } from '../game/trainer-port';
 
 import { METRIC_STALE_AFTER_SECONDS } from './metrics';
+import { targetSentence } from './TrainerPanel';
 import type { OpenTrainer, TrainerConnection } from './trainer';
 
 const TRAINER = deviceId('kickr');
@@ -1295,7 +1296,15 @@ describe('ending ERG by hand — the "End ERG" button', () => {
     // owner accepted that on 2026-09-21; the test states it rather than hiding
     // it behind a double that clears.
     expect(rig.targetOnTheTrainer()).toBe(210);
-    expect(rig.controller.getSnapshot().trainer.target).toEqual({ kind: 'none' });
+    // …so the screen may not say there is no target (PR #444's review). Until
+    // then this line asserted `{ kind: 'none' }` two lines below reading 210
+    // off the device, and the panel told the rider the trainer was following
+    // their effort.
+    const after = rig.controller.getSnapshot().trainer;
+    expect(after.target).toEqual({ kind: 'unknown', attempted: 210 });
+    expect(targetSentence(after)).toBe(
+      'The trainer may still be holding 210 W — this app can no longer tell.',
+    );
     // And the ride carries on, which is the whole difference between this
     // control and Stop.
     expect(rig.controller.getSnapshot().phase).toBe('recording');

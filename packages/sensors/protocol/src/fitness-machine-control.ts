@@ -599,6 +599,25 @@ export type TargetPower =
   | { readonly kind: 'unknown'; readonly attempted: Watts };
 
 /**
+ * What this client may still believe about the ERG target once a Stop has been
+ * **acknowledged**.
+ *
+ * ⚠️ **Not `none`.** Until PR #444's review both `stop()` and `letGo()` recorded
+ * `none` here, and a reviewer who remembers that is reading the old file. The
+ * trainer #372 was measured on answered the Stop `80 08 01` and kept holding its
+ * ERG target, so `none` put *"No target set. The trainer is following your
+ * effort."* on the ride screen while the machine held 200 W with no spiral
+ * check behind it. An acknowledged Stop is evidence the machine received a
+ * Stop, not that it let go — so a target this client had confirmed becomes one
+ * it can no longer vouch for, which is what `unknown` already says. A client
+ * that had set no target keeps `none`: a Stop cannot have left behind a target
+ * that was never written.
+ */
+function targetAfterStop(before: TargetPower): TargetPower {
+  return before.kind === 'confirmed' ? { kind: 'unknown', attempted: before.target } : before;
+}
+
+/**
  * A one-shot timer, injected.
  *
  * `protocol/` is platform-free, so there is no `setTimeout` here and no `Date`.
@@ -721,7 +740,8 @@ export interface TrainerControl {
    *
    * The bare procedure. A workout handing the trainer to its replacement sends
    * it; the end of a ride is {@link letGo}, which sends the same op code and
-   * marks the release.
+   * marks the release. Both leave a confirmed target **unknown** rather than
+   * none once the Stop is answered — `targetAfterStop` says why.
    * @see https://github.com/openzigs/onyourleft/issues/372
    */
   stop(): Promise<void>;
@@ -1224,7 +1244,7 @@ export function createTrainerControl(
       return enqueue(async () => {
         requireControl();
         await runProcedure({ opCode: 'stop' });
-        target = { kind: 'none' };
+        target = targetAfterStop(target);
       });
     },
 
@@ -1253,7 +1273,7 @@ export function createTrainerControl(
           }
           return { kind: 'incomplete', refusal: error };
         }
-        target = { kind: 'none' };
+        target = targetAfterStop(target);
         return { kind: 'stopped' };
       });
     },
