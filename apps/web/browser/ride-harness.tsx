@@ -326,7 +326,10 @@ function measure(): StageMeasurement {
     viewport: { width: window.innerWidth, height: window.innerHeight },
     stage: stage === null ? undefined : boxOf(stage),
     world: world === null ? undefined : boxOf(world),
-    panels: [...document.querySelectorAll('.oyl-hud > *')].map((each) =>
+    // The grid items a rider SEES. Since #397 the HUD also holds its one live
+    // region, visually hidden by clip — a 1 px box that is not a panel and
+    // must not be counted as one.
+    panels: [...document.querySelectorAll('.oyl-hud > :not([data-oyl-announcer])')].map((each) =>
       item(each.className, each),
     ),
     items,
