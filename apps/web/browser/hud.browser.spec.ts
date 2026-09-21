@@ -160,6 +160,22 @@ interface HudMeasurement {
   readonly regions: readonly RegionMeasurement[];
   /** #401 — each value's and panel's movement between a blank region and a full one. */
   readonly displacement: readonly Displacement[];
+  /** #400/#401 — the mute and the volume, measured three ways. */
+  readonly sound: readonly SoundControlMeasurement[];
+}
+
+/** @see hud-harness.tsx §`SoundControlMeasurement` */
+interface SoundControlMeasurement {
+  readonly label: string;
+  readonly width: number;
+  readonly height: number;
+  readonly minWidth: number;
+  readonly minHeight: number;
+  readonly unflooredWidth: number;
+  readonly unflooredHeight: number;
+  readonly neutralised: string;
+  readonly onStage: boolean;
+  readonly overlapsAPanel: boolean;
 }
 
 /** @see hud-harness.tsx §`RegionMeasurement` */
@@ -505,9 +521,10 @@ for (const viewport of REGION_VIEWPORTS) {
       const control = measured.regions.filter((region) => region.stage === 'hidden-control');
       const shipped = measured.regions.filter((region) => region.stage !== 'hidden-control');
 
-      // Six outcome panels, the empty stage and the populated one: a harness
-      // that stopped rendering regions would otherwise pass over nothing.
-      expect(shipped).toHaveLength(8);
+      // A harness that stopped rendering regions would otherwise pass over
+      // nothing.
+      // Six outcome panels, and the empty, populated and sound stages.
+      expect(shipped).toHaveLength(9);
       for (const region of shipped) {
         expect(
           hiddenBecause(region),
@@ -525,7 +542,7 @@ for (const viewport of REGION_VIEWPORTS) {
       }
       expect(
         shipped.filter((region) => region.stage !== 'empty').map((region) => region.text),
-      ).toEqual(Array<string>(7).fill(ANNOUNCEMENT));
+      ).toEqual(Array<string>(8).fill(ANNOUNCEMENT));
 
       // ⚠️ The control: the SAME region with `display: none`, which this
       // file's own predicate must call hidden. Without it a stylesheet that
@@ -536,8 +553,8 @@ for (const viewport of REGION_VIEWPORTS) {
 
       // And the browser's own accessibility view agrees: Playwright's role
       // query leaves out what is hidden from assistive technology, so it
-      // finds the seven populated shipping regions and NOT the control.
-      await expect(page.getByRole('status').filter({ hasText: ANNOUNCEMENT })).toHaveCount(7);
+      // finds the eight populated shipping regions and NOT the control.
+      await expect(page.getByRole('status').filter({ hasText: ANNOUNCEMENT })).toHaveCount(8);
     });
 
     test('moves no value and no panel when it is populated', async ({ page }) => {
@@ -588,3 +605,66 @@ test.describe('#401 — the displacement measurement can see a displacement at a
     expect(moved).toBeGreaterThanOrEqual(4);
   });
 });
+
+/**
+ * #400's controls — the mute and the volume — measured the three ways #316
+ * requires, at every phone viewport. #401's size criterion.
+ *
+ * ⚠️ **The number is 44, and the criterion is SC 2.5.5 (Target Size
+ * (Enhanced), AAA).** SC 2.5.8 (Target Size (Minimum), AA) is 24×24, which
+ * both clear with room; #401's own text asks for 24 and warns against citing
+ * 44 as the AA number. 44 is chosen for gloves on a handlebar, as #316 chose it
+ * for `.oyl-button`, and is not read off the AA table.
+ *
+ * The three do NOT fail for the same reason:
+ * - the **shipped box** is what a thumb lands on;
+ * - the **declaration** is what stops the size being emergent;
+ * - the box with the **floor stripped** says whether the floor is holding it.
+ *   The mute is an `.oyl-button`, whose tokens reach 44 on their own (#316's
+ *   arithmetic, 44.8 px). ⚠️ **The slider leans on its floor, and that is
+ *   decided here rather than discovered**: a range input's own box is about
+ *   16 px tall in this Chromium, so stripping `min-height` MUST drop it below
+ *   the target — which is also this test's proof that the strip took effect.
+ */
+const SOUND_TARGET_PIXELS = 44;
+
+for (const viewport of REGION_VIEWPORTS) {
+  test.describe(`#400 — the sound controls at ${viewport.name}`, () => {
+    test('are the size they claim, measured three ways, on screen and over no panel', async ({
+      page,
+    }) => {
+      const measured = await measure(page, viewport);
+      expect(measured.sound.map((control) => control.label)).toEqual([
+        'Mute sounds',
+        'Sound volume',
+      ]);
+      for (const control of measured.sound) {
+        const name = `${viewport.name}/${control.label}`;
+        // 1. The shipped box.
+        expect(control.width, `${name} width`).toBeGreaterThanOrEqual(SOUND_TARGET_PIXELS);
+        expect(control.height, `${name} height`).toBeGreaterThanOrEqual(SOUND_TARGET_PIXELS);
+        // 2. The declaration.
+        expect(control.minHeight, `${name} declares no min-height`).toBeGreaterThanOrEqual(
+          SOUND_TARGET_PIXELS,
+        );
+        expect(control.minWidth, `${name} declares no min-width`).toBeGreaterThanOrEqual(
+          SOUND_TARGET_PIXELS,
+        );
+        // 3. The floor stripped.
+        expect(control.neutralised, `${name}: the floor was not stripped`).toBe('0px');
+        if (control.label === 'Mute sounds') {
+          expect(control.unflooredHeight, `${name} leans on its floor`).toBeGreaterThanOrEqual(
+            SOUND_TARGET_PIXELS,
+          );
+        } else {
+          expect(control.unflooredHeight, `${name}'s floor is no longer load-bearing`).toBeLessThan(
+            SOUND_TARGET_PIXELS,
+          );
+        }
+        // And where a rider can reach it: on screen, over nothing.
+        expect(control.onStage, `${name} is off the screen`).toBe(true);
+        expect(control.overlapsAPanel, `${name} lands on another panel`).toBe(false);
+      }
+    });
+  });
+}

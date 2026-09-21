@@ -153,6 +153,13 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * `announce.ts`; the compiler refuses a HUD without it.
    */
   readonly announcement: string;
+  /**
+   * The mute and the volume — #400, WCAG 2.2 SC 1.4.2 — or `undefined` for a
+   * rider who has not turned sounds on. In the actions panel, under *Pause*
+   * and *End ride*, so the way to stop a sound is where the way to stop the
+   * ride is.
+   */
+  readonly sound?: ReactNode;
   readonly standingNotice?:
     | {
         readonly content: ReactNode;
@@ -270,6 +277,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
             </button>
           )}
         </div>
+        {props.sound}
       </div>
 
       {/*

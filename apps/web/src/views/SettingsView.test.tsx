@@ -43,6 +43,7 @@ import {
   readAnnouncementPreference,
   type PreferenceStorage,
 } from '../game/hud/announce-preference';
+import { DEFAULT_CUES, readCuePreference } from '../game/cue-preference';
 
 const OWNER = athleteId('local');
 
@@ -770,6 +771,42 @@ describe('announcements — #397', () => {
       '820 ft before it starts',
     );
     expect(climb?.value).toBe('250');
+    mounted.unmount();
+  });
+});
+
+describe('sounds — #400', () => {
+  it('is off until the rider turns it on, and keeps the choice and the volume on this device', async () => {
+    const values = new Map<string, string>();
+    const store: PreferenceStorage = {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => {
+        values.set(key, value);
+      },
+    };
+    const mounted = await mount(
+      <SettingsView
+        units="metric"
+        onUnitsChange={() => undefined}
+        onRiderMassChange={() => undefined}
+        announcements={store}
+      />,
+    );
+    const toggle = mounted.container.querySelector<HTMLInputElement>(
+      '.oyl-sounds input[type="checkbox"]',
+    );
+    expect(toggle?.checked).toBe(false);
+    await act(async () => {
+      toggle?.click();
+      await Promise.resolve();
+    });
+    expect(readCuePreference(store)).toEqual({ ...DEFAULT_CUES, enabled: true });
+    // The mute is NOT here: it is on the ride's own screen, where the sound is.
+    expect(
+      [...mounted.container.querySelectorAll('button')].some(
+        (each) => each.textContent === 'Mute sounds',
+      ),
+    ).toBe(false);
     mounted.unmount();
   });
 });

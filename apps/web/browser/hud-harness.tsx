@@ -152,6 +152,7 @@ import {
 import type { GhostOutcome } from '../src/game/ghost-outcome';
 import type { ChasedGap } from '../src/game/hud/fields';
 import { HudPanel } from '../src/game/hud/HudPanel';
+import { SoundControls } from '../src/game/SoundControls';
 import type { GameState } from '../src/game/simulation';
 
 // The shipping stylesheet, which is the whole point — see this file's header.
@@ -242,6 +243,29 @@ export interface Displacement {
   readonly dh: number;
 }
 
+/**
+ * One of #400's sound controls, on the `sound` stage — #401's size criterion.
+ *
+ * Measured three ways, for #316's reason: the shipped box (what a thumb lands
+ * on), the declaration (what stops the size being emergent), and the box with
+ * the floor stripped (which says whether the floor is what holds it).
+ */
+export interface SoundControlMeasurement {
+  readonly label: string;
+  readonly width: number;
+  readonly height: number;
+  readonly minWidth: number;
+  readonly minHeight: number;
+  readonly unflooredWidth: number;
+  readonly unflooredHeight: number;
+  /** What `min-height` read after it was stripped — `0px`, or the strip failed. */
+  readonly neutralised: string;
+  /** Whether the whole box is inside the stage, i.e. on screen with no scrolling. */
+  readonly onStage: boolean;
+  /** Whether the box overlaps any OTHER panel of the HUD. */
+  readonly overlapsAPanel: boolean;
+}
+
 /** What the spec reads back. */
 export interface HudMeasurement {
   readonly viewport: { readonly width: number; readonly height: number };
@@ -254,6 +278,8 @@ export interface HudMeasurement {
   readonly regions: readonly RegionMeasurement[];
   /** #401: every value's movement between a blank region and a full one. */
   readonly displacement: readonly Displacement[];
+  /** #400/#401: the mute and the volume, on the `sound` stage. */
+  readonly sound: readonly SoundControlMeasurement[];
 }
 
 declare global {
@@ -442,6 +468,16 @@ function Harness(): JSX.Element {
             onPause={() => undefined}
             onEnd={() => undefined}
             announcement={stage === 'empty' ? '' : ANNOUNCEMENT}
+            {...(stage === 'sound'
+              ? {
+                  sound: (
+                    <SoundControls
+                      preference={{ enabled: true, volume: 0.5, muted: false }}
+                      onChange={() => undefined}
+                    />
+                  ),
+                }
+              : {})}
           />
         </section>
       ))}
@@ -450,7 +486,7 @@ function Harness(): JSX.Element {
 }
 
 /** The three region stages — see the header's "The live region". */
-const REGION_STAGES = ['empty', 'populated', 'hidden-control'] as const;
+const REGION_STAGES = ['empty', 'populated', 'hidden-control', 'sound'] as const;
 
 /**
  * Put `display: none` on the control stage's region, after the render — #401.
@@ -561,7 +597,54 @@ function measure(): HudMeasurement {
     plan: measurePlan(),
     regions: measureRegions(),
     displacement: measureDisplacement(),
+    sound: measureSound(),
   };
+}
+
+function overlaps(a: DOMRect, b: DOMRect): boolean {
+  return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+}
+
+/** @see SoundControlMeasurement */
+function measureSound(): SoundControlMeasurement[] {
+  const stage = document.querySelector('[data-oyl-region-stage="sound"]');
+  if (stage === null) return [];
+  const bounds = stage.getBoundingClientRect();
+  const panels = [...stage.querySelectorAll('.oyl-hud__panel')].filter(
+    (panel) => !panel.classList.contains('oyl-hud__actions'),
+  );
+  const controls = [...stage.querySelectorAll<HTMLElement>('.oyl-sound button, .oyl-sound input')];
+  return controls.map((control) => {
+    const style = window.getComputedStyle(control);
+    const box = control.getBoundingClientRect();
+    const minWidth = Number.parseFloat(style.minWidth) || 0;
+    const minHeight = Number.parseFloat(style.minHeight) || 0;
+    const before = control.style.cssText;
+    control.style.minHeight = '0px';
+    control.style.minWidth = '0px';
+    const stripped = control.getBoundingClientRect();
+    const neutralised = window.getComputedStyle(control).minHeight;
+    control.style.cssText = before;
+    return {
+      label:
+        control.tagName === 'BUTTON'
+          ? textOf(control)
+          : textOf(control.closest('label') ?? control),
+      width: box.width,
+      height: box.height,
+      minWidth,
+      minHeight,
+      unflooredWidth: stripped.width,
+      unflooredHeight: stripped.height,
+      neutralised,
+      onStage:
+        box.top >= bounds.top &&
+        box.left >= bounds.left &&
+        box.bottom <= bounds.top + window.innerHeight &&
+        box.right <= bounds.left + window.innerWidth,
+      overlapsAPanel: panels.some((panel) => overlaps(box, panel.getBoundingClientRect())),
+    };
+  });
 }
 
 /** Whether anything above `element` takes it out of the rendering or the tree. */

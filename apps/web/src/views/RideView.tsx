@@ -50,6 +50,7 @@ import { Button } from '../design/Button';
 import { formatDuration } from '../format';
 import { StatusMessage } from '../design/StatusMessage';
 import { MetricGrid } from '../ride/MetricGrid';
+import { isReadable } from '../ride/metrics';
 import { TrainerPanel } from '../ride/TrainerPanel';
 import { WorkoutPanel } from '../ride/WorkoutPanel';
 import type { WorkoutPort } from '../workouts/store-port';
@@ -194,6 +195,9 @@ function LiveRide({
         <WorkoutPanel
           trainer={snapshot.trainer}
           workout={snapshot.workout}
+          // #400: the live power, or nothing — a stale or unpaired meter is
+          // `undefined`, which silences the tone rather than sounding a floor.
+          power={livePower(snapshot)}
           port={workouts}
           thresholdPower={thresholdPower}
           onStart={(record) => {
@@ -596,4 +600,16 @@ function connectionWords(state: string): string {
     default:
       return 'disconnected — reconnecting needs a tap, this browser cannot do it silently';
   }
+}
+
+/**
+ * The power a rider is producing right now, or `undefined` — #400.
+ *
+ * ⚠️ `undefined` for a stale reading as well as a missing one, on
+ * `ride/metrics.ts`'s own rule: a stale state carries no value at all, because
+ * the last number a sensor sent is not what the rider is doing now.
+ */
+function livePower(snapshot: RideSnapshot): number | undefined {
+  const state = snapshot.metrics.find((metric) => metric.id === 'power')?.state;
+  return state !== undefined && isReadable(state) ? state.value : undefined;
 }

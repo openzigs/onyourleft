@@ -86,6 +86,7 @@ import {
 
 import type { GamePort } from '../src/game/GameView';
 import type { GameTrainerPort } from '../src/game/trainer-port';
+import { CUES_STORAGE_KEY, DEFAULT_CUES, writeCuePreference } from '../src/game/cue-preference';
 import { AppShell } from '../src/shell/AppShell';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
 
@@ -221,6 +222,13 @@ const GAME: GamePort = {
  */
 const WITH_A_NOTICE = new URLSearchParams(window.location.search).get('trainer') === 'workout';
 
+/**
+ * `ride.html?sounds=on` — a ride with #400's mute and volume in the HUD's
+ * actions panel, which makes that panel taller. Written through the product's
+ * own preference module before the ride starts, exactly as Settings would.
+ */
+const WITH_SOUNDS = new URLSearchParams(window.location.search).get('sounds') === 'on';
+
 /** A trainer that accepts every gradient, so the trainer line is on the screen. */
 const TRAINER: GameTrainerPort = {
   readTrainer: () =>
@@ -319,6 +327,10 @@ function measure(): StageMeasurement {
   for (const control of document.querySelectorAll('.oyl-hud__control')) {
     items.push(item(`control: ${textOf(control)}`, control));
   }
+  // #400: the mute and the volume, when the rider turned sounds on.
+  for (const control of document.querySelectorAll('.oyl-sound button, .oyl-sound input')) {
+    items.push(item(`sound: ${textOf(control.closest('label') ?? control)}`, control));
+  }
   const labels = (selector: string): string[] =>
     [...document.querySelectorAll(`${selector} dt`)].map(textOf);
   const panel = document.querySelector('.oyl-hud__panel');
@@ -397,6 +409,11 @@ async function run(): Promise<void> {
   }
   // The real route, so the shell renders the real view.
   window.location.hash = '#/game';
+  // #400: a fresh origin every run, so absent means off.
+  localStorage.removeItem(CUES_STORAGE_KEY);
+  if (WITH_SOUNDS) {
+    writeCuePreference(localStorage, { ...DEFAULT_CUES, enabled: true });
+  }
 
   flushSync(() => {
     createRoot(host).render(

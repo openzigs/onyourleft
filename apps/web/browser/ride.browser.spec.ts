@@ -522,6 +522,48 @@ test.describe('a ride with a standing notice', () => {
 });
 
 /**
+ * #400 — a ride with sounds on puts *Mute sounds* and *Sound volume* in the
+ * actions panel, which makes it taller. WCAG 2.2 SC 1.4.2 needs both reachable
+ * DURING a ride, so they must be on screen, uncovered, at every overlay
+ * viewport — and the taller panel must still land on no other panel and not
+ * on the rider.
+ */
+test.describe('a ride with sounds on', () => {
+  for (const viewport of OVERLAY_VIEWPORTS) {
+    test(`puts the mute and the volume on screen, over nothing — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openRide(page, viewport, '?sounds=on');
+      const seen = await measure(page);
+
+      const sound = seen.items.filter((each) => each.name.startsWith('sound: '));
+      // The apparatus: both controls were rendered. Without this every
+      // assertion below is true of a ride where sounds stayed off.
+      expect(sound.map((each) => each.name)).toEqual(['sound: Mute sounds', 'sound: Sound volume']);
+      const lost = [
+        ...sound,
+        named(seen.items, 'control: Pause'),
+        named(seen.items, 'control: End ride'),
+      ].filter((each) => !inside(each.box, viewport) || !each.onTop);
+      expect(lost.map(describeItem)).toEqual([]);
+
+      const laidOut = seen.panels.filter((each) => each.box.height > 0);
+      expect(laidOut.filter((each) => !inside(each.box, viewport)).map(describeItem)).toEqual([]);
+      const collisions: string[] = [];
+      laidOut.forEach((a, index) => {
+        for (const b of laidOut.slice(index + 1)) {
+          if (overlap(a.box, b.box)) collisions.push(`${describeItem(a)} × ${describeItem(b)}`);
+        }
+      });
+      expect(collisions).toEqual([]);
+      expect(
+        laidOut.filter((each) => overlap(each.box, riderBox(viewport))).map(describeItem),
+      ).toEqual([]);
+    });
+  }
+});
+
+/**
  * #437 — once the notice is put away, the route panel is back.
  *
  * On a phone the open notice takes the route panel's cell (above), which used

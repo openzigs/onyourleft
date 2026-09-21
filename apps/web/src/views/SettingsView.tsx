@@ -90,6 +90,12 @@ import {
   type Every,
   type PreferenceStorage,
 } from '../game/hud/announce-preference';
+import {
+  readCuePreference,
+  steppedVolume,
+  writeCuePreference,
+  type CuePreference,
+} from '../game/cue-preference';
 import type { UnitsPort } from '../units/store-port';
 
 /**
@@ -364,6 +370,8 @@ export function SettingsView({
         storage={announcements === undefined ? deviceStorage() : announcements}
       />
 
+      <SoundsPanel storage={announcements === undefined ? deviceStorage() : announcements} />
+
       <PersistenceNotice {...(storage === undefined ? {} : { storage })} />
     </>
   );
@@ -474,6 +482,81 @@ function AnnouncementsPanel({
           save({ ...preference, climbLeadMetres });
         }}
       />
+      {message === undefined ? null : (
+        <StatusMessage tone={message.tone} live>
+          {message.text}
+        </StatusMessage>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Sounds during a ride — #400. Off by default, kept on this device beside the
+ * announcements.
+ *
+ * ⚠️ **The mute is not here, and that is deliberate**: it is on the ride's own
+ * screen (`game/SoundControls.tsx`), because WCAG 2.2 SC 1.4.2 needs a rider
+ * to be able to stop the sound where it is playing. The volume is here AND
+ * there — set once, adjusted mid-ride.
+ *
+ * ⚠️ Nothing here claims a sound is better than the screen — the research does
+ * not establish that. The claim is only what each sound means.
+ */
+function SoundsPanel({
+  storage,
+}: {
+  readonly storage: PreferenceStorage | undefined;
+}): JSX.Element {
+  const [preference, setPreference] = useState<CuePreference>(() => readCuePreference(storage));
+  const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
+
+  function save(next: CuePreference): void {
+    setPreference(next);
+    setMessage(
+      writeCuePreference(storage, next)
+        ? { tone: 'success', text: ANNOUNCEMENTS_SAVED }
+        : { tone: 'warning', text: ANNOUNCEMENTS_NOT_KEPT },
+    );
+  }
+
+  return (
+    <section className="oyl-panel oyl-announce oyl-sounds" aria-labelledby="oyl-sounds-heading">
+      <h2 id="oyl-sounds-heading">Sounds</h2>
+      <p className="oyl-muted">
+        Short sounds during a ride, as well as anything your screen reader says: a steady tone
+        during a workout that rises when your power is over the target and falls when it is under,
+        two rising notes when a workout block changes, and one low note as each distance-to-go mark
+        passes. The tone is silent whenever there is no power reading. Off unless you turn it on;
+        while riding, a Mute sounds button and a volume slider are on the ride screen.
+      </p>
+      <p>
+        <label className="oyl-announce__switch">
+          <input
+            type="checkbox"
+            checked={preference.enabled}
+            onChange={(event) => {
+              save({ ...preference, enabled: event.currentTarget.checked });
+            }}
+          />{' '}
+          Play sounds during a ride
+        </label>
+      </p>
+      <p>
+        <label htmlFor="oyl-sounds-volume">Sound volume</label>{' '}
+        <input
+          id="oyl-sounds-volume"
+          type="range"
+          min={0}
+          max={100}
+          step={10}
+          value={Math.round(preference.volume * 100)}
+          onChange={(event) => {
+            const volume = steppedVolume(Number(event.currentTarget.value) / 100);
+            if (volume !== undefined) save({ ...preference, volume });
+          }}
+        />
+      </p>
       {message === undefined ? null : (
         <StatusMessage tone={message.tone} live>
           {message.text}

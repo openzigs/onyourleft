@@ -39,6 +39,17 @@
  * another — Roselli, 2026-01-14), so ordering is decided before a sentence is
  * written, not by the role it is written into.
  *
+ * ## The sounds — #400
+ *
+ * For a rider who turned them on (off by default): a tone tracking power
+ * against the target the trainer ACKNOWLEDGED (`holdingWatts`, never a target
+ * only asked for), and two short rising notes as a block changes — played with
+ * the *"Now: …"* sentence above, so the sound is never the only carrier. The
+ * audio context is resumed inside the rider's press on a workout's *Ride*
+ * button and nowhere earlier; a dropped power reading, a paused workout and
+ * the end of the workout all silence the tone. `game/audio-cues.ts` holds every
+ * one of those rules; this panel only feeds it.
+ *
  * ## Colour carries nothing
  *
  * The status is a word and the block is a sentence, for `AnalysisView.tsx`'s
@@ -58,6 +69,11 @@ import {
   readAnnouncementPreference,
   type PreferenceStorage,
 } from '../game/hud/announce-preference';
+import { RideCues } from '../game/audio-cues';
+import type { CueOutput } from '../game/audio-port';
+import { readCuePreference, writeCuePreference, type CuePreference } from '../game/cue-preference';
+import { SoundControls } from '../game/SoundControls';
+import { sharedCueOutput } from '../game/web-audio';
 import { durationText, workoutRow } from '../workouts/library';
 
 import { upcomingBlock } from './lookahead';
@@ -87,9 +103,18 @@ export interface WorkoutPanelProps {
   readonly onEnd: () => void;
   /**
    * Where the rider's announcement choice is read from (#397, #398) — this
-   * DEVICE's storage unless a test hands in a double.
+   * DEVICE's storage unless a test hands in a double. The sound choice (#400)
+   * is read from the same place.
    */
   readonly announcements?: PreferenceStorage | undefined;
+  /**
+   * The rider's live power in watts, or `undefined` when the reading is not
+   * live — a dropped meter, none paired. #400's tone reads it, and an
+   * `undefined` here SILENCES the tone rather than sounding a floor.
+   */
+  readonly power?: number | undefined;
+  /** Where the sounds go (#400); the platform's Web Audio unless a test hands in a double. */
+  readonly sounds?: CueOutput | undefined;
 }
 
 export function WorkoutPanel({
@@ -100,9 +125,39 @@ export function WorkoutPanel({
   onStart,
   onEnd,
   announcements,
+  power,
+  sounds,
 }: WorkoutPanelProps): JSX.Element | null {
   const [saved, setSaved] = useState<readonly WorkoutRecord[]>([]);
   const [loadFault, setLoadFault] = useState<string | undefined>(undefined);
+  const storage = announcements ?? deviceStorage();
+  const [sound, setSound] = useState<CuePreference>(() => readCuePreference(storage));
+  /** This panel's sounds — made once, fed on every render. @see game/audio-cues.ts */
+  const cuesRef = useRef<RideCues | undefined>(undefined);
+  cuesRef.current ??= new RideCues(sounds ?? sharedCueOutput(), sound);
+  const cues = cuesRef.current;
+
+  // The tone: power against the ACKNOWLEDGED target, while the workout runs.
+  // Anything else — paused, finished, no workout, a dropped reading — is
+  // silence, which `RideCues.tone` decides.
+  const running = workout?.status === 'running';
+  const holding = workout?.holdingWatts;
+  useEffect(() => {
+    cues.tone({ watts: power, target: running ? holding : undefined });
+  }, [cues, power, running, holding]);
+  // ⚠️ Leaving the screen ends the sounds: a tone left playing after the panel
+  // has gone is #372's shape — a trainer holding the last gradient — in a new
+  // place. (The END of a workout needs no line of its own: the effect above
+  // then has no running workout and silences the tone.)
+  useEffect(() => () => cues.end(), [cues]);
+
+  function changeSound(next: CuePreference): void {
+    setSound(next);
+    writeCuePreference(storage, next);
+    cues.set(next);
+    // Inside the press: resumes a context the platform suspended.
+    cues.begin();
+  }
 
   useEffect(() => {
     if (port === undefined) {
@@ -143,7 +198,14 @@ export function WorkoutPanel({
           {durationText(workout.totalSeconds)}
         </p>
         {workout.nowRiding === undefined ? null : <p>Now: {workout.nowRiding}</p>}
-        <WorkoutAnnouncer workout={workout} storage={announcements} />
+        <WorkoutAnnouncer
+          workout={workout}
+          storage={announcements}
+          // #400: the interval sound, on the change that is SAID — never alone.
+          onBlockChange={() => {
+            cues.cue('interval');
+          }}
+        />
         <p>
           {workout.holdingWatts === undefined
             ? 'The trainer has not confirmed a target yet.'
@@ -154,6 +216,7 @@ export function WorkoutPanel({
             {workout.fault}
           </StatusMessage>
         )}
+        {sound.enabled ? <SoundControls preference={sound} onChange={changeSound} /> : null}
         <Button type="button" onClick={onEnd}>
           End workout
         </Button>
@@ -195,6 +258,14 @@ export function WorkoutPanel({
                 <Button
                   type="button"
                   onClick={() => {
+                    // ⚠️ #400: inside the press and before anything else — the
+                    // one place the audio context may be resumed. The choice is
+                    // re-read so one made on Settings since this panel mounted
+                    // is the one this workout sounds with.
+                    const choice = readCuePreference(storage);
+                    setSound(choice);
+                    cues.set(choice);
+                    cues.begin();
                     onStart(record);
                   }}
                 >
@@ -228,14 +299,21 @@ export function WorkoutPanel({
 function WorkoutAnnouncer({
   workout,
   storage,
+  onBlockChange,
 }: {
   readonly workout: RideWorkoutSnapshot;
   readonly storage: PreferenceStorage | undefined;
+  /** Told as the change is said — #400's interval sound. */
+  readonly onBlockChange: () => void;
 }): JSX.Element {
   const [said, setSaid] = useState('');
   const changed = useAnnouncedChange(workout.nowRiding);
+  const blockChanged = useRef(onBlockChange);
+  blockChanged.current = onBlockChange;
   useEffect(() => {
-    if (changed !== undefined) setSaid(`Now: ${changed.value}`);
+    if (changed === undefined) return;
+    setSaid(`Now: ${changed.value}`);
+    blockChanged.current();
   }, [changed]);
 
   // Read once, when the workout panel appears: a preference is a setting, not
