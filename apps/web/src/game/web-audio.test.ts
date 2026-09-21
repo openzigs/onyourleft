@@ -93,6 +93,27 @@ describe('the Web Audio output', () => {
     expect(fake.resumed()).toBe(2);
   });
 
+  it('answers isRunning() without ever making or resuming a context', () => {
+    let made = 0;
+    const suspended = fakeContext('suspended');
+    const output = webAudioOutput(() => {
+      made += 1;
+      return suspended.context;
+    });
+    // No context yet: not running, and asking does not make one.
+    expect(output.isRunning()).toBe(false);
+    expect(made).toBe(0);
+    output.resume();
+    // Suspended: still not running, and asking resumed nothing further.
+    expect(output.isRunning()).toBe(false);
+    expect(suspended.resumed()).toBe(1);
+
+    const running = fakeContext('running');
+    const other = webAudioOutput(() => running.context);
+    other.resume();
+    expect(other.isRunning()).toBe(true);
+  });
+
   it('keeps ONE tone: a second start moves it rather than layering another', () => {
     const fake = fakeContext('running');
     const output = webAudioOutput(() => fake.context);

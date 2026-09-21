@@ -28,6 +28,13 @@ export interface RecordingOutput extends CueOutput {
   readonly calls: RecordedCall[];
   /** How many tones are sounding now, by the port's own count. Never above one. */
   sounding: number;
+  /**
+   * What {@link CueOutput.isRunning} answers. A `resume()` sets it, as a
+   * gesture does to a real context; a test sets it `false` to stand for a
+   * context the platform suspended. Not recorded in `calls`: it is a question,
+   * not something the port was told.
+   */
+  running: boolean;
   /** The most tones ever sounding at once. */
   mostSounding: number;
   count: (kind: RecordedCall['kind']) => number;
@@ -37,11 +44,14 @@ export function recordingOutput(): RecordingOutput {
   const output: RecordingOutput = {
     calls: [],
     sounding: 0,
+    running: false,
     mostSounding: 0,
     count: (kind) => output.calls.filter((call) => call.kind === kind).length,
     resume: () => {
       output.calls.push({ kind: 'resume' });
+      output.running = true;
     },
+    isRunning: () => output.running,
     startTone: (hz, gain) => {
       output.calls.push({ kind: 'startTone', hz, gain });
       output.sounding += 1;

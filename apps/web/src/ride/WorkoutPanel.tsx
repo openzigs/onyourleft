@@ -137,6 +137,19 @@ export function WorkoutPanel({
   cuesRef.current ??= new RideCues(sounds ?? sharedCueOutput(), sound);
   const cues = cuesRef.current;
 
+  // ⚠️ #400's review: the workout outlives this panel — `RideSession` is above
+  // the router — so a rider who leaves the Ride screen mid-workout and comes
+  // back mounts a FRESH `RideCues`, which used to stay silent for the rest of
+  // the workout until they touched a sound control. `rejoin` carries on with a
+  // context an earlier press left running, and resumes nothing: a mount is not
+  // a gesture. Where the platform suspended the audio meanwhile, the tone stays
+  // silent and *Mute sounds* and the volume — shown whenever a workout is — are
+  // the press that brings it back (validation 0003, I12). Before the tone
+  // effect, so the first render after a return already sounds.
+  useEffect(() => {
+    cues.rejoin();
+  }, [cues]);
+
   // The tone: power against the ACKNOWLEDGED target, while the workout runs.
   // Anything else — paused, finished, no workout, a dropped reading — is
   // silence, which `RideCues.tone` decides.

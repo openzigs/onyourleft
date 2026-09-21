@@ -406,7 +406,11 @@ channel the comparison does not arise.
 resumed **only** inside a press — *Ride* in the game, a workout's *Ride* button, or either sound
 control — because a browser refuses audio that starts without one, silently. If Android suspends it
 (the screen goes off, another app takes the audio), sounds scheduled while suspended are not heard;
-the next press of a sound control or of *Ride* resumes it. I7 checks that.
+the next press of a sound control or of *Ride* resumes it. I7 checks that. A rider who leaves the
+Ride screen mid-workout and comes back gets the tone back **with no press** where the audio is still
+running, and nothing is resumed on the way — returning to a screen is not a gesture; where Android
+suspended the audio meanwhile, the tone stays silent until *Mute sounds* or the volume is touched.
+I12 checks both.
 
 | Step | What to do | What should happen |
 |---|---|---|
@@ -421,6 +425,7 @@ the next press of a sound control or of *Ride* resumes it. I7 checks that.
 | I9 | In the game, with distance every 1 km, cross a mark | One low note **and** *"N kilometres to go"* |
 | I10 | End the workout, then end the ride | The tone **stops** with the workout, and nothing is left sounding |
 | I11 | Start a second workout straight after | **One** tone, not two layered on each other |
+| I12 | Mid-workout with the tone sounding, open **Routes**, wait 10 s, return to **Ride**. Then repeat with the screen locked for 30 s while away | The first time the tone **returns on its own**. The second, record whether it returned; if not, pressing **Mute sounds** twice brings it back |
 
 ### I results
 
@@ -437,6 +442,7 @@ the next press of a sound control or of *Ride* resumes it. I7 checks that.
 | I9 | | | |
 | I10 | | | |
 | I11 | | | |
+| I12 | | | |
 
 **Could the rider tell the three sounds apart while riding hard? In their words:**
 

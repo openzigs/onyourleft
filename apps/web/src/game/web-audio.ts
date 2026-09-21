@@ -18,7 +18,9 @@
  * a browser can suspend an idle context. Nothing scheduled on a suspended
  * context is heard, and nothing here reports that — there is no event a rider
  * could act on. The next press of *Ride* or of a sound control calls `resume()`
- * again, which resumes it. Whether that is enough on a real phone is
+ * again, which resumes it. A Ride screen that comes back mid-workout asks
+ * {@link CueOutput.isRunning} instead and resumes nothing, because a mount is
+ * not a press (`audio-cues.ts` §`rejoin`). Whether that is enough on a real phone is
  * `docs/validation/0003-screen-reader-and-assistive-technology.md` Part I,
  * step I7, and its table is empty.
  *
@@ -90,6 +92,9 @@ export function webAudioOutput(create: (() => AudioContextLike) | undefined): Cu
         // nothing a rider can be told that the next press will not fix.
         context.resume().catch(() => undefined);
       }
+    },
+    isRunning() {
+      return context?.state === 'running';
     },
     startTone(frequencyHz, level) {
       if (context === undefined) return;

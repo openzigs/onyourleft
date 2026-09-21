@@ -50,7 +50,9 @@
  *
  * {@link RideCues.begin} is the only path to `resume()`, and it is called from
  * inside a press — *Ride* in the game, a workout's *Ride*, or a sound control.
- * Until then every other method is a no-op.
+ * Until then every other method is a no-op — except that {@link RideCues.rejoin}
+ * lets a panel that remounts mid-workout carry on with a context an EARLIER
+ * press left running, and does nothing at all to one that is not.
  */
 
 import type { CueName, CueOutput } from './audio-port';
@@ -112,6 +114,23 @@ export class RideCues {
     if (!this.#preference.enabled) return;
     this.#begun = true;
     this.#output.resume();
+  }
+
+  /**
+   * The screen came back while the audio a PRESS started is still running — a
+   * rider who left the Ride screen mid-workout and returned (#400's review).
+   * Carries on without a press, because there is nothing left to unlock.
+   *
+   * ⚠️ **Not a path to `resume()`.** This runs from a mount, outside any
+   * gesture, so it only ASKS: where the context is suspended — the platform
+   * took the audio while the rider was away — or was never made, the sounds
+   * stay silent until the rider's next press of *Mute sounds* or the volume,
+   * which `begin` then handles. Those controls are on screen whenever a workout
+   * is, so the remedy is always in reach.
+   */
+  rejoin(): void {
+    if (!this.#preference.enabled) return;
+    if (this.#output.isRunning()) this.#begun = true;
   }
 
   /** The rider moved the mute or the volume. */

@@ -36,6 +36,14 @@ export interface CueOutput {
    * relied on autoplay would pass every test and be dead in the product.
    */
   resume(): void;
+  /**
+   * Whether a context already exists and is `running` — #400's review. A panel
+   * that comes back mid-workout asks this rather than calling {@link resume},
+   * because it is not inside a press. ⚠️ **Never creates or resumes anything**:
+   * `false` where there is no context, and `false` for a suspended one, which
+   * only the rider's next press can fix.
+   */
+  isRunning(): boolean;
   /** Start the one continuous tone. A second call while one sounds moves it rather than adding one. */
   startTone(frequencyHz: number, gain: number): void;
   /** Move the tone that is sounding. */

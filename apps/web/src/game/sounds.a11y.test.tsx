@@ -382,6 +382,46 @@ describe('a workout — #400', () => {
     expect(output.calls.at(-1)).toEqual({ kind: 'stopTone' });
   });
 
+  it('picks the tone back up when the rider returns mid-workout, with no press and no resume', async () => {
+    // #400's review: the workout outlives the panel, and a fresh panel used to
+    // stay silent for the rest of it until a sound control was touched.
+    chooseSounds();
+    await show(undefined, 150);
+    await press(button('Ride Sweet spot'));
+    await show(riding(), 150);
+    mounted?.unmount();
+    mounted = undefined;
+    expect(output.sounding).toBe(0);
+
+    await show(riding(), 150);
+    expect(output.sounding, 'no tone after returning to the screen').toBe(1);
+    expect(output.count('startTone')).toBe(2);
+    // A mount is not a gesture: the context the first press started is reused.
+    expect(output.count('resume')).toBe(1);
+    expect(output.mostSounding).toBe(1);
+  });
+
+  it('stays silent on return where the audio was suspended meanwhile, with the controls that fix it', async () => {
+    chooseSounds();
+    await show(undefined, 150);
+    await press(button('Ride Sweet spot'));
+    await show(riding(), 150);
+    mounted?.unmount();
+    mounted = undefined;
+    // The platform took the audio while the rider was away.
+    output.running = false;
+
+    await show(riding(), 150);
+    expect(output.sounding).toBe(0);
+    expect(output.count('resume'), 'a mount resumed audio outside a gesture').toBe(1);
+    // …and the remedy is on the screen: pressing Mute sounds twice brings it back.
+    await press(button('Mute sounds'));
+    await press(button('Mute sounds'));
+    await show(riding(), 160);
+    expect(output.count('resume')).toBe(3);
+    expect(output.sounding).toBe(1);
+  });
+
   it('plays the interval sound with the "Now:" sentence, never without it', async () => {
     chooseSounds();
     await show(undefined, 150);
