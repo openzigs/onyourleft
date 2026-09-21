@@ -752,9 +752,11 @@ What a release still is: **not** reported through `onControlLost` (it is not a l
 after it is neither reported nor re-acquired against until this client next writes. A Stop the
 machine refuses resolves `incomplete`, which a screen says out loud.
 
-No test here proves a real trainer lets go; `docs/validation/0002-android-shell-and-game.md` Parts L
-and R are that. A pause inside a workout still sends `stop()`, and on the measured trainer that does
-not ease an ERG target either — [#441](https://github.com/openzigs/onyourleft/issues/441).
+**Easing a rider during a ride is a different command.** This trainer honours `0x05` Set Target Power
+to within ±2 W, so a workout that has to ease a stalled rider writes a **lower target** — the
+machine's own Supported Power Range minimum — never a Stop (#441,
+`apps/web/src/workout/session.ts`). No test here proves a real trainer eases or lets go;
+`docs/validation/0002-android-shell-and-game.md` Parts L, R and S are that.
 
 ### The bounds, in order
 

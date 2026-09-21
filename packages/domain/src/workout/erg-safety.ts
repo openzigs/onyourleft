@@ -107,8 +107,15 @@ export type ErgVerdict =
    * The rider has effectively stopped.
    *
    * Distinct from `spiralling` because the answer is different: there is no
-   * target low enough to ride at eight rpm, so the player releases the trainer
-   * and waits rather than reducing.
+   * target that is a fraction of the interval low enough to ride at eight rpm,
+   * so the player asks its caller to ease the trainer right off and waits.
+   *
+   * ⚠️ **"Ease right off" is the machine's LOWEST TARGET, not an FTMS Stop**
+   * (#441), and this comment used to say "releases the trainer" — a reviewer
+   * who remembers that is reading the old file. On the trainer #372 was
+   * measured on, an acknowledged Stop left the ERG target applied, so a rescue
+   * that stopped rescued nobody; the same trainer honoured a new `0x05` target
+   * to within ±2 W. `apps/web/src/workout/session.ts` §`ease` writes it.
    */
   | { readonly kind: 'stalled'; readonly reason: string };
 
@@ -143,7 +150,7 @@ export function assessErgCadence(history: readonly CadenceReading[], now: Second
     // the same problem.
     return {
       kind: 'stalled',
-      reason: 'Pedalling has stopped, so the trainer has been released.',
+      reason: 'Pedalling has stopped, so the target has been dropped to the trainer’s lowest.',
     };
   }
 

@@ -72,6 +72,22 @@ const TWO_INTERVALS = () => expandWorkout(workout([steady(6, 0.6), steady(6, 1.0
  */
 const RETAINS_THROUGH_STOP = () => ftmsTrainer({ id: 'kickr', retainsTargetsThroughStop: true });
 
+/**
+ * The same machine with a Supported Power Range that starts above zero, so an
+ * ease to "the floor" is a number a test can tell from 0 W and from a
+ * hard-coded one (#441). Read back through `trainer.powerRange`, never typed.
+ */
+const FLOOR_WATTS = 25;
+const MEASURED_TRAINER = () =>
+  ftmsTrainer({
+    id: 'kickr',
+    retainsTargetsThroughStop: true,
+    minTargetPower: watts(FLOOR_WATTS),
+  });
+
+/** A `0x05` Set Target Power write, as octets: op code, then sint16 little-endian. */
+const targetWrite = (target: number): number[] => [SET_TARGET_POWER, target & 0xff, target >> 8];
+
 async function loop(timelineFactory = TWO_INTERVALS, spec?: SimulatedDeviceSpec) {
   const trainer = await connectSimulatedTrainer(spec === undefined ? {} : { spec });
   await trainer.control.requestControl();
@@ -79,6 +95,7 @@ async function loop(timelineFactory = TWO_INTERVALS, spec?: SimulatedDeviceSpec)
     timeline: timelineFactory(),
     thresholdPower: THRESHOLD,
     control: trainer.control,
+    powerFloor: trainer.powerRange.minimum,
   });
   return { trainer, session };
 }
@@ -266,40 +283,48 @@ describe('a trainer disconnect pauses the workout and preserves it', () => {
   });
 });
 
-describe('the trainer is let go whenever the rider is not riding to a target', () => {
-  it('stops the trainer when the workout is paused', async () => {
-    // A rider who presses pause is off the pedals. Leaving ERG holding 250 W
-    // means the trainer is still loaded when they get back on, which is both
-    // unpleasant and, per CLAUDE.md §6, a safety question rather than a polish
-    // one.
-    const { trainer, session } = await loop();
+describe('the trainer is eased whenever the rider is not riding to a target — #441', () => {
+  // ⚠️ This block was "the trainer is let go", and every case asserted a Stop
+  // and a machine that dropped its target on one. On the trainer #372 was
+  // measured on, a Stop left the ERG target applied — so a pause, a free ride
+  // and a stalled rider all went on being held at the last interval. The double
+  // here keeps its target through a Stop, as that machine does, and has a floor
+  // above zero so the ease is a number with a source.
+
+  it('eases the trainer to its OWN floor when the workout is paused, with a 0x05 and no Stop', async () => {
+    const { trainer, session } = await loop(TWO_INTERVALS, MEASURED_TRAINER());
     session.start(seconds(0));
     await ride(session, 0, 2);
     expect(trainer.targetPowerOnTheTrainer()).toBe(150);
-
-    session.pause(seconds(3));
-    await session.settled();
-    expect(trainer.targetPowerOnTheTrainer()).toBeUndefined();
-  });
-
-  it('pauses with a Stop and NOT a Reset, and resumes to a target — #372', async () => {
-    // ⚠️ The Reset trap. A pause is not the end: the workout writes again
-    // after it, so it must keep control — and a Reset would give control up
-    // and turn every later target into a refusal.
-    const { trainer, session } = await loop(() => expandWorkout(workout([steady(600, 0.6)])));
-    session.start(seconds(0));
-    await ride(session, 0, 2);
     const before = trainer.wire.length;
 
     session.pause(seconds(3));
     await session.settled();
-    const paused = trainer.wire.slice(before).filter((entry) => entry.direction === 'write');
-    expect(paused.map((entry) => [...entry.bytes])).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
 
+    const sent = trainer.wire.slice(before).filter((entry) => entry.direction === 'write');
+    expect(trainer.powerRange.minimum).toBe(FLOOR_WATTS);
+    expect(sent.map((entry) => [...entry.bytes])).toStrictEqual([targetWrite(FLOOR_WATTS)]);
+    // Read from the device: the machine that ignored a Stop is holding the floor.
+    expect(trainer.targetPowerOnTheTrainer()).toBe(FLOOR_WATTS);
+  });
+
+  it('keeps control through a pause and resumes to the target', async () => {
+    const { trainer, session } = await loop(
+      () => expandWorkout(workout([steady(600, 0.6)])),
+      MEASURED_TRAINER(),
+    );
+    session.start(seconds(0));
+    await ride(session, 0, 2);
+
+    session.pause(seconds(3));
+    await session.settled();
     session.resume(seconds(10));
     await ride(session, 10, 12);
+
+    expect(trainer.control.hasControl()).toBe(true);
     expect(trainer.targetPowerOnTheTrainer()).toBe(150);
     expect(session.state().lastFault).toBeUndefined();
+    expect(trainer.wire.some((entry) => entry.bytes[0] === RESET)).toBe(false);
   });
 
   it('stops again at the end of a workout that passed through a free ride', async () => {
@@ -317,6 +342,37 @@ describe('the trainer is let go whenever the rider is not riding to a target', (
     const writes = trainer.wire.filter((entry) => entry.direction === 'write');
     expect(writes.at(-1)?.bytes).toStrictEqual([STOP_OR_PAUSE, 0x01]);
   });
+
+  it('says so when the machine refuses the ease, and tries again on the next tick', async () => {
+    // "A refusal is reported rather than assumed" (#441's third criterion).
+    const { trainer } = await loop();
+    const asked: number[] = [];
+    let refuse = true;
+    const session = createWorkoutSession({
+      timeline: expandWorkout(workout([{ kind: 'free-ride', seconds: seconds(10) }])),
+      thresholdPower: THRESHOLD,
+      powerFloor: watts(FLOOR_WATTS),
+      control: {
+        setTargetPower: (target) => {
+          asked.push(target);
+          return refuse
+            ? Promise.reject(new SensorError('control-rejected', 'the machine refused op code 0x5'))
+            : Promise.resolve(target);
+        },
+        stop: () => trainer.control.stop(),
+        letGo: () => trainer.control.letGo(),
+      },
+    });
+    session.start(seconds(0));
+    await ride(session, 0, 1);
+    expect(session.state().lastFault).toContain('refused');
+    refuse = false;
+    await ride(session, 2, 4);
+
+    // Refused twice while `refuse` held (ticks 0 and 1), then written once and
+    // not again: the guard is re-armed only by a refusal.
+    expect(asked).toStrictEqual([FLOOR_WATTS, FLOOR_WATTS, FLOOR_WATTS]);
+  });
 });
 
 describe('ending the workout releases the trainer — #372', () => {
@@ -333,6 +389,7 @@ describe('ending the workout releases the trainer — #372', () => {
         workout([steady(3, 0.6), { kind: 'free-ride', seconds: seconds(3) }]),
       ),
       thresholdPower: THRESHOLD,
+      powerFloor: trainer.powerRange.minimum,
       control: {
         setTargetPower: (target) => trainer.control.setTargetPower(target),
         stop: () => trainer.control.stop(),
@@ -403,6 +460,7 @@ describe('ending the workout releases the trainer — #372', () => {
     const session = createWorkoutSession({
       timeline: TWO_INTERVALS(),
       thresholdPower: THRESHOLD,
+      powerFloor: trainer.powerRange.minimum,
       control: {
         setTargetPower: (target) => trainer.control.setTargetPower(target),
         stop: () => trainer.control.stop(),
@@ -472,6 +530,59 @@ describe('the ERG spiral is broken against a real control point', () => {
     expect(held).toBeGreaterThan(150);
   });
 
+  it('rescues a STALLED rider with a lower 0x05 target, and sends no Stop — #441', async () => {
+    // ⚠️ The safety case. A rider ground to a halt in ERG used to be "released"
+    // with a Stop, and on the trainer #372 was measured on a Stop left the
+    // target applied — the rescue rescued nobody. What that trainer obeys is a
+    // new target, so the rescue is the machine's own floor.
+    const { trainer, session } = await loop(
+      () => expandWorkout(workout([steady(60, 1.0)])),
+      MEASURED_TRAINER(),
+    );
+    session.start(seconds(0));
+    const stalling = new Map<number, number>([
+      [0, 80],
+      [1, 78],
+      [2, 60],
+      [3, 40],
+      [4, 20],
+      [5, 8],
+      [6, 5],
+      [7, 4],
+    ]);
+    await ride(session, 0, 7, (second) => {
+      const rpm = stalling.get(second);
+      return rpm === undefined
+        ? undefined
+        : { at: seconds(second), cadence: revolutionsPerMinute(rpm) };
+    });
+    await flush();
+
+    const writes = trainer.wire.filter((entry) => entry.direction === 'write');
+    expect(writes.at(-1)?.bytes).toStrictEqual(targetWrite(FLOOR_WATTS));
+    expect(writes.some((entry) => entry.bytes[0] === STOP_OR_PAUSE)).toBe(false);
+    // The number on the machine went DOWN — the only thing this suite can say.
+    expect(trainer.targetPowerOnTheTrainer()).toBe(FLOOR_WATTS);
+  });
+
+  it('raises a relief target that would fall under the floor to the floor, rather than having it refused', async () => {
+    // 20 % of 250 W is 50 W; two thirds of that is 33 W, below this machine's
+    // 40 W minimum. Written as asked it would be refused out of range — an ease
+    // the machine rejects is no ease.
+    const { trainer, session } = await loop(
+      () => expandWorkout(workout([steady(60, 0.2)])),
+      ftmsTrainer({ id: 'kickr', retainsTargetsThroughStop: true, minTargetPower: watts(40) }),
+    );
+    session.start(seconds(0));
+    await ride(session, 0, 8, (second) => ({
+      at: seconds(second),
+      cadence: revolutionsPerMinute(Math.max(20, 80 - second * 8)),
+    }));
+
+    expect(trainer.targetPowerOnTheTrainer()).toBe(40);
+    expect(session.state().lastFault).toBeUndefined();
+  });
+
   it('holds the full target for a rider grinding at 60 rpm on purpose', async () => {
     const { trainer, session } = await loop(() => expandWorkout(workout([steady(30, 1.0)])));
     session.start(seconds(0));
@@ -500,22 +611,23 @@ describe('a refused write is reported and retried, not thrown', () => {
   });
 });
 
-describe('a free ride releases the trainer once, not every second', () => {
-  it('sends one stop for the whole block', async () => {
-    const { trainer, session } = await loop(() =>
-      expandWorkout(workout([{ kind: 'free-ride', seconds: seconds(8) }])),
+describe('a free ride eases the trainer once, not every second', () => {
+  it('writes the floor once for the whole block, and no Stop — #441', async () => {
+    const { trainer, session } = await loop(
+      () => expandWorkout(workout([{ kind: 'free-ride', seconds: seconds(8) }])),
+      MEASURED_TRAINER(),
     );
     session.start(seconds(0));
     await ride(session, 0, 6);
 
-    const stops = trainer.wire.filter(
-      (entry) => entry.direction === 'write' && entry.bytes[0] === 0x08,
-    );
-    // ⚠️ Seven ticks, one stop. Without the `released` guard this is seven
+    const writes = trainer.wire.filter((entry) => entry.direction === 'write');
+    // ⚠️ Seven ticks, one ease. Without the `released` guard this is seven
     // writes, each of which occupies a control point that runs one procedure
     // at a time. It is exactly one rather than zero because `released` starts
     // false: the session does not assume the trainer was left holding nothing.
-    expect(stops).toHaveLength(1);
+    expect(writes.filter((entry) => entry.bytes[0] === SET_TARGET_POWER)).toHaveLength(1);
+    expect(writes.some((entry) => entry.bytes[0] === STOP_OR_PAUSE)).toBe(false);
+    expect(trainer.targetPowerOnTheTrainer()).toBe(FLOOR_WATTS);
   });
 });
 

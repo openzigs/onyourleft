@@ -142,6 +142,7 @@ async function rideAndRecord(): Promise<Uint8Array> {
     timeline: PLAN(),
     thresholdPower: THRESHOLD,
     control: trainer.control,
+    powerFloor: trainer.powerRange.minimum,
   });
 
   const recorder = createRecorder({

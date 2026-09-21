@@ -1242,12 +1242,13 @@ export function createRideController(options: RideControllerOptions): RideContro
     },
 
     startWorkout(record: WorkoutRecord, thresholdPower: Watts): boolean {
-      const client = control();
+      const connection = trainerEntry()?.trainer;
+      const client = connection?.control;
       // ⚠️ Both halves. A trainer that is paired but has not granted control
       // answers every setpoint `0x05 Control Not Permitted`, so starting here
       // would produce a workout that runs its clock and controls nothing —
       // which is the silent failure #14's revision block names.
-      if (client === undefined || !client.hasControl()) {
+      if (connection === undefined || client === undefined || !client.hasControl()) {
         return false;
       }
       endWorkoutSession('replace');
@@ -1261,6 +1262,8 @@ export function createRideController(options: RideControllerOptions): RideContro
           stop: () => client.stop(),
           letGo: () => releaseTrainer(client),
         },
+        // #441: what an ease writes — the machine's own reported minimum.
+        powerFloor: connection.powerRange.minimum,
         onChange: changed,
       });
       workout = { record, session };

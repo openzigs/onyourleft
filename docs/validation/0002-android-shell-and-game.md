@@ -18,6 +18,9 @@ which measured whether the APK cold-starts with no network. ⚠️ **It is the o
 whose result table was filled in by the change that added it**, so it is a dated measurement rather
 than a script waiting for an afternoon; the rest of this file is still the latter unless a part says
 otherwise.
+**Part S added 2026-09-21** by [#441](https://github.com/openzigs/onyourleft/issues/441): whether a
+struggling rider in ERG is actually eased, now that the ease is a lower target rather than a Stop.
+Checked with `grep '^## Part'` for a duplicate letter first — S was free.
 **Discharges, when run:** [#87](https://github.com/openzigs/onyourleft/issues/87) criteria 2, 3, 5
 and 6 and its two-OEM line; the Android half of
 [#85](https://github.com/openzigs/onyourleft/issues/85); and
@@ -62,12 +65,14 @@ resistance to a person who is pedalling*.
    ([#364](https://github.com/openzigs/onyourleft/issues/364)) and the whole document had no
    simulation-mode step before it — which is why an afternoon spent filling in Part D truthfully
    would have left every cell green and the game sending nothing (#362).
-   ⚠️ **Part R ([#372](https://github.com/openzigs/onyourleft/issues/372)) runs between them: L, then
-   R, then D.** R is the ERG half of the release test and it needs a target set, so it is not a
+   ⚠️ **Parts R ([#372](https://github.com/openzigs/onyourleft/issues/372)) and S
+   ([#441](https://github.com/openzigs/onyourleft/issues/441)) run between them: L, then R, then S,
+   then D.** S deliberately lets cadence collapse under an ERG target, which is the most
+   uncomfortable thing in this document short of D4 — do it fresh, and not after D. R is the ERG half of the release test and it needs a target set, so it is not a
    no-resistance part. ⚠️ It used to say every step of it ends by *removing* resistance; on the
    owner's trainer none does (Part R says what was measured), so ride R as if the target stays —
    and D4 stays the last thing done all day.
-3. **Have the trainer's power switch within reach for Parts L, R and D.**
+3. **Have the trainer's power switch within reach for Parts L, R, S and D.**
 4. **Do not clip in for D4, and use flat pedals for L5, L7 and Part R.** D4: flat pedals or bare
    feet, or stand beside the bike. ⚠️ **L5, L7 and R are ridden**, and this item used to say not to
    clip in for L5 because L5 was *"off the bike, turn the cranks by hand"* — a reviewer who remembers
@@ -1678,13 +1683,13 @@ adb logcat | grep -i "BluetoothLe"
 | R1 | Ride screen, control taken. Set an ERG target of **200 W** and ride 60 s at a steady cadence. **While still pedalling**, press ***End ERG***. Keep the gear for ten seconds, then let cadence fall — 80, 70, 60, 50 rpm | In logcat: one **`0x08`** (`08 01`) answered `80 08 01`, **no `0x01`**, and **no `0x00`** after it. Record power as cadence fell — on the owner's trainer, expect it to **hold or rise** (accepted). Then set a new target of 150 W and confirm the trainer holds 150 W: **the app can still drive it**, which is the condition the acceptance rests on |
 | R2 | Start a **saved workout** with a long steady block (≥ 150 W). Ride 60 s. **While still pedalling**, end the workout (*End workout*). Then the same cadence ramp | `0x05` writes during the workout, then one `0x08`, no `0x01`, no `0x00` after it. The workout **ends** — it is not shown paused, and there is no *Control lost*. Record power as cadence fell |
 | R3 | Start the same workout, ride 60 s, and **while still pedalling** press *Stop* twice to end the **recording** | The same as R2. The workout's release and the ride's are one release, so there is **exactly one** `0x08` after the last `0x05` |
-| R4 | Start a workout whose **last block is a free ride**, and ride it to the end | During the free ride there is a `0x08` — a pause inside the workout, which on this trainer may not ease the target (see below). At the end of the workout there is **one more `0x08`** — the release the old code skipped because the free ride had already sent a Stop |
+| R4 | Start a workout whose **last block is a free ride**, and ride it to the end | During the free ride there is a **`0x05` at the trainer's lowest target** and no `0x08` — that is #441's ease, and Part S is where it is measured. At the end of the workout there is **one `0x08`** — the release the old code skipped because the free ride had already sent a Stop |
 
-⚠️ **R4's first `0x08` is a known gap, not this part's finding to fix.** A free-ride block, a paused
-ride and the ERG spiral-of-death easing all still send Stop, and on a trainer that keeps its ERG target
-through a Stop those do not ease the target. That is
-[#441](https://github.com/openzigs/onyourleft/issues/441); what R4 checks is that the **end** of such
-a workout still reaches the release.
+⚠️ **R4 used to expect a `0x08` during the free ride, and a reviewer who remembers that is reading the
+old procedure.** Since [#441](https://github.com/openzigs/onyourleft/issues/441) a workout eases the
+trainer — a free-ride block, a stalled rider, a paused ride — by writing its **lowest target**, because
+on the owner's trainer a Stop does not ease an ERG target and a `0x05` is honoured to within ±2 W.
+What R4 checks here is that the **end** of such a workout still reaches the release.
 
 ### R results
 
@@ -1696,6 +1701,62 @@ a workout still reaches the release.
 | R4 | | | | | |
 
 **What did the trainer keep after each release, in your own words?** ______________
+
+**Trainer (make, model, firmware, address):** ______________  **Build:** ______________
+
+---
+
+## Part S — does a struggling rider get eased? ([#441](https://github.com/openzigs/onyourleft/issues/441)) ⚠️ run after R, before D
+
+**Why this part exists.** Part R measured that on the owner's trainer an acknowledged `0x08` Stop
+leaves an ERG target applied. Until #441 a workout eased a rider **inside** the workout with exactly
+that Stop, in three places — a free-ride block, a **stalled** rider (the ERG spiral-of-death rule,
+cadence at or below 10 rpm), and a paused ride — so on that trainer none of them eased anything, and
+the stall rescue, which is the one case where the target most needs to go, did nothing.
+
+The same trainer honoured **`0x05` Set Target Power** to within ±2 W (200 W held at 197–202 W across
+64–81 rpm, #372). So since #441 all three write the machine's **own lowest target** — the minimum of
+the Supported Power Range it reported, never a number typed into the client — and a rider whose
+cadence is merely *collapsing* (not yet stalled) is eased to two thirds of the interval's target, as
+before, raised to that floor if it would fall under it. The relief then stays on until cadence has
+held for one whole trend window (8 s) — so the target should step back **floor → two thirds → full**,
+not flap.
+
+⚠️ **No test in the repository can prove a real trainer eases.** Every test asserts what is *sent*:
+a `0x05` with a lower value and no `0x08`. These steps are the proof, and #441's second criterion is
+about them.
+
+### ⚠️ Read this before starting
+
+- **S1 is deliberately uncomfortable.** It asks you to let your cadence collapse under an ERG target.
+  Flat pedals, a low gear, seated, the trainer's power switch within reach. Stop at once if anything
+  surprises you, and write down what.
+- **Read power from the trainer** (the Ride screen, or Indoor Bike Data in logcat).
+- Write down the trainer's **Supported Power Range minimum** first: the Ride screen quotes the range
+  the trainer reported. That number is what every ease should write.
+
+```bash
+adb logcat -c
+adb logcat | grep -i "BluetoothLe"
+```
+
+| Step | What to do | What should happen |
+|---|---|---|
+| S1 | ⚠️ **The stall rescue — the one that matters.** Ride screen, control taken, start a saved workout with a long steady block at a target you can hold but not comfortably (≥ 200 W). Ride 60 s. Then **stop pushing**: let cadence fall steadily towards zero over 10–15 s without stopping the recording | As cadence falls under ~50 rpm the target should drop to **two thirds** (a `0x05`); once cadence is at or below **10 rpm** a `0x05` at the trainer's **minimum** — and **no `0x08` anywhere**. **Power must FALL** as the rider slows: the brake lets go of the legs. If power holds or rises, the rescue does not work on this trainer: stop and record it |
+| S2 | From S1's stall, start pedalling again and settle at a comfortable cadence | The target steps back: two thirds while cadence is under 50 rpm, then — only after about **8 s** steady — the full target. It should **not** flap between full and eased while cadence hovers near 50 |
+| S3 | A workout with a **free-ride block** after an ERG block. Ride into the free ride and let cadence fall | One `0x05` at the trainer's minimum as the block starts, no `0x08`, and power **falls** with cadence — the previous interval's target is gone |
+| S4 | During an ERG block, press **Pause** while pedalling; keep pedalling slowly for 10 s; then **Resume** | On Pause one `0x05` at the minimum, no `0x08`; power falls with cadence while paused. On Resume the interval's target comes back within a second or two |
+
+### S results
+
+| Step | Trainer minimum (W) | `0x05` values seen, in order | `0x08` seen? | Power as cadence fell (rpm → W) |
+|---|---|---|---|---|
+| S1 | | | | |
+| S2 | | | | flapped? |
+| S3 | | | | |
+| S4 | | | | |
+
+**Did the stall rescue take the load off your legs, in your own words?** ______________
 
 **Trainer (make, model, firmware, address):** ______________  **Build:** ______________
 

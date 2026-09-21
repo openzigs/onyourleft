@@ -25,35 +25,52 @@
  * agreeing, not of one of them, which is why it is asserted here against a
  * simulated trainer rather than in either package alone.
  *
- * ## Two ways of letting go, and only one of them is a release — #372
+ * ## Easing the trainer, and letting it go — two different commands (#372, #441)
  *
- * ⚠️ **This section used to say that `stop()` is "the op code that means what a
- * rider means by *let me ride*", and then — in PR #442 as first written — that
- * the end of a workout was an FTMS Reset. A reviewer who remembers either is
- * reading an old file.** On the trainer #372 was measured on, an acknowledged
- * `0x08` Stop left a 200 W ERG target applied — for 36 s the machine held it,
- * and as cadence fell from 55 to 46 rpm the power ROSE from 99 W to 175 W —
- * and an acknowledged `0x01` Reset did exactly the same, while also revoking
- * control. So:
+ * ⚠️ **This section has been rewritten twice, and a reviewer who remembers
+ * either earlier version is reading an old file** — first `stop()` was "the op
+ * code that means what a rider means by *let me ride*", then PR #442 made the
+ * end of a workout an FTMS Reset. On the trainer #372 was measured on, an
+ * acknowledged `0x08` Stop left a 200 W ERG target applied — as cadence fell
+ * from 55 to 46 rpm the power ROSE from 99 W to 175 W — and an acknowledged
+ * `0x01` Reset did exactly the same. What that trainer DID obey, to within
+ * ±2 W, is a new `0x05` target. So:
  *
+ * - **Easing the trainer inside the workout** — a free-ride block, a stalled
+ *   rider, the ride paused — writes the machine's **lowest target**:
+ *   {@link WorkoutSessionOptions.powerFloor}, the minimum of the Supported
+ *   Power Range the trainer itself reported, through the same ERG writer as
+ *   every target. Never a hard-coded floor, and never a Stop (#441). ⚠️ The
+ *   three are one decision for one reason: in each of them the player has
+ *   stopped judging the rider's cadence — a free ride has no target to relieve,
+ *   a stalled rider is past relief, a paused player does not tick — so a target
+ *   left on the machine there is an ERG loop with **no spiral protection at
+ *   all**. The owner's acceptance of a Stop that does not release (#372) is
+ *   about the moment after a ride; these are during one.
  * - **The end of the workout** — it finished, or the rider ended it, or the
  *   ride stopped — is {@link TrainerControl.letGo}, the ride controller's one
- *   release, which sends a Stop and keeps control. The owner has accepted that
- *   the machine may keep its last target after a workout (#372, 2026-09-21).
- * - **A pause inside the workout** — a free-ride block, a stalled rider, the
- *   ride paused — stays `stop()`, because this session will write again.
- *   ⚠️ On the measured trainer a Stop does not ease an ERG target, which is
- *   [#441](https://github.com/openzigs/onyourleft/issues/441).
+ *   release, which sends a Stop and keeps control. The owner accepted that the
+ *   machine may keep its last target after a workout (#372, 2026-09-21).
  *
- * Neither is a target of zero. FTMS treats 0 W as a target, and a trainer
- * holding 0 W still has the flywheel loaded against the rider at its floor.
+ * ⚠️ **The floor is still a target**, and that is the trade #441 names: FTMS
+ * treats 0 W as a target too, and a trainer holding its floor still has the
+ * flywheel loaded at that floor. It is the least an ERG machine can be asked to
+ * hold — which on the measured trainer is a great deal less than what a Stop
+ * left behind. A spiralling rider who is still pedalling is eased to
+ * `RELIEF_SHARE` of the target instead (`packages/domain/src/workout/erg-safety.ts`),
+ * raised to the floor if that would fall under it — an ease the machine would
+ * refuse as out of range would rescue nobody.
  *
- * ⚠️ **Both are reached through {@link WorkoutSessionOptions.control}, not
- * through the writer.** `ErgWriter`'s sink is deliberately narrowed to
- * `setTargetPower` so it cannot send a Reset by mistake (FTMS §4.16.2.1), and
- * `erg-writer.test.ts` pins that with a `@ts-expect-error`. Releasing is this
- * file's job precisely because it is the one command the writer must not be
- * able to reach for.
+ * ⚠️ **No test here can prove a real trainer eases.** Every assertion is about
+ * what is SENT. Validation 0002 Part S is the pedal-through that says whether
+ * power falls.
+ *
+ * ⚠️ **The release is reached through {@link WorkoutSessionOptions.control},
+ * not through the writer; the ease goes through the writer.** `ErgWriter`'s
+ * sink is deliberately narrowed to `setTargetPower` so it cannot send a Reset
+ * by mistake (FTMS §4.16.2.1), and `erg-writer.test.ts` pins that with a
+ * `@ts-expect-error`. #441's ease needs nothing more than that one method —
+ * which is why it did not widen the sink.
  */
 
 import {
@@ -88,6 +105,15 @@ export interface WorkoutSessionOptions {
   readonly timeline: WorkoutTimeline;
   readonly thresholdPower: Watts;
   readonly control: WorkoutTrainer;
+  /**
+   * The lowest ERG target this trainer accepts — the minimum of the Supported
+   * Power Range **the machine itself reported** (#441). What an ease writes.
+   *
+   * ⚠️ Required, with no default: a default would be the hard-coded floor
+   * #43's criteria forbid, and a floor below the machine's minimum would be
+   * refused as out of range — an ease that rescues nobody.
+   */
+  readonly powerFloor: Watts;
   /** Told what happened, so a screen can re-render. */
   readonly onChange?: ((state: WorkoutSessionState) => void) | undefined;
   readonly refreshSeconds?: number | undefined;
@@ -150,7 +176,7 @@ export interface WorkoutSession {
 }
 
 export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSession {
-  const { timeline, thresholdPower, control, onChange } = options;
+  const { timeline, thresholdPower, control, powerFloor, onChange } = options;
 
   const player: WorkoutPlayer = createWorkoutPlayer({
     timeline,
@@ -162,8 +188,8 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
   let cadence: CadenceReading[] = [];
   let lastFault: string | undefined;
   /**
-   * Whether the trainer has been told to stop since this session last set a
-   * target.
+   * Whether the trainer has been eased to its floor since this session last
+   * set a target.
    *
    * ⚠️ **Starts `false`, meaning "assume it is holding something".** The
    * session does not know what the ride screen did before it — #49's own ERG
@@ -190,23 +216,33 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
   };
 
   /**
-   * Stop holding a target for now — the workout will write again.
+   * Ease the trainer to its lowest target for now — the workout will write
+   * again (#441). @see the module note for why this is a `0x05` and not a Stop.
    *
-   * Guarded by `released` so a free-ride block does not send `stop` once a
-   * second for its whole length — the machine is already stopped, and each of
-   * those writes would occupy the control point a real setpoint might need.
+   * Guarded by `released` so a free-ride block does not write the floor once a
+   * second for its whole length — each of those writes would occupy the
+   * control point a real setpoint might need. A write the machine refused, or
+   * that a newer target superseded, clears the guard so the next tick tries
+   * again: an ease that did not land is not an ease.
    *
-   * ⚠️ A Stop, not a release. @see the module note for what that does and
-   * does not do on real hardware.
+   * ⚠️ Through the writer, never `control` directly: the writer serialises
+   * with the targets, so an ease cannot overtake a target still in flight and
+   * be overwritten by it on the machine.
    */
   const ease = (): void => {
     if (released) {
       return;
     }
     released = true;
-    void control.stop().catch((error: unknown) => {
-      lastFault = faultText(error);
-      changed();
+    void writer.offer(powerFloor).then((outcome) => {
+      if (outcome.kind === 'written') {
+        return;
+      }
+      released = false;
+      if (outcome.kind === 'failed') {
+        lastFault = faultText(outcome.error);
+        changed();
+      }
     });
   };
 
@@ -293,7 +329,15 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
 
       switch (state.intent.kind) {
         case 'write-target':
-          offer(state.intent.watts);
+          // An eased target is raised to the floor if the relief would take
+          // it under — the machine refuses an out-of-range target outright,
+          // and a refused ease rescues nobody. An un-eased one is the
+          // workout's own number and is written as it is.
+          offer(
+            state.intent.eased
+              ? watts(Math.max(state.intent.watts, powerFloor))
+              : state.intent.watts,
+          );
           break;
         case 'release':
           ease();
@@ -346,7 +390,9 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
     supersede(): void {
       player.stop();
       writer.close();
-      ease();
+      // A bare Stop, as ever. Not `ease`: the writer is closed, and the
+      // replacement's first target follows at once.
+      void control.stop().catch(() => undefined);
       changed();
     },
 

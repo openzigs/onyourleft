@@ -207,7 +207,7 @@ interface BenchOptions {
    * How the simulated machine behaves — #372. `retainsTargetsThroughStop` is
    * the trainer that issue was measured on.
    */
-  readonly machine?: Pick<FtmsOptions, 'retainsTargetsThroughStop'>;
+  readonly machine?: Pick<FtmsOptions, 'retainsTargetsThroughStop' | 'minTargetPower'>;
   /**
    * Notify `0xFF` Control Permission Lost BEFORE the Stop's own answer — the
    * ordering PR #442's review reproduced, which nothing in BLE or FTMS rules
@@ -1535,6 +1535,46 @@ describe('a release is one Stop, and it is not a loss — #372', () => {
 
     await rig.controller.requestTrainerControl();
     expect(rig.controller.getSnapshot().trainer.releaseFault).toBeUndefined();
+    rig.controller.dispose();
+  });
+});
+
+describe('a paused ride eases the workout to the trainer’s OWN floor — #441', () => {
+  it('writes the minimum the trainer reported, as a 0x05, and no Stop', async () => {
+    // ⚠️ Through the controller's own composition, because the floor is the
+    // controller's to supply: it is read off the machine's Supported Power
+    // Range at pairing. A floor of 30 W here, so a hard-coded 0 is a red test.
+    const rig = benchWith({
+      machine: { retainsTargetsThroughStop: true, minTargetPower: watts(30) },
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    rig.controller.startWorkout(
+      {
+        id: workoutId('w1'),
+        createdBy: ATHLETE_A,
+        name: 'Long',
+        workout: {
+          name: 'Long',
+          blocks: [{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.8) }],
+        },
+        createdAt: unixSeconds(1),
+        updatedAt: unixSeconds(1),
+      },
+      watts(250),
+    );
+    await ride(rig, 2);
+    await flushMicrotasks();
+    expect(rig.targetOnTheTrainer()).toBe(200);
+    const before = rig.written.length;
+
+    await rig.controller.pause();
+    await ride(rig, 2);
+    await flushMicrotasks(20);
+
+    expect(rig.written.slice(before)).toStrictEqual([[0x05, 30, 0]]);
+    expect(rig.targetOnTheTrainer()).toBe(30);
     rig.controller.dispose();
   });
 });

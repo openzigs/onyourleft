@@ -68,8 +68,10 @@
  *
  * ⚠️ **Nothing here claims a Stop releases the trainer.** It ends the
  * session; on the measured machine the last target stays applied. A rider who
- * is struggling DURING a ride is a different question, and it is #441: the
- * one command this trainer demonstrably obeys in ERG is a new target.
+ * is struggling DURING a ride is a different question with a different answer:
+ * the one command this trainer demonstrably obeys in ERG is a new target, so a
+ * workout eases a rider by writing a LOWER one (`apps/web/src/workout/session.ts`,
+ * #441), never by stopping.
  *
  * ## Two failure vocabularies, deliberately not conflated
  *

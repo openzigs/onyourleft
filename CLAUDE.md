@@ -2155,11 +2155,13 @@ condition, measured and met, that the app can take control again. So `TrainerCon
 ride ending by button or by navigating away. What survives from #442 is structural: one release; it
 is **not reported as a loss** (no "Control lost", and a workout ends rather than pausing); nothing
 takes control back after one; and a refused Stop is reported as **Not released**.
-⚠️ **No test here proves a real
-trainer lets go** — every test asserts what is sent. Validation 0002 L5, L7 and Part R are the
-hardware steps. A pause INSIDE a workout (a free-ride block, a stalled rider, a paused ride) still
-sends a Stop, which on the measured trainer does not ease an ERG target: that is
-[#441](https://github.com/openzigs/onyourleft/issues/441).
+⚠️ **Easing a rider DURING a workout is a different command**
+([#441](https://github.com/openzigs/onyourleft/issues/441)): this trainer honours `0x05` Set Target
+Power to within ±2 W, so a free-ride block, a stalled rider and a paused ride write the machine's own
+Supported Power Range **minimum** through the ERG writer — never a Stop — and `ErgSink` stays
+`Pick<TrainerControl, 'setTargetPower'>`, which is all that needs. ⚠️ **No test here proves a real
+trainer lets go or eases** — every test asserts what is sent. Validation 0002 L5, L7, Part R and
+Part S are the hardware steps.
 
 ### 4j. The wiring gate
 
