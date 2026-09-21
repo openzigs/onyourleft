@@ -57,6 +57,7 @@
 
 import {
   expandWorkout,
+  type WorkoutTimeline,
   seconds,
   unixSeconds,
   type PlayerStatus,
@@ -272,6 +273,12 @@ export interface RideWorkoutSnapshot {
   readonly nowRiding: string | undefined;
   /** Why the last workout write could not be made, if any. */
   readonly fault: string | undefined;
+  /**
+   * The plan itself, so a screen can look AHEAD in it — #398. The same
+   * timeline the session plays; `segmentAt(timeline, elapsed + lead)` is the
+   * whole lookahead, with {@link elapsedSeconds} as the one clock.
+   */
+  readonly timeline: WorkoutTimeline;
 }
 
 /** Everything the view renders, and nothing it has to derive. */
@@ -943,6 +950,8 @@ export function createRideController(options: RideControllerOptions): RideContro
   interface WorkoutInProgress {
     readonly record: WorkoutRecord;
     readonly session: WorkoutSession;
+    /** Expanded once, and the same object the session plays. */
+    readonly timeline: WorkoutTimeline;
   }
 
   /**
@@ -983,7 +992,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       name: workout.record.name,
       status: state.player.status,
       elapsedSeconds: state.player.elapsed,
-      totalSeconds: expandWorkout(workout.record.workout).totalSeconds,
+      totalSeconds: workout.timeline.totalSeconds,
+      timeline: workout.timeline,
       holdingWatts: state.holding,
       // The block a rider is in, phrased by the module that phrases them
       // everywhere else — a second wording here would be the ride screen and
@@ -1252,8 +1262,9 @@ export function createRideController(options: RideControllerOptions): RideContro
         return false;
       }
       endWorkoutSession('replace');
+      const timeline = expandWorkout(record.workout);
       const session = createWorkoutSession({
-        timeline: expandWorkout(record.workout),
+        timeline,
         thresholdPower,
         // ⚠️ `letGo` is this controller's, so the end of the workout is the
         // same release as every other and is joined with the ride's own.
@@ -1266,7 +1277,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         powerFloor: connection.powerRange.minimum,
         onChange: changed,
       });
-      workout = { record, session };
+      workout = { record, session, timeline };
       // ⚠️ `now()`, NOT the cached `clock`. `clock` only moves on a tick, and
       // pairing and requesting control both advance the real clock without one
       // — so anchoring there started every workout already seconds old, and the
