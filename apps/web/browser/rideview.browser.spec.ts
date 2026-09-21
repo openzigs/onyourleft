@@ -249,7 +249,10 @@ for (const viewport of TABLETS) {
 
       expect(seen.mainClass).toBe('oyl-main oyl-main--instruments');
       expect(seen.mainMaxWidth).toBe('none');
-      expect(seen.main?.width).toBe(viewport.width);
+      // Every pixel the rail (#427) leaves: from its right edge to the window's.
+      expect(seen.primaryNav?.left).toBe(0);
+      expect(seen.main?.left).toBeCloseTo(seen.primaryNav?.right ?? -1, 0);
+      expect(seen.main?.right).toBe(viewport.width);
     });
 
     /**

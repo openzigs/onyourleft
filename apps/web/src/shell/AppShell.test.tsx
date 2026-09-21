@@ -125,22 +125,45 @@ describe('the header', () => {
     expect(document.querySelector('nav')?.getAttribute('aria-label')).toBe('Primary');
   });
 
-  it('links to every navigable route and to none of the others', async () => {
+  it('offers four destinations, each an icon and a word — #427', async () => {
     await open('/');
-    const hrefs = [...document.querySelectorAll('nav a')].map((a) => a.getAttribute('href'));
-    expect(hrefs).toEqual([
+    const primary = [...document.querySelectorAll('nav[aria-label="Primary"] a')];
+    expect(primary.map((a) => a.getAttribute('href'))).toEqual([
       '#/',
       '#/activities',
-      '#/analysis',
-      '#/segments',
       '#/routes',
-      '#/workouts',
-      '#/game',
       '#/devices',
-      '#/transfer',
-      '#/settings',
-      '#/about',
     ]);
+    expect(primary.map((a) => a.textContent)).toEqual(['Ride', 'History', 'Routes', 'More']);
+    for (const link of primary) {
+      // The icon is decoration; the word is the name.
+      expect(link.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+    }
+  });
+
+  it('lists the current group’s pages, and only that group’s', async () => {
+    await open('/');
+    const pages = [...document.querySelectorAll('nav[aria-label="Ride pages"] a')];
+    expect(pages.map((a) => a.getAttribute('href'))).toEqual(['#/', '#/game', '#/workouts']);
+    expect(document.querySelector('nav[aria-label="History pages"]')).toBeNull();
+  });
+
+  it('draws no second row for a group of one page', async () => {
+    await open('/routes');
+    expect(document.querySelectorAll('nav')).toHaveLength(1);
+    expect(
+      document
+        .querySelector('nav[aria-label="Primary"] a[href="#/routes"]')
+        ?.getAttribute('aria-current'),
+    ).toBe('page');
+  });
+
+  it('marks the current group as current and the current page as the page — never two pages', async () => {
+    await open('/analysis');
+    const history = document.querySelector('nav[aria-label="Primary"] a[href="#/activities"]');
+    expect(history?.getAttribute('aria-current')).toBe('true');
+    const pages = [...document.querySelectorAll('a[aria-current="page"]')];
+    expect(pages.map((a) => a.getAttribute('href'))).toEqual(['#/analysis']);
   });
 });
 

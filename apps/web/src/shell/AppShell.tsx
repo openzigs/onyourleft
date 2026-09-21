@@ -81,7 +81,15 @@ import type { WorkoutPort } from '../workouts/store-port';
 import { UpdateOffer } from '../offline/UpdateOffer';
 import type { UpdateWatcher } from '../offline/update';
 
-import { hrefFor, ROUTES, type RouteMatch } from './routes';
+import { NavIcon } from './NavIcon';
+import {
+  groupDestination,
+  hrefFor,
+  NAV_GROUPS,
+  routesInGroup,
+  type RouteDefinition,
+  type RouteMatch,
+} from './routes';
 import { useRoute } from './useRoute';
 
 /** The id `main` carries, and the only place it is written. */
@@ -515,26 +523,11 @@ export function AppShell(props: AppShellProps): JSX.Element {
         {immersive ? null : (
           <header className="oyl-header">
             <p className="oyl-wordmark">On Your Left</p>
-            <nav aria-label="Primary">
-              <ul className="oyl-nav-list">
-                {ROUTES.map((entry) => (
-                  <li key={entry.id}>
-                    <a
-                      className="oyl-nav-link"
-                      href={hrefFor(entry)}
-                      // The current page is marked for assistive technology as well
-                      // as visually. `aria-current` is the half that survives the
-                      // colour and the underline being unavailable — criterion 6.
-                      aria-current={entry.id === route.id ? 'page' : undefined}
-                    >
-                      {entry.navLabel}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </nav>
+            <PrimaryNav route={route} />
           </header>
         )}
+
+        {immersive ? null : <SectionNav route={route} />}
 
         <main
           id={MAIN_ID}
@@ -562,5 +555,80 @@ export function AppShell(props: AppShellProps): JSX.Element {
         )}
       </div>
     </UnitsProvider>
+  );
+}
+
+/**
+ * The primary destinations — #427. A bar on a compact width and a rail on a
+ * wider one, which is `theme.css` §"NAVIGATION"'s decision, not this one's:
+ * the markup is the same list either way, so a screen reader meets the same
+ * five links in the same order whatever the window.
+ *
+ * ⚠️ **`aria-current` has two values here and the difference is load-bearing.**
+ * `page` says "this link is the page you are on", and exactly one link on a
+ * page may say it — `routes.a11y.test.tsx` counts them. A group's link is
+ * the page only when the group IS one page (Routes); otherwise its page link
+ * is in {@link SectionNav}, and the group's link says `true`: "the current
+ * item of this set". Both are drawn with a visible shape as well as a colour.
+ */
+function PrimaryNav({ route }: { readonly route: RouteDefinition }): JSX.Element {
+  return (
+    <nav aria-label="Primary" className="oyl-nav">
+      <ul className="oyl-nav-list">
+        {NAV_GROUPS.map((group) => {
+          const destination = groupDestination(group.id);
+          const pages = routesInGroup(group.id);
+          const here = route.group === group.id;
+          const current = !here
+            ? undefined
+            : pages.length === 1 && route.id === destination.id
+              ? 'page'
+              : 'true';
+          return (
+            <li key={group.id}>
+              <a className="oyl-nav-link" href={hrefFor(destination)} aria-current={current}>
+                <NavIcon name={group.icon} />
+                <span className="oyl-nav-label">{group.label}</span>
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
+  );
+}
+
+/**
+ * The current group's pages, when it has more than one — #427's secondary
+ * layer. Outside `main` and before it, so the skip link passes it and the `h1`
+ * is still the first thing in the landmark; named for its group, so a landmark
+ * list tells it apart from the primary one (`audit.ts`'s
+ * `landmarks-are-distinguishable`).
+ */
+function SectionNav({ route }: { readonly route: RouteDefinition }): JSX.Element | null {
+  if (route.group === undefined) {
+    return null;
+  }
+  const group = NAV_GROUPS.find((each) => each.id === route.group);
+  const pages = routesInGroup(route.group);
+  if (group === undefined || pages.length < 2) {
+    return null;
+  }
+  return (
+    <nav aria-label={`${group.label} pages`} className="oyl-subnav">
+      <ul className="oyl-subnav-list">
+        {pages.map((page) => (
+          <li key={page.id}>
+            <a
+              className="oyl-subnav-link"
+              href={hrefFor(page)}
+              aria-current={page.id === route.id ? 'page' : undefined}
+            >
+              {page.navLabel}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </nav>
   );
 }

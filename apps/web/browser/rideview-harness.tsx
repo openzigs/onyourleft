@@ -133,6 +133,8 @@ export interface RideViewMeasurement {
   readonly summary: Box | undefined;
   /** `main`'s box and class, so a failure says whether the measure is on. */
   readonly main: Box | undefined;
+  /** The primary navigation's box — the rail, on a tablet, since #427. */
+  readonly primaryNav: Box | undefined;
   readonly mainClass: string;
   /** How wide the content is allowed to be: `main`'s resolved `max-width`. */
   readonly mainMaxWidth: string;
@@ -207,6 +209,7 @@ function measure(): RideViewMeasurement {
     }
   }
   const main = document.querySelector('main');
+  const nav = document.querySelector('nav[aria-label="Primary"]');
   const card = document.querySelector('.oyl-metric');
   const title = document.querySelector('main > h1');
   const summary = document.querySelector('main > h1 + p');
@@ -217,6 +220,7 @@ function measure(): RideViewMeasurement {
     title: title === null ? undefined : boxOf(title),
     summary: summary === null ? undefined : boxOf(summary),
     main: main === null ? undefined : boxOf(main),
+    primaryNav: nav === null ? undefined : boxOf(nav),
     mainClass: main?.className ?? '',
     mainMaxWidth: main === null ? '' : window.getComputedStyle(main).maxWidth,
     scrollY: window.scrollY,

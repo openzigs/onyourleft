@@ -271,7 +271,81 @@ h3:first-child {
   margin: 0 0 var(--oyl-space-sm);
 }
 
+/*
+ * NAVIGATION — #427. Five destinations at most, each an icon and a word, as a
+ * BAR on a compact window and a RAIL on a medium or expanded one (Material 3's
+ * adaptive guidance, read 2026-09-20). One list in the markup; this block alone
+ * decides which it is, on the window's size.
+ *
+ * ⚠️ **Persistent chrome, so measured rather than read** — CLAUDE.md §4f.
+ * `shell.browser.spec.ts` §`PERSISTENT_CHROME_BUDGET` now counts the bar and
+ * the rail as well as the header, and the one place a pinned bar would not fit
+ * is the one #307 failed at: at 320×256 a 64 px bar is 25 % of the screen. So
+ * the bar is pinned only on a compact window at least 30 rem tall; below that
+ * it is an ordinary row at the top of the page that scrolls away, which is
+ * what the eleven links were.
+ *
+ * Every item declares its 44 px target in both axes (#316's rule: declared,
+ * not emergent) and marks the current destination with a SHAPE — a filled
+ * pill behind the icon — as well as weight and colour.
+ */
 .oyl-nav-list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oyl-space-xs);
+  margin: 0;
+  padding: 0;
+}
+
+.oyl-nav-link {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  padding: var(--oyl-space-xs) var(--oyl-space-sm);
+  color: var(--oyl-color-ink);
+  text-decoration: none;
+  font-size: var(--oyl-font-size-sm);
+  border-radius: var(--oyl-radius);
+}
+
+.oyl-nav-icon {
+  display: block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  box-sizing: content-box;
+}
+
+/*
+ * The current destination is marked three ways and only one of them is colour:
+ * `aria-current` for assistive technology, a heavier label, and a filled pill
+ * behind the icon — a shape. Criterion 4 of #427, and #48's sixth.
+ */
+.oyl-nav-link[aria-current] {
+  font-weight: 700;
+  color: var(--oyl-color-accent);
+}
+
+.oyl-nav-link[aria-current] .oyl-nav-icon {
+  background: var(--oyl-color-accent);
+  color: var(--oyl-color-accent-ink);
+}
+
+.oyl-nav-link:hover .oyl-nav-label {
+  text-decoration: underline;
+}
+
+/* The group's own pages — the secondary layer. Scrolls with the page. */
+.oyl-subnav {
+  border-bottom: 1px solid var(--oyl-color-border);
+  padding: 0 var(--oyl-space-md);
+}
+
+.oyl-subnav-list {
   list-style: none;
   display: flex;
   flex-wrap: wrap;
@@ -280,21 +354,69 @@ h3:first-child {
   padding: 0;
 }
 
-.oyl-nav-link {
+.oyl-subnav-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
   color: var(--oyl-color-accent);
   text-decoration: underline;
-  padding: var(--oyl-space-xs) 0;
 }
 
-/*
- * The current page is marked three ways and only one of them is colour: the
- * `aria-current` attribute for assistive technology, a weight change, and an
- * underline thick enough to read as a rule. Criterion 6 of #48.
- */
-.oyl-nav-link[aria-current='page'] {
+.oyl-subnav-link[aria-current='page'] {
   font-weight: 700;
   text-decoration-thickness: 3px;
   text-underline-offset: 4px;
+}
+
+/* BAR — a compact window with the height to spare for it. */
+@media (max-width: 37.49rem) and (min-height: 30rem) {
+  .oyl-nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 4;
+    background: var(--oyl-color-surface-overlay);
+    border-top: 1px solid var(--oyl-color-border);
+    padding: var(--oyl-space-xs) var(--oyl-safe-right) var(--oyl-safe-bottom) var(--oyl-safe-left);
+  }
+
+  .oyl-nav-list {
+    flex-wrap: nowrap;
+    justify-content: space-around;
+  }
+
+  /* Room under the last of the content, so the bar never covers it. */
+  .oyl-shell:has(.oyl-nav) {
+    padding-bottom: 4.5rem;
+  }
+}
+
+/* RAIL — a medium or expanded window. */
+@media (min-width: 37.5rem) {
+  .oyl-nav {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: var(--oyl-safe-left);
+    z-index: 4;
+    width: 5.5rem;
+    overflow-y: auto;
+    background: var(--oyl-color-surface-overlay);
+    border-right: 1px solid var(--oyl-color-border);
+    padding: calc(var(--oyl-space-md) + var(--oyl-safe-top)) var(--oyl-space-xs)
+      var(--oyl-safe-bottom);
+  }
+
+  .oyl-nav-list {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+  }
+
+  .oyl-shell:has(.oyl-nav) {
+    padding-left: 5.5rem;
+  }
 }
 
 /*
