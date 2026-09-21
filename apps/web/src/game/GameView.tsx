@@ -373,11 +373,18 @@ export function GameView(props: GameViewProps): JSX.Element {
    */
   const roadNoticeRef = useRef<string | undefined>(undefined);
   /**
-   * Whether a workout held the trainer when this ride started — #447. A ride
-   * that ends with one still running must not suspend the audio under it:
-   * `audio-cues.ts` §`release`.
+   * The trainer port, for `teardown` — #447. A ref because `teardown` is a
+   * stable callback that must read the port as it is when the ride ENDS.
+   *
+   * ⚠️ **This used to be `workoutHeldRef`, sampled once when the ride
+   * started, and #448's review is why it is not.** A workout that ran out
+   * while the rider was on this route was still "held" at teardown, so the
+   * game only `end`ed and the audio context kept running with nothing to play
+   * — the idle audio thread #447 set out to stop. What decides it now is the
+   * port read at teardown: suspend unless a workout is there AND not finished.
    */
-  const workoutHeldRef = useRef(false);
+  const trainerPortRef = useRef(props.trainer);
+  trainerPortRef.current = props.trainer;
   /**
    * Whether THIS DEVICE asked for the riders' shadow map — #426. Read at the
    * start of each ride, like every other choice here; off unless somebody set
@@ -395,8 +402,9 @@ export function GameView(props: GameViewProps): JSX.Element {
    * distance sound, which stops by itself, so an `end` there was unobservable
    * and deleting it left every test green. What #447 adds is observable: the
    * port is told it may `suspend`, and `sounds.a11y.test.tsx` counts that. A
-   * ride that started while a workout held the trainer only `end`s, because
-   * that workout is still running and its tone must find the context awake.
+   * ride that ENDS while a workout is still running — read from the port at
+   * that moment, {@link trainerPortRef} — only `end`s, because its tone must
+   * find the context awake.
    */
   const cuesRef = useRef<RideCues | undefined>(undefined);
   /** What the rider chose for sound, read at the start of each ride. */
@@ -503,11 +511,16 @@ export function GameView(props: GameViewProps): JSX.Element {
     gradientRef.current = undefined;
     // #447: the ride is over, so the audio may stop running — unless a workout
     // is still running on the Ride screen's session, whose tone `rejoin`
-    // expects to find awake. @see cuesRef
-    if (workoutHeldRef.current) {
-      cuesRef.current?.end();
-    } else {
-      cuesRef.current?.release();
+    // expects to find awake. Read NOW, not at the start of the ride: the
+    // workout may have finished meanwhile. @see trainerPortRef
+    const cues = cuesRef.current;
+    if (cues !== undefined) {
+      const live = trainerPortRef.current?.readTrainer();
+      if (live?.kind === 'workout' && live.workoutFinished !== true) {
+        cues.end();
+      } else {
+        cues.release();
+      }
     }
     void lockRef.current.release();
     lockRef.current = NO_SCREEN_LOCK;
@@ -599,7 +612,6 @@ export function GameView(props: GameViewProps): JSX.Element {
       // a guard inside the loop.
       const found = props.trainer?.readTrainer() ?? NO_GAME_TRAINER;
       setTrainer(found);
-      workoutHeldRef.current = found.kind === 'workout';
       // #445: this ride's notice, for its first frame. @see roadNoticeRef
       const notice = trainerRoadNotice(found);
       roadNoticeRef.current =

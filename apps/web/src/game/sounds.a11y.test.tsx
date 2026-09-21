@@ -316,6 +316,55 @@ describe('the audio may stop once nothing is riding — #447', () => {
     expect(output.count('suspend')).toBe(0);
   });
 
+  /** A port whose workout is whatever `workoutNow` says at the moment it is read. */
+  let workoutNow: 'running' | 'finished' | 'none' = 'running';
+  const liveWorkout: GameTrainerPort = {
+    readTrainer: () =>
+      gameTrainerFrom(
+        { paired: true, controllable: true, canSimulate: true, hasControl: true },
+        workoutNow === 'none'
+          ? {
+              setSimulationParameters: () => Promise.resolve(),
+              letGo: () => Promise.resolve({ kind: 'stopped' as const }),
+            }
+          : undefined,
+        workoutNow !== 'none',
+        workoutNow === 'finished',
+      ),
+  };
+
+  it('suspends when the workout that held the trainer FINISHED during the ride — #448', async () => {
+    // The workout ran out while the rider was on the game route, where
+    // `WorkoutPanel` is not mounted to see it end. Sampled at the start of the
+    // ride, it was still "held" at the end and the audio ran on idle.
+    workoutNow = 'running';
+    chooseSounds();
+    await openGame(liveWorkout);
+    await press(button('Ride '));
+    workoutNow = 'finished';
+    await press(button('End ride'));
+    expect(output.calls.at(-1)).toEqual({ kind: 'suspend' });
+  });
+
+  it('suspends when the workout is GONE by the time the ride ends — #448', async () => {
+    workoutNow = 'running';
+    chooseSounds();
+    await openGame(liveWorkout);
+    await press(button('Ride '));
+    workoutNow = 'none';
+    await press(button('End ride'));
+    expect(output.calls.at(-1)).toEqual({ kind: 'suspend' });
+  });
+
+  it('does NOT suspend when a workout is running at the END, whatever it was at the start', async () => {
+    workoutNow = 'running';
+    chooseSounds();
+    await openGame(liveWorkout);
+    await press(button('Ride '));
+    await press(button('End ride'));
+    expect(output.count('suspend')).toBe(0);
+  });
+
   it('makes no call for a rider who did not turn sounds on, ride ended or not', async () => {
     await openGame();
     await press(button('Ride '));

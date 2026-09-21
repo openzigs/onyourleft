@@ -132,6 +132,20 @@ export interface GameTrainer {
    * and absent in every state but the one that needs saying.
    */
   readonly releaseFault?: string | undefined;
+  /**
+   * `true` when {@link GameTrainerKind} is `workout` and that workout has
+   * reached its END — #447, and #448's review. Absent otherwise.
+   *
+   * ⚠️ **The kind stays `workout`**, because a finished workout still holds
+   * the control point until the rider ends it on the Ride screen
+   * (`ride/controller.ts` §`simulationControl` refuses while it exists), so the
+   * road notice is still true. What changes is the SOUND: a finished workout's
+   * tone is silent and nothing will `rejoin` it, so a game ride that ends
+   * while one is only finished may let the audio stop. `GameView` §`teardown`
+   * re-reads this at the END of the ride for exactly that; nothing else here
+   * reads it.
+   */
+  readonly workoutFinished?: true | undefined;
 }
 
 /** A trainer nothing can be said to. The state every non-trainer ride is in. */
@@ -148,6 +162,11 @@ export interface GameTrainerPort {
    * claim from the deterministic one `simulation.ts` makes. Control lost
    * mid-ride therefore arrives as a **refused write**, which
    * `game/gradient.ts` reports rather than swallows.
+   *
+   * ⚠️ **One exception, and it decides no write**: `GameView` §`teardown` reads
+   * it again as the ride ENDS, to ask whether a workout still needs the audio
+   * awake (#447). Whether a workout was running when the ride began is the
+   * wrong question there — it may have finished while the rider was riding.
    */
   readTrainer(): GameTrainer;
 }
@@ -212,6 +231,8 @@ export function trainerRoadNotice(trainer: GameTrainer): string | undefined {
  * above it passed, and a snapshot cannot carry an object with methods on it.
  * @param workoutRunning whether a workout already owns the control point. See
  * the `workout` member of {@link GameTrainerKind}.
+ * @param workoutFinished whether that workout has reached its end — carried
+ * as {@link GameTrainer.workoutFinished}, and read only for the audio.
  */
 export function gameTrainerFrom(
   snapshot:
@@ -225,11 +246,14 @@ export function gameTrainerFrom(
     | undefined,
   control: GradientTrainer | undefined,
   workoutRunning: boolean,
+  workoutFinished = false,
 ): GameTrainer {
   if (snapshot === undefined || !snapshot.paired) {
     return NO_GAME_TRAINER;
   }
-  const found = trainerKindFrom(snapshot, control, workoutRunning);
+  const kind = trainerKindFrom(snapshot, control, workoutRunning);
+  const found: GameTrainer =
+    kind.kind === 'workout' && workoutFinished ? { ...kind, workoutFinished: true } : kind;
   return snapshot.releaseFault === undefined
     ? found
     : { ...found, releaseFault: snapshot.releaseFault };

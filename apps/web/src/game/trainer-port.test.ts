@@ -170,6 +170,21 @@ describe('gameTrainerFrom', () => {
     expect(decided.kind).toBe('workout');
   });
 
+  it('stays `workout` when that workout has finished, and says so only for the audio — #447', () => {
+    // A finished workout still holds the control point until the rider ends
+    // it, so the kind — and the road notice — must not change. What is
+    // carried is that its tone is over, which `GameView` reads at teardown.
+    const finished = gameTrainerFrom(PAIRED_AND_READY, undefined, true, true);
+    expect(finished).toEqual({ kind: 'workout', control: undefined, workoutFinished: true });
+    expect(gameTrainerFrom(PAIRED_AND_READY, undefined, true)).not.toHaveProperty(
+      'workoutFinished',
+    );
+    // And never on any other kind: "finished" without a workout is no fact.
+    expect(gameTrainerFrom(PAIRED_AND_READY, silentControl(), false, true)).not.toHaveProperty(
+      'workoutFinished',
+    );
+  });
+
   it('is still `none` where nothing is paired, workout or not', () => {
     // A workout cannot be running against a trainer that is not paired, but
     // the refusal must not invent one: `none` is the state with nothing to say.
