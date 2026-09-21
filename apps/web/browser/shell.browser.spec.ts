@@ -902,3 +902,49 @@ test.describe('#427 — a navigation target is declared rather than emergent', (
     }
   });
 });
+
+/**
+ * #397 — the announcement controls on Settings clear WCAG 2.2 SC 2.5.8's
+ * 24×24 CSS px (Level AA). ⚠️ Not 44: that is SC 2.5.5 (AAA), and CLAUDE.md
+ * §4f records this repository getting the two the wrong way round once.
+ */
+const MINIMUM_TARGET_PIXELS = 24;
+
+test.describe('#397 — the announcement controls', () => {
+  test.use({ viewport: { width: 375, height: 667 } });
+
+  async function controls(page: Page) {
+    return page.evaluate(() =>
+      [...document.querySelectorAll('.oyl-announce input, .oyl-announce select')].map((each) => {
+        const box = each.getBoundingClientRect();
+        return { name: each.tagName, width: box.width, height: box.height };
+      }),
+    );
+  }
+
+  test('every control is at least 24×24', async ({ page }) => {
+    await page.goto('/shell.html#/settings');
+    await page.waitForSelector('html[data-oyl-shell-ready]');
+    const seen = await controls(page);
+    expect(seen.length).toBe(4);
+    for (const control of seen) {
+      expect(control.width, control.name).toBeGreaterThanOrEqual(MINIMUM_TARGET_PIXELS);
+      expect(control.height, control.name).toBeGreaterThanOrEqual(MINIMUM_TARGET_PIXELS);
+    }
+  });
+
+  test('the control — without the declared size the switch is under 24', async ({ page }) => {
+    await page.goto('/shell.html#/settings');
+    await page.waitForSelector('html[data-oyl-shell-ready]');
+    await page.evaluate(() => {
+      const box = document.querySelector<HTMLInputElement>('.oyl-announce input');
+      if (box !== null) {
+        box.style.width = 'auto';
+        box.style.height = 'auto';
+      }
+    });
+    const seen = await controls(page);
+    const input = seen.find((each) => each.name === 'INPUT');
+    expect(input?.height ?? Infinity).toBeLessThan(MINIMUM_TARGET_PIXELS);
+  });
+});

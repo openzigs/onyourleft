@@ -489,6 +489,19 @@ h3:first-child {
 }
 
 /*
+ * The announcement switch (#397). A browser's own checkbox is about 13 px,
+ * under WCAG 2.2 SC 2.5.8's 24×24 (Level AA — the MINIMUM criterion; 44×44 is
+ * SC 2.5.5, AAA). Declared, and `shell.browser.spec.ts` measures it with a
+ * control that strips it.
+ */
+.oyl-announce input[type='checkbox'] {
+  width: 1.5rem;
+  height: 1.5rem;
+  vertical-align: middle;
+  margin: 0;
+}
+
+/*
  * A route that is operated rather than read (#422).
  *
  * `--oyl-measure` is a READING measure and it is right for every route that is

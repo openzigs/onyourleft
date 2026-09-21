@@ -66,7 +66,15 @@ import { GameSimulation, ghostClock, type GameState } from './simulation';
 import { corridorOrigin } from './terrain';
 import type { GameRenderer, GameView as RendererView } from './port';
 import { NO_SENSORS, type GameSensors } from './sensors';
-import { speedUnit } from '../units/format';
+import { speedUnit, spokenDistanceUnit } from '../units/format';
+import { announce, INITIAL_ANNOUNCER, type AnnouncerState } from './hud/announce';
+import {
+  DEFAULT_ANNOUNCEMENTS,
+  deviceStorage,
+  readAnnouncementPreference,
+  type AnnouncementPreference,
+} from './hud/announce-preference';
+import { hudReadings } from './hud/fields';
 import { useUnits } from '../units/context';
 import {
   MAXIMUM_INTENSITY_WATTS_PER_KILOGRAM,
@@ -299,6 +307,21 @@ export function GameView(props: GameViewProps): JSX.Element {
    * second ride shows its notice open again.
    */
   const [noticeChoice, setNoticeChoice] = useState<'auto' | 'open' | 'closed'>('auto');
+  /**
+   * What the HUD's one live region says — #397. Written only when the
+   * announcer produces a sentence, which is on very few frames by design.
+   */
+  const [announcement, setAnnouncement] = useState('');
+  /** The announcer's carry-over, threaded frame to frame. @see announce.ts */
+  const announcerRef = useRef<AnnouncerState>(INITIAL_ANNOUNCER);
+  /**
+   * What the rider asked to hear — read from THIS DEVICE at the start of each
+   * ride (#395 decided the device, not the athlete row), off by default.
+   */
+  const announcementsRef = useRef<AnnouncementPreference>(DEFAULT_ANNOUNCEMENTS);
+  /** The rider's units, for the spoken distance, read inside the loop. */
+  const unitsRef = useRef(units);
+  unitsRef.current = units;
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const simulationRef = useRef<GameSimulation | undefined>(undefined);
@@ -432,6 +455,11 @@ export function GameView(props: GameViewProps): JSX.Element {
       // exists to prevent, arriving from the other direction.
       outcomeRef.current = undefined;
       setNoticeChoice('auto');
+      // #397: a new ride starts silent. The last ride's sentence is not this
+      // one's, and a region carrying it at mount would announce it again.
+      announcerRef.current = INITIAL_ANNOUNCER;
+      setAnnouncement('');
+      announcementsRef.current = readAnnouncementPreference(deviceStorage());
       // ⚠️ **Read at the start of the ride and held for its length**, which is
       // what makes "changing your weight mid-session does not rewrite the ride
       // you are on" true by construction rather than by a rule somebody
@@ -601,6 +629,30 @@ export function GameView(props: GameViewProps): JSX.Element {
       );
       setState(simulation.state);
 
+      // #397: the announcer, on the RIDE's clock (`elapsed`, which does not
+      // run while the ride is paused — nor does this loop), from the same
+      // readings the HUD renders. Pure: its carry-over lives in the ref.
+      const readings = hudReadings({
+        state: simulation.state,
+        profile: chosen.profile,
+        cadence: sensors.cadence,
+        heartRate: sensors.heartRate,
+        units: unitsRef.current,
+      });
+      const togo = Number(readings.find((reading) => reading.key === 'remaining')?.value);
+      const heard = announce(announcerRef.current, {
+        now: simulation.state.elapsed,
+        readings,
+        ...(Number.isFinite(togo)
+          ? { remaining: { value: togo, unit: spokenDistanceUnit(unitsRef.current) } }
+          : {}),
+        preference: announcementsRef.current,
+      });
+      announcerRef.current = heard.state;
+      if (heard.sentence !== undefined) {
+        setAnnouncement(heard.sentence);
+      }
+
       const origin = corridorOrigin(chosen.profile);
       // ⚠️ **Where to DRAW them, which is not where the newest step left them**
       // — #323. The simulation ticks twenty times a second and this loop runs
@@ -760,6 +812,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       />
       <HudPanel
         profile={chosen.profile}
+        announcement={announcement}
         state={state}
         cadence={sensors.cadence}
         heartRate={sensors.heartRate}

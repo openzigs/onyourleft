@@ -143,6 +143,16 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * a refused gradient is a thing to act on NOW, and a rider must not be able
    * to put it away by mistake.
    */
+  /**
+   * The one sentence the announcer last produced, or `''` — #397.
+   *
+   * ⚠️ **Required, and that is the wiring, not a style.** CLAUDE.md §4j's
+   * third limit is that an optional prop nobody supplies is green in every
+   * gate, and an announcer threaded in as one would announce nothing in the
+   * shipped app with the whole suite passing. `GameView` computes it through
+   * `announce.ts`; the compiler refuses a HUD without it.
+   */
+  readonly announcement: string;
   readonly standingNotice?:
     | {
         readonly content: ReactNode;
@@ -272,6 +282,18 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
         middle of the stage — the part of the screen the whole layout exists to
         keep clear — catching pointer events over nothing.
       */}
+      {/*
+        #397: the ONE region the announcer writes into. Visually hidden by CLIP
+        (`oyl-visually-hidden`) — never `display: none`, `hidden` or
+        `aria-hidden`, because no live region announces while hidden — and
+        rendered from the first frame, EMPTY, so that the first sentence is a
+        change to it rather than the region's arrival. Before the notices in
+        the document, which are event messages of their own (#394).
+      */}
+      <p className="oyl-visually-hidden" role="status" data-oyl-announcer="hud">
+        {props.announcement}
+      </p>
+
       {hasContent(props.notices) || props.standingNotice !== undefined ? (
         <div
           className={

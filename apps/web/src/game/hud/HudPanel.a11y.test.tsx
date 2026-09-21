@@ -144,6 +144,7 @@ function props(overrides: Partial<HudInput> = {}): HudInput & {
   onPause: () => void;
   onEnd: () => void;
   paused: boolean;
+  announcement: string;
 } {
   const profile = route();
   return {
@@ -154,6 +155,7 @@ function props(overrides: Partial<HudInput> = {}): HudInput & {
     onPause: () => undefined,
     onEnd: () => undefined,
     paused: false,
+    announcement: '',
     ...overrides,
   };
 }

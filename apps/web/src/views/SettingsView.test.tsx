@@ -17,6 +17,7 @@
 
 import type { AthleteId, AthleteRecord, UnitSystem } from '@onyourleft/store';
 import { athleteId } from '@onyourleft/store';
+import { act } from 'react';
 import { describe, expect, it } from 'vitest';
 
 import { kilograms, KILOGRAMS_PER_POUND } from '@onyourleft/domain';
@@ -35,7 +36,13 @@ import {
   UNITS_NO_ATHLETE,
   UNITS_NO_STORE,
   UNITS_SAVED,
+  ANNOUNCEMENTS_NOT_KEPT,
+  ANNOUNCEMENTS_SAVED,
 } from './SettingsView';
+import {
+  readAnnouncementPreference,
+  type PreferenceStorage,
+} from '../game/hud/announce-preference';
 
 const OWNER = athleteId('local');
 
@@ -672,6 +679,89 @@ describe('SettingsView — your weight (#325)', () => {
 
     expect(mounted.container.querySelector('#oyl-rider-mass')).toBeNull();
     expect(mounted.container.textContent).toContain(MASS_NO_STORE);
+    mounted.unmount();
+  });
+});
+
+describe('announcements — #397', () => {
+  function disk(): { readonly store: PreferenceStorage; readonly values: Map<string, string> } {
+    const values = new Map<string, string>();
+    return {
+      values,
+      store: {
+        getItem: (key) => values.get(key) ?? null,
+        setItem: (key, value) => {
+          values.set(key, value);
+        },
+      },
+    };
+  }
+
+  it('is off until the rider turns it on, and keeps the choice on this device', async () => {
+    const { store, values } = disk();
+    const mounted = await mount(
+      <SettingsView
+        units="metric"
+        onUnitsChange={() => undefined}
+        onRiderMassChange={() => undefined}
+        announcements={store}
+      />,
+    );
+    const toggle = mounted.container.querySelector<HTMLInputElement>('.oyl-announce input');
+    expect(toggle?.checked).toBe(false);
+
+    await act(async () => {
+      toggle?.click();
+      await Promise.resolve();
+    });
+
+    expect(readAnnouncementPreference(store).enabled).toBe(true);
+    expect(values.size).toBe(1);
+    expect(mounted.container.textContent).toContain(ANNOUNCEMENTS_SAVED);
+    mounted.unmount();
+  });
+
+  it('says so when the device will not keep it', async () => {
+    const refusing: PreferenceStorage = {
+      getItem: () => null,
+      setItem: () => {
+        throw new DOMException('full', 'QuotaExceededError');
+      },
+    };
+    const mounted = await mount(
+      <SettingsView
+        units="metric"
+        onUnitsChange={() => undefined}
+        onRiderMassChange={() => undefined}
+        announcements={refusing}
+      />,
+    );
+    await act(async () => {
+      mounted.container.querySelector<HTMLInputElement>('.oyl-announce input')?.click();
+      await Promise.resolve();
+    });
+    expect(mounted.container.textContent).toContain(ANNOUNCEMENTS_NOT_KEPT);
+    mounted.unmount();
+  });
+
+  it('offers "never" on every row', async () => {
+    const mounted = await mount(
+      <SettingsView
+        units="imperial"
+        onUnitsChange={() => undefined}
+        onRiderMassChange={() => undefined}
+        announcements={disk().store}
+      />,
+    );
+    const selects = [
+      ...mounted.container.querySelectorAll<HTMLSelectElement>('.oyl-announce select'),
+    ];
+    expect(selects).toHaveLength(3);
+    for (const select of selects) {
+      expect([...select.options].map((option) => option.value)).toContain('never');
+    }
+    // The distance row is in the rider's own unit.
+    expect(mounted.container.textContent).toContain('every 1 mi');
     mounted.unmount();
   });
 });

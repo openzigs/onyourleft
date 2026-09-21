@@ -70,7 +70,18 @@ import { StatusMessage } from '../design/StatusMessage';
 import { PersistenceNotice } from '../support/PersistenceNotice';
 import type { StorageManagerLike } from '../support/persistent-storage';
 import { hrefFor, routeById } from '../shell/routes';
-import { formatMass, massIn, massUnit, measurementText } from '../units/format';
+import { distanceUnit, formatMass, massIn, massUnit, measurementText } from '../units/format';
+import {
+  DISTANCE_EVERY_CHOICES,
+  INTERVAL_LEAD_CHOICES,
+  POWER_EVERY_CHOICES,
+  deviceStorage,
+  readAnnouncementPreference,
+  writeAnnouncementPreference,
+  type AnnouncementPreference,
+  type Every,
+  type PreferenceStorage,
+} from '../game/hud/announce-preference';
 import type { UnitsPort } from '../units/store-port';
 
 /**
@@ -79,7 +90,7 @@ import type { UnitsPort } from '../units/store-port';
  * Named because it crosses a component boundary — see {@link WeightPanel} for
  * why the weight panel's message is held a level above the field that sets it.
  */
-type PanelMessage = { readonly tone: 'success' | 'danger'; readonly text: string };
+type PanelMessage = { readonly tone: 'success' | 'warning' | 'danger'; readonly text: string };
 
 /** What each choice is called, and the units it actually means. */
 const CHOICES: Readonly<Record<UnitSystem, { readonly label: string; readonly detail: string }>> = {
@@ -204,6 +215,12 @@ export interface SettingsViewProps {
    * to be right for.
    */
   readonly storage?: StorageManagerLike | undefined;
+  /**
+   * Where the announcement preference is kept (#397) — this DEVICE's
+   * `localStorage` unless a test hands in a double. Not a port on the athlete
+   * row: #395 decided the device.
+   */
+  readonly announcements?: PreferenceStorage | undefined;
 }
 
 export function SettingsView({
@@ -214,6 +231,7 @@ export function SettingsView({
   riderMass,
   onRiderMassChange,
   storage,
+  announcements,
 }: SettingsViewProps): JSX.Element {
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
 
@@ -333,8 +351,146 @@ export function SettingsView({
         prose about the product and this is a fact about *this browser* that
         can change between visits.
       */}
+      <AnnouncementsPanel
+        units={units}
+        storage={announcements === undefined ? deviceStorage() : announcements}
+      />
+
       <PersistenceNotice {...(storage === undefined ? {} : { storage })} />
     </>
+  );
+}
+
+/** What a rider is told when the device kept the choice, and when it would not. */
+export const ANNOUNCEMENTS_SAVED = 'Saved on this device.';
+export const ANNOUNCEMENTS_NOT_KEPT =
+  'This device would not keep that, so it lasts until the page closes. A private window or blocked site data is the usual reason.';
+
+/**
+ * Announcements for riding with a screen reader — #397, as #395 decided.
+ *
+ * ⚠️ **Off by default**, and every row has "never": WCAG 2.2 SC 2.2.2 (Level
+ * A) requires the rider to control auto-updating information, and an
+ * unasked-for live region interrupts. Kept on THIS DEVICE — assistive
+ * technology is a property of the machine a rider sits at — so it needs no
+ * store and is offered even where there is none.
+ *
+ * ⚠️ Not a speech engine: the sentences go into a live region in the ride
+ * HUD, and the rider's own screen reader speaks them.
+ */
+function AnnouncementsPanel({
+  units,
+  storage,
+}: {
+  readonly units: UnitSystem;
+  readonly storage: PreferenceStorage | undefined;
+}): JSX.Element {
+  const [preference, setPreference] = useState<AnnouncementPreference>(() =>
+    readAnnouncementPreference(storage),
+  );
+  const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
+
+  function save(next: AnnouncementPreference): void {
+    setPreference(next);
+    const kept = writeAnnouncementPreference(storage, next);
+    setMessage(
+      kept
+        ? { tone: 'success', text: ANNOUNCEMENTS_SAVED }
+        : { tone: 'warning', text: ANNOUNCEMENTS_NOT_KEPT },
+    );
+  }
+
+  const unit = distanceUnit(units);
+  return (
+    <section className="oyl-panel oyl-announce" aria-labelledby="oyl-announce-heading">
+      <h2 id="oyl-announce-heading">Announcements</h2>
+      <p className="oyl-muted">
+        For riding with a screen reader. During a ride in the trainer game, your screen reader is
+        given a short sentence now and then — never more than one every few seconds, and nothing you
+        have not chosen below. Off unless you turn it on, and kept on this device only.
+      </p>
+      <p>
+        <label className="oyl-announce__switch">
+          <input
+            type="checkbox"
+            checked={preference.enabled}
+            onChange={(event) => {
+              save({ ...preference, enabled: event.currentTarget.checked });
+            }}
+          />{' '}
+          Announce the ride to a screen reader
+        </label>
+      </p>
+      <EverySelect
+        id="oyl-announce-power"
+        label="Say your power"
+        value={preference.powerEverySeconds}
+        choices={POWER_EVERY_CHOICES}
+        describe={(seconds) =>
+          seconds < 60 ? `every ${String(seconds)} seconds` : `every ${String(seconds / 60)} min`
+        }
+        onChange={(powerEverySeconds) => {
+          save({ ...preference, powerEverySeconds });
+        }}
+      />
+      <EverySelect
+        id="oyl-announce-distance"
+        label="Say the distance to go"
+        value={preference.distanceEvery}
+        choices={DISTANCE_EVERY_CHOICES}
+        describe={(every) => `every ${String(every)} ${unit}`}
+        onChange={(distanceEvery) => {
+          save({ ...preference, distanceEvery });
+        }}
+      />
+      <EverySelect
+        id="oyl-announce-interval"
+        label="Say a workout's next block"
+        value={preference.intervalLeadSeconds}
+        choices={INTERVAL_LEAD_CHOICES}
+        describe={(seconds) => `${String(seconds)} seconds before it starts`}
+        onChange={(intervalLeadSeconds) => {
+          save({ ...preference, intervalLeadSeconds });
+        }}
+      />
+      {message === undefined ? null : (
+        <StatusMessage tone={message.tone} live>
+          {message.text}
+        </StatusMessage>
+      )}
+    </section>
+  );
+}
+
+/** One row: a choice of how often, or never. */
+function EverySelect(props: {
+  readonly id: string;
+  readonly label: string;
+  readonly value: Every;
+  readonly choices: readonly number[];
+  readonly describe: (value: number) => string;
+  readonly onChange: (value: Every) => void;
+}): JSX.Element {
+  return (
+    <p>
+      <label htmlFor={props.id}>{props.label}</label>{' '}
+      <select
+        className="oyl-input"
+        id={props.id}
+        value={String(props.value)}
+        onChange={(event) => {
+          const raw = event.currentTarget.value;
+          props.onChange(raw === 'never' ? 'never' : Number(raw));
+        }}
+      >
+        <option value="never">never</option>
+        {props.choices.map((choice) => (
+          <option key={choice} value={String(choice)}>
+            {props.describe(choice)}
+          </option>
+        ))}
+      </select>
+    </p>
   );
 }
 

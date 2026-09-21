@@ -513,7 +513,13 @@ apps/                 AGPL-3.0-or-later, without exception
                         chosen**: #335 settled that it cannot be changed
                         mid-ride, and `simulation.ts` §`SimulationSetup.wind`
                         is where that is written down
-    src/game/hud/       the ride HUD (#94) — the eight fields, the dropped
+    src/game/hud/       the ride HUD (#94) — and since #396/#397 its ONE live
+                        region: `announce.ts` is the pure core (one sentence per
+                        window, priority by ORDER never by politeness, lower
+                        items dropped not queued, no clock, no speechSynthesis —
+                        all lint-enforced) and `announce-preference.ts` keeps
+                        the rider's choice on the DEVICE, off by default. The
+                        eight fields, the dropped
                         sensor that is not a zero, and the wake lock. ⚠️ Since
                         #423 it is an OVERLAY: four small OPAQUE panels over a
                         full-bleed world, in two tiers — power, cadence and

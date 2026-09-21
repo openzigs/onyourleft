@@ -348,6 +348,7 @@ function Harness(): JSX.Element {
               paused={false}
               onPause={() => undefined}
               onEnd={() => undefined}
+              announcement=""
             />
           </section>
         )),

@@ -176,7 +176,10 @@ export function announce(state: AnnouncerState, input: AnnounceInput): Announcem
     candidates.push({ kind: pending.kind, sentence: pending.text });
   }
 
-  const power = input.readings.find((reading) => reading.key === 'power');
+  // Only what is announceable is read at all — a reading added to the HUD is
+  // not spoken until somebody adds it here, deliberately.
+  const readable = input.readings.filter((reading) => ANNOUNCEABLE_READINGS.includes(reading.key));
+  const power = readable.find((reading) => reading.key === 'power');
 
   // Power off an acknowledged target, held for a while.
   let offTargetSince = state.offTargetSince;
