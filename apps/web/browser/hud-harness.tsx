@@ -92,6 +92,32 @@
  * typing, which is why {@link STATE} carries the bound rather than an ordinary
  * breeze. @see the comment there.
  *
+ * ## The live region — #401
+ *
+ * ⚠️ **The fast suite cannot see the one thing most likely to make the whole
+ * announcement epic say nothing.** jsdom loads no stylesheet (CLAUDE.md §4e),
+ * and no live region announces while it is hidden (Roselli, 2026-01-14) — so
+ * a region that `display: none` reached from a stylesheet, a media query or a
+ * utility class would pass every `.a11y.test` there is while the rider heard
+ * nothing. So every shipping panel here now carries a POPULATED region (the
+ * longest sentence the announcer can say, {@link ANNOUNCEMENT}), and three more
+ * stages exist for it alone:
+ *
+ * - `empty` and `populated` — the same HUD with the region blank and full, so
+ *   the spec can require every value to sit at the SAME place in both: a region
+ *   that took up space would move something, and "no value overflows" alone
+ *   would not notice a value pushed down intact;
+ * - `hidden-control` — the populated HUD with `display: none` put on its region
+ *   after the render, which the spec REQUIRES to be reported hidden. Without it
+ *   a stylesheet that failed to load, a region that rendered nothing and a
+ *   correct page would all read "not hidden" alike.
+ *
+ * ⚠️ **None of this is a screen reader.** Playwright's Chromium announces
+ * nothing; what this establishes is that the region is not hidden, not clipped
+ * to nothing, and moves nothing. Whether TalkBack SPEAKS it is
+ * `docs/validation/0003-screen-reader-and-assistive-technology.md` Part B, and
+ * its tables are empty.
+ *
  * ## What this page does NOT prove
  *
  * That the HUD looks right. There is no reference image and ADR 0009 forbids
@@ -182,6 +208,40 @@ export interface PlanMeasurement {
   readonly roads: number;
 }
 
+/**
+ * One announcement region, read off the browser — #401.
+ *
+ * Every field is what the ENGINE resolved, not what the source says: the
+ * computed `display`, the attributes as they are on the node, and the box.
+ */
+export interface RegionMeasurement {
+  /** Which stage it sits on — see the header's "The live region". */
+  readonly stage: string;
+  readonly text: string;
+  readonly role: string | null;
+  readonly display: string;
+  readonly visibility: string;
+  readonly hiddenAttribute: boolean;
+  readonly ariaHidden: string | null;
+  /** Whether any ANCESTOR is `display: none`, `hidden` or `aria-hidden`. */
+  readonly ancestorHides: boolean;
+  /** `getClientRects().length` — zero for an element that generates no box at all. */
+  readonly boxes: number;
+  readonly width: number;
+  readonly height: number;
+  /** The computed `clip-path`, which is what keeps a present box out of sight. */
+  readonly clipPath: string;
+}
+
+/** How far one value moved between the `empty` and `populated` stages. */
+export interface Displacement {
+  readonly label: string;
+  readonly dx: number;
+  readonly dy: number;
+  readonly dw: number;
+  readonly dh: number;
+}
+
 /** What the spec reads back. */
 export interface HudMeasurement {
   readonly viewport: { readonly width: number; readonly height: number };
@@ -190,6 +250,10 @@ export interface HudMeasurement {
   readonly values: readonly ValueMeasurement[];
   /** `undefined` when the panel has no plan view at all, which is a failure. */
   readonly plan: PlanMeasurement | undefined;
+  /** #401: every announcement region on the page. */
+  readonly regions: readonly RegionMeasurement[];
+  /** #401: every value's movement between a blank region and a full one. */
+  readonly displacement: readonly Displacement[];
 }
 
 declare global {
@@ -278,6 +342,14 @@ const BOT_GAP: ChasedGap = {
   }),
 };
 
+/**
+ * The longest sentence the announcer says in a gradient ride — #401. The
+ * region is clipped whatever it holds, so the length is not what is being
+ * measured; it is here so that "the region moves nothing" is asserted with
+ * something IN it, which is the layout a rider actually has.
+ */
+export const ANNOUNCEMENT = 'Power 1234 watts, under the 1500 watt target';
+
 /** The three settled outcomes — the words #259 put in the slot a number had. */
 const OUTCOMES: readonly GhostOutcome[] = ['beaten', 'level', 'not-beaten'];
 
@@ -348,13 +420,53 @@ function Harness(): JSX.Element {
               paused={false}
               onPause={() => undefined}
               onEnd={() => undefined}
-              announcement=""
+              announcement={ANNOUNCEMENT}
             />
           </section>
         )),
       )}
+      {REGION_STAGES.map((stage) => (
+        <section
+          key={stage}
+          className="oyl-game oyl-game--riding"
+          style={STAGE_IN_FLOW}
+          data-oyl-region-stage={stage}
+        >
+          <HudPanel
+            profile={PROFILE}
+            state={STATE}
+            cadence={{ value: 92, live: true }}
+            heartRate={{ value: 168, live: true }}
+            chases={[BOT_GAP, ghostChase('level')]}
+            paused={false}
+            onPause={() => undefined}
+            onEnd={() => undefined}
+            announcement={stage === 'empty' ? '' : ANNOUNCEMENT}
+          />
+        </section>
+      ))}
     </div>
   );
+}
+
+/** The three region stages — see the header's "The live region". */
+const REGION_STAGES = ['empty', 'populated', 'hidden-control'] as const;
+
+/**
+ * Put `display: none` on the control stage's region, after the render — #401.
+ *
+ * In the DOM rather than through a prop, for {@link undoWordRule}'s reason:
+ * `HudPanel` has no way to hide its region and must not grow one for a
+ * harness. React never re-renders this page, so nothing puts it back.
+ */
+function hideControlRegion(root: ParentNode): void {
+  const region = root.querySelector<HTMLElement>(
+    '[data-oyl-region-stage="hidden-control"] [data-oyl-announcer="hud"]',
+  );
+  if (region === null) {
+    throw new Error('hud harness: the hidden-control stage rendered no region');
+  }
+  region.style.display = 'none';
 }
 
 /**
@@ -447,7 +559,91 @@ function measure(): HudMeasurement {
     columns,
     values,
     plan: measurePlan(),
+    regions: measureRegions(),
+    displacement: measureDisplacement(),
   };
+}
+
+/** Whether anything above `element` takes it out of the rendering or the tree. */
+function ancestorHides(element: Element): boolean {
+  for (let node = element.parentElement; node !== null; node = node.parentElement) {
+    if (
+      window.getComputedStyle(node).display === 'none' ||
+      node.hasAttribute('hidden') ||
+      node.getAttribute('aria-hidden') === 'true'
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Every HUD region on the page. @see RegionMeasurement */
+function measureRegions(): RegionMeasurement[] {
+  return [...document.querySelectorAll<HTMLElement>('[data-oyl-announcer="hud"]')].map((region) => {
+    const style = window.getComputedStyle(region);
+    const box = region.getBoundingClientRect();
+    const stage =
+      region.closest('[data-oyl-region-stage]')?.getAttribute('data-oyl-region-stage') ??
+      `panel:${region.closest('[data-oyl-panel]')?.getAttribute('data-oyl-panel') ?? '?'}`;
+    return {
+      stage,
+      text: textOf(region),
+      role: region.getAttribute('role'),
+      display: style.display,
+      visibility: style.visibility,
+      hiddenAttribute: region.hasAttribute('hidden'),
+      ariaHidden: region.getAttribute('aria-hidden'),
+      ancestorHides: ancestorHides(region),
+      boxes: region.getClientRects().length,
+      width: box.width,
+      height: box.height,
+      clipPath: style.clipPath,
+    };
+  });
+}
+
+/** Each value's box and each panel's, relative to its own stage. */
+function valueBoxes(stage: string): Map<string, DOMRect> {
+  const root = document.querySelector(`[data-oyl-region-stage="${stage}"]`);
+  const boxes = new Map<string, DOMRect>();
+  if (root === null) return boxes;
+  const origin = root.getBoundingClientRect();
+  for (const field of root.querySelectorAll('.oyl-hud__field')) {
+    const label = textOf(field.querySelector('.oyl-hud__label') ?? field);
+    const value = field.querySelector('.oyl-hud__value');
+    if (value === null) continue;
+    const box = value.getBoundingClientRect();
+    boxes.set(label, new DOMRect(box.x - origin.x, box.y - origin.y, box.width, box.height));
+  }
+  // And every panel, so a region that pushed a whole panel along — values and
+  // all, none of them overflowing — is a displacement too.
+  root.querySelectorAll('.oyl-hud__panel').forEach((panel, index) => {
+    const box = panel.getBoundingClientRect();
+    boxes.set(
+      `panel ${String(index)} (${panel.className})`,
+      new DOMRect(box.x - origin.x, box.y - origin.y, box.width, box.height),
+    );
+  });
+  return boxes;
+}
+
+/** @see Displacement */
+function measureDisplacement(): Displacement[] {
+  const empty = valueBoxes('empty');
+  const populated = valueBoxes('populated');
+  return [...empty].map(([label, before]) => {
+    const after = populated.get(label);
+    return after === undefined
+      ? { label, dx: Number.NaN, dy: Number.NaN, dw: Number.NaN, dh: Number.NaN }
+      : {
+          label,
+          dx: after.x - before.x,
+          dy: after.y - before.y,
+          dw: after.width - before.width,
+          dh: after.height - before.height,
+        };
+  });
 }
 
 /** The plan view of the first shipping panel. @see PlanMeasurement */
@@ -494,6 +690,7 @@ async function run(): Promise<void> {
     );
   });
   undoWordRule(container);
+  hideControlRegion(container);
   // ⚠️ Before anything is measured. Text is measured in whatever font is
   // resolved at the time, and a measurement taken before the font stack settles
   // is a measurement of a fallback. Nothing here loads a web font today —

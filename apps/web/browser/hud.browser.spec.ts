@@ -156,6 +156,35 @@ interface HudMeasurement {
   readonly values: readonly ValueMeasurement[];
   /** #285 — the plan view's box and the road drawn in it. */
   readonly plan: PlanMeasurement | undefined;
+  /** #401 — every announcement region, as the engine resolved it. */
+  readonly regions: readonly RegionMeasurement[];
+  /** #401 — each value's and panel's movement between a blank region and a full one. */
+  readonly displacement: readonly Displacement[];
+}
+
+/** @see hud-harness.tsx §`RegionMeasurement` */
+interface RegionMeasurement {
+  readonly stage: string;
+  readonly text: string;
+  readonly role: string | null;
+  readonly display: string;
+  readonly visibility: string;
+  readonly hiddenAttribute: boolean;
+  readonly ariaHidden: string | null;
+  readonly ancestorHides: boolean;
+  readonly boxes: number;
+  readonly width: number;
+  readonly height: number;
+  readonly clipPath: string;
+}
+
+/** @see hud-harness.tsx §`Displacement` */
+interface Displacement {
+  readonly label: string;
+  readonly dx: number;
+  readonly dy: number;
+  readonly dw: number;
+  readonly dh: number;
 }
 
 /** @see hud-harness.tsx §`PlanMeasurement` */
@@ -429,5 +458,133 @@ test.describe('the plan view is drawn at a size a rider can see', () => {
     // And it is inside the panel rather than overflowing it, which is what a
     // `preserveAspectRatio` that stopped fitting would produce.
     expect(plan?.roadHeight ?? 0).toBeLessThanOrEqual((plan?.height ?? 0) + 1);
+  });
+});
+
+/**
+ * #401 — the announcement region is NOT hidden, and moves nothing.
+ *
+ * ⚠️ **This asserts nothing about what a screen reader says.** Playwright's
+ * Chromium is not TalkBack, and no assertion here establishes that anything
+ * was announced — only that the region is not hidden (a hidden live region is
+ * silent: Roselli, 2026-01-14), not clipped away to nothing, and not pushing
+ * the HUD's layout about. Whether TalkBack speaks what lands in it is
+ * `docs/validation/0003-screen-reader-and-assistive-technology.md` Part B, and
+ * its tables are empty. This cannot substitute for that.
+ *
+ * Why here and not in the fast suite: jsdom loads no stylesheet, so a region
+ * that a stylesheet hid would pass every `.a11y.test` there is (CLAUDE.md §4e),
+ * and jsdom performs no layout, so nothing there can say what moved.
+ */
+
+/** The sentence `hud-harness.tsx` puts in every populated region. Mirrored. */
+const ANNOUNCEMENT = 'Power 1234 watts, under the 1500 watt target';
+
+/** A painted box this small is out of sight. `.oyl-visually-hidden` is 1×1. */
+const CLIPPED_PIXELS = 1;
+
+/** Why a region would be silent, or `undefined` when nothing hides it. */
+function hiddenBecause(region: RegionMeasurement): string | undefined {
+  if (region.display === 'none') return 'display: none';
+  if (region.visibility === 'hidden') return 'visibility: hidden';
+  if (region.hiddenAttribute) return 'the hidden attribute';
+  if (region.ariaHidden === 'true') return 'aria-hidden';
+  if (region.ancestorHides) return 'an ancestor that hides it';
+  if (region.boxes === 0) return 'no box at all';
+  return undefined;
+}
+
+const REGION_VIEWPORTS = VIEWPORTS.filter((viewport) => viewport.width < 1000);
+
+for (const viewport of REGION_VIEWPORTS) {
+  test.describe(`#401 — the announcement region at ${viewport.name}`, () => {
+    test('is present to assistive technology, out of sight, and the control is not', async ({
+      page,
+    }) => {
+      const measured = await measure(page, viewport);
+      const control = measured.regions.filter((region) => region.stage === 'hidden-control');
+      const shipped = measured.regions.filter((region) => region.stage !== 'hidden-control');
+
+      // Six outcome panels, the empty stage and the populated one: a harness
+      // that stopped rendering regions would otherwise pass over nothing.
+      expect(shipped).toHaveLength(8);
+      for (const region of shipped) {
+        expect(
+          hiddenBecause(region),
+          `${region.stage}: hidden by ${String(hiddenBecause(region))}`,
+        ).toBeUndefined();
+        expect(region.role).toBe('status');
+        // Both halves: present, AND out of sight. A region that became
+        // visible is a layout regression on a HUD; one that became
+        // `display: none` is a silence regression.
+        expect(region.width, `${region.stage} is painted, not clipped`).toBeLessThanOrEqual(
+          CLIPPED_PIXELS,
+        );
+        expect(region.height).toBeLessThanOrEqual(CLIPPED_PIXELS);
+        expect(region.clipPath).toContain('inset');
+      }
+      expect(
+        shipped.filter((region) => region.stage !== 'empty').map((region) => region.text),
+      ).toEqual(Array<string>(7).fill(ANNOUNCEMENT));
+
+      // ⚠️ The control: the SAME region with `display: none`, which this
+      // file's own predicate must call hidden. Without it a stylesheet that
+      // never loaded, a region that rendered nothing and a correct page all
+      // read "not hidden" identically.
+      expect(control).toHaveLength(1);
+      expect(hiddenBecause(control[0] as RegionMeasurement)).toBe('display: none');
+
+      // And the browser's own accessibility view agrees: Playwright's role
+      // query leaves out what is hidden from assistive technology, so it
+      // finds the seven populated shipping regions and NOT the control.
+      await expect(page.getByRole('status').filter({ hasText: ANNOUNCEMENT })).toHaveCount(7);
+    });
+
+    test('moves no value and no panel when it is populated', async ({ page }) => {
+      const measured = await measure(page, viewport);
+      expect(measured.displacement.length, 'nothing was compared').toBeGreaterThan(10);
+      const moved = measured.displacement.filter(
+        (each) =>
+          !(
+            Math.abs(each.dx) <= SUBPIXEL_SLACK &&
+            Math.abs(each.dy) <= SUBPIXEL_SLACK &&
+            Math.abs(each.dw) <= SUBPIXEL_SLACK &&
+            Math.abs(each.dh) <= SUBPIXEL_SLACK
+          ),
+      );
+      expect(moved).toEqual([]);
+    });
+  });
+}
+
+test.describe('#401 — the displacement measurement can see a displacement at all', () => {
+  /**
+   * ⚠️ The control for the assertion above, which is otherwise of the form
+   * "nothing moved" — what two copies of an empty page report too. One panel
+   * of the populated stage is nudged down 40 px, and the same measurement must
+   * see it and everything inside it move.
+   *
+   * ⚠️ **Why not the obvious control — the region with its clip class taken
+   * off?** It was tried first, and it moves NOTHING: in the riding overlay the
+   * HUD is a grid of named areas, and an unplaced paragraph is auto-placed
+   * into an implicit track after them. So a region that became VISIBLE is not
+   * a displacement here at all — it is caught by the clipped-box assertion
+   * above (`width`/`height` ≤ 1 px), which is why that assertion exists
+   * separately rather than being left to this one.
+   */
+  test('finds something moved when a panel is moved', async ({ page }) => {
+    const landscape = VIEWPORTS.find((viewport) => viewport.name === 'landscape');
+    if (landscape === undefined) throw new Error('no landscape viewport');
+    await measure(page, landscape);
+    const moved = await page.evaluate(() => {
+      const panel = document.querySelector<HTMLElement>(
+        '[data-oyl-region-stage="populated"] .oyl-hud__fields--primary',
+      );
+      if (panel !== null) panel.style.marginTop = '40px';
+      const again = window.__oylHudMeasure?.();
+      return (again?.displacement ?? []).filter((each) => Math.abs(each.dy) > 1).length;
+    });
+    // The panel itself and its three primary values, at least.
+    expect(moved).toBeGreaterThanOrEqual(4);
   });
 });
