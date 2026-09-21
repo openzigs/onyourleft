@@ -72,6 +72,7 @@
 import { distanceOnRoute, elevationAt, gradeAt, type RouteProfile } from '@onyourleft/domain';
 
 import { slotHash, uniformFrom } from './seeded';
+import { DRY, waterShaping, waterways, type WaterShaping } from './waterways';
 import {
   ROAD_WIDTH_METRES,
   ribbonNormals,
@@ -336,6 +337,9 @@ export function terrainHeightAt(
     return road;
   }
   const fields = reliefFields(profile, seed, wrapped, side);
+  const ways = waterways(profile, seed);
+  const shaped = (offset: number): WaterShaping =>
+    waterShaping(ways, profile, origin, wrapped, offset * (side === 0 ? 1 : -1), road);
   let column = 0;
   while (column < COLUMNS - 2 && lateral > (TERRAIN_COLUMN_OFFSETS[column + 1] as number)) {
     column += 1;
@@ -343,8 +347,8 @@ export function terrainHeightAt(
   const inner = TERRAIN_COLUMN_OFFSETS[column] as number;
   const outer = TERRAIN_COLUMN_OFFSETS[column + 1] as number;
   const share = Math.min(1, (lateral - inner) / (outer - inner));
-  const from = groundHeight(road, fields, inner);
-  const to = groundHeight(road, fields, outer);
+  const from = groundHeight(road, fields, inner, shaped(inner));
+  const to = groundHeight(road, fields, outer, shaped(outer));
   return from + (to - from) * share;
 }
 
@@ -356,9 +360,13 @@ export function terrainHeightAt(
  */
 export function terrainCorridor(
   profile: RouteProfile,
+  origin: CorridorOrigin,
   corridor: RoadCorridor,
   seed: number,
 ): TerrainMesh {
+  // #459. The streams and lakes, as a ceiling on the ground and a damping of
+  // its relief. @see waterShaping
+  const ways = waterways(profile, seed);
   const centre = corridor.centre;
   const rows = centre.length;
   const normals2d = ribbonNormals(centre);
@@ -380,13 +388,22 @@ export function terrainCorridor(
       for (let column = 0; column < COLUMNS; column += 1) {
         const offset = TERRAIN_COLUMN_OFFSETS[column] as number;
         // ⚠️ The first two columns are never folded: the road's edge and the
-        // foot of its verge are where they are on any bend.
+        // foot of its verge are where they are on any bend. (Under a bridge
+        // they are LOWERED, into the channel — the bridge's opening — but
+        // never moved.)
         const lateral = column < 2 ? offset : Math.min(offset, limit);
         const at = row * perRow + side * COLUMNS + column;
         vertices[at * 3] = point.x + normalX * lateral * sign;
         // Column 0 is `point.y` exactly: `groundHeight` drops nothing and adds
         // no relief at the road's half-width, so the edge needs no special case.
-        vertices[at * 3 + 1] = groundHeight(point.y, relief, lateral);
+        vertices[at * 3 + 1] = groundHeight(
+          point.y,
+          relief,
+          lateral,
+          ways.crossings.length + ways.lakes.length === 0
+            ? DRY
+            : waterShaping(ways, profile, origin, point.distance, lateral * sign, point.y),
+        );
         vertices[at * 3 + 2] = point.z + normalZ * lateral * sign;
         colours[at * 3] = tint;
         colours[at * 3 + 1] = tint;
@@ -507,7 +524,12 @@ function reliefFields(
  * ⚠️ **Never above the road inside {@link RELIEF_CLEAR_METRES}**: the drop is
  * at least zero, and the relief is exactly zero there.
  */
-function groundHeight(road: number, fields: ReliefFields, lateral: number): number {
+function groundHeight(
+  road: number,
+  fields: ReliefFields,
+  lateral: number,
+  water: WaterShaping,
+): number {
   const drop =
     lateral <= ROAD_HALF_WIDTH_METRES
       ? 0
@@ -517,8 +539,13 @@ function groundHeight(road: number, fields: ReliefFields, lateral: number): numb
   const field = fields.near + (fields.far - fields.near) * blend;
   const beyond = Math.max(0, lateral - RELIEF_CLEAR_METRES);
   const amplitude = Math.min(RELIEF_MAX_METRES, beyond * RELIEF_SLOPE);
-  const relief = amplitude * field + fields.tilt * beyond;
-  return road - drop + Math.min(RELIEF_MAX_METRES, Math.max(-RELIEF_MAX_METRES, relief));
+  const relief = (amplitude * field + fields.tilt * beyond) * water.relief;
+  // #459: the water's bed is a ceiling. Under a bridge that includes the road's
+  // own edge, which is the bridge's opening.
+  return Math.min(
+    water.ceiling,
+    road - drop + Math.min(RELIEF_MAX_METRES, Math.max(-RELIEF_MAX_METRES, relief)),
+  );
 }
 
 /**

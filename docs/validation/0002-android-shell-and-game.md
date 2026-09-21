@@ -1960,6 +1960,54 @@ indices. A software rasteriser says nothing about a phone's GPU, which is what V
 
 ---
 
+## Part W — water in the route's valleys, and the bridges over it ([#459](https://github.com/openzigs/onyourleft/issues/459))
+
+#459 puts a **stream across the road at every valley floor** of a route — a point that is the lowest
+for 300 m either way, with the road climbing at least 8 m out of it on both sides — and a **bridge**
+carrying the road over it: stone parapets, a slab under the deck and two abutments. A **lake** lies
+beside a long, level, low stretch that the road climbs out of at both ends. All of it is placed from
+the route's own elevation and a seeded hash (`apps/web/src/game/waterways.ts`); nothing is fetched.
+⚠️ **The deck is the road, unchanged, and the gradient a trainer is sent there is the route's** —
+`waterways.test.ts` rides the gradient session across the bridge and compares every grade it sends.
+Nothing from the scenery stands in the water or on its banks.
+
+The water is a **shader**, not a texture and not a second render: the sky reflected with a Fresnel
+term, ripples scrolling on the ride's own clock, and the edges tinted shallow. On the quality ladder
+it is shaded on the target rung only and one flat colour below it. The pinned Chromium measured the
+valley frame at **1.05 ms shaded against 1.04 ms flat** on a software rasteriser — which says nothing
+about a phone, and is why W3 exists. Water and bridges are **two draw calls** when either is in view,
+and none when neither is.
+
+| Step | What to do | What to record |
+|---|---|---|
+| W1 | Ride a **real route that crosses a valley** — down into it and out again | Is there a stream at the bottom, and a bridge carrying the road over it? Does the water read as water — does it move, does it reflect the sky? |
+| W2 | Look at the bridge as you ride over it | The parapets on both sides; nothing floating, nothing buried; the road surface itself exactly as on either side of it |
+| W3 | 12 s of riding with the bridge and water in view, target rung, the `dumpsys` block from Part T | Frame times with the water shaded |
+| W4 | If the route has a long level valley floor: ride along it | A lake beside the road? No trees standing in it? |
+| W5 | ⚠️ **Only after Part L, with the trainer handed to the game.** Ride across the bridge | The resistance through the valley follows the ROAD — down the approach, up the far side — and does not go flat over the bridge |
+| W6 | Ride a route with **no valley** | No stream, no bridge |
+
+### W results
+
+| | W3 |
+|---|--:|
+| Total frames rendered | |
+| Janky frames (legacy, > 16 ms) | |
+| Frame time 50th / 90th | |
+| **GPU time 50th / 90th** | |
+
+**Stream and bridge where the valley is (W1, W2)?** ______________
+
+**A lake beside a level valley floor, nothing standing in it (W4)?** ______________
+
+**Resistance followed the road across the bridge (W5)?** ______________
+
+**Nothing on a route with no valley (W6)?** ______________
+
+**Routes ridden:** ______________  **Phone (OEM, model, Android):** ______________  **Build:** ______________
+
+---
+
 ## After the session
 
 1. **Fill the tables in this file and commit it.** An empty table in `main` is the honest state; a

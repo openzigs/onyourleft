@@ -99,6 +99,7 @@ import {
   threeGameRenderer,
   WorldLamps,
   LIT_COLOURS,
+  BRIDGE_COLOUR,
 } from './three-renderer';
 import type { CameraPose, RiderMarker, SceneFrame } from './port';
 import {
@@ -1482,10 +1483,19 @@ function frameWithScatter(): SceneFrame {
       const profile = routeProfile(flatRouteAt(120));
       const origin = corridorOrigin(profile);
       return {
-        mesh: terrainCorridor(profile, roadCorridor(profile, origin, 100), 7),
+        mesh: terrainCorridor(profile, origin, roadCorridor(profile, origin, 100), 7),
         horizon: horizonRelief(profile, origin, 7),
       };
     })(),
+    water: {
+      surface: {
+        vertices: new Float32Array(0),
+        shore: new Float32Array(0),
+        indices: new Uint32Array(0),
+      },
+      bridges: [],
+      seconds: 0,
+    },
   };
 }
 
@@ -1610,7 +1620,13 @@ describe('the world has a light direction — #286', () => {
     //
     // ⚠️ **Two solid markers rather than three, since #349** — the rider is a
     // bicycle now, and its four colours arrive from `bicycle.ts` instead.
-    expect(LIT_COLOURS).toHaveLength(SCATTER_KINDS.length + 2 + BICYCLE_COLOURS.length);
+    //
+    // ⚠️ **And one more since #459: the bridges' stone**, which is lit like
+    // the scenery and is this file's own colour. (The ground is lit too since
+    // #458, but its colour is `world.ts`'s ground colour, a horizontal
+    // surface's, which `world.test.ts` bounds.)
+    expect(LIT_COLOURS).toHaveLength(SCATTER_KINDS.length + 2 + BICYCLE_COLOURS.length + 1);
+    expect(LIT_COLOURS).toContain(BRIDGE_COLOUR);
     expect(new Set(LIT_COLOURS).size).toBe(LIT_COLOURS.length);
   });
 });

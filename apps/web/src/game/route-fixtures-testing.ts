@@ -79,6 +79,23 @@ export function valleyRoute(): RouteProfile {
 }
 
 /**
+ * #459's lake fixture: a road that drops 30 m onto a **kilometre of level
+ * valley floor** from 700 m to 1 700 m and climbs out again — a flat, low,
+ * enclosed stretch, which is where a lake lies. The descents are too long and
+ * gentle, and the floor too wide, for a stream crossing: its lowest point is a
+ * kilometre wide rather than a point.
+ */
+export function lakeValleyRoute(): RouteProfile {
+  return northRoute(2_600, (along) => {
+    if (along <= 400) return 30;
+    if (along <= 700) return 30 - ((along - 400) / 300) * 30;
+    if (along <= 1_700) return 0;
+    if (along <= 2_000) return ((along - 1_700) / 300) * 30;
+    return 30;
+  });
+}
+
+/**
  * Rolling road: a smooth rise and fall of 12 m every 600 m, so the steepest is
  * about 12.6 % and there is no kink anywhere — the kind of profile a real
  * route's despiked grid actually is, where {@link hillRoute}'s corners are the

@@ -588,6 +588,16 @@ apps/                 AGPL-3.0-or-later, without exception
                         `GROUND_RADIUS_METRES` is reading the old file.** The
                         ground is LIT and WRITES DEPTH since #458;
                         `three-renderer.ts` §`TerrainBelt` says why both
+    src/game/waterways.ts
+                        water and bridges (#459) — a stream at every valley
+                        floor of the route's own elevation, a lake beside a
+                        long level stretch the road climbs out of, the channel
+                        and lake beds the landform is cut to, what the scenery
+                        may not stand on, and the bridge's parapets, slab and
+                        abutments. ⚠️ The deck is the ROAD, unchanged, and the
+                        grade a trainer is sent there is the route's — a test
+                        rides the gradient session across it. No culverts and
+                        no tunnels, and the file says why
     src/game/seeded.ts  the hash every seeded, stateless placement draws from —
                         moved out of `scatter.ts` by #458, unchanged to the bit
     src/game/route-fixtures-testing.ts
@@ -3289,6 +3299,8 @@ top of an issue **supersedes its body**.
 | Why the fog is solved from the view distance rather than written down, and what its floor costs | `apps/web/src/game/world.ts` §`FOG_OCCLUSION_AT_VIEW_END`, §`MINIMUM_VIEW_END_OCCLUSION` |
 | Why the ground is lit and writes depth since #458 (the flat ground plane before it did neither), and why an unset sky is black | `apps/web/src/game/three-renderer.ts` §`TerrainBelt`, §`UNSET_COLOUR`, §`#updateWorld` |
 | How the ground beside the road follows the route's gradient, where its heights come from, and what keeps it out of the carriageway | `apps/web/src/game/landform.ts`, [#458](https://github.com/openzigs/onyourleft/issues/458) |
+| Where a stream or a lake goes, why a bridge's deck is the road, and why there are no tunnels | `apps/web/src/game/waterways.ts`, [#459](https://github.com/openzigs/onyourleft/issues/459) |
+| What the water shader does without a texture or a second pass, and what it costs | `apps/web/src/game/three-renderer.ts` §`WATER_FRAGMENT`, §`WaterBelt`, `apps/web/browser/game-harness.ts` §`waterProbe` |
 | What proves the ground beside a climb stands above the rider and beside a descent below, with the flat quad as the control | `apps/web/browser/game-harness.ts` §`gradientProbe`, `apps/web/browser/game.browser.spec.ts` §"the gradient shows beside the road" |
 | What proves the world reaches the screen rather than only the frame | `apps/web/browser/game-harness.ts`, `apps/web/browser/game.browser.spec.ts` |
 | Why the rider is a bicycle built from numbers rather than a model somebody downloaded | `apps/web/src/game/bicycle.ts`, [#349](https://github.com/openzigs/onyourleft/issues/349) |

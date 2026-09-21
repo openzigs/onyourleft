@@ -82,6 +82,7 @@ import {
 
 import { terrainHeightAt } from './landform';
 import { mixInto, slotHash, uniformFrom } from './seeded';
+import { inWater, waterways } from './waterways';
 import { ROAD_WIDTH_METRES, localGroundPosition, type CorridorOrigin } from './terrain';
 import { treeLineMetres } from './world';
 
@@ -939,6 +940,8 @@ function fillCell(
   // to end — every cell filled to the same fraction, which is what makes a
   // hashed placement still read as a grid.
   const density = densityAt(place) * clusterAt(seed, cell);
+  // #459. Cached per profile, so this is a lookup. @see waterways
+  const ways = waterways(profile, seed);
   const weights = kindWeights(place);
   // ⚠️ **Whole bands, dropped rather than squeezed.** @see MINIMUM_SCATTER_SEPARATION_METRES
   const bands = bandsAt(place.curvature);
@@ -974,6 +977,14 @@ function fillCell(
         continue;
       }
       const at = distanceOnRoute(profile, cell.wrapped * cell.span + alongInCell);
+      // ⚠️ **Nothing stands in water — #459.** Dropped after every draw is
+      // made, so a stream or a lake takes the items that would have stood in
+      // it and moves no other: every quantity is its own hash stream, and the
+      // plan of what survives is unchanged. `waterways.ts` §`inWater` is the
+      // rule, with its clearance.
+      if (inWater(ways, profile, at, lateral * side)) {
+        continue;
+      }
       const ground = localGroundPosition(origin, positionAt(profile, at));
       const normal = normalAt(profile, origin, at);
 

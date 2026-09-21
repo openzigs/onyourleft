@@ -26,7 +26,7 @@ import { ghostDistanceAt, ghostHasFinished, type GhostTrack } from '@onyourleft/
 import { simulatedCrankAngle } from './bicycle';
 import { horizonRelief, terrainCorridor } from './landform';
 import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES } from './camera';
-import type { CameraPose, RiderMarker, SceneFrame } from './port';
+import type { CameraPose, RiderMarker, SceneFrame, WaterFrame } from './port';
 import { SCATTER_MAX_ITEMS, scatterAt, scatterSeed, type ScatterItem } from './scatter';
 import { ghostClock, type GameState } from './simulation';
 import {
@@ -35,6 +35,7 @@ import {
   type CorridorPoint,
   type RoadCorridor,
 } from './terrain';
+import { bridgeParts, waterSurface, waterways } from './waterways';
 import { worldStyle } from './world';
 import type { RouteProfile } from '@onyourleft/domain';
 
@@ -121,9 +122,23 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     // renderer draws a prefix of them (`three-renderer.ts` §`TerrainBelt`), so
     // the rung moves no vertex and the scenery stands on the same ground.
     terrain: {
-      mesh: terrainCorridor(input.profile, corridor, seed),
+      mesh: terrainCorridor(input.profile, input.origin, corridor, seed),
       horizon: horizonRelief(input.profile, input.origin, seed),
     },
+    // #459. The waterways are found once per route (`waterways.ts` §`computed`)
+    // and the surfaces and bridges built for this stretch of it, from the same
+    // corridor the ground and the road are built from.
+    water: water(input, corridor, seed),
+  };
+}
+
+/** The streams, lakes and bridges in view. @see SceneFrame.water */
+function water(input: SceneInput, corridor: RoadCorridor, seed: number): WaterFrame {
+  const ways = waterways(input.profile, seed);
+  return {
+    surface: waterSurface(input.profile, input.origin, corridor, ways),
+    bridges: bridgeParts(input.profile, input.origin, corridor, ways),
+    seconds: input.state.elapsed,
   };
 }
 

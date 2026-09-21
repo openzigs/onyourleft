@@ -59,6 +59,7 @@
 
 import {
   altitudeMetres,
+  elevationAt,
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
@@ -79,10 +80,12 @@ import {
   RIDER_SHADOW_MAP_RUNG,
   type QualitySettings,
 } from '../src/game/quality';
-import { hillRoute } from '../src/game/route-fixtures-testing';
+import { hillRoute, valleyRoute } from '../src/game/route-fixtures-testing';
+import { waterways } from '../src/game/waterways';
 import { VERGE_DROP_METRES } from '../src/game/landform';
 import { loadSceneryModels, threeGameRenderer } from '../src/game/three-renderer';
 import {
+  scatterSeed,
   SCATTER_KINDS,
   SCATTER_VARIANT_SLOTS,
   type ScatterItem,
@@ -108,6 +111,26 @@ interface GradientMeasurement {
   readonly terrainVertices: number;
   readonly terrainIndices: number;
   readonly terrainIndicesByRung: readonly number[];
+}
+
+/** What {@link waterProbe} publishes — #459. */
+interface WaterMeasurement {
+  /** How many streams and lakes the valley route has. */
+  readonly crossings: number;
+  /** A pixel on the stream beside the bridge, with the water drawn and without. */
+  readonly beside: Pixel;
+  readonly besideDry: Pixel;
+  /** A pixel on the bridge's deck, with the water drawn and without. */
+  readonly deck: Pixel;
+  readonly deckDry: Pixel;
+  /** The same deck pixel with the ROAD taken out: what is under the deck. */
+  readonly underDeck: Pixel;
+  /** Draw calls on the valley frame, and on the same frame with no water or bridge. */
+  readonly drawCalls: number;
+  readonly drawCallsDry: number;
+  /** Milliseconds a frame of the valley, water shaded and flat. */
+  readonly shadedMs: number;
+  readonly flatMs: number;
 }
 
 /** What {@link shadowMapProbe} publishes. */
@@ -516,6 +539,10 @@ declare global {
        * it changes are counted. @see gradientProbe
        */
       readonly gradient: GradientMeasurement;
+      /**
+       * #459 — the stream under the bridge, and the deck above it. @see waterProbe
+       */
+      readonly water: WaterMeasurement;
       /**
        * Pixels the bot's own cranks move over half a development — #368.
        *
@@ -1262,6 +1289,138 @@ const NO_GRADIENT: GradientMeasurement = {
   terrainVertices: 0,
   terrainIndices: 0,
   terrainIndicesByRung: [],
+};
+
+/**
+ * #459's fourth criterion, off pixels: *"the browser gate reads a water pixel
+ * under the bridge and proves the road deck is drawn above it"*.
+ *
+ * The rider is 40 m short of the valley route's bridge. Two points are probed,
+ * each with the water drawn and without it:
+ *
+ * - **beside the bridge**, on the stream 20 m out from the road: the water is
+ *   drawn there, so taking it away changes the pixel;
+ * - **on the deck**, over the stream's centre: the ROAD is drawn there, above
+ *   the water, so taking the water away changes nothing — and taking the ROAD
+ *   away shows water, which is what says the water really is under the deck
+ *   rather than absent from it.
+ *
+ * Draw calls and the shader's cost are published, the frame timed with the
+ * water shaded and flat.
+ */
+function waterProbe(): WaterMeasurement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 600;
+  canvas.height = 400;
+  const profile = valleyRoute();
+  const origin = corridorOrigin(profile);
+  const ways = waterways(profile, scatterSeed(profile));
+  const crossing = ways.crossings[0]?.distance ?? 1_000;
+  const start = atStartLine(profile);
+  const riding = (distance: number): SceneFrame => {
+    const frame = sceneFrame({
+      profile,
+      origin,
+      state: { ...start, ride: { ...start.ride, distance: metres(distance) } },
+    });
+    return { ...frame, markers: [], scatter: [] };
+  };
+  const frame = riding(crossing - 40);
+  const dry: SceneFrame = {
+    ...frame,
+    water: {
+      ...frame.water,
+      surface: { ...frame.water.surface, indices: new Uint32Array(0) },
+      bridges: [],
+    },
+  };
+  // The road AND the bridge's slab under it taken out: what is beneath the deck.
+  const noRoad: SceneFrame = {
+    ...frame,
+    corridor: { ...frame.corridor, indices: new Uint32Array(0) },
+    water: { ...frame.water, bridges: [] },
+  };
+  // The route runs due north from its origin: x is across it, z along it.
+  const water = (ways.crossings[0]?.waterElevation ?? 0) - origin.elevation;
+  const deckY = elevationAt(profile, crossing) - origin.elevation;
+  const empty: WaterMeasurement = {
+    crossings: ways.crossings.length + ways.lakes.length,
+    beside: NOWHERE,
+    besideDry: NOWHERE,
+    deck: NOWHERE,
+    deckDry: NOWHERE,
+    underDeck: NOWHERE,
+    drawCalls: 0,
+    drawCallsDry: 0,
+    shadedMs: 0,
+    flatMs: 0,
+  };
+  let measured = empty;
+  countingDrawCalls((calls) => {
+    const view = threeGameRenderer.create(canvas, NO_RIDER_SHADOWS);
+    view.resize(600, 400);
+    const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+    if (gl === null) {
+      view.destroy();
+      return;
+    }
+    const besideAt = pixelFor(frame, canvas, { x: -20, y: water, z: crossing });
+    const deckAt = pixelFor(frame, canvas, { x: 1.5, y: deckY, z: crossing });
+    const read = (scene: SceneFrame): readonly [Pixel, Pixel, number] => {
+      view.render(scene);
+      const before = calls();
+      view.render(scene);
+      const drawn = calls() - before;
+      return [readPixel(gl, besideAt.x, besideAt.y), readPixel(gl, deckAt.x, deckAt.y), drawn];
+    };
+    const [beside, deck, drawCalls] = read(frame);
+    const [besideDry, deckDry, drawCallsDry] = read(dry);
+    const [, underDeck] = read(noRoad);
+    const timed = (settings: QualitySettings): number => {
+      view.setQuality(settings);
+      for (let index = 0; index < 5; index += 1) view.render(frame);
+      awaitTheGpu(gl);
+      const started = performance.now();
+      for (let index = 0; index < SHADING_FRAMES; index += 1) {
+        view.render({ ...frame, water: { ...frame.water, seconds: index / 30 } });
+      }
+      awaitTheGpu(gl);
+      return (performance.now() - started) / SHADING_FRAMES;
+    };
+    const shaded = { ...NO_RIDER_SHADOWS, water: 'shaded' as const };
+    const flat = { ...NO_RIDER_SHADOWS, water: 'flat' as const };
+    // Alternating, for the reason `run` alternates the shading rounds: what
+    // the machine does at the start of a round is charged to both.
+    const rounds = [timed(shaded), timed(flat), timed(flat), timed(shaded)];
+    measured = {
+      ...empty,
+      beside,
+      besideDry,
+      deck,
+      deckDry,
+      underDeck,
+      drawCalls,
+      drawCallsDry,
+      shadedMs: ((rounds[0] ?? 0) + (rounds[3] ?? 0)) / 2,
+      flatMs: ((rounds[1] ?? 0) + (rounds[2] ?? 0)) / 2,
+    };
+    view.destroy();
+  });
+  return measured;
+}
+
+/** What {@link waterProbe} reports when it did not run. */
+const NO_WATER: WaterMeasurement = {
+  crossings: 0,
+  beside: NOWHERE,
+  besideDry: NOWHERE,
+  deck: NOWHERE,
+  deckDry: NOWHERE,
+  underDeck: NOWHERE,
+  drawCalls: 0,
+  drawCallsDry: 0,
+  shadedMs: 0,
+  flatMs: 0,
 };
 
 /** What one rider's silhouette looks like, drawn alone. @see colourProbes */
@@ -2110,6 +2269,7 @@ async function run(): Promise<void> {
       riderSilhouettePixels: {},
       riderBuriedPixels: 0,
       gradient: NO_GRADIENT,
+      water: NO_WATER,
       botCrankPixels: 0,
       contactShadowPixels: {},
       contactShadowLuminance: {},
@@ -2183,6 +2343,7 @@ async function run(): Promise<void> {
   const riderSilhouettePixels: Record<string, number> = {};
   let riderBuriedPixels = 0;
   let gradient: GradientMeasurement = NO_GRADIENT;
+  let water: WaterMeasurement = NO_WATER;
   let botCrankPixels = 0;
   let contactShadowPixels: Record<string, number> = {};
   let contactShadowLuminance: Record<string, readonly [number, number]> = {};
@@ -2687,6 +2848,8 @@ async function run(): Promise<void> {
     }
     // #458, on a canvas of its own. @see gradientProbe
     gradient = gradientProbe();
+    // #459. @see waterProbe
+    water = waterProbe();
     // #424, on canvases of their own — @see riderExtent. 16 : 9 is the
     // criterion's own frame; 10 : 16 is a tablet held upright.
     riderFrame = { landscape: riderExtent(640, 360), portrait: riderExtent(400, 640) };
@@ -2759,6 +2922,7 @@ async function run(): Promise<void> {
     riderSilhouettePixels,
     riderBuriedPixels,
     gradient,
+    water,
     botCrankPixels,
     contactShadowPixels,
     contactShadowLuminance,

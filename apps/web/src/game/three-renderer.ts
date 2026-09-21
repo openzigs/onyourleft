@@ -163,9 +163,12 @@ import {
   PlaneGeometry,
   Quaternion,
   Scene,
+  ShaderMaterial,
   ShadowMaterial,
   SphereGeometry,
   TorusGeometry,
+  UniformsLib,
+  UniformsUtils,
   Vector3,
   WebGLRenderer,
   type Material,
@@ -230,6 +233,7 @@ import {
   verticalFieldOfViewDegrees,
 } from './camera';
 import { ROAD_WIDTH_METRES, VIEW_AHEAD_METRES, VIEW_BEHIND_METRES } from './terrain';
+import { MAXIMUM_BRIDGE_PARTS, type BridgePart, type WaterSurface } from './waterways';
 import type { SunStyle, WorldStyle } from './world';
 
 /*
@@ -1076,6 +1080,9 @@ function releaseLoadedScene(source: Object3D): void {
   });
 }
 
+/** The bridges' stone. This repository's own: a weathered grey. */
+export const BRIDGE_COLOUR = 0x8f8a80;
+
 /**
  * Every colour **this file** decides that a lit material carries — #286.
  *
@@ -1115,6 +1122,8 @@ export const LIT_COLOURS: readonly number[] = [
   // #349. The rider's own four, from the file that decides them, for the reason
   // the two lines above read their tables rather than restating them.
   ...BICYCLE_COLOURS,
+  // #459. The bridges' stone, which is lit like the scenery.
+  BRIDGE_COLOUR,
 ];
 
 /**
@@ -2621,6 +2630,234 @@ export class HorizonRing {
  */
 const HORIZON_HAZE_SHARE = 0.7;
 
+/**
+ * The water shader — #459. Vertex half: world position and the shore weight,
+ * and three's own fog chunk.
+ */
+const WATER_VERTEX = /* glsl */ `
+attribute float shore;
+varying vec3 vWorld;
+varying float vShore;
+#include <fog_pars_vertex>
+void main() {
+  vec4 world = modelMatrix * vec4(position, 1.0);
+  vWorld = world.xyz;
+  vShore = shore;
+  vec4 mvPosition = viewMatrix * world;
+  gl_Position = projectionMatrix * mvPosition;
+  #include <fog_vertex>
+}
+`;
+
+/**
+ * The water shader's fragment half: the sky reflected with a Fresnel term,
+ * ripples as an analytic normal that scrolls with the ride's clock, and the
+ * edges tinted shallow by the geometry's own shore weight.
+ *
+ * ⚠️ **No texture, and no second pass.** The ripple normal is two travelling
+ * waves differentiated by hand, so there is no normal map to fetch — #366's
+ * "no texture reaches the GPU" holds — and the reflection is the sky's own two
+ * colours along the reflected ray, so there is no planar reflection render.
+ * The fog and colour-space chunks are three's, in the order its own
+ * `meshbasic` shader uses them.
+ */
+const WATER_FRAGMENT = /* glsl */ `
+uniform vec3 skyColour;
+uniform vec3 horizonColour;
+uniform vec3 deepColour;
+uniform vec3 shallowColour;
+uniform float time;
+varying vec3 vWorld;
+varying float vShore;
+#include <fog_pars_fragment>
+void main() {
+  vec2 p = vWorld.xz;
+  vec2 d1 = vec2(0.83, 0.56);
+  vec2 d2 = vec2(-0.47, 0.88);
+  float a1 = dot(p, d1) * 1.7 + time * 1.3;
+  float a2 = dot(p, d2) * 2.9 - time * 1.9;
+  vec2 slope = 0.06 * cos(a1) * d1 + 0.058 * cos(a2) * d2;
+  vec3 n = normalize(vec3(-slope.x, 1.0, -slope.y));
+  vec3 v = normalize(cameraPosition - vWorld);
+  float facing = clamp(dot(n, v), 0.0, 1.0);
+  float fresnel = 0.02 + 0.98 * pow(1.0 - facing, 5.0);
+  vec3 r = reflect(-v, n);
+  vec3 sky = mix(horizonColour, skyColour, smoothstep(0.0, 0.4, r.y));
+  vec3 body = mix(shallowColour, deepColour, smoothstep(0.0, 1.0, vShore));
+  gl_FragColor = vec4(mix(body, sky, fresnel), 1.0);
+  #include <colorspace_fragment>
+  #include <fog_fragment>
+}
+`;
+
+/** Open water, where it is deep. This repository's own, a dark blue-green. */
+const WATER_DEEP_COLOUR = 0x1d4a55;
+
+/** Water at its edge, over the bed: lighter, and greener. This repository's own. */
+const WATER_SHALLOW_COLOUR = 0x557a68;
+
+/**
+ * The water — #459. One mesh for every stream and lake in view, one draw call,
+ * rebuilt from `waterways.ts` every frame the way the road is.
+ *
+ * Exported for `three-renderer.test.ts`, for {@link ScatterBelt}'s reasons.
+ */
+export class WaterBelt {
+  readonly #geometry = new BufferGeometry();
+  readonly #shaded = new ShaderMaterial({
+    vertexShader: WATER_VERTEX,
+    fragmentShader: WATER_FRAGMENT,
+    fog: true,
+    // ⚠️ **Both faces.** A stream's strip is laid out across the road and a
+    // lake's along it, on either side, so their windings disagree; one-sided,
+    // half of them faced the ground and were culled. The first browser run of
+    // #459 drew a bridge over a dry trench for exactly that reason.
+    side: DoubleSide,
+    uniforms: UniformsUtils.merge([
+      UniformsLib.fog,
+      {
+        skyColour: { value: new Color(UNSET_COLOUR) },
+        horizonColour: { value: new Color(UNSET_COLOUR) },
+        deepColour: { value: new Color(WATER_DEEP_COLOUR) },
+        shallowColour: { value: new Color(WATER_SHALLOW_COLOUR) },
+        time: { value: 0 },
+      },
+    ]),
+  });
+  readonly #flat = new MeshBasicMaterial({ color: WATER_DEEP_COLOUR, side: DoubleSide });
+  readonly #mesh: Mesh;
+  #vertexCapacity = 0;
+  #indexCapacity = 0;
+
+  constructor() {
+    this.#mesh = new Mesh(this.#geometry, this.#shaded);
+    // Rebuilt in world coordinates every frame, like the road.
+    this.#mesh.frustumCulled = false;
+    this.#mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The one mesh. For `three-renderer.test.ts`. */
+  get mesh(): Mesh {
+    return this.#mesh;
+  }
+
+  /** @see QualitySettings.water */
+  setDrawn(drawn: QualitySettings['water']): void {
+    this.#mesh.material = drawn === 'shaded' ? this.#shaded : this.#flat;
+  }
+
+  /** This frame's water, under this frame's sky, at this frame's time. */
+  update(surface: WaterSurface, world: WorldStyle, seconds: number): void {
+    const uniforms = this.#shaded.uniforms as Record<string, { value: unknown } | undefined>;
+    (uniforms['skyColour']?.value as Color).setHex(world.skyColour);
+    (uniforms['horizonColour']?.value as Color).setHex(world.horizonColour);
+    (uniforms['time'] as { value: number }).value = seconds;
+    if (surface.vertices.length > this.#vertexCapacity) {
+      this.#vertexCapacity = Math.max(surface.vertices.length, this.#vertexCapacity * 2);
+      this.#geometry.setAttribute(
+        'position',
+        new BufferAttribute(new Float32Array(this.#vertexCapacity), 3),
+      );
+      this.#geometry.setAttribute(
+        'shore',
+        new BufferAttribute(new Float32Array(this.#vertexCapacity / 3), 1),
+      );
+    }
+    if (surface.indices.length > this.#indexCapacity) {
+      this.#indexCapacity = Math.max(surface.indices.length, this.#indexCapacity * 2);
+      this.#geometry.setIndex(new BufferAttribute(new Uint32Array(this.#indexCapacity), 1));
+    }
+    if (surface.indices.length > 0) {
+      upload(this.#geometry.getAttribute('position') as BufferAttribute, surface.vertices);
+      upload(this.#geometry.getAttribute('shore') as BufferAttribute, surface.shore);
+      upload(this.#geometry.getIndex() as BufferAttribute, surface.indices);
+    }
+    this.#geometry.setDrawRange(0, surface.indices.length);
+    // No water in view is no draw call, not an empty one.
+    this.#mesh.visible = surface.indices.length > 0;
+  }
+
+  dispose(): void {
+    this.#geometry.dispose();
+    this.#shaded.dispose();
+    this.#flat.dispose();
+  }
+}
+
+/**
+ * The bridges — #459. Every parapet, deck slab and abutment in view is one
+ * instance of one box: one draw call however many bridges there are.
+ *
+ * Exported for `three-renderer.test.ts`, for {@link ScatterBelt}'s reasons.
+ */
+export class BridgeBelt {
+  readonly #materials = vertexColouredMaterials();
+  readonly #mesh: InstancedMesh;
+  readonly #matrix = new Matrix4();
+  readonly #along = new Vector3();
+  readonly #across = new Vector3();
+  readonly #up = new Vector3();
+  readonly #vertical = new Vector3(0, 1, 0);
+
+  constructor() {
+    const box = new BoxGeometry(1, 1, 1);
+    paintEveryVertex(box, BRIDGE_COLOUR);
+    this.#mesh = new InstancedMesh(box, this.#materials.lit, MAXIMUM_BRIDGE_PARTS);
+    this.#mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.#mesh.count = 0;
+    this.#mesh.frustumCulled = false;
+    this.#mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The one mesh. For `three-renderer.test.ts`. */
+  get mesh(): InstancedMesh {
+    return this.#mesh;
+  }
+
+  /** @see QualitySettings.shading */
+  setShading(shading: QualitySettings['shading']): void {
+    this.#mesh.material = this.#materials[shading];
+  }
+
+  /**
+   * One box a part: `length` along its axis, `width` across it level, and
+   * `height` up. Allocates nothing.
+   */
+  update(parts: readonly BridgePart[]): void {
+    const count = Math.min(parts.length, MAXIMUM_BRIDGE_PARTS);
+    for (let index = 0; index < count; index += 1) {
+      const part = parts[index] as BridgePart;
+      this.#along.set(part.axisX, part.axisY, part.axisZ).normalize();
+      this.#across.crossVectors(this.#vertical, this.#along).normalize();
+      this.#up.crossVectors(this.#along, this.#across).normalize();
+      this.#across.multiplyScalar(part.width);
+      this.#up.multiplyScalar(part.height);
+      this.#along.multiplyScalar(part.length);
+      this.#matrix.makeBasis(this.#across, this.#up, this.#along);
+      this.#matrix.setPosition(part.x, part.y, part.z);
+      this.#mesh.setMatrixAt(index, this.#matrix);
+    }
+    this.#mesh.count = count;
+    this.#mesh.instanceMatrix.needsUpdate = count > 0;
+    this.#mesh.visible = count > 0;
+  }
+
+  dispose(): void {
+    this.#mesh.geometry.dispose();
+    this.#mesh.dispose();
+    this.#materials.lit.dispose();
+    this.#materials.flat.dispose();
+  }
+}
+
 class ThreeGameView implements GameView {
   readonly hasContext: boolean;
   readonly #renderer: WebGLRenderer | undefined;
@@ -2677,6 +2914,10 @@ class ThreeGameView implements GameView {
   readonly #terrain = new TerrainBelt();
   /** The hills on the horizon — #458. @see HorizonRing */
   readonly #horizon = new HorizonRing();
+  /** The streams and lakes — #459. @see WaterBelt */
+  readonly #water = new WaterBelt();
+  /** The bridges over them — #459. @see BridgeBelt */
+  readonly #bridges = new BridgeBelt();
   /**
    * What stands beside the road — #244. One mesh per kind, built once.
    *
@@ -2717,6 +2958,8 @@ class ThreeGameView implements GameView {
     // depth like everything else.
     this.#horizon.addTo(this.#scene);
     this.#terrain.addTo(this.#scene);
+    this.#water.addTo(this.#scene);
+    this.#bridges.addTo(this.#scene);
 
     this.#road = new Mesh(
       this.#roadGeometry,
@@ -2765,6 +3008,8 @@ class ThreeGameView implements GameView {
     this.#updateWorld(frame.world);
     this.#terrain.update(frame.terrain.mesh, frame.world.groundColour);
     this.#horizon.update(frame.terrain.horizon, frame.world, frame.camera);
+    this.#water.update(frame.water.surface, frame.world, frame.water.seconds);
+    this.#bridges.update(frame.water.bridges);
     this.#updateRoad(frame);
     this.#scatter.update(frame.scatter, frame.camera);
     this.#updateMarkers(frame.markers);
@@ -2787,6 +3032,8 @@ class ThreeGameView implements GameView {
     this.#scatter.setVariants(settings.sceneryVariants);
     // #458. How much ground beyond the road this rung draws.
     this.#terrain.setBands(settings.terrainBands);
+    // #459. The water shader, or one flat colour.
+    this.#water.setDrawn(settings.water);
     this.#applySize();
   }
 
@@ -2801,6 +3048,7 @@ class ThreeGameView implements GameView {
     this.#scatter.setShading(shading);
     this.#riders.setShading(shading);
     this.#terrain.setShading(shading);
+    this.#bridges.setShading(shading);
   }
 
   /**
@@ -2854,6 +3102,8 @@ class ThreeGameView implements GameView {
     this.#roadGeometry.dispose();
     this.#terrain.dispose();
     this.#horizon.dispose();
+    this.#water.dispose();
+    this.#bridges.dispose();
     disposeMaterial(this.#road.material);
     this.#scatter.dispose();
     this.#lighting.dispose();

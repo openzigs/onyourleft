@@ -22,13 +22,16 @@ import {
 import { hillRoute } from './route-fixtures-testing';
 import { scatterSeed } from './scatter';
 import { corridorOrigin, roadCorridor } from './terrain';
-import { HorizonRing, TerrainBelt } from './three-renderer';
+import { BridgeBelt, HorizonRing, TerrainBelt, WaterBelt } from './three-renderer';
+import { valleyRoute } from './route-fixtures-testing';
+import { bridgeParts, waterSurface, waterways } from './waterways';
 import { worldStyle } from './world';
 
 function groundAt(odometer: number) {
   const profile = hillRoute();
   return terrainCorridor(
     profile,
+    corridorOrigin(profile),
     roadCorridor(profile, corridorOrigin(profile), odometer),
     scatterSeed(profile),
   );
@@ -167,5 +170,75 @@ describe('the distant hills a view draws — #458', () => {
     // The foot is exactly the horizon colour; the ridge is not.
     expect(channel(1)).toEqual(channel(0));
     expect(channel(2)).not.toEqual(channel(1));
+  });
+});
+
+describe('the water and the bridges a view draws — #459', () => {
+  const profile = valleyRoute();
+  const origin = corridorOrigin(profile);
+  const ways = waterways(profile, scatterSeed(profile));
+  const crossing = ways.crossings[0]?.distance ?? 0;
+  const corridor = roadCorridor(profile, origin, crossing - 50);
+  const world = worldStyle(profile);
+
+  it('uploads the surface and draws it, and draws nothing where there is no water', () => {
+    const belt = new WaterBelt();
+    const surface = waterSurface(profile, origin, corridor, ways);
+    belt.update(surface, world, 12);
+    expect(surface.indices.length).toBeGreaterThan(0);
+    expect(belt.mesh.visible).toBe(true);
+    expect(belt.mesh.geometry.drawRange.count).toBe(surface.indices.length);
+    const shore = belt.mesh.geometry.getAttribute('shore') as unknown as Attribute;
+    expect([...shore.array].slice(0, surface.shore.length)).toEqual([...surface.shore]);
+    // Far from the valley: no water in view, and no draw call for it.
+    belt.update(
+      waterSurface(profile, origin, roadCorridor(profile, origin, 2_600), ways),
+      world,
+      12,
+    );
+    expect(belt.mesh.visible).toBe(false);
+  });
+
+  it('runs its ripples on the ride’s clock and reflects this frame’s sky', () => {
+    const belt = new WaterBelt();
+    belt.update(waterSurface(profile, origin, corridor, ways), world, 42.5);
+    const material = belt.mesh.material as unknown as {
+      readonly type: string;
+      readonly uniforms: Record<string, { value: { getHex?: () => number } | number }>;
+    };
+    expect(material.type).toBe('ShaderMaterial');
+    expect(material.uniforms['time']?.value).toBe(42.5);
+    const sky = material.uniforms['skyColour']?.value as { getHex: () => number };
+    expect(sky.getHex()).toBe(world.skyColour);
+    belt.setDrawn('flat');
+    expect((belt.mesh.material as unknown as { readonly type: string }).type).toBe(
+      'MeshBasicMaterial',
+    );
+  });
+
+  it('draws every block of every bridge in view as one instance of one box', () => {
+    const belt = new BridgeBelt();
+    const parts = bridgeParts(profile, origin, corridor, ways);
+    belt.update(parts);
+    expect(parts.length).toBeGreaterThan(4);
+    expect(belt.mesh.count).toBe(parts.length);
+    expect(belt.mesh.visible).toBe(true);
+    // The box's own size is the part's: its matrix stretches a unit cube to it.
+    const first = parts[0];
+    const matrix = { elements: new Float32Array(16) };
+    const read = belt.mesh.instanceMatrix.array as Float32Array;
+    matrix.elements.set(read.subarray(0, 16));
+    const column = (index: number) =>
+      Math.hypot(
+        matrix.elements[index * 4] as number,
+        matrix.elements[index * 4 + 1] as number,
+        matrix.elements[index * 4 + 2] as number,
+      );
+    expect(column(0)).toBeCloseTo(first?.width ?? 0, 4);
+    expect(column(1)).toBeCloseTo(first?.height ?? 0, 4);
+    expect(column(2)).toBeCloseTo(first?.length ?? 0, 4);
+    expect(matrix.elements[13]).toBeCloseTo(first?.y ?? 0, 4);
+    belt.update([]);
+    expect(belt.mesh.visible).toBe(false);
   });
 });

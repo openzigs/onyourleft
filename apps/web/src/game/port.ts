@@ -38,6 +38,7 @@ import type { HorizonRelief, TerrainMesh } from './landform';
 import type { QualitySettings } from './quality';
 import type { ScatterItem } from './scatter';
 import type { RoadCorridor } from './terrain';
+import type { BridgePart, WaterSurface } from './waterways';
 import type { WorldStyle } from './world';
 
 /**
@@ -191,6 +192,25 @@ export interface SceneFrame {
    * drawing buffer back, against the flat quad as its control.
    */
   readonly terrain: TerrainFrame;
+  /**
+   * The streams and lakes in view, the bridges over them, and the clock their
+   * ripples run on — #459.
+   *
+   * ⚠️ **The clock is the RIDE's** (`simulation.ts` §`GameState.elapsed`), not
+   * the renderer's own, so a frame is a function of the frame and nothing
+   * else: the browser gate draws the same frame twice and compares pixels, and
+   * a water surface animated off `performance.now()` would make every such
+   * comparison include the water moving.
+   */
+  readonly water: WaterFrame;
+}
+
+/** What {@link SceneFrame.water} carries. */
+export interface WaterFrame {
+  readonly surface: WaterSurface;
+  readonly bridges: readonly BridgePart[];
+  /** Seconds, for the ripples. */
+  readonly seconds: number;
 }
 
 /** What {@link SceneFrame.terrain} carries. */

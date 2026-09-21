@@ -243,6 +243,26 @@ export interface QualitySettings {
    * frame time on a phone.
    */
   readonly terrainBands: number;
+  /**
+   * How water is drawn — #459.
+   *
+   * - `'shaded'` — the water shader: the sky reflected with a Fresnel term,
+   *   ripples scrolling in the fragment, the edges tinted by depth. No second
+   *   render of the scene, which is what a planar reflection would be.
+   * - `'flat'` — one colour, unlit, the cheapest thing that still reads as
+   *   water beside a road.
+   *
+   * ⚠️ **Shaded on the target rung only.** Every fragment of water runs the
+   *   shader, and it is detail rather than information — nothing about where
+   *   the water is changes — so it goes on the first step down, with the
+   *   scenery and the far ground, before any rung gives up frame rate. The
+   *   browser gate publishes what the shader costs on the valley frame.
+   *
+   * ## ⚠️ Provenance — BR-1, and this is not a measurement either
+   *
+   * The rung is chosen, not measured; validation 0002 Part W is the phone.
+   */
+  readonly water: 'shaded' | 'flat';
   /** A human-readable name, for the diagnostic line #91 asks to be recorded. */
   readonly label: string;
 }
@@ -269,6 +289,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     // reason `scatterItems` above takes `SCATTER_MAX_ITEMS`.
     sceneryVariants: MAXIMUM_SCENERY_VARIANTS,
     terrainBands: TERRAIN_BANDS,
+    water: 'shaded',
     shading: 'lit',
     riderShadows: 'contact',
     label: 'full',
@@ -282,6 +303,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     scatterItems: 160,
     sceneryVariants: 2,
     terrainBands: 10,
+    water: 'flat',
     shading: 'lit',
     riderShadows: 'contact',
     label: 'reduced resolution and scenery',
@@ -292,6 +314,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     scatterItems: 100,
     sceneryVariants: 1,
     terrainBands: 9,
+    water: 'flat',
     shading: 'lit',
     riderShadows: 'contact',
     label: 'reduced resolution, scenery and frame rate',
@@ -312,6 +335,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     scatterItems: 60,
     sceneryVariants: 1,
     terrainBands: 8,
+    water: 'flat',
     shading: 'flat',
     riderShadows: 'contact',
     label: 'minimum',

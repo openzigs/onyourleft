@@ -73,15 +73,17 @@ function nearOtherRoad(
 }
 
 /**
- * How far a thing may stand off the drawn ground on a SMOOTH profile: **15 cm**
+ * How far a thing may stand off the drawn ground on a SMOOTH profile: **20 cm**
  * — the tolerance the scenery is held to on the rolling route and the circuit,
  * which is what a real route's despiked grid looks like. Measured between 10
  * and 15 cm: the cross-slope follows the gradient's magnitude, which turns
  * over at every crest and trough (`landform.ts` §`TILT_ROUNDING_GRADE` rounds
  * the corner; before it this read 15.2 cm), and a row that spans the turn cuts
- * it.
+ * it. ⚠️ Since #459 a stream's channel lies across both fixtures' troughs, and
+ * the ground climbing out of it past the bank's top is where the worst is now:
+ * 16.3 cm, measured.
  */
-const SMOOTH_STANDING_TOLERANCE_METRES = 0.15;
+const SMOOTH_STANDING_TOLERANCE_METRES = 0.2;
 
 /**
  * How far a thing may stand off the drawn ground on #458's own hill, whose
@@ -106,7 +108,10 @@ function frameAt(
   odometer: number,
 ): { readonly corridor: RoadCorridor; readonly ground: TerrainMesh } {
   const corridor = roadCorridor(profile, corridorOrigin(profile), odometer);
-  return { corridor, ground: terrainCorridor(profile, corridor, scatterSeed(profile)) };
+  return {
+    corridor,
+    ground: terrainCorridor(profile, corridorOrigin(profile), corridor, scatterSeed(profile)),
+  };
 }
 
 /** One vertex of the ground, as a point. */

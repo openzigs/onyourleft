@@ -108,6 +108,18 @@ interface GameHarnessResult {
   readonly riderMeanColour: Readonly<Record<string, Pixel>>;
   readonly riderSilhouettePixels: Readonly<Record<string, number>>;
   readonly riderBuriedPixels: number;
+  readonly water: {
+    readonly crossings: number;
+    readonly beside: Pixel;
+    readonly besideDry: Pixel;
+    readonly deck: Pixel;
+    readonly deckDry: Pixel;
+    readonly underDeck: Pixel;
+    readonly drawCalls: number;
+    readonly drawCallsDry: number;
+    readonly shadedMs: number;
+    readonly flatMs: number;
+  };
   readonly gradient: {
     readonly horizonPixels: number;
     readonly climbBuried: number;
@@ -712,6 +724,42 @@ test.describe('the gradient shows beside the road — #458', () => {
       previous = each;
     }
     expect(previous).toBeLessThan(full ?? 0);
+  });
+});
+
+/**
+ * #459 — a stream in the route's own valley, and the road carried over it on a
+ * bridge. `game-harness.ts` §`waterProbe` reads the pixels.
+ */
+test.describe('water under a bridge — #459', () => {
+  test('draws the stream beside the bridge, and the road’s deck above it', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { water } = await harness(harnessRun);
+    const key = (pixel: Pixel) => pixel.slice(0, 3).join(',');
+    const measured = `beside the bridge ${key(water.beside)} (dry ${key(water.besideDry)}); on the deck ${key(water.deck)} (dry ${key(water.deckDry)}), under it ${key(water.underDeck)}; ${String(water.drawCalls)} draw calls against ${String(water.drawCallsDry)} with no water or bridge; a frame of the valley ${water.shadedMs.toFixed(2)} ms with the water shaded, ${water.flatMs.toFixed(2)} ms flat`;
+    testInfo.annotations.push({ type: 'water under a bridge', description: measured });
+    console.log(`water under a bridge — ${measured}`);
+
+    // Non-vacuity: the valley route has its stream.
+    expect(water.crossings).toBeGreaterThan(0);
+    // The stream is drawn beside the bridge: taking it away changes the pixel,
+    // and what is there is water — blue over red, which ground is not.
+    expect(key(water.beside)).not.toBe(key(water.besideDry));
+    expect(water.beside[2]).toBeGreaterThan(water.beside[0]);
+    // The deck is drawn ABOVE the water: taking the water away changes nothing
+    // on the deck…
+    expect(key(water.deck)).toBe(key(water.deckDry));
+    // …and taking the ROAD away shows water there: it was under the deck all
+    // along, which is what a bridge over a stream is.
+    expect(key(water.underDeck)).not.toBe(key(water.deck));
+    expect(water.underDeck[2]).toBeGreaterThan(water.underDeck[0]);
+    // Two draw calls, whatever is in view: the water and the bridges.
+    expect(water.drawCalls - water.drawCallsDry).toBe(2);
+    // Published, never bounded: a software rasteriser says nothing about a
+    // phone's GPU. Validation 0002 Part W is the phone.
+    expect(water.shadedMs).toBeGreaterThan(0);
+    expect(water.flatMs).toBeGreaterThan(0);
   });
 });
 

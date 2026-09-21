@@ -409,6 +409,22 @@ describe('the ground beyond the road is a rung on the ladder — #458', () => {
   });
 });
 
+describe('the water shader is a rung on the ladder — #459', () => {
+  it('shades water at the target only, and gives it up before any frame rate', () => {
+    expect(qualitySettings(0).water).toBe('shaded');
+    const firstFlat = QUALITY_LADDER.findIndex((rung) => rung.water === 'flat');
+    const firstSlower = QUALITY_LADDER.findIndex(
+      (rung) => rung.frameCap < QUALITY_LADDER[0]!.frameCap,
+    );
+    expect(firstFlat).toBeGreaterThan(0);
+    expect(firstFlat).toBeLessThan(firstSlower);
+    // Never back on as the ladder goes down.
+    for (let level = firstFlat; level < QUALITY_LADDER.length; level += 1) {
+      expect(QUALITY_LADDER[level]?.water).toBe('flat');
+    }
+  });
+});
+
 describe('the riders’ shadows on the ladder — #426', () => {
   it('grounds the riders with a contact shadow on EVERY rung, the floor included', () => {
     expect(QUALITY_LADDER.map((rung) => rung.riderShadows)).toEqual(
