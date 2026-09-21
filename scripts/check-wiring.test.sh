@@ -1401,5 +1401,97 @@ run_check
 assert_green '#438: an ordinary @unwired still exempts'
 assert_says '#438: and is counted as one' '1 @unwired exemptions, 0 @test-facing exports read by a gate'
 
+# --- #447: "read by a gate" means READ, not mentioned ----------------------
+#
+# Until #447 WIRE004 matched the export's name anywhere in a gate's TEXT, so a
+# test that only said "see scene.ts MAXIMUM_SHARE" in a comment held the export
+# alive. Each red case below is green on the textual matcher, measured by
+# reverting `identifiersIn` to a regex over the file.
+
+# Red: named only in a comment of a test.
+new_fixture
+write apps/web/src/main.tsx <<'TS'
+import { buildScene } from './game/scene';
+buildScene();
+TS
+write apps/web/src/game/scene.ts <<'TS'
+export function buildScene(): void {}
+/** @test-facing a bound scene.test.ts holds the composition to. */
+export const MAXIMUM_SHARE = 0.5;
+TS
+write apps/web/src/game/scene.test.ts <<'TS'
+// The frame share is bounded by MAXIMUM_SHARE in scene.ts, which this file
+// used to import and no longer does.
+/** See {@link MAXIMUM_SHARE}. */
+export const nothing = 0;
+TS
+run_check
+assert_red '#447: a @test-facing export named only in a comment of a test is dead'
+assert_says '#447: as WIRE004, naming it' '`MAXIMUM_SHARE` is marked `@test-facing`'
+
+# Red: named only inside a string of a test.
+new_fixture
+write apps/web/src/main.tsx <<'TS'
+import { buildScene } from './game/scene';
+buildScene();
+TS
+write apps/web/src/game/scene.ts <<'TS'
+export function buildScene(): void {}
+/** @test-facing a bound scene.test.ts holds the composition to. */
+export const MAXIMUM_SHARE = 0.5;
+TS
+write apps/web/src/game/scene.test.ts <<'TS'
+export const label = 'MAXIMUM_SHARE is asserted elsewhere';
+export const template = `and MAXIMUM_SHARE here`;
+TS
+run_check
+assert_red '#447: a @test-facing export named only inside a string of a test is dead'
+
+# Green: the same export, actually used — a property access through a
+# namespace import counts, because it is an identifier the code refers to.
+new_fixture
+write apps/web/src/main.tsx <<'TS'
+import { buildScene } from './game/scene';
+buildScene();
+TS
+write apps/web/src/game/scene.ts <<'TS'
+export function buildScene(): void {}
+/** @test-facing a bound scene.test.ts holds the composition to. */
+export const MAXIMUM_SHARE = 0.5;
+TS
+write apps/web/src/game/scene.test.ts <<'TS'
+import * as scene from './scene';
+void scene.MAXIMUM_SHARE;
+TS
+run_check
+assert_green '#447: a @test-facing export read through a namespace import is held'
+
+# Red: held through another tagged export ONLY by that export's doc comment.
+new_fixture
+write apps/web/src/main.tsx <<'TS'
+import { buildScene } from './game/scene';
+buildScene();
+TS
+write apps/web/src/game/scene.ts <<'TS'
+export function buildScene(): void {}
+/** @test-facing the composition's input. */
+export const RIDER_HEIGHT = 1.8;
+/**
+ * Built from RIDER_HEIGHT once, and not any more.
+ *
+ * @test-facing asserted in scene.test.ts.
+ */
+export function riderShare(): number {
+  return 0.45; // was RIDER_HEIGHT / 4
+}
+TS
+write apps/web/src/game/scene.test.ts <<'TS'
+import { riderShare } from './scene';
+riderShare();
+TS
+run_check
+assert_red '#447: a comment in a held export does not hold another up'
+assert_says '#447: the input is reported' '`RIDER_HEIGHT` is marked `@test-facing`'
+
 printf '\n%d passed, %d failed\n' "${pass}" "${fail}"
 [ "${fail}" -eq 0 ]

@@ -19,6 +19,7 @@ import type { CueName, CueOutput } from './audio-port';
 
 export type RecordedCall =
   | { readonly kind: 'resume' }
+  | { readonly kind: 'suspend' }
   | { readonly kind: 'startTone'; readonly hz: number; readonly gain: number }
   | { readonly kind: 'setTone'; readonly hz: number; readonly gain: number }
   | { readonly kind: 'stopTone' }
@@ -52,6 +53,10 @@ export function recordingOutput(): RecordingOutput {
       output.running = true;
     },
     isRunning: () => output.running,
+    suspend: () => {
+      output.calls.push({ kind: 'suspend' });
+      output.running = false;
+    },
     startTone: (hz, gain) => {
       output.calls.push({ kind: 'startTone', hz, gain });
       output.sounding += 1;

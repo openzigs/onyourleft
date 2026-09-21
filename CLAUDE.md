@@ -962,7 +962,7 @@ bash scripts/check-a11y-suite.test.sh
 pnpm run check:wiring
 
 # Its own suite. Fixture-driven; the count is what the run prints and it ages —
-# 86 as of #406, and the line below said 81 until then.
+# 115 as of #447, 86 as of #406, and the line below said 81 until then.
 #
 # ⚠️ Since #406 the fixture builder **reads `WATCHED_PREFIXES` out of the
 # checker** rather than naming the directories itself, which is the move
@@ -2340,6 +2340,18 @@ beside the watched count — read them off the run, because they age. ⚠️ The
 **re-labelling under a stricter rule**, not by watching less: `WATCHED_PREFIXES` and the seam are
 unchanged, and the mutation that honours `@test-facing` whether or not a test reads it turns five
 fixture cases red.
+
+⚠️ **"Reads" means an identifier in the parsed code since
+[#447](https://github.com/openzigs/onyourleft/issues/447), and until then it meant the name
+appearing anywhere in the file's text** — so a `@test-facing` export mentioned only in a comment of
+a test, or inside a string, was held alive by a sentence. `check-wiring.mjs` §`identifiersIn` walks
+the TypeScript parser's own tree, which carries no comment and no string contents, and the same
+applies to a held export holding up another: a mention in its doc comment no longer counts.
+Measured on this tree: the held count is **22** either way, so nothing here was being held up by a
+comment alone. What it still cannot tell is WHICH declaration a name refers to — a test's own local
+of the same name holds the export alive — and that is §Limits' collision, stated for `WIRE002`
+already. Reverting `identifiersIn` to a match over the file's full text turns five fixture cases
+red.
 
 ⚠️ **The tag has to OPEN a line to be a tag, and until
 [#292](https://github.com/openzigs/onyourleft/issues/292) it did not have to** — a reviewer who

@@ -168,6 +168,18 @@ export function WorkoutPanel({
   // place. (The END of a workout needs no line of its own: the effect above
   // then has no running workout and silences the tone.)
   useEffect(() => () => cues.end(), [cues]);
+  // #447: the END of a workout, seen from here, lets the platform stop running
+  // the audio — `audio-port.ts` §`suspend` weighs it. Only on the transition
+  // from a workout to none (or to finished), never on unmount: a rider who
+  // leaves this screen mid-workout still has a workout running, and `rejoin`
+  // relies on the context being awake when they come back. The game cannot be
+  // riding meanwhile — it is another route, and this panel is mounted.
+  const active = workout !== undefined && workout.status !== 'finished';
+  const wasActive = useRef(active);
+  useEffect(() => {
+    if (wasActive.current && !active) cues.release();
+    wasActive.current = active;
+  }, [cues, active]);
 
   function changeSound(next: CuePreference): void {
     setSound(next);

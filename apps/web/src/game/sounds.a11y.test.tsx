@@ -49,6 +49,7 @@ import { CUES_STORAGE_KEY, DEFAULT_CUES } from './cue-preference';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './hud/announce-preference';
 import type { GameRenderer } from './port';
+import { gameTrainerFrom, type GameTrainerPort, type GradientTrainer } from './trainer-port';
 
 function flatRoute(): RidableRoute {
   const points: RoutePoint[] = [];
@@ -265,6 +266,63 @@ describe('the game — #400', () => {
   });
 });
 
+describe('the audio may stop once nothing is riding — #447', () => {
+  async function openGame(trainer?: GameTrainerPort): Promise<void> {
+    mounted = await mount(
+      <GameView
+        port={PORT}
+        renderer={() => Promise.resolve(RENDERER)}
+        now={() => nowMs}
+        sounds={output}
+        {...(trainer === undefined ? {} : { trainer })}
+      />,
+    );
+    await settle();
+  }
+
+  it('suspends the audio when a game ride ends, and the next press on Ride resumes it', async () => {
+    chooseSounds();
+    await openGame();
+    await press(button('Ride '));
+    expect(output.count('suspend')).toBe(0);
+    await press(button('End ride'));
+    expect(output.calls.at(-1)).toEqual({ kind: 'suspend' });
+
+    // The next ride's gesture is untouched: its press resumes, first thing.
+    const before = output.calls.length;
+    await press(button('Ride '));
+    expect(output.calls[before]).toEqual({ kind: 'resume' });
+  });
+
+  it('does NOT suspend under a workout that is still running on the Ride screen', async () => {
+    // A workout holds the trainer: `rejoin` will look for a context that is
+    // still awake when the rider goes back to it.
+    const workoutOwnsIt: GameTrainerPort = {
+      readTrainer: () =>
+        gameTrainerFrom(
+          { paired: true, controllable: true, canSimulate: true, hasControl: true },
+          {
+            setSimulationParameters: () => Promise.resolve(),
+            letGo: () => Promise.resolve({ kind: 'stopped' as const }),
+          } satisfies GradientTrainer,
+          true,
+        ),
+    };
+    chooseSounds();
+    await openGame(workoutOwnsIt);
+    await press(button('Ride '));
+    await press(button('End ride'));
+    expect(output.count('suspend')).toBe(0);
+  });
+
+  it('makes no call for a rider who did not turn sounds on, ride ended or not', async () => {
+    await openGame();
+    await press(button('Ride '));
+    await press(button('End ride'));
+    expect(output.calls).toEqual([]);
+  });
+});
+
 describe('a workout — #400', () => {
   const ATHLETE = toAthleteId('athlete-a');
   const blocks: readonly WorkoutBlock[] = [
@@ -380,6 +438,22 @@ describe('a workout — #400', () => {
     mounted = undefined;
     expect(output.sounding).toBe(0);
     expect(output.calls.at(-1)).toEqual({ kind: 'stopTone' });
+    // #447: and does NOT suspend — the workout is still running, and the
+    // return below relies on the audio being awake.
+    expect(output.count('suspend')).toBe(0);
+  });
+
+  it('suspends the audio when the workout ENDS — #447', async () => {
+    chooseSounds();
+    await show(undefined, 150);
+    await press(button('Ride Sweet spot'));
+    await show(riding(), 150);
+    await show(riding({ status: 'paused' }), 150);
+    expect(output.count('suspend'), 'a pause is not an end').toBe(0);
+    await show(riding({ status: 'finished' }), 150);
+    expect(output.count('suspend')).toBe(1);
+    await show(undefined, 150);
+    expect(output.count('suspend'), 'one end, one suspend').toBe(1);
   });
 
   it('picks the tone back up when the rider returns mid-workout, with no press and no resume', async () => {

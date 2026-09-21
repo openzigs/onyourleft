@@ -189,6 +189,25 @@ export class RideCues {
     this.#begun = false;
   }
 
+  /**
+   * {@link end}, and then let the platform stop running the audio — #447.
+   *
+   * ⚠️ **Only when no ride and no workout is running**, which the CALLER
+   * knows and this class does not: `WorkoutPanel` when its workout ends, and
+   * `GameView` when a ride ends with no workout holding the trainer. A panel
+   * that merely unmounts mid-workout calls {@link end}, never this — the
+   * workout is still running and {@link rejoin} relies on the context still
+   * being awake when the rider comes back. @see CueOutput.suspend
+   *
+   * Only for a ride that BEGAN its sounds: a rider who never turned them on
+   * gets no call on the port at all, which #400 pins.
+   */
+  release(): void {
+    const began = this.#begun;
+    this.end();
+    if (began) this.#output.suspend();
+  }
+
   #audible(): boolean {
     return this.#begun && this.#preference.enabled && !this.#preference.muted;
   }

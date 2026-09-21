@@ -426,6 +426,7 @@ I12 checks both.
 | I10 | End the workout, then end the ride | The tone **stops** with the workout, and nothing is left sounding |
 | I11 | Start a second workout straight after | **One** tone, not two layered on each other |
 | I12 | Mid-workout with the tone sounding, open **Routes**, wait 10 s, return to **Ride**. Then repeat with the screen locked for 30 s while away | The first time the tone **returns on its own**. The second, record whether it returned; if not, pressing **Mute sounds** twice brings it back |
+| I13 | ([#447](https://github.com/openzigs/onyourleft/issues/447)) End a workout, then play music from another app for 30 s, then start a second workout straight away | The music is **not** interrupted or ducked after the first workout ends (the app has let the audio stop), and the second workout's tone **is** heard from its first press — the press on *Ride* wakes it |
 
 ### I results
 
@@ -443,6 +444,7 @@ I12 checks both.
 | I10 | | | |
 | I11 | | | |
 | I12 | | | |
+| I13 | | | |
 
 **Could the rider tell the three sounds apart while riding hard? In their words:**
 
