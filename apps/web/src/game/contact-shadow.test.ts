@@ -12,7 +12,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { BICYCLE_LENGTH_METRES, RIDER_HEIGHT_METRES } from './bicycle';
+import { BICYCLE_FRONT_METRES, BICYCLE_LENGTH_METRES, RIDER_HEIGHT_METRES } from './bicycle';
 import {
   CASTS_CONTACT_SHADOW,
   CONTACT_SHADOW_DARKNESS,
@@ -35,10 +35,15 @@ const marker = (kind: RiderMarker['kind'], x = 0, z = 0): RiderMarker => ({
   headingZ: 1,
 });
 
-/** A sun 60° up, due south-east of the rider in the corridor's frame. */
+/**
+ * A sun 60° up, at an azimuth of 150°. ⚠️ Deliberately NOT `world.ts`'s 135°:
+ * at 135° the east and north components are equal in size, so a mutation that
+ * flips only one of them leaves the offset exactly perpendicular to the sun
+ * and the "away from the sun" assertion passing — measured, not guessed.
+ */
 const SUN = (() => {
   const elevation = (60 * Math.PI) / 180;
-  const azimuth = (135 * Math.PI) / 180;
+  const azimuth = (150 * Math.PI) / 180;
   return {
     x: Math.cos(elevation) * Math.sin(azimuth),
     y: Math.sin(elevation),
@@ -71,11 +76,13 @@ describe('where it lies — from the one sun `world.ts` already has', () => {
     const offsetX = into.x - 0;
     const offsetZ = into.z - 0;
     expect(offsetX * SUN.x + offsetZ * SUN.z).toBeLessThan(0);
-    // …by `h / tan(elevation)` for h = half the rider, give or take the
-    // bicycle's own middle, which is a centimetre ahead of the marker.
-    const horizontal = Math.hypot(SUN.x, SUN.z);
-    const expected = ((RIDER_HEIGHT_METRES / 2) * horizontal) / SUN.y;
-    expect(Math.hypot(offsetX, offsetZ)).toBeCloseTo(expected, 1);
+    // …exactly: the shadow of the point half the rider up, `h / tan(elev)`
+    // along the sun's horizontal direction reversed, from the bicycle's own
+    // middle — which is a centimetre ahead of the marker, along its heading.
+    const middle = BICYCLE_FRONT_METRES - BICYCLE_LENGTH_METRES / 2;
+    const h = RIDER_HEIGHT_METRES / 2;
+    expect(into.x).toBeCloseTo((-SUN.x / SUN.y) * h, 9);
+    expect(into.z).toBeCloseTo(middle + (-SUN.z / SUN.y) * h, 9);
   });
 
   it('follows the sun: a different route’s sun puts it somewhere else', () => {
