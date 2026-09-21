@@ -526,8 +526,15 @@ function markSlotCount(spanMetres: number): number {
  * array and produces `NaN` vertices. `NaN` in a vertex buffer does not throw; it
  * silently removes the triangle, which is the kind of rendering bug that gets
  * diagnosed as "the road flickers".
+ *
+ * ⚠️ **Exported since #458, and the export is the whole of the no-crack
+ * guarantee.** `landform.ts` builds the ground beside the road from the SAME
+ * centreline and these SAME normals, so its innermost column lands on the
+ * road's outermost one to the bit — at distance 0, across a loop's wrap and
+ * everywhere between — rather than on a second calculation that agrees with
+ * this one to a tolerance. #440 is what a second calculation cost.
  */
-function ribbonNormals(centre: readonly CorridorPoint[]): Float64Array {
+export function ribbonNormals(centre: readonly CorridorPoint[]): Float64Array {
   const normals = new Float64Array(centre.length * 2);
   let normalX = 1;
   let normalZ = 0;

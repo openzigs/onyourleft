@@ -38,6 +38,7 @@
  * is not the reduction threshold.
  */
 
+import { TERRAIN_BANDS } from './landform';
 import { SCATTER_MAX_ITEMS } from './scatter';
 import { MAXIMUM_SCENERY_VARIANTS } from './scenery-models';
 
@@ -214,6 +215,34 @@ export interface QualitySettings {
    *   part of them.
    */
   readonly riderShadows: 'contact' | 'map' | 'none';
+  /**
+   * How many bands of ground either side of the road are drawn, innermost
+   * first — #458. `landform.ts` §`TERRAIN_BANDS` is the most there are.
+   *
+   * ⚠️ **The ground is the largest fill in the frame since #458**, which is why
+   * it is on the ladder at all: the flat quad it replaced was two triangles,
+   * and a landform out to 420 m either side of 460 m of road is about two
+   * thousand, lit, most of them far away. What goes first is the OUTSIDE —
+   * the bands beyond 300 m, and then beyond 200 m and 135 m — which is the
+   * ground `world.ts` has already faded most of the way into the horizon
+   * colour, and which the horizon ring's own foot, in that same colour, stands
+   * in for once it is gone. So it goes with the first resolution step, on
+   * {@link scatterItems}' argument: the slice that costs least to look at is
+   * the slice taken first.
+   *
+   * ⚠️ **It never moves a vertex.** The rung shortens a draw range over the
+   * same mesh (`three-renderer.ts` §`TerrainBelt.setBands`), so a tree standing
+   * on the ground stands on the same ground at every rung, and the ground at
+   * the road's edge — the no-crack guarantee — is in every rung's first band.
+   *
+   * ## ⚠️ Provenance — BR-1, and this is not a measurement either
+   *
+   * 12 → 10 → 9 → 8, on the same footing as every figure on this ladder. What
+   * the browser gate measures is the vertex and index counts and the draw
+   * range, and `docs/validation/0002-android-shell-and-game.md` Part V is the
+   * frame time on a phone.
+   */
+  readonly terrainBands: number;
   /** A human-readable name, for the diagnostic line #91 asks to be recorded. */
   readonly label: string;
 }
@@ -239,6 +268,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     // `scenery-models.ts`'s own constant rather than a copy of it, for the
     // reason `scatterItems` above takes `SCATTER_MAX_ITEMS`.
     sceneryVariants: MAXIMUM_SCENERY_VARIANTS,
+    terrainBands: TERRAIN_BANDS,
     shading: 'lit',
     riderShadows: 'contact',
     label: 'full',
@@ -251,6 +281,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     frameCap: 30,
     scatterItems: 160,
     sceneryVariants: 2,
+    terrainBands: 10,
     shading: 'lit',
     riderShadows: 'contact',
     label: 'reduced resolution and scenery',
@@ -260,6 +291,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     frameCap: 24,
     scatterItems: 100,
     sceneryVariants: 1,
+    terrainBands: 9,
     shading: 'lit',
     riderShadows: 'contact',
     label: 'reduced resolution, scenery and frame rate',
@@ -279,6 +311,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     frameCap: 20,
     scatterItems: 60,
     sceneryVariants: 1,
+    terrainBands: 8,
     shading: 'flat',
     riderShadows: 'contact',
     label: 'minimum',

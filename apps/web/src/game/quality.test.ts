@@ -36,6 +36,7 @@ import {
   type QualitySample,
   type QualityState,
 } from './quality';
+import { TERRAIN_BANDS, TERRAIN_COLUMN_OFFSETS } from './landform';
 import { MAXIMUM_SCENERY_VARIANTS } from './scenery-models';
 import { SCATTER_MAX_ITEMS } from './scatter';
 
@@ -377,6 +378,34 @@ describe('the scenery gives up its variety before it gives up its items — #367
       );
     }
     expect(QUALITY_LADDER[QUALITY_LADDER.length - 1]?.sceneryVariants).toBe(1);
+  });
+});
+
+describe('the ground beyond the road is a rung on the ladder — #458', () => {
+  it('draws every band at the target, and never more as the phone gets hotter', () => {
+    expect(qualitySettings(0).terrainBands).toBe(TERRAIN_BANDS);
+    for (let level = 1; level < QUALITY_LADDER.length; level += 1) {
+      expect(QUALITY_LADDER[level]?.terrainBands ?? 0).toBeLessThanOrEqual(
+        QUALITY_LADDER[level - 1]?.terrainBands ?? 0,
+      );
+    }
+  });
+
+  it('gives the far ground up with the first scenery step, and never the road’s edge', () => {
+    // The ordering argument `QualitySettings.terrainBands` makes, as a
+    // property: the first rung to draw less ground is the first to draw less
+    // scenery. And the floor keeps the verge and the relief beside the road —
+    // every band out to 90 m — because the first two are the road's own edge,
+    // and a rung that dropped them would open a crack under the tarmac.
+    const bands = QUALITY_LADDER.map((rung) => rung.terrainBands);
+    const items = QUALITY_LADDER.map((rung) => rung.scatterItems);
+    const firstDrop = (values: readonly number[]) =>
+      values.findIndex((value, at) => at > 0 && value < (values[at - 1] ?? value));
+    expect(firstDrop(bands)).toBe(firstDrop(items));
+    for (const rung of QUALITY_LADDER) {
+      expect(Number.isInteger(rung.terrainBands)).toBe(true);
+      expect(TERRAIN_COLUMN_OFFSETS[rung.terrainBands] ?? 0).toBeGreaterThanOrEqual(90);
+    }
   });
 });
 

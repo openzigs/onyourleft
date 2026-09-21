@@ -1915,6 +1915,51 @@ Sounds **on** (Settings → Sounds). Headphones as in
 
 ---
 
+## Part V — does a climb look like a climb? ([#458](https://github.com/openzigs/onyourleft/issues/458))
+
+Until #458 the ground was one flat quad at the rider's own height that moved with them, so a 10 %
+climb lifted the road off a level world and a descent dived through it. Since #458 the ground either
+side of the road is a **landform** (`apps/web/src/game/landform.ts`): it stands at the height of the
+road beside it, it rises on one side of a climb and falls away on the other (a road cut across a
+hillside), it is **lit**, and it **writes depth** — so a hillside hides what is behind it. A ring of
+hazed hills stands on the horizon. **Heights come from the route and a seeded hash only**; nothing is
+fetched, and the gradient sent to a trainer is unchanged (it comes from the route profile, #362).
+
+⚠️ **What the pinned Chromium measured, and what it cannot.** The browser gate reads a height off
+the drawing buffer by occlusion and publishes the landform's cost — **1 222 vertices, 6 624 indices,
+one draw call**, and **7 draw calls** for the scenery-free scene where there were 6 (the ring is the
+new one). Each rung of the quality ladder draws fewer bands of ground: 6 624 / 5 520 / 4 968 / 4 416
+indices. A software rasteriser says nothing about a phone's GPU, which is what V3 is for.
+
+| Step | What to do | What to record |
+|---|---|---|
+| V1 | Ride a **real hilly route** — one with a sustained climb of 6 % or more and a descent | Does the climb read as a **climb**: ground rising beside the road ahead, a hillside on one side? Does the descent open a **valley** in front of you? In your words |
+| V2 | On the same route, watch the edge of the road for a minute on the climb and on a bend | Any **crack** between the road's edge and the ground — sky or a light line showing through? Any ground **over** the road on a bend? (Neither should happen: the ground is built on the road's own edge) |
+| V3 | 12 s of riding at the target rung, the `dumpsys` block from Part T | Frame times with the landform on |
+| V4 | Look at the horizon on a flat stretch | Are there hills on the horizon, or a hard line where the near ground ends? |
+| V5 | Ride past the same stretch on lap two of a loop | The same hills and hillsides in the same places |
+
+### V results
+
+| | V3 |
+|---|--:|
+| Total frames rendered | |
+| Janky frames (legacy, > 16 ms) | |
+| Frame time 50th / 90th | |
+| **GPU time 50th / 90th** | |
+
+**Does a climb read as a climb, and a descent as a valley (V1)?** ______________
+
+**Any crack at the road's edge, or ground over the road (V2)?** ______________
+
+**Hills on the horizon, or a hard edge (V4)?** ______________
+
+**The same place on lap two (V5)?** ______________
+
+**Route ridden:** ______________  **Phone (OEM, model, Android):** ______________  **Build:** ______________
+
+---
+
 ## After the session
 
 1. **Fill the tables in this file and commit it.** An empty table in `main` is the honest state; a

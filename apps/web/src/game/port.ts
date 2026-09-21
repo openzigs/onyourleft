@@ -34,6 +34,7 @@
  * hardware, and it is recorded as outstanding in `README.md` beside this file.
  */
 
+import type { HorizonRelief, TerrainMesh } from './landform';
 import type { QualitySettings } from './quality';
 import type { ScatterItem } from './scatter';
 import type { RoadCorridor } from './terrain';
@@ -177,6 +178,25 @@ export interface SceneFrame {
    * buffer rather than from this sentence.
    */
   readonly scatter: readonly ScatterItem[];
+  /**
+   * The ground either side of the road, and the hills on the horizon — #458.
+   *
+   * ⚠️ **It replaced a flat quad the renderer drew by itself**, so it is the
+   * first time the ground has crossed this seam at all: a quad at the rider's
+   * height needed nothing from the route, and a landform that follows the
+   * route's own gradient needs all of it. Like {@link world} and
+   * {@link scatter}, a field added here that `three-renderer.ts` never read
+   * would pass every jsdom test and change nothing on screen — so
+   * `game.browser.spec.ts` §"the gradient shows beside the road" reads the
+   * drawing buffer back, against the flat quad as its control.
+   */
+  readonly terrain: TerrainFrame;
+}
+
+/** What {@link SceneFrame.terrain} carries. */
+export interface TerrainFrame {
+  readonly mesh: TerrainMesh;
+  readonly horizon: HorizonRelief;
 }
 
 /** A live 3D view. Created by a {@link GameRenderer}, destroyed by its owner. */

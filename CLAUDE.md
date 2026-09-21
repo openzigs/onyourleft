@@ -573,6 +573,27 @@ apps/                 AGPL-3.0-or-later, without exception
                         `RouteProfile.grades` with no new engine, from
                         `plan.ts` §`planProgress`'s WRAPPED position — so lap
                         two's climb is announced and lap one's is not
+    src/game/landform.ts
+                        the ground beside the road (#458) — built from the SAME
+                        centreline and normals as the road, so its innermost
+                        column IS the road's edge (no crack at distance 0 or
+                        across a loop's wrap); the road's own height plus a
+                        seeded, stateless lateral profile and a cross-slope that
+                        follows the gradient, so a climb is a hillside; the three
+                        rules that keep it out of the carriageway (the clear
+                        band, the fold on a bend, the clearance from any other
+                        stretch of road); and the hills on the horizon. ⚠️ **It
+                        replaced a flat quad the renderer drew at the rider's
+                        height, and a reviewer who remembers
+                        `GROUND_RADIUS_METRES` is reading the old file.** The
+                        ground is LIT and WRITES DEPTH since #458;
+                        `three-renderer.ts` §`TerrainBelt` says why both
+    src/game/seeded.ts  the hash every seeded, stateless placement draws from —
+                        moved out of `scatter.ts` by #458, unchanged to the bit
+    src/game/route-fixtures-testing.ts
+                        routes built from arithmetic for the landform, the water
+                        and the settlements to be asserted over — a hill, a
+                        valley, a hairpin, a circuit. Test support, never shipped
     src/game/sensors.ts the four metric states the ride controller reports,
                         mapped to the three things a HUD renders
     src/game/ghost-source.ts
@@ -3266,7 +3287,9 @@ top of an issue **supersedes its body**.
 | What proves the road is still one draw call, and what proves a vertex buffer was re-uploaded at all | `apps/web/browser/game.browser.spec.ts` §"the road reads as a road", §`roadOnDescentPixel` |
 | Where the ground and sky colours came from, and which one of them is physics | `apps/web/src/game/world.ts` §Provenance |
 | Why the fog is solved from the view distance rather than written down, and what its floor costs | `apps/web/src/game/world.ts` §`FOG_OCCLUSION_AT_VIEW_END`, §`MINIMUM_VIEW_END_OCCLUSION` |
-| Why the ground plane writes no depth, and why an unset sky is black | `apps/web/src/game/three-renderer.ts` §`UNSET_COLOUR`, §`#updateWorld` |
+| Why the ground is lit and writes depth since #458 (the flat ground plane before it did neither), and why an unset sky is black | `apps/web/src/game/three-renderer.ts` §`TerrainBelt`, §`UNSET_COLOUR`, §`#updateWorld` |
+| How the ground beside the road follows the route's gradient, where its heights come from, and what keeps it out of the carriageway | `apps/web/src/game/landform.ts`, [#458](https://github.com/openzigs/onyourleft/issues/458) |
+| What proves the ground beside a climb stands above the rider and beside a descent below, with the flat quad as the control | `apps/web/browser/game-harness.ts` §`gradientProbe`, `apps/web/browser/game.browser.spec.ts` §"the gradient shows beside the road" |
 | What proves the world reaches the screen rather than only the frame | `apps/web/browser/game-harness.ts`, `apps/web/browser/game.browser.spec.ts` |
 | Why the rider is a bicycle built from numbers rather than a model somebody downloaded | `apps/web/src/game/bicycle.ts`, [#349](https://github.com/openzigs/onyourleft/issues/349) |
 | What the cranks do when nobody is reporting a cadence, and why that is better than a rate | `apps/web/src/game/bicycle.ts` §`advanceCrank` |

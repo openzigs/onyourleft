@@ -108,6 +108,17 @@ interface GameHarnessResult {
   readonly riderMeanColour: Readonly<Record<string, Pixel>>;
   readonly riderSilhouettePixels: Readonly<Record<string, number>>;
   readonly riderBuriedPixels: number;
+  readonly gradient: {
+    readonly horizonPixels: number;
+    readonly climbBuried: number;
+    readonly climbLifted: number;
+    readonly descentBelow: number;
+    readonly flatClimbBuried: number;
+    readonly flatDescentBelow: number;
+    readonly terrainVertices: number;
+    readonly terrainIndices: number;
+    readonly terrainIndicesByRung: readonly number[];
+  };
   readonly botCrankPixels: number;
   readonly contactShadowPixels: Readonly<Record<string, number>>;
   readonly contactShadowLuminance: Readonly<Record<string, readonly [number, number]>>;
@@ -198,11 +209,12 @@ const CHANNELS = ['red', 'green', 'blue'] as const;
 const RIDER_BOX_TOLERANCE = 0.02;
 
 /**
- * What one frame of the harness route costs, with the scenery taken out: **6**.
+ * What one frame of the harness route costs, with the scenery taken out: **7**.
  *
  * | | calls |
  * |---|--:|
- * | the ground | 1 |
+ * | the ground beside the road, lit — a landform since #458 (was one flat quad) | 1 |
+ * | the hills on the horizon (#458) | 1 |
  * | the road, however many marks and edge lines it carries (#242) | 1 |
  * | every rider's merged body and bicycle, instanced (#349, #368) | 1 |
  * | every rider's crankset, which turns on its own axis (#349, #368) | 1 |
@@ -233,8 +245,15 @@ const RIDER_BOX_TOLERANCE = 0.02;
  * term moved: the road splitting into three meshes and the riders growing a
  * fourth mesh are very different findings and a bare `5` cannot tell them
  * apart.
+ *
+ * ⚠️ **6 → 7 with #458, deliberately.** The flat quad was replaced by the
+ * landform — one call for one call — and the hills on the horizon are the one
+ * that is new: a ring of 48 quads, unfogged, drawn first. What it buys is that
+ * the corridor's ground no longer ends in sky once it runs out, and that a
+ * route has a skyline at all. §"the gradient shows beside the road" publishes
+ * what the landform itself costs in vertices and indices.
  */
-const SCENE_DRAW_CALLS = 1 + 1 + 3 + 1;
+const SCENE_DRAW_CALLS = 1 + 1 + 1 + 3 + 1;
 
 /**
  * The most meshes the scenery belt may ever hold: **12**.
@@ -633,6 +652,69 @@ test.describe('the world #241 derives from the route reaches the screen', () => 
   });
 });
 
+/**
+ * #458 — *"the rider cannot see the gradient"*. `game-harness.ts`
+ * §`gradientProbe` reads a height off the drawing buffer by occlusion, and
+ * publishes the same two measurements over the flat quad's geometry as the
+ * criterion's control.
+ */
+test.describe('the gradient shows beside the road — #458', () => {
+  test('hides a block below the rider’s level beside a climb, and shows one beside a descent', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { gradient } = await harness(harnessRun);
+    const measured = `the hills on the horizon cover ${String(gradient.horizonPixels)} px; climb: buried ${String(gradient.climbBuried)} px, lifted clear ${String(gradient.climbLifted)} px; descent: below the rider ${String(gradient.descentBelow)} px. Over the flat quad: climb ${String(gradient.flatClimbBuried)} px, descent ${String(gradient.flatDescentBelow)} px. The landform: ${String(gradient.terrainVertices)} vertices, ${String(gradient.terrainIndices)} indices; drawn per rung ${gradient.terrainIndicesByRung.join(' / ')}`;
+    testInfo.annotations.push({ type: 'the gradient beside the road', description: measured });
+    console.log(`the gradient beside the road — ${measured}`);
+
+    // Non-vacuity: the block is on screen at that place — lifted clear of the
+    // hillside it is drawn, so the zero below is the hill and not a block that
+    // was never in the frame.
+    expect(gradient.climbLifted).toBeGreaterThan(100);
+    // The ground beside a 10 % climb stands ABOVE the rider's road level: a
+    // block standing from 1.5 m below it to about 0.5 m above is entirely
+    // inside the hillside.
+    expect(gradient.climbBuried).toBe(0);
+    // And beside a 10 % descent it falls BELOW it: a block whose base is 2.5 m
+    // under the rider's road is standing in the air over the valley.
+    expect(gradient.descentBelow).toBeGreaterThan(100);
+
+    // ⚠️ **The control, which the criterion requires**: the flat quad's
+    // geometry — a level plane 0.25 m under the rider — fails the same pair.
+    // On the climb the top of the block stands above that plane and is drawn,
+    // so a flat world cannot hide it…
+    expect(gradient.flatClimbBuried).toBeGreaterThan(0);
+    // …and on the descent the plane is ABOVE most of the block, so it hides
+    // what the landform shows. (The quad as it shipped wrote no depth and would
+    // have drawn this block; the climb half is the one it fails either way.)
+    expect(gradient.flatDescentBelow).toBeLessThan(gradient.descentBelow);
+    const passes = (buried: number, below: number) => buried === 0 && below > 100;
+    expect(passes(gradient.climbBuried, gradient.descentBelow)).toBe(true);
+    expect(passes(gradient.flatClimbBuried, gradient.flatDescentBelow)).toBe(false);
+  });
+
+  test('publishes what the landform costs, and takes its outer bands first down the ladder', async ({
+    harnessRun,
+  }) => {
+    const { gradient } = await harness(harnessRun);
+    // ⚠️ Folded in here (#456's rule: no new harness load, no new case where an
+    // existing one will carry it). The hills on the horizon reach the screen:
+    // against the same ridge sunk below the horizon, they cover some of it.
+    expect(gradient.horizonPixels).toBeGreaterThan(500);
+    // Published rather than bounded, like every GPU cost here — a software
+    // rasteriser says nothing about a phone (validation 0002 Part V).
+    expect(gradient.terrainVertices).toBeGreaterThan(0);
+    const [full, ...lower] = gradient.terrainIndicesByRung;
+    expect(full).toBe(gradient.terrainIndices);
+    let previous = full ?? 0;
+    for (const each of lower) {
+      expect(each).toBeLessThanOrEqual(previous);
+      previous = each;
+    }
+    expect(previous).toBeLessThan(full ?? 0);
+  });
+});
+
 test.describe('the road reads as a road — #242', () => {
   /**
    * ⚠️ **The criterion that catches #240's named defect one layer down.** A
@@ -788,7 +870,12 @@ test.describe('the scenery reaches the screen, and costs one call a kind — #24
     const result = await harness(harnessRun);
 
     expect(result.sceneryColumnFraction).toBeLessThan(0.375);
-    expect(result.sceneryRowFraction).toBeGreaterThan(0.4);
+    // ⚠️ **Inclusive since #458**, and the reason is the region rather than
+    // the scenery: the search starts 40 % up the frame, and since the scenery
+    // stands on the landform the strongest change is a near item whose lower
+    // half runs off the bottom of that region — measured at exactly 0.4, the
+    // region's own first row. A change found there is still inside it.
+    expect(result.sceneryRowFraction).toBeGreaterThanOrEqual(0.4);
     expect(result.sceneryRowFraction).toBeLessThan(0.85);
   });
 

@@ -73,7 +73,14 @@ import type { WorldStyle } from '../src/game/world';
 
 import { sceneFrame } from '../src/game/scene';
 import { corridorOrigin } from '../src/game/terrain';
-import { qualitySettings, RIDER_SHADOW_MAP_RUNG, type QualitySettings } from '../src/game/quality';
+import {
+  QUALITY_LADDER,
+  qualitySettings,
+  RIDER_SHADOW_MAP_RUNG,
+  type QualitySettings,
+} from '../src/game/quality';
+import { hillRoute } from '../src/game/route-fixtures-testing';
+import { VERGE_DROP_METRES } from '../src/game/landform';
 import { loadSceneryModels, threeGameRenderer } from '../src/game/three-renderer';
 import {
   SCATTER_KINDS,
@@ -82,6 +89,26 @@ import {
   type ScatterKind,
 } from '../src/game/scatter';
 import { atStartLine } from '../src/game/simulation';
+
+/** What {@link gradientProbe} publishes — #458. */
+interface GradientMeasurement {
+  /** Pixels the hills on the horizon cover, against the same ridge sunk below it. */
+  readonly horizonPixels: number;
+  /** Pixels a block BELOW the rider's road level changes, 40 m up a 10 % climb. */
+  readonly climbBuried: number;
+  /** The same block lifted clear of that hillside: that it is drawn at all. */
+  readonly climbLifted: number;
+  /** Pixels a block below the rider's road level changes, 40 m down a 10 % descent. */
+  readonly descentBelow: number;
+  /** The climb's buried block again, over the flat quad's geometry. */
+  readonly flatClimbBuried: number;
+  /** The descent's block again, over the flat quad's geometry. */
+  readonly flatDescentBelow: number;
+  /** Vertices and indices the landform uploads, and the indices each rung draws. */
+  readonly terrainVertices: number;
+  readonly terrainIndices: number;
+  readonly terrainIndicesByRung: readonly number[];
+}
 
 /** What {@link shadowMapProbe} publishes. */
 type ShadowMapMeasurement = NonNullable<Window['__oylGameHarness']>['shadowMap'];
@@ -483,6 +510,12 @@ declare global {
        * made the probe see the whole bicycle, and this says by how much.
        */
       readonly riderBuriedPixels: number;
+      /**
+       * #458 — does the ground beside the road show the gradient? A probe
+       * object is drawn beside a 10 % climb and a 10 % descent, and the pixels
+       * it changes are counted. @see gradientProbe
+       */
+      readonly gradient: GradientMeasurement;
       /**
        * Pixels the bot's own cranks move over half a development — #368.
        *
@@ -1087,6 +1120,149 @@ function sceneryCallsAcrossRungs(frame: SceneFrame): readonly number[] {
   });
   return found;
 }
+
+/**
+ * #458's first criterion, read off pixels: *"the ground beside the road is
+ * higher than the rider's road level on the climb and lower on the descent —
+ * with a control: the flat-quad ground must fail the same assertion."*
+ *
+ * ## How a height is read off a picture
+ *
+ * By **occlusion**, which is the one thing about a height a drawing buffer
+ * states outright. A block is stood 14 m to the left of the road and 40 m
+ * ahead of the rider, and the pixels it changes are counted:
+ *
+ * - **On the climb** it stands from 1.5 m below the rider's road level to about
+ *   half a metre above it, and it is hidden — so the ground there is higher
+ *   than the rider's road. The
+ *   same block lifted 5 m clear of that hillside is drawn, which is what says
+ *   the zero is the hill and not a block that was never on screen.
+ * - **On the descent** its base is 2.5 m BELOW the rider's road level and it
+ *   is drawn — so the ground there is lower still.
+ *
+ * ## The control, and what it is
+ *
+ * The same two blocks over **the flat quad's geometry**: a level plane 0.25 m
+ * under the rider, put through the same renderer in place of the landform.
+ * On the climb the block's top stands above it and is drawn, and on the
+ * descent the plane hides what the landform shows — so the pair of
+ * assertions fails, which is the criterion's control. Measured: 87 px and
+ * 0 px, against the landform's 0 px and 266 px. ⚠️ The quad as it
+ * shipped also wrote NO depth, which could only make it hide less, so a plane
+ * that does write depth is the stronger version of it rather than a weaker
+ * one.
+ *
+ * On its own canvas, for {@link sceneryIndicesByKind}'s reason.
+ */
+function gradientProbe(): GradientMeasurement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 600;
+  canvas.height = 400;
+  const view = threeGameRenderer.create(canvas, NO_RIDER_SHADOWS);
+  view.resize(600, 400);
+  const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+  const profile = hillRoute();
+  const origin = corridorOrigin(profile);
+  const start = atStartLine(profile);
+  const riding = (distance: number): SceneFrame => {
+    const frame = sceneFrame({
+      profile,
+      origin,
+      state: { ...start, ride: { ...start.ride, distance: metres(distance) } },
+    });
+    return { ...frame, markers: [], scatter: [] };
+  };
+  /** The flat quad's geometry: every vertex of the landform on a level plane under the rider. */
+  const flattened = (frame: SceneFrame): SceneFrame => {
+    const vertices = Float32Array.from(frame.terrain.mesh.vertices);
+    const normals = new Float32Array(vertices.length);
+    for (let at = 0; at < vertices.length; at += 3) {
+      vertices[at + 1] = frame.camera.y - 0.25;
+      normals[at + 1] = 1;
+    }
+    return {
+      ...frame,
+      terrain: { ...frame.terrain, mesh: { ...frame.terrain.mesh, vertices, normals } },
+    };
+  };
+  /** A block 14 m left of the road, 40 m up it, its base `base` metres from the rider's road. */
+  const block = (frame: SceneFrame, base: number): ScatterItem => ({
+    ...placedAhead(frame.camera, 'building', 0, 40, -14),
+    y: frame.camera.y + base,
+    scale: 0.35,
+  });
+  const changed = (frame: SceneFrame, base: number): number => {
+    if (gl === null) return 0;
+    const bare = frame;
+    const withBlock: SceneFrame = { ...frame, scatter: [block(frame, base)] };
+    view.render(bare);
+    view.render(bare);
+    const absent = readRegion(gl, 0, 0, canvas.width, canvas.height);
+    view.render(withBlock);
+    view.render(withBlock);
+    const present = readRegion(gl, 0, 0, canvas.width, canvas.height);
+    return shadingAcross(present, absent).pixels;
+  };
+  // 100 m into the climb and 100 m into the descent: 40 m on is still on it.
+  const climb = riding(400);
+  const descent = riding(900);
+  // The hills on the horizon, by difference: the same level frame with the
+  // ridge sunk to its own foot, which is below the horizon, draws none.
+  const level = riding(100);
+  const sunk: SceneFrame = {
+    ...level,
+    terrain: {
+      ...level.terrain,
+      horizon: {
+        ...level.terrain.horizon,
+        tops: new Float32Array(level.terrain.horizon.tops.length).fill(level.terrain.horizon.foot),
+      },
+    },
+  };
+  let horizonPixels = 0;
+  if (gl !== null) {
+    view.render(sunk);
+    view.render(sunk);
+    const without = readRegion(gl, 0, 0, canvas.width, canvas.height);
+    view.render(level);
+    view.render(level);
+    horizonPixels = shadingAcross(
+      readRegion(gl, 0, 0, canvas.width, canvas.height),
+      without,
+    ).pixels;
+  }
+  const measured = {
+    horizonPixels,
+    climbBuried: changed(climb, -1.5),
+    climbLifted: changed(climb, 9),
+    descentBelow: changed(descent, -2.5),
+    flatClimbBuried: changed(flattened(climb), -1.5),
+    flatDescentBelow: changed(flattened(descent), -2.5),
+    terrainVertices: climb.terrain.mesh.vertices.length / 3,
+    terrainIndices: climb.terrain.mesh.indices.length,
+    terrainIndicesByRung: QUALITY_LADDER.map((rung) =>
+      Math.min(
+        climb.terrain.mesh.indices.length,
+        rung.terrainBands * climb.terrain.mesh.indicesPerBand,
+      ),
+    ),
+  };
+  view.destroy();
+  return measured;
+}
+
+/** What {@link gradientProbe} reports when it did not run. */
+const NO_GRADIENT: GradientMeasurement = {
+  horizonPixels: 0,
+  climbBuried: -1,
+  climbLifted: 0,
+  descentBelow: 0,
+  flatClimbBuried: -1,
+  flatDescentBelow: 0,
+  terrainVertices: 0,
+  terrainIndices: 0,
+  terrainIndicesByRung: [],
+};
 
 /** What one rider's silhouette looks like, drawn alone. @see colourProbes */
 interface RiderProbe {
@@ -1933,6 +2109,7 @@ async function run(): Promise<void> {
       riderMeanColour: {},
       riderSilhouettePixels: {},
       riderBuriedPixels: 0,
+      gradient: NO_GRADIENT,
       botCrankPixels: 0,
       contactShadowPixels: {},
       contactShadowLuminance: {},
@@ -2005,6 +2182,7 @@ async function run(): Promise<void> {
   const riderMeanColour: Record<string, Pixel> = {};
   const riderSilhouettePixels: Record<string, number> = {};
   let riderBuriedPixels = 0;
+  let gradient: GradientMeasurement = NO_GRADIENT;
   let botCrankPixels = 0;
   let contactShadowPixels: Record<string, number> = {};
   let contactShadowLuminance: Record<string, readonly [number, number]> = {};
@@ -2125,10 +2303,13 @@ async function run(): Promise<void> {
           // fraction, because it is the one with no geometry to aim at: 5 %
           // down a frame whose horizon is about half way down it.
           skyPixel = readPixel(gl, canvas.width * 0.5, canvas.height * 0.95);
+          const beside = onTheRoad(frame, GROUND_PROBE.ahead, GROUND_PROBE.across);
           const ground = pixelFor(frame, canvas, {
-            ...onTheRoad(frame, GROUND_PROBE.ahead, GROUND_PROBE.across),
-            // The ground is a flat plane at the RIDER's height, not the road's.
-            y: frame.camera.y - 0.25,
+            ...beside,
+            // ⚠️ Since #458 the ground is the ROAD's height less the verge
+            // drop, at the probe's own distance up the road — it used to be a
+            // flat plane at the RIDER's height, and this read `camera.y`.
+            y: beside.y - VERGE_DROP_METRES,
           });
           groundPixel = readPixel(gl, ground.x, ground.y);
           const near = pixelFor(
@@ -2504,6 +2685,8 @@ async function run(): Promise<void> {
         shadowMap = shadowMapProbe(probeFrame);
       }
     }
+    // #458, on a canvas of its own. @see gradientProbe
+    gradient = gradientProbe();
     // #424, on canvases of their own — @see riderExtent. 16 : 9 is the
     // criterion's own frame; 10 : 16 is a tablet held upright.
     riderFrame = { landscape: riderExtent(640, 360), portrait: riderExtent(400, 640) };
@@ -2575,6 +2758,7 @@ async function run(): Promise<void> {
     riderMeanColour,
     riderSilhouettePixels,
     riderBuriedPixels,
+    gradient,
     botCrankPixels,
     contactShadowPixels,
     contactShadowLuminance,

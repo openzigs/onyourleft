@@ -137,6 +137,26 @@ function serialise(item: ScatterItem): string {
   ].join(' ');
 }
 
+/**
+ * One item IN PLAN — everything {@link serialise} records but its height — #458.
+ *
+ * ⚠️ **Split out because #458 moves the heights and nothing else.** Scenery
+ * stood at the ROAD's height beside it until then, and it stands on the
+ * terrain since; a digest over `y` cannot tell "the trees moved" from "the
+ * ground under them did". This one can, and it was taken on `main` before a
+ * line of #458 was written, which is what makes it evidence about #458.
+ */
+function serialisePlan(item: ScatterItem): string {
+  return [
+    item.kind,
+    item.x.toFixed(3),
+    item.z.toFixed(3),
+    item.rotation.toFixed(3),
+    item.scale.toFixed(3),
+    String(item.variant),
+  ].join(' ');
+}
+
 /** FNV-1a, 32-bit, as eight hex digits. Short enough to read in a diff. */
 function digest(lines: readonly string[]): string {
   let hash = 0x811c9dc5;
@@ -192,7 +212,20 @@ describe('the arrangement a route produces — #341', () => {
     // model swap, renderer change or refactor that says it leaves placement
     // alone is measured against it, and D-4's *"a different arrangement is a
     // defect"* applies to that one exactly as it applied to #341.
-    expect(digest(placed.map(serialise))).toBe('e80be45a');
+    //
+    // ⚠️ **Regenerated for #458, and ONLY the heights moved** — `e80be45a`
+    // before it. The scenery stands on the landform since #458 rather than at
+    // the road's height beside it, so every `y` in this digest changed and no
+    // `x`, `z`, rotation, scale or variant did: the plan digest below was taken
+    // on `main` before #458 and is unmoved by it, which is the evidence this
+    // one cannot give about its own change.
+    expect(digest(placed.map(serialise))).toBe('058b273e');
+  });
+
+  it('places the same scenery IN PLAN as it did before the terrain — #458', () => {
+    // Taken on `main` at 45178a0, before a line of #458 was written. #458
+    // moved every height (the digest above) and this must not move with it.
+    expect(digest(placed.map(serialisePlan))).toBe('3a7a24e4');
   });
 
   it('places a world at all, so the digest is not over an empty sweep', () => {
@@ -270,14 +303,18 @@ describe('the arrangement a route produces — #341', () => {
     const middle = placed[Math.floor(placed.length / 2)];
     const last = placed[placed.length - 1];
 
+    // ⚠️ `0.000` before #458: the first building stood at the road's height
+    // and stands 0.25 m below it now, at the foot of the verge, which is where
+    // the flat quad under it always was — so it is the one item whose ground
+    // did not actually move.
     expect(first === undefined ? '' : serialise(first)).toBe(
-      'building 78.305 0.000 224.990 0.895 1.142',
+      'building 78.305 -0.250 224.990 0.895 1.142',
     );
     expect(middle === undefined ? '' : serialise(middle)).toBe(
-      'tree-conifer 698.203 17.759 295.920 1.009 0.837',
+      'tree-conifer 698.203 18.008 295.920 1.009 0.837',
     );
     expect(last === undefined ? '' : serialise(last)).toBe(
-      'tree-conifer 696.706 42.691 -291.975 0.240 1.178',
+      'tree-conifer 696.706 42.982 -291.975 0.240 1.178',
     );
   });
 });

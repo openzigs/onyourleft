@@ -24,6 +24,7 @@
 import { ghostDistanceAt, ghostHasFinished, type GhostTrack } from '@onyourleft/domain';
 
 import { simulatedCrankAngle } from './bicycle';
+import { horizonRelief, terrainCorridor } from './landform';
 import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES } from './camera';
 import type { CameraPose, RiderMarker, SceneFrame } from './port';
 import { SCATTER_MAX_ITEMS, scatterAt, scatterSeed, type ScatterItem } from './scatter';
@@ -99,6 +100,11 @@ export interface SceneInput {
 export function sceneFrame(input: SceneInput): SceneFrame {
   const riderDistance: number = input.riderDistance ?? input.state.ride.distance;
   const corridor = roadCorridor(input.profile, input.origin, riderDistance);
+  // O(1), and recomputed per frame for the reason `worldStyle` is: a cache
+  // keyed on a profile is a second source of truth a route change has to
+  // remember to clear. One seed for the scenery and the ground under it, so a
+  // tree and the hillside it stands on are hashed from the same route.
+  const seed = scatterSeed(input.profile);
   return {
     corridor,
     camera: cameraPose(corridor, riderDistance),
@@ -108,7 +114,16 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     // keyed on a profile is a second source of truth that a route change has
     // to remember to clear. `world.ts` says what the bound buys.
     world: worldStyle(input.profile),
-    scatter: scatter(corridor, input, riderDistance),
+    scatter: scatter(corridor, input, riderDistance, seed),
+    // #458. Built from the corridor just built, so the ground's innermost
+    // column is the road's outermost one — `landform.ts` says why that is the
+    // whole of the no-crack guarantee. Every band, whatever the rung: the
+    // renderer draws a prefix of them (`three-renderer.ts` §`TerrainBelt`), so
+    // the rung moves no vertex and the scenery stands on the same ground.
+    terrain: {
+      mesh: terrainCorridor(input.profile, corridor, seed),
+      horizon: horizonRelief(input.profile, input.origin, seed),
+    },
   };
 }
 
@@ -127,20 +142,14 @@ function scatter(
   corridor: RoadCorridor,
   input: SceneInput,
   riderDistance: number,
+  seed: number,
 ): readonly ScatterItem[] {
   const first = corridor.centre[0] as CorridorPoint;
   const last = corridor.centre[corridor.centre.length - 1] as CorridorPoint;
-  return scatterAt(
-    input.profile,
-    input.origin,
-    // O(1), and recomputed per frame for the reason `worldStyle` is: a cache
-    // keyed on a profile is a second source of truth a route change has to
-    // remember to clear.
-    scatterSeed(input.profile),
-    first.along,
-    last.along,
-    { maxItems: input.scatterItems ?? SCATTER_MAX_ITEMS, riderMetres: riderDistance },
-  );
+  return scatterAt(input.profile, input.origin, seed, first.along, last.along, {
+    maxItems: input.scatterItems ?? SCATTER_MAX_ITEMS,
+    riderMetres: riderDistance,
+  });
 }
 
 /**

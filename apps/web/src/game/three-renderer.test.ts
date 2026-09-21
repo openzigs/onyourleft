@@ -51,7 +51,8 @@ import {
 
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
-import { corridorOrigin } from './terrain';
+import { corridorOrigin, roadCorridor } from './terrain';
+import { horizonRelief, terrainCorridor } from './landform';
 
 import { QUALITY_LADDER, qualitySettings } from './quality';
 import {
@@ -1475,6 +1476,16 @@ function frameWithScatter(): SceneFrame {
       sun: worldStyle(routeProfile(flatRouteAt(120))).sun,
     },
     scatter: [item({ kind: 'tree-conifer', z: 30 }), item({ kind: 'rock', z: 60 })],
+    // #458. A real landform, from a real corridor, so this frame is one the
+    // program can produce rather than one with the ground left out.
+    terrain: (() => {
+      const profile = routeProfile(flatRouteAt(120));
+      const origin = corridorOrigin(profile);
+      return {
+        mesh: terrainCorridor(profile, roadCorridor(profile, origin, 100), 7),
+        horizon: horizonRelief(profile, origin, 7),
+      };
+    })(),
   };
 }
 
