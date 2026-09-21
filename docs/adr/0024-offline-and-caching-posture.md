@@ -304,3 +304,35 @@ with.
 | [create-react-app#3613](https://github.com/react/create-react-app/issues/3613) | 2026-09-19 | D-3 — the stale-chunk failure mode |
 | [Workbox — handling service worker updates](https://developer.chrome.com/docs/workbox/handling-service-worker-updates) | 2026-09-19 | D-3 — the `SKIP_WAITING` / `controllerchange` / reload sequence |
 | `scripts/check-repo-rules.sh` §`ASSET_LICENCES_*` | 2026-09-19 | D-5 — `AGPL-3.0-or-later` is on none of the three lists |
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-09-21** — §Consequences' *"A first visit downloads more … and is not yet measured"* is
+  no longer wholly true: its first-visit half was measured for
+  [#418](https://github.com/openzigs/onyourleft/issues/418), in the lockfile-pinned headless
+  Chromium on a developer machine and **not on a phone**, so the phone-plan half still stands.
+  **Method.** A cold first visit per run (a fresh browser context: no cache, no worker); the build
+  served by a local static server with **one shared throttled downlink** — so the page and the
+  service worker's precache genuinely contend, which DevTools' per-target network emulation does
+  not model — at 1.6 Mb/s down and 150 ms per request (DevTools' "Slow 4G" figures), gzip on text
+  as a CDN would send it, and the CPU throttled 4× over CDP; FCP from the `paint` timeline,
+  offline-ready as `navigator.serviceWorker.ready`; nine runs each, median reported. **Figures.**
+  The whole first visit — app plus D-2's precache — is **1,363,395 bytes on the wire** (the
+  precache is 27 files, 3.09 MiB uncompressed). Median first contentful paint was **1804 ms** as
+  shipped, **1700 ms** with the first render no longer waiting for `register()` to resolve, and
+  **1688 ms** with registration also deferred to `window.load`; median offline-ready was 7517,
+  7565 and 7574 ms respectively. A second batch comparing the shipped build with the change
+  `main.tsx` now carries gave FCP **1836 → 1708 ms** and offline-ready 7572 → 7482 ms. At 9 Mb/s,
+  40 ms and no CPU throttle every variant but the original painted at 392 ms (the original: 428).
+  **Reading.** The cost on first paint was the `await` of the registration before the first
+  render — one round trip for `sw.js` — and not bandwidth contention from the precache: the entry
+  chunk is fetched before the worker registers and `load` fires before the first paint. Deferring
+  registration to `load` bought 12 ms over not awaiting it, inside the runs' spread, and made the
+  device offline-ready later. So `main.tsx` renders first and still registers at module
+  evaluation; its comments carry these numbers, and the apparatus is described here and in the pull
+  request that closes #418 rather than committed as a gate, because a timing gate on a GPU-less CI runner is
+  the flaky kind.
