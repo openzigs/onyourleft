@@ -1076,7 +1076,7 @@ function releaseLoadedScene(source: Object3D): void {
  * halves of it are deliberately in different files: the elevation band cannot
  * see a colour, and this file must never see a sun constant.
  *
- * @unwired a bound `three-renderer.test.ts` asserts against; nothing in the
+ * @test-facing a bound `three-renderer.test.ts` asserts against; nothing in the
  * client reads it, because every material already holds its own colour.
  */
 export const LIT_COLOURS: readonly number[] = [

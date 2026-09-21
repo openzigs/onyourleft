@@ -67,7 +67,18 @@ import { corridorOrigin } from './terrain';
 import type { GameRenderer, GameView as RendererView } from './port';
 import { NO_SENSORS, type GameSensors } from './sensors';
 import { speedUnit, spokenDistanceUnit } from '../units/format';
-import { announce, INITIAL_ANNOUNCER, type AnnouncerState } from './hud/announce';
+import { announce, INITIAL_ANNOUNCER, remainingFrom, type AnnouncerState } from './hud/announce';
+import { slopeEvent, slopesOf, type Slope, type SlopeAnnounced } from './hud/climb-ahead';
+import type { CueOutput } from './audio-port';
+import { RideCues } from './audio-cues';
+import {
+  DEFAULT_CUES,
+  readCuePreference,
+  writeCuePreference,
+  type CuePreference,
+} from './cue-preference';
+import { SoundControls } from './SoundControls';
+import { sharedCueOutput } from './web-audio';
 import {
   DEFAULT_ANNOUNCEMENTS,
   deviceStorage,
@@ -179,6 +190,13 @@ export interface GameViewProps {
   readonly trainer?: GameTrainerPort | undefined;
   /** Injected so a test can drive the loop without a real animation frame. */
   readonly now?: (() => number) | undefined;
+  /**
+   * Where the ride's non-speech sounds go — #400. The platform's own Web Audio
+   * (`web-audio.ts` §`sharedCueOutput`) unless a test hands in a double; the
+   * default IS the production wiring, so a shell that passes nothing still
+   * sounds, and jsdom — which has no Web Audio — gets a silent no-op.
+   */
+  readonly sounds?: CueOutput | undefined;
   /**
    * Told when a ride takes the screen over, and when it hands it back — #423.
    *
@@ -319,6 +337,26 @@ export function GameView(props: GameViewProps): JSX.Element {
    * ride (#395 decided the device, not the athlete row), off by default.
    */
   const announcementsRef = useRef<AnnouncementPreference>(DEFAULT_ANNOUNCEMENTS);
+  /**
+   * The route's climbs and descents, found once per ride, and the approach
+   * last announced — #399. Refs for `announcerRef`'s reason: the loop reads
+   * them on every frame and must not re-run when they change.
+   */
+  const slopesRef = useRef<readonly Slope[]>([]);
+  const slopeAnnouncedRef = useRef<SlopeAnnounced>(undefined);
+  /**
+   * This ride's sounds — #400. Made inside the *Ride* press, so the audio
+   * context is resumed from a gesture. ⚠️ **Not ended in `teardown`, and that
+   * was measured rather than forgotten**: the game plays only the short
+   * distance sound, which stops by itself, and has no power target for the
+   * continuous tone — so a stop there would be unobservable, and deleting it
+   * left every test green. The tone, which CAN be left sounding, belongs to a
+   * workout, and `WorkoutPanel` stops it.
+   */
+  const cuesRef = useRef<RideCues | undefined>(undefined);
+  /** What the rider chose for sound, read at the start of each ride. */
+  const [sound, setSound] = useState<CuePreference>(DEFAULT_CUES);
+  const soundsOut = props.sounds;
   /** The rider's units, for the spoken distance, read inside the loop. */
   const unitsRef = useRef(units);
   unitsRef.current = units;
@@ -444,6 +482,15 @@ export function GameView(props: GameViewProps): JSX.Element {
       sitting: RidingPosition,
     ): Promise<void> => {
       const profile = route.profile;
+      // ⚠️ #400: FIRST, before the first `await` — this line runs inside the
+      // rider's press on *Ride*, and after an `await` it would not. A browser
+      // refuses audio that starts outside a gesture, silently, so this is
+      // where the audio context is made and resumed or it never sounds.
+      const soundChoice = readCuePreference(deviceStorage());
+      setSound(soundChoice);
+      cuesRef.current?.end();
+      cuesRef.current = new RideCues(soundsOut ?? sharedCueOutput(), soundChoice);
+      cuesRef.current.begin();
       ghostRef.current = ghost && port !== undefined ? await port.loadGhost(route.id) : undefined;
       // ⚠️ **A new ride settles its own result, and this is the only line that
       // makes that true.** `ghost-outcome.ts` returns a settled answer
@@ -460,6 +507,8 @@ export function GameView(props: GameViewProps): JSX.Element {
       announcerRef.current = INITIAL_ANNOUNCER;
       setAnnouncement('');
       announcementsRef.current = readAnnouncementPreference(deviceStorage());
+      slopesRef.current = slopesOf(profile);
+      slopeAnnouncedRef.current = undefined;
       // ⚠️ **Read at the start of the ride and held for its length**, which is
       // what makes "changing your weight mid-session does not rewrite the ride
       // you are on" true by construction rather than by a rule somebody
@@ -511,7 +560,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       setPhase('riding');
       lockRef.current = (await props.screenLock?.acquire()) ?? NO_SCREEN_LOCK;
     },
-    [port, props.screenLock, props.riderMass, props.trainer],
+    [port, props.screenLock, props.riderMass, props.trainer, soundsOut],
   );
 
   // #423. Whether the ride has the screen — @see GameViewProps.onImmersive.
@@ -639,18 +688,33 @@ export function GameView(props: GameViewProps): JSX.Element {
         heartRate: sensors.heartRate,
         units: unitsRef.current,
       });
-      const togo = Number(readings.find((reading) => reading.key === 'remaining')?.value);
+      // #399: "to go" is the HUD's own reading, parsed — see `remainingFrom`.
+      const remaining = remainingFrom(readings, spokenDistanceUnit(unitsRef.current));
+      // #399: a climb or a descent ahead, from the SAME wrapped position the
+      // strip and the plan view use (`climb-ahead.ts` says why that matters).
+      const slope = slopeEvent(slopeAnnouncedRef.current, {
+        slopes: slopesRef.current,
+        profile: chosen.profile,
+        distance: simulation.state.ride.distance,
+        lead: announcementsRef.current.enabled ? announcementsRef.current.climbLeadMetres : 'never',
+        units: unitsRef.current,
+      });
+      slopeAnnouncedRef.current = slope.announced;
       const heard = announce(announcerRef.current, {
         now: simulation.state.elapsed,
         readings,
-        ...(Number.isFinite(togo)
-          ? { remaining: { value: togo, unit: spokenDistanceUnit(unitsRef.current) } }
-          : {}),
+        ...(remaining === undefined ? {} : { remaining }),
+        ...(slope.event === undefined ? {} : { events: [slope.event] }),
         preference: announcementsRef.current,
       });
       announcerRef.current = heard.state;
       if (heard.sentence !== undefined) {
         setAnnouncement(heard.sentence);
+      }
+      // #400: the distance sound plays on the frame its SENTENCE is said and
+      // on no other, so it is never the only carrier of a mark passed.
+      if (heard.kind === 'distance-tick') {
+        cuesRef.current?.cue('distance');
       }
 
       const origin = corridorOrigin(chosen.profile);
@@ -818,6 +882,25 @@ export function GameView(props: GameViewProps): JSX.Element {
         heartRate={sensors.heartRate}
         chases={chasedGaps(state, ghostRef.current, outcomeRef.current)}
         paused={phase === 'paused'}
+        // #400: the mute and the volume, on the ride's own screen — SC 1.4.2.
+        // Only for a rider who turned sounds on: there is nothing to mute
+        // otherwise, and a control that does nothing is noise on a HUD.
+        sound={
+          sound.enabled ? (
+            <SoundControls
+              preference={sound}
+              onChange={(next) => {
+                setSound(next);
+                writeCuePreference(deviceStorage(), next);
+                cuesRef.current?.set(next);
+                // Inside the press, so a context the platform suspended is
+                // resumed here — `web-audio.ts` §"What happens when it is
+                // suspended".
+                cuesRef.current?.begin();
+              }}
+            />
+          ) : undefined
+        }
         // ⚠️ **The rider-visible evidence that #362 is fixed**, and the reason
         // it is on the screen rather than only in a test: `docs/validation/
         // 0002-android-shell-and-game.md` Part L asks somebody with a trainer in

@@ -255,7 +255,7 @@ export const FRUSTUM_SPREAD = horizontalSpread(WORST_CASE_ASPECT);
  * is. 9 : 21 is the tallest phone aspect on sale; with a browser's own chrome
  * showing the same phone is nearer 9 : 16, which is wider and therefore kinder.
  *
- * @unwired the narrow frame is what a rider gets and not what the renderer
+ * @test-facing the narrow frame is what a rider gets and not what the renderer
  * computes against: three takes the live aspect from the canvas every frame,
  * and the cull deliberately uses the wide bound above. It is a bound
  * `three-renderer.test.ts` measures the near field against.
@@ -279,7 +279,7 @@ export const NARROWEST_ASPECT = 9 / 21;
  * A landscape phone is wider than this, so for a phone on the bars it is still
  * the worst case.
  *
- * @unwired {@link NARROWEST_ASPECT}'s reason applies unchanged.
+ * @test-facing {@link NARROWEST_ASPECT}'s reason applies unchanged.
  */
 export const REFERENCE_ASPECT = 16 / 9;
 
@@ -293,7 +293,7 @@ export const REFERENCE_ASPECT = 16 / 9;
  * and the camera sits {@link CAMERA_BEHIND_METRES} behind the rider. That is
  * the whole of #355, and this file's header says what #424 did to it.
  *
- * @unwired a statement of the composition that `three-renderer.test.ts` holds
+ * @test-facing a statement of the composition that `three-renderer.test.ts` holds
  * the scenery's verge against. The renderer has no use for it: three clips.
  */
 export function vergeEntersFrameMetres(acrossMetres: number, aspect: number): number {
@@ -318,7 +318,7 @@ export function vergeEntersFrameMetres(acrossMetres: number, aspect: number): nu
  * line is `H − (H − h) · 14.5 / B` = 0.44 m up the pacer at that depth. At 50 m
  * and 200 m the whole of it is clear. `camera.test.ts` asserts all three.
  *
- * @unwired a consequence of the composition, asserted in `camera.test.ts` so
+ * @test-facing a consequence of the composition, asserted in `camera.test.ts` so
  * that lowering the camera is a red test rather than a rider who cannot see
  * who they are chasing.
  */
@@ -414,7 +414,7 @@ export function cameraRig(pose: CameraPose): CameraRig {
 /**
  * A rectangle in the frame, as fractions of its width and height from the top left.
  *
- * @unwired the return type of {@link riderFrameBox}, whose reason applies unchanged.
+ * @test-facing the return type of {@link riderFrameBox}, whose reason applies unchanged.
  */
 export interface FrameBox {
   readonly left: number;
@@ -459,7 +459,7 @@ export interface FrameBox {
  * ⚠️ On a level road. {@link cameraRig} holds the rider in nearly the same
  * place on a hill, and `camera.test.ts` says how nearly.
  *
- * @unwired the renderer never needs to know where the rider ended up — three
+ * @test-facing the renderer never needs to know where the rider ended up — three
  * projects them. It is the composition stated as a rectangle, for the two
  * browser gates above to hold the layout and the renderer to.
  */
@@ -509,6 +509,6 @@ export function riderFrameBox(aspect: number): FrameBox {
  * ({@link verticalHalfTangent}), so the same rider is a smaller share of a much
  * taller frame — 19.1 % of an upright phone — and a larger share of its width.
  *
- * @unwired a bound two test suites hold the composition to.
+ * @test-facing a bound two test suites hold the composition to.
  */
 export const MINIMUM_RIDER_FRAME_SHARE = 0.25;

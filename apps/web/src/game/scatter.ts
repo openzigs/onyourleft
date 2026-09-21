@@ -573,7 +573,7 @@ export const PLANTED_GROUND_SHARE = 0.45;
  * radius. Squeezing them is the version of this that looks equivalent and is
  * not: it would put two items eight centimetres apart on a 20 m bend.
  *
- * @unwired a bound, not a setting: `scatter.test.ts` measures the placement
+ * @test-facing a bound, not a setting: `scatter.test.ts` measures the placement
  * against it and no scenery decision reads it. Wiring it into the placer would
  * make the test assert the code against itself.
  */

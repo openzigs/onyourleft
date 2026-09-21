@@ -14,7 +14,18 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import {
+  altitudeMetres,
+  degreesLatitude,
+  degreesLongitude,
+  geographicPosition,
+  metres,
+  routeProfile,
+  type RoutePoint,
+} from '@onyourleft/domain';
+
 import { stripComments } from '../../units/no-inline-units';
+import { atStartLine } from '../simulation';
 
 import {
   ANNOUNCE_WINDOW_SECONDS,
@@ -23,12 +34,13 @@ import {
   OFF_TARGET_SECONDS,
   PRIORITY,
   announce,
+  remainingFrom,
   spokenPower,
   type AnnounceInput,
   type AnnouncerState,
 } from './announce';
 import { DEFAULT_ANNOUNCEMENTS, type AnnouncementPreference } from './announce-preference';
-import { NO_READING, type HudReading } from './fields';
+import { NO_READING, hudReadings, type HudReading } from './fields';
 
 const ON: AnnouncementPreference = { ...DEFAULT_ANNOUNCEMENTS, enabled: true };
 
@@ -102,6 +114,24 @@ describe('a reading speaks when it crosses its threshold, not before', () => {
       { ...ON, powerEverySeconds: 'never' },
     );
     expect(said).toEqual([undefined, undefined, '5 miles to go']);
+  });
+
+  it('ticks once per interval crossed, not once per frame inside it — #399', () => {
+    // 60 frames a second for 20 s at 10 m/s, with a tick every 0.1 km: the
+    // countdown crosses two marks and sits between them for hundreds of
+    // frames. Two sentences, one per mark, and silence in between.
+    const calls: Partial<AnnounceInput>[] = [];
+    for (let frame = 0; frame <= 1200; frame += 1) {
+      calls.push({
+        now: frame / 60,
+        remaining: { value: 5.05 - frame / 6000, unit: 'kilometres' },
+      });
+    }
+    const { said } = run(calls, { ...ON, powerEverySeconds: 'never', distanceEvery: 0.1 });
+    expect(said.filter((sentence) => sentence !== undefined)).toEqual([
+      '5 kilometres to go',
+      '4.9 kilometres to go',
+    ]);
   });
 
   it('treats the distance going UP as a new lap, not a mark', () => {
@@ -248,6 +278,102 @@ describe('priority is an ORDER, not a politeness', () => {
   it('puts the safety events first, in the order #395 decided', () => {
     expect(PRIORITY.slice(0, 3)).toEqual(['trainer-lost', 'workout-fault', 'interval-ahead']);
     expect(PRIORITY.indexOf('distance-tick')).toBeLessThan(PRIORITY.indexOf('power'));
+  });
+
+  it('puts a climb ahead below the safety events and above every reading — #399', () => {
+    const climb = PRIORITY.indexOf('climb-ahead');
+    expect(climb).toBe(PRIORITY.indexOf('interval-ahead') + 1);
+    for (const reading of ['power-off-target', 'distance-tick', 'power'] as const) {
+      expect(climb).toBeLessThan(PRIORITY.indexOf(reading));
+    }
+    // Through the core: a climb and a distance mark in the same window, and
+    // the climb is what is said.
+    const { said } = run(
+      [
+        { now: 0, remaining: { value: 10.1, unit: 'kilometres' } },
+        {
+          now: 60,
+          remaining: { value: 9.9, unit: 'kilometres' },
+          events: [{ kind: 'climb-ahead', text: 'Climb in 250 metres, 6 percent' }],
+        },
+      ],
+      { ...ON, powerEverySeconds: 'never' },
+    );
+    expect(said[1]).toBe('Climb in 250 metres, 6 percent');
+  });
+});
+
+describe('a climb ahead is a row with its own "never" — #399', () => {
+  it('drops a climb event when the rider chose never for climbs', () => {
+    const { said } = run(
+      [{ now: 60, events: [{ kind: 'climb-ahead', text: 'Climb in 250 metres, 6 percent' }] }],
+      { ...ON, powerEverySeconds: 'never', climbLeadMetres: 'never' },
+    );
+    expect(said).toEqual([undefined]);
+  });
+
+  it('says what each sentence was about, so a cue can follow the sentence — #400', () => {
+    const out = announce(INITIAL_ANNOUNCER, {
+      now: 0,
+      readings: [],
+      events: [{ kind: 'climb-ahead', text: 'Climb in 250 metres, 6 percent' }],
+      preference: ON,
+    });
+    expect(out.kind).toBe('climb-ahead');
+    expect(announce(out.state, { now: 1, readings: [], preference: ON }).kind).toBeUndefined();
+  });
+});
+
+describe('"to go" is the HUD’s own reading, not a second computation — #399', () => {
+  /** A 1 km out-and-back-shaped loop: north 500 m, then back along it. */
+  function loop(): ReturnType<typeof routeProfile> {
+    const points: RoutePoint[] = [];
+    for (let index = 0; index <= 100; index += 1) {
+      const along = index <= 50 ? index : 100 - index;
+      points.push({
+        position: geographicPosition(
+          degreesLatitude(51.5 + (along * 10) / 111_320),
+          // A few metres east on the way back, so the two legs are distinct.
+          degreesLongitude(-0.12 + (index > 50 ? 0.00005 : 0)),
+        ),
+        elevation: altitudeMetres(10),
+      });
+    }
+    return routeProfile(points, { loop: true });
+  }
+
+  it('says, on lap two, the number the screen shows — to the end of THIS lap', () => {
+    const profile = loop();
+    const total = profile.totalDistance as number;
+    const state = atStartLine(profile);
+    const lapTwo = {
+      ...state,
+      ride: { ...state.ride, distance: metres(total + 300) },
+    };
+    const readings = hudReadings({
+      profile,
+      state: lapTwo,
+      cadence: { value: 90, live: true },
+      heartRate: { value: 140, live: true },
+    });
+    const shown = readings.find((reading) => reading.key === 'remaining');
+    const heard = remainingFrom(readings, 'kilometres');
+    // Read off the rendered value, not restated: whatever the HUD shows is
+    // what is said, and on lap two that is a lap's worth less 300 m — not
+    // zero, which is what `totalDistance − odometer` gives (#296).
+    expect(heard?.value).toBe(Number(shown?.value));
+    expect(heard?.value).toBeGreaterThan(0);
+    expect(heard?.value).toBeCloseTo((total - 300) / 1000, 2);
+  });
+
+  it('hears nothing where the screen shows no number', () => {
+    expect(
+      remainingFrom(
+        [{ key: 'remaining', label: 'To go', value: NO_READING, unit: 'km', stale: false }],
+        'kilometres',
+      ),
+    ).toBeUndefined();
+    expect(remainingFrom([], 'kilometres')).toBeUndefined();
   });
 });
 

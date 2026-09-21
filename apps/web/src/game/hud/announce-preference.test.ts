@@ -41,6 +41,7 @@ const CHOSEN: AnnouncementPreference = {
   powerEverySeconds: 30,
   distanceEvery: 5,
   intervalLeadSeconds: 'never',
+  climbLeadMetres: 500,
 };
 
 describe('the announcement preference — #397', () => {

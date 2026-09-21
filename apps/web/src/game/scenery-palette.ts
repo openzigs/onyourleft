@@ -241,7 +241,7 @@ export interface ModelPalette {
  * land on rather than the number of materials it declares. Read on
  * **2026-09-19** from the committed bytes.
  *
- * @unwired a bound and an enumeration `scenery-palette.test.ts` asserts against.
+ * @test-facing a bound and an enumeration `scenery-palette.test.ts` asserts against.
  * Nothing in the client reads it, because every vertex already carries its own
  * colour — the same reason `three-renderer.ts` §`LIT_COLOURS` carries the tag.
  */

@@ -1180,5 +1180,226 @@ assert_says 'the ERG writer is watched' 'ErgWriter.offerTarget'
 assert_says 'the gradient driver factory is watched' 'createSimulationDriver'
 assert_says 'the control-point choice is watched' 'chooseTrainerControl'
 
+# --- #438: `@test-facing`, the verified exemption ------------------------------
+#
+# Arithmetic stated so that a test can hold the product to it — `camera.ts`'s
+# composition, a contrast floor — has no production caller BY DESIGN. Until
+# #438 each such export spent an `@unwired` whose reason was free text nobody
+# could check. `@test-facing` exempts it from WIRE002 only while a test, a spec
+# or a browser harness actually READS it, and the success line counts the two
+# populations apart. Every case below has a red twin.
+
+# The green case: a bound only a test reads.
+new_fixture
+write apps/web/src/main.tsx <<'TS'
+import { buildScene } from './game/scene';
+buildScene();
+TS
+write apps/web/src/game/scene.ts <<'TS'
+export function buildScene(): void {}
+/**
+ * The most a rider may fill of the frame.
+ *
+ * @test-facing a bound scene.test.ts holds the composition to.
+ */
+export const MAXIMUM_SHARE = 0.5;
+TS
+write apps/web/src/game/scene.test.ts <<'TS'
+import { MAXIMUM_SHARE } from './scene';
+void MAXIMUM_SHARE;
+TS
+run_check
+assert_green '#438: a @test-facing export a test reads passes'
+assert_says '#438: and the success line counts it apart from @unwired' '1 @test-facing exports read by a gate'
+assert_says '#438: and counts the @unwired population beside it' '0 @unwired exemptions'
+
+# Red: the same tag with no test reading it. This is the dead export a module
+# outside the watched set would have hidden (#438's option 2, rejected).
+new_fixture
+write apps/web/src/main.tsx <<'TS'
+import { buildScene } from './game/scene';
+buildScene();
+TS
+write apps/web/src/game/scene.ts <<'TS'
+export function buildScene(): void {}
+/**
+ * @test-facing a bound scene.test.ts holds the composition to.
+ */
+export const MAXIMUM_SHARE = 0.5;
+TS
+run_check
+assert_red '#438: a @test-facing export nothing reads fails'
+assert_says '#438: as WIRE004, naming it' 'WIRE004 apps/web/src/game/scene.ts:5 — `MAXIMUM_SHARE` is marked `@test-facing`'
+
+# Green: a browser harness is a gate too — and still not an entry point.
+new_fixture
+write apps/web/src/main.tsx <<'TS'
+import { buildScene } from './game/scene';
+buildScene();
+TS
+write apps/web/src/game/scene.ts <<'TS'
+export function buildScene(): void {}
+/** @test-facing the browser gate measures the rider against it. */
+export function riderBox(): number {
+  return 1;
+}
+TS
+write apps/web/browser/harness.ts <<'TS'
+import { riderBox } from '../src/game/scene';
+riderBox();
+TS
+run_check
+assert_green '#438: a browser harness reading it holds it'
+
+# Green: held through another held @test-facing export (the composition is
+# built from the model's dimensions, and only the composition is asserted).
+new_fixture
+write apps/web/src/main.tsx <<'TS'
+import { buildScene } from './game/scene';
+buildScene();
+TS
+write apps/web/src/game/scene.ts <<'TS'
+export function buildScene(): void {}
+/** @test-facing the composition's input. */
+export const RIDER_HEIGHT = 1.8;
+/** @test-facing asserted in scene.test.ts. */
+export function riderShare(): number {
+  return RIDER_HEIGHT / 4;
+}
+TS
+write apps/web/src/game/scene.test.ts <<'TS'
+import { riderShare } from './scene';
+riderShare();
+TS
+run_check
+assert_green '#438: held through a held @test-facing export'
+assert_says '#438: and both are counted' '2 @test-facing exports read by a gate'
+
+# Red: two tagged exports naming only EACH OTHER hold nothing up. Held is a
+# closure from the tests outward, not a mutual alibi.
+new_fixture
+write apps/web/src/main.tsx <<'TS'
+import { buildScene } from './game/scene';
+buildScene();
+TS
+write apps/web/src/game/scene.ts <<'TS'
+export function buildScene(): void {}
+/** @test-facing names the other. */
+export function first(): number {
+  return second();
+}
+/** @test-facing names the first. */
+export function second(): number {
+  return first();
+}
+TS
+run_check
+assert_red '#438: two tagged exports that only name each other are dead together'
+assert_says '#438: the first is reported' '`first` is marked `@test-facing`'
+assert_says '#438: and so is the second' '`second` is marked `@test-facing`'
+
+# Red: a reasonless tag, on the WIRE000 precedent.
+new_fixture
+write apps/web/src/main.tsx <<'TS'
+import { buildScene } from './game/scene';
+buildScene();
+TS
+write apps/web/src/game/scene.ts <<'TS'
+export function buildScene(): void {}
+/** @test-facing */
+export const MAXIMUM_SHARE = 0.5;
+TS
+write apps/web/src/game/scene.test.ts <<'TS'
+import { MAXIMUM_SHARE } from './scene';
+void MAXIMUM_SHARE;
+TS
+run_check
+assert_red '#438: a @test-facing tag with no reason fails'
+assert_says '#438: as WIRE000' 'WIRE000 apps/web/src/game/scene.ts:3 — `MAXIMUM_SHARE` carries `@test-facing` with no reason'
+
+# Red: the tag does NOT reach a whole file. A module only tests import is a
+# module that ships nothing, and that is WIRE001 however it is labelled.
+new_fixture
+write apps/web/src/main.tsx <<'TS'
+export {};
+TS
+write apps/web/src/game/bounds.ts <<'TS'
+/**
+ * @test-facing every bound in this file is read by a test.
+ */
+export const MAXIMUM_SHARE = 0.5;
+TS
+write apps/web/src/game/bounds.test.ts <<'TS'
+import { MAXIMUM_SHARE } from './bounds';
+void MAXIMUM_SHARE;
+TS
+run_check
+assert_red '#438: @test-facing on a file nothing imports is still WIRE001'
+assert_says '#438: named as such' 'WIRE001 apps/web/src/game/bounds.ts'
+
+# Red: nor a port method — a method only a test calls is #230 exactly.
+new_fixture
+write apps/web/src/main.tsx <<'TS'
+import type { AudioPort } from './game/audio-port';
+export function play(port: AudioPort): void {
+  port.start();
+}
+TS
+write apps/web/src/game/audio-port.ts <<'TS'
+export interface AudioPort {
+  start(): void;
+  /** @test-facing only the double calls it. */
+  stop(): void;
+}
+TS
+write apps/web/src/game/audio.test.ts <<'TS'
+import type { AudioPort } from './audio-port';
+export const stopped = (port: AudioPort): void => port.stop();
+TS
+run_check
+assert_red '#438: @test-facing does not exempt a port method'
+assert_says '#438: it is WIRE003' 'WIRE003 apps/web/src/game/audio-port.ts:4 — `AudioPort.stop`'
+
+# Red: WIRE004's stale half. An exemption on something production DOES name —
+# `@test-facing` or `@unwired` — is a false statement at the declaration. On the
+# tree #438 was measured on it found three: `PEAK_IRRADIANCE`, which #366 had
+# wired, and two more.
+for tag in test-facing unwired; do
+  new_fixture
+  write apps/web/src/main.tsx <<'TS'
+import { buildScene, MAXIMUM_SHARE } from './game/scene';
+buildScene(MAXIMUM_SHARE);
+TS
+  write apps/web/src/game/scene.ts <<TS
+export function buildScene(share: number): number {
+  return share;
+}
+/** @${tag} a bound nothing in the client reads. */
+export const MAXIMUM_SHARE = 0.5;
+TS
+  write apps/web/src/game/scene.test.ts <<'TS'
+import { MAXIMUM_SHARE } from './scene';
+void MAXIMUM_SHARE;
+TS
+  run_check
+  assert_red "#438: a stale @${tag} on a wired export fails"
+  assert_says "#438: as WIRE004, stale @${tag}" "\`MAXIMUM_SHARE\` carries \`@${tag}\` and production names it"
+done
+
+# Green, and the pair to the stale case: an ordinary @unwired is still counted.
+new_fixture
+write apps/web/src/main.tsx <<'TS'
+import { buildScene } from './game/scene';
+buildScene();
+TS
+write apps/web/src/game/scene.ts <<'TS'
+export function buildScene(): void {}
+/** @unwired a decision: nothing may call this until #999 lands. */
+export function later(): void {}
+TS
+run_check
+assert_green '#438: an ordinary @unwired still exempts'
+assert_says '#438: and is counted as one' '1 @unwired exemptions, 0 @test-facing exports read by a gate'
+
 printf '\n%d passed, %d failed\n' "${pass}" "${fail}"
 [ "${fail}" -eq 0 ]

@@ -95,10 +95,12 @@ export function metricStateFor(
 /**
  * Whether a state is one a rider may read a number off.
  *
- * @unwired no screen calls it — `MetricGrid` switches on `state.kind` itself,
- * because it renders something different for each of the four states rather
- * than branching on two. Kept as the narrowing a caller outside this module
- * would need, and `metrics.test.ts` is its only caller today.
+ * `MetricGrid` switches on `state.kind` itself, because it renders something
+ * different for each of the four states rather than branching on two. Since
+ * #400 `views/RideView.tsx` §`livePower` is a production caller — the tone
+ * needs the live number or nothing — so the `@unwired` this carried until then
+ * is gone; `check:wiring`'s `WIRE004` reports an exemption left on a
+ * declaration production names.
  */
 export function isReadable(state: MetricState): state is Extract<MetricState, { kind: 'live' }> {
   return state.kind === 'live';

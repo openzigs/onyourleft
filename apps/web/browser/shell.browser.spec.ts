@@ -926,7 +926,11 @@ test.describe('#397 — the announcement controls', () => {
     await page.goto('/shell.html#/settings');
     await page.waitForSelector('html[data-oyl-shell-ready]');
     const seen = await controls(page);
-    expect(seen.length).toBe(4);
+    // Seven since #399 and #400, and every one is measured below: the
+    // announcements' switch and four rows (power, distance, next block, and
+    // #399's climb ahead), and #400's Sounds panel — which carries the same
+    // class so its switch and its volume slider are held to the same floor.
+    expect(seen.length).toBe(7);
     for (const control of seen) {
       expect(control.width, control.name).toBeGreaterThanOrEqual(MINIMUM_TARGET_PIXELS);
       expect(control.height, control.name).toBeGreaterThanOrEqual(MINIMUM_TARGET_PIXELS);

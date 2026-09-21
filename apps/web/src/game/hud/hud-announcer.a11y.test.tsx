@@ -41,7 +41,11 @@ import { mount, queryAll, settle, type Mounted } from '../../testing/mount';
 import type { GamePort, RidableRoute } from '../GameView';
 import type { GameRenderer } from '../port';
 
-import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './announce-preference';
+import {
+  ANNOUNCEMENTS_STORAGE_KEY,
+  DEFAULT_ANNOUNCEMENTS,
+  type AnnouncementPreference,
+} from './announce-preference';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
 
@@ -59,8 +63,30 @@ function flatRoute(): RidableRoute {
   return { id: 'route-flat', name: 'Flat', profile: routeProfile(points), attempts: 0 };
 }
 
+/**
+ * 1 km flat, then 500 m at 6 %, then flat again — #399's climb, on a real
+ * profile built through the domain's own three windows.
+ */
+function hillyRoute(): RidableRoute {
+  const points: RoutePoint[] = [];
+  for (let index = 0; index <= 300; index += 1) {
+    const climbed = Math.min(Math.max(index - 100, 0), 50) * 0.6;
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(51.5 + (index * 10) / 111_320),
+        degreesLongitude(-0.12),
+      ),
+      elevation: altitudeMetres(10 + climbed),
+    });
+  }
+  return { id: 'route-hilly', name: 'Hilly', profile: routeProfile(points), attempts: 0 };
+}
+
+/** What the picker offers. Reset to the flat route before every case. */
+let routes: RidableRoute[] = [flatRoute()];
+
 const PORT: GamePort = {
-  listRoutes: () => Promise.resolve([flatRoute()]),
+  listRoutes: () => Promise.resolve(routes),
   loadGhost: () => Promise.resolve(undefined),
   readSensors: () => ({
     rider: { power: watts(230), live: true, paired: true },
@@ -95,6 +121,7 @@ beforeEach(() => {
   // in the shipped app, so the one it reads is `performance.now`.
   vi.spyOn(performance, 'now').mockImplementation(() => nowMs);
   localStorage.clear();
+  routes = [flatRoute()];
 });
 
 afterEach(() => {
@@ -148,11 +175,29 @@ async function startRide(): Promise<void> {
 const region = (): HTMLElement | null =>
   document.querySelector<HTMLElement>('[data-oyl-announcer="hud"]');
 
-function chooseAnnouncements(): void {
+function chooseAnnouncements(choice: Partial<AnnouncementPreference> = {}): void {
   localStorage.setItem(
     ANNOUNCEMENTS_STORAGE_KEY,
-    JSON.stringify({ ...DEFAULT_ANNOUNCEMENTS, enabled: true, powerEverySeconds: 15 }),
+    JSON.stringify({ ...DEFAULT_ANNOUNCEMENTS, enabled: true, powerEverySeconds: 15, ...choice }),
   );
+}
+
+/** Pump frames until the region says something matching, or give up. */
+async function pumpUntil(pattern: RegExp, frames: number): Promise<string> {
+  for (let frame = 0; frame < frames; frame += 1) {
+    await pump(1);
+    const text = region()?.textContent ?? '';
+    if (pattern.test(text)) return text;
+  }
+  return region()?.textContent ?? '';
+}
+
+/** The HUD's rendered "To go" value, as a number. */
+function renderedToGo(): number {
+  const field = [...document.querySelectorAll('.oyl-hud__field')].find(
+    (each) => each.querySelector('.oyl-hud__label')?.textContent === 'To go',
+  );
+  return Number(field?.querySelector('.oyl-hud__value')?.firstChild?.textContent);
 }
 
 describe('the HUD’s one live region — #397', () => {
@@ -211,5 +256,45 @@ describe('the HUD’s one live region — #397', () => {
     expect(document.querySelector('canvas.oyl-game__world')?.getAttribute('aria-hidden')).toBe(
       'true',
     );
+  });
+});
+
+describe('the road ahead, through the same region — #399', () => {
+  it('says a climb is coming, from the ride the rider is on', async () => {
+    routes = [hillyRoute()];
+    chooseAnnouncements({
+      powerEverySeconds: 'never',
+      distanceEvery: 'never',
+      climbLeadMetres: 250,
+    });
+    await startRide();
+    const said = await pumpUntil(/^Climb/, 400);
+    expect(said).toMatch(/^Climb in 250 metres, [5-7] percent$/);
+  });
+
+  it('says nothing about a climb when that row is never', async () => {
+    routes = [hillyRoute()];
+    chooseAnnouncements({
+      powerEverySeconds: 'never',
+      distanceEvery: 'never',
+      climbLeadMetres: 'never',
+    });
+    await startRide();
+    await pump(400);
+    expect(region()?.textContent).toBe('');
+  });
+
+  it('says the distance to go the HUD is showing, on the rider’s tick', async () => {
+    chooseAnnouncements({ powerEverySeconds: 'never', distanceEvery: 0.5 });
+    await startRide();
+    const said = await pumpUntil(/to go$/, 400);
+    const mark = Number(/^([\d.]+) kilometres to go$/.exec(said)?.[1]);
+    // The screen, read at the moment it was said: the mark just crossed, so
+    // the rendered countdown is under it and not a whole tick under it. Read
+    // off the HUD rather than restated, so the two cannot drift apart.
+    const shown = renderedToGo();
+    expect(Number.isFinite(mark), `nothing was said: "${said}"`).toBe(true);
+    expect(shown).toBeLessThanOrEqual(mark);
+    expect(shown).toBeGreaterThan(mark - 0.5);
   });
 });

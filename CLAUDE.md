@@ -543,6 +543,22 @@ apps/                 AGPL-3.0-or-later, without exception
                         is last and absent rather than nought in still air, on
                         the `NO_READING` precedent, and "nine" is safe only
                         because the wind cannot change mid-ride
+    src/game/audio-cues.ts
+                        the ride's non-speech sounds (#400) — every rule about
+                        them, against `audio-port.ts`: off by default, audio
+                        resumed only inside a press, a dropped power reading is
+                        SILENCE and never a floor tone, the mute silences at the
+                        port rather than at a flag, and a short sound plays only
+                        with its sentence. `web-audio.ts` is the one file that
+                        names `AudioContext`; `SoundControls.tsx` is the mute and
+                        the volume a rider reaches DURING a ride (WCAG 2.2 SC
+                        1.4.2). ⚠️ No dependency and no speech engine, and
+                        nothing claims a sound beats the screen
+    src/game/hud/climb-ahead.ts
+                        a climb or a descent ahead (#399), read off
+                        `RouteProfile.grades` with no new engine, from
+                        `plan.ts` §`planProgress`'s WRAPPED position — so lap
+                        two's climb is announced and lap one's is not
     src/game/sensors.ts the four metric states the ride controller reports,
                         mapped to the three things a HUD renders
     src/game/ghost-source.ts
@@ -2201,6 +2217,7 @@ well typed.**
 | `WIRE001` | a watched module no production module imports |
 | `WIRE002` | an exported symbol in a watched module that no production declaration names |
 | `WIRE003` | a method declared on a `*-port.ts` interface — or on one in the **trainer-command seam** — that no production declaration calls |
+| `WIRE004` | an export marked `@test-facing` that no test, spec or browser harness reads (nor any held `@test-facing` export one does) — it is dead; **or** either tag on an export production DOES name — the exemption is stale ([#438](https://github.com/openzigs/onyourleft/issues/438)) |
 
 **The entry point is read out of `apps/*/index.html`**, so it is the page Vite actually builds
 rather than a path written down twice. ⚠️ **`apps/web/browser/` is deliberately NOT an entry
@@ -2294,6 +2311,35 @@ followed by a reason, in its doc comment. The tag alone is refused — an exempt
 a config-file list with extra steps — and it is refused on **all three** paths, including a file's
 own doc comment, which is the broadest of them because it silences a whole module. A reasonless tag
 is reported as `WIRE000` rather than quietly honoured.
+
+⚠️ **Test-facing arithmetic has its own tag since
+[#438](https://github.com/openzigs/onyourleft/issues/438), `@test-facing`, and a reviewer who
+remembers every bound a test asserts against spending an `@unwired` is reading the old file.** #436
+took the `@unwired` population under `apps/` from 21 to 32 in one change, nearly all of it
+`camera.ts` and `bicycle.ts` stating the composition so `camera.test.ts` and two browser gates can
+hold the renderer to it — each correct, and indistinguishable in a count from a genuine gap, which
+is how *"an allowlist that grows is how a rule stops firing"* starts. #438 weighed three options:
+
+| Option | Verdict | Why |
+|---|---|---|
+| 1. Leave it | rejected | the population grows with every derived gate, and a free-text reason cannot go red when the test it names is deleted |
+| 2. A sibling module outside `WATCHED_PREFIXES` | rejected | fewer tags by watching LESS — an unwatched module is exactly where a genuinely dead export hides, and moving 23 declarations out of `camera.ts` and its neighbours reshapes files the renderer reads for a counting problem |
+| 3. A second tag, counted apart | **chosen, and made stricter than the first** | same watched set, same rules, and the new tag is **verified**: `@test-facing <reason>` exempts an export from `WIRE002` only while a test, a spec, a double or a browser harness reads it, or a held `@test-facing` export does. When nothing does, `WIRE004` calls it dead |
+
+It exempts **exports only** — a whole file only tests import is still `WIRE001`, and a port method
+only a double calls is still `WIRE003`, because both are #230's shape. `WIRE004` also reports
+**either** tag on an export production DOES name: a stale exemption is a false statement at the
+declaration, and on the tree #438 was measured on it found three — `world.ts` §`PEAK_IRRADIANCE`
+(wired by #366's `MAXIMUM_LIT_CHANNEL` and still claiming nothing evaluated it),
+`bicycle.ts` §`BICYCLE_FRONT_METRES` (named by `BICYCLE_LENGTH_METRES`, so the tag exempted
+nothing), and `ride/metrics.ts` §`isReadable` (wired by #400). **Measured** (tags opening a
+comment line in non-test files, on `56a735e` and after — #436's reviewer counted 32 by another
+method): raw `@unwired` tags under `apps/` **31 → 6**; exemptions the gate honours **32 → 9** `@unwired` + **22**
+`@test-facing`, the missing one being `isReadable`, now wired. The success line reports both counts
+beside the watched count — read them off the run, because they age. ⚠️ The count went down by
+**re-labelling under a stricter rule**, not by watching less: `WATCHED_PREFIXES` and the seam are
+unchanged, and the mutation that honours `@test-facing` whether or not a test reads it turns five
+fixture cases red.
 
 ⚠️ **The tag has to OPEN a line to be a tag, and until
 [#292](https://github.com/openzigs/onyourleft/issues/292) it did not have to** — a reviewer who
@@ -3336,5 +3382,9 @@ top of an issue **supersedes its body**.
 | Why a manifest line the client cannot read is shown to a rider rather than skipped | `apps/web/src/credits/manifest.ts`, `apps/web/src/views/CreditsView.tsx` |
 | Why the credits page has no navigation entry, and what that makes the About link | `apps/web/src/shell/routes.ts` §`CREDITS_ROUTE`, `apps/web/src/views/AboutView.tsx` |
 | What stops an empty credits screen looking exactly like a correct one | `apps/web/src/views/CreditsView.test.tsx`, [#142](https://github.com/openzigs/onyourleft/issues/142) |
+| What a person with TalkBack runs, and which questions only they can answer | [`docs/validation/0003-screen-reader-and-assistive-technology.md`](docs/validation/0003-screen-reader-and-assistive-technology.md), [#393](https://github.com/openzigs/onyourleft/issues/393) |
+| How a climb ahead is found, and why the lookahead starts from the wrapped position | `apps/web/src/game/hud/climb-ahead.ts`, [#399](https://github.com/openzigs/onyourleft/issues/399) |
+| Where the ride's sounds are decided, why a dropped sensor is silence, and where the audio context is created | `apps/web/src/game/audio-cues.ts`, `apps/web/src/game/web-audio.ts`, [#400](https://github.com/openzigs/onyourleft/issues/400) |
+| What proves the HUD's live region is not hidden and moves nothing, and why that is not a screen reader | `apps/web/browser/hud.browser.spec.ts` §"#401", [#401](https://github.com/openzigs/onyourleft/issues/401) |
 
 <!-- Last updated: 2026-09-17 by delivery:code-issue resolving #355 (the verge as a visibility constant, and the camera-cone gate that had been missing) -->

@@ -579,6 +579,16 @@ test.describe('a second version arrives', () => {
         'the page reloaded without anybody asking it to',
       ).toBe(true);
 
+      // ⚠️ #418: and the RIDER is offered it. Since #418 the first render no
+      // longer waits for the registration, so the update watcher reaches the
+      // tree in a second render once `register()` resolves — and a first
+      // render that was never followed by that second one would leave every
+      // assertion above green while no rider could ever take an update. The
+      // offer on screen is the only thing that says the watcher arrived.
+      await expect(opened.page.getByRole('button', { name: 'Update now' })).toBeVisible({
+        timeout: 30_000,
+      });
+
       // Now the gesture, which in the app is a click on "Update now".
       await opened.page.evaluate(async () => {
         const registration = await navigator.serviceWorker.getRegistration();

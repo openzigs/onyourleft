@@ -43,6 +43,7 @@ import {
   readAnnouncementPreference,
   type PreferenceStorage,
 } from '../game/hud/announce-preference';
+import { DEFAULT_CUES, readCuePreference } from '../game/cue-preference';
 
 const OWNER = athleteId('local');
 
@@ -756,12 +757,64 @@ describe('announcements — #397', () => {
     const selects = [
       ...mounted.container.querySelectorAll<HTMLSelectElement>('.oyl-announce select'),
     ];
-    expect(selects).toHaveLength(3);
+    // Four since #399: power, distance to go, the next block, a climb ahead.
+    expect(selects).toHaveLength(4);
     for (const select of selects) {
       expect([...select.options].map((option) => option.value)).toContain('never');
     }
     // The distance row is in the rider's own unit.
     expect(mounted.container.textContent).toContain('every 1 mi');
+    // #399: the climb row is STORED in metres and LABELLED in the rider's
+    // unit — 250 m is 820 ft, and the value submitted is still the metres.
+    const climb = mounted.container.querySelector<HTMLSelectElement>('#oyl-announce-climb');
+    expect([...(climb?.options ?? [])].map((option) => option.textContent)).toContain(
+      '820 ft before it starts',
+    );
+    expect(climb?.value).toBe('250');
+    mounted.unmount();
+  });
+});
+
+describe('sounds — #400', () => {
+  it('is off until the rider turns it on, and keeps the choice and the volume on this device', async () => {
+    const values = new Map<string, string>();
+    const store: PreferenceStorage = {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => {
+        values.set(key, value);
+      },
+    };
+    const mounted = await mount(
+      <SettingsView
+        units="metric"
+        onUnitsChange={() => undefined}
+        onRiderMassChange={() => undefined}
+        announcements={store}
+      />,
+    );
+    const toggle = mounted.container.querySelector<HTMLInputElement>(
+      '.oyl-sounds input[type="checkbox"]',
+    );
+    expect(toggle?.checked).toBe(false);
+    // #400's review: the distance note is played only on the frame its sentence
+    // is said (a sound is never the only carrier), so the copy must not promise
+    // it to a rider who has Sounds on and announcements off.
+    const copy = mounted.container.querySelector('.oyl-sounds .oyl-muted')?.textContent ?? '';
+    expect(copy.replace(/\s+/g, ' ')).toContain(
+      'That note plays only with its spoken sentence, so it needs announcements turned on above, with ' +
+        '“Say the distance to go” set to a distance.',
+    );
+    await act(async () => {
+      toggle?.click();
+      await Promise.resolve();
+    });
+    expect(readCuePreference(store)).toEqual({ ...DEFAULT_CUES, enabled: true });
+    // The mute is NOT here: it is on the ride's own screen, where the sound is.
+    expect(
+      [...mounted.container.querySelectorAll('button')].some(
+        (each) => each.textContent === 'Mute sounds',
+      ),
+    ).toBe(false);
     mounted.unmount();
   });
 });

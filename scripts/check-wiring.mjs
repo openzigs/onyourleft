@@ -116,6 +116,28 @@
  * (#292). Until that anchor, a comment saying an exemption had been removed
  * parsed as one — see `unwiredReason`, which is where the measurement is.
  *
+ * ## `@test-facing` — the second tag, and why it is the stricter one (#438)
+ *
+ * ⚠️ **"A threshold a test asserts against" above is now its own tag.** A
+ * reviewer who remembers every such bound spending an `@unwired` is reading
+ * the old file. #436 took the `@unwired` population under `apps/` from 21 to
+ * 32 in one change, nearly all of it arithmetic `camera.ts` and `bicycle.ts`
+ * state so that `camera.test.ts` and two browser gates can hold the renderer
+ * to it — correct, and indistinguishable in a count from a real gap.
+ *
+ * So `@test-facing <reason>` exempts an EXPORT from `WIRE002`, and only while
+ * something that is a gate reads it: a test, a spec, a double or a browser
+ * harness names it, or another held `@test-facing` export does. When nothing
+ * reads it any more it is dead, and `WIRE004` says so; `@unwired`'s free-text
+ * reason can never go red like that. It does not reach a whole file (`WIRE001`)
+ * or a port method (`WIRE003`) — a module or a method only tests reach is
+ * #230's shape exactly. And `WIRE004` also reports either tag on an export
+ * production DOES name, because a stale exemption is a false statement at the
+ * declaration: on the tree #438 was measured on, it found three.
+ *
+ * The success line counts the two populations apart. The options #438 weighed,
+ * and why a sibling module outside `WATCHED_PREFIXES` lost, are CLAUDE.md §4j.
+ *
  * Usage: node scripts/check-wiring.mjs [--root <dir>]
  */
 
@@ -742,6 +764,23 @@ export function watchedFiles(root) {
  * a tag in the same comment that still does.
  */
 export function unwiredReason(text) {
+  return tagReason(text, 'unwired');
+}
+
+/**
+ * The reason a declaration is deliberately named only by tests — #438.
+ *
+ * Read exactly as {@link unwiredReason} reads its tag: anchored to the start of
+ * a stripped comment line, `undefined` for no tag and `null` for a bare one.
+ * What the tag BUYS is different, and stricter — see `wiringProblems`: it
+ * exempts an export from `WIRE002` only while a test, a spec or a browser
+ * harness actually reads it, and never a whole file or a port method.
+ */
+export function testFacingReason(text) {
+  return tagReason(text, 'test-facing');
+}
+
+function tagReason(text, tag) {
   // The comment's own furniture first: `/**`, a trailing `*/`, the `*` down the
   // left margin and a `//` prefix. ⚠️ Without this the `*/` that closes a
   // one-line `@unwired` doc comment reads as the reason, and a tag with no
@@ -759,7 +798,7 @@ export function unwiredReason(text) {
   // exemption with nothing to show for it, which is the invisible half of this
   // change. The tolerance costs nothing the anchor is for: prose naming the
   // tag has a word or a backtick in front of it, never only whitespace.
-  const match = /^[ \t]*@unwired\b[ \t:]*(.*)/m.exec(stripped);
+  const match = new RegExp(`^[ \\t]*@${tag}(?![\\w-])[ \\t:]*(.*)`, 'm').exec(stripped);
   if (match === null) return undefined;
   const reason = match[1].trim();
   return reason.length < 3 || !/[a-zA-Z0-9]/.test(reason) ? null : reason;
@@ -831,6 +870,41 @@ export function portMethods(source) {
 const lineOf = (source, node) =>
   source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
 
+/**
+ * The text of every file that is a GATE rather than product — a test, a spec,
+ * a test double, or a browser harness — under `apps/`. What a `@test-facing`
+ * export has to be read by (#438).
+ *
+ * ⚠️ `browser/` counts here and is still NOT an entry point: a harness reading
+ * a bound is exactly what "test-facing" means, and exactly what must never
+ * make the bound look SHIPPED (#236).
+ */
+function gateReaders(root) {
+  const texts = [];
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (!SKIP_DIRECTORIES.has(entry.name)) walk(full);
+        continue;
+      }
+      const rel = slash(relative(root, full));
+      if (!/\.tsx?$/.test(rel)) continue;
+      if (isTestSupport(rel) || rel.split('/').includes('browser')) {
+        texts.push(readFileSync(full, 'utf8'));
+      }
+    }
+  };
+  walk(join(root, 'apps'));
+  return texts;
+}
+
 // ------------------------------------------------------------------- the gate
 
 /**
@@ -876,6 +950,8 @@ export function wiringProblems(root) {
   const reached = reachableNames(sources);
   const parsed = new Map(sources.map((source) => [source.fileName, source]));
   const problems = [];
+  /** Every `@test-facing` export, to be checked against what reads it. */
+  const testFacing = [];
 
   /**
    * True when a declaration says why it has no caller; a reasonless tag is a problem.
@@ -887,9 +963,13 @@ export function wiringProblems(root) {
    * exemption of the three — a bare `@unwired` in a file's doc comment silenced
    * a whole module with no `WIRE000`. Three call sites, one decision.
    */
+  let exemptions = 0;
   const exempted = (comment, what, where) => {
     const reason = unwiredReason(comment);
-    if (reason !== null) return reason !== undefined;
+    if (reason !== null) {
+      if (reason !== undefined) exemptions += 1;
+      return reason !== undefined;
+    }
     problems.push(
       `WIRE000 ${where} — ${what} carries \`@unwired\` with no reason. ` +
         'Say what makes it deliberate: an exemption nobody can read is a list in a config ' +
@@ -912,9 +992,43 @@ export function wiringProblems(root) {
       continue;
     }
     for (const declaration of exportedDeclarations(source)) {
-      if (reached.has(`value:${declaration.name}`)) continue;
       const at = `${rel}:${lineOf(source, declaration.doc)}`;
-      if (exempted(leadingCommentOf(source, declaration.doc), `\`${declaration.name}\``, at)) {
+      const comment = leadingCommentOf(source, declaration.doc);
+      const facing = testFacingReason(comment);
+      if (reached.has(`value:${declaration.name}`)) {
+        // WIRE004, the stale half: an exemption on something production DOES
+        // name is a false statement at the declaration, and a population that
+        // keeps its dead entries is one nobody can read a trend off.
+        const tag =
+          facing !== undefined
+            ? 'test-facing'
+            : unwiredReason(comment) !== undefined
+              ? 'unwired'
+              : undefined;
+        if (tag !== undefined) {
+          problems.push(
+            `WIRE004 ${at} — \`${declaration.name}\` carries \`@${tag}\` and production names ` +
+              'it. The exemption is stale: delete the tag, because what it claims is no longer true.',
+          );
+        }
+        continue;
+      }
+      if (facing !== undefined) {
+        if (facing === null) {
+          problems.push(
+            `WIRE000 ${at} — \`${declaration.name}\` carries \`@test-facing\` with no reason. ` +
+              'Say which gate holds the product to it.',
+          );
+        } else {
+          testFacing.push({
+            name: declaration.name,
+            at,
+            text: declaration.doc.getText(source),
+          });
+        }
+        continue;
+      }
+      if (exempted(comment, `\`${declaration.name}\``, at)) {
         continue;
       }
       problems.push(
@@ -940,10 +1054,41 @@ export function wiringProblems(root) {
       );
     }
   }
+  // WIRE004, the dead half — #438. A `@test-facing` export is exempt from
+  // WIRE002 only while something that is a GATE reads it: a test, a spec or a
+  // browser harness names it, or another held `@test-facing` export in the
+  // watched set does (the composition `camera.ts` states is built from
+  // `bicycle.ts`'s dimensions, and only the composition is asserted). Held is
+  // a closure from the tests outward, so two tagged exports naming only each
+  // other are dead together rather than holding each other up.
+  const readers = gateReaders(root);
+  const names = (text, name) => new RegExp(`(^|[^\\w$])${name}(?![\\w$])`).test(text);
+  const held = new Set(testFacing.filter((each) => readers.some((text) => names(text, each.name))));
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const each of testFacing) {
+      if (held.has(each)) continue;
+      if ([...held].some((other) => names(other.text, each.name))) {
+        held.add(each);
+        grew = true;
+      }
+    }
+  }
+  for (const each of testFacing) {
+    if (held.has(each)) continue;
+    problems.push(
+      `WIRE004 ${each.at} — \`${each.name}\` is marked \`@test-facing\` and no test, spec or ` +
+        'browser harness reads it, nor any test-facing export one does. Nothing ships it and ' +
+        'nothing holds anything to it: it is dead. Delete it, or wire it.',
+    );
+  }
+
   return {
     problems,
     modules: modules.size,
     watched: watched.length,
+    exemptions,
+    testFacing: held.size,
     // ⚠️ Reported rather than asserted — see `missingSeamFiles` for why an
     // all-absent seam cannot be a hard failure here, and why it must at least
     // be legible.
@@ -988,6 +1133,10 @@ if (invoked !== undefined && import.meta.filename === realpathSync(invoked)) {
     'check-wiring: every watched seam is reachable from the client’s entry point ' +
       `(${String(result.watched)} watched files, ${String(result.seam)} of ` +
       `${String(TRAINER_COMMAND_SEAM.length)} trainer-command seam modules, ` +
-      `${String(result.modules)} production modules).`,
+      `${String(result.modules)} production modules; ` +
+      // #438: the two exemption populations, counted apart, so growth in the
+      // one a test holds is not mistaken for growth in the one nothing does.
+      `${String(result.exemptions)} @unwired exemptions, ` +
+      `${String(result.testFacing)} @test-facing exports read by a gate).`,
   );
 }

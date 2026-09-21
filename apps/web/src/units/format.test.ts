@@ -35,6 +35,7 @@ import {
   speedFrom,
   speedIn,
   speedUnit,
+  spokenSmallDistanceUnit,
 } from './format';
 
 describe('formatSpeed', () => {
@@ -144,6 +145,16 @@ describe('formatSmallDistance — the segment and elevation scale', () => {
     // The two factors are definitions from the same 1959 agreement, so this
     // has to hold exactly. If it stops holding, one of them has been edited.
     expect(smallDistanceIn(1609.344, 'imperial')).toBeCloseTo(5280, 9);
+  });
+});
+
+describe('spokenSmallDistanceUnit — #399’s sentence', () => {
+  it('says the word a screen reader would otherwise guess at, in the same system', () => {
+    expect(spokenSmallDistanceUnit('metric')).toBe('metres');
+    expect(spokenSmallDistanceUnit('imperial')).toBe('feet');
+    // The same system as the printed label beside it, so the two cannot drift.
+    expect(smallDistanceUnit('metric')).toBe('m');
+    expect(smallDistanceUnit('imperial')).toBe('ft');
   });
 });
 

@@ -669,9 +669,66 @@ function buildUpdateWatcher(
 async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const platform = await buildPlatform(capabilities);
   const rideController = platform.rideController;
-  const registered = await workerRegistration;
   // Read once: two calls would be two reads of a global for one prop.
   const storage = platformStorage();
+  const root = createRoot(container);
+  const draw = (update: UpdateWatcher | undefined): void => {
+    root.render(
+      <StrictMode>
+        <AppShell
+          capabilities={capabilities}
+          {...(update === undefined ? {} : { update })}
+          {...(storage === undefined ? {} : { storage })}
+          {...(platform.shell === undefined ? {} : { shell: platform.shell })}
+          settings={buildUnitsPort()}
+          athleteMass={buildAthleteMassPort()}
+          // ⚠️ The **stored** mass, read before the first paint, and passed on
+          // undefaulted: `athlete/mass.ts` is the one place a missing one is
+          // substituted, and a default applied here would be a second.
+          {...(athlete?.mass === undefined ? {} : { riderMass: athlete.mass })}
+          // ⚠️ The **stored** preference, read before the first paint. The
+          // fallback is `DEFAULT_UNIT_SYSTEM` and it is applied in exactly one
+          // place — `AppShell`'s own default — so "a row with no setting" and
+          // "no row at all" read the same, which is what they mean.
+          {...(athlete?.units === undefined ? {} : { units: athlete.units })}
+          rideController={rideController}
+          transfer={buildTransferPort()}
+          library={buildLibraryPort()}
+          detail={buildDetailPort()}
+          analysis={buildAnalysisPort()}
+          segments={buildSegmentPort()}
+          match={buildMatchPort()}
+          routes={buildRoutePort()}
+          workouts={buildWorkoutPort()}
+          efforts={buildEffortPort()}
+          game={buildGamePort(rideController)}
+          gameTrainer={buildGameTrainerPort(rideController)}
+          gameRenderer={loadGameRenderer}
+          screenLock={browserScreenLockSource(platformWakeLock())}
+          map={loadMapPort}
+          basemap={browserBasemapConfig()}
+        />
+      </StrictMode>,
+    );
+  };
+  // ⚠️ **The first paint does not wait for the service worker — #418, measured.**
+  // This used to `await workerRegistration` BEFORE rendering, which put the
+  // round trip for `sw.js` in front of the first contentful paint of every
+  // visit. On a cold first visit over a shared 1.6 Mb/s, 150 ms link with the
+  // CPU throttled 4×, that await was the whole of the measurable cost:
+  // median FCP 1804 ms as it was, 1700 ms rendering first (−104 ms), and
+  // 1688 ms with registration ALSO deferred to `window.load` — 12 ms more,
+  // inside the spread of the runs. So the render moved and the registration
+  // did not: see the second comment on {@link workerRegistration} below, and
+  // ADR 0024's 2026-09-21 amendment for the method and every figure.
+  //
+  // What the watcher and `persist()` need is the registration, and they get it
+  // a moment later: the tree is drawn again with the watcher once one exists.
+  // An update offer cannot be missed by arriving late — `createUpdateWatcher`
+  // reads the registration's `waiting` and `installing` workers when it is
+  // made, which is exactly when it was made before this change.
+  draw(undefined);
+  const registered = await workerRegistration;
   const update = buildUpdateWatcher(registered, rideController);
   if (registered.kind === 'registered') {
     // ⚠️ **Only once a worker registered, and ADR 0024 D-5 is why**: Chrome
@@ -687,43 +744,9 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
     // `requestPersistence` resolves on every path rather than rejecting.
     void requestPersistenceOnce(storage);
   }
-  createRoot(container).render(
-    <StrictMode>
-      <AppShell
-        capabilities={capabilities}
-        {...(update === undefined ? {} : { update })}
-        {...(storage === undefined ? {} : { storage })}
-        {...(platform.shell === undefined ? {} : { shell: platform.shell })}
-        settings={buildUnitsPort()}
-        athleteMass={buildAthleteMassPort()}
-        // ⚠️ The **stored** mass, read before the first paint, and passed on
-        // undefaulted: `athlete/mass.ts` is the one place a missing one is
-        // substituted, and a default applied here would be a second.
-        {...(athlete?.mass === undefined ? {} : { riderMass: athlete.mass })}
-        // ⚠️ The **stored** preference, read before the first paint. The
-        // fallback is `DEFAULT_UNIT_SYSTEM` and it is applied in exactly one
-        // place — `AppShell`'s own default — so "a row with no setting" and "no
-        // row at all" read the same, which is what they mean.
-        {...(athlete?.units === undefined ? {} : { units: athlete.units })}
-        rideController={rideController}
-        transfer={buildTransferPort()}
-        library={buildLibraryPort()}
-        detail={buildDetailPort()}
-        analysis={buildAnalysisPort()}
-        segments={buildSegmentPort()}
-        match={buildMatchPort()}
-        routes={buildRoutePort()}
-        workouts={buildWorkoutPort()}
-        efforts={buildEffortPort()}
-        game={buildGamePort(rideController)}
-        gameTrainer={buildGameTrainerPort(rideController)}
-        gameRenderer={loadGameRenderer}
-        screenLock={browserScreenLockSource(platformWakeLock())}
-        map={loadMapPort}
-        basemap={browserBasemapConfig()}
-      />
-    </StrictMode>,
-  );
+  if (update !== undefined) {
+    draw(update);
+  }
 }
 
 /**
@@ -744,6 +767,24 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
  * outcome is needed for is #407: a registration is what an update watcher
  * watches, and `RegistrationOutcome.failed` is what a future notice would
  * read.
+ *
+ * ⚠️ **Still at module evaluation, NOT deferred to `window.load` — #418, and
+ * that was measured rather than argued.** The worry was that `install`'s
+ * `cache.addAll` over the whole asset graph (27 files, 3.09 MiB uncompressed)
+ * would compete for a slow link with the chunks the first paint needs. On a
+ * cold first visit — a fresh Chromium profile, one shared throttled link of
+ * 1.6 Mb/s down and 150 ms round trip serving gzip, the CPU throttled 4×,
+ * nine runs each — it does not, measurably: the entry chunk is fetched before
+ * the worker is even registered, and `load` fires before the first paint.
+ * Deferring registration to `load` moved median FCP by 12 ms over simply not
+ * awaiting it (1688 ms against 1700 ms) and median offline-ready by 9 ms
+ * (7574 ms against 7565 ms to `navigator.serviceWorker.ready`). Both are inside
+ * the runs' own spread, so neither is read as signal in either direction:
+ * deferring bought nothing measurable, and the simpler code is kept. Offline-
+ * ready is the number the rider #391's finding 4 names, in a basement on an
+ * unreliable link, which is why it was measured at all. On a fast link (9 Mb/s, 40 ms, no CPU throttle) the two differ
+ * by nothing at all (392 ms each). ADR 0024's 2026-09-21 amendment has the
+ * method and every run.
  *
  * `import.meta.env.BASE_URL` rather than `/`: the worker's scope is the base
  * path this build was compiled for, so a deployment under a subdirectory

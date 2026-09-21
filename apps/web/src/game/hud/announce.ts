@@ -25,9 +25,19 @@
  * | 1 | the trainer link lost | event | safety |
  * | 2 | a workout fault | event | safety |
  * | 3 | the next workout block, ahead of it | event (#398) | safety |
- * | 4 | power off an acknowledged target | ≥ 10 % for ≥ 5 s | attested |
- * | 5 | distance to go | a distance tick | attested |
- * | 6 | power | a time cadence | attested |
+ * | 4 | a climb or a descent ahead | event (#399) | attested |
+ * | 5 | power off an acknowledged target | ≥ 10 % for ≥ 5 s | attested |
+ * | 6 | distance to go | a distance tick | attested |
+ * | 7 | power | a time cadence | attested |
+ *
+ * ⚠️ **Rank 4 is #399's, and #395 did not place it** — its table decided the
+ * climb was in and left its rank to the issue that built it. It goes below
+ * the interval (a workout block is resistance the trainer is about to apply,
+ * #398's safety event) and above every READING, because it is an event that
+ * is true for a few seconds of road: a climb said after a routine power
+ * sentence has had its window is a climb the rider is already on. In a
+ * gradient ride it is also the one warning that the trainer's resistance is
+ * about to rise under the rider's legs.
  *
  * ⚠️ **Ranks 1, 2 and 4 have no production source yet, and the order above is
  * therefore not what a rider hears today** (PR #444's review). The two callers
@@ -75,7 +85,8 @@ export const OFF_TARGET_SECONDS = 5;
 export type AnnouncementEvent =
   | { readonly kind: 'trainer-lost'; readonly text: string }
   | { readonly kind: 'workout-fault'; readonly text: string }
-  | { readonly kind: 'interval-ahead'; readonly text: string };
+  | { readonly kind: 'interval-ahead'; readonly text: string }
+  | { readonly kind: 'climb-ahead'; readonly text: string };
 
 /** Every kind of sentence, events and readings together. */
 export type AnnouncementKind =
@@ -89,6 +100,7 @@ export const PRIORITY: readonly AnnouncementKind[] = [
   'trainer-lost',
   'workout-fault',
   'interval-ahead',
+  'climb-ahead',
   'power-off-target',
   'distance-tick',
   'power',
@@ -141,6 +153,12 @@ export const INITIAL_ANNOUNCER: AnnouncerState = {
 export interface Announcement {
   /** At most one sentence. `undefined` on most calls, by design. */
   readonly sentence: string | undefined;
+  /**
+   * What the sentence was about — #400. A non-speech cue plays only on the
+   * frame its sentence is said, so a rider with the sound off loses nothing:
+   * the cue is never the sole carrier of anything.
+   */
+  readonly kind: AnnouncementKind | undefined;
   readonly state: AnnouncerState;
 }
 
@@ -159,6 +177,26 @@ export function spokenPower(reading: HudReading | undefined): string {
   return `Power ${reading.value} watts`;
 }
 
+/**
+ * The distance to go as the announcer hears it — #399: **read off the HUD's own
+ * rendered reading**, never recomputed.
+ *
+ * ⚠️ `fields.ts` §`hudReadings` decides what "To go" means — to the end of
+ * THIS lap, through `plan.ts` §`planProgress`, in the rider's own unit — and a
+ * spoken form that did its own `totalDistance − odometer` would say "0 to go"
+ * for the whole of lap two of a loop (#296) while the screen said 4.2. So this
+ * parses the digits the rider can see and nothing else. `undefined` when the
+ * field is absent or shows no number.
+ */
+export function remainingFrom(
+  readings: readonly HudReading[],
+  unit: string,
+): { readonly value: number; readonly unit: string } | undefined {
+  const shown = readings.find((reading) => reading.key === 'remaining');
+  const value = shown === undefined || shown.stale ? Number.NaN : Number(shown.value);
+  return Number.isFinite(value) ? { value, unit } : undefined;
+}
+
 /** A distance mark, as a rider hears it: `12`, or `0.5` — never `12.0`. */
 function spokenNumber(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
@@ -170,13 +208,14 @@ export function announce(state: AnnouncerState, input: AnnounceInput): Announcem
   if (!preference.enabled) {
     // Off is off: nothing said, nothing waiting, and no baseline carried into
     // the moment it is switched on.
-    return { sentence: undefined, state: INITIAL_ANNOUNCER };
+    return { sentence: undefined, kind: undefined, state: INITIAL_ANNOUNCER };
   }
 
   // Events: keep the highest; a lower one arriving behind it is dropped.
   let pending = state.pending;
   for (const event of input.events ?? []) {
     if (event.kind === 'interval-ahead' && preference.intervalLeadSeconds === 'never') continue;
+    if (event.kind === 'climb-ahead' && preference.climbLeadMetres === 'never') continue;
     if (pending === undefined || rank(event.kind) <= rank(pending.kind)) {
       pending = event;
     }
@@ -269,6 +308,7 @@ export function announce(state: AnnouncerState, input: AnnounceInput): Announcem
 
   return {
     sentence: chosen?.sentence,
+    kind: chosen?.kind,
     state: {
       lastSpokenAt: chosen === undefined ? state.lastSpokenAt : now,
       powerFrom,
