@@ -65,6 +65,19 @@
  * own lowest target); starting to pedal again reads as `spiralling` below
  * 50 rpm, so the relief target; and the full target only after a steady
  * window.
+ *
+ * ## A rescue survives a free ride and a pause
+ *
+ * The latch is cleared by a whole window of `holding` verdicts and by
+ * {@link WorkoutPlayer.start}, and by nothing else — not by a free-ride block,
+ * where no verdict is taken, and not by a pause, where no tick runs. So a rider
+ * who spiralled, then rode a free block or paused, gets the relief target on
+ * the next ERG block for up to one {@link TREND_WINDOW} before the full one.
+ * That is deliberate, and it was implicit until PR #444's review: the pause and
+ * the free block are both likely to follow the struggle, the cost is at most
+ * eight seconds at two thirds of a target, and the error runs the safe way. A
+ * latch that a free ride cleared would put the full target that caused the
+ * spiral straight back on a rider whose legs have not been tested since.
  */
 
 import { seconds, watts, type Seconds, type Watts } from '../quantities';
@@ -257,9 +270,13 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
         // harder spins the rider out rather than loading them — which is a
         // great deal better than being held at the last interval with no
         // spiral check running at all.
+        // ⚠️ The reason said "Ride however you like" until PR #444's review.
+        // With the machine held at its floor in ERG that is not true — pushing
+        // harder spins the rider out rather than loading them — so it says
+        // only what this player knows: the block has no target of its own.
         pending = undefined;
         lastShare = undefined;
-        intent = { kind: 'release', reason: 'Ride however you like through this block.' };
+        intent = { kind: 'release', reason: 'This block sets no target of its own — ride easy.' };
         return snapshot();
       }
 

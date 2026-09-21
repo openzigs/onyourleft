@@ -357,6 +357,58 @@ describe('the ERG spiral is broken by easing the target, not by ending the inter
     });
   });
 
+  // PR #444's review: the latch outlives a free-ride block and a pause, and
+  // that was neither written down nor tested. It is a decision now — see the
+  // module note §"A rescue survives a free ride and a pause" — so it is pinned.
+  const steadyCadence = (from: number, to: number): readonly CadenceReading[] =>
+    Array.from({ length: to - from + 1 }, (_, index) => ({
+      at: seconds(from + index),
+      cadence: revolutionsPerMinute(82),
+    }));
+
+  it('carries a rescue across a free-ride block: the next target starts eased — #441', () => {
+    const subject = player(
+      expandWorkout(workout([steady(20, 0.6), freeRide(30), steady(60, 0.6)])),
+    );
+    subject.start(seconds(0));
+    const eased = subject.tick(seconds(10), { cadence: falling(70, 45, 10) });
+    expect(eased.intent).toMatchObject({ eased: true });
+    subject.acknowledge(watts(wroteWatts(eased.intent)));
+
+    expect(subject.tick(seconds(30), { cadence: steadyCadence(23, 30) }).intent.kind).toBe(
+      'release',
+    );
+
+    // The next ERG block, with a rested rider at 82 rpm: still the relief
+    // target, for one whole trend window, and then the full one.
+    const resumed = subject.tick(seconds(55), { cadence: steadyCadence(48, 55) });
+    expect(resumed.intent).toMatchObject({ eased: true, share: 0.6 });
+    expect(wroteWatts(resumed.intent)).toBe(Math.round(150 * RELIEF_SHARE));
+    subject.acknowledge(watts(wroteWatts(resumed.intent)));
+    const recovered = subject.tick(seconds(55 + TREND_WINDOW), {
+      cadence: steadyCadence(56, 55 + TREND_WINDOW),
+    });
+    expect(recovered.intent).toMatchObject({ eased: false });
+    expect(wroteWatts(recovered.intent)).toBe(150);
+  });
+
+  it('carries a rescue across a pause: the target that comes back on resume is eased — #441', () => {
+    const subject = player(expandWorkout(workout([steady(600, 0.6)])));
+    subject.start(seconds(0));
+    const eased = subject.tick(seconds(10), { cadence: falling(70, 45, 10) });
+    subject.acknowledge(watts(wroteWatts(eased.intent)));
+    subject.pause(seconds(12));
+    subject.resume(seconds(100));
+
+    const resumed = subject.tick(seconds(100), { cadence: steadyCadence(93, 100) });
+    expect(resumed.intent).toMatchObject({ eased: true });
+    subject.acknowledge(watts(wroteWatts(resumed.intent)));
+    expect(
+      subject.tick(seconds(100 + TREND_WINDOW), { cadence: steadyCadence(101, 100 + TREND_WINDOW) })
+        .intent,
+    ).toMatchObject({ eased: false });
+  });
+
   it('steps back up from a stall: floor, then relief, then the full target — #441', () => {
     const subject = player();
     subject.start(seconds(0));

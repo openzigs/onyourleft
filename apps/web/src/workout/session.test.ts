@@ -318,9 +318,20 @@ describe('the trainer is eased whenever the rider is not riding to a target — 
 
     session.pause(seconds(3));
     await session.settled();
+    // PR #444's review: validation 0002 S4 is "the floor while paused, the
+    // target on Resume", and this case asserted only the second half. Both are
+    // read off the machine, and what went over the wire on Resume is a 0x05.
+    expect(trainer.targetPowerOnTheTrainer()).toBe(FLOOR_WATTS);
+    const beforeResume = trainer.wire.length;
     session.resume(seconds(10));
     await ride(session, 10, 12);
 
+    const onResume = trainer.wire
+      .slice(beforeResume)
+      .filter((entry) => entry.direction === 'write')
+      .map((entry) => [...entry.bytes]);
+    expect(onResume[0]).toStrictEqual(targetWrite(150));
+    expect(onResume.some((write) => write[0] === STOP_OR_PAUSE)).toBe(false);
     expect(trainer.control.hasControl()).toBe(true);
     expect(trainer.targetPowerOnTheTrainer()).toBe(150);
     expect(session.state().lastFault).toBeUndefined();
