@@ -65,6 +65,22 @@
  * requires the file to name **exactly** these two illumination classes and no
  * third, which fails just as closed and says what was decided.
  *
+ * ## The riders stand on the road — #426
+ *
+ * Nothing the sun lit cast anything until #426, so the three bicycles floated.
+ * Two ways to ground them, both from the ONE sun above — no second light
+ * direction:
+ *
+ * - {@link ContactShadowBelt}: a soft blob under the rider and the pacer, drawn
+ *   ON the unlit road because the road cannot receive a shadow. One
+ *   transparent instanced draw, on every rung of the ladder. The ghost casts
+ *   none (`contact-shadow.ts` §`CASTS_CONTACT_SHADOW`).
+ * - A shadow map for the riders only, caught by a `ShadowMaterial` plane under
+ *   them — `quality.ts` §`RIDER_SHADOW_MAP_RUNG`, above the ladder, off unless
+ *   a device asks for it, and unmeasured on a phone. The scenery neither casts
+ *   nor receives on any rung, and `three-seam.test.ts` counts every
+ *   `castShadow` and `receiveShadow` write in this file to keep it so.
+ *
  * ## The road's colour is now its own vertices'
  *
  * ⚠️ **`ROAD_COLOUR` used to be a constant in this file and is now in
@@ -144,6 +160,7 @@ import {
   PlaneGeometry,
   Quaternion,
   Scene,
+  ShadowMaterial,
   SphereGeometry,
   TorusGeometry,
   Vector3,
@@ -172,6 +189,12 @@ import {
   legBones,
   type RiderPart,
 } from './bicycle';
+import {
+  CONTACT_SHADOW_DARKNESS,
+  CONTACT_SHADOW_LIFT_METRES,
+  placeContactShadow,
+  type ContactShadow,
+} from './contact-shadow';
 import type { QualitySettings } from './quality';
 import {
   MAXIMUM_SCENERY_VARIANTS,
@@ -1181,15 +1204,59 @@ export class WorldLamps {
    * ⚠️ **`position` and not a direction vector.** three has no setter for a
    * directional light's direction: the shader takes `position − target`,
    * normalised, so a unit vector written into `position` with the target left
-   * at the origin *is* the direction. The distance is irrelevant — nothing
-   * here casts a shadow, so there is no shadow camera to frame — which is why
-   * the unit vector is written straight in rather than scaled out to some
-   * arbitrary radius.
+   * at the origin *is* the direction. The distance is irrelevant to the
+   * lighting — which is why the unit vector is written straight in rather than
+   * scaled out to some arbitrary radius. ⚠️ Since #426 the distance matters to
+   * the shadow MAP's frame, on the one rung that has one, and
+   * {@link aimShadowAt} moves both ends for that rung after this has run.
    */
   apply(sun: SunStyle): void {
+    this.#sun.target.position.set(0, 0, 0);
     this.#ambient.intensity = sun.ambient * LAMBERT_IRRADIANCE_SCALE;
     this.#sun.intensity = sun.direct * LAMBERT_IRRADIANCE_SCALE;
     this.#sun.position.set(sun.x, sun.y, sun.z);
+  }
+
+  /**
+   * Whether the sun casts a shadow map — #426, the `'map'` rung only.
+   *
+   * ⚠️ **The only place in this file a lamp is told to cast**, and the one
+   * light that may: `three-seam.test.ts` counts the `castShadow` writes. The
+   * shadow camera is framed on {@link SHADOW_FRAME_METRES} either side of the
+   * rider and no further, because what is being bought is the riders' shadow
+   * and nothing else — the scenery neither casts nor receives.
+   */
+  setCasting(on: boolean): void {
+    this.#sun.castShadow = on;
+    if (!on) {
+      return;
+    }
+    const { shadow } = this.#sun;
+    shadow.mapSize.set(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
+    const frame = shadow.camera;
+    frame.left = -SHADOW_FRAME_METRES;
+    frame.right = SHADOW_FRAME_METRES;
+    frame.top = SHADOW_FRAME_METRES;
+    frame.bottom = -SHADOW_FRAME_METRES;
+    frame.near = 0.5;
+    frame.far = SHADOW_SUN_DISTANCE_METRES * 2;
+    frame.updateProjectionMatrix();
+  }
+
+  /**
+   * Moves the sun to {@link SHADOW_SUN_DISTANCE_METRES} up its own direction
+   * from the rider, looking at them — the shadow map's frame. ⚠️ The direction
+   * is exactly {@link apply}'s: `position − target` is the same unit vector,
+   * scaled. Called after `apply` on a `'map'` frame and never otherwise, so the
+   * other rungs keep the target at the origin that `apply` documents.
+   */
+  aimShadowAt(x: number, y: number, z: number, sun: SunStyle): void {
+    this.#sun.target.position.set(x, y, z);
+    this.#sun.position.set(
+      x + sun.x * SHADOW_SUN_DISTANCE_METRES,
+      y + sun.y * SHADOW_SUN_DISTANCE_METRES,
+      z + sun.z * SHADOW_SUN_DISTANCE_METRES,
+    );
   }
 
   /** Releases both lamps. Neither owns a GPU resource; three asks for this anyway. */
@@ -1198,6 +1265,25 @@ export class WorldLamps {
     this.#sun.dispose();
   }
 }
+
+/**
+ * The shadow map's resolution on the `'map'` rung: **512** texels square.
+ *
+ * #426 quotes 512–1024 for a phone; the bottom of that range, because it is
+ * a measurement's starting position and the riders are small in the frame. At
+ * {@link SHADOW_FRAME_METRES} that is 2.3 cm a texel.
+ */
+const SHADOW_MAP_SIZE = 512;
+
+/**
+ * How far either side of the rider the shadow map reaches: **6 m**. The rider
+ * and a pacer riding with them. A pacer further off is not shadowed on this
+ * rung at all — stated, because the contact blobs are OFF on it.
+ */
+const SHADOW_FRAME_METRES = 6;
+
+/** How far up the sun's direction the shadow camera stands. Only its frame depends on it. */
+const SHADOW_SUN_DISTANCE_METRES = 20;
 
 /**
  * The scenery belt: one {@link InstancedMesh} per {@link ScatterKind}, reused.
@@ -1884,6 +1970,23 @@ export class RiderBelt {
     this.#limbs.material = material;
   }
 
+  /**
+   * Whether the riders cast into the sun's shadow map — #426, the `'map'` rung.
+   * They do not RECEIVE one: what grounds a rider is its shadow on the road,
+   * and self-shadowing is a second shadow pass over the same three meshes.
+   */
+  setCasting(on: boolean): void {
+    for (const mesh of [this.#bodies, this.#cranksets, this.#limbs]) {
+      mesh.castShadow = on;
+    }
+  }
+
+  /** Asks three to rebuild both materials' programs. @see ThreeGameView.#applyRiderShadows */
+  recompile(): void {
+    this.#materials.lit.needsUpdate = true;
+    this.#materials.flat.needsUpdate = true;
+  }
+
   dispose(): void {
     for (const mesh of [this.#bodies, this.#cranksets, this.#limbs]) {
       mesh.geometry.dispose();
@@ -1986,6 +2089,171 @@ export class RiderBelt {
     }
     this.#stretch.setScalar(1);
   }
+}
+
+/**
+ * The riders' contact shadows — #426: a soft dark ellipse on the road under
+ * the rider and the pacer, **one instanced transparent draw for all of them**.
+ *
+ * `contact-shadow.ts` decides where each goes, from `world.ts`'s own sun, and
+ * who casts one at all (the ghost does not). This draws them.
+ *
+ * ## Why it reaches the screen over an unlit road
+ *
+ * It is drawn ON the road rather than received by it — the road is a
+ * `MeshBasicMaterial` with no shadow lookup at all. Three things make that
+ * work, and each was the obvious thing to get wrong:
+ *
+ * - **Transparent, with no depth write**, so three draws it after every opaque
+ *   thing — the road, the ground and the riders are already in the depth
+ *   buffer — and it neither hides the wheel standing on it nor is hidden by the
+ *   road it lies on.
+ * - **Depth-TESTED**, so the road over a crest, or the rider's own wheels, in
+ *   front of it still hide it. A blob drawn without the test would show through
+ *   a hill a pacer has gone over.
+ * - **Lifted {@link CONTACT_SHADOW_LIFT_METRES} and polygon-offset toward the
+ *   camera**, so it does not fight the road's own triangles for the same depth.
+ *   The ground plane writes no depth (`#groundMaterial`), so off the road
+ *   nothing is under it to fight.
+ *
+ * ⚠️ **Black with a per-vertex ALPHA, not a texture.** A soft edge is usually
+ * a radial texture; `game.browser.spec.ts` §"uploads no texture to the GPU"
+ * holds this scene to none, so the fade is a colour attribute of four
+ * components — alpha {@link CONTACT_SHADOW_DARKNESS} at the middle, nothing at
+ * the rim — which three turns into vertex alphas by itself.
+ *
+ * Exported for `three-renderer.test.ts`, for {@link RiderBelt}'s reasons.
+ */
+export class ContactShadowBelt {
+  readonly #material = new MeshBasicMaterial({
+    vertexColors: true,
+    transparent: true,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -4,
+  });
+  readonly #mesh: InstancedMesh;
+  /** Reused for every rider on every frame. @see placeContactShadow */
+  readonly #shadow: ContactShadow = { x: 0, y: 0, z: 0, yaw: 0, halfAlong: 0, halfAcross: 0 };
+  readonly #position = new Vector3();
+  readonly #turn = new Quaternion();
+  readonly #stretch = new Vector3();
+  readonly #matrix = new Matrix4();
+  readonly #up = new Vector3(0, 1, 0);
+  #shown = true;
+
+  constructor() {
+    this.#mesh = new InstancedMesh(contactShadowGeometry(), this.#material, RIDDEN_KINDS.length);
+    this.#mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.#mesh.count = 0;
+    // For `RiderBelt`'s reason: every rider is within metres of the camera.
+    this.#mesh.frustumCulled = false;
+    this.#mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The one mesh. For `three-renderer.test.ts`. */
+  get mesh(): InstancedMesh {
+    return this.#mesh;
+  }
+
+  /**
+   * Whether the blobs are drawn at all — `'contact'` rungs only. On the
+   * `'map'` rung the shadow map draws the real shape instead, and a blob under
+   * it would darken the same road twice. @see QualitySettings.riderShadows
+   */
+  setShown(on: boolean): void {
+    this.#shown = on;
+    if (!on) {
+      this.#mesh.count = 0;
+      this.#mesh.visible = false;
+    }
+  }
+
+  /** One blob per rider who casts one, under this frame's sun. Allocates nothing. */
+  place(markers: readonly RiderMarker[], sun: SunStyle): void {
+    if (!this.#shown) {
+      return;
+    }
+    let slot = 0;
+    for (const marker of markers) {
+      if (slot >= RIDDEN_KINDS.length) {
+        break;
+      }
+      if (!placeContactShadow(marker, sun, this.#shadow)) {
+        continue;
+      }
+      const shadow = this.#shadow;
+      this.#position.set(shadow.x, shadow.y, shadow.z);
+      this.#turn.setFromAxisAngle(this.#up, shadow.yaw);
+      this.#stretch.set(shadow.halfAcross, 1, shadow.halfAlong);
+      this.#mesh.setMatrixAt(slot, this.#matrix.compose(this.#position, this.#turn, this.#stretch));
+      slot += 1;
+    }
+    this.#mesh.count = slot;
+    this.#mesh.instanceMatrix.needsUpdate = true;
+    this.#mesh.visible = slot > 0;
+  }
+
+  dispose(): void {
+    this.#mesh.geometry.dispose();
+    this.#mesh.dispose();
+    this.#material.dispose();
+  }
+}
+
+/** How many points round the blob's rim: enough that 24 edges read as an ellipse. */
+const CONTACT_SHADOW_SEGMENTS = 24;
+
+/** How far out, as a share of the rim, the blob keeps most of its darkness. */
+const CONTACT_SHADOW_CORE = 0.45;
+
+/**
+ * A unit disc lying in the ground plane, facing up: black, alpha
+ * {@link CONTACT_SHADOW_DARKNESS} at the middle, 80 % of that at
+ * {@link CONTACT_SHADOW_CORE} of the way out, and nothing at the rim.
+ *
+ * ⚠️ **Wound to face +Y**, because the material culls back faces and a disc
+ * wound the other way is invisible from above — which is every camera this
+ * program has. `three-renderer.test.ts` computes the normal rather than
+ * trusting this sentence.
+ */
+function contactShadowGeometry(): BufferGeometry {
+  const rings = [
+    { radius: CONTACT_SHADOW_CORE, alpha: CONTACT_SHADOW_DARKNESS * 0.8 },
+    { radius: 1, alpha: 0 },
+  ];
+  const vertexCount = 1 + rings.length * CONTACT_SHADOW_SEGMENTS;
+  const positions = new Float32Array(vertexCount * 3);
+  const colours = new Float32Array(vertexCount * 4);
+  colours[3] = CONTACT_SHADOW_DARKNESS;
+  rings.forEach((ring, index) => {
+    for (let step = 0; step < CONTACT_SHADOW_SEGMENTS; step += 1) {
+      const angle = (step / CONTACT_SHADOW_SEGMENTS) * Math.PI * 2;
+      const at = 1 + index * CONTACT_SHADOW_SEGMENTS + step;
+      positions[at * 3] = Math.cos(angle) * ring.radius;
+      positions[at * 3 + 2] = Math.sin(angle) * ring.radius;
+      colours[at * 4 + 3] = ring.alpha;
+    }
+  });
+  const indices: number[] = [];
+  const ringAt = (ring: number, step: number): number =>
+    1 + ring * CONTACT_SHADOW_SEGMENTS + (step % CONTACT_SHADOW_SEGMENTS);
+  for (let step = 0; step < CONTACT_SHADOW_SEGMENTS; step += 1) {
+    // (centre, next, this) faces +Y — see the note above.
+    indices.push(0, ringAt(0, step + 1), ringAt(0, step));
+    indices.push(ringAt(0, step), ringAt(0, step + 1), ringAt(1, step + 1));
+    indices.push(ringAt(0, step), ringAt(1, step + 1), ringAt(1, step));
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new BufferAttribute(colours, 4));
+  geometry.setIndex(indices);
+  return geometry;
 }
 
 /**
@@ -2138,6 +2406,30 @@ class ThreeGameView implements GameView {
    * second collection to hold.
    */
   readonly #riders = new RiderBelt();
+  /** The riders' contact shadows — #426. One draw for all of them. */
+  readonly #contactShadows = new ContactShadowBelt();
+  /**
+   * What catches the riders' shadow MAP on the `'map'` rung — #426.
+   *
+   * ⚠️ **A plane of its own, because the road cannot**: the road and the
+   * ground are unlit and have no shadow lookup at all. A `ShadowMaterial` draws
+   * nothing but the shadow falling on it, so a flat square at the road's height
+   * under the rider shows the riders' shadow over the road and nothing else.
+   * It shares {@link ContactShadowBelt}'s limit — flat on a road that climbs —
+   * and its depth handling: transparent, no depth write, tested, offset.
+   */
+  readonly #shadowCatcher = new Mesh(
+    new PlaneGeometry(SHADOW_FRAME_METRES * 2, SHADOW_FRAME_METRES * 2),
+    new ShadowMaterial({
+      opacity: CONTACT_SHADOW_DARKNESS,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -4,
+    }),
+  );
+  /** The `riderShadows` the view is drawing with, so a change is seen once. */
+  #riderShadows: QualitySettings['riderShadows'] | undefined;
   /**
    * The world, as three objects built once and mutated thereafter — #240's
    * NFR-3. Every one of them is a fixed instance: the sky is the `Color` the
@@ -2223,6 +2515,14 @@ class ThreeGameView implements GameView {
     // no rider draws nothing rather than adding one on the frame it appears.
     this.#riders.addTo(this.#scene);
 
+    // #426. Both are built and added once; the rung decides which one draws.
+    this.#contactShadows.addTo(this.#scene);
+    this.#shadowCatcher.rotation.x = -Math.PI / 2;
+    this.#shadowCatcher.receiveShadow = true;
+    this.#shadowCatcher.frustumCulled = false;
+    this.#shadowCatcher.visible = false;
+    this.#scene.add(this.#shadowCatcher);
+
     this.#lighting.addTo(this.#scene);
 
     // ⚠️ **No longer inside a `renderer !== undefined` guard, since #286.**
@@ -2244,6 +2544,7 @@ class ThreeGameView implements GameView {
     this.#updateRoad(frame);
     this.#scatter.update(frame.scatter, frame.camera);
     this.#updateMarkers(frame.markers);
+    this.#updateShadows(frame);
     this.#placeCamera(frame.camera);
     this.#renderer.render(this.#scene, this.#camera);
   }
@@ -2251,6 +2552,7 @@ class ThreeGameView implements GameView {
   setQuality(settings: QualitySettings): void {
     this.#quality = settings;
     this.#applyShading();
+    this.#applyRiderShadows();
     // #245. Applied here rather than read in `render`, so that the rung is a
     // property of the belt between frames and the render loop takes no scenery
     // decision at all. @see ScatterBelt.setBudget
@@ -2274,6 +2576,43 @@ class ThreeGameView implements GameView {
     this.#riders.setShading(shading);
   }
 
+  /**
+   * The rung's way of grounding the riders — #426. @see QualitySettings.riderShadows
+   *
+   * ⚠️ **`shadowMap.enabled` is renderer state that three bakes into every lit
+   * material's program**, so turning it on or off after the first frame needs
+   * those programs rebuilt — the rider's two materials and the catcher. Done
+   * only when the value CHANGES, which on the ladder is at most once a ride
+   * (the map rung is above it, and the first step down leaves it).
+   */
+  #applyRiderShadows(): void {
+    const { riderShadows } = this.#quality;
+    if (riderShadows === this.#riderShadows) {
+      return;
+    }
+    this.#riderShadows = riderShadows;
+    const map = riderShadows === 'map';
+    if (this.#renderer !== undefined) {
+      this.#renderer.shadowMap.enabled = map;
+    }
+    this.#lighting.setCasting(map);
+    this.#riders.setCasting(map);
+    this.#riders.recompile();
+    this.#shadowCatcher.visible = map;
+    this.#shadowCatcher.material.needsUpdate = true;
+    this.#contactShadows.setShown(riderShadows === 'contact');
+  }
+
+  /** Where this frame's shadows fall — #426. */
+  #updateShadows(frame: SceneFrame): void {
+    this.#contactShadows.place(frame.markers, frame.world.sun);
+    if (this.#riderShadows === 'map') {
+      const pose = frame.camera;
+      this.#lighting.aimShadowAt(pose.x, pose.y, pose.z, frame.world.sun);
+      this.#shadowCatcher.position.set(pose.x, pose.y + CONTACT_SHADOW_LIFT_METRES, pose.z);
+    }
+  }
+
   resize(widthCssPixels: number, heightCssPixels: number): void {
     this.#widthCssPixels = Math.max(1, widthCssPixels);
     this.#heightCssPixels = Math.max(1, heightCssPixels);
@@ -2288,6 +2627,9 @@ class ThreeGameView implements GameView {
     this.#scatter.dispose();
     this.#lighting.dispose();
     this.#riders.dispose();
+    this.#contactShadows.dispose();
+    this.#shadowCatcher.geometry.dispose();
+    this.#shadowCatcher.material.dispose();
     // `forceContextLoss` before `dispose` because a WebGL context is not
     // garbage-collected promptly and a browser allows only a handful at once —
     // a rider starting five rides in a session would otherwise run out.

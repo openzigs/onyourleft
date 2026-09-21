@@ -1796,6 +1796,81 @@ adb logcat | grep -i "BluetoothLe"
 
 ---
 
+## Part T — the riders' shadows, and what a real shadow map costs ([#426](https://github.com/openzigs/onyourleft/issues/426))
+
+#426 grounded the three bicycles. Two things shipped, and only one of them is on by default:
+
+| | on by default? | what it costs, by construction | where it is measured |
+|---|---|---|---|
+| **Contact shadows** — a soft blob under the rider and the pacer, placed from `world.ts`'s own sun | **yes, on every rung** | one transparent instanced draw call for all of them (the scenery-free frame is 6 calls, from 5) | `game.browser.spec.ts` §"draws each of the three in its own colour" reads it back, with the shadows off as its control |
+| **A shadow map** for the riders only, caught by a shadow-catching plane under them | **no** — `quality.ts` §`RIDER_SHADOW_MAP_RUNG`, above the ladder, and the first thing the ladder gives up | a shadow pass of the three rider meshes into a 512² depth map, plus the catcher | the pinned Chromium publishes a frame time on a software rasteriser, which says nothing about a phone. **This part is the measurement #426 closes on** |
+
+⚠️ **The ghost casts neither, on purpose** (`contact-shadow.ts` §`CASTS_CONTACT_SHADOW`): a bicycle
+with no shadow reads as *not really here*, which is #93's at-a-glance criterion. T2 asks whether it
+does.
+
+⚠️ **Read Part H's §"The baseline, and where it actually lives" before comparing anything**, and
+note that the figure #426 quotes — *"GPU 50th percentile 7 ms during a ride"* — predates
+#366/#367/#368. T3 re-takes it without the map first, on the same build, so the comparison is on
+one day and one phone rather than across three months of changes.
+
+### T — how the shadow map is switched on
+
+There is **no control for it on any screen**, deliberately (`quality.ts`
+§`RIDER_SHADOW_MAP_STORAGE_KEY` says why). With a **debug** build running and Part P's adb forward in
+place, on any screen but the game:
+
+```bash
+node apps/mobile/tools/webview-probe.mjs \
+  'localStorage.setItem("oyl.game.riderShadowMap", "on"), localStorage.getItem("oyl.game.riderShadowMap")'
+```
+
+It prints `on`. It is read at the **start** of each ride, so start a new one. To turn it off again,
+the same with `localStorage.removeItem("oyl.game.riderShadowMap")`, which prints `undefined`.
+
+### T — the steps
+
+| Step | What to do | What to record |
+|---|---|---|
+| T1 | Shadow map **off** (the default). Ride any route with a pacer | Does the rider look **on** the road now, rather than floating over it? Does the pacer's blob follow the pacer, and fall on the same side as the rider's? |
+| T2 | Ride the same route racing a ghost | The ghost has **no** shadow. Does that read as *"not really here"*, or as a rendering fault? |
+| T3 | Shadow map **off**. 12 s of riding, target rung, the `dumpsys` block below | the **off** column |
+| T4 | Switch the shadow map **on** (above), start a new ride, and repeat T3 | the **on** column. And by eye: is the real shadow worth having over the blob? |
+| T5 | With it **on**, ride for **20 minutes** and note whether the ladder stepped down — the HUD's quality line, or `dumpsys` frame times rising | whether it left the map rung, and after how long. The first step down takes the map away (`quality.ts` §`rungFor`) |
+
+```bash
+adb shell dumpsys gfxinfo dev.openzigs.onyourleft reset
+# ... ride for 12 s with the game visible, the rider pedalling and the pacer in shot ...
+adb shell dumpsys gfxinfo dev.openzigs.onyourleft | grep -iE "Total frames|Janky|percentile|Missed Vsync|GPU"
+```
+
+### T results
+
+| | T3 — contact shadows | T4 — shadow map | difference |
+|---|--:|--:|--:|
+| Total frames rendered | | | |
+| Janky frames (legacy, > 16 ms) | | | |
+| Frame time 50th / 90th | | | |
+| **GPU time 50th / 90th** | | | |
+| Missed Vsync | | | |
+
+**Does the rider stand on the road (T1)?** ______________
+
+**Does the ghost read as not-really-there, or as broken (T2)?** ______________
+
+**Is the real shadow worth having over the blob, by eye (T4)?** ______________
+
+**Did the ladder leave the map rung in 20 minutes, and when (T5)?** ______________
+
+**Phone (OEM, model, Android):** ______________  **Build:** ______________
+
+**The decision this is for**, to be written on #426 when the table is filled: the shadow map
+**lands as a rung** (and on which devices it is offered), or it is recorded as **"measured, not
+worth it"** with the numbers above and the rung is removed. #426 stays open until one of the two is
+written down; it was opened with `Refs`, not `Closes`, for exactly this.
+
+---
+
 ## After the session
 
 1. **Fill the tables in this file and commit it.** An empty table in `main` is the honest state; a

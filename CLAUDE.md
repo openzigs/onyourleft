@@ -304,6 +304,20 @@ apps/                 AGPL-3.0-or-later, without exception
                         Part N. `simulatedCrankAngle` turns the other two's
                         cranks from their own ODOMETER at a fixed gear, which
                         is neither a reading nor a rate anybody invented
+    src/game/contact-shadow.ts
+                        where each rider's contact shadow lies (#426) — thrown
+                        from `world.ts`'s ONE sun, never a second light
+                        direction, and who casts one at all. ⚠️ **The ghost
+                        does not**, on purpose: a bicycle with no shadow reads
+                        as "not really here", which is #93's at-a-glance
+                        criterion. `three-renderer.ts` §`ContactShadowBelt`
+                        draws them as one instanced transparent call, ON the
+                        road rather than received by it, because the road is
+                        unlit and has no shadow lookup at all. A real shadow
+                        map for the riders is `quality.ts`
+                        §`RIDER_SHADOW_MAP_RUNG`: above the ladder, off unless
+                        a device asks, and unmeasured on a phone — validation
+                        0002 Part T, which #426 closes on
     src/game/terrain.ts the road as geometry (#91), and since #242 as a road: two
                         edge lines and a broken centre line built into the same
                         vertex buffer, and a surface tinted by signed gradient.
@@ -2347,8 +2361,8 @@ appearing anywhere in the file's text** — so a `@test-facing` export mentioned
 a test, or inside a string, was held alive by a sentence. `check-wiring.mjs` §`identifiersIn` walks
 the TypeScript parser's own tree, which carries no comment and no string contents, and the same
 applies to a held export holding up another: a mention in its doc comment no longer counts.
-Measured on this tree: the held count is **22** either way, so nothing here was being held up by a
-comment alone. What it still cannot tell is WHICH declaration a name refers to — a test's own local
+Measured on the tree #447 was written on: the held count was **22** either way, so nothing here was
+being held up by a comment alone (it is 19 after #426, which shipped three of them). What it still cannot tell is WHICH declaration a name refers to — a test's own local
 of the same name holds the export alive — and that is §Limits' collision, stated for `WIRE002`
 already. Reverting `identifiersIn` to a match over the file's full text turns five fixture cases
 red.
@@ -3246,6 +3260,10 @@ top of an issue **supersedes its body**.
 | Why the rider is a bicycle built from numbers rather than a model somebody downloaded | `apps/web/src/game/bicycle.ts`, [#349](https://github.com/openzigs/onyourleft/issues/349) |
 | What the cranks do when nobody is reporting a cadence, and why that is better than a rate | `apps/web/src/game/bicycle.ts` §`advanceCrank` |
 | Why the knee is resolved forward rather than backward, and the clamp the fit makes reachable | `apps/web/src/game/bicycle.ts` §`legBones` |
+| Why the riders cast a contact shadow, from which sun, and why the ghost casts none | `apps/web/src/game/contact-shadow.ts` §`CASTS_CONTACT_SHADOW`, `apps/web/src/game/three-renderer.ts` §`ContactShadowBelt`, [#426](https://github.com/openzigs/onyourleft/issues/426) |
+| Why the scene-free frame is six draw calls since #426, and what the shadow map would cost instead | `apps/web/browser/game.browser.spec.ts` §`SCENE_DRAW_CALLS`, §"measures what the shading costs" |
+| Why the shadow map is a rung above the ladder with no control on any screen, and how a device is measured with it on | `apps/web/src/game/quality.ts` §`RIDER_SHADOW_MAP_RUNG`, §`RIDER_SHADOW_MAP_STORAGE_KEY`, [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part T |
+| What `three-seam.test.ts` counts about shadows, and why a shadow map needed a rule no lamp count could give | `apps/web/src/game/three-seam.test.ts` §"lets only the sun and the riders cast a shadow" |
 | Why the rider costs three draw calls where the sphere cost one | `apps/web/src/game/three-renderer.ts` §`RiderModel`, `apps/web/browser/game.browser.spec.ts` §`SCENE_DRAW_CALLS` |
 | Why every marker now carries a heading, and why it is the road's rather than the camera's | `apps/web/src/game/port.ts` §`RiderMarker.headingX`, `apps/web/src/game/scene.ts` §`headingAt` |
 | Why #286's shading probe is no longer the rider's own marker | `apps/web/browser/game-harness.ts` §`oneColourSolid` |

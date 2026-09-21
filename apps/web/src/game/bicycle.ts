@@ -300,19 +300,16 @@ const HANDLEBAR_LENGTH_METRES = 0.4;
  * the browser gate's minimum share would be measuring a rider that no longer
  * exists.
  *
- * @test-facing the renderer builds the rider from the parts below and never needs
- * their overall size; three projects them. The only things that name this are
- * `camera.ts` §`riderFrameBox` and §`roadAppearsOverRiderMetres`, which are
- * themselves statements of the composition that two browser gates and
- * `camera.test.ts` hold the layout and the renderer to — so by this gate's own
- * reckoning nothing that SHIPS reads it, and that is true.
+ * ⚠️ **It ships since #426, and carried `@test-facing` until then**: the
+ * contact shadow (`contact-shadow.ts`) is thrown from half this height and
+ * lengthened by the shadow the whole of it casts, so a reviewer who remembers
+ * "nothing that SHIPS reads it" here is reading the old file.
  */
 export const RIDER_HEIGHT_METRES = HELMET_Y + HELMET_RADIUS;
 
 /**
- * Half the rider's width — the handlebar, which is the widest part.
- *
- * @test-facing {@link RIDER_HEIGHT_METRES}'s reason applies unchanged.
+ * Half the rider's width — the handlebar, which is the widest part. Ships
+ * since #426: it is the contact shadow's half-width, before its margin.
  */
 export const RIDER_HALF_WIDTH_METRES = HANDLEBAR_LENGTH_METRES / 2;
 
@@ -320,7 +317,11 @@ export const RIDER_HALF_WIDTH_METRES = HANDLEBAR_LENGTH_METRES / 2;
  * How far AHEAD of the point a rider is placed at the top of their helmet is:
  * 0.19 m. @see BICYCLE_REAR_CONTACT_METRES
  *
- * @test-facing {@link RIDER_HEIGHT_METRES}'s reason applies unchanged.
+ * @test-facing the renderer builds the rider from the parts below and never
+ * needs where the helmet is; three projects them. What names this is
+ * `camera.ts` §`riderFrameBox`, a statement of the composition that two browser
+ * gates and `camera.test.ts` hold the layout and the renderer to — so nothing
+ * that SHIPS reads it, and that is true.
  */
 export const RIDER_HELMET_AHEAD_METRES = HELMET_Z;
 
@@ -358,7 +359,7 @@ const FRONT_HUB_Z = 0.52;
  * this and {@link RIDER_HELMET_AHEAD_METRES} so that the rectangle the HUD is
  * kept clear of is the rectangle the rider is in.
  *
- * @test-facing {@link RIDER_HEIGHT_METRES}'s reason applies unchanged.
+ * @test-facing {@link RIDER_HELMET_AHEAD_METRES}'s reason applies unchanged.
  */
 export const BICYCLE_REAR_CONTACT_METRES = REAR_HUB_Z;
 
@@ -378,10 +379,11 @@ export const BICYCLE_REAR_CONTACT_METRES = REAR_HUB_Z;
 export const BICYCLE_FRONT_METRES = FRONT_HUB_Z + WHEEL_RADIUS;
 
 /**
- * The bicycle, tyre to tyre: 1.70 m.
- *
- * @test-facing {@link BICYCLE_FRONT_METRES}'s reason applies unchanged; this is
- * the bound the same test holds the owner's 16 : 10 tablet to.
+ * The bicycle, tyre to tyre: 1.70 m. It is also the bound
+ * `three-renderer.test.ts` §"the verge and the camera cone" holds the owner's
+ * 16 : 10 tablet to — and since #426 it ships, as the contact shadow's length
+ * before the sun lengthens it, which is why it no longer carries the
+ * `@test-facing` it had.
  */
 export const BICYCLE_LENGTH_METRES = BICYCLE_FRONT_METRES - (REAR_HUB_Z - WHEEL_RADIUS);
 const SADDLE_Y = 0.94;

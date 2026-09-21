@@ -24,9 +24,13 @@ import {
   HEADROOM_RESTORE_BELOW,
   INITIAL_QUALITY,
   QUALITY_LADDER,
+  RIDER_SHADOW_MAP_RUNG,
+  RIDER_SHADOW_MAP_STORAGE_KEY,
   SUSTAINED_SAMPLES,
   nextQuality,
   qualitySettings,
+  readShadowMapChoice,
+  rungFor,
   type QualityLevel,
   type QualitySample,
   type QualityState,
@@ -372,5 +376,58 @@ describe('the scenery gives up its variety before it gives up its items — #367
       );
     }
     expect(QUALITY_LADDER[QUALITY_LADDER.length - 1]?.sceneryVariants).toBe(1);
+  });
+});
+
+describe('the riders’ shadows on the ladder — #426', () => {
+  it('grounds the riders with a contact shadow on EVERY rung, the floor included', () => {
+    expect(QUALITY_LADDER.map((rung) => rung.riderShadows)).toEqual(
+      QUALITY_LADDER.map(() => 'contact'),
+    );
+  });
+
+  it('puts the shadow map on no rung of the ladder — the ladder never reaches it by itself', () => {
+    // From level 0, a device running cool for as long as you like stays at 0,
+    // and 0 has no shadow map: off by default, on the device floor and above.
+    const cool = sustain(INITIAL_QUALITY, { frameMs: 5, thermalHeadroom: 0.1 }, 1_000);
+    expect(cool.level).toBe(0);
+    expect(rungFor(cool.level, false).riderShadows).toBe('contact');
+  });
+
+  it('is the full rung with one field changed, so a measurement of it is of the map alone', () => {
+    const { riderShadows, label, ...rest } = RIDER_SHADOW_MAP_RUNG;
+    const {
+      riderShadows: top,
+      label: topLabel,
+      ...full
+    } = QUALITY_LADDER[0] as never as typeof RIDER_SHADOW_MAP_RUNG;
+    expect(riderShadows).toBe('map');
+    expect(top).toBe('contact');
+    expect(label).not.toBe(topLabel);
+    expect(rest).toEqual(full);
+  });
+
+  it('is given to a device that asked, at level 0 only, and taken away by the first step down', () => {
+    expect(rungFor(0, true)).toBe(RIDER_SHADOW_MAP_RUNG);
+    expect(rungFor(0, false)).toBe(qualitySettings(0));
+    for (const level of [1, 2, 3] as const) {
+      expect(rungFor(level, true)).toBe(qualitySettings(level));
+    }
+  });
+
+  it('reads the choice off this device, and any failure to read it is "no"', () => {
+    const storing = (value: string | null) => ({ getItem: () => value });
+    expect(readShadowMapChoice(storing('on'))).toBe(true);
+    expect(readShadowMapChoice(storing(null))).toBe(false);
+    expect(readShadowMapChoice(storing('yes'))).toBe(false);
+    expect(readShadowMapChoice(undefined)).toBe(false);
+    expect(
+      readShadowMapChoice({
+        getItem: () => {
+          throw new Error('blocked');
+        },
+      }),
+    ).toBe(false);
+    expect(RIDER_SHADOW_MAP_STORAGE_KEY).toBe('oyl.game.riderShadowMap');
   });
 });

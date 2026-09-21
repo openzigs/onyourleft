@@ -46,7 +46,14 @@ import {
   type WindChoice,
   type WindProblemField,
 } from './wind-choice';
-import { INITIAL_QUALITY, nextQuality, qualitySettings, type QualityState } from './quality';
+import {
+  INITIAL_QUALITY,
+  nextQuality,
+  qualitySettings,
+  readShadowMapChoice,
+  rungFor,
+  type QualityState,
+} from './quality';
 import { createGradientSession, type GradientSession, type GradientSessionState } from './gradient';
 import {
   NO_GAME_TRAINER,
@@ -370,6 +377,13 @@ export function GameView(props: GameViewProps): JSX.Element {
    * `audio-cues.ts` §`release`.
    */
   const workoutHeldRef = useRef(false);
+  /**
+   * Whether THIS DEVICE asked for the riders' shadow map — #426. Read at the
+   * start of each ride, like every other choice here; off unless somebody set
+   * it, and there is no control for it (`quality.ts`
+   * §`RIDER_SHADOW_MAP_STORAGE_KEY` says why). @see rungFor
+   */
+  const shadowMapRef = useRef(false);
   const gradientFaultRef = useRef<string | undefined>(undefined);
   /**
    * This ride's sounds — #400. Made inside the *Ride* press, so the audio
@@ -545,6 +559,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       announcerRef.current = INITIAL_ANNOUNCER;
       setAnnouncement('');
       announcementsRef.current = readAnnouncementPreference(deviceStorage());
+      shadowMapRef.current = readShadowMapChoice(deviceStorage());
       slopesRef.current = slopesOf(profile);
       slopeAnnouncedRef.current = undefined;
       // ⚠️ **Read at the start of the ride and held for its length**, which is
@@ -645,7 +660,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       // context still gets a HUD and a ride.
       void load().then((renderer) => {
         if (viewRef.current === undefined) {
-          viewRef.current = renderer.create(canvas, qualitySettings(quality.level));
+          viewRef.current = renderer.create(canvas, rungFor(quality.level, shadowMapRef.current));
           viewRef.current.resize(canvas.clientWidth || 320, canvas.clientHeight || 180);
         }
       });
@@ -861,7 +876,7 @@ export function GameView(props: GameViewProps): JSX.Element {
   }, [phase, chosen, port, props.renderer, props.now]);
 
   useEffect(() => {
-    const settings = qualitySettings(quality.level);
+    const settings = rungFor(quality.level, shadowMapRef.current);
     // ⚠️ Both halves of the rung, from one place. The renderer stops submitting
     // the instances and `sceneFrame` stops placing them — #245, and
     // `ScatterBelt.setBudget` says why neither alone is the whole of it.

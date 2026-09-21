@@ -73,7 +73,7 @@ import type { WorldStyle } from '../src/game/world';
 
 import { sceneFrame } from '../src/game/scene';
 import { corridorOrigin } from '../src/game/terrain';
-import { qualitySettings } from '../src/game/quality';
+import { qualitySettings, RIDER_SHADOW_MAP_RUNG, type QualitySettings } from '../src/game/quality';
 import { loadSceneryModels, threeGameRenderer } from '../src/game/three-renderer';
 import {
   SCATTER_KINDS,
@@ -82,6 +82,9 @@ import {
   type ScatterKind,
 } from '../src/game/scatter';
 import { atStartLine } from '../src/game/simulation';
+
+/** What {@link shadowMapProbe} publishes. */
+type ShadowMapMeasurement = NonNullable<Window['__oylGameHarness']>['shadowMap'];
 
 /** One read-back pixel, as four bytes. */
 type Pixel = readonly [number, number, number, number];
@@ -481,6 +484,48 @@ declare global {
        * is the one input `bicycle.ts` §`simulatedCrankAngle` takes.
        */
       readonly botCrankPixels: number;
+      /**
+       * Pixels each rider's contact shadow darkens, drawn alone — #426.
+       *
+       * The same rider at the same place on the same frame, once with
+       * `riderShadows: 'none'` and once with the `'contact'` every rung of the
+       * ladder draws: the pixels that differ are the blob and nothing else.
+       * ⚠️ **The ghost's is the decision, not a failure**: it casts none
+       * (`contact-shadow.ts` §`CASTS_CONTACT_SHADOW`), so its entry is 0.
+       */
+      readonly contactShadowPixels: Readonly<Record<string, number>>;
+      /**
+       * The mean luminance of those pixels with the shadow and without — #426.
+       * A blob that reached the buffer and made the road LIGHTER, or one that
+       * only moved a colour sideways, is not a shadow.
+       */
+      readonly contactShadowLuminance: Readonly<Record<string, readonly [number, number]>>;
+      /**
+       * The control for {@link contactShadowPixels}: the same shadowless frame
+       * drawn twice and compared. Anything but 0 means the difference above is
+       * a renderer that is never still rather than a shadow.
+       */
+      readonly contactShadowNoise: number;
+      /**
+       * The riders' shadow MAP, measured — #426's second half, and published
+       * rather than asserted. Only when the page is loaded with
+       * `?shadow-map`: every other spec case reloads this page, and a
+       * measurement nobody asserts on should not cost all of them its frames.
+       */
+      readonly shadowMap: {
+        readonly measured: boolean;
+        /** Mean ms a frame on the full rung — contact shadows. */
+        readonly contactFrameMs: number;
+        /** Mean ms a frame on `RIDER_SHADOW_MAP_RUNG`. */
+        readonly mapFrameMs: number;
+        /** The widest spread between two rounds of the same rung. */
+        readonly noiseMs: number;
+        /** Draw calls on one frame of each — the shadow pass is extra calls. */
+        readonly contactDrawCalls: number;
+        readonly mapDrawCalls: number;
+        /** Pixels the map shadow darkens under the rider alone, against `'none'`. */
+        readonly shadowPixels: number;
+      };
       readonly errors: readonly string[];
     };
   }
@@ -560,7 +605,9 @@ function riderExtent(width: number, height: number): RiderExtent {
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
-  const view = threeGameRenderer.create(canvas, qualitySettings(0));
+  // ⚠️ With the riders' shadows OFF since #426: this measures the RIDER's share
+  // of the frame, and a blob on the road beside the wheels is not the rider.
+  const view = threeGameRenderer.create(canvas, NO_RIDER_SHADOWS);
   view.resize(width, height);
   const profile = levelRoute();
   const start = atStartLine(profile);
@@ -1056,6 +1103,9 @@ function colourProbes(probe: SceneFrame): {
   readonly buildingBlue: number;
   readonly riders: Readonly<Record<string, RiderProbe>>;
   readonly botCrankPixels: number;
+  readonly contactShadowPixels: Readonly<Record<string, number>>;
+  readonly contactShadowLuminance: Readonly<Record<string, readonly [number, number]>>;
+  readonly contactShadowNoise: number;
 } {
   const canvas = document.createElement('canvas');
   canvas.width = 600;
@@ -1068,8 +1118,14 @@ function colourProbes(probe: SceneFrame): {
   const riders: Record<string, RiderProbe> = {};
   let textures = 0;
   let baselineTextures = 0;
+  let contactShadowNoise = 0;
+  const contactShadowPixels: Record<string, number> = {};
+  const contactShadowLuminance: Record<string, readonly [number, number]> = {};
   countingTextures((counted) => {
-    const view = threeGameRenderer.create(canvas, qualitySettings(0));
+    // ⚠️ Shadows OFF for the colour claims (#426): a rider's mean silhouette
+    // colour is the rider's, and a blob of darkened road around the wheels
+    // would be averaged into it. They are turned on below, for the shadow's own.
+    const view = threeGameRenderer.create(canvas, NO_RIDER_SHADOWS);
     view.resize(600, 400);
     const gl = canvas.getContext('webgl2');
     const whole = () =>
@@ -1139,6 +1195,38 @@ function colourProbes(probe: SceneFrame): {
     const botAtTop = whole();
     view.render(alone('bot', Math.PI / 2));
     botCrankPixels = shadingAcross(whole(), botAtTop).pixels;
+
+    // ---------------------------------------- the contact shadows — #426
+    //
+    // Each rider alone, at the same place, first with the shadows off and
+    // then with the `'contact'` every ladder rung draws: the pixels that
+    // differ are the blob. The control is the shadowless frame drawn twice.
+    // ⚠️ And inside the texture count on purpose: the soft edge is a vertex
+    // ALPHA, and #366's "no texture reaches the GPU" is asserted over this.
+    //
+    // ⚠️ **At the road's own height 8 m up it**, where `alone` above uses the
+    // camera pose's: the harness route climbs at 5 %, so `alone`'s rider stands
+    // 0.4 m under the tarmac — invisible to a colour mean, and fatal to a blob
+    // that is depth-tested against that tarmac. The first version of this probe
+    // read 0 px for all three for exactly that reason.
+    const onTarmac = onTheRoad(probe, 8, 0);
+    const grounded = (kind: 'rider' | 'bot' | 'ghost'): SceneFrame => {
+      const frame = alone(kind, 0);
+      return { ...frame, markers: frame.markers.map((each) => ({ ...each, y: onTarmac.y })) };
+    };
+    for (const kind of ['rider', 'bot', 'ghost'] as const) {
+      view.setQuality(NO_RIDER_SHADOWS);
+      view.render(grounded(kind));
+      const without = whole();
+      view.render(grounded(kind));
+      contactShadowNoise = Math.max(contactShadowNoise, shadingAcross(whole(), without).pixels);
+      view.setQuality(qualitySettings(0));
+      view.render(grounded(kind));
+      const withShadow = whole();
+      const found = luminanceAcross(withShadow, without);
+      contactShadowPixels[kind] = found.pixels;
+      contactShadowLuminance[kind] = [found.with, found.without];
+    }
     view.destroy();
     textures = counted() - baseline;
   });
@@ -1151,8 +1239,143 @@ function colourProbes(probe: SceneFrame): {
     buildingBlue,
     riders,
     botCrankPixels,
+    contactShadowPixels,
+    contactShadowLuminance,
+    contactShadowNoise,
   };
 }
+
+/** The full rung with the riders' shadows off — what a probe of the RIDER draws with. */
+const NO_RIDER_SHADOWS: QualitySettings = { ...qualitySettings(0), riderShadows: 'none' };
+
+/** What the harness reports for the shadow map when it did not measure it. */
+const NO_SHADOW_MAP: ShadowMapMeasurement = {
+  measured: false,
+  contactFrameMs: 0,
+  mapFrameMs: 0,
+  noiseMs: 0,
+  contactDrawCalls: 0,
+  mapDrawCalls: 0,
+  shadowPixels: 0,
+};
+
+/**
+ * Where two frames differ, and the mean luminance of those pixels in each.
+ * @see contactShadowLuminance
+ */
+function luminanceAcross(
+  present: Uint8Array,
+  absent: Uint8Array,
+): { readonly pixels: number; readonly with: number; readonly without: number } {
+  let pixels = 0;
+  let withTotal = 0;
+  let withoutTotal = 0;
+  for (let at = 0; at + 3 < present.length; at += 4) {
+    if (
+      present[at] === absent[at] &&
+      present[at + 1] === absent[at + 1] &&
+      present[at + 2] === absent[at + 2]
+    ) {
+      continue;
+    }
+    pixels += 1;
+    withTotal += luminanceOf([present[at] ?? 0, present[at + 1] ?? 0, present[at + 2] ?? 0, 255]);
+    withoutTotal += luminanceOf([absent[at] ?? 0, absent[at + 1] ?? 0, absent[at + 2] ?? 0, 255]);
+  }
+  return pixels === 0
+    ? { pixels: 0, with: 0, without: 0 }
+    : { pixels, with: withTotal / pixels, without: withoutTotal / pixels };
+}
+
+/**
+ * The riders' shadow MAP, measured on its own canvas — #426.
+ *
+ * ⚠️ **Published, never asserted against a budget**, and #426 says why: this
+ * is a headless Chromium on a software rasteriser, and a GPU-less runner's
+ * number says nothing about what a phone's GPU pays. The device measurement is
+ * `docs/validation/0002-android-shell-and-game.md` Part T. What IS asserted is
+ * that the measurement measured something: a shadow reached the buffer, and
+ * the map rung drew more calls than the contact one.
+ *
+ * Alternating which rung goes first each round, and warming each with a
+ * discarded sweep, for exactly the reasons the shading measurement gives.
+ */
+function shadowMapProbe(probe: SceneFrame): ShadowMapMeasurement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 600;
+  canvas.height = 400;
+  const profile = harnessRoute();
+  const origin = corridorOrigin(profile);
+  const start = atStartLine(profile);
+  const frameAt = (distance: number) =>
+    sceneFrame({
+      profile,
+      origin,
+      state: { ...start, ride: { ...start.ride, distance: metres(distance) } },
+      botDistance: distance + 4,
+    });
+  let result: ShadowMapMeasurement = NO_SHADOW_MAP;
+  countingDrawCalls((calls) => {
+    const view = threeGameRenderer.create(canvas, qualitySettings(0));
+    view.resize(600, 400);
+    const gl = canvas.getContext('webgl2');
+    const whole = () =>
+      gl === null ? new Uint8Array(0) : readRegion(gl, 0, 0, canvas.width, canvas.height);
+    const contact = qualitySettings(0);
+    const riderOnly: SceneFrame = {
+      ...probe,
+      scatter: [],
+      markers: probe.markers.filter((marker) => marker.kind === 'rider'),
+    };
+
+    const drawnWith = (settings: QualitySettings): number => {
+      view.setQuality(settings);
+      view.render(riderOnly);
+      const before = calls();
+      view.render(riderOnly);
+      return calls() - before;
+    };
+    const contactDrawCalls = drawnWith(contact);
+    const mapDrawCalls = drawnWith(RIDER_SHADOW_MAP_RUNG);
+    const withMap = whole();
+    view.setQuality(NO_RIDER_SHADOWS);
+    view.render(riderOnly);
+    const shadowPixels = luminanceAcross(withMap, whole());
+
+    for (const settings of [contact, RIDER_SHADOW_MAP_RUNG]) {
+      view.setQuality(settings);
+      void timeFrames(view, frameAt, gl);
+    }
+    const contactRounds: number[] = [];
+    const mapRounds: number[] = [];
+    for (let round = 0; round < SHADOW_MAP_ROUNDS; round += 1) {
+      const order =
+        round % 2 === 0 ? [contact, RIDER_SHADOW_MAP_RUNG] : [RIDER_SHADOW_MAP_RUNG, contact];
+      for (const settings of order) {
+        view.setQuality(settings);
+        (settings === contact ? contactRounds : mapRounds).push(timeFrames(view, frameAt, gl));
+      }
+    }
+    view.destroy();
+    const mean = (values: readonly number[]) =>
+      values.reduce((total, each) => total + each, 0) / values.length;
+    const range = (values: readonly number[]) => Math.max(...values) - Math.min(...values);
+    result = {
+      measured: true,
+      contactFrameMs: mean(contactRounds),
+      mapFrameMs: mean(mapRounds),
+      noiseMs: Math.max(range(contactRounds), range(mapRounds)),
+      contactDrawCalls,
+      mapDrawCalls,
+      // Only pixels the map made DARKER count as its shadow.
+      shadowPixels: shadowPixels.with < shadowPixels.without ? shadowPixels.pixels : 0,
+    };
+  });
+  return result;
+}
+
+/** Rounds of each rung in {@link shadowMapProbe}: two, alternating, after a warm-up. */
+const SHADOW_MAP_ROUNDS = 2;
 
 /**
  * Where a point in the world lands in the frame, as fractions of its width and
@@ -1688,6 +1911,10 @@ async function run(): Promise<void> {
       riderMeanColour: {},
       riderSilhouettePixels: {},
       botCrankPixels: 0,
+      contactShadowPixels: {},
+      contactShadowLuminance: {},
+      contactShadowNoise: 0,
+      shadowMap: NO_SHADOW_MAP,
       errors: ['no canvas'],
     };
     return;
@@ -1755,6 +1982,10 @@ async function run(): Promise<void> {
   const riderMeanColour: Record<string, Pixel> = {};
   const riderSilhouettePixels: Record<string, number> = {};
   let botCrankPixels = 0;
+  let contactShadowPixels: Record<string, number> = {};
+  let contactShadowLuminance: Record<string, readonly [number, number]> = {};
+  let contactShadowNoise = 0;
+  let shadowMap: ShadowMapMeasurement = NO_SHADOW_MAP;
   /** The frame the model comparison is measured on. @see sceneryIndicesByKind */
   let probeFrame: SceneFrame | null = null;
   /** The frame the variant measurements are taken on. @see variantIndices */
@@ -2060,7 +2291,9 @@ async function run(): Promise<void> {
         // control is drawn first and compared against the identical frame
         // before it, which is what makes a non-zero difference below evidence
         // of the cranks rather than of a renderer that is never still.
-        view.setQuality(lit);
+        // ⚠️ With the riders' shadows off (#426): what is counted below is the
+        // BICYCLE's own silhouette, and a blob under it is not the bicycle.
+        view.setQuality({ ...lit, riderShadows: 'none' });
         const cranksAt = (angle: number): SceneFrame => ({
           ...riderOnly,
           markers: riderOnly.markers.map((marker) => ({ ...marker, crankAngle: angle })),
@@ -2239,6 +2472,12 @@ async function run(): Promise<void> {
         riderSilhouettePixels[kind] = each.pixels;
       }
       botCrankPixels = found.botCrankPixels;
+      contactShadowPixels = found.contactShadowPixels;
+      contactShadowLuminance = found.contactShadowLuminance;
+      contactShadowNoise = found.contactShadowNoise;
+      if (new URLSearchParams(location.search).has('shadow-map')) {
+        shadowMap = shadowMapProbe(probeFrame);
+      }
     }
     // #424, on canvases of their own — @see riderExtent. 16 : 9 is the
     // criterion's own frame; 10 : 16 is a tablet held upright.
@@ -2311,6 +2550,10 @@ async function run(): Promise<void> {
     riderMeanColour,
     riderSilhouettePixels,
     botCrankPixels,
+    contactShadowPixels,
+    contactShadowLuminance,
+    contactShadowNoise,
+    shadowMap,
     errors,
   };
 }
