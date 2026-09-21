@@ -1695,6 +1695,11 @@ what a real trainer does**: every test asserts what is *sent*.
 - After each release the Trainer panel should show **neither** *Control lost* **nor** *Ask the
   trainer for control*: a release is not a loss, and a Stop keeps control. There is no need to take
   control again between steps.
+- After *End ERG* the panel should read ***The trainer may still be holding 200 W — this app can no
+  longer tell.*** — and ⚠️ **never** *No target set. The trainer is following your effort.*, which
+  is what it said until PR #444's review while the trainer went on holding 200 W. An answered Stop
+  is not evidence the machine let go, so a confirmed target becomes an unknown one. Record the exact
+  sentence in the *Panel afterwards* column.
 - **No `0x00` may follow the `0x08`** in any step. A Request Control after a release is the client
   taking control back on its own — L's note above says how that happened before PR #442's review.
   Record whether a `0xFF` status arrived at all.
