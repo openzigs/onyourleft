@@ -527,8 +527,10 @@ function SoundsPanel({
         Short sounds during a ride, as well as anything your screen reader says: a steady tone
         during a workout that rises when your power is over the target and falls when it is under,
         two rising notes when a workout block changes, and one low note as each distance-to-go mark
-        passes. The tone is silent whenever there is no power reading. Off unless you turn it on;
-        while riding, a Mute sounds button and a volume slider are on the ride screen.
+        passes in the game. That note plays only with its spoken sentence, so it needs announcements
+        turned on above, with &ldquo;Say the distance to go&rdquo; set to a distance. The tone is
+        silent whenever there is no power reading. Off unless you turn it on; while riding, a Mute
+        sounds button and a volume slider are on the ride screen.
       </p>
       <p>
         <label className="oyl-announce__switch">

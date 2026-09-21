@@ -796,6 +796,14 @@ describe('sounds — #400', () => {
       '.oyl-sounds input[type="checkbox"]',
     );
     expect(toggle?.checked).toBe(false);
+    // #400's review: the distance note is played only on the frame its sentence
+    // is said (a sound is never the only carrier), so the copy must not promise
+    // it to a rider who has Sounds on and announcements off.
+    const copy = mounted.container.querySelector('.oyl-sounds .oyl-muted')?.textContent ?? '';
+    expect(copy.replace(/\s+/g, ' ')).toContain(
+      'That note plays only with its spoken sentence, so it needs announcements turned on above, with ' +
+        '“Say the distance to go” set to a distance.',
+    );
     await act(async () => {
       toggle?.click();
       await Promise.resolve();
