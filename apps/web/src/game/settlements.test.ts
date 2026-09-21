@@ -313,6 +313,23 @@ describe('nothing stands on the road, whichever stretch of it — #468 review B1
     const cos = Math.cos(item.rotation);
     const sin = Math.sin(item.rotation);
     let least = Number.POSITIVE_INFINITY;
+    // Only the stretches that could come within ten metres of the footprint —
+    // anything a point of it is nearer than that to passes within its bounding
+    // radius and ten metres of its centre. Further than that the answer is
+    // `+Infinity`, which every assertion here reads as clear. Measuring every
+    // stretch took six seconds on CI's first run of this under coverage.
+    const radius = Math.hypot(footprint.x, Math.max(-footprint.back, footprint.front)) + 10;
+    const near: [{ x: number; z: number }, { x: number; z: number }][] = [];
+    for (let at = 0; at + 1 < line.length; at += 1) {
+      const a = line[at] as { x: number; z: number };
+      const b = line[at + 1] as { x: number; z: number };
+      const dx = b.x - a.x;
+      const dz = b.z - a.z;
+      const span = dx * dx + dz * dz;
+      const t =
+        span > 0 ? Math.min(1, Math.max(0, ((item.x - a.x) * dx + (item.z - a.z) * dz) / span)) : 0;
+      if (Math.hypot(item.x - (a.x + dx * t), item.z - (a.z + dz * t)) <= radius) near.push([a, b]);
+    }
     const across = Math.max(1, Math.ceil((2 * footprint.x) / 0.5));
     const deep = Math.max(1, Math.ceil((footprint.front - footprint.back) / 0.5));
     for (let i = 0; i <= across; i += 1) {
@@ -322,9 +339,7 @@ describe('nothing stands on the road, whichever stretch of it — #468 review B1
         // A yaw of `rotation`, as three applies it.
         const x = item.x + lx * cos + lz * sin;
         const z = item.z - lx * sin + lz * cos;
-        for (let at = 0; at + 1 < line.length; at += 1) {
-          const a = line[at] as { x: number; z: number };
-          const b = line[at + 1] as { x: number; z: number };
+        for (const [a, b] of near) {
           const dx = b.x - a.x;
           const dz = b.z - a.z;
           const span = dx * dx + dz * dz;
