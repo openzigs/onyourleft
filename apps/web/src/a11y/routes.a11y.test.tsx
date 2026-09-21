@@ -462,12 +462,19 @@ describe('criterion 3 — everything interactive is reachable by keyboard', () =
   });
 
   it('reaches every route from every other in at most two activations — #427', async () => {
-    // The group, then the page. Walked from every route rather than from the
-    // one the app opens on, because the secondary row is drawn for the
-    // CURRENT group only — a route one activation from home can be two from
-    // anywhere else, and would be three if a group's link went nowhere useful.
+    // The group, then the page. What a page offers depends only on its GROUP —
+    // the primary links are the same everywhere and the second row is drawn
+    // for the current group — so walking from one page of every group covers
+    // every ordered pair without paying for 110 of them (which timed out under
+    // coverage instrumentation, measured). A route one activation from home
+    // can be two from elsewhere, and would be three if a group's link went
+    // nowhere useful.
     await open('/');
-    for (const from of ROUTES) {
+    const representatives = ROUTES.filter(
+      (route, index) => ROUTES.findIndex((each) => each.group === route.group) === index,
+    );
+    expect(representatives.length).toBeGreaterThanOrEqual(5);
+    for (const from of representatives) {
       await navigateTo(from);
       for (const to of ROUTES) {
         if (to.id === from.id) continue;
@@ -477,7 +484,7 @@ describe('criterion 3 — everything interactive is reachable by keyboard', () =
         await navigateTo(from);
       }
     }
-  });
+  }, 30_000);
 
   it('marks the current page for assistive technology, not only with colour', async () => {
     await open('/activities');
