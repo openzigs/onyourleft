@@ -56,4 +56,34 @@ describe('the lookahead — #398', () => {
   it('says nothing past the end', () => {
     expect(upcomingBlock(TIMELINE, 1200, LEAD)).toBeUndefined();
   });
+
+  it('words a ramp, a free ride, an unchanged effort and a long block', () => {
+    const shapes = expandWorkout({
+      name: 'Shapes',
+      blocks: [
+        { kind: 'steady', seconds: seconds(60), target: thresholdShare(0.6) },
+        {
+          kind: 'ramp',
+          seconds: seconds(3900),
+          from: thresholdShare(0.6),
+          to: thresholdShare(0.9),
+        },
+        { kind: 'steady', seconds: seconds(60), target: thresholdShare(0.9) },
+        { kind: 'free-ride', seconds: seconds(1) },
+        { kind: 'steady', seconds: seconds(60), target: thresholdShare(0.5) },
+      ],
+    });
+    expect(upcomingBlock(shapes, 55, LEAD)?.sentence).toBe(
+      'In 5 seconds: the same effort — 1 hour 5 minutes rising from 60 to 90 percent of your threshold.',
+    );
+    expect(upcomingBlock(shapes, 3955, LEAD)?.sentence).toBe(
+      'In 5 seconds: the same effort — 1 minute at 90 percent of your threshold.',
+    );
+    expect(upcomingBlock(shapes, 4015, LEAD)?.sentence).toBe(
+      'In 5 seconds: easing off — 1 second of free riding, with no target.',
+    );
+    expect(upcomingBlock(shapes, 4020.5, LEAD)?.sentence).toBe(
+      'In 1 second: harder — 1 minute at 50 percent of your threshold.',
+    );
+  });
 });
