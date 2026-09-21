@@ -1455,7 +1455,7 @@ viewport.
 | Roadside scenery level with the rider | in shot | ⚠️ **not in shot** — it enters the frame 0.7 m ahead of the rider. This is a deliberate trade and `apps/web/src/game/camera.ts` argues it |
 
 ⚠️ **What a headless Chromium established, and what it cannot.** At 1280×800, 1024×768, 800×1280,
-844×390, 736×360, 390×844, 360×800 and 320×704 every reading and both controls are on screen with no
+844×390, 736×360, 390×844, 360×800 and 360×752 every reading and both controls are on screen with no
 scrolling, no panel is over another or over the rider, and a control that takes the stage away puts
 *End ride* below the fold again. None of that says the screen **looks right**, that the panels are
 where a thumb falls, that a 70° lens is comfortable for an hour, or that the frame rate held. **Only

@@ -43,10 +43,12 @@
  *
  * ⚠️ "Every control is inside the viewport" is satisfied by a page that
  * rendered nothing, a stylesheet that failed to load, and a ride that never
- * started. So each layout is measured **twice**: as shipped, and again after
- * `unstage()` has taken `oyl-game--riding` off the live element — the same DOM
- * under the same stylesheet at the same viewport, minus the one class #423
- * added. The second measurement is required to **fail**: *Pause* below the
+ * started. So every landscape and every stacked viewport is measured **twice**
+ * (an upright overlay viewport cannot carry this control, and
+ * `Viewport.unstagedFails` says why and what stands in for it): as shipped, and
+ * again after `unstage()` has taken `oyl-game--riding` off the live element —
+ * the same DOM under the same stylesheet at the same viewport, minus the one
+ * class #423 added. The second measurement is required to **fail**: *Pause* below the
  * fold again, which is #419's own finding. `ride-harness.tsx` says why React
  * does not put the class back.
  *
@@ -91,10 +93,18 @@ interface Viewport {
    * here — i.e. whether this viewport can carry the control.
    *
    * ⚠️ Not every viewport can, and pretending otherwise would be asserting the
-   * opposite of the bug: upright on a tall screen the stacked page FITS, exactly
-   * as #373's old placement was visible in portrait. The control runs wherever
-   * the pre-#423 page fails — every landscape viewport, and the smallest
-   * upright one — which is at least one viewport for each of the three layouts.
+   * opposite of the bug: upright on a tall screen the unstaged page FITS,
+   * exactly as #373's old placement was visible in portrait. So the control
+   * runs at every LANDSCAPE overlay viewport and at all four stacked ones, and
+   * at no upright overlay viewport.
+   *
+   * ⚠️ **Which leaves the column layout with no control of this kind, and that
+   * is stated rather than papered over.** What stands in for it there is the
+   * apparatus case — fourteen items, four panels, the surface token resolved —
+   * and the mutation record: a 7 rem track floor, a 14 rem plan view and a
+   * route panel moved back to the bottom each turned column-layout cases red
+   * when they were tried (B6, B8 and B11 in the pull request). A control that
+   * cannot honestly fail is worse than none.
    */
   readonly unstagedFails: boolean;
 }
@@ -124,7 +134,7 @@ const OVERLAY_VIEWPORTS: readonly Viewport[] = [
     height: 800,
     unstagedFails: false,
   },
-  { name: 'the smallest column layout — 320×704', width: 320, height: 704, unstagedFails: true },
+  { name: 'the smallest column layout — 360×752', width: 360, height: 752, unstagedFails: false },
 ];
 
 /**
@@ -138,6 +148,11 @@ const STACKED_VIEWPORTS: readonly Viewport[] = [
   { name: 'reflow — 320×256', width: 320, height: 256, unstagedFails: true },
   { name: 'a small phone on its side — 640×360', width: 640, height: 360, unstagedFails: true },
   { name: 'a phone upright in a browser — 390×664', width: 390, height: 664, unstagedFails: false },
+  // ⚠️ Was "the smallest column layout" until the pull request's first CI run:
+  // on the runner's fonts the three top panels are 373 px here, 8 px over the
+  // rider's helmet, while the same case was green on a Mac. `theme.css`
+  // §"COLUMN" records what that changed.
+  { name: 'a very narrow phone upright — 320×704', width: 320, height: 704, unstagedFails: true },
 ];
 
 async function openRide(page: Page, viewport: Viewport, query = ''): Promise<void> {
@@ -470,7 +485,7 @@ test.describe('a ride with a standing notice', () => {
 
   // Every overlay viewport but the smallest column one, which `theme.css`
   // §"WHERE THERE IS NO FREE CELL" records as a limit rather than a pass.
-  for (const viewport of OVERLAY_VIEWPORTS.filter((each) => each.width > 320)) {
+  for (const viewport of OVERLAY_VIEWPORTS.filter((each) => each.height !== 752)) {
     test(`is whole, over no panel and not over the rider — ${viewport.name}`, async ({ page }) => {
       await openRide(page, viewport, QUERY);
       const seen = await measure(page);

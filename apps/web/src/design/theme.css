@@ -1031,7 +1031,7 @@ select option {
  * ## Three layouts, chosen by the room there is
  *
  *   corners   ≥ 46rem wide and ≥ 22.5rem tall   a phone on its side, any tablet
- *   column    20–46rem wide and ≥ 44rem tall    a phone upright, in the app
+ *   column    22.5–46rem wide and ≥ 47rem tall  a phone upright, in the app
  *   stacked   anything smaller                  320×256 — SC 1.4.10's viewport,
  *                                               and a phone upright in a
  *                                               browser with its own bars up
@@ -1548,7 +1548,7 @@ select option {
  * the right failure: a HUD that silently became scrollable is #419 again.
  */
 @media (min-width: 46rem) and (min-height: 22.5rem),
-  (min-width: 20rem) and (max-width: 45.99rem) and (min-height: 44rem) {
+  (min-width: 22.5rem) and (max-width: 45.99rem) and (min-height: 47rem) {
   .oyl-game--riding {
     overflow: hidden;
   }
@@ -1726,13 +1726,14 @@ select option {
  * about. A screen-reader user loses the route's position sentence for as long
  * as a sighted one loses the picture, which is the honest equivalence.
  *
- * ⚠️ **One limit, stated rather than gated.** Upright on a phone between 704
- * and about 760 px tall, a notice of the longest kind ends within a few pixels
- * of the top of the rider's helmet. `ride.browser.spec.ts` measures 390×844 and
- * 360×800, which clear it by 50 px and 8 px.
+ * ⚠️ **One limit, stated rather than gated.** Upright on a phone at the very
+ * bottom of the column layout's range — 752 px tall — a notice of the longest
+ * kind ends within a few pixels of the top of the rider's helmet, and on a
+ * font with wider glyphs than this machine's it may touch it.
+ * `ride.browser.spec.ts` measures 390×844 and 360×800, which clear it.
  */
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
-  (min-width: 20rem) and (max-width: 45.99rem) and (min-height: 44rem) {
+  (min-width: 22.5rem) and (max-width: 45.99rem) and (min-height: 47rem) {
   .oyl-game--riding .oyl-hud:has(> .oyl-hud__notices) .oyl-hud__route {
     display: none;
   }
@@ -1766,13 +1767,25 @@ select option {
  * and 68 %: everything above 47 % is sky, and sky is the cheapest thing on the
  * screen to cover.
  *
- * ⚠️ **44 rem tall or it is not used**, and that threshold is the same
- * measurement run the other way: three panels at the top are 365 px on a
- * 360 px-wide phone, and they have to end above the rider's helmet at 52 %.
- * 365 / 0.52 is 702 px. Every phone in the Android shell is taller than that.
- * A phone upright in a BROWSER, with the browser's own bars showing, is about
- * 664 px and gets the stacked layout — which before #423 was the only layout
- * there was, without the pinned controls.
+ * ⚠️ **47 rem tall and 22.5 rem wide or it is not used**, and both thresholds
+ * are the same measurement run the other way: the three panels at the top have
+ * to end above the rider's helmet, which is 52 % of the way down the frame.
+ *
+ * ⚠️ **The first version of this said 44 rem, and CI is what said no.** On
+ * this repository's development machines those three panels are 365 px, and
+ * 365 / 0.52 is 702 px. On the runner they are **373 px at 320 px wide**: a
+ * different `system-ui`, wider glyphs, and a label that wraps in a 90 px track.
+ * The pull request's first CI run put the route panel 8 px over the rider's
+ * helmet at 320×704 while the same spec was green locally — CLAUDE.md §4f's
+ * *"a green browser gate on a developer's machine says nothing about…"*, this
+ * time about fonts. So: 373 / 0.52 is 717 px, 47 rem is 752, and a phone
+ * narrower than 360 px — where the tracks are narrow enough to wrap a label —
+ * gets the stacked layout instead. There is no 320 px phone 752 px tall.
+ *
+ * Every phone in the Android shell is taller than that. A phone upright in a
+ * BROWSER, with the browser's own bars showing, is about 664 px and gets the
+ * stacked layout — which before #423 was the only layout there was, without the
+ * pinned controls.
  *
  * ⚠️ **Portrait is what the owner has been riding and #422 and #423 both say
  * it must not regress.** Before #423 this orientation showed a 390×219
@@ -1780,7 +1793,7 @@ select option {
  * 844 px viewport (#419's own table). `ride.browser.spec.ts` measures the same
  * viewport now: every reading and both controls on screen at `scrollY === 0`.
  */
-@media (min-width: 20rem) and (max-width: 45.99rem) and (min-height: 44rem) {
+@media (min-width: 22.5rem) and (max-width: 45.99rem) and (min-height: 47rem) {
   .oyl-game--riding .oyl-hud {
     grid-template-areas:
       'primary'

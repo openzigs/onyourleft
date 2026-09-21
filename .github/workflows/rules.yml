@@ -63,7 +63,16 @@ jobs:
     # one run for six hours. Raised from 10 with #63: the browser gate downloads
     # a pinned Chromium (~170 MB), which is fast on a good day and is the one
     # step here whose duration depends on somebody else's CDN.
-    timeout-minutes: 15
+    #
+    # Raised from 15 with #423. A stop has to be clear of the thing it stops, and
+    # it no longer was: the last three runs on main took 9m20s, 12m55s and 13m05s,
+    # and the first run of #423's pull request ran for 14m19s with nothing hung
+    # -- 41 seconds from being killed. The browser gate is what grew (6.8 minutes on
+    # main, 8.0 with the ride-stage and Ride-screen specs), and every case in
+    # game.browser.spec.ts reloads a harness that takes ten seconds on a runner
+    # with no GPU. Twenty is still a stop: a hung job dies in twenty minutes
+    # rather than six hours.
+    timeout-minutes: 20
     steps:
       - name: Check out the repository
         # Pinned to a full commit SHA, not a tag: a tag is mutable, and a

@@ -1429,7 +1429,14 @@ own.** It installs a ~170 MB Chromium and then runs for about three seconds, whi
 shape a separate job exists for — and it stays here anyway, because a second job reports under a
 different context and could not block a merge. A gate that cannot block is not a gate. The job's
 `timeout-minutes` moved from 10 to 15 to give the download room; that number is a stop on a hung
-job, not a budget.
+job, not a budget. ⚠️ **It is 20 since
+[#423](https://github.com/openzigs/onyourleft/issues/423), and a reviewer who remembers 15 is reading
+the old file.** A stop has to be clear of the thing it stops: main was taking 9 to 13 minutes, and the
+first run of #423's pull request ran for **14m19s** with nothing hung — 41 seconds from being killed. The
+browser gate is what grew (6.8 minutes on main, 8.0 with the ride-stage and Ride-screen specs), and
+⚠️ **every case in `game.browser.spec.ts` reloads a harness that takes ten seconds on a runner with
+no GPU** — so a new case there costs ten seconds of CI, which is why #424's five were folded into
+two. Add a case to an existing one where the assertion allows it.
 
 ⚠️ **The browser is pinned by the lockfile, not by the install command.** `@playwright/test`
 **1.63.0** ships Chromium revision **1243**, and `playwright install chromium` fetches whatever the
