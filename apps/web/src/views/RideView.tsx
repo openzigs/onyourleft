@@ -137,55 +137,87 @@ function LiveRide({
   }, [controller]);
 
   return (
-    <>
-      <h2>Live</h2>
-      <MetricGrid metrics={snapshot.metrics} />
-      <p className="oyl-ride__clock">
-        {formatDuration(snapshot.elapsedSeconds)} elapsed · {formatDuration(snapshot.movingSeconds)}{' '}
-        moving · {snapshot.sampleCount} seconds recorded
-      </p>
+    // ⚠️ **Three groups, laid out by `theme.css` §`.oyl-ride` — #422.** This was
+    // one flat column under a prose reading measure, and on the owner's tablet
+    // in landscape it was cut off at the ride controls: `WorkoutPanel` was
+    // below the fold, so structured workouts were invisible. A rider who set
+    // out to test whether ERG releases cleanly (#372) started a plain recording
+    // instead, and the wire showed Request Control, 103 seconds of nothing, and
+    // Stop. The groups are what let a wide screen put the trainer BESIDE the
+    // live metrics instead of under them; `browser/rideview.browser.spec.ts`
+    // measures that every control in all three is on screen with no scrolling.
+    //
+    // The ORDER in the document is unchanged — live, trainer, sensors — so a
+    // screen reader and the tab key meet everything in the order they did.
+    <div className="oyl-ride">
+      <div className="oyl-ride__group oyl-ride__group--live">
+        <h2>Live</h2>
+        <MetricGrid metrics={snapshot.metrics} />
 
-      <RideControls controller={controller} snapshot={snapshot} />
-      <StorageNotice snapshot={snapshot} />
-      <RecoveryOffer controller={controller} snapshot={snapshot} />
+        {/*
+          ⚠️ **The controls come BEFORE the clock, and until #436's review they
+          came after it.** A reviewer who remembers the clock sitting between
+          the metrics and Pause / Stop is reading the old file. The clock is
+          one line on a wide column and two on a narrow one, in a font this
+          repository does not choose, so everything beneath it moved with it —
+          and what was beneath it was the one pair of controls that ends a
+          recording. Measured in the pinned Chromium at 1280×720, which is
+          about what a landscape tablet's WebView is left once the system bars
+          are taken off the display's 800: Pause / Stop ended at y = 737, below
+          the fold. `theme.css` §`.oyl-ride` has the table. Nothing focusable
+          moved relative to anything else focusable, so the tab order is what
+          it was.
+        */}
+        <RideControls controller={controller} snapshot={snapshot} />
+        <p className="oyl-ride__clock">
+          {formatDuration(snapshot.elapsedSeconds)} elapsed ·{' '}
+          {formatDuration(snapshot.movingSeconds)} moving · {snapshot.sampleCount} seconds recorded
+        </p>
+        <StorageNotice snapshot={snapshot} />
+        <RecoveryOffer controller={controller} snapshot={snapshot} />
+      </div>
 
-      <h2>Trainer</h2>
-      <TrainerPanel
-        trainer={snapshot.trainer}
-        onRequestControl={() => {
-          void controller.requestTrainerControl();
-        }}
-        onSetTargetPower={(target: Watts) => {
-          void controller.setTargetPower(target);
-        }}
-        onClearTarget={() => {
-          void controller.clearTargetPower();
-        }}
-      />
-      <WorkoutPanel
-        trainer={snapshot.trainer}
-        workout={snapshot.workout}
-        port={workouts}
-        thresholdPower={thresholdPower}
-        onStart={(record) => {
-          // ⚠️ Guarded rather than defaulted. The panel does not render a Start
-          // control without a threshold, so this is unreachable through the UI
-          // — and a `?? watts(0)` here would make every target in the workout
-          // zero watts, which is a silent wrong number reaching a trainer
-          // rather than a refusal a rider can see.
-          if (thresholdPower === undefined) {
-            return;
-          }
-          controller.startWorkout(record, thresholdPower);
-        }}
-        onEnd={() => {
-          controller.endWorkout();
-        }}
-      />
+      <div className="oyl-ride__group oyl-ride__group--trainer">
+        <h2>Trainer</h2>
+        <TrainerPanel
+          trainer={snapshot.trainer}
+          onRequestControl={() => {
+            void controller.requestTrainerControl();
+          }}
+          onSetTargetPower={(target: Watts) => {
+            void controller.setTargetPower(target);
+          }}
+          onClearTarget={() => {
+            void controller.clearTargetPower();
+          }}
+        />
+        <WorkoutPanel
+          trainer={snapshot.trainer}
+          workout={snapshot.workout}
+          port={workouts}
+          thresholdPower={thresholdPower}
+          onStart={(record) => {
+            // ⚠️ Guarded rather than defaulted. The panel does not render a Start
+            // control without a threshold, so this is unreachable through the UI
+            // — and a `?? watts(0)` here would make every target in the workout
+            // zero watts, which is a silent wrong number reaching a trainer
+            // rather than a refusal a rider can see.
+            if (thresholdPower === undefined) {
+              return;
+            }
+            controller.startWorkout(record, thresholdPower);
+          }}
+          onEnd={() => {
+            controller.endWorkout();
+          }}
+        />
+      </div>
 
-      <h2>Sensors</h2>
-      <SensorList controller={controller} snapshot={snapshot} />
-    </>
+      <div className="oyl-ride__group oyl-ride__group--sensors">
+        <h2>Sensors</h2>
+        <SensorList controller={controller} snapshot={snapshot} />
+      </div>
+    </div>
   );
 }
 

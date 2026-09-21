@@ -170,3 +170,22 @@ describe('the table itself', () => {
     expect(ALL_ROUTES).toContain(NOT_FOUND_ROUTE);
   });
 });
+
+describe('which routes are read and which are operated (#422)', () => {
+  it('drops the reading measure for the Ride screen and for nothing else', () => {
+    // ⚠️ Both directions. `--oyl-measure` hid `WorkoutPanel` below the fold on
+    // a landscape tablet, which is why the Ride screen escapes it — and it is
+    // correct for every other route here, which is why nothing else does. A
+    // second `instruments` route is a decision, and this is where it is seen.
+    const operated = ALL_ROUTES.filter((route) => route.layout === 'instruments');
+
+    expect(operated.map((route) => route.id)).toEqual(['ride']);
+    expect(ALL_ROUTES.length - operated.length).toBeGreaterThan(10);
+  });
+
+  it('gives every route one of the two, so the shell never writes a class naming no rule', () => {
+    for (const route of ALL_ROUTES) {
+      expect(['prose', 'instruments'], route.id).toContain(route.layout);
+    }
+  });
+});

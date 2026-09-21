@@ -279,32 +279,41 @@ export const SCATTER_BANDS_PER_SIDE = 5;
  * #355.** A perspective camera's cone has an apex, so what a rider can see to
  * the side grows with depth and is *nothing* at the camera. An item standing
  * `across` metres from the centreline is off the side of the screen until it is
- * `across / NEAR_CONE_SPREAD` metres ahead of the **camera** — where
- * `NEAR_CONE_SPREAD` ≈ 1.026 is `three-renderer.ts`'s horizontal half-angle
- * tangent on the narrowest frame `theme.css` permits, 16 : 9 — and the camera
- * sits `CAMERA_BEHIND_METRES` = 8 m behind the rider. So, in one line a future
- * change to any of the four numbers has to read:
+ * `across / spread` metres ahead of the **camera** — where `spread` is
+ * `camera.ts` §`horizontalSpread`, the frame's aspect ratio times the tangent
+ * of half the lens — and the camera sits `CAMERA_BEHIND_METRES` behind the
+ * rider. So, in one line a future change to any of those numbers has to read:
  *
  * > **an item at the verge is invisible until `(ROAD_WIDTH_METRES / 2 +
- * > SCATTER_VERGE_METRES) / NEAR_CONE_SPREAD − CAMERA_BEHIND_METRES` metres
- * > ahead of the rider.** Negative means it is already in shot beside them.
+ * > SCATTER_VERGE_METRES) / spread − CAMERA_BEHIND_METRES` metres ahead of the
+ * > rider.** Negative means it is already in shot beside them.
+ * > `camera.ts` §`vergeEntersFrameMetres` is that sentence as a function.
  *
- * At six metres that was **+1.26 m**: the nearest row of scenery entered the
- * frame only ahead of the rider and nothing at the verge was ever beside them.
- * At three it is **−1.67 m**, so the near band is in shot from the rider's own
- * position. The break-even verge is about **4.7 m**. ⚠️ Widening the verge,
- * narrowing `CAMERA_FIELD_OF_VIEW_DEGREES` or moving the camera nearer the
+ * ⚠️ **Every number that used to follow this sentence was taken through a
+ * camera 8 m back on a 60° lens in a 16 : 9 letterbox, and #423 and #424 moved
+ * all three** — a reviewer who remembers +1.26 m at a 6 m verge, −1.67 m at
+ * three and a break-even verge of 4.7 m is reading the old file. Through the
+ * camera that ships, at 16 : 9: **+0.72 m** at this 3 m verge and **+3.13 m** at
+ * the 6 m one #355 replaced. It is no longer negative, and `camera.ts`'s header
+ * is where that is argued rather than apologised for: a rider who fills a fifth
+ * of the frame and scenery in shot level with them cannot both be had on a
+ * 16 : 10 tablet, by any camera.
+ *
+ * ⚠️ Widening the verge, narrowing the lens or moving the camera nearer the
  * rider all push it the wrong way, and **all three are gated** in
- * `three-renderer.test.ts` §"the verge stands inside the near cone — #355"
- * rather than left to this paragraph — because the geometry was already
- * written down on `WORST_CASE_ASPECT` and `lateralReachMetres` and three
- * tuning passes went by without anyone computing it.
+ * `three-renderer.test.ts` §"the verge and the camera cone" rather than left to
+ * this paragraph — because the geometry was written down beside
+ * `lateralReachMetres` for three tuning passes before anyone computed it. Each
+ * floor there is held from BOTH sides: the verge that ships must clear it and
+ * the 6 m verge must not, through today's camera, so a floor cannot be quietly
+ * re-pinned to whatever a new constant produces.
  *
  * ⚠️ **What #355's own arithmetic overstates, measured rather than repeated.**
  * That issue says roughly fifteen items fall in the first 25 m and *"are simply
  * not in frame"*. On a 12 km level fixture at the 6 m verge, **13.7** items a
  * frame stood in the first 25 m of road and **9.3** of them were already in a
- * 16 : 9 frame; this change takes that to 10.6. So the near field was never
+ * 16 : 9 frame; that change took it to 10.6 (and #424's camera, on its wider
+ * lens, holds 10.1). So the near field was never
  * bare by geometry — a bit under a third of it was off the side of the screen,
  * and a bit under a quarter still is. ⚠️ **The frames that carry nothing in
  * shot in the near field are NOT this**: 14 in 100, identical at verges of 6,

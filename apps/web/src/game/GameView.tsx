@@ -171,6 +171,45 @@ export interface GameViewProps {
   readonly trainer?: GameTrainerPort | undefined;
   /** Injected so a test can drive the loop without a real animation frame. */
   readonly now?: (() => number) | undefined;
+  /**
+   * Told when a ride takes the screen over, and when it hands it back — #423.
+   *
+   * While a ride runs the world is full-bleed and the page chrome — the app
+   * header, the navigation, the route's `h1` and its summary, the footer — is
+   * **absent**, not covered. This is how the shell finds out: `true` when a
+   * ride starts, `false` when it ends *or when this component unmounts*, which
+   * is what stops a rider who leaves with the browser's own Back button being
+   * left on some other page with no header.
+   *
+   * ⚠️ **Absent rather than hidden, and that is CLAUDE.md §4e rather than
+   * taste.** The accessibility suite loads no stylesheet, so a header hidden
+   * with `display: none` is, to `tabbableElements`, eleven focusable links —
+   * and to a keyboard user behind an opaque full-bleed stage it is eleven tab
+   * stops with no visible focus. The shell does not render it at all.
+   *
+   * ⚠️ **An optional prop nobody supplies is the hole `check:wiring` states it
+   * cannot see** (§4j, its third §Limits entry), so the other half is pinned by
+   * a test rather than trusted: `shell/immersive.test.tsx` starts a ride through
+   * the real shell and asserts the header goes and comes back.
+   *
+   * ## How a rider leaves a ride mid-way, which #423 asks to have recorded
+   *
+   * **By pressing *End ride*, and that is the only control on the screen that
+   * leaves.** There is deliberately no navigation on the stage: a link a gloved
+   * thumb can brush is a ride ended by accident, with the trainer released
+   * under somebody who is still pedalling, and *End ride* is
+   * `CONTROL_MINIMUM_PIXELS` square precisely so that it is pressed on purpose.
+   * *Pause* is beside it for everything short of leaving. The platform's own
+   * Back — the browser's button, Android's gesture — still works and is an
+   * unmount, which {@link teardown} already treats exactly as *End ride*: the
+   * trainer is sent an FTMS Stop, the screen lock is released and the GL
+   * context is destroyed.
+   *
+   * ⚠️ **None of this touches a recording or a workout.** `RideSession` is
+   * mounted in `AppShell` *above* the router for exactly this reason, and the
+   * shell goes on rendering it while the chrome is absent.
+   */
+  readonly onImmersive?: ((immersive: boolean) => void) | undefined;
 }
 
 type Phase = 'choosing' | 'riding' | 'paused';
@@ -427,6 +466,26 @@ export function GameView(props: GameViewProps): JSX.Element {
     [port, props.screenLock, props.riderMass, props.trainer],
   );
 
+  // #423. Whether the ride has the screen — @see GameViewProps.onImmersive.
+  //
+  // ⚠️ The same predicate the render below branches on, written once: a shell
+  // told "immersive" while this component was still drawing the route picker
+  // would remove the chrome from a *form*, which is the one state of this
+  // screen that needs it.
+  const onTheStage = phase !== 'choosing' && chosen !== undefined && state !== undefined;
+  const onImmersive = props.onImmersive;
+  useEffect(() => {
+    if (!onTheStage || onImmersive === undefined) {
+      return;
+    }
+    onImmersive(true);
+    return () => {
+      // The cleanup runs when the ride ends AND when the component unmounts,
+      // so neither path can leave the shell without its header.
+      onImmersive(false);
+    };
+  }, [onTheStage, onImmersive]);
+
   // The loop. Deliberately the only place `requestAnimationFrame` appears.
   useEffect(() => {
     if (phase !== 'riding' || chosen === undefined || port === undefined) {
@@ -449,6 +508,47 @@ export function GameView(props: GameViewProps): JSX.Element {
           viewRef.current.resize(canvas.clientWidth || 320, canvas.clientHeight || 180);
         }
       });
+    }
+
+    // ⚠️ **#423 made this necessary rather than nice.** The canvas used to be
+    // `aspect-ratio: 16 / 9` whatever the viewport did, so a rotation changed
+    // its size and never its shape, and sizing the renderer once at creation
+    // cost some sharpness. It now fills the stage, so turning a tablet from
+    // portrait to landscape changes the shape from about 0.6 : 1 to 1.6 : 1 —
+    // and a renderer still holding the old aspect draws every circle as an
+    // ellipse for the rest of the ride.
+    //
+    // An observer rather than a read of `clientWidth` inside `tick`: the HUD
+    // re-renders every frame, so the document is dirty every frame, and reading
+    // a layout property there forces a synchronous layout sixty times a second
+    // on the device least able to afford one. `typeof` because jsdom has no
+    // `ResizeObserver` and the accessibility suite renders this screen there.
+    //
+    // ⚠️ **A known limit, stated rather than fixed — #436's review.** This
+    // effect returns early unless the ride is `riding` and disconnects in its
+    // cleanup, so a rider who PAUSES and then rotates gets no `resize`: the
+    // last frame is shown stretched until they resume, when the new observer's
+    // first callback corrects it. Hoisting the observer out of this effect is
+    // not the repair it looks like. `resize` is three's `setSize`, which
+    // resets the canvas's dimensions and so CLEARS the drawing buffer, and
+    // nothing draws while paused — it would trade a stretched frame for a
+    // blank one. The repair is a view that can redraw its last frame on
+    // demand, which the port does not offer today. Validation 0002 Q3 asks the
+    // person holding the tablet to look at it.
+    const observer =
+      canvas === null || typeof ResizeObserver !== 'function'
+        ? undefined
+        : new ResizeObserver(() => {
+            // Skipped while the box is empty — a stage mid-teardown, or a
+            // canvas not yet laid out — because a zero height is an aspect
+            // ratio of infinity, which three turns into a NaN projection and a
+            // black frame.
+            if (canvas.clientWidth > 0 && canvas.clientHeight > 0) {
+              viewRef.current?.resize(canvas.clientWidth, canvas.clientHeight);
+            }
+          });
+    if (canvas !== null) {
+      observer?.observe(canvas);
     }
 
     const tick = (): void => {
@@ -557,6 +657,7 @@ export function GameView(props: GameViewProps): JSX.Element {
     frame = requestAnimationFrame(tick);
     return () => {
       cancelAnimationFrame(frame);
+      observer?.disconnect();
     };
     // ⚠️ `quality` is read inside `tick` and is deliberately NOT a dependency.
     // Re-running this effect on every quality change would cancel the frame,
@@ -575,7 +676,7 @@ export function GameView(props: GameViewProps): JSX.Element {
     viewRef.current?.setQuality(settings);
   }, [quality.level]);
 
-  if (phase === 'choosing' || chosen === undefined || state === undefined) {
+  if (!onTheStage) {
     return (
       <RoutePicker
         routes={routes}
@@ -613,12 +714,18 @@ export function GameView(props: GameViewProps): JSX.Element {
   const gradient = gradientRef.current?.state();
   const roadNotice = trainerRoadNotice(trainer);
   return (
-    <section className="oyl-game" aria-label="Trainer game">
+    // ⚠️ **`oyl-game--riding` is the stage — #423.** `theme.css` makes it fill
+    // the viewport and lays the HUD over the world. It is a modifier rather
+    // than the base class because `browser/ride.browser.spec.ts` takes it
+    // *off* for its control: the same markup without it is the stacked page
+    // #419 measured, with *Pause* below the fold, and a gate that could not see
+    // that would be green over anything.
+    <section className="oyl-game oyl-game--riding" aria-label="Trainer game">
       <canvas
         ref={canvasRef}
         className="oyl-game__world"
         // The world is decorative in the accessibility sense: everything it
-        // conveys is also in the HUD below it, as text. Marking it so is more
+        // conveys is also in the HUD over it, as text. Marking it so is more
         // honest than an alt text describing a scene that changes every frame.
         aria-hidden="true"
       />
@@ -641,8 +748,10 @@ export function GameView(props: GameViewProps): JSX.Element {
         // is #373.** In landscape it used to fall outside the viewport with
         // nothing to say it existed — so the one step Part L is built around
         // could not be performed in the orientation a handlebar-mounted phone
-        // is most likely to be in. `hud/fields.ts` §`TrainerLine` argues the
-        // placement and `browser/ride.browser.spec.ts` measures it.
+        // is most likely to be in. ⚠️ #373 moved it and did NOT thereby make
+        // it visible: the panel it moved into ran off the bottom too (#419,
+        // #422). `hud/fields.ts` §`TrainerLine` argues the placement and says
+        // what did fix it; `browser/ride.browser.spec.ts` measures it.
         trainer={trainerReading(gradient)}
         onPause={() => {
           setPhase((current) => (current === 'paused' ? 'riding' : 'paused'));
@@ -652,17 +761,21 @@ export function GameView(props: GameViewProps): JSX.Element {
           setPhase('choosing');
           setChosen(undefined);
         }}
+        // #423: inside the HUD's own grid rather than after it, so a notice
+        // gets a cell no panel can occupy. @see HudPanelProps.notices
+        notices={[
+          roadNotice === undefined ? undefined : (
+            <StatusMessage key="road" tone="warning" label="The road is not reaching your trainer">
+              {roadNotice}
+            </StatusMessage>
+          ),
+          gradient?.fault === undefined ? undefined : (
+            <StatusMessage key="fault" tone="danger" label="Trainer" live>
+              {gradient.fault}
+            </StatusMessage>
+          ),
+        ]}
       />
-      {roadNotice === undefined ? undefined : (
-        <StatusMessage tone="warning" label="The road is not reaching your trainer">
-          {roadNotice}
-        </StatusMessage>
-      )}
-      {gradient?.fault === undefined ? undefined : (
-        <StatusMessage tone="danger" label="Trainer" live>
-          {gradient.fault}
-        </StatusMessage>
-      )}
     </section>
   );
 }

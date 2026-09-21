@@ -75,6 +75,24 @@
 
   --oyl-radius: 0.375rem;
   --oyl-measure: 68ch;
+
+  /*
+   * The parts of the screen the platform keeps for itself — a notch, a gesture
+   * bar, a status bar — as four lengths (#423).
+   *
+   * ⚠️ NOT design tokens, which is why they are not in `tokens.ts` and carry no
+   * contrast pair: nobody chooses these, the device reports them. They are
+   * aliases so that the fallback chain is written once.
+   *
+   * The chain is Capacitor's own documented one. `--safe-area-inset-*` is what
+   * its Android shell injects, because `env()` reports wrong values in a
+   * WebView older than 140; `env()` is the standard, and is zero unless
+   * `index.html` says `viewport-fit=cover`; `0px` is every desktop browser.
+   */
+  --oyl-safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --oyl-safe-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
+  --oyl-safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --oyl-safe-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
 }
 
 *,
@@ -85,6 +103,15 @@
 
 body {
   margin: 0;
+  /*
+   * #423 added `viewport-fit=cover` so that the ride's world can run under a
+   * notch, and that opt-in applies to every route. This is what keeps every
+   * OTHER route where it was: the page is inset by whatever the platform keeps,
+   * which is `0px` everywhere it was `0px` before. The ride's stage is
+   * `position: fixed`, so it is measured from the viewport and is not inset by
+   * this — which is the point.
+   */
+  padding: var(--oyl-safe-top) var(--oyl-safe-right) var(--oyl-safe-bottom) var(--oyl-safe-left);
   background: var(--oyl-color-canvas);
   color: var(--oyl-color-ink);
   font-family:
@@ -277,6 +304,67 @@ h3:first-child {
   flex: 1;
   padding: var(--oyl-space-lg) var(--oyl-space-md);
   max-width: var(--oyl-measure);
+}
+
+/*
+ * A route that is operated rather than read (#422).
+ *
+ * `--oyl-measure` is a READING measure and it is right for every route that is
+ * read. `shell/routes.ts` §`RouteLayout` says which route is not, why that is a
+ * field on the route table rather than a media query, and what the measure cost
+ * on a landscape tablet the day somebody measured it.
+ *
+ * ⚠️ The base rule above is untouched and must stay that way: this modifier is
+ * the whole of the escape, and a route gets it by declaring `instruments`.
+ */
+.oyl-main--instruments {
+  max-width: none;
+}
+
+/*
+ * The title and its one-line summary share a row where the screen is laid out
+ * in columns (#422, from #436's review).
+ *
+ * ⚠️ **This is height, not decoration.** On a landscape tablet the Ride screen's
+ * fold is the scarce thing, and the display's height is not the WebView's: the
+ * Android shell configures no fullscreen mode, so the status bar and the
+ * navigation bar come off the top and bottom of what `rideview.browser.spec.ts`
+ * had been measuring. Stacked, the title and summary spend 40.8 px above the
+ * first control for one line of text that fits beside the heading. `.oyl-ride`
+ * below has the whole budget; this rule is one of its two terms.
+ *
+ * The same `60rem` as `.oyl-ride`'s first column break, on purpose: below it
+ * the screen is one column and a page that scrolls, the fold is not a promise
+ * anybody made, and the stacked title is left exactly as it was.
+ *
+ * `align-items: start` and not `stretch`: `.oyl-main` is the flex child that
+ * takes the shell's spare height, and a stretched grid row would hand that
+ * height to the title row.
+ */
+@media (min-width: 60rem) {
+  .oyl-main--instruments {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: var(--oyl-space-lg);
+    align-items: start;
+    align-content: start;
+  }
+
+  .oyl-main--instruments > * {
+    grid-column: 1 / -1;
+  }
+
+  .oyl-main--instruments > h1 {
+    grid-column: 1;
+    align-self: baseline;
+    margin-bottom: var(--oyl-space-md);
+  }
+
+  .oyl-main--instruments > h1 + p {
+    grid-column: 2;
+    align-self: baseline;
+    margin: 0 0 var(--oyl-space-md);
+  }
 }
 
 .oyl-main:focus {
@@ -593,6 +681,113 @@ h3:first-child {
   font-variant-numeric: tabular-nums;
 }
 
+/*
+ * The Ride screen's three groups — live, trainer, sensors (#422).
+ *
+ * ## What was wrong, measured
+ *
+ * One column, under `.oyl-main`'s prose reading measure. In the pinned Chromium
+ * at 1280×800, the owner's tablet in landscape, with the measure ON
+ * (`browser/rideview.browser.spec.ts` re-takes this as its control):
+ *
+ *   Pause / Stop              y = 661–706    on the bottom edge
+ *   the ERG target form       y = 807–852    below the fold
+ *   the control that starts   y = 1006–1051  a whole screen further down
+ *   a workout
+ *
+ * beside 595 px of blank display. That is what the owner's screenshot showed on
+ * 2026-09-20: a page cut off at the ride controls, structured workouts
+ * invisible, and a safety test for #372 that started a plain recording because
+ * the control that starts a workout was not on the screen.
+ *
+ * ## What this does
+ *
+ * `routes.ts` §`RouteLayout` takes the measure off this route. This rule is
+ * what then USES the width, because removing a `max-width` from one column
+ * gives one very wide column: the same controls at the same heights, with the
+ * workout still at y = 727 and one 1 248 px line of text across the top.
+ *
+ *   < 60rem    one column           a phone, either way up: a page that scrolls
+ *   ≥ 60rem    live | trainer       a small tablet; the sensors go underneath
+ *   ≥ 76rem    live | trainer | sensors
+ *
+ * ⚠️ **The cost, which #422 asks to have written down.** Side by side, a
+ * column is about 400 px where the single column was 653, so the four metric
+ * cards sit two by two rather than four in a row and the live group is taller
+ * than it was. That is the trade: height the screen has, for a fold the
+ * controls are all above.
+ *
+ * ## The fold is the WebView's, not the display's — #436's review
+ *
+ * ⚠️ **The paragraph above used to be the end of the argument, and a reviewer
+ * who remembers that is reading the old file.** "Height the screen has" was
+ * measured at 1280×800, which is the tablet's DISPLAY. The Android shell
+ * configures no fullscreen mode, so the WebView is shorter by the status bar
+ * and the navigation bar, and the taller live group put Pause / Stop — the
+ * controls that END a recording — at y = 692–737: +63 px at 800, +15 at 752,
+ * and **below the fold at 728**. #422's defect, one panel up.
+ *
+ * What is above Pause / Stop now, at 1280 wide, and what each term was:
+ *
+ *   the header                      96.8     unchanged; it is every route's
+ *   main's padding                  24.0     unchanged
+ *   title + summary, one row        53.5     was 94.3 stacked    −40.8
+ *   "Live" and the four cards      395.4     unchanged
+ *   the clock                        0       was 82.0 above them −82.0
+ *   Pause / Stop                 570–614     was 692–737
+ *
+ * Two terms, and each has its own red test in `rideview.browser.spec.ts`: the
+ * title row is `.oyl-main--instruments` above, and the clock is `RideView.tsx`
+ * rendering the controls BEFORE it — DOM order, not `order:`, because a visual
+ * order that disagrees with the tab order is its own defect. That leaves
+ * 105.5 px to a 720 px fold and 125.3 at 1024×720, and the spec publishes the
+ * margin on every run and holds it to a floor rather than to zero.
+ *
+ * ⚠️ 720 is an assumed WebView height, erring short. Nobody has read
+ * `window.innerHeight` off the device yet; validation 0002 Part Q6 asks.
+ *
+ * ⚠️ **The SENSORS group is the one that may still be below the fold**, on the
+ * two-column layout, and that is a decision rather than an oversight. Pairing a
+ * sensor is what a rider does before a ride; everything in the other two groups
+ * is what they do during one. The spec holds the first two groups to "no
+ * scrolling" at both tablet viewports and the third at the wider one only.
+ *
+ * Width rather than `orientation`, for `.oyl-game--riding`'s reason: a tablet
+ * held upright is 800 px wide and gets one column because 800 px is one
+ * column's worth, not because it is upright.
+ */
+.oyl-ride {
+  display: grid;
+  gap: var(--oyl-space-lg) var(--oyl-space-xl);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* A group's heading opens it, so the grid's gap is its top margin — the 2.5 rem
+   an `h2` carries is for a heading in the middle of a page of prose. */
+.oyl-ride__group > h2:first-child {
+  margin-top: 0;
+}
+
+@media (min-width: 60rem) {
+  .oyl-ride {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .oyl-ride__group--sensors {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (min-width: 76rem) {
+  .oyl-ride {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .oyl-ride__group--sensors {
+    grid-column: auto;
+  }
+}
+
 .oyl-trainer__state {
   font-size: var(--oyl-font-size-lg);
 }
@@ -849,19 +1044,111 @@ select option {
  * 300x150 CSS pixels whatever the viewport is, so the renderer drew a correct
  * scene into a postage stamp beside a full-width HUD, on every device.
  *
- * `aspect-ratio` rather than a fixed height, because this one is ridden on a
- * phone clamped to a handlebar and on a tablet, in both orientations, where the
- * map is a panel on a reading page. `max-height` is what stops a wide landscape
- * viewport pushing the HUD off the bottom -- the HUD is the half a rider needs
- * and the world is the half they can lose.
+ * ## Since #423 this rule is the FALLBACK, and the stage below is the product
+ *
+ * ⚠️ A reviewer who remembers `aspect-ratio: 16 / 9; max-height: 60vh` as what
+ * a rider sees is reading the old file. That letterbox, with the HUD stacked
+ * under it, is what #419 measured: a 572 px panel under the canvas, *Pause* and
+ * *End ride* below the fold at every viewport tried, and on a landscape tablet
+ * about 53 % of the display blank beside it (#422). While a ride runs the world
+ * is now full-bleed — see `.oyl-game--riding`. What is left here is what a
+ * viewport too small for an overlay gets, and the two numbers are that case's:
+ * the world is the half a rider can lose, so it is capped at 40 % of a viewport
+ * that is by definition short.
  */
 .oyl-game__world {
   aspect-ratio: 16 / 9;
   background: var(--oyl-color-ink);
-  border-radius: var(--oyl-radius);
   display: block;
-  max-height: 60vh;
+  margin-inline: auto;
+  max-height: 40vh;
+  /*
+   * ⚠️ 6 : 1 and no wider — six times the 40vh above. `game/camera.ts`
+   * §`WORST_CASE_ASPECT` is the scenery cull's bound, and it is only safe while
+   * no frame is wider than it: measured, a 100 m hairpin starts dropping
+   * scenery a rider can see at 8 : 1. `width: 100%` with a `max-height` does
+   * NOT hold the aspect ratio — the height clamps and the width does not — so a
+   * short wide window would otherwise reach any ratio it liked.
+   */
+  max-width: 240vh;
   width: 100%;
+}
+
+/*
+ * THE STAGE — a ride has the screen (#423).
+ *
+ * `GameView` puts this class on its root for exactly as long as a ride is
+ * running or paused, and `AppShell` stops rendering the page chrome for exactly
+ * as long (`GameViewProps.onImmersive`). So there is nothing under this box but
+ * an empty `main`, and nothing over it.
+ *
+ * ## `position: fixed`, and what §4f requires of that
+ *
+ * CLAUDE.md §4f: a change to `position` or `z-index` *"is reviewed by measuring
+ * it in the pinned Chromium, not by reading the CSS."*
+ * `browser/ride.browser.spec.ts` is that measurement — the stage's box against
+ * the viewport, every control inside it with `scrollY === 0`, at a phone in
+ * both orientations, a landscape tablet and 320×256 — and its control takes
+ * this class OFF and requires the controls to fall below the fold again.
+ *
+ * `fixed` rather than a tall flex child because it is the only one of the two
+ * that does not depend on what the shell happens to have above it: a banner
+ * added to `AppShell` next year cannot push *End ride* off the bottom of a
+ * fixed box. `inset: 0` rather than `100vh`, because on a phone `100vh` is the
+ * viewport with the URL bar hidden and the bottom of the box — where the
+ * controls are — would sit under it.
+ *
+ * `z-index: 20` is above the skip link's 10 and the header's 5. Both are absent
+ * while this is on screen, so it outranks nothing today; it is stated so that
+ * something added to the shell later loses to the ride rather than drawing
+ * across it.
+ *
+ * ## Three layouts, chosen by the room there is
+ *
+ *   corners   ≥ 46rem wide and ≥ 22.5rem tall   a phone on its side, any tablet
+ *   column    22.5–46rem wide and ≥ 47rem tall  a phone upright, in the app
+ *   stacked   anything smaller                  320×256 — SC 1.4.10's viewport,
+ *                                               and a phone upright in a
+ *                                               browser with its own bars up
+ *
+ * By WIDTH rather than by `orientation`: a tablet held upright is 768 px wide
+ * and has four corners worth using, and `orientation: portrait` would have
+ * given it a phone's single column with half the width empty — #422's defect,
+ * rotated. `rem` so that a rider who has raised their text size crosses into
+ * the simpler layout sooner, which is the direction to be wrong in.
+ *
+ * ⚠️ `column`'s upper edge is written `(width < 46rem)`, not `max-width:
+ * 45.99rem`. The second leaves a 0.16 px band — 735.84 to 736 px — that is in
+ * neither layout, and fractional viewport widths are real at a non-integer
+ * device pixel ratio. It fell through to `stacked`, which works, so nothing was
+ * broken; the range form simply has no band to fall through (#436's review).
+ *
+ * ⚠️ **`stacked` is this rule on its own**, and it is the only one that
+ * scrolls. At 320×256 four panels cannot share the screen with a world, so the
+ * stage becomes one scrolling column with the controls pinned to its bottom
+ * edge — see `.oyl-hud__actions`. That is one scroller, not the *"scroll region
+ * inside a page that also scrolls"* #419 rules out: the page under a fixed,
+ * opaque stage has nothing in it to scroll.
+ *
+ * ## Safe areas
+ *
+ * `:root` §`--oyl-safe-top` is where the platform's insets arrive. The WORLD
+ * runs under a notch or a gesture bar — it is decorative, and a full-bleed
+ * world with a bar cut out of it is not full-bleed — and every PANEL is held
+ * clear of them by `.oyl-hud`'s padding.
+ * ⚠️ A headless Chromium reports zero for all four, so `ride.browser.spec.ts`
+ * sets the same custom properties Capacitor's shell injects and measures the
+ * panels moving; what the owner's tablet actually reports is for
+ * `docs/validation/0002-android-shell-and-game.md` to record, because no gate
+ * here can.
+ */
+.oyl-game--riding {
+  background: var(--oyl-color-ink);
+  inset: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  position: fixed;
+  z-index: 20;
 }
 
 /*
@@ -991,23 +1278,98 @@ select option {
  *   criterion is checkable at all.
  */
 
+/*
+ * ⚠️ **The container paints NOTHING since #423, and that is the point of it.**
+ * It spans the whole stage, so a background here is a panel over the road.
+ * The opaque surface moved to `.oyl-hud__panel`, and
+ * `hud-surface.a11y.test.ts` asserts both halves: every panel is painted with
+ * the token and nothing else, and this rule is painted with nothing at all.
+ *
+ * What is declared here is the STACKED layout — one column, in document order.
+ * The two overlay layouts are the media queries at the end of this block.
+ */
 .oyl-hud {
-  background: var(--oyl-color-hud-surface);
   color: var(--oyl-color-hud-ink);
-  padding: var(--oyl-space-md);
   display: flex;
   flex-direction: column;
   gap: var(--oyl-space-sm);
+  padding: max(var(--oyl-space-sm), var(--oyl-safe-top))
+    max(var(--oyl-space-sm), var(--oyl-safe-right)) max(var(--oyl-space-sm), var(--oyl-safe-bottom))
+    max(var(--oyl-space-sm), var(--oyl-safe-left));
+}
+
+/*
+ * One solid panel. Four of these and the road between them are the HUD.
+ *
+ * ⚠️ **OPAQUE, and a request to soften it is an ADR rather than an edit here.**
+ * `design/tokens.ts` §`hudSurface`: a translucent panel over a scene that
+ * changes every metre has no fixed colour to check contrast against, so
+ * translucency takes the HUD outside `contrast.a11y.test.ts`. The genre's
+ * frosted glass is therefore not available to this project, deliberately
+ * (#423). Small and solid, pushed to the edges, is what is.
+ *
+ * The border is what survives `forced-colors`: there the surface flattens to
+ * `Canvas`, and a panel with no edge over a canvas the system has also
+ * flattened is text floating on nothing.
+ */
+.oyl-hud__panel {
+  background: var(--oyl-color-hud-surface);
+  border: 1px solid var(--oyl-color-hud-border);
+  border-radius: var(--oyl-radius);
+  color: var(--oyl-color-hud-ink);
+  margin: 0;
+  padding: var(--oyl-space-sm);
 }
 
 .oyl-hud__fields {
-  margin: 0;
   display: grid;
-  /* Four across on a phone in landscape on the bars, two in portrait. `auto-fit`
-     rather than a media query so the breakpoint follows the actual width the
-     HUD is given rather than the width of the device. */
-  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
   gap: var(--oyl-space-sm);
+}
+
+/*
+ * The three a rider steers the effort by — `hud/fields.ts` §`ReadingTier`.
+ *
+ * Exactly three tracks rather than `auto-fit`, because the tier is exactly
+ * three fields and always will be while that file says so: `auto-fit` in a
+ * wide panel would leave them rattling in a row built for five.
+ *
+ * ⚠️ `minmax(0, 1fr)`, where this grid's tracks had a `7rem` floor until #423.
+ * Three 7 rem tracks, their gaps, the panel's padding and the stage's come to
+ * 386 px, and the first measurement of this layout found the third field —
+ * heart rate — running off the right-hand edge of a **360 px** viewport, which
+ * is the commonest Android width there is. A floor that cannot be honoured is
+ * an overflow; a track that shares what there is cannot overflow its panel.
+ * What keeps a VALUE inside its track is then the rule below, and
+ * `hud.browser.spec.ts` measures every value against its track at 360 px.
+ */
+.oyl-hud__fields--primary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/*
+ * A narrow phone: the unit goes UNDER the number.
+ *
+ * At 360 px a primary track is 103 px, and `168 bpm` at 2.5 rem with its unit
+ * beside it measures 105. The number is the reading and the unit is read once,
+ * so the unit is what moves — the alternative was a smaller number on the
+ * smallest screens, which is the wrong way round for a panel read at arm's
+ * length. 24 rem is where a track reaches the 111 px that fits all three.
+ */
+@media (max-width: 24rem) {
+  .oyl-hud__fields--primary .oyl-hud__unit {
+    display: block;
+  }
+}
+
+/*
+ * Everything else, smaller and denser.
+ *
+ * `auto-fit` here, because this tier's count varies between rides — one gap or
+ * two, a wind or none — and only between rides (`fields.ts` §`hudReadings`).
+ * `5.5rem` is the floor the secondary word rule below is derived against.
+ */
+.oyl-hud__fields--secondary {
+  grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr));
 }
 
 .oyl-hud__field {
@@ -1031,34 +1393,39 @@ select option {
   color: var(--oyl-color-hud-ink);
 }
 
+/* #423. A secondary reading: a magnitude still, and still larger than any
+   label, but three-fifths the size of the three above it. "Visibly larger" is
+   #423's criterion and `hud-value-size.test.ts` holds the ratio, so the two
+   tiers cannot drift back into a grid of equals one tweak at a time. */
+.oyl-hud__fields--secondary .oyl-hud__value {
+  font-size: 1.5rem;
+}
+
 /* #259. A value that is a WORD rather than a magnitude.
 
-   ⚠️ The grid track above is `minmax(7rem, 1fr)`, and `7rem` is a floor rather
-   than an `auto`: the track does not grow to fit its content. A single word has
-   no break opportunity either, so at 2.5 rem anything past about five
-   characters spills sideways across the next field and lands on its number.
-   Measured in the pinned Chromium: `Beaten` 120 px, `Finished` 144 px,
-   `Matched` 151 px.
+   ⚠️ A grid track's `minmax()` floor is a floor rather than an `auto`: the
+   track does not grow to fit its content. A single word has no break
+   opportunity either, so anything wider than the track spills sideways across
+   the next field and lands on its number. Measured in the pinned Chromium at
+   2.5 rem: `Beaten` 120 px, `Finished` 144 px, `Matched` 151 px.
 
-   ⚠️ Those three widths are confirmed; the track width beside them was not.
-   #266 re-measured through the product's own ancestor chain — `.oyl-main`
-   around `.oyl-game` around this panel — and the narrowest track the grid
-   actually produces is 118 px, at five columns, which is what every viewport
-   from 686 px up gets (a phone in landscape and a desktop alike). A 390 px
-   phone in portrait gets two columns of 159 px, in which all three words fit
-   even at 2.5 rem. `browser/hud.browser.spec.ts` carries the table and reads
-   the numbers off Chromium on every run.
-
-   1.5 rem is chosen against the 7 rem FLOOR rather than against either of those
-   measurements, because the floor is the narrowest a track can be: 151 px ×
-   (1.5 / 2.5) = 91 px inside 112 px. Still far larger than the 0.875 rem label
-   beside it, which is what keeps the field glanceable (#94).
+   ⚠️ **Re-derived for #423, not carried over.** A reviewer who remembers
+   `1.5rem` against a `7rem` floor here is reading the old file. The only values
+   that are ever words are the gap fields' outcomes, and every gap is a
+   SECONDARY reading now — so the track that binds is the secondary tier's
+   `5.5rem` floor, 88 px, and the magnitude a word must stay under is that
+   tier's 1.5 rem. Type scales linearly: 151 px × (1.25 / 2.5) = 75.5 px inside
+   88 px. `hud-value-size.test.ts` does that arithmetic against these
+   declarations, and `browser/hud.browser.spec.ts` reads the real widths off
+   Chromium on every run — with a control that sets the words back at the size
+   they had before #259 and requires them to spill.
 
    Deliberately no `overflow-wrap`. A longer word should be caught rather than
    quietly broken into `Finish` and `ed`, which are different words on a panel
    read at arm's length. */
-.oyl-hud__value--word {
-  font-size: 1.5rem;
+.oyl-hud__value--word,
+.oyl-hud__fields--secondary .oyl-hud__value--word {
+  font-size: 1.25rem;
 }
 
 .oyl-hud__unit {
@@ -1066,10 +1433,17 @@ select option {
   color: var(--oyl-color-hud-ink-muted);
 }
 
+/* #423. `144 km/h` is the widest reading a rider can produce (#335) and at
+   1.5 rem with a 1 rem unit it is wider than the 5.5 rem floor. The unit is
+   what gives: it is read once, on the first ride. `hud-value-size.test.ts`
+   holds this to the same floor every other piece of supporting text has. */
+.oyl-hud__fields--secondary .oyl-hud__unit {
+  font-size: var(--oyl-font-size-sm);
+}
+
 /* #255. Small, and on its own line under the number, so the gap's direction is
-   legible without the 2.5 rem value becoming a sentence. `oyl-hud__label`'s
-   colour, which `contrast.a11y.test.ts` already pairs against the HUD
-   surface. */
+   legible without the value becoming a sentence. `oyl-hud__label`'s colour,
+   which `contrast.a11y.test.ts` already pairs against the HUD surface. */
 .oyl-hud__detail {
   display: block;
   font-size: var(--oyl-font-size-sm);
@@ -1084,6 +1458,14 @@ select option {
   display: block;
   font-size: var(--oyl-font-size-sm);
   color: var(--oyl-color-hud-stale-ink);
+}
+
+/* The elevation strip and the plan view: one panel, the two axes of "where am
+   I on this route". Stacked here; side by side in the column layout below. */
+.oyl-hud__route {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oyl-space-xs);
 }
 
 .oyl-hud__profile-svg {
@@ -1110,10 +1492,15 @@ select option {
    Both colours are tokens `contrast.a11y.test.ts` already walks against the HUD
    surface, so this panel adds no pair and its measured contrast is unchanged.
    `non-scaling-stroke` keeps the road one hairline wide whatever width the HUD
-   is given, which is what stops a 47 km route reading as a fat smear. */
+   is given, which is what stops a 47 km route reading as a fat smear.
+
+   ⚠️ 5 rem since #423, where it was 8. Over a full-bleed world every rem of
+   this is road a rider cannot see, and `hud.browser.spec.ts` §"the plan view is
+   drawn at a size a rider can see" holds the floor the other way: more than
+   64 px in each direction, with the road filling at least half of it. */
 .oyl-hud__plan-svg {
   width: 100%;
-  height: 8rem;
+  height: 5rem;
   display: block;
 }
 
@@ -1140,15 +1527,47 @@ select option {
   color: var(--oyl-color-hud-ink-muted);
 }
 
-/* #373. What the trainer is being asked for, inside the panel.
+/*
+ * The trainer line and the two ride controls: one panel, because being able to
+ * see the first is meant to follow from being able to reach the second (#373).
+ *
+ * ⚠️ **`position: sticky` is the stacked layout's answer to #419, and it is
+ * inert in the other two.** In the stacked layout the stage scrolls and this
+ * panel is pinned to its bottom edge, so *Pause* and *End ride* are on screen
+ * at 320×256 without a rider scrolling for them — everything else passes
+ * beneath. In the overlay layouts the stage does not scroll, so a sticky box is
+ * simply where the grid put it.
+ */
+.oyl-hud__actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oyl-space-sm);
+}
 
-   ⚠️ It lived on the page background as `.oyl-muted` until #373, BELOW this
+/* ⚠️ Scoped to the stage, and the scope is the browser gate's control rather
+   than tidiness: `ride.browser.spec.ts` takes `oyl-game--riding` off the live
+   element and requires *Pause* to fall below the fold again. A sticky panel
+   that survived that would keep the controls on screen in the very layout the
+   control exists to show failing. */
+.oyl-game--riding .oyl-hud__actions {
+  bottom: max(var(--oyl-space-sm), var(--oyl-safe-bottom));
+  position: sticky;
+}
+
+/* #373. What the trainer is being asked for, inside a panel.
+
+   ⚠️ It lived on the page background as `.oyl-muted` until #373, BELOW the
    panel, where two things were wrong with it: in landscape it fell outside the
    viewport with no indication it existed, and its colour pair was never one
    `contrast.a11y.test.ts` checks — `--oyl-color-ink-muted` on
    `--oyl-color-bg`, over a panel whose own surface is a different token
-   entirely. Inside `.oyl-hud` it inherits the opaque HUD surface, so the pair
+   entirely. Inside a HUD panel it inherits the opaque HUD surface, so the pair
    that is measured is the pair a rider sees.
+
+   ⚠️ **#373 fixed the colour pair and not the visibility**, and this comment
+   used to imply it fixed both: the panel it moved into was itself taller than a
+   landscape viewport (#419, #422). `HudPanel.tsx` records what does make it
+   visible.
 
    `--oyl-font-size-md` rather than the 2.5 rem a value gets: this is a sentence
    read once, not a magnitude glanced at, and `hud-value-size.test.ts` carries
@@ -1179,6 +1598,318 @@ select option {
 .oyl-hud__control:focus-visible {
   outline: 3px solid var(--oyl-color-hud-ink);
   outline-offset: 2px;
+}
+
+/* A notice is an exception, so it is set as compactly as it can be read: the
+   page's `StatusMessage`, in the HUD's supporting size, with the grid's gap
+   doing the job of its margin. It keeps its own opaque surface and its own
+   token pair, which `contrast.a11y.test.ts` already checks. */
+.oyl-hud__notices .oyl-status {
+  font-size: var(--oyl-font-size-sm);
+  line-height: 1.35;
+  margin: 0;
+  padding: var(--oyl-space-sm);
+}
+
+/*
+ * THE OVERLAY, both layouts — what they share (#423).
+ *
+ * The world fills the stage and the HUD is a grid laid over it, holding four
+ * panels at its edges and nothing in the middle. `.oyl-game--riding` records
+ * how the two layouts are chosen.
+ *
+ * `pointer-events: none` on the grid and `auto` on what is in it: the grid
+ * covers the whole world, and without this the empty middle of it would eat a
+ * tap that belongs to nothing today and to the world the day it takes input.
+ *
+ * ⚠️ `overflow: hidden` on the stage here is what makes "no scrolling" a
+ * property of the layout rather than of how much content there happens to be.
+ * If a panel ever outgrows its cell it is CLIPPED rather than scrolled to, and
+ * `ride.browser.spec.ts` §"every panel is whole" is what goes red — which is
+ * the right failure: a HUD that silently became scrollable is #419 again.
+ */
+@media (min-width: 46rem) and (min-height: 22.5rem),
+  (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+  .oyl-game--riding {
+    overflow: hidden;
+  }
+
+  .oyl-game--riding .oyl-game__world {
+    aspect-ratio: auto;
+    height: 100%;
+    inset: 0;
+    max-height: none;
+    /* 6 : 1 again, of the full height this time — see `.oyl-game__world`. With
+       `inset: 0` and the auto inline margins it inherits, a frame that hits
+       the cap is pillarboxed in the middle of the stage rather than stretched.
+       `ride.browser.spec.ts` measures it at 2600×400. */
+    max-width: 600vh;
+    position: absolute;
+  }
+
+  .oyl-game--riding .oyl-hud {
+    display: grid;
+    inset: 0;
+    pointer-events: none;
+    position: absolute;
+  }
+
+  .oyl-game--riding .oyl-hud > * {
+    pointer-events: auto;
+  }
+
+  .oyl-game--riding .oyl-hud__fields--primary {
+    grid-area: primary;
+  }
+
+  .oyl-game--riding .oyl-hud__fields--secondary {
+    grid-area: secondary;
+  }
+
+  .oyl-game--riding .oyl-hud__route {
+    grid-area: route;
+  }
+
+  .oyl-game--riding .oyl-hud__actions {
+    grid-area: actions;
+    position: static;
+  }
+
+  .oyl-game--riding .oyl-hud__notices {
+    grid-area: notices;
+  }
+}
+
+/*
+ * CORNERS — a phone on its side, and any tablet.
+ *
+ *   primary  ·  secondary          what is read every few seconds, top-start;
+ *      ·  notices  ·               what is read every few minutes, top-end
+ *   route    ·    actions          where you are, bottom-start; what you
+ *                                  press, bottom-end — under the right thumb
+ *
+ * The middle row is `1fr` and holds nothing but a notice, top-aligned, on the
+ * rare ride that has one. That row is the road. `camera.ts` §`riderFrameBox`
+ * says where in the frame the rider is drawn, and `ride.browser.spec.ts`
+ * asserts no panel is laid over that box at any viewport it measures — so
+ * "the centre is clear" is a measurement and not this diagram.
+ *
+ * ⚠️ **The cost, which #422 asks to have written down.** A side-by-side
+ * arrangement — world beside HUD — was the obvious shape and is not what this
+ * is: it would give the world half a landscape display and keep a column of
+ * instruments the height of the screen, which is a smaller version of the page
+ * this replaces. An overlay gives the world all of it and costs the corners;
+ * what is lost is whatever scenery stands behind four opaque rectangles, and
+ * on a 640×360 phone that is a real share of the frame. The alternative that
+ * gives it back is translucency, and `.oyl-hud__panel` says why that is not
+ * on offer.
+ *
+ * The first column is capped at 24 rem — three 7 rem tracks, their gaps and the
+ * panel's own padding, with a little slack — so the primary panel is as wide as
+ * its three numbers need and the secondary tier takes what is left.
+ */
+@media (min-width: 46rem) and (min-height: 22.5rem) {
+  .oyl-game--riding .oyl-hud {
+    grid-template-areas:
+      'primary secondary'
+      'notices notices'
+      'route actions';
+    grid-template-columns: minmax(0, 24rem) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+
+  /* `start`, or the row stretches both top panels to the taller of the two and
+     a three-number panel becomes a 180 px slab on a phone whose secondary tier
+     has wrapped to three rows. Measured, at 640×360. */
+  .oyl-game--riding .oyl-hud__fields--primary,
+  .oyl-game--riding .oyl-hud__fields--secondary {
+    align-self: start;
+  }
+
+  .oyl-game--riding .oyl-hud__fields--secondary,
+  .oyl-game--riding .oyl-hud__actions {
+    justify-self: end;
+    width: min(100%, 26rem);
+  }
+
+  .oyl-game--riding .oyl-hud__actions {
+    align-self: end;
+    width: min(100%, 20rem);
+  }
+
+  .oyl-game--riding .oyl-hud__route {
+    align-self: end;
+    width: min(100%, 18rem);
+  }
+
+  /*
+   * A notice goes under the primary panel, at the START edge — not across the
+   * middle, which is where the rider is. `ride.browser.spec.ts` lays out a ride
+   * with one and holds it to the same "no panel over the rider" as the panels.
+   * 22 rem keeps it inside the first column's 24.
+   */
+  .oyl-game--riding .oyl-hud__notices {
+    align-self: start;
+    justify-self: start;
+    max-width: min(100%, 22rem);
+  }
+}
+
+/*
+ * A SHORT corners layout — a phone on its side, 360 to 480 px tall.
+ *
+ * ⚠️ #419 asks that whatever is given up be recorded, so: **the plan view and
+ * the elevation strip are each drawn shorter here, and neither is dropped.**
+ * At 844×390 the two top panels and the two bottom ones would otherwise leave
+ * under 60 px of clear road between them. 4.5 rem keeps the plan view above the
+ * 64 px floor `hud.browser.spec.ts` holds it to.
+ *
+ * ⚠️ **46 rem wide, where the first version of this layout admitted 40**, and
+ * the six rem are the rider: at 640 px the rider is drawn between x = 298 and
+ * x = 342, a notice in the first column reaches x = 328, and there is no width
+ * at which a sentence that long both fits and stops short of them. A phone
+ * narrower than 736 px on its side gets the stacked layout.
+ */
+@media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem) {
+  .oyl-game--riding .oyl-hud__plan-svg {
+    height: 4.5rem;
+  }
+
+  .oyl-game--riding .oyl-hud__profile-svg {
+    height: 2rem;
+  }
+}
+
+/*
+ * WHERE THERE IS NO FREE CELL, a notice takes the route panel's.
+ *
+ * The two layouts a phone gets — corners on its side, column upright — have
+ * nowhere to put a sentence. Measured: *"Your trainer has not granted control,
+ * so the hills on this route are not being sent to it…"* is 135 px tall at the
+ * width a phone gives it; the gap between the top panels and the bottom ones
+ * on a 844×390 screen is 99 px, and the strip of road between an upright
+ * rider's wheels and the controls is 127 px. Everywhere it fits, it is over a
+ * panel or over the rider, and `ride.browser.spec.ts` §"a ride with a standing
+ * notice" found both.
+ *
+ * ⚠️ #419 asks that what is given up be recorded, so: **on a phone, while a
+ * notice stands, the elevation strip and the plan view are not shown.** They
+ * are what gives way because of what every notice here says — that the road is
+ * not reaching the trainer, or that the trainer refused it. The strip's whole
+ * job is to show a rider the resistance that is coming, and a rider reading
+ * this is being told that it is not. On a tablet there is room for both and
+ * nothing gives way.
+ *
+ * ⚠️ **"While a notice stands" is THE WHOLE RIDE, and this comment used to
+ * read as though it were a moment** — #436's review. `GameView` reads the
+ * trainer once, in `start`, and `trainer-port.ts` §`trainerRoadNotice` has a
+ * sentence for four of the six states: `workout`, `not-controllable`,
+ * `no-simulation` and `no-control`. Nothing dismisses it. So a rider doing a
+ * structured workout in the game on a phone, or riding a trainer that
+ * broadcasts power and cannot be driven, has no elevation strip and no plan
+ * view from the first frame to the last.
+ *
+ * And the argument above covers the strip and NOT the plan view. #285's plan
+ * says where on the road the rider is, which is true and useful whatever the
+ * trainer is doing; it goes because it shares the strip's panel, not because
+ * the notice makes it moot. That is a real cost and it is
+ * [#437](https://github.com/openzigs/onyourleft/issues/437)'s to remedy — a
+ * notice that collapses to one line once read would give the cell back.
+ *
+ * ⚠️ `display: none`, which CLAUDE.md §4e warns about — for CONTROLS. The
+ * accessibility suite loads no stylesheet, so an element hidden here still
+ * looks focusable to `tabbableElements`; this panel holds an `svg` with a text
+ * equivalent and no control at all, so there is nothing for that to be wrong
+ * about. A screen-reader user loses the route's position sentence for as long
+ * as a sighted one loses the picture, which is the honest equivalence — and
+ * "as long as" is, per the paragraph above, the whole ride.
+ *
+ * ⚠️ **One limit, stated rather than gated.** Upright on a phone at the very
+ * bottom of the column layout's range — 752 px tall — a notice of the longest
+ * kind ends within a few pixels of the top of the rider's helmet, and on a
+ * font with wider glyphs than this machine's it may touch it.
+ * `ride.browser.spec.ts` measures 390×844 and 360×800, which clear it.
+ */
+@media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
+  (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud:has(> .oyl-hud__notices) .oyl-hud__route {
+    display: none;
+  }
+
+  .oyl-game--riding .oyl-hud__notices {
+    grid-area: route;
+  }
+}
+
+@media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem) {
+  .oyl-game--riding .oyl-hud__notices {
+    align-self: end;
+    /* 20 rem and not the 22 a taller screen gives it: at 736 px the rider is
+       drawn from x = 347 and this ends at x = 328. */
+    max-width: min(100%, 20rem);
+  }
+}
+
+/*
+ * COLUMN — a phone upright.
+ *
+ * Everything that is READ goes at the top, stacked over the SKY; the road and
+ * the rider get the middle; what is PRESSED is at the bottom, where a thumb is.
+ *
+ * ⚠️ **The route panel is at the top here and at the bottom in the corners
+ * layout, and the reason is a measurement.** The first version of this layout
+ * put it above the controls, and on a 390×664 viewport the two together began
+ * 64 % of the way down the frame — over the rider's wheels, which
+ * `game/camera.ts` §`riderFrameBox` puts at 68 %. Upright, the lens is at its
+ * 90° stop, the horizon is 47 % down the frame and the rider is between 52 %
+ * and 68 %: everything above 47 % is sky, and sky is the cheapest thing on the
+ * screen to cover.
+ *
+ * ⚠️ **47 rem tall and 22.5 rem wide or it is not used**, and both thresholds
+ * are the same measurement run the other way: the three panels at the top have
+ * to end above the rider's helmet, which is 52 % of the way down the frame.
+ *
+ * ⚠️ **The first version of this said 44 rem, and CI is what said no.** On
+ * this repository's development machines those three panels are 365 px, and
+ * 365 / 0.52 is 702 px. On the runner they are **373 px at 320 px wide**: a
+ * different `system-ui`, wider glyphs, and a label that wraps in a 90 px track.
+ * The pull request's first CI run put the route panel 8 px over the rider's
+ * helmet at 320×704 while the same spec was green locally — CLAUDE.md §4f's
+ * *"a green browser gate on a developer's machine says nothing about…"*, this
+ * time about fonts. So: 373 / 0.52 is 717 px, 47 rem is 752, and a phone
+ * narrower than 360 px — where the tracks are narrow enough to wrap a label —
+ * gets the stacked layout instead. There is no 320 px phone 752 px tall.
+ *
+ * Every phone in the Android shell is taller than that. A phone upright in a
+ * BROWSER, with the browser's own bars showing, is about 664 px and gets the
+ * stacked layout — which before #423 was the only layout there was, without the
+ * pinned controls.
+ *
+ * ⚠️ **Portrait is what the owner has been riding and #422 and #423 both say
+ * it must not regress.** Before #423 this orientation showed a 390×219
+ * letterbox with a page of instruments under it and *Pause* at y = 1112 of an
+ * 844 px viewport (#419's own table). `ride.browser.spec.ts` measures the same
+ * viewport now: every reading and both controls on screen at `scrollY === 0`.
+ */
+@media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud {
+    grid-template-areas:
+      'primary'
+      'secondary'
+      'route'
+      '.'
+      'actions';
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  }
+
+  /* The strip and the plan view SIDE BY SIDE: upright, height is what is
+     scarce, and stacked they are 170 px of sky where side by side they are 98. */
+  .oyl-game--riding .oyl-hud__route {
+    display: grid;
+    gap: var(--oyl-space-sm);
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
 }
 
 /* --- Capability queries (#307) --------------------------------------------- */

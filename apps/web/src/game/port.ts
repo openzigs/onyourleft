@@ -40,27 +40,14 @@ import type { RoadCorridor } from './terrain';
 import type { WorldStyle } from './world';
 
 /**
- * How far behind the rider a renderer puts the chase camera, in metres.
+ * Where the chase camera is, in the corridor's local metres.
  *
- * ⚠️ **Here rather than in `three-renderer.ts`, because two files need it and
- * one of them must not import `three`.** `world.ts`'s near-fog bound is the
- * claim that the road under the rider is left alone, and "under the rider"
- * means *at the camera's distance from the rider's own marker* — so
- * `world.test.ts` checks `fogFactor` at exactly this distance. It used to do
- * that against a hand-copied `8`, which silently stops describing the camera
- * the day the camera moves, and starts testing the wrong distance without
- * going red. `world.ts` imports `VIEW_AHEAD_METRES` from `terrain.ts` for the
- * same reason and says so: *"so the two cannot drift"*.
- *
- * ADR 0008 **D-5** fixes the camera, so this is part of the seam's contract
- * rather than one renderer's taste: there is no free-look, and adding one is a
- * change to that ADR. Eight metres back is roughly a following motorbike — far
- * enough that the road ahead fills the frame on a phone held at arm's length,
- * close enough that the rider's own marker stays large enough to find.
+ * ⚠️ **`CAMERA_BEHIND_METRES` lived here until #424 and does not any more** — a
+ * reviewer who remembers this file exporting it is reading the old one. It was
+ * here because `world.test.ts` needs it and must not import `three`; `camera.ts`
+ * meets the same need and holds the other three numbers of the composition
+ * beside it.
  */
-export const CAMERA_BEHIND_METRES = 8;
-
-/** Where the chase camera is, in the corridor's local metres. */
 export interface CameraPose {
   /** The rider's position on the road. */
   readonly x: number;
@@ -69,6 +56,21 @@ export interface CameraPose {
   /** Which way the rider is facing, as a unit vector in the ground plane. */
   readonly headingX: number;
   readonly headingZ: number;
+  /**
+   * The road's height under the CAMERA — `CAMERA_BEHIND_METRES` back along the
+   * route from the rider — #424.
+   *
+   * ⚠️ **Required, where an optional field with a level-road default would
+   * have been less work**, and `RiderMarker.crankAngle` just below records what
+   * that shape costs: an optional field nobody supplies is a hole no gate in
+   * this repository can see, and `botDistance` was exactly that before #237. A
+   * pose with no `eyeRoadY` would compile, render, and hold the camera level
+   * over every hill for ever. `camera.ts` §`cameraRig` says what the two
+   * heights are for.
+   */
+  readonly eyeRoadY: number;
+  /** The road's height where the camera LOOKS, `CAMERA_TARGET_AHEAD_METRES` up the route. */
+  readonly targetRoadY: number;
 }
 
 /** A marker on the road: the rider, the bot (#92), or the ghost (#93). */

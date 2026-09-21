@@ -11,6 +11,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { SIMULATED_DEVELOPMENT_METRES, simulatedCrankAngle } from './bicycle';
+import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES } from './camera';
 import { gapAgainst } from './hud/fields';
 import type { RiderMarker, SceneFrame } from './port';
 import { qualitySettings } from './quality';
@@ -322,6 +323,42 @@ describe('the chase camera', () => {
     // The route runs due north, so the heading is +z and not -z.
     expect(frame.camera.headingZ).toBeGreaterThan(0.9);
     expect(Math.abs(frame.camera.headingX)).toBeLessThan(0.1);
+  });
+
+  /**
+   * #424. `camera.ts` §`cameraRig` pitches the camera by two road heights, and
+   * this is the only place they are produced. `straightRoute` climbs at a
+   * steady 2 %, so both have a known value.
+   */
+  it('reads the road’s height under the camera and at the look-ahead', () => {
+    const setup = straightRoute();
+    const start = atStartLine(setup.profile);
+    const { camera } = sceneFrame({
+      profile: setup.profile,
+      origin: corridorOrigin(setup.profile),
+      state: { ...start, ride: { ...start.ride, distance: metres(1_000) } },
+    });
+
+    // ⚠️ Both directions, and against the grade rather than against each
+    // other: a pose that carried `y` for both would satisfy "finite" and hold
+    // the camera level over every hill for ever.
+    expect(camera.eyeRoadY - camera.y).toBeCloseTo(-0.02 * CAMERA_BEHIND_METRES, 2);
+    expect(camera.targetRoadY - camera.y).toBeCloseTo(0.02 * CAMERA_TARGET_AHEAD_METRES, 2);
+  });
+
+  it('clamps the height under the camera at the start line, where there is no road behind', () => {
+    const setup = straightRoute();
+    const { camera } = sceneFrame({
+      profile: setup.profile,
+      origin: corridorOrigin(setup.profile),
+      state: atStartLine(setup.profile),
+    });
+
+    // To the centimetre: the profile is smoothed, so the first point and the
+    // rider on it differ by about a millimetre.
+    expect(camera.eyeRoadY).toBeCloseTo(camera.y, 2);
+    // The look-ahead is not clamped here, so the two are not simply both `y`.
+    expect(camera.targetRoadY).toBeGreaterThan(camera.y + 0.4);
   });
 
   it('faces the way the road goes on a route that does not run north', () => {

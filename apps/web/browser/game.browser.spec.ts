@@ -23,6 +23,9 @@
 import { expect, test } from '@playwright/test';
 
 import { HARNESS_ORIGIN } from '../playwright.config';
+import { MINIMUM_RIDER_FRAME_SHARE, riderFrameBox } from '../src/game/camera';
+
+import type { RiderExtent } from './game-harness';
 
 /** One read-back pixel, as four bytes. */
 type Pixel = readonly [number, number, number, number];
@@ -55,6 +58,8 @@ interface GameHarnessResult {
   readonly groundPixel: Pixel;
   readonly roadPixel: Pixel;
   readonly roadFarPixel: Pixel;
+  readonly roadProbeRows: readonly [number, number];
+  readonly riderFrame: { readonly landscape: RiderExtent; readonly portrait: RiderExtent };
   readonly resourcesAfterFirstFrame: number;
   readonly resourcesAfterAllFrames: number;
   readonly resourcesAfterSecondSweep: number;
@@ -164,6 +169,20 @@ function channelsOf(packed: number): readonly [number, number, number] {
 
 /** The three colour channels, by the name a failure should name. */
 const CHANNELS = ['red', 'green', 'blue'] as const;
+
+/**
+ * How closely the rider the renderer DREW must agree with the rectangle
+ * `camera.ts` §`riderFrameBox` says they are drawn into, as a fraction of the
+ * frame: two points.
+ *
+ * It is not zero for three reasons, none of them slack: the read-back is
+ * quantised to a row of pixels (0.3 % of a 360 px frame); the box is the
+ * rider's bounding planes and the model is a helmet and two tyres, which are
+ * round; and the rider's rear wheel is nearer the camera than the point they
+ * are placed at, so it reaches a little lower in the frame than a box standing
+ * at that point does.
+ */
+const RIDER_BOX_TOLERANCE = 0.02;
 
 /**
  * What one frame of the harness route costs, with the scenery taken out: **6**.
@@ -358,6 +377,29 @@ test.describe('the world #241 derives from the route reaches the screen', () => 
    */
   test('fades the distant road, rather than drawing it at full strength', async ({ page }) => {
     const result = await harness(page);
+
+    // ⚠️ **#424, and the reason this test and the one below mean anything
+    // again.** The far probe was a fixed 58 % up the frame, worked out against
+    // a camera 3 m up on a 60° lens. When #424 moved the camera the far end of
+    // the road dropped to 54 % — and the probe was reading the SKY. Nothing
+    // went red: *"the distant road is a different colour from the near road"*
+    // is true of the sky too. Measured: with the old probe put back, the four
+    // lines below go red and everything else in this block stays green.
+    // `game-harness.ts` §`inTheFrame` aims both probes from the geometry now,
+    // and this holds them to what that has to produce. ⚠️ Here rather than in
+    // a case of its own because every case in this file reloads a ten-second
+    // harness on CI, and the job's stop is fifteen minutes away from nothing.
+    const [near, far] = result.roadProbeRows;
+    // Further up the road is further up the frame, and neither is in the sky.
+    expect(far).toBeLessThan(near);
+    expect(far).toBeGreaterThan(0.4);
+    expect(near).toBeLessThan(0.9);
+    // The sky is unfogged and is the scene's background; the far road is a
+    // fogged surface. They are different colours on every route there is.
+    expect(result.roadFarPixel.slice(0, 3)).not.toEqual(result.skyPixel.slice(0, 3));
+    // And it is still tarmac under the haze: the fog is 37 % at this depth, so
+    // the road's own blue-over-red ordering survives it.
+    expect(result.roadFarPixel[2]).toBeGreaterThan(result.roadFarPixel[0] ?? 255);
 
     // Non-vacuity first: with no fog to apply there is nothing here to see,
     // and this test would be asserting that two different surfaces differ.
@@ -1306,6 +1348,73 @@ test.describe('the pacer and the ghost are bicycles — #368', () => {
     // own silhouette.
     expect(result.botCrankPixels).toBeGreaterThan(
       (result.riderSilhouettePixels['bot'] ?? 0) * 0.02,
+    );
+  });
+});
+
+/**
+ * #424 — *"The rider's bicycle occupies a stated minimum share of frame height
+ * at 16 : 9, measured in the browser gate — a number, so 'prominent' cannot
+ * drift back to 'speck'."*
+ *
+ * `camera.test.ts` holds the ARITHMETIC to that number. This holds the
+ * RENDERER to it: the real `threeGameRenderer`, the real `sceneFrame`, the real
+ * bicycle, and the rider's extent read back off the drawing buffer by
+ * differencing a frame with them against one without. `game-harness.ts`
+ * §`riderExtent` says what that catches that arithmetic cannot.
+ */
+test.describe('the rider is prominent — #424', () => {
+  /**
+   * ⚠️ One case where there were three, and it is CI's clock rather than
+   * taste: every case in this file reloads the harness, which is ten seconds
+   * on the runner, and the job is stopped at a fixed number of minutes. The
+   * three claims are still three groups of assertions, in the order that makes
+   * a failure readable — nothing measured, then too small, then misplaced.
+   */
+  test('fills at least a quarter of a 16 : 9 frame’s height, where `camera.ts` says', async ({
+    page,
+  }) => {
+    const { riderFrame } = await harness(page);
+    const { landscape, portrait } = riderFrame;
+
+    // Non-vacuity. A probe that found no differing pixel reports a box of no
+    // size, and "agrees with the arithmetic to two points" is not a claim to
+    // make about a rider nobody drew.
+    expect(landscape.pixels).toBeGreaterThan(500);
+    expect(portrait.pixels).toBeGreaterThan(500);
+    expect(landscape.aspect).toBeCloseTo(16 / 9, 5);
+    expect(portrait.aspect).toBeCloseTo(10 / 16, 5);
+
+    // #424's criterion. 18.1 % with the camera it replaced, which this fails.
+    expect(landscape.bottom - landscape.top).toBeGreaterThanOrEqual(MINIMUM_RIDER_FRAME_SHARE);
+
+    // ⚠️ What ties the layout gate to the renderer. `ride.browser.spec.ts`
+    // requires that no HUD panel is over `riderFrameBox`; that is only a claim
+    // about the RIDER while the rider is actually drawn there.
+    const expected = riderFrameBox(landscape.aspect);
+    expect(Math.abs(landscape.top - expected.top)).toBeLessThan(RIDER_BOX_TOLERANCE);
+    expect(Math.abs(landscape.bottom - expected.bottom)).toBeLessThan(RIDER_BOX_TOLERANCE);
+    // Centred, and about as wide as a handlebar.
+    expect((landscape.left + landscape.right) / 2).toBeCloseTo(0.5, 1);
+    expect(landscape.right - landscape.left).toBeLessThan(0.1);
+  });
+
+  test('the lens opens on an upright frame — #423', async ({ page }) => {
+    // ⚠️ The control for the lens policy reaching the GPU. At 16 : 9 the
+    // reference lens and the policy are the same lens, so the case above passes
+    // for a renderer that never applied `verticalFieldOfViewDegrees`. Upright
+    // they differ: 19 % of the frame's height on the 90° stop, 27 % on a fixed
+    // 70°.
+    const { portrait } = (await harness(page)).riderFrame;
+    const expected = riderFrameBox(portrait.aspect);
+    const fixedLens = riderFrameBox(16 / 9);
+
+    expect(
+      Math.abs(portrait.bottom - portrait.top - (expected.bottom - expected.top)),
+    ).toBeLessThan(RIDER_BOX_TOLERANCE);
+    // And the two predictions are far enough apart for that to mean something.
+    expect(fixedLens.bottom - fixedLens.top - (expected.bottom - expected.top)).toBeGreaterThan(
+      3 * RIDER_BOX_TOLERANCE,
     );
   });
 });

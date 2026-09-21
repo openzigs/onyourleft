@@ -24,6 +24,7 @@
 import { ghostDistanceAt, ghostHasFinished, type GhostTrack } from '@onyourleft/domain';
 
 import { simulatedCrankAngle } from './bicycle';
+import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES } from './camera';
 import type { CameraPose, RiderMarker, SceneFrame } from './port';
 import { SCATTER_MAX_ITEMS, scatterAt, scatterSeed, type ScatterItem } from './scatter';
 import { ghostClock, type GameState } from './simulation';
@@ -153,7 +154,24 @@ function scatter(
  */
 export function cameraPose(corridor: RoadCorridor, atDistance: number): CameraPose {
   const here = placeOnCorridor(corridor, atDistance);
-  return { x: here.x, y: here.y, z: here.z, ...headingAt(corridor, here.index) };
+  return {
+    x: here.x,
+    y: here.y,
+    z: here.z,
+    ...headingAt(corridor, here.index),
+    // #424 — the two heights the camera pitches by, read off the SAME corridor
+    // the road is drawn from, so the gaze and the tarmac cannot disagree.
+    // `camera.ts` §`cameraRig` says why these are the road's real heights and
+    // not the local grade extrapolated: approaching a crest the grade is still
+    // +8 % while the road 25 m on has already flattened.
+    //
+    // `placeOnCorridor` clamps at both ends, and the corridor reaches 60 m
+    // behind the rider and 400 m ahead, so both reads are inside it everywhere
+    // except the first 4.5 m and the last 25 m of a point-to-point route —
+    // where they settle on the first or last point and the gaze goes level.
+    eyeRoadY: placeOnCorridor(corridor, atDistance - CAMERA_BEHIND_METRES).y,
+    targetRoadY: placeOnCorridor(corridor, atDistance + CAMERA_TARGET_AHEAD_METRES).y,
+  };
 }
 
 /**

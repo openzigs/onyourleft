@@ -50,6 +50,45 @@ export type RouteId =
   | 'credits'
   | 'not-found';
 
+/**
+ * Whether a route is something to READ or something to OPERATE — #422.
+ *
+ * `theme.css` bounds `.oyl-main` with `max-width: var(--oyl-measure)`, a
+ * typographic reading measure of about 68 characters. That is the right rule
+ * for a list of rides, a settings form and a page of prose, and it was applied
+ * to **every** route — including the one a rider operates with a trainer in
+ * front of them, on a tablet clamped to the bars in landscape. Measured on a
+ * Pixel Tablet on 2026-09-20: a portrait-width column beside a display that was
+ * about 53 % blank, cut off at the ride controls, with `WorkoutPanel` entirely
+ * below the fold. A rider who set out to test whether ERG releases cleanly
+ * (#372) started a plain recording instead, because the control that starts a
+ * workout was not on the screen — and the wire showed Request Control, 103
+ * seconds of nothing, and Stop. **A layout rule produced a false answer to a
+ * safety question.**
+ *
+ * - `prose` keeps the measure. Every route but one.
+ * - `instruments` drops it and lets the view use the width it is given.
+ *
+ * ## Why a field on the route table, which #422 asks to have decided
+ *
+ * - **Not a media query alone.** A query knows the viewport and not the route;
+ *   a wide viewport is exactly where the Activities list most needs its measure.
+ * - **Not a class the view adds.** `main` is the shell's element, so a view
+ *   would be reaching up out of itself to restyle its own container.
+ * - **Required, not optional with a default.** A route added to this table
+ *   fails to compile until somebody has said which it is. The cheap mistake
+ *   this prevents is the one that was made: nobody decided the Ride screen was
+ *   prose, it simply inherited it.
+ *
+ * ⚠️ **The measure is NOT removed globally and must not be.** It is correct for
+ * every other route here.
+ *
+ * ⚠️ The trainer game is `prose` and that is not an oversight: its *picker* is
+ * a form and wants the measure, and its *ride* is a fixed full-bleed stage
+ * (#423) which no `max-width` on an ancestor can bound.
+ */
+export type RouteLayout = 'prose' | 'instruments';
+
 export interface RouteDefinition {
   readonly id: RouteId;
   /**
@@ -66,12 +105,15 @@ export interface RouteDefinition {
   readonly title: string;
   /** One line under the heading, so a view is never a bare title. */
   readonly summary: string;
+  /** @see RouteLayout */
+  readonly layout: RouteLayout;
 }
 
 /** Every navigable route, in the order they appear in the header. */
 export const ROUTES: readonly RouteDefinition[] = [
   {
     id: 'ride',
+    layout: 'instruments',
     path: '/',
     navLabel: 'Ride',
     title: 'Ride',
@@ -80,6 +122,7 @@ export const ROUTES: readonly RouteDefinition[] = [
   },
   {
     id: 'activities',
+    layout: 'prose',
     path: '/activities',
     navLabel: 'Activities',
     title: 'Activities',
@@ -87,6 +130,7 @@ export const ROUTES: readonly RouteDefinition[] = [
   },
   {
     id: 'analysis',
+    layout: 'prose',
     path: '/analysis',
     navLabel: 'Analysis',
     title: 'Analysis',
@@ -95,6 +139,7 @@ export const ROUTES: readonly RouteDefinition[] = [
   },
   {
     id: 'segments',
+    layout: 'prose',
     path: '/segments',
     navLabel: 'Segments',
     title: 'Segments',
@@ -104,6 +149,7 @@ export const ROUTES: readonly RouteDefinition[] = [
   },
   {
     id: 'routes',
+    layout: 'prose',
     path: '/routes',
     navLabel: 'Routes',
     title: 'Routes',
@@ -113,6 +159,7 @@ export const ROUTES: readonly RouteDefinition[] = [
   },
   {
     id: 'workouts',
+    layout: 'prose',
     path: '/workouts',
     navLabel: 'Workouts',
     title: 'Workouts',
@@ -122,6 +169,7 @@ export const ROUTES: readonly RouteDefinition[] = [
   },
   {
     id: 'game',
+    layout: 'prose',
     path: '/game',
     navLabel: 'Trainer game',
     title: 'Trainer game',
@@ -131,6 +179,7 @@ export const ROUTES: readonly RouteDefinition[] = [
   },
   {
     id: 'devices',
+    layout: 'prose',
     path: '/devices',
     navLabel: 'Devices',
     title: 'Devices',
@@ -138,6 +187,7 @@ export const ROUTES: readonly RouteDefinition[] = [
   },
   {
     id: 'transfer',
+    layout: 'prose',
     path: '/transfer',
     // "Files", not "Import", because the page is both directions and because
     // ADR 0009 R3 forbids naming one of our features after somebody else's
@@ -149,6 +199,7 @@ export const ROUTES: readonly RouteDefinition[] = [
   },
   {
     id: 'settings',
+    layout: 'prose',
     path: '/settings',
     navLabel: 'Settings',
     title: 'Settings',
@@ -158,6 +209,7 @@ export const ROUTES: readonly RouteDefinition[] = [
   },
   {
     id: 'about',
+    layout: 'prose',
     path: '/about',
     navLabel: 'About',
     title: 'About On Your Left',
@@ -183,6 +235,7 @@ export const ROUTES: readonly RouteDefinition[] = [
  */
 export const ROUTE_BUILDER_ROUTE: RouteDefinition = {
   id: 'route-builder',
+  layout: 'prose',
   path: '/routes/new',
   navLabel: 'Draw a route',
   title: 'Draw a route',
@@ -210,6 +263,7 @@ export const ROUTE_BUILDER_ROUTE: RouteDefinition = {
  */
 export const CREDITS_ROUTE: RouteDefinition = {
   id: 'credits',
+  layout: 'prose',
   path: '/about/credits',
   navLabel: 'Credits',
   title: 'Credits',
@@ -231,6 +285,7 @@ export const CREDITS_ROUTE: RouteDefinition = {
  */
 export const ACTIVITY_DETAIL_ROUTE: RouteDefinition = {
   id: 'activity-detail',
+  layout: 'prose',
   path: '/activities/:activity',
   navLabel: 'Ride details',
   // The `h1` the shell renders, and therefore the same for every ride. The
@@ -257,6 +312,7 @@ export const ACTIVITY_DETAIL_ROUTE: RouteDefinition = {
  */
 export const SEGMENT_DETAIL_ROUTE: RouteDefinition = {
   id: 'segment-detail',
+  layout: 'prose',
   path: '/segments/:segment',
   navLabel: 'Segment',
   // The shell's `h1`, and therefore the same for every segment — the segment's
@@ -280,6 +336,7 @@ export const SEGMENT_DETAIL_ROUTE: RouteDefinition = {
  */
 export const NOT_FOUND_ROUTE: RouteDefinition = {
   id: 'not-found',
+  layout: 'prose',
   path: '/not-found',
   navLabel: 'Not found',
   title: 'That page does not exist',

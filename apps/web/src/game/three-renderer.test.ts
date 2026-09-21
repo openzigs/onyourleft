@@ -63,18 +63,32 @@ import {
   type ScatterKind,
 } from './scatter';
 import { ROAD_WIDTH_METRES, VIEW_AHEAD_METRES, VIEW_BEHIND_METRES } from './terrain';
-import { BICYCLE_COLOURS, CRANK_AXIS_Y, CRANK_AXIS_Z, LEG_BONE_COUNT } from './bicycle';
+import {
+  BICYCLE_COLOURS,
+  BICYCLE_FRONT_METRES,
+  BICYCLE_LENGTH_METRES,
+  CRANK_AXIS_Y,
+  CRANK_AXIS_Z,
+  LEG_BONE_COUNT,
+} from './bicycle';
 import { MAXIMUM_SCENERY_VARIANTS, SCENERY_MODELS } from './scenery-models';
 import { MAXIMUM_LIT_CHANNEL } from './scenery-palette';
 import {
   CAMERA_ABOVE_METRES,
+  CAMERA_BEHIND_METRES,
   CAMERA_FIELD_OF_VIEW_DEGREES,
   CAMERA_TARGET_AHEAD_METRES,
-  FOGGED_OUT_METRES,
   FRUSTUM_SPREAD,
+  MAXIMUM_FIELD_OF_VIEW_DEGREES,
+  NARROWEST_ASPECT,
+  REFERENCE_ASPECT,
+  vergeEntersFrameMetres,
+  WORST_CASE_ASPECT,
+} from './camera';
+import {
+  FOGGED_OUT_METRES,
   lateralReachMetres,
   loadSceneryModels,
-  NARROWEST_ASPECT,
   prepareSceneryGeometry,
   RiderBelt,
   SCATTER_INSTANCE_CAPACITY,
@@ -84,9 +98,8 @@ import {
   threeGameRenderer,
   WorldLamps,
   LIT_COLOURS,
-  WORST_CASE_ASPECT,
 } from './three-renderer';
-import { CAMERA_BEHIND_METRES, type CameraPose, type RiderMarker, type SceneFrame } from './port';
+import type { CameraPose, RiderMarker, SceneFrame } from './port';
 import {
   fogFactor,
   irradianceOn,
@@ -96,7 +109,15 @@ import {
 } from './world';
 
 /** A rider at the origin, facing +z, so `along` is `z` and `across` is `x`. */
-const POSE: CameraPose = { x: 0, y: 0, z: 0, headingX: 0, headingZ: 1 };
+const POSE: CameraPose = {
+  x: 0,
+  y: 0,
+  z: 0,
+  headingX: 0,
+  headingZ: 1,
+  eyeRoadY: 0,
+  targetRoadY: 0,
+};
 
 function item(overrides: Partial<ScatterItem> = {}): ScatterItem {
   return { kind: 'shrub', x: 3, y: 0, z: 10, rotation: 0, scale: 1, variant: 0, ...overrides };
@@ -475,8 +496,37 @@ describe('the cull, which is the thing this renderer has never had to do', () =>
     expect(meshFor(belt, 'rock')?.count).toBe(1);
   });
 
+  it('opens the cone from the CAMERA, which is behind the rider', () => {
+    // ⚠️ **#424, and a gap that was already there.** `lateralReachMetres` adds
+    // `CAMERA_BEHIND_METRES` back on because the cone's apex is at the camera
+    // and not at the rider — its own comment says so — and deleting that term
+    // left every test in this file green, on `main` as well as here: the 43 m
+    // floor is wider than the 19 m the term contributes beside the rider, so
+    // "nothing on screen is culled" holds without it. It holds by the floor's
+    // generosity rather than by the geometry being right, and the floor is the
+    // number #353 and #355 each narrowed. So the apex is pinned where it is.
+    expect(lateralReachMetres(-CAMERA_BEHIND_METRES)).toBe(SCATTER_LATERAL_METRES);
+    expect(lateralReachMetres(0) - SCATTER_LATERAL_METRES).toBeCloseTo(
+      FRUSTUM_SPREAD * CAMERA_BEHIND_METRES,
+      10,
+    );
+
+    // And through the belt rather than only through the function: level with
+    // the rider, the cone has already opened by the camera's setback.
+    const belt = new ScatterBelt();
+    const opened = SCATTER_LATERAL_METRES + FRUSTUM_SPREAD * CAMERA_BEHIND_METRES;
+    belt.update(
+      [item({ kind: 'rock', x: opened - 1, z: 0 }), item({ kind: 'rock', x: opened + 1, z: 0 })],
+      POSE,
+    );
+    expect(meshFor(belt, 'rock')?.count).toBe(1);
+    // `toBeCloseTo`: an instance matrix is 32-bit and `opened` is not a whole number.
+    expect(instancePosition(belt, 'rock', 0)[0]).toBeCloseTo(opened - 1, 3);
+  });
+
   it('keeps the whole placement band beside a rider the cone has not opened for', () => {
-    // At the camera itself the cone is `FRUSTUM_SPREAD` × 8 m wide and that is
+    // At the rider the cone is `FRUSTUM_SPREAD` × `CAMERA_BEHIND_METRES` wide —
+    // 18.9 m since #424, 27.7 m on the camera before it — and that is
     // narrower than the band `scatter.ts` places into, so the floor is what
     // stops the rider riding through a bare strip. Behind the camera the cone
     // term is clamped to zero rather than allowed to go negative, which is the
@@ -522,12 +572,15 @@ describe('the cull, which is the thing this renderer has never had to do', () =>
     // somebody would look for it.** That property re-derives the frustum from
     // `WORST_CASE_ASPECT` — the same constant the bound is built from — so it
     // is self-consistent at *any* value and would stay green on a worst case
-    // narrowed to the 16 : 9 the canvas is designed at. What makes 6 safe is
-    // the reading of `design/tokens.ts` and `theme.css` recorded on
-    // `WORST_CASE_ASPECT` itself, and a reading is not something a test can
-    // re-derive. So this pins the number instead: lower it and come back here.
-    expect(WORST_CASE_ASPECT).toBeGreaterThanOrEqual(6);
-    expect(FRUSTUM_SPREAD).toBeCloseTo(3.4641, 4);
+    // narrowed to 16 : 9. ⚠️ **What makes 6 safe changed in #423**: it used to
+    // be a reading of `theme.css` that no test could re-derive, and it is now
+    // a `max-width` in that stylesheet which `browser/ride.browser.spec.ts`
+    // measures at a 6.5 : 1 viewport. This still pins the number, because the
+    // two are in different languages and nothing else ties them: lower it here
+    // and the stylesheet's `600vh` has to come down with it.
+    expect(WORST_CASE_ASPECT).toBe(6);
+    // ⚠️ 3.4641 until #424 widened the lens from 60° to 70°: 6 × tan 35°.
+    expect(FRUSTUM_SPREAD).toBeCloseTo(4.2012, 4);
     // And the spread really is the camera's, rather than a number beside it.
     expect(FRUSTUM_SPREAD).toBeCloseTo(
       WORST_CASE_ASPECT * Math.tan((CAMERA_FIELD_OF_VIEW_DEGREES / 2) * (Math.PI / 180)),
@@ -574,7 +627,7 @@ describe('the cull, which is the thing this renderer has never had to do', () =>
     // z = 50 is 50 m to the side. A cull written against the world axes would
     // agree with this file's other tests exactly and be wrong on every bend.
     const belt = new ScatterBelt();
-    const facingWest: CameraPose = { x: 0, y: 0, z: 0, headingX: -1, headingZ: 0 };
+    const facingWest: CameraPose = { ...POSE, headingX: -1, headingZ: 0 };
 
     belt.update(
       [
@@ -895,7 +948,8 @@ describe('the cull against what `scene.ts` actually hands it', () => {
     expect(tightestRadius).toBeGreaterThan(99);
     expect(tightestRadius).toBeLessThan(101);
     // 0.4390 when this was measured for #348; 0.5514 for #351, 0.5514 again
-    // for #353, and 0.5243 for #355.
+    // for #353, 0.5243 for #355 and **0.5568** for #424 — a nearer camera and
+    // a wider lens put a little more of a hairpin's fold inside the cone.
     expect(lowest).toBeGreaterThan(0.5);
     expect(lowest).toBeLessThan(0.6);
     // The dropped half is the point: none of it was visible.
@@ -935,7 +989,10 @@ describe('the cull against what `scene.ts` actually hands it', () => {
 
     // 49 169 across the ten sweeps when this was written; **35 718** when #348
     // re-measured it, because that issue roughly halved how much scenery a
-    // stretch of road carries; **47 871** since #353 and **48 089** since #355.
+    // stretch of road carries; **47 871** since #353, **48 089** since #355 and
+    // **50 395** since #424 — which is two changes at once: a wider lens puts
+    // more on screen, and "not yet fogged out" is judged at the depth three
+    // fogs by rather than at the straight-line distance (`asTheCameraSeesIt`).
     // The floor moved with the measurement rather than the measurement being
     // left to describe a world that has changed.
     expect(clear).toBeGreaterThan(30_000);
@@ -944,76 +1001,136 @@ describe('the cull against what `scene.ts` actually hands it', () => {
 
 /**
  * #355 — the verge and the camera cone, which is the interaction three passes
- * of constant-tuning went by without computing.
+ * of constant-tuning went by without computing — **re-derived for #423 and
+ * #424, which between them moved every quantity in it.**
  *
  * ## The relationship, in one sentence
  *
  * A perspective camera's cone has an **apex**. An item standing `across` metres
  * from the centreline is off the side of the screen until it is
- * `across / NEAR_CONE_SPREAD` metres ahead of the **camera**, and the camera
- * sits {@link CAMERA_BEHIND_METRES} behind the rider — so the verge decides not
- * only how far away the nearest scenery stands but **whether a rider ever sees
- * it beside them at all**. At a 6 m verge the nearest thing `scatter.ts` can
- * place is 9.5 m from the centreline and does not enter a 16 : 9 frame until
- * 1.3 m *ahead* of the rider; at 3 m it is 6.5 m out and is already in frame
- * 1.7 m *behind* them.
+ * `across / spread` metres ahead of the **camera**, and the camera sits
+ * {@link CAMERA_BEHIND_METRES} behind the rider — so the verge decides not only
+ * how far away the nearest scenery stands but **whether a rider sees it beside
+ * them at all**.
  *
- * ## Two assertions, and neither is the other's superset
+ * ## ⚠️ What #424 did to it, and why the old first assertion is gone
  *
- * The first is arithmetic over the constants and fails the instant the verge,
- * the field of view or the camera's setback makes the nearest row invisible
- * beside the rider. The second drives the real `sceneFrame` and measures what
- * share of the scenery actually placed in the near field lands inside a narrow
- * frame — because the first says nothing about how much of the *band* is in
- * shot, and a verge that satisfied it with a band 60 m deep behind it would
- * still put the world on the horizon.
+ * A reviewer who remembers `expect(entersFrameAt(nearest)).toBeLessThan(0)` —
+ * *"puts the nearest thing the verge permits in shot beside the rider"* — is
+ * reading the old file, and it was not loosened: **it cannot hold beside the
+ * thing #424 asks for.** `camera.ts`'s header has the law. The rider's share
+ * of frame height and the verge's entry point both depend on the camera
+ * through the one product `B · tan(fov / 2)`, so with the verge in shot level
+ * with the rider the most the rider can fill on this lens is 23.2 % of a 16 : 9
+ * frame, **20.6 % of the owner's 16 : 10 tablet** and 16.9 % at 4 : 3 — against
+ * the 18.1 % #424 was filed about. `camera.test.ts` asserts those three, so the
+ * trade is a checked fact rather than an excuse.
+ *
+ * What replaces it is stated against the rider's own bicycle rather than
+ * against a number: the nearest scenery is in shot **before the rider's front
+ * wheel is level with it** at 16 : 9, and within a bicycle's length on the
+ * 16 : 10 tablet. Scenery and rider overlap in the frame; they no longer
+ * overlap in depth all the way back to the saddle.
+ *
+ * ## ⚠️ And what #423 did to it: there is no one "narrowest frame" any more
+ *
+ * #355's 72 % bound was taken at 16 : 9 because 16 : 9 was the narrowest the
+ * canvas could be. The world is full-bleed now. The bound is **kept where it
+ * was taken** ({@link REFERENCE_ASPECT}) rather than re-pointed at a frame it
+ * was never measured in, and the narrower frames get rows of their own.
+ *
+ * ## How every floor below is set, which is #355's own method made executable
+ *
+ * #355 put its bound *"between the two and nearer the new one, so the
+ * arrangement this issue replaces goes red on it"* — and that sentence was a
+ * comment. Here it is an assertion: each row measures the shipped verge **and
+ * the 6 m verge #355 was filed against, seen through today's camera**, and
+ * requires the floor to separate them. So a floor cannot be re-pinned to
+ * whatever a new constant happens to produce: move the camera, and either the
+ * shipped arrangement falls under its floor or the rejected one climbs over it,
+ * and the row goes red either way.
+ *
+ * The 6 m verge is emulated by standing every item 3 m further out. That is
+ * exact rather than approximate — `scatter.test.ts` §"#353" asserts nothing in
+ * `fillCell` reads the verge, so moving it moves where scenery stands and never
+ * how much there is.
  *
  * ## ⚠️ What this block does NOT claim, and #355's own arithmetic overstates
  *
  * The issue says *"roughly 15 items fall in the first 25 m — they are simply
- * not in frame"*. Measured on the fixture below at the verge it was filed
- * against: **13.7** items a frame stand in the first 25 m of road and **9.3**
- * of them are already inside a 16 : 9 frame. The near field was never bare by
- * geometry; a bit under a third of it was outside the frame, and this change
- * takes that to a bit under a quarter. ⚠️ **The count of frames carrying
- * nothing in shot in the first 25 m does not move at all** — 14 in 100 before
- * and after — because 13 of those 14 have nothing *placed* there, which is the
- * clustering field `OPEN_GROUND_SHARE` parameterises doing what #348 asked it
- * to, and not the cone.
+ * not in frame"*. Measured: **13.7** items a frame stand there, and most are in
+ * shot at every landscape aspect. ⚠️ **The count of frames carrying nothing in
+ * shot in the first 25 m does not move with the verge at all**, because nearly
+ * all of those frames have nothing *placed* there — the clustering field
+ * `OPEN_GROUND_SHARE` parameterises doing what #348 asked it to, and not the
+ * cone.
  *
  * ⚠️ **It is still a proxy and not the device**, in the sense `scatter.test.ts`
  * §"#351" means. A frame count cannot say the world looks right.
  */
-describe('the verge stands inside the near cone — #355', () => {
+describe('the verge and the camera cone — #355, re-derived for #423 and #424', () => {
+  /** How far from the centreline the nearest thing `scatter.ts` can place stands. */
+  const NEAREST = ROAD_WIDTH_METRES / 2 + SCATTER_VERGE_METRES;
+
+  /** The owner's tablet in landscape, which is where this app is ridden. */
+  const TABLET_ASPECT = 16 / 10;
+
   /**
    * How far ahead of the **rider** an item standing `across` metres from the
-   * centreline first enters a {@link NARROWEST_ASPECT} frame. Negative means it
-   * is already in shot at the rider's own position.
+   * centreline first enters a frame of this aspect. Negative means it is
+   * already in shot at the rider's own position.
    *
-   * ⚠️ **Derived here rather than imported**, and that is the point of it: the
-   * production side of this relationship is a *comment* on
-   * {@link SCATTER_VERGE_METRES}, so a version that called some exported helper
-   * would be checking one arrangement of these four constants against another
-   * arrangement of the same four. It is the posture `asTheCameraSeesIt` takes
-   * towards the cull.
+   * ⚠️ **Derived here rather than imported**, and that is the point of it:
+   * `camera.ts` §`vergeEntersFrameMetres` is the production statement of this
+   * relationship, so a version that called it would be checking one
+   * arrangement of these constants against the same arrangement. It is the
+   * posture `asTheCameraSeesIt` takes towards the cull. The last case in this
+   * block is what ties the two together.
    */
-  const entersFrameAt = (across: number): number =>
-    across / (NARROWEST_ASPECT * Math.tan((CAMERA_FIELD_OF_VIEW_DEGREES / 2) * (Math.PI / 180))) -
-    CAMERA_BEHIND_METRES;
+  const entersFrameAt = (across: number, aspect: number): number =>
+    across / lensSpread(aspect) - CAMERA_BEHIND_METRES;
 
-  it('puts the nearest thing the verge permits in shot beside the rider', () => {
-    // ⚠️ **The gate #355 asks for, and it is a gate rather than a note because
-    // the same paragraph has been in `three-renderer.ts` since #269 and was
-    // read by nobody through three tuning passes.** It goes red on a verge past
-    // about 4.7 m, on a narrower field of view, and on a camera moved closer to
-    // the rider — each of which makes the near band invisible in exactly the
-    // way #355 was filed about.
+  it('gave up the verge level with the rider, and says so', () => {
+    // ⚠️ **Why the old gate is gone.** The rider's share of frame height and
+    // the verge's entry point depend on the camera through one product,
+    // `B · tan(fov / 2)` — `camera.ts`'s header has the law — so holding the
+    // verge level with the rider pins the camera back, and `camera.test.ts`
+    // §"is out of reach of any camera on this lens that holds #355’s old gate"
+    // asserts what that leaves: 23.2 % of the frame at 16 : 9, 20.6 % on the
+    // owner's tablet, against the quarter #424 sets as the floor.
     //
-    // Measured: **−1.67 m** at a 3 m verge, against **+1.26 m** at the 6 m one
-    // this issue replaces.
-    const nearest = ROAD_WIDTH_METRES / 2 + SCATTER_VERGE_METRES;
+    // What is asserted HERE is the other side of that trade, so that it cannot
+    // be mistaken for an oversight: the verge really is no longer level with
+    // the rider, at any landscape aspect. A future change that quietly made
+    // this negative again would have made the rider small again to do it.
+    for (const aspect of [REFERENCE_ASPECT, TABLET_ASPECT, 4 / 3]) {
+      expect(entersFrameAt(NEAREST, aspect)).toBeGreaterThan(0);
+    }
+    // And the camera that satisfied #355 did it from 8 m back on a 60° lens.
+    expect(NEAREST / (REFERENCE_ASPECT * Math.tan((30 * Math.PI) / 180)) - 8).toBeCloseTo(-1.67, 2);
+  });
 
-    expect(entersFrameAt(nearest)).toBeLessThan(0);
+  it('has the nearest scenery in shot before the rider’s front wheel is level with it', () => {
+    // Measured: **+0.72 m** at 16 : 9, against −1.67 m with the camera 8 m back
+    // and +1.83 m with this camera on the old 60° lens. The front of the
+    // rider's bicycle is 0.86 m ahead of the point the marker is placed at, so
+    // a tree at the verge and the rider's front wheel are in the frame together.
+    const entersAt = entersFrameAt(NEAREST, REFERENCE_ASPECT);
+
+    expect(entersAt).toBeLessThan(BICYCLE_FRONT_METRES);
+    // Non-vacuity, and the honest half of the trade: it is NOT level with the
+    // rider any more, and a test that still said so would be a test of 0 < 1.
+    expect(entersAt).toBeGreaterThan(0);
+  });
+
+  it('has it in shot within a bicycle’s length on the owner’s tablet', () => {
+    // Measured: **+1.30 m** at 16 : 10, inside the 1.70 m the bicycle is long.
+    // ⚠️ A 4 : 3 tablet measures +2.46 m and is NOT gated: the only 4 : 3
+    // tablets in numbers are iPads, and Web Bluetooth does not exist on iOS
+    // (CLAUDE.md §8), so nobody can ride this there. It is recorded so that the
+    // number is not rediscovered as a regression.
+    expect(entersFrameAt(NEAREST, TABLET_ASPECT)).toBeLessThan(BICYCLE_LENGTH_METRES);
+    expect(entersFrameAt(NEAREST, 4 / 3)).toBeCloseTo(2.46, 1);
   });
 
   it('still leaves the far edge of the band entering frame up the road, not beside it', () => {
@@ -1024,14 +1141,32 @@ describe('the verge stands inside the near cone — #355', () => {
     // carriageway assertions; what this one says is that the *band* is still
     // deep enough to reach out of the near cone, so the world is a band seen in
     // perspective rather than a hedge drawn at one remove. Measured: the far
-    // edge stands 21.5 m out and enters frame **12.95 m** up the road.
-    const farthest = ROAD_WIDTH_METRES / 2 + SCATTER_VERGE_METRES + SCATTER_BAND_METRES;
+    // edge stands 21.5 m out and enters a 16 : 9 frame **12.8 m** up the road.
+    const farthest = NEAREST + SCATTER_BAND_METRES;
 
-    expect(entersFrameAt(farthest)).toBeGreaterThan(8);
+    expect(entersFrameAt(farthest, REFERENCE_ASPECT)).toBeGreaterThan(8);
+  });
+
+  it('agrees with the statement of the same thing in `camera.ts`', () => {
+    // The two are derived separately on purpose; this is the one place they
+    // meet. A drift between them means one of the two files is describing a
+    // different camera from the one that ships.
+    for (const aspect of [
+      WORST_CASE_ASPECT,
+      REFERENCE_ASPECT,
+      TABLET_ASPECT,
+      1,
+      NARROWEST_ASPECT,
+    ]) {
+      expect(vergeEntersFrameMetres(NEAREST, aspect)).toBeCloseTo(
+        entersFrameAt(NEAREST, aspect),
+        10,
+      );
+    }
   });
 
   /**
-   * The same claim against the real `sceneFrame`, which is what stops the pair
+   * The same claim against the real `sceneFrame`, which is what stops the cases
    * above being arithmetic that agrees with itself.
    *
    * ⚠️ **Twelve kilometres and a hundred frames, matching `scatter.test.ts`
@@ -1058,7 +1193,7 @@ describe('the verge stands inside the near cone — #355', () => {
   interface NearField {
     /** Items standing in the nearest {@link NEAR_FIELD_METRES} of road. */
     readonly placed: number;
-    /** How many of those are inside a {@link NARROWEST_ASPECT} frame. */
+    /** How many of those are inside the frame. */
     readonly inShot: number;
     /** Frames with nothing at all in shot there. */
     readonly blankFrames: number;
@@ -1068,76 +1203,127 @@ describe('the verge stands inside the near cone — #355', () => {
   /** The stretch of road a rider is actually looking at, in metres. */
   const NEAR_FIELD_METRES = 25;
 
-  const nearField = (): NearField => {
+  /** How much further out a 6 m verge stands than the 3 m one that ships. */
+  const REJECTED_VERGE_EXTRA_METRES = 3;
+
+  /** The hundred frames, built once: `sceneFrame` is the expensive half. */
+  const frames = ((): readonly SceneFrame[] => {
     const profile = routeProfile(levelRoute());
     const origin = corridorOrigin(profile);
     const start = atStartLine(profile);
+    const built: SceneFrame[] = [];
+    for (let step = 0; step < 100; step += 1) {
+      built.push(
+        sceneFrame({
+          profile,
+          origin,
+          state: { ...start, ride: { ...start.ride, distance: metres(500 + step * 100) } },
+        }),
+      );
+    }
+    return built;
+  })();
+
+  /**
+   * @param vergeExtraMetres stand every item this much further from the
+   * centreline — see "How every floor below is set" above.
+   */
+  const nearField = (aspect: number, vergeExtraMetres = 0): NearField => {
     let placed = 0;
     let inShot = 0;
     let blankFrames = 0;
-    let frames = 0;
-    for (let step = 0; step < 100; step += 1) {
-      const frame = sceneFrame({
-        profile,
-        origin,
-        state: { ...start, ride: { ...start.ride, distance: metres(500 + step * 100) } },
-      });
+    for (const frame of frames) {
       let visible = 0;
       for (const each of frame.scatter) {
-        const along =
-          (each.x - frame.camera.x) * frame.camera.headingX +
-          (each.z - frame.camera.z) * frame.camera.headingZ;
+        const dx = each.x - frame.camera.x;
+        const dz = each.z - frame.camera.z;
+        const along = dx * frame.camera.headingX + dz * frame.camera.headingZ;
         if (along < 0 || along >= NEAR_FIELD_METRES) {
           continue;
         }
         placed += 1;
-        if (asTheCameraSeesIt(each, frame.camera, NARROWEST_ASPECT).insideHorizontally) {
+        // Outwards along the rider's own lateral axis, which on this straight
+        // level fixture is the road's.
+        const across = dx * frame.camera.headingZ - dz * frame.camera.headingX;
+        const push = Math.sign(across) * vergeExtraMetres;
+        const moved: ScatterItem = {
+          ...each,
+          x: each.x + push * frame.camera.headingZ,
+          z: each.z - push * frame.camera.headingX,
+        };
+        if (asTheCameraSeesIt(moved, frame.camera, aspect).insideHorizontally) {
           visible += 1;
         }
       }
       inShot += visible;
       blankFrames += visible === 0 ? 1 : 0;
-      frames += 1;
     }
-    return { placed, inShot, blankFrames, frames };
+    return { placed, inShot, blankFrames, frames: frames.length };
   };
 
-  it('shows a rider most of what is standing in the first 25 m of road', () => {
-    // ⚠️ **The measurement #355 was filed on, taken properly.** At the 6 m
-    // verge 13.68 items a frame stand in the first 25 m and **9.28** of them
-    // are in a 16 : 9 frame — 67.8 %. At 3 m the same 13.68 are placed and
-    // **10.58** are in shot — 77.3 %. The bound sits between the two and nearer
-    // the new one, so the arrangement this issue replaces goes red on it.
-    //
-    // ⚠️ **The supply is identical at both**, which is the same property
-    // `scatter.test.ts` §"#353" asserts about the band: nothing in `fillCell`
-    // reads the verge, so moving it moves where scenery stands and never how
-    // much there is. That is what makes this a measurement of the *cone* rather
-    // than of the density.
-    const { placed, inShot, frames } = nearField();
+  const share = (field: NearField): number => field.inShot / field.placed;
+
+  /**
+   * Each frame, the share of the first 25 m a rider must be shown, and what was
+   * measured either side of it when the floor was set.
+   *
+   * | frame | shipped, 3 m verge | floor | rejected, 6 m verge |
+   * |---|--:|--:|--:|
+   * | 16 : 9 — {@link REFERENCE_ASPECT}, #355's own | 73.8 % | **72 %** | 64.7 % |
+   * | 16 : 10 — the owner's tablet | 69.4 % | **65 %** | 59.1 % |
+   * | 4 : 3 | 59.4 % | **54 %** | 47.4 % |
+   * | 9 : 21 — {@link NARROWEST_ASPECT}, a phone upright | 12.7 % | **9 %** | 3.1 % |
+   *
+   * ⚠️ **The 16 : 9 floor is #355's, unmoved**, and the camera was solved
+   * against it: this position on the old 60° lens measures 64.7 %, which is
+   * under the 67.8 % #355 was *filed about*. 70° is what clears it.
+   *
+   * ⚠️ **The last row is not a defect and must not be tuned as one.** A frame
+   * less than half as wide as it is tall shows an eighth of what stands beside
+   * the road because that is what such a frame is; the verge would have to be
+   * inside the carriageway to change it. It is gated so that it cannot fall to
+   * *nothing* unnoticed — which is what a fixed 70° lens does to it, measured
+   * on this fixture before `camera.ts` §`verticalHalfTangent` opened the lens
+   * on a narrow frame: **2.1 %**.
+   */
+  const ROWS = [
+    { name: '16 : 9, where #355 took its bound', aspect: REFERENCE_ASPECT, floor: 0.72 },
+    { name: '16 : 10, the owner’s tablet', aspect: TABLET_ASPECT, floor: 0.65 },
+    { name: '4 : 3', aspect: 4 / 3, floor: 0.54 },
+    { name: '9 : 21, a phone upright', aspect: NARROWEST_ASPECT, floor: 0.09 },
+  ] as const;
+
+  it.each(ROWS)('shows a rider enough of the first 25 m of road — $name', ({ aspect, floor }) => {
+    const shipped = nearField(aspect);
+    const rejected = nearField(aspect, REJECTED_VERGE_EXTRA_METRES);
 
     // Non-vacuity: a sweep that found nothing placed would report a share of
-    // 0/0, and one that found nothing in shot would report a real zero for the
-    // wrong reason.
-    expect(placed / frames).toBeGreaterThan(10);
-    expect(inShot / placed).toBeGreaterThan(0.72);
+    // 0/0, and the supply must be the same in both or the comparison is of two
+    // different worlds.
+    expect(shipped.placed / shipped.frames).toBeGreaterThan(10);
+    expect(rejected.placed).toBe(shipped.placed);
+
+    expect(share(shipped)).toBeGreaterThan(floor);
+    // ⚠️ The half that stops the floor being re-pinned — see this block's
+    // header. The arrangement #355 replaced must still FAIL, through this
+    // camera, at this aspect.
+    expect(share(rejected)).toBeLessThan(floor);
   });
 
   it('is not the reason a frame occasionally carries nothing in the near field', () => {
     // ⚠️ **The half of #355's diagnosis that the measurement does not support,
-    // pinned so that it is not rediscovered as a fourth cause.** Fourteen
-    // frames in a hundred carry nothing in shot in the first 25 m, and that
-    // figure is **identical at verges of 6, 5, 4, 3, 2 and 1.5 m** — thirteen
-    // of the fourteen have nothing *placed* there at all, which is the
-    // clustering behaving as #348 designed it. Narrowing the verge cannot fix
-    // a frame with nothing in it, and an issue that reads a blank near field as
-    // a cone problem is diagnosing the wrong constant. ⚠️ **Both directions are
-    // asserted**, because a world that never opened out would be a regression
-    // of #348's third bullet and a world that opened out everywhere would be
-    // #348's own overcorrection.
-    const { blankFrames, frames } = nearField();
+    // pinned so that it is not rediscovered as a fourth cause.** Some frames in
+    // a hundred carry nothing in shot in the first 25 m, and nearly all of
+    // them have nothing *placed* there at all, which is the clustering behaving
+    // as #348 designed it. Narrowing the verge cannot fix a frame with nothing
+    // in it, and an issue that reads a blank near field as a cone problem is
+    // diagnosing the wrong constant. ⚠️ **Both directions are asserted**,
+    // because a world that never opened out would be a regression of #348's
+    // third bullet and a world that opened out everywhere would be #348's own
+    // overcorrection.
+    const { blankFrames, frames: count } = nearField(REFERENCE_ASPECT);
 
-    expect(blankFrames).toBeLessThan(frames / 5);
+    expect(blankFrames).toBeLessThan(count / 5);
     expect(blankFrames).toBeGreaterThan(0);
   });
 });
@@ -1169,9 +1355,10 @@ describe('a ride with no GL context keeps its HUD — FR-5', () => {
  * deliberately not the implementation's arithmetic rearranged.**
  * `lateralReachMetres` approximates; this does not. The camera sits
  * `CAMERA_BEHIND_METRES` behind the rider and `CAMERA_ABOVE_METRES` above, and
- * looks at a point `CAMERA_TARGET_AHEAD_METRES` up the road at the rider's own
- * height — so its axis is pitched down by about 5.2° and the depth of a point
- * is its projection on that pitched axis, not its distance up the road.
+ * looks at the ROAD `CAMERA_TARGET_AHEAD_METRES` ahead of them — so on the flat
+ * its axis is pitched down by about 3.9° (5.2° until #424 lowered and closed
+ * it), and the depth of a point is its projection on that pitched axis, not its
+ * distance up the road.
  *
  * The camera's *right* axis is exactly the rider's lateral one: three builds
  * the basis from a world up of (0, 1, 0) and this camera has no roll, so the
@@ -1188,9 +1375,11 @@ describe('a ride with no GL context keeps its HUD — FR-5', () => {
  * than defaulted.** Two blocks ask this function two opposite questions: the
  * cull's property needs {@link WORST_CASE_ASPECT}, because a cull that drops
  * something visible on the *widest* frame is the defect; the near-field gate
- * needs {@link NARROWEST_ASPECT}, because scenery that misses the *narrowest*
- * frame is the defect there. A default would silently give one of them the
- * other one's answer, and the wide one is the answer that makes both look fine.
+ * needs the narrow ones — {@link REFERENCE_ASPECT}, where #355's bound was
+ * taken, down to {@link NARROWEST_ASPECT} — because scenery that misses a
+ * *narrow* frame is the defect there. A default would silently give one of them
+ * the other one's answer, and the wide one is the answer that makes both look
+ * fine.
  */
 function asTheCameraSeesIt(
   each: ScatterItem,
@@ -1201,19 +1390,47 @@ function asTheCameraSeesIt(
   const dz = each.z - pose.z;
   const along = dx * pose.headingX + dz * pose.headingZ;
   const across = dx * pose.headingZ - dz * pose.headingX;
-  // From the camera rather than from the rider, in its own three axes.
+  // From the camera rather than from the rider, in its own three axes. ⚠️ Both
+  // heights are the ROAD's since #424 — under the camera and at the look-ahead
+  // — so the axis follows the hill rather than staying level behind the rider.
   const forward = along + CAMERA_BEHIND_METRES;
-  const rise = each.y - pose.y - CAMERA_ABOVE_METRES;
+  const rise = each.y - pose.eyeRoadY - CAMERA_ABOVE_METRES;
   const axisRun = CAMERA_TARGET_AHEAD_METRES + CAMERA_BEHIND_METRES;
-  const axisDrop = -CAMERA_ABOVE_METRES;
+  const axisDrop = pose.targetRoadY - pose.eyeRoadY - CAMERA_ABOVE_METRES;
   const axisLength = Math.hypot(axisRun, axisDrop);
   const depthOnAxis = (forward * axisRun + rise * axisDrop) / axisLength;
-  const halfAngleTangent = aspect * Math.tan((CAMERA_FIELD_OF_VIEW_DEGREES / 2) * (Math.PI / 180));
   return {
     // The near plane the renderer constructs its camera with.
-    insideHorizontally: depthOnAxis > 0.5 && Math.abs(across) <= halfAngleTangent * depthOnAxis,
-    depth: Math.hypot(forward, across, rise),
+    insideHorizontally: depthOnAxis > 0.5 && Math.abs(across) <= lensSpread(aspect) * depthOnAxis,
+    // ⚠️ **The depth three FOGS by, which until #424 this was not.** It was
+    // `hypot(forward, across, rise)` — the straight-line distance — and
+    // `fog_vertex.glsl` is `vFogDepth = -mvPosition.z`: the depth along the
+    // view axis. They agree on the axis and part company off it, in the
+    // direction that made this file's central property *weaker*: an item 200 m
+    // to the side and 60 m deep was counted as 209 m away and three-quarters
+    // fogged, excusing a cull of something three draws almost clear. #424 asks
+    // for the fog's coupling to the camera to be re-derived; this is what that
+    // turned up. The property still holds with the honest depth — asserted
+    // below at ten radii — so the cull was right and its proof was not.
+    depth: depthOnAxis,
   };
+}
+
+/**
+ * `aspect · tan(fov / 2)` for the lens a frame of this shape gets — the same
+ * policy `camera.ts` §`verticalHalfTangent` states, **restated from the two
+ * angles rather than imported**, for the reason this whole helper is
+ * independent: a test that called the production function would be checking
+ * one arrangement of the constants against itself.
+ *
+ * A frame at least as wide as it is tall gets the reference lens. A narrower
+ * one is opened until it sees to the side what a square frame would, and stops
+ * at the maximum.
+ */
+function lensSpread(aspect: number): number {
+  const reference = Math.tan((CAMERA_FIELD_OF_VIEW_DEGREES / 2) * (Math.PI / 180));
+  const widest = Math.tan((MAXIMUM_FIELD_OF_VIEW_DEGREES / 2) * (Math.PI / 180));
+  return aspect * Math.min(widest, Math.max(reference, reference / aspect));
 }
 
 /**

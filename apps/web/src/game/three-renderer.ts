@@ -180,7 +180,6 @@ import {
   type SceneryModel,
 } from './scenery-models';
 import { atlasColourAt, tonedForTheSun, type AtlasImage, type LinearRgb } from './scenery-palette';
-import { CAMERA_BEHIND_METRES } from './port';
 import type { CameraPose, GameRenderer, GameView, RiderMarker, SceneFrame } from './port';
 import {
   SCATTER_BAND_METRES,
@@ -190,40 +189,26 @@ import {
   type ScatterItem,
   type ScatterKind,
 } from './scatter';
+import {
+  CAMERA_BEHIND_METRES,
+  CAMERA_FIELD_OF_VIEW_DEGREES,
+  FRUSTUM_SPREAD,
+  cameraRig,
+  verticalFieldOfViewDegrees,
+} from './camera';
 import { ROAD_WIDTH_METRES, VIEW_AHEAD_METRES, VIEW_BEHIND_METRES } from './terrain';
 import type { SunStyle, WorldStyle } from './world';
 
-/**
- * How far above the rider the chase camera sits, in metres.
- *
- * Its sibling {@link CAMERA_BEHIND_METRES} is in `port.ts` rather than here,
- * because `world.test.ts` needs it and must not import `three`; that is where
- * the rest of this note lives. ADR 0008 **D-5** fixes the camera, so the two
- * together are the whole of its configuration — there is no free-look, and
- * adding one is a change to that ADR.
- *
- * ⚠️ Exported since #269, with {@link CAMERA_TARGET_AHEAD_METRES} and
- * {@link CAMERA_FIELD_OF_VIEW_DEGREES}, because the scenery cull is now derived
- * from the camera's own geometry and `three-renderer.test.ts` re-derives the
- * frustum from these three numbers independently. A test that read the camera
- * back off this file's own `PerspectiveCamera` would be checking the code
- * against itself; a test that typed `3` would stop meaning anything the day
- * this moves.
+/*
+ * ⚠️ **The camera's four numbers lived here until #424 and do not any more** —
+ * `CAMERA_ABOVE_METRES`, `CAMERA_TARGET_AHEAD_METRES` and
+ * `CAMERA_FIELD_OF_VIEW_DEGREES`, with `CAMERA_BEHIND_METRES` beside them in
+ * `port.ts`. A reviewer who remembers them exported from this file is reading
+ * the old one. They are one composition and `camera.ts` holds all four, with
+ * the law that ties them together and the two aspect bounds that used to sit
+ * further down this file. This file is still the only one that names `three`;
+ * what moved is arithmetic that never needed to.
  */
-export const CAMERA_ABOVE_METRES = 3;
-
-/** How far ahead of the rider the camera looks. */
-export const CAMERA_TARGET_AHEAD_METRES = 25;
-
-/**
- * The camera's **vertical** field of view, in degrees — three's own convention.
- *
- * The horizontal one is not a second number: three derives it per frame as
- * `atan(aspect · tan(fov / 2))`, so the width of what a rider can see is this
- * number and the shape of the canvas, and nothing else. {@link FRUSTUM_SPREAD}
- * is where that becomes the scenery cull's bound.
- */
-export const CAMERA_FIELD_OF_VIEW_DEGREES = 60;
 
 /**
  * What tells the three riders apart — #368.
@@ -352,98 +337,6 @@ const SCATTER_BAND_REACH_METRES =
   ROAD_WIDTH_METRES / 2 + SCATTER_VERGE_METRES + SCATTER_BAND_METRES;
 
 /**
- * The widest the world canvas can be for its height: **6 : 1**.
- *
- * ⚠️ **Read out of `design/theme.css`, not chosen for roundness**, because
- * {@link FRUSTUM_SPREAD} is only ever as safe as this number is pessimistic.
- * `.oyl-game__world` is `aspect-ratio: 16 / 9` inside `.oyl-main`'s
- * `max-width: 68ch`, with `max-height: 60vh`. The aspect ratio therefore *is*
- * 16 : 9 — about 1.78 — until the `max-height` clamp bites, and past that point
- * it is `width / (0.6 · viewportHeight)`. Taking 68ch at the default 16 px root
- * as ≈ 544 px of border box and 512 px of content, that reaches:
- *
- * | aspect | viewport height it needs |
- * |---|--:|
- * | 16 : 9 | 512 CSS px and up |
- * | 3 : 1 | 285 CSS px |
- * | 4 : 1 | 213 CSS px |
- * | **6 : 1** | **142 CSS px** |
- *
- * A phone in landscape is 320–450 CSS px tall and a desktop window cannot
- * usefully be dragged under about 200, so 6 : 1 is past anything a rider can
- * produce — including the awkward case, which is a **text**-only zoom: that
- * widens 68ch without shortening the viewport, but only until the column stops
- * being the narrower of the two, and on a 844 × 390 landscape phone at 200 %
- * text the canvas is 812 × 234, which is 3.5 : 1. A whole-page zoom scales both
- * axes and moves the ratio not at all.
- *
- * **Being generous here is nearly free**, which is why it is 6 rather than the
- * 4 the measurements would also have supported: past about 95 m ahead the cone
- * is wider than {@link FOGGED_OUT_METRES} and the cap is what binds, so
- * widening this only affects the near field at all. The
- * measured cost of 6 over 4 is that a 150 m bend keeps 98.8 % of its scenery
- * instead of 95.0 % — and those extra items are ones that are *on screen* at
- * 6 : 1, so the wider bound is the more correct one rather than the more
- * wasteful one.
- */
-export const WORST_CASE_ASPECT = 6;
-
-/**
- * The tangent of the camera's horizontal half-angle, at {@link WORST_CASE_ASPECT}.
- *
- * three builds a perspective projection from a **vertical** field of view and
- * an aspect ratio, so the horizontal half-angle is `atan(aspect · tan(fov / 2))`
- * and this is its tangent: how many metres wider the visible cone gets per
- * metre of depth, on each side. 6 × tan 30° ≈ 3.464.
- */
-export const FRUSTUM_SPREAD =
-  WORST_CASE_ASPECT * Math.tan((CAMERA_FIELD_OF_VIEW_DEGREES / 2) * (Math.PI / 180));
-
-/**
- * The **narrowest** the world canvas can be for its height: **16 : 9**.
- *
- * ⚠️ **{@link WORST_CASE_ASPECT}'s opposite, and it answers the opposite
- * question.** That one bounds the cull, so it has to be the *widest* frame a
- * rider can produce — a cull written against a narrower one would throw away
- * scenery somebody can see. This one bounds what a rider is **shown**, so it
- * has to be the *narrowest*: the near field is bare on the worst frame there
- * is, not on the average one.
- *
- * Read out of `design/theme.css` exactly as its sibling is, and from the same
- * rule. `.oyl-game__world` is `aspect-ratio: 16 / 9`, and the only thing that
- * moves it is `max-height: 60vh` clamping the height — which can only make the
- * canvas **wider**. So 16 : 9 is a floor rather than an estimate, and the
- * horizontal half-angle at it is `atan(1.778 · tan 30°)` ≈ 45.8°.
- *
- * ⚠️ **What follows from it is the whole of #355**, and three passes of
- * constant-tuning went by without anyone computing it: the cone is this narrow
- * near the camera, so an item standing `across` metres from the centreline is
- * off the side of the screen until it is `across / (16/9 · tan 30°)` metres
- * ahead of the **camera** — which sits {@link CAMERA_BEHIND_METRES} behind the
- * rider. `scatter.ts` §{@link SCATTER_VERGE_METRES} carries the consequence at
- * the constant that decides it, and `three-renderer.test.ts` §"the verge stands
- * inside the near cone — #355" is the gate rather than the note.
- *
- * @unwired the narrow frame is what a rider gets and not what the renderer
- * computes against, so nothing in the client reads it: three takes the live
- * aspect from the canvas every frame, and the cull deliberately uses the wide
- * bound above. It is a bound `three-renderer.test.ts` asserts the placement
- * against.
- */
-export const NARROWEST_ASPECT = 16 / 9;
-
-/**
- * The tangent of the camera's horizontal half-angle, at {@link NARROWEST_ASPECT}
- * — how far to the side of the view axis a rider can see, per metre of depth,
- * on the narrowest frame there is. 1.778 × tan 30° ≈ 1.026.
- *
- * @unwired {@link NARROWEST_ASPECT}'s reason applies unchanged; this is that
- * constant put into the units every claim about the near field is made in.
- */
-export const NEAR_CONE_SPREAD =
-  NARROWEST_ASPECT * Math.tan((CAMERA_FIELD_OF_VIEW_DEGREES / 2) * (Math.PI / 180));
-
-/**
  * The depth past which everything is at least three-quarters fogged: **400 m**.
  *
  * ⚠️ **Derived from `world.ts`, not from the corridor it happens to equal.**
@@ -458,8 +351,35 @@ export const NEAR_CONE_SPREAD =
  * still make out.
  *
  * It is what stops {@link lateralReachMetres} growing without limit: the cone
- * alone would permit an item 950 m to the side of a rider at the far end of the
- * corridor, which is on screen and invisible.
+ * alone would permit an item 1 700 m to the side of a rider at the far end of
+ * the corridor, which is on screen and invisible.
+ *
+ * ⚠️ **What #424's lower camera does and does not do to this, since the issue
+ * asks.** Nothing to the *solve*: `world.ts` fades the corridor's cut end by
+ * solving a density against `VIEW_AHEAD_METRES`, which is a distance from the
+ * RIDER, while three fogs by depth from the CAMERA along its axis — and the
+ * camera is behind the rider, so the cut end is always a little deeper than
+ * the solve assumed and a little more faded. That was true at 8 m back and
+ * 5.2° of pitch (406.6 m) and is true at 4.5 m and 3.9° (403.7 m);
+ * `camera.test.ts` §"the fog solve's premise" asserts it rather than leaving
+ * it to this sentence. What a lower camera does change is the *ground*: from
+ * 2 m up the plane is seen at a shallower angle, so more of the frame's lower
+ * half is ground that is far away and therefore fogged, and the near, unfogged
+ * band under the rider is a thinner strip than it was from 3 m. That is a
+ * change to how the frame looks and to no bound — the ground plane still ends
+ * 1 200 m out, where the thinnest air this client models has faded it by more
+ * than 99.999 %.
+ *
+ * ⚠️ **And the cap is a statement about lateral distance, where three's fog is
+ * a function of depth.** An item 400 m to the side and 100 m deep is NOT
+ * three-quarters fogged — it is between a twelfth and a sixth fogged, depending
+ * on the altitude. The cap never drops such
+ * an item for a reason that has nothing to do with fog: the corridor is
+ * `VIEW_AHEAD_METRES` of road, so nothing `scatter.ts` places is further from
+ * the rider than that road is long, and an item that far to the side has used
+ * the whole of it getting there. `three-renderer.test.ts` §"never drops an
+ * item that is on screen and not yet fogged out" is what carries the claim, at
+ * ten radii, with the depth three really uses.
  */
 export const FOGGED_OUT_METRES = VIEW_AHEAD_METRES;
 
@@ -488,14 +408,48 @@ export const FOGGED_OUT_METRES = VIEW_AHEAD_METRES;
  * rider. The second one is the margin the two approximations in
  * {@link lateralReachMetres} need:
  *
- * - **The camera is pitched down** by `atan(3 / 33) ≈ 5.2°`, so an item's depth
- *   along the view axis is `0.996 · d − 0.090 · (itemHeight − cameraHeight)`
- *   rather than `d`. Ignoring that overstates depth for anything *below* the
- *   camera, and the margin covers it for a drop of `49 / (FRUSTUM_SPREAD ·
- *   0.090) ≈ 138 m` inside the 400 m view — a sustained 35 % descent, which no
- *   road is. ⚠️ **220 m until #353 and 157 m until #355**, each of which
- *   narrowed the floor: the margin is smaller every time and the claim it
- *   supports is the same one, re-derived rather than carried over.
+ * - **The camera is pitched**, so an item's depth along the view axis is
+ *   `cos p · d − sin p · (itemHeight − cameraHeight)` rather than the `d`
+ *   {@link lateralReachMetres} uses. Where that is *more* than `d` the true
+ *   frustum is wider than the bound assumes, and this margin is what absorbs
+ *   it: the bound stays safe while `depth − d ≤ 43 / FRUSTUM_SPREAD` ≈
+ *   **10.2 m**.
+ *
+ *   ⚠️ **Re-derived for #424, which changed both halves of that.** The lens
+ *   went from 60° to 70°, so `FRUSTUM_SPREAD` is 4.20 where it was 3.46 and the
+ *   same 43 m buys 10.2 m of depth error where it bought 12.4. And the pitch is
+ *   no longer a constant `atan(3 / 33) ≈ 5.2°`: `camera.ts` §`cameraRig` aims
+ *   the camera at the ROAD, so `p` is `atan(2 / 29.5) ≈ 3.9°` plus the slope of
+ *   the road between the eye and the look-ahead. Worked at the far end of the
+ *   view, 404.5 m from the camera:
+ *
+ *   | the road | `p` | item below the eye | `depth − d` |
+ *   |---|--:|--:|--:|
+ *   | level | 3.9° | 2 m | −0.8 m |
+ *   | a sustained 8 % descent | 8.4° | 34 m | +0.7 m |
+ *   | a sustained 15 % descent | 12.3° | 63 m | +4.1 m |
+ *   | a sustained 25 % descent | 17.6° | 103 m | **+12.2 m** |
+ *   | a sustained 8 % climb | −0.7° | −30 m (above it) | +0.3 m |
+ *   | a sustained 15 % climb | −4.7° | −59 m | +3.4 m |
+ *   | a sustained 22 % climb | −8.7° | −87 m | +8.5 m |
+ *   | a sustained 25 % climb | −10.3° | −99 m | **+11.2 m** |
+ *
+ *   So the margin holds to a sustained grade of about 22 % down, or about 24 %
+ *   up, over the whole 400 m view, which no road is; the paragraph this
+ *   replaces claimed 35 % on the old lens and a level gaze.
+ *
+ *   ⚠️ **On EITHER sign of grade the bound errs narrow, and this paragraph
+ *   used to say a climb erred wide.** That was true of the level gaze — a
+ *   fixed 5.2° down-pitch looking at a road that rises — and a reviewer who
+ *   remembers it is reading the old file. Under `cameraRig` the axis follows
+ *   the road, so `p` goes negative on a climb while the item goes ABOVE the
+ *   eye, both factors of `− sin p · (itemHeight − cameraHeight)` change sign
+ *   together, and the term stays positive: depth along the axis is roughly the
+ *   road's path length whichever way it tilts. #436's review found it by
+ *   extending the table; the four climb rows are that arithmetic.
+ *   ⚠️ **220 m of drop until #353, 157 m until #355 and 138 m until #424**:
+ *   the margin is smaller every time and the claim it supports is the same
+ *   one, re-derived rather than carried over.
  * - **An instance is placed at a point and drawn with a size**: the tallest
  *   kind is about 7 m and the widest a little over 3 m across, so an item whose
  *   centre is just outside the cone can still have a branch inside it.
@@ -524,14 +478,20 @@ export const SCATTER_LATERAL_METRES = 2 * SCATTER_BAND_REACH_METRES;
  * 3. {@link FOGGED_OUT_METRES}, the cap.
  *
  * ⚠️ **What this gets wrong, measured the same way the box was, and
- * re-measured for #351, #353 and #355** — a reviewer who remembers
+ * re-measured for #351, #353, #355 and #424** — a reviewer who remembers
  * 100 / 98.7 / 98.7 / 98.3 / 43.9 here is reading the #348 file, and
  * 98.3 / 98.8 / 99.2 / 79.6 the one before that. Driving the real `sceneFrame`
  * through the real belt on constant-radius routes — worst frame of a 1.5 km
  * sweep — it submits **99.6 %** on a straight route, **98.8 %** at R = 450 m,
- * **99.2 %** at R = 200 m, **98.8 %** at R = 150 m and **52.4 %** at
+ * **99.2 %** at R = 200 m, **98.8 %** at R = 150 m and **55.7 %** at
  * R = 100 m. On the same sweep the box kept 98.3 %, 56.7 % and 41.3 % of the
  * first three.
+ *
+ * ⚠️ **#424 moved only the last of those, and upwards** — 52.4 % before it.
+ * The camera is 3.5 m nearer the rider and the lens 10° wider, so the cone is
+ * wider at every depth and a little more of a hairpin's fold is inside it. The
+ * four figures above it are set by the floor rather than by the cone and did
+ * not move in the second decimal place.
  *
  * ⚠️ **The share dropped on a bend tracks the band's depth, and is not a
  * property of the cull.** #348 took the placement band from 21 m to 44.5 m from
@@ -582,18 +542,29 @@ export const SCATTER_LATERAL_METRES = 2 * SCATTER_BAND_REACH_METRES;
  *
  * | aspect | R = 100 m | R = 75 m | R = 50 m |
  * |---|--:|--:|--:|
- * | 6 : 1 ({@link WORST_CASE_ASPECT}) | 0 | 0 | 0 |
+ * | 6 : 1 (`WORST_CASE_ASPECT`) | 0 | 0 | 0 |
  * | 7 : 1 | 0 | 0 | 0 |
- * | 8 : 1 | **8** | 0 | 0 |
- * | 9 : 1 | 69 | **17** | 0 |
- * | 10 : 1 | 111 | 46 | **2** |
+ * | 8 : 1 | **14** | 0 | 0 |
+ * | 9 : 1 | 60 | **9** | 0 |
+ * | 10 : 1 | 107 | 37 | **1** |
  *
- * So the cliff is still at **8 : 1** on a 100 m hairpin, and further out on
- * tighter ones. The quoted figure survives its own re-measurement, and the two
- * rungs of margin above {@link WORST_CASE_ASPECT} are now a measurement rather
- * than an inference. ⚠️ Past 8 : 1 the constant is simply the wrong instrument,
- * and the fix would be to pass the camera's live aspect in rather than to widen
- * it again.
+ * ⚠️ **Re-measured for #424, with the new camera and the new lens**: 8 / 69 /
+ * 111, 17 / 46 and 2 before it. So the cliff is still at **8 : 1** on a 100 m
+ * hairpin, and further out on tighter ones, and the two rungs of margin above
+ * `WORST_CASE_ASPECT` are a measurement rather than an inference.
+ *
+ * ⚠️ **Two things about that table changed in #423 and #424, and neither is
+ * the numbers.** First, the aspect ratio it is safe up to is no longer an
+ * argument about what a rider would plausibly do with a window: the world is
+ * full-bleed now, so `theme.css` caps the canvas at 6 : 1 outright and
+ * `camera.ts` §`WORST_CASE_ASPECT` says where that is measured. Second, "less
+ * than `MINIMUM_VIEW_END_OCCLUSION` faded" is now judged at the depth three
+ * actually fogs by — along the view axis, `fog_vertex.glsl`'s
+ * `-mvPosition.z` — where the probe used to use the straight-line distance,
+ * which is larger off-axis and so excused culls it should not have.
+ * `three-renderer.test.ts` §`asTheCameraSeesIt` records it. The property held
+ * under the honest depth at every radius, so the cull was right and its proof
+ * was generous.
  */
 export function lateralReachMetres(alongMetres: number): number {
   const aheadOfCamera = Math.max(0, alongMetres + CAMERA_BEHIND_METRES);
@@ -2153,6 +2124,8 @@ class ThreeGameView implements GameView {
   readonly #renderer: WebGLRenderer | undefined;
   readonly #scene = new Scene();
   readonly #camera = new PerspectiveCamera(CAMERA_FIELD_OF_VIEW_DEGREES, 1, 0.5, 2_000);
+  /** Reused every frame: `#placeCamera` allocated a `Vector3` per frame until #424 (NFR-3). */
+  readonly #lookAt = new Vector3();
   readonly #roadGeometry = new BufferGeometry();
   readonly #road: Mesh;
   /**
@@ -2417,19 +2390,16 @@ class ThreeGameView implements GameView {
     this.#riders.place(markers);
   }
 
+  /**
+   * ⚠️ **Where the camera stands and looks is `camera.ts` §`cameraRig`'s, not
+   * this method's** — #424. It used to be worked out here from `pose.y`, a
+   * level gaze from behind the rider whatever the road did, and `cameraRig`
+   * says what that does to a low camera on a hill. This applies the answer.
+   */
   #placeCamera(pose: CameraPose): void {
-    this.#camera.position.set(
-      pose.x - pose.headingX * CAMERA_BEHIND_METRES,
-      pose.y + CAMERA_ABOVE_METRES,
-      pose.z - pose.headingZ * CAMERA_BEHIND_METRES,
-    );
-    this.#camera.lookAt(
-      new Vector3(
-        pose.x + pose.headingX * CAMERA_TARGET_AHEAD_METRES,
-        pose.y,
-        pose.z + pose.headingZ * CAMERA_TARGET_AHEAD_METRES,
-      ),
-    );
+    const { eye, target } = cameraRig(pose);
+    this.#camera.position.set(eye.x, eye.y, eye.z);
+    this.#camera.lookAt(this.#lookAt.set(target.x, target.y, target.z));
   }
 
   /**
@@ -2448,7 +2418,14 @@ class ThreeGameView implements GameView {
     const devicePixels = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1;
     this.#renderer.setPixelRatio(Math.max(0.1, devicePixels * this.#quality.renderScale));
     this.#renderer.setSize(this.#widthCssPixels, this.#heightCssPixels, false);
-    this.#camera.aspect = this.#widthCssPixels / this.#heightCssPixels;
+    const aspect = this.#widthCssPixels / this.#heightCssPixels;
+    this.#camera.aspect = aspect;
+    // ⚠️ #423 made the lens a function of the frame. The world was a 16 : 9
+    // letterbox, so one vertical angle served every rider; it fills the
+    // viewport now, and a fixed 70° on a phone held upright is a 36° horizontal
+    // slot with the road's own edges outside it. `camera.ts`
+    // §`verticalHalfTangent` has the policy and the table.
+    this.#camera.fov = verticalFieldOfViewDegrees(aspect);
     this.#camera.updateProjectionMatrix();
   }
 }

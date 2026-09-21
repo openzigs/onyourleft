@@ -4,11 +4,28 @@
  * The page the HUD half of the browser gate drives — #266.
  *
  * It renders the **real** `game/hud/HudPanel.tsx`, through the **real**
- * `game/hud/fields.ts`, under the **real** `design/theme.css`, inside the
- * **real** ancestor chain `AppShell` and `GameView` give it. Nothing here is a
- * stand-in, for the reason `harness.ts` and `game-harness.ts` both give: a
- * layout measured against a stylesheet of the harness's own would be a
- * measurement of the harness.
+ * `game/hud/fields.ts`, under the **real** `design/theme.css`, on the **real**
+ * stage `GameView` gives it. Nothing here is a stand-in, for the reason
+ * `harness.ts` and `game-harness.ts` both give: a layout measured against a
+ * stylesheet of the harness's own would be a measurement of the harness.
+ *
+ * ## ⚠️ The ancestor chain changed in #423, and this page changed with it
+ *
+ * A reviewer who remembers `oyl-shell` → `oyl-main` → `oyl-game` here is
+ * reading the old file. That chain was what bounded the panel's width — the
+ * shell's reading measure — and it bounds nothing any more: while a ride runs
+ * the HUD is laid over a stage that is `position: fixed; inset: 0`, so its
+ * containing block is the VIEWPORT, whatever is above it in the document. Left
+ * as it was, this page would have gone on measuring the stacked layout a rider
+ * now only gets at 320×256, at a phone's width, and passing.
+ *
+ * So each panel is rendered on a stage of its own. ⚠️ **One thing about those
+ * stages is this file's and not the product's**: `position: relative` and a
+ * height of `100vh`, inline, where the product has `position: fixed`. Six fixed
+ * stages would be six panels on top of one another. What the override keeps is
+ * the only thing the HUD's layout reads — a containing block the size of the
+ * viewport — and `ride.browser.spec.ts` measures the product's own fixed stage,
+ * through the real `GameView`, so the substitution is not the only evidence.
  *
  * ## What it exists to catch, and why no other gate can
  *
@@ -33,11 +50,22 @@
  *
  * ## The control panels, and why a green run would otherwise mean nothing
  *
- * ⚠️ Every panel is rendered **twice**. The second copy has
- * `oyl-hud__value--word` stripped off its value elements, so the same words are
- * laid out at the size `.oyl-hud__value` gives them — which is what the HUD
- * looked like before #259, and what it looks like again the moment somebody
- * deletes that rule.
+ * ⚠️ Every panel is rendered **twice**. In the second copy the fields whose
+ * value is a word have `oyl-hud__value--word` stripped off **and are moved into
+ * the primary list**, so the same words are laid out at `.oyl-hud__value`'s
+ * 2.5 rem in a track about 7 rem wide — which is what the HUD looked like
+ * before #259.
+ *
+ * ⚠️ **The move is new in #423, and stripping the class alone stopped being a
+ * control.** Every value that can be a word is a gap, and every gap is a
+ * secondary reading now, set at 1.5 rem: without #259's rule `Matched` is 91 px
+ * in a track that is 93 px or more at every viewport measured here. It would
+ * spill only at the 5.5 rem floor, by under three pixels, in one word — which
+ * is a control that goes green on a font with slightly narrower glyphs, and CI
+ * is not this machine. `hud-value-size.test.ts` holds that case by arithmetic
+ * at the floor. What THIS control is for is proving the apparatus can see an
+ * overflow at all, so it reproduces the overflow #259 was actually filed on,
+ * with a third of the word's width to spare.
  *
  * It is here because the obvious version of this gate cannot fail. A harness
  * that gave the panel a 1200 px container would find no overflow anywhere, and
@@ -287,32 +315,43 @@ function ghostChase(outcome: GhostOutcome): ChasedGap {
  * `hud.browser.spec.ts` §"Which orientation is the binding one" carries the
  * consequence for what the gate can claim.
  */
+/**
+ * The one piece of geometry here that is this file's — see the header.
+ *
+ * `position: relative` puts the stage in the flow, so six of them stack; the
+ * height is the viewport's, which is what `inset: 0` gives the product's. The
+ * HUD inside is `position: absolute; inset: 0` against this box exactly as it
+ * is against the product's.
+ */
+const STAGE_IN_FLOW = { position: 'relative', inset: 'auto', height: '100vh' } as const;
+
 function Harness(): JSX.Element {
   return (
-    <div className="oyl-shell">
-      <main className="oyl-main">
-        {OUTCOMES.flatMap((outcome) =>
-          [false, true].map((control) => (
-            <section
-              key={`${outcome}-${String(control)}`}
-              className="oyl-game"
-              data-oyl-panel={outcome}
-              data-oyl-control={control ? 'true' : 'false'}
-            >
-              <HudPanel
-                profile={PROFILE}
-                state={STATE}
-                cadence={{ value: 92, live: true }}
-                heartRate={{ value: 168, live: true }}
-                chases={[BOT_GAP, ghostChase(outcome)]}
-                paused={false}
-                onPause={() => undefined}
-                onEnd={() => undefined}
-              />
-            </section>
-          )),
-        )}
-      </main>
+    <div>
+      {OUTCOMES.flatMap((outcome) =>
+        [false, true].map((control) => (
+          <section
+            key={`${outcome}-${String(control)}`}
+            // The product's own stage classes, so the product's own overlay
+            // rules apply. @see STAGE_IN_FLOW
+            className="oyl-game oyl-game--riding"
+            style={STAGE_IN_FLOW}
+            data-oyl-panel={outcome}
+            data-oyl-control={control ? 'true' : 'false'}
+          >
+            <HudPanel
+              profile={PROFILE}
+              state={STATE}
+              cadence={{ value: 92, live: true }}
+              heartRate={{ value: 168, live: true }}
+              chases={[BOT_GAP, ghostChase(outcome)]}
+              paused={false}
+              onPause={() => undefined}
+              onEnd={() => undefined}
+            />
+          </section>
+        )),
+      )}
     </div>
   );
 }
@@ -327,8 +366,19 @@ function Harness(): JSX.Element {
  */
 function undoWordRule(root: ParentNode): void {
   for (const panel of root.querySelectorAll('[data-oyl-control="true"]')) {
+    const primary = panel.querySelector('.oyl-hud__fields--primary');
+    if (primary === null) {
+      throw new Error('hud harness: a control panel rendered no primary list');
+    }
     for (const value of panel.querySelectorAll('.oyl-hud__value--word')) {
       value.classList.remove('oyl-hud__value--word');
+      // ⚠️ Into the primary list — see "The control panels" in the header for
+      // why stripping the class is no longer enough on its own. React never
+      // re-renders this page, so it never moves the node back.
+      const field = value.closest('.oyl-hud__field');
+      if (field !== null) {
+        primary.append(field);
+      }
     }
   }
 }
@@ -384,7 +434,9 @@ function measure(): HudMeasurement {
   }
   // Read off the resolved grid rather than counted from the fields: `auto-fit`
   // decides this, and counting the fields would report how many there are.
-  const fields = document.querySelector('.oyl-hud__fields');
+  // ⚠️ The SECONDARY list since #423: the primary one is three fixed tracks,
+  // so its count says nothing about whether `auto-fit` resolved.
+  const fields = document.querySelector('[data-oyl-control="false"] .oyl-hud__fields--secondary');
   const columns =
     fields === null
       ? 0

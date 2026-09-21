@@ -67,6 +67,7 @@ import {
   type RoutePoint,
 } from '@onyourleft/domain';
 
+import { cameraRig, verticalHalfTangent } from '../src/game/camera';
 import type { CameraPose, SceneFrame } from '../src/game/port';
 import type { WorldStyle } from '../src/game/world';
 
@@ -84,6 +85,18 @@ import { atStartLine } from '../src/game/simulation';
 
 /** One read-back pixel, as four bytes. */
 type Pixel = readonly [number, number, number, number];
+
+/** The box the rider's own pixels fill, as fractions of the frame from the top left. */
+export interface RiderExtent {
+  /** The canvas's width over its height. */
+  readonly aspect: number;
+  readonly top: number;
+  readonly bottom: number;
+  readonly left: number;
+  readonly right: number;
+  /** How many pixels the rider changed. Zero means there was nothing to measure. */
+  readonly pixels: number;
+}
 
 declare global {
   interface Window {
@@ -144,6 +157,18 @@ declare global {
        * browser tests green before this existed.
        */
       readonly roadFarPixel: Pixel;
+      /**
+       * How far down the frame the near and the far road probes were taken, as
+       * fractions from the top — #424. Published so the spec can hold them to
+       * the order they must be in: a far probe that is not ABOVE the near one
+       * is not further up the road, whatever colour it read.
+       */
+      readonly roadProbeRows: readonly [number, number];
+      /**
+       * The rider as the renderer actually drew them, read back off the drawing
+       * buffer — #424's first criterion. @see riderExtent
+       */
+      readonly riderFrame: { readonly landscape: RiderExtent; readonly portrait: RiderExtent };
       /**
        * GPU buffers and textures three had created after the first frame, and
        * after {@link FRAMES}. Equal means nothing new was allocated per frame.
@@ -488,6 +513,118 @@ function harnessRoute(): ReturnType<typeof routeProfile> {
 const ON_THE_DESCENT_METRES = 800;
 
 const NOWHERE: Pixel = [0, 0, 0, 0];
+
+/** What the harness reports for the rider before it has measured one. */
+const NO_RIDER: RiderExtent = { aspect: 0, top: 0, bottom: 0, left: 0, right: 0, pixels: 0 };
+
+/** Two kilometres of dead-level road. @see riderExtent */
+function levelRoute(): ReturnType<typeof routeProfile> {
+  const points: RoutePoint[] = [];
+  for (let index = 0; index <= 200; index += 1) {
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(51.5 + (index * 10) / 111_320),
+        degreesLongitude(-0.12),
+      ),
+      elevation: altitudeMetres(0),
+    });
+  }
+  return routeProfile(points);
+}
+
+/**
+ * How much of the frame the rider fills, **measured on pixels the real
+ * renderer drew** — #424's first criterion.
+ *
+ * *"The rider's bicycle occupies a stated minimum share of frame height at
+ * 16 : 9, measured in the browser gate — a number, so 'prominent' cannot drift
+ * back to 'speck'."* `camera.ts` §`riderFrameBox` is that number as arithmetic,
+ * and arithmetic can agree with itself over a renderer that draws the rider
+ * somewhere else: a `fov` never applied, a marker scaled, a camera placed by
+ * some other rule. So the same frame is rendered twice — once with the rider
+ * and nothing else that moves, once with no rider at all — and the box of the
+ * pixels that differ is the rider.
+ *
+ * On a LEVEL road, because `riderFrameBox` is stated for one: on the harness's
+ * own 5 % hill the rider stands plumb on a tilted road and their feet are half
+ * a point lower in the frame.
+ *
+ * On a canvas of its own, for {@link sceneryIndicesByKind}'s reason. ⚠️ And
+ * at TWO shapes. 16 : 9 is the criterion. 10 : 16 is the control for #423's
+ * lens: a renderer that never applied `verticalFieldOfViewDegrees` would draw
+ * an upright frame on the 70° reference lens, where the rider fills 23 % of
+ * the height rather than the 16 % the 90° stop gives — and the 16 : 9
+ * measurement, where both lenses are the same lens, could not tell.
+ */
+function riderExtent(width: number, height: number): RiderExtent {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const view = threeGameRenderer.create(canvas, qualitySettings(0));
+  view.resize(width, height);
+  const profile = levelRoute();
+  const start = atStartLine(profile);
+  const frame = sceneFrame({
+    profile,
+    origin: corridorOrigin(profile),
+    state: { ...start, ride: { ...start.ride, distance: metres(1_000) } },
+  });
+  const riderOnly: SceneFrame = {
+    ...frame,
+    scatter: [],
+    markers: frame.markers.filter((marker) => marker.kind === 'rider'),
+  };
+  const nobody: SceneFrame = { ...frame, scatter: [], markers: [] };
+  const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+  if (gl === null || riderOnly.markers.length !== 1) {
+    view.destroy();
+    return { ...NO_RIDER, aspect: width / height };
+  }
+  // Twice each, and only the second read: the first draw of a geometry uploads
+  // it, and an upload can cost the frame it happens on.
+  view.render(riderOnly);
+  view.render(riderOnly);
+  const present = readRegion(gl, 0, 0, width, height);
+  view.render(nobody);
+  view.render(nobody);
+  const absent = readRegion(gl, 0, 0, width, height);
+  view.destroy();
+
+  let pixels = 0;
+  let lowRow = height;
+  let highRow = -1;
+  let lowColumn = width;
+  let highColumn = -1;
+  for (let row = 0; row < height; row += 1) {
+    for (let column = 0; column < width; column += 1) {
+      const at = (row * width + column) * 4;
+      if (
+        present[at] === absent[at] &&
+        present[at + 1] === absent[at + 1] &&
+        present[at + 2] === absent[at + 2]
+      ) {
+        continue;
+      }
+      pixels += 1;
+      lowRow = Math.min(lowRow, row);
+      highRow = Math.max(highRow, row);
+      lowColumn = Math.min(lowColumn, column);
+      highColumn = Math.max(highColumn, column);
+    }
+  }
+  if (pixels === 0) {
+    return { ...NO_RIDER, aspect: width / height };
+  }
+  // `readPixels` rows run from the BOTTOM, so the highest row is the top.
+  return {
+    aspect: width / height,
+    top: 1 - (highRow + 1) / height,
+    bottom: 1 - lowRow / height,
+    left: lowColumn / width,
+    right: (highColumn + 1) / width,
+    pixels,
+  };
+}
 
 /** What the harness reports for the world before a frame has produced one. */
 const NO_WORLD: WorldStyle = {
@@ -1017,8 +1154,130 @@ function colourProbes(probe: SceneFrame): {
   };
 }
 
-/** Where the road fills the frame, as fractions of its height. @see findCentreLine */
-const ROAD_BAND = { from: 0.45, to: 0.56 } as const;
+/**
+ * Where a point in the world lands in the frame, as fractions of its width and
+ * height from the TOP LEFT — #424.
+ *
+ * ⚠️ **Every fixed-position probe in this file used to be a pair of fractions
+ * somebody worked out against a camera 3 m up, 8 m back, on a 60° lens**, and
+ * #424 moved all three. They did not go red. They went on passing while
+ * pointing at other things: the "distant road" probe, 58 % up the frame, was
+ * looking at the SKY — the far end of the road is 54 % up now — and *"the
+ * distant road is a different colour from the near road"* is true of the sky
+ * too. A probe that has silently moved off its subject is this repository's
+ * usual defect arriving through a camera.
+ *
+ * So the probes are aimed from the geometry instead: a point on the road, so
+ * many metres ahead and so many to the side, put through the camera the frame
+ * actually carries. `camera.ts` is used to AIM and never to assert — what says
+ * a probe landed on tarmac is still its colour, read back from the GPU.
+ *
+ * The right vector is `(headingZ, −headingX)` because the camera has no roll,
+ * which is `three-renderer.test.ts` §`asTheCameraSeesIt`'s argument.
+ */
+function inTheFrame(
+  frame: SceneFrame,
+  aspect: number,
+  point: { readonly x: number; readonly y: number; readonly z: number },
+): { readonly across: number; readonly down: number } {
+  const pose = frame.camera;
+  const { eye, target } = cameraRig(pose);
+  const axis = { x: target.x - eye.x, y: target.y - eye.y, z: target.z - eye.z };
+  const length = Math.hypot(axis.x, axis.y, axis.z);
+  const forward = { x: axis.x / length, y: axis.y / length, z: axis.z / length };
+  const right = { x: pose.headingZ, z: -pose.headingX };
+  // up = forward × right, for a camera with no roll. ⚠️ The other order is
+  // DOWN, and the first version of this had it: the far road probe landed
+  // below the near one and `game.browser.spec.ts` §"takes its distant probe
+  // further up the ROAD" is what said so.
+  const up = {
+    x: right.z * forward.y,
+    y: right.x * forward.z - right.z * forward.x,
+    z: -right.x * forward.y,
+  };
+  const to = { x: point.x - eye.x, y: point.y - eye.y, z: point.z - eye.z };
+  const depth = to.x * forward.x + to.y * forward.y + to.z * forward.z;
+  const t = verticalHalfTangent(aspect);
+  return {
+    across: (1 + (to.x * right.x + to.z * right.z) / (depth * t * aspect)) / 2,
+    down: (1 - (to.x * up.x + to.y * up.y + to.z * up.z) / (depth * t)) / 2,
+  };
+}
+
+/**
+ * A point on the road `ahead` metres up it from the rider and `across` metres
+ * to the right of its centreline, at the road's own height there.
+ *
+ * Read off the frame's corridor — the vertices that were drawn — rather than
+ * off the route, so the probe and the tarmac cannot disagree about where the
+ * road is.
+ */
+function onTheRoad(
+  frame: SceneFrame,
+  ahead: number,
+  across: number,
+): { readonly x: number; readonly y: number; readonly z: number } {
+  const pose = frame.camera;
+  const x = pose.x + ahead * pose.headingX + across * pose.headingZ;
+  const z = pose.z + ahead * pose.headingZ - across * pose.headingX;
+  // The centreline point nearest that spot: the corridor samples the road about
+  // every ten metres and this route is straight, so nearest is within 5 m and a
+  // 5 % grade puts that inside a quarter of a metre of height.
+  let nearest = frame.corridor.centre[0];
+  let best = Number.POSITIVE_INFINITY;
+  for (const each of frame.corridor.centre) {
+    const apart = Math.hypot(each.x - x, each.z - z);
+    if (apart < best) {
+      best = apart;
+      nearest = each;
+    }
+  }
+  return { x, y: nearest?.y ?? pose.y, z };
+}
+
+/** {@link inTheFrame} as the pixel `readPixels` wants: origin BOTTOM left. */
+function pixelFor(
+  frame: SceneFrame,
+  canvas: HTMLCanvasElement,
+  point: { readonly x: number; readonly y: number; readonly z: number },
+): { readonly x: number; readonly y: number } {
+  const at = inTheFrame(frame, canvas.width / canvas.height, point);
+  return { x: canvas.width * at.across, y: canvas.height * (1 - at.down) };
+}
+
+/**
+ * Where the road's near lane is probed: 20 m up the road, 1.5 m right of the
+ * centre line.
+ *
+ * 20 m, because `camera.ts` §`roadAppearsOverRiderMetres` puts everything
+ * nearer than 14 m directly behind the rider's back. 1.5 m, because that is
+ * clear of a 0.15 m centre-line mark, of the rider — whose 0.2 m half-width
+ * shadows ±0.9 m of road at this depth — and of the edge line 3.3 m out.
+ */
+const NEAR_ROAD_PROBE = { ahead: 20, across: 1.5 } as const;
+
+/**
+ * The same lane, 150 m up the road: the only difference between the two
+ * read-backs is how far each has converged on the horizon. Past the bot, which
+ * `frameAt` puts 120 m ahead on the centre line and which is 1.2 m clear of
+ * this ray at its own depth.
+ */
+const FAR_ROAD_PROBE = { ahead: 150, across: 1.5 } as const;
+
+/**
+ * Where the GROUND is probed: 6 m ahead of the rider, 4.5 m left of the centre
+ * line. Off the 7 m carriageway by a metre, and inside the 6.5 m at which
+ * `scatter.ts` first allows anything to stand — the one strip of this world
+ * that is guaranteed to be bare ground whatever the seed places.
+ */
+const GROUND_PROBE = { ahead: 6, across: -4.5 } as const;
+
+/**
+ * The stretch of the centre column in which a centre-line mark can be seen:
+ * from just past where the road appears over the rider's helmet to just short
+ * of the bot. @see findCentreLine
+ */
+const CENTRE_LINE_STRETCH = { fromAhead: 16, toAhead: 100 } as const;
 
 /**
  * How far across the carriageway the second probe sits, as a fraction of width.
@@ -1111,7 +1370,8 @@ function shadingAcross(present: Uint8Array, absent: Uint8Array): MarkerShading {
 function findCentreLine(
   gl: WebGL2RenderingContext | WebGLRenderingContext,
   width: number,
-  height: number,
+  fromRow: number,
+  toRow: number,
 ): { readonly centre: Pixel; readonly beside: Pixel; readonly row: number } {
   const column = Math.floor(width / 2);
   const beside = column + Math.max(2, Math.round(width * BESIDE_FRACTION));
@@ -1121,11 +1381,7 @@ function findCentreLine(
     row: 0,
     apart: -1,
   };
-  for (
-    let row = Math.floor(height * ROAD_BAND.from);
-    row <= Math.floor(height * ROAD_BAND.to);
-    row += 1
-  ) {
+  for (let row = Math.floor(fromRow); row <= Math.floor(toRow); row += 1) {
     const onLine = readPixel(gl, column, row);
     const onRoad = readPixel(gl, beside, row);
     const apart = Math.abs(luminanceOf(onLine) - luminanceOf(onRoad));
@@ -1383,6 +1639,8 @@ async function run(): Promise<void> {
       groundPixel: NOWHERE,
       roadPixel: NOWHERE,
       roadFarPixel: NOWHERE,
+      roadProbeRows: [0, 0],
+      riderFrame: { landscape: NO_RIDER, portrait: NO_RIDER },
       resourcesAfterFirstFrame: 0,
       resourcesAfterAllFrames: 0,
       resourcesAfterSecondSweep: 0,
@@ -1449,6 +1707,8 @@ async function run(): Promise<void> {
   let groundPixel: Pixel = NOWHERE;
   let roadPixel: Pixel = NOWHERE;
   let roadFarPixel: Pixel = NOWHERE;
+  let roadProbeRows: readonly [number, number] = [0, 0];
+  let riderFrame = { landscape: NO_RIDER, portrait: NO_RIDER };
   let resourcesAfterFirstFrame = 0;
   let resourcesAfterAllFrames = 0;
   let resourcesAfterSecondSweep = 0;
@@ -1604,27 +1864,38 @@ async function run(): Promise<void> {
         framesDrawn += 1;
         const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
         if (gl !== null) {
-          // The chase camera sits 3 m above the road and looks 25 m ahead of
-          // it, which puts the horizon a few degrees above the centre of the
-          // frame. These fractions come from that geometry rather than from the
-          // eye: at 95 % of the height the ray is well above the horizon; at
-          // 5 % across and 37.5 % up it meets the ground about 11 m to the side
-          // of a road that is 7 m wide; and the centre is the road itself.
+          // ⚠️ **Aimed from the geometry since #424** — @see inTheFrame for
+          // what the fixed fractions these replace were pointing at by the time
+          // the camera had moved. The sky is the one probe that is still a
+          // fraction, because it is the one with no geometry to aim at: 5 %
+          // down a frame whose horizon is about half way down it.
           skyPixel = readPixel(gl, canvas.width * 0.5, canvas.height * 0.95);
-          groundPixel = readPixel(gl, canvas.width * 0.05, canvas.height * 0.375);
-          // ⚠️ **Off the centre column by one percent of the width, since
-          // #242.** Dead centre is now where the centre line is painted, and
-          // this probe is about the road *surface* — its channel ordering, and
-          // how far the fog has taken it. Six pixels across is clear of a mark
-          // and nowhere near the edge lines at either probe's depth.
-          roadPixel = readPixel(gl, canvas.width * 0.51, canvas.height * 0.5);
-          // The fourth probe, and the only one that can see the fog. Straight
-          // up the centre column from `roadPixel`, so it is the same surface at
-          // a greater depth and the only thing between the two read-backs is
-          // how far each has converged toward the horizon colour. 0.58 rather
-          // than higher because the bot marker sits at about 0.60.
-          roadFarPixel = readPixel(gl, canvas.width * 0.51, canvas.height * 0.58);
-          const found = findCentreLine(gl, canvas.width, canvas.height);
+          const ground = pixelFor(frame, canvas, {
+            ...onTheRoad(frame, GROUND_PROBE.ahead, GROUND_PROBE.across),
+            // The ground is a flat plane at the RIDER's height, not the road's.
+            y: frame.camera.y - 0.25,
+          });
+          groundPixel = readPixel(gl, ground.x, ground.y);
+          const near = pixelFor(
+            frame,
+            canvas,
+            onTheRoad(frame, NEAR_ROAD_PROBE.ahead, NEAR_ROAD_PROBE.across),
+          );
+          roadPixel = readPixel(gl, near.x, near.y);
+          // The fourth probe, and the only one that can see the fog.
+          const far = pixelFor(
+            frame,
+            canvas,
+            onTheRoad(frame, FAR_ROAD_PROBE.ahead, FAR_ROAD_PROBE.across),
+          );
+          roadFarPixel = readPixel(gl, far.x, far.y);
+          roadProbeRows = [1 - near.y / canvas.height, 1 - far.y / canvas.height];
+          const found = findCentreLine(
+            gl,
+            canvas.width,
+            pixelFor(frame, canvas, onTheRoad(frame, CENTRE_LINE_STRETCH.fromAhead, 0)).y,
+            pixelFor(frame, canvas, onTheRoad(frame, CENTRE_LINE_STRETCH.toAhead, 0)).y,
+          );
           centreLinePixel = found.centre;
           roadBesidePixel = found.beside;
           centreLineRowFraction = found.row / canvas.height;
@@ -1682,10 +1953,16 @@ async function run(): Promise<void> {
 
         // The last frame, and the only one read back from a *different* place
         // on the route. @see roadOnDescentPixel
-        view.render(frameAt(ON_THE_DESCENT_METRES));
+        const descending = frameAt(ON_THE_DESCENT_METRES);
+        view.render(descending);
         framesDrawn += 1;
         if (gl !== null) {
-          roadOnDescentPixel = readPixel(gl, canvas.width * 0.51, canvas.height * 0.5);
+          const at = pixelFor(
+            descending,
+            canvas,
+            onTheRoad(descending, NEAR_ROAD_PROBE.ahead, NEAR_ROAD_PROBE.across),
+          );
+          roadOnDescentPixel = readPixel(gl, at.x, at.y);
         }
         resourcesAfterAllFrames = resources();
 
@@ -1963,6 +2240,9 @@ async function run(): Promise<void> {
       }
       botCrankPixels = found.botCrankPixels;
     }
+    // #424, on canvases of their own — @see riderExtent. 16 : 9 is the
+    // criterion's own frame; 10 : 16 is a tablet held upright.
+    riderFrame = { landscape: riderExtent(640, 360), portrait: riderExtent(400, 640) };
   } catch (error: unknown) {
     errors.push(error instanceof Error ? error.message : String(error));
   }
@@ -1982,6 +2262,8 @@ async function run(): Promise<void> {
     groundPixel,
     roadPixel,
     roadFarPixel,
+    roadProbeRows,
+    riderFrame,
     resourcesAfterFirstFrame,
     resourcesAfterAllFrames,
     resourcesAfterSecondSweep,

@@ -133,6 +133,52 @@ export interface HudReading {
   readonly word?: boolean | undefined;
 }
 
+/**
+ * How large a reading is drawn — the HUD's hierarchy, and **only** that (#423).
+ *
+ * ## The decision, recorded because #423 asks for it to be
+ *
+ * Until #423 every field was the same 2.5 rem in one grid of equals. Full-bleed
+ * puts the instruments on top of the road, so every square centimetre a panel
+ * takes is road a rider cannot see, and a grid of nine equal fields is the most
+ * expensive way to spend it. So there are two tiers:
+ *
+ * | tier | fields | why |
+ * |---|---|---|
+ * | `primary` | power, cadence, heart rate | the three a rider **steers the effort by**, read every few seconds — each is a live sensor, and each is what an interval is ridden to |
+ * | `secondary` | speed, gradient, to go, every gap, wind | **consequences and context**, read every few minutes. Speed on a trainer is what the simulation made of the power; the gradient is felt through the pedals before it is read; to-go, the gaps and the wind change slowly |
+ *
+ * ⚠️ **The order {@link hudReadings} returns is untouched**, and the primary
+ * three were already its first three — so a field is still found by position
+ * (#94), within a tier and across the pair. The tier decides a size and which
+ * corner; it moves no field relative to its neighbours.
+ *
+ * ⚠️ **This is NOT a statement about which readings are SPOKEN.**
+ * [#395](https://github.com/openzigs/onyourleft/issues/395) asks that question
+ * for speech and it has a different answer space: a reading worth a large
+ * glyph is not thereby worth interrupting a rider's audio for, and a gap that
+ * is glanced at once a minute may be exactly the thing worth *announcing* when
+ * it changes sign. Nothing here should be read as a default for it, and
+ * nothing in `HudPanel.tsx` keys any `aria-live` behaviour off this value.
+ */
+export type ReadingTier = 'primary' | 'secondary';
+
+/**
+ * The keys of the primary tier. @see ReadingTier
+ *
+ * A set of keys rather than a field on {@link HudReading}, so the whole of the
+ * decision is in one place a reviewer can read — and so a field added to
+ * {@link hudReadings} lands in the *secondary* tier until somebody decides
+ * otherwise, which is the cheap direction to be wrong in: a secondary reading
+ * costs the road less.
+ */
+const PRIMARY_READING_KEYS: ReadonlySet<string> = new Set(['power', 'cadence', 'heartRate']);
+
+/** Which tier a reading is drawn in. @see ReadingTier */
+export function readingTier(reading: HudReading): ReadingTier {
+  return PRIMARY_READING_KEYS.has(reading.key) ? 'primary' : 'secondary';
+}
+
 /** One rider being raced, and how far ahead of the rider they are. */
 export interface ChasedGap {
   /** Which of the two this is. Decides the label, and nothing else. */
@@ -632,9 +678,29 @@ export function gapAgainst(state: GameState, theirDistance: number): GapInput {
  * - A rider does not glance at it. They read it once, while checking that the
  *   hills are real.
  *
- * So it is a row of the panel's own flex column, immediately above the
- * controls — which ties its reachability to a control that must already be
- * reachable rather than to a rule of its own.
+ * So it is a row of the panel the controls are in, immediately above them —
+ * which ties its reachability to a control that must already be reachable
+ * rather than to a rule of its own.
+ *
+ * ## ⚠️ #373 did NOT make this line visible in landscape, and said it had
+ *
+ * A reviewer who remembers this note ending at the paragraph above is reading
+ * the old file, and would reasonably conclude landscape was solved. It was
+ * not. #373 was right about where the line BELONGS and did nothing about why
+ * it could not be seen: the panel it moved into was itself 572 px tall under a
+ * canvas, in a 390 px viewport (#419), so the line went from lost below the
+ * panel to lost at the bottom of it. The owner's tablet, in landscape on
+ * 2026-09-20, showed exactly that (#422): *Pause*, *End ride* and this line all
+ * below the fold.
+ *
+ * The premise above — *"a control that must already be reachable"* — was the
+ * part that was false. It became true in #423: while a ride runs the world is
+ * full-bleed, the HUD is laid over it, and this line shares a panel with
+ * *Pause* and *End ride* that is pinned to a corner of the stage.
+ * `browser/ride.browser.spec.ts` measures all three on screen with no
+ * scrolling, at a phone in both orientations and at a landscape tablet, with a
+ * control that takes the stage away and requires them to fall below the fold
+ * again.
  *
  * ⚠️ **`simulating`, not `holding`.** `game/gradient.ts`
  * §`GradientSessionState.asked` is explicit that the two are different claims:

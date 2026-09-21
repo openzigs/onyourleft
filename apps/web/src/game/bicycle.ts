@@ -281,6 +281,49 @@ const SHIN_METRES = 0.4475;
 /** How thick a leg segment is drawn. @see legBones */
 export const LIMB_RADIUS_METRES = 0.055;
 
+/** Where the helmet is, and how big. The top of it is the top of the rider. */
+const HELMET_Y = 1.4;
+const HELMET_Z = 0.19;
+const HELMET_RADIUS = 0.115;
+
+/** Tip to tip. The widest thing on the bicycle, the rider's elbows included. */
+const HANDLEBAR_LENGTH_METRES = 0.4;
+
+/**
+ * How tall the rider is on the bicycle, road to the top of the helmet: 1.515 m.
+ *
+ * ⚠️ **Exported for the camera, and derived rather than typed** — #424.
+ * `camera.ts` frames the chase camera against this number: how much of the
+ * frame's height the rider fills, and how far up the road the tarmac first
+ * shows over their helmet, are both functions of it. A `1.5` written there
+ * would go on describing this model after somebody gave it a taller one, and
+ * the browser gate's minimum share would be measuring a rider that no longer
+ * exists.
+ *
+ * @unwired the renderer builds the rider from the parts below and never needs
+ * their overall size; three projects them. The only things that name this are
+ * `camera.ts` §`riderFrameBox` and §`roadAppearsOverRiderMetres`, which are
+ * themselves statements of the composition that two browser gates and
+ * `camera.test.ts` hold the layout and the renderer to — so by this gate's own
+ * reckoning nothing that SHIPS reads it, and that is true.
+ */
+export const RIDER_HEIGHT_METRES = HELMET_Y + HELMET_RADIUS;
+
+/**
+ * Half the rider's width — the handlebar, which is the widest part.
+ *
+ * @unwired {@link RIDER_HEIGHT_METRES}'s reason applies unchanged.
+ */
+export const RIDER_HALF_WIDTH_METRES = HANDLEBAR_LENGTH_METRES / 2;
+
+/**
+ * How far AHEAD of the point a rider is placed at the top of their helmet is:
+ * 0.19 m. @see BICYCLE_REAR_CONTACT_METRES
+ *
+ * @unwired {@link RIDER_HEIGHT_METRES}'s reason applies unchanged.
+ */
+export const RIDER_HELMET_AHEAD_METRES = HELMET_Z;
+
 const SHOULDER_Y = 1.3;
 const SHOULDER_Z = 0.06;
 const SHOULDER_ACROSS = 0.16;
@@ -300,6 +343,44 @@ const WHEEL_RADIUS = 0.34;
 const TYRE_RADIUS = 0.028;
 const REAR_HUB_Z = -0.5;
 const FRONT_HUB_Z = 0.52;
+
+/**
+ * Where the rear tyre meets the road, relative to the point a rider is placed
+ * at: 0.5 m BEHIND it, so negative.
+ *
+ * ⚠️ **The lowest point of the rider in a chase camera's frame, and not the
+ * point they are placed at** — #424. The camera is behind the rider, so the
+ * rear wheel is the part of them nearest it, and at 4.5 m that half metre is
+ * worth nearly four points of the frame: a box drawn from the placement point
+ * ends at 76 % of the frame's height and the rider the renderer draws ends at
+ * 80 %. `browser/game.browser.spec.ts` measured that difference off the
+ * drawing buffer, which is how it got here. `camera.ts` §`riderFrameBox` uses
+ * this and {@link RIDER_HELMET_AHEAD_METRES} so that the rectangle the HUD is
+ * kept clear of is the rectangle the rider is in.
+ *
+ * @unwired {@link RIDER_HEIGHT_METRES}'s reason applies unchanged.
+ */
+export const BICYCLE_REAR_CONTACT_METRES = REAR_HUB_Z;
+
+/**
+ * How far ahead of the point a rider is PLACED at the front of their bicycle
+ * is: the front hub plus a wheel's radius, 0.86 m.
+ *
+ * @unwired a dimension of the model that `three-renderer.test.ts` §"the verge
+ * and the camera cone" states #424's near-field bound against — *"in shot
+ * before the front wheel is level with it"* — so that the bound is a property
+ * of this bicycle rather than a number typed beside it. Nothing draws with it:
+ * the parts below are built from the hubs and the radius directly.
+ */
+export const BICYCLE_FRONT_METRES = FRONT_HUB_Z + WHEEL_RADIUS;
+
+/**
+ * The bicycle, tyre to tyre: 1.70 m.
+ *
+ * @unwired {@link BICYCLE_FRONT_METRES}'s reason applies unchanged; this is the
+ * bound the same test holds the owner's 16 : 10 tablet to.
+ */
+export const BICYCLE_LENGTH_METRES = BICYCLE_FRONT_METRES - (REAR_HUB_Z - WHEEL_RADIUS);
 const SADDLE_Y = 0.94;
 const SADDLE_Z = -0.28;
 const HEAD_TUBE_TOP_Y = 0.96;
@@ -408,7 +489,7 @@ export const RIDER_BODY_PARTS: readonly RiderPart[] = [
   // A handlebar lies across the bicycle, so its tube is rolled a quarter turn.
   part(
     'handlebar',
-    { shape: 'tube', radius: 0.014, length: 0.4 },
+    { shape: 'tube', radius: 0.014, length: HANDLEBAR_LENGTH_METRES },
     RIDER_PALETTE.tyre,
     { y: HEAD_TUBE_TOP_Y + 0.02, z: HEAD_TUBE_TOP_Z },
     { roll: Math.PI / 2 },
@@ -425,7 +506,10 @@ export const RIDER_BODY_PARTS: readonly RiderPart[] = [
     { y: TORSO_SPAN.y, z: TORSO_SPAN.z },
     { pitch: TORSO_SPAN.pitch },
   ),
-  part('helmet', { shape: 'ball', radius: 0.115 }, RIDER_PALETTE.limb, { y: 1.4, z: 0.19 }),
+  part('helmet', { shape: 'ball', radius: HELMET_RADIUS }, RIDER_PALETTE.limb, {
+    y: HELMET_Y,
+    z: HELMET_Z,
+  }),
 ];
 
 /**

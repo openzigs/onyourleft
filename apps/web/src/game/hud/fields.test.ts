@@ -16,6 +16,7 @@ import {
   gapAgainst,
   hudReadings,
   profileReading,
+  readingTier,
   trainerLine,
   type HudInput,
 } from './fields';
@@ -860,5 +861,70 @@ describe('the trainer status line — #373', () => {
    */
   it('does not claim the trainer is holding the gradient', () => {
     expect(trainerLine({ gradePercent: 7.5, writes: 3 })).not.toContain('olding');
+  });
+});
+
+/**
+ * #423 — the HUD is a hierarchy. `fields.ts` §`ReadingTier` records the
+ * decision; this pins the three properties of it that something else rests on.
+ */
+describe('which readings are drawn large (#423)', () => {
+  /** A ride with every optional field present: two gaps and a wind. */
+  function everyField(): HudInput {
+    const base = baseInput();
+    const gap = pacerGap({
+      botDistance: metres(200),
+      riderDistance: metres(100),
+      referenceSpeed: metresPerSecond(10),
+    });
+    return {
+      ...base,
+      state: { ...base.state, headwindMetresPerSecond: metresPerSecond(4) },
+      chases: [
+        { to: 'bot', gap },
+        { to: 'ghost', gap },
+      ],
+    };
+  }
+
+  it('draws power, cadence and heart rate large, and nothing else', () => {
+    const tiers = hudReadings(everyField()).map((each) => [each.key, readingTier(each)]);
+
+    expect(tiers.filter(([, tier]) => tier === 'primary').map(([key]) => key)).toEqual([
+      'power',
+      'cadence',
+      'heartRate',
+    ]);
+    // Non-vacuity: the fixture really does carry the fields a secondary tier
+    // would be wrong about — both gaps and the wind.
+    expect(tiers.filter(([, tier]) => tier === 'secondary').map(([key]) => key)).toEqual([
+      'speed',
+      'gradient',
+      'remaining',
+      'gap-bot',
+      'gap-ghost',
+      'wind',
+    ]);
+  });
+
+  it('keeps the primary readings first, so splitting the list moves nothing', () => {
+    // ⚠️ `HudPanel` renders the two tiers as two lists. That is only a
+    // re-grouping — and #94's *"found by position"* only survives it — while
+    // every primary reading precedes every secondary one in the order
+    // `hudReadings` already returns. A primary key added further down the list
+    // would silently reorder the screen.
+    const tiers = hudReadings(everyField()).map(readingTier);
+    const firstSecondary = tiers.indexOf('secondary');
+
+    expect(firstSecondary).toBeGreaterThan(0);
+    expect(tiers.slice(firstSecondary)).not.toContain('primary');
+  });
+
+  it('draws a field nobody has classified small', () => {
+    // The cheap direction to be wrong in: a secondary reading costs the road
+    // less than a primary one does.
+    expect(
+      readingTier({ key: 'something-new', label: 'New', value: '1', unit: '', stale: false }),
+    ).toBe('secondary');
   });
 });

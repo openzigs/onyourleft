@@ -58,7 +58,15 @@ apps/                 AGPL-3.0-or-later, without exception
                         ride screen's own layout in both orientations, which is
                         where the trainer status line is and where the
                         measurement that the HUD does not fit a landscape phone
-                        came from
+                        came from. ⚠️ Since #423 that page RIDES: it starts a
+                        ride through the real picker rather than re-typing
+                        `GameView`'s markup, and what it measures is the stage
+                        — every reading and control on screen with no
+                        scrolling at eight viewports, a landscape tablet among
+                        them, which no gate had ever measured. Since #422 it
+                        also holds rideview.html and rideview-harness.tsx — the
+                        Ride SCREEN at `#/`, which is a different route, where a
+                        prose reading measure hid the workout below the fold
     public/             what Vite copies verbatim into `dist` (#405) — the web app
                         manifest and the three icons it names. A `.webmanifest`
                         is on neither LIC001's nor LIC002's extension list and
@@ -242,6 +250,26 @@ apps/                 AGPL-3.0-or-later, without exception
                         Since #237 the simulation also advances the bot pacer,
                         on the same fixed step as the rider and through
                         #92's advanceBot rather than a second integrator
+    src/game/camera.ts  the chase camera as ONE composition (#424) — height,
+                        distance behind, look-ahead and lens, which were four
+                        constants in two files with four gates stated against
+                        them. ⚠️ **The law in its header is the thing to read
+                        before moving any of them**: the rider's share of the
+                        frame and the point at which roadside scenery enters
+                        it both depend on the camera through the one product
+                        `B · tan(fov / 2)`, so #355's "verge in shot level with
+                        the rider" and #424's "rider prominent" are one dial
+                        and cannot both be had — 20.6 % of the owner's tablet
+                        is the most the first leaves the second. The lens is
+                        70° because that is what holds #355's 72 % near-field
+                        bound with the camera 4.5 m back; it is solved, not
+                        chosen. ⚠️ Since #423 the lens is also a function of
+                        the FRAME: the world is full-bleed, and a fixed
+                        vertical angle on an upright phone is a 36° slot.
+                        ⚠️ The camera pitches with the ROAD — both the eye and
+                        the look-at ride the corridor's own heights — so a
+                        pacer 50 m ahead stays put on a 20 % hill where a level
+                        gaze put it behind the rider's back
     src/game/bicycle.ts the rider, as a bicycle and somebody on it (#349) — the
                         parts as numbers rather than an asset, the two-bone knee
                         that puts each foot on its own pedal, and the one rule
@@ -329,14 +357,20 @@ apps/                 AGPL-3.0-or-later, without exception
                         verge is 3 m rather than 6 m, and the reason is the
                         one thing four passes of tuning never computed**: a
                         perspective cone has an apex, so an item at the verge
-                        is off the side of a 16:9 frame until
+                        is off the side of the frame until
                         `(ROAD_WIDTH_METRES / 2 + SCATTER_VERGE_METRES) /
-                        NEAR_CONE_SPREAD − CAMERA_BEHIND_METRES` metres ahead
-                        of the rider — +1.26 m at a 6 m verge, −1.67 m at a
-                        3 m one. SCATTER_VERGE_METRES is therefore a
+                        spread − CAMERA_BEHIND_METRES` metres ahead of the
+                        rider. SCATTER_VERGE_METRES is therefore a
                         VISIBILITY constant as well as a placement one, and
-                        three-renderer.test.ts §"the verge stands inside the
-                        near cone" is the gate rather than the note. ⚠️ #355's
+                        three-renderer.test.ts §"the verge and the camera
+                        cone" is the gate rather than the note. ⚠️ **Every
+                        figure that used to follow that formula here — +1.26 m
+                        at a 6 m verge, −1.67 m at 3 m — was taken through a
+                        camera #424 replaced**; it is +0.72 m now, on purpose,
+                        and `camera.ts` argues it. Each floor in that gate is
+                        held from BOTH sides — the shipped verge must clear it
+                        and the 6 m one must not, through today's camera — so
+                        it cannot be re-pinned to a new constant. ⚠️ #355's
                         own arithmetic OVERSTATES the effect and the file says
                         so: 13.7 items stood in the first 25 m and 9.3 of them
                         were already in frame, so this moved 9.3 to 10.6 and
@@ -467,7 +501,15 @@ apps/                 AGPL-3.0-or-later, without exception
                         mid-ride, and `simulation.ts` §`SimulationSetup.wind`
                         is where that is written down
     src/game/hud/       the ride HUD (#94) — the eight fields, the dropped
-                        sensor that is not a zero, and the wake lock; and since
+                        sensor that is not a zero, and the wake lock. ⚠️ Since
+                        #423 it is an OVERLAY: four small OPAQUE panels over a
+                        full-bleed world, in two tiers — power, cadence and
+                        heart rate large, everything else smaller
+                        (`fields.ts` §`ReadingTier`, which is about SIZE and
+                        says nothing about what is spoken; that is #395). The
+                        panels stay opaque because a translucent one has no
+                        fixed colour to check contrast against, and changing
+                        that is an ADR, not a CSS edit; and since
                         #285 the route in plan with the rider on it — north-up,
                         one path per unbroken run, and the wrapped fraction
                         that keeps a rider on lap two off the finish line.
@@ -1387,7 +1429,14 @@ own.** It installs a ~170 MB Chromium and then runs for about three seconds, whi
 shape a separate job exists for — and it stays here anyway, because a second job reports under a
 different context and could not block a merge. A gate that cannot block is not a gate. The job's
 `timeout-minutes` moved from 10 to 15 to give the download room; that number is a stop on a hung
-job, not a budget.
+job, not a budget. ⚠️ **It is 20 since
+[#423](https://github.com/openzigs/onyourleft/issues/423), and a reviewer who remembers 15 is reading
+the old file.** A stop has to be clear of the thing it stops: main was taking 9 to 13 minutes, and the
+first run of #423's pull request ran for **14m19s** with nothing hung — 41 seconds from being killed. The
+browser gate is what grew (6.8 minutes on main, 8.0 with the ride-stage and Ride-screen specs), and
+⚠️ **every case in `game.browser.spec.ts` reloads a harness that takes ten seconds on a runner with
+no GPU** — so a new case there costs ten seconds of CI, which is why #424's five were folded into
+two. Add a case to an existing one where the assertion allows it.
 
 ⚠️ **The browser is pinned by the lockfile, not by the install command.** `@playwright/test`
 **1.63.0** ships Chromium revision **1243**, and `playwright install chromium` fetches whatever the
@@ -1652,13 +1701,15 @@ browser runs**.
 | `pmtiles-fixture.ts` | a PMTiles v3 archive written from arithmetic, so the gate has a basemap to render. Emitted into `browser/dist` by `vite.browser.config.ts`, never committed, and carrying no OpenStreetMap data. ⚠️ It used to be the **only** file here with a Vitest test beside it; `hosted-archive.ts` is the second, and `apps/web/vitest.config.ts`'s `browser/**/*.test.ts` covers both |
 | `game.html`, `game-harness.ts` | since #91, the same idea for the renderer: a page that builds a scene through the **real** `game/three-renderer.ts` and the **real** `terrain.ts` |
 | `game.browser.spec.ts` | its spec — the renderer constructs against a live context, the geometry is one a driver accepts, and a frame reaches the drawing buffer (read back with `readPixels`, because `render` not throwing is a weaker claim) |
-| `hud.html`, `hud-harness.tsx` | since #266, the ride HUD: the **real** `game/hud/HudPanel.tsx` under the **real** `design/theme.css`, in the **real** `oyl-shell` → `oyl-main` → `oyl-game` chain `AppShell` and `GameView` give it, with every field populated and all three of #259's settled outcome words. A **`.tsx`**, and the only React in this directory |
-| `hud.browser.spec.ts` | its spec — no `.oyl-hud__value` overflows its grid track at a phone viewport in either orientation, read back from the browser's own layout. Its **control panels** are the half that makes a green run mean something |
+| `hud.html`, `hud-harness.tsx` | since #266, the ride HUD: the **real** `game/hud/HudPanel.tsx` under the **real** `design/theme.css`, on the **real** stage `GameView` gives it, with every field populated and all three of #259's settled outcome words. ⚠️ **Until #423 that was the `oyl-shell` → `oyl-main` → `oyl-game` chain, and a reviewer who remembers it is reading the old file**: the HUD is laid over a `position: fixed` stage now, so its containing block is the viewport whatever is above it, and the old chain would have gone on measuring a stacked layout a rider only gets at 320×256. One thing on this page is the harness's own and it says so: each stage is `position: relative` and `100vh` tall, because six fixed stages are six panels on top of one another. A **`.tsx`**, and the first React in this directory |
+| `hud.browser.spec.ts` | its spec — no `.oyl-hud__value` overflows its grid track at a phone in either orientation, at **360 px** (where #423's first layout ran the third primary reading off the screen) and at a landscape tablet, read back from the browser's own layout. Its **control panels** are the half that makes a green run mean something; ⚠️ since #423 the control moves the words into the primary list as well as stripping #259's class, because every word is a secondary reading now and at 1.5 rem it would spill by under three pixels, which is not a control |
 | `shell.html`, `shell-harness.tsx` | since #307's review, the app **shell**: the **real** `shell/AppShell.tsx` with the **real** `ROUTES` table under the **real** `design/theme.css`. The second `.tsx` here. ⚠️ Its spacer goes **inside `.oyl-main`** and the file says why at length — after `.oyl-shell` the header scrolls out of its own sticky containing block and measures 0 px, and inside `.oyl-shell` `main` stays shorter than the viewport so a focus scroll never consults `scroll-margin-top`. Each mistake made a different assertion pass over nothing. ⚠️ Since #316 it also renders the **real** `design/Button.tsx` in both variants, with `RideView`'s own labels, because a shell handed no ports renders **zero** controls on all eleven routes and a size assertion over an empty list passes |
 | `shell.browser.spec.ts` | its spec — how much of the viewport persistent chrome still covers after a scroll, where a fragment jump lands the `h1`, whether the focused skip link is the topmost thing at its own centre (hit-tested, not read off a `z-index`), and no horizontal scrolling at 320 px. ⚠️ Since #316 it also measures the **touch target** three ways, and the three fail for different reasons — see below |
 | `offline.browser.spec.ts` | since #408, the offline claim — against **`apps/web/dist`**, in a **persistent** context closed and reopened, with **two controls**. The only spec here that does not drive a harness page, and the first use of `setOffline` in this repository |
-| `ride.html`, `ride-harness.tsx` | since [#373](https://github.com/openzigs/onyourleft/issues/373), the **ride screen's own layout**: the **real** `AppShell` at the **real** game route, with the **real** `HudPanel` inside the `section.oyl-game` `GameView` gives it. The third `.tsx` here. ⚠️ It renders **no WebGL** — the canvas is the shipping `.oyl-game__world` element, and its `aspect-ratio` and `max-height` are what decide this layout. ⚠️ The shell's own view child is **hidden, not removed**: removing it threw inside React, unmounted the whole shell, and set the ready flag anyway — a 0 px document reporting success, which is the vacuous harness its control exists to catch |
-| `ride.browser.spec.ts` | its spec — where the trainer status line is, measured in both orientations. ⚠️ **What it established is bigger than #373**: `.oyl-hud` is **572 px** tall and a landscape phone viewport is 390, so the panel does not fit on screen at all and *Pause* and *End ride* are below the fold at every viewport measured (844×390, 390×844, 1280×800, 768×1024). No placement of one line changes that and shrinking the world cannot either, so what is asserted is the property that does hold — a rider who reaches the controls has the line on screen. Filed as [#419](https://github.com/openzigs/onyourleft/issues/419). Its control is the same sentence in the pre-#373 position, which must still be off screen at that point |
+| `ride.html`, `ride-harness.tsx` | since [#373](https://github.com/openzigs/onyourleft/issues/373), the trainer game's ride, and since [#423](https://github.com/openzigs/onyourleft/issues/423) its **stage**. ⚠️ **It RIDES now, and a reviewer who remembers it rendering `<HudPanel>` by hand is reading the old file**: the real `AppShell` at the real game route is handed a game port, and the page ticks the picker's own checkboxes and presses its own *Ride* — so a `GameView` that stopped putting `oyl-game--riding` on its root, or a shell that stopped listening, fails here rather than passing over a fixture that still does both. The fixture is the WIDEST ride the picker can start (a pacer, a ghost and a wind). It renders **no WebGL**. `?trainer=workout` is the same ride with the longest standing notice there is |
+| `ride.browser.spec.ts` | its spec — at **eight overlay viewports, a landscape tablet among them, which no gate had ever measured**: the world fills the viewport, the chrome is absent, every reading and control is on screen at `scrollY === 0` and hit-tested uncovered, no panel is over another or over the RIDER (`game/camera.ts` §`riderFrameBox`), and a safe-area inset moves every panel. ⚠️ **#373 called landscape solved and it was not**: it moved the trainer line into a panel that was itself 572 px tall in a 390 px viewport (#419), confirmed on hardware in #422. ⚠️ Its **control** takes `oyl-game--riding` off the live element and requires *End ride* to fall below the fold again; without it every assertion here is true of a page that rendered nothing. The case that asserted #419's premise — *"the HUD panel is taller than a landscape phone viewport"* — is **removed**, as that issue asked, rather than loosened |
+| `rideview.html`, `rideview-harness.tsx` | since [#422](https://github.com/openzigs/onyourleft/issues/422), the **Ride SCREEN** — `views/RideView.tsx` at `#/`, which is not the game. On the owner's tablet in landscape a prose reading measure cut it off at the ride controls with `WorkoutPanel` below the fold, and a rider testing whether ERG releases (#372) started a plain recording instead: **a layout defect produced a false answer to a safety question.** The fixture is the screen at its fullest — control granted, a saved workout, a threshold — because the control the owner could not see only renders then |
+| `rideview.browser.spec.ts` | its spec — every ride control on screen with no scrolling at 1280×800 and 1024×768, the trainer BESIDE the live metrics, and nothing wider than a phone. Its control puts the measure and the single column back and requires the workout to be below the fold again, which is the defect itself. ⚠️ **Since #436's review it also measures at 1280×720 and 1024×720, and a reviewer who remembers two tablet viewports is reading the old file**: 1280×800 is the tablet's *display*, the Android shell configures no fullscreen mode, and the WebView is shorter by the system bars — at 728 px *Pause* / *Stop* were below the fold behind a green gate. ⚠️ **720 is assumed, not read off the device**; validation 0002 Q6 asks for `window.innerHeight`. Every tablet case now **publishes its margin to the fold** and holds it to a 50 px floor rather than to zero, because a control that clears by 3 px in this Chromium's fonts has not been shown to clear anywhere else. **The rule it leaves behind: a browser-gate "device" viewport is the display's CSS size, not the WebView's — report the margin, and treat one under about 50 px as unproven on that device** |
 | `../playwright.config.ts` | Chromium only, no retries, the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all — and since #408 **two `webServer` entries**, because the product and the harness are different builds |
 | `../vite.browser.config.ts` | the harness build. A second Vite config, so the harness cannot reach a shipped bundle |
 
@@ -1786,9 +1837,9 @@ command and its own CI step.
 ⚠️ **`vite.browser.config.ts` names every entry explicitly, and must.** Vite's multi-page mode
 discovers only `index.html`; a page added without a line in `build.rollupOptions.input` is simply
 not built, and the failure is a 404 while the spec runs rather than a build error — which reads
-like a server fault and sends the next person to `playwright.config.ts`. There are **six** entries
-today, not two — the map, the game, the HUD, the app shell, the ride screen's layout (#373) and
-the capture tool — and this sentence said *four* until #373, so read
+like a server fault and sends the next person to `playwright.config.ts`. There are **seven** entries
+today, not two — the map, the game, the HUD, the app shell, the game's stage (#373, #423), the
+Ride screen (#422) and the capture tool — and this sentence said *four* until #373, so read
 `build.rollupOptions.input` rather than this line. #266 confirmed the trap by
 deleting its own line — the run died sixty seconds later inside `waitForFunction` with no mention
 of the config, which is why `hud.browser.spec.ts` now checks the response status and names
@@ -3067,7 +3118,7 @@ top of an issue **supersedes its body**.
 | What the scenery models cost the GPU, and why that number is published rather than bounded | [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part H, `apps/web/browser/game.browser.spec.ts` |
 | Why the scenery is one mesh per kind, and the only thing this renderer culls | `apps/web/src/game/three-renderer.ts` §`ScatterBelt`, §`lateralReachMetres` |
 | Why the scenery cull is a cone rather than a box, and what it still throws away on a bend | `apps/web/src/game/three-renderer.ts` §`lateralReachMetres`, §`SCATTER_LATERAL_METRES`, `apps/web/src/game/three-renderer.test.ts` §"the cull against what `scene.ts` actually hands it" |
-| Which aspect ratio the cull is stated against, and why a test cannot re-derive it | `apps/web/src/game/three-renderer.ts` §`WORST_CASE_ASPECT`, `apps/web/src/design/theme.css` §`.oyl-game__world` |
+| Which aspect ratio the cull is stated against, and what ENFORCES it now that the world is full-bleed | `apps/web/src/game/camera.ts` §`WORST_CASE_ASPECT`, `apps/web/src/design/theme.css` §`.oyl-game__world`, `apps/web/browser/ride.browser.spec.ts` §"the world is never wider than the cull allows" |
 | Why scenery beyond 400 m to the side is dropped however wide the view is | `apps/web/src/game/three-renderer.ts` §`FOGGED_OUT_METRES`, `apps/web/src/game/world.ts` §`MINIMUM_VIEW_END_OCCLUSION` |
 | Why the scenery is a hash of where you are rather than a generator that walks forward | `apps/web/src/game/scatter.ts` §`scatterAt`, §`scatterSeed` |
 | Why the scenery's shapes will come from a pack when its placement does not, and which one kind is excluded | [ADR 0022](docs/adr/0022-game-scenery-model-pack.md) D-3, D-4 |
@@ -3077,8 +3128,8 @@ top of an issue **supersedes its body**.
 | Why a stretch of road has nothing beside it, and why that is a field rather than a coin | `apps/web/src/game/scatter.ts` §`clusterAt`, §`CLUSTER_SPAN_METRES`, §`OPEN_GROUND_SHARE` |
 | How far scenery may stand from a road that bends, and what the committed code used to put in the carriageway | `apps/web/src/game/scatter.ts` §`bandsAt`, §`BEND_INNER_SHARE`, [#348](https://github.com/openzigs/onyourleft/issues/348) |
 | Why a band is a depth and not also a place along the road | `apps/web/src/game/scatter.ts` §`SCATTER_BANDS_PER_SIDE`, §`CELL_FILL` |
-| Why the verge decides whether a rider sees the near scenery at all, and the arithmetic four tuning passes never did | `apps/web/src/game/scatter.ts` §`SCATTER_VERGE_METRES`, `apps/web/src/game/three-renderer.ts` §`NARROWEST_ASPECT`, `apps/web/src/game/three-renderer.test.ts` §"the verge stands inside the near cone — #355" |
-| Why the cull uses the widest frame a rider can produce and the near-field gate uses the narrowest | `apps/web/src/game/three-renderer.ts` §`WORST_CASE_ASPECT`, §`NARROWEST_ASPECT` |
+| Why the verge decides whether a rider sees the near scenery at all, and the arithmetic four tuning passes never did | `apps/web/src/game/scatter.ts` §`SCATTER_VERGE_METRES`, `apps/web/src/game/camera.ts` §`vergeEntersFrameMetres`, `apps/web/src/game/three-renderer.test.ts` §"the verge and the camera cone" |
+| Why the cull uses the widest frame a rider can produce, and why the near-field gate is still taken at 16 : 9 when that is no longer the narrowest | `apps/web/src/game/camera.ts` §`WORST_CASE_ASPECT`, §`NARROWEST_ASPECT`, §`REFERENCE_ASPECT` |
 | At what aspect ratio the scenery cull starts dropping something visible, measured rather than inferred | `apps/web/src/game/three-renderer.ts` §`lateralReachMetres`, [#355](https://github.com/openzigs/onyourleft/issues/355) |
 | Which scenery constant moves density and which one only moves scenery sideways, measured rather than reasoned about | `apps/web/src/game/scatter.ts` §`SCATTER_BAND_METRES`, `apps/web/src/game/scatter.test.ts` §"how much is placed does not depend on how deep the band is — #353" |
 | What the closest two scenery items may be, why it is a measurement rather than a setting, and what #353 cost it | `apps/web/src/game/scatter.ts` §`MINIMUM_SCATTER_SEPARATION_METRES` |
@@ -3116,7 +3167,23 @@ top of an issue **supersedes its body**.
 | How far a `<select>` may be styled before it stops being one | `apps/web/src/design/theme.css` §`select`, [#305](https://github.com/openzigs/onyourleft/issues/305) |
 | Why the button's 44 px touch target is declared rather than emergent, and why a floor is not enough on its own | `apps/web/src/design/theme.css` §`.oyl-button`, `apps/web/browser/shell.browser.spec.ts` §`TOUCH_TARGET_PIXELS` |
 | When the header sticks, when it deliberately does not, and the measurement that decides | `apps/web/src/design/theme.css` §`@media (min-width: 64rem) and (min-height: 40rem)`, `apps/web/browser/shell.browser.spec.ts` |
-| Where the trainer status line is, why it is in the HUD rather than under it, and what that measurement found about the whole panel | `apps/web/src/game/hud/fields.ts` §`TrainerLine`, `apps/web/browser/ride.browser.spec.ts`, [#373](https://github.com/openzigs/onyourleft/issues/373) |
+| Where the trainer status line is, why it is in the HUD rather than under it, and why #373 did not make it visible in landscape | `apps/web/src/game/hud/fields.ts` §`TrainerLine`, `apps/web/src/game/hud/HudPanel.tsx`, `apps/web/browser/ride.browser.spec.ts`, [#373](https://github.com/openzigs/onyourleft/issues/373), [#422](https://github.com/openzigs/onyourleft/issues/422) |
+| Why the world is full-bleed during a ride, which three layouts the HUD has and what chooses between them | `apps/web/src/design/theme.css` §`.oyl-game--riding`, [#423](https://github.com/openzigs/onyourleft/issues/423) |
+| Why the HUD's panels are opaque and the frosted-glass look is not on offer | `apps/web/src/design/tokens.ts` §`hudSurface`, `apps/web/src/design/theme.css` §`.oyl-hud__panel`, `apps/web/src/game/hud/hud-surface.a11y.test.ts` |
+| Which readings are drawn large, and why that says nothing about which are spoken | `apps/web/src/game/hud/fields.ts` §`ReadingTier`, [#395](https://github.com/openzigs/onyourleft/issues/395) |
+| How a rider leaves a ride mid-way, and why the stage has no navigation on it | `apps/web/src/game/GameView.tsx` §`GameViewProps.onImmersive` |
+| Why the page chrome is ABSENT during a ride rather than hidden, and what is deliberately still rendered | `apps/web/src/shell/AppShell.tsx` §`immersive`, `apps/web/src/shell/immersive.test.tsx` |
+| What a phone gives up while a standing notice is on the stage, why "while" is the whole ride, and who owns the remedy | `apps/web/src/design/theme.css` §"WHERE THERE IS NO FREE CELL", [#437](https://github.com/openzigs/onyourleft/issues/437) |
+| Why the Ride screen's controls come before its clock, and what the fold costs inside a WebView | `apps/web/src/views/RideView.tsx` §`LiveRide`, `apps/web/src/design/theme.css` §`.oyl-ride`, `apps/web/browser/rideview.browser.spec.ts` §`FOLD_MARGIN_PIXELS` |
+| Which routes keep the prose reading measure, and why that is a field on the route table | `apps/web/src/shell/routes.ts` §`RouteLayout`, [#422](https://github.com/openzigs/onyourleft/issues/422) |
+| How a layout defect produced a false answer to a safety question | `apps/web/browser/rideview-harness.tsx`, [#422](https://github.com/openzigs/onyourleft/issues/422), [#372](https://github.com/openzigs/onyourleft/issues/372) |
+| Why the camera is where it is, and why a prominent rider and scenery level with them are one dial | `apps/web/src/game/camera.ts`, [#424](https://github.com/openzigs/onyourleft/issues/424) |
+| How the camera pitches with grade, and what a level gaze did to a pacer on a hill | `apps/web/src/game/camera.ts` §`cameraRig`, `apps/web/src/game/camera.test.ts` §"how the camera pitches with grade" |
+| Why the lens opens on an upright phone, and where it stops | `apps/web/src/game/camera.ts` §`verticalHalfTangent`, §`MAXIMUM_FIELD_OF_VIEW_DEGREES` |
+| Why the camera is ABOVE the rider's helmet when #424 asked for shoulder height | `apps/web/src/game/camera.ts` §`roadAppearsOverRiderMetres` |
+| What holds "prominent" to a number, and why it is read off the drawing buffer as well as computed | `apps/web/src/game/camera.ts` §`MINIMUM_RIDER_FRAME_SHARE`, `apps/web/browser/game-harness.ts` §`riderExtent` |
+| Why the game's pixel probes are aimed from geometry rather than from fixed fractions of the frame | `apps/web/browser/game-harness.ts` §`inTheFrame` |
+| Which depth three fogs by, and what judging fog by straight-line distance excused | `apps/web/src/game/three-renderer.test.ts` §`asTheCameraSeesIt`, `apps/web/src/game/three-renderer.ts` §`FOGGED_OUT_METRES` |
 | What stops persistent chrome eating a small viewport, and why no other gate can see it | `apps/web/browser/shell.browser.spec.ts` §`PERSISTENT_CHROME_BUDGET`, §4f |
 | Why the harness spacer's position is load-bearing, and the two places it must not go | `apps/web/browser/shell-harness.tsx` §`SPACER_PIXELS` |
 | What floor the HUD's labels and its dropped-sensor mark sit on | `apps/web/src/game/hud/hud-value-size.test.ts` §"the HUD’s supporting text has a floor" |
