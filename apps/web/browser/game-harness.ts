@@ -509,8 +509,9 @@ declare global {
       /**
        * The riders' shadow MAP, measured — #426's second half, and published
        * rather than asserted. Only when the page is loaded with
-       * `?shadow-map`: every other spec case reloads this page, and a
-       * measurement nobody asserts on should not cost all of them its frames.
+       * `?shadow-map`: the spec's other cases share one load of this page
+       * without it (#456), and a measurement nobody asserts on should not cost
+       * that load its frames.
        */
       readonly shadowMap: {
         readonly measured: boolean;

@@ -1482,10 +1482,21 @@ job, not a budget. ⚠️ **It is 20 since
 [#423](https://github.com/openzigs/onyourleft/issues/423), and a reviewer who remembers 15 is reading
 the old file.** A stop has to be clear of the thing it stops: main was taking 9 to 13 minutes, and the
 first run of #423's pull request ran for **14m19s** with nothing hung — 41 seconds from being killed. The
-browser gate is what grew (6.8 minutes on main, 8.0 with the ride-stage and Ride-screen specs), and
-⚠️ **every case in `game.browser.spec.ts` reloads a harness that takes ten seconds on a runner with
-no GPU** — so a new case there costs ten seconds of CI, which is why #424's five were folded into
-two. Add a case to an existing one where the assertion allows it.
+browser gate is what grew (6.8 minutes on main, 8.0 with the ride-stage and Ride-screen specs).
+⚠️ **Since [#456](https://github.com/openzigs/onyourleft/issues/456) the cases in
+`game.browser.spec.ts` share ONE load of their harness, and a reviewer who remembers "every case
+reloads a harness that takes ten seconds" is reading the old file.** They did reload it, and that was
+the whole critical path: 43 cases at 9.1 s each, run in one worker, came to 6.0 to 7.3 minutes of a
+browser gate that took 271 to 449 s, in a job that ran 8m40s to 13m44s on `main`. The harness does
+all of its work in one `run()` and publishes one object, so a worker-scoped fixture now loads it
+once per query (`''` and `?shadow-map`) and every case reads that result, with every assertion
+unchanged. On #456's pull request that made the game spec 32 s, the browser gate 88 s and the job
+**7m44s**. The browser gate's slowest spec is now `ride.browser.spec.ts` at about 45 s of case time,
+and the job's largest step is Vitest with coverage at about 150 s. ⚠️ **What this does NOT change**:
+a failing case makes Playwright replace its worker, so the case after it loads the page again. A red
+run costs more than a green one (49 s against 13 s locally, with nine cases red). A new case that
+reads the shared result costs almost nothing. A new case that drives its own page still costs a
+load, so add it to the harness's one run where the claim allows.
 
 ⚠️ **The browser is pinned by the lockfile, not by the install command.** `@playwright/test`
 **1.63.0** ships Chromium revision **1243**, and `playwright install chromium` fetches whatever the
