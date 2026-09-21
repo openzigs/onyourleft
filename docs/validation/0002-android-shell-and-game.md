@@ -901,6 +901,12 @@ arriving in a procedure rather than in a gate.
   below the fold at every viewport measured — 844×390, 390×844, 1280×800 and 768×1024. Scroll to
   the controls and the trainer line is on screen with them. That is
   [#419](https://github.com/openzigs/onyourleft/issues/419) and it is not fixed here.
+- ⚠️ **Since [#423](https://github.com/openzigs/onyourleft/issues/423) you do NOT scroll, and a
+  reader who remembers the two bullets above as the state of things is reading the old procedure.**
+  #373 moved the line and did not make it visible: confirmed on a tablet in landscape on 2026-09-20
+  ([#422](https://github.com/openzigs/onyourleft/issues/422)). While a ride runs the world now fills
+  the screen and the line shares a corner panel with *Pause* and *End ride*. Part Q is where that is
+  checked on the device.
 - **The count is the half that catches #362.** A gradient rendered in that line with `(0 sent)`
   beside it is exactly the defect: the number was computed and never written.
 - **`adb logcat` is the independent check**, and it is the one that found the defect. Filter for
@@ -1418,6 +1424,121 @@ invisible from a table that only said "pass".
 - **That a worker inside the shell would be harmful.** It establishes only that one would be
   unnecessary. D-4's second argument — an APK update racing a registration holding the previous
   build — is untested and would need a worker to exist inside the shell to test.
+
+---
+
+## Part Q — the ride's stage, the Ride screen and the chase camera ([#423](https://github.com/openzigs/onyourleft/issues/423), [#422](https://github.com/openzigs/onyourleft/issues/422), [#419](https://github.com/openzigs/onyourleft/issues/419), [#424](https://github.com/openzigs/onyourleft/issues/424))
+
+**What was measured on the owner's Pixel Tablet on 2026-09-20, held in landscape, and is the reason
+this part exists:** on the trainer game, *Pause*, *End ride* and the trainer status line were all
+**below the fold**, beside a display that was about 53 % blank. On the **Ride** screen it was worse:
+`WorkoutPanel` was off-screen, so structured workouts were invisible — and a rider who set out to
+answer [#372](https://github.com/openzigs/onyourleft/issues/372)'s open ERG question started a plain
+recording believing it was a workout. The wire showed Request Control, 103 seconds of nothing, then
+Stop. **Zero ERG targets.** A layout defect produced a false answer to a safety question, and it
+read as a clean pass.
+
+⚠️ **#373 had called landscape solved and it was not**, and Part L above still carries the sentence
+that said so. It moved the trainer line *into* a panel that was itself 572 px tall in a 390 px
+viewport.
+
+### What changed, and what it predicts
+
+| | before | after |
+|---|---|---|
+| The game during a ride | a 16 : 9 canvas capped at 60 % of the height, the HUD stacked under it, under the page's header, title and summary | ⚠️ **the world fills the screen**; the header, navigation, title, summary and footer are **not rendered**; the HUD is four small **opaque** panels laid over the world's corners |
+| HUD readings | nine equal fields at 2.5 rem | two tiers: **power, cadence, heart rate** at 2.5 rem; everything else at 1.5 rem |
+| Leaving a ride | any navigation link | ⚠️ ***End ride*, and only that.** There is no navigation on the stage. The platform's own Back still works and ends the ride exactly as *End ride* does |
+| The Ride screen | one column under a 68-character reading measure | three groups — live, trainer, sensors — side by side where there is width |
+| The camera | 8 m back, 3 m up, 60° lens, level gaze | **4.5 m back, 2 m up, 70° lens**, and it **pitches with the road** |
+| The rider, share of a 16 : 9 frame's height | 18.1 % | **27.3 %** by arithmetic, **28.1 %** read back off the drawing buffer in the pinned Chromium |
+| Roadside scenery level with the rider | in shot | ⚠️ **not in shot** — it enters the frame 0.7 m ahead of the rider. This is a deliberate trade and `apps/web/src/game/camera.ts` argues it |
+
+⚠️ **What a headless Chromium established, and what it cannot.** At 1280×800, 1024×768, 800×1280,
+844×390, 736×360, 390×844, 360×800 and 320×704 every reading and both controls are on screen with no
+scrolling, no panel is over another or over the rider, and a control that takes the stage away puts
+*End ride* below the fold again. None of that says the screen **looks right**, that the panels are
+where a thumb falls, that a 70° lens is comfortable for an hour, or that the frame rate held. **Only
+somebody holding the tablet can say any of that, and this part is where they say it.**
+
+### ⚠️ Read this before starting
+
+- **Q6 is the safety step and it is the reason for the rest.** It is #372's question, asked again
+  now that the control that answers it can be seen. Follow Part D's safety notes: low gear, seated,
+  ready to stop pedalling.
+- **A notice changes the layout on a phone.** If the game shows *"The road is not reaching your
+  trainer"*, then on a phone — either way up — the elevation strip and the plan view give their
+  place to it. That is recorded in `apps/web/src/design/theme.css` §"WHERE THERE IS NO FREE CELL".
+  On the tablet all five are shown.
+- ⚠️ **Safe areas are the one thing no gate could measure.** The browser gate fakes an inset and
+  watches the panels move. Whether the tablet *reports* one — and so whether a panel sits under the
+  status bar or the gesture bar — is Q4.
+
+### Q — the stage, by eye
+
+| Step | What to do | What to record |
+|---|---|---|
+| Q1 | Tablet in **landscape**. Start a ride in the trainer game with a pacer, a ghost and a wind | Does the world fill the screen? Is the app's header gone? Are *Pause*, *End ride* and the trainer line visible **without scrolling**? |
+| Q2 | The same ride. Look at the four panels | Is any panel over the rider, or over the road directly ahead? Are power, cadence and heart rate readable at arm's length, and visibly larger than the rest? |
+| Q3 | Rotate to **portrait** mid-ride | Does the layout follow? Does the world redraw at the new shape without stretching — are the wheels still round? ⚠️ This is the orientation that was already working and must not have regressed |
+| Q4 | Both orientations | ⚠️ Is any panel under the **status bar**, the **gesture bar** or a camera cut-out? Is any panel's edge clipped? |
+| Q5 | Press *End ride* | Does the header come back? Then start another ride and leave with the **system Back** gesture instead | 
+| Q6 | ⚠️ **The Ride screen, landscape, trainer paired and control granted.** Is *Ride a workout* visible **without scrolling**? Start a saved workout, ride 60 s, end it | Did the trainer's resistance change when the workout started? ⚠️ **Did it release when the workout ended?** — this is #372. Capture `adb logcat` filtered for `BluetoothLe`: there must be `0x04` Set Target Power writes this time |
+
+### Q — the camera, by eye and by number
+
+| Step | What to do | What to record |
+|---|---|---|
+| Q7 | A ride on a rolling route | Is the rider prominent — roughly a quarter of the screen's height? Does 30 km/h read as faster than it did? |
+| Q8 | A steep climb, then a steep descent | ⚠️ Do you still see road on both? Does the pacer stay in the same part of the screen, or does it go behind the rider (descent) or under the top panels (climb)? |
+| Q9 | A pacer **and** a ghost, at roughly 10 m, 50 m and 200 m | #93's third criterion, re-asked: can all three still be told apart? At 10 m on a dead-straight road the pacer's wheels are behind the rider by design — is that a problem in practice? |
+| Q10 | Anywhere | ⚠️ Is the 70° lens comfortable? Does anything at the edge of the screen look stretched enough to notice? Would you ride an hour with it? |
+| Q11 | 12 s of riding at the target rung, tablet in landscape | the rows below. ⚠️ A lower camera draws more near scenery at a larger size, and the canvas is now the whole screen: this is **fill rate**, which the draw-call counts in the browser gate cannot see |
+
+```bash
+adb shell dumpsys gfxinfo dev.openzigs.onyourleft reset
+# ... ride for 12 s, landscape, with a pacer and a ghost both in play ...
+adb shell dumpsys gfxinfo dev.openzigs.onyourleft | grep -iE "Total frames|Janky|percentile|Missed Vsync|GPU"
+```
+
+### Q results
+
+| | #323's baseline | Q11 (target rung, full-bleed) |
+|---|--:|--:|
+| Total frames rendered | | |
+| **Janky frames (legacy, > 16 ms)** | 40.63 % | |
+| Frame time 50th | 13 ms | |
+| GPU time 50th / 90th | 6 / 9 ms | |
+| Missed Vsync | | |
+
+**Every control visible without scrolling, landscape (Q1)?** ______________
+
+**Any panel over the rider or the road ahead (Q2)?** ______________
+
+**Portrait still right, and the world not stretched after a rotation (Q3)?** ______________
+
+**Any panel under a system bar or a cut-out (Q4)?** ______________
+
+**Header back after *End ride*, and after system Back (Q5)?** ______________
+
+**⚠️ Workout visible, started, and RELEASED on the Ride screen (Q6)? `0x04` writes seen?** ______________
+
+**Rider prominent; speed reads as speed (Q7)?** ______________
+
+**Road visible on a steep climb and a steep descent; pacer stays put (Q8)?** ______________
+
+**Three riders told apart at 10 / 50 / 200 m (Q9)?** ______________
+
+**The lens, for an hour (Q10)?** ______________
+
+**Device (OEM, model, Android):** ______________  **Build:** ______________
+
+⚠️ **If Q10's answer is no, the remedy is in one file and it is not free.**
+`apps/web/src/game/camera.ts` §`CAMERA_FIELD_OF_VIEW_DEGREES` is 70 because that is what keeps 72 %
+of the first 25 m of roadside in shot with the camera this close; narrow it and that gate goes red,
+which is the gate doing its job. The honest options are a camera further back — which makes the
+rider smaller, by the law in that file's header — or accepting a lower near-field share, which is a
+decision to record rather than a constant to nudge.
 
 ---
 

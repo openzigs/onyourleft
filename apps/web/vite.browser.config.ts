@@ -102,6 +102,12 @@ export default defineConfig({
         // not prove, and why its control is what makes a green run mean
         // anything.
         ride: 'browser/ride.html',
+        // #422. The Ride SCREEN — `views/RideView.tsx` at `#/`, which is not
+        // the game's stage above. A prose reading measure put `WorkoutPanel`
+        // below the fold on a landscape tablet, so structured workouts were
+        // invisible and a rider testing whether ERG releases (#372) started a
+        // plain recording instead. `rideview-harness.tsx` says what it proves.
+        rideview: 'browser/rideview.html',
         // Not a gate the way the other two are: `capture.html` is the tool a
         // person opens with a trainer in front of them (#111), and a headless
         // runner has no Bluetooth adapter. It is built and loaded here so that
