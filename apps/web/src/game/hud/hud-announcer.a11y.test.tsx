@@ -170,12 +170,16 @@ describe('the HUD’s one live region — #397', () => {
     expect(region()?.textContent).toBe('');
   });
 
-  it('is exactly ONE region in the HUD', async () => {
+  it('is the HUD’s only CONTINUOUS region — the only region at all while no notice stands', async () => {
     chooseAnnouncements();
     await startRide();
     await pump(4);
-    // A ride with no notice standing, so every `status` in the HUD is the
-    // announcer's. Notices are event messages of their own (#394).
+    // ⚠️ Scoped, and PR #444's review is why the name says so: this test used
+    // to be called "is exactly ONE region in the HUD", and it holds only with
+    // no notice standing. A road notice and a gradient fault are #394's event
+    // regions, each live while it is shown, so the HUD can carry three. What
+    // #395 asks for is ONE region fed from a throttle; those two are one-off
+    // events the throttle does not see — `announce.ts` §"Ranks 1, 2 and 4".
     expect(
       document.querySelectorAll('.oyl-hud [role="status"], .oyl-hud [aria-live]'),
     ).toHaveLength(1);
