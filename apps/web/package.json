@@ -25,14 +25,14 @@
     "pmtiles": "4.5.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "three": "0.185.1"
+    "three": "0.186.0"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
     "@types/node": "24.13.3",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
-    "@types/three": "0.185.4",
+    "@types/three": "0.186.0",
     "@vitejs/plugin-react": "6.1.1",
     "fake-indexeddb": "6.2.5",
     "fit-file-parser": "5.0.2",
