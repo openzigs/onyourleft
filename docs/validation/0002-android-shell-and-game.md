@@ -1653,7 +1653,7 @@ adb logcat | grep -i "BluetoothLe"
 ⚠️ **R4's `0x08` is a known gap, not this part's finding to fix.** A free-ride block, a paused ride and
 the ERG spiral-of-death easing all still send Stop, because the workout writes again afterwards and a
 Reset would give up the control it writes through. On a trainer that keeps its ERG target through a
-Stop, those do not ease the target either. It is recorded as its own issue; what R4 checks is that
+Stop, those do not ease the target either. That is [#441](https://github.com/openzigs/onyourleft/issues/441); what R4 checks is that
 the **end** of such a workout is a Reset regardless — the case the old code skipped, because a Stop
 had already been sent.
 

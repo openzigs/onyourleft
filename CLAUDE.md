@@ -2158,7 +2158,7 @@ that refuses the Reset gets a flat road and a Stop, reported as **Not released**
 ⚠️ `ErgSink` still cannot reach `reset` or `letGo` — the session that owns the writer releases,
 never the writer — and a **pause inside a workout** (a free-ride block, a paused ride, the ERG spiral
 easing) is still a Stop, because the workout writes again afterwards; on the measured trainer that
-does not ease an ERG target either, which is its own issue. ⚠️ **No test here proves a real trainer
+does not ease an ERG target either, which is [#441](https://github.com/openzigs/onyourleft/issues/441). ⚠️ **No test here proves a real trainer
 lets go on a Reset** — the #44 simulator clears its targets on one because it was written to.
 Validation 0002 L5, L7 and Part R are the proof, and #372 closes on them.
 

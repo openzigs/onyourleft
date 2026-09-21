@@ -46,7 +46,8 @@
  *   ride paused — stays `stop()`, because this session will write again and
  *   needs control to do it. ⚠️ That path carries #372's finding too and is
  *   NOT fixed here: on the measured trainer a Stop does not ease an ERG target,
- *   so it is a separate issue rather than a claim this file makes.
+ *   so it is [#441](https://github.com/openzigs/onyourleft/issues/441) rather
+ *   than a claim this file makes.
  *
  * Neither is a target of zero. FTMS treats 0 W as a target, and a trainer
  * holding 0 W still has the flywheel loaded against the rider at its floor.
