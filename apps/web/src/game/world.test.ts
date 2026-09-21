@@ -31,7 +31,7 @@ import {
 } from '@onyourleft/domain';
 
 import { relativeLuminance } from '../design/contrast';
-import { CAMERA_BEHIND_METRES } from './port';
+import { CAMERA_BEHIND_METRES } from './camera';
 import { VIEW_AHEAD_METRES } from './terrain';
 import {
   FOG_OCCLUSION_AT_VIEW_END,
