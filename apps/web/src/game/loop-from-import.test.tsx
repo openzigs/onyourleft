@@ -199,7 +199,16 @@ function planDescription(view: Mounted): string {
   return view.container.querySelector('.oyl-hud__plan-svg')?.getAttribute('aria-label') ?? '';
 }
 
-describe('a circuit imported with the loop box ticked', () => {
+/**
+ * ⚠️ **Fifteen seconds rather than Vitest's five**, for `position-wiring.test.tsx`
+ * §`RIDE_TIMEOUT_MS`'s reason: every frame builds a landform, the water and
+ * the villages since #458–#460, and the slowest case here took about 7.1 s
+ * under coverage on #468's head. A stop on a hung ride, not a budget; the
+ * assertions are unchanged.
+ */
+const RIDE_TIMEOUT_MS = 15_000;
+
+describe('a circuit imported with the loop box ticked', { timeout: RIDE_TIMEOUT_MS }, () => {
   it('counts the second lap on the HUD a rider is looking at', async () => {
     const route = await importedRoute(true);
     expect(route.profile.totalDistance).toBeGreaterThan(LAP_METRES * 0.9);
@@ -273,7 +282,7 @@ describe('a circuit imported with the loop box ticked', () => {
   });
 });
 
-describe('the same file imported without the box', () => {
+describe('the same file imported without the box', { timeout: RIDE_TIMEOUT_MS }, () => {
   it('finishes rather than lapping, and says nothing about a lap', async () => {
     // The control on the assertions above: the geometry is identical, so a
     // wording that appeared here too would be coming from something other than

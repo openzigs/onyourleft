@@ -1981,7 +1981,7 @@ and none when neither is.
 | Step | What to do | What to record |
 |---|---|---|
 | W1 | Ride a **real route that crosses a valley** — down into it and out again | Is there a stream at the bottom, and a bridge carrying the road over it? Does the water read as water — does it move, does it reflect the sky? |
-| W2 | Look at the bridge as you ride over it | The parapets on both sides; nothing floating, nothing buried; the road surface itself exactly as on either side of it |
+| W2 | Look at the bridge as you ride over it | The parapets on both sides; nothing floating, nothing buried; the road surface itself exactly as on either side of it. ⚠️ And **either side of the bridge** (#468's review, B2): the road runs on a solid stone approach down to where the bank meets it — never a strip of tarmac over an open trench |
 | W3 | 12 s of riding with the bridge and water in view, target rung, the `dumpsys` block from Part T | Frame times with the water shaded |
 | W4 | If the route has a long level valley floor: ride along it | A lake beside the road? No trees standing in it? |
 | W5 | ⚠️ **Only after Part L, with the trainer handed to the game.** Ride across the bridge | The resistance through the valley follows the ROAD — down the approach, up the far side — and does not go flat over the bridge |
@@ -1996,7 +1996,7 @@ and none when neither is.
 | Frame time 50th / 90th | |
 | **GPU time 50th / 90th** | |
 
-**Stream and bridge where the valley is (W1, W2)?** ______________
+**Stream and bridge where the valley is, and solid road either side of it (W1, W2)?** ______________
 
 **A lake beside a level valley floor, nothing standing in it (W4)?** ______________
 
@@ -2030,10 +2030,10 @@ budget, 240 → 120 → 60 → 40: houses are kept and the far field boundaries 
 |---|---|---|
 | X1 | Ride a **real route with a long level stretch low down** — a valley road | Villages and farmsteads, rather than houses one at a time? Do the houses face the road? Is the church a landmark you can see coming? |
 | X2 | Look at the five kinds of building as you pass | Can you tell a house, a barn, a church, a row of shops and a shed apart by their shape? |
-| X3 | Look along the fields | Walls, hedges or fences along the verge and out from the road; walls on the higher ground |
+| X3 | Look along the fields | Walls, hedges or fences along the verge and out from the road; walls on the higher ground. ⚠️ On a **hairpin or a tight bend** (#468's review, B1): no wall, hedge, fence or building standing on the road — the other leg of the hairpin included |
 | X4 | The signposts at a village's ends | A blank board: no words, no name |
 | X5 | 12 s of riding through a village with its fields in view, target rung, the `dumpsys` block from Part T | Frame times with the new kinds on |
-| X6 | Ride through the same village on lap two of a loop | The same houses in the same places |
+| X6 | Ride through the same village on lap two of a loop | The same houses in the same places — and ⚠️ the **same field colours** between the same walls (#468's review, B3: on its first head every field changed colour on lap two) |
 
 ### X results
 
@@ -2048,9 +2048,9 @@ budget, 240 → 120 → 60 → 40: houses are kept and the far field boundaries 
 
 **Five buildings told apart by shape (X2)?** ______________
 
-**Walls, hedges and fences where described (X3); blank signposts (X4)?** ______________
+**Walls, hedges and fences where described (X3); nothing on the road at a hairpin; blank signposts (X4)?** ______________
 
-**The same village on lap two (X6)?** ______________
+**The same village, and the same field colours, on lap two (X6)?** ______________
 
 **Route ridden:** ______________  **Phone (OEM, model, Android):** ______________  **Build:** ______________
 
