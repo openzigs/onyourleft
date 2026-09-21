@@ -137,6 +137,8 @@ export interface RideViewMeasurement {
   /** How wide the content is allowed to be: `main`'s resolved `max-width`. */
   readonly mainMaxWidth: string;
   readonly scrollY: number;
+  /** How far the document COULD scroll: `scrollHeight − innerHeight` (#439). */
+  readonly pageOverflow: number;
   /** What `theme.css` resolved a metric card's background to, as a load check. */
   readonly cardBackground: string;
 }
@@ -149,6 +151,8 @@ declare global {
       readonly measure: () => RideViewMeasurement;
       /** The control. @see this file's header */
       readonly constrain: () => void;
+      /** #439's control. @see ride-harness.tsx §restoreFullHeightShell */
+      readonly restoreFullHeightShell: () => void;
     };
   }
 }
@@ -216,6 +220,7 @@ function measure(): RideViewMeasurement {
     mainClass: main?.className ?? '',
     mainMaxWidth: main === null ? '' : window.getComputedStyle(main).maxWidth,
     scrollY: window.scrollY,
+    pageOverflow: document.documentElement.scrollHeight - window.innerHeight,
     cardBackground: card === null ? '' : window.getComputedStyle(card).backgroundColor,
   };
 }
@@ -234,6 +239,13 @@ function constrain(): void {
   // why the first version of this control passed over nothing at that viewport.
   main.classList.replace('oyl-main--instruments', 'oyl-main--prose');
   ride.classList.remove('oyl-ride');
+}
+
+/** #439's control. @see ride-harness.tsx §restoreFullHeightShell */
+function restoreFullHeightShell(): void {
+  const style = document.createElement('style');
+  style.textContent = '.oyl-shell { min-height: 100vh; }';
+  document.head.append(style);
 }
 
 async function until<T>(what: string, look: () => T | undefined | null): Promise<T> {
@@ -285,10 +297,10 @@ async function run(): Promise<void> {
   );
   await document.fonts.ready;
 
-  window.__oylRideView = { ready: true, errors, measure, constrain };
+  window.__oylRideView = { ready: true, errors, measure, constrain, restoreFullHeightShell };
 }
 
 run().catch((error: unknown) => {
   errors.push(error instanceof Error ? error.message : String(error));
-  window.__oylRideView = { ready: false, errors, measure, constrain };
+  window.__oylRideView = { ready: false, errors, measure, constrain, restoreFullHeightShell };
 });

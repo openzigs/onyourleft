@@ -227,8 +227,24 @@ h3:first-child {
   border: 0;
 }
 
+/*
+ * One viewport tall LESS the insets `body` is padded by — #439.
+ *
+ * ⚠️ It was `min-height: 100vh`, and a reviewer who remembers that is reading
+ * the old file. `body` carries the safe-area insets as padding (see `body`
+ * above), so a shell one whole viewport tall plus that padding made every page
+ * exactly `top + bottom` taller than the screen. On the owner's Pixel Tablet,
+ * edge-to-edge at API 36, that was 36 + 800 + 32 = 868 in an 800 px WebView: a
+ * full-bleed ride whose document scrolled by 68 px, measured over
+ * `apps/mobile/tools/webview-probe.mjs` on 2026-09-21. On a desktop browser the
+ * insets are 0 and this is the old rule exactly.
+ *
+ * `rideview.browser.spec.ts` and `ride.browser.spec.ts` §"#439" measure it
+ * with the insets applied to the engine itself, and each carries the old rule
+ * back as a control that must scroll again.
+ */
 .oyl-shell {
-  min-height: 100vh;
+  min-height: calc(100vh - var(--oyl-safe-top) - var(--oyl-safe-bottom));
   display: flex;
   flex-direction: column;
 }

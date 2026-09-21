@@ -58,6 +58,8 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { applyInsets, PIXEL_TABLET_LANDSCAPE_INSETS, resolvedInsets } from './insets';
+
 import { riderFrameBox } from '../src/game/camera';
 
 import type { Box, StageItem, StageMeasurement } from './ride-harness';
@@ -585,4 +587,39 @@ test.describe('safe areas', () => {
     expect(after.world?.width).toBe(TABLET.width);
     expect(after.world?.height).toBe(TABLET.height);
   });
+});
+
+/**
+ * #439 — the full-bleed ride must not scroll, with edge-to-edge insets applied
+ * to the ENGINE (`insets.ts`), not to the page.
+ *
+ * Measured on the owner's tablet: `scrollHeight` 868 in an 800 px WebView,
+ * insets 36 + 32. The stage is `position: fixed`, so a rider did not see the
+ * page move — but a drag that missed a control scrolled the document under the
+ * HUD. Every viewport the ride is laid out at, with the tablet's own insets:
+ * a phone's are different numbers, and the arithmetic that failed is the same.
+ */
+test.describe('#439 — a ride with edge-to-edge insets does not scroll', () => {
+  for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
+    test(`scrollHeight === innerHeight — ${viewport.name}`, async ({ page }) => {
+      await applyInsets(page, PIXEL_TABLET_LANDSCAPE_INSETS);
+      await openRide(page, viewport);
+      // The apparatus: the insets are really there, or "does not scroll" is a
+      // statement about a desktop browser.
+      expect(await resolvedInsets(page)).toEqual(PIXEL_TABLET_LANDSCAPE_INSETS);
+
+      const seen = await measure(page);
+      expect(seen.pageOverflow).toBe(0);
+
+      // ⚠️ The control: the shell's old `min-height: 100vh`. The same page must
+      // scroll again, by exactly the two insets — which is #439's 68 px.
+      await page.evaluate(() => {
+        window.__oylRide?.restoreFullHeightShell();
+      });
+      const reverted = await measure(page);
+      expect(reverted.pageOverflow).toBe(
+        PIXEL_TABLET_LANDSCAPE_INSETS.top + PIXEL_TABLET_LANDSCAPE_INSETS.bottom,
+      );
+    });
+  }
 });

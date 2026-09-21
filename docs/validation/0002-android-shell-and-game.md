@@ -1506,8 +1506,10 @@ viewport.
 844×390, 736×360, 390×844, 360×800 and 360×752 every reading and both controls are on screen with no
 scrolling, no panel is over another or over the rider, and a control that takes the stage away puts
 *End ride* below the fold again. The **Ride screen** is measured separately, at 1280×800 and
-1024×768 and — since #436's review — at 1280×720 and 1024×720, which stand in for a WebView that
-has lost its system bars; every tablet case there prints its margin to the fold. None of that says
+1024×768, at 1024×720 (a guess at a 4:3 tablet that has lost its bars) and — since
+[#439](https://github.com/openzigs/onyourleft/issues/439) — at **1280×800 with edge-to-edge insets
+36/32 applied to the engine**, which replaced the 1280×720 guess; every tablet case there prints its
+margin to the fold. None of that says
 the screen **looks right**, that the panels are where a thumb falls, that a 70° lens is comfortable
 for an hour, or that the frame rate held. **Only somebody holding the tablet can say any of that,
 and this part is where they say it.**
@@ -1539,8 +1541,15 @@ and this part is where they say it.**
 | Q5 | Press *End ride* | Does the header come back? Then start another ride and leave with the **system Back** gesture instead | 
 | Q6 | ⚠️ **The Ride screen, landscape, trainer paired and control granted.** Start a recording first. Are ***Pause* and *Stop*** visible **without scrolling**, and is *Ride a workout*? ⚠️ By measurement *Pause* / *Stop* are the lowest ride controls on this screen, not the workout — they are what a short WebView loses first. Then **record the WebView's size** — see below. Then start a saved workout, ride 60 s, end it | Did the trainer's resistance change when the workout started? ⚠️ **Did it release when the workout ended?** — this is #372, and Part R2 is how to tell; on the owner's trainer it did not, and that is accepted. Capture `adb logcat` filtered for `BluetoothLe`: there must be **`0x05`** Set Target Power writes this time |
 
-⚠️ **Q6's number, and why one line of output matters.** The browser gate measures the Ride screen at
-1280×800 — the tablet's *display* — and, since #436's review, at **1280×720, which is a guess** at
+⚠️ **Q6's number has been read once, and it changed the gate — #439.** On 2026-09-21 the probe below
+answered **1280 × 800, with safe-area insets top 36 and bottom 32**: the app targets API 36, Android
+enforces edge-to-edge from 35, and the bars are drawn *over* the WebView rather than taken off it.
+`rideview.browser.spec.ts` §`TABLET_IN_THE_SHELL` is now those numbers, applied to the engine; a
+reviewer who remembers it guessing 1280×720 is reading the old file. What is still NOT read: the
+**portrait** insets (the gate reuses the landscape ones and says so) — run the probe upright too and
+add `JSON.stringify(getComputedStyle(document.documentElement).getPropertyValue('--safe-area-inset-top'))`.
+The paragraph that follows is the history. The browser gate used to measure the Ride screen at
+1280×800 — the tablet's *display* — and, after #436's review, at **1280×720, which was a guess** at
 what the WebView is left once the status bar and the navigation bar are taken off. The Android shell
 configures no fullscreen mode, so the two differ, and before that review *Pause* / *Stop* ended at
 y = 737: on screen at 800, **below the fold at 728**. They now end at y = 614, which clears a 720 px
@@ -1553,9 +1562,19 @@ node apps/mobile/tools/webview-probe.mjs \
 ```
 
 Four numbers: the WebView's width and height in CSS pixels, the pixel ratio, and where the first
-ride control actually ends on the device. The second is what lets
-`apps/web/browser/rideview.browser.spec.ts` §`TABLET_IN_THE_SHELL` stop guessing; the fourth against
-the second is the real margin to the fold, which no gate here can take.
+ride control actually ends on the device. The second is what let
+`apps/web/browser/rideview.browser.spec.ts` §`TABLET_IN_THE_SHELL` stop guessing (#439); the fourth
+against the second **less the bottom inset** is the real margin to the fold, which no gate here can
+take.
+
+**#439 — does the ride still scroll?** With a game ride on the stage, landscape and then upright:
+
+```bash
+node apps/mobile/tools/webview-probe.mjs \
+  '[innerHeight, document.documentElement.scrollHeight].join(" ")'
+```
+
+The two numbers must be **equal**. On 2026-09-21, before #439, they were `800 868`.
 
 ### Q — the camera, by eye and by number
 
@@ -1598,6 +1617,10 @@ adb shell dumpsys gfxinfo dev.openzigs.onyourleft | grep -iE "Total frames|Janky
 ***Pause* / *Stop* visible without scrolling on the Ride screen, mid-recording, landscape (Q6)?** ______________
 
 **The WebView, landscape — `innerWidth` × `innerHeight`, pixel ratio, and where the first ride control ends (Q6):** ______________
+
+**#439 — `innerHeight scrollHeight` with a game ride on the stage, landscape / upright (equal = fixed):** ______________ / ______________
+
+**#439 — the safe-area insets upright, `top right bottom left`:** ______________
 
 **⚠️ Workout visible, started, and RELEASED on the Ride screen (Q6)? `0x05` writes seen?** ______________
 

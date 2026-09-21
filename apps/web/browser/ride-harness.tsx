@@ -168,6 +168,8 @@ declare global {
       readonly unstage: () => void;
       /** What Capacitor's Android shell injects. @see theme.css §--oyl-safe-top */
       readonly setSafeArea: (pixels: number) => void;
+      /** #439's control: the shell's old `min-height: 100vh`. @see restoreFullHeightShell */
+      readonly restoreFullHeightShell: () => void;
     };
   }
 }
@@ -358,6 +360,18 @@ function setSafeArea(pixels: number): void {
   }
 }
 
+/**
+ * #439's control — put back the rule the shell had before: one whole viewport
+ * tall, on top of a `body` padded by the insets. With edge-to-edge insets the
+ * document must scroll again by their sum; without that, "the ride does not
+ * scroll" is equally true of a page that rendered no shell at all.
+ */
+function restoreFullHeightShell(): void {
+  const style = document.createElement('style');
+  style.textContent = '.oyl-shell { min-height: 100vh; }';
+  document.head.append(style);
+}
+
 async function run(): Promise<void> {
   const host = document.querySelector('#shell');
   if (host === null) {
@@ -406,10 +420,24 @@ async function run(): Promise<void> {
   // ⚠️ Before anything is measured. @see hud-harness.tsx
   await document.fonts.ready;
 
-  window.__oylRide = { ready: true, errors, measure, unstage, setSafeArea };
+  window.__oylRide = {
+    ready: true,
+    errors,
+    measure,
+    unstage,
+    setSafeArea,
+    restoreFullHeightShell,
+  };
 }
 
 run().catch((error: unknown) => {
   errors.push(error instanceof Error ? error.message : String(error));
-  window.__oylRide = { ready: false, errors, measure, unstage, setSafeArea };
+  window.__oylRide = {
+    ready: false,
+    errors,
+    measure,
+    unstage,
+    setSafeArea,
+    restoreFullHeightShell,
+  };
 });
