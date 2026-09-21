@@ -376,6 +376,33 @@ describe('a workout — #400', () => {
     expect(output.count('setTone')).toBe(0);
   });
 
+  it('moves the volume mid-workout from the slider, independently of the system’s', async () => {
+    chooseSounds();
+    await show(undefined, 150);
+    await press(button('Ride Sweet spot'));
+    await show(riding(), 150);
+    const started = output.calls.find((call) => call.kind === 'startTone');
+    const slider = document.querySelector<HTMLInputElement>('.oyl-sound input[type="range"]');
+    expect(slider?.value).toBe('50');
+    await act(async () => {
+      // React tracks an input's value through the prototype's setter, so a
+      // plain assignment would not register as a change.
+      Reflect.set(HTMLInputElement.prototype, 'value', '10', slider);
+      slider?.dispatchEvent(new Event('input', { bubbles: true }));
+      await Promise.resolve();
+    });
+    // No new power reading: the volume must reach the tone on its own.
+    const moved = output.calls.filter((call) => call.kind === 'setTone').at(-1);
+    expect(moved?.kind).toBe('setTone');
+    const gain = (call: typeof moved): number =>
+      call !== undefined && 'gain' in call ? call.gain : Number.NaN;
+    // Half volume to a tenth: a fifth of the level, same pitch.
+    expect(gain(moved) / gain(started)).toBeCloseTo(0.2);
+    expect(JSON.parse(localStorage.getItem(CUES_STORAGE_KEY) ?? '{}')).toMatchObject({
+      volume: 0.1,
+    });
+  });
+
   it('makes no call at all for a rider who did not turn sounds on', async () => {
     await show(undefined, 150);
     await press(button('Ride Sweet spot'));

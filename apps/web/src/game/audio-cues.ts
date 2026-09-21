@@ -119,6 +119,17 @@ export class RideCues {
     this.#preference = preference;
     if (!this.#audible()) {
       this.#silence();
+      return;
+    }
+    // ⚠️ A new volume reaches a tone that is ALREADY sounding now, not on the
+    // next power reading — a steady rider on target sends the same step for
+    // minutes, and "I moved the slider and nothing happened" is SC 1.4.2
+    // failing in the one case it exists for. Found by `sounds.a11y.test.tsx`.
+    const tone = this.#tone;
+    const gain = TONE_LEVEL * preference.volume;
+    if (tone !== undefined && tone.gain !== gain) {
+      this.#output.setTone(hertz(tone.step), gain);
+      this.#tone = { step: tone.step, gain };
     }
   }
 
