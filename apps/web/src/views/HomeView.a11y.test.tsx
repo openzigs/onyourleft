@@ -170,4 +170,27 @@ describe('the home screen — #428', () => {
     expect(text()).toContain('this app has control');
     expectClean('home, trainer and a leftover ride');
   });
+
+  it('tells a rider with no trainer, and one without control, what to do next', async () => {
+    await openHome([]);
+    expect(text()).toContain('No trainer paired');
+    mounted?.unmount();
+    await openHome([], {
+      ...idleSnapshot(),
+      trainer: { ...idleSnapshot().trainer, paired: true, controllable: true },
+    });
+    expect(text()).toContain('has not been given control');
+  });
+
+  it('says so when there has been no ride this week, and when no ride has a load yet', async () => {
+    const old = ride('old', 30);
+    await openHome([
+      {
+        activity: { ...old.activity, effortWeightedPower: undefined, loadCoveredTime: undefined },
+      },
+    ]);
+    expect(text()).toContain('No rides in the last seven days.');
+    expect(text()).toContain('No ride here has a load yet');
+    expect(text()).toContain('not worked out yet');
+  });
 });
