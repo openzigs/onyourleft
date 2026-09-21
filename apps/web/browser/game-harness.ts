@@ -80,16 +80,18 @@ import {
   RIDER_SHADOW_MAP_RUNG,
   type QualitySettings,
 } from '../src/game/quality';
-import { hillRoute, valleyRoute } from '../src/game/route-fixtures-testing';
+import { hillRoute, northRoute, valleyRoute } from '../src/game/route-fixtures-testing';
+import { structuresAt } from '../src/game/settlements';
 import { waterways } from '../src/game/waterways';
 import { VERGE_DROP_METRES } from '../src/game/landform';
 import { loadSceneryModels, threeGameRenderer } from '../src/game/three-renderer';
 import {
   scatterSeed,
-  SCATTER_KINDS,
+  STRUCTURE_KINDS,
+  SCENERY_KINDS,
   SCATTER_VARIANT_SLOTS,
   type ScatterItem,
-  type ScatterKind,
+  type SceneryKind,
 } from '../src/game/scatter';
 import { atStartLine } from '../src/game/simulation';
 
@@ -131,6 +133,21 @@ interface WaterMeasurement {
   /** Milliseconds a frame of the valley, water shaded and flat. */
   readonly shadedMs: number;
   readonly flatMs: number;
+}
+
+/** What {@link settlementProbe} publishes — #460. */
+interface SettlementMeasurement {
+  /** How many structures the village frame carries, and of how many kinds. */
+  readonly structures: number;
+  readonly kinds: number;
+  /** Pixels the structures change, against the same frame without them. */
+  readonly pixels: number;
+  /** Draw calls with the structures, and without. */
+  readonly drawCalls: number;
+  readonly drawCallsBare: number;
+  /** Milliseconds a frame, with the structures and without. */
+  readonly withMs: number;
+  readonly withoutMs: number;
 }
 
 /** What {@link shadowMapProbe} publishes. */
@@ -543,6 +560,8 @@ declare global {
        * #459 — the stream under the bridge, and the deck above it. @see waterProbe
        */
       readonly water: WaterMeasurement;
+      /** #460 — a village and its fields, drawn and timed. @see settlementProbe */
+      readonly settlement: SettlementMeasurement;
       /**
        * Pixels the bot's own cranks move over half a development — #368.
        *
@@ -928,19 +947,19 @@ function sceneryIndicesByKind(frame: SceneFrame): Record<string, number> {
   countingIndices((indices) => {
     const view = threeGameRenderer.create(canvas, qualitySettings(0));
     view.resize(600, 400);
-    const only = (kind: ScatterKind | null): SceneFrame => ({
+    const only = (kind: SceneryKind | null): SceneFrame => ({
       ...frame,
       markers: [],
       scatter: kind === null ? [] : frame.scatter.filter((item) => item.kind === kind),
     });
-    const drawnBy = (kind: ScatterKind | null): number => {
+    const drawnBy = (kind: SceneryKind | null): number => {
       view.render(only(kind));
       const before = indices();
       view.render(only(kind));
       return indices() - before;
     };
     const road = drawnBy(null);
-    for (const kind of SCATTER_KINDS) {
+    for (const kind of SCENERY_KINDS) {
       counts[kind] = drawnBy(kind) - road;
     }
     view.destroy();
@@ -958,7 +977,7 @@ function sceneryIndicesByKind(frame: SceneFrame): Record<string, number> {
  */
 function placedAhead(
   pose: CameraPose,
-  kind: ScatterKind,
+  kind: SceneryKind,
   variant: number,
   along: number,
   across: number,
@@ -1085,7 +1104,7 @@ function variantIndicesByKind(frame: SceneFrame): Record<string, readonly number
   countingIndices((indices) => {
     const view = threeGameRenderer.create(canvas, qualitySettings(0));
     view.resize(600, 400);
-    const only = (kind: ScatterKind | null, variant: number): SceneFrame => ({
+    const only = (kind: SceneryKind | null, variant: number): SceneFrame => ({
       ...frame,
       markers: [],
       scatter:
@@ -1093,14 +1112,14 @@ function variantIndicesByKind(frame: SceneFrame): Record<string, readonly number
           ? []
           : frame.scatter.filter((item) => item.kind === kind && item.variant === variant),
     });
-    const drawnBy = (kind: ScatterKind | null, variant: number): number => {
+    const drawnBy = (kind: SceneryKind | null, variant: number): number => {
       view.render(only(kind, variant));
       const before = indices();
       view.render(only(kind, variant));
       return indices() - before;
     };
     const road = drawnBy(null, 0);
-    for (const kind of SCATTER_KINDS) {
+    for (const kind of SCENERY_KINDS) {
       counts[kind] = Array.from(
         { length: SCATTER_VARIANT_SLOTS },
         (_, slot) => drawnBy(kind, slot) - road,
@@ -1409,6 +1428,102 @@ function waterProbe(): WaterMeasurement {
   return measured;
 }
 
+/**
+ * #460: a village and its walled fields, on level farmland, 60 m short of the
+ * first house. The structures are drawn — the pixels they change against the
+ * same frame without them — and the frame is timed both ways, which is the
+ * browser's half of "frame time with the new kinds on"; the phone's is
+ * validation 0002 Part X.
+ */
+function settlementProbe(): SettlementMeasurement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 600;
+  canvas.height = 400;
+  const profile = northRouteForHarness();
+  const origin = corridorOrigin(profile);
+  const seed = scatterSeed(profile);
+  const firstHouse = structuresAt(profile, origin, seed, 0, profile.totalDistance, {
+    maxItems: 100_000,
+    riderMetres: 0,
+  }).find((item) => item.kind === 'building');
+  const start = atStartLine(profile);
+  const frame = sceneFrame({
+    profile,
+    origin,
+    state: {
+      ...start,
+      ride: { ...start.ride, distance: metres(Math.max(0, (firstHouse?.z ?? 500) - 60)) },
+    },
+  });
+  const structural = new Set<string>(STRUCTURE_KINDS);
+  const bare: SceneFrame = {
+    ...frame,
+    scatter: frame.scatter.filter((item) => !structural.has(item.kind)),
+  };
+  const built = frame.scatter.filter((item) => structural.has(item.kind));
+  let measured: SettlementMeasurement = {
+    structures: built.length,
+    kinds: new Set(built.map((item) => item.kind)).size,
+    pixels: 0,
+    drawCalls: 0,
+    drawCallsBare: 0,
+    withMs: 0,
+    withoutMs: 0,
+  };
+  countingDrawCalls((calls) => {
+    const view = threeGameRenderer.create(canvas, NO_RIDER_SHADOWS);
+    view.resize(600, 400);
+    const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+    if (gl === null) {
+      view.destroy();
+      return;
+    }
+    const drawn = (scene: SceneFrame): readonly [Uint8Array, number] => {
+      view.render(scene);
+      const before = calls();
+      view.render(scene);
+      return [readRegion(gl, 0, 0, canvas.width, canvas.height), calls() - before];
+    };
+    const [present, drawCalls] = drawn(frame);
+    const [absent, drawCallsBare] = drawn(bare);
+    const timed = (scene: SceneFrame): number => {
+      for (let index = 0; index < 5; index += 1) view.render(scene);
+      awaitTheGpu(gl);
+      const started = performance.now();
+      for (let index = 0; index < SHADING_FRAMES; index += 1) view.render(scene);
+      awaitTheGpu(gl);
+      return (performance.now() - started) / SHADING_FRAMES;
+    };
+    const rounds = [timed(frame), timed(bare), timed(bare), timed(frame)];
+    measured = {
+      ...measured,
+      pixels: shadingAcross(present, absent).pixels,
+      drawCalls,
+      drawCallsBare,
+      withMs: ((rounds[0] ?? 0) + (rounds[3] ?? 0)) / 2,
+      withoutMs: ((rounds[1] ?? 0) + (rounds[2] ?? 0)) / 2,
+    };
+    view.destroy();
+  });
+  return measured;
+}
+
+/** Six kilometres of level, low farmland — somewhere a village stands. */
+function northRouteForHarness(): ReturnType<typeof routeProfile> {
+  return northRoute(6_000, () => 40);
+}
+
+/** What {@link settlementProbe} reports when it did not run. */
+const NO_SETTLEMENT: SettlementMeasurement = {
+  structures: 0,
+  kinds: 0,
+  pixels: 0,
+  drawCalls: 0,
+  drawCallsBare: 0,
+  withMs: 0,
+  withoutMs: 0,
+};
+
 /** What {@link waterProbe} reports when it did not run. */
 const NO_WATER: WaterMeasurement = {
   crossings: 0,
@@ -1492,7 +1607,7 @@ function colourProbes(probe: SceneFrame): {
     // mostly fog. Each is moved to 12 m and scaled up, which changes nothing
     // about what colour it is.
     const pose = probe.camera;
-    const closeUp = (kind: ScatterKind): SceneFrame => ({
+    const closeUp = (kind: SceneryKind): SceneFrame => ({
       ...probe,
       markers: [],
       scatter: [{ ...placedAhead(pose, kind, 0, 14, 0), scale: 1.4 }],
@@ -2270,6 +2385,7 @@ async function run(): Promise<void> {
       riderBuriedPixels: 0,
       gradient: NO_GRADIENT,
       water: NO_WATER,
+      settlement: NO_SETTLEMENT,
       botCrankPixels: 0,
       contactShadowPixels: {},
       contactShadowLuminance: {},
@@ -2344,6 +2460,7 @@ async function run(): Promise<void> {
   let riderBuriedPixels = 0;
   let gradient: GradientMeasurement = NO_GRADIENT;
   let water: WaterMeasurement = NO_WATER;
+  let settlement: SettlementMeasurement = NO_SETTLEMENT;
   let botCrankPixels = 0;
   let contactShadowPixels: Record<string, number> = {};
   let contactShadowLuminance: Record<string, readonly [number, number]> = {};
@@ -2393,7 +2510,7 @@ async function run(): Promise<void> {
         const pose = frame.camera;
         probeFrame = {
           ...frame,
-          scatter: SCATTER_KINDS.map((kind, at) => placedAhead(pose, kind, 0, 40 + at * 15, 8)),
+          scatter: SCENERY_KINDS.map((kind, at) => placedAhead(pose, kind, 0, 40 + at * 15, 8)),
         };
         // ⚠️ **A second probe, for #367, and it is a different shape of
         // frame.** The one above carries exactly one item of each kind, which
@@ -2405,7 +2522,7 @@ async function run(): Promise<void> {
         variantFrame = {
           ...frame,
           markers: [],
-          scatter: SCATTER_KINDS.flatMap((kind, at) =>
+          scatter: SCENERY_KINDS.flatMap((kind, at) =>
             Array.from({ length: SCATTER_VARIANT_SLOTS }, (_, slot) =>
               placedAhead(pose, kind, slot, 40 + at * 15, 8 + slot * 4),
             ),
@@ -2850,6 +2967,8 @@ async function run(): Promise<void> {
     gradient = gradientProbe();
     // #459. @see waterProbe
     water = waterProbe();
+    // #460. @see settlementProbe
+    settlement = settlementProbe();
     // #424, on canvases of their own — @see riderExtent. 16 : 9 is the
     // criterion's own frame; 10 : 16 is a tablet held upright.
     riderFrame = { landscape: riderExtent(640, 360), portrait: riderExtent(400, 640) };
@@ -2923,6 +3042,7 @@ async function run(): Promise<void> {
     riderBuriedPixels,
     gradient,
     water,
+    settlement,
     botCrankPixels,
     contactShadowPixels,
     contactShadowLuminance,

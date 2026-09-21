@@ -219,11 +219,12 @@ import { atlasColourAt, tonedForTheSun, type AtlasImage, type LinearRgb } from '
 import type { CameraPose, GameRenderer, GameView, RiderMarker, SceneFrame } from './port';
 import {
   SCATTER_BAND_METRES,
-  SCATTER_KINDS,
+  SCENERY_KINDS,
   SCATTER_MAX_ITEMS,
   SCATTER_VERGE_METRES,
+  type SceneryKind,
   type ScatterItem,
-  type ScatterKind,
+  type StructureKind,
 } from './scatter';
 import {
   CAMERA_BEHIND_METRES,
@@ -645,7 +646,199 @@ export const SCATTER_INSTANCE_CAPACITY = SCATTER_MAX_ITEMS;
  * primitive on its own origin, so a cone left alone is half buried.
  * {@link prepareSceneryGeometry} puts a model on the same footing.
  */
-const SCATTER_STYLE: Record<ScatterKind, { colour: number; geometry: () => BufferGeometry }> = {
+/** One coloured solid of a shape built from several — #460. */
+interface ShapePart {
+  readonly colour: number;
+  readonly geometry: () => BufferGeometry;
+}
+
+/**
+ * How a kind is drawn when no model stands in for it: one solid in one colour,
+ * or — since #460 — several solids in several colours merged into one shape.
+ */
+interface SceneryStyle {
+  /** The kind's main colour: its only one, or its walls'. */
+  readonly colour: number;
+  /** The whole shape, uncoloured: what a model is sized against. */
+  readonly geometry: () => BufferGeometry;
+  /** The coloured solids the shape is made of, where it is more than one. */
+  readonly parts?: readonly ShapePart[];
+}
+
+/**
+ * How deep a built shape reaches below the ground it stands on, in metres:
+ * **0.6** — a plinth, so a house on a gentle slope is set into it rather than
+ * floating off its downhill corner. The ground under a building is never
+ * steeper than `settlements.ts` allows.
+ */
+const FOUNDATION_METRES = 0.6;
+
+/** A box with its base at `bottom` and centred on `(x, z)`. */
+function block(
+  width: number,
+  height: number,
+  depth: number,
+  x = 0,
+  bottom = 0,
+  z = 0,
+): BufferGeometry {
+  return new BoxGeometry(width, height, depth).translate(x, bottom + height / 2, z);
+}
+
+/**
+ * A pitched roof: a triangular prism `length` along x, `span` across z and
+ * `rise` high, its eaves at `eaves`. Built by hand rather than from three's own
+ * classes because none of them is a prism; non-indexed, so its faces are flat.
+ */
+function gable(length: number, span: number, rise: number, eaves: number): BufferGeometry {
+  const x = length / 2;
+  const z = span / 2;
+  const top = eaves + rise;
+  const corners = {
+    a: [-x, eaves, z],
+    b: [x, eaves, z],
+    c: [x, eaves, -z],
+    d: [-x, eaves, -z],
+    e: [-x, top, 0],
+    f: [x, top, 0],
+  } as const;
+  const faces: (readonly (keyof typeof corners)[])[] = [
+    ['a', 'b', 'f'],
+    ['a', 'f', 'e'],
+    ['c', 'd', 'e'],
+    ['c', 'e', 'f'],
+    ['a', 'e', 'd'],
+    ['b', 'c', 'f'],
+  ];
+  const positions: number[] = [];
+  for (const face of faces) {
+    for (const corner of face) {
+      positions.push(...corners[corner]);
+    }
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/**
+ * The buildings, the field boundaries and the signpost #460 adds, each built
+ * from numbers typed here — nothing is downloaded and nothing traced, ADR 0009.
+ *
+ * ⚠️ **Every building's front is +z and its long side along x**, because
+ * `settlements.ts` turns +z to face the road: a barn or a row of shops lies
+ * along the road and a church puts its tower towards it. Every field boundary
+ * runs along +z, because a run is turned to follow the road or to leave it.
+ * ⚠️ And every one of them is set {@link FOUNDATION_METRES} into the ground.
+ */
+const STRUCTURE_STYLE = {
+  barn: [
+    {
+      colour: 0x8a3b2e,
+      geometry: () => block(14, 4.5 + FOUNDATION_METRES, 8, 0, -FOUNDATION_METRES),
+    },
+    { colour: 0x4a4038, geometry: () => gable(14.6, 8.6, 3.2, 4.5) },
+  ],
+  church: [
+    {
+      colour: 0xb8b2a4,
+      geometry: () => block(7, 6 + FOUNDATION_METRES, 14, 0, -FOUNDATION_METRES, -2),
+    },
+    {
+      colour: 0x55595e,
+      geometry: () =>
+        gable(14.6, 7.6, 3.8, 6)
+          .rotateY(Math.PI / 2)
+          .translate(0, 0, -2),
+    },
+    {
+      colour: 0xa9a394,
+      geometry: () => block(4, 13 + FOUNDATION_METRES, 4, 0, -FOUNDATION_METRES, 6.5),
+    },
+    {
+      colour: 0x4b4f54,
+      geometry: () => new ConeGeometry(3, 6, 4).rotateY(Math.PI / 4).translate(0, 13 + 3, 6.5),
+    },
+  ],
+  'shop-row': [
+    {
+      colour: 0xb58a68,
+      geometry: () => block(20, 7 + FOUNDATION_METRES, 7, 0, -FOUNDATION_METRES),
+    },
+    { colour: 0x4e4238, geometry: () => block(20.2, 2.8, 7.3, 0, 0) },
+    { colour: 0x6b6b6b, geometry: () => block(20.4, 0.5, 7.4, 0, 7) },
+  ],
+  shed: [
+    {
+      colour: 0x8c9296,
+      geometry: () => block(10, 3.2 + FOUNDATION_METRES, 8, 0, -FOUNDATION_METRES),
+    },
+    {
+      colour: 0x6f7478,
+      geometry: () => new BoxGeometry(10.4, 0.3, 8.8).rotateX(0.12).translate(0, 3.55, 0),
+    },
+  ],
+  wall: [{ colour: 0x9b9486, geometry: () => block(0.55, 1.1 + 0.5, 8, 0, -0.5) }],
+  hedge: [{ colour: 0x3e5e2e, geometry: () => block(1.1, 1.7 + 0.5, 8, 0, -0.5) }],
+  fence: [
+    {
+      colour: 0x8a6f4f,
+      geometry: () =>
+        merged([
+          ...[-4, -2, 0, 2, 4].map((z) => block(0.12, 1.3 + 0.4, 0.12, 0, -0.4, z)),
+          block(0.06, 0.1, 8, 0, 0.5),
+          block(0.06, 0.1, 8, 0, 0.95),
+        ]),
+    },
+  ],
+  signpost: [
+    {
+      colour: 0x5a5a5a,
+      geometry: () => new CylinderGeometry(0.06, 0.06, 3, 6).translate(0, 1.1, 0),
+    },
+    {
+      colour: 0xe0dccf,
+      geometry: () =>
+        merged([block(0.05, 0.28, 1, 0, 2.15, 0.45), block(0.05, 0.28, 1, 0, 1.8, -0.45)]),
+    },
+  ],
+} as const satisfies Record<StructureKindWithoutModels, readonly ShapePart[]>;
+
+/** The structures #460 draws only from numbers — every one but `building`. */
+type StructureKindWithoutModels = Exclude<StructureKind, 'building'>;
+
+/** Several solids as one geometry: position and normal only, flat-shaded. */
+function merged(parts: readonly BufferGeometry[]): BufferGeometry {
+  const flat = parts.map((part) => {
+    const each = part.index === null ? part : part.toNonIndexed();
+    for (const name of Object.keys(each.attributes)) {
+      if (name !== 'position' && name !== 'normal') {
+        each.deleteAttribute(name);
+      }
+    }
+    return each;
+  });
+  const joined = mergeGeometries(flat);
+  for (const part of new Set([...parts, ...flat])) {
+    part.dispose();
+  }
+  if (joined === null) {
+    throw new Error('a built shape could not be merged into one geometry');
+  }
+  return joined;
+}
+
+/** A style from coloured parts: its first part's colour, all of its solids. */
+function builtStyle(parts: readonly ShapePart[]): SceneryStyle {
+  return {
+    colour: (parts[0] as ShapePart).colour,
+    geometry: () => merged(parts.map((part) => part.geometry())),
+    parts,
+  };
+}
+
+const SCATTER_STYLE: Record<SceneryKind, SceneryStyle> = {
   'tree-broadleaf': {
     colour: 0x3f6b33,
     // A canopy, coarse on purpose: at the distances fog leaves visible, a
@@ -672,6 +865,15 @@ const SCATTER_STYLE: Record<ScatterKind, { colour: number; geometry: () => Buffe
     colour: 0xa8968a,
     geometry: () => new BoxGeometry(7, 6, 9).translate(0, 3, 0),
   },
+  // #460. Built from numbers — `STRUCTURE_STYLE` says how, and why they face +z.
+  barn: builtStyle(STRUCTURE_STYLE.barn),
+  church: builtStyle(STRUCTURE_STYLE.church),
+  'shop-row': builtStyle(STRUCTURE_STYLE['shop-row']),
+  shed: builtStyle(STRUCTURE_STYLE.shed),
+  wall: builtStyle(STRUCTURE_STYLE.wall),
+  hedge: builtStyle(STRUCTURE_STYLE.hedge),
+  fence: builtStyle(STRUCTURE_STYLE.fence),
+  signpost: builtStyle(STRUCTURE_STYLE.signpost),
 };
 
 /**
@@ -690,7 +892,7 @@ const SCATTER_STYLE: Record<ScatterKind, { colour: number; geometry: () => Buffe
  * 5.5 m wide. Matching the largest extent makes the model occupy the box the
  * solid occupied, whichever way round it is.
  */
-export function sceneryFitMetres(kind: ScatterKind): number {
+export function sceneryFitMetres(kind: SceneryKind): number {
   const solid = SCATTER_STYLE[kind].geometry();
   solid.computeBoundingBox();
   const size = solid.boundingBox?.getSize(new Vector3()) ?? new Vector3(1, 1, 1);
@@ -770,7 +972,7 @@ export function sceneryFitMetres(kind: ScatterKind): number {
  */
 export function prepareSceneryGeometry(
   source: Object3D,
-  kind: ScatterKind,
+  kind: SceneryKind,
   readImage: (image: unknown) => AtlasImage | undefined = readImagePixels,
 ): BufferGeometry {
   source.updateWorldMatrix(false, true);
@@ -972,7 +1174,7 @@ function readImagePixels(image: unknown): AtlasImage | undefined {
  * — `three-renderer.test.ts` §"the shapes the models bring" — and the browser
  * gate counts the vertices that actually reached a driver.
  */
-let sceneryGeometries: ReadonlyMap<ScatterKind, readonly BufferGeometry[]> = new Map();
+let sceneryGeometries: ReadonlyMap<SceneryKind, readonly BufferGeometry[]> = new Map();
 
 /** Reads one model's scene out of its file. Replaced in tests; @see loadSceneryModels. */
 async function readModelScene(url: string): Promise<Object3D> {
@@ -1005,9 +1207,9 @@ export async function loadSceneryModels(
   load: (url: string) => Promise<Object3D> = readModelScene,
   readImage: (image: unknown) => AtlasImage | undefined = readImagePixels,
 ): Promise<void> {
-  const loaded = new Map<ScatterKind, readonly BufferGeometry[]>();
+  const loaded = new Map<SceneryKind, readonly BufferGeometry[]>();
   await Promise.all(
-    SCATTER_KINDS.map(async (kind) => {
+    SCENERY_KINDS.map(async (kind) => {
       const models: readonly SceneryModel[] = SCENERY_MODELS[kind] ?? [];
       // ⚠️ **Bounded here as well as asserted in `scenery-models.test.ts`.**
       // The test is what fails a pull request that adds a fourth shape without
@@ -1084,6 +1286,16 @@ function releaseLoadedScene(source: Object3D): void {
 export const BRIDGE_COLOUR = 0x8f8a80;
 
 /**
+ * Every colour a kind is drawn in when no model stands in for it: its own, and
+ * — since #460 — each part of a built shape's. {@link LIT_COLOURS} is built
+ * from it, and `three-renderer.test.ts` holds the list to it.
+ */
+export function sceneryColours(kind: SceneryKind): readonly number[] {
+  const style = SCATTER_STYLE[kind];
+  return [style.colour, ...(style.parts ?? []).map((part) => part.colour)];
+}
+
+/**
  * Every colour **this file** decides that a lit material carries — #286.
  *
  * ⚠️ **It is no longer the whole of the scene's palette, and that sentence used
@@ -1113,7 +1325,8 @@ export const BRIDGE_COLOUR = 0x8f8a80;
  * client reads it, because every material already holds its own colour.
  */
 export const LIT_COLOURS: readonly number[] = [
-  ...SCATTER_KINDS.map((kind) => SCATTER_STYLE[kind].colour),
+  // Every colour of every kind, the built shapes' parts included (#460), once.
+  ...new Set(SCENERY_KINDS.flatMap(sceneryColours)),
   // #368. The bot's and the ghost's, which are **tints** on the rider's own
   // palette rather than colours of their own since they became bicycles. Each
   // is a conservative bound on what it produces: a tint multiplies, and both
@@ -1349,7 +1562,7 @@ const SHADOW_SUN_DISTANCE_METRES = 20;
  * and a map of maps would need a guard at each level for a lookup that can only
  * miss in one way.
  */
-function beltKey(kind: ScatterKind, variant: number): string {
+function beltKey(kind: SceneryKind, variant: number): string {
   return `${kind}:${String(variant)}`;
 }
 
@@ -1369,9 +1582,27 @@ function beltKey(kind: ScatterKind, variant: number): string {
  * `Color` and is converted from sRGB. A model's own factor does **not** take
  * that path, because it is linear already — `scenery-palette.ts` §`LinearRgb`.
  */
-function paintedPrimitive(kind: ScatterKind): BufferGeometry {
-  const geometry = SCATTER_STYLE[kind].geometry();
-  paintEveryVertex(geometry, SCATTER_STYLE[kind].colour);
+function paintedPrimitive(kind: SceneryKind): BufferGeometry {
+  const style = SCATTER_STYLE[kind];
+  if (style.parts !== undefined) {
+    // #460: each part painted in its own colour, then merged — one geometry,
+    // so still one mesh and one draw call however many colours it has.
+    const painted = style.parts.map((part) => {
+      const geometry = merged([part.geometry()]);
+      paintEveryVertex(geometry, part.colour);
+      return geometry;
+    });
+    const joined = mergeGeometries(painted);
+    for (const each of painted) {
+      each.dispose();
+    }
+    if (joined === null) {
+      throw new Error(`${kind}: its parts could not be merged into one geometry`);
+    }
+    return joined;
+  }
+  const geometry = style.geometry();
+  paintEveryVertex(geometry, style.colour);
   return geometry;
 }
 
@@ -1385,7 +1616,7 @@ export class ScatterBelt {
    */
   readonly #meshes = new Map<string, InstancedMesh>();
   /** Which variants each kind actually has a shape for, in order. */
-  readonly #shapes = new Map<ScatterKind, number>();
+  readonly #shapes = new Map<SceneryKind, number>();
   /**
    * The belt's lit material and its unlit twin, built once — #286, #366.
    *
@@ -1448,8 +1679,8 @@ export class ScatterBelt {
    * primitive, which is `post` always and any other kind whose files could not
    * be read.
    */
-  constructor(models: ReadonlyMap<ScatterKind, readonly BufferGeometry[]> = sceneryGeometries) {
-    for (const kind of SCATTER_KINDS) {
+  constructor(models: ReadonlyMap<SceneryKind, readonly BufferGeometry[]> = sceneryGeometries) {
+    for (const kind of SCENERY_KINDS) {
       const shapes = models.get(kind) ?? [];
       this.#shapes.set(kind, Math.max(1, Math.min(MAXIMUM_SCENERY_VARIANTS, shapes.length)));
       for (let variant = 0; variant < (this.#shapes.get(kind) ?? 1); variant += 1) {
@@ -1503,7 +1734,7 @@ export class ScatterBelt {
   }
 
   /** Every mesh one kind is drawn across. @see ScatterBelt.meshes */
-  meshesOf(kind: ScatterKind): readonly InstancedMesh[] {
+  meshesOf(kind: SceneryKind): readonly InstancedMesh[] {
     const found: InstancedMesh[] = [];
     for (let variant = 0; variant < (this.#shapes.get(kind) ?? 0); variant += 1) {
       const mesh = this.#meshes.get(beltKey(kind, variant));
@@ -3025,7 +3256,9 @@ class ThreeGameView implements GameView {
     // #245. Applied here rather than read in `render`, so that the rung is a
     // property of the belt between frames and the render loop takes no scenery
     // decision at all. @see ScatterBelt.setBudget
-    this.#scatter.setBudget(settings.scatterItems);
+    // ⚠️ Since #460 the frame carries the structures before the scenery, each
+    // with a budget of its own, so the belt's is the two together.
+    this.#scatter.setBudget(settings.scatterItems + settings.structureItems);
     // #367, and the same argument one line up: a rung is a property of the belt
     // between frames, so the render loop takes no decision about how many
     // distinct shapes it may draw. @see ScatterBelt.setVariants

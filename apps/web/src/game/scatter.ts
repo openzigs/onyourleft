@@ -94,15 +94,35 @@ import { treeLineMetres } from './world';
  * twice; a caller handed a kind leaves the renderer responsible for telling a
  * conifer from a rock, which is where that responsibility belongs.
  */
-export type ScatterKind =
-  'tree-broadleaf' | 'tree-conifer' | 'shrub' | 'rock' | 'post' | 'building';
+export type ScatterKind = 'tree-broadleaf' | 'tree-conifer' | 'shrub' | 'rock' | 'post';
 
 /**
- * Every kind, in a fixed order.
+ * What stands beside the road because somebody BUILT it there — #460.
+ *
+ * ⚠️ **`building` used to be a {@link ScatterKind}, and a reviewer who
+ * remembers six scatter kinds is reading the old file.** It was scattered by
+ * the same field as the trees, so a house stood anywhere a tree could: alone,
+ * at any angle, at any distance from the road. #460 moved it here, where
+ * `settlements.ts` places it in villages and farmsteads, facing the road at one
+ * setback, beside four more kinds of building and the walls, hedges and fences
+ * that divide the fields.
+ */
+export type StructureKind =
+  'building' | 'barn' | 'church' | 'shop-row' | 'shed' | 'wall' | 'hedge' | 'fence' | 'signpost';
+
+/** Everything a frame's scenery can be. */
+export type SceneryKind = ScatterKind | StructureKind;
+
+/**
+ * Every kind THIS file places, in a fixed order.
  *
  * The order is load-bearing: {@link pickKind} walks it to turn one uniform
  * number into a kind, so reordering it changes every world. It is also what
  * `scatter.test.ts` iterates to assert that no member is dead code.
+ *
+ * ⚠️ **Five since #460**: `building` went to {@link STRUCTURE_KINDS}. It was
+ * last, and carried no weight anywhere but a level valley floor, so the other
+ * five kinds are picked exactly as before everywhere else.
  */
 export const SCATTER_KINDS: readonly ScatterKind[] = [
   'tree-broadleaf',
@@ -110,8 +130,23 @@ export const SCATTER_KINDS: readonly ScatterKind[] = [
   'shrub',
   'rock',
   'post',
-  'building',
 ];
+
+/** Every kind `settlements.ts` places — #460. */
+export const STRUCTURE_KINDS: readonly StructureKind[] = [
+  'building',
+  'barn',
+  'church',
+  'shop-row',
+  'shed',
+  'wall',
+  'hedge',
+  'fence',
+  'signpost',
+];
+
+/** Every kind the renderer draws: the scattered ones and the built ones. */
+export const SCENERY_KINDS: readonly SceneryKind[] = [...SCATTER_KINDS, ...STRUCTURE_KINDS];
 
 /**
  * How many distinct shapes one kind's items are spread across: **6**.
@@ -132,7 +167,7 @@ export const SCATTER_VARIANT_SLOTS = 6;
 
 /** One thing standing beside the road. */
 export interface ScatterItem {
-  readonly kind: ScatterKind;
+  readonly kind: SceneryKind;
   /** Local metres, the same frame `terrain.ts` builds the corridor in. */
   readonly x: number;
   readonly y: number;
@@ -654,7 +689,11 @@ export const AMBIGUOUS_CHORD_SHARE =
  */
 export const DEGENERATE_TANGENT_METRES = 1e-6;
 
-/** How far up the local tree line people still build: a fifth of the way. */
+/**
+ * How far up the local tree line people still build: a fifth of the way.
+ * Read by `settlements.ts` since #460, which places every building; it stays
+ * here beside the tree line it is a share of.
+ */
 export const SETTLEMENT_TREE_LINE_FRACTION = 0.2;
 
 /** The gradient above which nobody builds beside the road, in percent. */
@@ -719,9 +758,6 @@ const WEIGHT_SHRUB_ABOVE_THE_TREES = 2;
 
 /** How much of a place a tight bend's posts take, at full curvature. */
 const WEIGHT_POST_AT_A_TIGHT_BEND = 4;
-
-/** How much of a valley floor is built on. Small: a building is an event. */
-const WEIGHT_BUILDING_ON_THE_VALLEY_FLOOR = 0.6;
 
 /** Every uniform this file draws, one stream each, so none of them correlate. */
 const STREAM_KEEP = 0;
@@ -1320,7 +1356,7 @@ function aboveTheTrees(place: Place): boolean {
  */
 function kindWeights(place: Place): readonly number[] {
   // In SCATTER_KINDS order.
-  const weights = [0, 0, 0, 0, 0, 0];
+  const weights = [0, 0, 0, 0, 0];
 
   if (aboveTheTrees(place)) {
     weights[3] = WEIGHT_ROCK_ABOVE_THE_TREES;
@@ -1337,13 +1373,9 @@ function kindWeights(place: Place): readonly number[] {
     weights[0] = WEIGHT_TREES * (1 - conifer);
     weights[2] = WEIGHT_SHRUB_IN_TREES;
     weights[3] = WEIGHT_ROCK_IN_TREES;
-    if (
-      place.altitude <= place.treeLine * SETTLEMENT_TREE_LINE_FRACTION &&
-      place.steepness < SETTLEMENT_GRADE_PERCENT &&
-      place.curvature < TIGHT_BEND_RADIANS_PER_METRE
-    ) {
-      weights[5] = WEIGHT_BUILDING_ON_THE_VALLEY_FLOOR;
-    }
+    // ⚠️ **No building here since #460.** A valley floor used to take one in
+    // about seventeen of its items, anywhere a tree could stand; buildings are
+    // `settlements.ts`'s now, in villages and farmsteads facing the road.
   }
 
   weights[4] =

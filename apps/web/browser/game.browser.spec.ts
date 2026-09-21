@@ -108,6 +108,15 @@ interface GameHarnessResult {
   readonly riderMeanColour: Readonly<Record<string, Pixel>>;
   readonly riderSilhouettePixels: Readonly<Record<string, number>>;
   readonly riderBuriedPixels: number;
+  readonly settlement: {
+    readonly structures: number;
+    readonly kinds: number;
+    readonly pixels: number;
+    readonly drawCalls: number;
+    readonly drawCallsBare: number;
+    readonly withMs: number;
+    readonly withoutMs: number;
+  };
   readonly water: {
     readonly crossings: number;
     readonly beside: Pixel;
@@ -268,13 +277,24 @@ const RIDER_BOX_TOLERANCE = 0.02;
 const SCENE_DRAW_CALLS = 1 + 1 + 1 + 3 + 1;
 
 /**
- * The most meshes the scenery belt may ever hold: **12**.
+ * The most meshes the scenery belt may ever hold: **20**.
  *
  * | kind | shapes |
  * |---|--:|
  * | `tree-broadleaf`, `tree-conifer`, `shrub`, `rock` | 2 each |
  * | `building` | 3 |
  * | `post`, which ADR 0022 D-3 leaves procedural | 1 |
+ * | `barn`, `church`, `shop-row`, `shed` — #460, built from numbers | 1 each |
+ * | `wall`, `hedge`, `fence`, `signpost` — #460, built from numbers | 1 each |
+ *
+ * ⚠️ **12 → 20 with #460, deliberately, and this is the line that says so.**
+ * Four kinds of building and four of roadside structure, each one shape and
+ * so one mesh and at most one draw call — a village and its walled fields for
+ * eight calls however many houses and walls it has. No model was added: every
+ * one of the eight is built in `three-renderer.ts` §`STRUCTURE_STYLE` from
+ * numbers, so ADR 0022's one-author pack and `MAXIMUM_SCENERY_VARIANTS` are
+ * untouched. What the calls cost on a phone is validation 0002 Part X, and a
+ * frame of a village is timed in §"a village and its fields".
  *
  * ⚠️ **A ceiling rather than the count, and #367's sixth criterion asks for
  * exactly that**: *"a budget that says how many variants may exist at all, so
@@ -286,7 +306,7 @@ const SCENE_DRAW_CALLS = 1 + 1 + 1 + 3 + 1;
  *
  * ⚠️ **It was 6 before #367**, one mesh a kind, which is what #244 spent.
  */
-const SCATTER_MESH_CEILING = 4 * 2 + 3 + 1;
+const SCATTER_MESH_CEILING = 4 * 2 + 3 + 1 + 4 + 4;
 
 /**
  * One load of the harness page, and every request it made on the way.
@@ -760,6 +780,38 @@ test.describe('water under a bridge — #459', () => {
     // phone's GPU. Validation 0002 Part W is the phone.
     expect(water.shadedMs).toBeGreaterThan(0);
     expect(water.flatMs).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * #460 — places, not houses. `game-harness.ts` §`settlementProbe` draws a
+ * village and its fields and times the frame with and without them.
+ */
+test.describe('a village and its fields — #460', () => {
+  test('draws the structures, one call a kind, and publishes what they cost', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { settlement } = await harness(harnessRun);
+    const measured = `${String(settlement.structures)} structures of ${String(settlement.kinds)} kinds cover ${String(settlement.pixels)} px; ${String(settlement.drawCalls)} draw calls against ${String(settlement.drawCallsBare)} without them; a frame ${settlement.withMs.toFixed(2)} ms with them, ${settlement.withoutMs.toFixed(2)} ms without`;
+    testInfo.annotations.push({ type: 'a village and its fields', description: measured });
+    console.log(`a village and its fields — ${measured}`);
+
+    // Non-vacuity: the frame is a village, with more than one kind in it.
+    expect(settlement.structures).toBeGreaterThan(10);
+    expect(settlement.kinds).toBeGreaterThanOrEqual(3);
+    // It reaches the drawing buffer — the named defect shape of this epic is a
+    // list the renderer never draws.
+    expect(settlement.pixels).toBeGreaterThan(500);
+    // One call a mesh at most, however many items: never one per item. A
+    // kind is one mesh, but a house is up to three (#367's variants), so the
+    // bound is the kinds plus the two extra shapes a house can take.
+    expect(settlement.drawCalls - settlement.drawCallsBare).toBeGreaterThan(0);
+    expect(settlement.drawCalls - settlement.drawCallsBare).toBeLessThanOrEqual(
+      settlement.kinds + 2,
+    );
+    expect(settlement.drawCalls - settlement.drawCallsBare).toBeLessThan(settlement.structures);
+    // Published, never bounded — validation 0002 Part X is the phone.
+    expect(settlement.withMs).toBeGreaterThan(0);
   });
 });
 
@@ -1495,8 +1547,9 @@ test.describe('a kind is drawn as several shapes, and it is measured — #367', 
     const result = await harness(harnessRun);
 
     for (const [kind, counts] of Object.entries(result.variantIndices)) {
-      if (kind === 'post') {
-        // ADR 0022 D-3 leaves it a cylinder, so every slot is the same shape.
+      if (!(MODELLED_KINDS as readonly string[]).includes(kind)) {
+        // ADR 0022 D-3 leaves `post` a cylinder, and #460's eight structures
+        // are built from numbers as one shape each: every slot is the same.
         continue;
       }
       const drawn = counts.filter((count) => count > 0);
@@ -1531,8 +1584,9 @@ test.describe('a kind is drawn as several shapes, and it is measured — #367', 
     // step", and the two together are the claim.
     expect(atTwo).toBeLessThan(atThree ?? 0);
     expect(atOne).toBeLessThan(atTwo ?? 0);
-    // One shape a kind is what #244 spent, which is the floor rung's cost.
-    expect(atOne).toBe(6);
+    // One shape a kind is what #244 spent, which is the floor rung's cost —
+    // six then, and fourteen since #460 added eight kinds of one shape each.
+    expect(atOne).toBe(14);
 
     const measured =
       `scenery draw calls at 3, 2 and 1 shapes a kind: ` +

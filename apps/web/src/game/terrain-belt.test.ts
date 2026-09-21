@@ -20,9 +20,10 @@ import {
   terrainCorridor,
 } from './landform';
 import { hillRoute } from './route-fixtures-testing';
+import type { SceneryKind } from './scatter';
 import { scatterSeed } from './scatter';
 import { corridorOrigin, roadCorridor } from './terrain';
-import { BridgeBelt, HorizonRing, TerrainBelt, WaterBelt } from './three-renderer';
+import { BridgeBelt, HorizonRing, ScatterBelt, TerrainBelt, WaterBelt } from './three-renderer';
 import { valleyRoute } from './route-fixtures-testing';
 import { bridgeParts, waterSurface, waterways } from './waterways';
 import { worldStyle } from './world';
@@ -240,5 +241,80 @@ describe('the water and the bridges a view draws — #459', () => {
     expect(matrix.elements[13]).toBeCloseTo(first?.y ?? 0, 4);
     belt.update([]);
     expect(belt.mesh.visible).toBe(false);
+  });
+});
+
+describe('the buildings and the field boundaries a view draws — #460', () => {
+  /** The size of a kind's shape, as the belt holds it, with no model loaded. */
+  const sizeOf = (belt: ScatterBelt, kind: SceneryKind): readonly number[] => {
+    const geometry = belt.meshesOf(kind)[0]?.geometry;
+    geometry?.computeBoundingBox();
+    const box = geometry?.boundingBox;
+    return box === null || box === undefined
+      ? [0, 0, 0]
+      : [box.max.x - box.min.x, box.max.y - box.min.y, box.max.z - box.min.z];
+  };
+
+  it('draws five kinds of building with five different silhouettes', () => {
+    const belt = new ScatterBelt(new Map());
+    const kinds: readonly SceneryKind[] = ['building', 'barn', 'church', 'shop-row', 'shed'];
+    const sizes = kinds.map((kind) => sizeOf(belt, kind));
+    // Every pair differs by more than a metre in at least one dimension — a
+    // silhouette, not a recolour.
+    for (let first = 0; first < kinds.length; first += 1) {
+      for (let second = first + 1; second < kinds.length; second += 1) {
+        const apart = Math.max(
+          ...[0, 1, 2].map((axis) =>
+            Math.abs((sizes[first]?.[axis] ?? 0) - (sizes[second]?.[axis] ?? 0)),
+          ),
+        );
+        expect(apart, `${kinds[first] ?? ''} against ${kinds[second] ?? ''}`).toBeGreaterThan(1);
+      }
+    }
+    // The church is the landmark: the tallest thing in a village.
+    expect(sizeOf(belt, 'church')[1]).toBeGreaterThan(18);
+    belt.dispose();
+  });
+
+  it('paints a built shape in more than one colour, in one mesh', () => {
+    const belt = new ScatterBelt(new Map());
+    for (const kind of ['barn', 'church', 'shop-row', 'shed', 'signpost'] as const) {
+      const meshes = belt.meshesOf(kind);
+      expect(meshes, kind).toHaveLength(1);
+      const colours = meshes[0]?.geometry.getAttribute('color') as unknown as Attribute;
+      const seen = new Set<string>();
+      for (let vertex = 0; vertex < colours.array.length / 3; vertex += 1) {
+        seen.add(
+          [colours.getX(vertex), colours.getY(vertex), colours.getZ(vertex)]
+            .map((channel) => channel.toFixed(3))
+            .join(','),
+        );
+      }
+      expect(seen.size, kind).toBeGreaterThanOrEqual(2);
+    }
+    belt.dispose();
+  });
+
+  it('draws every wall, hedge and fence of a kind in one instanced mesh', () => {
+    const belt = new ScatterBelt(new Map());
+    const pose = { x: 0, y: 0, z: 0, headingX: 0, headingZ: 1, eyeRoadY: 0, targetRoadY: 0 };
+    const items = (['wall', 'hedge', 'fence'] as const).flatMap((kind, at) =>
+      Array.from({ length: 40 }, (_, index) => ({
+        kind,
+        x: -10 - at * 3,
+        y: 0,
+        z: index * 8,
+        rotation: 0,
+        scale: 1,
+        variant: index % 6,
+      })),
+    );
+    belt.update(items, pose);
+    for (const kind of ['wall', 'hedge', 'fence'] as const) {
+      const meshes = belt.meshesOf(kind);
+      expect(meshes, kind).toHaveLength(1);
+      expect(meshes[0]?.count, kind).toBe(40);
+    }
+    belt.dispose();
   });
 });

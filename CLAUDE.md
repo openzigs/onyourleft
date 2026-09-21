@@ -598,6 +598,19 @@ apps/                 AGPL-3.0-or-later, without exception
                         grade a trainer is sent there is the route's — a test
                         rides the gradient session across it. No culverts and
                         no tunnels, and the file says why
+    src/game/settlements.ts
+                        places, not houses (#460) — villages and farmsteads on
+                        level, low, dry stretches of the route, each building
+                        facing the road at one setback; five kinds of building
+                        (a house from the pack, and a barn, a church, a row of
+                        shops and a shed built from numbers in
+                        `three-renderer.ts` §`STRUCTURE_STYLE`); walls, hedges
+                        and fences along the fields; blank signposts. ⚠️
+                        **`building` is not a scatter kind since #460**, and a
+                        reviewer who remembers six `SCATTER_KINDS` is reading
+                        the old file: `StructureKind` and `SCENERY_KINDS` are in
+                        `scatter.ts`, and the frame carries the structures FIRST
+                        on a budget of their own (`QualitySettings.structureItems`)
     src/game/seeded.ts  the hash every seeded, stateless placement draws from —
                         moved out of `scatter.ts` by #458, unchanged to the bit
     src/game/route-fixtures-testing.ts
@@ -3300,6 +3313,8 @@ top of an issue **supersedes its body**.
 | Why the ground is lit and writes depth since #458 (the flat ground plane before it did neither), and why an unset sky is black | `apps/web/src/game/three-renderer.ts` §`TerrainBelt`, §`UNSET_COLOUR`, §`#updateWorld` |
 | How the ground beside the road follows the route's gradient, where its heights come from, and what keeps it out of the carriageway | `apps/web/src/game/landform.ts`, [#458](https://github.com/openzigs/onyourleft/issues/458) |
 | Where a stream or a lake goes, why a bridge's deck is the road, and why there are no tunnels | `apps/web/src/game/waterways.ts`, [#459](https://github.com/openzigs/onyourleft/issues/459) |
+| Where a village or a farmstead stands, which way its buildings face, and what divides the fields | `apps/web/src/game/settlements.ts`, [#460](https://github.com/openzigs/onyourleft/issues/460) |
+| How the grouping of buildings is measured, and against what | `apps/web/src/game/settlements.test.ts` §"clusters them, where the scatter they replaced spread them out" |
 | What the water shader does without a texture or a second pass, and what it costs | `apps/web/src/game/three-renderer.ts` §`WATER_FRAGMENT`, §`WaterBelt`, `apps/web/browser/game-harness.ts` §`waterProbe` |
 | What proves the ground beside a climb stands above the rider and beside a descent below, with the flat quad as the control | `apps/web/browser/game-harness.ts` §`gradientProbe`, `apps/web/browser/game.browser.spec.ts` §"the gradient shows beside the road" |
 | What proves the world reaches the screen rather than only the frame | `apps/web/browser/game-harness.ts`, `apps/web/browser/game.browser.spec.ts` |

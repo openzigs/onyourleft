@@ -71,7 +71,7 @@ import {
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
 import { corridorOrigin } from './terrain';
-import { SCATTER_KINDS, SCATTER_VARIANT_SLOTS, type ScatterItem } from './scatter';
+import { SCATTER_KINDS, SCATTER_VARIANT_SLOTS, STRUCTURE_KINDS, type ScatterItem } from './scatter';
 
 const LATITUDE_DEGREES = 51.5;
 const METRES_PER_DEGREE_LATITUDE = 111_320;
@@ -219,13 +219,25 @@ describe('the arrangement a route produces — #341', () => {
     // `x`, `z`, rotation, scale or variant did: the plan digest below was taken
     // on `main` before #458 and is unmoved by it, which is the evidence this
     // one cannot give about its own change.
-    expect(digest(placed.map(serialise))).toBe('058b273e');
+    //
+    // ⚠️ **And regenerated for #460, which moves the arrangement on purpose** —
+    // `058b273e` before it. A scattered building is gone, a village and its
+    // fields stand in front of the scenery, and the scenery in the village's
+    // gardens is cleared. `settlements.test.ts` asserts what must be true of
+    // the new arrangement — grouped, facing the road, the same every lap —
+    // and none of it names a coordinate.
+    expect(digest(placed.map(serialise))).toBe('e0ca4264');
   });
 
   it('places the same scenery IN PLAN as it did before the terrain — #458', () => {
     // Taken on `main` at 45178a0, before a line of #458 was written. #458
-    // moved every height (the digest above) and this must not move with it.
-    expect(digest(placed.map(serialisePlan))).toBe('3a7a24e4');
+    // moved every height (the digest above) and did not move this.
+    //
+    // ⚠️ **#460 moved it, deliberately, and it was `3a7a24e4` until then** —
+    // the same change the digest above records, seen in plan. Like that one it
+    // is now a record rather than evidence, until the next change that says it
+    // leaves placement alone.
+    expect(digest(placed.map(serialisePlan))).toBe('d6e24a9e');
   });
 
   it('places a world at all, so the digest is not over an empty sweep', () => {
@@ -262,8 +274,24 @@ describe('the arrangement a route produces — #341', () => {
     // both saturate the budget agree on this number and on nothing else, which
     // is why the count of distinct *places* sits beside it — 1 233, 839, 1 120
     // are three different worlds.
-    expect(placed.length).toBe(7680);
-    expect(new Set(placed.map((item) => `${item.x},${item.z}`)).size).toBe(1120);
+    //
+    // ⚠️ **Counted over the natural scenery since #460**, which is the
+    // population the sentences above describe: a frame now carries a village's
+    // buildings and its fields' boundaries in front of the scenery, on a budget
+    // of their own. #460 changed the natural count too, and by a mechanism worth
+    // stating: nothing it did places a tree less often, but a tree that would
+    // stand in a garden is taken out AFTER the budget is spent
+    // (`settlements.ts` §`clearOfBuildings`), so the frames beside the village
+    // carry a little under 240. That is why the distinct places fell from
+    // 1 120 to 1 018: the village's gardens are cleared. The valley floor's
+    // one-in-seventeen scattered buildings did not take their places with
+    // them — the same hash streams pick a tree or a shrub there instead.
+    const natural = placed.filter((item) =>
+      (SCATTER_KINDS as readonly string[]).includes(item.kind),
+    );
+    expect(natural.length).toBe(6946);
+    expect(new Set(natural.map((item) => `${item.x},${item.z}`)).size).toBe(1018);
+    expect(placed.length - natural.length).toBe(1917);
   });
 
   it('changes WHAT stands somewhere and not WHERE — #367', () => {
@@ -293,7 +321,30 @@ describe('the arrangement a route produces — #341', () => {
   it('still uses every kind `scatter.ts` can place', () => {
     // A model swap that dropped a kind would leave a digest that is *different*
     // rather than one that is wrong-looking, and this is what names which.
-    expect([...new Set(placed.map((item) => item.kind))].sort()).toEqual([...SCATTER_KINDS].sort());
+    // ⚠️ Since #460 `building` is not one of them — `settlements.ts` places it —
+    // so the natural kinds are checked here and the built ones below.
+    const natural = placed.filter((item) =>
+      (SCATTER_KINDS as readonly string[]).includes(item.kind),
+    );
+    expect([...new Set(natural.map((item) => item.kind))].sort()).toEqual(
+      [...SCATTER_KINDS].sort(),
+    );
+  });
+
+  it('carries a village and its fields on this fixture — #460', () => {
+    // The fixture's first 500 m are the level valley floor #348 put there for a
+    // building to stand on, and since #460 that is a village: houses, a row of
+    // shops, a church and a signpost at each way in, with its fields walled,
+    // hedged and fenced up the climb. No farmstead falls on the first 1.5 km of
+    // it; `settlements.test.ts` covers the barn and the shed.
+    const built = new Set(
+      placed
+        .filter((item) => (STRUCTURE_KINDS as readonly string[]).includes(item.kind))
+        .map((item) => item.kind),
+    );
+    expect([...built].sort()).toEqual(
+      ['building', 'church', 'fence', 'hedge', 'shop-row', 'signpost', 'wall'].sort(),
+    );
   });
 
   it('places its first, middle and last item exactly where it did', () => {
@@ -307,11 +358,13 @@ describe('the arrangement a route produces — #341', () => {
     // and stands 0.25 m below it now, at the foot of the verge, which is where
     // the flat quad under it always was — so it is the one item whose ground
     // did not actually move.
+    // ⚠️ Since #460 the first item of the sweep is a village's first house,
+    // facing the road, where it was a building the scatter stood at 78 m.
     expect(first === undefined ? '' : serialise(first)).toBe(
-      'building 78.305 -0.250 224.990 0.895 1.142',
+      'building 32.848 -0.280 193.390 2.056 1.000',
     );
     expect(middle === undefined ? '' : serialise(middle)).toBe(
-      'tree-conifer 698.203 18.008 295.920 1.009 0.837',
+      'tree-broadleaf 637.145 15.886 300.906 4.644 1.340',
     );
     expect(last === undefined ? '' : serialise(last)).toBe(
       'tree-conifer 696.706 42.982 -291.975 0.240 1.178',

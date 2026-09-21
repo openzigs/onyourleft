@@ -35,6 +35,7 @@ import {
   type CorridorPoint,
   type RoadCorridor,
 } from './terrain';
+import { STRUCTURE_MAX_ITEMS, clearOfBuildings, structuresAt } from './settlements';
 import { bridgeParts, waterSurface, waterways } from './waterways';
 import { worldStyle } from './world';
 import type { RouteProfile } from '@onyourleft/domain';
@@ -86,6 +87,12 @@ export interface SceneInput {
    * phone doing all the arithmetic and then throwing the answer away.
    */
   readonly scatterItems?: number | undefined;
+  /**
+   * The most structures this frame may carry — the current rung's
+   * `structureItems`, #460. Optional for {@link scatterItems}' reason, and
+   * absent means the target rung.
+   */
+  readonly structureItems?: number | undefined;
   /**
    * How far the rider's cranks have turned, in radians — #349.
    *
@@ -161,10 +168,18 @@ function scatter(
 ): readonly ScatterItem[] {
   const first = corridor.centre[0] as CorridorPoint;
   const last = corridor.centre[corridor.centre.length - 1] as CorridorPoint;
-  return scatterAt(input.profile, input.origin, seed, first.along, last.along, {
+  const natural = scatterAt(input.profile, input.origin, seed, first.along, last.along, {
     maxItems: input.scatterItems ?? SCATTER_MAX_ITEMS,
     riderMetres: riderDistance,
   });
+  // #460. The villages, farmsteads and field boundaries, FIRST — so that a belt
+  // spending its budget in frame order never loses a house to a far tree — and
+  // the natural scenery kept clear of every building.
+  const built = structuresAt(input.profile, input.origin, seed, first.along, last.along, {
+    maxItems: input.structureItems ?? STRUCTURE_MAX_ITEMS,
+    riderMetres: riderDistance,
+  });
+  return [...built, ...clearOfBuildings(natural, built)];
 }
 
 /**

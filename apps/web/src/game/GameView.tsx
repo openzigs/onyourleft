@@ -431,6 +431,11 @@ export function GameView(props: GameViewProps): JSX.Element {
    */
   const scatterItemsRef = useRef<number>(qualitySettings(INITIAL_QUALITY.level).scatterItems);
   /**
+   * The rung's structure budget — #460 — held the way {@link scatterItemsRef}
+   * is and for its reason.
+   */
+  const structureItemsRef = useRef<number>(qualitySettings(INITIAL_QUALITY.level).structureItems);
+  /**
    * How the race against the ghost ended, once it has — #259.
    *
    * ⚠️ **A ref rather than state, and one frame of memory rather than none.**
@@ -849,6 +854,8 @@ export function GameView(props: GameViewProps): JSX.Element {
           // *placing* the scenery it is about to stop drawing. @see
           // scatterItemsRef for why this is not read off `quality` here.
           scatterItems: scatterItemsRef.current,
+          // #460, the same shape for the same reason. @see structureItemsRef
+          structureItems: structureItemsRef.current,
           // #349: how far the cranks have turned. `port.ts`
           // §`RiderMarker.crankAngle` records that an optional field nobody
           // supplies is a hole this repository's gates cannot see, which is
@@ -899,6 +906,7 @@ export function GameView(props: GameViewProps): JSX.Element {
     // the instances and `sceneFrame` stops placing them — #245, and
     // `ScatterBelt.setBudget` says why neither alone is the whole of it.
     scatterItemsRef.current = settings.scatterItems;
+    structureItemsRef.current = settings.structureItems;
     viewRef.current?.setQuality(settings);
   }, [quality.level]);
 

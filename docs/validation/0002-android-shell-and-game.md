@@ -2008,6 +2008,54 @@ and none when neither is.
 
 ---
 
+## Part X — villages, farmsteads, and fields with walls ([#460](https://github.com/openzigs/onyourleft/issues/460))
+
+Until #460 every building was one scatter kind, placed wherever a tree could stand: alone, at any
+angle, anywhere in the band. Since #460 buildings stand in **places** (`apps/web/src/game/settlements.ts`):
+on level, low, dry stretches of the route a seeded field puts a **village** — a street of houses at
+one setback, all facing the road, a **row of shops** at its middle, a **church** at one end and a
+**signpost** at each way in — or a **farmstead**: a farmhouse, a **barn** and a **shed** grouped on
+one side. Fields beside the road are **walled** on higher or steeper ground and **hedged** or
+**fenced** on the low flat land, along the verge and out from the road. ⚠️ **Signposts carry no
+words** — no real name, brand or signage. Everything new is built from numbers in
+`three-renderer.ts` §`STRUCTURE_STYLE`; no model was added.
+
+⚠️ **What the pinned Chromium measured.** The scenery belt's ceiling is **20** meshes where it was 12
+(eight new kinds of one shape each), so the scenery can spend up to 20 draw calls; a village frame
+drew **21 calls against 14** without its structures, and timed **4.48 ms against 3.04 ms** — on a
+software rasteriser, which is not a phone. On the quality ladder the structures have their own
+budget, 240 → 120 → 60 → 40: houses are kept and the far field boundaries go first.
+
+| Step | What to do | What to record |
+|---|---|---|
+| X1 | Ride a **real route with a long level stretch low down** — a valley road | Villages and farmsteads, rather than houses one at a time? Do the houses face the road? Is the church a landmark you can see coming? |
+| X2 | Look at the five kinds of building as you pass | Can you tell a house, a barn, a church, a row of shops and a shed apart by their shape? |
+| X3 | Look along the fields | Walls, hedges or fences along the verge and out from the road; walls on the higher ground |
+| X4 | The signposts at a village's ends | A blank board: no words, no name |
+| X5 | 12 s of riding through a village with its fields in view, target rung, the `dumpsys` block from Part T | Frame times with the new kinds on |
+| X6 | Ride through the same village on lap two of a loop | The same houses in the same places |
+
+### X results
+
+| | X5 |
+|---|--:|
+| Total frames rendered | |
+| Janky frames (legacy, > 16 ms) | |
+| Frame time 50th / 90th | |
+| **GPU time 50th / 90th** | |
+
+**Places rather than houses, facing the road (X1)?** ______________
+
+**Five buildings told apart by shape (X2)?** ______________
+
+**Walls, hedges and fences where described (X3); blank signposts (X4)?** ______________
+
+**The same village on lap two (X6)?** ______________
+
+**Route ridden:** ______________  **Phone (OEM, model, Android):** ______________  **Build:** ______________
+
+---
+
 ## After the session
 
 1. **Fill the tables in this file and commit it.** An empty table in `main` is the honest state; a

@@ -38,6 +38,7 @@ import {
 } from './quality';
 import { TERRAIN_BANDS, TERRAIN_COLUMN_OFFSETS } from './landform';
 import { MAXIMUM_SCENERY_VARIANTS } from './scenery-models';
+import { STRUCTURE_MAX_ITEMS } from './settlements';
 import { SCATTER_MAX_ITEMS } from './scatter';
 
 /** Feeds the same measurement `count` times, as a sustained condition would. */
@@ -422,6 +423,22 @@ describe('the water shader is a rung on the ladder — #459', () => {
     for (let level = firstFlat; level < QUALITY_LADDER.length; level += 1) {
       expect(QUALITY_LADDER[level]?.water).toBe('flat');
     }
+  });
+});
+
+describe('the structures are a rung on the ladder — #460', () => {
+  it('carries every structure at the target, fewer down the ladder, and never none', () => {
+    expect(qualitySettings(0).structureItems).toBe(STRUCTURE_MAX_ITEMS);
+    const built = QUALITY_LADDER.map((rung) => rung.structureItems);
+    const items = QUALITY_LADDER.map((rung) => rung.scatterItems);
+    const firstDrop = (values: readonly number[]) =>
+      values.findIndex((value, at) => at > 0 && value < (values[at - 1] ?? value));
+    // With the scenery, on its argument: the far end of the view goes first.
+    expect(firstDrop(built)).toBe(firstDrop(items));
+    for (let level = 1; level < QUALITY_LADDER.length; level += 1) {
+      expect(built[level] ?? 0).toBeLessThanOrEqual(built[level - 1] ?? 0);
+    }
+    expect(Math.min(...built)).toBeGreaterThan(0);
   });
 });
 

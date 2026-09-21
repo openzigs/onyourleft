@@ -40,6 +40,7 @@
 
 import { TERRAIN_BANDS } from './landform';
 import { SCATTER_MAX_ITEMS } from './scatter';
+import { STRUCTURE_MAX_ITEMS } from './settlements';
 import { MAXIMUM_SCENERY_VARIANTS } from './scenery-models';
 
 /** How hard the renderer is working. Lower is cooler. */
@@ -263,6 +264,30 @@ export interface QualitySettings {
    * The rung is chosen, not measured; validation 0002 Part W is the phone.
    */
   readonly water: 'shaded' | 'flat';
+  /**
+   * How many structures a frame may carry — buildings, signposts and field
+   * boundaries, #460.
+   *
+   * ⚠️ **Its own budget rather than a share of {@link scatterItems}**, because
+   * the two are thinned differently: the scenery by a distance-biased rank
+   * (`scatter.ts` §`thin`), the structures by keeping every building and then
+   * the field boundaries nearest the rider (`settlements.ts` §`structuresAt`).
+   * A shared budget would let a forest cost a village its houses.
+   *
+   * It goes on the same rungs as the scenery, for the same reason: what is
+   * taken first is the far end of the view, which the fog has mostly taken
+   * already.
+   *
+   * ## ⚠️ Provenance — BR-1, and not a measurement
+   *
+   * 240 → 120 → 60 → 40: halved at each of the first two steps, faster than
+   * the scenery's own two-thirds, because what a structure budget takes first
+   * is a field's far boundary and a wall 40 m from the road reads as the same
+   * field without it. The houses are never what goes: they lead the list.
+   * Validation 0002 Part X is the frame time on a phone with the new kinds in
+   * view.
+   */
+  readonly structureItems: number;
   /** A human-readable name, for the diagnostic line #91 asks to be recorded. */
   readonly label: string;
 }
@@ -290,6 +315,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     sceneryVariants: MAXIMUM_SCENERY_VARIANTS,
     terrainBands: TERRAIN_BANDS,
     water: 'shaded',
+    structureItems: STRUCTURE_MAX_ITEMS,
     shading: 'lit',
     riderShadows: 'contact',
     label: 'full',
@@ -304,6 +330,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     sceneryVariants: 2,
     terrainBands: 10,
     water: 'flat',
+    structureItems: 120,
     shading: 'lit',
     riderShadows: 'contact',
     label: 'reduced resolution and scenery',
@@ -315,6 +342,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     sceneryVariants: 1,
     terrainBands: 9,
     water: 'flat',
+    structureItems: 60,
     shading: 'lit',
     riderShadows: 'contact',
     label: 'reduced resolution, scenery and frame rate',
@@ -336,6 +364,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     sceneryVariants: 1,
     terrainBands: 8,
     water: 'flat',
+    structureItems: 40,
     shading: 'flat',
     riderShadows: 'contact',
     label: 'minimum',

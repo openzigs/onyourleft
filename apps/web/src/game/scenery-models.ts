@@ -79,7 +79,7 @@
  * and `prepareSceneryGeometry` together enforce.
  */
 
-import type { ScatterKind } from './scatter';
+import type { SceneryKind } from './scatter';
 
 /**
  * The file each kind's shape is read from.
@@ -167,7 +167,7 @@ export const MAXIMUM_SCENERY_VARIANTS = 3;
  * every model to the space its primitive occupied, so a "small" rock and a
  * "large" one are the same rock at this scale and buy nothing.
  */
-export const SCENERY_MODELS: Partial<Record<ScatterKind, readonly SceneryModel[]>> = {
+export const SCENERY_MODELS: Partial<Record<SceneryKind, readonly SceneryModel[]>> = {
   'tree-broadleaf': [
     { name: 'tree_default', url: treeDefaultUrl },
     { name: 'tree_oak', url: oakUrl },
