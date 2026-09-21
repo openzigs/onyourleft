@@ -288,6 +288,29 @@ export interface QualitySettings {
    * view.
    */
   readonly structureItems: number;
+  /**
+   * Whether the road and the ground carry their procedural surface detail —
+   * #425: a grain on the tarmac, a mottle and a patchwork of fields on the
+   * ground, computed in the fragment from where it is.
+   *
+   * ⚠️ **No texture.** #425 asked for tiled textures, and the photographic
+   * ones wait for [#431](https://github.com/openzigs/onyourleft/issues/431);
+   * what ships is the half that needs no asset, drawn by arithmetic in the
+   * shader, so "no texture reaches the GPU" (#366) still holds and ADR 0022 is
+   * not amended.
+   *
+   * ⚠️ **On the target rung only**, which is #425's own criterion: *"a
+   * throttling phone drops textures before it drops frame rate"* — the first
+   * step down takes it, and the first rung that lowers the frame cap is the
+   * one after. Detail is what goes first because nothing a rider needs lives
+   * in it: the gradient is in the road's own colour, which the grain is
+   * bounded against (`terrain.ts` §`ROAD_SURFACE_GRAIN`).
+   *
+   * ## ⚠️ Provenance — BR-1, and not a measurement
+   *
+   * Validation 0002 Part Y measures the frame time on a phone.
+   */
+  readonly surfaceDetail: boolean;
   /** A human-readable name, for the diagnostic line #91 asks to be recorded. */
   readonly label: string;
 }
@@ -316,6 +339,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     terrainBands: TERRAIN_BANDS,
     water: 'shaded',
     structureItems: STRUCTURE_MAX_ITEMS,
+    surfaceDetail: true,
     shading: 'lit',
     riderShadows: 'contact',
     label: 'full',
@@ -331,6 +355,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     terrainBands: 10,
     water: 'flat',
     structureItems: 120,
+    surfaceDetail: false,
     shading: 'lit',
     riderShadows: 'contact',
     label: 'reduced resolution and scenery',
@@ -343,6 +368,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     terrainBands: 9,
     water: 'flat',
     structureItems: 60,
+    surfaceDetail: false,
     shading: 'lit',
     riderShadows: 'contact',
     label: 'reduced resolution, scenery and frame rate',
@@ -365,6 +391,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     terrainBands: 8,
     water: 'flat',
     structureItems: 40,
+    surfaceDetail: false,
     shading: 'flat',
     riderShadows: 'contact',
     label: 'minimum',

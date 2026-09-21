@@ -97,6 +97,23 @@ import { atStartLine } from '../src/game/simulation';
 
 /** What {@link gradientProbe} publishes — #458. */
 interface GradientMeasurement {
+  /**
+   * #425: two sky pixels, straight ahead 25° and 8° above the horizon — and
+   * the same two with the route's haze set to its sky, which is the flat sky
+   * this replaced.
+   */
+  readonly skyHigh: Pixel;
+  readonly skyLow: Pixel;
+  readonly flatSkyHigh: Pixel;
+  readonly flatSkyLow: Pixel;
+  /**
+   * #425: how much the road varies across a patch of carriageway, with the
+   * surface detail on and off — the standard deviation of luminance, in
+   * levels — and how many pixels of the frame the ground's detail changes.
+   */
+  readonly roadSpreadDetailed: number;
+  readonly roadSpreadPlain: number;
+  readonly groundChangedByDetail: number;
   /** Pixels the hills on the horizon cover, against the same ridge sunk below it. */
   readonly horizonPixels: number;
   /** Pixels a block BELOW the rider's road level changes, 40 m up a 10 % climb. */
@@ -1277,7 +1294,74 @@ function gradientProbe(): GradientMeasurement {
       without,
     ).pixels;
   }
+  // ------------------------------------------------ the sky — #425
+  const skyPoint = (frame: SceneFrame, degrees: number) => {
+    const { eye } = cameraRig(frame.camera);
+    const far = 1_500;
+    return pixelFor(frame, canvas, {
+      x: eye.x + frame.camera.headingX * far,
+      y: eye.y + far * Math.tan((degrees * Math.PI) / 180),
+      z: eye.z + frame.camera.headingZ * far,
+    });
+  };
+  const flatSky: SceneFrame = {
+    ...level,
+    world: { ...level.world, horizonColour: level.world.skyColour },
+  };
+  const skyAt = (frame: SceneFrame): readonly [Pixel, Pixel] => {
+    if (gl === null) return [NOWHERE, NOWHERE];
+    view.render(frame);
+    view.render(frame);
+    const high = skyPoint(frame, 25);
+    const low = skyPoint(frame, 8);
+    return [readPixel(gl, high.x, high.y), readPixel(gl, low.x, low.y)];
+  };
+  const [skyHigh, skyLow] = skyAt(level);
+  const [flatSkyHigh, flatSkyLow] = skyAt(flatSky);
+
+  // -------------------------------- the road's and ground's detail — #425
+  const patchSpread = (frame: SceneFrame, ahead: number, across: number): number => {
+    if (gl === null) return 0;
+    view.render(frame);
+    view.render(frame);
+    // Clear of the centre line and the edge line — a patch of carriageway
+    // alone, whose one vertex colour made it flat before #425.
+    const centre = pixelFor(frame, canvas, onTheRoad(frame, ahead, across));
+    const region = readRegion(gl, Math.floor(centre.x) - 7, Math.floor(centre.y) - 6, 14, 12);
+    const levels: number[] = [];
+    for (let at = 0; at + 3 < region.length; at += 4) {
+      levels.push(luminanceOf([region[at] ?? 0, region[at + 1] ?? 0, region[at + 2] ?? 0, 255]));
+    }
+    const mean = levels.reduce((sum, each) => sum + each, 0) / levels.length;
+    // The standard deviation, in levels: a patch of one colour reads nought.
+    return Math.sqrt(levels.reduce((sum, each) => sum + (each - mean) ** 2, 0) / levels.length);
+  };
+  view.setQuality({ ...NO_RIDER_SHADOWS, surfaceDetail: true });
+  const roadSpreadDetailed = patchSpread(level, 16, 1.8);
+  const groundDetailed =
+    gl === null
+      ? undefined
+      : (view.render(level), view.render(level), readRegion(gl, 0, 0, canvas.width, canvas.height));
+  view.setQuality({ ...NO_RIDER_SHADOWS, surfaceDetail: false });
+  const roadSpreadPlain = patchSpread(level, 16, 1.8);
+  const groundPlain =
+    gl === null
+      ? undefined
+      : (view.render(level), view.render(level), readRegion(gl, 0, 0, canvas.width, canvas.height));
+  const groundChangedByDetail =
+    groundDetailed === undefined || groundPlain === undefined
+      ? 0
+      : shadingAcross(groundDetailed, groundPlain).pixels;
+  view.setQuality(NO_RIDER_SHADOWS);
+
   const measured = {
+    skyHigh,
+    skyLow,
+    flatSkyHigh,
+    flatSkyLow,
+    roadSpreadDetailed,
+    roadSpreadPlain,
+    groundChangedByDetail,
     horizonPixels,
     climbBuried: changed(climb, -1.5),
     climbLifted: changed(climb, 9),
@@ -1299,6 +1383,13 @@ function gradientProbe(): GradientMeasurement {
 
 /** What {@link gradientProbe} reports when it did not run. */
 const NO_GRADIENT: GradientMeasurement = {
+  skyHigh: NOWHERE,
+  skyLow: NOWHERE,
+  flatSkyHigh: NOWHERE,
+  flatSkyLow: NOWHERE,
+  roadSpreadDetailed: 0,
+  roadSpreadPlain: 0,
+  groundChangedByDetail: 0,
   horizonPixels: 0,
   climbBuried: -1,
   climbLifted: 0,

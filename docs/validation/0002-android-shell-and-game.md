@@ -2056,6 +2056,58 @@ budget, 240 → 120 → 60 → 40: houses are kept and the far field boundaries 
 
 ---
 
+## Part Y — a sky with a gradient, and surfaces with detail ([#425](https://github.com/openzigs/onyourleft/issues/425), the no-asset half)
+
+#425 asked for the road and the ground to be textured and the sky to be more than one colour. What
+ships is **the half that needs no asset**; the photographic surfaces, KTX2 and an HDRI sky wait for
+[#431](https://github.com/openzigs/onyourleft/issues/431), the ADR that decides whether the world goes
+realistic.
+
+- **The sky** is a vertical gradient from the route's own sky colour overhead to its haze at the
+  horizon — a dome of vertex colours, one draw call, no texture.
+- **The road** carries a grain and **the ground** a mottle, both computed in the fragment shader from
+  where the pixel is, and the ground a **patchwork of fields** on the same grid the walls stand on
+  (#460). ⚠️ **No texture is sampled**, so "no texture reaches the GPU" (#366) still holds and
+  ADR 0022 is not amended. The grain **multiplies** the road's gradient tint and is bounded so the
+  steepest climb and descent still differ by the WCAG contrast the cue needs.
+- It **fades out with distance** — noise at a grazing angle shimmers, and #424's low camera makes
+  that worse — and it is on the **target rung only**: the first step down the quality ladder drops
+  it, one step before any rung lowers the frame rate.
+
+⚠️ **What the pinned Chromium measured**: the sky 25° up and 8° up are two colours (and one colour
+with the haze set to the sky, the control); a patch of carriageway varies by 1.82 levels with the
+detail and 0.00 without; the ground's detail changes 120 000 pixels of a 600 × 400 frame. The
+scenery-free scene is **8 draw calls** (the dome is the new one).
+
+| Step | What to do | What to record |
+|---|---|---|
+| Y1 | Ride any route in daylight on the target rung | Is the sky darker and bluer overhead and paler at the horizon? |
+| Y2 | Watch the road just ahead of the bicycle, and the ground beside it, at speed | A surface, or noise? ⚠️ **Any shimmer or crawling** — especially further ahead, at a grazing angle — is the finding |
+| Y3 | Watch a climb and a descent | Is the gradient tint on the road still as easy to read as before? |
+| Y4 | Look at the fields beside the road on a level stretch | Fields of different greens and a yellower crop, meeting where the walls and hedges are? |
+| Y5 | 12 s of riding, target rung, the `dumpsys` block from Part T; then the same with the quality ladder one rung down (a hot phone, or Part E's forcing) | Frame times with the detail on, and off |
+
+### Y results
+
+| | Y5 — detail on | Y5 — one rung down |
+|---|--:|--:|
+| Total frames rendered | | |
+| Janky frames (legacy, > 16 ms) | | |
+| Frame time 50th / 90th | | |
+| **GPU time 50th / 90th** | | |
+
+**Sky graded (Y1)?** ______________
+
+**Surface or noise; any shimmer, and where (Y2)?** ______________
+
+**Gradient tint still legible (Y3)?** ______________
+
+**Fields meeting at the walls (Y4)?** ______________
+
+**Phone (OEM, model, Android):** ______________  **Build:** ______________
+
+---
+
 ## After the session
 
 1. **Fill the tables in this file and commit it.** An empty table in `main` is the honest state; a

@@ -19,12 +19,19 @@ import {
   horizonRelief,
   terrainCorridor,
 } from './landform';
-import { hillRoute } from './route-fixtures-testing';
-import type { SceneryKind } from './scatter';
-import { scatterSeed } from './scatter';
+import { hillRoute, valleyRoute } from './route-fixtures-testing';
+import { scatterSeed, type SceneryKind } from './scatter';
 import { corridorOrigin, roadCorridor } from './terrain';
-import { BridgeBelt, HorizonRing, ScatterBelt, TerrainBelt, WaterBelt } from './three-renderer';
-import { valleyRoute } from './route-fixtures-testing';
+import {
+  BridgeBelt,
+  HorizonRing,
+  ScatterBelt,
+  SKY_GRADIENT_RISE,
+  SkyDome,
+  TerrainBelt,
+  WaterBelt,
+  skyShare,
+} from './three-renderer';
 import { bridgeParts, waterSurface, waterways } from './waterways';
 import { worldStyle } from './world';
 
@@ -316,5 +323,63 @@ describe('the buildings and the field boundaries a view draws — #460', () => {
       expect(meshes[0]?.count, kind).toBe(40);
     }
     belt.dispose();
+  });
+});
+
+describe('the sky and the surfaces — #425', () => {
+  it('grades the sky from the haze at the horizon to the sky overhead', () => {
+    expect(skyShare(-0.3)).toBe(0);
+    expect(skyShare(0)).toBe(0);
+    expect(skyShare(SKY_GRADIENT_RISE)).toBe(1);
+    expect(skyShare(1)).toBe(1);
+    let previous = 0;
+    for (let rise = 0; rise <= 1; rise += 0.05) {
+      expect(skyShare(rise)).toBeGreaterThanOrEqual(previous);
+      previous = skyShare(rise);
+    }
+  });
+
+  it('paints the dome in the route’s own two colours, and follows the eye', () => {
+    const dome = new SkyDome();
+    const world = worldStyle(hillRoute());
+    dome.update(world, { x: 3, y: 4, z: 5 });
+    const positions = dome.mesh.geometry.getAttribute('position') as unknown as Attribute;
+    const colours = dome.mesh.geometry.getAttribute('color') as unknown as Attribute;
+    let top = 0;
+    let bottom = 0;
+    for (let vertex = 0; vertex < positions.array.length / 3; vertex += 1) {
+      if (positions.getY(vertex) > positions.getY(top)) top = vertex;
+      if (positions.getY(vertex) < positions.getY(bottom)) bottom = vertex;
+    }
+    const channels = (vertex: number) => [
+      colours.getX(vertex),
+      colours.getY(vertex),
+      colours.getZ(vertex),
+    ];
+    // Overhead the sky's own colour; underfoot the haze — and not the same.
+    expect(channels(top)).not.toEqual(channels(bottom));
+    const material = dome.mesh.material as unknown as Material;
+    expect(material.fog).toBe(false);
+    expect(material.depthWrite).toBe(false);
+    expect([dome.mesh.position.x, dome.mesh.position.y, dome.mesh.position.z]).toEqual([3, 4, 5]);
+    // A flat world — the haze set to the sky — paints one colour everywhere.
+    const flat = new SkyDome();
+    flat.update({ ...world, horizonColour: world.skyColour }, { x: 0, y: 0, z: 0 });
+    const flatColours = flat.mesh.geometry.getAttribute('color') as unknown as Attribute;
+    expect(flatColours.getX(top)).toBeCloseTo(flatColours.getX(bottom), 6);
+  });
+
+  it('switches the ground’s detail with the rung, compiling it once each way', () => {
+    const belt = new TerrainBelt();
+    const defines = () =>
+      Object.keys((belt.mesh.material as unknown as { defines?: object }).defines ?? {});
+    belt.setSurfaceDetail(true);
+    expect(defines()).toContain('SURFACE_DETAIL');
+    const version = (belt.mesh.material as unknown as { version: number }).version;
+    belt.setSurfaceDetail(true);
+    // Asked again with no change: nothing recompiled.
+    expect((belt.mesh.material as unknown as { version: number }).version).toBe(version);
+    belt.setSurfaceDetail(false);
+    expect(defines()).not.toContain('SURFACE_DETAIL');
   });
 });

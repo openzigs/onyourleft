@@ -139,6 +139,7 @@
 
 import {
   AmbientLight,
+  BackSide,
   Box3,
   BoxGeometry,
   BufferAttribute,
@@ -233,7 +234,13 @@ import {
   cameraRig,
   verticalFieldOfViewDegrees,
 } from './camera';
-import { ROAD_WIDTH_METRES, VIEW_AHEAD_METRES, VIEW_BEHIND_METRES } from './terrain';
+import {
+  ROAD_SURFACE_GRAIN,
+  ROAD_WIDTH_METRES,
+  VIEW_AHEAD_METRES,
+  VIEW_BEHIND_METRES,
+} from './terrain';
+import { FIELD_DEPTH_METRES, FIELD_EDGE_LATERAL_METRES } from './settlements';
 import { MAXIMUM_BRIDGE_PARTS, type BridgePart, type WaterSurface } from './waterways';
 import type { SunStyle, WorldStyle } from './world';
 
@@ -780,7 +787,7 @@ const STRUCTURE_STYLE = {
     },
   ],
   wall: [{ colour: 0x9b9486, geometry: () => block(0.55, 1.1 + 0.5, 8, 0, -0.5) }],
-  hedge: [{ colour: 0x3e5e2e, geometry: () => block(1.1, 1.7 + 0.5, 8, 0, -0.5) }],
+  hedge: [{ colour: 0x3e5e2e, geometry: () => block(1.1, 1.3 + 0.5, 8, 0, -0.5) }],
   fence: [
     {
       colour: 0x8a6f4f,
@@ -2669,9 +2676,19 @@ function reserve(mesh: InstancedMesh, needed: number): void {
  */
 export class TerrainBelt {
   readonly #geometry = new BufferGeometry();
+  /** How long this route's fields are, for the patchwork — #425. @see TerrainMesh.fieldSpan */
+  readonly #fieldSpan = { value: 90 };
   readonly #materials = {
-    lit: new MeshLambertMaterial({ color: UNSET_COLOUR, vertexColors: true }),
-    flat: new MeshBasicMaterial({ color: UNSET_COLOUR, vertexColors: true }),
+    lit: withSurfaceDetail(
+      new MeshLambertMaterial({ color: UNSET_COLOUR, vertexColors: true }),
+      'ground',
+      this.#fieldSpan,
+    ),
+    flat: withSurfaceDetail(
+      new MeshBasicMaterial({ color: UNSET_COLOUR, vertexColors: true }),
+      'ground',
+      this.#fieldSpan,
+    ),
   };
   readonly #mesh: Mesh;
   #vertexCapacity = 0;
@@ -2701,6 +2718,12 @@ export class TerrainBelt {
     this.#mesh.material = this.#materials[shading];
   }
 
+  /** The surface detail, on or off — #425. @see QualitySettings.surfaceDetail */
+  setSurfaceDetail(on: boolean): void {
+    setSurfaceDetail(this.#materials.lit, on);
+    setSurfaceDetail(this.#materials.flat, on);
+  }
+
   /** How many bands of ground this rung draws, innermost first. @see QualitySettings.terrainBands */
   setBands(bands: number): void {
     this.#bands = Math.max(1, Math.min(TERRAIN_BANDS, Math.floor(bands)));
@@ -2720,6 +2743,8 @@ export class TerrainBelt {
         ['position', 3],
         ['normal', 3],
         ['color', 3],
+        // #425: where on the route each vertex stands, for the patchwork.
+        ['fields', 2],
       ] as const) {
         this.#geometry.setAttribute(
           name,
@@ -2734,7 +2759,9 @@ export class TerrainBelt {
     upload(this.#geometry.getAttribute('position') as BufferAttribute, ground.vertices);
     upload(this.#geometry.getAttribute('normal') as BufferAttribute, ground.normals);
     upload(this.#geometry.getAttribute('color') as BufferAttribute, ground.colours);
+    upload(this.#geometry.getAttribute('fields') as BufferAttribute, ground.fields);
     upload(this.#geometry.getIndex() as BufferAttribute, ground.indices);
+    this.#fieldSpan.value = ground.fieldSpan;
     this.#indicesPerBand = ground.indicesPerBand;
     this.#indexCount = ground.indices.length;
     this.#applyRange();
@@ -2860,6 +2887,247 @@ export class HorizonRing {
  * corridor's own far end by.
  */
 const HORIZON_HAZE_SHARE = 0.7;
+
+/**
+ * The procedural surface detail — #425's half that needs no asset.
+ *
+ * ## What it is, and what it is not
+ *
+ * A grain on the tarmac and a mottle on the ground, from two octaves of value
+ * noise over the fragment's own WORLD position, and on the ground a patchwork
+ * of fields on the grid the walls stand on (`landform.ts` §`fieldSpanMetres`,
+ * `settlements.ts` §`fieldEdgesAt`). Computed in the fragment shader from
+ * numbers: **no texture is sampled**, so #366's "no texture reaches the GPU"
+ * holds, ADR 0022's posture is unchanged and no amendment is owed. The
+ * photographic surfaces #425 also asks for wait for
+ * [#431](https://github.com/openzigs/onyourleft/issues/431).
+ *
+ * ⚠️ **It fades out with distance**, 12 m to 45 m on the road and 20 m to 90 m
+ * on the ground, because noise sampled at a grazing angle aliases — the
+ * shimmer #425 warns #424's low camera makes worse. A texture would have
+ * mipmaps to do this; arithmetic has to do it by hand.
+ *
+ * ⚠️ **The road's grain is bounded by `terrain.ts` §`ROAD_SURFACE_GRAIN`** and
+ * multiplies the gradient tint rather than replacing it: the colour is how a
+ * rider reads the climb ahead, and `terrain.test.ts` holds the worst case of
+ * the two together to `MINIMUM_TINT_CONTRAST_RATIO`.
+ *
+ * Injected into three's own materials with `onBeforeCompile`, behind a define
+ * a quality rung switches (`QualitySettings.surfaceDetail`), so the road is
+ * still one material and one draw call.
+ */
+const DETAIL_COMMON = /* glsl */ `
+float oylHash(vec2 p) {
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
+float oylNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(oylHash(i), oylHash(i + vec2(1.0, 0.0)), u.x),
+    mix(oylHash(i + vec2(0.0, 1.0)), oylHash(i + vec2(1.0, 1.0)), u.x),
+    u.y
+  );
+}
+`;
+
+/** What the road's fragment does with the grain, behind the define. */
+const ROAD_DETAIL = /* glsl */ `
+#ifdef SURFACE_DETAIL
+{
+  float fade = 1.0 - smoothstep(12.0, 45.0, distance(cameraPosition, vDetailWorld));
+  float grain = (oylNoise(vDetailWorld.xz * 5.3) - 0.5) * 1.4
+    + (oylNoise(vDetailWorld.xz * 1.1) - 0.5) * 1.0
+    + (oylNoise(vDetailWorld.xz * 0.21) - 0.5) * 0.8;
+  diffuseColor.rgb *= 1.0 + ${String(ROAD_SURFACE_GRAIN)} * clamp(grain, -1.0, 1.0) * fade;
+}
+#endif
+`;
+
+/**
+ * What the ground's fragment does: the mottle, and the patchwork of fields
+ * beyond the verge — some cropped and yellower, some pasture, some darker —
+ * one colour a field, hashed from which field it is.
+ */
+const GROUND_DETAIL = /* glsl */ `
+#ifdef SURFACE_DETAIL
+{
+  float fade = 1.0 - smoothstep(20.0, 90.0, distance(cameraPosition, vDetailWorld));
+  float mottle = (oylNoise(vDetailWorld.xz * 0.9) - 0.5) * 0.12
+    + (oylNoise(vDetailWorld.xz * 0.11) - 0.5) * 0.16;
+  float fieldIndex = floor(vFields.x / fieldSpan);
+  float fieldSide = vFields.y >= 0.0 ? 1.0 : -1.0;
+  float fieldBand = floor(abs(vFields.y) / ${String(FIELD_DEPTH_METRES.toFixed(1))});
+  float fieldKind = oylHash(vec2(fieldIndex * 1.37 + fieldSide * 17.0, fieldBand * 3.1 + 7.0));
+  vec3 crop = vec3(1.18, 1.08, 0.72);
+  vec3 pasture = vec3(1.0);
+  vec3 fallow = vec3(0.86, 0.9, 0.84);
+  vec3 fieldTone = fieldKind < 0.35 ? crop : (fieldKind < 0.75 ? pasture : fallow);
+  float farmland = smoothstep(${String(FIELD_EDGE_LATERAL_METRES.toFixed(1))}, ${String((FIELD_EDGE_LATERAL_METRES + 1.5).toFixed(1))}, abs(vFields.y));
+  diffuseColor.rgb *= mix(vec3(1.0), fieldTone, farmland);
+  diffuseColor.rgb *= 1.0 + mottle * fade;
+}
+#endif
+`;
+
+/**
+ * Teaches one of three's materials the surface detail, behind the
+ * `SURFACE_DETAIL` define. @see DETAIL_COMMON
+ *
+ * ⚠️ `customProgramCacheKey` is what stops three handing a detailed road the
+ * program it compiled for a plain material of the same class — the cache key
+ * otherwise ignores `onBeforeCompile` entirely.
+ */
+function withSurfaceDetail<M extends MeshBasicMaterial | MeshLambertMaterial>(
+  material: M,
+  surface: 'road' | 'ground',
+  fieldSpan: { value: number },
+): M {
+  material.defines = { ...material.defines };
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms['fieldSpan'] = fieldSpan;
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>\nvarying vec3 vDetailWorld;\n${
+          surface === 'ground' ? 'attribute vec2 fields;\nvarying vec2 vFields;\n' : ''
+        }`,
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>\nvDetailWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;\n${
+          surface === 'ground' ? 'vFields = fields;\n' : ''
+        }`,
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>\nvarying vec3 vDetailWorld;\n${
+          surface === 'ground' ? 'varying vec2 vFields;\nuniform float fieldSpan;\n' : ''
+        }${DETAIL_COMMON}`,
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>\n${surface === 'ground' ? GROUND_DETAIL : ROAD_DETAIL}`,
+      );
+  };
+  material.customProgramCacheKey = () => `oyl-surface-detail-${surface}`;
+  return material;
+}
+
+/** Switches a material's surface detail on or off, compiling it again once. */
+function setSurfaceDetail(material: Material, on: boolean): void {
+  const defines = { ...(material.defines ?? {}) };
+  if (on === Object.hasOwn(defines, 'SURFACE_DETAIL')) {
+    return;
+  }
+  if (on) {
+    defines['SURFACE_DETAIL'] = '';
+  } else {
+    delete defines['SURFACE_DETAIL'];
+  }
+  material.defines = defines;
+  material.needsUpdate = true;
+}
+
+/**
+ * The sky — #425: a vertical gradient from the route's own sky colour
+ * overhead to its haze at the horizon, where it used to be one flat colour.
+ *
+ * A sphere round the camera, unfogged, drawn first and writing no depth, whose
+ * vertex colours are worked out from the height of each vertex. **No HDRI and
+ * no texture**: the two colours are `world.ts`'s, so the sky is still a
+ * function of the route. The expensive version — an HDRI skybox — waits for
+ * [#431](https://github.com/openzigs/onyourleft/issues/431).
+ *
+ * Exported for `three-renderer.test.ts`, for {@link ScatterBelt}'s reasons.
+ */
+export class SkyDome {
+  readonly #geometry = new SphereGeometry(SKY_DOME_RADIUS_METRES, 24, 16);
+  readonly #material = new MeshBasicMaterial({
+    vertexColors: true,
+    fog: false,
+    depthWrite: false,
+    side: BackSide,
+  });
+  readonly #mesh: Mesh;
+  readonly #sky = new Color();
+  readonly #haze = new Color();
+  readonly #mixed = new Color();
+  /** The two colours last painted, so a frame whose world has not changed costs nothing. */
+  #painted = '';
+
+  constructor() {
+    const count = this.#geometry.getAttribute('position').count;
+    this.#geometry.setAttribute('color', new BufferAttribute(new Float32Array(count * 3), 3));
+    this.#mesh = new Mesh(this.#geometry, this.#material);
+    this.#mesh.frustumCulled = false;
+    this.#mesh.renderOrder = -3;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The one mesh. For `three-renderer.test.ts`. */
+  get mesh(): Mesh {
+    return this.#mesh;
+  }
+
+  /** Paints the gradient from this frame's world, and centres it on the eye. */
+  update(
+    world: WorldStyle,
+    eye: { readonly x: number; readonly y: number; readonly z: number },
+  ): void {
+    this.#mesh.position.set(eye.x, eye.y, eye.z);
+    const key = `${String(world.skyColour)}/${String(world.horizonColour)}`;
+    if (key === this.#painted) {
+      return;
+    }
+    this.#painted = key;
+    this.#sky.setHex(world.skyColour);
+    this.#haze.setHex(world.horizonColour);
+    const positions = this.#geometry.getAttribute('position') as BufferAttribute;
+    const colours = this.#geometry.getAttribute('color') as BufferAttribute;
+    for (let vertex = 0; vertex < positions.count; vertex += 1) {
+      this.#mixed
+        .copy(this.#haze)
+        .lerp(this.#sky, skyShare(positions.getY(vertex) / SKY_DOME_RADIUS_METRES));
+      colours.setXYZ(vertex, this.#mixed.r, this.#mixed.g, this.#mixed.b);
+    }
+    colours.needsUpdate = true;
+  }
+
+  dispose(): void {
+    this.#geometry.dispose();
+    this.#material.dispose();
+  }
+}
+
+/** How far out the sky is drawn, in metres: inside the camera's 2 000 m far plane. */
+const SKY_DOME_RADIUS_METRES = 1_800;
+
+/**
+ * How much of the sky's own colour, rather than the haze, a direction at
+ * height `rise` (the sine of its elevation) is painted: none at and below the
+ * horizon, all of it by about 30° up, easing between.
+ */
+export function skyShare(rise: number): number {
+  const t = Math.min(1, Math.max(0, rise / SKY_GRADIENT_RISE));
+  return Math.pow(t * t * (3 - 2 * t), SKY_GRADIENT_EASE);
+}
+
+/**
+ * The sine of the elevation by which the sky has reached its own colour:
+ * **0.5**, which is 30° up — the top of a chase camera's frame.
+ */
+export const SKY_GRADIENT_RISE = 0.5;
+
+/** How quickly the haze gives way near the horizon: **0.7**, a little faster than even. */
+const SKY_GRADIENT_EASE = 0.7;
 
 /**
  * The water shader — #459. Vertex half: world position and the shore weight,
@@ -3145,6 +3413,8 @@ class ThreeGameView implements GameView {
   readonly #terrain = new TerrainBelt();
   /** The hills on the horizon — #458. @see HorizonRing */
   readonly #horizon = new HorizonRing();
+  /** The sky's gradient — #425. @see SkyDome */
+  readonly #skyDome = new SkyDome();
   /** The streams and lakes — #459. @see WaterBelt */
   readonly #water = new WaterBelt();
   /** The bridges over them — #459. @see BridgeBelt */
@@ -3165,6 +3435,14 @@ class ThreeGameView implements GameView {
    */
   readonly #lighting = new WorldLamps();
   #quality: QualitySettings;
+  /** This frame's world, for the sky dome, which is placed with the camera. */
+  #world: WorldStyle = {
+    skyColour: UNSET_COLOUR,
+    groundColour: UNSET_COLOUR,
+    horizonColour: UNSET_COLOUR,
+    fogDensity: 0,
+    sun: { x: 0, y: 1, z: 0, ambient: 0, direct: 0 },
+  };
   #widthCssPixels = 1;
   #heightCssPixels = 1;
   #vertexCapacity = 0;
@@ -3187,6 +3465,7 @@ class ThreeGameView implements GameView {
 
     // #458. The ring first, as the backdrop it is; the ground after it writes
     // depth like everything else.
+    this.#skyDome.addTo(this.#scene);
     this.#horizon.addTo(this.#scene);
     this.#terrain.addTo(this.#scene);
     this.#water.addTo(this.#scene);
@@ -3197,7 +3476,10 @@ class ThreeGameView implements GameView {
       // `vertexColors` is what makes the surface, the two edge lines and the
       // broken centre line **one mesh and one draw call** (#242). Without it
       // each would need a material of its own, and a material is a draw call.
-      new MeshBasicMaterial({ side: DoubleSide, vertexColors: true }),
+      // #425: the road's grain, behind the rung's define. Still ONE material.
+      withSurfaceDetail(new MeshBasicMaterial({ side: DoubleSide, vertexColors: true }), 'road', {
+        value: 0,
+      }),
     );
     // The corridor is rebuilt in world coordinates every time, so three's own
     // frustum culling has nothing useful to test against and would occasionally
@@ -3237,6 +3519,7 @@ class ThreeGameView implements GameView {
       return;
     }
     this.#updateWorld(frame.world);
+    this.#world = frame.world;
     this.#terrain.update(frame.terrain.mesh, frame.world.groundColour);
     this.#horizon.update(frame.terrain.horizon, frame.world, frame.camera);
     this.#water.update(frame.water.surface, frame.world, frame.water.seconds);
@@ -3267,6 +3550,9 @@ class ThreeGameView implements GameView {
     this.#terrain.setBands(settings.terrainBands);
     // #459. The water shader, or one flat colour.
     this.#water.setDrawn(settings.water);
+    // #425. The grain and the patchwork, on the target rung only.
+    this.#terrain.setSurfaceDetail(settings.surfaceDetail);
+    setSurfaceDetail(this.#road.material as Material, settings.surfaceDetail);
     this.#applySize();
   }
 
@@ -3335,6 +3621,7 @@ class ThreeGameView implements GameView {
     this.#roadGeometry.dispose();
     this.#terrain.dispose();
     this.#horizon.dispose();
+    this.#skyDome.dispose();
     this.#water.dispose();
     this.#bridges.dispose();
     disposeMaterial(this.#road.material);
@@ -3454,6 +3741,9 @@ class ThreeGameView implements GameView {
     const { eye, target } = cameraRig(pose);
     this.#camera.position.set(eye.x, eye.y, eye.z);
     this.#camera.lookAt(this.#lookAt.set(target.x, target.y, target.z));
+    // #425. The sky is centred on the eye, so it is always the same distance
+    // away in every direction and only its colours carry any information.
+    this.#skyDome.update(this.#world, eye);
   }
 
   /**

@@ -232,6 +232,25 @@ const RELIEF_KEY = 0x2_0000;
 /** How much the ground's own colour varies, either way, as a share: **6 %**. */
 export const TERRAIN_MOTTLE = 0.06;
 
+/**
+ * How long a field beside the road is, nominally, in metres: **90** — #460.
+ *
+ * Here rather than in `settlements.ts`, which walls the fields, because the
+ * ground's own patchwork (#425) is drawn on the same grid and the two must not
+ * disagree about where a field ends: a wall that stood across the middle of a
+ * field of one colour would be a wall between nothing.
+ */
+export const FIELD_SPAN_METRES = 90;
+
+/**
+ * The field length that divides this route evenly — {@link FIELD_SPAN_METRES}
+ * stretched, as `scatter.ts` §`cellSpanMetres` stretches its cells, so a loop's
+ * seam is a field boundary and lap two's fields are lap one's.
+ */
+export function fieldSpanMetres(profile: RouteProfile): number {
+  return profile.totalDistance / Math.max(1, Math.round(profile.totalDistance / FIELD_SPAN_METRES));
+}
+
 /** The ground beside the road for one frame, ready to become a vertex buffer. */
 export interface TerrainMesh {
   /** Three floats a vertex. @see TerrainMesh.rows for the layout */
@@ -268,6 +287,11 @@ export interface TerrainMesh {
   readonly rows: number;
   /** Indices a band spends, both sides, every row: for a draw range. */
   readonly indicesPerBand: number;
+  /**
+   * How long this route's fields are, in metres — {@link fieldSpanMetres}.
+   * The ground's patchwork is drawn on it, and the walls stand on it.
+   */
+  readonly fieldSpan: number;
 }
 
 /**
@@ -423,6 +447,7 @@ export function terrainCorridor(
     indices,
     rows,
     indicesPerBand: Math.max(0, rows - 1) * 2 * 6,
+    fieldSpan: fieldSpanMetres(profile),
   };
 }
 

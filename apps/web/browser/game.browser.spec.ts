@@ -130,6 +130,13 @@ interface GameHarnessResult {
     readonly flatMs: number;
   };
   readonly gradient: {
+    readonly skyHigh: Pixel;
+    readonly skyLow: Pixel;
+    readonly flatSkyHigh: Pixel;
+    readonly flatSkyLow: Pixel;
+    readonly roadSpreadDetailed: number;
+    readonly roadSpreadPlain: number;
+    readonly groundChangedByDetail: number;
     readonly horizonPixels: number;
     readonly climbBuried: number;
     readonly climbLifted: number;
@@ -236,6 +243,7 @@ const RIDER_BOX_TOLERANCE = 0.02;
  * |---|--:|
  * | the ground beside the road, lit — a landform since #458 (was one flat quad) | 1 |
  * | the hills on the horizon (#458) | 1 |
+ * | the sky's gradient (#425) | 1 |
  * | the road, however many marks and edge lines it carries (#242) | 1 |
  * | every rider's merged body and bicycle, instanced (#349, #368) | 1 |
  * | every rider's crankset, which turns on its own axis (#349, #368) | 1 |
@@ -273,8 +281,12 @@ const RIDER_BOX_TOLERANCE = 0.02;
  * the corridor's ground no longer ends in sky once it runs out, and that a
  * route has a skyline at all. §"the gradient shows beside the road" publishes
  * what the landform itself costs in vertices and indices.
+ *
+ * ⚠️ **7 → 8 with #425, deliberately**: the sky is a dome of vertex colours
+ * where it was the scene's background colour, which costs a draw call and no
+ * texture. The background is still set, underneath it.
  */
-const SCENE_DRAW_CALLS = 1 + 1 + 1 + 3 + 1;
+const SCENE_DRAW_CALLS = 1 + 1 + 1 + 1 + 3 + 1;
 
 /**
  * The most meshes the scenery belt may ever hold: **20**.
@@ -751,6 +763,46 @@ test.describe('the gradient shows beside the road — #458', () => {
  * #459 — a stream in the route's own valley, and the road carried over it on a
  * bridge. `game-harness.ts` §`waterProbe` reads the pixels.
  */
+/**
+ * #425's no-asset half — the sky's gradient and the road's and ground's
+ * surface detail, both drawn by arithmetic. The photographic surfaces, KTX2 and
+ * the HDRI wait for #431; this block is what can be claimed without them.
+ */
+test.describe('a sky with a gradient, and surfaces with detail — #425', () => {
+  test('grades the sky from overhead to the haze, where it used to be one colour', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { gradient } = await harness(harnessRun);
+    const key = (pixel: Pixel) => pixel.slice(0, 3).join(',');
+    const measured = `sky 25° up ${key(gradient.skyHigh)}, 8° up ${key(gradient.skyLow)}; with the haze set to the sky ${key(gradient.flatSkyHigh)} and ${key(gradient.flatSkyLow)}. Road patch deviation ${gradient.roadSpreadDetailed.toFixed(2)} levels with detail, ${gradient.roadSpreadPlain.toFixed(2)} without; the ground's detail changes ${String(gradient.groundChangedByDetail)} px`;
+    testInfo.annotations.push({ type: 'the sky and the surfaces', description: measured });
+    console.log(`the sky and the surfaces — ${measured}`);
+
+    // Two heights of one sky are two colours…
+    expect(key(gradient.skyHigh)).not.toBe(key(gradient.skyLow));
+    // …the higher one bluer, as overhead is…
+    expect(gradient.skyHigh[2] - gradient.skyHigh[0]).toBeGreaterThan(
+      gradient.skyLow[2] - gradient.skyLow[0],
+    );
+    // …and the control: with the haze set to the sky, which is the flat sky
+    // this replaced, the two are one colour. What made them differ is the
+    // gradient and nothing else.
+    expect(key(gradient.flatSkyHigh)).toBe(key(gradient.flatSkyLow));
+  });
+
+  test('gives the road and the ground a surface, and takes it away on the next rung', async ({
+    harnessRun,
+  }) => {
+    const { gradient } = await harness(harnessRun);
+    // The road was one vertex colour across a patch this size: the grain is
+    // what makes it vary, and the rung that drops the detail flattens it again.
+    expect(gradient.roadSpreadDetailed).toBeGreaterThan(gradient.roadSpreadPlain + 0.5);
+    expect(gradient.roadSpreadPlain).toBeLessThan(0.5);
+    // The ground's mottle and patchwork reach the screen.
+    expect(gradient.groundChangedByDetail).toBeGreaterThan(5_000);
+  });
+});
+
 test.describe('water under a bridge — #459', () => {
   test('draws the stream beside the bridge, and the road’s deck above it', async ({
     harnessRun,

@@ -442,6 +442,22 @@ describe('the structures are a rung on the ladder — #460', () => {
   });
 });
 
+describe('the surface detail is a rung on the ladder — #425', () => {
+  it('draws it at the target only, and drops it before any frame rate', () => {
+    // #425: "a throttling phone drops textures before it drops frame rate".
+    expect(qualitySettings(0).surfaceDetail).toBe(true);
+    const firstPlain = QUALITY_LADDER.findIndex((rung) => !rung.surfaceDetail);
+    const firstSlower = QUALITY_LADDER.findIndex(
+      (rung) => rung.frameCap < (QUALITY_LADDER[0]?.frameCap ?? 0),
+    );
+    expect(firstPlain).toBeGreaterThan(0);
+    expect(firstPlain).toBeLessThan(firstSlower);
+    for (let level = firstPlain; level < QUALITY_LADDER.length; level += 1) {
+      expect(QUALITY_LADDER[level]?.surfaceDetail).toBe(false);
+    }
+  });
+});
+
 describe('the riders’ shadows on the ladder — #426', () => {
   it('grounds the riders with a contact shadow on EVERY rung, the floor included', () => {
     expect(QUALITY_LADDER.map((rung) => rung.riderShadows)).toEqual(

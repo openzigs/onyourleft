@@ -3316,6 +3316,8 @@ top of an issue **supersedes its body**.
 | Where a village or a farmstead stands, which way its buildings face, and what divides the fields | `apps/web/src/game/settlements.ts`, [#460](https://github.com/openzigs/onyourleft/issues/460) |
 | How the grouping of buildings is measured, and against what | `apps/web/src/game/settlements.test.ts` §"clusters them, where the scatter they replaced spread them out" |
 | What the water shader does without a texture or a second pass, and what it costs | `apps/web/src/game/three-renderer.ts` §`WATER_FRAGMENT`, §`WaterBelt`, `apps/web/browser/game-harness.ts` §`waterProbe` |
+| Why the road and the ground have a surface with no texture, and what bounds the road's grain against its gradient tint | `apps/web/src/game/three-renderer.ts` §`DETAIL_COMMON`, `apps/web/src/game/terrain.ts` §`ROAD_SURFACE_GRAIN`, [#425](https://github.com/openzigs/onyourleft/issues/425) |
+| Where the sky's gradient comes from, and why there is no HDRI yet | `apps/web/src/game/three-renderer.ts` §`SkyDome`, [#431](https://github.com/openzigs/onyourleft/issues/431) |
 | What proves the ground beside a climb stands above the rider and beside a descent below, with the flat quad as the control | `apps/web/browser/game-harness.ts` §`gradientProbe`, `apps/web/browser/game.browser.spec.ts` §"the gradient shows beside the road" |
 | What proves the world reaches the screen rather than only the frame | `apps/web/browser/game-harness.ts`, `apps/web/browser/game.browser.spec.ts` |
 | Why the rider is a bicycle built from numbers rather than a model somebody downloaded | `apps/web/src/game/bicycle.ts`, [#349](https://github.com/openzigs/onyourleft/issues/349) |

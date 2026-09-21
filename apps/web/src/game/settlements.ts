@@ -41,8 +41,10 @@
  *
  * ## Fields, and what divides them
  *
- * The land beside the road is divided into fields {@link FIELD_SPAN_METRES}
- * long, each side, stretched to divide the route evenly. A field is enclosed
+ * The land beside the road is divided into fields `landform.ts`
+ * §`FIELD_SPAN_METRES` long, each side, stretched to divide the route evenly —
+ * the grid the ground's own patchwork is drawn on (#425), so a wall stands
+ * where one field's colour meets the next. A field is enclosed
  * with {@link ENCLOSED_SHARE}, on ground that is below the trees and no steeper
  * than {@link FIELD_GRADE_PERCENT}: along the verge at
  * {@link FIELD_EDGE_LATERAL_METRES} from the centreline, and out from the road
@@ -66,7 +68,7 @@ import {
   type RouteProfile,
 } from '@onyourleft/domain';
 
-import { terrainHeightAt } from './landform';
+import { fieldSpanMetres, terrainHeightAt } from './landform';
 import {
   SETTLEMENT_GRADE_PERCENT,
   SETTLEMENT_TREE_LINE_FRACTION,
@@ -116,13 +118,6 @@ export const FARM_SETBACK_METRES = [24, 30] as const;
 
 /** How far from the centreline a signpost stands, in metres: **5.5** — on the verge. */
 export const SIGNPOST_LATERAL_METRES = 5.5;
-
-/**
- * How long a field is along the road, in metres: **90**. Nominal — stretched so
- * the route holds a whole number, and a field boundary is the same place on
- * every lap.
- */
-export const FIELD_SPAN_METRES = 90;
 
 /** The share of fields that are enclosed: **0.55**. */
 export const ENCLOSED_SHARE = 0.55;
@@ -400,8 +395,9 @@ function fieldEdgesAt(
   found: { item: ScatterItem; along: number }[],
 ): void {
   const total = profile.totalDistance;
-  const fields = Math.max(1, Math.round(total / FIELD_SPAN_METRES));
-  const span = total / fields;
+  // The ground's own field grid, so the patchwork and the walls agree (#425).
+  const span = fieldSpanMetres(profile);
+  const fields = Math.max(1, Math.round(total / span));
   const ways = waterways(profile, seed);
   const first = Math.floor(fromMetres / span) - 1;
   const last = Math.floor(toMetres / span);
