@@ -202,7 +202,7 @@ export const MINIMUM_VIEW_END_OCCLUSION = 0.75;
  * depth and at the chase camera's own distance, because a density that failed
  * it would be a grey screen rather than a visible bug.
  *
- * @unwired a bound `world.test.ts` asserts the chosen density against; the
+ * @test-facing a bound `world.test.ts` asserts the chosen density against; the
  * density is derived from the view distance rather than from this number.
  */
 export const NEAR_FOG_LIMIT = 0.02;
@@ -307,8 +307,11 @@ const DEGREES_TO_RADIANS = Math.PI / 180;
  * only thing that keeps {@link SUN_ELEVATION_AT_POLE_DEGREES} honest — the
  * colours live in `three-renderer.ts` and this file must never see them.
  *
- * @unwired a bound `three-renderer.test.ts` multiplies through every lit
- * colour in the scene; nothing in the client evaluates it.
+ * ⚠️ **No exemption, and until #438 it carried one that was false**: it said
+ * nothing in the client evaluates this, and since #366 `scenery-palette.ts`
+ * §`MAXIMUM_LIT_CHANNEL` does. `three-renderer.test.ts` still multiplies it
+ * through every lit colour in the scene. The stale tag is what `WIRE004` was
+ * written to catch, and it was one of its first three findings.
  */
 export const PEAK_IRRADIANCE = SUN_AMBIENT_SHARE + directIntensity(SUN_ELEVATION_AT_POLE_DEGREES);
 
@@ -320,7 +323,7 @@ export const PEAK_IRRADIANCE = SUN_AMBIENT_SHARE + directIntensity(SUN_ELEVATION
  * `saturate(dot(normal, lightDirection)) * lightColour`, plus the ambient
  * irradiance, and this is that with the π both sides cancel.
  *
- * @unwired three applies its own Lambert term in the shader, so nothing in the
+ * @test-facing three applies its own Lambert term in the shader, so nothing in the
  * client evaluates this — it exists to make that shader's behaviour checkable
  * where there is no GL context, which is every test in the Vitest suite.
  * `fogFactor` above it exists for exactly the same reason.
@@ -436,7 +439,7 @@ function densityForOcclusion(occlusion: number): number {
  * The `FogExp2` curve, written here rather than read off the renderer, so the
  * bound {@link NEAR_FOG_LIMIT} states can be asserted without a GL context.
  *
- * @unwired three applies its own `FogExp2` in the shader, so nothing in the
+ * @test-facing three applies its own `FogExp2` in the shader, so nothing in the
  * client evaluates this — it exists to make that shader's behaviour checkable
  * where there is no GL context, which is every test in the Vitest suite.
  */

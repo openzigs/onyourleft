@@ -300,7 +300,7 @@ const HANDLEBAR_LENGTH_METRES = 0.4;
  * the browser gate's minimum share would be measuring a rider that no longer
  * exists.
  *
- * @unwired the renderer builds the rider from the parts below and never needs
+ * @test-facing the renderer builds the rider from the parts below and never needs
  * their overall size; three projects them. The only things that name this are
  * `camera.ts` §`riderFrameBox` and §`roadAppearsOverRiderMetres`, which are
  * themselves statements of the composition that two browser gates and
@@ -312,7 +312,7 @@ export const RIDER_HEIGHT_METRES = HELMET_Y + HELMET_RADIUS;
 /**
  * Half the rider's width — the handlebar, which is the widest part.
  *
- * @unwired {@link RIDER_HEIGHT_METRES}'s reason applies unchanged.
+ * @test-facing {@link RIDER_HEIGHT_METRES}'s reason applies unchanged.
  */
 export const RIDER_HALF_WIDTH_METRES = HANDLEBAR_LENGTH_METRES / 2;
 
@@ -320,7 +320,7 @@ export const RIDER_HALF_WIDTH_METRES = HANDLEBAR_LENGTH_METRES / 2;
  * How far AHEAD of the point a rider is placed at the top of their helmet is:
  * 0.19 m. @see BICYCLE_REAR_CONTACT_METRES
  *
- * @unwired {@link RIDER_HEIGHT_METRES}'s reason applies unchanged.
+ * @test-facing {@link RIDER_HEIGHT_METRES}'s reason applies unchanged.
  */
 export const RIDER_HELMET_AHEAD_METRES = HELMET_Z;
 
@@ -358,7 +358,7 @@ const FRONT_HUB_Z = 0.52;
  * this and {@link RIDER_HELMET_AHEAD_METRES} so that the rectangle the HUD is
  * kept clear of is the rectangle the rider is in.
  *
- * @unwired {@link RIDER_HEIGHT_METRES}'s reason applies unchanged.
+ * @test-facing {@link RIDER_HEIGHT_METRES}'s reason applies unchanged.
  */
 export const BICYCLE_REAR_CONTACT_METRES = REAR_HUB_Z;
 
@@ -366,19 +366,22 @@ export const BICYCLE_REAR_CONTACT_METRES = REAR_HUB_Z;
  * How far ahead of the point a rider is PLACED at the front of their bicycle
  * is: the front hub plus a wheel's radius, 0.86 m.
  *
- * @unwired a dimension of the model that `three-renderer.test.ts` §"the verge
- * and the camera cone" states #424's near-field bound against — *"in shot
+ * A dimension of the model that `three-renderer.test.ts` §"the verge and the
+ * camera cone" states #424's near-field bound against — *"in shot
  * before the front wheel is level with it"* — so that the bound is a property
  * of this bicycle rather than a number typed beside it. Nothing draws with it:
- * the parts below are built from the hubs and the radius directly.
+ * the parts below are built from the hubs and the radius directly. ⚠️ **It
+ * carries no exemption, and until #438 it carried an `@unwired` one**: the
+ * gate counts {@link BICYCLE_LENGTH_METRES}'s initialiser as naming it, so the
+ * tag exempted nothing — `WIRE004` now reports a tag like that as stale.
  */
 export const BICYCLE_FRONT_METRES = FRONT_HUB_Z + WHEEL_RADIUS;
 
 /**
  * The bicycle, tyre to tyre: 1.70 m.
  *
- * @unwired {@link BICYCLE_FRONT_METRES}'s reason applies unchanged; this is the
- * bound the same test holds the owner's 16 : 10 tablet to.
+ * @test-facing {@link BICYCLE_FRONT_METRES}'s reason applies unchanged; this is
+ * the bound the same test holds the owner's 16 : 10 tablet to.
  */
 export const BICYCLE_LENGTH_METRES = BICYCLE_FRONT_METRES - (REAR_HUB_Z - WHEEL_RADIUS);
 const SADDLE_Y = 0.94;

@@ -2217,6 +2217,7 @@ well typed.**
 | `WIRE001` | a watched module no production module imports |
 | `WIRE002` | an exported symbol in a watched module that no production declaration names |
 | `WIRE003` | a method declared on a `*-port.ts` interface — or on one in the **trainer-command seam** — that no production declaration calls |
+| `WIRE004` | an export marked `@test-facing` that no test, spec or browser harness reads (nor any held `@test-facing` export one does) — it is dead; **or** either tag on an export production DOES name — the exemption is stale ([#438](https://github.com/openzigs/onyourleft/issues/438)) |
 
 **The entry point is read out of `apps/*/index.html`**, so it is the page Vite actually builds
 rather than a path written down twice. ⚠️ **`apps/web/browser/` is deliberately NOT an entry
@@ -2310,6 +2311,35 @@ followed by a reason, in its doc comment. The tag alone is refused — an exempt
 a config-file list with extra steps — and it is refused on **all three** paths, including a file's
 own doc comment, which is the broadest of them because it silences a whole module. A reasonless tag
 is reported as `WIRE000` rather than quietly honoured.
+
+⚠️ **Test-facing arithmetic has its own tag since
+[#438](https://github.com/openzigs/onyourleft/issues/438), `@test-facing`, and a reviewer who
+remembers every bound a test asserts against spending an `@unwired` is reading the old file.** #436
+took the `@unwired` population under `apps/` from 21 to 32 in one change, nearly all of it
+`camera.ts` and `bicycle.ts` stating the composition so `camera.test.ts` and two browser gates can
+hold the renderer to it — each correct, and indistinguishable in a count from a genuine gap, which
+is how *"an allowlist that grows is how a rule stops firing"* starts. #438 weighed three options:
+
+| Option | Verdict | Why |
+|---|---|---|
+| 1. Leave it | rejected | the population grows with every derived gate, and a free-text reason cannot go red when the test it names is deleted |
+| 2. A sibling module outside `WATCHED_PREFIXES` | rejected | fewer tags by watching LESS — an unwatched module is exactly where a genuinely dead export hides, and moving 23 declarations out of `camera.ts` and its neighbours reshapes files the renderer reads for a counting problem |
+| 3. A second tag, counted apart | **chosen, and made stricter than the first** | same watched set, same rules, and the new tag is **verified**: `@test-facing <reason>` exempts an export from `WIRE002` only while a test, a spec, a double or a browser harness reads it, or a held `@test-facing` export does. When nothing does, `WIRE004` calls it dead |
+
+It exempts **exports only** — a whole file only tests import is still `WIRE001`, and a port method
+only a double calls is still `WIRE003`, because both are #230's shape. `WIRE004` also reports
+**either** tag on an export production DOES name: a stale exemption is a false statement at the
+declaration, and on the tree #438 was measured on it found three — `world.ts` §`PEAK_IRRADIANCE`
+(wired by #366's `MAXIMUM_LIT_CHANNEL` and still claiming nothing evaluated it),
+`bicycle.ts` §`BICYCLE_FRONT_METRES` (named by `BICYCLE_LENGTH_METRES`, so the tag exempted
+nothing), and `ride/metrics.ts` §`isReadable` (wired by #400). **Measured** (tags opening a
+comment line in non-test files, on `56a735e` and after — #436's reviewer counted 32 by another
+method): raw `@unwired` tags under `apps/` **31 → 6**; exemptions the gate honours **32 → 9** `@unwired` + **22**
+`@test-facing`, the missing one being `isReadable`, now wired. The success line reports both counts
+beside the watched count — read them off the run, because they age. ⚠️ The count went down by
+**re-labelling under a stricter rule**, not by watching less: `WATCHED_PREFIXES` and the seam are
+unchanged, and the mutation that honours `@test-facing` whether or not a test reads it turns five
+fixture cases red.
 
 ⚠️ **The tag has to OPEN a line to be a tag, and until
 [#292](https://github.com/openzigs/onyourleft/issues/292) it did not have to** — a reviewer who

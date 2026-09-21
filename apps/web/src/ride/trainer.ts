@@ -280,7 +280,7 @@ export function openCapacitorTrainer(
 /**
  * How long a control point procedure may go unanswered.
  *
- * @unwired the value that binds is `packages/sensors/protocol`'s
+ * @test-facing the value that binds is `packages/sensors/protocol`'s
  * `CONTROL_POINT_PROCEDURE_TIMEOUT_SECONDS`, which the client cannot import
  * without pulling the protocol into a view. This is the copy `trainer.test.ts`
  * asserts the timeout against, and nothing in the client passes it anywhere.

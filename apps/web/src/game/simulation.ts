@@ -806,7 +806,7 @@ function botCourseFor(setup: SimulationSetup): BotCourse | undefined {
  * instead, which is the object that has the answer. What still calls it is
  * `browser/game-harness.ts`, which builds a scene with no simulation at all.
  *
- * @unwired the browser harness is its only caller, and a harness is a gate
+ * @test-facing the browser harness is its only caller, and a harness is a gate
  * rather than a page the product loads — #236 is what happens when the two are
  * confused, so `check-wiring.mjs` does not treat `browser/` as an entry point.
  */
