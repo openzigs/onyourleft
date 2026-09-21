@@ -77,10 +77,22 @@ export interface RideAnnouncerProps {
   /** Where the rider's announcement choice is read from. This device's, by default. */
   readonly storage?: PreferenceStorage | undefined;
   /**
-   * Told the kind of every sentence as it is SAID — #400's interval sound plays
-   * on the `interval-now` it belongs to, and never alone.
+   * Told the kind of every event as it HAPPENS — the moment it is handed to
+   * the announcer, whether or not it then wins the 3 s window. #400's interval
+   * sound plays here, on the block change itself.
+   *
+   * ⚠️ **This used to be `onSaid`, told only what was SPOKEN, and #448's review
+   * is why it is not.** Since #445 `interval-now` goes through the announcer's
+   * window, so a sound that waited to be said was held up to 3 s behind
+   * anything spoken just before, and DROPPED when a higher-ranked event —
+   * *"Control lost"* pausing the workout in the same render — took the window.
+   * The beep is not only for a screen-reader user: a sighted rider with sounds
+   * on and announcements off lost it too. The sentence is still queued in the
+   * same call, so the sound is never the only thing offered; what may be
+   * dropped by priority is the SENTENCE, and the change is on the panel as
+   * *"Now: …"* either way.
    */
-  readonly onSaid?: ((kind: AnnouncementKind) => void) | undefined;
+  readonly onEvent?: ((kind: AnnouncementKind) => void) | undefined;
   /** The throttle's clock, in seconds. The wall clock unless a test hands one in. */
   readonly clock?: (() => number) | undefined;
 }
@@ -133,7 +145,7 @@ export function RideAnnouncer({
   trainer,
   workout,
   storage,
-  onSaid,
+  onEvent,
   clock,
 }: RideAnnouncerProps): JSX.Element {
   const [said, setSaid] = useState('');
@@ -149,8 +161,8 @@ export function RideAnnouncer({
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const now = useRef(clock ?? wallSeconds);
   now.current = clock ?? wallSeconds;
-  const told = useRef(onSaid);
-  told.current = onSaid;
+  const told = useRef(onEvent);
+  told.current = onEvent;
 
   /**
    * One call of the core. ⚠️ The only place this component writes the region,
@@ -158,6 +170,9 @@ export function RideAnnouncer({
    */
   const hear = useRef((events: readonly AnnouncementEvent[]): void => {
     clearTimeout(timer.current);
+    // Told BEFORE the core decides what is said, so a sound bound to an event
+    // follows the event rather than the window. @see RideAnnouncerProps.onEvent
+    for (const event of events) told.current?.(event.kind);
     const at = now.current();
     const heard = announce(announcer.current, {
       now: at,
@@ -169,9 +184,8 @@ export function RideAnnouncer({
       preference: { ...preference, powerEverySeconds: 'never', distanceEvery: 'never' },
     });
     announcer.current = heard.state;
-    if (heard.sentence !== undefined && heard.kind !== undefined) {
+    if (heard.sentence !== undefined) {
       setSaid(heard.sentence);
-      told.current?.(heard.kind);
     }
     // A sentence that is WAITING for the window has no render to carry it — a
     // paused workout re-renders nothing — so ask again when the window opens.

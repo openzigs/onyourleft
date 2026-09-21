@@ -50,8 +50,12 @@
  *
  * For a rider who turned them on (off by default): a tone tracking power
  * against the target the trainer ACKNOWLEDGED (`holdingWatts`, never a target
- * only asked for), and two short rising notes as a block changes — played with
- * the *"Now: …"* sentence above, so the sound is never the only carrier. The
+ * only asked for), and two short rising notes as a block changes — played ON
+ * the change, with the *"Now: …"* sentence queued to the announcer in the same
+ * event, so the sound is never the only thing offered. ⚠️ The sentence can
+ * still be held or dropped by the announcer's order (a *"Control lost"* in the
+ * same window outranks it); the sound is not, and the block stays on the panel
+ * as *"Now: …"* for a rider who can see it (#448's review). The
  * audio context is resumed inside the rider's press on a workout's *Ride*
  * button and nowhere earlier; a dropped power reading, a paused workout and
  * the end of the workout all silence the tone. `game/audio-cues.ts` holds every
@@ -220,8 +224,11 @@ export function WorkoutPanel({
       workout={workout}
       storage={announcements}
       clock={announcerClock}
-      // #400: the interval sound, on the change that is SAID — never alone.
-      onSaid={(kind) => {
+      // #400: the interval sound, on the block CHANGE — not on the sentence
+      // winning the window, which could hold it 3 s or drop it (#448's
+      // review). The "Now: …" sentence is queued in the same call, so the
+      // sound is never offered alone. @see RideAnnouncerProps.onEvent
+      onEvent={(kind) => {
         if (kind === 'interval-now') cues.cue('interval');
       }}
     />

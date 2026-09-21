@@ -7,7 +7,8 @@
  * `audio-cues.test.ts` holds the rules against a port double; this is the
  * wiring: that the game and the workout panel resume audio only inside the
  * rider's press, feed the tone the ACKNOWLEDGED target and the LIVE reading,
- * play each short sound on the frame its SENTENCE is said, put the mute and
+ * play the distance sound on the frame its SENTENCE is said and the interval
+ * sound on the block change its sentence is queued with (#448), put the mute and
  * the volume on the ride's own screen, and stop the tone when the workout or
  * the ride ends.
  *
@@ -504,6 +505,67 @@ describe('a workout — #400', () => {
     expect(output.count('playCue')).toBe(0);
     await show(riding({ nowRiding: '5 min at 95%', elapsedSeconds: 600 }), 230);
     expect(workoutRegion()).toBe('Now: 5 min at 95%');
+    expect(output.calls.filter((call) => call.kind === 'playCue')).toEqual([
+      expect.objectContaining({ cue: 'interval' }),
+    ]);
+  });
+
+  it('plays the interval sound on the CHANGE, even when "Control lost" takes the window — #448', async () => {
+    // A rank-1 event and a block change in the same render: the announcer
+    // speaks the loss and drops "Now:", which is the order working. The sound
+    // used to go with the dropped sentence.
+    chooseSounds();
+    await show(undefined, 150);
+    await press(button('Ride Sweet spot'));
+    await show(riding(), 150);
+    const lost: TrainerSnapshot = { ...trainer, hasControl: false, lost: 'permission-lost' };
+    await mounted?.rerender(
+      <WorkoutPanel
+        trainer={lost}
+        workout={riding({ nowRiding: '5 min at 95%', elapsedSeconds: 600 })}
+        port={workoutStub(ATHLETE, [record])}
+        thresholdPower={watts(250)}
+        onStart={() => undefined}
+        onEnd={() => undefined}
+        power={230}
+        sounds={output}
+      />,
+    );
+    await settle();
+    expect(workoutRegion()).toMatch(/^Control lost: /);
+    expect(output.calls.filter((call) => call.kind === 'playCue')).toEqual([
+      expect.objectContaining({ cue: 'interval' }),
+    ]);
+  });
+
+  it('plays the interval sound at once while a sentence said just before holds the window — #448', async () => {
+    let clock = 100;
+    const at = (workout: RideWorkoutSnapshot, lostNow: boolean) => (
+      <WorkoutPanel
+        trainer={lostNow ? { ...trainer, lost: 'link-lost' } : trainer}
+        workout={workout}
+        port={workoutStub(ATHLETE, [record])}
+        thresholdPower={watts(250)}
+        onStart={() => undefined}
+        onEnd={() => undefined}
+        power={230}
+        sounds={output}
+        announcerClock={() => clock}
+      />
+    );
+    chooseSounds();
+    mounted = await mount(at(riding(), false));
+    await settle();
+    await press(button('Mute sounds'));
+    await press(button('Mute sounds'));
+    await mounted.rerender(at(riding(), true));
+    await settle();
+    expect(workoutRegion()).toMatch(/^Control lost: /);
+    // One second later — inside the window — the block changes.
+    clock = 101;
+    await mounted.rerender(at(riding({ nowRiding: '5 min at 95%', elapsedSeconds: 600 }), true));
+    await settle();
+    expect(workoutRegion(), 'the sentence waits for its window').toMatch(/^Control lost: /);
     expect(output.calls.filter((call) => call.kind === 'playCue')).toEqual([
       expect.objectContaining({ cue: 'interval' }),
     ]);
