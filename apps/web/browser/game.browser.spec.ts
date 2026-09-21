@@ -289,14 +289,17 @@ const DESKTOP_CHROME = { viewport, userAgent, deviceScaleFactor, isMobile, hasTo
  * this file: `game-harness.ts` does ALL of its work in one `run()` and
  * publishes one object at the end of it, so the cases never drove the page —
  * each loaded it, waited for that object and asserted on a different field of
- * the serialised copy `page.evaluate` handed back, which nothing writes to. What the cases share is that object; every assertion
- * on it is unchanged, and so is every case's name, so a red run still names
- * the claim that broke.
+ * the serialised copy `page.evaluate` handed back, which nothing writes to.
+ * What the cases share is that copy; every assertion on it is unchanged, and so
+ * is every case's name, so a red run still names the claim that broke.
  *
- * ⚠️ **A failed run fails every case that reads it**, with the same error —
- * the memo holds the rejected promise rather than retrying. That is the right
- * outcome: a harness that throws is one nothing in this file can be true of,
- * and a retry would be the flake-hiding `playwright.config.ts` refuses.
+ * ⚠️ **A red case costs a reload, and that was measured rather than assumed.**
+ * Playwright replaces a worker after any failing case, and this memo lives in
+ * the worker, so the case after a failure loads the page afresh: with the road
+ * taken out of the scene nine cases went red and the file took 49 s rather
+ * than 13. A green run pays two loads — the plain page and `?shadow-map` — and
+ * nothing here retries a load that failed, which is the flake-hiding
+ * `playwright.config.ts` refuses.
  */
 const test = base.extend<object, { harnessRun: (query?: string) => Promise<HarnessRun> }>({
   harnessRun: [
