@@ -37,6 +37,8 @@ import {
 
 import { tabbableElements } from '../a11y/audit';
 import type { GamePort, RidableRoute } from '../game/GameView';
+import { UPDATE_REGION_LABEL } from '../offline/UpdateOffer';
+import type { UpdateWatcher } from '../offline/update';
 import { ridingSnapshot, stubRideController } from '../ride/testing';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { mount, settle, type Mounted } from '../testing/mount';
@@ -110,11 +112,42 @@ async function press(text: string): Promise<void> {
 
 async function openTheGame(
   rideController?: ReturnType<typeof stubRideController>['controller'],
+  update?: UpdateWatcher,
 ): Promise<void> {
   mounted = await mount(
-    <AppShell capabilities={NO_BLUETOOTH} game={GAME} rideController={rideController} />,
+    <AppShell
+      capabilities={NO_BLUETOOTH}
+      game={GAME}
+      rideController={rideController}
+      update={update}
+    />,
   );
   await settle();
+}
+
+/**
+ * A watcher with an update already waiting, which is the state the real one is
+ * in for as long as a rider has not answered it. It never changes its mind:
+ * what is under test is whether the *shell* renders the offer, and a watcher
+ * that went quiet on its own would make "absent mid-ride" true of any shell.
+ */
+function updateWaiting(): { readonly watcher: UpdateWatcher; readonly activations: () => number } {
+  let activations = 0;
+  return {
+    watcher: {
+      status: () => 'available',
+      subscribe: () => () => undefined,
+      activate: () => {
+        activations += 1;
+      },
+      dismiss: () => undefined,
+    },
+    activations: () => activations,
+  };
+}
+
+function updateOffer(): Element | null {
+  return document.querySelector(`[aria-label="${UPDATE_REGION_LABEL}"]`);
 }
 
 /** The chrome, by the elements that are it. */
@@ -214,6 +247,49 @@ describe('a ride takes the screen over — #423', () => {
     for (const [name, element] of Object.entries(chrome())) {
       expect(element, name).not.toBeNull();
     }
+  });
+});
+
+describe('an update is not offered mid-ride, and is not lost — #423', () => {
+  // ⚠️ None of the cases above hands the shell an `update` watcher, and the
+  // offer renders `null` without one — so "leaves nothing to tab to but the
+  // ride's own controls" was asserted over a shell that could never have
+  // rendered the offer. #436's review found it by deleting `|| immersive` from
+  // `AppShell` and watching this directory stay green. This is the one piece
+  // of chrome whose control RELOADS THE PAGE: left rendered it is a tab stop
+  // behind an opaque stage, and Enter on it ends the ride by reload rather
+  // than by `teardown`.
+
+  it('offers it while a rider is choosing a route', async () => {
+    // The control. Without it, "absent during a ride" is true of a watcher
+    // this shell never rendered an offer for at all.
+    await openTheGame(undefined, updateWaiting().watcher);
+
+    expect(updateOffer()).not.toBeNull();
+    const stops = tabbableElements(document.body).map((each) => each.textContent);
+    expect(stops).toContain('Update now');
+  });
+
+  it('renders no offer once the ride has started, and nothing of it to tab to', async () => {
+    const waiting = updateWaiting();
+    await openTheGame(undefined, waiting.watcher);
+    await press('Ride ');
+
+    expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
+    expect(updateOffer()).toBeNull();
+    const stops = tabbableElements(document.body).map((each) => each.textContent);
+    expect(stops).toEqual(['Pause', 'End ride']);
+    expect(waiting.activations()).toBe(0);
+  });
+
+  it('offers it again when the ride ends, because the watcher held it', async () => {
+    await openTheGame(undefined, updateWaiting().watcher);
+    await press('Ride ');
+    expect(updateOffer()).toBeNull();
+    await press('End ride');
+
+    expect(updateOffer()).not.toBeNull();
+    expect(button('Update now')).toBeDefined();
   });
 });
 
