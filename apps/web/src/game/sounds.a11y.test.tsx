@@ -179,6 +179,38 @@ describe('the game — #400', () => {
     expect(output.calls[0]).toEqual({ kind: 'resume' });
   });
 
+  it('resumes audio SYNCHRONOUSLY inside the press on Ride, before any awaited work', async () => {
+    // ⚠️ The test above passes with `begin()` moved below an `await`: it reads
+    // the calls only after `press` has flushed every promise. A browser grants
+    // audio to the gesture's own synchronous turn, so what is asserted here is
+    // the port's state on the SAME turn as the click — no `act` flush and no
+    // microtask between the two. The ride races a ghost, so that `start`'s own
+    // first `await` (the ghost's load) is actually taken rather than skipped.
+    chooseSounds();
+    mounted = await mount(
+      <GameView
+        port={{ ...PORT, listRoutes: () => Promise.resolve([{ ...flatRoute(), attempts: 1 }]) }}
+        renderer={() => Promise.resolve(RENDERER)}
+        now={() => nowMs}
+        sounds={output}
+      />,
+    );
+    await settle();
+    const ghost = document.querySelector<HTMLInputElement>('li input[type="checkbox"]');
+    await press(ghost ?? undefined);
+    expect(ghost?.checked, 'the ghost was not chosen, so no await is taken').toBe(true);
+    const ride = button('Ride ');
+    expect(ride).toBeDefined();
+    let resumedInThePress = -1;
+    await act(async () => {
+      ride?.click();
+      resumedInThePress = output.count('resume');
+      await Promise.resolve();
+    });
+    await settle();
+    expect(resumedInThePress, 'audio was not resumed inside the press on Ride').toBe(1);
+  });
+
   it('makes no call at all for a rider who did not turn sounds on, and shows no control', async () => {
     chooseDistanceTicks();
     await openGame();
