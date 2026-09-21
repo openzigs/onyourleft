@@ -121,6 +121,43 @@ describe('the ground a view draws — #458', () => {
     belt.update(groundAt(520), 0x557744);
     expect(attribute(belt, 'position')).toBe(first);
   });
+
+  it('sends the index list once, not once a frame — #468 review', () => {
+    // `landform.ts` lends the same index array for every frame of one row
+    // count; three counts each `needsUpdate` as a new version to upload.
+    const belt = new TerrainBelt();
+    const first = groundAt(500);
+    belt.update(first, 0x557744);
+    const index = belt.mesh.geometry.getIndex() as unknown as { readonly version: number };
+    const uploaded = index.version;
+    const second = groundAt(520);
+    // Non-vacuity: the second frame really does hand back the same array.
+    expect(second.indices).toBe(first.indices);
+    belt.update(second, 0x557744);
+    expect(index.version).toBe(uploaded);
+    // A different list IS sent: a copy is a different array with the same rows.
+    belt.update({ ...second, indices: Uint32Array.from(second.indices) }, 0x557744);
+    expect(index.version).toBe(uploaded + 1);
+  });
+
+  it('tells the patchwork how many fields a lap has, so lap two wraps onto lap one — #468 review B3', () => {
+    const belt = new TerrainBelt();
+    const ground = groundAt(500);
+    belt.update(ground, 0x557744);
+    // The same uniform object three's program reads.
+    const shader = {
+      uniforms: {} as Record<string, { value: number }>,
+      vertexShader: '#include <common>\n#include <begin_vertex>',
+      fragmentShader: '#include <common>\n#include <color_fragment>',
+    };
+    (
+      belt.mesh.material as unknown as { onBeforeCompile: (s: typeof shader) => void }
+    ).onBeforeCompile(shader);
+    expect(shader.uniforms['fieldCount']?.value).toBe(ground.fieldCount);
+    expect(ground.fieldCount * ground.fieldSpan).toBeCloseTo(hillRoute().totalDistance, 6);
+    // And the fragment wraps the field index by it.
+    expect(shader.fragmentShader).toContain('fieldCount * floor(');
+  });
 });
 
 describe('the distant hills a view draws — #458', () => {

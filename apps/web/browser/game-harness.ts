@@ -80,7 +80,12 @@ import {
   RIDER_SHADOW_MAP_RUNG,
   type QualitySettings,
 } from '../src/game/quality';
-import { hillRoute, northRoute, valleyRoute } from '../src/game/route-fixtures-testing';
+import {
+  circuitRoute,
+  hillRoute,
+  northRoute,
+  valleyRoute,
+} from '../src/game/route-fixtures-testing';
 import { structuresAt } from '../src/game/settlements';
 import { waterways } from '../src/game/waterways';
 import { VERGE_DROP_METRES } from '../src/game/landform';
@@ -114,6 +119,14 @@ interface GradientMeasurement {
   readonly roadSpreadDetailed: number;
   readonly roadSpreadPlain: number;
   readonly groundChangedByDetail: number;
+  /**
+   * #468's review, B3: pixels that differ between the same place on a loop
+   * seen on lap one and on lap three, with the surface detail on — and the
+   * same comparison with the patchwork's lap wrap defeated, which is the field
+   * colours as #468's first head drew them.
+   */
+  readonly lapChanged: number;
+  readonly lapChangedUnwrapped: number;
   /** Pixels the hills on the horizon cover, against the same ridge sunk below it. */
   readonly horizonPixels: number;
   /** Pixels a block BELOW the rider's road level changes, 40 m up a 10 % climb. */
@@ -1342,6 +1355,39 @@ function gradientProbe(): GradientMeasurement {
     gl === null
       ? undefined
       : (view.render(level), view.render(level), readRegion(gl, 0, 0, canvas.width, canvas.height));
+  // ------------------------- the patchwork on lap three — #468 review B3
+  // A level loop, so nothing but the lap can differ between the two frames.
+  const circuit = circuitRoute(400, () => 20);
+  const circuitOrigin = corridorOrigin(circuit);
+  const circuitStart = atStartLine(circuit);
+  const onCircuit = (odometer: number): SceneFrame => {
+    const frame = sceneFrame({
+      profile: circuit,
+      origin: circuitOrigin,
+      state: { ...circuitStart, ride: { ...circuitStart.ride, distance: metres(odometer) } },
+    });
+    return { ...frame, markers: [], scatter: [] };
+  };
+  /** The first head's patchwork: a field count no lap reaches wraps nothing. */
+  const unwrapped = (frame: SceneFrame): SceneFrame => ({
+    ...frame,
+    terrain: { ...frame.terrain, mesh: { ...frame.terrain.mesh, fieldCount: 1e9 } },
+  });
+  const whole = (frame: SceneFrame): Uint8Array | undefined => {
+    if (gl === null) return undefined;
+    view.render(frame);
+    view.render(frame);
+    return readRegion(gl, 0, 0, canvas.width, canvas.height);
+  };
+  const lapsApart = (first: SceneFrame, third: SceneFrame): number => {
+    const one = whole(first);
+    const three = whole(third);
+    return one === undefined || three === undefined ? 0 : shadingAcross(three, one).pixels;
+  };
+  const lapOne = onCircuit(600);
+  const lapThree = onCircuit(600 + 2 * circuit.totalDistance);
+  const lapChanged = lapsApart(lapOne, lapThree);
+  const lapChangedUnwrapped = lapsApart(unwrapped(lapOne), unwrapped(lapThree));
   view.setQuality({ ...NO_RIDER_SHADOWS, surfaceDetail: false });
   const roadSpreadPlain = patchSpread(level, 16, 1.8);
   const groundPlain =
@@ -1362,6 +1408,8 @@ function gradientProbe(): GradientMeasurement {
     roadSpreadDetailed,
     roadSpreadPlain,
     groundChangedByDetail,
+    lapChanged,
+    lapChangedUnwrapped,
     horizonPixels,
     climbBuried: changed(climb, -1.5),
     climbLifted: changed(climb, 9),
@@ -1390,6 +1438,8 @@ const NO_GRADIENT: GradientMeasurement = {
   roadSpreadDetailed: 0,
   roadSpreadPlain: 0,
   groundChangedByDetail: 0,
+  lapChanged: 0,
+  lapChangedUnwrapped: 0,
   horizonPixels: 0,
   climbBuried: -1,
   climbLifted: 0,

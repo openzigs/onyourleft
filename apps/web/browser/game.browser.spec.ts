@@ -137,6 +137,8 @@ interface GameHarnessResult {
     readonly roadSpreadDetailed: number;
     readonly roadSpreadPlain: number;
     readonly groundChangedByDetail: number;
+    readonly lapChanged: number;
+    readonly lapChangedUnwrapped: number;
     readonly horizonPixels: number;
     readonly climbBuried: number;
     readonly climbLifted: number;
@@ -800,6 +802,14 @@ test.describe('a sky with a gradient, and surfaces with detail — #425', () => 
     expect(gradient.roadSpreadPlain).toBeLessThan(0.5);
     // The ground's mottle and patchwork reach the screen.
     expect(gradient.groundChangedByDetail).toBeGreaterThan(5_000);
+    // #468's review, B3: the same place on lap three is the same colour as on
+    // lap one — and the control, the patchwork with its lap wrap defeated,
+    // which is what the first head drew, repaints the fields.
+    console.log(
+      `the patchwork a lap later — ${String(gradient.lapChanged)} px changed, ${String(gradient.lapChangedUnwrapped)} px unwrapped`,
+    );
+    expect(gradient.lapChangedUnwrapped).toBeGreaterThan(2_000);
+    expect(gradient.lapChanged).toBeLessThan(gradient.lapChangedUnwrapped / 50);
   });
 });
 

@@ -293,6 +293,22 @@ export interface TerrainMesh {
    * The ground's patchwork is drawn on it, and the walls stand on it.
    */
   readonly fieldSpan: number;
+  /**
+   * How many fields a lap of this route has, each side: `totalDistance /
+   * fieldSpan`, a whole number by construction.
+   *
+   * ⚠️ **What makes lap two's patchwork lap one's** — #468's review, B3.
+   * {@link TerrainMesh.fields} carries the ODOMETER, which keeps counting on
+   * lap two, and the shader picked each field's colour from
+   * `floor(odometer / fieldSpan)`: the same field was a different colour every
+   * lap while the walls between them, which `settlements.ts` places on the
+   * wrapped field, stayed put. The shader now wraps that index by this count.
+   * The odometer rather than the wrapped distance stays in the attribute
+   * because the attribute is INTERPOLATED: a triangle across a loop's seam
+   * with 4 995 at one corner and 5 at the next would sweep through every
+   * field between them — #440's lesson, in a varying.
+   */
+  readonly fieldCount: number;
 }
 
 /**
@@ -464,6 +480,7 @@ export function terrainCorridor(
     rows,
     indicesPerBand: Math.max(0, rows - 1) * 2 * 6,
     fieldSpan: fieldSpanMetres(profile),
+    fieldCount: Math.max(1, Math.round(profile.totalDistance / FIELD_SPAN_METRES)),
   };
 }
 

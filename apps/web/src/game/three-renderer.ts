@@ -2678,16 +2678,20 @@ export class TerrainBelt {
   readonly #geometry = new BufferGeometry();
   /** How long this route's fields are, for the patchwork — #425. @see TerrainMesh.fieldSpan */
   readonly #fieldSpan = { value: 90 };
+  /** How many fields a lap has, which the patchwork wraps by — #468 review B3. @see TerrainMesh.fieldCount */
+  readonly #fieldCount = { value: 1 };
   readonly #materials = {
     lit: withSurfaceDetail(
       new MeshLambertMaterial({ color: UNSET_COLOUR, vertexColors: true }),
       'ground',
       this.#fieldSpan,
+      this.#fieldCount,
     ),
     flat: withSurfaceDetail(
       new MeshBasicMaterial({ color: UNSET_COLOUR, vertexColors: true }),
       'ground',
       this.#fieldSpan,
+      this.#fieldCount,
     ),
   };
   readonly #mesh: Mesh;
@@ -2696,6 +2700,13 @@ export class TerrainBelt {
   #bands = TERRAIN_BANDS;
   #indicesPerBand = 0;
   #indexCount = 0;
+  /**
+   * The index list last uploaded. `landform.ts` §`terrainIndices` lends the
+   * SAME array for every frame of one row count, so a frame that hands it
+   * back again needs no upload — 6 624 indices sent to the GPU sixty times a
+   * second for nothing, which #468's review noted.
+   */
+  #uploadedIndices: Uint32Array | undefined;
 
   constructor() {
     this.#mesh = new Mesh(this.#geometry, this.#materials.lit);
@@ -2755,13 +2766,18 @@ export class TerrainBelt {
     if (ground.indices.length > this.#indexCapacity) {
       this.#indexCapacity = ground.indices.length;
       this.#geometry.setIndex(new BufferAttribute(new Uint32Array(this.#indexCapacity), 1));
+      this.#uploadedIndices = undefined;
     }
     upload(this.#geometry.getAttribute('position') as BufferAttribute, ground.vertices);
     upload(this.#geometry.getAttribute('normal') as BufferAttribute, ground.normals);
     upload(this.#geometry.getAttribute('color') as BufferAttribute, ground.colours);
     upload(this.#geometry.getAttribute('fields') as BufferAttribute, ground.fields);
-    upload(this.#geometry.getIndex() as BufferAttribute, ground.indices);
+    if (ground.indices !== this.#uploadedIndices) {
+      upload(this.#geometry.getIndex() as BufferAttribute, ground.indices);
+      this.#uploadedIndices = ground.indices;
+    }
     this.#fieldSpan.value = ground.fieldSpan;
+    this.#fieldCount.value = ground.fieldCount;
     this.#indicesPerBand = ground.indicesPerBand;
     this.#indexCount = ground.indices.length;
     this.#applyRange();
@@ -2958,7 +2974,11 @@ const GROUND_DETAIL = /* glsl */ `
   float fade = 1.0 - smoothstep(20.0, 90.0, distance(cameraPosition, vDetailWorld));
   float mottle = (oylNoise(vDetailWorld.xz * 0.9) - 0.5) * 0.12
     + (oylNoise(vDetailWorld.xz * 0.11) - 0.5) * 0.16;
-  float fieldIndex = floor(vFields.x / fieldSpan);
+  // Wrapped by the lap's own field count, so lap two's field is lap one's —
+  // #468 review B3. Not mod(): its division is not exact on every GPU, and a
+  // whole multiple landing a hair under an integer would pick the neighbour.
+  float fieldOnLap = floor(vFields.x / fieldSpan);
+  float fieldIndex = fieldOnLap - fieldCount * floor((fieldOnLap + 0.5) / fieldCount);
   float fieldSide = vFields.y >= 0.0 ? 1.0 : -1.0;
   float fieldBand = floor(abs(vFields.y) / ${String(FIELD_DEPTH_METRES.toFixed(1))});
   float fieldKind = oylHash(vec2(fieldIndex * 1.37 + fieldSide * 17.0, fieldBand * 3.1 + 7.0));
@@ -2985,10 +3005,12 @@ function withSurfaceDetail<M extends MeshBasicMaterial | MeshLambertMaterial>(
   material: M,
   surface: 'road' | 'ground',
   fieldSpan: { value: number },
+  fieldCount: { value: number },
 ): M {
   material.defines = { ...material.defines };
   material.onBeforeCompile = (shader) => {
     shader.uniforms['fieldSpan'] = fieldSpan;
+    shader.uniforms['fieldCount'] = fieldCount;
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -3006,7 +3028,9 @@ function withSurfaceDetail<M extends MeshBasicMaterial | MeshLambertMaterial>(
       .replace(
         '#include <common>',
         `#include <common>\nvarying vec3 vDetailWorld;\n${
-          surface === 'ground' ? 'varying vec2 vFields;\nuniform float fieldSpan;\n' : ''
+          surface === 'ground'
+            ? 'varying vec2 vFields;\nuniform float fieldSpan;\nuniform float fieldCount;\n'
+            : ''
         }${DETAIL_COMMON}`,
       )
       .replace(
@@ -3477,9 +3501,12 @@ class ThreeGameView implements GameView {
       // broken centre line **one mesh and one draw call** (#242). Without it
       // each would need a material of its own, and a material is a draw call.
       // #425: the road's grain, behind the rung's define. Still ONE material.
-      withSurfaceDetail(new MeshBasicMaterial({ side: DoubleSide, vertexColors: true }), 'road', {
-        value: 0,
-      }),
+      withSurfaceDetail(
+        new MeshBasicMaterial({ side: DoubleSide, vertexColors: true }),
+        'road',
+        { value: 0 },
+        { value: 1 },
+      ),
     );
     // The corridor is rebuilt in world coordinates every time, so three's own
     // frustum culling has nothing useful to test against and would occasionally
