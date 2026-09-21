@@ -523,6 +523,18 @@ export function GameView(props: GameViewProps): JSX.Element {
     // a layout property there forces a synchronous layout sixty times a second
     // on the device least able to afford one. `typeof` because jsdom has no
     // `ResizeObserver` and the accessibility suite renders this screen there.
+    //
+    // ⚠️ **A known limit, stated rather than fixed — #436's review.** This
+    // effect returns early unless the ride is `riding` and disconnects in its
+    // cleanup, so a rider who PAUSES and then rotates gets no `resize`: the
+    // last frame is shown stretched until they resume, when the new observer's
+    // first callback corrects it. Hoisting the observer out of this effect is
+    // not the repair it looks like. `resize` is three's `setSize`, which
+    // resets the canvas's dimensions and so CLEARS the drawing buffer, and
+    // nothing draws while paused — it would trade a stretched frame for a
+    // blank one. The repair is a view that can redraw its last frame on
+    // demand, which the port does not offer today. Validation 0002 Q3 asks the
+    // person holding the tablet to look at it.
     const observer =
       canvas === null || typeof ResizeObserver !== 'function'
         ? undefined

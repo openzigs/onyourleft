@@ -38,6 +38,15 @@
  * control the owner could not see), and a paired sensor. A page that fits idle
  * and overflows mid-ride is the failure this would otherwise miss.
  *
+ * ⚠️ **"The most" is about which panels are open, not about how long a list
+ * is, and this header used to read as though it were both.** The library here
+ * holds ONE saved workout. `WorkoutPanel` lists the whole library, so a rider
+ * with ten has nine more start controls below wherever this one landed. That
+ * is a list that scrolls, by design — what the gate covers is that the panel,
+ * and the **first** control in it, are on the screen, which is what tells a
+ * rider structured workouts exist at all. Do not read a green run as "every
+ * workout is reachable without scrolling".
+ *
  * ## The control
  *
  * ⚠️ `window.__oylRideView.constrain()` puts the page back the way #422 found
@@ -119,6 +128,9 @@ export interface RideViewMeasurement {
   readonly controls: readonly RideViewControl[];
   /** Each group's own box, so a failure says which column moved. */
   readonly groups: Readonly<Record<'live' | 'trainer' | 'sensors', Box | undefined>>;
+  /** The route's `h1`, and the one-line summary the shell puts after it. */
+  readonly title: Box | undefined;
+  readonly summary: Box | undefined;
   /** `main`'s box and class, so a failure says whether the measure is on. */
   readonly main: Box | undefined;
   readonly mainClass: string;
@@ -192,10 +204,14 @@ function measure(): RideViewMeasurement {
   }
   const main = document.querySelector('main');
   const card = document.querySelector('.oyl-metric');
+  const title = document.querySelector('main > h1');
+  const summary = document.querySelector('main > h1 + p');
   return {
     viewport: { width: window.innerWidth, height: window.innerHeight },
     controls,
     groups,
+    title: title === null ? undefined : boxOf(title),
+    summary: summary === null ? undefined : boxOf(summary),
     main: main === null ? undefined : boxOf(main),
     mainClass: main?.className ?? '',
     mainMaxWidth: main === null ? '' : window.getComputedStyle(main).maxWidth,

@@ -1457,19 +1457,25 @@ viewport.
 ⚠️ **What a headless Chromium established, and what it cannot.** At 1280×800, 1024×768, 800×1280,
 844×390, 736×360, 390×844, 360×800 and 360×752 every reading and both controls are on screen with no
 scrolling, no panel is over another or over the rider, and a control that takes the stage away puts
-*End ride* below the fold again. None of that says the screen **looks right**, that the panels are
-where a thumb falls, that a 70° lens is comfortable for an hour, or that the frame rate held. **Only
-somebody holding the tablet can say any of that, and this part is where they say it.**
+*End ride* below the fold again. The **Ride screen** is measured separately, at 1280×800 and
+1024×768 and — since #436's review — at 1280×720 and 1024×720, which stand in for a WebView that
+has lost its system bars; every tablet case there prints its margin to the fold. None of that says
+the screen **looks right**, that the panels are where a thumb falls, that a 70° lens is comfortable
+for an hour, or that the frame rate held. **Only somebody holding the tablet can say any of that,
+and this part is where they say it.**
 
 ### ⚠️ Read this before starting
 
 - **Q6 is the safety step and it is the reason for the rest.** It is #372's question, asked again
   now that the control that answers it can be seen. Follow Part D's safety notes: low gear, seated,
   ready to stop pedalling.
-- **A notice changes the layout on a phone.** If the game shows *"The road is not reaching your
-  trainer"*, then on a phone — either way up — the elevation strip and the plan view give their
-  place to it. That is recorded in `apps/web/src/design/theme.css` §"WHERE THERE IS NO FREE CELL".
-  On the tablet all five are shown.
+- **A notice changes the layout on a phone — for the whole ride.** If the game shows a notice about
+  the road not reaching your trainer, then on a phone — either way up — the elevation strip and the
+  plan view give their place to it. ⚠️ **Not for a moment: from the first frame to the last.** The
+  trainer is read once when the ride starts, four of its six states carry a notice (a structured
+  workout in the game is one of them), and nothing dismisses it. That is recorded in
+  `apps/web/src/design/theme.css` §"WHERE THERE IS NO FREE CELL", and the remedy is
+  [#437](https://github.com/openzigs/onyourleft/issues/437). On the tablet all five are shown.
 - ⚠️ **Safe areas are the one thing no gate could measure.** The browser gate fakes an inset and
   watches the panels move. Whether the tablet *reports* one — and so whether a panel sits under the
   status bar or the gesture bar — is Q4.
@@ -1480,10 +1486,28 @@ somebody holding the tablet can say any of that, and this part is where they say
 |---|---|---|
 | Q1 | Tablet in **landscape**. Start a ride in the trainer game with a pacer, a ghost and a wind | Does the world fill the screen? Is the app's header gone? Are *Pause*, *End ride* and the trainer line visible **without scrolling**? |
 | Q2 | The same ride. Look at the four panels | Is any panel over the rider, or over the road directly ahead? Are power, cadence and heart rate readable at arm's length, and visibly larger than the rest? |
-| Q3 | Rotate to **portrait** mid-ride | Does the layout follow? Does the world redraw at the new shape without stretching — are the wheels still round? ⚠️ This is the orientation that was already working and must not have regressed |
+| Q3 | Rotate to **portrait** mid-ride | Does the layout follow? Does the world redraw at the new shape without stretching — are the wheels still round? ⚠️ This is the orientation that was already working and must not have regressed. ⚠️ Then **pause, rotate back, and look before resuming**: the paused frame is **expected to be stretched** until *Resume* — a known limit, `apps/web/src/game/GameView.tsx` says why — so what to record is whether it corrects itself on the first frame after resuming, and whether it is bad enough to matter when re-seating a tablet on the bars |
 | Q4 | Both orientations | ⚠️ Is any panel under the **status bar**, the **gesture bar** or a camera cut-out? Is any panel's edge clipped? |
 | Q5 | Press *End ride* | Does the header come back? Then start another ride and leave with the **system Back** gesture instead | 
-| Q6 | ⚠️ **The Ride screen, landscape, trainer paired and control granted.** Is *Ride a workout* visible **without scrolling**? Start a saved workout, ride 60 s, end it | Did the trainer's resistance change when the workout started? ⚠️ **Did it release when the workout ended?** — this is #372. Capture `adb logcat` filtered for `BluetoothLe`: there must be `0x04` Set Target Power writes this time |
+| Q6 | ⚠️ **The Ride screen, landscape, trainer paired and control granted.** Start a recording first. Are ***Pause* and *Stop*** visible **without scrolling**, and is *Ride a workout*? ⚠️ By measurement *Pause* / *Stop* are the lowest ride controls on this screen, not the workout — they are what a short WebView loses first. Then **record the WebView's size** — see below. Then start a saved workout, ride 60 s, end it | Did the trainer's resistance change when the workout started? ⚠️ **Did it release when the workout ended?** — this is #372. Capture `adb logcat` filtered for `BluetoothLe`: there must be `0x04` Set Target Power writes this time |
+
+⚠️ **Q6's number, and why one line of output matters.** The browser gate measures the Ride screen at
+1280×800 — the tablet's *display* — and, since #436's review, at **1280×720, which is a guess** at
+what the WebView is left once the status bar and the navigation bar are taken off. The Android shell
+configures no fullscreen mode, so the two differ, and before that review *Pause* / *Stop* ended at
+y = 737: on screen at 800, **below the fold at 728**. They now end at y = 614, which clears a 720 px
+fold by 105 px in the pinned Chromium — with this machine's fonts, not the tablet's. With a **debug**
+build running and Part P's adb forward in place, in landscape on the Ride screen:
+
+```bash
+node apps/mobile/tools/webview-probe.mjs \
+  '[innerWidth, innerHeight, devicePixelRatio, document.querySelector(".oyl-ride__group--live button")?.getBoundingClientRect().bottom].join(" ")'
+```
+
+Four numbers: the WebView's width and height in CSS pixels, the pixel ratio, and where the first
+ride control actually ends on the device. The second is what lets
+`apps/web/browser/rideview.browser.spec.ts` §`TABLET_IN_THE_SHELL` stop guessing; the fourth against
+the second is the real margin to the fold, which no gate here can take.
 
 ### Q — the camera, by eye and by number
 
@@ -1517,9 +1541,15 @@ adb shell dumpsys gfxinfo dev.openzigs.onyourleft | grep -iE "Total frames|Janky
 
 **Portrait still right, and the world not stretched after a rotation (Q3)?** ______________
 
+**Rotated while PAUSED — stretched until *Resume* as expected, corrected on the first frame after, and does it matter (Q3)?** ______________
+
 **Any panel under a system bar or a cut-out (Q4)?** ______________
 
 **Header back after *End ride*, and after system Back (Q5)?** ______________
+
+***Pause* / *Stop* visible without scrolling on the Ride screen, mid-recording, landscape (Q6)?** ______________
+
+**The WebView, landscape — `innerWidth` × `innerHeight`, pixel ratio, and where the first ride control ends (Q6):** ______________
 
 **⚠️ Workout visible, started, and RELEASED on the Ride screen (Q6)? `0x04` writes seen?** ______________
 

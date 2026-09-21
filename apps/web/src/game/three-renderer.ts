@@ -429,11 +429,24 @@ export const FOGGED_OUT_METRES = VIEW_AHEAD_METRES;
  *   | a sustained 8 % descent | 8.4° | 34 m | +0.7 m |
  *   | a sustained 15 % descent | 12.3° | 63 m | +4.1 m |
  *   | a sustained 25 % descent | 17.6° | 103 m | **+12.2 m** |
+ *   | a sustained 8 % climb | −0.7° | −30 m (above it) | +0.3 m |
+ *   | a sustained 15 % climb | −4.7° | −59 m | +3.4 m |
+ *   | a sustained 22 % climb | −8.7° | −87 m | +8.5 m |
+ *   | a sustained 25 % climb | −10.3° | −99 m | **+11.2 m** |
  *
- *   So the margin holds to a sustained descent of about 22 % over the whole
- *   400 m view, which no road is; the paragraph this replaces claimed 35 % on
- *   the old lens and a level gaze. On a climb the term has the other sign and
- *   the bound errs wide, which is the safe direction.
+ *   So the margin holds to a sustained grade of about 22 % down, or about 24 %
+ *   up, over the whole 400 m view, which no road is; the paragraph this
+ *   replaces claimed 35 % on the old lens and a level gaze.
+ *
+ *   ⚠️ **On EITHER sign of grade the bound errs narrow, and this paragraph
+ *   used to say a climb erred wide.** That was true of the level gaze — a
+ *   fixed 5.2° down-pitch looking at a road that rises — and a reviewer who
+ *   remembers it is reading the old file. Under `cameraRig` the axis follows
+ *   the road, so `p` goes negative on a climb while the item goes ABOVE the
+ *   eye, both factors of `− sin p · (itemHeight − cameraHeight)` change sign
+ *   together, and the term stays positive: depth along the axis is roughly the
+ *   road's path length whichever way it tilts. #436's review found it by
+ *   extending the table; the four climb rows are that arithmetic.
  *   ⚠️ **220 m of drop until #353, 157 m until #355 and 138 m until #424**:
  *   the margin is smaller every time and the claim it supports is the same
  *   one, re-derived rather than carried over.

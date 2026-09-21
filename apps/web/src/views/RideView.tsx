@@ -153,12 +153,26 @@ function LiveRide({
       <div className="oyl-ride__group oyl-ride__group--live">
         <h2>Live</h2>
         <MetricGrid metrics={snapshot.metrics} />
+
+        {/*
+          ⚠️ **The controls come BEFORE the clock, and until #436's review they
+          came after it.** A reviewer who remembers the clock sitting between
+          the metrics and Pause / Stop is reading the old file. The clock is
+          one line on a wide column and two on a narrow one, in a font this
+          repository does not choose, so everything beneath it moved with it —
+          and what was beneath it was the one pair of controls that ends a
+          recording. Measured in the pinned Chromium at 1280×720, which is
+          about what a landscape tablet's WebView is left once the system bars
+          are taken off the display's 800: Pause / Stop ended at y = 737, below
+          the fold. `theme.css` §`.oyl-ride` has the table. Nothing focusable
+          moved relative to anything else focusable, so the tab order is what
+          it was.
+        */}
+        <RideControls controller={controller} snapshot={snapshot} />
         <p className="oyl-ride__clock">
           {formatDuration(snapshot.elapsedSeconds)} elapsed ·{' '}
           {formatDuration(snapshot.movingSeconds)} moving · {snapshot.sampleCount} seconds recorded
         </p>
-
-        <RideControls controller={controller} snapshot={snapshot} />
         <StorageNotice snapshot={snapshot} />
         <RecoveryOffer controller={controller} snapshot={snapshot} />
       </div>

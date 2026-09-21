@@ -321,6 +321,52 @@ h3:first-child {
   max-width: none;
 }
 
+/*
+ * The title and its one-line summary share a row where the screen is laid out
+ * in columns (#422, from #436's review).
+ *
+ * ⚠️ **This is height, not decoration.** On a landscape tablet the Ride screen's
+ * fold is the scarce thing, and the display's height is not the WebView's: the
+ * Android shell configures no fullscreen mode, so the status bar and the
+ * navigation bar come off the top and bottom of what `rideview.browser.spec.ts`
+ * had been measuring. Stacked, the title and summary spend 40.8 px above the
+ * first control for one line of text that fits beside the heading. `.oyl-ride`
+ * below has the whole budget; this rule is one of its two terms.
+ *
+ * The same `60rem` as `.oyl-ride`'s first column break, on purpose: below it
+ * the screen is one column and a page that scrolls, the fold is not a promise
+ * anybody made, and the stacked title is left exactly as it was.
+ *
+ * `align-items: start` and not `stretch`: `.oyl-main` is the flex child that
+ * takes the shell's spare height, and a stretched grid row would hand that
+ * height to the title row.
+ */
+@media (min-width: 60rem) {
+  .oyl-main--instruments {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: var(--oyl-space-lg);
+    align-items: start;
+    align-content: start;
+  }
+
+  .oyl-main--instruments > * {
+    grid-column: 1 / -1;
+  }
+
+  .oyl-main--instruments > h1 {
+    grid-column: 1;
+    align-self: baseline;
+    margin-bottom: var(--oyl-space-md);
+  }
+
+  .oyl-main--instruments > h1 + p {
+    grid-column: 2;
+    align-self: baseline;
+    margin: 0 0 var(--oyl-space-md);
+  }
+}
+
 .oyl-main:focus {
   outline: none;
 }
@@ -670,6 +716,35 @@ h3:first-child {
  * cards sit two by two rather than four in a row and the live group is taller
  * than it was. That is the trade: height the screen has, for a fold the
  * controls are all above.
+ *
+ * ## The fold is the WebView's, not the display's — #436's review
+ *
+ * ⚠️ **The paragraph above used to be the end of the argument, and a reviewer
+ * who remembers that is reading the old file.** "Height the screen has" was
+ * measured at 1280×800, which is the tablet's DISPLAY. The Android shell
+ * configures no fullscreen mode, so the WebView is shorter by the status bar
+ * and the navigation bar, and the taller live group put Pause / Stop — the
+ * controls that END a recording — at y = 692–737: +63 px at 800, +15 at 752,
+ * and **below the fold at 728**. #422's defect, one panel up.
+ *
+ * What is above Pause / Stop now, at 1280 wide, and what each term was:
+ *
+ *   the header                      96.8     unchanged; it is every route's
+ *   main's padding                  24.0     unchanged
+ *   title + summary, one row        53.5     was 94.3 stacked    −40.8
+ *   "Live" and the four cards      395.4     unchanged
+ *   the clock                        0       was 82.0 above them −82.0
+ *   Pause / Stop                 570–614     was 692–737
+ *
+ * Two terms, and each has its own red test in `rideview.browser.spec.ts`: the
+ * title row is `.oyl-main--instruments` above, and the clock is `RideView.tsx`
+ * rendering the controls BEFORE it — DOM order, not `order:`, because a visual
+ * order that disagrees with the tab order is its own defect. That leaves
+ * 105.5 px to a 720 px fold and 125.3 at 1024×720, and the spec publishes the
+ * margin on every run and holds it to a floor rather than to zero.
+ *
+ * ⚠️ 720 is an assumed WebView height, erring short. Nobody has read
+ * `window.innerHeight` off the device yet; validation 0002 Part Q6 asks.
  *
  * ⚠️ **The SENSORS group is the one that may still be below the fold**, on the
  * two-column layout, and that is a decision rather than an oversight. Pairing a
@@ -1041,6 +1116,12 @@ select option {
  * given it a phone's single column with half the width empty — #422's defect,
  * rotated. `rem` so that a rider who has raised their text size crosses into
  * the simpler layout sooner, which is the direction to be wrong in.
+ *
+ * ⚠️ `column`'s upper edge is written `(width < 46rem)`, not `max-width:
+ * 45.99rem`. The second leaves a 0.16 px band — 735.84 to 736 px — that is in
+ * neither layout, and fractional viewport widths are real at a non-integer
+ * device pixel ratio. It fell through to `stacked`, which works, so nothing was
+ * broken; the range form simply has no band to fall through (#436's review).
  *
  * ⚠️ **`stacked` is this rule on its own**, and it is the only one that
  * scrolls. At 320×256 four panels cannot share the screen with a world, so the
@@ -1548,7 +1629,7 @@ select option {
  * the right failure: a HUD that silently became scrollable is #419 again.
  */
 @media (min-width: 46rem) and (min-height: 22.5rem),
-  (min-width: 22.5rem) and (max-width: 45.99rem) and (min-height: 47rem) {
+  (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
   .oyl-game--riding {
     overflow: hidden;
   }
@@ -1719,12 +1800,29 @@ select option {
  * this is being told that it is not. On a tablet there is room for both and
  * nothing gives way.
  *
+ * ⚠️ **"While a notice stands" is THE WHOLE RIDE, and this comment used to
+ * read as though it were a moment** — #436's review. `GameView` reads the
+ * trainer once, in `start`, and `trainer-port.ts` §`trainerRoadNotice` has a
+ * sentence for four of the six states: `workout`, `not-controllable`,
+ * `no-simulation` and `no-control`. Nothing dismisses it. So a rider doing a
+ * structured workout in the game on a phone, or riding a trainer that
+ * broadcasts power and cannot be driven, has no elevation strip and no plan
+ * view from the first frame to the last.
+ *
+ * And the argument above covers the strip and NOT the plan view. #285's plan
+ * says where on the road the rider is, which is true and useful whatever the
+ * trainer is doing; it goes because it shares the strip's panel, not because
+ * the notice makes it moot. That is a real cost and it is
+ * [#437](https://github.com/openzigs/onyourleft/issues/437)'s to remedy — a
+ * notice that collapses to one line once read would give the cell back.
+ *
  * ⚠️ `display: none`, which CLAUDE.md §4e warns about — for CONTROLS. The
  * accessibility suite loads no stylesheet, so an element hidden here still
  * looks focusable to `tabbableElements`; this panel holds an `svg` with a text
  * equivalent and no control at all, so there is nothing for that to be wrong
  * about. A screen-reader user loses the route's position sentence for as long
- * as a sighted one loses the picture, which is the honest equivalence.
+ * as a sighted one loses the picture, which is the honest equivalence — and
+ * "as long as" is, per the paragraph above, the whole ride.
  *
  * ⚠️ **One limit, stated rather than gated.** Upright on a phone at the very
  * bottom of the column layout's range — 752 px tall — a notice of the longest
@@ -1733,7 +1831,7 @@ select option {
  * `ride.browser.spec.ts` measures 390×844 and 360×800, which clear it.
  */
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
-  (min-width: 22.5rem) and (max-width: 45.99rem) and (min-height: 47rem) {
+  (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
   .oyl-game--riding .oyl-hud:has(> .oyl-hud__notices) .oyl-hud__route {
     display: none;
   }
@@ -1793,7 +1891,7 @@ select option {
  * 844 px viewport (#419's own table). `ride.browser.spec.ts` measures the same
  * viewport now: every reading and both controls on screen at `scrollY === 0`.
  */
-@media (min-width: 22.5rem) and (max-width: 45.99rem) and (min-height: 47rem) {
+@media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
   .oyl-game--riding .oyl-hud {
     grid-template-areas:
       'primary'

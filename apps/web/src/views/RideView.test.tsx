@@ -266,6 +266,29 @@ describe('criterion 3 — an unavailable metric shows no number', () => {
   });
 });
 
+describe('#422 — the controls that end a recording come before the clock', () => {
+  it('renders Pause and Stop ahead of the clock line, in the document', async () => {
+    // ⚠️ Layout, asserted in a suite that performs none — so this pins the
+    // ORDER and `browser/rideview.browser.spec.ts` measures what the order is
+    // worth: 82 px, which is the difference between Pause / Stop clearing a
+    // 720 px WebView by 105 px and by 23. The clock wraps to one line or two
+    // in a font nobody here chooses, and everything after it moves with it.
+    const stub = stubRideController(ridingSnapshot());
+    await show(stub);
+
+    const clock = document.querySelector('.oyl-ride__clock');
+    if (clock === null) {
+      throw new Error('the live group renders no clock line');
+    }
+    for (const label of ['Pause', 'Stop']) {
+      const position = buttonNamed(label).compareDocumentPosition(clock);
+      expect(position & Node.DOCUMENT_POSITION_FOLLOWING, label).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+    }
+  });
+});
+
 describe('criterion 6 — one click cannot end a ride', () => {
   it('arms a confirmation instead of stopping', async () => {
     const stub = stubRideController(ridingSnapshot());
