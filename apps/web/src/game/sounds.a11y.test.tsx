@@ -394,7 +394,7 @@ describe('a workout — #400', () => {
     // No new power reading: the volume must reach the tone on its own.
     const moved = output.calls.filter((call) => call.kind === 'setTone').at(-1);
     expect(moved?.kind).toBe('setTone');
-    const gain = (call: typeof moved): number =>
+    const gain = (call: (typeof output.calls)[number] | undefined): number =>
       call !== undefined && 'gain' in call ? call.gain : Number.NaN;
     // Half volume to a tenth: a fifth of the level, same pitch.
     expect(gain(moved) / gain(started)).toBeCloseTo(0.2);
