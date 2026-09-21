@@ -15,22 +15,26 @@ import { distanceOnRoute, metres, positionAt, type RouteProfile } from '@onyourl
 
 import {
   circuitRoute,
+  hairpinRoute,
   lakeValleyRoute,
   northRoute,
   steadyClimb,
   valleyRoute,
 } from './route-fixtures-testing';
 import { SCATTER_KINDS, scatterAt, scatterSeed, type ScatterItem } from './scatter';
+import { ROAD_CLEARANCE_METRES } from './landform';
 import { sceneFrame } from './scene';
 import {
   BUILDING_CLEARANCE_METRES,
   CHURCH_SETBACK_METRES,
   SETBACK_METRES,
+  STRUCTURE_FOOTPRINTS,
   STRUCTURE_MAX_ITEMS,
+  structureClearance,
   structuresAt,
 } from './settlements';
 import { atStartLine } from './simulation';
-import { corridorOrigin, localGroundPosition } from './terrain';
+import { ROAD_WIDTH_METRES, corridorOrigin, localGroundPosition } from './terrain';
 import { inWater, waterways } from './waterways';
 
 const BUILDINGS = new Set(['building', 'barn', 'church', 'shop-row', 'shed']);
@@ -285,5 +289,120 @@ describe('the scenery keeps out of the gardens — #460', () => {
       }
     }
     expect(buildings).toBeGreaterThan(20);
+  });
+});
+
+describe('nothing stands on the road, whichever stretch of it — #468 review B1', () => {
+  /**
+   * The least distance, in plan, from any point of an item's footprint to the
+   * road's centreline — the route resampled every metre through
+   * `positionAt`, and the footprint sampled every half metre. Deliberately a
+   * different method from `settlements.ts` §`offTheRoad`, which is exact.
+   */
+  function centreline(profile: RouteProfile): readonly { x: number; z: number }[] {
+    const origin = corridorOrigin(profile);
+    const line: { x: number; z: number }[] = [];
+    for (let along = 0; along <= profile.totalDistance; along += 1) {
+      line.push(localGroundPosition(origin, positionAt(profile, metres(along))));
+    }
+    return line;
+  }
+
+  function clearance(line: readonly { x: number; z: number }[], item: ScatterItem): number {
+    const footprint = STRUCTURE_FOOTPRINTS[item.kind as keyof typeof STRUCTURE_FOOTPRINTS];
+    const cos = Math.cos(item.rotation);
+    const sin = Math.sin(item.rotation);
+    let least = Number.POSITIVE_INFINITY;
+    const across = Math.max(1, Math.ceil((2 * footprint.x) / 0.5));
+    const deep = Math.max(1, Math.ceil((footprint.front - footprint.back) / 0.5));
+    for (let i = 0; i <= across; i += 1) {
+      for (let j = 0; j <= deep; j += 1) {
+        const lx = -footprint.x + (2 * footprint.x * i) / across;
+        const lz = footprint.back + ((footprint.front - footprint.back) * j) / deep;
+        // A yaw of `rotation`, as three applies it.
+        const x = item.x + lx * cos + lz * sin;
+        const z = item.z - lx * sin + lz * cos;
+        for (let at = 0; at + 1 < line.length; at += 1) {
+          const a = line[at] as { x: number; z: number };
+          const b = line[at + 1] as { x: number; z: number };
+          const dx = b.x - a.x;
+          const dz = b.z - a.z;
+          const span = dx * dx + dz * dz;
+          const t =
+            span > 0 ? Math.min(1, Math.max(0, ((x - a.x) * dx + (z - a.z) * dz) / span)) : 0;
+          least = Math.min(least, Math.hypot(x - (a.x + dx * t), z - (a.z + dz * t)));
+        }
+      }
+    }
+    return least;
+  }
+
+  it('measures a footprint against the road exactly, whatever way it is turned', () => {
+    // The exact measure against the sampled one, over every kind at scattered
+    // places and headings around a hairpin — its two legs and its bend — so a
+    // footprint that straddles the road, one turned the wrong way, and one
+    // measured from its centre alone all disagree with the samples.
+    const profile = hairpinRoute(20);
+    const origin = corridorOrigin(profile);
+    const line = centreline(profile);
+    let state = 12_345;
+    const next = (): number => {
+      state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return state / 2_147_483_648;
+    };
+    let near = 0;
+    let straddling = 0;
+    for (const kind of Object.keys(STRUCTURE_FOOTPRINTS)) {
+      for (let trial = 0; trial < 40; trial += 1) {
+        const item: ScatterItem = {
+          kind: kind as ScatterItem['kind'],
+          x: -25 + 70 * next(),
+          y: 0,
+          z: 300 + 200 * next(),
+          rotation: 2 * Math.PI * next(),
+          scale: 1,
+          variant: 0,
+        };
+        const exact = structureClearance(profile, origin, item);
+        const sampled = clearance(line, item);
+        // Within the reach that matters — past it the grid is not searched
+        // and the answer is only a bound — the samples can only ever be
+        // further than the truth, and by no more than half a sample.
+        if (sampled < ROAD_CLEARANCE_METRES) {
+          near += 1;
+          if (sampled < 0.5) straddling += 1;
+          expect(exact).toBeLessThanOrEqual(sampled + 1e-9);
+          expect(sampled - exact, `${kind} at trial ${String(trial)}`).toBeLessThan(0.45);
+        }
+      }
+    }
+    // Non-vacuity: plenty of the trials came close, and many stood on the road
+    // — 118 and 82 of 360, measured.
+    expect(near).toBeGreaterThan(60);
+    expect(straddling).toBeGreaterThan(40);
+  });
+
+  it('keeps every wall, hedge, fence and building off the far leg of a hairpin', () => {
+    // #468's review measured, on this PR's first head, a wall 1.61 m from the
+    // centreline of a 20 m hairpin and 2.40 m on a 10 m one: on the tarmac,
+    // which is 3.5 m either side of it. A boundary runs 48 m straight out from
+    // the road, and nothing asked what else was there.
+    let between = 0;
+    for (const radius of [10, 20, 40]) {
+      const profile = hairpinRoute(radius);
+      const line = centreline(profile);
+      for (const item of built(profile, 0, profile.totalDistance)) {
+        expect(
+          clearance(line, item),
+          `${item.kind} at (${item.x.toFixed(1)}, ${item.z.toFixed(1)}) on a ${String(radius)} m hairpin`,
+        ).toBeGreaterThanOrEqual(ROAD_WIDTH_METRES / 2);
+        // The hairpin's two legs run north at x = 0 and x = 2r: count what
+        // stands in the gap between them, along the straights.
+        if (item.x > 0 && item.x < 2 * radius && item.z < 350) between += 1;
+      }
+    }
+    // Non-vacuity: the fixture really does enclose the fields between the
+    // two legs, so the assertion above had boundaries there to judge.
+    expect(between).toBeGreaterThan(50);
   });
 });

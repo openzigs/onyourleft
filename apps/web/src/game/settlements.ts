@@ -57,6 +57,19 @@
  * half-open exactly as `scatter.ts` admits one, so two adjacent spans are a
  * partition and lap two is the same place as lap one.
  *
+ * ## ⚠️ Nothing stands on ANY stretch of the road
+ *
+ * Every structure's whole footprint ({@link STRUCTURE_FOOTPRINTS}) is held
+ * {@link ROAD_CLEARANCE_METRES} from every segment of the WHOLE route, not
+ * only from the road it was placed beside — {@link structureClearance}. #468's
+ * first head had no such rule, and its review found a wall 1.61 m from the
+ * centreline of a 20 m hairpin: a field boundary runs
+ * {@link FIELD_DEPTH_METRES} straight out and reached the other leg. The same
+ * rule is what keeps a house off the inside of its own tight bend, which
+ * {@link buildable} does not look at. This is the third placer here to need it
+ * (`scatter.ts` in #348, `landform.ts` §`clearReach` in #458), and
+ * `settlements.test.ts` §"nothing stands on the road" is its hairpin fixture.
+ *
  * Pure, and names no rendering library.
  */
 
@@ -65,10 +78,11 @@ import {
   elevationAt,
   gradeAt,
   positionAt,
+  type GeographicPosition,
   type RouteProfile,
 } from '@onyourleft/domain';
 
-import { fieldSpanMetres, terrainHeightAt } from './landform';
+import { ROAD_CLEARANCE_METRES, fieldSpanMetres, terrainHeightAt } from './landform';
 import {
   SETTLEMENT_GRADE_PERCENT,
   SETTLEMENT_TREE_LINE_FRACTION,
@@ -205,9 +219,222 @@ export function structuresAt(
     const key = `${item.kind} ${item.x.toFixed(3)} ${item.z.toFixed(3)}`;
     if (seen.has(key)) return false;
     seen.add(key);
-    return true;
+    // ⚠️ Off EVERY stretch of the road, not only the one it was placed beside.
+    // @see structureClearance
+    return structureClearance(profile, origin, item) >= ROAD_CLEARANCE_METRES;
   });
   return once.slice(0, Math.max(0, budget.maxItems));
+}
+
+/**
+ * How much ground each structure covers, in its own frame, in metres: half its
+ * width across (`x`) and how far it reaches behind (`back`, negative) and in
+ * front (`front`) of where it stands, along the way it faces (`z`).
+ *
+ * Read off `three-renderer.ts` §`STRUCTURE_STYLE`, the shapes those kinds are
+ * built from — the roof and the eaves included, because they overhang — and,
+ * for `building`, off the 9 m that `sceneryFitMetres` fits a model's largest
+ * extent to, taken as a square because a model's proportions are the pack's.
+ * A wall, hedge or fence is one {@link BOUNDARY_PIECE_METRES} piece along `z`.
+ *
+ * ⚠️ **Generous rather than exact, on purpose**: an overstated footprint
+ * drops a house from a hairpin's inside, which nobody misses; an understated
+ * one stands its eaves over the carriageway.
+ */
+export const STRUCTURE_FOOTPRINTS: Readonly<
+  Record<StructureKind, { readonly x: number; readonly back: number; readonly front: number }>
+> = {
+  building: { x: 4.5, back: -4.5, front: 4.5 },
+  barn: { x: 7.3, back: -4.3, front: 4.3 },
+  church: { x: 3.8, back: -9.3, front: 9.5 },
+  'shop-row': { x: 10.2, back: -3.7, front: 3.7 },
+  shed: { x: 5.2, back: -4.4, front: 4.4 },
+  wall: { x: 0.3, back: -BOUNDARY_PIECE_METRES / 2, front: BOUNDARY_PIECE_METRES / 2 },
+  hedge: { x: 0.55, back: -BOUNDARY_PIECE_METRES / 2, front: BOUNDARY_PIECE_METRES / 2 },
+  fence: { x: 0.1, back: -BOUNDARY_PIECE_METRES / 2, front: BOUNDARY_PIECE_METRES / 2 },
+  signpost: { x: 0.1, back: -0.95, front: 0.95 },
+};
+
+/** The side of one cell of {@link roadGrid}, in metres. */
+const ROAD_CELL_METRES = 32;
+
+/** The whole route's centreline in local metres, bucketed by cell. */
+interface RoadGrid {
+  readonly origin: CorridorOrigin;
+  /** Two floats a point: the route's own grid, in plan. */
+  readonly points: Float64Array;
+  /** Segment `s` runs from point `s` to point `s + 1`. */
+  readonly cells: ReadonlyMap<number, readonly number[]>;
+}
+
+const roadGrids = new WeakMap<RouteProfile, RoadGrid>();
+
+function cellKey(column: number, row: number): number {
+  return column * 100_003 + row;
+}
+
+/**
+ * The whole route as segments in a grid of cells, built once a route.
+ *
+ * ⚠️ **The WHOLE route and not the frame's corridor**, which is the point of
+ * #468's review finding B1: a field's boundary runs {@link FIELD_DEPTH_METRES}
+ * straight out from the road, and on a hairpin that reaches the other leg — a
+ * stretch of road that may be hundreds of metres of route away and outside any
+ * window a frame would think to look in. `scatter.ts` fixed its own form of
+ * this in #348, and `landform.ts` §`clearReach` its own in #458; each placer
+ * that stands things along the road's normal has shipped without the check at
+ * first. The route's own points are what `terrain.ts` §`pointAt` interpolates
+ * the road between, so a segment here is the drawn centreline.
+ */
+function roadGrid(profile: RouteProfile, origin: CorridorOrigin): RoadGrid {
+  const cached = roadGrids.get(profile);
+  if (
+    cached !== undefined &&
+    cached.origin.latitude === origin.latitude &&
+    cached.origin.longitude === origin.longitude
+  ) {
+    return cached;
+  }
+  // ⚠️ No segment from the last point back to the first on a loop:
+  // `positionAt` interpolates between neighbours only, and a loop's grid ends
+  // on its own closing point, so no such stretch is ever drawn.
+  const positions = profile.positions;
+  const count = positions.length;
+  const points = new Float64Array(count * 2);
+  for (let index = 0; index < count; index += 1) {
+    const local = localGroundPosition(origin, positions[index] as GeographicPosition);
+    points[index * 2] = local.x;
+    points[index * 2 + 1] = local.z;
+  }
+  const cells = new Map<number, number[]>();
+  const cellOf = (value: number): number => Math.floor(value / ROAD_CELL_METRES);
+  for (let segment = 0; segment + 1 < count; segment += 1) {
+    const ax = points[segment * 2] as number;
+    const az = points[segment * 2 + 1] as number;
+    const bx = points[segment * 2 + 2] as number;
+    const bz = points[segment * 2 + 3] as number;
+    for (let column = cellOf(Math.min(ax, bx)); column <= cellOf(Math.max(ax, bx)); column += 1) {
+      for (let row = cellOf(Math.min(az, bz)); row <= cellOf(Math.max(az, bz)); row += 1) {
+        const key = cellKey(column, row);
+        const list = cells.get(key);
+        if (list === undefined) cells.set(key, [segment]);
+        else list.push(segment);
+      }
+    }
+  }
+  const grid = { origin, points, cells };
+  roadGrids.set(profile, grid);
+  return grid;
+}
+
+/**
+ * How close a structure's whole {@link STRUCTURE_FOOTPRINTS footprint} comes
+ * to the road's centreline, in metres, over EVERY stretch of the road. Exact
+ * wherever the answer is within {@link ROAD_CLEARANCE_METRES} of the
+ * footprint, which is all a caller asks; further out it is `+Infinity` or an
+ * upper bound, because the grid is only searched that far.
+ *
+ * {@link structuresAt} keeps a structure only when this is at least
+ * {@link ROAD_CLEARANCE_METRES}: the carriageway's half-width and its verge,
+ * the same clearance `landform.ts` §`clearReach` holds the ground to.
+ */
+export function structureClearance(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  item: ScatterItem,
+): number {
+  const road = roadGrid(profile, origin);
+  const footprint = STRUCTURE_FOOTPRINTS[item.kind as StructureKind];
+  const reach =
+    Math.hypot(footprint.x, Math.max(-footprint.back, footprint.front)) + ROAD_CLEARANCE_METRES;
+  const cellOf = (value: number): number => Math.floor(value / ROAD_CELL_METRES);
+  const cos = Math.cos(item.rotation);
+  const sin = Math.sin(item.rotation);
+  // Into the structure's own frame: the inverse of a yaw of `rotation`.
+  const localX = (x: number, z: number): number => (x - item.x) * cos - (z - item.z) * sin;
+  const localZ = (x: number, z: number): number => (x - item.x) * sin + (z - item.z) * cos;
+  // A segment in two of the cells searched is measured twice, which costs a
+  // few multiplications and no allocation — the frame's thread is the one
+  // GATT notifications arrive on (#240's NFR-2).
+  let least = Number.POSITIVE_INFINITY;
+  for (let column = cellOf(item.x - reach); column <= cellOf(item.x + reach); column += 1) {
+    for (let row = cellOf(item.z - reach); row <= cellOf(item.z + reach); row += 1) {
+      for (const segment of road.cells.get(cellKey(column, row)) ?? []) {
+        const ax = road.points[segment * 2] as number;
+        const az = road.points[segment * 2 + 1] as number;
+        const bx = road.points[segment * 2 + 2] as number;
+        const bz = road.points[segment * 2 + 3] as number;
+        least = Math.min(
+          least,
+          segmentToBox(
+            localX(ax, az),
+            localZ(ax, az),
+            localX(bx, bz),
+            localZ(bx, bz),
+            footprint.x,
+            footprint.back,
+            footprint.front,
+          ),
+        );
+      }
+    }
+  }
+  return least;
+}
+
+/**
+ * The distance from segment `(ax, az)–(bx, bz)` to the box `|x| ≤ half`,
+ * `back ≤ z ≤ front`: nought when they meet, and otherwise the least of each
+ * end to the box and each corner to the segment — which is where two convex
+ * shapes that do not meet are closest.
+ */
+function segmentToBox(
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  half: number,
+  back: number,
+  front: number,
+): number {
+  // Liang–Barsky: does any of the segment lie inside the box?
+  let enter = 0;
+  let leave = 1;
+  const dx = bx - ax;
+  const dz = bz - az;
+  for (const [p, q] of [
+    [-dx, ax + half],
+    [dx, half - ax],
+    [-dz, az - back],
+    [dz, front - az],
+  ] as const) {
+    if (p === 0) {
+      if (q < 0) {
+        enter = 1;
+        leave = 0;
+      }
+    } else {
+      const t = q / p;
+      if (p < 0) enter = Math.max(enter, t);
+      else leave = Math.min(leave, t);
+    }
+  }
+  if (enter <= leave) return 0;
+  const toBox = (x: number, z: number): number =>
+    Math.hypot(Math.max(0, Math.abs(x) - half), Math.max(0, back - z, z - front));
+  const span = dx * dx + dz * dz;
+  const toSegment = (x: number, z: number): number => {
+    const t = span > 0 ? Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / span)) : 0;
+    return Math.hypot(x - (ax + dx * t), z - (az + dz * t));
+  };
+  return Math.min(
+    toBox(ax, az),
+    toBox(bx, bz),
+    toSegment(-half, back),
+    toSegment(half, back),
+    toSegment(-half, front),
+    toSegment(half, front),
+  );
 }
 
 /** Where on the route something is, and which way the road runs there. */
