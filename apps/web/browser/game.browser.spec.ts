@@ -20,7 +20,7 @@
  * about thermal behaviour, and nothing about how any of it behaves on a phone.
  */
 
-import { expect, test } from '@playwright/test';
+import { test as base, devices, expect } from '@playwright/test';
 
 import { HARNESS_ORIGIN } from '../playwright.config';
 import { MINIMUM_RIDER_FRAME_SHARE, riderFrameBox } from '../src/game/camera';
@@ -256,23 +256,95 @@ const SCENE_DRAW_CALLS = 1 + 1 + 3 + 1;
  */
 const SCATTER_MESH_CEILING = 4 * 2 + 3 + 1;
 
+/**
+ * One load of the harness page, and every request it made on the way.
+ *
+ * The request list is collected from before `goto` rather than after, because
+ * a request made during the load is one that is over by the time a
+ * `page.evaluate` could look.
+ */
+interface HarnessRun {
+  readonly result: GameHarnessResult;
+  readonly requested: readonly string[];
+}
+
+/**
+ * The project's own device, as the options a context takes.
+ *
+ * ⚠️ A worker-scoped fixture cannot use the `page` fixture, so it opens its own
+ * context — and a context opened with no options is NOT the one every other
+ * case in this gate runs in. Spreading the same device the project names in
+ * `playwright.config.ts` is what keeps the shared load's page the same page.
+ */
+const { viewport, userAgent, deviceScaleFactor, isMobile, hasTouch } = devices['Desktop Chrome'];
+const DESKTOP_CHROME = { viewport, userAgent, deviceScaleFactor, isMobile, hasTouch };
+
+/**
+ * ⚠️ **The harness is loaded ONCE per query per worker, and every case reads
+ * that one run — #456.** Until then every case in this file reloaded the page,
+ * which is about nine seconds on a runner with no GPU: 43 cases were 6 to 7.3
+ * minutes of the required job's wall clock and the whole of its critical path.
+ *
+ * It is safe for a reason that is a property of the harness rather than of
+ * this file: `game-harness.ts` does ALL of its work in one `run()` and
+ * publishes one object at the end of it, so the cases never drove the page —
+ * each loaded it, waited for that object and asserted on a different field of
+ * the serialised copy `page.evaluate` handed back, which nothing writes to. What the cases share is that object; every assertion
+ * on it is unchanged, and so is every case's name, so a red run still names
+ * the claim that broke.
+ *
+ * ⚠️ **A failed run fails every case that reads it**, with the same error —
+ * the memo holds the rejected promise rather than retrying. That is the right
+ * outcome: a harness that throws is one nothing in this file can be true of,
+ * and a retry would be the flake-hiding `playwright.config.ts` refuses.
+ */
+const test = base.extend<object, { harnessRun: (query?: string) => Promise<HarnessRun> }>({
+  harnessRun: [
+    async ({ browser }, use) => {
+      const runs = new Map<string, Promise<HarnessRun>>();
+      const load = async (query: string): Promise<HarnessRun> => {
+        const context = await browser.newContext(DESKTOP_CHROME);
+        try {
+          const page = await context.newPage();
+          const requested: string[] = [];
+          page.on('request', (request) => requested.push(request.url()));
+          await page.goto(`${HARNESS_ORIGIN}/game.html${query}`);
+          // The harness publishes at the end of `run()` and nowhere else, so
+          // waiting on the property existing is waiting on the run having
+          // finished — not on a timer. ⚠️ Since #341 that run is
+          // **asynchronous**: it awaits the scenery models before it creates
+          // anything, exactly as `main.tsx` does.
+          await page.waitForFunction(() => window.__oylGameHarness !== undefined);
+          const result = await page.evaluate(() => window.__oylGameHarness as GameHarnessResult);
+          return { result, requested };
+        } finally {
+          await context.close();
+        }
+      };
+      await use((query = '') => {
+        let run = runs.get(query);
+        if (run === undefined) {
+          run = load(query);
+          runs.set(query, run);
+        }
+        return run;
+      });
+    },
+    { scope: 'worker' },
+  ],
+});
+
+/** The shared run's result, which is all but one case in this file reads. */
 async function harness(
-  page: import('@playwright/test').Page,
+  run: (query?: string) => Promise<HarnessRun>,
   query = '',
 ): Promise<GameHarnessResult> {
-  await page.goto(`${HARNESS_ORIGIN}/game.html${query}`);
-  // The harness publishes at the end of `run()` and nowhere else, so waiting on
-  // the property existing is waiting on the run having finished — not on a
-  // timer. ⚠️ Since #341 that run is **asynchronous**: it awaits the scenery
-  // models before it creates anything, exactly as `main.tsx` does, so the
-  // property appears a few hundred milliseconds later than it used to.
-  await page.waitForFunction(() => window.__oylGameHarness !== undefined);
-  return page.evaluate(() => window.__oylGameHarness as GameHarnessResult);
+  return (await run(query)).result;
 }
 
 test.describe('the game renderer in a real browser', () => {
-  test('constructs against a live WebGL context', async ({ page }) => {
-    const result = await harness(page);
+  test('constructs against a live WebGL context', async ({ harnessRun }) => {
+    const result = await harness(harnessRun);
 
     expect(result.errors).toEqual([]);
     expect(result.created).toBe(true);
@@ -282,8 +354,8 @@ test.describe('the game renderer in a real browser', () => {
     expect(result.hasContext).toBe(true);
   });
 
-  test('accepts the geometry terrain.ts builds', async ({ page }) => {
-    const result = await harness(page);
+  test('accepts the geometry terrain.ts builds', async ({ harnessRun }) => {
+    const result = await harness(harnessRun);
 
     // A vertex buffer whose length disagrees with its index buffer is a
     // type-correct object that a driver rejects at draw time, which is why this
@@ -300,8 +372,8 @@ test.describe('the game renderer in a real browser', () => {
     expect(result.highestIndex).toBeLessThan(result.vertexCount / 3);
   });
 
-  test('draws the road itself at the centre of the frame', async ({ page }) => {
-    const result = await harness(page);
+  test('draws the road itself at the centre of the frame', async ({ harnessRun }) => {
+    const result = await harness(harnessRun);
 
     expect(result.framesDrawn).toBe(FRAMES);
 
@@ -326,17 +398,17 @@ test.describe('the game renderer in a real browser', () => {
     expect(result.roadPixel.slice(0, 3)).not.toEqual(result.groundPixel.slice(0, 3));
   });
 
-  test('survives its buffers being reused across frames', async ({ page }) => {
+  test('survives its buffers being reused across frames', async ({ harnessRun }) => {
     // A hundred frames, because the renderer reuses and only grows its vertex
     // buffer. A single-frame harness cannot see a reuse bug at all.
-    const result = await harness(page);
+    const result = await harness(harnessRun);
 
     expect(result.framesDrawn).toBe(FRAMES);
     expect(result.errors).toEqual([]);
   });
 
-  test('places the rider and the bot on the road', async ({ page }) => {
-    const result = await harness(page);
+  test('places the rider and the bot on the road', async ({ harnessRun }) => {
+    const result = await harness(harnessRun);
 
     expect(result.markerKinds).toContain('rider');
     expect(result.markerKinds).toContain('bot');
@@ -351,27 +423,31 @@ test.describe('the world #241 derives from the route reaches the screen', () => 
    * changes nothing a rider sees. Only a read-back can tell the two apart, and
    * only in a browser: jsdom has no WebGL at all.
    */
-  test('draws a sky above the horizon, where the clear colour used to be', async ({ page }) => {
-    const result = await harness(page);
+  test('draws a sky above the horizon, where the clear colour used to be', async ({
+    harnessRun,
+  }) => {
+    const result = await harness(harnessRun);
 
     expect(isClearColour(result.skyPixel)).toBe(false);
   });
 
-  test('draws ground beside the road, where the clear colour used to be', async ({ page }) => {
-    const result = await harness(page);
+  test('draws ground beside the road, where the clear colour used to be', async ({
+    harnessRun,
+  }) => {
+    const result = await harness(harnessRun);
 
     expect(isClearColour(result.groundPixel)).toBe(false);
   });
 
-  test('draws a sky and a ground that are not the same thing', async ({ page }) => {
+  test('draws a sky and a ground that are not the same thing', async ({ harnessRun }) => {
     // A renderer that painted one flat colour over the whole frame would pass
     // both tests above and fail this one. There has to be a horizon.
-    const result = await harness(page);
+    const result = await harness(harnessRun);
 
     expect(result.skyPixel.slice(0, 3)).not.toEqual(result.groundPixel.slice(0, 3));
   });
 
-  test('puts the derived colours on the screen, not an arbitrary pair', async ({ page }) => {
+  test('puts the derived colours on the screen, not an arbitrary pair', async ({ harnessRun }) => {
     // Asserted as channel ORDERING rather than as values, deliberately. Every
     // step between `world.ts` and a read-back byte — colour management, the
     // output transfer function, the fog blend — is monotone per channel, so an
@@ -379,7 +455,7 @@ test.describe('the world #241 derives from the route reaches the screen', () => 
     // makes the sky blue-dominant at every latitude and altitude, and the
     // harness route is temperate and near sea level, so its ground is
     // vegetation and green-dominant.
-    const result = await harness(page);
+    const result = await harness(harnessRun);
     const [skyRed, skyGreen, skyBlue] = result.skyPixel;
     const [groundRed, groundGreen, groundBlue] = result.groundPixel;
 
@@ -403,8 +479,10 @@ test.describe('the world #241 derives from the route reaches the screen', () => 
    * Two at different depths can: the only difference between `roadPixel` and
    * `roadFarPixel` is how far each has converged toward the horizon.
    */
-  test('fades the distant road, rather than drawing it at full strength', async ({ page }) => {
-    const result = await harness(page);
+  test('fades the distant road, rather than drawing it at full strength', async ({
+    harnessRun,
+  }) => {
+    const result = await harness(harnessRun);
 
     // ⚠️ **#424, and the reason this test and the one below mean anything
     // again.** The far probe was a fixed 58 % up the frame, worked out against
@@ -415,8 +493,8 @@ test.describe('the world #241 derives from the route reaches the screen', () => 
     // lines below go red and everything else in this block stays green.
     // `game-harness.ts` §`inTheFrame` aims both probes from the geometry now,
     // and this holds them to what that has to produce. ⚠️ Here rather than in
-    // a case of its own because every case in this file reloads a ten-second
-    // harness on CI, and the job's stop is fifteen minutes away from nothing.
+    // a case of its own because, when it was written, every case in this file
+    // reloaded a ten-second harness on CI; since #456 they share one load.
     const [near, far] = result.roadProbeRows;
     // Further up the road is further up the frame, and neither is in the sky.
     expect(far).toBeLessThan(near);
@@ -436,7 +514,7 @@ test.describe('the world #241 derives from the route reaches the screen', () => 
   });
 
   test('fades it toward the horizon colour the route derived, not an arbitrary one', async ({
-    page,
+    harnessRun,
   }) => {
     // Direction per channel, against the horizon colour the harness publishes
     // rather than against a colour written down here — the same reason the sky
@@ -448,7 +526,7 @@ test.describe('the world #241 derives from the route reaches the screen', () => 
     // `horizon − road`. A fog colour that is not the derived one moves at
     // least one channel the wrong way: magenta drives green down where the
     // derived haze drives it up.
-    const result = await harness(page);
+    const result = await harness(harnessRun);
     const horizon = channelsOf(result.world.horizonColour);
 
     let checked = 0;
@@ -499,7 +577,7 @@ test.describe('the world #241 derives from the route reaches the screen', () => 
    */
 
   test('allocates nothing new on the GPU on a second pass over the same route', async ({
-    page,
+    harnessRun,
   }) => {
     // #240's NFR-3, measured with three's own allocations rather than with
     // object identity: a renderer that rebuilt the ground mesh every frame
@@ -526,19 +604,21 @@ test.describe('the world #241 derives from the route reaches the screen', () => 
     // sweep, so what fits through it is an allocation that happens once, at one
     // distance, and never again — but it is a hole the previous assertion did
     // not have.
-    const result = await harness(page);
+    const result = await harness(harnessRun);
 
     expect(result.resourcesAfterFirstFrame).toBeGreaterThan(0);
     expect(result.resourcesAfterSecondSweep).toBe(result.resourcesAfterAllFrames);
   });
 
-  test("finishes allocating within one pass, and within the belt's own bound", async ({ page }) => {
+  test("finishes allocating within one pass, and within the belt's own bound", async ({
+    harnessRun,
+  }) => {
     // The other half of the test above, and what stops it passing vacuously
     // over a renderer that allocates on the first pass without limit. Six
     // kinds, five buffers each — position, normal, uv, index and the instance
     // matrix — is everything the belt can ever ask the driver for beyond the
     // first frame, and nothing else in the scene appears after it.
-    const result = await harness(page);
+    const result = await harness(harnessRun);
     const MOST_BUFFERS_A_KIND_CAN_ADD = 5;
     const KINDS = 6;
 
@@ -563,8 +643,10 @@ test.describe('the road reads as a road — #242', () => {
    * decay the first time anybody adjusted the palette, and nothing would say
    * it had.
    */
-  test('draws a centre line that the carriageway beside it does not have', async ({ page }) => {
-    const result = await harness(page);
+  test('draws a centre line that the carriageway beside it does not have', async ({
+    harnessRun,
+  }) => {
+    const result = await harness(harnessRun);
     const [lineRed, , lineBlue] = result.centreLinePixel;
     const [roadRed, , roadBlue] = result.roadBesidePixel;
 
@@ -583,13 +665,13 @@ test.describe('the road reads as a road — #242', () => {
   });
 
   test('paints the centre line brighter than the surface, not merely differently', async ({
-    page,
+    harnessRun,
   }) => {
     // The luminance half of #242's accessibility argument, at the screen
     // rather than at the constants: a marking a rider cannot pick out in
     // sunlight is not a marking. `terrain.test.ts` asserts the contrast ratio
     // the colours have; this asserts the direction survived the pipeline.
-    const result = await harness(page);
+    const result = await harness(harnessRun);
     const brightness = (pixel: Pixel): number =>
       0.2126 * (pixel[0] ?? 0) + 0.7152 * (pixel[1] ?? 0) + 0.0722 * (pixel[2] ?? 0);
 
@@ -609,8 +691,8 @@ test.describe('the road reads as a road — #242', () => {
    * and the bot's. The ghost is not in play in this harness and a hidden mesh
    * issues nothing. A road split into three meshes reads as six.
    */
-  test('still draws the whole road in one call', async ({ page }) => {
-    const result = await harness(page);
+  test('still draws the whole road in one call', async ({ harnessRun }) => {
+    const result = await harness(harnessRun);
 
     // ⚠️ If this goes red at some number **other** than 6, read the
     // enumeration above before reading `terrain.ts`: the literal is the whole
@@ -648,8 +730,8 @@ test.describe('the gradient cue reaches the screen, on a frame after the first �
    * luminance-carrying, so a descent is *brighter* than a climb — not merely a
    * different hue.
    */
-  test('draws the descent brighter than the climb', async ({ page }) => {
-    const result = await harness(page);
+  test('draws the descent brighter than the climb', async ({ harnessRun }) => {
+    const result = await harness(harnessRun);
     const brightness = (pixel: Pixel): number =>
       0.2126 * (pixel[0] ?? 0) + 0.7152 * (pixel[1] ?? 0) + 0.0722 * (pixel[2] ?? 0);
     const [descentRed, descentGreen, descentBlue] = result.roadOnDescentPixel;
@@ -681,8 +763,8 @@ test.describe('the scenery reaches the screen, and costs one call a kind — #24
    * and draws nothing at all. Only a frame rendered twice can tell those apart,
    * and only in a browser: jsdom has no WebGL.
    */
-  test('changes what is beside the road when the scenery is added', async ({ page }) => {
-    const result = await harness(page);
+  test('changes what is beside the road when the scenery is added', async ({ harnessRun }) => {
+    const result = await harness(harnessRun);
 
     // Non-vacuity first, and it is not ceremony: a harness route that placed
     // no scenery would make every assertion below a claim about two identical
@@ -694,12 +776,12 @@ test.describe('the scenery reaches the screen, and costs one call a kind — #24
     expect(result.sceneryPixelWith.slice(0, 3)).not.toEqual(result.sceneryPixelWithout.slice(0, 3));
   });
 
-  test('finds that change beside the road rather than on it', async ({ page }) => {
+  test('finds that change beside the road rather than on it', async ({ harnessRun }) => {
     // The carriageway runs up the middle of the frame, so a difference found
     // there could be the road, a marker or a centre-line mark. The harness
     // searches the left of the frame only, and this pins that it stayed there:
     // scenery is the thing #244 put *beside* the road.
-    const result = await harness(page);
+    const result = await harness(harnessRun);
 
     expect(result.sceneryColumnFraction).toBeLessThan(0.375);
     expect(result.sceneryRowFraction).toBeGreaterThan(0.4);
@@ -714,8 +796,8 @@ test.describe('the scenery reaches the screen, and costs one call a kind — #24
    * have caught a per-item `Mesh` — a mistake that is invisible until a phone
    * is in hand, because it is correct in every other respect.
    */
-  test('draws many items in at most one call per kind', async ({ page }) => {
-    const result = await harness(page);
+  test('draws many items in at most one call per kind', async ({ harnessRun }) => {
+    const result = await harness(harnessRun);
 
     expect(result.scatterKindCount).toBeGreaterThan(0);
     expect(result.scatterKindCount).toBeLessThanOrEqual(6);
@@ -771,8 +853,10 @@ test.describe('the scenery reaches the screen, and costs one call a kind — #24
  * substitute and why the bot's own marker, 120 m up the road, is not.
  */
 test.describe('the world is lit, and can stop being — #286', () => {
-  test('finds the probe at both shadings, so the spreads mean something', async ({ page }) => {
-    const result = await harness(page);
+  test('finds the probe at both shadings, so the spreads mean something', async ({
+    harnessRun,
+  }) => {
+    const result = await harness(harnessRun);
 
     // Non-vacuity first. A probe that fell off the bottom of the frame would
     // make every assertion below a comparison of two empty sets, and a spread
@@ -788,8 +872,8 @@ test.describe('the world is lit, and can stop being — #286', () => {
     );
   });
 
-  test('gives one object a lit face and a shaded one — criterion 1', async ({ page }) => {
-    const result = await harness(page);
+  test('gives one object a lit face and a shaded one — criterion 1', async ({ harnessRun }) => {
+    const result = await harness(harnessRun);
 
     // ⚠️ **#286's first acceptance criterion in its own words**: *a form-giving
     // difference between a lit and an unlit face, not only a hue difference*.
@@ -806,8 +890,8 @@ test.describe('the world is lit, and can stop being — #286', () => {
     }
   });
 
-  test('draws it flat at the floor rung — criterion 4', async ({ page }) => {
-    const result = await harness(page);
+  test('draws it flat at the floor rung — criterion 4', async ({ harnessRun }) => {
+    const result = await harness(harnessRun);
 
     // ⚠️ **The rung is the answer #286 gives to #245**, and this is what says
     // it is a real one rather than a field nothing reads. `QualitySettings.
@@ -824,8 +908,8 @@ test.describe('the world is lit, and can stop being — #286', () => {
     expect(result.litMarkerSpread).toBeGreaterThan(result.flatMarkerSpread * 5);
   });
 
-  test('costs no extra draw call, whichever material is on', async ({ page }) => {
-    const result = await harness(page);
+  test('costs no extra draw call, whichever material is on', async ({ harnessRun }) => {
+    const result = await harness(harnessRun);
 
     // Shading is a fragment cost. The lit and the unlit material are mounted
     // on the same meshes, so the swap must not change what the driver is asked
@@ -835,8 +919,8 @@ test.describe('the world is lit, and can stop being — #286', () => {
     expect(result.litDrawCalls).toBe(result.flatDrawCalls);
   });
 
-  test('carries a real sun on the frame, derived from the route', async ({ page }) => {
-    const result = await harness(page);
+  test('carries a real sun on the frame, derived from the route', async ({ harnessRun }) => {
+    const result = await harness(harnessRun);
     const { sun } = result.world;
 
     // The harness route is at 51.5° N, so the sun is well up but not at the
@@ -875,11 +959,13 @@ test.describe('the world is lit, and can stop being — #286', () => {
    * outstanding, so nothing here says a mid-range phone in a handlebar mount
    * can afford the shading. That is why the floor rung exists.
    */
-  test('measures what the shading costs, rather than asserting it', async ({ page }, testInfo) => {
+  test('measures what the shading costs, rather than asserting it', async ({
+    harnessRun,
+  }, testInfo) => {
     // ⚠️ `?shadow-map`: the one case that also measures #426's shadow map,
     // folded in here because this is the case that already times rungs and
     // publishes them — and so that no other case pays for its frames.
-    const result = await harness(page, '?shadow-map');
+    const result = await harness(harnessRun, '?shadow-map');
 
     expect(result.shadedFrames).toBeGreaterThanOrEqual(30);
     expect(result.litFrameMs).toBeGreaterThan(0);
@@ -956,8 +1042,10 @@ test.describe('the world is lit, and can stop being — #286', () => {
  * makes a silent failure invisible, so this is where it is caught.
  */
 test.describe('the scenery is models, not solids — #341', () => {
-  test('draws more geometry for every kind ADR 0022 gives a model', async ({ page }, testInfo) => {
-    const result = await harness(page);
+  test('draws more geometry for every kind ADR 0022 gives a model', async ({
+    harnessRun,
+  }, testInfo) => {
+    const result = await harness(harnessRun);
 
     // ⚠️ **Non-vacuity first.** A kind with no items in the probe frame draws
     // nothing under either condition, and "0 is not greater than 0" would read
@@ -994,13 +1082,13 @@ test.describe('the scenery is models, not solids — #341', () => {
   });
 
   test('leaves `post` exactly as it was, because a post has no silhouette to buy', async ({
-    page,
+    harnessRun,
   }) => {
     // ADR 0022 D-3, in the one place it can be observed rather than read: a
     // marker post 1.1 m tall and 14 cm across is the same handful of pixels
     // whether it is modelled or extruded, and a model would cost a manifest
     // row, bundle bytes inside the APK and a share of #245's instance budget.
-    const result = await harness(page);
+    const result = await harness(harnessRun);
 
     expect(result.sceneryIndicesModelled[PROCEDURAL_KIND]).toBe(
       result.sceneryIndicesPlain[PROCEDURAL_KIND],
@@ -1008,21 +1096,23 @@ test.describe('the scenery is models, not solids — #341', () => {
   });
 
   test('still costs one draw call a kind, however much geometry a model carries', async ({
-    page,
+    harnessRun,
   }) => {
     // ⚠️ **#341's own warning, and the thing this change is most likely to
     // break without anybody seeing it**: *"Six packs of individually-drawn
     // models would multiply draw calls by the item count and undo #245's
     // budget entirely."* The belt merges every part of a model into one
     // geometry for exactly this, and the number below is #244's, unchanged.
-    const result = await harness(page);
+    const result = await harness(harnessRun);
     const sceneryCalls = result.drawCallsWithScatter - result.drawCallsWithoutScatter;
 
     expect(sceneryCalls).toBeGreaterThanOrEqual(result.scatterKindCount);
     expect(sceneryCalls).toBeLessThanOrEqual(SCATTER_MESH_CEILING);
   });
 
-  test('fetches the committed models and its one atlas, and nothing else', async ({ page }) => {
+  test('fetches the committed models and its one atlas, and nothing else', async ({
+    harnessRun,
+  }) => {
     // ⚠️ **#240's NFR-5 — *"makes no network request"* — was true until #341
     // because there was no file to declare one.** A glTF may name an external
     // resource by URI, and every City Kit building names exactly one: the
@@ -1042,12 +1132,10 @@ test.describe('the scenery is models, not solids — #341', () => {
     //
     // The request list is collected before the page is opened rather than
     // after, because a request made during the load is one that is over by the
-    // time a `page.evaluate` could look.
-    const requested: string[] = [];
-    page.on('request', (request) => requested.push(request.url()));
-
-    await page.goto(`${HARNESS_ORIGIN}/game.html`);
-    await page.waitForFunction(() => window.__oylGameHarness !== undefined);
+    // time a `page.evaluate` could look — and since #456 it is the list from
+    // the same load every other case in this file reads, which `HarnessRun`
+    // records for exactly this case.
+    const { requested } = await harnessRun();
 
     // ⚠️ **Distinct URLs, because the harness deliberately loads twice**: once
     // for the measurement and once more to restore the models after the
@@ -1070,13 +1158,15 @@ test.describe('the scenery is models, not solids — #341', () => {
     expect(requested.filter((url) => !url.startsWith(HARNESS_ORIGIN))).toEqual([]);
   });
 
-  test('uploads no texture to the GPU, however the colour got there — #366', async ({ page }) => {
+  test('uploads no texture to the GPU, however the colour got there — #366', async ({
+    harnessRun,
+  }) => {
     // ⚠️ **#366's fourth criterion, and the only way to make it.** The atlas is
     // fetched above; a renderer that kept the `Texture` and bound it would draw
     // an identical frame, at an identical draw-call count, with an identical
     // vertex buffer, and every other assertion in this file would stay green.
     // `gl.createTexture` is the one thing it could not avoid.
-    const result = await harness(page);
+    const result = await harness(harnessRun);
 
     // ⚠️ **The instrument first.** A zero that was always going to be a zero is
     // not evidence: a counter patched onto the wrong prototype, or a probe body
@@ -1117,8 +1207,8 @@ test.describe('the scenery is models, not solids — #341', () => {
  * carries", where it is read straight off the mesh.
  */
 test.describe('the rider pedals, and it reaches the screen — #349', () => {
-  test('changes what is on the screen when the cranks turn', async ({ page }, testInfo) => {
-    const result = await harness(page);
+  test('changes what is on the screen when the cranks turn', async ({ harnessRun }, testInfo) => {
+    const result = await harness(harnessRun);
 
     // The control first: two draws of the identical frame differ nowhere. Read
     // before the claim, because without it every number below could be noise.
@@ -1141,7 +1231,9 @@ test.describe('the rider pedals, and it reaches the screen — #349', () => {
     console.log(`what the pedalling moves — ${measured}`);
   });
 
-  test('carries its legs with it when it moves without pedalling', async ({ page }, testInfo) => {
+  test('carries its legs with it when it moves without pedalling', async ({
+    harnessRun,
+  }, testInfo) => {
     // ⚠️ **The gate the test above is blind to by construction**, and the
     // reason it is here is worth stating: every other probe on this page holds
     // the rider's position fixed and varies its crank angle, which is the half
@@ -1152,7 +1244,7 @@ test.describe('the rider pedals, and it reaches the screen — #349', () => {
     // power-only ride. Caught in review of #366–#368 after the limbs moved out
     // of a `Group` carrying the world transform and into an `InstancedMesh`
     // that does not.
-    const result = await harness(page);
+    const result = await harness(harnessRun);
 
     // The control first, for the reason the crank control is read first: the
     // rider genuinely moved, so the zero below is a renderer that followed.
@@ -1169,8 +1261,8 @@ test.describe('the rider pedals, and it reaches the screen — #349', () => {
     console.log(`what a move without pedalling moves — ${measured}`);
   });
 
-  test('costs three draw calls rather than the twenty its parts would', async ({ page }) => {
-    const result = await harness(page);
+  test('costs three draw calls rather than the twenty its parts would', async ({ harnessRun }) => {
+    const result = await harness(harnessRun);
 
     // #240's NFR-2. `bicycle.ts` describes about two dozen solids, and a mesh
     // apiece would cost four times what all the scenery costs for the one
@@ -1198,14 +1290,16 @@ test.describe('the rider pedals, and it reaches the screen — #349', () => {
  * provably must.
  */
 test.describe('the scenery carries its own colours — #366', () => {
-  test('draws a broadleaf tree with a trunk that is not its canopy', async ({ page }, testInfo) => {
+  test('draws a broadleaf tree with a trunk that is not its canopy', async ({
+    harnessRun,
+  }, testInfo) => {
     // ⚠️ **The red count is the whole criterion.** One colour per kind was the
     // world before #366 and for a broadleaf tree that colour was `0x3f6b33`, a
     // green: every pixel of every tree was green-dominant and no arrangement of
     // lighting could make one lead on red. `woodBark` is (0.886, 0.514, 0.341),
     // which is red-dominant — so a trunk drawn from the model's own values
     // cannot be missed and a trunk drawn from ours cannot be mistaken for one.
-    const result = await harness(page);
+    const result = await harness(harnessRun);
 
     expect(result.treeGreenPixels).toBeGreaterThan(0);
     expect(result.treeRedPixels).toBeGreaterThan(0);
@@ -1218,13 +1312,13 @@ test.describe('the scenery carries its own colours — #366', () => {
     console.log(`the tree the pack draws — ${measured}`);
   });
 
-  test('draws a building in the colours its atlas carries', async ({ page }, testInfo) => {
+  test('draws a building in the colours its atlas carries', async ({ harnessRun }, testInfo) => {
     // #366's second criterion. The atlas gives it a green roof (66, 172, 124)
     // and slate walls (95, 100, 124), so both a green-leading and a
     // blue-leading pixel exist. The flat colour it had before #366 is
     // `0xa8968a`, which is red-leading, so **neither** does — and a building
     // drawn in that colour fails both of these at once rather than one.
-    const result = await harness(page);
+    const result = await harness(harnessRun);
 
     expect(result.buildingGreenPixels).toBeGreaterThan(20);
     expect(result.buildingBluePixels).toBeGreaterThan(20);
@@ -1253,13 +1347,13 @@ test.describe('the scenery carries its own colours — #366', () => {
  * was left by #341.
  */
 test.describe('a kind is drawn as several shapes, and it is measured — #367', () => {
-  test('draws each of a kind’s variants as a different shape', async ({ page }) => {
+  test('draws each of a kind’s variants as a different shape', async ({ harnessRun }) => {
     // ⚠️ **Per variant, which no other measurement here can say.** A belt that
     // had quietly collapsed every variant onto one geometry would hold the
     // right number of meshes, spend the right number of draw calls and draw the
     // world #367 exists to replace. Two equal index counts are two variants
     // drawing the same thing.
-    const result = await harness(page);
+    const result = await harness(harnessRun);
 
     for (const [kind, counts] of Object.entries(result.variantIndices)) {
       if (kind === 'post') {
@@ -1274,9 +1368,9 @@ test.describe('a kind is drawn as several shapes, and it is measured — #367', 
   });
 
   test('spends a bounded number of draw calls, and fewer as the ladder drops', async ({
-    page,
+    harnessRun,
   }, testInfo) => {
-    const result = await harness(page);
+    const result = await harness(harnessRun);
     const [atThree, atTwo, atOne] = result.sceneryCallsByVariants;
 
     // The ceiling first, which is the budget this issue is required to state.
@@ -1328,25 +1422,25 @@ test.describe('a kind is drawn as several shapes, and it is measured — #367', 
  * 10 m, 50 m and 200 m, and its result table is empty.
  */
 test.describe('the pacer and the ghost are bicycles — #368', () => {
-  test('costs no draw call at all for the two that were solids', async ({ page }) => {
+  test('costs no draw call at all for the two that were solids', async ({ harnessRun }) => {
     // ⚠️ **The direction nobody expects.** #349 drew one bicycle in three calls
     // and left the bot a cone and the ghost an octahedron at one apiece; #368
     // instances all three riders into the same three meshes. So the frame was
     // five calls where it had been six, and a ghost would add none. (Six again
     // since #426's contact shadow — ONE call for however many riders cast
     // one, and the ghost casts none, so a ghost still adds nothing.)
-    const result = await harness(page);
+    const result = await harness(harnessRun);
 
     expect(result.drawCallsWithoutScatter).toBe(SCENE_DRAW_CALLS);
     expect(result.markerKinds).toContain('rider');
     expect(result.markerKinds).toContain('bot');
   });
 
-  test('draws each of the three in its own colour', async ({ page }, testInfo) => {
+  test('draws each of the three in its own colour', async ({ harnessRun }, testInfo) => {
     // ⚠️ **Each drawn alone, at the same place, on the same frame**, so the
     // only thing that can differ between the three is the tint. Drawing them
     // together would measure whichever happened to be in front.
-    const result = await harness(page);
+    const result = await harness(harnessRun);
     const { rider, bot, ghost } = result.riderMeanColour;
 
     for (const [kind, pixels] of Object.entries(result.riderSilhouettePixels)) {
@@ -1397,8 +1491,8 @@ test.describe('the pacer and the ghost are bicycles — #368', () => {
     // ------------------------------------------- their shadows — #426
     //
     // ⚠️ **Folded into this case rather than given one of its own**, because
-    // every case here reloads a ten-second harness (§4c) and this one already
-    // draws each rider alone. The same rider at the same place, with the
+    // every case here reloaded a ten-second harness until #456 (§4c) and this
+    // one already draws each rider alone. The same rider at the same place, with the
     // shadows off and then with the `'contact'` every rung draws — so the
     // pixels that differ are the blob, and nothing else can be.
     const shadows = result.contactShadowPixels;
@@ -1430,12 +1524,12 @@ test.describe('the pacer and the ghost are bicycles — #368', () => {
     expect(shadows.ghost).toBe(0);
   });
 
-  test('turns the pacer’s own cranks, from its own odometer', async ({ page }) => {
+  test('turns the pacer’s own cranks, from its own odometer', async ({ harnessRun }) => {
     // ⚠️ **The claim no jsdom test can make**: `scene.ts` derives the angle,
     // `three-renderer.ts` writes it into an instance matrix, and all of it is
     // satisfied by a renderer that draws none of it — #240's named defect shape
     // for this epic. The two frames differ only in the bot's crank angle.
-    const result = await harness(page);
+    const result = await harness(harnessRun);
 
     expect(result.botCrankPixels).toBeGreaterThan(0);
     // A pedalling bot's worth of change rather than a stray pixel, against its
@@ -1459,16 +1553,17 @@ test.describe('the pacer and the ghost are bicycles — #368', () => {
  */
 test.describe('the rider is prominent — #424', () => {
   /**
-   * ⚠️ One case where there were three, and it is CI's clock rather than
-   * taste: every case in this file reloads the harness, which is ten seconds
-   * on the runner, and the job is stopped at a fixed number of minutes. The
+   * ⚠️ One case where there were three, and it was CI's clock rather than
+   * taste: every case in this file reloaded the harness until #456, which is
+   * ten seconds on the runner, and the job is stopped at a fixed number of
+   * minutes. The
    * three claims are still three groups of assertions, in the order that makes
    * a failure readable — nothing measured, then too small, then misplaced.
    */
   test('fills at least a quarter of a 16 : 9 frame’s height, where `camera.ts` says', async ({
-    page,
+    harnessRun,
   }) => {
-    const { riderFrame } = await harness(page);
+    const { riderFrame } = await harness(harnessRun);
     const { landscape, portrait } = riderFrame;
 
     // Non-vacuity. A probe that found no differing pixel reports a box of no
@@ -1493,13 +1588,13 @@ test.describe('the rider is prominent — #424', () => {
     expect(landscape.right - landscape.left).toBeLessThan(0.1);
   });
 
-  test('the lens opens on an upright frame — #423', async ({ page }) => {
+  test('the lens opens on an upright frame — #423', async ({ harnessRun }) => {
     // ⚠️ The control for the lens policy reaching the GPU. At 16 : 9 the
     // reference lens and the policy are the same lens, so the case above passes
     // for a renderer that never applied `verticalFieldOfViewDegrees`. Upright
     // they differ: 19 % of the frame's height on the 90° stop, 27 % on a fixed
     // 70°.
-    const { portrait } = (await harness(page)).riderFrame;
+    const { portrait } = (await harness(harnessRun)).riderFrame;
     const expected = riderFrameBox(portrait.aspect);
     const fixedLens = riderFrameBox(16 / 9);
 
