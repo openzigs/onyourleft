@@ -776,13 +776,13 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
  * 1.6 Mb/s down and 150 ms round trip serving gzip, the CPU throttled 4×,
  * nine runs each — it does not, measurably: the entry chunk is fetched before
  * the worker is even registered, and `load` fires before the first paint.
- * Deferring registration to `load` bought 12 ms of median FCP over simply not
- * awaiting it (1688 ms against 1700 ms, inside the runs' own spread), and it
- * made the device offline-ready LATER (7574 ms against 7565 ms median to
- * `navigator.serviceWorker.ready`). That second number is the rider #391's
- * finding 4 names, in a basement on an unreliable link, and deferring would
- * shrink the window in which their precache completes for nothing a first
- * paint gains. On a fast link (9 Mb/s, 40 ms, no CPU throttle) the two differ
+ * Deferring registration to `load` moved median FCP by 12 ms over simply not
+ * awaiting it (1688 ms against 1700 ms) and median offline-ready by 9 ms
+ * (7574 ms against 7565 ms to `navigator.serviceWorker.ready`). Both are inside
+ * the runs' own spread, so neither is read as signal in either direction:
+ * deferring bought nothing measurable, and the simpler code is kept. Offline-
+ * ready is the number the rider #391's finding 4 names, in a basement on an
+ * unreliable link, which is why it was measured at all. On a fast link (9 Mb/s, 40 ms, no CPU throttle) the two differ
  * by nothing at all (392 ms each). ADR 0024's 2026-09-21 amendment has the
  * method and every run.
  *

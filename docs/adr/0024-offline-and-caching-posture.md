@@ -331,8 +331,9 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   **Reading.** The cost on first paint was the `await` of the registration before the first
   render — one round trip for `sw.js` — and not bandwidth contention from the precache: the entry
   chunk is fetched before the worker registers and `load` fires before the first paint. Deferring
-  registration to `load` bought 12 ms over not awaiting it, inside the runs' spread, and made the
-  device offline-ready later. So `main.tsx` renders first and still registers at module
+  registration to `load` moved median first paint by 12 ms and median offline-ready by 9 ms
+  (7574 against 7565 ms) — both inside the runs' spread, so neither is read as signal in either
+  direction: deferring bought nothing measurable. So `main.tsx` renders first and still registers at module
   evaluation; its comments carry these numbers, and the apparatus is described here and in the pull
   request that closes #418 rather than committed as a gate, because a timing gate on a GPU-less CI runner is
   the flaky kind.
