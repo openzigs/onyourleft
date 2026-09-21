@@ -57,6 +57,8 @@ interface ScriptedMachine {
   answer(opCode: number, result: number): void;
   /** Answer nothing at all, so the procedure never completes. */
   goSilent(): void;
+  /** Start answering again after {@link goSilent}. */
+  answerAgain(): void;
   /**
    * Hold the CCCD write open, and return the release.
    *
@@ -142,6 +144,9 @@ function scriptedMachine(): ScriptedMachine {
     },
     goSilent() {
       silent = true;
+    },
+    answerAgain() {
+      silent = false;
     },
     holdIndicationEnable() {
       enableGate = new Promise<void>((resolve) => {
@@ -1541,6 +1546,33 @@ describe('releasing the trainer at the end of a ride — #372', () => {
     ]);
     // An ERG target nothing replaced is not "none": nobody confirmed it went.
     expect(trainer.targetPower()).toStrictEqual({ kind: 'unknown', attempted: 200 });
+  });
+
+  it('keeps a target it could not confirm as unknown, rather than promoting it to none', async () => {
+    // A target that timed out may or may not be on the machine; a fallback that
+    // replaced nothing cannot have cleared it either.
+    const timers: Array<() => void> = [];
+    const trainer = control({
+      features: featuresWith(1 << 3),
+      scheduleTimeout: (_after, run) => {
+        timers.push(run);
+        return () => undefined;
+      },
+    });
+    await trainer.requestControl();
+    machine.goSilent();
+    const unanswered = trainer.setTargetPower(watts(180));
+    await inFlight();
+    timers.at(-1)?.();
+    await expect(unanswered).rejects.toThrow(SensorError);
+    expect(trainer.targetPower()).toStrictEqual({ kind: 'unknown', attempted: 180 });
+
+    machine.answerAgain();
+    machine.answer(FTMS_OP_CODE.reset, FTMS_RESULT_CODE.opCodeNotSupported);
+    const outcome = await trainer.letGo();
+
+    expect(outcome.kind).toBe('incomplete');
+    expect(trainer.targetPower()).toStrictEqual({ kind: 'unknown', attempted: 180 });
   });
 
   it('still sends the Stop, and still says incomplete, when the flat road is refused', async () => {
