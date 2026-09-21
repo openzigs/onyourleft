@@ -1586,6 +1586,7 @@ The two numbers must be **equal**. On 2026-09-21, before #439, they were `800 86
 | Q10 | Anywhere | ⚠️ Is the 70° lens comfortable? Does anything at the edge of the screen look stretched enough to notice? Would you ride an hour with it? |
 | Q11 | 12 s of riding at the target rung, tablet in landscape | the rows below. ⚠️ A lower camera draws more near scenery at a larger size, and the canvas is now the whole screen: this is **fill rate**, which the draw-call counts in the browser gate cannot see |
 | Q12 | ⚠️ **Re-import the loop route first** — a route saved before [#440](https://github.com/openzigs/onyourleft/issues/440) keeps the gap in its stored profile. Then start a ride on it and look at the road at 0 % before pedalling; then do the same on a **point-to-point** route | On the loop: the road runs **straight on down the middle of the screen**, with no diagonal white line and no cut edge. Whatever the loop's own closing kink looks like behind the rider is real geometry. On the point-to-point route: **nothing** behind the start line — no wedge of road. If the loop is still broken after a re-import, record the loop's closing gap (the route screen's *not a loop* refusal names it if it is over 25 m) |
+| Q13 | ⚠️ **On a phone**, with a workout running on the Ride screen, open the trainer game and start a ride ([#437](https://github.com/openzigs/onyourleft/issues/437)). Ride 20 s, then press ***Trainer notice*** twice | The notice *"…a workout is driving your trainer…"* stands open for about **15 s of ride** and then gets out of the way: the **elevation strip and the plan view come back**. *Trainer notice* reopens it and closes it again. With TalkBack on, the sentence is still read when the notice is put away |
 
 ```bash
 adb shell dumpsys gfxinfo dev.openzigs.onyourleft reset
@@ -1624,6 +1625,8 @@ adb shell dumpsys gfxinfo dev.openzigs.onyourleft | grep -iE "Total frames|Janky
 **#439 — the safe-area insets upright, `top right bottom left`:** ______________
 
 **#440 — the start of a re-imported loop, and of a point-to-point route (Q12):** ______________
+
+**#437 — notice put away after ~15 s, strip and plan view back, reopened by the control (Q13):** ______________
 
 **⚠️ Workout visible, started, and RELEASED on the Ride screen (Q6)? `0x05` writes seen?** ______________
 

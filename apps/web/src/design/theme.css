@@ -1816,21 +1816,22 @@ select option {
  * this is being told that it is not. On a tablet there is room for both and
  * nothing gives way.
  *
- * ⚠️ **"While a notice stands" is THE WHOLE RIDE, and this comment used to
- * read as though it were a moment** — #436's review. `GameView` reads the
- * trainer once, in `start`, and `trainer-port.ts` §`trainerRoadNotice` has a
- * sentence for four of the six states: `workout`, `not-controllable`,
- * `no-simulation` and `no-control`. Nothing dismisses it. So a rider doing a
- * structured workout in the game on a phone, or riding a trainer that
- * broadcasts power and cannot be driven, has no elevation strip and no plan
- * view from the first frame to the last.
+ * ⚠️ **Until #437, "while a notice stands" was THE WHOLE RIDE** — #436's
+ * review, and a reviewer who remembers this comment saying so is reading the
+ * old file. `GameView` reads the trainer once, in `start`, and
+ * `trainer-port.ts` §`trainerRoadNotice` has a sentence for four of the six
+ * states, and nothing dismissed it — so a structured workout in the game on a
+ * phone had no elevation strip and no plan view from the first frame to the
+ * last. And the argument above covers the strip and NOT the plan view: #285's
+ * plan says where on the road the rider is whatever the trainer is doing.
  *
- * And the argument above covers the strip and NOT the plan view. #285's plan
- * says where on the road the rider is, which is true and useful whatever the
- * trainer is doing; it goes because it shares the strip's panel, not because
- * the notice makes it moot. That is a real cost and it is
- * [#437](https://github.com/openzigs/onyourleft/issues/437)'s to remedy — a
- * notice that collapses to one line once read would give the cell back.
+ * **Since #437 the notice collapses** — by the rider's *Trainer notice*
+ * control, or on its own once it has stood for `GameView`
+ * §`STANDING_NOTICE_SECONDS` of ride — and a collapsed notice takes NO cell:
+ * `.oyl-hud__notices--collapsed` below is visually hidden by clip, so the
+ * route panel comes back. The sentence stays in the document, where a screen
+ * reader reaches it, and the control reopens it. The rule below hides the
+ * route only for a notice that is standing OPEN.
  *
  * ⚠️ `display: none`, which CLAUDE.md §4e warns about — for CONTROLS. The
  * accessibility suite loads no stylesheet, so an element hidden here still
@@ -1838,7 +1839,7 @@ select option {
  * equivalent and no control at all, so there is nothing for that to be wrong
  * about. A screen-reader user loses the route's position sentence for as long
  * as a sighted one loses the picture, which is the honest equivalence — and
- * "as long as" is, per the paragraph above, the whole ride.
+ * since #437 "as long as" is until the notice is put away, not the whole ride.
  *
  * ⚠️ **One limit, stated rather than gated.** Upright on a phone at the very
  * bottom of the column layout's range — 752 px tall — a notice of the longest
@@ -1848,7 +1849,9 @@ select option {
  */
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
   (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
-  .oyl-game--riding .oyl-hud:has(> .oyl-hud__notices) .oyl-hud__route {
+  .oyl-game--riding
+    .oyl-hud:has(> .oyl-hud__notices:not(.oyl-hud__notices--collapsed))
+    .oyl-hud__route {
     display: none;
   }
 
@@ -1864,6 +1867,25 @@ select option {
        drawn from x = 347 and this ends at x = 328. */
     max-width: min(100%, 20rem);
   }
+}
+
+/*
+ * A standing notice the rider has put away — #437. Visually hidden by clip,
+ * as `.oyl-visually-hidden` is and for its reason: `display: none` would take
+ * the sentence out of the accessibility tree, and a live region that is hidden
+ * announces nothing. Specific enough to beat the grid placement above, which
+ * would otherwise give an empty grid item the route panel's cell.
+ */
+.oyl-hud .oyl-hud__notices.oyl-hud__notices--collapsed {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 /*

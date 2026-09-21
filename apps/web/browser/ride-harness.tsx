@@ -170,6 +170,8 @@ declare global {
       readonly setSafeArea: (pixels: number) => void;
       /** #439's control: the shell's old `min-height: 100vh`. @see restoreFullHeightShell */
       readonly restoreFullHeightShell: () => void;
+      /** #437's control: a notice takes the route cell even collapsed. */
+      readonly restoreNoticeTakesTheRoute: () => void;
     };
   }
 }
@@ -372,6 +374,19 @@ function restoreFullHeightShell(): void {
   document.head.append(style);
 }
 
+/**
+ * #437's control — put back the rule before it: a notice, open or not, hides
+ * the route panel on a phone. With the notice put away the strip and the plan
+ * view must be gone again; without that, "the plan view is on screen after the
+ * notice is put away" is equally true of a harness whose notice never rendered.
+ */
+function restoreNoticeTakesTheRoute(): void {
+  const style = document.createElement('style');
+  style.textContent =
+    '.oyl-game--riding .oyl-hud:has(> .oyl-hud__notices) .oyl-hud__route { display: none; }';
+  document.head.append(style);
+}
+
 async function run(): Promise<void> {
   const host = document.querySelector('#shell');
   if (host === null) {
@@ -427,6 +442,7 @@ async function run(): Promise<void> {
     unstage,
     setSafeArea,
     restoreFullHeightShell,
+    restoreNoticeTakesTheRoute,
   };
 }
 
@@ -439,5 +455,6 @@ run().catch((error: unknown) => {
     unstage,
     setSafeArea,
     restoreFullHeightShell,
+    restoreNoticeTakesTheRoute,
   };
 });

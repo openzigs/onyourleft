@@ -242,6 +242,18 @@ const PACER_PROBLEM_ID = 'oyl-game-pacer-problem';
  */
 const WIND_PROBLEM_ID = 'oyl-game-wind-problem';
 
+/**
+ * How long a standing trainer notice stays open before it gets out of the
+ * way, in seconds of RIDE — #437.
+ *
+ * Long enough to read the longest of `trainer-port.ts` §`trainerRoadNotice`'s
+ * four sentences twice at a handlebar's distance (about 30 words, so ~8 s at
+ * an ordinary reading pace), short enough that the elevation strip and the
+ * plan view are back before the first climb of any route worth riding. A
+ * judgement, stated as one; the control reopens it at any time.
+ */
+export const STANDING_NOTICE_SECONDS = 15;
+
 export function GameView(props: GameViewProps): JSX.Element {
   // ⚠️ Read here rather than inside `WindControls`, because `windChoice` is a
   // pure function and has to be called where its answer can be handed to both
@@ -281,6 +293,12 @@ export function GameView(props: GameViewProps): JSX.Element {
    * with the reason the machine gave.
    */
   const [trainer, setTrainer] = useState<GameTrainer>(NO_GAME_TRAINER);
+  /**
+   * What the rider has done with the standing notice — #437. `auto` until they
+   * touch *Trainer notice*, after which it is theirs. Reset by `start`, so a
+   * second ride shows its notice open again.
+   */
+  const [noticeChoice, setNoticeChoice] = useState<'auto' | 'open' | 'closed'>('auto');
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const simulationRef = useRef<GameSimulation | undefined>(undefined);
@@ -413,6 +431,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       // that is no longer loaded: the same false congratulation that module
       // exists to prevent, arriving from the other direction.
       outcomeRef.current = undefined;
+      setNoticeChoice('auto');
       // ⚠️ **Read at the start of the ride and held for its length**, which is
       // what makes "changing your weight mid-session does not rewrite the ride
       // you are on" true by construction rather than by a rule somebody
@@ -717,6 +736,12 @@ export function GameView(props: GameViewProps): JSX.Element {
   // The tick's own `setState` is what schedules this render, so it is fresh.
   const gradient = gradientRef.current?.state();
   const roadNotice = trainerRoadNotice(trainer);
+  // #437: open for the first STANDING_NOTICE_SECONDS of ride, then out of the
+  // way unless the rider asks for it — on the RIDE's clock, so a paused ride
+  // does not put away a notice nobody has had time to read.
+  const noticeOpen =
+    noticeChoice === 'open' ||
+    (noticeChoice === 'auto' && (state?.elapsed ?? 0) < STANDING_NOTICE_SECONDS);
   return (
     // ⚠️ **`oyl-game--riding` is the stage — #423.** `theme.css` makes it fill
     // the viewport and lays the HUD over the world. It is a modifier rather
@@ -767,12 +792,22 @@ export function GameView(props: GameViewProps): JSX.Element {
         }}
         // #423: inside the HUD's own grid rather than after it, so a notice
         // gets a cell no panel can occupy. @see HudPanelProps.notices
+        standingNotice={
+          roadNotice === undefined
+            ? undefined
+            : {
+                content: (
+                  <StatusMessage tone="warning" label="The road is not reaching your trainer">
+                    {roadNotice}
+                  </StatusMessage>
+                ),
+                expanded: noticeOpen,
+                onToggle: () => {
+                  setNoticeChoice(noticeOpen ? 'closed' : 'open');
+                },
+              }
+        }
         notices={[
-          roadNotice === undefined ? undefined : (
-            <StatusMessage key="road" tone="warning" label="The road is not reaching your trainer">
-              {roadNotice}
-            </StatusMessage>
-          ),
           gradient?.fault === undefined ? undefined : (
             <StatusMessage key="fault" tone="danger" label="Trainer" live>
               {gradient.fault}

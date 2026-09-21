@@ -127,7 +127,33 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * `contrast.a11y.test.ts` already checks.
    */
   readonly notices?: ReactNode;
+  /**
+   * A notice that stands for the WHOLE ride — the road not reaching the
+   * trainer — and that a rider can put away once it is read (#437).
+   *
+   * ⚠️ **Collapsed is visually hidden by clip, never removed.** The sentence
+   * stays in the document where it was, so a screen-reader user who has not
+   * reached it yet still can, and so a live region on it is not re-inserted
+   * (an element moved between containers is a new element, and a new live
+   * region is announced unreliably or twice). What collapsing gives back is
+   * the grid cell: on a phone the notice takes the route panel's, and a
+   * collapsed one takes none — `theme.css` §"WHERE THERE IS NO FREE CELL".
+   *
+   * ⚠️ **Separate from {@link notices}**, which are faults and always shown:
+   * a refused gradient is a thing to act on NOW, and a rider must not be able
+   * to put it away by mistake.
+   */
+  readonly standingNotice?:
+    | {
+        readonly content: ReactNode;
+        readonly expanded: boolean;
+        readonly onToggle: () => void;
+      }
+    | undefined;
 }
+
+/** The id the notice toggle's `aria-controls` names. One HUD per page. */
+export const STANDING_NOTICE_ID = 'oyl-hud-standing-notice';
 
 export function HudPanel(props: HudPanelProps): JSX.Element {
   const units = useUnits();
@@ -215,6 +241,24 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
           >
             End ride
           </button>
+          {/*
+            #437. A constant name and `aria-expanded`, rather than a label that
+            flips between "Show" and "Hide": a screen reader then says what the
+            control is and which way it stands, and a speech-control user has
+            one thing to say. Last, so Pause and End ride keep their places.
+          */}
+          {props.standingNotice === undefined ? null : (
+            <button
+              type="button"
+              className="oyl-hud__control"
+              aria-expanded={props.standingNotice.expanded}
+              aria-controls={STANDING_NOTICE_ID}
+              onClick={props.standingNotice.onToggle}
+              style={{ minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS }}
+            >
+              Trainer notice
+            </button>
+          )}
         </div>
       </div>
 
@@ -228,7 +272,25 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
         middle of the stage — the part of the screen the whole layout exists to
         keep clear — catching pointer events over nothing.
       */}
-      {hasContent(props.notices) ? <div className="oyl-hud__notices">{props.notices}</div> : null}
+      {hasContent(props.notices) || props.standingNotice !== undefined ? (
+        <div
+          className={
+            hasContent(props.notices) || props.standingNotice?.expanded === true
+              ? 'oyl-hud__notices'
+              : 'oyl-hud__notices oyl-hud__notices--collapsed'
+          }
+        >
+          {props.standingNotice === undefined ? null : (
+            <div
+              id={STANDING_NOTICE_ID}
+              className={props.standingNotice.expanded ? undefined : 'oyl-visually-hidden'}
+            >
+              {props.standingNotice.content}
+            </div>
+          )}
+          {props.notices}
+        </div>
+      ) : null}
     </section>
   );
 }
