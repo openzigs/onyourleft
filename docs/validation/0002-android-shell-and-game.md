@@ -947,9 +947,9 @@ adb logcat | grep -i "BluetoothLe"
 | L2 | ⚠️ **On the bike, low gear, seated.** Start the ride on a route with a gentle climb and pedal. Scroll the HUD down until *Pause* is on screen | Within a second or two the HUD's trainer line — just above the controls — reads `Trainer: simulating …%` with a **non-zero** count beside it, and the resistance increases as the climb starts. ⚠️ Do this in **landscape as well as portrait** and say which orientations you read it in; that is what #373 was about |
 | L3 | Ride through the steepest section of the route you chose | The percentage on that line **tracks the route's own gradient** — compare it against the gradient field on the HUD, which is read from the same profile. They should agree to a tenth or so |
 | L4 | Ride over the crest and onto the descent | The percentage goes **negative** and the resistance drops away. A sign lost between the profile and the control point shows up here and nowhere else |
-| L5 | ⚠️ **The pedal-through test — flat pedals, low gear, seated.** Ride a steady climb at a steady cadence and watch the HUD's power. **While still pedalling**, press *End ride*. Keep pedalling in the same gear for ten seconds, then let your cadence fall — 80, 70, 60, 50 rpm — and read the trainer's own power on the Ride screen or in logcat as you do | **Released:** power **falls** as cadence falls, and the climb's weight is gone. **Still holding:** power stays up or **rises** as cadence falls. In logcat the release is **one `0x01` Reset** answered `80 01 01` — and **no `0x08`**. The Ride screen afterwards shows *Ask the trainer for control*, not *Control lost*. If it shows **Not released**, the trainer refused the Reset: write down exactly what logcat shows after the `0x01` |
+| L5 | ⚠️ **The pedal-through test — flat pedals, low gear, seated.** Ride a steady climb at a steady cadence and watch the HUD's power. **While still pedalling**, press *End ride*. Keep pedalling in the same gear for ten seconds, then let your cadence fall — 80, 70, 60, 50 rpm — and read the trainer's own power on the Ride screen or in logcat as you do | **Released:** power **falls** as cadence falls, and the climb's weight is gone. **Still holding:** power stays up or **rises** as cadence falls. In logcat the release is **one `0x01` Reset** answered `80 01 01` — and **no `0x08`**, and **no `0x00` Request Control after the `0x01`**. The Ride screen afterwards shows *Ask the trainer for control*, not *Control lost*. If it shows **Not released**, the trainer refused the Reset: write down exactly what logcat shows after the `0x01` |
 | L6 | Read the logcat you have been collecting | There are **write** lines, not only `Notifying listeners`. Count them and compare with the `(n sent)` figure the HUD showed |
-| L7 | Take control again on the Ride screen (the release gave it up — see below). Start a second ride on the same route, climb, and **while still pedalling navigate away from the game screen** with the system Back gesture. Then the same cadence ramp as L5 | The same as L5: power **falls** with cadence, one `0x01` and no `0x08`. This is the cleanup path rather than the button, and it is a different line of code making the same claim |
+| L7 | Take control again on the Ride screen (the release gave it up — see below). Start a second ride on the same route, climb, and **while still pedalling navigate away from the game screen** with the system Back gesture. Then the same cadence ramp as L5 | The same as L5: power **falls** with cadence, one `0x01`, no `0x08` and no `0x00` after the `0x01`. This is the cleanup path rather than the button, and it is a different line of code making the same claim |
 
 ⚠️ **L3 is the step that distinguishes "a gradient was written" from "the right gradient was
 written".** A driver fed the wrong distance writes a perfectly plausible number that has nothing to
@@ -977,6 +977,16 @@ cadence falls, which is exactly what #372's ERG measurement saw after an acknowl
 deliberate rather than a regression: taking control is a thing the rider does. L7 starts by doing
 it.
 
+⚠️ **Why "no `0x00` after the `0x01`" is in L5, L7 and every step of Part R.** A trainer may notify
+Fitness Machine Status `0xFF` (*Control Permission Lost*) as it executes the Reset, and nothing in BLE
+or FTMS says whether that arrives before or after the Reset's own `80 01 01`. Until PR #442's review
+the client treated a `0xFF` that arrived *first* as somebody else taking control: it showed
+*Control lost*, and it **wrote a `0x00` Request Control straight after the Reset** — control back in
+the app's hands without the rider doing anything. The fix is tested against a scripted machine
+(`fitness-machine-control.test.ts` §"A status and an answer on two characteristics"), but which order
+*this* trainer uses is only in the logcat. Note whether a `0xFF` status line appears and whether it
+is before or after `80 01 01`; either order is fine, a `0x00` after the `0x01` is not.
+
 ### L results
 
 | Step | Result | Notes |
@@ -985,9 +995,9 @@ it.
 | L2 | first gradient seen / writes reported: | orientation(s) read in: |
 | L3 | HUD gradient vs trainer line: | |
 | L4 | negative on the descent? | |
-| L5 | pedal-through on *End ride*: power as cadence fell (rpm → W): | `0x01` seen? `0x08` seen? screen said: |
+| L5 | pedal-through on *End ride*: power as cadence fell (rpm → W): | `0x01` seen? `0x08` seen? `0x00` after `0x01`? `0xFF` before/after `80 01 01`? screen said: |
 | L6 | write lines in logcat: | notifications for comparison: |
-| L7 | pedal-through on navigating away: power as cadence fell (rpm → W): | `0x01` seen? `0x08` seen? |
+| L7 | pedal-through on navigating away: power as cadence fell (rpm → W): | `0x01` seen? `0x08` seen? `0x00` after `0x01`? |
 
 **Did the hills feel like hills (in your own words)?** ______________
 
@@ -1634,6 +1644,9 @@ filled in #372 is not fixed.
   does.
 - After each release the Trainer panel should read *Ask the trainer for control* and **not** *Control
   lost*: ending ERG gives control up by design. Take control again before the next step.
+- **No `0x00` may follow the `0x01`** in any step. A Request Control after a release is the client
+  taking control back on its own — L's note above says how that happened before PR #442's review.
+  Record whether a `0xFF` status arrived, and whether before or after `80 01 01`.
 - If a panel reads **Not released**, the trainer refused the Reset and the client sent a flat road and
   a Stop instead. Write down exactly what logcat shows after the `0x01`, and treat the trainer as
   **still holding** until the pedal-through says otherwise.
@@ -1645,8 +1658,8 @@ adb logcat | grep -i "BluetoothLe"
 
 | Step | What to do | What should happen |
 |---|---|---|
-| R1 | Ride screen, control taken. Set an ERG target of **200 W** and ride 60 s at a steady cadence. **While still pedalling**, press ***End ERG***. Keep the gear for ten seconds, then let cadence fall — 80, 70, 60, 50 rpm | Power **falls** with cadence. In logcat: one **`0x01`** answered `80 01 01`, and **no `0x08`** after the `0x05`. The panel reads *Ask the trainer for control* |
-| R2 | Take control again. Start a **saved workout** with a long steady block (≥ 150 W). Ride 60 s. **While still pedalling**, end the workout (*End workout*). Then the same cadence ramp | Power **falls** with cadence. `0x05` writes during the workout, then one `0x01`, no `0x08` after the last `0x05`. The workout **ends** — it is not shown paused, and there is no *Control lost* |
+| R1 | Ride screen, control taken. Set an ERG target of **200 W** and ride 60 s at a steady cadence. **While still pedalling**, press ***End ERG***. Keep the gear for ten seconds, then let cadence fall — 80, 70, 60, 50 rpm | Power **falls** with cadence. In logcat: one **`0x01`** answered `80 01 01`, and **no `0x08`** after the `0x05`, and **no `0x00`** after the `0x01`. The panel reads *Ask the trainer for control* |
+| R2 | Take control again. Start a **saved workout** with a long steady block (≥ 150 W). Ride 60 s. **While still pedalling**, end the workout (*End workout*). Then the same cadence ramp | Power **falls** with cadence. `0x05` writes during the workout, then one `0x01`, no `0x08` after the last `0x05`, no `0x00` after the `0x01`. The workout **ends** — it is not shown paused, and there is no *Control lost* |
 | R3 | Take control again. Start the same workout, ride 60 s, and **while still pedalling** press *Stop* twice to end the **recording** | The same as R2. The workout's release and the ride's are one release, so there is **exactly one** `0x01` |
 | R4 | Take control again. Start a workout whose **last block is a free ride**, and ride it to the end | During the free ride there is a `0x08` — that is a pause inside the workout, and on this trainer it may not ease the target (see below). At the end of the workout there is one `0x01`, and the pedal-through after it shows power falling with cadence |
 
@@ -1659,12 +1672,12 @@ had already been sent.
 
 ### R results
 
-| Step | Power as cadence fell (rpm → W) | `0x01` answered? | `0x08` after the last target? | Panel afterwards |
-|---|---|---|---|---|
-| R1 | | | | |
-| R2 | | | | |
-| R3 | | how many? | | |
-| R4 | | | | |
+| Step | Power as cadence fell (rpm → W) | `0x01` answered? | `0x08` after the last target? | `0x00` after the `0x01`? | Panel afterwards |
+|---|---|---|---|---|---|
+| R1 | | | | | |
+| R2 | | | | | |
+| R3 | | how many? | | | |
+| R4 | | | | | |
 
 **Did the trainer let go, in your own words?** ______________
 

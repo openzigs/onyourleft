@@ -679,6 +679,8 @@ export function GameView(props: GameViewProps): JSX.Element {
   }, [quality.level]);
 
   if (!onTheStage) {
+    // One snapshot read for both notices, so they describe the same moment.
+    const trainerNow = props.trainer?.readTrainer();
     return (
       <RoutePicker
         routes={routes}
@@ -687,8 +689,8 @@ export function GameView(props: GameViewProps): JSX.Element {
         // rider to take control *before they start*, which is only actionable
         // on the screen they have not left yet. A snapshot read, so it costs a
         // property access per render and never opens a connection.
-        trainerNotice={trainerRoadNotice(props.trainer?.readTrainer() ?? NO_GAME_TRAINER)}
-        releaseNotice={props.trainer?.readTrainer().releaseFault}
+        trainerNotice={trainerRoadNotice(trainerNow ?? NO_GAME_TRAINER)}
+        releaseNotice={trainerNow?.releaseFault}
         withGhost={withGhost}
         onGhost={setWithGhost}
         withPacer={withPacer}

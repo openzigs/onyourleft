@@ -210,6 +210,13 @@ interface BenchOptions {
    * refuses the release.
    */
   readonly machine?: Pick<FtmsOptions, 'retainsTargetsThroughStop' | 'supportsReset'>;
+  /**
+   * Notify `0xFF` Control Permission Lost BEFORE the Reset's own answer — the
+   * ordering PR #442's review reproduced, which nothing in BLE or FTMS rules
+   * out and the simulator, which answers first, never produces. Also turns on
+   * `reacquireControl`, as production has it, so a re-grab would be written.
+   */
+  readonly permissionLostBeforeResetAnswer?: boolean;
 }
 
 function benchWith(options: BenchOptions = {}): Bench {
@@ -228,6 +235,8 @@ function benchWith(options: BenchOptions = {}): Bench {
   let control: TrainerControl | undefined;
   const sessionIds: RecordingSessionId[] = [];
   const written: number[][] = [];
+
+  const statusListeners: Array<(value: DataView) => void> = [];
 
   const openTrainer: OpenTrainer = (id) => {
     if (options.trainerOffers !== undefined) {
@@ -258,13 +267,20 @@ function benchWith(options: BenchOptions = {}): Bench {
           },
           onControlPointIndication: (listener) =>
             controlPoint.onResponse((response) => listener(responseToOctets(response))),
-          onStatus: (listener) =>
-            controlPoint.onStatus((status) => listener(statusToOctets(status))),
+          onStatus: (listener) => {
+            statusListeners.push(listener);
+            return controlPoint.onStatus((status) => listener(statusToOctets(status)));
+          },
           writeControlPoint: (value) => {
             written.push([...value]);
             const outcome = controlPoint.write(requestFromOctets(value));
             if (outcome.kind === 'att-error') {
               return Promise.reject(new Error(outcome.error));
+            }
+            if (options.permissionLostBeforeResetAnswer === true && value[0] === RESET) {
+              for (const listener of [...statusListeners]) {
+                listener(viewOf([0xff]));
+              }
             }
             if (options.silentTrainer !== true) {
               // The simulator delivers the indication on its next tick.
@@ -273,7 +289,7 @@ function benchWith(options: BenchOptions = {}): Bench {
             return Promise.resolve();
           },
         },
-        { powerRange, reacquireControl: false },
+        { powerRange, reacquireControl: options.permissionLostBeforeResetAnswer === true },
       ),
       canSetPower: true,
       canSimulate: true,
@@ -1391,6 +1407,36 @@ describe('a release is a Reset, and it is not a loss — #372', () => {
     expect(rig.written.slice(before)).toStrictEqual([[RESET]]);
     // And the recording carries on: ending a workout is not ending a ride.
     expect(snapshot.phase).toBe('recording');
+    rig.controller.dispose();
+  });
+
+  it('ends a workout with no "Control lost" and no re-grab when 0xFF beats the Reset’s answer', async () => {
+    // PR #442's review: a `0xFF` notified before `80 01 01` used to read as an
+    // involuntary loss — the warning, `linkLost` on a workout that was ending,
+    // and a Request Control written straight after the Reset.
+    const rig = benchWith({
+      machine: { retainsTargetsThroughStop: true },
+      permissionLostBeforeResetAnswer: true,
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    rig.controller.startWorkout(oneBlock(), THRESHOLD);
+    await ride(rig, 2);
+    await flushMicrotasks();
+    const before = rig.written.length;
+
+    rig.controller.endWorkout();
+    await flushMicrotasks(20);
+    await ride(rig, 3);
+    await flushMicrotasks(20);
+
+    const snapshot = rig.controller.getSnapshot();
+    expect(snapshot.workout).toBeUndefined();
+    expect(snapshot.trainer.lost).toBeUndefined();
+    expect(snapshot.trainer.hasControl).toBe(false);
+    expect(snapshot.trainer.releaseFault).toBeUndefined();
+    expect(rig.written.slice(before)).toStrictEqual([[RESET]]);
     rig.controller.dispose();
   });
 

@@ -746,15 +746,18 @@ export interface TrainerControl {
    * Sends `0x01` **Reset**. On success the machine has been told to return to
    * its defaults and this client **no longer holds control** — by design, and
    * silently: a release is not a loss, so {@link onControlLost} is NOT told,
-   * and a `0xFF` Control Permission Lost that follows it is not re-acquired
-   * against. The caller that released owns what happens next; taking control
-   * again is {@link requestControl}, which is a thing the rider does.
+   * and a `0xFF` Control Permission Lost is not re-acquired against — whether
+   * it arrives after the Reset's answer, or BEFORE it, which nothing in BLE or
+   * FTMS rules out. The caller that released owns what happens next; taking
+   * control again is {@link requestControl}, which is a thing the rider does.
    *
    * If the machine refuses the Reset or does not answer it, and control is
    * still held, the fallback is written: Set Indoor Bike Simulation Parameters
    * at 0 % in still air — skipped where the Feature characteristic says the
    * machine has no simulation mode — then Stop. That resolves `incomplete`,
-   * never `reset`.
+   * never `reset`. A revocation during the fallback (a `0xFF`, or Control Not
+   * Permitted answering the flat road after a Reset that timed out) ends it
+   * early, still `incomplete`, and is not reported as a loss either.
    *
    * @throws {SensorError} `control-not-held` or `not-connected` when there is
    * nothing this client can send — including a Reset answered Control Not
@@ -826,13 +829,45 @@ export function createTrainerControl(
 
   let held = false;
   /**
-   * Set by a successful {@link TrainerControl.letGo}, cleared by the next
-   * granted Request Control. While it is set a `0xFF` Control Permission Lost
-   * is the machine confirming what this client asked for, and neither a loss
-   * to report nor a control to take back — re-acquiring here would be the
-   * silent re-grab the release exists to rule out.
+   * Set when a {@link TrainerControl.letGo} has run — whatever it achieved —
+   * and cleared by the next granted Request Control. While it is set a `0xFF`
+   * Control Permission Lost is the tail of a release this client asked for, and
+   * neither a loss to report nor a control to take back — re-acquiring here
+   * would be the silent re-grab the release exists to rule out.
+   *
+   * ⚠️ This used to be set only by a Reset answered with success, and a
+   * reviewer who remembers that is reading the old file. It left two holes:
+   * see {@link releasing}, and an `incomplete` release after which a late
+   * `0xFF` still queued a Request Control behind a ride that had ended.
    */
   let released = false;
+  /**
+   * Present for the WHOLE of a {@link TrainerControl.letGo} — set before the
+   * Reset is written, cleared when the release settles.
+   *
+   * ⚠️ **Why before the write, and not on the Reset's answer.** A `0xFF`
+   * Control Permission Lost arrives on the Fitness Machine Status
+   * characteristic and the Reset's answer on the control point, and nothing in
+   * BLE or FTMS orders two different characteristics. A machine that revokes
+   * control as it executes a Reset may notify `0xFF` BEFORE it indicates
+   * `80 01 01` — and when the flag was set only on that answer, the `0xFF` was
+   * read as an involuntary loss: "Control lost" on the Ride screen, a finished
+   * workout paused through `linkLost`, and a Request Control queued straight
+   * behind the Reset, so control came back without the rider doing anything.
+   * PR #442's review reproduced exactly that, writes `[0x00, 0x05, 0x01, 0x00]`.
+   *
+   * While it is present, a revocation — a `0xFF`, or Control Not Permitted
+   * answering one of the fallback's writes after a Reset that timed out — is
+   * recorded here and nothing else: control is dropped, no listener is told,
+   * nothing is re-requested. The Reset's OWN Control Not Permitted answer is
+   * the exception and is still a loss, because it says the Reset was not this
+   * client's to send: somebody else had the machine first.
+   *
+   * ⚠️ It is NOT evidence of a release. A `0xFF` cannot say whose action caused
+   * it, so a release whose Reset was not answered with success still resolves
+   * `incomplete` even when the machine revoked control during it.
+   */
+  let releasing: { revoked: boolean } | undefined;
   let indicationsEnabled = false;
   let linkUp = true;
   let closed = false;
@@ -902,7 +937,13 @@ export function createTrainerControl(
       return;
     }
     if (status.kind === 'control-permission-lost') {
+      if (releasing !== undefined) {
+        held = false;
+        releasing.revoked = true;
+        return;
+      }
       if (released) {
+        held = false;
         return;
       }
       target = { kind: 'none' };
@@ -988,10 +1029,18 @@ export function createTrainerControl(
 
     const response = await answered;
     if (response.result === 'control-not-permitted') {
-      // The routine case on a phone that reconnected. No status notification
-      // arrives; the machine simply says no. A client that kept believing it
-      // had control would write into the void for the rest of the ride.
-      loseControl('permission-lost');
+      if (releasing !== undefined && request.opCode !== 'reset') {
+        // A fallback write after a Reset that went unanswered, refused because
+        // the machine did execute the Reset and dropped this client. Part of
+        // the release, not a loss — see `releasing`.
+        held = false;
+        releasing.revoked = true;
+      } else {
+        // The routine case on a phone that reconnected. No status notification
+        // arrives; the machine simply says no. A client that kept believing it
+        // had control would write into the void for the rest of the ride.
+        loseControl('permission-lost');
+      }
       // ⚠️ NOT folded into the `control-rejected` branch below. `0x05` is the
       // one result code that says something a rider can act on, and swallowing
       // it into the generic "the machine refused op code 0x11" is how a
@@ -1072,6 +1121,88 @@ export function createTrainerControl(
       return min + (steps - 1) * increment;
     }
     return candidate;
+  };
+
+  /**
+   * The body of {@link TrainerControl.letGo}, run with `releasing` set.
+   *
+   * Every revocation that arrives while this runs lands in `release.revoked`
+   * rather than in a listener, so this function — and nothing that listens for
+   * losses — decides what the release achieved.
+   */
+  const releaseTheMachine = async (release: { revoked: boolean }): Promise<TrainerRelease> => {
+    let resetRefusal: SensorError;
+    try {
+      await runProcedure({ opCode: 'reset' });
+      // FTMS §4.16.2.1: control ends with the client's own Reset. Dropped here
+      // WITHOUT `loseControl` — a release is not a loss, and the one listener
+      // that matters (the ride screen) would otherwise show a "Control lost"
+      // warning and pause a workout that is ending.
+      target = { kind: 'none' };
+      held = false;
+      return { kind: 'reset' };
+    } catch (error) {
+      if (!(error instanceof SensorError)) {
+        throw error;
+      }
+      resetRefusal = error;
+    }
+    // A flat road replaced any ERG target; without one this client cannot say
+    // what the machine still holds, and "none" would be a claim.
+    const incomplete = (flattened: boolean): TrainerRelease => {
+      target =
+        flattened || target.kind === 'none'
+          ? { kind: 'none' }
+          : {
+              kind: 'unknown',
+              attempted: target.kind === 'confirmed' ? target.target : target.attempted,
+            };
+      return { kind: 'incomplete', resetRefusal, flattened };
+    };
+    if (
+      release.revoked &&
+      // The Reset's own Control Not Permitted is a loss, rejected below.
+      resetRefusal.code !== 'control-not-held' &&
+      linkUp &&
+      !closed
+    ) {
+      // The machine revoked control during a Reset that was not answered with
+      // success — a timed-out Reset it executed, most likely. There is nothing
+      // left this client may send, and a `0xFF` cannot say whose action it
+      // was, so this is not reported as released.
+      return incomplete(false);
+    }
+    // ⚠️ Re-checked: a Reset answered Control Not Permitted has already dropped
+    // control through `runProcedure`, and a link that went during it is down.
+    // Either way there is nothing left to send, and the caller is told so
+    // rather than handed an outcome.
+    requireControl();
+    let flattened = false;
+    if (features?.targetSetting.indoorBikeSimulationParameters !== false) {
+      try {
+        await runProcedure({
+          opCode: 'set-simulation-parameters',
+          parameters: { grade: FLAT_ROAD, windSpeed: metresPerSecond(0) },
+        });
+        flattened = true;
+      } catch {
+        // Reported by `flattened` staying false. The Stop is still worth
+        // sending, and a refusal of it is what rejects this release.
+      }
+    }
+    if (release.revoked) {
+      // Revoked since the Reset — the flat road answered Control Not
+      // Permitted, or a `0xFF` arrived. A Stop now would be refused too.
+      return incomplete(flattened);
+    }
+    try {
+      await runProcedure({ opCode: 'stop' });
+    } catch (error) {
+      if (!release.revoked) {
+        throw error;
+      }
+    }
+    return incomplete(flattened);
   };
 
   return {
@@ -1229,52 +1360,16 @@ export function createTrainerControl(
     letGo(): Promise<TrainerRelease> {
       return enqueue(async (): Promise<TrainerRelease> => {
         requireControl();
-        let resetRefusal: SensorError;
+        // ⚠️ Before the Reset is written, not on its answer — `releasing` says
+        // why, and what went wrong when it was the other way round.
+        const release = { revoked: false };
+        releasing = release;
         try {
-          await runProcedure({ opCode: 'reset' });
-          // FTMS §4.16.2.1: control ends with the client's own Reset. Dropped
-          // here WITHOUT `loseControl` — a release is not a loss, and the one
-          // listener that matters (the ride screen) would otherwise show a
-          // "Control lost" warning and pause a workout that is ending.
-          target = { kind: 'none' };
-          held = false;
+          return await releaseTheMachine(release);
+        } finally {
+          releasing = undefined;
           released = true;
-          return { kind: 'reset' };
-        } catch (error) {
-          if (!(error instanceof SensorError)) {
-            throw error;
-          }
-          resetRefusal = error;
         }
-        // ⚠️ Re-checked: a Reset answered Control Not Permitted has already
-        // dropped control through `runProcedure`, and a link that went during
-        // it is down. Either way there is nothing left to send, and the caller
-        // is told so rather than handed an outcome.
-        requireControl();
-        let flattened = false;
-        if (features?.targetSetting.indoorBikeSimulationParameters !== false) {
-          try {
-            await runProcedure({
-              opCode: 'set-simulation-parameters',
-              parameters: { grade: FLAT_ROAD, windSpeed: metresPerSecond(0) },
-            });
-            flattened = true;
-          } catch {
-            // Reported by `flattened` staying false. The Stop is still worth
-            // sending, and a refusal of it is what rejects this release.
-          }
-        }
-        await runProcedure({ opCode: 'stop' });
-        // A flat road replaced any ERG target; without one this client cannot
-        // say what the machine still holds, and "none" would be a claim.
-        target =
-          flattened || target.kind === 'none'
-            ? { kind: 'none' }
-            : {
-                kind: 'unknown',
-                attempted: target.kind === 'confirmed' ? target.target : target.attempted,
-              };
-        return { kind: 'incomplete', resetRefusal, flattened };
       });
     },
 
