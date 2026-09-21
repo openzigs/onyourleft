@@ -142,8 +142,7 @@ function requestFromOctets(bytes: Uint8Array): FtmsControlRequest {
     case 0x08:
       return { opCode: 'stop-or-pause', stop: bytes[1] === 0x01 };
     case 0x11:
-      // Only the grade is read back: #372's release fallback writes a flat
-      // road, and that is the field a test asserts on.
+      // Only what a game ride's gradient write carries is read back.
       return {
         opCode: 'set-simulation-parameters',
         parameters: {
@@ -206,17 +205,18 @@ interface BenchOptions {
   readonly trainerOffers?: TrainerControlChoice;
   /**
    * How the simulated machine behaves — #372. `retainsTargetsThroughStop` is
-   * the trainer that issue was measured on, and `supportsReset: false` one that
-   * refuses the release.
+   * the trainer that issue was measured on.
    */
-  readonly machine?: Pick<FtmsOptions, 'retainsTargetsThroughStop' | 'supportsReset'>;
+  readonly machine?: Pick<FtmsOptions, 'retainsTargetsThroughStop'>;
   /**
-   * Notify `0xFF` Control Permission Lost BEFORE the Reset's own answer — the
+   * Notify `0xFF` Control Permission Lost BEFORE the Stop's own answer — the
    * ordering PR #442's review reproduced, which nothing in BLE or FTMS rules
    * out and the simulator, which answers first, never produces. Also turns on
    * `reacquireControl`, as production has it, so a re-grab would be written.
    */
-  readonly permissionLostBeforeResetAnswer?: boolean;
+  readonly permissionLostBeforeStopAnswer?: boolean;
+  /** Refuse every `0x08` write at the ATT layer, so a release cannot land. */
+  readonly refuseStop?: boolean;
 }
 
 function benchWith(options: BenchOptions = {}): Bench {
@@ -273,11 +273,14 @@ function benchWith(options: BenchOptions = {}): Bench {
           },
           writeControlPoint: (value) => {
             written.push([...value]);
+            if (options.refuseStop === true && value[0] === STOP_OR_PAUSE) {
+              return Promise.reject(new Error('write not permitted'));
+            }
             const outcome = controlPoint.write(requestFromOctets(value));
             if (outcome.kind === 'att-error') {
               return Promise.reject(new Error(outcome.error));
             }
-            if (options.permissionLostBeforeResetAnswer === true && value[0] === RESET) {
+            if (options.permissionLostBeforeStopAnswer === true && value[0] === STOP_OR_PAUSE) {
               for (const listener of [...statusListeners]) {
                 listener(viewOf([0xff]));
               }
@@ -289,7 +292,7 @@ function benchWith(options: BenchOptions = {}): Bench {
             return Promise.resolve();
           },
         },
-        { powerRange, reacquireControl: options.permissionLostBeforeResetAnswer === true },
+        { powerRange, reacquireControl: options.permissionLostBeforeStopAnswer === true },
       ),
       canSetPower: true,
       canSimulate: true,
@@ -1272,9 +1275,9 @@ const STOP_OR_PAUSE = 0x08;
 
 describe('ending ERG by hand — the "End ERG" button', () => {
   it('takes the trainer out of ERG without ending the ride', async () => {
-    // ⚠️ #372: the machine here keeps its target through a Stop, as the one
-    // real trainer measured did — so the End ERG that used to send a Stop, and
-    // passed this test against a simulator that dropped targets on one, is red.
+    // ⚠️ #372: this used to read the target back from a simulator that
+    // DROPPED it on a Stop, and so asserted a release the one real trainer
+    // measured does not perform. What is asserted now is what was sent.
     const rig = benchWith({ machine: { retainsTargetsThroughStop: true } });
     await rig.controller.pair('trainer');
     await rig.controller.start();
@@ -1285,11 +1288,13 @@ describe('ending ERG by hand — the "End ERG" button', () => {
 
     await rig.controller.clearTargetPower();
 
-    // What was sent: a Reset, and a release that does not consist of a Stop.
-    expect(rig.written.slice(before)).toStrictEqual([[RESET]]);
-    // Read from the device, not from the client that asked: the machine is no
-    // longer holding a target.
-    expect(rig.targetOnTheTrainer()).toBeUndefined();
+    // What was sent: the one release, a Stop — and never a Reset (#442 was
+    // re-scoped away from one; it cleared nothing and cost control).
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    // ⚠️ Read from the device: the measured machine is STILL holding it. The
+    // owner accepted that on 2026-09-21; the test states it rather than hiding
+    // it behind a double that clears.
+    expect(rig.targetOnTheTrainer()).toBe(210);
     expect(rig.controller.getSnapshot().trainer.target).toEqual({ kind: 'none' });
     // And the ride carries on, which is the whole difference between this
     // control and Stop.
@@ -1340,7 +1345,10 @@ describe("tickNow — the browser interval's entry point", () => {
 
 describe('ending a ride takes the trainer out of ERG', () => {
   it('stops the machine before it stops the recording', async () => {
-    // #372: a machine that keeps its target through a Stop, as measured.
+    // ⚠️ This used to assert that the machine "is no longer holding a target",
+    // read back from a simulator that dropped targets on a Stop — which the one
+    // real trainer measured does not (#372). What is asserted is the release
+    // that was sent, and that the recording is stopped after it.
     const rig = benchWith({ machine: { retainsTargetsThroughStop: true } });
     await rig.controller.pair('trainer');
     await rig.controller.start();
@@ -1351,17 +1359,18 @@ describe('ending a ride takes the trainer out of ERG', () => {
     rig.controller.armStop();
     await rig.controller.confirmStop();
 
-    // The machine is no longer holding a target. A ride that ended with the
-    // trainer still applying 220 W leaves a rider pushing against something
-    // nothing on screen is showing.
-    expect(rig.targetOnTheTrainer()).toBeUndefined();
-    expect(rig.written.at(-1)).toStrictEqual([RESET]);
+    expect(rig.written.at(-1)).toStrictEqual([STOP_OR_PAUSE, 0x01]);
     expect(rig.controller.getSnapshot().phase).toBe('stopped');
     rig.controller.dispose();
   });
 });
 
-describe('a release is a Reset, and it is not a loss — #372', () => {
+describe('a release is one Stop, and it is not a loss — #372', () => {
+  // ⚠️ This block asserted a Reset until #442 was re-scoped, and a reviewer who
+  // remembers `[[RESET]]` and `hasControl: false` here is reading the old file.
+  // On the owner's trainer the Reset was acknowledged and cleared nothing a
+  // Stop did not — and it revoked control, so every ride ended with the rider
+  // asking for it again.
   const THRESHOLD = watts(250);
   const oneBlock = (): WorkoutRecord => ({
     id: workoutId('w1'),
@@ -1375,20 +1384,18 @@ describe('a release is a Reset, and it is not a loss — #372', () => {
     updatedAt: unixSeconds(1),
   });
 
-  async function riding(machine?: BenchOptions['machine']): Promise<Bench> {
-    const rig = benchWith(machine === undefined ? {} : { machine });
+  async function riding(options: BenchOptions = {}): Promise<Bench> {
+    const rig = benchWith({ machine: { retainsTargetsThroughStop: true }, ...options });
     await rig.controller.pair('trainer');
     await rig.controller.requestTrainerControl();
     await rig.controller.start();
     return rig;
   }
 
-  it('ends a workout rather than pausing it, with no "Control lost", and clears the target', async () => {
-    // ⚠️ The trap a naive switch to Reset walks into: the Reset revokes
-    // control, and a control-loss listener that did not know it was intended
-    // would PAUSE the workout and raise the warning. Ending a workout is not
-    // losing control.
-    const rig = await riding({ retainsTargetsThroughStop: true });
+  it('ends a workout rather than pausing it, with no "Control lost", and keeps control', async () => {
+    // ⚠️ A control-loss listener that ran on a release would PAUSE the workout
+    // and raise the warning. Ending a workout is not losing control.
+    const rig = await riding();
     rig.controller.startWorkout(oneBlock(), THRESHOLD);
     await ride(rig, 2);
     await flushMicrotasks();
@@ -1401,26 +1408,19 @@ describe('a release is a Reset, and it is not a loss — #372', () => {
     const snapshot = rig.controller.getSnapshot();
     expect(snapshot.workout).toBeUndefined();
     expect(snapshot.trainer.lost).toBeUndefined();
-    expect(snapshot.trainer.hasControl).toBe(false);
+    expect(snapshot.trainer.hasControl).toBe(true);
     expect(snapshot.trainer.releaseFault).toBeUndefined();
-    expect(rig.targetOnTheTrainer()).toBeUndefined();
-    expect(rig.written.slice(before)).toStrictEqual([[RESET]]);
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
     // And the recording carries on: ending a workout is not ending a ride.
     expect(snapshot.phase).toBe('recording');
     rig.controller.dispose();
   });
 
-  it('ends a workout with no "Control lost" and no re-grab when 0xFF beats the Reset’s answer', async () => {
-    // PR #442's review: a `0xFF` notified before `80 01 01` used to read as an
+  it('ends a workout with no "Control lost" and no re-grab when 0xFF beats the Stop’s answer', async () => {
+    // PR #442's review: a `0xFF` notified before the answer used to read as an
     // involuntary loss — the warning, `linkLost` on a workout that was ending,
-    // and a Request Control written straight after the Reset.
-    const rig = benchWith({
-      machine: { retainsTargetsThroughStop: true },
-      permissionLostBeforeResetAnswer: true,
-    });
-    await rig.controller.pair('trainer');
-    await rig.controller.requestTrainerControl();
-    await rig.controller.start();
+    // and a Request Control written straight after the release.
+    const rig = await riding({ permissionLostBeforeStopAnswer: true });
     rig.controller.startWorkout(oneBlock(), THRESHOLD);
     await ride(rig, 2);
     await flushMicrotasks();
@@ -1434,43 +1434,40 @@ describe('a release is a Reset, and it is not a loss — #372', () => {
     const snapshot = rig.controller.getSnapshot();
     expect(snapshot.workout).toBeUndefined();
     expect(snapshot.trainer.lost).toBeUndefined();
-    expect(snapshot.trainer.hasControl).toBe(false);
     expect(snapshot.trainer.releaseFault).toBeUndefined();
-    expect(rig.written.slice(before)).toStrictEqual([[RESET]]);
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
     rig.controller.dispose();
   });
 
-  it('sends ONE Reset when a ride with a workout in it is stopped, and reports no fault', async () => {
-    // The workout's release and the ride's are joined. A second Reset queued
-    // behind the first would find control already given up and report
-    // "not granted control" about a release that worked.
-    const rig = await riding({ retainsTargetsThroughStop: true });
+  it('sends ONE Stop when a ride with a workout in it is stopped, and reports no fault', async () => {
+    // The workout's release and the ride's are joined into one.
+    const rig = await riding();
     rig.controller.startWorkout(oneBlock(), THRESHOLD);
     await ride(rig, 2);
     await flushMicrotasks();
+    const before = rig.written.length;
 
     rig.controller.armStop();
     await rig.controller.confirmStop();
     await flushMicrotasks(20);
 
-    expect(rig.written.filter((write) => write[0] === RESET)).toHaveLength(1);
-    expect(rig.written.some((write) => write[0] === STOP_OR_PAUSE)).toBe(false);
-    expect(rig.targetOnTheTrainer()).toBeUndefined();
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
+    expect(rig.written.some((write) => write[0] === RESET)).toBe(false);
     expect(rig.controller.getSnapshot().trainer.releaseFault).toBeUndefined();
     expect(rig.controller.getSnapshot().trainer.refusal).toBeUndefined();
     rig.controller.dispose();
   });
 
-  it('does not take control back after a release — that is the rider’s to do', async () => {
-    // Rule 2 at the top of `controller.ts`, and the decision #372 records:
-    // after a release the next game ride is told to take control on this
-    // screen rather than being handed it silently.
+  it('does not re-request control after a release, and needs none for the next game ride', async () => {
+    // Rule 2 at the top of `controller.ts`: exactly one Request Control, the
+    // rider's. And because a Stop keeps control, the next game ride is READY
+    // — which is the whole of what the re-scope bought back.
     const rig = await riding();
     await rig.controller.clearTargetPower();
     await ride(rig, 5);
     await flushMicrotasks(20);
 
-    expect(rig.controller.getSnapshot().trainer.hasControl).toBe(false);
+    expect(rig.controller.getSnapshot().trainer.hasControl).toBe(true);
     expect(rig.written.filter((write) => write[0] === 0x00)).toHaveLength(1);
     expect(
       gameTrainerFrom(
@@ -1478,11 +1475,11 @@ describe('a release is a Reset, and it is not a loss — #372', () => {
         rig.controller.simulationControl(),
         false,
       ).kind,
-    ).toBe('no-control');
+    ).toBe('ready');
     rig.controller.dispose();
   });
 
-  it('releases a game ride through the same Reset, and does not report it as a loss', async () => {
+  it('releases a game ride through the same Stop, and does not report it as a loss', async () => {
     const rig = await riding();
     const handle = rig.controller.simulationControl();
     await handle?.setSimulationParameters({ grade: gradePercent(6) });
@@ -1491,16 +1488,13 @@ describe('a release is a Reset, and it is not a loss — #372', () => {
     const outcome = await handle?.letGo();
     await flushMicrotasks(20);
 
-    expect(outcome).toStrictEqual({ kind: 'reset' });
-    expect(rig.written.slice(before)).toStrictEqual([[RESET]]);
+    expect(outcome).toStrictEqual({ kind: 'stopped' });
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
     expect(rig.controller.getSnapshot().trainer.lost).toBeUndefined();
-    expect(rig.controller.getSnapshot().trainer.hasControl).toBe(false);
     rig.controller.dispose();
   });
 
   it('keeps control when one workout replaces another, so the new one can drive the trainer', async () => {
-    // A Reset on the way out of the first workout would revoke the control the
-    // second is about to write through — the Reset trap, reached from here.
     const rig = await riding();
     rig.controller.startWorkout(oneBlock(), THRESHOLD);
     await ride(rig, 2);
@@ -1526,20 +1520,16 @@ describe('a release is a Reset, and it is not a loss — #372', () => {
     rig.controller.dispose();
   });
 
-  it('tells the rider when the trainer refused the Reset, and clears that when control is taken', async () => {
-    const rig = await riding({ supportsReset: false });
+  it('tells the rider when the trainer refused the Stop, and clears that when control is taken', async () => {
+    const rig = await riding({ refuseStop: true });
     await rig.controller.setTargetPower(watts(200));
     const before = rig.written.length;
 
     await rig.controller.clearTargetPower();
     await flushMicrotasks(20);
 
-    // The fallback went out: Reset, a flat road, and a Stop.
-    expect(rig.written.slice(before).map((write) => write[0])).toStrictEqual([
-      RESET,
-      0x11,
-      STOP_OR_PAUSE,
-    ]);
+    // One attempt, and nothing sent after the refusal: no Reset, no flat road.
+    expect(rig.written.slice(before)).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
     const fault = rig.controller.getSnapshot().trainer.releaseFault;
     expect(fault).toContain('may still be holding resistance');
 

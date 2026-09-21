@@ -736,18 +736,25 @@ The three ways control is lost, all of which this client watches for:
 - **This client's own Reset.** FTMS §4.16.2.1: control permission ends when the client initiates a
   Reset. The trap for a workout player that resets between intervals and keeps sending targets.
 
-### Letting the trainer go is a Reset — #372
+### Letting the trainer go — #372, and what it does NOT do
 
-`letGo()` is how a ride, a workout or an ERG session ends, and it sends **`0x01` Reset**, not
-`0x08` Stop. ⚠️ Until [#372](https://github.com/openzigs/onyourleft/issues/372) this client released
-with `stop()`, and on the one trainer measured an acknowledged Stop released nothing: a grade stayed
-applied, and an ERG target was still being chased 36 s later, power rising as cadence fell. A Reset
-returns the machine to its defaults per FTMS and gives this client's control up — the trap above is a
-client that *keeps writing* after that, and a release is terminal. It is **not** reported through
-`onControlLost` (it is not a loss), a `0xFF` that follows it is not re-acquired against, and a machine
-that refuses the Reset is written a flat road and a Stop and the outcome is `incomplete`, never a
-release. `stop()` remains for pauses inside a workout. No test here proves a real trainer lets go on
-a Reset; `docs/validation/0002-android-shell-and-game.md` Part R is that.
+`letGo()` is how a ride, a workout or an ERG session ends: one method every release goes through, and
+it sends **`0x08` Stop**. ⚠️ PR #442 first made it a **`0x01` Reset**, and a reviewer who remembers
+that is reading the old README. On the one trainer measured
+([#372](https://github.com/openzigs/onyourleft/issues/372), 2026-09-19 and 2026-09-21) **neither
+command releases**: after an acknowledged Stop a grade stayed applied and an ERG target was still
+being chased 36 s later, and after an acknowledged Reset (`80 01 01`) the trainer held 198–202 W across
+64–81 rpm and then raised power as cadence fell. A Reset also revokes control, so it bought nothing
+and cost the rider a fresh *Ask the trainer for control* per ride. The owner accepted end-of-ride
+retention on 2026-09-21, on the condition — measured and met — that the app can take control again.
+
+What a release still is: **not** reported through `onControlLost` (it is not a loss), and a `0xFF`
+after it is neither reported nor re-acquired against until this client next writes. A Stop the
+machine refuses resolves `incomplete`, which a screen says out loud.
+
+No test here proves a real trainer lets go; `docs/validation/0002-android-shell-and-game.md` Parts L
+and R are that. A pause inside a workout still sends `stop()`, and on the measured trainer that does
+not ease an ERG target either — [#441](https://github.com/openzigs/onyourleft/issues/441).
 
 ### The bounds, in order
 

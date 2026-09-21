@@ -28,13 +28,14 @@
  * 2. **Control that has been lost is said out loud.** `onControlLost` sets
  *    {@link TrainerSnapshot.lost}, and every path that could quietly clear it
  *    goes through `requestTrainerControl`, which is a thing the rider does.
- *    ⚠️ Since #372 control is also given up **on purpose**: every release —
- *    the end of a ride, of a workout, of manual ERG, of a game ride — is an
- *    FTMS Reset through {@link releaseTrainer}, and a Reset revokes control.
- *    That is not a loss and is not reported as one (no warning, and a workout
- *    ends rather than pausing); nor does anything take control back
- *    afterwards. The screen returns to *Ask the trainer for control*, which is
- *    still the rider's to press.
+ *    ⚠️ Since #372 every release — the end of a ride, of a workout, of manual
+ *    ERG, of a game ride — goes through ONE function, {@link releaseTrainer},
+ *    which sends an FTMS Stop. A release is not a loss and is not reported as
+ *    one (no warning, and a workout ends rather than pausing), and nothing
+ *    takes control back after one. ⚠️ PR #442 first made that release a Reset,
+ *    which revoked control; a reviewer who remembers the screen returning to
+ *    *Ask the trainer for control* after every ride is reading the old file.
+ *    On the trainer measured, the Reset cleared nothing a Stop did not.
  * 3. **A silent channel reads as unavailable, never as its last number.** The
  *    controller keeps the last reading only to compute *how long ago* it was;
  *    `metrics.ts` is what decides what the screen may say, and it has no
@@ -213,9 +214,11 @@ export interface TrainerSnapshot {
   /** Set when control was lost, and cleared only by asking for it again. */
   readonly lost: ControlLossReason | undefined;
   /**
-   * Set when the last release could not be confirmed — the trainer refused the
-   * Reset, or refused everything (#372). Words a rider can act on: the trainer
-   * may still be holding resistance.
+   * Set when the last release could not be confirmed — the trainer refused or
+   * did not answer the Stop (#372). Words a rider can act on: the trainer may
+   * still be holding resistance. ⚠️ Its absence is not a claim that the
+   * trainer let go: an acknowledged Stop does not clear a target on the
+   * trainer measured.
    *
    * ⚠️ A separate field from {@link refusal} because it is a different claim
    * about a different moment: a refusal is about a setpoint the rider asked
@@ -416,9 +419,9 @@ export interface RideController {
   requestTrainerControl(): Promise<void>;
   setTargetPower(target: Watts): Promise<void>;
   /**
-   * End ERG — release the trainer (#372): an FTMS Reset, which clears the
-   * target and gives control up, so the panel returns to *Ask the trainer for
-   * control*. The ride carries on.
+   * End ERG — release the trainer (#372) through the one release, an FTMS
+   * Stop. Control is kept. ⚠️ On the trainer measured the target stays applied
+   * after it, which the owner has accepted; setting a new one works.
    */
   clearTargetPower(): Promise<void>;
   /**
@@ -453,8 +456,7 @@ export interface RideController {
    * `fitness-machine-control.ts`, the machine ignores setpoints until it is
    * started again — so ending a game ride silently stopped the workout's
    * trainer while the workout's clock ran on and every target reported
-   * success. Since #372 that release is a Reset, which revokes control
-   * outright, so the refusal matters more rather than less. That is the same silent failure {@link RideController.startWorkout}
+   * success. That is the same silent failure {@link RideController.startWorkout}
    * refuses to start into; this is the other end of it, and CLAUDE.md §6 puts
    * trainer control in the safety class.
    *
@@ -549,14 +551,15 @@ export function createRideController(options: RideControllerOptions): RideContro
    *
    * Every path that ends a ride, a workout, manual ERG or a game ride reaches
    * the trainer through this, and it sends `TrainerControl.letGo()`: an FTMS
-   * Reset, with a flat-road-and-Stop fallback when the machine refuses one.
-   * Four callers and one decision, because the defect #372 found was one
-   * decision (a Stop) copied into three places, each correct by its own tests.
+   * Stop. Four callers and one decision, because what #372 found was one
+   * decision copied into three places, each correct by its own tests — so the
+   * next time hardware says the decision is wrong, it changes in one place.
+   * ⚠️ PR #442 first made it a Reset; on the measured trainer that cleared
+   * nothing a Stop did not and cost the rider their control.
    *
    * ⚠️ **Joined, not repeated.** Ending a ride ends its workout first and then
-   * releases the trainer, and both reach here within the same microtask; a
-   * second Reset queued behind the first would find control already given up
-   * and report *"not granted control"* as a fault on a release that worked.
+   * releases the trainer, and both reach here within the same microtask; one
+   * release is one Stop on the wire, not two.
    *
    * ⚠️ **An intended release is told apart from a loss HERE, by the call, not
    * by a reason string.** `letGo()` does not raise `onControlLost`, so the
@@ -570,7 +573,7 @@ export function createRideController(options: RideControllerOptions): RideContro
     }
     const attempt = client.letGo().then(
       (outcome) => {
-        releaseFault = outcome.kind === 'reset' ? undefined : RELEASE_INCOMPLETE;
+        releaseFault = outcome.kind === 'stopped' ? undefined : RELEASE_INCOMPLETE;
         // A setpoint the rider asked for can no longer be answered.
         requested = undefined;
         return outcome;
@@ -1001,10 +1004,10 @@ export function createRideController(options: RideControllerOptions): RideContro
   };
 
   /**
-   * End the workout. Its session releases the trainer on the way out — an FTMS
-   * Reset, through {@link releaseTrainer} — unless another workout is taking
-   * the trainer over, in which case it is `supersede`d: a Reset there would
-   * revoke the control the replacement is about to write through.
+   * End the workout. Its session releases the trainer on the way out, through
+   * {@link releaseTrainer} — unless another workout is taking the trainer over,
+   * in which case it is `supersede`d: the replacement writes straight on, and a
+   * release would mark a trainer the next workout is about to drive.
    */
   const endWorkoutSession = (handover: 'release' | 'replace' = 'release'): void => {
     if (workout === undefined) {
@@ -1387,9 +1390,9 @@ export function createRideController(options: RideControllerOptions): RideContro
   };
 
   /**
-   * Let the trainer go, best effort — an FTMS Reset through
-   * {@link releaseTrainer} (#372). ⚠️ It used to send a Stop, and on the
-   * trainer #372 was measured on a Stop left the ERG target applied.
+   * Let the trainer go, best effort, through {@link releaseTrainer} (#372) — an
+   * FTMS Stop. ⚠️ On the trainer #372 was measured on, the ERG target stays
+   * applied after it; the owner has accepted that.
    *
    * Failures are swallowed on purpose: this runs while the ride is being
    * stopped, and a rejection here must not leave the recording unstopped.
@@ -1398,7 +1401,7 @@ export function createRideController(options: RideControllerOptions): RideContro
    *
    * ⚠️ Joins a release already on the wire — the workout's, when a ride with a
    * workout in it stops — rather than sending a second one. That works because
-   * `hasControl()` is still `true` while that Reset is queued, so this reaches
+   * `hasControl()` is still `true` while that Stop is queued, so this reaches
    * {@link releaseTrainer}, which returns the one in flight.
    */
   async function stopTrainer(): Promise<void> {

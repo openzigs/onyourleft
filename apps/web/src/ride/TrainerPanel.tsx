@@ -21,12 +21,15 @@
  * procedure is outstanding. That is a string assertion and it is deliberately
  * brittle: the word is the guarantee.
  *
- * ## Ending ERG gives control up, and that is not a loss — #372
+ * ## Ending ERG is a release, and a release is not a loss — #372
  *
- * *End ERG* releases the trainer with an FTMS Reset, which revokes control, so
- * afterwards this panel shows *Ask the trainer for control* — the ordinary
- * state, not the "Control lost" warning below. A release the trainer did not
- * confirm is the one thing said about it, as *Not released*.
+ * *End ERG* releases the trainer through the controller's one release, an FTMS
+ * Stop, and control is kept — so this panel does not show the "Control lost"
+ * warning below, and does not ask the rider to take control again. ⚠️ PR #442
+ * first made it a Reset, which revoked control and put *Ask the trainer for
+ * control* here after every ride; a reviewer who remembers that is reading the
+ * old file. A release the trainer did not acknowledge is the one thing said
+ * about it, as *Not released*.
  *
  * ## Control loss is a notice, not a disabled button
  *
@@ -215,8 +218,8 @@ export function TrainerPanel({
       )}
 
       {/*
-        #372: a release the trainer did not confirm. Rendered whether or not
-        control is still held — after a refused Reset it may be either — and
+        #372: a release the trainer did not acknowledge. Rendered whether or
+        not control is still held — after a refused Stop it may be either — and
         before the refusal, because it is about the machine under the rider
         rather than about a number they typed.
       */}

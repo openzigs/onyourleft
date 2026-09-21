@@ -173,13 +173,15 @@ describe('after a release — #372', () => {
     },
   };
 
-  it('offers control again, as the ordinary state rather than a warning', async () => {
-    // What the controller leaves behind a confirmed release: no control, and
-    // no loss. `controller.test.ts` asserts the controller gets there; this is
-    // what the rider then reads.
-    const text = await render(snapshot({ ...driven, hasControl: false }));
+  it('says nothing alarming after an acknowledged release, and does not ask for control again', async () => {
+    // What the controller leaves behind an acknowledged release: control KEPT,
+    // and no loss. ⚠️ PR #442's Reset left `hasControl: false` here and the
+    // panel asking for control after every ride; a reviewer who remembers that
+    // is reading the old file. `controller.test.ts` asserts the controller gets
+    // here; this is what the rider then reads.
+    const text = await render(snapshot({ ...driven, hasControl: true }));
 
-    expect(text).toContain('Ask the trainer for control');
+    expect(text).not.toContain('Ask the trainer for control');
     expect(text).not.toContain('Control lost');
     expect(text).not.toContain('Not released');
   });

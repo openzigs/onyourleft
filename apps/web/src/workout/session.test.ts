@@ -32,6 +32,7 @@ import {
   type Workout,
   type WorkoutBlock,
 } from '@onyourleft/domain';
+import { SensorError } from '@onyourleft/sensors';
 import { ftmsTrainer, type SimulatedDeviceSpec } from '@onyourleft/sensors/simulator';
 import { connectSimulatedTrainer } from '@onyourleft/sensors/protocol/testing';
 import { describe, expect, it } from 'vitest';
@@ -66,9 +67,8 @@ const TWO_INTERVALS = () => expandWorkout(workout([steady(6, 0.6), steady(6, 1.0
 
 /**
  * The trainer #372 was measured on: an acknowledged Stop leaves its targets
- * applied. ⚠️ A double built to model one machine's behaviour — it makes a
- * release that is really a Stop go red here, and proves nothing about whether
- * any real trainer lets go on a Reset. Validation 0002 Part L is that.
+ * applied. ⚠️ A double built to model one machine's behaviour. It proves
+ * nothing about any real trainer; validation 0002 Parts R and S are that.
  */
 const RETAINS_THROUGH_STOP = () => ftmsTrainer({ id: 'kickr', retainsTargetsThroughStop: true });
 
@@ -110,7 +110,7 @@ async function ride(
 
 /**
  * Let a release run out. It is not the writer's, so `settled()` does not wait
- * for it: a Reset queued behind the control's own promise chain lands a few
+ * for it: a Stop queued behind the control's own promise chain lands a few
  * microtasks after the tick that asked for it.
  */
 async function flush(): Promise<void> {
@@ -194,11 +194,12 @@ describe('a completed ERG workout holds the target profile', () => {
     expect(settledReadings).toContain(250);
   });
 
-  it('reaches the finish and lets the trainer go with a Reset — #372', async () => {
-    // ⚠️ This used to assert a `0x08` Stop. On the trainer #372 was measured on,
-    // an acknowledged Stop left a 200 W ERG target being chased for as long as
-    // the rider pedalled, so the double here keeps its target through a Stop
-    // the same way — and the finish has to be a Reset to clear it. Not a
+  it('reaches the finish and lets the trainer go with one Stop — #372', async () => {
+    // ⚠️ PR #442 first made this a Reset, and a reviewer who remembers
+    // `[RESET]` here is reading the old file: on the owner's trainer a Reset
+    // cleared nothing a Stop did not, and it revoked control. So the double
+    // keeps its target through the Stop, as the measured machine does, and
+    // what is asserted is what was SENT — not that anything let go. Not a
     // target of zero either: a machine holding 0 W is still holding.
     const { trainer, session } = await loop(TWO_INTERVALS, RETAINS_THROUGH_STOP());
     session.start(seconds(0));
@@ -206,10 +207,13 @@ describe('a completed ERG workout holds the target profile', () => {
     await flush();
 
     expect(session.state().player.status).toBe('finished');
-    expect(trainer.targetPowerOnTheTrainer()).toBeUndefined();
     const writes = trainer.wire.filter((entry) => entry.direction === 'write');
-    expect(writes.at(-1)?.bytes).toStrictEqual([RESET]);
-    expect(writes.filter((entry) => entry.bytes[0] === RESET)).toHaveLength(1);
+    expect(writes.at(-1)?.bytes).toStrictEqual([STOP_OR_PAUSE, 0x01]);
+    expect(writes.filter((entry) => entry.bytes[0] === RESET)).toHaveLength(0);
+    expect(trainer.control.hasControl()).toBe(true);
+    // The measured machine's behaviour, stated rather than hidden: it is still
+    // holding the last interval.
+    expect(trainer.targetPowerOnTheTrainer()).toBe(250);
     expect(session.state().lastFault).toBeUndefined();
   });
 });
@@ -279,9 +283,9 @@ describe('the trainer is let go whenever the rider is not riding to a target', (
   });
 
   it('pauses with a Stop and NOT a Reset, and resumes to a target — #372', async () => {
-    // ⚠️ The Reset trap, from the other side. A pause is not the end: the
-    // workout writes again after it, so it must keep control — and a Reset
-    // would give control up and turn every later target into a refusal.
+    // ⚠️ The Reset trap. A pause is not the end: the workout writes again
+    // after it, so it must keep control — and a Reset would give control up
+    // and turn every later target into a refusal.
     const { trainer, session } = await loop(() => expandWorkout(workout([steady(600, 0.6)])));
     session.start(seconds(0));
     await ride(session, 0, 2);
@@ -301,40 +305,52 @@ describe('the trainer is let go whenever the rider is not riding to a target', (
   it('stops again at the end of a workout that passed through a free ride', async () => {
     // ⚠️ The release bookkeeping has to be reset by a *write*, not only by the
     // first one. Without that, a free-ride block marks the trainer released and
-    // the ERG block after it sets a target the finish then declines to clear —
-    // leaving the rider holding a setpoint after the workout has ended.
-    const { trainer, session } = await loop(
-      () => expandWorkout(workout([{ kind: 'free-ride', seconds: seconds(3) }, steady(3, 0.6)])),
-      RETAINS_THROUGH_STOP(),
-    );
-    session.start(seconds(0));
-    await ride(session, 0, 7);
-
-    expect(session.state().player.status).toBe('finished');
-    expect(trainer.targetPowerOnTheTrainer()).toBeUndefined();
-  });
-});
-
-describe('ending the workout releases the trainer — #372', () => {
-  it('releases at the end of a workout whose LAST block is a free ride', async () => {
-    // ⚠️ The case the `released` guard used to swallow. The free ride sends a
-    // Stop and marks the trainer released; the finish then declined to send
-    // anything. On a machine that keeps its target through a Stop that left
-    // the ERG block's 150 W applied after the workout ended.
-    const { trainer, session } = await loop(
-      () => expandWorkout(workout([steady(3, 0.6), { kind: 'free-ride', seconds: seconds(3) }])),
-      RETAINS_THROUGH_STOP(),
+    // the ERG block after it sets a target the finish then declines to let go.
+    const { trainer, session } = await loop(() =>
+      expandWorkout(workout([{ kind: 'free-ride', seconds: seconds(3) }, steady(3, 0.6)])),
     );
     session.start(seconds(0));
     await ride(session, 0, 7);
     await flush();
 
     expect(session.state().player.status).toBe('finished');
-    expect(trainer.targetPowerOnTheTrainer()).toBeUndefined();
-    expect(trainer.wire.filter((entry) => entry.bytes[0] === RESET)).toHaveLength(1);
+    const writes = trainer.wire.filter((entry) => entry.direction === 'write');
+    expect(writes.at(-1)?.bytes).toStrictEqual([STOP_OR_PAUSE, 0x01]);
+  });
+});
+
+describe('ending the workout releases the trainer — #372', () => {
+  it('releases at the end of a workout whose LAST block is a free ride', async () => {
+    // ⚠️ The case the `released` guard used to swallow: the free ride eased
+    // the trainer and marked it released, and the finish then declined to call
+    // `letGo` at all — so a refusal of it could never be reported. #442 found
+    // it and it survives the re-scope. Counted on the session's own trainer
+    // rather than the wire, because it is the CALL that was missing.
+    const { trainer } = await loop();
+    const released: string[] = [];
+    const session = createWorkoutSession({
+      timeline: expandWorkout(
+        workout([steady(3, 0.6), { kind: 'free-ride', seconds: seconds(3) }]),
+      ),
+      thresholdPower: THRESHOLD,
+      control: {
+        setTargetPower: (target) => trainer.control.setTargetPower(target),
+        stop: () => trainer.control.stop(),
+        letGo: () => {
+          released.push('letGo');
+          return trainer.control.letGo();
+        },
+      },
+    });
+    session.start(seconds(0));
+    await ride(session, 0, 7);
+    await flush();
+
+    expect(session.state().player.status).toBe('finished');
+    expect(released).toStrictEqual(['letGo']);
   });
 
-  it('releases with a Reset when the rider ends it early, and writes nothing after', async () => {
+  it('releases with a Stop when the rider ends it early, and writes nothing after', async () => {
     const { trainer, session } = await loop(TWO_INTERVALS, RETAINS_THROUGH_STOP());
     session.start(seconds(0));
     await ride(session, 0, 2);
@@ -348,8 +364,7 @@ describe('ending the workout releases the trainer — #372', () => {
     await session.settled();
 
     const after = trainer.wire.slice(before).filter((entry) => entry.direction === 'write');
-    expect(after.map((entry) => [...entry.bytes])).toStrictEqual([[RESET]]);
-    expect(trainer.targetPowerOnTheTrainer()).toBeUndefined();
+    expect(after.map((entry) => [...entry.bytes])).toStrictEqual([[STOP_OR_PAUSE, 0x01]]);
   });
 
   it('releases once however many times it is ended', async () => {
@@ -360,12 +375,15 @@ describe('ending the workout releases the trainer — #372', () => {
     session.stop();
     await session.settled();
     await flush();
-    expect(trainer.wire.filter((entry) => entry.bytes[0] === RESET)).toHaveLength(1);
+    const writes = trainer.wire.filter((entry) => entry.direction === 'write');
+    const lastTarget = writes.findLastIndex((entry) => entry.bytes[0] === SET_TARGET_POWER);
+    expect(writes.slice(lastTarget + 1).map((entry) => [...entry.bytes])).toStrictEqual([
+      [STOP_OR_PAUSE, 0x01],
+    ]);
   });
 
-  it('hands over to a replacement with a Stop, not a Reset, so control survives', async () => {
-    // `supersede` is how the ride screen swaps one workout for another. A Reset
-    // there would give up the control the next workout writes through.
+  it('hands over to a replacement with a bare Stop, not the release, so control survives', async () => {
+    // `supersede` is how the ride screen swaps one workout for another.
     const { trainer, session } = await loop();
     session.start(seconds(0));
     await ride(session, 0, 2);
@@ -380,11 +398,21 @@ describe('ending the workout releases the trainer — #372', () => {
     expect(trainer.control.hasControl()).toBe(true);
   });
 
-  it('tells the rider when the trainer refused the Reset', async () => {
-    const { session } = await loop(
-      TWO_INTERVALS,
-      ftmsTrainer({ id: 'kickr', supportsReset: false }),
-    );
+  it('tells the rider when the trainer refused the release', async () => {
+    const { trainer } = await loop();
+    const session = createWorkoutSession({
+      timeline: TWO_INTERVALS(),
+      thresholdPower: THRESHOLD,
+      control: {
+        setTargetPower: (target) => trainer.control.setTargetPower(target),
+        stop: () => trainer.control.stop(),
+        letGo: () =>
+          Promise.resolve({
+            kind: 'incomplete' as const,
+            refusal: new SensorError('control-rejected', 'the machine refused op code 0x8'),
+          }),
+      },
+    });
     session.start(seconds(0));
     await ride(session, 0, 2);
 
@@ -492,20 +520,19 @@ describe('a free ride releases the trainer once, not every second', () => {
 });
 
 describe('what the trainer is never asked to do', () => {
-  it('sends no Reset between intervals — only one, after the last target', async () => {
+  it('sends no Reset for the whole of a workout, the end included', async () => {
     // ⚠️ FTMS §4.16.2.1: a client-initiated Reset revokes the client's own
-    // control permission, which is the Reset trap. ⚠️ This test used to be
-    // "sends no Reset for the whole of a workout"; since #372 the end of a
-    // workout IS a Reset, so what is asserted over the actual octets is that
-    // there is exactly one and that no target follows it. `ErgSink` still
-    // cannot reach it at all — `erg-writer.test.ts` pins that.
+    // control permission. `ErgSink` and `WorkoutTrainer` both narrow it away,
+    // so this is a belt-and-braces assertion over the actual octets. ⚠️ PR #442
+    // first made the END of a workout a Reset and rewrote this test to allow
+    // one; the re-scope put it back, because on the measured trainer the Reset
+    // cleared nothing and cost the rider their control.
     const { trainer, session } = await loop();
     session.start(seconds(0));
     await ride(session, 0, 12);
-    const writes = trainer.wire.filter((entry) => entry.direction === 'write');
-    const resets = writes.flatMap((entry, index) => (entry.bytes[0] === RESET ? [index] : []));
-    const lastTarget = writes.findLastIndex((entry) => entry.bytes[0] === SET_TARGET_POWER);
-    expect(resets).toHaveLength(1);
-    expect(resets[0]).toBeGreaterThan(lastTarget);
+    await flush();
+    expect(
+      trainer.wire.filter((entry) => entry.direction === 'write' && entry.bytes[0] === RESET),
+    ).toHaveLength(0);
   });
 });

@@ -37,49 +37,39 @@
  * failure for as long as the road stays similar. `SimulationDriver.restart`
  * exists for exactly this and says so; this is its production caller.
  *
- * **Two: ending a ride releases the trainer, and since #372 that is an FTMS
- * Reset (`0x01`), NOT a Stop.** ⚠️ This paragraph has now been wrong twice, and
- * a reviewer who remembers either earlier version is reading an old file.
- * First it said `stop()` was "the deliberate way to end resistance"; then it
- * said, correctly, that a Stop does not remove the resistance, and left the
- * remedy open. [#372](https://github.com/openzigs/onyourleft/issues/372) chose
- * it, and {@link GradientSession.stop} now calls `control.letGo()`.
+ * **Two: ending a ride releases the trainer — and ⚠️ ON THE TRAINER MEASURED,
+ * NOTHING THIS CLIENT CAN SEND REMOVES THE RESISTANCE.** This paragraph has
+ * been wrong twice, and a reviewer who remembers either earlier version is
+ * reading an old file: first it said `stop()` was "the deliberate way to end
+ * resistance"; then PR #442 made the release an FTMS Reset because FTMS says a
+ * Reset returns the machine to its defaults.
  *
- * The hazard is unchanged: FTMS simulation parameters persist on the machine
- * until they are changed, so a rider who ends a ride on a 9 % wall and walks
- * away leaves the flywheel loaded against whoever gets on next. What a Stop
- * does about it was measured on hardware on 2026-09-19 — end a ride on a steep
- * climb and turn the cranks by hand, then do it again on a steep descent:
- * **climb heavy, descent easy, so the grade was still applied** after an
- * acknowledged `0x08`. (A single hand-turn cannot show this, because a
- * direct-drive trainer always has drag and simulation resistance nearly
- * vanishes at zero speed; validation 0002 L5 now uses the pedal-through test,
- * which judges by the trainer's own power reading instead.)
+ * The hazard is real: FTMS simulation parameters persist on the machine until
+ * they are changed, so a rider who ends a ride on a 9 % wall and walks away
+ * leaves the flywheel loaded against whoever gets on next. What the machine
+ * does about it was measured ([#372](https://github.com/openzigs/onyourleft/issues/372)):
  *
- * Why a Reset, and why the Reset trap does not forbid it: FTMS §4.16.2.1 makes
- * Reset return the machine to its defaults — the specification's own way to
- * clear a target setting — and revoke this client's control. The trap is a
- * client that keeps writing after that. This session writes nothing after
- * `stop()` (the `stopped` flag and the writer's `close()` both say so), and if
- * anything did, `TrainerControl` would refuse it for want of control rather
- * than send it into a machine that has stopped listening.
+ * - **Stop, 2026-09-19.** End a ride on a steep climb and turn the cranks by
+ *   hand, then again on a steep descent: **climb heavy, descent easy**, so the
+ *   grade was still applied after an acknowledged `0x08`. (A single hand-turn
+ *   cannot show this — a direct-drive trainer always has drag, and simulation
+ *   resistance nearly vanishes at zero speed — which is why validation 0002 L5
+ *   now uses the pedal-through test and reads the trainer's own power.)
+ * - **Reset, 2026-09-21**, PR #442's build, ERG: acknowledged `80 01 01`, and
+ *   the trainer held 198–202 W across 64–81 rpm, then raised power as cadence
+ *   fell. It cleared nothing a Stop did not, and it revoked control, so every
+ *   ride ended with the rider asking for control again.
  *
- * ⚠️ **What follows for the next ride, decided rather than left to happen:**
- * after a release this client holds no control, so the next game ride's
- * `gameTrainerFrom` reports `no-control` and tells the rider to take control on
- * the Ride screen. That is kept. Re-requesting control at the start of the next
- * ride would be the screen deciding to apply resistance to somebody, which
- * `trainer-port.ts` rules out for the game and `ride/controller.ts`'s rule 2
- * rules out everywhere: taking control is a thing the rider does.
+ * The owner accepted the retention on 2026-09-21, on the condition that the app
+ * can take control again — which it can. So {@link GradientSession.stop} calls
+ * `control.letGo()`, which is the ride controller's ONE release and sends a
+ * Stop. The value of it being one method is that the next time hardware says
+ * what a release should send, it changes in one place.
  *
- * ⚠️ If the machine refuses the Reset, `letGo()` writes a flat road and a Stop
- * and resolves `incomplete`, and the rider is told the trainer may still be
- * holding resistance — by the ride controller, which every release goes
- * through, on the Ride screen and on this game's route picker.
- *
- * ⚠️ No gate here can prove a real trainer lets go. Every test asserts what was
- * sent; the #44 simulator clears its targets on a Reset because it was written
- * to. Validation 0002 Part L is the only evidence that counts.
+ * ⚠️ If the machine refuses or does not answer the Stop, the rider is told the
+ * trainer may still be holding resistance — by the ride controller, on the Ride
+ * screen and on this game's route picker. An acknowledged Stop says nothing of
+ * the kind, because on the measured trainer it would be saying it every time.
  *
  * **Three: a rider is told when a write is refused.** A caller offering a
  * gradient every second has nowhere to catch a rejection that arrives four
@@ -173,8 +163,8 @@ export interface GradientSession {
    */
   sample(at: Seconds, distance: number): void;
   /**
-   * End the ride and let the trainer go — `control.letGo()`, an FTMS Reset
-   * (#372). @see the module note, "Two".
+   * End the ride and let the trainer go — `control.letGo()`, an FTMS Stop
+   * (#372). @see the module note, "Two", for what that does not do.
    *
    * Idempotent: `GameView` tears down from the "End ride" button and from the
    * effect's cleanup, and a rider who navigates away has ended the ride just as
@@ -270,8 +260,8 @@ export function createGradientSession(options: GradientSessionOptions): Gradient
 }
 
 /**
- * What a rider is told when the end of a ride could not be confirmed as a
- * release — the Reset was refused and a flat road and a Stop were sent instead.
+ * What a rider is told when the machine refused or did not answer the release's
+ * Stop.
  */
 const RELEASE_INCOMPLETE_ROAD =
   'The trainer did not confirm it let go of the road. It may still be holding resistance — ease off before you get off.';

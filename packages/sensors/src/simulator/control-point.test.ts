@@ -246,26 +246,6 @@ describe('the op codes #43 added to this machine', () => {
       stopped: true,
       targetPower: 200,
     });
-
-    // …and a Reset still clears them, which is what a release relies on.
-    controlPoint.write({ opCode: 'reset' });
-    bench.advance(seconds(1));
-    expect(bench.device(TRAINER).inspect().ftms?.targetPower).toBeUndefined();
-  });
-
-  it('answers a Reset Op Code Not Supported, and holds on, when built without one', async () => {
-    const { bench, controlPoint, responses } = await connectedTrainer({ supportsReset: false });
-    controlPoint.enableIndications();
-    controlPoint.write({ opCode: 'request-control' });
-    bench.advance(seconds(1));
-    controlPoint.write({ opCode: 'set-target-power', target: watts(200) });
-    bench.advance(seconds(1));
-
-    controlPoint.write({ opCode: 'reset' });
-    bench.advance(seconds(1));
-
-    expect(responses.at(-1)).toEqual({ requestOpCode: 'reset', result: 'op-code-not-supported' });
-    expect(bench.device(TRAINER).inspect().ftms?.targetPower).toBe(200);
   });
 
   it('reports the ranges its two supported-range characteristics would carry', async () => {

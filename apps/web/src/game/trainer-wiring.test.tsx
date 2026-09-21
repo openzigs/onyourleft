@@ -127,10 +127,10 @@ function trainerPort(
       commands.written.push(parameters);
       return Promise.resolve();
     },
-    // #372: a release, which is a Reset — `stop` is no longer on the type.
+    // #372: the controller's one release — `stop` is no longer on the type.
     letGo: async () => {
       commands.releases.push(commands.written.length);
-      return Promise.resolve({ kind: 'reset' as const });
+      return Promise.resolve({ kind: 'stopped' as const });
     },
   };
   return { readTrainer: () => gameTrainerFrom(snapshot, control, workoutRunning) };
@@ -294,11 +294,10 @@ describe('the road the game draws reaches the trainer', () => {
 
   it('sends no release when a workout holds the trainer', async () => {
     // ⚠️ **The assertion that is really about safety.** A release is an FTMS
-    // Reset since #372 (a Stop before it), and either makes the machine stop
-    // listening to this client — so a game ride that ended while a workout was
-    // running would leave the workout's clock going and every one of its
-    // targets refused or ignored — the silent failure `startWorkout` refuses to
-    // start into, arriving after the guard.
+    // Stop, which makes the machine stop listening to this client — so a game
+    // ride that ended while a workout was running would leave the workout's
+    // clock going and every one of its targets refused or ignored — the silent
+    // failure `startWorkout` refuses to start into, arriving after the guard.
     const commands: Commands = { written: [], releases: [] };
     await ride(trainerPort(READY, commands, true));
     await act(async () => {
@@ -342,7 +341,7 @@ describe('the road the game draws reaches the trainer', () => {
 
   it('tells the rider on the picker when the last release was not confirmed — #372', async () => {
     // A game ride ends on the picker, not on the Ride screen, and a trainer
-    // that refused the Reset may still be holding the hill.
+    // that refused the Stop may still be holding the hill.
     const commands: Commands = { written: [], releases: [] };
     mounted = await mount(
       <GameView

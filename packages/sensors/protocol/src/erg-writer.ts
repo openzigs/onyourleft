@@ -127,10 +127,10 @@ export interface ErgWriter {
    *
    * ⚠️ **Does not stop the trainer.** Closing a writer ends this client's
    * stream of targets; the machine keeps holding the last one it was given
-   * until somebody calls `letGo()` on the control — an FTMS Reset since
-   * #372; it said `stop()` here, and on real hardware a Stop did not clear an
-   * ERG target — which is `TrainerControl`'s job and deliberately not
-   * reachable from here. A rider
+   * until somebody writes it another one — and on the trainer #372 was
+   * measured on, it keeps holding it through `letGo()`'s Stop and through a
+   * Reset as well. Ending the session is `TrainerControl`'s job and
+   * deliberately not reachable from here. A rider
    * left pedalling against a target because a screen unmounted is the failure
    * that would follow from conflating the two.
    */

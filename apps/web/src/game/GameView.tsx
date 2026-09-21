@@ -202,9 +202,8 @@ export interface GameViewProps {
    * *Pause* is beside it for everything short of leaving. The platform's own
    * Back — the browser's button, Android's gesture — still works and is an
    * unmount, which {@link teardown} already treats exactly as *End ride*: the
-   * trainer is released (an FTMS Reset since #372 — it said "Stop" here, and
-   * a Stop did not release real hardware), the screen lock is released and
-   * the GL context is destroyed.
+   * trainer is released through the ride controller's one release (#372), the
+   * screen lock is released and the GL context is destroyed.
    *
    * ⚠️ **None of this touches a recording or a workout.** `RideSession` is
    * mounted in `AppShell` *above* the router for exactly this reason, and the
@@ -371,8 +370,8 @@ export function GameView(props: GameViewProps): JSX.Element {
     // ⚠️ **First**, and before anything else can throw. #362's second half is
     // that a ride which ends on a 9 % wall must not leave the flywheel loaded
     // against whoever gets on the trainer next — `gradient.ts` §`stop` records
-    // why that is an FTMS Reset (#372) rather than a Stop, which this comment
-    // used to name and which real hardware showed releases nothing. `stop` is
+    // what that release sends and — measured on hardware, #372 — what it does
+    // not do, which is remove the resistance. `stop` is
     // idempotent because this callback runs from the "End ride" button *and*
     // from the effect's cleanup, and a rider who navigates away has ended the
     // ride just as surely as one who pressed the button — validation 0002 L7.

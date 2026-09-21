@@ -270,15 +270,10 @@ export interface FtmsOptions {
    * measured on: an acknowledged `0x08` left both a grade and an ERG target
    * applied. ⚠️ A double modelling one machine's behaviour, not evidence about
    * any other; it exists so a client that "releases" with a Stop is a red test
-   * rather than a green one.
+   * rather than a green one — and so that a workout easing a stalled rider
+   * with a Stop instead of a lower target (#441) is one too.
    */
   readonly retainsTargetsThroughStop?: boolean;
-  /**
-   * Whether this machine answers Reset at all. Defaults to `true`. Built
-   * `false`, a Reset is answered `0x02` Op Code Not Supported — the case a
-   * release's fallback exists for.
-   */
-  readonly supportsReset?: boolean;
 }
 
 export const DEFAULT_MIN_TARGET_POWER: Watts = watts(0);
@@ -328,7 +323,6 @@ export function createFtmsMachine(
   };
   const supportsSimulation = options.supportsSimulation ?? true;
   const retainsTargetsThroughStop = options.retainsTargetsThroughStop ?? false;
-  const supportsReset = options.supportsReset ?? true;
   let fields = options.fields ?? DEFAULT_INDOOR_BIKE_DATA_FIELDS;
 
   let controlHeld = false;
@@ -353,9 +347,6 @@ export function createFtmsMachine(
       case 'reset':
         if (!controlHeld) {
           return 'control-not-permitted';
-        }
-        if (!supportsReset) {
-          return 'op-code-not-supported';
         }
         // 4.16.2.1: a Reset returns the machine to its defaults *and* resets
         // the control permission — the client that asked for it loses it.

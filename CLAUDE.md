@@ -441,10 +441,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         writes. It owns the three things neither package can: a
                         refused write restarts the driver, ending a ride
                         releases the trainer, and a refusal becomes a sentence.
-                        ⚠️ **The release is an FTMS Reset (`0x01`) since #372,
-                        and a reviewer who remembers "an FTMS Stop rather than a
-                        flat road" is reading the old file**: on real hardware
-                        an acknowledged Stop left the grade applied. §4h. ⚠️ It sends the **grade and nothing
+                        ⚠️ **The release is an FTMS Stop through the ride
+                        controller's ONE release, and on the one trainer
+                        measured it does NOT remove the grade — nor did the
+                        Reset PR #442 tried** (#372, §4h). ⚠️ It sends the **grade and nothing
                         else** — the rider's wind is out of scope and their drag
                         area would double-count against the game's own physics
     src/game/trainer-port.ts
@@ -462,11 +462,12 @@ apps/                 AGPL-3.0-or-later, without exception
                         control point on the machine and a running workout owns
                         it, `RideSession` is mounted above the router so
                         `workoutTick` keeps driving ERG targets while the rider
-                        is in the game, and the game's own release — an FTMS
-                        Reset since #372, a Stop before it — makes the machine
-                        stop listening to this client, so ending a game ride
-                        would have left the workout's clock running against a
-                        machine that had stopped listening. `ride/controller.ts` §`simulationControl`
+                        is in the game, and the game's own release is an FTMS
+                        **Stop** — after which the machine ignores setpoints
+                        until it is started again, so ending a game ride would
+                        have left the workout's clock running against a machine
+                        that had stopped listening while every target reported
+                        success. `ride/controller.ts` §`simulationControl`
                         refuses the handle and this supplies the sentence
     src/game/rider.ts   what the rider and their bicycle weigh together, what
                         air they ride through, and — since #365 — **how much of
@@ -2142,25 +2143,23 @@ comment warns they are "not necessarily" the same. `fitness-machine-channel.test
 assumption, because if it ever breaks the symptom is a control point write addressed to a device the
 plugin has never heard of, on the one path that applies physical resistance to somebody.
 
-⚠️ **Letting a trainer go is an FTMS Reset (`0x01`), not a Stop (`0x08`), since
-[#372](https://github.com/openzigs/onyourleft/issues/372)** — and a reviewer who remembers
-`stop()` being "the deliberate way to end resistance" is reading the old file. On the one trainer
-measured, an acknowledged Stop released nothing: a grade stayed applied (2026-09-19) and an ERG
-target was still being chased, power rising as cadence fell (2026-09-21). So
-`TrainerControl.letGo()` in `packages/sensors/protocol` is the **one** place that decides what a
-release sends, and every release goes through `ride/controller.ts` §`releaseTrainer` — *End ERG*, the
-end of a workout, stopping a ride, and a game ride ending by button or by navigating away. Three
-things about it are decisions, not details: a Reset **revokes control** (FTMS §4.16.2.1), which is
-the intent for a terminal release and why nothing is written after one; it is **not reported as a
-loss** — no "Control lost", and a workout ends rather than pausing — and nothing takes control back
-afterwards, so the next game ride tells the rider to take control on the Ride screen; and a machine
-that refuses the Reset gets a flat road and a Stop, reported as **Not released**, never as released.
-⚠️ `ErgSink` still cannot reach `reset` or `letGo` — the session that owns the writer releases,
-never the writer — and a **pause inside a workout** (a free-ride block, a paused ride, the ERG spiral
-easing) is still a Stop, because the workout writes again afterwards; on the measured trainer that
-does not ease an ERG target either, which is [#441](https://github.com/openzigs/onyourleft/issues/441). ⚠️ **No test here proves a real trainer
-lets go on a Reset** — the #44 simulator clears its targets on one because it was written to.
-Validation 0002 L5, L7 and Part R are the proof, and #372 closes on them.
+⚠️ **Letting a trainer go goes through ONE method, and on the one trainer measured nothing it could
+send releases anything** ([#372](https://github.com/openzigs/onyourleft/issues/372)). A reviewer
+who remembers `stop()` being "the deliberate way to end resistance", **or** PR #442's "a release is
+an FTMS Reset", is reading an old file. On the owner's trainer an acknowledged `0x08` Stop kept a grade
+(2026-09-19) and an ERG target (2026-09-21), and an acknowledged `0x01` Reset kept the ERG target too
+(2026-09-21) — while also revoking control. The owner **accepted end-of-ride retention** on the
+condition, measured and met, that the app can take control again. So `TrainerControl.letGo()` in
+`packages/sensors/protocol` sends a **Stop** and keeps control, and every release goes through
+`ride/controller.ts` §`releaseTrainer` — *End ERG*, the end of a workout, stopping a ride, and a game
+ride ending by button or by navigating away. What survives from #442 is structural: one release; it
+is **not reported as a loss** (no "Control lost", and a workout ends rather than pausing); nothing
+takes control back after one; and a refused Stop is reported as **Not released**.
+⚠️ **No test here proves a real
+trainer lets go** — every test asserts what is sent. Validation 0002 L5, L7 and Part R are the
+hardware steps. A pause INSIDE a workout (a free-ride block, a stalled rider, a paused ride) still
+sends a Stop, which on the measured trainer does not ease an ERG target: that is
+[#441](https://github.com/openzigs/onyourleft/issues/441).
 
 ### 4j. The wiring gate
 
@@ -3092,7 +3091,7 @@ top of an issue **supersedes its body**.
 | Why a quantised acknowledgement is not a change, and the busy loop that follows from reading it as one | `packages/domain/src/workout/player.ts` §`acknowledge` |
 | Which single place rebases the workout offset after a pause, and why the other two do not | `packages/domain/src/workout/player.ts` §`resume` |
 | Why a workout player cannot send an FTMS Reset even by mistake | `packages/sensors/protocol/src/erg-writer.ts` §`ErgSink` |
-| Why the end of a workout is a Reset, a pause inside one is still a Stop, neither is a target of zero, and which object may reach for them | `apps/web/src/workout/session.ts` §`finish`, §`ease`, §`WorkoutTrainer`, §4h |
+| What the end of a workout sends, what an ease inside one sends, and which object may reach for each | `apps/web/src/workout/session.ts` §`finish`, §`ease`, §`WorkoutTrainer`, §4h |
 | Why a lost trainer link does not close the ERG writer, and what closing it cost | `apps/web/src/workout/session.ts` §`linkLost` |
 | Why the session assumes the trainer is already holding something when a workout starts | `apps/web/src/workout/session.ts` §`released` |
 | What the #44 simulator proves about the control loop that neither package can prove alone | `apps/web/src/workout/session.test.ts` |
@@ -3251,9 +3250,9 @@ top of an issue **supersedes its body**.
 | How the road the game draws reaches a trainer, and what proves a ride sends one | `apps/web/src/game/gradient.ts`, `apps/web/src/game/trainer-wiring.test.tsx`, [#362](https://github.com/openzigs/onyourleft/issues/362) |
 | Why a machine that does not offer simulation mode is never written to, and what the rider is told instead | `apps/web/src/game/trainer-port.ts` §`gameTrainerFrom`, §`trainerRoadNotice` |
 | Why the game is refused the trainer while a workout is running, and what the game's release would have done to that workout | `apps/web/src/ride/controller.ts` §`simulationControl`, `apps/web/src/game/trainer-port.ts` §`GameTrainerKind` member `workout` |
-| What happens to the resistance when a ride ends, and why it is a Reset rather than a Stop or a flat road | `apps/web/src/game/gradient.ts` §`stop`, `packages/sensors/protocol/src/fitness-machine-control.ts` §`letGo`, [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part L, Part R, [#372](https://github.com/openzigs/onyourleft/issues/372) |
+| What happens to the resistance when a ride ends, and why neither a Stop nor a Reset removed it on the trainer measured | `apps/web/src/game/gradient.ts` §`stop`, `packages/sensors/protocol/src/fitness-machine-control.ts` §`letGo`, [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part L, Part R, [#372](https://github.com/openzigs/onyourleft/issues/372) |
 | Where every release in the client goes through, why one is joined rather than repeated, and why it is not a loss of control | `apps/web/src/ride/controller.ts` §`releaseTrainer` |
-| Why a workout replaced by another does not Reset the trainer | `apps/web/src/workout/session.ts` §`supersede`, `apps/web/src/ride/controller.ts` §`endWorkoutSession` |
+| Why a workout replaced by another is handed over with a bare Stop rather than the release | `apps/web/src/workout/session.ts` §`supersede`, `apps/web/src/ride/controller.ts` §`endWorkoutSession` |
 | Why the simulator can be built to keep its targets through a Stop, and what that does not prove | `packages/sensors/src/simulator/ftms.ts` §`FtmsOptions.retainsTargetsThroughStop` |
 | Why the gradient write carries no wind and no drag area | `apps/web/src/game/gradient.ts` §"What is deliberately NOT sent" |
 | Why every rider used to be simulated as a track racer, and where the drag area is chosen now | `apps/web/src/game/rider.ts` §`RIDING_POSITIONS`, [`packages/physics/README.md`](packages/physics/README.md) §2 |
