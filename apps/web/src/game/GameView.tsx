@@ -67,7 +67,8 @@ import { corridorOrigin } from './terrain';
 import type { GameRenderer, GameView as RendererView } from './port';
 import { NO_SENSORS, type GameSensors } from './sensors';
 import { speedUnit, spokenDistanceUnit } from '../units/format';
-import { announce, INITIAL_ANNOUNCER, type AnnouncerState } from './hud/announce';
+import { announce, INITIAL_ANNOUNCER, remainingFrom, type AnnouncerState } from './hud/announce';
+import { slopeEvent, slopesOf, type Slope, type SlopeAnnounced } from './hud/climb-ahead';
 import {
   DEFAULT_ANNOUNCEMENTS,
   deviceStorage,
@@ -319,6 +320,13 @@ export function GameView(props: GameViewProps): JSX.Element {
    * ride (#395 decided the device, not the athlete row), off by default.
    */
   const announcementsRef = useRef<AnnouncementPreference>(DEFAULT_ANNOUNCEMENTS);
+  /**
+   * The route's climbs and descents, found once per ride, and the approach
+   * last announced — #399. Refs for `announcerRef`'s reason: the loop reads
+   * them on every frame and must not re-run when they change.
+   */
+  const slopesRef = useRef<readonly Slope[]>([]);
+  const slopeAnnouncedRef = useRef<SlopeAnnounced>(undefined);
   /** The rider's units, for the spoken distance, read inside the loop. */
   const unitsRef = useRef(units);
   unitsRef.current = units;
@@ -460,6 +468,8 @@ export function GameView(props: GameViewProps): JSX.Element {
       announcerRef.current = INITIAL_ANNOUNCER;
       setAnnouncement('');
       announcementsRef.current = readAnnouncementPreference(deviceStorage());
+      slopesRef.current = slopesOf(profile);
+      slopeAnnouncedRef.current = undefined;
       // ⚠️ **Read at the start of the ride and held for its length**, which is
       // what makes "changing your weight mid-session does not rewrite the ride
       // you are on" true by construction rather than by a rule somebody
@@ -639,13 +649,23 @@ export function GameView(props: GameViewProps): JSX.Element {
         heartRate: sensors.heartRate,
         units: unitsRef.current,
       });
-      const togo = Number(readings.find((reading) => reading.key === 'remaining')?.value);
+      // #399: "to go" is the HUD's own reading, parsed — see `remainingFrom`.
+      const remaining = remainingFrom(readings, spokenDistanceUnit(unitsRef.current));
+      // #399: a climb or a descent ahead, from the SAME wrapped position the
+      // strip and the plan view use (`climb-ahead.ts` says why that matters).
+      const slope = slopeEvent(slopeAnnouncedRef.current, {
+        slopes: slopesRef.current,
+        profile: chosen.profile,
+        distance: simulation.state.ride.distance,
+        lead: announcementsRef.current.enabled ? announcementsRef.current.climbLeadMetres : 'never',
+        units: unitsRef.current,
+      });
+      slopeAnnouncedRef.current = slope.announced;
       const heard = announce(announcerRef.current, {
         now: simulation.state.elapsed,
         readings,
-        ...(Number.isFinite(togo)
-          ? { remaining: { value: togo, unit: spokenDistanceUnit(unitsRef.current) } }
-          : {}),
+        ...(remaining === undefined ? {} : { remaining }),
+        ...(slope.event === undefined ? {} : { events: [slope.event] }),
         preference: announcementsRef.current,
       });
       announcerRef.current = heard.state;

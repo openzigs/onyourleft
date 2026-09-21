@@ -151,6 +151,15 @@ export function spokenDistanceUnit(units: UnitSystem): string {
   return units === 'imperial' ? 'miles' : 'kilometres';
 }
 
+/**
+ * The segment-scale unit as it is SAID — #399's climb-ahead sentence, on
+ * {@link spokenDistanceUnit}'s reasoning: a screen reader reads `m` as a
+ * letter and `ft` as a word it guesses at.
+ */
+export function spokenSmallDistanceUnit(units: UnitSystem): string {
+  return units === 'imperial' ? 'feet' : 'metres';
+}
+
 /** The unit label a segment-scale distance or an elevation carries. */
 export function smallDistanceUnit(units: UnitSystem): string {
   return units === 'imperial' ? 'ft' : 'm';

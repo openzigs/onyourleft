@@ -39,6 +39,13 @@ export interface AnnouncementPreference {
   readonly distanceEvery: Every;
   /** How long before a workout's block changes it is said, in seconds (#398). */
   readonly intervalLeadSeconds: Every;
+  /**
+   * How far ahead of a climb or a descent it is said, in METRES along the road
+   * (#399). Metres rather than the rider's unit because the choices are road
+   * lengths a rider judges by eye, and `SettingsView` labels each one in their
+   * own unit through `units/format.ts`.
+   */
+  readonly climbLeadMetres: Every;
 }
 
 /** #395's table: every row's default, and the whole feature off. */
@@ -47,6 +54,7 @@ export const DEFAULT_ANNOUNCEMENTS: AnnouncementPreference = {
   powerEverySeconds: 60,
   distanceEvery: 1,
   intervalLeadSeconds: 10,
+  climbLeadMetres: 250,
 };
 
 /** #395: 15 s to 5 min. */
@@ -55,6 +63,9 @@ export const POWER_EVERY_CHOICES: readonly number[] = [15, 30, 60, 120, 300];
 export const DISTANCE_EVERY_CHOICES: readonly number[] = [0.5, 1, 2, 5, 10];
 /** #395 / #398: 5 to 30 s ahead. */
 export const INTERVAL_LEAD_CHOICES: readonly number[] = [5, 10, 15, 30];
+
+/** #399: a street's length to a kilometre ahead. */
+export const CLIMB_LEAD_CHOICES: readonly number[] = [100, 250, 500, 1000];
 
 /** Namespaced, because the origin is shared. The `v1` is the shape's. */
 export const ANNOUNCEMENTS_STORAGE_KEY = 'oyl.announcements.v1';
@@ -111,6 +122,14 @@ export function readAnnouncementPreference(
       row['intervalLeadSeconds'],
       INTERVAL_LEAD_CHOICES,
       DEFAULT_ANNOUNCEMENTS.intervalLeadSeconds,
+    ),
+    // A row stored before #399 has no such key and reads as the default, one
+    // field at a time — no version bump, because nothing already stored changes
+    // meaning.
+    climbLeadMetres: chosen(
+      row['climbLeadMetres'],
+      CLIMB_LEAD_CHOICES,
+      DEFAULT_ANNOUNCEMENTS.climbLeadMetres,
     ),
   };
 }

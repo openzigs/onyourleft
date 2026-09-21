@@ -756,12 +756,20 @@ describe('announcements — #397', () => {
     const selects = [
       ...mounted.container.querySelectorAll<HTMLSelectElement>('.oyl-announce select'),
     ];
-    expect(selects).toHaveLength(3);
+    // Four since #399: power, distance to go, the next block, a climb ahead.
+    expect(selects).toHaveLength(4);
     for (const select of selects) {
       expect([...select.options].map((option) => option.value)).toContain('never');
     }
     // The distance row is in the rider's own unit.
     expect(mounted.container.textContent).toContain('every 1 mi');
+    // #399: the climb row is STORED in metres and LABELLED in the rider's
+    // unit — 250 m is 820 ft, and the value submitted is still the metres.
+    const climb = mounted.container.querySelector<HTMLSelectElement>('#oyl-announce-climb');
+    expect([...(climb?.options ?? [])].map((option) => option.textContent)).toContain(
+      '820 ft before it starts',
+    );
+    expect(climb?.value).toBe('250');
     mounted.unmount();
   });
 });

@@ -70,9 +70,17 @@ import { StatusMessage } from '../design/StatusMessage';
 import { PersistenceNotice } from '../support/PersistenceNotice';
 import type { StorageManagerLike } from '../support/persistent-storage';
 import { hrefFor, routeById } from '../shell/routes';
-import { distanceUnit, formatMass, massIn, massUnit, measurementText } from '../units/format';
+import {
+  distanceUnit,
+  formatMass,
+  formatSmallDistance,
+  massIn,
+  massUnit,
+  measurementText,
+} from '../units/format';
 import {
   DISTANCE_EVERY_CHOICES,
+  CLIMB_LEAD_CHOICES,
   INTERVAL_LEAD_CHOICES,
   POWER_EVERY_CHOICES,
   deviceStorage,
@@ -451,6 +459,19 @@ function AnnouncementsPanel({
         describe={(seconds) => `${String(seconds)} seconds before it starts`}
         onChange={(intervalLeadSeconds) => {
           save({ ...preference, intervalLeadSeconds });
+        }}
+      />
+      <EverySelect
+        id="oyl-announce-climb"
+        label="Say a climb ahead"
+        value={preference.climbLeadMetres}
+        choices={CLIMB_LEAD_CHOICES}
+        // #399: stored in metres, labelled in the rider's own unit.
+        describe={(metres) =>
+          `${measurementText(formatSmallDistance(metres, units))} before it starts`
+        }
+        onChange={(climbLeadMetres) => {
+          save({ ...preference, climbLeadMetres });
         }}
       />
       {message === undefined ? null : (
