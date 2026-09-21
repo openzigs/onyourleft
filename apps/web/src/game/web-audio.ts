@@ -47,7 +47,7 @@ import type { CueName, CueOutput } from './audio-port';
 /** The half of `AudioContext` this file uses, so a test can hand in a fake. */
 export type AudioContextLike = Pick<
   AudioContext,
-  'currentTime' | 'destination' | 'state' | 'resume' | 'createOscillator' | 'createGain'
+  'currentTime' | 'destination' | 'state' | 'resume' | 'suspend' | 'createOscillator' | 'createGain'
 >;
 
 /** One note of a short sound: its pitch, when it starts, how long it lasts. */
@@ -76,6 +76,15 @@ const GLIDE_SECONDS = 0.04;
 export function webAudioOutput(create: (() => AudioContextLike) | undefined): CueOutput {
   let context: AudioContextLike | undefined;
   let tone: { readonly oscillator: OscillatorNode; readonly gain: GainNode } | undefined;
+  /**
+   * A `suspend()` has been ASKED for — #447. ⚠️ `state` does not change until
+   * the platform has done it, so a rider who ends a workout and presses *Ride*
+   * on the next one in the same breath would find `state` still `running`, be
+   * resumed by nothing, and ride in silence once the suspension landed. The
+   * flag is what makes that `resume()` ask anyway; the platform applies the two
+   * in the order they were asked.
+   */
+  let asleep = false;
 
   const setTone = (frequencyHz: number, level: number): void => {
     if (context === undefined || tone === undefined) return;
@@ -87,14 +96,21 @@ export function webAudioOutput(create: (() => AudioContextLike) | undefined): Cu
     resume() {
       if (create === undefined) return;
       context ??= create();
-      if (context.state === 'suspended') {
+      if (context.state === 'suspended' || asleep) {
+        asleep = false;
         // Refused outside a gesture, or by the platform; either way there is
         // nothing a rider can be told that the next press will not fix.
         context.resume().catch(() => undefined);
       }
     },
     isRunning() {
-      return context?.state === 'running';
+      return context?.state === 'running' && !asleep;
+    },
+    suspend() {
+      if (context === undefined || context.state !== 'running' || asleep) return;
+      asleep = true;
+      // Refused by nothing a rider can act on; the next press resumes it anyway.
+      context.suspend().catch(() => undefined);
     },
     startTone(frequencyHz, level) {
       if (context === undefined) return;

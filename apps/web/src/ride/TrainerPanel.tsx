@@ -49,8 +49,14 @@ import { StatusMessage } from '../design/StatusMessage';
 
 import type { TrainerSnapshot } from './controller';
 
-/** Human words for why control went. Each is a different thing to do next. */
-const LOSS_REASON: Readonly<Record<'permission-lost' | 'reset' | 'link-lost', string>> = {
+/**
+ * Human words for why control went. Each is a different thing to do next.
+ *
+ * Exported because `RideAnnouncer.tsx` SPEAKS these words (#445): the rider
+ * who hears "Control lost" hears the sentence a sighted rider reads here, and
+ * two copies of it would drift.
+ */
+export const LOSS_REASON: Readonly<Record<'permission-lost' | 'reset' | 'link-lost', string>> = {
   'permission-lost':
     'The trainer took control back — another app may have asked for it. Ask for control again to keep using ERG.',
   reset: 'The trainer was reset, which ends control by design. Ask for control again to continue.',
@@ -211,8 +217,14 @@ export function TrainerPanel({
         </p>
       ) : null}
 
+      {/*
+        ⚠️ Not `live`, since #445: the ONE ride region (`RideAnnouncer.tsx`)
+        speaks it, in the announcer's order. A `live` here too would say it
+        twice, and could say it in the same second as a lower item. The message
+        is still here, unchanged, for a rider who can see it.
+      */}
       {trainer.lost === undefined ? null : (
-        <StatusMessage tone="warning" label="Control lost" live>
+        <StatusMessage tone="warning" label="Control lost">
           {LOSS_REASON[trainer.lost]}
         </StatusMessage>
       )}
@@ -224,11 +236,21 @@ export function TrainerPanel({
         rather than about a number they typed.
       */}
       {trainer.releaseFault === undefined ? null : (
-        <StatusMessage tone="danger" label="Not released" live>
+        // Not `live` since #445, for the reason *Control lost* above is not.
+        <StatusMessage tone="danger" label="Not released">
           {trainer.releaseFault}
         </StatusMessage>
       )}
 
+      {/*
+        ⚠️ **These two stay `live`, and that is decided rather than missed
+        (#445).** Each is the answer to the rider's OWN press — *Set target*, or
+        *Ask the trainer for control* — on the form their focus is in, so it is
+        the one moment they are waiting to hear something and no reading is
+        competing for it. The announcer's throttle exists for sentences the
+        rider did not ask for; putting an answer they did ask for behind a
+        routine sentence's window would delay it for no one's benefit.
+      */}
       {trainer.refusal === undefined ? null : (
         <StatusMessage tone="danger" label="Refused" live>
           {trainer.refusal}

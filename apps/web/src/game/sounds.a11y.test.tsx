@@ -7,7 +7,8 @@
  * `audio-cues.test.ts` holds the rules against a port double; this is the
  * wiring: that the game and the workout panel resume audio only inside the
  * rider's press, feed the tone the ACKNOWLEDGED target and the LIVE reading,
- * play each short sound on the frame its SENTENCE is said, put the mute and
+ * play the distance sound on the frame its SENTENCE is said and the interval
+ * sound on the block change its sentence is queued with (#448), put the mute and
  * the volume on the ride's own screen, and stop the tone when the workout or
  * the ride ends.
  *
@@ -49,6 +50,7 @@ import { CUES_STORAGE_KEY, DEFAULT_CUES } from './cue-preference';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './hud/announce-preference';
 import type { GameRenderer } from './port';
+import { gameTrainerFrom, type GameTrainerPort, type GradientTrainer } from './trainer-port';
 
 function flatRoute(): RidableRoute {
   const points: RoutePoint[] = [];
@@ -265,6 +267,112 @@ describe('the game — #400', () => {
   });
 });
 
+describe('the audio may stop once nothing is riding — #447', () => {
+  async function openGame(trainer?: GameTrainerPort): Promise<void> {
+    mounted = await mount(
+      <GameView
+        port={PORT}
+        renderer={() => Promise.resolve(RENDERER)}
+        now={() => nowMs}
+        sounds={output}
+        {...(trainer === undefined ? {} : { trainer })}
+      />,
+    );
+    await settle();
+  }
+
+  it('suspends the audio when a game ride ends, and the next press on Ride resumes it', async () => {
+    chooseSounds();
+    await openGame();
+    await press(button('Ride '));
+    expect(output.count('suspend')).toBe(0);
+    await press(button('End ride'));
+    expect(output.calls.at(-1)).toEqual({ kind: 'suspend' });
+
+    // The next ride's gesture is untouched: its press resumes, first thing.
+    const before = output.calls.length;
+    await press(button('Ride '));
+    expect(output.calls[before]).toEqual({ kind: 'resume' });
+  });
+
+  it('does NOT suspend under a workout that is still running on the Ride screen', async () => {
+    // A workout holds the trainer: `rejoin` will look for a context that is
+    // still awake when the rider goes back to it.
+    const workoutOwnsIt: GameTrainerPort = {
+      readTrainer: () =>
+        gameTrainerFrom(
+          { paired: true, controllable: true, canSimulate: true, hasControl: true },
+          {
+            setSimulationParameters: () => Promise.resolve(),
+            letGo: () => Promise.resolve({ kind: 'stopped' as const }),
+          } satisfies GradientTrainer,
+          true,
+        ),
+    };
+    chooseSounds();
+    await openGame(workoutOwnsIt);
+    await press(button('Ride '));
+    await press(button('End ride'));
+    expect(output.count('suspend')).toBe(0);
+  });
+
+  /** A port whose workout is whatever `workoutNow` says at the moment it is read. */
+  let workoutNow: 'running' | 'finished' | 'none' = 'running';
+  const liveWorkout: GameTrainerPort = {
+    readTrainer: () =>
+      gameTrainerFrom(
+        { paired: true, controllable: true, canSimulate: true, hasControl: true },
+        workoutNow === 'none'
+          ? {
+              setSimulationParameters: () => Promise.resolve(),
+              letGo: () => Promise.resolve({ kind: 'stopped' as const }),
+            }
+          : undefined,
+        workoutNow !== 'none',
+        workoutNow === 'finished',
+      ),
+  };
+
+  it('suspends when the workout that held the trainer FINISHED during the ride — #448', async () => {
+    // The workout ran out while the rider was on the game route, where
+    // `WorkoutPanel` is not mounted to see it end. Sampled at the start of the
+    // ride, it was still "held" at the end and the audio ran on idle.
+    workoutNow = 'running';
+    chooseSounds();
+    await openGame(liveWorkout);
+    await press(button('Ride '));
+    workoutNow = 'finished';
+    await press(button('End ride'));
+    expect(output.calls.at(-1)).toEqual({ kind: 'suspend' });
+  });
+
+  it('suspends when the workout is GONE by the time the ride ends — #448', async () => {
+    workoutNow = 'running';
+    chooseSounds();
+    await openGame(liveWorkout);
+    await press(button('Ride '));
+    workoutNow = 'none';
+    await press(button('End ride'));
+    expect(output.calls.at(-1)).toEqual({ kind: 'suspend' });
+  });
+
+  it('does NOT suspend when a workout is running at the END, whatever it was at the start', async () => {
+    workoutNow = 'running';
+    chooseSounds();
+    await openGame(liveWorkout);
+    await press(button('Ride '));
+    await press(button('End ride'));
+    expect(output.count('suspend')).toBe(0);
+  });
+
+  it('makes no call for a rider who did not turn sounds on, ride ended or not', async () => {
+    await openGame();
+    await press(button('Ride '));
+    await press(button('End ride'));
+    expect(output.calls).toEqual([]);
+  });
+});
+
 describe('a workout — #400', () => {
   const ATHLETE = toAthleteId('athlete-a');
   const blocks: readonly WorkoutBlock[] = [
@@ -329,7 +437,7 @@ describe('a workout — #400', () => {
   }
 
   const workoutRegion = (): string =>
-    document.querySelector('[data-oyl-announcer="workout"]')?.textContent ?? '';
+    document.querySelector('[data-oyl-announcer="ride"]')?.textContent ?? '';
 
   it('resumes audio in the press on a workout’s Ride button, and not before', async () => {
     chooseSounds();
@@ -380,6 +488,22 @@ describe('a workout — #400', () => {
     mounted = undefined;
     expect(output.sounding).toBe(0);
     expect(output.calls.at(-1)).toEqual({ kind: 'stopTone' });
+    // #447: and does NOT suspend — the workout is still running, and the
+    // return below relies on the audio being awake.
+    expect(output.count('suspend')).toBe(0);
+  });
+
+  it('suspends the audio when the workout ENDS — #447', async () => {
+    chooseSounds();
+    await show(undefined, 150);
+    await press(button('Ride Sweet spot'));
+    await show(riding(), 150);
+    await show(riding({ status: 'paused' }), 150);
+    expect(output.count('suspend'), 'a pause is not an end').toBe(0);
+    await show(riding({ status: 'finished' }), 150);
+    expect(output.count('suspend')).toBe(1);
+    await show(undefined, 150);
+    expect(output.count('suspend'), 'one end, one suspend').toBe(1);
   });
 
   it('picks the tone back up when the rider returns mid-workout, with no press and no resume', async () => {
@@ -430,6 +554,67 @@ describe('a workout — #400', () => {
     expect(output.count('playCue')).toBe(0);
     await show(riding({ nowRiding: '5 min at 95%', elapsedSeconds: 600 }), 230);
     expect(workoutRegion()).toBe('Now: 5 min at 95%');
+    expect(output.calls.filter((call) => call.kind === 'playCue')).toEqual([
+      expect.objectContaining({ cue: 'interval' }),
+    ]);
+  });
+
+  it('plays the interval sound on the CHANGE, even when "Control lost" takes the window — #448', async () => {
+    // A rank-1 event and a block change in the same render: the announcer
+    // speaks the loss and drops "Now:", which is the order working. The sound
+    // used to go with the dropped sentence.
+    chooseSounds();
+    await show(undefined, 150);
+    await press(button('Ride Sweet spot'));
+    await show(riding(), 150);
+    const lost: TrainerSnapshot = { ...trainer, hasControl: false, lost: 'permission-lost' };
+    await mounted?.rerender(
+      <WorkoutPanel
+        trainer={lost}
+        workout={riding({ nowRiding: '5 min at 95%', elapsedSeconds: 600 })}
+        port={workoutStub(ATHLETE, [record])}
+        thresholdPower={watts(250)}
+        onStart={() => undefined}
+        onEnd={() => undefined}
+        power={230}
+        sounds={output}
+      />,
+    );
+    await settle();
+    expect(workoutRegion()).toMatch(/^Control lost: /);
+    expect(output.calls.filter((call) => call.kind === 'playCue')).toEqual([
+      expect.objectContaining({ cue: 'interval' }),
+    ]);
+  });
+
+  it('plays the interval sound at once while a sentence said just before holds the window — #448', async () => {
+    let clock = 100;
+    const at = (workout: RideWorkoutSnapshot, lostNow: boolean) => (
+      <WorkoutPanel
+        trainer={lostNow ? { ...trainer, lost: 'link-lost' } : trainer}
+        workout={workout}
+        port={workoutStub(ATHLETE, [record])}
+        thresholdPower={watts(250)}
+        onStart={() => undefined}
+        onEnd={() => undefined}
+        power={230}
+        sounds={output}
+        announcerClock={() => clock}
+      />
+    );
+    chooseSounds();
+    mounted = await mount(at(riding(), false));
+    await settle();
+    await press(button('Mute sounds'));
+    await press(button('Mute sounds'));
+    await mounted.rerender(at(riding(), true));
+    await settle();
+    expect(workoutRegion()).toMatch(/^Control lost: /);
+    // One second later — inside the window — the block changes.
+    clock = 101;
+    await mounted.rerender(at(riding({ nowRiding: '5 min at 95%', elapsedSeconds: 600 }), true));
+    await settle();
+    expect(workoutRegion(), 'the sentence waits for its window').toMatch(/^Control lost: /);
     expect(output.calls.filter((call) => call.kind === 'playCue')).toEqual([
       expect.objectContaining({ cue: 'interval' }),
     ]);

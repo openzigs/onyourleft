@@ -165,4 +165,35 @@ describe('the rendering seam', () => {
     expect(extra(renderer)).toEqual([]);
     expect(extra(`${renderer}\nconst lamp = new SpotLight(0xffffff, 1);\n`)).toEqual(['SpotLight']);
   });
+
+  it('lets only the sun and the riders cast a shadow, and only the catcher receive one — #426', () => {
+    // #426 asked whether this file should see shadow state as well as lamps,
+    // since a shadow map adds no light class and would slip past the two
+    // tests above. **It should**, and this is the decision: a `castShadow`
+    // left on the scenery is a second render of every tree on every frame,
+    // and nothing else here would notice it. So every write is counted:
+    //
+    // | write | where | count |
+    // |---|---|---|
+    // | `.castShadow =` | `WorldLamps.setCasting` (the sun) and `RiderBelt.setCasting` | 2 |
+    // | `.receiveShadow =` | the shadow catcher, in `ThreeGameView`'s constructor | 1 |
+    // | `shadowMap.enabled =` | `ThreeGameView.#applyRiderShadows`, from the rung | 1 |
+    //
+    // ⚠️ A count, so a third caster is a red test whoever edited it — and the
+    // BEHAVIOUR (the belt never casts; the riders cast on the map rung only) is
+    // `three-renderer.test.ts`'s, which this cannot see.
+    const renderer = readFileSync(join(repositoryRoot, THE_SEAM), 'utf8');
+    expect(renderer.match(/\.castShadow\s*=/g) ?? []).toHaveLength(2);
+    expect(renderer.match(/\.receiveShadow\s*=/g) ?? []).toHaveLength(1);
+    expect(renderer.match(/shadowMap\.enabled\s*=/g) ?? []).toHaveLength(1);
+
+    const elsewhere = files
+      .filter((file) => file !== THE_SEAM && file !== THIS_FILE)
+      .filter((file) =>
+        /\.(?:castShadow|receiveShadow)\s*=|shadowMap\.enabled\s*=/.test(
+          readFileSync(join(repositoryRoot, file), 'utf8'),
+        ),
+      );
+    expect(elsewhere).toEqual([]);
+  });
 });

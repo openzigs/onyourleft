@@ -40,6 +40,7 @@ import type { CapabilityProbe } from '../../support/bluetooth-support';
 import { mount, queryAll, settle, type Mounted } from '../../testing/mount';
 import type { GamePort, RidableRoute } from '../GameView';
 import type { GameRenderer } from '../port';
+import { gameTrainerFrom, type GameTrainerPort, type GradientTrainer } from '../trainer-port';
 
 import {
   ANNOUNCEMENTS_STORAGE_KEY,
@@ -159,13 +160,14 @@ async function press(element: HTMLElement | undefined): Promise<void> {
   await settle();
 }
 
-async function startRide(): Promise<void> {
+async function startRide(trainer?: GameTrainerPort): Promise<void> {
   globalThis.location.hash = '#/game';
   mounted = await mount(
     <AppShell
       capabilities={NO_BLUETOOTH}
       game={PORT}
       gameRenderer={() => Promise.resolve(RENDERER)}
+      {...(trainer === undefined ? {} : { gameTrainer: trainer })}
     />,
   );
   await settle();
@@ -174,6 +176,13 @@ async function startRide(): Promise<void> {
 
 const region = (): HTMLElement | null =>
   document.querySelector<HTMLElement>('[data-oyl-announcer="hud"]');
+
+/** Everything on the ride's stage that would speak by itself. */
+const voicesOnTheStage = (): readonly Element[] => [
+  ...document.querySelectorAll(
+    '.oyl-game [role="status"], .oyl-game [role="alert"], .oyl-game [aria-live]',
+  ),
+];
 
 function chooseAnnouncements(choice: Partial<AnnouncementPreference> = {}): void {
   localStorage.setItem(
@@ -215,19 +224,15 @@ describe('the HUD’s one live region — #397', () => {
     expect(region()?.textContent).toBe('');
   });
 
-  it('is the HUD’s only CONTINUOUS region — the only region at all while no notice stands', async () => {
+  it('is exactly ONE region in the HUD while no notice stands', async () => {
     chooseAnnouncements();
     await startRide();
     await pump(4);
-    // ⚠️ Scoped, and PR #444's review is why the name says so: this test used
-    // to be called "is exactly ONE region in the HUD", and it holds only with
-    // no notice standing. A road notice and a gradient fault are #394's event
-    // regions, each live while it is shown, so the HUD can carry three. What
-    // #395 asks for is ONE region fed from a throttle; those two are one-off
-    // events the throttle does not see — `announce.ts` §"Ranks 1, 2 and 4".
-    expect(
-      document.querySelectorAll('.oyl-hud [role="status"], .oyl-hud [aria-live]'),
-    ).toHaveLength(1);
+    // ⚠️ PR #444's review scoped this to "no notice standing", because a road
+    // notice and a gradient fault were #394's own live regions and the HUD
+    // could carry three. Since #445 they are not, and the cases in §"#445"
+    // below hold the count at ONE with each of them standing.
+    expect(voicesOnTheStage()).toHaveLength(1);
   });
 
   it('is visually hidden by clip, never taken out of the accessibility tree', async () => {
@@ -296,5 +301,53 @@ describe('the road ahead, through the same region — #399', () => {
     expect(Number.isFinite(mark), `nothing was said: "${said}"`).toBe(true);
     expect(shown).toBeLessThanOrEqual(mark);
     expect(shown).toBeGreaterThan(mark - 0.5);
+  });
+});
+
+/**
+ * A trainer port built the way `main.tsx` builds one — through the real
+ * `gameTrainerFrom` — whose every gradient write is refused.
+ */
+function trainerPort(hasControl: boolean): GameTrainerPort {
+  const control: GradientTrainer = {
+    setSimulationParameters: () => Promise.reject(new Error('Control Not Permitted')),
+    letGo: () => Promise.resolve({ kind: 'stopped' as const }),
+  };
+  const snapshot = { paired: true, controllable: true, canSimulate: true, hasControl };
+  return { readTrainer: () => gameTrainerFrom(snapshot, control, false) };
+}
+
+describe('the trainer’s sentences go through the same ONE region — #445', () => {
+  it('says the road notice once, on the ride’s first frames, and SHOWS it without a region of its own', async () => {
+    // Announcements left OFF — the default. The notice was #394's status
+    // message, spoken to everyone, and moving it must not put it behind a
+    // switch (`announce.ts` §ALWAYS_SPOKEN).
+    await startRide(trainerPort(false));
+    await pump(2);
+    expect(region()?.textContent).toMatch(/^The road is not reaching your trainer: /);
+    expect(document.body.textContent).toContain('The road is not reaching your trainer');
+    expect(voicesOnTheStage()).toHaveLength(1);
+  });
+
+  it('says a refused gradient write once, keeps showing it, and stays ONE region', async () => {
+    await startRide(trainerPort(true));
+    const said = await pumpUntil(/^Trainer: /, 40);
+    expect(said).toMatch(/^Trainer: /);
+    const shown = [...document.querySelectorAll('.oyl-hud .oyl-status')].find((each) =>
+      (each.textContent ?? '').includes('Trainer:'),
+    );
+    expect(shown, 'a sighted rider can no longer see the fault').toBeDefined();
+    expect(shown?.getAttribute('role'), 'the fault speaks for itself as well').toBeNull();
+    expect(voicesOnTheStage()).toHaveLength(1);
+  });
+
+  it('does not let a power reading take the window the fault needs', async () => {
+    // Power every 15 s, and the ride long enough for several: the fault is
+    // rank 1 and is what the region says the frame it becomes known, whatever
+    // the cadence had lined up.
+    chooseAnnouncements({ powerEverySeconds: 15, distanceEvery: 'never' });
+    await startRide(trainerPort(true));
+    const said = await pumpUntil(/^Trainer: /, 40);
+    expect(said).toMatch(/^Trainer: /);
   });
 });

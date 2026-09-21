@@ -108,6 +108,18 @@ interface GameHarnessResult {
   readonly riderMeanColour: Readonly<Record<string, Pixel>>;
   readonly riderSilhouettePixels: Readonly<Record<string, number>>;
   readonly botCrankPixels: number;
+  readonly contactShadowPixels: Readonly<Record<string, number>>;
+  readonly contactShadowLuminance: Readonly<Record<string, readonly [number, number]>>;
+  readonly contactShadowNoise: number;
+  readonly shadowMap: {
+    readonly measured: boolean;
+    readonly contactFrameMs: number;
+    readonly mapFrameMs: number;
+    readonly noiseMs: number;
+    readonly contactDrawCalls: number;
+    readonly mapDrawCalls: number;
+    readonly shadowPixels: number;
+  };
   readonly errors: readonly string[];
 }
 
@@ -194,6 +206,19 @@ const RIDER_BOX_TOLERANCE = 0.02;
  * | every rider's merged body and bicycle, instanced (#349, #368) | 1 |
  * | every rider's crankset, which turns on its own axis (#349, #368) | 1 |
  * | every rider's four leg segments, as one instanced mesh (#349, #368) | 1 |
+ * | every rider's contact shadow, as one instanced transparent mesh (#426) | 1 |
+ *
+ * ⚠️ **5 → 6 with #426, deliberately, and this line is where it is published.**
+ * The riders floated, and the blob under the rider and the pacer is ONE draw
+ * however many of them there are — the frame here carries two and pays one
+ * call, and a ghost would add none because it casts none. What was weighed
+ * against it: a draw call is #240's NFR-2 budget, and this is the cheapest one
+ * that grounds three objects; the alternative that draws the real shape — the
+ * shadow map on `quality.ts` §`RIDER_SHADOW_MAP_RUNG` — costs a shadow pass of
+ * all three rider meshes plus a catcher, and §"measures what the shading
+ * costs" publishes its count and its frame time rather than bounding them.
+ * ⚠️ The table said **6** above a sum of 5 between #368 and #426, because its
+ * heading was never moved when #368 took a call away; it is right again now.
  *
  * ⚠️ **It was 4 before #349 and 6 between #349 and #368, and it is 5 now** —
  * which is the direction nobody expects a change that gives two more objects a
@@ -208,7 +233,7 @@ const RIDER_BOX_TOLERANCE = 0.02;
  * fourth mesh are very different findings and a bare `5` cannot tell them
  * apart.
  */
-const SCENE_DRAW_CALLS = 1 + 1 + 3;
+const SCENE_DRAW_CALLS = 1 + 1 + 3 + 1;
 
 /**
  * The most meshes the scenery belt may ever hold: **12**.
@@ -231,8 +256,11 @@ const SCENE_DRAW_CALLS = 1 + 1 + 3;
  */
 const SCATTER_MESH_CEILING = 4 * 2 + 3 + 1;
 
-async function harness(page: import('@playwright/test').Page): Promise<GameHarnessResult> {
-  await page.goto(`${HARNESS_ORIGIN}/game.html`);
+async function harness(
+  page: import('@playwright/test').Page,
+  query = '',
+): Promise<GameHarnessResult> {
+  await page.goto(`${HARNESS_ORIGIN}/game.html${query}`);
   // The harness publishes at the end of `run()` and nowhere else, so waiting on
   // the property existing is waiting on the run having finished — not on a
   // timer. ⚠️ Since #341 that run is **asynchronous**: it awaits the scenery
@@ -848,7 +876,10 @@ test.describe('the world is lit, and can stop being — #286', () => {
    * can afford the shading. That is why the floor rung exists.
    */
   test('measures what the shading costs, rather than asserting it', async ({ page }, testInfo) => {
-    const result = await harness(page);
+    // ⚠️ `?shadow-map`: the one case that also measures #426's shadow map,
+    // folded in here because this is the case that already times rungs and
+    // publishes them — and so that no other case pays for its frames.
+    const result = await harness(page, '?shadow-map');
 
     expect(result.shadedFrames).toBeGreaterThanOrEqual(30);
     expect(result.litFrameMs).toBeGreaterThan(0);
@@ -879,6 +910,32 @@ test.describe('the world is lit, and can stop being — #286', () => {
     // nobody re-runs, which is the failure #286 quotes #244's review about.
     // The list reporter prints a test's stdout beside its own line.
     console.log(`frame cost of the lighting — ${measured}`);
+
+    // ------------------------------------------ the shadow map — #426
+    //
+    // ⚠️ **Published, not bounded.** A software rasteriser on a GPU-less runner
+    // says nothing about a phone, which is why the rung is off by default and
+    // `docs/validation/0002-android-shell-and-game.md` Part T is the procedure
+    // that decides it. What is asserted is only that there WAS a measurement:
+    // a shadow reached the buffer, and the rung drew its shadow pass.
+    const map = result.shadowMap;
+    expect(map.measured).toBe(true);
+    expect(map.shadowPixels).toBeGreaterThan(0);
+    expect(map.mapDrawCalls).toBeGreaterThan(map.contactDrawCalls);
+    expect(map.contactFrameMs).toBeGreaterThan(0);
+    expect(map.mapFrameMs).toBeGreaterThan(0);
+    const mapCost = map.mapFrameMs - map.contactFrameMs;
+    const shadowMeasured =
+      `contact ${map.contactFrameMs.toFixed(3)} ms (${String(map.contactDrawCalls)} calls, rider alone), ` +
+      `shadow map ${map.mapFrameMs.toFixed(3)} ms (${String(map.mapDrawCalls)} calls), ` +
+      `difference ${mapCost >= 0 ? '+' : ''}${mapCost.toFixed(3)} ms a frame, against a ` +
+      `same-rung spread of ${map.noiseMs.toFixed(3)} ms; ${String(map.shadowPixels)} px darkened ` +
+      `by the map under the rider alone`;
+    testInfo.annotations.push({
+      type: 'frame cost of the rider shadow map',
+      description: shadowMeasured,
+    });
+    console.log(`frame cost of the rider shadow map — ${shadowMeasured}`);
   });
 });
 
@@ -1274,8 +1331,10 @@ test.describe('the pacer and the ghost are bicycles — #368', () => {
   test('costs no draw call at all for the two that were solids', async ({ page }) => {
     // ⚠️ **The direction nobody expects.** #349 drew one bicycle in three calls
     // and left the bot a cone and the ghost an octahedron at one apiece; #368
-    // instances all three riders into the same three meshes. So the frame is
-    // five calls where it was six, and a ghost would add none.
+    // instances all three riders into the same three meshes. So the frame was
+    // five calls where it had been six, and a ghost would add none. (Six again
+    // since #426's contact shadow — ONE call for however many riders cast
+    // one, and the ghost casts none, so a ghost still adds nothing.)
     const result = await harness(page);
 
     expect(result.drawCallsWithoutScatter).toBe(SCENE_DRAW_CALLS);
@@ -1334,6 +1393,41 @@ test.describe('the pacer and the ghost are bicycles — #368', () => {
 
     expect(luminance(rider)).toBeGreaterThan(luminance(ghost) * 1.8);
     expect(luminance(rider)).toBeGreaterThan(luminance(bot) * 1.8);
+
+    // ------------------------------------------- their shadows — #426
+    //
+    // ⚠️ **Folded into this case rather than given one of its own**, because
+    // every case here reloads a ten-second harness (§4c) and this one already
+    // draws each rider alone. The same rider at the same place, with the
+    // shadows off and then with the `'contact'` every rung draws — so the
+    // pixels that differ are the blob, and nothing else can be.
+    const shadows = result.contactShadowPixels;
+    const [riderWith, riderWithout] = result.contactShadowLuminance.rider ?? [0, 0];
+    const [botWith, botWithout] = result.contactShadowLuminance.bot ?? [0, 0];
+    const shadowed = `contact shadow — rider ${String(shadows.rider)} px (luminance ${riderWithout.toFixed(1)} → ${riderWith.toFixed(1)}), bot ${String(shadows.bot)} px (${botWithout.toFixed(1)} → ${botWith.toFixed(1)}), ghost ${String(shadows.ghost)} px; control ${String(result.contactShadowNoise)} px`;
+    testInfo.annotations.push({ type: 'the riders’ contact shadows', description: shadowed });
+    console.log(`the riders’ contact shadows — ${shadowed}`);
+    // The control: the shadowless frame twice is the same frame, so a
+    // difference below is the blob and not a renderer that is never still.
+    expect(result.contactShadowNoise).toBe(0);
+    // It reached the drawing buffer — over an unlit road that writes depth,
+    // which is the whole of what the transparent, depth-tested, lifted draw
+    // was for — under the rider and the pacer…
+    //
+    // ⚠️ A floor of 50 against a measured 110, and small on purpose: from a
+    // chase camera the bicycle stands on most of its own blob, so what shows is
+    // the rim either side of the wheels and the part the sun throws sideways.
+    // The floor says "it reached the buffer", not how big it looks — T1 in
+    // validation 0002 Part T is the person who says that.
+    expect(shadows.rider ?? 0).toBeGreaterThan(50);
+    expect(shadows.bot ?? 0).toBeGreaterThan(50);
+    // …and it is a SHADOW: those pixels are darker with it than without.
+    expect(riderWith).toBeLessThan(riderWithout * 0.9);
+    expect(botWith).toBeLessThan(botWithout * 0.9);
+    // ⚠️ The ghost casts none, and that is the decision #426 asked to be
+    // recorded (`contact-shadow.ts` §`CASTS_CONTACT_SHADOW`) — which also makes
+    // it the in-scene control: same frame, same place, no blob.
+    expect(shadows.ghost).toBe(0);
   });
 
   test('turns the pacer’s own cranks, from its own odometer', async ({ page }) => {

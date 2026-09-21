@@ -103,7 +103,7 @@ const panel = (workout: RideWorkoutSnapshot, storage: PreferenceStorage) => (
 );
 
 const region = (): string =>
-  document.querySelector('[data-oyl-announcer="workout"]')?.textContent ?? '<no region>';
+  document.querySelector('[data-oyl-announcer="ride"]')?.textContent ?? '<no region>';
 
 /** Ride the panel through a list of instants, collecting what the region said at each. */
 async function ride(

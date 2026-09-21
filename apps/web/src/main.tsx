@@ -575,6 +575,8 @@ function buildGameTrainerPort(controller: RideController | undefined): GameTrain
         snapshot?.trainer,
         controller?.simulationControl(),
         snapshot?.workout !== undefined,
+        // #447: read only for the audio, at the end of a game ride.
+        snapshot?.workout?.status === 'finished',
       );
     },
   };

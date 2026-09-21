@@ -338,7 +338,7 @@ with the step that produces it. TalkBack on throughout.
 | G3 | On the Ride screen, with a trainer granted control, start the saved workout with *Say a workout's next block* at **10 seconds** | About ten seconds before each block changes: the next block as a share of threshold, never in watts. At the change: *"Now: …"* |
 | G4 | Pause the ride across a block boundary | Nothing is said about the next block while paused |
 | G5 | Set *Say a workout's next block* to **never** and ride a boundary | No lookahead sentence. *"Now: …"* **is** still said — it is the visible line made audible, not a setting (#394) |
-| G6 | Switch the trainer off mid-ride on the Ride screen | *"Control lost"* on the Trainer panel is announced (#394). ⚠️ Off the bike for this step |
+| G6 | Switch the trainer off mid-ride on the Ride screen | *"Control lost"* on the Trainer panel is announced (#394) — since #445 by the Ride screen's one region; Part J is the step that checks it is said once. ⚠️ Off the bike for this step |
 | G7 | In the game, ride with a trainer that cannot take simulation mode (or none) | *"The road is not reaching your trainer"*, once, when it appears |
 
 ### G results
@@ -426,6 +426,7 @@ I12 checks both.
 | I10 | End the workout, then end the ride | The tone **stops** with the workout, and nothing is left sounding |
 | I11 | Start a second workout straight after | **One** tone, not two layered on each other |
 | I12 | Mid-workout with the tone sounding, open **Routes**, wait 10 s, return to **Ride**. Then repeat with the screen locked for 30 s while away | The first time the tone **returns on its own**. The second, record whether it returned; if not, pressing **Mute sounds** twice brings it back |
+| I13 | ([#447](https://github.com/openzigs/onyourleft/issues/447)) End a workout, then play music from another app for 30 s, then start a second workout straight away | The music is **not** interrupted or ducked after the first workout ends (the app has let the audio stop), and the second workout's tone **is** heard from its first press — the press on *Ride* wakes it |
 
 ### I results
 
@@ -443,8 +444,39 @@ I12 checks both.
 | I10 | | | |
 | I11 | | | |
 | I12 | | | |
+| I13 | | | |
 
 **Could the rider tell the three sounds apart while riding hard? In their words:**
+
+---
+
+## Part J — one voice while riding ([#445](https://github.com/openzigs/onyourleft/issues/445))
+
+Before #445, *"Control lost"*, *"Not released"*, a workout fault, the game's road notice and a
+refused gradient write were each spoken by a live region of their own, beside the announcer's
+throttle — so a routine power sentence could be spoken in the same second as *"Control lost"*, and
+the HUD carried three regions while a notice stood. Since #445 each goes through the announcer into
+the screen's **one** region, in `apps/web/src/game/hud/announce.ts`'s order, and the visible
+message stays where it was. ⚠️ Steps J1 and J4 are with announcements **off**, the default: those
+sentences are spoken whatever the rider chose (`announce.ts` §`ALWAYS_SPOKEN`). ⚠️ Off the bike
+for J1–J3. ⚠️ J2 used to be on the Ride screen, where it **could not fail** — that screen speaks no
+power sentence whatever the rider set — and it was moved to the game by #448's review.
+
+| Step | What to do | What should be seen, and said |
+|---|---|---|
+| J1 | Announcements **off**. On the Ride screen, with a trainer granted control, switch the trainer off | **Seen**: *"Control lost"* on the Trainer panel. **Said**: *"Control lost: …"* **once** — not twice, and not a second time when you move TalkBack's focus onto the panel's own message (reading it by touch is expected; an unprompted repeat is the defect) |
+| J2 | **In the game**, not on the Ride screen. Announcements **on**, power every **15 s**. Start a ride on a trainer that takes simulation mode and wait until a power sentence has been said at least twice (off the bike it is *"No power reading"*, which is fine). Then take control away mid-ride on another app, or refuse a gradient as in J3 | *"Trainer: …"* is said, and **no** power sentence is said within about **3 s** of it, before or after. The next power sentence comes at its own time, not in the same breath. ⚠️ **Why the game and not the Ride screen**: the Ride screen never speaks power at all (`apps/web/src/ride/RideAnnouncer.tsx` sets `powerEverySeconds: 'never'`, because its numbers are `MetricGrid`'s own), so a Ride-screen version of this step could not fail. The game's HUD is where a power sentence and a trainer sentence can collide, which is the defect #445 describes |
+| J3 | In the game, on a trainer that refuses a gradient (or take control away mid-ride on another app) | **Seen**: the *Trainer* notice on the HUD. **Said**: *"Trainer: …"* once |
+| J4 | Announcements **off**. Ride the game with a trainer that cannot take simulation mode | **Seen**: *"The road is not reaching your trainer"*. **Said**: the same, once, as the ride starts |
+
+### J results
+
+| Step | Seen? | Said? How many times? | Word for word | Notes |
+|---|---|---|---|---|
+| J1 | | | | |
+| J2 | | | | |
+| J3 | | | | |
+| J4 | | | | |
 
 ---
 

@@ -127,7 +127,9 @@
  *
  * So `@test-facing <reason>` exempts an EXPORT from `WIRE002`, and only while
  * something that is a gate reads it: a test, a spec, a double or a browser
- * harness names it, or another held `@test-facing` export does. When nothing
+ * harness names it, or another held `@test-facing` export does. ⚠️ **"Names"
+ * is an identifier in the parsed code since #447** — a mention in a comment or
+ * inside a string holds nothing up; see `identifiersIn`. When nothing
  * reads it any more it is dead, and `WIRE004` says so; `@unwired`'s free-text
  * reason can never go red like that. It does not reach a whole file (`WIRE001`)
  * or a port method (`WIRE003`) — a module or a method only tests reach is
@@ -880,7 +882,7 @@ const lineOf = (source, node) =>
  * make the bound look SHIPPED (#236).
  */
 function gateReaders(root) {
-  const texts = [];
+  const readers = [];
   const walk = (dir) => {
     let entries;
     try {
@@ -897,12 +899,39 @@ function gateReaders(root) {
       const rel = slash(relative(root, full));
       if (!/\.tsx?$/.test(rel)) continue;
       if (isTestSupport(rel) || rel.split('/').includes('browser')) {
-        texts.push(readFileSync(full, 'utf8'));
+        readers.push(identifiersIn(parseFile(full)));
       }
     }
   };
   walk(join(root, 'apps'));
-  return texts;
+  return readers;
+}
+
+/**
+ * Every identifier a piece of code USES — #447.
+ *
+ * ⚠️ **Identifiers, not text, and until #447 it was text.** WIRE004 asked
+ * whether a gate's source matched `\bNAME\b` anywhere, so a `@test-facing`
+ * export mentioned only in a COMMENT of a test — "see `camera.ts`
+ * §MAXIMUM_SHARE" — was held alive by a sentence, and so was one quoted inside
+ * a string. A comment is not a read and a string is not a use. The parser's
+ * own tree has neither in it: `forEachChild` never visits a comment, a JSDoc
+ * node or the inside of a string literal, so what this returns is exactly the
+ * names the code refers to — an import, a call, a property access, a JSX tag.
+ *
+ * ⚠️ What it still cannot tell is WHICH declaration a name refers to (§Limits,
+ * "a collision"): a test that declares its own local `MAXIMUM_SHARE` holds the
+ * export alive. Resolving that needs a type checker over every gate file, and
+ * the collision limit is already the one this gate states for WIRE002.
+ */
+function identifiersIn(node) {
+  const found = new Set();
+  const visit = (each) => {
+    if (ts.isIdentifier(each) || ts.isPrivateIdentifier(each)) found.add(each.text);
+    ts.forEachChild(each, visit);
+  };
+  visit(node);
+  return found;
 }
 
 // ------------------------------------------------------------------- the gate
@@ -1023,7 +1052,7 @@ export function wiringProblems(root) {
           testFacing.push({
             name: declaration.name,
             at,
-            text: declaration.doc.getText(source),
+            uses: identifiersIn(declaration.doc),
           });
         }
         continue;
@@ -1061,14 +1090,18 @@ export function wiringProblems(root) {
   // `bicycle.ts`'s dimensions, and only the composition is asserted). Held is
   // a closure from the tests outward, so two tagged exports naming only each
   // other are dead together rather than holding each other up.
+  //
+  // ⚠️ "Reads" is an IDENTIFIER in the parsed code since #447 — see
+  // `identifiersIn` — so a name in a comment or a string holds nothing up.
   const readers = gateReaders(root);
-  const names = (text, name) => new RegExp(`(^|[^\\w$])${name}(?![\\w$])`).test(text);
-  const held = new Set(testFacing.filter((each) => readers.some((text) => names(text, each.name))));
+  const held = new Set(testFacing.filter((each) => readers.some((uses) => uses.has(each.name))));
   for (let grew = true; grew;) {
     grew = false;
     for (const each of testFacing) {
       if (held.has(each)) continue;
-      if ([...held].some((other) => names(other.text, each.name))) {
+      // `other.name` is excluded because a declaration's own name is one of
+      // its identifiers, and a tagged export must not hold itself up.
+      if ([...held].some((other) => other.name !== each.name && other.uses.has(each.name))) {
         held.add(each);
         grew = true;
       }

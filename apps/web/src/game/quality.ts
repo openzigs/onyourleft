@@ -195,6 +195,25 @@ export interface QualitySettings {
    * [#245](https://github.com/openzigs/onyourleft/issues/245)'s question.
    */
   readonly shading: 'lit' | 'flat';
+  /**
+   * How the riders are grounded on the road — #426.
+   *
+   * - `'contact'` — one soft ellipse under each rider and the pacer, placed from
+   *   `world.ts`'s own sun (`contact-shadow.ts`). One transparent draw for all
+   *   of them. **Every rung of {@link QUALITY_LADDER}**, the floor included: a
+   *   quad a few hundred pixels across is not what a throttling phone is
+   *   short of, and a rider floating over the road is the defect #426 is.
+   * - `'map'` — a real shadow map, cast by the riders only, received by a
+   *   shadow-catching plane under them. **On no rung of the ladder**: it is
+   *   {@link RIDER_SHADOW_MAP_RUNG}, above the top, which a rider has to ask
+   *   for and the ladder takes away first. #426 says ship it only as a rung,
+   *   off by default on the device floor, until it is measured there.
+   * - `'none'` — nothing. On no rung either; it is what the browser gate
+   *   renders to prove the contact shadow is what darkened the road, and what
+   *   a probe that measures the RIDER uses so the shadow is not counted as
+   *   part of them.
+   */
+  readonly riderShadows: 'contact' | 'map' | 'none';
   /** A human-readable name, for the diagnostic line #91 asks to be recorded. */
   readonly label: string;
 }
@@ -221,6 +240,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     // reason `scatterItems` above takes `SCATTER_MAX_ITEMS`.
     sceneryVariants: MAXIMUM_SCENERY_VARIANTS,
     shading: 'lit',
+    riderShadows: 'contact',
     label: 'full',
   },
   // ⚠️ The scenery goes here, WITH the first resolution step rather than as a
@@ -232,6 +252,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     scatterItems: 160,
     sceneryVariants: 2,
     shading: 'lit',
+    riderShadows: 'contact',
     label: 'reduced resolution and scenery',
   },
   {
@@ -240,6 +261,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     scatterItems: 100,
     sceneryVariants: 1,
     shading: 'lit',
+    riderShadows: 'contact',
     label: 'reduced resolution, scenery and frame rate',
   },
   // ⚠️ The only rung that is flat. Resolution and frame rate are given up
@@ -258,6 +280,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     scatterItems: 60,
     sceneryVariants: 1,
     shading: 'flat',
+    riderShadows: 'contact',
     label: 'minimum',
   },
 ];
@@ -347,6 +370,92 @@ export function nextQuality(state: QualityState, sample: QualitySample): Quality
 /** The settings for a level. */
 export function qualitySettings(level: QualityLevel): QualitySettings {
   return QUALITY_LADDER[level] as QualitySettings;
+}
+
+/**
+ * The top rung with a real shadow map for the riders — #426's second half.
+ *
+ * ## Why it is above the ladder rather than on it
+ *
+ * #426: *"Measure (2) and ship it only as a rung on `quality.ts`'s ladder,
+ * off by default on the device floor."* {@link QUALITY_LADDER} starts every
+ * ride at level 0 and climbs back to it whenever a device runs cool, so a
+ * shadow map at level 0 would be ON by default everywhere, and one inserted
+ * above it would be climbed to by any cool device, the floor included. So it
+ * is a rung the ladder never reaches by itself: a rider who asks for it
+ * starts here, and the first reduction the ladder takes — thermal or frame
+ * time, the same two signals as every other rung — is to level 1, which has
+ * no shadow map. It is the first thing given up, which is where #426 puts it.
+ *
+ * ⚠️ **It is the full rung with one field changed**, so a measurement of it
+ * against level 0 is a measurement of the shadow map and nothing else.
+ *
+ * ⚠️ **Nothing measured it on a device yet.** The browser gate publishes what
+ * it costs in the pinned Chromium on a software rasteriser, which says nothing
+ * about a phone; `docs/validation/0002-android-shell-and-game.md` Part T is
+ * the procedure, with its tables empty. Whether this stays, becomes a default
+ * on some devices, or is removed as "measured, not worth it" is that
+ * measurement's to decide. How a rider asks for it: {@link rungFor}.
+ */
+export const RIDER_SHADOW_MAP_RUNG: QualitySettings = {
+  ...(QUALITY_LADDER[0] as QualitySettings),
+  riderShadows: 'map',
+  label: 'full, with a rider shadow map',
+};
+
+/**
+ * The settings a ride draws with at a level — {@link qualitySettings}, except
+ * that a rider who asked for the shadow map gets {@link RIDER_SHADOW_MAP_RUNG}
+ * in place of level 0, and loses it the moment the ladder steps down.
+ * Whether it ever comes back that ride is {@link keepsShadowMap}'s: it does not.
+ */
+export function rungFor(level: QualityLevel, shadowMap: boolean): QualitySettings {
+  return level === 0 && shadowMap ? RIDER_SHADOW_MAP_RUNG : qualitySettings(level);
+}
+
+/**
+ * Whether a ride that wanted the shadow map still wants it at this level —
+ * the LATCH that makes "the first thing given up" stay given up.
+ *
+ * ⚠️ **{@link rungFor} alone would flap, and did until #448's review.** The
+ * ladder climbs back to level 0 whenever the device cools, and `rungFor(0,
+ * true)` is the map rung, so every 0 → 1 → 0 round trip turned the map off and
+ * on again. Each change rebuilds the riders' and the catcher's shader programs
+ * (`three-renderer.ts` §`applyRiderShadows`), which is a stall; a stall is a
+ * frame-time spike; and a frame-time spike is what pushes the ladder down
+ * again. So once any step down has been seen, the answer is `false` for the
+ * rest of the ride, whatever the level does next.
+ *
+ * Fed its own previous answer on every level change — `GameView` holds it in
+ * a ref and re-reads the device's choice only when a ride STARTS, which is
+ * what resets the latch. Pure: the state is the caller's.
+ */
+export function keepsShadowMap(wanted: boolean, level: QualityLevel): boolean {
+  return wanted && level === 0;
+}
+
+/**
+ * Where a rider's request for the shadow map is kept: THIS device's
+ * `localStorage`, the way `hud/announce-preference.ts` keeps announcements —
+ * a GPU is a property of the device, not of the athlete.
+ *
+ * ⚠️ **There is no control for it on any screen, deliberately.** It exists to
+ * be MEASURED (Part T of validation 0002 sets it through
+ * `apps/mobile/tools/webview-probe.mjs`), and a Settings switch offering a
+ * rider a feature nobody has measured on their device would be offering them
+ * a hot phone. A control is the measurement's to add.
+ */
+export const RIDER_SHADOW_MAP_STORAGE_KEY = 'oyl.game.riderShadowMap';
+
+/** Whether this device has asked for the shadow map. Any failure to read is "no". */
+export function readShadowMapChoice(
+  storage: { getItem(key: string): string | null } | undefined,
+): boolean {
+  try {
+    return storage?.getItem(RIDER_SHADOW_MAP_STORAGE_KEY) === 'on';
+  } catch {
+    return false;
+  }
 }
 
 /** Whether this sample argues for less work. */

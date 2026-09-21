@@ -20,17 +20,49 @@
  * window pre-empts a lower one; a lower one is **dropped, not queued** — a
  * queue that grows is the continuous-speech failure itself.
  *
- * | rank | what | trigger | evidence (#395) |
- * |---|---|---|---|
- * | 1 | the trainer link lost | event | safety |
- * | 2 | a workout fault | event | safety |
- * | 3 | the next workout block, ahead of it | event (#398) | safety |
- * | 4 | a climb or a descent ahead | event (#399) | attested |
- * | 5 | power off an acknowledged target | ≥ 10 % for ≥ 5 s | attested |
- * | 6 | distance to go | a distance tick | attested |
- * | 7 | power | a time cadence | attested |
+ * | rank | what | trigger | evidence (#395) | spoken with announcements OFF? |
+ * |---|---|---|---|---|
+ * | 1 | the trainer is not doing what the ride says | event | safety | **yes** — #394 |
+ * | 2 | a workout fault | event | safety | **yes** — #394 |
+ * | 3 | the workout block, as it changes | event (#394) | safety | **yes** — #394 |
+ * | 4 | the next workout block, ahead of it | event (#398) | safety | no |
+ * | 5 | a climb or a descent ahead | event (#399) | attested | no |
+ * | 6 | power off an acknowledged target | ≥ 10 % for ≥ 5 s | attested | no |
+ * | 7 | distance to go | a distance tick | attested | no |
+ * | 8 | power | a time cadence | attested | no |
  *
- * ⚠️ **Rank 4 is #399's, and #395 did not place it** — its table decided the
+ * ⚠️ **Every rank has a production source since #445, and a reviewer who
+ * remembers a note here saying ranks 1, 2 and 4 had none is reading the old
+ * file.** That note was true until #445 (PR #444's review), and by #446 it was
+ * also wrong about which rank it meant: rank 4 was the climb by then, which
+ * `GameView` feeds (#447). The sources now:
+ *
+ * | kind | fed by | from |
+ * |---|---|---|
+ * | `trainer-lost` | `ride/RideAnnouncer.tsx` | `TrainerSnapshot.lost` ("Control lost") and `.releaseFault` ("Not released") |
+ * | `trainer-lost` | `GameView` | the road notice at the start of a ride, and a refused gradient write — which is how control lost ARRIVES in the game (`GameView` §`trainer`) |
+ * | `workout-fault` | `ride/RideAnnouncer.tsx` | `RideWorkoutSnapshot.fault` |
+ * | `interval-now` | `ride/RideAnnouncer.tsx` | `RideWorkoutSnapshot.nowRiding`, as it changes |
+ * | `interval-ahead` | `ride/RideAnnouncer.tsx` | `ride/lookahead.ts` |
+ * | `climb-ahead` | `GameView` | `hud/climb-ahead.ts` |
+ * | readings | `GameView` | `fields.ts` §`hudReadings` |
+ *
+ * ⚠️ **Rank 1 is broader than its name**, and the name was kept rather than
+ * churned through every test: it is *the machine under the rider is not doing
+ * what this screen says*. On the Ride screen that is control lost and a
+ * release the trainer did not acknowledge; in the game it is the road notice
+ * and a refused gradient write. They share a rank because they share what a
+ * rider must do about them — stop trusting the resistance — and none of them
+ * is ever competing with another in the same second.
+ *
+ * ⚠️ **Rank 3 is new with #445, and #395 placed it without naming it.** Its
+ * "interval change" row was one row; there are two sentences, and they are
+ * ordered by time: the block that has changed under the rider's legs NOW
+ * outranks the one coming in ten seconds. Until #445 the change was written
+ * straight into the region, beside the throttle rather than through it, which
+ * is the same two-writers defect the rest of this change removes.
+ *
+ * ⚠️ **Rank 5 is #399's, and #395 did not place it** — its table decided the
  * climb was in and left its rank to the issue that built it. It goes below
  * the interval (a workout block is resistance the trainer is about to apply,
  * #398's safety event) and above every READING, because it is an event that
@@ -39,16 +71,17 @@
  * gradient ride it is also the one warning that the trainer's resistance is
  * about to rise under the rider's legs.
  *
- * ⚠️ **Ranks 1, 2 and 4 have no production source yet, and the order above is
- * therefore not what a rider hears today** (PR #444's review). The two callers
- * are `GameView` — a gradient ride, so there is no ERG target to be off and no
- * workout to fault, and it feeds power and distance only — and
- * `ride/WorkoutPanel.tsx`, which feeds `interval-ahead` only. A lost trainer
- * link and a workout fault ARE spoken, but by #394's own event regions, which
- * this throttle does not see: a reading here can be said in the same second
- * as one of those. Feeding them in means taking them out of #394's regions in
- * the same change, or each is said twice — which is #445, not something to
- * half-do here.
+ * ## ⚠️ Three kinds are spoken with announcements OFF — {@link ALWAYS_SPOKEN}
+ *
+ * #395's table says the safety rows are *"on when announcements are on"*, and
+ * this module departs from that cell on purpose. Those three sentences were
+ * #394's status messages before #395 existed: each was its own `live` region
+ * and was spoken to every rider with a screen reader, whatever they had
+ * chosen, because SC 4.1.3 asks for exactly that. Moving them into the one
+ * region (#445) is a change to HOW they are spoken; gating them behind a
+ * switch that is off by default would have been a change to WHETHER, and would
+ * have silenced "Control lost" for every rider who never opened Settings. The
+ * owner may reverse this: it is the membership of one array.
  *
  * **Not announceable in this cut**, each for #395's reason: cadence and heart
  * rate (inferred only — nothing attested asks for them), the pacer and ghost
@@ -85,6 +118,7 @@ export const OFF_TARGET_SECONDS = 5;
 export type AnnouncementEvent =
   | { readonly kind: 'trainer-lost'; readonly text: string }
   | { readonly kind: 'workout-fault'; readonly text: string }
+  | { readonly kind: 'interval-now'; readonly text: string }
   | { readonly kind: 'interval-ahead'; readonly text: string }
   | { readonly kind: 'climb-ahead'; readonly text: string };
 
@@ -99,12 +133,38 @@ export type AnnouncementKind =
 export const PRIORITY: readonly AnnouncementKind[] = [
   'trainer-lost',
   'workout-fault',
+  'interval-now',
   'interval-ahead',
   'climb-ahead',
   'power-off-target',
   'distance-tick',
   'power',
 ];
+
+/**
+ * The kinds said whether or not the rider turned announcements on — #445.
+ * @see the module note §"Three kinds are spoken with announcements OFF"
+ */
+export const ALWAYS_SPOKEN: readonly AnnouncementKind[] = [
+  'trainer-lost',
+  'workout-fault',
+  'interval-now',
+];
+
+/**
+ * What the announcer does with announcements off: the three status kinds and
+ * nothing else — every reading and every optional event is `'never'`.
+ */
+function statusOnly(preference: AnnouncementPreference): AnnouncementPreference {
+  return {
+    ...preference,
+    enabled: true,
+    powerEverySeconds: 'never',
+    distanceEvery: 'never',
+    intervalLeadSeconds: 'never',
+    climbLeadMetres: 'never',
+  };
+}
 
 /** The readings a sentence may be built from. Everything else is not announceable. */
 export const ANNOUNCEABLE_READINGS: readonly string[] = ['power', 'remaining'];
@@ -204,16 +264,17 @@ function spokenNumber(value: number): string {
 
 /** Advance the announcer to `now`. Pure. @see the module note */
 export function announce(state: AnnouncerState, input: AnnounceInput): Announcement {
-  const { now, preference } = input;
-  if (!preference.enabled) {
-    // Off is off: nothing said, nothing waiting, and no baseline carried into
-    // the moment it is switched on.
-    return { sentence: undefined, kind: undefined, state: INITIAL_ANNOUNCER };
-  }
+  const { now } = input;
+  // ⚠️ Off is off for every READING and every optional event — nothing said,
+  // and no baseline carried into the moment it is switched on — but NOT for
+  // the three status kinds #394 already spoke to everyone (#445).
+  const off = !input.preference.enabled;
+  const preference = off ? statusOnly(input.preference) : input.preference;
 
   // Events: keep the highest; a lower one arriving behind it is dropped.
   let pending = state.pending;
   for (const event of input.events ?? []) {
+    if (off && !ALWAYS_SPOKEN.includes(event.kind)) continue;
     if (event.kind === 'interval-ahead' && preference.intervalLeadSeconds === 'never') continue;
     if (event.kind === 'climb-ahead' && preference.climbLeadMetres === 'never') continue;
     if (pending === undefined || rank(event.kind) <= rank(pending.kind)) {
@@ -311,7 +372,7 @@ export function announce(state: AnnouncerState, input: AnnounceInput): Announcem
     kind: chosen?.kind,
     state: {
       lastSpokenAt: chosen === undefined ? state.lastSpokenAt : now,
-      powerFrom,
+      powerFrom: off ? undefined : powerFrom,
       distanceMark,
       pending: chosen !== undefined && chosen.kind === pending?.kind ? undefined : pending,
       offTargetSince,

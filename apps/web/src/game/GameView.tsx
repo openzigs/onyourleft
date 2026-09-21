@@ -46,7 +46,15 @@ import {
   type WindChoice,
   type WindProblemField,
 } from './wind-choice';
-import { INITIAL_QUALITY, nextQuality, qualitySettings, type QualityState } from './quality';
+import {
+  INITIAL_QUALITY,
+  keepsShadowMap,
+  nextQuality,
+  qualitySettings,
+  readShadowMapChoice,
+  rungFor,
+  type QualityState,
+} from './quality';
 import { createGradientSession, type GradientSession, type GradientSessionState } from './gradient';
 import {
   NO_GAME_TRAINER,
@@ -67,7 +75,13 @@ import { corridorOrigin } from './terrain';
 import type { GameRenderer, GameView as RendererView } from './port';
 import { NO_SENSORS, type GameSensors } from './sensors';
 import { speedUnit, spokenDistanceUnit } from '../units/format';
-import { announce, INITIAL_ANNOUNCER, remainingFrom, type AnnouncerState } from './hud/announce';
+import {
+  announce,
+  INITIAL_ANNOUNCER,
+  remainingFrom,
+  type AnnouncementEvent,
+  type AnnouncerState,
+} from './hud/announce';
 import { slopeEvent, slopesOf, type Slope, type SlopeAnnounced } from './hud/climb-ahead';
 import type { CueOutput } from './audio-port';
 import { RideCues } from './audio-cues';
@@ -345,13 +359,52 @@ export function GameView(props: GameViewProps): JSX.Element {
   const slopesRef = useRef<readonly Slope[]>([]);
   const slopeAnnouncedRef = useRef<SlopeAnnounced>(undefined);
   /**
+   * The trainer's two sentences, fed to the HUD's ONE region — #445. Until
+   * #445 each was a `live` `StatusMessage` of its own, so the HUD carried three
+   * regions while a notice stood and a power reading could be said in the same
+   * second as either. Rank 1 in `announce.ts` (`trainer-lost`), because a
+   * refused gradient write is how control lost ARRIVES in the game (see
+   * {@link trainer}) and the road notice is the same fact known at the start.
+   *
+   * - `roadNoticeRef`: the notice this ride started with, said on its first
+   *   frame and then cleared — it was "announced when it appears", and it
+   *   appears with the ride.
+   * - `gradientFaultRef`: the fault last seen, so one fault is said once.
+   */
+  const roadNoticeRef = useRef<string | undefined>(undefined);
+  /**
+   * The trainer port, for `teardown` — #447. A ref because `teardown` is a
+   * stable callback that must read the port as it is when the ride ENDS.
+   *
+   * ⚠️ **This used to be `workoutHeldRef`, sampled once when the ride
+   * started, and #448's review is why it is not.** A workout that ran out
+   * while the rider was on this route was still "held" at teardown, so the
+   * game only `end`ed and the audio context kept running with nothing to play
+   * — the idle audio thread #447 set out to stop. What decides it now is the
+   * port read at teardown: suspend unless a workout is there AND not finished.
+   */
+  const trainerPortRef = useRef(props.trainer);
+  trainerPortRef.current = props.trainer;
+  /**
+   * Whether THIS DEVICE asked for the riders' shadow map — #426. Read at the
+   * start of each ride, like every other choice here; off unless somebody set
+   * it, and there is no control for it (`quality.ts`
+   * §`RIDER_SHADOW_MAP_STORAGE_KEY` says why). @see rungFor
+   */
+  const shadowMapRef = useRef(false);
+  const gradientFaultRef = useRef<string | undefined>(undefined);
+  /**
    * This ride's sounds — #400. Made inside the *Ride* press, so the audio
-   * context is resumed from a gesture. ⚠️ **Not ended in `teardown`, and that
-   * was measured rather than forgotten**: the game plays only the short
-   * distance sound, which stops by itself, and has no power target for the
-   * continuous tone — so a stop there would be unobservable, and deleting it
-   * left every test green. The tone, which CAN be left sounding, belongs to a
-   * workout, and `WorkoutPanel` stops it.
+   * context is resumed from a gesture.
+   *
+   * ⚠️ **Released in `teardown` since #447, and this note used to say it was
+   * deliberately NOT ended there** — because the game plays only the short
+   * distance sound, which stops by itself, so an `end` there was unobservable
+   * and deleting it left every test green. What #447 adds is observable: the
+   * port is told it may `suspend`, and `sounds.a11y.test.tsx` counts that. A
+   * ride that ENDS while a workout is still running — read from the port at
+   * that moment, {@link trainerPortRef} — only `end`s, because its tone must
+   * find the context awake.
    */
   const cuesRef = useRef<RideCues | undefined>(undefined);
   /** What the rider chose for sound, read at the start of each ride. */
@@ -456,6 +509,19 @@ export function GameView(props: GameViewProps): JSX.Element {
     // ride just as surely as one who pressed the button — validation 0002 L7.
     gradientRef.current?.stop();
     gradientRef.current = undefined;
+    // #447: the ride is over, so the audio may stop running — unless a workout
+    // is still running on the Ride screen's session, whose tone `rejoin`
+    // expects to find awake. Read NOW, not at the start of the ride: the
+    // workout may have finished meanwhile. @see trainerPortRef
+    const cues = cuesRef.current;
+    if (cues !== undefined) {
+      const live = trainerPortRef.current?.readTrainer();
+      if (live?.kind === 'workout' && live.workoutFinished !== true) {
+        cues.end();
+      } else {
+        cues.release();
+      }
+    }
     void lockRef.current.release();
     lockRef.current = NO_SCREEN_LOCK;
     viewRef.current?.destroy();
@@ -507,6 +573,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       announcerRef.current = INITIAL_ANNOUNCER;
       setAnnouncement('');
       announcementsRef.current = readAnnouncementPreference(deviceStorage());
+      shadowMapRef.current = readShadowMapChoice(deviceStorage());
       slopesRef.current = slopesOf(profile);
       slopeAnnouncedRef.current = undefined;
       // ⚠️ **Read at the start of the ride and held for its length**, which is
@@ -545,6 +612,11 @@ export function GameView(props: GameViewProps): JSX.Element {
       // a guard inside the loop.
       const found = props.trainer?.readTrainer() ?? NO_GAME_TRAINER;
       setTrainer(found);
+      // #445: this ride's notice, for its first frame. @see roadNoticeRef
+      const notice = trainerRoadNotice(found);
+      roadNoticeRef.current =
+        notice === undefined ? undefined : `The road is not reaching your trainer: ${notice}`;
+      gradientFaultRef.current = undefined;
       gradientRef.current =
         found.control === undefined
           ? undefined
@@ -601,7 +673,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       // context still gets a HUD and a ride.
       void load().then((renderer) => {
         if (viewRef.current === undefined) {
-          viewRef.current = renderer.create(canvas, qualitySettings(quality.level));
+          viewRef.current = renderer.create(canvas, rungFor(quality.level, shadowMapRef.current));
           viewRef.current.resize(canvas.clientWidth || 320, canvas.clientHeight || 180);
         }
       });
@@ -700,11 +772,24 @@ export function GameView(props: GameViewProps): JSX.Element {
         units: unitsRef.current,
       });
       slopeAnnouncedRef.current = slope.announced;
+      // #445: the trainer's sentences go through the SAME core, so the order in
+      // `announce.ts` is the order a rider hears. @see roadNoticeRef
+      const events: AnnouncementEvent[] = [];
+      if (roadNoticeRef.current !== undefined) {
+        events.push({ kind: 'trainer-lost', text: roadNoticeRef.current });
+        roadNoticeRef.current = undefined;
+      }
+      const fault = gradientRef.current?.state().fault;
+      if (fault !== gradientFaultRef.current) {
+        gradientFaultRef.current = fault;
+        if (fault !== undefined) events.push({ kind: 'trainer-lost', text: `Trainer: ${fault}` });
+      }
+      if (slope.event !== undefined) events.push(slope.event);
       const heard = announce(announcerRef.current, {
         now: simulation.state.elapsed,
         readings,
         ...(remaining === undefined ? {} : { remaining }),
-        ...(slope.event === undefined ? {} : { events: [slope.event] }),
+        events,
         preference: announcementsRef.current,
       });
       announcerRef.current = heard.state;
@@ -804,7 +889,12 @@ export function GameView(props: GameViewProps): JSX.Element {
   }, [phase, chosen, port, props.renderer, props.now]);
 
   useEffect(() => {
-    const settings = qualitySettings(quality.level);
+    // #426, the latch: a step down takes the shadow map away for the rest of
+    // the ride, and climbing back to level 0 does not return it. Only the next
+    // ride's start re-reads the device's choice. `quality.ts` §`keepsShadowMap`
+    // says why a rung that came back would flap.
+    shadowMapRef.current = keepsShadowMap(shadowMapRef.current, quality.level);
+    const settings = rungFor(quality.level, shadowMapRef.current);
     // ⚠️ Both halves of the rung, from one place. The renderer stops submitting
     // the instances and `sceneFrame` stops placing them — #245, and
     // `ScatterBelt.setBudget` says why neither alone is the whole of it.
@@ -933,10 +1023,11 @@ export function GameView(props: GameViewProps): JSX.Element {
             ? undefined
             : {
                 content: (
-                  // #394: announced when it appears — it is absent until a
-                  // ride starts on a trainer the road cannot reach, which is
-                  // the case `live` exists for.
-                  <StatusMessage tone="warning" label="The road is not reaching your trainer" live>
+                  // ⚠️ Not `live` since #445: the HUD's one region says it, on
+                  // the ride's first frame, in the announcer's order
+                  // (@see roadNoticeRef). It is still here for a rider who
+                  // can see it.
+                  <StatusMessage tone="warning" label="The road is not reaching your trainer">
                     {roadNotice}
                   </StatusMessage>
                 ),
@@ -948,7 +1039,8 @@ export function GameView(props: GameViewProps): JSX.Element {
         }
         notices={[
           gradient?.fault === undefined ? undefined : (
-            <StatusMessage key="fault" tone="danger" label="Trainer" live>
+            // Not `live` since #445, for the road notice's reason above.
+            <StatusMessage key="fault" tone="danger" label="Trainer">
               {gradient.fault}
             </StatusMessage>
           ),

@@ -44,6 +44,20 @@ export interface CueOutput {
    * only the rider's next press can fix.
    */
   isRunning(): boolean;
+  /**
+   * Let the platform stop running the audio — #447. Suspends a context that is
+   * running and does nothing otherwise; never creates one.
+   *
+   * ⚠️ **Called only when neither a ride nor a workout is running**, and that
+   * is the whole of the safety argument. An idle `running` context still runs
+   * the platform's audio thread — work a phone on a handlebar pays for in
+   * battery for the rest of the session — and a suspended one costs the next
+   * ride nothing, because its *Ride* press calls {@link resume} inside the
+   * gesture anyway. What it WOULD cost is a panel coming back mid-workout
+   * ({@link isRunning} would say no, and the tone would wait for a press),
+   * which is why a workout still running is never suspended under.
+   */
+  suspend(): void;
   /** Start the one continuous tone. A second call while one sounds moves it rather than adding one. */
   startTone(frequencyHz: number, gain: number): void;
   /** Move the tone that is sounding. */

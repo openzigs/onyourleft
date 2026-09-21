@@ -41,10 +41,23 @@
  *
  * ## ⚠️ A sound is never the only carrier
  *
- * Every event with a sound also has its sentence: the interval sound plays with
- * `WorkoutPanel`'s *"Now: …"* region, and the distance sound only on the frame
- * `announce.ts` SAID the distance-tick sentence. A rider with the sound off
- * loses nothing.
+ * Every event with a sound also has its sentence, and the two rules for WHEN
+ * are different on purpose:
+ *
+ * - **The interval sound plays on the block change**, and the *"Now: …"*
+ *   sentence is handed to the announcer in the same event
+ *   (`ride/RideAnnouncer.tsx` §`onEvent`). The sentence may then wait for the
+ *   3 s window or be dropped by a higher-ranked one; the sound is not. ⚠️ Until
+ *   #448's review this read *"plays with the region"*, and since #445 put
+ *   `interval-now` behind the window that meant a beep held or lost with its
+ *   sentence — a loss for a sighted rider with announcements off, too. What is
+ *   true now: the sound is never the only thing OFFERED, and the change is
+ *   always on the panel, but it is not always SPOKEN.
+ * - **The distance sound plays only on the frame `announce.ts` SAID the
+ *   distance-tick sentence** — unchanged by #448, whose finding was about the
+ *   interval sound only.
+ *
+ * A rider with the sound off loses nothing.
  *
  * ## No audio without a gesture
  *
@@ -187,6 +200,25 @@ export class RideCues {
   end(): void {
     this.#silence();
     this.#begun = false;
+  }
+
+  /**
+   * {@link end}, and then let the platform stop running the audio — #447.
+   *
+   * ⚠️ **Only when no ride and no workout is running**, which the CALLER
+   * knows and this class does not: `WorkoutPanel` when its workout ends, and
+   * `GameView` when a ride ends with no workout holding the trainer. A panel
+   * that merely unmounts mid-workout calls {@link end}, never this — the
+   * workout is still running and {@link rejoin} relies on the context still
+   * being awake when the rider comes back. @see CueOutput.suspend
+   *
+   * Only for a ride that BEGAN its sounds: a rider who never turned them on
+   * gets no call on the port at all, which #400 pins.
+   */
+  release(): void {
+    const began = this.#begun;
+    this.end();
+    if (began) this.#output.suspend();
   }
 
   #audible(): boolean {

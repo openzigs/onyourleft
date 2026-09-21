@@ -28,6 +28,7 @@ interface FakeOscillator {
 function fakeContext(state: 'suspended' | 'running' = 'suspended') {
   const oscillators: FakeOscillator[] = [];
   let resumed = 0;
+  let suspended = 0;
   const param = () => ({
     value: 0,
     setValueAtTime: () => undefined,
@@ -40,6 +41,12 @@ function fakeContext(state: 'suspended' | 'running' = 'suspended') {
     state,
     resume: () => {
       resumed += 1;
+      return Promise.resolve();
+    },
+    // ⚠️ `state` is left alone, as the platform leaves it until the
+    // suspension has actually happened — which is the race `asleep` is for.
+    suspend: () => {
+      suspended += 1;
       return Promise.resolve();
     },
     createOscillator: () => {
@@ -70,6 +77,7 @@ function fakeContext(state: 'suspended' | 'running' = 'suspended') {
     context: context as unknown as AudioContextLike,
     oscillators,
     resumed: () => resumed,
+    suspended: () => suspended,
   };
 }
 
@@ -158,5 +166,44 @@ describe('the Web Audio output', () => {
       output.playCue('distance', 0.3);
       output.stopTone();
     }).not.toThrow();
+  });
+});
+
+describe('letting the audio stop after a ride — #447', () => {
+  it('suspends a running context, and does nothing without one', () => {
+    const none = webAudioOutput(() => fakeContext('running').context);
+    none.suspend();
+    expect(none.isRunning()).toBe(false);
+
+    const fake = fakeContext('running');
+    const output = webAudioOutput(() => fake.context);
+    output.resume();
+    expect(output.isRunning()).toBe(true);
+    output.suspend();
+    output.suspend();
+    expect(fake.suspended(), 'asked twice').toBe(1);
+    expect(output.isRunning(), 'a context asked to sleep still reports running').toBe(false);
+  });
+
+  it('does not suspend a context that is not running', () => {
+    const fake = fakeContext('suspended');
+    const output = webAudioOutput(() => fake.context);
+    output.resume();
+    output.suspend();
+    expect(fake.suspended()).toBe(0);
+  });
+
+  it('resumes on the next press even while the platform still says running', () => {
+    // ⚠️ The race: `state` changes only once the platform has suspended, so a
+    // press in the same breath as the end of a workout finds `running` — and a
+    // `resume()` that trusted it would ask for nothing, and ride in silence.
+    const fake = fakeContext('running');
+    const output = webAudioOutput(() => fake.context);
+    output.resume();
+    expect(fake.resumed()).toBe(0);
+    output.suspend();
+    output.resume();
+    expect(fake.resumed()).toBe(1);
+    expect(output.isRunning()).toBe(true);
   });
 });

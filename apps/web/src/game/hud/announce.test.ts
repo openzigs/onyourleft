@@ -30,6 +30,7 @@ import { atStartLine } from '../simulation';
 import {
   ANNOUNCE_WINDOW_SECONDS,
   ANNOUNCEABLE_READINGS,
+  ALWAYS_SPOKEN,
   INITIAL_ANNOUNCER,
   OFF_TARGET_SECONDS,
   PRIORITY,
@@ -199,16 +200,46 @@ describe('never means never — for every announceable reading', () => {
     });
   }
 
-  it('says nothing at all with the master switch off — the default', () => {
+  it('says no reading and no optional event with the master switch off — the default', () => {
+    const { said, state } = run(
+      [
+        { now: 0, remaining: { value: 10.1, unit: 'kilometres' } },
+        { now: 100, remaining: { value: 1, unit: 'kilometres' } },
+        { now: 200, events: [{ kind: 'interval-ahead', text: 'In ten seconds: harder.' }] },
+        { now: 300, events: [{ kind: 'climb-ahead', text: 'Climb in 250 metres, 6 percent' }] },
+      ],
+      { ...DEFAULT_ANNOUNCEMENTS, powerEverySeconds: 15, distanceEvery: 1 },
+    );
+    expect(DEFAULT_ANNOUNCEMENTS.enabled).toBe(false);
+    expect(said).toEqual([undefined, undefined, undefined, undefined]);
+    // …and no baseline carried into the moment it is switched on.
+    expect(state.powerFrom).toBeUndefined();
+    expect(state.distanceMark).toBeUndefined();
+  });
+
+  // #445: the three status kinds were #394's live regions, spoken to every
+  // rider with a screen reader whatever they had chosen. Moving them into the
+  // one region must not put them behind a switch that is off by default.
+  for (const kind of ['trainer-lost', 'workout-fault', 'interval-now'] as const) {
+    it(`still says ${kind} with the master switch off — #445`, () => {
+      const { said } = run([{ now: 0, events: [{ kind, text: `${kind} happened.` }] }], {
+        ...DEFAULT_ANNOUNCEMENTS,
+      });
+      expect(said).toEqual([`${kind} happened.`]);
+    });
+  }
+
+  it('keeps the throttle for the status kinds with the master switch off — #445', () => {
     const { said } = run(
       [
-        { now: 0, events: [{ kind: 'trainer-lost', text: 'The trainer is not answering.' }] },
-        { now: 100, remaining: { value: 1, unit: 'kilometres' } },
+        { now: 0, events: [{ kind: 'interval-now', text: 'Now: 5 min at 95%' }] },
+        { now: 1, events: [{ kind: 'trainer-lost', text: 'Control lost.' }] },
+        { now: 2 },
+        { now: ANNOUNCE_WINDOW_SECONDS },
       ],
       DEFAULT_ANNOUNCEMENTS,
     );
-    expect(DEFAULT_ANNOUNCEMENTS.enabled).toBe(false);
-    expect(said).toEqual([undefined, undefined]);
+    expect(said).toEqual(['Now: 5 min at 95%', undefined, undefined, 'Control lost.']);
   });
 });
 
@@ -276,7 +307,13 @@ describe('priority is an ORDER, not a politeness', () => {
   });
 
   it('puts the safety events first, in the order #395 decided', () => {
-    expect(PRIORITY.slice(0, 3)).toEqual(['trainer-lost', 'workout-fault', 'interval-ahead']);
+    expect(PRIORITY.slice(0, 4)).toEqual([
+      'trainer-lost',
+      'workout-fault',
+      'interval-now',
+      'interval-ahead',
+    ]);
+    expect(ALWAYS_SPOKEN).toEqual(PRIORITY.slice(0, 3));
     expect(PRIORITY.indexOf('distance-tick')).toBeLessThan(PRIORITY.indexOf('power'));
   });
 
