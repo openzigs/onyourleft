@@ -277,6 +277,7 @@ export interface TerrainMesh {
   /**
    * Triangles, innermost band first — both sides, every row — then the next
    * band out. @see TERRAIN_BANDS for why the order is load-bearing.
+   * ⚠️ **Borrowed**: shared by every mesh of the same row count.
    */
   readonly indices: Uint32Array;
   /**
@@ -360,8 +361,23 @@ export function terrainHeightAt(
   if (lateral <= ROAD_HALF_WIDTH_METRES) {
     return road;
   }
-  const fields = reliefFields(profile, seed, wrapped, side);
   const ways = waterways(profile, seed);
+  // ⚠️ **Inside the clear band there is no relief to read**, so the hashed
+  // fields are not drawn at all: the ground there is the road less the verge,
+  // under whatever ceiling water puts on it. A third of the scenery stands in
+  // that band, and this is the whole of what it costs to stand it there.
+  if (lateral <= RELIEF_CLEAR_METRES && ways.crossings.length + ways.lakes.length === 0) {
+    return groundHeight(road, NO_RELIEF, lateral, DRY);
+  }
+  // The far field starts to count at the blend's near end; a bracket that
+  // ends inside it reads only the near field, and no bracket reads the mottle.
+  const fields = reliefFields(
+    profile,
+    seed,
+    wrapped,
+    side,
+    lateral < (RELIEF_BLEND_METRES[0] as number) ? 'height-near-the-road' : 'everything',
+  );
   const shaped = (offset: number): WaterShaping =>
     waterShaping(ways, profile, origin, wrapped, offset * (side === 0 ? 1 : -1), road);
   let column = 0;
@@ -490,6 +506,9 @@ export function horizonRelief(
   return { tops, foot: low - 20, base: low - 1_000 };
 }
 
+/** Relief fields that contribute nothing — for the clear band, where there is none. */
+const NO_RELIEF: ReliefFields = { near: 0, far: 0, mottle: 0, tilt: 0 };
+
 /** The relief fields beside one point of the route, on one side. */
 interface ReliefFields {
   /** The field near the road, in [−1, 1]. */
@@ -510,6 +529,13 @@ function reliefFields(
   seed: number,
   wrapped: number,
   side: number,
+  /**
+   * How far out anything will be read. The far field and the mottle cost two
+   * hashes each and a tree beside the road never reads either — its column
+   * bracket ends well inside the far field's blend, and a height has no colour
+   * — so a caller that knows says so, and the fields are not drawn.
+   */
+  reading: 'everything' | 'height-near-the-road' = 'everything',
 ): ReliefFields {
   const nodes = Math.max(2, Math.round(profile.totalDistance / RELIEF_SPAN_METRES));
   const at = (wrapped / profile.totalDistance) * nodes;
@@ -535,10 +561,11 @@ function reliefFields(
   // nothing on a real climb.
   const slope = gradeAt(profile, wrapped) / 100;
   const grade = Math.hypot(slope, TILT_ROUNDING_GRADE) - TILT_ROUNDING_GRADE;
+  const nearOnly = reading === 'height-near-the-road';
   return {
     near: field(side),
-    far: field(2 + side),
-    mottle: field(4 + side),
+    far: nearOnly ? 0 : field(2 + side),
+    mottle: nearOnly ? 0 : field(4 + side),
     tilt: CROSS_SLOPE_PER_GRADE * grade * (side === 0 ? uphill : -uphill),
   };
 }
@@ -624,6 +651,9 @@ function foldReach(centre: readonly CorridorPoint[], normals: Float64Array): Flo
  */
 export const ROAD_CLEARANCE_METRES = ROAD_HALF_WIDTH_METRES + VERGE_METRES;
 
+/** The side of one cell of {@link clearReach}'s grid, in metres: a segment's own length. */
+const CLEAR_CELL_METRES = 12;
+
 /** How many halvings {@link clearReach} spends finding where a side must stop. */
 const CLEAR_REACH_STEPS = 8;
 
@@ -644,29 +674,36 @@ function clearReach(
   normals: Float64Array,
   reach: Float64Array,
 ): Float64Array {
-  // Each segment's box, grown by the clearance, so a point nowhere near a
-  // segment — which is nearly every point on nearly every row — is refused in
-  // four comparisons rather than a projection. It halved the ground's cost a
-  // frame, measured.
-  const boxes = new Float64Array(Math.max(0, centre.length - 1) * 4);
+  // ⚠️ **A grid of the segments, so a point is only ever measured against the
+  // few whose boxes — grown by the clearance — reach its cell.** Nearly every
+  // point on nearly every row is in an empty cell and is refused in one
+  // lookup. The first cut projected every column of every row onto every
+  // segment, 0.50 ms of a frame; a box test on each took it to 0.15 ms, and the
+  // grid to about a third of that again — measured, and the JS thread's cost
+  // is the one #240's NFR-2 names.
+  const cells = new Map<number, number[]>();
+  const cellOf = (value: number): number => Math.floor(value / CLEAR_CELL_METRES);
+  const key = (column: number, row: number): number => column * 100_003 + row;
   for (let segment = 0; segment + 1 < centre.length; segment += 1) {
     const from = centre[segment] as CorridorPoint;
     const to = centre[segment + 1] as CorridorPoint;
-    boxes[segment * 4] = Math.min(from.x, to.x) - ROAD_CLEARANCE_METRES;
-    boxes[segment * 4 + 1] = Math.max(from.x, to.x) + ROAD_CLEARANCE_METRES;
-    boxes[segment * 4 + 2] = Math.min(from.z, to.z) - ROAD_CLEARANCE_METRES;
-    boxes[segment * 4 + 3] = Math.max(from.z, to.z) + ROAD_CLEARANCE_METRES;
+    const lowX = cellOf(Math.min(from.x, to.x) - ROAD_CLEARANCE_METRES);
+    const highX = cellOf(Math.max(from.x, to.x) + ROAD_CLEARANCE_METRES);
+    const lowZ = cellOf(Math.min(from.z, to.z) - ROAD_CLEARANCE_METRES);
+    const highZ = cellOf(Math.max(from.z, to.z) + ROAD_CLEARANCE_METRES);
+    for (let column = lowX; column <= highX; column += 1) {
+      for (let cellRow = lowZ; cellRow <= highZ; cellRow += 1) {
+        const at = key(column, cellRow);
+        const list = cells.get(at);
+        if (list === undefined) cells.set(at, [segment]);
+        else list.push(segment);
+      }
+    }
   }
   const clearOf = (x: number, z: number): boolean => {
-    for (let segment = 0; segment + 1 < centre.length; segment += 1) {
-      if (
-        x < (boxes[segment * 4] as number) ||
-        x > (boxes[segment * 4 + 1] as number) ||
-        z < (boxes[segment * 4 + 2] as number) ||
-        z > (boxes[segment * 4 + 3] as number)
-      ) {
-        continue;
-      }
+    const near = cells.get(key(cellOf(x), cellOf(z)));
+    if (near === undefined) return true;
+    for (const segment of near) {
       const from = centre[segment] as CorridorPoint;
       const to = centre[segment + 1] as CorridorPoint;
       const dx = to.x - from.x;
@@ -736,8 +773,22 @@ function steadied(reach: Float64Array): Float64Array {
   return out;
 }
 
+/**
+ * The last index list built, and the row count it was built for.
+ *
+ * ⚠️ **Borrowed, not owned**, exactly as `terrain.ts` §`roadIndices` lends the
+ * road's: for a corridor of one shape the list is identical frame after frame,
+ * and rebuilding 6 624 indices sixty times a second is an allocation on the
+ * thread GATT notifications arrive on (#240's NFR-2/NFR-3). The renderer copies
+ * what it is handed and nothing mutates it.
+ */
+let lastIndices: { readonly rows: number; readonly indices: Uint32Array } | undefined;
+
 /** Innermost band first, both sides and every row, then the next band out. */
 function terrainIndices(rows: number): Uint32Array {
+  if (lastIndices !== undefined && lastIndices.rows === rows) {
+    return lastIndices.indices;
+  }
   const perRow = COLUMNS * 2;
   const indices = new Uint32Array(Math.max(0, rows - 1) * 2 * TERRAIN_BANDS * 6);
   let at = 0;
@@ -764,6 +815,7 @@ function terrainIndices(rows: number): Uint32Array {
       }
     }
   }
+  lastIndices = { rows, indices };
   return indices;
 }
 
