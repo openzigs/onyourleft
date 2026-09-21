@@ -26,7 +26,7 @@ import {
 function silentControl(): GradientTrainer {
   return {
     setSimulationParameters: vi.fn(async () => Promise.resolve()),
-    stop: vi.fn(async () => Promise.resolve()),
+    letGo: vi.fn(async () => Promise.resolve({ kind: 'reset' as const })),
   };
 }
 
@@ -37,10 +37,46 @@ const PAIRED_AND_READY = {
   hasControl: true,
 } as const;
 
+describe('what the game may command — #372', () => {
+  it('can release the trainer and cannot Reset, Stop or take control of it', () => {
+    // ⚠️ `stop` was on `GradientTrainer` until #372 and `letGo` replaced it:
+    // a Stop did not release real hardware. The bare `reset` stays off, and so
+    // does `requestControl`, which is the rider's. Widen the type and TS2578
+    // fires on the directive that no longer has an error to expect.
+    const control = silentControl();
+    expect(control.letGo).toBeDefined();
+    // @ts-expect-error the bare Reset is not the game's to send.
+    expect(control.reset).toBeUndefined();
+    // @ts-expect-error nor is a Stop, since #372.
+    expect(control.stop).toBeUndefined();
+    // @ts-expect-error nor is taking control.
+    expect(control.requestControl).toBeUndefined();
+    // @ts-expect-error nor is an ERG target, which is the workout's.
+    expect(control.setTargetPower).toBeUndefined();
+  });
+});
+
 describe('gameTrainerFrom', () => {
   it('hands over a control only when every gate has passed', () => {
     const control = silentControl();
     expect(gameTrainerFrom(PAIRED_AND_READY, control, false)).toEqual({ kind: 'ready', control });
+  });
+
+  it('carries an unconfirmed release to the picker, in whatever state it leaves the trainer — #372', () => {
+    const fault = 'The trainer may still be holding resistance.';
+    // A refused Reset leaves control held, so the trainer is still `ready`…
+    expect(
+      gameTrainerFrom({ ...PAIRED_AND_READY, releaseFault: fault }, silentControl(), false)
+        .releaseFault,
+    ).toBe(fault);
+    // …and a release refused outright may leave it without control.
+    expect(
+      gameTrainerFrom(
+        { ...PAIRED_AND_READY, hasControl: false, releaseFault: fault },
+        silentControl(),
+        false,
+      ),
+    ).toEqual({ kind: 'no-control', control: undefined, releaseFault: fault });
   });
 
   it('is `none` where there is no ride controller at all', () => {

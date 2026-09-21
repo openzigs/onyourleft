@@ -25,7 +25,8 @@ import {
   type RoutePoint,
   type RouteProfile,
 } from '@onyourleft/domain';
-import type { SimulationParameters } from '@onyourleft/sensors/protocol';
+import { SensorError } from '@onyourleft/sensors';
+import type { SimulationParameters, TrainerRelease } from '@onyourleft/sensors/protocol';
 
 /** A kilometre rising at a steady 4 %, then a kilometre falling at 4 %. */
 function hill(): RouteProfile {
@@ -43,13 +44,18 @@ function hill(): RouteProfile {
 }
 
 /** A trainer that keeps every command, and answers whatever it is told to. */
-function recordingTrainer(options: { readonly reject?: Error | undefined } = {}): {
+function recordingTrainer(
+  options: {
+    readonly reject?: Error | undefined;
+    readonly release?: TrainerRelease | undefined;
+  } = {},
+): {
   readonly control: GradientTrainer;
   readonly written: SimulationParameters[];
-  readonly stops: number[];
+  readonly releases: number[];
 } {
   const written: SimulationParameters[] = [];
-  const stops: number[] = [];
+  const releases: number[] = [];
   const control: GradientTrainer = {
     setSimulationParameters: async (parameters) => {
       written.push(parameters);
@@ -58,12 +64,12 @@ function recordingTrainer(options: { readonly reject?: Error | undefined } = {})
       }
       return Promise.resolve();
     },
-    stop: async () => {
-      stops.push(written.length);
-      return Promise.resolve();
+    letGo: async () => {
+      releases.push(written.length);
+      return Promise.resolve(options.release ?? { kind: 'reset' });
     },
   };
-  return { control, written, stops };
+  return { control, written, releases };
 }
 
 /** Let the writer's promise chain run out. */
@@ -212,7 +218,7 @@ describe('a gradient session drives a trainer from a route', () => {
     const control: GradientTrainer = {
       setSimulationParameters: async () =>
         failing ? Promise.reject(new Error('boom')) : undefined,
-      stop: async () => Promise.resolve(),
+      letGo: async () => Promise.resolve({ kind: 'reset' as const }),
     };
     const session = createGradientSession({ profile: hill(), control });
     session.sample(seconds(0), 500);
@@ -225,11 +231,15 @@ describe('a gradient session drives a trainer from a route', () => {
     expect(session.state().fault).toBeUndefined();
   });
 
-  it('releases the trainer when the ride ends, with a Stop rather than a flat road', async () => {
+  it('releases the trainer when the ride ends, through letGo() rather than a flat road', async () => {
     // #362's "what happens to the applied resistance when the ride is stopped",
-    // and `docs/validation/0002` Part I4. FTMS simulation parameters persist on
+    // and `docs/validation/0002` Part L5. FTMS simulation parameters persist on
     // the machine until they are changed, so a ride ended on a wall would leave
-    // the flywheel loaded against whoever gets on next.
+    // the flywheel loaded against whoever gets on next. ⚠️ Since #372 the
+    // release is `letGo()` — an FTMS Reset — because a Stop, which this test
+    // used to count, did not remove the grade on real hardware. `stop` is not
+    // on `GradientTrainer` any more, so reverting to it is a compile error; the
+    // octets a release sends are asserted in `fitness-machine-control.test.ts`.
     const trainer = recordingTrainer();
     const session = createGradientSession({ profile: hill(), control: trainer.control });
     session.sample(seconds(0), 500);
@@ -238,7 +248,7 @@ describe('a gradient session drives a trainer from a route', () => {
     session.stop();
     await drain();
 
-    expect(trainer.stops).toHaveLength(1);
+    expect(trainer.releases).toHaveLength(1);
     // Not a gradient of zero: a flat road is still a statement about the road.
     expect(trainer.written.every((parameters) => parameters.grade !== 0)).toBe(true);
   });
@@ -252,7 +262,7 @@ describe('a gradient session drives a trainer from a route', () => {
     session.stop();
     session.stop();
     await drain();
-    expect(trainer.stops).toHaveLength(1);
+    expect(trainer.releases).toHaveLength(1);
   });
 
   it('writes nothing after it has been stopped', async () => {
@@ -268,10 +278,10 @@ describe('a gradient session drives a trainer from a route', () => {
   it('tells the rider when the release itself is refused', async () => {
     // ⚠️ The path a rider most needs to be told about, because its consequence
     // is resistance left on a machine after they have got off. The write
-    // succeeded, so the failure arrives only from `stop()`.
+    // succeeded, so the failure arrives only from `letGo()`.
     const control: GradientTrainer = {
       setSimulationParameters: async () => Promise.resolve(),
-      stop: async () => Promise.reject(new Error('control-not-held')),
+      letGo: async () => Promise.reject(new Error('control-not-held')),
     };
     const session = createGradientSession({ profile: hill(), control });
     session.sample(seconds(0), 500);
@@ -279,6 +289,37 @@ describe('a gradient session drives a trainer from a route', () => {
     session.stop();
     await drain();
     expect(session.state().fault).toContain('not granted control');
+  });
+
+  it('tells the rider when the trainer refused the Reset and the release is not confirmed', async () => {
+    // #372: a release that resolved `incomplete` was acknowledged and still
+    // does not establish that the hill has gone. Nothing but a Reset answered
+    // with success may read as released.
+    const trainer = recordingTrainer({
+      release: {
+        kind: 'incomplete',
+        resetRefusal: new SensorError('control-rejected', 'op-code-not-supported'),
+        flattened: true,
+      },
+    });
+    const session = createGradientSession({ profile: hill(), control: trainer.control });
+    session.sample(seconds(0), 500);
+    await drain();
+
+    session.stop();
+    await drain();
+
+    expect(session.state().fault).toContain('may still be holding resistance');
+  });
+
+  it('says nothing is wrong when the Reset was confirmed', async () => {
+    const trainer = recordingTrainer();
+    const session = createGradientSession({ profile: hill(), control: trainer.control });
+    session.sample(seconds(0), 500);
+    await drain();
+    session.stop();
+    await drain();
+    expect(session.state().fault).toBeUndefined();
   });
 
   it('words each refusal for the road rather than for a target', async () => {
@@ -309,7 +350,7 @@ describe('a gradient session drives a trainer from a route', () => {
         written.push(parameters);
         return new Promise<void>(() => undefined);
       },
-      stop: async () => Promise.resolve(),
+      letGo: async () => Promise.resolve({ kind: 'reset' as const }),
     };
     const session = createGradientSession({ profile: hill(), control });
     for (let at = 0; at < 30; at += 1) {

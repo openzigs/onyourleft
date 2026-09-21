@@ -143,6 +143,7 @@ export type {
   TargetPower,
   TrainerControl,
   TrainerControlOptions,
+  TrainerRelease,
 } from './fitness-machine-control';
 
 export {

@@ -21,6 +21,13 @@
  * procedure is outstanding. That is a string assertion and it is deliberately
  * brittle: the word is the guarantee.
  *
+ * ## Ending ERG gives control up, and that is not a loss — #372
+ *
+ * *End ERG* releases the trainer with an FTMS Reset, which revokes control, so
+ * afterwards this panel shows *Ask the trainer for control* — the ordinary
+ * state, not the "Control lost" warning below. A release the trainer did not
+ * confirm is the one thing said about it, as *Not released*.
+ *
  * ## Control loss is a notice, not a disabled button
  *
  * `design/Button.tsx` records why a disabled control is not how this shell says
@@ -204,6 +211,18 @@ export function TrainerPanel({
       {trainer.lost === undefined ? null : (
         <StatusMessage tone="warning" label="Control lost" live>
           {LOSS_REASON[trainer.lost]}
+        </StatusMessage>
+      )}
+
+      {/*
+        #372: a release the trainer did not confirm. Rendered whether or not
+        control is still held — after a refused Reset it may be either — and
+        before the refusal, because it is about the machine under the rider
+        rather than about a number they typed.
+      */}
+      {trainer.releaseFault === undefined ? null : (
+        <StatusMessage tone="danger" label="Not released" live>
+          {trainer.releaseFault}
         </StatusMessage>
       )}
 

@@ -169,5 +169,9 @@ function ftmsOptionsOf(options: FtmsOptions): FtmsOptions {
       ? {}
       : { supportsSimulation: options.supportsSimulation }),
     ...(options.fields === undefined ? {} : { fields: options.fields }),
+    ...(options.retainsTargetsThroughStop === undefined
+      ? {}
+      : { retainsTargetsThroughStop: options.retainsTargetsThroughStop }),
+    ...(options.supportsReset === undefined ? {} : { supportsReset: options.supportsReset }),
   };
 }

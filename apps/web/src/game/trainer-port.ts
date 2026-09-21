@@ -27,15 +27,22 @@
  *
  * ## What the game may command, and what it deliberately may not
  *
- * {@link GradientTrainer} is `setSimulationParameters` and `stop` and nothing
- * else — narrowed for exactly the reason `workout/session.ts` narrows
- * `WorkoutTrainer` to `setTargetPower` and `stop`: **a method that is not on
- * the type cannot be called by a later edit**, and the two that are missing are
- * the dangerous ones. `reset()` revokes this client's control, and
- * `requestControl()` is a thing the *rider* does — a game screen that took
- * control on its own would be the screen deciding to apply physical resistance
- * to somebody, which CLAUDE.md §6 rules out and `RideController.startWorkout`
- * already rules out for the workout path.
+ * {@link GradientTrainer} is `setSimulationParameters` and `letGo` and
+ * nothing else — narrowed for exactly the reason `workout/session.ts` narrows
+ * `WorkoutTrainer`: **a method that is not on the type cannot be called by a
+ * later edit**. `requestControl()` is a thing the *rider* does — a game screen
+ * that took control on its own would be the screen deciding to apply physical
+ * resistance to somebody, which CLAUDE.md §6 rules out and
+ * `RideController.startWorkout` already rules out for the workout path.
+ *
+ * ⚠️ **`stop` was on this type until #372, and `letGo` replaced it.** A Stop
+ * did not remove the resistance on real hardware; `letGo` sends a Reset,
+ * which does per FTMS and which revokes control. The game must not be able to
+ * Reset mid-ride, and the type alone cannot say "only at the end" — so the
+ * guarantee is two things together: `gradient.ts` calls `letGo` from its
+ * `stop` alone, once, after which it writes nothing; and a write that somehow
+ * followed would be refused by `TrainerControl` for want of control rather
+ * than sent. The bare `reset()` stays off this type.
  *
  * ⚠️ **`setTargetPower` is absent too, and that is not an oversight.** ERG and
  * simulation are two different things the same machine can be told; the game
@@ -47,10 +54,10 @@ import type { TrainerControl } from '@onyourleft/sensors/protocol';
 /**
  * The trainer, narrowed to the two commands a ride in the game may give it.
  *
- * @see the module note for why the other nine methods of `TrainerControl` are
- * unreachable from here.
+ * @see the module note for why the other methods of `TrainerControl` are
+ * unreachable from here, and why `letGo` rather than `stop` (#372).
  */
-export type GradientTrainer = Pick<TrainerControl, 'setSimulationParameters' | 'stop'>;
+export type GradientTrainer = Pick<TrainerControl, 'setSimulationParameters' | 'letGo'>;
 
 /**
  * What the paired trainer can be told about the road, right now.
@@ -72,8 +79,10 @@ export type GameTrainerKind =
    * (`shell/AppShell.tsx`), so a workout started on the Ride screen keeps
    * ticking while the rider is in the game — and a game ride that also wrote
    * would put two writers about 1 Hz each on one characteristic, then release
-   * it with an FTMS **Stop** that leaves the workout's clock running against a
-   * machine which has stopped listening. `ride/controller.ts`
+   * it — with an FTMS Stop until #372, a Reset since, and the Reset is worse:
+   * it revokes the control the workout is writing through — leaving the
+   * workout's clock running against a machine which has stopped listening.
+   * `ride/controller.ts`
    * §`simulationControl` refuses the handle; this is the sentence that goes
    * with the refusal.
    */
@@ -114,6 +123,16 @@ export interface GameTrainer {
    * — or worse, one that will accept it having never said it could.
    */
   readonly control: GradientTrainer | undefined;
+  /**
+   * The last release the trainer did not confirm, if any (#372) — the ride
+   * controller's `TrainerSnapshot.releaseFault`, carried to the route picker.
+   *
+   * ⚠️ Here because the game is where a ride that ends on a climb ends: a rider
+   * who presses *End ride* lands on the picker, not on the Ride screen, and a
+   * trainer that refused the Reset may still be holding the hill. Optional,
+   * and absent in every state but the one that needs saying.
+   */
+  readonly releaseFault?: string | undefined;
 }
 
 /** A trainer nothing can be said to. The state every non-trainer ride is in. */
@@ -202,6 +221,7 @@ export function gameTrainerFrom(
         readonly controllable: boolean;
         readonly canSimulate: boolean;
         readonly hasControl: boolean;
+        readonly releaseFault?: string | undefined;
       }
     | undefined,
   control: GradientTrainer | undefined,
@@ -210,6 +230,22 @@ export function gameTrainerFrom(
   if (snapshot === undefined || !snapshot.paired) {
     return NO_GAME_TRAINER;
   }
+  const found = trainerKindFrom(snapshot, control, workoutRunning);
+  return snapshot.releaseFault === undefined
+    ? found
+    : { ...found, releaseFault: snapshot.releaseFault };
+}
+
+/** {@link gameTrainerFrom} for a paired trainer, before the release notice is attached. */
+function trainerKindFrom(
+  snapshot: {
+    readonly controllable: boolean;
+    readonly canSimulate: boolean;
+    readonly hasControl: boolean;
+  },
+  control: GradientTrainer | undefined,
+  workoutRunning: boolean,
+): GameTrainer {
   // ⚠️ **Before the `control === undefined` test, and that ordering is the
   // whole point.** `ride/controller.ts` §`simulationControl` already returns
   // `undefined` while a workout runs, so without this the very refusal that

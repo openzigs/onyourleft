@@ -226,7 +226,7 @@ const TRAINER: GameTrainerPort = {
           kind: 'ready',
           control: {
             setSimulationParameters: async () => Promise.resolve(),
-            stop: async () => Promise.resolve(),
+            letGo: async () => Promise.resolve({ kind: 'reset' as const }),
           },
         },
 };

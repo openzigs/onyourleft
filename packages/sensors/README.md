@@ -736,6 +736,19 @@ The three ways control is lost, all of which this client watches for:
 - **This client's own Reset.** FTMS §4.16.2.1: control permission ends when the client initiates a
   Reset. The trap for a workout player that resets between intervals and keeps sending targets.
 
+### Letting the trainer go is a Reset — #372
+
+`letGo()` is how a ride, a workout or an ERG session ends, and it sends **`0x01` Reset**, not
+`0x08` Stop. ⚠️ Until [#372](https://github.com/openzigs/onyourleft/issues/372) this client released
+with `stop()`, and on the one trainer measured an acknowledged Stop released nothing: a grade stayed
+applied, and an ERG target was still being chased 36 s later, power rising as cadence fell. A Reset
+returns the machine to its defaults per FTMS and gives this client's control up — the trap above is a
+client that *keeps writing* after that, and a release is terminal. It is **not** reported through
+`onControlLost` (it is not a loss), a `0xFF` that follows it is not re-acquired against, and a machine
+that refuses the Reset is written a flat road and a Stop and the outcome is `incomplete`, never a
+release. `stop()` remains for pauses inside a workout. No test here proves a real trainer lets go on
+a Reset; `docs/validation/0002-android-shell-and-game.md` Part R is that.
+
 ### The bounds, in order
 
 The device is an **actuator** as well as a sensor, so its own advertised limits are not trusted on

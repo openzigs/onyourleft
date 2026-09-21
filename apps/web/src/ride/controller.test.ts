@@ -19,6 +19,8 @@
  */
 
 import {
+  gradePercent,
+  metresPerSecond,
   revolutionsPerMinute,
   seconds,
   thresholdShare,
@@ -46,6 +48,7 @@ import {
   type FitnessMachineStatus,
   type FtmsControlRequest,
   type FtmsControlResponse,
+  type FtmsOptions,
   type SimulatorBench,
 } from '@onyourleft/sensors/simulator';
 import {
@@ -72,6 +75,8 @@ import {
   type RideController,
   type RideSavePort,
 } from './controller';
+import { gameTrainerFrom } from '../game/trainer-port';
+
 import { METRIC_STALE_AFTER_SECONDS } from './metrics';
 import type { OpenTrainer, TrainerConnection } from './trainer';
 
@@ -136,6 +141,18 @@ function requestFromOctets(bytes: Uint8Array): FtmsControlRequest {
       return { opCode: 'set-target-power', target: watts(readInt16(bytes, 1)) };
     case 0x08:
       return { opCode: 'stop-or-pause', stop: bytes[1] === 0x01 };
+    case 0x11:
+      // Only the grade is read back: #372's release fallback writes a flat
+      // road, and that is the field a test asserts on.
+      return {
+        opCode: 'set-simulation-parameters',
+        parameters: {
+          windSpeed: metresPerSecond(readInt16(bytes, 1) / 1000),
+          grade: gradePercent(readInt16(bytes, 3) / 100),
+          rollingResistanceCoefficient: (bytes[5] ?? 0) / 10_000,
+          windResistanceCoefficient: (bytes[6] ?? 0) / 100,
+        },
+      };
     default:
       throw new Error(`the bridge does not encode op code ${String(bytes[0])}`);
   }
@@ -164,6 +181,8 @@ interface Bench {
   readonly trainerControl: () => TrainerControl | undefined;
   /** What the trainer itself is holding, read from the device. */
   readonly targetOnTheTrainer: () => Watts | undefined;
+  /** Every control point write, as octets, in order — #372 asserts on these. */
+  readonly written: number[][];
   readonly sessionIds: RecordingSessionId[];
 }
 
@@ -185,13 +204,28 @@ interface BenchOptions {
    * nothing this program will write to it.
    */
   readonly trainerOffers?: TrainerControlChoice;
+  /**
+   * How the simulated machine behaves — #372. `retainsTargetsThroughStop` is
+   * the trainer that issue was measured on, and `supportsReset: false` one that
+   * refuses the release.
+   */
+  readonly machine?: Pick<FtmsOptions, 'retainsTargetsThroughStop' | 'supportsReset'>;
+  /**
+   * Notify `0xFF` Control Permission Lost BEFORE the Reset's own answer — the
+   * ordering PR #442's review reproduced, which nothing in BLE or FTMS rules
+   * out and the simulator, which answers first, never produces. Also turns on
+   * `reacquireControl`, as production has it, so a re-grab would be written.
+   */
+  readonly permissionLostBeforeResetAnswer?: boolean;
 }
 
 function benchWith(options: BenchOptions = {}): Bench {
   const which = options.devices ?? 'trainer';
   const { transport, bench } = createSimulator({
     devices: [
-      ...(which === 'strap' ? [] : [ftmsTrainer({ id: 'kickr', name: 'KICKR 1F2A' })]),
+      ...(which === 'strap'
+        ? []
+        : [ftmsTrainer({ id: 'kickr', name: 'KICKR 1F2A', ...options.machine })]),
       ...(which === 'trainer+strap' || which === 'strap'
         ? [hrsStrap({ id: 'strap', name: 'HRM 04B1' })]
         : []),
@@ -200,6 +234,9 @@ function benchWith(options: BenchOptions = {}): Bench {
 
   let control: TrainerControl | undefined;
   const sessionIds: RecordingSessionId[] = [];
+  const written: number[][] = [];
+
+  const statusListeners: Array<(value: DataView) => void> = [];
 
   const openTrainer: OpenTrainer = (id) => {
     if (options.trainerOffers !== undefined) {
@@ -230,12 +267,20 @@ function benchWith(options: BenchOptions = {}): Bench {
           },
           onControlPointIndication: (listener) =>
             controlPoint.onResponse((response) => listener(responseToOctets(response))),
-          onStatus: (listener) =>
-            controlPoint.onStatus((status) => listener(statusToOctets(status))),
+          onStatus: (listener) => {
+            statusListeners.push(listener);
+            return controlPoint.onStatus((status) => listener(statusToOctets(status)));
+          },
           writeControlPoint: (value) => {
+            written.push([...value]);
             const outcome = controlPoint.write(requestFromOctets(value));
             if (outcome.kind === 'att-error') {
               return Promise.reject(new Error(outcome.error));
+            }
+            if (options.permissionLostBeforeResetAnswer === true && value[0] === RESET) {
+              for (const listener of [...statusListeners]) {
+                listener(viewOf([0xff]));
+              }
             }
             if (options.silentTrainer !== true) {
               // The simulator delivers the indication on its next tick.
@@ -244,7 +289,7 @@ function benchWith(options: BenchOptions = {}): Bench {
             return Promise.resolve();
           },
         },
-        { powerRange, reacquireControl: false },
+        { powerRange, reacquireControl: options.permissionLostBeforeResetAnswer === true },
       ),
       canSetPower: true,
       canSimulate: true,
@@ -283,6 +328,7 @@ function benchWith(options: BenchOptions = {}): Bench {
     sessionIds,
     trainerControl: () => control,
     targetOnTheTrainer: () => bench.device(TRAINER).inspect().ftms?.targetPower,
+    written,
   };
 }
 
@@ -1220,17 +1266,27 @@ describe('pausing and resuming by hand', () => {
   });
 });
 
+/** The octets of a write, by op code: FTMS Table 4.15. */
+const RESET = 0x01;
+const STOP_OR_PAUSE = 0x08;
+
 describe('ending ERG by hand — the "End ERG" button', () => {
   it('takes the trainer out of ERG without ending the ride', async () => {
-    const rig = benchWith();
+    // ⚠️ #372: the machine here keeps its target through a Stop, as the one
+    // real trainer measured did — so the End ERG that used to send a Stop, and
+    // passed this test against a simulator that dropped targets on one, is red.
+    const rig = benchWith({ machine: { retainsTargetsThroughStop: true } });
     await rig.controller.pair('trainer');
     await rig.controller.start();
     await rig.controller.requestTrainerControl();
     await rig.controller.setTargetPower(watts(210));
     expect(rig.targetOnTheTrainer()).toBe(210);
+    const before = rig.written.length;
 
     await rig.controller.clearTargetPower();
 
+    // What was sent: a Reset, and a release that does not consist of a Stop.
+    expect(rig.written.slice(before)).toStrictEqual([[RESET]]);
     // Read from the device, not from the client that asked: the machine is no
     // longer holding a target.
     expect(rig.targetOnTheTrainer()).toBeUndefined();
@@ -1284,7 +1340,8 @@ describe("tickNow — the browser interval's entry point", () => {
 
 describe('ending a ride takes the trainer out of ERG', () => {
   it('stops the machine before it stops the recording', async () => {
-    const rig = benchWith();
+    // #372: a machine that keeps its target through a Stop, as measured.
+    const rig = benchWith({ machine: { retainsTargetsThroughStop: true } });
     await rig.controller.pair('trainer');
     await rig.controller.start();
     await rig.controller.requestTrainerControl();
@@ -1298,7 +1355,196 @@ describe('ending a ride takes the trainer out of ERG', () => {
     // trainer still applying 220 W leaves a rider pushing against something
     // nothing on screen is showing.
     expect(rig.targetOnTheTrainer()).toBeUndefined();
+    expect(rig.written.at(-1)).toStrictEqual([RESET]);
     expect(rig.controller.getSnapshot().phase).toBe('stopped');
+    rig.controller.dispose();
+  });
+});
+
+describe('a release is a Reset, and it is not a loss — #372', () => {
+  const THRESHOLD = watts(250);
+  const oneBlock = (): WorkoutRecord => ({
+    id: workoutId('w1'),
+    createdBy: ATHLETE_A,
+    name: 'Long',
+    workout: {
+      name: 'Long',
+      blocks: [{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.8) }],
+    },
+    createdAt: unixSeconds(1),
+    updatedAt: unixSeconds(1),
+  });
+
+  async function riding(machine?: BenchOptions['machine']): Promise<Bench> {
+    const rig = benchWith(machine === undefined ? {} : { machine });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    return rig;
+  }
+
+  it('ends a workout rather than pausing it, with no "Control lost", and clears the target', async () => {
+    // ⚠️ The trap a naive switch to Reset walks into: the Reset revokes
+    // control, and a control-loss listener that did not know it was intended
+    // would PAUSE the workout and raise the warning. Ending a workout is not
+    // losing control.
+    const rig = await riding({ retainsTargetsThroughStop: true });
+    rig.controller.startWorkout(oneBlock(), THRESHOLD);
+    await ride(rig, 2);
+    await flushMicrotasks();
+    expect(rig.targetOnTheTrainer()).toBe(200);
+    const before = rig.written.length;
+
+    rig.controller.endWorkout();
+    await flushMicrotasks(20);
+
+    const snapshot = rig.controller.getSnapshot();
+    expect(snapshot.workout).toBeUndefined();
+    expect(snapshot.trainer.lost).toBeUndefined();
+    expect(snapshot.trainer.hasControl).toBe(false);
+    expect(snapshot.trainer.releaseFault).toBeUndefined();
+    expect(rig.targetOnTheTrainer()).toBeUndefined();
+    expect(rig.written.slice(before)).toStrictEqual([[RESET]]);
+    // And the recording carries on: ending a workout is not ending a ride.
+    expect(snapshot.phase).toBe('recording');
+    rig.controller.dispose();
+  });
+
+  it('ends a workout with no "Control lost" and no re-grab when 0xFF beats the Reset’s answer', async () => {
+    // PR #442's review: a `0xFF` notified before `80 01 01` used to read as an
+    // involuntary loss — the warning, `linkLost` on a workout that was ending,
+    // and a Request Control written straight after the Reset.
+    const rig = benchWith({
+      machine: { retainsTargetsThroughStop: true },
+      permissionLostBeforeResetAnswer: true,
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    rig.controller.startWorkout(oneBlock(), THRESHOLD);
+    await ride(rig, 2);
+    await flushMicrotasks();
+    const before = rig.written.length;
+
+    rig.controller.endWorkout();
+    await flushMicrotasks(20);
+    await ride(rig, 3);
+    await flushMicrotasks(20);
+
+    const snapshot = rig.controller.getSnapshot();
+    expect(snapshot.workout).toBeUndefined();
+    expect(snapshot.trainer.lost).toBeUndefined();
+    expect(snapshot.trainer.hasControl).toBe(false);
+    expect(snapshot.trainer.releaseFault).toBeUndefined();
+    expect(rig.written.slice(before)).toStrictEqual([[RESET]]);
+    rig.controller.dispose();
+  });
+
+  it('sends ONE Reset when a ride with a workout in it is stopped, and reports no fault', async () => {
+    // The workout's release and the ride's are joined. A second Reset queued
+    // behind the first would find control already given up and report
+    // "not granted control" about a release that worked.
+    const rig = await riding({ retainsTargetsThroughStop: true });
+    rig.controller.startWorkout(oneBlock(), THRESHOLD);
+    await ride(rig, 2);
+    await flushMicrotasks();
+
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    await flushMicrotasks(20);
+
+    expect(rig.written.filter((write) => write[0] === RESET)).toHaveLength(1);
+    expect(rig.written.some((write) => write[0] === STOP_OR_PAUSE)).toBe(false);
+    expect(rig.targetOnTheTrainer()).toBeUndefined();
+    expect(rig.controller.getSnapshot().trainer.releaseFault).toBeUndefined();
+    expect(rig.controller.getSnapshot().trainer.refusal).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('does not take control back after a release — that is the rider’s to do', async () => {
+    // Rule 2 at the top of `controller.ts`, and the decision #372 records:
+    // after a release the next game ride is told to take control on this
+    // screen rather than being handed it silently.
+    const rig = await riding();
+    await rig.controller.clearTargetPower();
+    await ride(rig, 5);
+    await flushMicrotasks(20);
+
+    expect(rig.controller.getSnapshot().trainer.hasControl).toBe(false);
+    expect(rig.written.filter((write) => write[0] === 0x00)).toHaveLength(1);
+    expect(
+      gameTrainerFrom(
+        rig.controller.getSnapshot().trainer,
+        rig.controller.simulationControl(),
+        false,
+      ).kind,
+    ).toBe('no-control');
+    rig.controller.dispose();
+  });
+
+  it('releases a game ride through the same Reset, and does not report it as a loss', async () => {
+    const rig = await riding();
+    const handle = rig.controller.simulationControl();
+    await handle?.setSimulationParameters({ grade: gradePercent(6) });
+    const before = rig.written.length;
+
+    const outcome = await handle?.letGo();
+    await flushMicrotasks(20);
+
+    expect(outcome).toStrictEqual({ kind: 'reset' });
+    expect(rig.written.slice(before)).toStrictEqual([[RESET]]);
+    expect(rig.controller.getSnapshot().trainer.lost).toBeUndefined();
+    expect(rig.controller.getSnapshot().trainer.hasControl).toBe(false);
+    rig.controller.dispose();
+  });
+
+  it('keeps control when one workout replaces another, so the new one can drive the trainer', async () => {
+    // A Reset on the way out of the first workout would revoke the control the
+    // second is about to write through — the Reset trap, reached from here.
+    const rig = await riding();
+    rig.controller.startWorkout(oneBlock(), THRESHOLD);
+    await ride(rig, 2);
+    await flushMicrotasks();
+
+    rig.controller.startWorkout(
+      {
+        ...oneBlock(),
+        name: 'Second',
+        workout: {
+          name: 'Second',
+          blocks: [{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.6) }],
+        },
+      },
+      THRESHOLD,
+    );
+    await ride(rig, 2);
+    await flushMicrotasks();
+
+    expect(rig.written.some((write) => write[0] === RESET)).toBe(false);
+    expect(rig.controller.getSnapshot().trainer.hasControl).toBe(true);
+    expect(rig.targetOnTheTrainer()).toBe(150);
+    rig.controller.dispose();
+  });
+
+  it('tells the rider when the trainer refused the Reset, and clears that when control is taken', async () => {
+    const rig = await riding({ supportsReset: false });
+    await rig.controller.setTargetPower(watts(200));
+    const before = rig.written.length;
+
+    await rig.controller.clearTargetPower();
+    await flushMicrotasks(20);
+
+    // The fallback went out: Reset, a flat road, and a Stop.
+    expect(rig.written.slice(before).map((write) => write[0])).toStrictEqual([
+      RESET,
+      0x11,
+      STOP_OR_PAUSE,
+    ]);
+    const fault = rig.controller.getSnapshot().trainer.releaseFault;
+    expect(fault).toContain('may still be holding resistance');
+
+    await rig.controller.requestTrainerControl();
+    expect(rig.controller.getSnapshot().trainer.releaseFault).toBeUndefined();
     rig.controller.dispose();
   });
 });

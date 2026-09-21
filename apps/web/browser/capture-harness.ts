@@ -253,11 +253,18 @@ async function start(): Promise<void> {
         return;
       }
       try {
-        // `stop()`, never a target of zero. `workout/session.ts` records why:
-        // zero watts is a setpoint the machine holds, and a rider pedalling
-        // against nothing is not the same as a released trainer.
-        await control.control.stop();
-        log('✓ released control with Stop');
+        // `letGo()` — the shipping client's one release, an FTMS Reset
+        // (#372). ⚠️ This used to send `stop()`, and on the trainer #372 was
+        // measured on an acknowledged Stop left the target applied. Never a
+        // target of zero either: zero watts is a setpoint the machine holds.
+        const outcome = await control.control.letGo();
+        log(
+          outcome.kind === 'reset'
+            ? '✓ released with Reset — control is given up'
+            : `⚠ Reset refused (${outcome.resetRefusal.message}); sent ${
+                outcome.flattened ? 'a flat road and ' : ''
+              }Stop instead — NOT a confirmed release`,
+        );
       } catch (error: unknown) {
         report('releasing control', error);
       }
