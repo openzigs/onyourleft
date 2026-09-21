@@ -80,7 +80,7 @@ describe('the lookahead — #398', () => {
       'In 5 seconds: the same effort — 1 minute at 90 percent of your threshold.',
     );
     expect(upcomingBlock(shapes, 4015, LEAD)?.sentence).toBe(
-      'In 5 seconds: easing off — 1 second of free riding, with no target.',
+      'In 5 seconds: easing off — 1 second of free riding, with the trainer at its lightest.',
     );
     expect(upcomingBlock(shapes, 4020.5, LEAD)?.sentence).toBe(
       'In 1 second: harder — 1 minute at 50 percent of your threshold.',

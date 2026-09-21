@@ -51,11 +51,20 @@ function spokenLength(totalSeconds: number): string {
   return rest === 0 ? head : `${head} ${String(rest)} minutes`;
 }
 
-/** A segment in words. A ramp says both ends; a free ride says there is no target. */
+/**
+ * A segment in words. A ramp says both ends; a free ride says what the trainer
+ * is doing through it.
+ *
+ * ⚠️ A free ride said "with no target" until PR #444's review, and a reviewer
+ * who remembers that is reading the old file. Since #441 the session eases a
+ * free-ride block by writing the machine's own lowest ERG target
+ * (`workout/session.ts` §`ease`) — on every trainer, including one a Stop used
+ * to free — so there IS a target, the least the machine will hold.
+ */
 function spokenSegment(segment: WorkoutSegment): string {
   const length = spokenLength(segment.endsAt - segment.startsAt);
   if (segment.from === undefined || segment.to === undefined) {
-    return `${length} of free riding, with no target`;
+    return `${length} of free riding, with the trainer at its lightest`;
   }
   if (segment.from === segment.to) {
     return `${length} at ${String(percentOf(segment.from))} percent of your threshold`;
