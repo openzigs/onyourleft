@@ -237,6 +237,25 @@ describe('the wrapped position — criteria 4 and 5', () => {
     expect(found?.metresAhead).toBeCloseTo(250);
   });
 
+  it('treats a climb that runs across the line as ONE climb, starting where it starts', () => {
+    // 150 m of climb at the end of the loop and 150 m more after the line:
+    // one hill, announced once per lap, and never "a climb" at 0 m.
+    const profile = graded([...stretch(15, 6), ...stretch(150, 0), ...stretch(36, 6)], true);
+    const slopes = slopesOf(profile);
+    expect(slopes).toHaveLength(1);
+    expect(slopes[0]?.start).toBe(1650);
+    expect(slopes[0]?.length).toBe(510);
+    // Inside its tail after the line, nothing is ahead: the rider is on it.
+    expect(
+      slopeAhead(slopes, profile, (profile.totalDistance as number) + 50, 250),
+    ).toBeUndefined();
+    const total = profile.totalDistance as number;
+    expect(ride(profile, 0, 2 * total, 1, 250).map((event) => event.text)).toEqual([
+      'Climb in 250 metres, 6 percent',
+      'Climb in 250 metres, 6 percent',
+    ]);
+  });
+
   it('says nothing on a point-to-point route ridden past its end — it does not wrap', () => {
     const profile = graded(LOOP, false);
     const total = profile.totalDistance as number;
