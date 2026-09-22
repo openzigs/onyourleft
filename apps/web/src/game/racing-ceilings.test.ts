@@ -27,10 +27,14 @@
  *    nonsense — it would say a rider may hold more watts per kilogram for an
  *    hour than for five seconds — and it is one transposed row away in a
  *    Markdown table nobody compiles.
- * 2. **Provenance is one of two words, and a row with no anchor may not claim
- *    the stronger one.** The amendment's whole honesty rests on the difference
- *    between *read first-hand* and *a lead nobody has read*; a third word
- *    invented later, or an unanchored row promoted to `first-hand`, erases it.
+ * 2. **Provenance is one of two words, and the stronger one has to be earned.**
+ *    The amendment's whole honesty rests on the difference between *read
+ *    first-hand* and *a lead nobody has read*; a third word invented later, or
+ *    a row promoted to `first-hand` over an anchor that names nothing, erases
+ *    it. ⚠️ The rule is the **positive** one — a `first-hand` row carries an
+ *    anchor with substance and the address of the page it says it fetched —
+ *    because the earlier negative one tested a spelling: it fired on an em dash
+ *    and let an empty or vague anchor through.
  * 3. **The body still says what the amendment quotes back at it.** ADR 0013
  *    forbids editing an accepted ADR's body, and `CLAUDE.md` §7 says a reviewer
  *    asking *"does any hunk touch a line that already existed?"* is the
@@ -84,6 +88,15 @@ const DURATION_SECONDS: ReadonlyMap<string, number> = new Map([
 
 /** The only two words the provenance column may carry. */
 const PROVENANCE = ['first-hand', 'unsourced'] as const;
+
+/**
+ * How much text an anchor must have left once its emphasis, its link targets
+ * and its dashes are stripped, before a row may claim it was read first-hand.
+ * Forty characters is shorter than a person's name and the title of the thing
+ * they appear in, which is the least any of this table's anchors identifies —
+ * it is a floor on "names something", not a style rule.
+ */
+const ANCHOR_MINIMUM_CHARACTERS = 40;
 
 interface CeilingRow {
   readonly duration: string;
@@ -174,16 +187,38 @@ describe("ADR 0028's owner answers — #488", () => {
     }
   });
 
-  it('refuses to call a ceiling with no anchor first-hand', () => {
-    // The amendment writes an em dash where a figure has nothing behind it.
-    // Such a row is a number somebody chose, and saying it was read first-hand
-    // would be the one claim this table exists to keep honest.
+  it('refuses to call a ceiling first-hand unless its anchor names what was read', () => {
+    // ⚠️ This assertion used to fire on ONE SPELLING — an anchor cell equal to
+    // an em dash — so an empty cell, a lone hyphen, or a wave of the hand
+    // ("a published chart") could claim `first-hand` and pass. The honest
+    // property is the positive one, and the amendment states it: `first-hand`
+    // means *the page was fetched and the figure read from it*. So a row
+    // claiming it must carry an anchor with substance in it AND the address of
+    // the page it claims to have read. The old em-dash case falls out of that
+    // rather than being spelled separately, and so does every other way of
+    // anchoring a number to nothing.
+    //
+    // Nothing is asserted about an `unsourced` row's anchor: a lead is allowed
+    // to be a citation with no URL, which is what three of the four rows are.
     for (const row of ceilingRows) {
-      if (row.anchor.replace(/\*/g, '').trim() === '—') {
-        expect(row.provenance, `${row.duration} has no anchor and claims to be sourced`).toBe(
-          'unsourced',
-        );
+      if (row.provenance !== 'first-hand') {
+        continue;
       }
+      const substance = row.anchor
+        // A link's text is substance; its target is checked separately below.
+        .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+        .replace(/[*_`]/g, '')
+        .replace(/[—–-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      expect(
+        substance.length,
+        `${row.duration} claims first-hand and its anchor names nothing`,
+      ).toBeGreaterThanOrEqual(ANCHOR_MINIMUM_CHARACTERS);
+      expect(
+        row.anchor,
+        `${row.duration} claims the page was fetched and does not say which page`,
+      ).toMatch(/https?:\/\/\S+/);
     }
   });
 
