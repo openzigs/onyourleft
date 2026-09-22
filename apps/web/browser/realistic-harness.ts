@@ -52,7 +52,8 @@ import {
 } from '../src/game/three-renderer';
 import { configQuery, parseConfig, percentiles, type Percentiles } from './realistic/config';
 import { rideFrame, RIDE_METRES_PER_SECOND } from './realistic/frame';
-import { describe, guarded, MeasurementClock, readoutMs } from './realistic/loop';
+import { describe, guarded, MeasurementClock } from './realistic/loop';
+import { readoutLine, takeOverReporting } from './realistic/reporting';
 import { realisticRoute } from './realistic/route';
 
 /** How long the scene runs before anything is sampled: shader compiles, first uploads. */
@@ -301,14 +302,15 @@ async function run(): Promise<void> {
       shownAt = now;
       // The clock's own rolling window, never the measurement window: that one
       // is emptied every frame once measured, which is the `NaN` the tablet
-      // showed. @see MeasurementClock.recent
-      const live = percentiles(clock.recent);
-      controls.line.textContent =
-        `${drawnWorldOf(view)} world · ${worldRung(state).label}` +
-        `${measured ? ' · measured' : elapsed < WARM_UP_SECONDS ? ' · warming up' : ' · sampling'}` +
-        ` · frame p50 ${readoutMs(live.p50)} · ` +
-        `buffer ${String(gl?.drawingBufferWidth ?? 0)}×${String(gl?.drawingBufferHeight ?? 0)}` +
-        (notice === undefined ? '' : `\n${notice}`);
+      // showed. @see readoutLine
+      controls.line.textContent = readoutLine({
+        world: drawnWorldOf(view),
+        rung: worldRung(state).label,
+        phase: measured ? 'measured' : elapsed < WARM_UP_SECONDS ? 'warming up' : 'sampling',
+        clock,
+        buffer: [gl?.drawingBufferWidth ?? 0, gl?.drawingBufferHeight ?? 0],
+        notice,
+      });
     }
   };
   const safeStep = guarded(step, fail);
@@ -334,19 +336,11 @@ function fail(message: string): void {
 // this module existed; from here on it hands them to `fail`, and what it caught
 // meanwhile is reported now. Without that script — a page built from an old
 // `realistic.html` — this module listens for itself, as it always did.
-if (early === undefined) {
-  addEventListener('error', (event) => {
-    fail(describe(event.error ?? event.message));
-  });
-  addEventListener('unhandledrejection', (event) => {
-    fail(describe(event.reason));
-  });
-} else {
-  early.report = fail;
-  for (const message of early.errors.splice(0)) fail(message);
-}
+// @see takeOverReporting
+takeOverReporting(early, fail, (type, listener) => addEventListener(type, listener), describe);
 // One line for `adb logcat`, whatever else happens: whether the shell's bridge
-// reached this page is the question the tablet's `triggerEvent` error asks.
+// reached this page. It does (#480) — the tablet's `triggerEvent` error is the
+// app's launch, not this page. @see apps/mobile/src/android/lifecycle-events.test.ts
 console.log(
   `OYL-REALISTIC-LOAD ${JSON.stringify({ bridge: published.bridge ?? 'no early script' })}`,
 );

@@ -3,10 +3,11 @@
 /**
  * `realistic.html`'s first script, run against a fake window — #478.
  *
- * On the owner's tablet the page logged `Uncaught TypeError: Cannot read
- * properties of undefined (reading 'triggerEvent')`: the Android shell sends
- * its lifecycle events by evaluating `window.Capacitor.triggerEvent(…)` in the
- * page, and on this page there was no `window.Capacitor`. The script is inline
+ * #478 wrote it believing the tablet's `Uncaught TypeError: Cannot read
+ * properties of undefined (reading 'triggerEvent')` came from this page having
+ * no `window.Capacitor`. #480 found it does have one; the error is the app's
+ * launch (`apps/mobile/src/android/lifecycle-events.test.ts`). The stand-in is
+ * kept for a page the bridge does not reach. The script is inline
  * in the HTML because it has to run before anything else, so this reads it out
  * of the HTML rather than importing it — the file the harness build ships is
  * the file under test.
@@ -18,6 +19,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import type { EarlyRecord } from '../realistic-harness';
+import { describe as describeError } from './loop';
+import { takeOverReporting } from './reporting';
 
 const HTML = readFileSync(fileURLToPath(new URL('../realistic.html', import.meta.url)), 'utf8');
 
@@ -123,5 +126,51 @@ describe('realistic.html’s first script — #478', () => {
     early.report = (message) => reported.push(message);
     onError?.({ error: null, message: 'Script error.' });
     expect(reported).toEqual(['Script error.']);
+  });
+});
+
+describe('the page’s module taking over from the early script — #480', () => {
+  it('receives every error raised AFTER it loads, not only the ones buffered before', () => {
+    // #479's fix: `early.report = fail`. Without it the early script's own
+    // listeners go on buffering into an array nobody reads again, and nothing
+    // reaches `__oylRealistic.errors` or the OYL-REALISTIC-ERROR line.
+    const page = aWindow({ androidBridge: {} });
+    const onError = page.listeners.get('error');
+    onError?.({ error: new Error('before the module'), message: 'before the module' });
+    const early = page.window.__oylRealisticEarly as EarlyRecord;
+    const failed: string[] = [];
+    const listened: string[] = [];
+    takeOverReporting(
+      early,
+      (message) => failed.push(message),
+      (type) => listened.push(type),
+      describeError,
+    );
+    expect(failed).toEqual(['before the module']);
+    expect(early.errors).toEqual([]);
+    onError?.({ error: new RangeError('mid-ride'), message: 'mid-ride' });
+    page.listeners.get('unhandledrejection')?.({ reason: 'a late load' });
+    expect(failed).toEqual(['before the module', 'RangeError: mid-ride', 'a late load']);
+    expect(early.errors).toEqual([]);
+    // The early script's listeners are the ones in use; the module adds none.
+    expect(listened).toEqual([]);
+  });
+
+  it('listens for itself when the page has no early script', () => {
+    const listeners = new Map<
+      string,
+      (event: { error?: unknown; message?: unknown; reason?: unknown }) => void
+    >();
+    const failed: string[] = [];
+    takeOverReporting(
+      undefined,
+      (message) => failed.push(message),
+      (type, listener) => listeners.set(type, listener),
+      describeError,
+    );
+    listeners.get('error')?.({ error: new TypeError('x'), message: 'x' });
+    listeners.get('error')?.({ error: undefined, message: 'Script error.' });
+    listeners.get('unhandledrejection')?.({ reason: new Error('y') });
+    expect(failed).toEqual(['TypeError: x', 'Script error.', 'y']);
   });
 });

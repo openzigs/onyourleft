@@ -1816,7 +1816,7 @@ adb logcat | grep -i "BluetoothLe"
 | | on by default? | what it costs, by construction | where it is measured |
 |---|---|---|---|
 | **Contact shadows** — a soft blob under the rider and the pacer, placed from `world.ts`'s own sun | **yes, on every rung** | one transparent instanced draw call for all of them (the scenery-free frame is 6 calls, from 5) | `game.browser.spec.ts` §"draws each of the three in its own colour" reads it back, with the shadows off as its control |
-| **A shadow map** for the riders only, caught by a shadow-catching plane under them | **no** — `quality.ts` §`RIDER_SHADOW_MAP_RUNG`, above the ladder, and the first thing the ladder gives up — for the rest of the ride, `quality.ts` §`keepsShadowMap` | a shadow pass of the three rider meshes into a 512² depth map, plus the catcher | the pinned Chromium publishes a frame time on a software rasteriser, which says nothing about a phone. **This part is the measurement #426 closes on** |
+| **A shadow map** for the riders only, caught by a shadow-catching plane under them | **no** — `quality.ts` §`RIDER_SHADOW_MAP_RUNG`, above the ladder, and the first thing the ladder gives up — for the rest of the ride, `quality.ts` §`keepsShadowMap` | a shadow pass of the three rider meshes into a 512² depth map, plus the catcher | the pinned Chromium publishes a frame time on a software rasteriser, which says nothing about a phone. ⚠️ Since [#473](https://github.com/openzigs/onyourleft/issues/473) the harness times frames built as `GameView` builds them (lent, no copy); a figure published before it also paid for a ~55 KB copy a frame the product never makes, so the two are not comparable. **This part is the measurement #426 closes on** |
 
 ⚠️ **The ghost casts neither, on purpose** (`contact-shadow.ts` §`CASTS_CONTACT_SHADOW`): a bicycle
 with no shadow reads as *not really here*, which is #93's at-a-glance criterion. T2 asks whether it
@@ -2221,17 +2221,41 @@ the readout was computed over the measurement window, which the page empties eve
 30-second figure is published — so it was `NaN` during the warm-up and for the rest of every ride.
 It reads the clock's own rolling window now. The `TypeError` is Capacitor's: the shell sends its
 lifecycle events by evaluating `window.Capacitor.triggerEvent("resume", "document")` in the page
-(`MockCordovaWebViewImpl`, when the app resumes after a pause), and on this page there was no
-`window.Capacitor` — which the product's own page does have. **Why it was absent is the device's to
-answer**, and the page now records the evidence before any other script runs:
+(`MockCordovaWebViewImpl`, when the app resumes after a pause).
+
+⚠️ **This paragraph used to say "on this page there was no `window.Capacitor`", and blamed the
+harness page — a reader who remembers that is reading the old file.** [#480](https://github.com/openzigs/onyourleft/issues/480)
+settled it the other way. On 2026-09-22 (main `89a5d9b`) the tablet logged the same `TypeError`
+**twice within the first second of launching the app**, with logcat cleared just before, and
+**before anything navigated to this page**; the page itself then reported
+`capacitorAtStart: "object"`. So the bridge reaches this page, and the error is the app's launch. In
+Capacitor 8.5.2 the only code that evaluates `triggerEvent` in a page is `MockCordovaWebViewImpl`'s
+`pause` and its `resume`-after-a-pause, posted to the main looper to run against whatever document
+the WebView holds by then; the bridge is injected for the app's origin only, so a `window` without
+it in the first second is the WebView's initial blank document, before the app's page has
+committed. Two errors are one pause and one resume at launch. It is **harmless**: that document is
+discarded, and nothing in this client listens for Capacitor's `pause` or `resume` — the app reads
+`visibilitychange`. `apps/mobile/src/android/lifecycle-events.test.ts` asserts both premises
+against the installed Capacitor and this repository's sources. **What only the device can confirm**,
+on the next launch with logcat cleared:
+
+```bash
+"$ADB" logcat -d -b events | grep -E 'wm_on_(paused|resume)_called.*MainActivity'   # a pause and a resume at launch
+"$ADB" logcat -d -s chromium | grep triggerEvent                                     # its source: is NOT https://localhost/…
+```
+
+If the two errors do **not** sit beside a pause and a resume, or their `source:` is the app's own
+page, the argument above is wrong and #480's third item is open again.
+
+The page still records the bridge before any other script runs, which is how this was settled:
 
 ```bash
 "$ADB" logcat -d -s chromium | grep -E 'OYL-REALISTIC-(LOAD|BRIDGE|ERROR)'
 ```
 
 - `OYL-REALISTIC-LOAD {"bridge":{"capacitorAtStart":…,"androidBridgeAtStart":…,"standIn":…}}` — one
-  line per load. `capacitorAtStart: "object"` means Capacitor's bridge reached this page and the
-  `TypeError` should not recur. `"undefined"` with `androidBridgeAtStart: "object"` means the WebView
+  line per load. `capacitorAtStart: "object"` means Capacitor's bridge reached this page, which is
+  what the tablet reported on 2026-09-22. `"undefined"` with `androidBridgeAtStart: "object"` means the WebView
   gave the page Capacitor's message channel but Capacitor's document-start script did not run on it;
   both `"undefined"` means neither reached it.
 - `OYL-REALISTIC-BRIDGE {"event":"resume","target":"document"}` — a lifecycle event the shell sent to a
