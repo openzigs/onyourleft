@@ -36,6 +36,29 @@
  * ride is saved, and the rider is offered it then. `recording.subscribe` is
  * what makes that moment arrive without anybody polling.
  *
+ * ## ⚠️ The tab that did NOT ask — #483, and [ADR 0027](../../../../docs/adr/0027-a-tab-left-behind-by-another-tabs-update.md)
+ *
+ * Two tabs on version 1. The rider presses *Update now* in **B**. The new
+ * worker activates, its `activate` deletes every cache but its own, and **the
+ * spec's Activate algorithm makes it the controller of every client of the
+ * registration — tab A included**, whatever `clients.claim()` does. Tab A is
+ * now version 1's JavaScript under version 2's cache: any lazy chunk it has not
+ * already loaded is a version-1 hashed URL that version 2's precache does not
+ * hold, and after a deploy the server no longer serves it either. This client
+ * is four lazy chunks and a dozen models deep, so that is the likely case.
+ *
+ * Until #483 tab A was told `none` — literally true of the *offer* and
+ * misleading about the *tab*. ADR 0027 D-1 gives it a state of its own,
+ * {@link UpdateStatus} `superseded`, and D-2 makes the repair a **rider's
+ * reload** rather than an automatic one.
+ *
+ * ⚠️ **The signal is the worker's own state, NOT `controllerchange`.** A
+ * `controllerchange` with `asked === false` also fires on the very first
+ * activation on an origin, where nothing is stale and a reload would be a
+ * reload loop (#467). What distinguishes the two is that a worker this watcher
+ * was *offering* — so `isAnUpdate` was true of it — left `installed` for a
+ * state other than `redundant`, which means it activated. See {@link follow}.
+ *
  * ## ⚠️ `controllerchange` fires when nobody asked, and that is a reload loop
  *
  * `worker-core.ts`'s `activate` calls `clients.claim()`, so the **first ever**
@@ -59,7 +82,21 @@ export type UpdateStatus =
   /** A new version is waiting and a ride is in progress. ADR 0024 D-3 rule 3. */
   | 'deferred'
   /** The rider asked. Waiting for `controllerchange`, then one reload. */
-  | 'activating';
+  | 'activating'
+  /**
+   * Another tab took an update and this tab was left behind: it is running an
+   * older bundle under the new worker's cache, so a chunk it has not loaded yet
+   * is a URL nothing serves. ADR 0027 D-1. The repair is a reload, and
+   * {@link UpdateWatcher.reloadNow} is the rider's gesture for it.
+   */
+  | 'superseded'
+  /**
+   * The same, while a ride is in progress: **nothing reloads over an unsaved
+   * ride**, which is ADR 0024 D-3 rule 3 applied to the repair rather than to
+   * the activation. ADR 0027 D-3. A sentence and no button, exactly as
+   * `deferred` is.
+   */
+  | 'superseded-deferred';
 
 /** The half of `ServiceWorkerContainer` this watcher listens to. */
 export interface ControllerChangeSource {
@@ -94,6 +131,16 @@ export interface UpdateWatcher {
   readonly activate: () => void;
   /** The rider said not now. A later update offers itself again. */
   readonly dismiss: () => void;
+  /**
+   * The rider's gesture for a tab another tab left behind — ADR 0027 D-2.
+   *
+   * ⚠️ Refused unless the status is exactly `superseded`, which is the same
+   * shape {@link UpdateWatcher.activate}'s refusal has and is there for the
+   * same reason: while a ride is in progress the status is
+   * `superseded-deferred`, so this reloads nothing over an unsaved ride even if
+   * a view offers the button anyway.
+   */
+  readonly reloadNow: () => void;
 }
 
 export function createUpdateWatcher(ports: UpdateWatcherPorts): UpdateWatcher {
@@ -102,6 +149,12 @@ export function createUpdateWatcher(ports: UpdateWatcherPorts): UpdateWatcher {
   let dismissed = false;
   let asked = false;
   let reloaded = false;
+  /**
+   * Whether an update this tab was offering activated without this tab asking
+   * — #483. Sticky for the life of the tab: nothing that happens in this tab
+   * makes an old bundle current again, and only a reload repairs it.
+   */
+  let superseded = false;
   const followed = new Set<ServiceWorkerLike>();
 
   const announce = (): void => {
@@ -168,12 +221,27 @@ export function createUpdateWatcher(ports: UpdateWatcherPorts): UpdateWatcher {
         // rider is told now is ADR 0024 D-3's `none` — there is nothing
         // waiting, deferred or otherwise.
         //
-        // ⚠️ **`none` is true of the offer and not of the tab — #483.** When
-        // ANOTHER tab took the update, this one is now controlled by the new
-        // worker, whose activation deleted this tab's precache: a lazy chunk
-        // it has not loaded yet is a URL nothing serves. D-3 has no state for
-        // that, and choosing one is #483's; #481's review (finding 5) found it.
+        // ⚠️ **`none` was true of the offer and not of the tab, and #483 is
+        // where that stopped being what the rider is told.** When ANOTHER tab
+        // took the update, this one is now controlled by the new worker, whose
+        // activation deleted this tab's precache: a lazy chunk it has not
+        // loaded yet is a URL nothing serves. ADR 0024 D-3 had no state for
+        // that; [ADR 0027](../../../../docs/adr/0027-a-tab-left-behind-by-another-tabs-update.md)
+        // D-1 gives it one.
+        //
+        // ⚠️ **`redundant` is the case that is NOT it, and telling the two
+        // apart is the whole of this branch.** A worker leaves `installed` for
+        // `redundant` when a NEWER worker replaced it while it was still
+        // waiting — nothing activated, this tab's cache is untouched, and the
+        // newer one will be offered when it installs. Every other exit
+        // (`activating`, `activated`) means it took control. Reading this off
+        // `controllerchange` instead would be wrong for the opposite reason:
+        // that fires on the first ever activation too, where nothing is stale
+        // (#467).
         waiting = null;
+        if (worker.state !== 'redundant') {
+          superseded = true;
+        }
         announce();
       }
     };
@@ -231,14 +299,25 @@ export function createUpdateWatcher(ports: UpdateWatcherPorts): UpdateWatcher {
     ports.reload();
   });
 
+  const riding = (): boolean => ports.recording?.inProgress() === true;
+
   const status = (): UpdateStatus => {
     if (asked) {
       return 'activating';
     }
+    // ⚠️ **Before the waiting worker, deliberately — ADR 0027 D-4.** A tab that
+    // has been left behind is already running a bundle whose chunks may not
+    // resolve; a further release waiting behind it does not make that less
+    // true, and both are repaired by the same reload. Offering "Update now"
+    // there would tell the rider the wrong story about why their page has to
+    // reload, and `activate` refuses in this state for that reason.
+    if (superseded) {
+      return riding() ? 'superseded-deferred' : 'superseded';
+    }
     if (waiting === null || dismissed) {
       return 'none';
     }
-    return ports.recording?.inProgress() === true ? 'deferred' : 'available';
+    return riding() ? 'deferred' : 'available';
   };
 
   return {
@@ -262,6 +341,18 @@ export function createUpdateWatcher(ports: UpdateWatcherPorts): UpdateWatcher {
     dismiss: () => {
       dismissed = true;
       announce();
+    },
+    reloadNow: () => {
+      // ⚠️ The same refusal `activate` makes, for the same reason: a ride is
+      // the one thing in this app a rider cannot redo, and `status()` is
+      // `superseded-deferred` rather than `superseded` for as long as one is
+      // recording OR paused. `reloaded` is shared with the `controllerchange`
+      // path so that a tab reloads at most once however it got here.
+      if (status() !== 'superseded' || reloaded) {
+        return;
+      }
+      reloaded = true;
+      ports.reload();
     },
   };
 }

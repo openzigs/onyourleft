@@ -141,6 +141,10 @@ function updateWaiting(): { readonly watcher: UpdateWatcher; readonly activation
         activations += 1;
       },
       dismiss: () => undefined,
+      // #483. This fixture never reaches `superseded`, so the reload is never
+      // offered; it is here because `UpdateWatcher` requires it, and a stub
+      // that could reload would be a stub that could take a ride away.
+      reloadNow: () => undefined,
     },
     activations: () => activations,
   };

@@ -640,6 +640,30 @@ test.describe('a second version arrives', () => {
       expect(
         await opened.page.evaluate(() => navigator.serviceWorker.controller?.scriptURL ?? ''),
       ).toContain(nextName);
+
+      // ⚠️ **#483, in a real browser and on no extra page load.** This page
+      // never pressed "Update now" — the line above posted `SKIP_WAITING`
+      // straight to the worker, which is precisely what ANOTHER TAB pressing
+      // it looks like from here. The spec's Activate made the new worker this
+      // page's controller anyway, and the old worker's cache is gone: the page
+      // is an old bundle under a new worker. Before #483 it was told `none`
+      // and showed nothing at all.
+      //
+      // Two things make this more than a rendering assertion. (1) The marker
+      // planted before the update is still here, so the page was NOT reloaded
+      // out from under the rider — ADR 0027 D-2, in the engine rather than in
+      // jsdom. (2) "Update now" must be gone: a page offering both would be
+      // one that never noticed, and D-4 says the reload is the way out.
+      await expect(opened.page.getByRole('button', { name: 'Reload now' })).toBeVisible({
+        timeout: 30_000,
+      });
+      await expect(opened.page.getByRole('button', { name: 'Update now' })).toHaveCount(0);
+      expect(
+        await opened.page.evaluate(
+          () => (globalThis as unknown as { __oylAlive?: number }).__oylAlive !== undefined,
+        ),
+        'the page reloaded itself after another tab took the update',
+      ).toBe(true);
     } finally {
       await opened.page
         .evaluate(async () => {

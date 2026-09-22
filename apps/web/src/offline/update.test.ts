@@ -451,13 +451,22 @@ describe('the worker stops waiting without this tab asking — #473', () => {
     worker.become('activating');
   }
 
+  // ⚠️ **Since #483 the words in this block's expectations changed and its
+  // claim did not.** #473's finding is that the OFFER must go — that pressing
+  // "Update now" must not post to a worker that is already active and leave
+  // the tab saying "activating" for ever. Every assertion about `posted` and
+  // `reloads` below is unchanged and still the point. What moved is what the
+  // rider is TOLD afterwards: `none` was true of the offer and false of the
+  // tab, which is #483, so it is `superseded` now. A reviewer who remembers
+  // these cases asserting `none` is reading the pre-#483 file.
+
   it('withdraws the offer when ANOTHER TAB activates it', () => {
     const { watcher, registration, announcements } = harness();
     const worker = registration.installUpdate();
     expect(watcher.status()).toBe('available');
     const before = announcements();
     takenElsewhere(registration, worker);
-    expect(watcher.status()).toBe('none');
+    expect(watcher.status()).toBe('superseded');
     // The rider's screen has to hear about it; nothing polls.
     expect(announcements()).toBe(before + 1);
   });
@@ -472,7 +481,7 @@ describe('the worker stops waiting without this tab asking — #473', () => {
     changes.fire();
     watcher.activate();
     expect(worker.posted).toEqual([]);
-    expect(watcher.status()).toBe('none');
+    expect(watcher.status()).toBe('superseded');
     expect(reloads()).toBe(0);
   });
 
@@ -485,15 +494,16 @@ describe('the worker stops waiting without this tab asking — #473', () => {
 
   it('withdraws a DEFERRED offer too, rather than deferring nothing', () => {
     // ADR 0024 D-3's `deferred` means "a new version is waiting and a ride is
-    // in progress". Once it has gone there is nothing to defer.
+    // in progress". Once it has gone there is nothing to defer — and since
+    // #483 what there IS to say is that the ride's own tab was left behind.
     const { watcher, registration, recording } = harness();
     recording.set(true);
     const worker = registration.installUpdate();
     expect(watcher.status()).toBe('deferred');
     takenElsewhere(registration, worker);
-    expect(watcher.status()).toBe('none');
+    expect(watcher.status()).toBe('superseded-deferred');
     recording.set(false);
-    expect(watcher.status()).toBe('none');
+    expect(watcher.status()).toBe('superseded');
   });
 
   it('withdraws an offer for a worker that was ALREADY waiting when the watcher was made', () => {
@@ -509,15 +519,215 @@ describe('the worker stops waiting without this tab asking — #473', () => {
     });
     expect(watcher.status()).toBe('available');
     takenElsewhere(registration, worker);
-    expect(watcher.status()).toBe('none');
+    expect(watcher.status()).toBe('superseded');
   });
 
   it('still offers the NEXT release after withdrawing one', () => {
+    // ⚠️ Withdrawn by being made REDUNDANT, which is #483's other exit from
+    // `installed` and the one where nothing activated. It used to be withdrawn
+    // by another tab activating it, which since #483 leaves this tab
+    // `superseded` and offering a reload rather than an update — ADR 0027 D-4,
+    // asserted in the #483 block. The claim this case makes is unchanged: one
+    // withdrawal must not silence this tab for the rest of its life.
     const { watcher, registration } = harness();
     const first = registration.installUpdate();
-    takenElsewhere(registration, first);
-    first.become('activated');
+    first.become('redundant');
+    expect(watcher.status()).toBe('none');
     registration.installUpdate();
+    expect(watcher.status()).toBe('available');
+  });
+});
+
+describe('the tab that did NOT ask is left behind — #483, ADR 0027', () => {
+  /**
+   * Two tabs over ONE registration, which is what the case is about.
+   *
+   * ⚠️ Both watchers see the same `FakeWorker` objects, because in a browser
+   * both tabs are clients of one registration and one worker: the
+   * `statechange` every watcher hears is the same event. A test that gave each
+   * tab its own registration would be two independent tabs rather than the
+   * case, and would pass over any implementation at all.
+   */
+  function twoTabs(): {
+    readonly registration: FakeRegistration;
+    readonly a: Harness;
+    readonly b: Harness;
+  } {
+    const registration = new FakeRegistration();
+    const make = (): Harness => {
+      const changes = new FakeControllerChanges();
+      const recording = recordingInterlock();
+      let reloads = 0;
+      let announcements = 0;
+      const watcher = createUpdateWatcher({
+        registration,
+        controllerChanges: changes,
+        recording,
+        reload: () => {
+          reloads += 1;
+        },
+      });
+      watcher.subscribe(() => {
+        announcements += 1;
+      });
+      return {
+        watcher,
+        registration,
+        changes,
+        recording,
+        reloads: () => reloads,
+        announcements: () => announcements,
+      };
+    };
+    registration.running();
+    return { registration, a: make(), b: make() };
+  }
+
+  /** B presses "Update now", and the worker activates for every client. */
+  function bTakesTheUpdate(registration: FakeRegistration, b: Harness, worker: FakeWorker): void {
+    b.watcher.activate();
+    registration.waiting = null;
+    registration.active = worker;
+    worker.become('activating');
+  }
+
+  it('tells the tab that did not ask that it was left behind, rather than "none"', () => {
+    // ⚠️ **The finding.** Before #483 tab A was told `none` — true of the
+    // offer and false of the tab: A is running version 1's JavaScript under
+    // version 2's cache, and any lazy chunk it has not loaded is a URL nothing
+    // serves.
+    const { registration, a, b } = twoTabs();
+    const worker = registration.installUpdate();
+    expect(a.watcher.status()).toBe('available');
+    expect(b.watcher.status()).toBe('available');
+
+    const before = a.announcements();
+    bTakesTheUpdate(registration, b, worker);
+
+    expect(a.watcher.status()).toBe('superseded');
+    // The rider's screen has to hear about it; nothing polls.
+    expect(a.announcements()).toBeGreaterThan(before);
+    // And B is unaffected: it asked, so it is waiting for its own reload.
+    expect(b.watcher.status()).toBe('activating');
+  });
+
+  it('reloads the tab that did not ask only when the rider asks it to', () => {
+    const { registration, a, b } = twoTabs();
+    const worker = registration.installUpdate();
+    bTakesTheUpdate(registration, b, worker);
+
+    // ADR 0027 D-2: nothing reloads on its own, not even here. A
+    // `controllerchange` arrives in A too — that is how the spec's Activate
+    // works — and A must still not reload by itself.
+    a.changes.fire();
+    expect(a.reloads()).toBe(0);
+
+    a.watcher.reloadNow();
+    expect(a.reloads()).toBe(1);
+  });
+
+  it('reloads at most once however many times the rider presses', () => {
+    const { registration, a, b } = twoTabs();
+    const worker = registration.installUpdate();
+    bTakesTheUpdate(registration, b, worker);
+    a.watcher.reloadNow();
+    a.watcher.reloadNow();
+    a.watcher.reloadNow();
+    expect(a.reloads()).toBe(1);
+  });
+
+  it('and B, which asked, reloads on controllerchange exactly as it did before', () => {
+    const { registration, a, b } = twoTabs();
+    const worker = registration.installUpdate();
+    bTakesTheUpdate(registration, b, worker);
+    b.changes.fire();
+    expect(b.reloads()).toBe(1);
+    expect(a.reloads()).toBe(0);
+  });
+
+  it('will not reload over an unsaved ride, recording or paused — ADR 0027 D-3', () => {
+    // ⚠️ #483's fourth criterion, and the one rule that could not be relaxed:
+    // `rideInProgress` counts a PAUSED ride, so both are held. The refusal is
+    // in the watcher and not only in the component, for the reason
+    // `activate`'s is.
+    const { registration, a, b } = twoTabs();
+    const worker = registration.installUpdate();
+    a.recording.set(true);
+    bTakesTheUpdate(registration, b, worker);
+
+    expect(a.watcher.status()).toBe('superseded-deferred');
+    a.watcher.reloadNow();
+    expect(a.reloads()).toBe(0);
+    a.changes.fire();
+    expect(a.reloads()).toBe(0);
+
+    // And the moment the ride is saved the rider may act, with nobody polling.
+    const before = a.announcements();
+    a.recording.set(false);
+    expect(a.announcements()).toBeGreaterThan(before);
+    expect(a.watcher.status()).toBe('superseded');
+    a.watcher.reloadNow();
+    expect(a.reloads()).toBe(1);
+  });
+
+  it('does not call a tab superseded when a NEWER worker made the waiting one redundant', () => {
+    // ⚠️ The other way out of `installed`, and it is the case that must NOT
+    // report a stale tab: nothing activated, so nothing deleted this tab's
+    // cache, and the newer worker will be offered when it installs.
+    const { watcher, registration } = harness();
+    const worker = registration.installUpdate();
+    worker.become('redundant');
+    expect(watcher.status()).toBe('none');
+    registration.installUpdate();
+    expect(watcher.status()).toBe('available');
+  });
+
+  it('does not call a rider’s FIRST ever visit superseded', () => {
+    // ⚠️ #467's guard, restated for the new state. `clients.claim()` makes the
+    // first ever worker the controller of the page that installed it, and a
+    // rule written off `controllerchange` would have called every first visit
+    // stale. The signal is a worker this watcher was OFFERING leaving
+    // `installed`, and a first install is never offered.
+    const { watcher, registration, changes, reloads } = harness();
+    registration.installFirstEver();
+    changes.fire();
+    expect(watcher.status()).toBe('none');
+    expect(reloads()).toBe(0);
+  });
+
+  it('refuses to activate a further release, and reloading is the one way out', () => {
+    // ADR 0027 D-4. A release that installs behind a tab already left behind
+    // does not make the old bundle current; the reload repairs both.
+    const { registration, a, b } = twoTabs();
+    const first = registration.installUpdate();
+    bTakesTheUpdate(registration, b, first);
+    first.become('activated');
+
+    const second = registration.installUpdate();
+    expect(a.watcher.status()).toBe('superseded');
+    a.watcher.activate();
+    expect(second.posted).toEqual([]);
+    expect(a.reloads()).toBe(0);
+    a.watcher.reloadNow();
+    expect(a.reloads()).toBe(1);
+  });
+
+  it('is not reachable by "Not now", which silences an offer and not a fact', () => {
+    const { registration, a, b } = twoTabs();
+    const worker = registration.installUpdate();
+    a.watcher.dismiss();
+    expect(a.watcher.status()).toBe('none');
+    bTakesTheUpdate(registration, b, worker);
+    expect(a.watcher.status()).toBe('superseded');
+    a.watcher.dismiss();
+    expect(a.watcher.status()).toBe('superseded');
+  });
+
+  it('does nothing when the rider’s tab was never left behind', () => {
+    const { watcher, registration, reloads } = harness();
+    registration.installUpdate();
+    watcher.reloadNow();
+    expect(reloads()).toBe(0);
     expect(watcher.status()).toBe('available');
   });
 });
