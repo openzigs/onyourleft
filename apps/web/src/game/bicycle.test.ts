@@ -29,6 +29,7 @@ import {
   CRANK_AXIS_Z,
   CRANK_LENGTH_METRES,
   emptyRiderJoints,
+  handPosition,
   LEG_BONE_COUNT,
   legBones,
   riderJoints,
@@ -42,6 +43,7 @@ import {
   type RiderPart,
 } from './bicycle';
 import { NO_READING, hudReadings, type HudInput, type SensorReading } from './hud/fields';
+import { DEFAULT_RIDING_POSITION, RIDING_POSITION_ORDER } from './rider';
 import { atStartLine } from './simulation';
 import {
   altitudeMetres,
@@ -68,6 +70,12 @@ function reachOf(solid: RiderPart['solid']): number {
     case 'tube':
       return Math.hypot(solid.radius * 2, solid.length) / 2;
     case 'ring':
+      return solid.radius + solid.thickness;
+    // A part of a ring is inside the whole ring's sphere whatever it sweeps, so
+    // this is the same bound and is loose rather than wrong — which is what a
+    // bounding sphere is for. The bar's own extent is asserted exactly, from
+    // its arc, in §"the rider sits on the bicycle".
+    case 'bend':
       return solid.radius + solid.thickness;
     case 'ball':
       return solid.radius;
@@ -218,6 +226,212 @@ describe('the rider is a bicycle with somebody on it', () => {
     expect(first.y).toBeCloseTo(-second.y, 9);
     expect(first.x).toBeCloseTo(-second.x, 9);
     expect(Math.abs(first.y)).toBeCloseTo(CRANK_LENGTH_METRES, 9);
+  });
+});
+
+/**
+ * Where a point of a part's own centreline ends up, in the bicycle's frame.
+ *
+ * ⚠️ **This applies the three rotations X, then Y, then Z, then the
+ * translation** — `RiderPart`'s own documented order, which `three-renderer.ts`
+ * §`riderPartGeometry` builds with. It IS a re-implementation, and that is
+ * deliberate here where `reachOf`'s bounding sphere deliberately avoids one:
+ * the question below is not how big a part is but **where a particular point of
+ * it lands**, and a hand on a bar cannot be checked any other way without a
+ * GPU. The two disagreeing is the finding, not the noise.
+ */
+function placed(
+  part: RiderPart,
+  local: { readonly x: number; readonly y: number; readonly z: number },
+): { readonly x: number; readonly y: number; readonly z: number } {
+  const rx = (p: { x: number; y: number; z: number }, a: number) => ({
+    x: p.x,
+    y: p.y * Math.cos(a) - p.z * Math.sin(a),
+    z: p.y * Math.sin(a) + p.z * Math.cos(a),
+  });
+  const ry = (p: { x: number; y: number; z: number }, a: number) => ({
+    x: p.x * Math.cos(a) + p.z * Math.sin(a),
+    y: p.y,
+    z: -p.x * Math.sin(a) + p.z * Math.cos(a),
+  });
+  const rz = (p: { x: number; y: number; z: number }, a: number) => ({
+    x: p.x * Math.cos(a) - p.y * Math.sin(a),
+    y: p.x * Math.sin(a) + p.y * Math.cos(a),
+    z: p.z,
+  });
+  const turned = rz(ry(rx({ ...local }, part.pitch), part.yaw), part.roll);
+  return { x: turned.x + part.x, y: turned.y + part.y, z: turned.z + part.z };
+}
+
+/** Points along a part's centreline, in the bicycle's frame. */
+function centreline(part: RiderPart): readonly { x: number; y: number; z: number }[] {
+  const solid = part.solid;
+  const steps = 24;
+  if (solid.shape === 'bend') {
+    return Array.from({ length: steps + 1 }, (_, step) => {
+      const angle = solid.start + (step / steps) * solid.sweep;
+      return placed(part, {
+        x: solid.radius * Math.cos(angle),
+        y: solid.radius * Math.sin(angle),
+        z: 0,
+      });
+    });
+  }
+  if (solid.shape === 'tube') {
+    return Array.from({ length: steps + 1 }, (_, step) =>
+      placed(part, { x: 0, y: (step / steps - 0.5) * solid.length, z: 0 }),
+    );
+  }
+  return [placed(part, { x: 0, y: 0, z: 0 })];
+}
+
+/** Every part of the handlebar — the tops, the two bends and the two drops. */
+const BAR_PARTS = RIDER_BODY_PARTS.filter((each) => each.name.startsWith('bar '));
+
+/** How far a point is from the nearest point of the bar's centreline. */
+function distanceToBar(at: { readonly y: number; readonly z: number }, side: 1 | -1): number {
+  let best = Number.POSITIVE_INFINITY;
+  for (const part of BAR_PARTS) {
+    // The tops run right across, so either hand can hold them; a bend and a
+    // drop belong to one side of the bicycle.
+    if (part.name !== 'bar tops' && Math.sign(part.x) !== side) continue;
+    for (const point of centreline(part)) {
+      if (part.name === 'bar tops' && Math.sign(point.x) !== side) continue;
+      best = Math.min(best, Math.hypot(point.y - at.y, point.z - at.z));
+    }
+  }
+  return best;
+}
+
+describe('the rider sits on the bicycle — #369', () => {
+  it('has a drop bar rather than one straight tube across', () => {
+    // The defect this replaces: the stylised bicycle's whole handlebar was a
+    // single `tube`, which is a town bike, while `three-renderer.ts` drew a
+    // curl on the realistic one from four literals of its own.
+    const bends = BAR_PARTS.filter((each) => each.solid.shape === 'bend');
+    expect(bends).toHaveLength(2);
+    expect(BAR_PARTS.filter((each) => each.name.startsWith('bar drop'))).toHaveLength(2);
+    // One bend each side, at the ends of the tops rather than in the middle.
+    expect(bends.map((each) => Math.sign(each.x)).sort()).toEqual([-1, 1]);
+    const tops = BAR_PARTS.find((each) => each.name === 'bar tops');
+    expect(tops).toBeDefined();
+    const half = reachOf((tops as RiderPart).solid);
+    for (const bend of bends) {
+      expect(Math.abs(bend.x)).toBeGreaterThan(half * 0.8);
+    }
+  });
+
+  it('curves the bar forward at the top and down to the drops, like a road bar', () => {
+    // Read off the arc itself rather than from the constants that built it, so
+    // a bend that was swept the wrong way — the arc through the BACK, which is
+    // what a sweep with no start angle gives you — is a failure here.
+    for (const bend of BAR_PARTS.filter((each) => each.solid.shape === 'bend')) {
+      const arc = centreline(bend);
+      const first = arc[0] as { y: number; z: number };
+      const last = arc[arc.length - 1] as { y: number; z: number };
+      const furthestForward = Math.max(...arc.map((point) => point.z));
+
+      // It starts at the tops and ends at the drops: a whole bar's drop lower.
+      expect(last.y).toBeLessThan(first.y - 0.1);
+      expect(last.y).toBeGreaterThan(first.y - 0.16);
+      // …and the curve's forward-most point is ahead of both ends, which is
+      // what makes it a bar's reach rather than a hook pointing backwards.
+      expect(furthestForward).toBeGreaterThan(first.z + 0.04);
+      expect(furthestForward).toBeGreaterThan(last.z + 0.04);
+      // The whole bend stays in the bicycle's own plane, at its own side.
+      for (const point of arc) {
+        expect(point.x).toBeCloseTo(bend.x, 9);
+      }
+    }
+  });
+
+  it('puts every hand position on the bar that is actually drawn', () => {
+    // ⚠️ **The assertion #369 exists for.** Before it, the hands were a
+    // `GRIP_Y`/`GRIP_Z` pair and the drops were four numbers in another file,
+    // 50 mm apart, and every gate in this repository was green about it.
+    for (const position of RIDING_POSITION_ORDER) {
+      const at = handPosition(position);
+      for (const side of [1, -1] as const) {
+        // Within a bar's own radius plus the thickness of a hand: a hand that
+        // is 50 mm off the tube is not holding it.
+        expect(distanceToBar(at, side)).toBeLessThan(0.04);
+      }
+    }
+  });
+
+  it('gets lower with every position the drag table charges less air for', () => {
+    // `rider.ts` orders the three most-air-pushed first and charges 0.42, 0.36
+    // and 0.31 m² for them. A bar whose drops were ABOVE its tops would make
+    // that table describe a bicycle nobody is drawing.
+    const heights = RIDING_POSITION_ORDER.map((position) => handPosition(position).y);
+    for (let at = 1; at < heights.length; at += 1) {
+      expect(heights[at] as number).toBeLessThan(heights[at - 1] as number);
+    }
+    // And the two the rider reaches for are a real bar's drop apart.
+    expect(handPosition('upright').y - handPosition('drops').y).toBeGreaterThan(0.1);
+    expect(handPosition('upright').y - handPosition('drops').y).toBeLessThan(0.17);
+  });
+
+  it('draws the rider in the position `rider.ts` rides them in by default', () => {
+    // The merged geometry is built once, so the drawn hands are one position's.
+    // That it is the DEFAULT is what keeps the picture and the drag area from
+    // describing two different riders on the same frame.
+    const grips = emptyRiderJoints();
+    riderJoints(0, grips);
+    const hoods = handPosition(DEFAULT_RIDING_POSITION);
+    for (const grip of grips.grip) {
+      expect(grip.y).toBeCloseTo(hoods.y, 9);
+      expect(grip.z).toBeCloseTo(hoods.z, 9);
+    }
+  });
+
+  it('reaches the bar with an arm, rather than with a tow rope or a stub', () => {
+    // The arms are drawn as tubes from the shoulder to the grip, so they take
+    // whatever length the gap between the two happens to be: move the bar and
+    // the arm simply grows, with nothing complaining. This is what complains.
+    //
+    // ⚠️ **The bound is tight on purpose, and it was measured rather than
+    // guessed.** A first version allowed 0.40–0.62 m and a bar moved 150 mm
+    // forward passed it — 0.599 m, which on a rider 1.515 m tall at the helmet
+    // is an arm two fifths of their height. Shoulder-to-hand is about 0.30 of a
+    // person's stature, and a rider measuring 1.515 m crouched stands about
+    // 1.75 m, so the arm is ~0.52 m at the very most.
+    const arms = RIDER_BODY_PARTS.filter((each) => each.name.startsWith('arm '));
+    expect(arms).toHaveLength(2);
+    for (const arm of arms) {
+      const length = (arm.solid as { readonly length: number }).length;
+      expect(length).toBeGreaterThan(0.42);
+      expect(length).toBeLessThan(0.53);
+      // …and the arm runs DOWN and FORWARD from the shoulder at a road fit's
+      // angle. A bar far enough forward flattens it towards a reach; a bar too
+      // close stands it up under the rider.
+      const ends = centreline(arm);
+      const lowest = ends.reduce((a, b) => (a.y < b.y ? a : b));
+      const highest = ends.reduce((a, b) => (a.y > b.y ? a : b));
+      const belowHorizontal =
+        (Math.atan2(highest.y - lowest.y, lowest.z - highest.z) * 180) / Math.PI;
+      expect(belowHorizontal).toBeGreaterThan(35);
+      expect(belowHorizontal).toBeLessThan(55);
+      // …and it ends ON the bar rather than short of it or through it.
+      expect(distanceToBar(lowest, Math.sign(arm.x) as 1 | -1)).toBeLessThan(0.05);
+    }
+  });
+
+  it('sets the saddle a leg above the bottom bracket, not a stool above it', () => {
+    // Saddle height is the one measurement every rider knows, and it is what
+    // makes a bicycle look ridden rather than sat on. About 109 % of the inside
+    // leg is the usual fit; here the leg is the thigh and shin this file
+    // already builds, so the check is against those rather than a new number.
+    const saddle = RIDER_BODY_PARTS.find((each) => each.name === 'saddle');
+    expect(saddle).toBeDefined();
+    const height = (saddle as RiderPart).y - CRANK_AXIS_Y;
+    const leg = legBones(0);
+    const oneLeg = (leg[0] as LimbBone).length + (leg[1] as LimbBone).length;
+    // The saddle sits between the extended leg's reach less a crank and that
+    // reach itself: a rider whose knee never straightens, and one who cannot
+    // reach the bottom of the stroke, are the two failures either side.
+    expect(height).toBeGreaterThan(oneLeg - CRANK_LENGTH_METRES * 1.3);
+    expect(height).toBeLessThan(oneLeg);
   });
 });
 

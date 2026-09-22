@@ -2673,6 +2673,15 @@ function solidGeometry(solid: RiderPart['solid']): BufferGeometry {
       return new CylinderGeometry(solid.radius, solid.radius, solid.length, LIMB_SEGMENTS);
     case 'ring':
       return new TorusGeometry(solid.radius, solid.thickness, 5, 12);
+    case 'bend':
+      // ⚠️ `rotateZ(start)` is applied to the geometry HERE, before the part's
+      // own X→Y→Z rotations — which is exactly what `RiderSolid.bend` says it
+      // is for. Folding it into the part's `roll` would apply it last, after
+      // the yaw that stands the arc up, and spin the bar out of the bicycle's
+      // plane entirely.
+      return new TorusGeometry(solid.radius, solid.thickness, 5, 12, solid.sweep).rotateZ(
+        solid.start,
+      );
     case 'ball':
       return new SphereGeometry(solid.radius, 8, 6);
   }
@@ -5054,6 +5063,25 @@ function tintable(geometry: BufferGeometry, material: Material, capacity: number
   return mesh;
 }
 
+/**
+ * Whether a part is the handlebar — the tops, a bend or a drop (#369).
+ *
+ * Bar tape is rubber; a frame tube is not. This used to be
+ * `part.name === 'handlebar'`, which was a whole-bar test when the bar was one
+ * straight tube and became a test that matched nothing the moment it was four.
+ *
+ * ⚠️ **Which geometry gets which material is NOT asserted anywhere**, and
+ * #369 measured that rather than assuming it: making this return `false`
+ * always — every bar part drawn as frame metal — leaves all 1 221 tests in
+ * `src/game` green. The browser gate's ADR 0026 D-11 assertion covers the
+ * material *class* on each mesh and says nothing about which parts landed in
+ * which merge. It is a look, and this repository has no look gate (ADR 0009
+ * forbids deriving one from another product).
+ */
+function isBarPart(part: RiderPart): boolean {
+  return part.name.startsWith('bar ');
+}
+
 /** A tube part's two ends, in the bicycle's own frame. */
 function placedPart(geometry: BufferGeometry, part: RiderPart): BufferGeometry {
   return geometry
@@ -5108,19 +5136,28 @@ function realisticBicycle(): {
         new CylinderGeometry(solid.radius, solid.radius, solid.length, 12),
         part,
       );
-      (part.name === 'handlebar' ? rubber : frame).push(geometry);
+      (isBarPart(part) ? rubber : frame).push(geometry);
+    } else if (solid.shape === 'bend') {
+      // ⚠️ **The drops come from `bicycle.ts` since #369, and a reviewer who
+      // remembers a `TorusGeometry(0.07, 0.012, 8, 16, Math.PI)` written out
+      // here is reading the old file.** They were four literals in this
+      // function while the hands were placed from two more in `bicycle.ts`,
+      // which is why the two never met.
+      rubber.push(
+        placedPart(
+          new TorusGeometry(solid.radius, solid.thickness, 8, 16, solid.sweep).rotateZ(solid.start),
+          part,
+        ),
+      );
     } else if (solid.shape === 'box') {
       rubber.push(placedPart(new BoxGeometry(solid.width * 0.8, solid.height, solid.depth), part));
+    } else {
+      // ⚠️ **A shape this chain does not know is a THROW rather than a skip.**
+      // It used to fall out of an `if`/`else if` chain in silence, so #369's
+      // `bend` would have left the realistic bicycle with no drops at all and
+      // every gate green — the defect shape this repository keeps finding.
+      throw new Error(`the realistic bicycle cannot draw a ${solid.shape}`);
     }
-  }
-  // Drops: a half-torus each side of the bar, curling down and back.
-  for (const side of [-1, 1]) {
-    rubber.push(
-      new TorusGeometry(0.07, 0.012, 8, 16, Math.PI)
-        .rotateY(Math.PI / 2)
-        .rotateX(Math.PI / 2)
-        .translate(side * 0.2, 0.91, 0.34),
-    );
   }
   return { frame: merged(frame), rubber: merged(rubber), metal: merged(metal) };
 }
@@ -5147,8 +5184,17 @@ function realisticCrankset(): BufferGeometry {
  * How many triangles the realistic bicycle and crankset have — what
  * `realistic-budget.ts` §`REALISTIC_BICYCLE_TRIANGLES` holds them to.
  *
- * @test-facing: `three-renderer.test.ts` holds the geometry this file builds
- * to the budget, since it is built here rather than read off a file.
+ * ⚠️ **This said `three-renderer.test.ts` held it and NOTHING DID** — a
+ * reviewer who remembers that line is reading the old file. #369 went looking
+ * for the assertion before growing this geometry and found the export had no
+ * caller anywhere in the tree, so `REALISTIC_BICYCLE_TRIANGLES` was being
+ * compared with itself inside `realistic-budget.test.ts`' frame sum and a
+ * bicycle of any size at all would have passed. `check:wiring` cannot see it
+ * either: the `@test-facing` tag exempts an export from `WIRE002` on the
+ * strength of a test reading it, and it takes the tag's word for which test.
+ *
+ * @test-facing: `realistic-budget.test.ts` §"holds the bicycle the renderer
+ * actually builds under its own budget" — which now exists.
  */
 export function realisticBicycleTriangles(): number {
   const bike = realisticBicycle();

@@ -44,7 +44,11 @@ import { readGlb } from './model-bytes-testing';
 import { fileImageSize, modelFacts } from './realistic-bytes-testing';
 import { STRUCTURE_KINDS } from './scatter';
 import { SCENERY_MODELS } from './scenery-models';
-import { realisticStructureTriangles, ScatterBelt } from './three-renderer';
+import {
+  realisticBicycleTriangles,
+  realisticStructureTriangles,
+  ScatterBelt,
+} from './three-renderer';
 
 const SHIPPED = fileURLToPath(new URL('../../public/realistic/', import.meta.url));
 const at = (file: string): string => join(SHIPPED, file);
@@ -125,6 +129,24 @@ describe('each committed file inside its class’s budget — ADR 0026 D-6', () 
 });
 
 describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
+  it('holds the bicycle the renderer actually builds under its own budget — #369', () => {
+    // ⚠️ **This assertion did not exist until #369 and the budget said it did.**
+    // `REALISTIC_BICYCLE_TRIANGLES`' own comment claimed *"its count is
+    // asserted against the geometry the renderer actually builds rather than
+    // read off a file"*, and `realisticBicycleTriangles()` — exported from
+    // `three-renderer.ts` with a `@test-facing` tag naming the test that would
+    // read it — had **no caller anywhere in the tree**. So the number below
+    // was compared with itself in the frame sum underneath, and a bicycle of
+    // any size at all would have passed. #369 grew that geometry (a drop bar
+    // in place of one straight tube), which is what made it worth having.
+    //
+    // Measured on the way in: 5 212 triangles before the drop bar, 5 308
+    // after — the bar costs 96.
+    const built = realisticBicycleTriangles();
+    expect(built).toBeGreaterThan(0);
+    expect(built).toBeLessThanOrEqual(REALISTIC_BICYCLE_TRIANGLES);
+  });
+
   it('holds the worst frame the near-mesh caps allow under the frame’s triangles', () => {
     const heaviest = (kind: (typeof REALISTIC_VEGETATION_KINDS)[number]): number =>
       Math.max(...REALISTIC_VEGETATION[kind].map((model) => modelFacts(at(model.file)).triangles));
