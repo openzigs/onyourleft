@@ -98,11 +98,46 @@ Every rider in a race is simulated with:
 
 | | |
 |---|---|
-| **The same model** | `packages/physics`, at one agreed version, with **its own default coefficients** — not a per-rider set |
+| **The same model** | `packages/physics`, at one agreed version. D-2 rule 5 is what puts that version on the wire |
+| **The same coefficients** | **What `apps/web/src/game/rider.ts` §`rideConditionsFor` already builds**: `MARTIN_1998_COEFFICIENTS` with **exactly two overrides and no others** — `withDragArea(ridingPositionDragArea(position))` for the race's position, and `GAME_ROLLING_RESISTANCE_COEFFICIENT`. **One set for the whole room**, never a per-rider one |
 | **The same bicycle** | `apps/web/src/game/rider.ts` §`BICYCLE_MASS_KILOGRAMS`, for everybody |
 | **Their own body mass** | The one thing that is per-rider and the one thing that is declared. #325's athlete mass |
-| **A race-fixed riding position** | One of `rider.ts` §`RIDING_POSITIONS`, chosen by the race and **not changeable by a client, ever, and specifically not mid-race** |
+| **A race-fixed riding position** | One of `rider.ts` §`RIDING_POSITIONS` — 0.42 / 0.36 / 0.31 m² — chosen by the race and **not changeable by a client, ever, and specifically not mid-race**. It is the `position` the coefficients row takes |
 | **The same wind** | #326's vector, the race's rather than the rider's. A rider who could set their own tailwind is not racing |
+
+⚠️ **The coefficients are the GAME's, not the package's defaults, and the two are different numbers.**
+This row is written out because an earlier draft of it said both *"its own default coefficients"* and
+*"a race-fixed riding position"*, which cannot both hold: a riding position **is** a drag area
+(`RIDING_POSITIONS`, applied through `withDragArea`), so choosing one necessarily departs from
+`MARTIN_1998_COEFFICIENTS`. What a race runs is the set in the table above, and it differs from the
+package's defaults in two fields:
+
+| Field | Package default | What a race runs | Where it is argued |
+|---|---|---|---|
+| `C_D·A` | **0.264 m²** (`0.88 × 0.3` — Martin's track racer) | the race's position: **0.42 / 0.36 / 0.31 m²** | `rider.ts` §`ridingPositionDragArea`, #365 |
+| `C_RR` | **0.0032** (Kyle 1988, high-pressure clinchers on smooth asphalt) | **0.005** | `rider.ts` §`GAME_ROLLING_RESISTANCE_COEFFICIENT`, #365 |
+
+Every other field — spoke drag, bearing friction, drivetrain loss, wheel inertia — is the package
+default, unchanged.
+
+Two reasons for taking the game's rather than the package's, in order of weight:
+
+1. **A race must produce the same speed for the same watts as the solo game the rider just rode.** A
+   rider who is measurably quicker alone than in a race would read the race as broken, and they would
+   be half right: it would be a different bicycle on a different road. `C_RR` alone is worth roughly
+   0.8 km/h at 150 W on the flat (`rider.ts` §`GAME_ROLLING_RESISTANCE_COEFFICIENT`), and the drag
+   change is larger.
+2. **Both overrides are already argued in the tree, and the package's defaults are argued for
+   something else.** `MARTIN_1998_COEFFICIENTS` exists to reproduce a published paper —
+   `martin-1998.test.ts` rests on it and `packages/physics` must keep it (`CLAUDE.md` §2) — and its
+   rider is a track racer nobody in a room is. #365 moved both fields deliberately and recorded why.
+
+⚠️ **Where those two constants live is a problem the room inherits, not one this ADR solves.** They
+are under `apps/`, and nothing under `packages/` may import `apps/` — `eslint.config.js`'s
+`boundaries/dependencies` block, `CLAUDE.md` §4d. So a room cannot read them where they sit, and
+whoever writes D-2's rule moves them into `packages/` (with the game reading them from there, so
+there is one set rather than two that can drift) rather than restating the numbers.
+[#487](https://github.com/openzigs/onyourleft/issues/487) carries it.
 
 ⚠️ **The riding position is race-fixed rather than derived from the rider's height, and that is a
 decision against what #465 notes other platforms do.** Three reasons, in order of weight:
@@ -143,6 +178,11 @@ exist, fed by a transport that does not exist, with thresholds nobody has agreed
 `CLAUDE.md` §4a's *"a documented command nobody has run"* in a new place — and **worse than absent**,
 because a reviewer reads plausible validation code as evidence that the validation question was
 settled. The shape is settled here; the function is written by whoever builds the room, against this.
+
+⚠️ **The remainder is carried by [#487](https://github.com/openzigs/onyourleft/issues/487)**, which
+is the repair `CLAUDE.md` §7 names for a closing keyword that reaches further than the work does:
+#465 closes with this criterion unmet, so the criterion lives in the tracker rather than only in this
+paragraph. #487 is blocked on #7 and on Q3, and it carries D-1's constant move with it.
 
 A report is `{ riderId, sequence, atMs, powerWatts, cadenceRpm? }`; the rider has a declared
 `massKilograms` and a `physicsVersion`. In order:
@@ -300,6 +340,8 @@ checkable by reading our own code and none requires a reader to have read a pate
   people on the road, and that is worth saying out loud rather than discovering.
 - **#465's third acceptance criterion is not met as written** (D-2). The rule is specified here and
   not implemented; the reason is in D-2 and it is a deliberate deviation rather than an omission.
+  ⚠️ **[#487](https://github.com/openzigs/onyourleft/issues/487) carries the remainder**, so the gap
+  is in the tracker and not only in this document.
 
 ### Constraints this places on other work
 
@@ -311,6 +353,7 @@ checkable by reading our own code and none requires a reader to have read a pate
 | [#327](https://github.com/openzigs/onyourleft/issues/327) | D-5, including the `C_D·A`-only rule |
 | [#7](https://github.com/openzigs/onyourleft/issues/7) | D-0's first block, and D-2's room |
 | [#466](https://github.com/openzigs/onyourleft/issues/466) | Closed by spike 0005; D-7 is where its recommendation landed |
+| [#487](https://github.com/openzigs/onyourleft/issues/487) | D-2's rule, as the pure function #465 asked for, and D-1's two constants moved into `packages/` where a room can read them |
 
 ---
 

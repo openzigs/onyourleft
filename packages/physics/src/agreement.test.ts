@@ -78,10 +78,31 @@ import { advance, START_OF_RIDE, type RideConditions, type RideState } from './s
  * Every input written out, so a vector below depends on no default.
  *
  * ⚠️ The **coefficients are deliberately left to the package's own defaults**,
- * which is the opposite choice and is the point: a race's clients and its room
- * would use the defaults, so the defaults are what has to be pinned. Mass, air
- * density and the integration step are spelled out because a vector that
- * depended on a *caller's* choice would be pinning the caller instead.
+ * which is the opposite choice and needs its reason stated — because the reason
+ * is NOT that a race runs them.
+ * [ADR 0028](../../../docs/adr/0028-racing-fairness.md) D-1 decides that a race
+ * runs `MARTIN_1998_COEFFICIENTS` with **two** overrides: the race's riding
+ * position through `withDragArea` (0.42 / 0.36 / 0.31 m², not the default
+ * `0.88 × 0.3 = 0.264`) and a rolling resistance of 0.005 rather than 0.0032.
+ * Both constants live in `apps/web/src/game/rider.ts`, which this package may
+ * not import and must not (`eslint.config.js` §`boundaries/dependencies`).
+ *
+ * So what the defaults pin is the **base every race configuration is built
+ * on**, not a configuration any race runs: every field a race does not
+ * override is one of these, and this package's arithmetic is all of them. A
+ * change to either moves every race's answer and is a red build here, whatever
+ * coefficients a caller supplies on top — which is the property D-2 rule 5's
+ * physics-version-on-the-wire rests on.
+ *
+ * ⚠️ **A second vector at the race's own configuration is deliberately absent**
+ * and belongs to [#487](https://github.com/openzigs/onyourleft/issues/487).
+ * Writing 0.36 and 0.005 as literals here would pin a configuration this
+ * package cannot see move — a test that goes stale in silence, which is worse
+ * than the gap it closes. #487 moves those constants into `packages/` first,
+ * and then the vector costs five lines and has a constant to point at.
+ *
+ * Mass, air density and the integration step are spelled out because a vector
+ * that depended on a *caller's* choice would be pinning the caller instead.
  */
 const CONDITIONS: RideConditions = {
   totalMass: kilograms(83),
