@@ -37,7 +37,12 @@ until then `quality.ts`'s frame cap was read by nothing and **every rung drew at
 rate**. Now the top rung — "the target rung" in every Part below — draws at the display's rate
 (60 Hz on the tablet) and the rungs below cap at 30, 24 and 20. A row taken at the target rung before
 #476 is comparable with one after it; a row taken at a lower rung ("the floor rung", K7, M6) is not.
-Part Z's frame-rate note has the table.
+**And again the same day** by [#482](https://github.com/openzigs/onyourleft/issues/482), the owner's
+*"I want the extra 60 fps step"*: the ladder is **five** rungs, and the first step down sheds
+resolution and scenery **at the display's rate** — only the three below it cap, at 30, 24 and 20. A
+reader who remembers "one rung down" meaning 30 fps is reading the #476 file; "one rung down" (Y5, T5)
+is 60 fps with less detail now. The floor rung is unchanged in every figure. Part Z's frame-rate note
+has the table.
 **Discharges, when run:** [#87](https://github.com/openzigs/onyourleft/issues/87) criteria 2, 3, 5
 and 6 and its two-OEM line; the Android half of
 [#85](https://github.com/openzigs/onyourleft/issues/85); and
@@ -2103,9 +2108,10 @@ realistic.
   steepest climb and descent still differ by the WCAG contrast the cue needs.
 - It **fades out with distance** — noise at a grazing angle shimmers, and #424's low camera makes
   that worse — and it is on the **target rung only**: the first step down the quality ladder drops
-  it, one step before any rung lowers the frame rate below #91's 30 fps. (That first step also takes
-  the frame rate from the display's 60 to 30 since [#476](https://github.com/openzigs/onyourleft/issues/476)
-  — see Part Z's frame-rate note.)
+  it, and since [#482](https://github.com/openzigs/onyourleft/issues/482) that step keeps the
+  display's rate, so the detail goes one step before any rung caps the frame rate at all. (Between
+  [#476](https://github.com/openzigs/onyourleft/issues/476) and #482 the same step also took the frame
+  rate from 60 to 30 — see Part Z's frame-rate note.)
 
 ⚠️ **What the pinned Chromium measured**: the sky 25° up and 8° up are two colours (and one colour
 with the haze set to the sky, the control); a patch of carriageway varies by 1.82 levels with the
@@ -2118,7 +2124,7 @@ scenery-free scene is **8 draw calls** (the dome is the new one).
 | Y2 | Watch the road just ahead of the bicycle, and the ground beside it, at speed | A surface, or noise? ⚠️ **Any shimmer or crawling** — especially further ahead, at a grazing angle — is the finding |
 | Y3 | Watch a climb and a descent | Is the gradient tint on the road still as easy to read as before? |
 | Y4 | Look at the fields beside the road on a level stretch | Fields of different greens and a yellower crop, meeting where the walls and hedges are? |
-| Y5 | 12 s of riding, target rung, the `dumpsys` block from Part T; then the same with the quality ladder one rung down (a hot phone, or Part E's forcing) | Frame times with the detail on, and off |
+| Y5 | 12 s of riding, target rung, the `dumpsys` block from Part T; then the same with the quality ladder one rung down (a hot phone, or Part E's forcing). ⚠️ **Since #482 "one rung down" is still the display's rate**, so the two rows differ in detail and not in frame cap — the comparison this row always wanted; a Y5 row taken between #476 and #482 compared 60 fps against 30 | Frame times with the detail on, and off |
 
 ### Y results
 
@@ -2193,20 +2199,25 @@ Z5–Z8 below, and **no part of it has been measured on a device yet**.
 
 ⚠️ **The frame cap is honoured since [#476](https://github.com/openzigs/onyourleft/issues/476),
 and this paragraph used to say it was read by nothing — a reader who remembers "every rung draws
-at the display's rate" is reading the old file.** The owner's ruling (2026-09-22): **the top rung
-of each ladder draws at the display's rate — 60 Hz on the tablet, and never above it — and the
-stylised rungs below cap at 30 → 24 → 20** (`quality.ts` §`QUALITY_LADDER`). Both **realistic**
-rungs draw at the display's rate, so a hot tablet gives up realism before it gives up frame rate;
-the first capped rung it can reach is the stylised ladder's level 1, at 30. What that means for a
-number read here:
+at the display's rate" is reading the old file.** The owner's rulings (2026-09-22, #476 and then
+[#482](https://github.com/openzigs/onyourleft/issues/482)): **the top TWO rungs of the stylised
+ladder draw at the display's rate — 60 Hz on the tablet, and never above it — the first of them at
+full detail and the second with reduced resolution and scenery, and only the three below cap, at
+30 → 24 → 20** (`quality.ts` §`QUALITY_LADDER`). ⚠️ **A reader who remembers the first step down
+cutting to 30 fps is reading the #476 file**: between #476 and #482 it took the resolution, the
+scenery and the drop from 60 to 30 in one step. Both **realistic** rungs are the stylised ladder's top
+two with the world swapped, so they draw at the display's rate too, and a hot tablet gives up realism
+two steps before it gives up any frame rate: the first capped rung it can reach is the stylised
+ladder's level 2, at 30. What that means for a number read here:
 
 | Rung (`world` · `rung` on the page) | Frame cap | Frame p50 on a 60 Hz display that keeps up |
 |---|---|--:|
 | realistic · realistic | display rate | 16.7 ms |
 | realistic · realistic, reduced resolution and scenery | display rate | 16.7 ms |
 | stylised · full | display rate | 16.7 ms |
-| stylised · reduced resolution and scenery | 30 fps | 33.3 ms |
-| stylised · reduced resolution, scenery and frame rate | 24 fps | 41.7 ms (33 and 50 alternating) |
+| stylised · reduced resolution and scenery | display rate | 16.7 ms |
+| stylised · reduced resolution and scenery, 30 fps | 30 fps | 33.3 ms |
+| stylised · reduced resolution, scenery and frame rate | 24 fps | 33.3 or 50 ms — the two alternate, so a p50 reads one of them; 41.7 ms is their **mean**, not a median |
 | stylised · minimum | 20 fps | 50 ms |
 
 **The page's frame p50/p90/p99 are the time between DRAWN frames**, so on a capped rung they read the
@@ -2324,7 +2335,7 @@ Landscape, full brightness, on charge, nothing else running; let the tablet cool
 | Z4 | Look at the trees near and far, and at the point where a tree changes from a mesh to a picture | Do the near trees look sparse beside the far ones (the thinned canopy — spike 0005 §2)? Is the switch visible? |
 | Z5 | Look at the rider from behind, and hold the ride still: `location.href = '/harness/realistic.html?at=900&panel=0'` | Do the legs follow the pedals? With the ride held (`?at=`), do the legs STOP? — #349's rule for the realistic rider |
 | Z6 | `?panel=0&ladder=0`, 30 s; then `?world=stylised&panel=0&ladder=0`, 30 s — each with the `dumpsys` block below. ⚠️ **Both are TOP rungs, so both draw at the display's rate, 60 Hz** (#476) — this is realistic against stylised at 60, and nothing about a cap | Frame and GPU percentiles, realistic against stylised |
-| Z7 | **The soak**: `?soak=20&panel=0` — the ladder free, as a rider would have it. ⚠️ **It starts at the realistic top rung, at the display's rate (60 Hz)**, and every minute's line says the rung and its `frameCap`: while it says `display` it is measuring 60 fps realism; a minute that says `30`, `24` or `20` is a stylised rung the ladder stepped to, and its frame times read that cap | One line a minute; thermal status; the rung **and frame cap** it ends on |
+| Z7 | **The soak**: `?soak=20&panel=0` — the ladder free, as a rider would have it. ⚠️ **It starts at the realistic top rung, at the display's rate (60 Hz)**, and every minute's line says the rung and its `frameCap`: while it says `display` it is measuring 60 fps — and since #482 that is **four** rungs, not two: realistic, realistic reduced, stylised full and stylised reduced, so a minute at `display` can already be two steps down, and the `world` and `rung` columns say which. Stepping down now looks like: the picture softens and thins **at 60** (realistic reduced), then the world changes to stylised **at 60**, softens and thins again **at 60**, and only then does the frame rate fall — a minute that says `30`, `24` or `20` is a stylised rung the ladder stepped to, and its frame times read that cap. ⚠️ Each step needs thirty drawn frames of heat, so the ladder reacts in half a second at `display` and in 1.0, 1.25 and 1.5 s at 30, 24 and 20 (`quality.ts` §`SUSTAINED_SAMPLES`) | One line a minute; thermal status; the rung **and frame cap** it ends on |
 | Z8 | During Z7, once at minute 10: `"$ADB" shell dumpsys meminfo dev.openzigs.onyourleft \| grep -iE "Graphics\|GL mtrack\|TOTAL"` | What the driver actually holds, against the 160 MiB estimate (the estimate is **136 MiB** since #475's structures) |
 | Z9 | Ride past the farmstead and any village: `?panel=0&ladder=0`. Look at a house, a barn, a wall and a hedge from the road | Do the walls read as brick, board and stone, and the roofs as tile, slate and iron? Is a brick the same size on every wall (it should be — the photographs are laid out in metres)? ⚠️ **The hedge is the weakest**: it wears leaf litter tinted green, the nearest photograph any admitted source publishes — say whether it reads as a hedge |
 | Z10 | Ride over the bridge and past the lake | Does the water take the sky's colour — grey under grey cloud, not the stylised world's blue? Any seam where it meets the bank? |

@@ -43,10 +43,41 @@
  * quantity whatever the cap. A frame after a skipped one reports nothing.
  */
 
-import { DISPLAY_RATE } from './quality';
+import { DISPLAY_RATE, QUALITY_LADDER } from './quality';
 
 /** How early a vsync's timestamp may arrive and still count as due. */
 export const PACING_SLACK_MS = 2;
+
+/**
+ * What a cap that is not a frame rate is read as: the ladder's LOWEST cap —
+ * #482, from #481's review (finding 3).
+ *
+ * ⚠️ **It used to fail open.** `!(cap > 0)` made 0, a negative number and
+ * `NaN` mean "uncapped", which is drawing at the display's rate — the heaviest
+ * outcome there is, on the rungs that exist because a device is hot. A
+ * mistyped rung would have drawn at full rate with every test green. So an
+ * invalid cap now fails CLOSED, to the floor rung's rate.
+ *
+ * Clamped rather than thrown, deliberately: this runs inside
+ * `requestAnimationFrame`, and a throw there ends the render loop mid-ride,
+ * which is a frozen world under a rider who is pedalling. The mistake is caught
+ * where it can be made instead — `quality.test.ts` §"gives every rung a cap the
+ * pacer can honour" is red for any rung whose cap is neither
+ * {@link DISPLAY_RATE} nor a positive number.
+ */
+export const INVALID_CAP_READ_AS = Math.min(
+  // Over the VALID caps only, or a mistyped floor rung would make this NaN too.
+  ...QUALITY_LADDER.map((rung) => rung.frameCap).filter((cap) => Number.isFinite(cap) && cap > 0),
+);
+
+/**
+ * The cap the pacer actually applies: the rung's own, unless it is not a
+ * frame rate. @see INVALID_CAP_READ_AS
+ */
+export function honouredCap(cap: number): number {
+  if (cap === DISPLAY_RATE) return DISPLAY_RATE;
+  return Number.isFinite(cap) && cap > 0 ? cap : INVALID_CAP_READ_AS;
+}
 
 /** What one animation frame is, to the pacer. */
 export interface PacedFrame {
@@ -69,12 +100,16 @@ export class FramePacer {
    * Call once per animation frame with its time in milliseconds and the rung's
    * cap in frames a second.
    */
-  frame(at: number, cap: number): PacedFrame {
+  frame(at: number, rungCap: number): PacedFrame {
     const frameMs =
       this.#previousDrawn && this.#previousAt !== undefined
         ? Math.max(0, at - this.#previousAt)
         : undefined;
-    const interval = cap === DISPLAY_RATE || !(cap > 0) ? 0 : 1000 / cap;
+    // ⚠️ Normalised BEFORE it is compared with the last one: `NaN !== NaN`, so
+    // a NaN cap compared raw would read as a new cap on every frame, restart
+    // the schedule every frame and draw every frame — failing open again.
+    const cap = honouredCap(rungCap);
+    const interval = cap === DISPLAY_RATE ? 0 : 1000 / cap;
     let draw: boolean;
     // A new cap starts its own schedule from this frame, rather than inheriting
     // a due time computed at another rate.

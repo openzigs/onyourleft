@@ -3571,7 +3571,11 @@ top of an issue **supersedes its body**.
 | Why the realistic bicycle is built from numbers, and how the MakeHuman body pedals | `apps/web/src/game/bicycle.ts` §"Two riders now", §`riderJoints`, `three-renderer.ts` §`RealisticRiderBelt` |
 | Why the realistic structures are built from numbers and wear CC0 photographs, and why a house is two belts | `apps/web/src/game/realistic-assets.ts` §`REALISTIC_STRUCTURE_SURFACES`, `three-renderer.ts` §`RealisticStructureBelts`, [#475](https://github.com/openzigs/onyourleft/issues/475) |
 | Why the water stays a shader in the realistic world, and what it reflects there | `apps/web/src/game/three-renderer.ts` §`WaterBelt.update`, `realistic-light.ts` §`reflectedSkyColour` |
-| What frame rate each rung of the quality ladder draws at, and why the top one is the display's own | `apps/web/src/game/quality.ts` §`QUALITY_LADDER` "The owner's ruling", [#476](https://github.com/openzigs/onyourleft/issues/476) |
+| What frame rate each rung of the quality ladder draws at, and why the top TWO are the display's own | `apps/web/src/game/quality.ts` §`QUALITY_LADDER` "The owner's rulings", [#476](https://github.com/openzigs/onyourleft/issues/476), [#482](https://github.com/openzigs/onyourleft/issues/482) |
+| What "frame rate given up" means when #245, #425 and #459 say scenery, detail and water go first | `apps/web/src/game/quality.ts` §`QUALITY_LADDER` "What frame rate given up means, precisely" |
+| Why the ladder reacts more slowly on a capped rung, and why that is a decision rather than a drift | `apps/web/src/game/quality.ts` §`SUSTAINED_SAMPLES` |
+| What a frame cap that is not a frame rate is read as, and why it is clamped rather than thrown | `apps/web/src/game/frame-pacer.ts` §`INVALID_CAP_READ_AS` |
+| Why the HUD's quality state is a level and not the ladder's whole state | `apps/web/src/game/GameView.tsx` §`qualityLevel` |
 | Why a skipped animation frame is not a fast frame, and what the ladder is told under a cap | `apps/web/src/game/frame-pacer.ts`, `apps/web/src/game/GameView.tsx` §`tick` |
 | What stops an empty credits screen looking exactly like a correct one | `apps/web/src/views/CreditsView.test.tsx`, [#142](https://github.com/openzigs/onyourleft/issues/142) |
 | What a person with TalkBack runs, and which questions only they can answer | [`docs/validation/0003-screen-reader-and-assistive-technology.md`](docs/validation/0003-screen-reader-and-assistive-technology.md), [#393](https://github.com/openzigs/onyourleft/issues/393) |

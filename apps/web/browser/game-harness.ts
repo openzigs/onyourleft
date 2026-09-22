@@ -2424,8 +2424,8 @@ const SWEEP_STEP_METRES = 3.7;
 /**
  * How many frames each of #286's two frame-cost means is taken over: **60**.
  *
- * Two seconds of riding at 30 fps (`QUALITY_LADDER`'s first step down; the top
- * rung draws at the display's rate since #476), which is long
+ * Two seconds of riding at 30 fps (`QUALITY_LADDER`'s first capped rung — level
+ * 2 since #482; the top two rungs draw at the display's rate), which is long
  * enough that one slow frame is a sixtieth of the answer and short enough that
  * the whole measurement — four sweeps, two at each shading — is under a second
  * on top of a gate that already runs for twenty.
@@ -3313,7 +3313,7 @@ async function run(): Promise<void> {
         // ------------------------------------------------ the light — #286
         //
         // ⚠️ **Everything below runs at rung 0's own render scale, with only
-        // `shading` overridden.** `qualitySettings(3)` is the rung that turns
+        // `shading` overridden.** `qualitySettings(4)` is the rung that turns
         // the shading off in the product, and it *also* halves the drawing
         // buffer — so measuring against it would confound a shading cost with
         // a fill-rate cost, and a pixel read back at half the resolution is a

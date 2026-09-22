@@ -54,13 +54,14 @@ import { atStartLine } from './simulation';
 import { corridorOrigin, roadCorridor } from './terrain';
 import { horizonRelief, terrainCorridor } from './landform';
 
-import { QUALITY_LADDER, qualitySettings } from './quality';
+import { QUALITY_LADDER, qualitySettings, type QualityLevel } from './quality';
 import {
   SCATTER_BAND_METRES,
   SCATTER_KINDS,
   SCENERY_KINDS,
   SCATTER_MAX_ITEMS,
   SCATTER_VERGE_METRES,
+  STRUCTURE_KINDS,
   type ScatterItem,
   type SceneryKind,
 } from './scatter';
@@ -75,6 +76,12 @@ import {
 } from './bicycle';
 import { MAXIMUM_SCENERY_VARIANTS, SCENERY_MODELS } from './scenery-models';
 import { MAXIMUM_LIT_CHANNEL } from './scenery-palette';
+import { REALISTIC_STRUCTURE_MESHES } from './realistic-budget';
+import {
+  PHOTOGRAPHIC_STRUCTURE_SURFACES,
+  REALISTIC_STRUCTURE_PARTS,
+  type StructureSurface,
+} from './realistic-assets';
 import {
   CAMERA_ABOVE_METRES,
   CAMERA_BEHIND_METRES,
@@ -92,6 +99,7 @@ import {
   lateralReachMetres,
   loadSceneryModels,
   prepareSceneryGeometry,
+  RealisticStructureBelts,
   RiderBelt,
   SCATTER_INSTANCE_CAPACITY,
   sceneryFitMetres,
@@ -1693,7 +1701,7 @@ describe('the scenery can lose its shading — #286', () => {
 
   it('wears the unlit one at the floor rung', () => {
     const belt = new ScatterBelt();
-    belt.setShading(qualitySettings(3).shading);
+    belt.setShading(qualitySettings(4).shading);
 
     for (const kind of SCENERY_KINDS) {
       expect(materialTypeOf(belt, kind)).toBe('MeshBasicMaterial');
@@ -1792,7 +1800,8 @@ describe('the scenery can lose its shading — #286', () => {
     expect(qualitySettings(0).shading).toBe('lit');
     expect(qualitySettings(1).shading).toBe('lit');
     expect(qualitySettings(2).shading).toBe('lit');
-    expect(qualitySettings(3).shading).toBe('flat');
+    expect(qualitySettings(3).shading).toBe('lit');
+    expect(qualitySettings(4).shading).toBe('flat');
   });
 });
 
@@ -1868,7 +1877,7 @@ describe('the scenery belt spends a budget it never sets — #245', () => {
     // `count` is what this reads — a belt that left the matrices in place and
     // only moved `visible` would submit every one of them.
     const scenery = new ScatterBelt();
-    const floor = qualitySettings(3).scatterItems;
+    const floor = qualitySettings(4).scatterItems;
 
     scenery.setBudget(floor);
     scenery.update(belt(floor + 40), POSE);
@@ -1892,7 +1901,7 @@ describe('the scenery belt spends a budget it never sets — #245', () => {
     expect(submitted(scenery)).toBe(many);
   });
 
-  it('changes what is submitted across all four rungs, and reallocates for none of them', () => {
+  it('changes what is submitted across every rung, and reallocates for none of them', () => {
     // #245's sixth criterion, NFR-3. The rungs are reached on a phone that is
     // already too hot, so a buffer replaced on the way down is an allocation on
     // the worst frame of the ride — and on the same JavaScript thread GATT
@@ -1905,8 +1914,8 @@ describe('the scenery belt spends a budget it never sets — #245', () => {
     const attributeAtTheTop = mesh?.instanceMatrix;
     const bufferAtTheTop = mesh?.instanceMatrix.array;
 
-    const counts = [0, 1, 2, 3].map((level) => {
-      scenery.setBudget(qualitySettings(level as 0 | 1 | 2 | 3).scatterItems);
+    const counts = QUALITY_LADDER.map((_, level) => {
+      scenery.setBudget(qualitySettings(level as QualityLevel).scatterItems);
       scenery.update(frame, POSE);
       return submitted(scenery);
     });
@@ -1914,7 +1923,10 @@ describe('the scenery belt spends a budget it never sets — #245', () => {
     expect(counts).toEqual(QUALITY_LADDER.map((rung) => rung.scatterItems));
     // Non-vacuity: the counts have to have actually moved, or the three
     // identity assertions below are a claim about a belt nobody disturbed.
-    expect(new Set(counts).size).toBe(QUALITY_LADDER.length);
+    // Level 2 is level 1 capped at 30 (#482), so the ladder holds one figure
+    // fewer than it has rungs; every distinct figure must have been submitted.
+    expect(new Set(counts).size).toBe(new Set(QUALITY_LADDER.map((r) => r.scatterItems)).size);
+    expect(new Set(counts).size).toBeGreaterThanOrEqual(QUALITY_LADDER.length - 1);
     expect(meshFor(scenery, 'tree-conifer')).toBe(mesh);
     expect(meshFor(scenery, 'tree-conifer')?.instanceMatrix).toBe(attributeAtTheTop);
     expect(meshFor(scenery, 'tree-conifer')?.instanceMatrix.array).toBe(bufferAtTheTop);
@@ -1931,11 +1943,11 @@ describe('the scenery belt spends a budget it never sets — #245', () => {
     const scenery = new ScatterBelt();
     const mesh = meshFor(scenery, 'rock');
     const attributeBefore = mesh?.instanceMatrix;
-    scenery.setBudget(qualitySettings(3).scatterItems);
+    scenery.setBudget(qualitySettings(4).scatterItems);
 
     scenery.update(belt(SCATTER_INSTANCE_CAPACITY + 60, 'rock'), POSE);
 
-    expect(submitted(scenery)).toBe(qualitySettings(3).scatterItems);
+    expect(submitted(scenery)).toBe(qualitySettings(4).scatterItems);
     expect(meshFor(scenery, 'rock')?.instanceMatrix).toBe(attributeBefore);
     expect(meshFor(scenery, 'rock')?.instanceMatrix.count).toBe(SCATTER_INSTANCE_CAPACITY);
   });
@@ -3071,5 +3083,30 @@ describe('a kind is drawn as several shapes — #367', () => {
     expect(belt.meshesOf('rock')).toHaveLength(1);
     expect(meshFor(belt, 'rock', 0)?.count).toBe(6);
     belt.dispose();
+  });
+});
+
+describe('what the realistic structures cost in meshes — #482', () => {
+  it('builds exactly REALISTIC_STRUCTURE_MESHES, one per surface a kind wears', () => {
+    // #481's review, finding 6: up to fifteen instanced meshes, bounded by
+    // nothing and stated nowhere. Counted off the REAL belts, so a new kind or
+    // surface is a red test here rather than a draw call nobody decided on.
+    const belts = new RealisticStructureBelts(new Map());
+    const surfaces: readonly StructureSurface[] = [...PHOTOGRAPHIC_STRUCTURE_SURFACES, 'painted'];
+    let built = 0;
+    for (const surface of surfaces) {
+      for (const kind of STRUCTURE_KINDS)
+        built += belts.beltOf(surface)?.meshesOf(kind).length ?? 0;
+    }
+    // An independent derivation: the distinct (surface, kind) pairs the parts
+    // table names. A church wears stone twice and is one stone mesh.
+    const pairs = new Set(
+      Object.entries(REALISTIC_STRUCTURE_PARTS).flatMap(([kind, parts]) =>
+        parts.map((surface) => `${surface}:${kind}`),
+      ),
+    );
+    expect(built).toBe(pairs.size);
+    expect(built).toBe(REALISTIC_STRUCTURE_MESHES);
+    belts.dispose();
   });
 });
