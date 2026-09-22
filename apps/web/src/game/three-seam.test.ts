@@ -53,6 +53,18 @@ import { describe, expect, it } from 'vitest';
 
 const repositoryRoot = fileURLToPath(new URL('../../../../', import.meta.url));
 
+/**
+ * ⚠️ SPIKE #457, on `spike/issue-457-realism-on-the-device-floor` ONLY — a
+ * branch that is never merged. The realism spike draws with three directly
+ * (HDRI, PMREM, skinned meshes, post-processing), none of which the product's
+ * seam offers, and it is a harness page that ships in nothing: it is built only
+ * by `vite.browser.config.ts`. The exemption is one directory, named, and the
+ * test below still fails for any other importer — `would notice a second
+ * importer outside the spike` is what says so.
+ */
+const SPIKE_457 = 'apps/web/browser/realism/';
+const inSpike457 = (file: string): boolean => file.startsWith(SPIKE_457);
+
 /** The one file allowed to import the rendering library. */
 const THE_SEAM = 'apps/web/src/game/three-renderer.ts';
 
@@ -128,9 +140,51 @@ describe('the rendering seam', () => {
   it('has exactly one file importing three', () => {
     const importers = files
       .filter((file) => file !== THIS_FILE)
+      .filter((file) => !inSpike457(file))
       .filter((file) => IMPORTS_THREE.test(readFileSync(join(repositoryRoot, file), 'utf8')));
 
     expect(importers).toEqual([THE_SEAM]);
+  });
+
+  it('would notice a second importer outside the spike — #457’s exemption is one directory', () => {
+    const exempt = inSpike457;
+    expect(exempt('apps/web/browser/realism/view.ts')).toBe(true);
+    expect(exempt('apps/web/browser/realism-harness.ts')).toBe(false);
+    expect(exempt('apps/web/browser/game-harness.ts')).toBe(false);
+    expect(exempt('apps/web/src/game/scene.ts')).toBe(false);
+  });
+
+  it('holds the spike to the product’s two lamps, and keeps it out of the product — #457', () => {
+    // ⚠️ SPIKE BRANCH ONLY. The exemption above is a WEAKENING of the
+    // one-importer rule and is stated as one: a spike that measures an HDRI,
+    // PMREM, a skinned mesh and a bloom pass cannot draw through a seam that
+    // offers none of them without widening `three-renderer.ts` itself, which
+    // would change the product. What it must NOT do is widen the other two
+    // rules, so both are held over the exempt files as well:
+    const spike = files.filter(inSpike457);
+    expect(spike.length).toBeGreaterThan(0);
+    // (1) no illumination class beyond the decided pair — image-based light
+    // from an HDRI is `scene.environment`, not a lamp, and needs no new class;
+    const decided = new Set(['AmbientLight', 'DirectionalLight']);
+    const lamps = spike.flatMap((file) =>
+      [
+        ...new Set(
+          readFileSync(join(repositoryRoot, file), 'utf8').match(/[A-Za-z]*Light[A-Za-z]*/g) ?? [],
+        ),
+      ]
+        .filter((name) => !decided.has(name))
+        .map((name) => `${file}: ${name}`),
+    );
+    expect(lamps).toEqual([]);
+    // (2) and nothing the product builds may reach the spike, so the exemption
+    // can never carry `three` into a shipped module.
+    const reachesSpike = /['"][^'"]*browser\/realism(?:\/|-harness|['"])/;
+    const leaks = files
+      .filter((file) => file.startsWith('apps/web/src/') || file.startsWith('packages/'))
+      .filter((file) => file !== THIS_FILE)
+      .filter((file) => reachesSpike.test(readFileSync(join(repositoryRoot, file), 'utf8')));
+    expect(leaks).toEqual([]);
+    expect(reachesSpike.test("import { x } from '../../browser/realism/view';")).toBe(true);
   });
 
   it('names exactly the two illumination classes #286 decided on', () => {

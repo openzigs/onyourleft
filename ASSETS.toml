@@ -256,6 +256,76 @@ read = "2026-09-16"
 sha256 = "7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172"
 
 [[asset]]
+path = "apps/web/browser/realism/screenshots/00-baseline-the-product.jpg"
+source = "This repository, #457 (spike branch, never merged) — a screenshot of this project's own renderer, taken by `node apps/web/tools/realism/screenshots.ts` in the pinned headless Chromium; its inputs are the product's own scene and the CC0 assets the spike fetches (Poly Haven, MakeHuman)"
+licence = "CC0-1.0"
+read = "2026-09-21"
+sha256 = "e4d78bf7a7ce1b6a338805ea071a6572e3d7a1d511c3ab18f91bdcfd660e1388"
+
+[[asset]]
+path = "apps/web/browser/realism/screenshots/01-1-sky-environment-aces.jpg"
+source = "This repository, #457 (spike branch, never merged) — a screenshot of this project's own renderer, taken by `node apps/web/tools/realism/screenshots.ts` in the pinned headless Chromium; its inputs are the product's own scene and the CC0 assets the spike fetches (Poly Haven, MakeHuman)"
+licence = "CC0-1.0"
+read = "2026-09-21"
+sha256 = "a9c21370da13e462f2c60286c80409eac709592dca357c389da6156e78addf5e"
+
+[[asset]]
+path = "apps/web/browser/realism/screenshots/02-1-sky-environment-agx.jpg"
+source = "This repository, #457 (spike branch, never merged) — a screenshot of this project's own renderer, taken by `node apps/web/tools/realism/screenshots.ts` in the pinned headless Chromium; its inputs are the product's own scene and the CC0 assets the spike fetches (Poly Haven, MakeHuman)"
+licence = "CC0-1.0"
+read = "2026-09-21"
+sha256 = "f8a9f817820fbc323ddd30e04374919769bff8740dfbb20a9afe6f5bad5e42a3"
+
+[[asset]]
+path = "apps/web/browser/realism/screenshots/03-2-surfaces-1k.jpg"
+source = "This repository, #457 (spike branch, never merged) — a screenshot of this project's own renderer, taken by `node apps/web/tools/realism/screenshots.ts` in the pinned headless Chromium; its inputs are the product's own scene and the CC0 assets the spike fetches (Poly Haven, MakeHuman)"
+licence = "CC0-1.0"
+read = "2026-09-21"
+sha256 = "5525217f09d425d4bae7fd17fcbae16803c4dde28923ae44062b274fa99e6d36"
+
+[[asset]]
+path = "apps/web/browser/realism/screenshots/04-2-surfaces-2k.jpg"
+source = "This repository, #457 (spike branch, never merged) — a screenshot of this project's own renderer, taken by `node apps/web/tools/realism/screenshots.ts` in the pinned headless Chromium; its inputs are the product's own scene and the CC0 assets the spike fetches (Poly Haven, MakeHuman)"
+licence = "CC0-1.0"
+read = "2026-09-21"
+sha256 = "df63f07deedee25adf93b59f52f2f0906fed77d0cad597de26305e3874740c7e"
+
+[[asset]]
+path = "apps/web/browser/realism/screenshots/05-3-trees-impostors.jpg"
+source = "This repository, #457 (spike branch, never merged) — a screenshot of this project's own renderer, taken by `node apps/web/tools/realism/screenshots.ts` in the pinned headless Chromium; its inputs are the product's own scene and the CC0 assets the spike fetches (Poly Haven, MakeHuman)"
+licence = "CC0-1.0"
+read = "2026-09-21"
+sha256 = "05b9060f3f3de57e90c61a0143bb6e996da82521734b8ca85fe33528281c187a"
+
+[[asset]]
+path = "apps/web/browser/realism/screenshots/06-4-rider.jpg"
+source = "This repository, #457 (spike branch, never merged) — a screenshot of this project's own renderer, taken by `node apps/web/tools/realism/screenshots.ts` in the pinned headless Chromium; its inputs are the product's own scene and the CC0 assets the spike fetches (Poly Haven, MakeHuman)"
+licence = "CC0-1.0"
+read = "2026-09-21"
+sha256 = "e76694540680782425787c0308722555e75b0295d4264216968d6a686eb77ce6"
+
+[[asset]]
+path = "apps/web/browser/realism/screenshots/07-5-haze.jpg"
+source = "This repository, #457 (spike branch, never merged) — a screenshot of this project's own renderer, taken by `node apps/web/tools/realism/screenshots.ts` in the pinned headless Chromium; its inputs are the product's own scene and the CC0 assets the spike fetches (Poly Haven, MakeHuman)"
+licence = "CC0-1.0"
+read = "2026-09-21"
+sha256 = "d18cc4a41892b3e203d4c8b2f52719d8dd85e9a3f4ea824afe0f3c491f67e585"
+
+[[asset]]
+path = "apps/web/browser/realism/screenshots/08-5-bloom.jpg"
+source = "This repository, #457 (spike branch, never merged) — a screenshot of this project's own renderer, taken by `node apps/web/tools/realism/screenshots.ts` in the pinned headless Chromium; its inputs are the product's own scene and the CC0 assets the spike fetches (Poly Haven, MakeHuman)"
+licence = "CC0-1.0"
+read = "2026-09-21"
+sha256 = "8ca9303d558ed81609333c7b6a3a3b1e126c9eaeeca79220babe795375848b01"
+
+[[asset]]
+path = "apps/web/browser/realism/screenshots/09-all-on.jpg"
+source = "This repository, #457 (spike branch, never merged) — a screenshot of this project's own renderer, taken by `node apps/web/tools/realism/screenshots.ts` in the pinned headless Chromium; its inputs are the product's own scene and the CC0 assets the spike fetches (Poly Haven, MakeHuman)"
+licence = "CC0-1.0"
+read = "2026-09-21"
+sha256 = "8cf92206e35be72e6e1db3e4515be43740ceaa113060e03e41bb9a9827f6ccad"
+
+[[asset]]
 path = "apps/web/src/game/models/building-type-h.glb"
 source = "Kenney *City Kit (Suburban)*, CC0-1.0 — https://kenney.nl/assets/city-kit-suburban, downloaded as kenney_city-kit-suburban_20.zip and extracted verbatim from `Models/GLB format/`, unconverted (ADR 0022 D-1)"
 licence = "CC0-1.0"

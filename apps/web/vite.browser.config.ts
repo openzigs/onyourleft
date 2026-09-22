@@ -25,6 +25,9 @@
  * keep in step with `vite.config.ts` for no behaviour the gate can observe.
  */
 
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { defineConfig, type Plugin } from 'vite';
 
 import { buildFixtureArchive, FIXTURE_ARCHIVE_FILE } from './browser/pmtiles-fixture';
@@ -57,8 +60,36 @@ function pmtilesFixture(): Plugin {
   };
 }
 
+/**
+ * ⚠️ SPIKE (#457), on a branch that is never merged: copy the realism spike's
+ * processed assets into the harness build, when they exist.
+ *
+ * They are fetched and processed by `tools/realism/fetch-assets.ts` and
+ * `process-assets.ts` into `tools/realism/build/`, which is ignored and pruned
+ * — so on CI and on any clean clone the directory is absent, nothing is
+ * copied, and `realism.html` says so on screen rather than failing the build.
+ * Emitted rather than served from `public/` for `pmtilesFixture`'s reason: a
+ * binary in the tree is exactly what #431 not having landed forbids.
+ */
+function realismAssets(): Plugin {
+  const from = join(import.meta.dirname, 'tools', 'realism', 'build', 'processed');
+  return {
+    name: 'oyl-realism-assets',
+    generateBundle() {
+      if (!existsSync(from)) return;
+      for (const name of readdirSync(from)) {
+        this.emitFile({
+          type: 'asset',
+          fileName: `realism-assets/${name}`,
+          source: readFileSync(join(from, name)),
+        });
+      }
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [pmtilesFixture()],
+  plugins: [pmtilesFixture(), realismAssets()],
   root: 'browser',
   // ⚠️ A **multi-page** app, which here means "a static file server". Vite's
   // default single-page mode rewrites every unknown path to `index.html`, so a
@@ -118,6 +149,10 @@ export default defineConfig({
         // the page cannot be discovered to be broken on the one afternoon
         // somebody has the hardware — see `capture.browser.spec.ts`.
         capture: 'browser/capture.html',
+        // ⚠️ SPIKE (#457), never merged: realism on the device floor. Not a
+        // gate — no spec asserts on it; it is the page the tablet is measured
+        // on. `realism-harness.ts` says what it measures and how it is opened.
+        realism: 'browser/realism.html',
       },
     },
     // Sourcemaps so a failure in CI names a line of ours rather than a column
