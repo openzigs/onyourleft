@@ -28,8 +28,10 @@ import {
   CRANK_AXIS_Y,
   CRANK_AXIS_Z,
   CRANK_LENGTH_METRES,
+  emptyRiderJoints,
   LEG_BONE_COUNT,
   legBones,
+  riderJoints,
   MAXIMUM_CRANK_STEP_SECONDS,
   RIDER_BODY_PARTS,
   RIDER_CRANK_PARTS,
@@ -582,5 +584,71 @@ describe("a simulated rider's cranks turn because its wheels did — #368", () =
     // does not move at all, which is the rule that does NOT apply here.
     expect(advanceCrank(1.2, { live: false, value: 90 }, 1)).toBeCloseTo(1.2, 9);
     expect(simulatedCrankAngle(SIMULATED_DEVELOPMENT_METRES / 2)).not.toBeCloseTo(0, 3);
+  });
+});
+
+describe('the joints a realistic body is posed onto — #369', () => {
+  /** A bone's two ends, from its midpoint, length and pitch. */
+  function ends(bone: LimbBone): readonly [readonly [number, number], readonly [number, number]] {
+    const dy = (bone.length / 2) * Math.cos(bone.pitch);
+    const dz = (bone.length / 2) * Math.sin(bone.pitch);
+    return [
+      [bone.y - dy, bone.z - dz],
+      [bone.y + dy, bone.z + dz],
+    ];
+  }
+
+  it('puts each knee and foot exactly where the stylised leg puts it, at every angle', () => {
+    // ⚠️ The claim #369 needs: ONE source for where a leg is. A realistic knee
+    // solved a second way would drift from the stylised one, and the HUD's
+    // cadence would be drawn by two different legs.
+    const joints = emptyRiderJoints();
+    for (let step = 0; step < 72; step += 1) {
+      const angle = (step / 72) * TAU;
+      riderJoints(angle, joints);
+      const bones = legBones(angle);
+      for (const index of [0, 1] as const) {
+        const thigh = bones[index * 2] as LimbBone;
+        const shin = bones[index * 2 + 1] as LimbBone;
+        const [, knee] = ends(thigh);
+        const [, foot] = ends(shin);
+        expect(joints.knee[index].x).toBeCloseTo(thigh.x, 12);
+        expect(joints.knee[index].y).toBeCloseTo(knee[0], 9);
+        expect(joints.knee[index].z).toBeCloseTo(knee[1], 9);
+        expect(joints.foot[index].y).toBeCloseTo(foot[0], 9);
+        expect(joints.foot[index].z).toBeCloseTo(foot[1], 9);
+      }
+    }
+  });
+
+  it('puts each foot on its own pedal, half a turn apart', () => {
+    const joints = riderJoints(0.3, emptyRiderJoints());
+    for (const index of [0, 1] as const) {
+      const foot = joints.foot[index];
+      expect(Math.hypot(foot.y - CRANK_AXIS_Y, foot.z - CRANK_AXIS_Z)).toBeCloseTo(
+        CRANK_LENGTH_METRES,
+        12,
+      );
+    }
+    const [left, right] = joints.foot;
+    expect(left.y - CRANK_AXIS_Y).toBeCloseTo(-(right.y - CRANK_AXIS_Y), 12);
+    expect(left.x).toBe(-right.x);
+  });
+
+  it('moves the legs only when the crank angle does — #349’s rule, for the realistic rider', () => {
+    const a = riderJoints(1.1, emptyRiderJoints());
+    const same = riderJoints(1.1, emptyRiderJoints());
+    const turned = riderJoints(1.1 + Math.PI / 2, emptyRiderJoints());
+    expect(same).toEqual(a);
+    expect(turned.foot[0]).not.toEqual(a.foot[0]);
+    // The body does not move with the cranks: hips, shoulders and hands hold.
+    expect(turned.hips).toEqual(a.hips);
+    expect(turned.shoulders).toEqual(a.shoulders);
+    expect(turned.grip).toEqual(a.grip);
+  });
+
+  it('writes into the set it is given rather than making another', () => {
+    const joints = emptyRiderJoints();
+    expect(riderJoints(0, joints)).toBe(joints);
   });
 });
