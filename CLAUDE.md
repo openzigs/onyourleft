@@ -1540,9 +1540,11 @@ Apache-2.0, both zero-dependency, both under `packages/store`) and — since #40
 `@types/web-bluetooth` 0.0.21 (MIT, zero-dependency, types only, a devDependency of
 `packages/sensors`) and — since #31 — `fit-file-parser` 5.0.2 (MIT, a devDependency of
 `packages/fit` **and, since #51, of `apps/web` too**, whose closure is `buffer` MIT → `base64-js`
-MIT and `ieee754` BSD-3-Clause) and — since #63 — `maplibre-gl` 6.7.0 and `pmtiles` 4.5.0 (both
+MIT and `ieee754` BSD-3-Clause) and — since #63 — `maplibre-gl` **6.10.0** and `pmtiles` 4.5.0 (both
 BSD-3-Clause, both runtime dependencies of `apps/web`, whose closure adds BSD-2-Clause, ISC, MIT and
-one `(MIT OR Apache-2.0)` and no GPL, AGPL or non-OSI licence) and — also since #63 —
+one `(MIT OR Apache-2.0)` and no GPL, AGPL or non-OSI licence — ⚠️ **this said 6.7.0 until #489**,
+which took 6.10.0 with the browser gate re-run; the bump added `bidi-js` and `require-from-string`
+to that closure, both MIT, so the sentence above still describes it) and — also since #63 —
 `@playwright/test` 1.63.0 (Apache-2.0, with `playwright` and `playwright-core`, all three
 Apache-2.0; a devDependency of `apps/web`, and the only dependency in the workspace that pins a
 **browser** as well as a version — see §4f) and — since #91 — `three` **0.185.1** (MIT,

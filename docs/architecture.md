@@ -727,20 +727,25 @@ alternatives are there.
 | Test runner | Vitest 4.1.11 |
 | Coverage gate | **no percentage** — every new code path covered by a test proven to fail without the change |
 | Linter / formatter | ESLint 10 + typescript-eslint + Prettier 3 |
-| Map rendering | **MapLibre GL JS 6.7.0** + **`pmtiles` 4.5.0**, both BSD-3-Clause — installed by #63, in `apps/web` (ADR 0010 D-1) |
+| Map rendering | **MapLibre GL JS 6.10.0** + **`pmtiles` 4.5.0**, both BSD-3-Clause — installed by #63, in `apps/web` (ADR 0010 D-1) |
 | Basemap | Protomaps basemap as a PMTiles archive on storage this project controls. ⚠️ **This row used to read "not published yet — #53" and no longer does**: #53 published a continental-US extract of a pinned daily build on 2026-09-16, and #63's browser gate has rendered from it. It is not in `.env.example` — see below. The gate's *default* archive is still the synthetic one built by `apps/web/browser/pmtiles-fixture.ts`, which contains no OpenStreetMap data |
 | Real-time transport | deferred to [#16](https://github.com/openzigs/onyourleft/issues/16) |
 
-Installed as of #23: the toolchain above, React 19.2.8, React DOM 19.2.8 and Vite 8.2.2. Everything
+Installed as of #23: the toolchain above, React 19.2.8, React DOM 19.2.8 and Vite 8.3.0. Everything
 else in the table is a decision that no `package.json` has acted on yet. `CLAUDE.md` section 4b
 keeps that list; the commands are in section 4a.
 
 ### The map dependencies, recorded because #63's definition of done asks for it
 
-| Package | Version installed | Licence, verified from the installed tree on 2026-09-07 |
+| Package | Version installed | Licence, verified from the installed tree on 2026-09-22 |
 |---|---|---|
-| `maplibre-gl` | **6.7.0** | BSD-3-Clause |
+| `maplibre-gl` | **6.10.0** | BSD-3-Clause |
 | `pmtiles` | **4.5.0** | BSD-3-Clause |
+
+⚠️ **`maplibre-gl` read 6.7.0 here until [#489](https://github.com/openzigs/onyourleft/issues/489)**,
+which took Dependabot's 6.10.0 after re-running the browser gate against it; a reviewer who
+remembers 6.7.0 is reading the old file. The bump added `bidi-js` and `require-from-string` to the
+closure below, both MIT, so its licence sentence is unchanged.
 
 Both land in `apps/web`, which is AGPL-3.0-or-later; BSD-3 is admissible there and under `packages/`
 alike, and what keeps them in `apps/` is the DOM rather than the licence (ADR 0010 D-1 says so in as
@@ -749,7 +754,7 @@ reaches `packages/*` — unlike the devDependencies that arrive there through Vi
 §3 records as the trap.
 
 Their closure adds BSD-2-Clause, ISC, MIT and one `(MIT OR Apache-2.0)` and no GPL, no AGPL and
-nothing non-OSI. `maplibre-gl` is **977 kB minified**, which is why `apps/web/src/map/maplibre.ts` is
+nothing non-OSI. `maplibre-gl` is **1 006 kB minified** (977 kB at 6.7.0), which is why `apps/web/src/map/maplibre.ts` is
 reached through a dynamic `import()` and lands in its own chunk: a rider who only opens indoor rides
 never downloads it.
 
