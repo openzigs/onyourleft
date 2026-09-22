@@ -237,14 +237,18 @@ import {
 import type { QualitySettings } from './quality';
 import {
   isRealisticVegetation,
+  PHOTOGRAPHIC_STRUCTURE_SURFACES,
   REALISTIC_RIDER,
   REALISTIC_SKY,
+  REALISTIC_STRUCTURE_PARTS,
+  REALISTIC_STRUCTURE_SURFACES,
   REALISTIC_SURFACES,
   REALISTIC_VEGETATION,
   REALISTIC_VEGETATION_KINDS,
   realisticUrl,
   type RealisticVegetationKind,
   type RealisticWorldOutcome,
+  type StructureSurface,
 } from './realistic-assets';
 import { REALISTIC_NEAR_MESHES } from './realistic-budget';
 import {
@@ -252,9 +256,14 @@ import {
   halfToFloat,
   PHOTOGRAPHIC_ROAD_GRAIN,
   REALISTIC_EXPOSURE,
+  reflectedSkyColour,
+  skyBandRadiance,
   skyRotation,
+  WATER_HORIZON_BAND,
+  WATER_ZENITH_BAND,
   skySunU,
   upwardRadiance,
+  type LinearColour,
   type SkyPixels,
 } from './realistic-light';
 import {
@@ -270,6 +279,7 @@ import {
   SCENERY_KINDS,
   SCATTER_MAX_ITEMS,
   SCATTER_VERGE_METRES,
+  STRUCTURE_KINDS,
   type SceneryKind,
   type ScatterItem,
   type StructureKind,
@@ -1769,14 +1779,26 @@ export class ScatterBelt {
    * them; `physical` lights it as the realistic world lights everything, by the
    * environment and the sun rather than by the ambient lamp. The realistic
    * world's belt is handed an EMPTY `models` so that every kind it draws is its
-   * procedural primitive: no Kenney model beside a photoscan (D-3), until
-   * layer 3 gives the structures shapes of their own (#475).
+   * procedural primitive: no Kenney model beside a photoscan (D-3). Since
+   * layer 3 (#475) that is `post` alone, and the structures are
+   * {@link RealisticStructureBelts}', each of which builds this belt with the
+   * `models` and the `materials` of one photographic surface.
    */
   constructor(
     models: ReadonlyMap<SceneryKind, readonly BufferGeometry[]> = sceneryGeometries,
-    options: { readonly skip?: ReadonlySet<SceneryKind>; readonly physical?: boolean } = {},
+    options: {
+      readonly skip?: ReadonlySet<SceneryKind>;
+      readonly physical?: boolean;
+      /**
+       * The pair to wear instead — #475: one realistic structure surface's
+       * textured pair, which the belt then owns and releases.
+       */
+      readonly materials?: ShadedMaterials;
+    } = {},
   ) {
-    this.#materials = options.physical === true ? physicalMaterials() : vertexColouredMaterials();
+    this.#materials =
+      options.materials ??
+      (options.physical === true ? physicalMaterials() : vertexColouredMaterials());
     this.#skip = options.skip ?? new Set();
     for (const kind of SCENERY_KINDS) {
       if (options.skip?.has(kind) === true) {
@@ -2727,7 +2749,8 @@ function vertexColouredMaterials(): ShadedMaterials {
 /**
  * The realistic world's pair — ADR 0026 D-10: a physically based material the
  * environment map lights, on everything the realistic world still draws as a
- * primitive (the posts, the structures until layer 3, the bridges). The same
+ * primitive (the posts and the bridges; the structures are
+ * {@link RealisticStructureBelts}' since layer 3, #475). The same
  * vertex colours; matte, as painted wood, render and stone are.
  *
  * ⚠️ Constructed here and registered, so D-11's assertion covers it.
@@ -3390,6 +3413,11 @@ void main() {
 }
 `;
 
+/** Relative luminance of a colour in the linear working space, Rec. 709. */
+function linearLuminance(colour: Color): number {
+  return 0.2126 * colour.r + 0.7152 * colour.g + 0.0722 * colour.b;
+}
+
 /** Open water, where it is deep. This repository's own, a dark blue-green. */
 const WATER_DEEP_COLOUR = 0x1d4a55;
 
@@ -3445,13 +3473,38 @@ export class WaterBelt {
     return this.#mesh;
   }
 
+  /** The sky colour the shaded water reflects, linear RGB. @see waterSkyOf */
+  get reflectedSky(): readonly [number, number, number] {
+    const sky = (this.#shaded.uniforms as Record<string, { value: Color } | undefined>)['skyColour']
+      ?.value;
+    return [sky?.r ?? Number.NaN, sky?.g ?? Number.NaN, sky?.b ?? Number.NaN];
+  }
+
   /** @see QualitySettings.water */
   setDrawn(drawn: QualitySettings['water']): void {
     this.#mesh.material = drawn === 'shaded' ? this.#shaded : this.#flat;
   }
 
-  /** This frame's water, under this frame's sky, at this frame's time. */
-  update(surface: WaterSurface, world: WorldStyle, seconds: number): void {
+  /**
+   * This frame's water, under this frame's sky, at this frame's time.
+   *
+   * @param reflection the realistic sky's two bands, when the realistic world
+   * is drawn — #475. ⚠️ **The water stays #459's procedural shader on the
+   * realistic rungs, and that is argued rather than defaulted**: no source in
+   * ADR 0026 D-4's list publishes a water surface (Poly Haven and ambientCG
+   * publish none, read 2026-09-22 — ambientCG's nearest is ice), a
+   * photograph of water tiled across a lake is a frozen picture of ripples,
+   * and every real-time engine draws water as a shader. What was NOT
+   * realistic is what it reflected: the stylised sky's two colours, under a
+   * photographed one. With a reflection it takes the HDRI's own hue at the
+   * brightness #459 was tuned to — `realistic-light.ts` §`reflectedSkyColour`.
+   */
+  update(
+    surface: WaterSurface,
+    world: WorldStyle,
+    seconds: number,
+    reflection?: { readonly zenith: LinearColour; readonly horizon: LinearColour },
+  ): void {
     // ⚠️ #469, for {@link TerrainBelt.update}'s reason. @see WaterSurface.lease
     if (!waterSurfaceIsCurrent(surface)) {
       throw new Error(
@@ -3459,8 +3512,16 @@ export class WaterBelt {
       );
     }
     const uniforms = this.#shaded.uniforms as Record<string, { value: unknown } | undefined>;
-    (uniforms['skyColour']?.value as Color).setHex(world.skyColour);
-    (uniforms['horizonColour']?.value as Color).setHex(world.horizonColour);
+    const sky = uniforms['skyColour']?.value as Color;
+    const horizon = uniforms['horizonColour']?.value as Color;
+    sky.setHex(world.skyColour);
+    horizon.setHex(world.horizonColour);
+    if (reflection !== undefined) {
+      // In the working (linear) space, where `setHex` has just put the two
+      // stylised colours whose brightness the water was tuned against.
+      sky.setRGB(...reflectedSkyColour(reflection.zenith, linearLuminance(sky)));
+      horizon.setRGB(...reflectedSkyColour(reflection.horizon, linearLuminance(horizon)));
+    }
     (uniforms['time'] as { value: number }).value = seconds;
     if (surface.vertices.length > this.#vertexCapacity) {
       this.#vertexCapacity = Math.max(surface.vertices.length, this.#vertexCapacity * 2);
@@ -3648,6 +3709,12 @@ interface RealisticSky {
   readonly upward: number;
   /** Where its sun is in the picture, as a horizontal texture coordinate. */
   readonly sunU: number;
+  /**
+   * The mean radiance of the sky well above the horizon and at it — what the
+   * water reflects on the realistic rungs (#475). @see skyBandRadiance
+   */
+  readonly zenith: LinearColour;
+  readonly horizon: LinearColour;
 }
 
 /** Everything the realistic world is drawn from, loaded once per tab. */
@@ -3656,6 +3723,11 @@ interface RealisticWorld {
   readonly road: { readonly colour: Texture; readonly normal: Texture };
   readonly ground: { readonly colour: Texture; readonly normal: Texture };
   readonly vegetation: ReadonlyMap<RealisticVegetationKind, readonly RealisticShape[]>;
+  /** The structures' photographic surfaces — ADR 0026 D-12 layer 3, #475. */
+  readonly structures: ReadonlyMap<
+    Exclude<StructureSurface, 'painted'>,
+    { readonly colour: Texture; readonly normal: Texture }
+  >;
   /** The rider's body, as the loader left it: a scene holding one skinned mesh. */
   readonly body: Object3D;
 }
@@ -3755,6 +3827,17 @@ export async function loadRealisticWorld(
       normal: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.ground.normal))),
     };
     const rider = model(() => loaders.model(realisticUrl(REALISTIC_RIDER)));
+    // #475: the structures' surfaces, loaded with everything else and settled
+    // with it — a world whose buildings could not load is half a world.
+    const structureMaps = PHOTOGRAPHIC_STRUCTURE_SURFACES.map((surface) => ({
+      surface,
+      colour: texture(() =>
+        loaders.texture(realisticUrl(REALISTIC_STRUCTURE_SURFACES[surface].colour)),
+      ),
+      normal: texture(() =>
+        loaders.texture(realisticUrl(REALISTIC_STRUCTURE_SURFACES[surface].normal)),
+      ),
+    }));
     const shapes = REALISTIC_VEGETATION_KINDS.map((kind) => ({
       kind,
       models: REALISTIC_VEGETATION[kind].map(({ name, file, impostor }) => ({
@@ -3779,6 +3862,7 @@ export async function loadRealisticWorld(
       ground.colour,
       ground.normal,
       rider,
+      ...structureMaps.flatMap((each) => [each.colour, each.normal]),
       ...shapes.flatMap((each) => each.models.flatMap((one) => [one.scene, one.strip])),
     ]);
     for (const outcome of settled) {
@@ -3803,9 +3887,31 @@ export async function loadRealisticWorld(
     }
     roadColour.colorSpace = SRGBColorSpace;
     groundColour.colorSpace = SRGBColorSpace;
+    const structures = new Map<
+      Exclude<StructureSurface, 'painted'>,
+      { readonly colour: Texture; readonly normal: Texture }
+    >();
+    for (const each of structureMaps) {
+      const colour = await each.colour;
+      const normal = await each.normal;
+      for (const map of [colour, normal]) {
+        map.wrapS = RepeatWrapping;
+        map.wrapT = RepeatWrapping;
+        map.minFilter = LinearMipmapLinearFilter;
+      }
+      colour.colorSpace = SRGBColorSpace;
+      structures.set(each.surface, { colour, normal });
+    }
     skyTexture.mapping = EquirectangularReflectionMapping;
     const pixels = skyPixelsOf(skyTexture);
-    const skyRead = { texture: skyTexture, upward: upwardRadiance(pixels), sunU: skySunU(pixels) };
+    const skyRead = {
+      texture: skyTexture,
+      upward: upwardRadiance(pixels),
+      sunU: skySunU(pixels),
+      // #475. @see WaterBelt.update
+      zenith: skyBandRadiance(pixels, WATER_ZENITH_BAND[0], WATER_ZENITH_BAND[1]),
+      horizon: skyBandRadiance(pixels, WATER_HORIZON_BAND[0], WATER_HORIZON_BAND[1]),
+    };
     // ⚠️ Swapped in only once the new world is whole, and the old one released
     // only after the swap: a reload that failed half-way, or whose release
     // threw, must leave the world a view draws intact — the first version of
@@ -3817,6 +3923,7 @@ export async function loadRealisticWorld(
       road: { colour: roadColour, normal: roadNormal },
       ground: { colour: groundColour, normal: groundNormal },
       vegetation,
+      structures,
       body,
     };
     if (previous !== undefined) {
@@ -3900,6 +4007,10 @@ function releaseRealisticWorld(world: RealisticWorld): void {
   }
   for (const shapes of world.vegetation.values()) {
     for (const shape of shapes) releaseRealisticShape(shape);
+  }
+  for (const maps of world.structures.values()) {
+    maps.colour.dispose();
+    maps.normal.dispose();
   }
   releaseLoadedScene(world.body);
 }
@@ -5050,14 +5161,288 @@ export function realisticBicycleTriangles(): number {
 }
 
 /**
+ * The walls and the roof of a realistic house — ADR 0026 D-12 layer 3, #475.
+ *
+ * ⚠️ **Built here from numbers because no source in D-4's list publishes a
+ * country house**: `realistic-assets.ts` §`REALISTIC_STRUCTURE_SURFACES` says
+ * what was looked for. The stylised world draws a Kenney model here and the
+ * realistic world's primitives belt drew a 7 × 6 × 9 m box; this is a house —
+ * brick walls, a clay-tiled gable — inside the same 9 m square
+ * `settlements.ts` §`STRUCTURE_FOOTPRINTS` keeps clear of the road, and like
+ * every structure its front is +z and its ridge along x.
+ */
+function realisticBuildingParts(): BufferGeometry[] {
+  return [block(8.4, 5 + FOUNDATION_METRES, 7, 0, -FOUNDATION_METRES), gable(9, 7.6, 2.6, 5)];
+}
+
+/**
+ * One structure's parts, in `REALISTIC_STRUCTURE_PARTS`' order — #475.
+ *
+ * Every kind but `building` is {@link STRUCTURE_STYLE}'s own parts, so the
+ * realistic shape is the stylised one with a photograph on it: the same
+ * triangles, in the same place.
+ */
+export function realisticStructureParts(kind: StructureKind): BufferGeometry[] {
+  return kind === 'building'
+    ? realisticBuildingParts()
+    : STRUCTURE_STYLE[kind].map((part) => part.geometry());
+}
+
+/**
+ * A geometry with texture coordinates in metres of its surface — #475.
+ *
+ * Each triangle is projected along the axis its own face is most nearly
+ * facing: a wall facing ±x reads (z, y), one facing ±z reads (x, y), a roof or
+ * a top reads (x, z). So a brick is the same size on every wall of every
+ * building and a course of them runs level, which a box's own 0-to-1
+ * coordinates would not give — they stretch one photograph across a whole
+ * wall, whatever its size. Position and normal are kept; nothing else is.
+ */
+function projectedInMetres(geometry: BufferGeometry, tileMetres: number): BufferGeometry {
+  const flat = geometry.index === null ? geometry : geometry.toNonIndexed();
+  if (flat !== geometry) geometry.dispose();
+  for (const name of Object.keys(flat.attributes)) {
+    if (name !== 'position' && name !== 'normal') flat.deleteAttribute(name);
+  }
+  if (flat.getAttribute('normal') === undefined) flat.computeVertexNormals();
+  const position = flat.getAttribute('position');
+  const uv = new Float32Array(position.count * 2);
+  const a = new Vector3();
+  const b = new Vector3();
+  const c = new Vector3();
+  const across = new Vector3();
+  for (let first = 0; first + 2 < position.count; first += 3) {
+    a.fromBufferAttribute(position, first);
+    b.fromBufferAttribute(position, first + 1);
+    c.fromBufferAttribute(position, first + 2);
+    const normal = across.subVectors(c, b).cross(b.clone().sub(a));
+    const x = Math.abs(normal.x);
+    const y = Math.abs(normal.y);
+    const z = Math.abs(normal.z);
+    for (let corner = 0; corner < 3; corner += 1) {
+      const at = first + corner;
+      const px = position.getX(at);
+      const py = position.getY(at);
+      const pz = position.getZ(at);
+      const [u, v] = x >= y && x >= z ? [pz, py] : y >= z ? [px, pz] : [px, py];
+      uv[at * 2] = u / tileMetres;
+      uv[at * 2 + 1] = v / tileMetres;
+    }
+  }
+  flat.setAttribute('uv', new BufferAttribute(uv, 2));
+  return flat;
+}
+
+/**
+ * The parts of one structure that wear one surface, as one geometry, or
+ * `undefined` when none do — #475.
+ */
+export function realisticStructureGeometry(
+  kind: StructureKind,
+  surface: StructureSurface,
+): BufferGeometry | undefined {
+  const parts = realisticStructureParts(kind);
+  const surfaces = REALISTIC_STRUCTURE_PARTS[kind];
+  if (parts.length !== surfaces.length) {
+    for (const part of parts) part.dispose();
+    throw new Error(
+      `${kind}: ${String(parts.length)} parts and ${String(surfaces.length)} surfaces to wear`,
+    );
+  }
+  const tile = surface === 'painted' ? 1 : REALISTIC_STRUCTURE_SURFACES[surface].tileMetres;
+  const mine: BufferGeometry[] = [];
+  parts.forEach((part, index) => {
+    if (surfaces[index] === surface) mine.push(projectedInMetres(part, tile));
+    else part.dispose();
+  });
+  if (mine.length === 0) return undefined;
+  const joined = mergeGeometries(mine);
+  for (const each of mine) each.dispose();
+  if (joined === null) throw new Error(`${kind}: its ${surface} parts could not be merged`);
+  return joined;
+}
+
+/**
+ * How each structure surface takes the light — #475. The photographs carry the
+ * colour; these are the two physically based numbers three needs besides, and
+ * a tint where one is argued:
+ *
+ * - `hedge` is tinted greener, because the nearest photograph any source in
+ *   D-4 publishes is leaf litter seen from above (`tools/realistic/sources.ts`
+ *   §`STRUCTURE_TEXTURES`), and a hedge is a living one;
+ * - `painted` — a signpost's pole — has no photograph, so its colour is the
+ *   stylised pole's own;
+ * - `corrugated` is the one metal: galvanised sheet, half metallic and fairly
+ *   smooth, so it catches the sky the environment map puts in it.
+ *
+ * Every other figure is matte, as brick, stone, tile and boards are.
+ */
+const STRUCTURE_SURFACE_FINISH: Readonly<
+  Record<
+    StructureSurface,
+    { readonly roughness: number; readonly metalness: number; readonly tint: number }
+  >
+> = {
+  brick: { roughness: 0.9, metalness: 0, tint: 0xffffff },
+  'roof-tiles': { roughness: 0.8, metalness: 0, tint: 0xffffff },
+  slate: { roughness: 0.7, metalness: 0, tint: 0xffffff },
+  stone: { roughness: 0.95, metalness: 0, tint: 0xffffff },
+  planks: { roughness: 0.85, metalness: 0, tint: 0xffffff },
+  corrugated: { roughness: 0.5, metalness: 0.5, tint: 0xffffff },
+  hedge: { roughness: 0.95, metalness: 0, tint: 0x8fcf66 },
+  painted: { roughness: 0.6, metalness: 0.2, tint: 0x5a5a5a },
+};
+
+/**
+ * The kinds the realistic world's primitives belt leaves to the others: the
+ * vegetation belt's four, and — since #475, layer 3 — every structure. What is
+ * left for it is `post`, which ADR 0022 D-3 keeps procedural in both worlds.
+ */
+export const REALISTIC_PRIMITIVE_SKIP: ReadonlySet<SceneryKind> = new Set<SceneryKind>([
+  ...REALISTIC_VEGETATION_KINDS,
+  ...STRUCTURE_KINDS,
+]);
+
+/**
+ * How many triangles one realistic structure of a kind is drawn with, every
+ * surface together — what `realistic-budget.ts` §`REALISTIC_TRIANGLES` holds a
+ * structure to, since it is built here rather than read off a file.
+ *
+ * @test-facing held by `realistic-budget.test.ts`
+ */
+export function realisticStructureTriangles(kind: StructureKind): number {
+  let total = 0;
+  for (const part of realisticStructureParts(kind)) {
+    const flat = part.index === null ? part : part.toNonIndexed();
+    total += flat.getAttribute('position').count / 3;
+    flat.dispose();
+    part.dispose();
+  }
+  return total;
+}
+
+/** Every surface a structure can wear, the photographic ones first. */
+const STRUCTURE_SURFACES: readonly StructureSurface[] = [
+  ...PHOTOGRAPHIC_STRUCTURE_SURFACES,
+  'painted',
+];
+
+/**
+ * The pair one surface's belt wears — ADR 0026 D-10 and D-11: constructed
+ * here, from the world's own textures, never by a loader.
+ */
+function structureMaterials(
+  surface: StructureSurface,
+  textures: RealisticWorld['structures'],
+): ShadedMaterials {
+  const finish = STRUCTURE_SURFACE_FINISH[surface];
+  const maps = surface === 'painted' ? undefined : textures.get(surface);
+  return {
+    lit: constructed(
+      new MeshStandardMaterial({
+        color: finish.tint,
+        roughness: finish.roughness,
+        metalness: finish.metalness,
+        ...(maps === undefined ? {} : { map: maps.colour, normalMap: maps.normal }),
+      }),
+    ),
+    flat: constructed(
+      new MeshBasicMaterial({
+        color: finish.tint,
+        ...(maps === undefined ? {} : { map: maps.colour }),
+      }),
+    ),
+  };
+}
+
+/**
+ * The realistic world's structures, one {@link ScatterBelt} per surface — #475.
+ *
+ * ## Why a belt a surface, and why every belt counts every item
+ *
+ * A structure wears more than one surface — a house is brick and tile — so
+ * it cannot be one mesh with one material the way the stylised world's
+ * vertex-coloured structures are. Each surface's belt holds, for each kind
+ * that wears it, that kind's parts in it; so a house is two instances, one in
+ * the brick belt and one in the tile belt, placed by the SAME matrix because
+ * both belts place it from the same item. Every other kind is on the belt's
+ * `skip` list, which is what makes it spend the budget without being drawn
+ * (#478): each belt admits exactly the items the stylised belt would, so a
+ * house can never be drawn with its walls and without its roof.
+ */
+export class RealisticStructureBelts {
+  readonly #belts: readonly { readonly surface: StructureSurface; readonly belt: ScatterBelt }[];
+
+  /** @param textures the world's structure surfaces. @see RealisticWorld.structures */
+  constructor(textures: RealisticWorld['structures']) {
+    this.#belts = STRUCTURE_SURFACES.map((surface) => {
+      const models = new Map<SceneryKind, readonly BufferGeometry[]>();
+      for (const kind of STRUCTURE_KINDS) {
+        const geometry = realisticStructureGeometry(kind, surface);
+        if (geometry !== undefined) models.set(kind, [geometry]);
+      }
+      const belt = new ScatterBelt(models, {
+        skip: new Set(SCENERY_KINDS.filter((kind) => !models.has(kind))),
+        materials: structureMaterials(surface, textures),
+      });
+      // The belt wears copies. @see ScatterBelt's constructor
+      for (const [geometry] of models.values()) geometry?.dispose();
+      return { surface, belt };
+    });
+  }
+
+  /** The belt one surface is drawn by. */
+  beltOf(surface: StructureSurface): ScatterBelt | undefined {
+    return this.#belts.find((each) => each.surface === surface)?.belt;
+  }
+
+  addTo(scene: Scene): void {
+    for (const { belt } of this.#belts) belt.addTo(scene);
+  }
+
+  setShown(on: boolean): void {
+    for (const { belt } of this.#belts) belt.setShown(on);
+  }
+
+  setBudget(items: number): void {
+    for (const { belt } of this.#belts) belt.setBudget(items);
+  }
+
+  update(items: readonly ScatterItem[], pose: CameraPose): void {
+    for (const { belt } of this.#belts) belt.update(items, pose);
+  }
+
+  /**
+   * How many structures the last frame drew — each counted once, off the belt
+   * of the first surface it wears, so a house is one item and not two.
+   */
+  get drawnItems(): number {
+    let drawn = 0;
+    for (const kind of STRUCTURE_KINDS) {
+      const first = REALISTIC_STRUCTURE_PARTS[kind][0];
+      for (const mesh of first === undefined ? [] : (this.beltOf(first)?.meshesOf(kind) ?? [])) {
+        drawn += mesh.count;
+      }
+    }
+    return drawn;
+  }
+
+  dispose(): void {
+    for (const { belt } of this.#belts) belt.dispose();
+  }
+}
+
+/**
  * What one view builds to draw the realistic world — ADR 0026 D-10's second
  * path, beside the stylised one in this same file.
  *
  * - {@link RealisticVegetationBelt}: the trees, shrubs and rocks (#474).
+ * - {@link RealisticStructureBelts}: the structures, in photographic
+ *   surfaces (#475, layer 3).
  * - A second {@link ScatterBelt}, **with no models** and physically based
- *   materials, for every other kind: `post`, and the structures until layer 3
- *   gives them realistic shapes (#475). No Kenney model is drawn beside a
- *   photoscan on any rung — D-3.
+ *   materials, for the one kind left: `post`, which ADR 0022 D-3 keeps
+ *   procedural in both worlds. No Kenney model is drawn beside a photoscan on
+ *   any rung — D-3.
  * - {@link RealisticRiderBelt}: the MakeHuman riders on their bicycles (#369).
  * - The road's and the ground's photographic materials, swapped onto the
  *   stylised meshes, so the road stays one mesh and one draw call (#425).
@@ -5069,6 +5454,7 @@ export function realisticBicycleTriangles(): number {
  */
 class RealisticDrawing {
   readonly vegetation: RealisticVegetationBelt;
+  readonly structures: RealisticStructureBelts;
   readonly primitives: ScatterBelt;
   readonly riders: RealisticRiderBelt;
   readonly road: MeshStandardMaterial;
@@ -5090,8 +5476,9 @@ class RealisticDrawing {
       texture.anisotropy = anisotropy;
     }
     this.vegetation = new RealisticVegetationBelt(world.vegetation);
+    this.structures = new RealisticStructureBelts(world.structures);
     this.primitives = new ScatterBelt(new Map(), {
-      skip: new Set<SceneryKind>(REALISTIC_VEGETATION_KINDS),
+      skip: REALISTIC_PRIMITIVE_SKIP,
       physical: true,
     });
     this.riders = new RealisticRiderBelt(world.body);
@@ -5109,14 +5496,23 @@ class RealisticDrawing {
 
   addTo(scene: Scene): void {
     this.vegetation.addTo(scene);
+    this.structures.addTo(scene);
     this.primitives.addTo(scene);
     this.riders.addTo(scene);
   }
 
   setShown(on: boolean): void {
     this.vegetation.setShown(on);
+    this.structures.setShown(on);
     this.primitives.setShown(on);
     this.riders.setShown(on);
+  }
+
+  /** Every scenery belt, handed the same frame. */
+  updateScenery(items: readonly ScatterItem[], pose: CameraPose): void {
+    this.vegetation.update(items, pose);
+    this.structures.update(items, pose);
+    this.primitives.update(items, pose);
   }
 
   /**
@@ -5129,16 +5525,18 @@ class RealisticDrawing {
    */
   setBudget(items: number): void {
     this.vegetation.setBudget(items);
+    this.structures.setBudget(items);
     this.primitives.setBudget(items);
   }
 
-  /** How many scenery items the last frame drew, both belts together. */
+  /** How many scenery items the last frame drew, every belt together. */
   get sceneryDrawn(): number {
-    return this.vegetation.drawnItems + this.primitives.drawnItems;
+    return this.vegetation.drawnItems + this.structures.drawnItems + this.primitives.drawnItems;
   }
 
   dispose(): void {
     this.vegetation.dispose();
+    this.structures.dispose();
     this.primitives.dispose();
     this.riders.dispose();
     this.road.dispose();
@@ -5174,6 +5572,10 @@ function evictRealisticWorldFromGpu(): void {
       }
       shape.impostor?.texture.dispose();
     }
+  }
+  for (const maps of world.structures.values()) {
+    maps.colour.dispose();
+    maps.normal.dispose();
   }
 }
 
@@ -5211,6 +5613,19 @@ export function drawnWorldOf(view: GameView): QualitySettings['world'] {
  */
 export function sceneryDrawnOf(view: GameView): number {
   return view instanceof ThreeGameView ? view.sceneryDrawn : 0;
+}
+
+/**
+ * The sky colour a view's water reflected in its last frame, linear RGB — what
+ * the browser gate holds the realistic rungs' water to (#475): the line in
+ * `render` that hands the water the realistic sky is one jsdom cannot reach,
+ * because it has no view without a GL context.
+ *
+ * @unwired reached only from the browser gate's harness; nothing in the render
+ * path needs to ask.
+ */
+export function waterSkyOf(view: GameView): readonly [number, number, number] {
+  return view instanceof ThreeGameView ? view.waterSky : [Number.NaN, Number.NaN, Number.NaN];
 }
 
 /**
@@ -5403,15 +5818,20 @@ class ThreeGameView implements GameView {
     this.#world = frame.world;
     this.#terrain.update(frame.terrain.mesh, frame.world.groundColour);
     this.#horizon.update(frame.terrain.horizon, frame.world, frame.camera);
-    this.#water.update(frame.water.surface, frame.world, frame.water.seconds);
+    this.#water.update(
+      frame.water.surface,
+      frame.world,
+      frame.water.seconds,
+      // #475: on the realistic rungs the water reflects the realistic sky.
+      this.#drawing === 'realistic' ? realisticWorld?.sky : undefined,
+    );
     this.#bridges.update(frame.water.bridges);
     this.#updateRoad(frame);
     // ⚠️ Both worlds' belts are handed the frame, and the hidden world's
     // return at once (ADR 0026 D-3): one frame, one arrangement, whichever
     // world draws it — so the two can never disagree about where a tree is.
     this.#scatter.update(frame.scatter, frame.camera);
-    this.#realistic?.vegetation.update(frame.scatter, frame.camera);
-    this.#realistic?.primitives.update(frame.scatter, frame.camera);
+    this.#realistic?.updateScenery(frame.scatter, frame.camera);
     this.#realistic?.riders.place(frame.markers);
     this.#updateMarkers(frame.markers);
     this.#updateShadows(frame);
@@ -5508,6 +5928,11 @@ class ThreeGameView implements GameView {
   /** Which world the last rung this view was given is drawn in. @see drawnWorldOf */
   get drawnWorld(): QualitySettings['world'] {
     return this.#drawing;
+  }
+
+  /** The sky the water reflected in the last frame. @see waterSkyOf */
+  get waterSky(): readonly [number, number, number] {
+    return this.#water.reflectedSky;
   }
 
   /** Every mesh in the scene and what it wears — for the harness's D-11 check. @see sceneMaterialsOf */

@@ -99,6 +99,7 @@ import {
   sceneMaterialsOf,
   sceneryDrawnOf,
   threeGameRenderer,
+  waterSkyOf,
 } from '../src/game/three-renderer';
 import { realisticWorldNotice } from '../src/game/realistic-assets';
 import {
@@ -2592,6 +2593,13 @@ export interface RealisticMeasurement {
   /** SwiftShader milliseconds a frame — published, never asserted. */
   readonly realisticFrameMs: number;
   readonly stylisedFrameMs: number;
+  /**
+   * #475: the sky colour the water reflected in the last realistic frame and
+   * in the last stylised one, linear RGB — the realistic sky's hue at the
+   * stylised sky's brightness. @see waterSkyOf
+   */
+  readonly waterSkyRealistic: readonly number[];
+  readonly waterSkyStylised: readonly number[];
 }
 
 const NO_REALISTIC: RealisticMeasurement = {
@@ -2624,6 +2632,8 @@ const NO_REALISTIC: RealisticMeasurement = {
   afterStepDownStandard: 0,
   realisticFrameMs: 0,
   stylisedFrameMs: 0,
+  waterSkyRealistic: [],
+  waterSkyStylised: [],
 };
 
 /** Relative luminance of an sRGB pixel, WCAG 2.2's own formula. */
@@ -2841,6 +2851,9 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     riding(valleyRoute(), 800 + distance, build);
   const realisticFrameMs = timeFrames(view, frameAt, gl);
   const stylisedFrameMs = timeFrames(plain, frameAt, plainGl);
+  // #475: each view's last frame was its own world's. @see waterSkyOf
+  const waterSkyRealistic = waterSkyOf(view);
+  const waterSkyStylised = waterSkyOf(plain);
   plain.destroy();
 
   // D-3's step down: the stylised ladder's top, whole.
@@ -2891,6 +2904,8 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     afterStepDownStandard,
     realisticFrameMs,
     stylisedFrameMs,
+    waterSkyRealistic,
+    waterSkyStylised,
   };
 }
 

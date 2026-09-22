@@ -1930,6 +1930,16 @@ test.describe('the realistic world — ADR 0026', () => {
     expect(measured.sceneryDrawnTop).toBeGreaterThan(measured.sceneryProbeBudget);
     expect(measured.sceneryDrawnBudgeted).toBeGreaterThan(0);
     expect(measured.sceneryDrawnBudgeted).toBeLessThanOrEqual(measured.sceneryProbeBudget);
+    // #475: the water on a realistic rung reflects the realistic sky — a
+    // different colour at the brightness the stylised water was tuned to.
+    const luminance = (rgb: readonly number[]): number =>
+      0.2126 * (rgb[0] ?? 0) + 0.7152 * (rgb[1] ?? 0) + 0.0722 * (rgb[2] ?? 0);
+    expect(measured.waterSkyRealistic).toHaveLength(3);
+    expect(measured.waterSkyRealistic).not.toEqual(measured.waterSkyStylised);
+    expect(luminance(measured.waterSkyRealistic)).toBeCloseTo(
+      luminance(measured.waterSkyStylised),
+      4,
+    );
   });
 
   test('fetches the realistic set only when asked — the default world fetches none of it', async ({

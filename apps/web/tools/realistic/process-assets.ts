@@ -49,6 +49,7 @@ import {
   OUTPUTS,
   PINNED_BLENDER,
   shippedFiles,
+  TEXTURE_SCRIPT,
   type InputLock,
   type OutputSpec,
 } from './sources';
@@ -83,9 +84,12 @@ function blender(script: string, args: readonly string[]): string {
   return output;
 }
 
-/** The input a script reads: a Poly Haven glTF, or MakeHuman's directory. */
+/** The input a script reads: a Poly Haven glTF, MakeHuman's directory, or a texture's (#475). */
 function inputFor(output: OutputSpec): string {
   if (output.from === 'makehuman') return join(RAW, 'makehuman');
+  if (output.recipe.how === 'blender' && output.recipe.script === TEXTURE_SCRIPT) {
+    return join(RAW, output.from);
+  }
   return join(RAW, output.from, `${output.from}_1k.gltf`);
 }
 

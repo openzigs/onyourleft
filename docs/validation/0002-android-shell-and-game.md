@@ -2150,6 +2150,17 @@ and layer 3 (structures) is [#475](https://github.com/openzigs/onyourleft/issues
 to it is the owner's page, `apps/web/browser/realistic.html`, staged into a **local debug APK**.
 This Part is what that page is for.
 
+⚠️ **Since #475's build half, layer 3 is in too, and the soak now follows it.** Every structure
+kind is drawn on the realistic rungs in **CC0 photographic surfaces** — brick and clay tile on a
+house and a row of shops, boards and corrugated iron on a barn, stone and slate on a church, stone
+on a field wall, boards on a fence, leaves on a hedge (`realistic-assets.ts`
+§`REALISTIC_STRUCTURE_SURFACES`). ⚠️ **The shapes are this repository's own, built from numbers**:
+no source in ADR 0026 D-4's list publishes a whole country building (Poly Haven's "buildings" are
+urban facade kits of 118 000–175 000 triangles), so what is photographic is what covers them. The
+water stays #459's procedural shader and now **reflects the realistic sky's own colour**
+(`three-renderer.ts` §`WaterBelt.update` argues why it stays procedural). Z9 and Z10 below are the
+two looks that change, and the rider control still waits for the soak — #475.
+
 ### What is already measured, and where it came from
 
 The provisional budget in `apps/web/src/game/realistic-budget.ts` (ADR 0026 D-6) rests on the one
@@ -2314,7 +2325,9 @@ Landscape, full brightness, on charge, nothing else running; let the tablet cool
 | Z5 | Look at the rider from behind, and hold the ride still: `location.href = '/harness/realistic.html?at=900&panel=0'` | Do the legs follow the pedals? With the ride held (`?at=`), do the legs STOP? — #349's rule for the realistic rider |
 | Z6 | `?panel=0&ladder=0`, 30 s; then `?world=stylised&panel=0&ladder=0`, 30 s — each with the `dumpsys` block below. ⚠️ **Both are TOP rungs, so both draw at the display's rate, 60 Hz** (#476) — this is realistic against stylised at 60, and nothing about a cap | Frame and GPU percentiles, realistic against stylised |
 | Z7 | **The soak**: `?soak=20&panel=0` — the ladder free, as a rider would have it. ⚠️ **It starts at the realistic top rung, at the display's rate (60 Hz)**, and every minute's line says the rung and its `frameCap`: while it says `display` it is measuring 60 fps realism; a minute that says `30`, `24` or `20` is a stylised rung the ladder stepped to, and its frame times read that cap | One line a minute; thermal status; the rung **and frame cap** it ends on |
-| Z8 | During Z7, once at minute 10: `"$ADB" shell dumpsys meminfo dev.openzigs.onyourleft \| grep -iE "Graphics\|GL mtrack\|TOTAL"` | What the driver actually holds, against the 160 MiB estimate |
+| Z8 | During Z7, once at minute 10: `"$ADB" shell dumpsys meminfo dev.openzigs.onyourleft \| grep -iE "Graphics\|GL mtrack\|TOTAL"` | What the driver actually holds, against the 160 MiB estimate (the estimate is **136 MiB** since #475's structures) |
+| Z9 | Ride past the farmstead and any village: `?panel=0&ladder=0`. Look at a house, a barn, a wall and a hedge from the road | Do the walls read as brick, board and stone, and the roofs as tile, slate and iron? Is a brick the same size on every wall (it should be — the photographs are laid out in metres)? ⚠️ **The hedge is the weakest**: it wears leaf litter tinted green, the nearest photograph any admitted source publishes — say whether it reads as a hedge |
+| Z10 | Ride over the bridge and past the lake | Does the water take the sky's colour — grey under grey cloud, not the stylised world's blue? Any seam where it meets the bank? |
 
 Each 30-second row:
 
@@ -2370,6 +2383,10 @@ done
 **Trees near and far (Z4)?** ______________
 
 **Legs follow the pedals, and stop when held (Z5)?** ______________
+
+**Structures: brick, board, stone, tile, slate, iron; the hedge (Z9)?** ______________
+
+**The water's reflection (Z10)?** ______________
 
 **`OYL-REALISTIC-LOAD` — `capacitorAtStart` / `androidBridgeAtStart`, and any `OYL-REALISTIC-BRIDGE` or
 `OYL-REALISTIC-ERROR` line (#478):** ______________

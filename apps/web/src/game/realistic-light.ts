@@ -144,6 +144,117 @@ export function upwardRadiance(sky: SkyPixels, step = 4): number {
   return weighted / weights;
 }
 
+/** A colour in linear light, red, green and blue. */
+export type LinearColour = readonly [number, number, number];
+
+/**
+ * The elevations, in degrees, whose sky the realistic water reflects as its
+ * "sky" and its "horizon" colour — #475. #459's water shader mixes two colours
+ * along the reflected ray, reaching the sky's at 0.4 of the way up (about 24°);
+ * these are the two bands of the HDRI those two colours stand for.
+ *
+ * @unwired read by `three-renderer.ts` §`loadRealisticWorld`, which nothing the
+ * shipped app calls until #475's rider control follows the soak
+ */
+export const WATER_ZENITH_BAND: readonly [number, number] = [30, 90];
+
+/**
+ * The horizon's band. @see WATER_ZENITH_BAND
+ *
+ * @unwired read by `three-renderer.ts` §`loadRealisticWorld`, which nothing the
+ * shipped app calls until #475's rider control follows the soak
+ */
+export const WATER_HORIZON_BAND: readonly [number, number] = [0, 10];
+
+/**
+ * The mean radiance of the sky between two elevations, in degrees, as linear
+ * RGB — every column of each row, each row weighted by the cosine of its
+ * elevation, which is the solid angle an equirectangular row covers. So it is
+ * an average over the whole ring of sky, and turning the sky
+ * ({@link skyRotation}) cannot move it.
+ *
+ * Throws when the band holds no finite texel: a water surface reflecting a
+ * colour nobody measured is a quieter failure than a world that did not load.
+ *
+ * @unwired read by `three-renderer.ts` §`loadRealisticWorld`, which nothing the
+ * shipped app calls until #475's rider control follows the soak
+ */
+export function skyBandRadiance(
+  sky: SkyPixels,
+  fromDegrees: number,
+  toDegrees: number,
+  step = 4,
+): LinearColour {
+  const from = (fromDegrees * Math.PI) / 180;
+  const to = (toDegrees * Math.PI) / 180;
+  const sum = [0, 0, 0];
+  let weights = 0;
+  // Every ROW, and every `step`-th column: a band ten degrees deep is only
+  // fifty-odd rows of a 2K sky, and skipping rows could miss it entirely. A
+  // sky too coarse to have a row inside the band at all is read at the one
+  // row nearest its middle.
+  const inBand = (row: number): boolean => {
+    const elevation = elevationOf(row, sky.height);
+    return elevation >= from && elevation <= to;
+  };
+  let rows = Array.from({ length: sky.height }, (_, row) => row).filter(inBand);
+  if (rows.length === 0) {
+    const middle = (from + to) / 2;
+    let nearest = 0;
+    for (let row = 1; row < sky.height; row += 1) {
+      if (
+        Math.abs(elevationOf(row, sky.height) - middle) <
+        Math.abs(elevationOf(nearest, sky.height) - middle)
+      ) {
+        nearest = row;
+      }
+    }
+    rows = [nearest];
+  }
+  for (const row of rows) {
+    const elevation = elevationOf(row, sky.height);
+    const weight = Math.cos(elevation);
+    for (let column = 0; column < sky.width; column += step) {
+      const at = (row * sky.width + column) * 4;
+      const r = sky.channel(at);
+      const g = sky.channel(at + 1);
+      const b = sky.channel(at + 2);
+      if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) continue;
+      sum[0] = (sum[0] ?? 0) + weight * r;
+      sum[1] = (sum[1] ?? 0) + weight * g;
+      sum[2] = (sum[2] ?? 0) + weight * b;
+      weights += weight;
+    }
+  }
+  if (!(weights > 0)) {
+    throw new Error(
+      `the sky has no texel between ${String(fromDegrees)}° and ${String(toDegrees)}°`,
+    );
+  }
+  return [(sum[0] ?? 0) / weights, (sum[1] ?? 0) / weights, (sum[2] ?? 0) / weights];
+}
+
+/**
+ * A band of the realistic sky ({@link skyBandRadiance}) as the colour the
+ * water reflects: its HUE, at the brightness `targetLuminance` asks for — #475.
+ *
+ * ⚠️ **The hue is the photograph's and the brightness is not.** #459's water
+ * was tuned against the stylised sky's two colours, and its shader is not tone
+ * mapped; an HDRI's absolute radiance is whatever the photographer exposed.
+ * So the realistic rungs keep the brightness the stylised world's water was
+ * judged at — `three-renderer.ts` passes the luminance of `world.ts`'s own sky
+ * and horizon colours — and take the colour of the sky actually drawn behind
+ * the water, so a lake under a grey HDRI is grey rather than the stylised
+ * world's blue. A band with no light at all answers black.
+ */
+export function reflectedSkyColour(band: LinearColour, targetLuminance: number): LinearColour {
+  const [r, g, b] = band;
+  const measured = luminance(r, g, b);
+  if (!(measured > 0) || !(targetLuminance > 0)) return [0, 0, 0];
+  const scale = targetLuminance / measured;
+  return [r * scale, g * scale, b * scale];
+}
+
 /**
  * Where in the picture the sky's sun is: the brightest texel of its upper
  * hemisphere, as a horizontal texture coordinate in [0, 1).

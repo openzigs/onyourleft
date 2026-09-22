@@ -23,22 +23,31 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { REALISTIC_LADDER, type QualitySettings } from './quality';
 import { REALISTIC_BICYCLE_TRIANGLES, REALISTIC_NEAR_MESHES } from './realistic-budget';
 import {
+  PHOTOGRAPHIC_STRUCTURE_SURFACES,
   REALISTIC_SKY,
+  REALISTIC_STRUCTURE_PARTS,
+  REALISTIC_STRUCTURE_SURFACES,
   REALISTIC_VEGETATION,
   REALISTIC_VEGETATION_KINDS,
   realisticUrl,
+  type StructureSurface,
 } from './realistic-assets';
 import type { CameraPose } from './port';
-import type { ScatterItem, SceneryKind } from './scatter';
+import { STRUCTURE_KINDS, type ScatterItem, type SceneryKind } from './scatter';
 import {
   isConstructedMaterial,
   loadRealisticWorld,
   prepareRealisticShape,
   realisticBicycleTriangles,
+  REALISTIC_PRIMITIVE_SKIP,
   realisticResourceUrl,
+  RealisticStructureBelts,
+  realisticStructureGeometry,
+  realisticStructureParts,
   RealisticVegetationBelt,
   realisticWorldLoaded,
   ScatterBelt,
+  WaterBelt,
   type RealisticLoaders,
   type RealisticShape,
 } from './three-renderer';
@@ -277,14 +286,13 @@ describe('the vegetation belt — #474', () => {
 });
 
 describe('the realistic world’s primitives belt — ADR 0026 D-3', () => {
-  it('builds no mesh for a kind the vegetation belt draws', () => {
-    const belt = new ScatterBelt(new Map(), {
-      skip: new Set<SceneryKind>(REALISTIC_VEGETATION_KINDS),
-      physical: true,
-    });
+  it('builds no mesh for a kind the vegetation or the structure belts draw', () => {
+    const belt = new ScatterBelt(new Map(), { skip: REALISTIC_PRIMITIVE_SKIP, physical: true });
     for (const kind of REALISTIC_VEGETATION_KINDS) expect(belt.meshesOf(kind)).toEqual([]);
+    // #475, layer 3: every structure is the structure belts' now.
+    for (const kind of STRUCTURE_KINDS) expect(belt.meshesOf(kind), kind).toEqual([]);
+    // ADR 0022 D-3's post stays procedural in both worlds, and is all that is left.
     expect(belt.meshesOf('post').length).toBe(1);
-    expect(belt.meshesOf('building').length).toBe(1);
   });
 
   it('lights what it does draw physically, with a constructed material', () => {
@@ -342,17 +350,20 @@ describe('the rung’s scenery budget, spent by both realistic belts together �
   function belts(budget?: number): {
     readonly vegetation: RealisticVegetationBelt;
     readonly primitives: ScatterBelt;
+    readonly structures: RealisticStructureBelts;
   } {
     const vegetation = aBelt();
     const primitives = new ScatterBelt(new Map(), {
-      skip: new Set<SceneryKind>(REALISTIC_VEGETATION_KINDS),
+      skip: REALISTIC_PRIMITIVE_SKIP,
       physical: true,
     });
+    const structures = aStructureBelt();
     if (budget !== undefined) {
       vegetation.setBudget(budget);
       primitives.setBudget(budget);
+      structures.setBudget(budget);
     }
-    return { vegetation, primitives };
+    return { vegetation, primitives, structures };
   }
 
   /**
@@ -419,6 +430,27 @@ describe('the rung’s scenery budget, spent by both realistic belts together �
     expect(drawnDepths(vegetation).sort((a, b) => a - b)).toEqual([5, 6]);
   });
 
+  it('spends one budget across trees, posts AND structures — #475', () => {
+    // Thirds: a tree, a post and a house, all in view, so the cut lands in the
+    // middle of all three.
+    const kinds: readonly SceneryKind[] = ['tree-broadleaf', 'post', 'building'];
+    const items = Array.from({ length: 60 }, (_, index) =>
+      item(kinds[index % 3] as SceneryKind, 5 + index * 0.5, index % 2 === 0 ? 4 : -4),
+    );
+    const { vegetation, primitives, structures } = belts(30);
+    vegetation.update(items, POSE);
+    primitives.update(items, POSE);
+    structures.update(items, POSE);
+    expect(vegetation.drawnItems + primitives.drawnItems + structures.drawnItems).toBe(30);
+    expect(structures.drawnItems).toBe(10);
+    // And never a house's walls without its roof: both surfaces admit the
+    // same houses.
+    const walls = structures.beltOf('brick')?.meshesOf('building')[0]?.count;
+    const roof = structures.beltOf('roof-tiles')?.meshesOf('building')[0]?.count;
+    expect(walls).toBe(10);
+    expect(roof).toBe(10);
+  });
+
   it('draws nothing at a budget of nought, in either belt', () => {
     const { vegetation, primitives } = belts(0);
     vegetation.update(frame(20), POSE);
@@ -440,6 +472,163 @@ describe('the rung’s scenery budget, spent by both realistic belts together �
     vegetation.setShown(false);
     vegetation.update(frame(10), POSE);
     expect(vegetation.drawnItems).toBe(0);
+  });
+});
+
+/** A texture three would have loaded: the fields a material and a release read. */
+function aTexture(): never {
+  return { image: { width: 512, height: 512 }, dispose: () => undefined } as never;
+}
+
+/** The structure belts over fake textures, one colour and one normal map a surface. */
+function aStructureBelt(): RealisticStructureBelts {
+  return new RealisticStructureBelts(
+    new Map(
+      PHOTOGRAPHIC_STRUCTURE_SURFACES.map((surface) => [
+        surface,
+        { colour: aTexture(), normal: aTexture() },
+      ]),
+    ),
+  );
+}
+
+describe('the realistic structures — ADR 0026 D-12 layer 3, #475', () => {
+  it('pairs every part of every structure with a surface to wear', () => {
+    for (const kind of STRUCTURE_KINDS) {
+      const parts = realisticStructureParts(kind);
+      expect(parts.length, kind).toBe(REALISTIC_STRUCTURE_PARTS[kind].length);
+      for (const part of parts) part.dispose();
+    }
+  });
+
+  it('draws a house as brick walls and a tiled roof, placed by one item', () => {
+    const belt = aStructureBelt();
+    belt.update([item('building', 20, 9)], POSE);
+    const walls = belt.beltOf('brick')?.meshesOf('building')[0];
+    const roof = belt.beltOf('roof-tiles')?.meshesOf('building')[0];
+    expect(walls?.count).toBe(1);
+    expect(roof?.count).toBe(1);
+    // The same matrix: one house, not two things near each other.
+    expect(Array.from(walls?.instanceMatrix.array.slice(0, 16) ?? [])).toEqual(
+      Array.from(roof?.instanceMatrix.array.slice(0, 16) ?? []),
+    );
+    // Counted once.
+    expect(belt.drawnItems).toBe(1);
+    // And no other surface draws a house.
+    for (const surface of ['slate', 'stone', 'planks', 'corrugated', 'hedge', 'painted'] as const) {
+      expect(belt.beltOf(surface)?.meshesOf('building') ?? [], surface).toEqual([]);
+    }
+  });
+
+  it('draws every kind it is handed, each counted once', () => {
+    const belt = aStructureBelt();
+    belt.update(
+      STRUCTURE_KINDS.map((kind, index) => item(kind, 10 + index * 5, 9)),
+      POSE,
+    );
+    expect(belt.drawnItems).toBe(STRUCTURE_KINDS.length);
+  });
+
+  it('wears only constructed, physically based materials carrying the world’s photographs — D-10, D-11', () => {
+    const textures = new Map(
+      PHOTOGRAPHIC_STRUCTURE_SURFACES.map((surface) => [
+        surface,
+        { colour: aTexture(), normal: aTexture() },
+      ]),
+    );
+    const belt = new RealisticStructureBelts(textures);
+    for (const surface of [...PHOTOGRAPHIC_STRUCTURE_SURFACES, 'painted'] as const) {
+      const meshes = STRUCTURE_KINDS.flatMap((kind) => belt.beltOf(surface)?.meshesOf(kind) ?? []);
+      expect(meshes.length, surface).toBeGreaterThan(0);
+      for (const mesh of meshes) {
+        expect(typeOf(mesh), surface).toBe('MeshStandardMaterial');
+        expect(isConstructedMaterial(mesh.material as never), surface).toBe(true);
+        const material = mesh.material as unknown as { map: unknown; normalMap: unknown };
+        if (surface === 'painted') {
+          expect(material.map).toBeNull();
+        } else {
+          expect(material.map, surface).toBe(textures.get(surface)?.colour);
+          expect(material.normalMap, surface).toBe(textures.get(surface)?.normal);
+        }
+      }
+    }
+  });
+
+  it('lays a photograph out in metres, so a brick is the same size on every wall', () => {
+    const tile = REALISTIC_STRUCTURE_SURFACES.brick.tileMetres;
+    const walls = realisticStructureGeometry('building', 'brick');
+    const position = walls?.getAttribute('position');
+    const uv = walls?.getAttribute('uv');
+    expect(position).toBeDefined();
+    expect(uv?.count).toBe(position?.count);
+    let checked = 0;
+    for (let at = 0; at < (position?.count ?? 0); at += 1) {
+      const u = (uv?.getX(at) ?? 0) * tile;
+      const v = (uv?.getY(at) ?? 0) * tile;
+      // Every coordinate is one of the vertex's own positions, in metres.
+      const own = [position?.getX(at), position?.getY(at), position?.getZ(at)];
+      expect(
+        own.some((each) => Math.abs((each ?? NaN) - u) < 1e-4),
+        `u at ${String(at)}`,
+      ).toBe(true);
+      expect(
+        own.some((each) => Math.abs((each ?? NaN) - v) < 1e-4),
+        `v at ${String(at)}`,
+      ).toBe(true);
+      checked += 1;
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it('has no surface nothing wears, and wears no surface it has no maps for', () => {
+    const worn = new Set<StructureSurface>(Object.values(REALISTIC_STRUCTURE_PARTS).flat());
+    expect([...worn].sort()).toEqual([...PHOTOGRAPHIC_STRUCTURE_SURFACES, 'painted'].sort());
+  });
+});
+
+describe('the water on the realistic rungs — #475', () => {
+  const STYLE = { skyColour: 0x87b5e0, horizonColour: 0xc9dbe6 } as never;
+  const uniform = (water: WaterBelt, name: string): readonly number[] => {
+    const material = water.mesh.material as unknown as {
+      uniforms: Record<string, { value: { r: number; g: number; b: number } }>;
+    };
+    const colour = material.uniforms[name]?.value;
+    return [colour?.r ?? NaN, colour?.g ?? NaN, colour?.b ?? NaN];
+  };
+  const luminance = ([r, g, b]: readonly number[]): number =>
+    0.2126 * (r ?? 0) + 0.7152 * (g ?? 0) + 0.0722 * (b ?? 0);
+  const surface = {
+    vertices: new Float32Array(0),
+    shore: new Float32Array(0),
+    indices: new Uint32Array(0),
+  } as never;
+
+  it('reflects the realistic sky’s hue at the brightness the stylised water was tuned to', () => {
+    const water = new WaterBelt();
+    // Grey above, warm at the horizon: nothing like the stylised blue.
+    const reflection = { zenith: [2, 2, 2], horizon: [3, 2, 1] } as const;
+    water.update(surface, STYLE, 0);
+    const stylisedSky = uniform(water, 'skyColour');
+    const stylisedHorizon = uniform(water, 'horizonColour');
+    water.update(surface, STYLE, 0, reflection);
+    const sky = uniform(water, 'skyColour');
+    const horizon = uniform(water, 'horizonColour');
+    // The same brightness…
+    expect(luminance(sky)).toBeCloseTo(luminance(stylisedSky), 6);
+    expect(luminance(horizon)).toBeCloseTo(luminance(stylisedHorizon), 6);
+    // …in the photograph's colour: grey is grey, and the horizon is warm.
+    expect(sky[0]).toBeCloseTo(sky[2] ?? NaN, 6);
+    expect(horizon[0] ?? 0).toBeGreaterThan(horizon[2] ?? 0);
+    expect(stylisedSky[2] ?? 0).toBeGreaterThan(stylisedSky[0] ?? 0);
+  });
+
+  it('reflects the stylised sky when no realistic one is handed it', () => {
+    const water = new WaterBelt();
+    water.update(surface, STYLE, 0, { zenith: [2, 2, 2], horizon: [3, 2, 1] });
+    water.update(surface, STYLE, 0);
+    expect(uniform(water, 'skyColour')[2] ?? 0).toBeGreaterThan(
+      uniform(water, 'skyColour')[0] ?? 0,
+    );
   });
 });
 
@@ -510,6 +699,11 @@ describe('loading the realistic world — ADR 0026 D-7', () => {
     await expect(loadRealisticWorld(reading)).resolves.toEqual({ loaded: true });
     expect(realisticWorldLoaded()).toBe(true);
     expect(reading.asked).toContain(realisticUrl(REALISTIC_SKY));
+    // #475: and every structure surface's two maps.
+    for (const surface of PHOTOGRAPHIC_STRUCTURE_SURFACES) {
+      expect(reading.asked).toContain(realisticUrl(REALISTIC_STRUCTURE_SURFACES[surface].colour));
+      expect(reading.asked).toContain(realisticUrl(REALISTIC_STRUCTURE_SURFACES[surface].normal));
+    }
     for (const url of reading.asked) expect(url).toMatch(/^\/realistic\//);
   });
 
@@ -547,6 +741,13 @@ describe('loading the realistic world — ADR 0026 D-7', () => {
     expect(realisticWorldLoaded()).toBe(true);
   });
 
+  it('loads none of it when a structure’s surface fails — a world without its buildings is half a world (#475)', async () => {
+    await expect(loadRealisticWorld(loaders())).resolves.toEqual({ loaded: true });
+    const outcome = await loadRealisticWorld(loaders('old_stone_wall_nor_gl'));
+    expect(outcome).toMatchObject({ loaded: false });
+    expect(outcome.loaded ? '' : outcome.detail).toMatch(/old_stone_wall_nor_gl/);
+  });
+
   it('says it was offline when the browser says so, which is the fallback D-7 names', async () => {
     vi.stubGlobal('navigator', { onLine: false });
     const outcome = await loadRealisticWorld(loaders('farm_field'));
@@ -568,26 +769,35 @@ describe('a failed load releases everything it loaded, including what arrives la
    * it rejected on the refusal and returned while everything else was still in
    * flight, so what arrived afterwards was held by nobody.
    */
-  function lateLoaders(options: { readonly fail?: string; readonly unsized?: string }): {
+  function lateLoaders(options: {
+    readonly fail?: string;
+    readonly unsized?: string;
+    /** A URL part whose files answer LATER than every other — #475. */
+    readonly slowest?: string;
+  }): {
     readonly loaders: RealisticLoaders;
     readonly held: Held[];
   } {
     const held: Held[] = [];
-    const late = <T>(make: () => T): Promise<T> =>
+    const late = <T>(make: () => T, ms: number): Promise<T> =>
       new Promise((resolve) => {
         setTimeout(() => {
           resolve(make());
-        }, 5);
+        }, ms);
       });
     const answer = <T>(url: string, make: (one: Held) => T): Promise<T> => {
       if (options.fail !== undefined && url.includes(options.fail)) {
         return Promise.reject(new Error(`${url}: Failed to fetch`));
       }
-      return late(() => {
-        const one: Held = { url, released: false };
-        held.push(one);
-        return make(one);
-      });
+      const slow = options.slowest !== undefined && url.includes(options.slowest);
+      return late(
+        () => {
+          const one: Held = { url, released: false };
+          held.push(one);
+          return make(one);
+        },
+        slow ? 20 : 5,
+      );
     };
     const texture = (one: Held): unknown => ({
       image: { width: 64, height: 64 },
@@ -657,6 +867,19 @@ describe('a failed load releases everything it loaded, including what arrives la
     expect(held.length).toBeGreaterThan(10);
     // …and not one of them is still held.
     expect(held.filter((one) => !one.released).map((one) => one.url)).toEqual([]);
+  });
+
+  it('waits for the structures’ surfaces too, however late they answer — #475', async () => {
+    // Every structure map answers after every other file. A load that did not
+    // settle them before deciding would have released everything else and
+    // left these held by nobody.
+    const { loaders, held } = lateLoaders({ fail: REALISTIC_SKY, slowest: '_512.jpg' });
+    const outcome = await loadRealisticWorld(loaders);
+    expect(outcome.loaded).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const surfaces = held.filter((one) => one.url.includes('_512.jpg'));
+    expect(surfaces.length).toBe(2 * PHOTOGRAPHIC_STRUCTURE_SURFACES.length);
+    expect(surfaces.filter((one) => !one.released).map((one) => one.url)).toEqual([]);
   });
 
   it('releases the materials it had built for the trees before a later model failed', async () => {

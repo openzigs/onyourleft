@@ -30,6 +30,10 @@
  * - {@link REALISTIC_VEGETATION} is ADR 0026 D-12's second layer: the four
  *   kinds `scatter.ts` places that a photoscan can stand in for. Trees carry an
  *   impostor strip for the far band.
+ * - {@link REALISTIC_STRUCTURE_SURFACES} are ADR 0026 D-12's third layer
+ *   (#475): the photographic surfaces the structures wear. The structures'
+ *   SHAPES are built in `three-renderer.ts` from numbers, because no source in
+ *   D-4's list publishes a whole country building — see that table.
  * - {@link REALISTIC_RIDER} is the body; the bicycle under it is built in
  *   `three-renderer.ts` from `bicycle.ts`'s own parts, because no road bicycle
  *   whose own page states CC0 or CC-BY-4.0 was found (spike 0005).
@@ -41,7 +45,7 @@
 
 import { isNativeShell, platformCapacitor } from '../support/capacitor';
 
-import type { ScatterKind } from './scatter';
+import type { ScatterKind, StructureKind } from './scatter';
 
 /**
  * Where the realistic files are in the build, relative to its root.
@@ -95,6 +99,77 @@ export const REALISTIC_SURFACES: { readonly road: SurfaceMaps; readonly ground: 
     normal: 'sparse_grass_nor_gl_1k.jpg',
     tileMetres: 4,
   },
+};
+
+/**
+ * A photographic surface a realistic structure wears — ADR 0026 D-12 layer 3,
+ * #475 — and `painted`, the one that wears no photograph.
+ */
+export type StructureSurface =
+  'brick' | 'roof-tiles' | 'slate' | 'stone' | 'planks' | 'corrugated' | 'hedge' | 'painted';
+
+/** The surfaces that are a photograph, in a fixed order. */
+export const PHOTOGRAPHIC_STRUCTURE_SURFACES: readonly Exclude<StructureSurface, 'painted'>[] = [
+  'brick',
+  'roof-tiles',
+  'slate',
+  'stone',
+  'planks',
+  'corrugated',
+  'hedge',
+];
+
+/**
+ * The structures' photographic surfaces — #475. Each is a Poly Haven CC0
+ * texture, downsized by the pipeline to 512 px (`tools/realistic/sources.ts`
+ * §`STRUCTURE_TEXTURES` says which, and why these), and its `tileMetres` is
+ * Poly Haven's own stated size for the texture.
+ *
+ * ⚠️ **Surfaces and not buildings, and that is a finding rather than a
+ * shortcut.** ADR 0026 D-12 layer 3 asks for realistic structures sourced per
+ * D-4; D-4's sources publish no whole country building a rider would pass —
+ * Poly Haven's `buildings` category is urban facade kits of 118 000 to 175 000
+ * triangles, gates and shutters (read 2026-09-22), and ambientCG publishes
+ * materials only. So the shapes are `three-renderer.ts`'s own, from numbers,
+ * as the stylised world's are, and what is photographic is what covers them.
+ *
+ * `painted` — a signpost's pole — carries no photograph: at 6 cm across there
+ * is nothing on it for one to show.
+ */
+export const REALISTIC_STRUCTURE_SURFACES: Readonly<
+  Record<Exclude<StructureSurface, 'painted'>, SurfaceMaps>
+> = {
+  brick: structureMaps('brick_wall_02', 2),
+  'roof-tiles': structureMaps('clay_roof_tiles_02', 2.5),
+  slate: structureMaps('grey_roof_tiles_02', 1.5),
+  stone: structureMaps('old_stone_wall', 2),
+  planks: structureMaps('dark_planks', 2),
+  corrugated: structureMaps('corrugated_iron', 1.12),
+  hedge: structureMaps('forest_leaves_02', 3),
+};
+
+function structureMaps(id: string, tileMetres: number): SurfaceMaps {
+  return { colour: `${id}_diff_512.jpg`, normal: `${id}_nor_gl_512.jpg`, tileMetres };
+}
+
+/**
+ * Which surface each part of each structure wears, in the order
+ * `three-renderer.ts` builds the parts — #475. A building's parts are its
+ * walls and its roof; every other kind's are `STRUCTURE_STYLE`'s own, part for
+ * part, so the realistic shape is the stylised one with a surface on it.
+ */
+export const REALISTIC_STRUCTURE_PARTS: Readonly<
+  Record<StructureKind, readonly StructureSurface[]>
+> = {
+  building: ['brick', 'roof-tiles'],
+  barn: ['planks', 'corrugated'],
+  church: ['stone', 'slate', 'stone', 'slate'],
+  'shop-row': ['brick', 'planks', 'slate'],
+  shed: ['corrugated', 'corrugated'],
+  wall: ['stone'],
+  hedge: ['hedge'],
+  fence: ['planks'],
+  signpost: ['painted', 'planks'],
 };
 
 /** The scatter kinds the realistic world has its own shape for — ADR 0026 D-12 layer 2. */
@@ -197,6 +272,10 @@ export function realisticFiles(): readonly string[] {
         model.impostor === undefined ? [model.file] : [model.file, model.impostor],
       ),
     ),
+    ...PHOTOGRAPHIC_STRUCTURE_SURFACES.flatMap((surface) => [
+      REALISTIC_STRUCTURE_SURFACES[surface].colour,
+      REALISTIC_STRUCTURE_SURFACES[surface].normal,
+    ]),
     REALISTIC_RIDER,
   ];
 }

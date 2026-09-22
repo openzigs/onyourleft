@@ -104,6 +104,53 @@ function polyHaven(id: string, select: PolyHavenSelection): AssetSource {
 }
 
 /**
+ * The photographic surfaces the realistic structures wear — #475, ADR 0026
+ * D-12 layer 3 — each a Poly Haven CC0 texture: its id, and the file name Poly
+ * Haven gives its 1K colour map (one of them spells it `diffuse`). How many
+ * metres one repeat covers is `realistic-assets.ts`'s, beside the file names
+ * the renderer loads.
+ *
+ * - `brick_wall_02` — a house and a row of shops;
+ * - `clay_roof_tiles_02` — their roofs;
+ * - `grey_roof_tiles_02` — a church's slate roof and spire;
+ * - `old_stone_wall` — a church, its tower, and a dry-stone field wall;
+ * - `dark_planks` — a barn's boards, a fence, a shopfront, a sign;
+ * - `corrugated_iron` — a shed, and a barn's roof;
+ * - `forest_leaves_02` — a hedge. ⚠️ Leaf litter photographed from above, the
+ *   nearest thing to a clipped hedge any source in D-4 publishes; it is tinted
+ *   greener in `three-renderer.ts`, and a hedge is the weakest of the nine.
+ */
+export const STRUCTURE_TEXTURES: readonly {
+  readonly id: string;
+  readonly colourFile: string;
+}[] = [
+  { id: 'brick_wall_02', colourFile: 'brick_wall_02_diff_1k.jpg' },
+  { id: 'clay_roof_tiles_02', colourFile: 'clay_roof_tiles_02_diff_1k.jpg' },
+  { id: 'grey_roof_tiles_02', colourFile: 'grey_roof_tiles_02_diff_1k.jpg' },
+  { id: 'old_stone_wall', colourFile: 'old_stone_wall_diff_1k.jpg' },
+  { id: 'dark_planks', colourFile: 'dark_planks_diff_1k.jpg' },
+  { id: 'corrugated_iron', colourFile: 'corrugated_iron_diff_1k.jpg' },
+  { id: 'forest_leaves_02', colourFile: 'forest_leaves_02_diffuse_1k.jpg' },
+];
+
+/** The side, in pixels, the pipeline downsizes a structure's maps to. */
+export const STRUCTURE_TEXTURE_PIXELS = 512;
+
+/**
+ * The two committed maps of one structure texture, as `three-renderer.ts` and
+ * `realistic-assets.ts` name them.
+ */
+export function structureMapFiles(id: string): {
+  readonly colour: string;
+  readonly normal: string;
+} {
+  return {
+    colour: `${id}_diff_${String(STRUCTURE_TEXTURE_PIXELS)}.jpg`,
+    normal: `${id}_nor_gl_${String(STRUCTURE_TEXTURE_PIXELS)}.jpg`,
+  };
+}
+
+/**
  * Every upstream input. Why each one, briefly — `docs/spikes/0005` has the
  * rest, and #474 the vegetation's own reasons:
  *
@@ -121,6 +168,12 @@ function polyHaven(id: string, select: PolyHavenSelection): AssetSource {
  * - `makehuman` — the rider's body: base mesh, default skeleton and weights,
  *   CC0 since September 2020, stated in the repository's own asset licence
  *   and again in the mesh file's header.
+ * - {@link STRUCTURE_TEXTURES} — the structures' surfaces (#475, ADR 0026
+ *   D-12 layer 3). ⚠️ **Surfaces, not buildings**: no source in D-4's list
+ *   publishes a whole country building — Poly Haven's `buildings` category,
+ *   read on 2026-09-22, is thirteen urban facade kits, gates and shutters, the
+ *   facades at 118 000 to 175 000 triangles — so the structures are built from
+ *   numbers in `three-renderer.ts` and wear these.
  */
 export const SOURCES: readonly AssetSource[] = [
   polyHaven('farm_field', { type: 'hdri', resolution: '2k' }),
@@ -139,6 +192,9 @@ export const SOURCES: readonly AssetSource[] = [
   polyHaven('fir_sapling_medium', { type: 'model', resolution: '1k' }),
   polyHaven('shrub_02', { type: 'model', resolution: '1k' }),
   polyHaven('boulder_01', { type: 'model', resolution: '1k' }),
+  ...STRUCTURE_TEXTURES.map((texture) =>
+    polyHaven(texture.id, { type: 'texture', resolution: '1k', maps: ['Diffuse', 'nor_gl'] }),
+  ),
   {
     id: 'makehuman',
     licencePage: `${MAKEHUMAN_RAW}/LICENSE.md`,
@@ -197,6 +253,9 @@ export interface OutputSpec {
 
 const TREE_SCRIPT = 'blender/process_tree.py';
 
+/** Where {@link structureMap}'s script lives — #475. */
+export const TEXTURE_SCRIPT = 'blender/process_texture.py';
+
 /**
  * Every shipped file, in the order the pipeline makes them.
  *
@@ -226,6 +285,13 @@ export const OUTPUTS: readonly OutputSpec[] = [
     modified:
       'collapse-decimated from 66 122 to about 2 400 triangles, its colour and normal maps downsized to 512 px and its roughness map dropped; stood on its base',
   },
+  ...STRUCTURE_TEXTURES.flatMap((texture) => {
+    const made = structureMapFiles(texture.id);
+    return [
+      structureMap(made.colour, texture.id, texture.colourFile, 'colour'),
+      structureMap(made.normal, texture.id, `${texture.id}_nor_gl_1k.jpg`, 'data'),
+    ];
+  }),
   {
     file: 'rider.glb',
     from: 'makehuman',
@@ -234,6 +300,25 @@ export const OUTPUTS: readonly OutputSpec[] = [
       'the body mesh only, its skeleton reduced from 163 bones to 24 with each dropped bone’s weights merged into its nearest kept ancestor, coloured as cycling kit by dominant bone, collapse-decimated to about 9 000 triangles, in its rest pose',
   },
 ];
+
+/** One structure map: a Poly Haven 1K map downsized — #475. */
+function structureMap(
+  file: string,
+  from: string,
+  mapFile: string,
+  kind: 'colour' | 'data',
+): OutputSpec {
+  return {
+    file,
+    from,
+    recipe: {
+      how: 'blender',
+      script: TEXTURE_SCRIPT,
+      args: [mapFile, String(STRUCTURE_TEXTURE_PIXELS), kind],
+    },
+    modified: `one map of the texture (${mapFile}), downsized from 1024 to ${String(STRUCTURE_TEXTURE_PIXELS)} px and re-encoded as JPEG`,
+  };
+}
 
 function verbatim(file: string): OutputRecipe {
   return { how: 'verbatim', file };
