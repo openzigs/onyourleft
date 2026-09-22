@@ -443,6 +443,85 @@ describe('not now', () => {
   });
 });
 
+describe('the worker stops waiting without this tab asking — #473', () => {
+  /** What another tab's "Update now" does to the worker every tab shares. */
+  function takenElsewhere(registration: FakeRegistration, worker: FakeWorker): void {
+    registration.waiting = null;
+    registration.active = worker;
+    worker.become('activating');
+  }
+
+  it('withdraws the offer when ANOTHER TAB activates it', () => {
+    const { watcher, registration, announcements } = harness();
+    const worker = registration.installUpdate();
+    expect(watcher.status()).toBe('available');
+    const before = announcements();
+    takenElsewhere(registration, worker);
+    expect(watcher.status()).toBe('none');
+    // The rider's screen has to hear about it; nothing polls.
+    expect(announcements()).toBe(before + 1);
+  });
+
+  it('does not then post to an active worker and sit at "activating" for ever', () => {
+    // The finding's own sequence: tab A still showed the offer, pressed it,
+    // posted SKIP_WAITING to a worker that was already active, set `asked`,
+    // and waited for a `controllerchange` that had already fired.
+    const { watcher, registration, changes, reloads } = harness();
+    const worker = registration.installUpdate();
+    takenElsewhere(registration, worker);
+    changes.fire();
+    watcher.activate();
+    expect(worker.posted).toEqual([]);
+    expect(watcher.status()).toBe('none');
+    expect(reloads()).toBe(0);
+  });
+
+  it('withdraws the offer when a newer worker makes it redundant', () => {
+    const { watcher, registration } = harness();
+    const worker = registration.installUpdate();
+    worker.become('redundant');
+    expect(watcher.status()).toBe('none');
+  });
+
+  it('withdraws a DEFERRED offer too, rather than deferring nothing', () => {
+    // ADR 0024 D-3's `deferred` means "a new version is waiting and a ride is
+    // in progress". Once it has gone there is nothing to defer.
+    const { watcher, registration, recording } = harness();
+    recording.set(true);
+    const worker = registration.installUpdate();
+    expect(watcher.status()).toBe('deferred');
+    takenElsewhere(registration, worker);
+    expect(watcher.status()).toBe('none');
+    recording.set(false);
+    expect(watcher.status()).toBe('none');
+  });
+
+  it('withdraws an offer for a worker that was ALREADY waiting when the watcher was made', () => {
+    // That worker was noted and never followed, so no `statechange` reached
+    // the watcher at all.
+    const registration = new FakeRegistration();
+    const worker = registration.installUpdate();
+    const watcher = createUpdateWatcher({
+      registration,
+      controllerChanges: new FakeControllerChanges(),
+      recording: undefined,
+      reload: () => undefined,
+    });
+    expect(watcher.status()).toBe('available');
+    takenElsewhere(registration, worker);
+    expect(watcher.status()).toBe('none');
+  });
+
+  it('still offers the NEXT release after withdrawing one', () => {
+    const { watcher, registration } = harness();
+    const first = registration.installUpdate();
+    takenElsewhere(registration, first);
+    first.become('activated');
+    registration.installUpdate();
+    expect(watcher.status()).toBe('available');
+  });
+});
+
 describe('subscribers', () => {
   it('can stop listening', () => {
     const registration = new FakeRegistration();

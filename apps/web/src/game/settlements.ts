@@ -279,6 +279,18 @@ function millimetres(metres: number): number {
  * kinds at one place. {@link samePlace} is what decides; the key only says
  * where to look. Every term is an integer well inside 2⁵³, so the arithmetic
  * itself is exact.
+ *
+ * ⚠️ **"The same kind at the same millimetre" means {@link millimetres}'
+ * rounding, which is NOT the `toFixed(3)` key this replaced — #473.**
+ * `toFixed` rounds the exact decimal half AWAY from zero; `Math.round` rounds
+ * the float product half towards +∞. So the two disagree only at a
+ * half-millimetre boundary: `-0.0001` and `0.0001` m were two places and are
+ * now one (both round to 0 mm), and `-0.0005` rounds to 0 here where `toFixed`
+ * gave `-0.001`. No real case reaches it — a repeat is an exact recomputation
+ * of one item, bit for bit, so it lands on the same grid point under either
+ * rule — and #472's review forced every key to collide with `settlements` and
+ * `arrangement-unchanged` staying green. Change {@link millimetres} and this is
+ * the equivalence that changes.
  */
 function placeKey(item: ScatterItem): number {
   return millimetres(item.x) * 92_821 + millimetres(item.z);

@@ -28,6 +28,15 @@ import { MINIMUM_RIDER_FRAME_SHARE, riderFrameBox } from '../src/game/camera';
 import type { RealisticMeasurement, RiderExtent } from './game-harness';
 import { MINIMUM_TINT_CONTRAST_RATIO } from '../src/game/terrain';
 
+/**
+ * Said beside every frame time this spec publishes — #473. Since #473 the
+ * harness TIMES frames built as `GameView` builds them, lent and drawn at once
+ * (`game-harness.ts` §`lentSceneFrame`); every figure published before it also
+ * paid for a ~55 KB copy per frame the product never makes, so a figure from
+ * before #473 is not comparable with one after it.
+ */
+const LENT_FRAMES_NOTE = 'frames built lent, as GameView builds them (no copy since #473)';
+
 /** One read-back pixel, as four bytes. */
 type Pixel = readonly [number, number, number, number];
 
@@ -1244,7 +1253,7 @@ test.describe('the world is lit, and can stop being — #286', () => {
       `difference ${cost >= 0 ? '+' : ''}${cost.toFixed(3)} ms a frame, ` +
       `against a same-shading run-to-run spread of ${result.frameMsNoise.toFixed(3)} ms; ` +
       `${String(result.shadedFrames)} frames a measurement, same scene and route, ` +
-      `render scale unchanged`;
+      `render scale unchanged; ${LENT_FRAMES_NOTE}`;
     testInfo.annotations.push({ type: 'frame cost of the lighting', description: measured });
     // ⚠️ **And printed, not only annotated.** An annotation reaches the JSON
     // and HTML reports and **not the log**, which is the only artefact anybody
@@ -1272,7 +1281,7 @@ test.describe('the world is lit, and can stop being — #286', () => {
       `shadow map ${map.mapFrameMs.toFixed(3)} ms (${String(map.mapDrawCalls)} calls), ` +
       `difference ${mapCost >= 0 ? '+' : ''}${mapCost.toFixed(3)} ms a frame, against a ` +
       `same-rung spread of ${map.noiseMs.toFixed(3)} ms; ${String(map.shadowPixels)} px darkened ` +
-      `by the map under the rider alone`;
+      `by the map under the rider alone; ${LENT_FRAMES_NOTE}`;
     testInfo.annotations.push({
       type: 'frame cost of the rider shadow map',
       description: shadowMeasured,
@@ -1987,7 +1996,7 @@ test.describe('the realistic world — ADR 0026', () => {
         `${measured.realisticFrameMs.toFixed(1)} ms a frame against ${measured.stylisedFrameMs.toFixed(1)} ms stylised ` +
         `(SwiftShader, not a phone); ${String(measured.drawCalls)} draw calls; scenery drawn ` +
         `${String(measured.sceneryDrawnTop)} at the top rung, ${String(measured.sceneryDrawnBudgeted)} ` +
-        `at a budget of ${String(measured.sceneryProbeBudget)}`,
+        `at a budget of ${String(measured.sceneryProbeBudget)}; ${LENT_FRAMES_NOTE}`,
     );
   });
 });

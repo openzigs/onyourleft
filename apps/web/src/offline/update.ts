@@ -156,6 +156,19 @@ export function createUpdateWatcher(ports: UpdateWatcherPorts): UpdateWatcher {
     const settle = (): void => {
       if (worker.state === 'installed' && isAnUpdate(worker)) {
         noteWaiting(worker);
+      } else if (waiting === worker && worker.state !== 'installed') {
+        // ⚠️ **It has stopped waiting, so the offer goes — #473.** A worker
+        // leaves `installed` for `activating` (somebody took the update — in
+        // ANOTHER TAB, as often as not) or for `redundant` (a newer one
+        // superseded it). This used to be set and never cleared: tab A kept
+        // offering a worker tab B had already activated, and pressing it
+        // posted `SKIP_WAITING` to an active worker, set `asked`, and left
+        // tab A saying "activating" for the life of the tab, because the
+        // `controllerchange` it waits for had already happened. What the
+        // rider is told now is ADR 0024 D-3's `none` — there is nothing
+        // waiting, deferred or otherwise.
+        waiting = null;
+        announce();
       }
     };
     worker.addEventListener('statechange', settle);
@@ -175,9 +188,14 @@ export function createUpdateWatcher(ports: UpdateWatcherPorts): UpdateWatcher {
   // 35651738641. So both workers the registration can be
   // holding are read here, and an installing one is followed exactly as
   // `updatefound` would have followed it.
+  //
+  // ⚠️ A worker already waiting is FOLLOWED rather than merely noted, so that
+  // its leaving `installed` withdraws the offer as it does for one this
+  // watcher saw arrive (#473). Noting it alone left no `statechange` listener
+  // on it at all.
   const alreadyWaiting = ports.registration.waiting;
-  if (alreadyWaiting !== null && isAnUpdate(alreadyWaiting)) {
-    waiting = alreadyWaiting;
+  if (alreadyWaiting !== null) {
+    follow(alreadyWaiting);
   }
   const alreadyInstalling = ports.registration.installing;
   if (alreadyInstalling !== null) {
