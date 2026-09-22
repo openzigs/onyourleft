@@ -302,6 +302,14 @@ export function createUpdateWatcher(ports: UpdateWatcherPorts): UpdateWatcher {
   const riding = (): boolean => ports.recording?.inProgress() === true;
 
   const status = (): UpdateStatus => {
+    // ⚠️ **Before `superseded`, deliberately — ADR 0027 D-4.** The tab that
+    // asked is waiting for its own `controllerchange`, and `settle` sets
+    // `superseded` on it too; offering it a *Reload now* in the same moment is
+    // two controls for one reload. `update.test.ts` §"tells the tab that did not
+    // ask…" pins it at its last assertion — swapping these two turns that case
+    // red. D-4 states the cost this buys: a tab whose `controllerchange` never
+    // arrives after it asked never reaches `superseded`, and stays on
+    // "Updating…" with no control on screen.
     if (asked) {
       return 'activating';
     }

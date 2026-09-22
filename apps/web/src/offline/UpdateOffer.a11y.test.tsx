@@ -135,9 +135,19 @@ describe('the offer is inside the accessibility gate', () => {
   });
 
   it('gives each of the five states its OWN sentence, with none repeated — #483', () => {
-    // ⚠️ A record keyed by status makes a MISSING sentence a type error and
-    // says nothing about a DUPLICATED one — which is the mutation that stayed
-    // green: `superseded-deferred` rendering the offer's deferred sentence.
+    // ⚠️ What this catches is **two constants declared with the same text**. A
+    // record keyed by status makes a MISSING sentence a type error and says
+    // nothing about a DUPLICATED one, and the whole-sentence assertions above
+    // would pass over a duplicate in silence — each would find its own text and
+    // neither would notice the other had it too.
+    //
+    // ⚠️ What it does NOT catch is the MAPPING mutation that stayed green while
+    // this file was being written — `TEXT_FOR['superseded-deferred'] →
+    // UPDATE_DEFERRED_TEXT` — which leaves all five constants distinct and this
+    // set the same size. #486's review re-ran it: it is the whole-sentence
+    // assertions that go red, in "audits clean in both of #483’s states" and in
+    // "offers no reload a ride in progress would refuse". Do not read this case
+    // as their protection and delete them.
     const texts = [
       UPDATE_AVAILABLE_TEXT,
       UPDATE_DEFERRED_TEXT,

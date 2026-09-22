@@ -121,6 +121,21 @@ that happens in this tab makes an old bundle current again, a release installing
 make the staleness less true, and both are repaired by the same reload; so `activate()` is refused in
 this state, and the rider is given one story about why their page has to reload rather than two.
 
+⚠️ **And `asked` outranks `superseded` in turn** — `update.ts` §`status` returns `activating` before
+it reads `superseded` at all. That is necessary: a tab that has pressed *Update now* is waiting for
+its own `controllerchange` — `settle` sets `superseded` on that tab too — and offering it a *Reload
+now* in the same moment is two controls for one reload. It is a **tested** ordering rather than an
+incidental one: `update.test.ts` §*"tells the tab that did not ask that it was left behind"* ends by
+requiring the tab that **did** ask to still read `activating`, and swapping the two checks turns that
+case red. The cost is stated here rather than left in the code: **a tab whose `controllerchange` never
+arrives after it asked can never reach `superseded`.** It sits on *"Updating. This page will reload in
+a moment."* for the life of the tab, holding `superseded` internally with no control on screen — in
+exactly the state where a manual reload is the repair. It is reachable if the worker's
+`skipWaiting()` rejects or the event is missed. It is **not a regression** — that tab was equally
+stuck before this ADR — and the ordering is deliberately **not** changed to repair it, because the
+repair would put two controls on screen during every ordinary update, which is the thing the
+paragraph above refuses.
+
 ## Consequences
 
 - A rider with two tabs is told the truth in both. The one that asked reloads; the one that did not
