@@ -23,18 +23,23 @@ import {
   HEADROOM_REDUCE_ABOVE,
   HEADROOM_RESTORE_BELOW,
   INITIAL_QUALITY,
+  INITIAL_REALISTIC_QUALITY,
   QUALITY_LADDER,
+  REALISTIC_LADDER,
   RIDER_SHADOW_MAP_RUNG,
   RIDER_SHADOW_MAP_STORAGE_KEY,
   SUSTAINED_SAMPLES,
   keepsShadowMap,
   nextQuality,
+  nextWorldQuality,
   qualitySettings,
   readShadowMapChoice,
   rungFor,
+  worldRung,
   type QualityLevel,
   type QualitySample,
   type QualityState,
+  type WorldQualityState,
 } from './quality';
 import { TERRAIN_BANDS, TERRAIN_COLUMN_OFFSETS } from './landform';
 import { MAXIMUM_SCENERY_VARIANTS } from './scenery-models';
@@ -527,5 +532,79 @@ describe('the riders’ shadows on the ladder — #426', () => {
       }),
     ).toBe(false);
     expect(RIDER_SHADOW_MAP_STORAGE_KEY).toBe('oyl.game.riderShadowMap');
+  });
+});
+
+describe('the realistic world is a ladder above the stylised one — ADR 0026 D-3', () => {
+  /** Feeds the same measurement `count` times to the two-ladder policy. */
+  function sustainWorld(
+    state: WorldQualityState,
+    sample: QualitySample,
+    count: number,
+  ): WorldQualityState {
+    let current = state;
+    for (let index = 0; index < count; index += 1) {
+      current = nextWorldQuality(current, sample);
+    }
+    return current;
+  }
+
+  it('draws the stylised world on every rung of the stylised ladder, and nowhere else', () => {
+    for (const rung of QUALITY_LADDER) expect(rung.world, rung.label).toBe('stylised');
+    expect(RIDER_SHADOW_MAP_RUNG.world).toBe('stylised');
+    for (const rung of REALISTIC_LADDER) expect(rung.world, rung.label).toBe('realistic');
+  });
+
+  it('is the stylised target with the world swapped, so its cost is the world alone', () => {
+    const [top] = REALISTIC_LADDER;
+    expect({ ...top, world: 'stylised', label: '' }).toEqual({
+      ...QUALITY_LADDER[0],
+      label: '',
+    });
+  });
+
+  it('reduces within itself before the world is given up, and never lowers the frame cap', () => {
+    const reduced = sustainWorld(INITIAL_REALISTIC_QUALITY, HOT, SUSTAINED_SAMPLES);
+    expect(reduced.realistic).toBe(true);
+    expect(worldRung(reduced)).toBe(REALISTIC_LADDER[1]);
+    for (const rung of REALISTIC_LADDER) {
+      expect(rung.frameCap, rung.label).toBe(QUALITY_LADDER[0]?.frameCap);
+    }
+    // Cheaper than the realistic target by the stylised ladder's first step.
+    expect(REALISTIC_LADDER[1]?.renderScale).toBeLessThan(REALISTIC_LADDER[0]?.renderScale ?? 0);
+    expect(REALISTIC_LADDER[1]?.scatterItems).toBeLessThan(REALISTIC_LADDER[0]?.scatterItems ?? 0);
+  });
+
+  it('steps from its floor to the TOP of the stylised ladder — every kind at once', () => {
+    const floor = sustainWorld(INITIAL_REALISTIC_QUALITY, HOT, SUSTAINED_SAMPLES);
+    const left = sustainWorld(floor, HOT, SUSTAINED_SAMPLES);
+    expect(left).toEqual({ realistic: false, quality: INITIAL_QUALITY });
+    expect(worldRung(left)).toBe(QUALITY_LADDER[0]);
+    expect(worldRung(left).world).toBe('stylised');
+  });
+
+  it('never re-enters realism once it has left it, however cool the device gets — the latch', () => {
+    const left = sustainWorld(INITIAL_REALISTIC_QUALITY, HOT, SUSTAINED_SAMPLES * 2);
+    expect(left.realistic).toBe(false);
+    const cooled = sustainWorld(left, COOL, SUSTAINED_SAMPLES * 10);
+    expect(cooled.realistic).toBe(false);
+    expect(worldRung(cooled)).toBe(QUALITY_LADDER[0]);
+  });
+
+  it('climbs back within the realistic ladder when a device cools, as the stylised one does', () => {
+    const floor = sustainWorld(INITIAL_REALISTIC_QUALITY, HOT, SUSTAINED_SAMPLES);
+    const cooled = sustainWorld(floor, COOL, SUSTAINED_SAMPLES);
+    expect(cooled).toEqual(INITIAL_REALISTIC_QUALITY);
+  });
+
+  it('moves on the stylised ladder exactly as `nextQuality` does once realism is left', () => {
+    const stylised: WorldQualityState = { realistic: false, quality: INITIAL_QUALITY };
+    const moved = sustainWorld(stylised, HOT, SUSTAINED_SAMPLES * 3);
+    expect(moved.quality).toEqual(sustain(INITIAL_QUALITY, HOT, SUSTAINED_SAMPLES * 3));
+  });
+
+  it('is never reached from a stylised start, however cool the device', () => {
+    const stylised: WorldQualityState = { realistic: false, quality: INITIAL_QUALITY };
+    expect(sustainWorld(stylised, COOL, SUSTAINED_SAMPLES * 10).realistic).toBe(false);
   });
 });

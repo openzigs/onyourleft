@@ -311,6 +311,28 @@ export interface QualitySettings {
    * Validation 0002 Part Y measures the frame time on a phone.
    */
   readonly surfaceDetail: boolean;
+  /**
+   * Which of the two worlds this rung draws — [ADR 0026](../../../../docs/adr/0026-realistic-game-world.md)
+   * D-3 and D-10.
+   *
+   * - `'stylised'` — today's world: the Kenney models, #366's vertex colours,
+   *   the Lambert/flat pair, the procedural surfaces. **Every rung of
+   *   {@link QUALITY_LADDER}**, and the world the precache holds (D-7).
+   * - `'realistic'` — the photoscanned world: physically based materials lit
+   *   by an HDRI's environment and `world.ts`'s one sun, photographic road and
+   *   ground, photoscanned vegetation and the MakeHuman rider. **Only the rungs
+   *   of {@link REALISTIC_LADDER}**, which sits above the stylised ladder and
+   *   which nothing in the shipped app selects — D-12: *"offered to riders only
+   *   when the world is whole"*, and layer 3 (structures) has not landed.
+   *
+   * ⚠️ **A whole world, never a kind at a time.** No rung draws a pack asset
+   * from one world beside a pack asset from the other (D-3): on a realistic
+   * rung the buildings are their own procedural primitives rather than Kenney's
+   * models until layer 3 lands (#475), and stepping down leaves the realistic
+   * ladder for the stylised ladder's TOP, every kind at once —
+   * {@link nextWorldQuality}.
+   */
+  readonly world: 'stylised' | 'realistic';
   /** A human-readable name, for the diagnostic line #91 asks to be recorded. */
   readonly label: string;
 }
@@ -342,6 +364,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     surfaceDetail: true,
     shading: 'lit',
     riderShadows: 'contact',
+    world: 'stylised',
     label: 'full',
   },
   // ⚠️ The scenery goes here, WITH the first resolution step rather than as a
@@ -358,6 +381,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     surfaceDetail: false,
     shading: 'lit',
     riderShadows: 'contact',
+    world: 'stylised',
     label: 'reduced resolution and scenery',
   },
   {
@@ -371,6 +395,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     surfaceDetail: false,
     shading: 'lit',
     riderShadows: 'contact',
+    world: 'stylised',
     label: 'reduced resolution, scenery and frame rate',
   },
   // ⚠️ The only rung that is flat. Resolution and frame rate are given up
@@ -394,6 +419,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     surfaceDetail: false,
     shading: 'flat',
     riderShadows: 'contact',
+    world: 'stylised',
     label: 'minimum',
   },
 ];
@@ -458,6 +484,21 @@ export interface QualitySample {
  * result; it does not decide it.
  */
 export function nextQuality(state: QualityState, sample: QualitySample): QualityState {
+  const { level, pressure } = step(state, sample, QUALITY_LADDER.length - 1);
+  return { level, pressure };
+}
+
+/**
+ * One measurement's worth of movement on a ladder of `last + 1` rungs, and
+ * whether it wanted to step down past the last one — which only
+ * {@link nextWorldQuality} cares about, because only the realistic ladder has
+ * somewhere to go when it runs out.
+ */
+function step(
+  state: QualityState,
+  sample: QualitySample,
+  last: number,
+): QualityState & { readonly pastTheFloor: boolean } {
   const hot = isHot(sample);
   const cool = isCool(sample);
 
@@ -465,19 +506,23 @@ export function nextQuality(state: QualityState, sample: QualitySample): Quality
   // decays rather than persisting. Without this a phone that was briefly hot an
   // hour ago would still be one sample from a reduction.
   if (!hot && !cool) {
-    return { ...state, pressure: decayToward(state.pressure, 0) };
+    return { ...state, pressure: decayToward(state.pressure, 0), pastTheFloor: false };
   }
 
   const pressure = hot ? Math.max(0, state.pressure) + 1 : Math.min(0, state.pressure) - 1;
   if (Math.abs(pressure) < SUSTAINED_SAMPLES) {
-    return { level: state.level, pressure };
+    return { level: state.level, pressure, pastTheFloor: false };
   }
 
   const wanted = hot ? state.level + 1 : state.level - 1;
-  const level = clampLevel(wanted);
+  const level = clampLevel(wanted, last);
   // Pressure resets on a change so the next rung needs its own sustained run,
   // rather than the ladder being descended in consecutive frames.
-  return { level, pressure: level === state.level ? pressure : 0 };
+  return {
+    level,
+    pressure: level === state.level ? pressure : 0,
+    pastTheFloor: wanted > last,
+  };
 }
 
 /** The settings for a level. */
@@ -571,6 +616,120 @@ export function readShadowMapChoice(
   }
 }
 
+/**
+ * The realistic world's rungs — [ADR 0026](../../../../docs/adr/0026-realistic-game-world.md)
+ * D-3, above {@link QUALITY_LADDER}, coolest last.
+ *
+ * ## Why a ladder of its own rather than two more rungs on that one
+ *
+ * D-3: *"the realistic world is a second set of rungs above it. It is chosen
+ * by the rider … and — like {@link RIDER_SHADOW_MAP_RUNG} — it is never
+ * entered by the thermal logic on its own."* {@link nextQuality} climbs back
+ * to level 0 whenever a device runs cool, so realism inserted above level 0
+ * would be climbed to by every cool device — the floor device included, which
+ * D-3 says is never defaulted to realism. A ladder of its own, left by
+ * {@link nextWorldQuality} and never re-entered, is the same latch the shadow
+ * map has, for a whole world.
+ *
+ * ## The two rungs, and what the second gives up
+ *
+ * The first is the stylised target rung's every figure with the world
+ * swapped, so a measurement of it against level 0 is a measurement of realism
+ * and nothing else. The second takes the stylised ladder's first step down —
+ * resolution, scenery, the far ground and the water shader — **inside** the
+ * realistic world, before the world itself is given up: D-3's *"the realistic
+ * rungs reduce within themselves"*. Neither lowers the frame cap, so a hot
+ * device gives up realism before it gives up frame rate, which is what the
+ * owner's brief for this pull request asked of the ladder. ⚠️ **The frame cap
+ * is a declaration nothing reads today** —
+ * [#476](https://github.com/openzigs/onyourleft/issues/476) — so that ordering
+ * is true of this table and of what the ladder will do once the cap is honoured.
+ *
+ * ⚠️ **Nothing in the shipped app selects either.** D-12: the realistic world
+ * is offered to riders only when it is whole, and layer 3 (structures) has not
+ * landed — [#475](https://github.com/openzigs/onyourleft/issues/475). The one
+ * way to reach it is the owner's harness page, `apps/web/browser/realistic.html`,
+ * and `realistic-offered.test.ts` fails the build if a module the product
+ * ships names this ladder.
+ *
+ * ⚠️ Provenance: every figure is the stylised rung it is copied from, so it is
+ * BR-1 exactly as they are. What realism costs on the tablet is #457's device
+ * run and `realistic-budget.ts`; the soak is validation 0002 Part Z.
+ *
+ * @unwired reached only from the owner's harness page until ADR 0026 D-12's
+ * layer 3 lands and a rider is offered the realistic world — #475.
+ */
+export const REALISTIC_LADDER: readonly QualitySettings[] = [
+  { ...(QUALITY_LADDER[0] as QualitySettings), world: 'realistic', label: 'realistic' },
+  {
+    ...(QUALITY_LADDER[1] as QualitySettings),
+    world: 'realistic',
+    label: 'realistic, reduced resolution and scenery',
+  },
+];
+
+/** Where a ride that may be realistic is on the two ladders. */
+export interface WorldQualityState {
+  /** Whether the ride is still on {@link REALISTIC_LADDER}. Once false, false for the ride. */
+  readonly realistic: boolean;
+  /** The level on whichever ladder {@link realistic} names. */
+  readonly quality: QualityState;
+}
+
+/**
+ * A ride the rider started in the realistic world.
+ *
+ * @unwired reached only from the owner's harness page until #475 offers the
+ * realistic world to a rider; see {@link REALISTIC_LADDER}.
+ */
+export const INITIAL_REALISTIC_QUALITY: WorldQualityState = {
+  realistic: true,
+  quality: INITIAL_QUALITY,
+};
+
+/**
+ * The next state after one more measurement, on whichever ladder the ride is.
+ *
+ * Within {@link REALISTIC_LADDER} it moves exactly as {@link nextQuality} does,
+ * with the same hysteresis. **Stepping down past its last rung leaves realism**
+ * for the stylised ladder's level 0 — the TOP of that ladder, every kind at
+ * once (D-3) — and nothing ever steps back: a device that was too hot for
+ * realism once this ride is not handed it again the moment it cools, because
+ * each switch is a whole world of textures uploaded or freed, and that stall is
+ * itself a frame-time spike that would push it straight back down. The same
+ * argument {@link keepsShadowMap} makes, for the same reason.
+ *
+ * Pure: the state is the caller's.
+ *
+ * @unwired reached only from the owner's harness page until #475; see
+ * {@link REALISTIC_LADDER}.
+ */
+export function nextWorldQuality(
+  state: WorldQualityState,
+  sample: QualitySample,
+): WorldQualityState {
+  if (!state.realistic) {
+    return { realistic: false, quality: nextQuality(state.quality, sample) };
+  }
+  const moved = step(state.quality, sample, REALISTIC_LADDER.length - 1);
+  if (moved.pastTheFloor) {
+    return { realistic: false, quality: INITIAL_QUALITY };
+  }
+  return { realistic: true, quality: { level: moved.level, pressure: moved.pressure } };
+}
+
+/**
+ * The settings a ride draws with in a {@link WorldQualityState}.
+ *
+ * @unwired reached only from the owner's harness page until #475; see
+ * {@link REALISTIC_LADDER}.
+ */
+export function worldRung(state: WorldQualityState): QualitySettings {
+  return state.realistic
+    ? (REALISTIC_LADDER[state.quality.level] as QualitySettings)
+    : qualitySettings(state.quality.level);
+}
+
 /** Whether this sample argues for less work. */
 function isHot(sample: QualitySample): boolean {
   const headroom = sample.thermalHeadroom;
@@ -606,8 +765,7 @@ function decayToward(pressure: number, target: number): number {
   return pressure < target ? pressure + 1 : target;
 }
 
-function clampLevel(level: number): QualityLevel {
-  const last = QUALITY_LADDER.length - 1;
+function clampLevel(level: number, last: number): QualityLevel {
   const clamped = level < 0 ? 0 : level > last ? last : level;
   return clamped as QualityLevel;
 }

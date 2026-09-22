@@ -138,6 +138,7 @@
  */
 
 import {
+  AgXToneMapping,
   AmbientLight,
   BackSide,
   Box3,
@@ -150,30 +151,45 @@ import {
   DirectionalLight,
   DoubleSide,
   DynamicDrawUsage,
+  EquirectangularReflectionMapping,
   FogExp2,
   Group,
+  HalfFloatType,
   InstancedBufferAttribute,
   InstancedMesh,
+  LinearMipmapLinearFilter,
   LoadingManager,
   Matrix4,
   Mesh,
   MeshBasicMaterial,
   MeshLambertMaterial,
+  MeshStandardMaterial,
+  NoToneMapping,
   OctahedronGeometry,
   PerspectiveCamera,
   PlaneGeometry,
+  PMREMGenerator,
   Quaternion,
+  RepeatWrapping,
   Scene,
   ShaderMaterial,
   ShadowMaterial,
   SphereGeometry,
+  SRGBColorSpace,
+  TextureLoader,
   TorusGeometry,
+  ShaderChunk,
   UniformsLib,
   UniformsUtils,
+  Vector2,
   Vector3,
   WebGLRenderer,
+  type Bone,
+  type DataTexture,
   type Material,
   type Object3D,
+  type SkinnedMesh,
+  type Texture,
 } from 'three';
 // ⚠️ **Both of these ship inside `three@0.185.1` itself** — MIT, zero runtime
 // dependencies — reached through the package's own `./addons/*` export. ADR
@@ -182,7 +198,12 @@ import {
 // `three-seam.test.ts`'s `['"]three(?:\/[^'"]*)?['"]`, so a loader imported
 // anywhere but here is a red test with no change to that rule.
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+// ⚠️ **The realistic world's two addons ship in `three@0.185.1` too** (ADR 0026
+// D-2: *"three 0.185.1 already ships PMREMGenerator, the HDR loader, GLTFLoader
+// and KTX2Loader"*), so this adds no dependency and `DEP001` is not engaged.
+import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 
 import {
   BICYCLE_COLOURS,
@@ -193,7 +214,10 @@ import {
   RIDER_BODY_PARTS,
   RIDER_CRANK_PARTS,
   RIDER_PALETTE,
+  emptyRiderJoints,
   legBones,
+  riderJoints,
+  type JointPoint,
   type RiderPart,
 } from './bicycle';
 import {
@@ -211,6 +235,28 @@ import {
   type TerrainMesh,
 } from './landform';
 import type { QualitySettings } from './quality';
+import {
+  isRealisticVegetation,
+  REALISTIC_RIDER,
+  REALISTIC_SKY,
+  REALISTIC_SURFACES,
+  REALISTIC_VEGETATION,
+  REALISTIC_VEGETATION_KINDS,
+  realisticUrl,
+  type RealisticVegetationKind,
+  type RealisticWorldOutcome,
+} from './realistic-assets';
+import { REALISTIC_NEAR_MESHES } from './realistic-budget';
+import {
+  environmentIntensity,
+  halfToFloat,
+  PHOTOGRAPHIC_ROAD_GRAIN,
+  REALISTIC_EXPOSURE,
+  skyRotation,
+  skySunU,
+  upwardRadiance,
+  type SkyPixels,
+} from './realistic-light';
 import {
   MAXIMUM_SCENERY_VARIANTS,
   SCENERY_MODELS,
@@ -1383,7 +1429,12 @@ const LAMBERT_IRRADIANCE_SCALE = Math.PI;
  * every pair is built by now.
  */
 interface ShadedMaterials {
-  readonly lit: MeshLambertMaterial;
+  /**
+   * `MeshLambertMaterial` in the stylised world; since ADR 0026 a
+   * `MeshStandardMaterial` in the realistic one, which the environment map
+   * lights — {@link physicalMaterials}.
+   */
+  readonly lit: MeshLambertMaterial | MeshStandardMaterial;
   readonly flat: MeshBasicMaterial;
 }
 
@@ -1448,9 +1499,13 @@ export class WorldLamps {
    * the shadow MAP's frame, on the one rung that has one, and
    * {@link aimShadowAt} moves both ends for that rung after this has run.
    */
-  apply(sun: SunStyle): void {
+  apply(sun: SunStyle, ambientShare = 1): void {
     this.#sun.target.position.set(0, 0, 0);
-    this.#ambient.intensity = sun.ambient * LAMBERT_IRRADIANCE_SCALE;
+    // ⚠️ `ambientShare` is 0 in the realistic world (ADR 0026 D-9): the
+    // environment map IS the ambient term there, solved to give a horizontal
+    // surface exactly `sun.ambient` (`realistic-light.ts`), and an ambient lamp
+    // on top of it would light every surface twice.
+    this.#ambient.intensity = sun.ambient * LAMBERT_IRRADIANCE_SCALE * ambientShare;
     this.#sun.intensity = sun.direct * LAMBERT_IRRADIANCE_SCALE;
     this.#sun.position.set(sun.x, sun.y, sun.z);
   }
@@ -1644,7 +1699,9 @@ export class ScatterBelt {
    * on a device that is already too hot, and building a material there is an
    * allocation on the worst frame of the ride. @see vertexColouredMaterials
    */
-  readonly #materials = vertexColouredMaterials();
+  readonly #materials: ShadedMaterials;
+  /** Whether the belt draws at all — false while the other world is drawn. @see setShown */
+  #shown = true;
   /**
    * Survivors of the cull, per mesh, for the frame being built.
    *
@@ -1691,9 +1748,23 @@ export class ScatterBelt {
    * client gets; a kind with no entry is drawn as {@link SCATTER_STYLE}'s
    * primitive, which is `post` always and any other kind whose files could not
    * be read.
+   * @param options how the realistic world uses a second belt — ADR 0026
+   * D-3. `skip` names kinds this belt never draws, because another belt draws
+   * them; `physical` lights it as the realistic world lights everything, by the
+   * environment and the sun rather than by the ambient lamp. The realistic
+   * world's belt is handed an EMPTY `models` so that every kind it draws is its
+   * procedural primitive: no Kenney model beside a photoscan (D-3), until
+   * layer 3 gives the structures shapes of their own (#475).
    */
-  constructor(models: ReadonlyMap<SceneryKind, readonly BufferGeometry[]> = sceneryGeometries) {
+  constructor(
+    models: ReadonlyMap<SceneryKind, readonly BufferGeometry[]> = sceneryGeometries,
+    options: { readonly skip?: ReadonlySet<SceneryKind>; readonly physical?: boolean } = {},
+  ) {
+    this.#materials = options.physical === true ? physicalMaterials() : vertexColouredMaterials();
     for (const kind of SCENERY_KINDS) {
+      if (options.skip?.has(kind) === true) {
+        continue;
+      }
       const shapes = models.get(kind) ?? [];
       this.#shapes.set(kind, Math.max(1, Math.min(MAXIMUM_SCENERY_VARIANTS, shapes.length)));
       for (let variant = 0; variant < (this.#shapes.get(kind) ?? 1); variant += 1) {
@@ -1844,6 +1915,20 @@ export class ScatterBelt {
   }
 
   /**
+   * Whether the belt draws at all — ADR 0026 D-3. A view holds one belt for
+   * each world and draws one of them; the other is hidden rather than emptied,
+   * so switching costs one flag and no buffer.
+   */
+  setShown(on: boolean): void {
+    this.#shown = on;
+    if (!on) {
+      for (const mesh of this.#meshes.values()) {
+        mesh.visible = false;
+      }
+    }
+  }
+
+  /**
    * Places this frame's scenery, culled to what the rider can see.
    *
    * ⚠️ **The frame is the rider's, not the camera's**, and since #269 the two
@@ -1877,6 +1962,9 @@ export class ScatterBelt {
    * a guard the two passes do not share is a guard that can disagree.
    */
   update(items: readonly ScatterItem[], pose: CameraPose): void {
+    if (!this.#shown) {
+      return;
+    }
     for (const key of this.#meshes.keys()) {
       this.#counts.set(key, 0);
     }
@@ -1884,7 +1972,7 @@ export class ScatterBelt {
     for (const item of items) {
       const key = this.#keyFor(item);
       const mesh = this.#meshes.get(key);
-      if (mesh === undefined || !this.#inView(item, pose)) {
+      if (mesh === undefined || !inView(item, pose)) {
         continue;
       }
       if (admitted >= this.#budget) {
@@ -1902,7 +1990,7 @@ export class ScatterBelt {
     admitted = 0;
     for (const item of items) {
       const mesh = this.#meshes.get(this.#keyFor(item));
-      if (mesh === undefined || !this.#inView(item, pose)) {
+      if (mesh === undefined || !inView(item, pose)) {
         continue;
       }
       if (admitted >= this.#budget) {
@@ -1951,20 +2039,6 @@ export class ScatterBelt {
   }
 
   /**
-   * Whether an item is inside what the rider can see.
-   *
-   * `along` is the item's distance up the rider's heading and `across` is its
-   * distance to the side of it — the two components of the same offset in the
-   * rider's own frame, which is the frame {@link VIEW_AHEAD_METRES} and
-   * {@link lateralReachMetres} are both stated in.
-   *
-   * ⚠️ **Two bounds of different shapes, and they are not interchangeable.**
-   * Along the road it is a pair of constants, because the corridor itself is
-   * built between them and nothing outside them is drawn at all. To the side it
-   * is a **cone**, because that is what a perspective camera can see — #269,
-   * and {@link lateralReachMetres} carries the derivation and the measurement.
-   */
-  /**
    * Which mesh an item is drawn by — its kind, and its variant folded into
    * however many shapes that kind has at this rung.
    *
@@ -1984,17 +2058,6 @@ export class ScatterBelt {
     // produce one; a caller that built a frame some other way can.
     const wanted = Number.isInteger(item.variant) ? item.variant : 0;
     return beltKey(item.kind, ((wanted % shapes) + shapes) % shapes);
-  }
-
-  #inView(item: ScatterItem, pose: CameraPose): boolean {
-    const dx = item.x - pose.x;
-    const dz = item.z - pose.z;
-    const along = dx * pose.headingX + dz * pose.headingZ;
-    if (along > VIEW_AHEAD_METRES || along < -VIEW_BEHIND_METRES) {
-      return false;
-    }
-    const across = dx * pose.headingZ - dz * pose.headingX;
-    return Math.abs(across) <= lateralReachMetres(along);
   }
 }
 
@@ -2093,6 +2156,8 @@ export class RiderBelt {
   readonly #posed = new Float64Array(RIDDEN_KINDS.length * POSE_KEY.length).fill(Number.NaN);
   /** Which kind is in which slot, as one string, so a change is one compare. */
   #layout = '';
+  /** Whether this belt draws at all. @see setShown */
+  #shown = true;
 
   readonly #position = new Vector3();
   readonly #turn = new Quaternion();
@@ -2168,6 +2233,9 @@ export class RiderBelt {
    * `port.ts` declares and is what a fourth would hit.
    */
   place(markers: readonly RiderMarker[]): void {
+    if (!this.#shown) {
+      return;
+    }
     // ⚠️ **`Object.hasOwn`, not `in`.** `RIDER_TINTS` is an object literal, so
     // `'toString' in RIDER_TINTS` is true through the prototype — and a marker
     // that got past this with a kind the table does not hold would be handed
@@ -2216,6 +2284,14 @@ export class RiderBelt {
   /** Draws no rider at all, for a frame that carries none. */
   hide(): void {
     this.place([]);
+  }
+
+  /** Whether the stylised riders draw at all — false while the realistic ones do (ADR 0026 D-3). */
+  setShown(on: boolean): void {
+    this.#shown = on;
+    if (!on) {
+      this.#group.visible = false;
+    }
   }
 
   /** @see QualitySettings.shading */
@@ -2612,6 +2688,23 @@ function vertexColouredMaterials(): ShadedMaterials {
 }
 
 /**
+ * The realistic world's pair — ADR 0026 D-10: a physically based material the
+ * environment map lights, on everything the realistic world still draws as a
+ * primitive (the posts, the structures until layer 3, the bridges). The same
+ * vertex colours; matte, as painted wood, render and stone are.
+ *
+ * ⚠️ Constructed here and registered, so D-11's assertion covers it.
+ */
+function physicalMaterials(): ShadedMaterials {
+  return {
+    lit: constructed(
+      new MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 }),
+    ),
+    flat: constructed(new MeshBasicMaterial({ vertexColors: true })),
+  };
+}
+
+/**
  * Makes room for `needed` instances, growing the matrix buffer if it has to.
  *
  * ⚠️ **The mesh is never replaced, and in practice nor is its buffer**:
@@ -2701,6 +2794,8 @@ export class TerrainBelt {
     ),
   };
   readonly #mesh: Mesh;
+  #shading: QualitySettings['shading'] = 'lit';
+  #photographic: MeshStandardMaterial | undefined;
   #vertexCapacity = 0;
   #indexCapacity = 0;
   #bands = TERRAIN_BANDS;
@@ -2732,13 +2827,33 @@ export class TerrainBelt {
 
   /** @see QualitySettings.shading */
   setShading(shading: QualitySettings['shading']): void {
-    this.#mesh.material = this.#materials[shading];
+    this.#shading = shading;
+    this.#mount();
+  }
+
+  /**
+   * The realistic world's photographic ground, or back to the stylised pair —
+   * ADR 0026 D-10. The same mesh and the same buffers either way, so the ground
+   * under a tree is the same ground in both worlds; only the material changes.
+   */
+  setPhotographic(material: MeshStandardMaterial | undefined): void {
+    this.#photographic = material;
+    this.#mount();
+  }
+
+  /** The field span and count the photographic ground's patchwork reads. */
+  get fields(): { readonly span: { value: number }; readonly count: { value: number } } {
+    return { span: this.#fieldSpan, count: this.#fieldCount };
   }
 
   /** The surface detail, on or off — #425. @see QualitySettings.surfaceDetail */
   setSurfaceDetail(on: boolean): void {
     setSurfaceDetail(this.#materials.lit, on);
     setSurfaceDetail(this.#materials.flat, on);
+  }
+
+  #mount(): void {
+    this.#mesh.material = this.#photographic ?? this.#materials[this.#shading];
   }
 
   /** How many bands of ground this rung draws, innermost first. @see QualitySettings.terrainBands */
@@ -2764,6 +2879,7 @@ export class TerrainBelt {
     }
     this.#materials.lit.color.setHex(groundColour);
     this.#materials.flat.color.setHex(groundColour);
+    this.#photographic?.color.setHex(groundColour);
     if (ground.vertices.length > this.#vertexCapacity) {
       this.#vertexCapacity = ground.vertices.length;
       for (const [name, size] of [
@@ -3017,14 +3133,22 @@ const GROUND_DETAIL = /* glsl */ `
  * program it compiled for a plain material of the same class — the cache key
  * otherwise ignores `onBeforeCompile` entirely.
  */
-function withSurfaceDetail<M extends MeshBasicMaterial | MeshLambertMaterial>(
+function withSurfaceDetail<
+  M extends MeshBasicMaterial | MeshLambertMaterial | MeshStandardMaterial,
+>(
   material: M,
   surface: 'road' | 'ground',
   fieldSpan: { value: number },
   fieldCount: { value: number },
 ): M {
   material.defines = { ...material.defines };
-  material.onBeforeCompile = (shader) => {
+  // ⚠️ Chained after whatever the material already did before it compiles —
+  // since ADR 0026 the photographic ground has its own injection, and this one
+  // must add to it rather than replace it.
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
     shader.uniforms['fieldSpan'] = fieldSpan;
     shader.uniforms['fieldCount'] = fieldCount;
     shader.vertexShader = shader.vertexShader
@@ -3054,7 +3178,7 @@ function withSurfaceDetail<M extends MeshBasicMaterial | MeshLambertMaterial>(
         `#include <color_fragment>\n${surface === 'ground' ? GROUND_DETAIL : ROAD_DETAIL}`,
       );
   };
-  material.customProgramCacheKey = () => `oyl-surface-detail-${surface}`;
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-surface-detail-${surface}`;
   return material;
 }
 
@@ -3341,6 +3465,12 @@ export class WaterBelt {
  */
 export class BridgeBelt {
   readonly #materials = vertexColouredMaterials();
+  /** The realistic world's stone — ADR 0026 D-10. @see physicalMaterials */
+  readonly #physical = constructed(
+    new MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 }),
+  );
+  #shading: QualitySettings['shading'] = 'lit';
+  #world: QualitySettings['world'] = 'stylised';
   readonly #mesh: InstancedMesh;
   readonly #matrix = new Matrix4();
   readonly #along = new Vector3();
@@ -3369,7 +3499,19 @@ export class BridgeBelt {
 
   /** @see QualitySettings.shading */
   setShading(shading: QualitySettings['shading']): void {
-    this.#mesh.material = this.#materials[shading];
+    this.#shading = shading;
+    this.#mount();
+  }
+
+  /** Which world's stone the bridges are — ADR 0026 D-10. */
+  setWorld(world: QualitySettings['world']): void {
+    this.#world = world;
+    this.#mount();
+  }
+
+  #mount(): void {
+    this.#mesh.material =
+      this.#world === 'realistic' ? this.#physical : this.#materials[this.#shading];
   }
 
   /**
@@ -3400,7 +3542,1489 @@ export class BridgeBelt {
     this.#mesh.dispose();
     this.#materials.lit.dispose();
     this.#materials.flat.dispose();
+    this.#physical.dispose();
   }
+}
+
+/* ============================================================================
+ * THE REALISTIC WORLD — ADR 0026, #425, #474, #369
+ * ========================================================================== */
+
+/**
+ * Every material the realistic path constructs — [ADR 0026](../../../../docs/adr/0026-realistic-game-world.md) D-11.
+ *
+ * ADR 0022 D-7's end survives its means: *"a `MeshStandardMaterial`
+ * constructed by `GLTFLoader` from a glTF's own material block is not in any
+ * source file … and would change how the whole scene is shaded without a
+ * single gate going red."* The realistic world needs physically based
+ * materials and textures, so what it may not have is a LOADER-built one: every
+ * material a realistic mesh wears is made by {@link constructed} below, from
+ * the textures and factors the file supplies, and the loader's own is disposed
+ * at load. Membership here is what `three-renderer.test.ts` and
+ * `game.browser.spec.ts` assert on every realistic mesh — a material a future
+ * change let through from a loader is not in this set, whatever its class.
+ */
+const CONSTRUCTED_MATERIALS = new WeakSet<Material>();
+
+/** Registers a material this file made. @see CONSTRUCTED_MATERIALS */
+function constructed<M extends Material>(material: M): M {
+  CONSTRUCTED_MATERIALS.add(material);
+  return material;
+}
+
+/**
+ * Whether this file constructed a material — ADR 0026 D-11's assertion.
+ *
+ * @test-facing held by `realistic-renderer.test.ts`, and by the browser gate
+ * through `sceneMaterialsOf`; nothing in the render path needs to ask
+ */
+export function isConstructedMaterial(material: Material): boolean {
+  return CONSTRUCTED_MATERIALS.has(material);
+}
+
+/** One drawable piece of a realistic shape: a geometry and the material it wears. */
+export interface RealisticPart {
+  readonly geometry: BufferGeometry;
+  readonly material: MeshStandardMaterial;
+}
+
+/** A realistic model, ready to instance. */
+export interface RealisticShape {
+  readonly name: string;
+  readonly parts: readonly RealisticPart[];
+  /**
+   * The full scan's largest extent, in the model's own units — what
+   * `sceneryFitMetres` is divided by, so a realistic tree occupies the space
+   * its stylised twin did. Read from the file's extras, where the pipeline
+   * recorded it before thinning grew any card past it.
+   */
+  readonly extent: number;
+  readonly triangles: number;
+  /** The far band's billboard, for a tree. */
+  readonly impostor?: { readonly material: ShaderMaterial; readonly texture: Texture };
+}
+
+/** The sky: the HDR itself, and what was read off it. @see realistic-light.ts */
+interface RealisticSky {
+  readonly texture: DataTexture;
+  /** The cosine-weighted mean radiance of its upper hemisphere. */
+  readonly upward: number;
+  /** Where its sun is in the picture, as a horizontal texture coordinate. */
+  readonly sunU: number;
+}
+
+/** Everything the realistic world is drawn from, loaded once per tab. */
+interface RealisticWorld {
+  readonly sky: RealisticSky;
+  readonly road: { readonly colour: Texture; readonly normal: Texture };
+  readonly ground: { readonly colour: Texture; readonly normal: Texture };
+  readonly vegetation: ReadonlyMap<RealisticVegetationKind, readonly RealisticShape[]>;
+  /** The rider's body, as the loader left it: a scene holding one skinned mesh. */
+  readonly body: Object3D;
+}
+
+/**
+ * The realistic world, or nothing.
+ *
+ * ⚠️ **Module state, for `sceneryGeometries`' reason**: `GameRenderer.create`
+ * is synchronous and loading is not, so the loading is a step a caller runs
+ * first and the result is held here. Unlike the stylised models it is loaded
+ * ONLY when a caller asks — ADR 0026 D-7: the realistic set is fetched when the
+ * rider chooses the realistic world, never on a first visit — and today the
+ * only caller is the owner's harness page (D-12).
+ */
+let realisticWorld: RealisticWorld | undefined;
+
+/** How the realistic world's files are read. Replaced in tests. */
+export interface RealisticLoaders {
+  readonly model: (url: string) => Promise<Object3D>;
+  readonly texture: (url: string) => Promise<Texture>;
+  readonly sky: (url: string) => Promise<DataTexture>;
+}
+
+/**
+ * What a realistic model file may fetch besides itself: nothing. Every
+ * committed realistic GLB embeds its images, which three reads through `blob:`
+ * URLs of its own making, so any other URL a file declared would be the
+ * network — the posture `scenery-models.ts` §`sceneryResourceUrl` takes for the
+ * stylised pack.
+ */
+function realisticResourceUrl(own: string): (url: string) => string {
+  return (url) =>
+    url === own || url.startsWith('blob:') || url.startsWith('data:')
+      ? url
+      : 'data:application/octet-stream;base64,';
+}
+
+const THREE_LOADERS: RealisticLoaders = {
+  model: async (url) => {
+    const manager = new LoadingManager();
+    manager.setURLModifier(realisticResourceUrl(url));
+    return (await new GLTFLoader(manager).loadAsync(url)).scene;
+  },
+  texture: (url) => new TextureLoader().loadAsync(url),
+  sky: (url) => new HDRLoader().loadAsync(url),
+};
+
+/**
+ * Loads the realistic world, all of it or none of it — ADR 0026 D-3, D-7.
+ *
+ * ⚠️ **All or none.** A world whose trees loaded and whose sky did not would
+ * be a half-replaced world, which D-3 exists to refuse; so any failure releases
+ * whatever did load and leaves the view drawing the stylised world, and the
+ * outcome says why — D-7: *"offline with the realistic world chosen, the game
+ * falls back to the stylised world and says so"*. `realistic-assets.ts`
+ * §`realisticWorldNotice` is the sentence.
+ *
+ * @unwired reached only from the owner's harness page until ADR 0026 D-12's
+ * layer 3 lands and a rider is offered the realistic world — #475.
+ */
+export async function loadRealisticWorld(
+  loaders: RealisticLoaders = THREE_LOADERS,
+): Promise<RealisticWorldOutcome> {
+  const loaded: { textures: Texture[]; objects: Object3D[] } = { textures: [], objects: [] };
+  try {
+    const keep = <T extends Texture>(texture: T): T => {
+      loaded.textures.push(texture);
+      return texture;
+    };
+    const [skyTexture, roadColour, roadNormal, groundColour, groundNormal, body] =
+      await Promise.all([
+        loaders.sky(realisticUrl(REALISTIC_SKY)).then(keep),
+        loaders.texture(realisticUrl(REALISTIC_SURFACES.road.colour)).then(keep),
+        loaders.texture(realisticUrl(REALISTIC_SURFACES.road.normal)).then(keep),
+        loaders.texture(realisticUrl(REALISTIC_SURFACES.ground.colour)).then(keep),
+        loaders.texture(realisticUrl(REALISTIC_SURFACES.ground.normal)).then(keep),
+        loaders.model(realisticUrl(REALISTIC_RIDER)).then((scene) => {
+          loaded.objects.push(scene);
+          return scene;
+        }),
+      ]);
+    const vegetation = new Map<RealisticVegetationKind, readonly RealisticShape[]>();
+    for (const kind of REALISTIC_VEGETATION_KINDS) {
+      const shapes = await Promise.all(
+        REALISTIC_VEGETATION[kind].map(async (model) => {
+          const [scene, strip] = await Promise.all([
+            loaders.model(realisticUrl(model.file)),
+            model.impostor === undefined
+              ? Promise.resolve(undefined)
+              : loaders.texture(realisticUrl(model.impostor)).then(keep),
+          ]);
+          loaded.objects.push(scene);
+          return prepareRealisticShape(scene, model.name, strip);
+        }),
+      );
+      vegetation.set(kind, shapes);
+    }
+    for (const texture of [roadColour, roadNormal, groundColour, groundNormal]) {
+      texture.wrapS = RepeatWrapping;
+      texture.wrapT = RepeatWrapping;
+      texture.minFilter = LinearMipmapLinearFilter;
+    }
+    roadColour.colorSpace = SRGBColorSpace;
+    groundColour.colorSpace = SRGBColorSpace;
+    skyTexture.mapping = EquirectangularReflectionMapping;
+    const pixels = skyPixelsOf(skyTexture);
+    const sky = { texture: skyTexture, upward: upwardRadiance(pixels), sunU: skySunU(pixels) };
+    // ⚠️ Swapped in only once the new world is whole, and the old one released
+    // only after the swap: a reload that failed half-way, or whose release
+    // threw, must leave the world a view draws intact — the first version of
+    // this released first and lost both, which `realistic-renderer.test.ts`
+    // §"never half a world" caught.
+    const previous = realisticWorld;
+    realisticWorld = {
+      sky,
+      road: { colour: roadColour, normal: roadNormal },
+      ground: { colour: groundColour, normal: groundNormal },
+      vegetation,
+      body,
+    };
+    if (previous !== undefined) {
+      try {
+        releaseRealisticWorld(previous);
+      } catch {
+        // A release that fails leaks the old world's memory; it does not make
+        // the new world any less loaded, and must not be reported as though it
+        // did.
+      }
+    }
+    return { loaded: true };
+  } catch (error: unknown) {
+    for (const texture of loaded.textures) texture.dispose();
+    for (const scene of loaded.objects) releaseLoadedScene(scene);
+    return {
+      loaded: false,
+      offline: typeof navigator !== 'undefined' && navigator.onLine === false,
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Whether a realistic world is loaded and a view could draw it.
+ *
+ * @test-facing held by `realistic-renderer.test.ts`, which is where "all of it
+ * or none of it" is asserted against the module state a view reads
+ */
+export function realisticWorldLoaded(): boolean {
+  return realisticWorld !== undefined;
+}
+
+/** Releases a realistic world that another has replaced. */
+function releaseRealisticWorld(world: RealisticWorld): void {
+  world.sky.texture.dispose();
+  for (const texture of [
+    world.road.colour,
+    world.road.normal,
+    world.ground.colour,
+    world.ground.normal,
+  ]) {
+    texture.dispose();
+  }
+  for (const shapes of world.vegetation.values()) {
+    for (const shape of shapes) {
+      for (const part of shape.parts) {
+        part.geometry.dispose();
+        part.material.map?.dispose();
+        part.material.normalMap?.dispose();
+        part.material.dispose();
+      }
+      shape.impostor?.texture.dispose();
+      shape.impostor?.material.dispose();
+    }
+  }
+  releaseLoadedScene(world.body);
+}
+
+/** An HDR texture's texels, as `realistic-light.ts` reads them. */
+function skyPixelsOf(texture: DataTexture): SkyPixels {
+  const image = texture.image as { width: number; height: number; data: ArrayLike<number> };
+  const data = image.data;
+  const half = texture.type === HalfFloatType;
+  return {
+    width: image.width,
+    height: image.height,
+    channel: (index) => {
+      const value = data[index] ?? 0;
+      return half ? halfToFloat(value) : value;
+    },
+  };
+}
+
+/**
+ * One realistic model, as parts to instance — ADR 0026 D-11.
+ *
+ * Every mesh's geometry is taken into the model's own frame, and its material
+ * is REPLACED: a `MeshStandardMaterial` this file constructs, carrying only the
+ * loader's colour factor, colour map and normal map (with the normal scale
+ * three's loader chose for a file with no tangents), a constant roughness —
+ * the pipeline dropped the roughness maps — and the vertex colours the pipeline
+ * baked the ambient occlusion into. Foliage becomes alpha-TESTED rather than
+ * blended, so it sorts and instances like anything else; both faces are drawn,
+ * because a leaf card has two.
+ *
+ * The loader's material is disposed here, and its textures survive only
+ * because the new material holds them.
+ *
+ * @test-facing held by `realistic-renderer.test.ts`, which is D-11's jsdom half;
+ * the shipped path calls it only from `loadRealisticWorld`, which nothing the
+ * app runs reaches until #475
+ */
+export function prepareRealisticShape(
+  source: Object3D,
+  name: string,
+  impostorStrip?: Texture,
+): RealisticShape {
+  source.updateWorldMatrix(false, true);
+  const parts: RealisticPart[] = [];
+  let triangles = 0;
+  let extras: Readonly<Record<string, unknown>> = {};
+  source.traverse((node) => {
+    const extra = (node as Partial<{ userData: Record<string, unknown> }>).userData;
+    if (extra !== undefined && typeof extra['oyl_scan_height'] === 'number') extras = extra;
+    const mesh = node as Partial<Mesh>;
+    if (mesh.isMesh !== true || mesh.geometry === undefined) return;
+    const loaded = mesh.material;
+    if (loaded === undefined || Array.isArray(loaded)) {
+      throw new Error(`${name}: a part declares no material, or more than one`);
+    }
+    const geometry = mesh.geometry.clone().applyMatrix4(node.matrixWorld);
+    const factor = loaded as Partial<MeshStandardMaterial>;
+    const foliage = loaded.transparent || loaded.alphaTest > 0 || loaded.alphaHash;
+    const material = constructed(
+      new MeshStandardMaterial({
+        color: factor.color?.clone() ?? new Color(0xffffff),
+        map: factor.map ?? null,
+        normalMap: factor.normalMap ?? null,
+        normalScale: factor.normalScale?.clone() ?? new Vector2(1, 1),
+        vertexColors: geometry.getAttribute('color') !== undefined,
+        roughness: REALISTIC_ROUGHNESS,
+        metalness: 0,
+        side: DoubleSide,
+        alphaTest: foliage ? REALISTIC_ALPHA_CUTOFF : 0,
+        transparent: false,
+      }),
+    );
+    loaded.dispose();
+    const index = geometry.getIndex();
+    triangles += (index?.count ?? geometry.getAttribute('position').count) / 3;
+    parts.push({ geometry, material });
+  });
+  if (parts.length === 0) throw new Error(`${name}: the model holds no mesh`);
+  const height = Number(extras['oyl_scan_height']);
+  const width = Number(extras['oyl_scan_width']);
+  const extent = Math.max(height, width);
+  if (!(extent > 0)) throw new Error(`${name}: the file records no scan size`);
+  const impostor =
+    impostorStrip === undefined
+      ? undefined
+      : { texture: impostorStrip, material: impostorMaterial(impostorStrip, extras) };
+  return { name, parts, extent, triangles, ...(impostor === undefined ? {} : { impostor }) };
+}
+
+/**
+ * The roughness every realistic surface wears: **0.85**. The pipeline drops
+ * the scans' roughness maps (a third of their texture memory, for a term a
+ * chase camera barely resolves on foliage and bark), so one figure stands in —
+ * matte, as bark, leaves, grass and stone are.
+ */
+const REALISTIC_ROUGHNESS = 0.85;
+
+/** Where an alpha-tested leaf card is cut: half coverage, glTF's own default for MASK. */
+const REALISTIC_ALPHA_CUTOFF = 0.5;
+
+/** A unit quad standing on its bottom edge: x in [−0.5, 0.5], y in [0, 1]. */
+function impostorQuad(): BufferGeometry {
+  return new PlaneGeometry(1, 1).translate(0, 0.5, 0);
+}
+
+/**
+ * The far band's material: a billboard that turns about the vertical to face
+ * the camera, drawn with whichever of the strip's eight views faces it, sized
+ * from the scan the strip was rendered from. Constructed here — D-11 — and
+ * alpha-tested so it depth-sorts with the near meshes.
+ *
+ * ⚠️ **Unlit**: the strip was rendered lit, by the pipeline's own sun. It is
+ * fogged, tone mapped and colour-managed exactly as a lit material is, so it
+ * fades into the horizon with everything else.
+ */
+function impostorMaterial(
+  strip: Texture,
+  extras: Readonly<Record<string, unknown>>,
+): ShaderMaterial {
+  const frames = Number(extras['oyl_impostor_frames']);
+  const ortho = Number(extras['oyl_impostor_scale']);
+  const height = Number(extras['oyl_scan_height']);
+  if (!(frames > 0) || !(ortho > 0) || !(height > 0)) {
+    throw new Error('an impostor strip whose file records no frame count, scale or height');
+  }
+  strip.colorSpace = SRGBColorSpace;
+  const image = strip.image as { width?: number; height?: number } | undefined;
+  const frameAspect =
+    image?.width !== undefined && image.height !== undefined && image.height > 0
+      ? image.width / frames / image.height
+      : 0.5;
+  const material = new ShaderMaterial({
+    uniforms: UniformsUtils.merge([UniformsLib.fog, { strip: { value: null } }]),
+    fog: true,
+    side: DoubleSide,
+    defines: {
+      FRAMES: frames.toFixed(1),
+      QUAD_W: (ortho * frameAspect).toFixed(5),
+      QUAD_H: ortho.toFixed(5),
+      // The strip is centred on half the scan's height, so the quad's bottom
+      // edge is below the ground by the difference.
+      QUAD_BOTTOM: (height / 2 - ortho / 2).toFixed(5),
+    },
+    vertexShader: /* glsl */ `
+      #include <common>
+      #include <fog_pars_vertex>
+      varying vec2 vStripUv;
+      void main() {
+        vec3 centre = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+        vec3 across = (instanceMatrix * vec4(1.0, 0.0, 0.0, 0.0)).xyz;
+        vec3 along = (instanceMatrix * vec4(0.0, 0.0, 1.0, 0.0)).xyz;
+        float size = length(across);
+        vec3 toCamera = cameraPosition - centre;
+        vec2 facing = normalize(toCamera.xz + vec2(1e-5));
+        float localX = dot(toCamera.xz, across.xz / size);
+        float localZ = dot(toCamera.xz, along.xz / size);
+        float frame = mod(floor(atan(localX, localZ) / (2.0 * PI) * FRAMES + 0.5), FRAMES);
+        vec3 right = vec3(facing.y, 0.0, -facing.x);
+        vec3 world = centre
+          + right * position.x * QUAD_W * size
+          + vec3(0.0, QUAD_BOTTOM + position.y * QUAD_H, 0.0) * size;
+        vStripUv = vec2((frame + uv.x) / FRAMES, uv.y);
+        vec4 mvPosition = viewMatrix * vec4(world, 1.0);
+        gl_Position = projectionMatrix * mvPosition;
+        #include <fog_vertex>
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      #include <common>
+      #include <fog_pars_fragment>
+      uniform sampler2D strip;
+      varying vec2 vStripUv;
+      void main() {
+        vec4 texel = texture2D(strip, vStripUv);
+        if (texel.a < ${REALISTIC_ALPHA_CUTOFF.toFixed(2)}) discard;
+        gl_FragColor = vec4(texel.rgb, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+        #include <fog_fragment>
+      }
+    `,
+  });
+  (material.uniforms['strip'] as { value: Texture | null }).value = strip;
+  return constructed(material);
+}
+
+/**
+ * Whether a scatter item is inside what the rider can see — one test for both
+ * worlds' belts, so the realistic world culls exactly what the stylised one
+ * does. It was `ScatterBelt`'s private method until ADR 0026 gave it a second
+ * caller.
+ *
+ * `along` is the item's distance up the rider's heading and `across` is its
+ * distance to the side of it — the two components of the same offset in the
+ * rider's own frame, which is the frame {@link VIEW_AHEAD_METRES} and
+ * {@link lateralReachMetres} are both stated in.
+ *
+ * ⚠️ **Two bounds of different shapes, and they are not interchangeable.**
+ * Along the road it is a pair of constants, because the corridor itself is
+ * built between them and nothing outside them is drawn at all. To the side it
+ * is a **cone**, because that is what a perspective camera can see — #269,
+ * and {@link lateralReachMetres} carries the derivation and the measurement.
+ */
+function inView(item: ScatterItem, pose: CameraPose): boolean {
+  const dx = item.x - pose.x;
+  const dz = item.z - pose.z;
+  const along = dx * pose.headingX + dz * pose.headingZ;
+  if (along > VIEW_AHEAD_METRES || along < -VIEW_BEHIND_METRES) {
+    return false;
+  }
+  const across = dx * pose.headingZ - dz * pose.headingX;
+  return Math.abs(across) <= lateralReachMetres(along);
+}
+
+/**
+ * The realistic world's trees, shrubs and rocks — ADR 0026 D-12 layer 2, #474.
+ *
+ * ## Where they stand is `scatter.ts`'s, unchanged
+ *
+ * It is handed the same `SceneFrame.scatter` the stylised belt is, draws the
+ * four kinds `realistic-assets.ts` has shapes for, and leaves every other
+ * item to the primitives belt beside it. So D-2's *"only what is drawn at a
+ * place changes, never the place"* holds by construction, and
+ * `arrangement-unchanged.test.ts`' digest cannot move.
+ *
+ * ## Near meshes by COUNT, far impostors, and what is not drawn
+ *
+ * For each kind, the `realistic-budget.ts` §`REALISTIC_NEAR_MESHES` items
+ * nearest the rider are drawn as meshes — the whole of the frame's triangle
+ * budget, whatever the road. Every other TREE is its impostor, a quad drawn
+ * from the eight views the pipeline rendered of the full scan; every other
+ * shrub and rock is not drawn at all, because a 1.5 m shrub beyond the nearest
+ * eight is a handful of pixels the fog is already taking.
+ *
+ * ⚠️ **Nothing is allocated per frame.** The nearest-N selection is written
+ * into typed arrays sized once, and every instanced mesh is built with its
+ * capacity in the constructor, as #240's NFR-3 requires of every belt here.
+ *
+ * Exported for `three-renderer.test.ts`, for {@link ScatterBelt}'s reasons.
+ */
+export class RealisticVegetationBelt {
+  readonly #kinds: VegetationSlot[] = [];
+  readonly #quad = impostorQuad();
+  readonly #matrix = new Matrix4();
+  readonly #position = new Vector3();
+  readonly #quaternion = new Quaternion();
+  readonly #scale = new Vector3();
+  readonly #up = new Vector3(0, 1, 0);
+  #shown = true;
+
+  constructor(vegetation: ReadonlyMap<RealisticVegetationKind, readonly RealisticShape[]>) {
+    for (const kind of REALISTIC_VEGETATION_KINDS) {
+      const shapes = vegetation.get(kind) ?? [];
+      const cap = REALISTIC_NEAR_MESHES[kind];
+      this.#kinds.push({
+        kind,
+        shapes,
+        near: shapes.map((shape) =>
+          shape.parts.map((part) => instanced(part.geometry, part.material, cap)),
+        ),
+        far: shapes.map((shape) =>
+          shape.impostor === undefined
+            ? undefined
+            : instanced(this.#quad, shape.impostor.material, SCATTER_INSTANCE_CAPACITY),
+        ),
+        chosen: new Int32Array(cap),
+        distances: new Float64Array(cap),
+        count: 0,
+        fit: sceneryFitMetres(kind),
+      });
+    }
+  }
+
+  /** Every mesh the belt draws with. For the tests and the harness. */
+  get meshes(): readonly InstancedMesh[] {
+    return this.#kinds.flatMap((each) => [
+      ...each.near.flat(),
+      ...each.far.filter((mesh): mesh is InstancedMesh => mesh !== undefined),
+    ]);
+  }
+
+  addTo(scene: Scene): void {
+    for (const mesh of this.meshes) scene.add(mesh);
+  }
+
+  /** Hides every mesh, for a frame drawn in the stylised world. */
+  setShown(on: boolean): void {
+    this.#shown = on;
+    if (!on) for (const mesh of this.meshes) mesh.visible = false;
+  }
+
+  /** This frame's vegetation: the nearest of each kind as meshes, the rest of the trees as impostors. */
+  update(items: readonly ScatterItem[], pose: CameraPose): void {
+    if (!this.#shown) return;
+    for (const each of this.#kinds) {
+      each.count = 0;
+      for (const meshes of each.near) for (const mesh of meshes) mesh.count = 0;
+      for (const mesh of each.far) if (mesh !== undefined) mesh.count = 0;
+    }
+    // Pass 1: the nearest N of each kind, by distance from the rider.
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index] as ScatterItem;
+      const each = this.#slotFor(item);
+      if (each === undefined || !inView(item, pose)) continue;
+      const distance = Math.hypot(item.x - pose.x, item.z - pose.z);
+      const cap = each.chosen.length;
+      if (each.count === cap && distance >= (each.distances[cap - 1] ?? Infinity)) continue;
+      // Insertion into a sorted list of at most `cap`, dropping the worst.
+      let at = Math.min(each.count, cap - 1);
+      while (at > 0 && (each.distances[at - 1] ?? 0) > distance) {
+        each.distances[at] = each.distances[at - 1] ?? 0;
+        each.chosen[at] = each.chosen[at - 1] ?? 0;
+        at -= 1;
+      }
+      each.distances[at] = distance;
+      each.chosen[at] = index;
+      each.count = Math.min(cap, each.count + 1);
+    }
+    // Pass 2: every item into the mesh or the impostor it is drawn with.
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index] as ScatterItem;
+      const each = this.#slotFor(item);
+      if (each === undefined || each.shapes.length === 0 || !inView(item, pose)) continue;
+      const variant = variantOf(item.variant, each.shapes.length);
+      const shape = each.shapes[variant] as RealisticShape;
+      let near = false;
+      for (let slot = 0; slot < each.count; slot += 1) {
+        if (each.chosen[slot] === index) {
+          near = true;
+          break;
+        }
+      }
+      const target = near ? undefined : each.far[variant];
+      if (!near && target === undefined) continue;
+      const size = (each.fit * item.scale) / shape.extent;
+      this.#position.set(item.x, item.y, item.z);
+      this.#quaternion.setFromAxisAngle(this.#up, item.rotation);
+      this.#scale.setScalar(size);
+      this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
+      if (near) {
+        for (const mesh of each.near[variant] ?? []) {
+          mesh.setMatrixAt(mesh.count, this.#matrix);
+          mesh.count += 1;
+        }
+      } else if (target !== undefined && target.count < SCATTER_INSTANCE_CAPACITY) {
+        target.setMatrixAt(target.count, this.#matrix);
+        target.count += 1;
+      }
+    }
+    for (const mesh of this.meshes) {
+      if (mesh.count > 0) mesh.instanceMatrix.needsUpdate = true;
+      mesh.visible = mesh.count > 0;
+    }
+  }
+
+  /** Releases the belt's own buffers. The shapes are the loaded world's and outlive it. */
+  dispose(): void {
+    for (const mesh of this.meshes) mesh.dispose();
+    this.#quad.dispose();
+  }
+
+  #slotFor(item: ScatterItem): VegetationSlot | undefined {
+    if (!isRealisticVegetation(item.kind)) return undefined;
+    return this.#kinds.find((each) => each.kind === item.kind);
+  }
+}
+
+/** One realistic kind's meshes and its nearest-N selection. @see RealisticVegetationBelt */
+interface VegetationSlot {
+  readonly kind: RealisticVegetationKind;
+  readonly shapes: readonly RealisticShape[];
+  /** Per shape, one instanced mesh per part. */
+  readonly near: readonly (readonly InstancedMesh[])[];
+  /** Per shape, its impostor, for a tree. */
+  readonly far: readonly (InstancedMesh | undefined)[];
+  /** The nearest items' indices and distances, best first. */
+  readonly chosen: Int32Array;
+  readonly distances: Float64Array;
+  count: number;
+  readonly fit: number;
+}
+
+/** An instanced mesh of a fixed capacity, empty, never frustum-culled. */
+function instanced(geometry: BufferGeometry, material: Material, capacity: number): InstancedMesh {
+  const mesh = new InstancedMesh(geometry, material, capacity);
+  mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+  mesh.count = 0;
+  mesh.visible = false;
+  // For the rider's reason: every near mesh is within metres of the camera,
+  // and the impostors' instances are culled by `inView` before they are here.
+  mesh.frustumCulled = false;
+  return mesh;
+}
+
+/** An item's variant folded into however many shapes there are. @see ScatterBelt */
+function variantOf(variant: number, shapes: number): number {
+  const wanted = Number.isInteger(variant) ? variant : 0;
+  return ((wanted % shapes) + shapes) % shapes;
+}
+
+/**
+ * The road's photographic material — #425, ADR 0026 D-2 and D-10.
+ *
+ * ## The photograph is a grain, never a colour
+ *
+ * `terrain.ts` tints the road by signed gradient, with a luminance step
+ * `MINIMUM_TINT_CONTRAST_RATIO` holds, and paints its lines in the same
+ * vertex buffer (#242): **the road's colour is how a rider reads the climb
+ * ahead.** So the asphalt photograph does not colour it. The texel's
+ * luminance, divided by the texture's own mean — its smallest mip, one texel
+ * that IS the mean — is a grain the vertex tint is multiplied by, clamped to
+ * `realistic-light.ts` §`PHOTOGRAPHIC_ROAD_GRAIN`: the procedural grain's own
+ * bound, which `terrain.test.ts` already holds against the contrast ratio.
+ * The normal map is kept, so the surface has the photograph's relief under the
+ * light; the colour map's hue is not.
+ *
+ * ## Still one mesh and one draw call
+ *
+ * The same `Mesh` and the same buffers as the stylised road — this material
+ * is swapped onto it — so #240's one-call road is one call in both worlds, and
+ * `game.browser.spec.ts` counts it. The texture coordinates are the world's own
+ * `x` and `z` over a tile size, computed in the vertex shader, so there is no
+ * attribute to upload and a road rebuilt every frame cannot swim.
+ *
+ * ⚠️ **Mipmapped and anisotropic** — `ThreeGameView` sets the anisotropy from
+ * the device, capped at {@link REALISTIC_ANISOTROPY} — because #424's low
+ * camera looks along the road at a grazing angle, which is exactly where an
+ * unfiltered texture shimmers (#425). Whether it does on the tablet is the
+ * owner's check, in validation 0002 Part Z; nothing in CI can see shimmer.
+ */
+function photographicRoadMaterial(colour: Texture, normal: Texture): MeshStandardMaterial {
+  const material = constructed(
+    new MeshStandardMaterial({
+      vertexColors: true,
+      map: colour,
+      normalMap: normal,
+      normalScale: new Vector2(0.6, 0.6),
+      roughness: 0.9,
+      metalness: 0,
+      side: DoubleSide,
+    }),
+  );
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms['tileMetres'] = { value: REALISTIC_SURFACES.road.tileMetres };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float tileMetres;')
+      .replace('#include <uv_vertex>', `#include <uv_vertex>\n${PLANAR_UV}`);
+    shader.fragmentShader = shader.fragmentShader
+      // ⚠️ **Every face is lit as facing UP, whichever way it is wound.**
+      // `terrain.ts` §`roadIndices` keeps the winding consistent within a lane
+      // and says it is not relied on — the stylised road is unlit, so it never
+      // was. A lit double-sided material turns a face's normal round when its
+      // back is to the camera, so a lane wound the other way drew black: the
+      // first photographic road read 0.004 in the browser gate. The normal is
+      // the corridor's own up, and the face it is on does not change it.
+      .replace(
+        '#include <normal_fragment_begin>',
+        ShaderChunk.normal_fragment_begin.replace('gl_FrontFacing ? 1.0 : - 1.0', '1.0'),
+      )
+      // The sheen, scaled at its source: the Fresnel term's reflectance at
+      // normal incidence and at grazing, which every specular term three
+      // computes is built from. @see ROAD_SHEEN
+      .replace(
+        '#include <lights_physical_fragment>',
+        `#include <lights_physical_fragment>
+material.specularColor *= ${ROAD_SHEEN.toFixed(3)};
+material.specularColorBlended *= ${ROAD_SHEEN.toFixed(3)};
+material.specularF90 *= ${ROAD_SHEEN.toFixed(3)};`,
+      )
+      .replace(
+        '#include <map_fragment>',
+        /* glsl */ `
+#ifdef USE_MAP
+{
+  const vec3 oylLuma = vec3(0.2126, 0.7152, 0.0722);
+  float oylTexel = dot(texture2D(map, vMapUv).rgb, oylLuma);
+  float oylMean = max(dot(textureLod(map, vec2(0.5), 16.0).rgb, oylLuma), 1e-3);
+  diffuseColor.rgb *= clamp(oylTexel / oylMean, ${String(1 - PHOTOGRAPHIC_ROAD_GRAIN)}, ${String(1 + PHOTOGRAPHIC_ROAD_GRAIN)});
+}
+#endif
+`,
+      );
+  };
+  material.customProgramCacheKey = () => 'oyl-photographic-road';
+  return material;
+}
+
+/**
+ * How much of its specular reflection the photographic road keeps: **0.25** —
+ * set by the measurement below, and the owner's to look at in validation 0002
+ * Part Z.
+ *
+ * ⚠️ **The sheen is what compresses the gradient cue, measured.** A chase
+ * camera looks along the road at a grazing angle, where Fresnel reflection
+ * tends to one: the sky's reflection is ADDED to every lane, which lifts the
+ * dark climb tint far more than the pale descent tint. With the full
+ * physically based specular, the steepest climb and the steepest descent read
+ * 2.68 : 1 off the browser gate's drawing buffer, under
+ * `MINIMUM_TINT_CONTRAST_RATIO`'s 3 — so the photographic road passed every
+ * gate here except the one about information. The colour is information and
+ * the sheen is not (ADR 0026 D-2), so most of the sheen goes: measured the same
+ * way, **4.74 : 1 with none and 3.97 : 1 at a quarter**, which keeps a wet-ish
+ * glint at a grazing angle and a margin of about a third over the criterion.
+ */
+const ROAD_SHEEN = 0.25;
+
+/** World-planar texture coordinates for the colour and normal maps, from `tileMetres`. */
+const PLANAR_UV = /* glsl */ `
+{
+  vec2 oylPlanar = (modelMatrix * vec4(position, 1.0)).xz / tileMetres;
+#ifdef USE_MAP
+  vMapUv = oylPlanar;
+#endif
+#ifdef USE_NORMALMAP
+  vNormalMapUv = oylPlanar;
+#endif
+}
+`;
+
+/**
+ * The ground's photographic material — #425.
+ *
+ * The grass photograph brings grain, clumps and light; the hue stays
+ * `world.ts`'s ground colour, chosen per route, and the landform's own vertex
+ * colours. Every grass on Poly Haven is the colour of the field it was
+ * photographed in, and unmodified it made #457's world look dead — so the map
+ * is divided by its own mean and multiplied by the world's colour. It is
+ * sampled at two scales and blended by distance, which is the cheapest cure
+ * for a tiling that reads as a grid at 150 m, and it keeps #460's field
+ * patchwork (`withSurfaceDetail`) on top.
+ */
+function photographicGroundMaterial(
+  colour: Texture,
+  normal: Texture,
+  fieldSpan: { value: number },
+  fieldCount: { value: number },
+): MeshStandardMaterial {
+  const material = constructed(
+    new MeshStandardMaterial({
+      color: UNSET_COLOUR,
+      vertexColors: true,
+      map: colour,
+      normalMap: normal,
+      normalScale: new Vector2(0.8, 0.8),
+      roughness: 0.95,
+      metalness: 0,
+    }),
+  );
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms['tileMetres'] = { value: REALISTIC_SURFACES.ground.tileMetres };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float tileMetres;')
+      .replace('#include <uv_vertex>', `#include <uv_vertex>\n${PLANAR_UV}`);
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <map_fragment>',
+      /* glsl */ `
+#ifdef USE_MAP
+{
+  vec3 oylNear = texture2D(map, vMapUv).rgb;
+  vec3 oylFar = texture2D(map, vMapUv * 0.111 + vec2(0.37, 0.61)).rgb;
+  float oylFarShare = smoothstep(8.0, 120.0, -vViewPosition.z);
+  vec3 oylTexel = mix(oylNear, mix(oylNear, oylFar, 0.5) * 0.55 + oylFar * 0.45, oylFarShare);
+  vec3 oylMean = max(textureLod(map, vec2(0.5), 16.0).rgb, vec3(1e-3));
+  diffuseColor.rgb *= oylTexel / oylMean;
+}
+#endif
+`,
+    );
+  };
+  material.customProgramCacheKey = () => 'oyl-photographic-ground';
+  // #460's patchwork, chained after the photograph rather than replacing it.
+  return withSurfaceDetail(material, 'ground', fieldSpan, fieldCount);
+}
+
+/**
+ * The most anisotropic filtering a realistic surface asks for: **8**, or the
+ * device's own maximum where that is less. #425's grazing-angle shimmer is what
+ * it is for; 8 is the common ceiling of mobile GPUs that offer the extension,
+ * and more than a chase camera's angle needs.
+ */
+const REALISTIC_ANISOTROPY = 8;
+
+/**
+ * The realistic riders — ADR 0026 D-12 layer 4, #369.
+ *
+ * ## A real body on a bicycle built from numbers
+ *
+ * The body is MakeHuman's CC0 base mesh, rigged with its own default skeleton
+ * and cut to 24 bones by `tools/realistic/blender/process_rider.py`. The
+ * bicycle under it is **not downloaded**: on 2026-09-22 neither of the two
+ * sources ADR 0026 D-4 names that state a licence per asset — Poly Haven's 521
+ * models and ambientCG's — offered a bicycle at all, and a marketplace's label
+ * is not a grant (#369). So it is `bicycle.ts`'s own parts drawn round and
+ * spoked: tubes at the stylised radii, wheels with rims, tyres and spokes, drops,
+ * a saddle, a crankset at the same angle. It is this repository's geometry, so
+ * it has no licence surface and no `ASSETS.toml` row, and it is already right
+ * about where the crank is — which #369 says a downloaded frame would have had
+ * to be re-fitted to.
+ *
+ * ## Posed from `bicycle.ts`, every frame — #349's rule survives
+ *
+ * Nothing is baked. Each rider's bones are aimed, every frame, at
+ * `bicycle.ts` §`riderJoints`: the hips on the saddle, the back to the
+ * shoulders, the hands on the hoods, and each knee and foot from the same
+ * two-bone solve the stylised legs use. The crank angle is the marker's own,
+ * which `GameView` turns from the trainer's cadence and holds when the cadence
+ * drops — so the realistic legs turn **exactly when the HUD shows a cadence**,
+ * at exactly that cadence, and stop when it goes, as #349 requires of whatever
+ * replaces the geometry.
+ *
+ * ## Three of them, told apart as #368 tells them apart
+ *
+ * The pacer and the ghost wear the same body on the same bicycle, tinted by
+ * {@link RIDER_TINTS} — the body through its own material's colour, the bicycle
+ * and the helmet per instance. Eight draw calls for all three: three bodies
+ * (a skinned mesh is not instanceable), the frame, the rubber and the metal,
+ * the cranksets and the helmets.
+ *
+ * ⚠️ **One allocation a rider a frame, and it is `legBones`'**: the knee solve
+ * returns a two-number object, as it already does for the stylised rider.
+ * Everything else is written into objects made in the constructor.
+ */
+export class RealisticRiderBelt {
+  readonly #group = new Group();
+  readonly #riders: RealisticRiderSlot[] = [];
+  readonly #frame: InstancedMesh;
+  readonly #rubber: InstancedMesh;
+  readonly #metal: InstancedMesh;
+  readonly #cranks: InstancedMesh;
+  readonly #helmets: InstancedMesh;
+  readonly #materials: readonly MeshStandardMaterial[];
+  /** The body's scale: its rest leg, stretched to `bicycle.ts`'s thigh and shin. */
+  readonly #scale: number;
+  readonly #joints = emptyRiderJoints();
+  readonly #tint = new Color();
+  readonly #matrix = new Matrix4();
+  readonly #local = new Matrix4();
+  readonly #helmetLocal = new Matrix4();
+  readonly #turn = new Quaternion();
+  readonly #world = new Quaternion();
+  readonly #parent = new Quaternion();
+  readonly #a = new Vector3();
+  readonly #b = new Vector3();
+  readonly #c = new Vector3();
+  readonly #d = new Vector3();
+  readonly #e = new Vector3();
+  readonly #up = new Vector3(0, 1, 0);
+  readonly #acrossTheBicycle = new Vector3(1, 0, 0);
+  readonly #unit = new Vector3(1, 1, 1);
+  #shown = true;
+
+  constructor(body: Object3D) {
+    const bike = realisticBicycle();
+    const frameMaterial = constructed(
+      new MeshStandardMaterial({ color: RIDER_PALETTE.frame, roughness: 0.35, metalness: 0.3 }),
+    );
+    const rubberMaterial = constructed(
+      new MeshStandardMaterial({ color: RIDER_PALETTE.tyre, roughness: 0.85, metalness: 0 }),
+    );
+    const metalMaterial = constructed(
+      new MeshStandardMaterial({ color: 0xb8b8bc, roughness: 0.3, metalness: 0.9 }),
+    );
+    const helmetMaterial = constructed(
+      new MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.4, metalness: 0 }),
+    );
+    const riders = RIDDEN_KINDS.length;
+    this.#frame = tintable(bike.frame, frameMaterial, riders);
+    this.#rubber = tintable(bike.rubber, rubberMaterial, riders);
+    this.#metal = tintable(bike.metal, metalMaterial, riders);
+    this.#cranks = tintable(realisticCrankset(), metalMaterial, riders);
+    this.#helmets = tintable(
+      new SphereGeometry(0.13, 16, 10, 0, Math.PI * 2, 0, Math.PI / 1.8),
+      helmetMaterial,
+      riders,
+    );
+    this.#materials = [frameMaterial, rubberMaterial, metalMaterial, helmetMaterial];
+    for (const mesh of [this.#frame, this.#rubber, this.#metal, this.#cranks, this.#helmets]) {
+      this.#group.add(mesh);
+    }
+
+    let scale = 1;
+    for (let slot = 0; slot < riders; slot += 1) {
+      const holder = cloneSkinned(body);
+      let skinned: SkinnedMesh | undefined;
+      holder.traverse((node) => {
+        if ((node as Partial<SkinnedMesh>).isSkinnedMesh === true) skinned = node as SkinnedMesh;
+      });
+      if (skinned === undefined) throw new Error('the rider model holds no skinned mesh');
+      const source = skinned.material as Material;
+      const material = constructed(
+        new MeshStandardMaterial({ vertexColors: true, roughness: 0.65, metalness: 0 }),
+      );
+      if (slot === 0) source.dispose();
+      skinned.material = material;
+      skinned.frustumCulled = false;
+      const bones = new Map<string, Bone>();
+      for (const bone of skinned.skeleton.bones) bones.set(bone.name, bone);
+      if (slot === 0) {
+        holder.updateMatrixWorld(true);
+        const at = (name: string, into: Vector3): Vector3 =>
+          boneOf(bones, name).getWorldPosition(into);
+        const restLeg =
+          at('upperleg01.L', this.#a).distanceTo(at('lowerleg01.L', this.#b)) +
+          this.#b.distanceTo(at('foot.L', this.#c));
+        const bikeLeg = legBones(0)
+          .slice(0, 2)
+          .reduce((sum, bone) => sum + bone.length, 0);
+        scale = bikeLeg / restLeg;
+      }
+      holder.scale.setScalar(scale);
+      const root = new Group();
+      root.add(holder);
+      root.visible = false;
+      this.#group.add(root);
+      const ordered = skinned.skeleton.bones;
+      this.#riders.push({
+        root,
+        body: skinned,
+        material,
+        bones,
+        ordered,
+        restQuaternions: ordered.map((bone) => bone.quaternion.clone()),
+        restPositions: ordered.map((bone) => bone.position.clone()),
+        angle: 0,
+      });
+    }
+    this.#scale = scale;
+    // The helmet sits on the head bone, a little up and forward of its joint.
+    this.#helmetLocal.makeTranslation(0, 0.06 / scale, 0.01 / scale);
+    this.#helmetLocal.scale(this.#unit.setScalar(1 / scale));
+    this.#unit.set(1, 1, 1);
+    this.#group.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#group);
+  }
+
+  /** The group every realistic rider hangs under. For the tests and the harness. */
+  get group(): Group {
+    return this.#group;
+  }
+
+  /** Every material the riders wear. For the D-11 assertion. */
+  get materials(): readonly Material[] {
+    return [...this.#materials, ...this.#riders.map((rider) => rider.material)];
+  }
+
+  /** Whether the realistic riders draw at all — false while the stylised ones do. */
+  setShown(on: boolean): void {
+    this.#shown = on;
+    if (!on) this.#group.visible = false;
+  }
+
+  /** This frame's riders, posed from their own crank angles. @see RiderBelt.place */
+  place(markers: readonly RiderMarker[]): void {
+    if (!this.#shown) return;
+    let slot = 0;
+    for (const marker of markers) {
+      if (slot >= this.#riders.length) break;
+      if (!Object.hasOwn(RIDER_TINTS, marker.kind)) continue;
+      this.#placeOne(slot, marker);
+      slot += 1;
+    }
+    for (let rest = slot; rest < this.#riders.length; rest += 1) {
+      (this.#riders[rest] as RealisticRiderSlot).root.visible = false;
+    }
+    for (const mesh of [this.#frame, this.#rubber, this.#metal, this.#cranks, this.#helmets]) {
+      mesh.count = slot;
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
+    }
+    this.#group.visible = slot > 0;
+  }
+
+  dispose(): void {
+    for (const mesh of [this.#frame, this.#rubber, this.#metal, this.#cranks, this.#helmets]) {
+      mesh.geometry.dispose();
+      mesh.dispose();
+    }
+    for (const material of this.#materials) material.dispose();
+    for (const rider of this.#riders) {
+      rider.material.dispose();
+      rider.body.skeleton.dispose();
+    }
+  }
+
+  #placeOne(slot: number, marker: RiderMarker): void {
+    const rider = this.#riders[slot] as RealisticRiderSlot;
+    rider.root.visible = true;
+    rider.root.position.set(marker.x, marker.y, marker.z);
+    rider.root.quaternion.setFromAxisAngle(this.#up, Math.atan2(marker.headingX, marker.headingZ));
+    // ⚠️ A frame that carries no angle HOLDS the one this rider had: no
+    // cadence is no rotation, which is #349's rule and `advanceCrank`'s.
+    rider.angle = marker.crankAngle ?? rider.angle;
+    const tint = this.#tint.setHex(RIDER_TINTS[marker.kind]);
+    rider.material.color.copy(tint);
+    rider.root.updateMatrixWorld(true);
+    this.#pose(rider, rider.angle);
+    const world = rider.root.matrixWorld;
+    for (const mesh of [this.#frame, this.#rubber, this.#metal]) {
+      mesh.setMatrixAt(slot, world);
+      mesh.setColorAt(slot, tint);
+    }
+    this.#a.set(0, CRANK_AXIS_Y, CRANK_AXIS_Z);
+    this.#turn.setFromAxisAngle(this.#acrossTheBicycle, rider.angle);
+    this.#local.compose(this.#a, this.#turn, this.#unit);
+    this.#cranks.setMatrixAt(slot, this.#matrix.multiplyMatrices(world, this.#local));
+    this.#cranks.setColorAt(slot, tint);
+    const head = boneOf(rider.bones, 'head');
+    this.#helmets.setMatrixAt(
+      slot,
+      this.#matrix.multiplyMatrices(head.matrixWorld, this.#helmetLocal),
+    );
+    this.#helmets.setColorAt(slot, tint);
+  }
+
+  /** Aims one rider's bones at `bicycle.ts`'s joints for a crank angle. */
+  #pose(rider: RealisticRiderSlot, crankAngle: number): void {
+    for (let index = 0; index < rider.ordered.length; index += 1) {
+      const bone = rider.ordered[index] as Bone;
+      bone.quaternion.copy(rider.restQuaternions[index] as Quaternion);
+      bone.position.copy(rider.restPositions[index] as Vector3);
+    }
+    rider.root.updateMatrixWorld(true);
+    const joints = riderJoints(crankAngle, this.#joints);
+    const toWorld = (point: JointPoint, into: Vector3): Vector3 =>
+      into.set(point.x, point.y, point.z).applyMatrix4(rider.root.matrixWorld);
+    // The whole body, moved so its hips sit on the saddle.
+    const hips = boneOf(rider.bones, 'upperleg01.L')
+      .getWorldPosition(this.#a)
+      .add(boneOf(rider.bones, 'upperleg01.R').getWorldPosition(this.#b))
+      .multiplyScalar(0.5);
+    const shift = toWorld(joints.hips, this.#b).sub(hips);
+    const skeletonRoot = boneOf(rider.bones, 'root');
+    skeletonRoot.parent?.getWorldQuaternion(this.#parent);
+    shift.applyQuaternion(this.#parent.invert()).divideScalar(this.#scale);
+    skeletonRoot.position.add(shift);
+    rider.root.updateMatrixWorld(true);
+    // The back, from the hips towards the shoulders.
+    toWorld(joints.shoulders, this.#c).sub(toWorld(joints.hips, this.#d));
+    this.#aim(rider, 'spine05', 'neck01', this.#c);
+    const forward = this.#e.set(0, 0, 1).transformDirection(rider.root.matrixWorld);
+    for (const index of [0, 1] as const) {
+      const suffix = index === 0 ? 'L' : 'R';
+      // The arm: shoulder to the grip, the elbow out and down.
+      const shoulder = boneOf(rider.bones, `upperarm01.${suffix}`).getWorldPosition(this.#a);
+      const grip = toWorld(joints.grip[index], this.#b);
+      const upper = this.#length(rider, `upperarm01.${suffix}`, `lowerarm01.${suffix}`);
+      const fore = this.#length(rider, `lowerarm01.${suffix}`, `wrist.${suffix}`);
+      const pole = this.#c
+        .set(index === 0 ? 1 : -1, -1, 0)
+        .transformDirection(rider.root.matrixWorld);
+      const elbow = twoBoneJoint(shoulder, grip, upper, fore, pole, this.#d);
+      this.#aim(
+        rider,
+        `upperarm01.${suffix}`,
+        `lowerarm01.${suffix}`,
+        this.#c.copy(elbow).sub(shoulder),
+      );
+      this.#aim(rider, `lowerarm01.${suffix}`, `wrist.${suffix}`, this.#c.copy(grip).sub(elbow));
+      // The leg: hip to the pedal, the knee forward — `bicycle.ts`'s own rule.
+      const hip = boneOf(rider.bones, `upperleg01.${suffix}`).getWorldPosition(this.#a);
+      const foot = toWorld(joints.foot[index], this.#b);
+      const thigh = this.#length(rider, `upperleg01.${suffix}`, `lowerleg01.${suffix}`);
+      const shin = this.#length(rider, `lowerleg01.${suffix}`, `foot.${suffix}`);
+      const knee = twoBoneJoint(hip, foot, thigh, shin, forward, this.#d);
+      this.#aim(rider, `upperleg01.${suffix}`, `lowerleg01.${suffix}`, this.#c.copy(knee).sub(hip));
+      this.#aim(rider, `lowerleg01.${suffix}`, `foot.${suffix}`, this.#c.copy(foot).sub(knee));
+    }
+  }
+
+  #length(rider: RealisticRiderSlot, from: string, to: string): number {
+    const start = boneOf(rider.bones, from).getWorldPosition(this.#scratchLength);
+    return start.distanceTo(boneOf(rider.bones, to).getWorldPosition(this.#scratchLengthTo));
+  }
+
+  readonly #scratchLength = new Vector3();
+  readonly #scratchLengthTo = new Vector3();
+  readonly #aimHead = new Vector3();
+  readonly #aimCurrent = new Vector3();
+  readonly #aimWanted = new Vector3();
+
+  /** Turns `bone` so the direction to `child`'s head is `direction`, in world space. */
+  #aim(rider: RealisticRiderSlot, boneName: string, childName: string, direction: Vector3): void {
+    const bone = boneOf(rider.bones, boneName);
+    const child = boneOf(rider.bones, childName);
+    bone.getWorldPosition(this.#aimHead);
+    child.getWorldPosition(this.#aimCurrent).sub(this.#aimHead).normalize();
+    this.#aimWanted.copy(direction).normalize();
+    this.#turn.setFromUnitVectors(this.#aimCurrent, this.#aimWanted);
+    bone.getWorldQuaternion(this.#world);
+    this.#parent.identity();
+    bone.parent?.getWorldQuaternion(this.#parent);
+    bone.quaternion.copy(this.#parent.invert().multiply(this.#turn.multiply(this.#world)));
+    bone.updateMatrixWorld(true);
+  }
+}
+
+/** One realistic rider: its body, its bones at rest, and its held crank angle. */
+interface RealisticRiderSlot {
+  readonly root: Group;
+  readonly body: SkinnedMesh;
+  readonly material: MeshStandardMaterial;
+  readonly bones: ReadonlyMap<string, Bone>;
+  readonly restQuaternions: readonly Quaternion[];
+  readonly restPositions: readonly Vector3[];
+  readonly ordered: readonly Bone[];
+  angle: number;
+}
+
+/**
+ * A bone by its MakeHuman name. three's loader strips the `.` from a node name
+ * (`PropertyBinding.sanitizeNodeName`), so `upperleg01.L` arrives as
+ * `upperleg01L` — spike 0005, "What these taught #430", 8.
+ */
+function boneOf(bones: ReadonlyMap<string, Bone>, name: string): Bone {
+  const bone = bones.get(name.replace(/\./g, ''));
+  if (bone === undefined) throw new Error(`the rider model has no bone ${name}`);
+  return bone;
+}
+
+/**
+ * The elbow or knee of a two-bone limb from `root` to `target`, bent towards
+ * `pole` — the law `bicycle.ts` §`kneeBetween` uses, in three dimensions.
+ * Written into `into`.
+ */
+function twoBoneJoint(
+  root: Vector3,
+  target: Vector3,
+  upper: number,
+  lower: number,
+  pole: Vector3,
+  into: Vector3,
+): Vector3 {
+  const reachX = target.x - root.x;
+  const reachY = target.y - root.y;
+  const reachZ = target.z - root.z;
+  const full = Math.max(Math.hypot(reachX, reachY, reachZ), 1e-6);
+  const distance = Math.min(full, upper + lower - 1e-4);
+  const ax = reachX / full;
+  const ay = reachY / full;
+  const az = reachZ / full;
+  const cosine = Math.min(
+    1,
+    Math.max(-1, (upper * upper + distance * distance - lower * lower) / (2 * upper * distance)),
+  );
+  const along = pole.x * ax + pole.y * ay + pole.z * az;
+  let bx = pole.x - along * ax;
+  let by = pole.y - along * ay;
+  let bz = pole.z - along * az;
+  const bend = Math.hypot(bx, by, bz);
+  if (bend < 1e-9) {
+    bx = 0;
+    by = 0;
+    bz = 1;
+  } else {
+    bx /= bend;
+    by /= bend;
+    bz /= bend;
+  }
+  const sine = Math.sqrt(1 - cosine * cosine);
+  return into.set(
+    root.x + upper * (cosine * ax + sine * bx),
+    root.y + upper * (cosine * ay + sine * by),
+    root.z + upper * (cosine * az + sine * bz),
+  );
+}
+
+/** An instanced mesh with a per-instance tint, empty. @see RiderBelt */
+function tintable(geometry: BufferGeometry, material: Material, capacity: number): InstancedMesh {
+  const mesh = new InstancedMesh(geometry, material, capacity);
+  mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+  const white = new Color(0xffffff);
+  // ⚠️ `instanceColor` is sized from `count` when first written, so this runs
+  // while `count` is still the capacity — `RiderBelt`'s own note.
+  for (let slot = 0; slot < capacity; slot += 1) mesh.setColorAt(slot, white);
+  mesh.count = 0;
+  mesh.frustumCulled = false;
+  return mesh;
+}
+
+/** A tube part's two ends, in the bicycle's own frame. */
+function placedPart(geometry: BufferGeometry, part: RiderPart): BufferGeometry {
+  return geometry
+    .rotateX(part.pitch)
+    .rotateY(part.yaw)
+    .rotateZ(part.roll)
+    .translate(part.x, part.y, part.z);
+}
+
+/**
+ * The realistic bicycle: `bicycle.ts`'s parts, drawn round — frame, rubber
+ * and metal, one merged geometry each.
+ */
+function realisticBicycle(): {
+  readonly frame: BufferGeometry;
+  readonly rubber: BufferGeometry;
+  readonly metal: BufferGeometry;
+} {
+  const frame: BufferGeometry[] = [];
+  const rubber: BufferGeometry[] = [];
+  const metal: BufferGeometry[] = [];
+  for (const part of RIDER_BODY_PARTS) {
+    if (part.name.startsWith('arm') || part.name === 'torso' || part.name === 'helmet') continue;
+    const solid = part.solid;
+    if (solid.shape === 'ring') {
+      // A wheel in the bicycle's YZ plane at its hub: tyre, rim, hub, spokes.
+      const radius = solid.radius + solid.thickness;
+      const tyre = solid.thickness;
+      rubber.push(
+        new TorusGeometry(radius - tyre, tyre, 10, 48)
+          .rotateY(Math.PI / 2)
+          .translate(0, part.y, part.z),
+      );
+      metal.push(
+        new TorusGeometry(radius - tyre * 2.2, tyre * 0.45, 6, 48)
+          .rotateY(Math.PI / 2)
+          .translate(0, part.y, part.z),
+        new CylinderGeometry(0.02, 0.02, 0.1, 10).rotateZ(Math.PI / 2).translate(0, part.y, part.z),
+      );
+      const spokes = 20;
+      const length = radius - tyre * 2.2;
+      for (let spoke = 0; spoke < spokes; spoke += 1) {
+        metal.push(
+          new CylinderGeometry(0.0015, 0.0015, length, 3)
+            .translate(0, length / 2, 0)
+            .rotateX((spoke / spokes) * Math.PI * 2)
+            .translate(spoke % 2 === 0 ? 0.02 : -0.02, part.y, part.z),
+        );
+      }
+    } else if (solid.shape === 'tube') {
+      const geometry = placedPart(
+        new CylinderGeometry(solid.radius, solid.radius, solid.length, 12),
+        part,
+      );
+      (part.name === 'handlebar' ? rubber : frame).push(geometry);
+    } else if (solid.shape === 'box') {
+      rubber.push(placedPart(new BoxGeometry(solid.width * 0.8, solid.height, solid.depth), part));
+    }
+  }
+  // Drops: a half-torus each side of the bar, curling down and back.
+  for (const side of [-1, 1]) {
+    rubber.push(
+      new TorusGeometry(0.07, 0.012, 8, 16, Math.PI)
+        .rotateY(Math.PI / 2)
+        .rotateX(Math.PI / 2)
+        .translate(side * 0.2, 0.91, 0.34),
+    );
+  }
+  return { frame: merged(frame), rubber: merged(rubber), metal: merged(metal) };
+}
+
+/** The realistic crankset, in the bottom bracket's own frame. */
+function realisticCrankset(): BufferGeometry {
+  const parts: BufferGeometry[] = [];
+  for (const part of RIDER_CRANK_PARTS) {
+    const solid = part.solid;
+    if (solid.shape === 'ring') {
+      parts.push(
+        new TorusGeometry(solid.radius, solid.thickness / 2, 6, 40)
+          .rotateY(Math.PI / 2)
+          .translate(part.x, part.y, part.z),
+      );
+    } else if (solid.shape === 'box') {
+      parts.push(placedPart(new BoxGeometry(solid.width, solid.height, solid.depth), part));
+    }
+  }
+  return merged(parts);
+}
+
+/**
+ * How many triangles the realistic bicycle and crankset have — what
+ * `realistic-budget.ts` §`REALISTIC_BICYCLE_TRIANGLES` holds them to.
+ *
+ * @test-facing: `three-renderer.test.ts` holds the geometry this file builds
+ * to the budget, since it is built here rather than read off a file.
+ */
+export function realisticBicycleTriangles(): number {
+  const bike = realisticBicycle();
+  const crank = realisticCrankset();
+  const count = (geometry: BufferGeometry): number =>
+    (geometry.getIndex()?.count ?? geometry.getAttribute('position').count) / 3;
+  const total = count(bike.frame) + count(bike.rubber) + count(bike.metal) + count(crank);
+  for (const geometry of [bike.frame, bike.rubber, bike.metal, crank]) geometry.dispose();
+  return total;
+}
+
+/**
+ * What one view builds to draw the realistic world — ADR 0026 D-10's second
+ * path, beside the stylised one in this same file.
+ *
+ * - {@link RealisticVegetationBelt}: the trees, shrubs and rocks (#474).
+ * - A second {@link ScatterBelt}, **with no models** and physically based
+ *   materials, for every other kind: `post`, and the structures until layer 3
+ *   gives them realistic shapes (#475). No Kenney model is drawn beside a
+ *   photoscan on any rung — D-3.
+ * - {@link RealisticRiderBelt}: the MakeHuman riders on their bicycles (#369).
+ * - The road's and the ground's photographic materials, swapped onto the
+ *   stylised meshes, so the road stays one mesh and one draw call (#425).
+ * - The environment map, prefiltered from the sky with this view's own
+ *   renderer — a `PMREMGenerator` needs one, which is why this is built in the
+ *   view and not at load. The generator is disposed as soon as the map exists,
+ *   releasing its ping-pong target (`realistic-budget.ts`
+ *   §`environmentMapBytes`).
+ */
+class RealisticDrawing {
+  readonly vegetation: RealisticVegetationBelt;
+  readonly primitives: ScatterBelt;
+  readonly riders: RealisticRiderBelt;
+  readonly road: MeshStandardMaterial;
+  readonly ground: MeshStandardMaterial;
+  readonly environment: Texture;
+
+  constructor(
+    world: RealisticWorld,
+    renderer: WebGLRenderer,
+    fields: { readonly span: { value: number }; readonly count: { value: number } },
+  ) {
+    const anisotropy = Math.min(REALISTIC_ANISOTROPY, renderer.capabilities.getMaxAnisotropy());
+    for (const texture of [
+      world.road.colour,
+      world.road.normal,
+      world.ground.colour,
+      world.ground.normal,
+    ]) {
+      texture.anisotropy = anisotropy;
+    }
+    this.vegetation = new RealisticVegetationBelt(world.vegetation);
+    this.primitives = new ScatterBelt(new Map(), {
+      skip: new Set<SceneryKind>(REALISTIC_VEGETATION_KINDS),
+      physical: true,
+    });
+    this.riders = new RealisticRiderBelt(world.body);
+    this.road = photographicRoadMaterial(world.road.colour, world.road.normal);
+    this.ground = photographicGroundMaterial(
+      world.ground.colour,
+      world.ground.normal,
+      fields.span,
+      fields.count,
+    );
+    const generator = new PMREMGenerator(renderer);
+    this.environment = generator.fromEquirectangular(world.sky.texture).texture;
+    generator.dispose();
+  }
+
+  addTo(scene: Scene): void {
+    this.vegetation.addTo(scene);
+    this.primitives.addTo(scene);
+    this.riders.addTo(scene);
+  }
+
+  setShown(on: boolean): void {
+    this.vegetation.setShown(on);
+    this.primitives.setShown(on);
+    this.riders.setShown(on);
+  }
+
+  dispose(): void {
+    this.vegetation.dispose();
+    this.primitives.dispose();
+    this.riders.dispose();
+    this.road.dispose();
+    this.ground.dispose();
+    this.environment.dispose();
+  }
+}
+
+/**
+ * Frees the realistic world's textures and geometry from the GPU, keeping the
+ * objects: three uploads a disposed texture again if anything draws it, so a
+ * later view that asks for realism still can, while a phone that stepped down
+ * holds none of it meanwhile.
+ */
+function evictRealisticWorldFromGpu(): void {
+  const world = realisticWorld;
+  if (world === undefined) return;
+  world.sky.texture.dispose();
+  for (const texture of [
+    world.road.colour,
+    world.road.normal,
+    world.ground.colour,
+    world.ground.normal,
+  ]) {
+    texture.dispose();
+  }
+  for (const shapes of world.vegetation.values()) {
+    for (const shape of shapes) {
+      for (const part of shape.parts) {
+        part.geometry.dispose();
+        part.material.map?.dispose();
+        part.material.normalMap?.dispose();
+      }
+      shape.impostor?.texture.dispose();
+    }
+  }
+}
+
+/**
+ * One mesh's material, as the harness reports it.
+ *
+ * @unwired the shape of what `sceneMaterialsOf` hands the browser gate's harness
+ */
+export interface SceneMaterial {
+  /** Whether the mesh and every ancestor is visible — whether it can be drawn. */
+  readonly visible: boolean;
+  /** three's own `type`: `MeshStandardMaterial`, `ShaderMaterial` and so on. */
+  readonly type: string;
+  /** ADR 0026 D-11: whether this file constructed it. */
+  readonly constructed: boolean;
+}
+
+/**
+ * Which world a view is drawing — for the owner's harness page, which says so
+ * on screen (D-7's "and says so"), and for the browser gate.
+ *
+ * @unwired reached only from the harness pages under `apps/web/browser/` until
+ * #475 offers the realistic world to a rider.
+ */
+export function drawnWorldOf(view: GameView): QualitySettings['world'] {
+  return view instanceof ThreeGameView ? view.drawnWorld : 'stylised';
+}
+
+/**
+ * Every mesh a view's scene holds and the material on it — ADR 0026 D-11's
+ * assertion, made by the browser gate over a real scene.
+ *
+ * @unwired reached only from the browser gate's harness; nothing in the render
+ * path needs to ask.
+ */
+export function sceneMaterialsOf(view: GameView): readonly SceneMaterial[] {
+  return view instanceof ThreeGameView ? view.sceneMaterials() : [];
 }
 
 class ThreeGameView implements GameView {
@@ -3480,6 +5104,19 @@ class ThreeGameView implements GameView {
    * every frame by `#updateWorld`, exactly as the fog is coloured every frame.
    */
   readonly #lighting = new WorldLamps();
+  /**
+   * The stylised road's material — the one `#road` wears unless the realistic
+   * world is drawn, and the one the surface-detail rung switches.
+   */
+  readonly #roadMaterial: MeshBasicMaterial;
+  /**
+   * What this view builds to draw the realistic world, on the first realistic
+   * rung it is given while one is loaded — ADR 0026. `undefined` in every view
+   * the shipped app makes, because nothing it ships asks for that rung (D-12).
+   */
+  #realistic: RealisticDrawing | undefined;
+  /** Which world the last frame was drawn in. Never `'realistic'` without {@link #realistic}. */
+  #drawing: QualitySettings['world'] = 'stylised';
   #quality: QualitySettings;
   /** This frame's world, for the sky dome, which is placed with the camera. */
   #world: WorldStyle = {
@@ -3517,19 +5154,17 @@ class ThreeGameView implements GameView {
     this.#water.addTo(this.#scene);
     this.#bridges.addTo(this.#scene);
 
-    this.#road = new Mesh(
-      this.#roadGeometry,
-      // `vertexColors` is what makes the surface, the two edge lines and the
-      // broken centre line **one mesh and one draw call** (#242). Without it
-      // each would need a material of its own, and a material is a draw call.
-      // #425: the road's grain, behind the rung's define. Still ONE material.
-      withSurfaceDetail(
-        new MeshBasicMaterial({ side: DoubleSide, vertexColors: true }),
-        'road',
-        { value: 0 },
-        { value: 1 },
-      ),
+    // `vertexColors` is what makes the surface, the two edge lines and the
+    // broken centre line **one mesh and one draw call** (#242). Without it
+    // each would need a material of its own, and a material is a draw call.
+    // #425: the road's grain, behind the rung's define. Still ONE material.
+    this.#roadMaterial = withSurfaceDetail(
+      new MeshBasicMaterial({ side: DoubleSide, vertexColors: true }),
+      'road',
+      { value: 0 },
+      { value: 1 },
     );
+    this.#road = new Mesh(this.#roadGeometry, this.#roadMaterial);
     // The corridor is rebuilt in world coordinates every time, so three's own
     // frustum culling has nothing useful to test against and would occasionally
     // cull the road we just built. There is one mesh; culling it saves nothing.
@@ -3574,7 +5209,13 @@ class ThreeGameView implements GameView {
     this.#water.update(frame.water.surface, frame.world, frame.water.seconds);
     this.#bridges.update(frame.water.bridges);
     this.#updateRoad(frame);
+    // ⚠️ Both worlds' belts are handed the frame, and the hidden world's
+    // return at once (ADR 0026 D-3): one frame, one arrangement, whichever
+    // world draws it — so the two can never disagree about where a tree is.
     this.#scatter.update(frame.scatter, frame.camera);
+    this.#realistic?.vegetation.update(frame.scatter, frame.camera);
+    this.#realistic?.primitives.update(frame.scatter, frame.camera);
+    this.#realistic?.riders.place(frame.markers);
     this.#updateMarkers(frame.markers);
     this.#updateShadows(frame);
     this.#placeCamera(frame.camera);
@@ -3591,6 +5232,7 @@ class ThreeGameView implements GameView {
     // ⚠️ Since #460 the frame carries the structures before the scenery, each
     // with a budget of its own, so the belt's is the two together.
     this.#scatter.setBudget(settings.scatterItems + settings.structureItems);
+    this.#realistic?.primitives.setBudget(settings.scatterItems + settings.structureItems);
     // #367, and the same argument one line up: a rung is a property of the belt
     // between frames, so the render loop takes no decision about how many
     // distinct shapes it may draw. @see ScatterBelt.setVariants
@@ -3601,8 +5243,88 @@ class ThreeGameView implements GameView {
     this.#water.setDrawn(settings.water);
     // #425. The grain and the patchwork, on the target rung only.
     this.#terrain.setSurfaceDetail(settings.surfaceDetail);
-    setSurfaceDetail(this.#road.material as Material, settings.surfaceDetail);
+    setSurfaceDetail(this.#roadMaterial, settings.surfaceDetail);
+    // ADR 0026. Which world this rung draws — after everything above, so the
+    // realistic belts it may build are budgeted by the same rung.
+    this.#applyWorld(settings.world);
     this.#applySize();
+  }
+
+  /**
+   * Draws the world a rung asks for — ADR 0026 D-3 and D-10.
+   *
+   * ⚠️ **A realistic rung draws the realistic world only when one is loaded.**
+   * Without one — nobody asked `loadRealisticWorld`, or it failed — the view
+   * draws the stylised world, whole, and `drawnWorldOf` says so: D-7's
+   * fallback, and the reason the harness's notice can be true.
+   *
+   * ⚠️ **Leaving the realistic world frees it**, from this view and from the
+   * GPU: the textures are disposed, so a phone that stepped down because it was
+   * hot is not left holding a hundred mebibytes it will not draw again this
+   * ride — `quality.ts` §`nextWorldQuality` never climbs back.
+   */
+  #applyWorld(wanted: QualitySettings['world']): void {
+    const loaded = realisticWorld;
+    const world =
+      wanted === 'realistic' && loaded !== undefined && this.#renderer !== undefined
+        ? 'realistic'
+        : 'stylised';
+    if (world === this.#drawing) {
+      return;
+    }
+    this.#drawing = world;
+    const realistic = world === 'realistic';
+    if (realistic && loaded !== undefined && this.#renderer !== undefined) {
+      if (this.#realistic === undefined) {
+        this.#realistic = new RealisticDrawing(loaded, this.#renderer, this.#terrain.fields);
+        this.#realistic.addTo(this.#scene);
+        this.#realistic.primitives.setBudget(
+          this.#quality.scatterItems + this.#quality.structureItems,
+        );
+      }
+    }
+    const drawing = realistic ? this.#realistic : undefined;
+    this.#scatter.setShown(!realistic);
+    this.#riders.setShown(!realistic);
+    this.#skyDome.mesh.visible = !realistic;
+    this.#realistic?.setShown(realistic);
+    this.#road.material = drawing?.road ?? this.#roadMaterial;
+    this.#terrain.setPhotographic(drawing?.ground);
+    this.#bridges.setWorld(world);
+    this.#scene.background =
+      drawing === undefined || loaded === undefined ? this.#sky : loaded.sky.texture;
+    this.#scene.environment = drawing?.environment ?? null;
+    if (this.#renderer !== undefined) {
+      this.#renderer.toneMapping = realistic ? AgXToneMapping : NoToneMapping;
+      this.#renderer.toneMappingExposure = REALISTIC_EXPOSURE;
+    }
+    if (!realistic && this.#realistic !== undefined) {
+      this.#realistic.dispose();
+      this.#realistic = undefined;
+      evictRealisticWorldFromGpu();
+    }
+  }
+
+  /** Which world the last rung this view was given is drawn in. @see drawnWorldOf */
+  get drawnWorld(): QualitySettings['world'] {
+    return this.#drawing;
+  }
+
+  /** Every mesh in the scene and what it wears — for the harness's D-11 check. @see sceneMaterialsOf */
+  sceneMaterials(): readonly SceneMaterial[] {
+    const found: SceneMaterial[] = [];
+    this.#scene.traverse((node) => {
+      const mesh = node as Partial<Mesh>;
+      if (mesh.isMesh !== true || mesh.material === undefined) return;
+      let visible = true;
+      for (let at: Object3D | null = node; at !== null; at = at.parent) {
+        if (!at.visible) visible = false;
+      }
+      for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+        found.push({ visible, type: material.type, constructed: isConstructedMaterial(material) });
+      }
+    });
+    return found;
   }
 
   /**
@@ -3667,13 +5389,14 @@ class ThreeGameView implements GameView {
   }
 
   destroy(): void {
+    this.#realistic?.dispose();
     this.#roadGeometry.dispose();
     this.#terrain.dispose();
     this.#horizon.dispose();
     this.#skyDome.dispose();
     this.#water.dispose();
     this.#bridges.dispose();
-    disposeMaterial(this.#road.material);
+    this.#roadMaterial.dispose();
     this.#scatter.dispose();
     this.#lighting.dispose();
     this.#riders.dispose();
@@ -3716,7 +5439,21 @@ class ThreeGameView implements GameView {
     // function of the route and a renderer is handed a frame, not a route. A
     // sun pointed once in the constructor would be the previous route's sun
     // for the whole of the next ride.
-    this.#lighting.apply(world.sun);
+    const loaded = realisticWorld;
+    if (this.#drawing === 'realistic' && loaded !== undefined) {
+      // ADR 0026 D-9: the sky is the ambient term, solved to give a horizontal
+      // surface exactly `world.ts`'s ambient share, and turned so its sun
+      // stands where `world.ts`'s does. `realistic-light.ts` has the arithmetic.
+      this.#lighting.apply(world.sun, 0);
+      const intensity = environmentIntensity(world.sun.ambient, loaded.sky.upward);
+      this.#scene.environmentIntensity = intensity;
+      this.#scene.backgroundIntensity = intensity;
+      const turn = skyRotation(loaded.sky.sunU, world.sun.x, world.sun.z);
+      this.#scene.backgroundRotation.set(0, turn, 0);
+      this.#scene.environmentRotation.set(0, turn, 0);
+    } else {
+      this.#lighting.apply(world.sun);
+    }
   }
 
   /**
@@ -3752,6 +5489,14 @@ class ThreeGameView implements GameView {
         'color',
         new BufferAttribute(new Float32Array(this.#vertexCapacity), 3),
       );
+      // ADR 0026: the photographic road is lit, and a lit surface needs a
+      // normal. Straight up, written once when the buffer grows and never per
+      // frame: the road is within a few degrees of level, and the stylised
+      // road's own note on that (the header) applies — the normal MAP is what
+      // gives the asphalt its relief.
+      const up = new Float32Array(this.#vertexCapacity);
+      for (let at = 1; at < up.length; at += 3) up[at] = 1;
+      this.#roadGeometry.setAttribute('normal', new BufferAttribute(up, 3));
     }
     if (indices.length > this.#indexCapacity) {
       this.#indexCapacity = indices.length;
@@ -3835,16 +5580,6 @@ class ThreeGameView implements GameView {
 function upload(attribute: BufferAttribute, values: Float32Array | Uint32Array): void {
   (attribute.array as Float32Array | Uint32Array).set(values);
   attribute.needsUpdate = true;
-}
-
-function disposeMaterial(material: Material | Material[]): void {
-  if (Array.isArray(material)) {
-    for (const each of material) {
-      each.dispose();
-    }
-    return;
-  }
-  material.dispose();
 }
 
 /** The renderer this app ships. @see GameRenderer */
