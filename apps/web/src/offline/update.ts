@@ -98,10 +98,11 @@ export interface UpdateWatcher {
 
 export function createUpdateWatcher(ports: UpdateWatcherPorts): UpdateWatcher {
   const listeners = new Set<() => void>();
-  let waiting: ServiceWorkerLike | null = ports.registration.waiting;
+  let waiting: ServiceWorkerLike | null = null;
   let dismissed = false;
   let asked = false;
   let reloaded = false;
+  const followed = new Set<ServiceWorkerLike>();
 
   const announce = (): void => {
     for (const listener of listeners) {
@@ -118,26 +119,76 @@ export function createUpdateWatcher(ports: UpdateWatcherPorts): UpdateWatcher {
     announce();
   };
 
-  ports.registration.addEventListener('updatefound', () => {
-    const installing = ports.registration.installing;
-    if (installing === null) {
+  /**
+   * Whether an installed worker is an UPDATE — that is, whether there is an
+   * older version running that it would replace.
+   *
+   * ⚠️ **This used to be answered by `registration.waiting` being non-null, and
+   * in Chromium that is false** — measured on the pinned Chromium 153 over
+   * five first visits on 2026-09-21 (#467). On the **first** ever install the
+   * browser sets `registration.waiting` to the new worker, dispatches
+   * `statechange` → `installed`, and only then moves it to `active`: at the
+   * moment this watcher reads it, `waiting` is the worker and `active` is
+   * `null`. One of those five first visits put "Update now" on screen, offering
+   * a new rider the version they were already running; which of them does
+   * depended only on whether the watcher had subscribed before `updatefound`.
+   * What distinguishes an update from a first install is the **active** worker:
+   * an update always has an older one that is not this one.
+   */
+  const isAnUpdate = (worker: ServiceWorkerLike): boolean => {
+    const active = ports.registration.active;
+    return active !== null && active !== worker;
+  };
+
+  /**
+   * Follow a worker that is installing, and offer it once it has installed.
+   *
+   * ⚠️ **The worker itself is offered, not `registration.waiting` re-read** —
+   * a worker in the `installed` state is the waiting worker by definition, and
+   * reading the registration's attribute instead ties the offer to the order
+   * in which the browser delivers two separate updates to the page.
+   */
+  const follow = (worker: ServiceWorkerLike): void => {
+    if (followed.has(worker)) {
       return;
     }
-    installing.addEventListener('statechange', () => {
-      if (installing.state !== 'installed') {
-        return;
+    followed.add(worker);
+    const settle = (): void => {
+      if (worker.state === 'installed' && isAnUpdate(worker)) {
+        noteWaiting(worker);
       }
-      // ⚠️ `registration.waiting` rather than `installing`, and the difference
-      // matters: on the **first** install there is no controlled page, so the
-      // worker goes straight from `installed` to `activating` and
-      // `registration.waiting` is null. Reading `installing` instead would
-      // offer every rider an "update" on their first ever visit, to a version
-      // they are already running.
-      const nowWaiting = ports.registration.waiting;
-      if (nowWaiting !== null) {
-        noteWaiting(nowWaiting);
-      }
-    });
+    };
+    worker.addEventListener('statechange', settle);
+    settle();
+  };
+
+  // ⚠️ **What is already under way when the watcher is made — #467.** The
+  // watcher reaches the page in `main.tsx`'s SECOND render (#418), once the
+  // app's own `register()` has resolved and the athlete row and the platform
+  // have been built. An update that began installing before then has already
+  // fired its `updatefound`, which nothing was listening for, and this watcher
+  // used to read `registration.waiting` alone: a worker still INSTALLING at
+  // that moment was followed by nobody, reached `waiting` unseen, and the rider
+  // was never offered it. Measured locally the second render lands 20 to 75 ms
+  // before the browser gate registers its second worker; an offer that never
+  // appears is what losing it looks like, and that is #467's failure in run
+  // 35651738641. So both workers the registration can be
+  // holding are read here, and an installing one is followed exactly as
+  // `updatefound` would have followed it.
+  const alreadyWaiting = ports.registration.waiting;
+  if (alreadyWaiting !== null && isAnUpdate(alreadyWaiting)) {
+    waiting = alreadyWaiting;
+  }
+  const alreadyInstalling = ports.registration.installing;
+  if (alreadyInstalling !== null) {
+    follow(alreadyInstalling);
+  }
+
+  ports.registration.addEventListener('updatefound', () => {
+    const installing = ports.registration.installing;
+    if (installing !== null) {
+      follow(installing);
+    }
   });
 
   ports.recording?.subscribe(() => {

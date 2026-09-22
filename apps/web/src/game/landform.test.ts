@@ -398,10 +398,14 @@ describe('the ground is the same place on every lap — #458', () => {
   it('builds identical heights a whole lap apart', () => {
     const profile = circuitRoute(150);
     const lap = profile.totalDistance;
-    const first = frameAt(profile, 123).ground;
+    // ⚠️ Copied out before the second build: since #469 the mesh's arrays are
+    // lent and the next build writes over them, so comparing `first.vertices`
+    // with `third.vertices` would compare one array with itself.
+    const first = Float32Array.from(frameAt(profile, 123).ground.vertices);
     const third = frameAt(profile, 123 + 2 * lap).ground;
-    for (let at = 1; at < first.vertices.length; at += 3) {
-      expect(third.vertices[at]).toBeCloseTo(first.vertices[at] as number, 3);
+    expect(third.vertices).not.toBe(first);
+    for (let at = 1; at < first.length; at += 3) {
+      expect(third.vertices[at]).toBeCloseTo(first[at] as number, 3);
     }
   });
 

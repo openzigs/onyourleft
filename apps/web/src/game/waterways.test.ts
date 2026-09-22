@@ -152,10 +152,13 @@ describe('where a stream crosses the road — #459', () => {
     const near = (crossings[0]?.distance ?? 0) - 200;
     const surface = (odometer: number) =>
       waterSurface(profile, origin, roadCorridor(profile, origin, odometer), waysOf(profile));
+    // ⚠️ Copied out before the second build: since #469 the surface's arrays
+    // are lent views of storage the next build writes over.
     const first = surface(near);
-    const third = surface(near + 2 * profile.totalDistance);
     expect(first.indices.length).toBeGreaterThan(0);
-    expect([...third.vertices]).toEqual([...first.vertices]);
+    const firstVertices = [...first.vertices];
+    const third = surface(near + 2 * profile.totalDistance);
+    expect([...third.vertices]).toEqual(firstVertices);
   });
 });
 

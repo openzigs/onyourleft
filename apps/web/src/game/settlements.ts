@@ -214,16 +214,83 @@ export function structuresAt(
   // the same place — `scatter.ts` §`scatterAt` makes the same promise for the
   // scenery. Two copies of one wall at one place would be two instances drawn
   // into the same pixels.
-  const seen = new Set<string>();
-  const once = found.filter((item) => {
-    const key = `${item.kind} ${item.x.toFixed(3)} ${item.z.toFixed(3)}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
+  const once = distinctPlaces(found).filter(
     // ⚠️ Off EVERY stretch of the road, not only the one it was placed beside.
     // @see structureClearance
-    return structureClearance(profile, origin, item) >= ROAD_CLEARANCE_METRES;
-  });
+    (item) => structureClearance(profile, origin, item) >= ROAD_CLEARANCE_METRES,
+  );
   return once.slice(0, Math.max(0, budget.maxItems));
+}
+
+/**
+ * `items` with every repeat of a place dropped, the first kept, in order.
+ *
+ * ⚠️ **A number, not a string — #469.** The key used to be
+ * `${kind} ${x.toFixed(3)} ${z.toFixed(3)}`: three strings built and one
+ * concatenated for every structure in view, every frame, on the thread GATT
+ * notifications arrive on. The place is now the millimetre grid point hashed to
+ * a number ({@link placeKey}), and a number two different places share is told
+ * apart by {@link samePlace} rather than trusted.
+ */
+export function distinctPlaces(items: readonly ScatterItem[]): ScatterItem[] {
+  placesSeen.clear();
+  const distinct = items.filter((item, index) => {
+    const key = placeKey(item);
+    const earlier = placesSeen.get(key);
+    if (earlier === undefined) {
+      placesSeen.set(key, item);
+      return true;
+    }
+    if (samePlace(earlier, item)) return false;
+    // A collision: two different places, one key. Rare enough to settle by
+    // walking everything before this item, which is exact.
+    return !seenBefore(items, index, item);
+  });
+  // Emptied again on the way out, so the map holds no structure between frames.
+  placesSeen.clear();
+  return distinct;
+}
+
+/**
+ * The first structure seen at each key: reused, and emptied as each
+ * {@link distinctPlaces} begins and ends, so one call's places never drop the
+ * next's and no frame's structures are held on to after it.
+ */
+const placesSeen = new Map<number, ScatterItem>();
+
+/** Whether any of the first `count` items stands where `item` does. */
+function seenBefore(items: readonly ScatterItem[], count: number, item: ScatterItem): boolean {
+  for (let index = 0; index < count; index += 1) {
+    if (samePlace(items[index] as ScatterItem, item)) return true;
+  }
+  return false;
+}
+
+/** A place to the millimetre, as the two grid numbers {@link samePlace} compares. */
+function millimetres(metres: number): number {
+  return Math.round(metres * 1_000);
+}
+
+/**
+ * Where a structure stands, as a number: its millimetre grid point, hashed.
+ *
+ * ⚠️ **A hash, not a pairing**: two places a whole number of 92 821 mm apart
+ * in one axis and the right amount in the other share a key, and so do two
+ * kinds at one place. {@link samePlace} is what decides; the key only says
+ * where to look. Every term is an integer well inside 2⁵³, so the arithmetic
+ * itself is exact.
+ */
+function placeKey(item: ScatterItem): number {
+  return millimetres(item.x) * 92_821 + millimetres(item.z);
+}
+
+/** The same kind at the same millimetre: what "the same structure" means here. */
+function samePlace(first: ScatterItem, second: ScatterItem): boolean {
+  return (
+    first.kind === second.kind &&
+    millimetres(first.x) === millimetres(second.x) &&
+    millimetres(first.z) === millimetres(second.z)
+  );
 }
 
 /**
@@ -359,7 +426,7 @@ export function structureClearance(
   let least = Number.POSITIVE_INFINITY;
   for (let column = cellOf(item.x - reach); column <= cellOf(item.x + reach); column += 1) {
     for (let row = cellOf(item.z - reach); row <= cellOf(item.z + reach); row += 1) {
-      for (const segment of road.cells.get(cellKey(column, row)) ?? []) {
+      for (const segment of road.cells.get(cellKey(column, row)) ?? NO_SEGMENTS) {
         const ax = road.points[segment * 2] as number;
         const az = road.points[segment * 2 + 1] as number;
         const bx = road.points[segment * 2 + 2] as number;
@@ -397,45 +464,69 @@ function segmentToBox(
   back: number,
   front: number,
 ): number {
-  // Liang–Barsky: does any of the segment lie inside the box?
-  let enter = 0;
-  let leave = 1;
+  // Liang–Barsky: does any of the segment lie inside the box? Four clips,
+  // written out rather than looped over `[p, q]` pairs — the loop built five
+  // arrays a call, and this runs for every road segment near every structure
+  // in view, every frame: about 600 KiB a frame of garbage on a village route
+  // before #469, measured, which was more than the rest of the frame together.
   const dx = bx - ax;
   const dz = bz - az;
-  for (const [p, q] of [
-    [-dx, ax + half],
-    [dx, half - ax],
-    [-dz, az - back],
-    [dz, front - az],
-  ] as const) {
-    if (p === 0) {
-      if (q < 0) {
-        enter = 1;
-        leave = 0;
-      }
-    } else {
-      const t = q / p;
-      if (p < 0) enter = Math.max(enter, t);
-      else leave = Math.min(leave, t);
-    }
-  }
-  if (enter <= leave) return 0;
-  const toBox = (x: number, z: number): number =>
-    Math.hypot(Math.max(0, Math.abs(x) - half), Math.max(0, back - z, z - front));
+  clip.enter = 0;
+  clip.leave = 1;
+  clipAgainst(-dx, ax + half);
+  clipAgainst(dx, half - ax);
+  clipAgainst(-dz, az - back);
+  clipAgainst(dz, front - az);
+  if (clip.enter <= clip.leave) return 0;
   const span = dx * dx + dz * dz;
-  const toSegment = (x: number, z: number): number => {
-    const t = span > 0 ? Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / span)) : 0;
-    return Math.hypot(x - (ax + dx * t), z - (az + dz * t));
-  };
   return Math.min(
-    toBox(ax, az),
-    toBox(bx, bz),
-    toSegment(-half, back),
-    toSegment(half, back),
-    toSegment(-half, front),
-    toSegment(half, front),
+    pointToBox(ax, az, half, back, front),
+    pointToBox(bx, bz, half, back, front),
+    pointToSegment(-half, back, ax, az, dx, dz, span),
+    pointToSegment(half, back, ax, az, dx, dz, span),
+    pointToSegment(-half, front, ax, az, dx, dz, span),
+    pointToSegment(half, front, ax, az, dx, dz, span),
   );
 }
+
+/** The parameter interval {@link segmentToBox} narrows, reused between calls. */
+const clip = { enter: 0, leave: 1 };
+
+/** One Liang–Barsky clip, against the edge where `p·t ≤ q`. */
+function clipAgainst(p: number, q: number): void {
+  if (p === 0) {
+    if (q < 0) {
+      clip.enter = 1;
+      clip.leave = 0;
+    }
+    return;
+  }
+  const t = q / p;
+  if (p < 0) clip.enter = Math.max(clip.enter, t);
+  else clip.leave = Math.min(clip.leave, t);
+}
+
+/** From a point to the box `|x| ≤ half`, `back ≤ z ≤ front`. */
+function pointToBox(x: number, z: number, half: number, back: number, front: number): number {
+  return Math.hypot(Math.max(0, Math.abs(x) - half), Math.max(0, back - z, z - front));
+}
+
+/** From a point to the segment from `(ax, az)` along `(dx, dz)`, whose squared length is `span`. */
+function pointToSegment(
+  x: number,
+  z: number,
+  ax: number,
+  az: number,
+  dx: number,
+  dz: number,
+  span: number,
+): number {
+  const t = span > 0 ? Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / span)) : 0;
+  return Math.hypot(x - (ax + dx * t), z - (az + dz * t));
+}
+
+/** A cell with no road in it. Shared, so a miss allocates nothing. */
+const NO_SEGMENTS: readonly number[] = [];
 
 /** Where on the route something is, and which way the road runs there. */
 interface Frame {

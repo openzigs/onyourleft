@@ -1931,6 +1931,31 @@ one draw call**, and **7 draw calls** for the scenery-free scene where there wer
 new one). Each rung of the quality ladder draws fewer bands of ground: 6 624 / 5 520 / 4 968 / 4 416
 indices. A software rasteriser says nothing about a phone's GPU, which is what V3 is for.
 
+⚠️ **V3 is also [#469](https://github.com/openzigs/onyourleft/issues/469)'s device check, and it is
+PENDING.** #469 stopped the ground, the water and the settlements allocating fresh storage every
+frame: the ground's four arrays and the water's three are now lent and reused, and the buildings are
+de-duplicated by a number rather than a string. Measured on 2026-09-21 in **Node 24's V8, not on a
+phone and not in the pinned Chromium**, riding `sceneFrame` 3 000 frames at 0.15 m a frame (9 m/s at
+60 fps) over three fixture routes, before and after on the same machine:
+
+| Route | Typed-array storage a frame | JS heap allocated a frame | Minor GCs per 1 000 frames | `sceneFrame` median |
+|---|---|---|---|---|
+| `hillRoute`, from 300 m | 14 arrays, 68.2 KB → 5, 13.0 KB | 453 KB → 451 KB | 88.7 → 88.7 | 0.22–0.31 → 0.22–0.24 ms |
+| `lakeValleyRoute`, from 800 m | 15 arrays, 70.0 KB → 6, 13.7 KB | 1 658 KB → 1 152 KB | 156 → 72 | 0.44–0.48 → 0.41–0.43 ms |
+| 20 km level farmland, from 2 km | 14 arrays, 68.2 KB → 5, 13.0 KB | 1 360 KB → 1 059 KB | 138 → 75 | 0.42–0.43 → 0.39–0.47 ms |
+
+Method: typed-array constructions counted by wrapping the constructors for one pass; the JS heap by
+V8's sampling heap profiler (`HeapProfiler.startSampling`, 512-byte interval, collected objects
+included), which does not see a typed array's backing store — hence the two columns; GCs by
+`PerformanceObserver` `gc` entries; time as the median of eleven runs, three runs each way
+interleaved, and the range is across those three. What is left in the typed-array column is the
+road's own (`terrain.ts` §`roadCorridor`) and the horizon's 192 bytes, which #469 did not take on;
+what is left on the heap is mostly small objects and numbers — the relief and water shaping at every
+vertex, the scenery and the settlements' clearance search. `apps/web/src/game/lent-buffers.test.ts`
+pins the reuse. What only a phone can say is whether the legacy-jank row moves, so **record V3
+against a build that has #469 in it, and say so** beside the build. Part F's 0.11 % is the figure to
+compare it with.
+
 | Step | What to do | What to record |
 |---|---|---|
 | V1 | Ride a **real hilly route** — one with a sustained climb of 6 % or more and a descent | Does the climb read as a **climb**: ground rising beside the road ahead, a hillside on one side? Does the descent open a **valley** in front of you? In your words |

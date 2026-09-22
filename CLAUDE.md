@@ -613,7 +613,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         height, and a reviewer who remembers
                         `GROUND_RADIUS_METRES` is reading the old file.** The
                         ground is LIT and WRITES DEPTH since #458;
-                        `three-renderer.ts` §`TerrainBelt` says why both
+                        `three-renderer.ts` §`TerrainBelt` says why both.
+                        ⚠️ Since #469 its four arrays — and `waterways.ts`'s
+                        surface — are LENT: the next build writes over them,
+                        the renderer throws on a stale one, and a test or
+                        harness that holds two frames takes
+                        `frame-testing.ts` §`retainedFrame` first. Comparing
+                        two frames' arrays without it compares one array
+                        with itself and passes
     src/game/waterways.ts
                         water and bridges (#459) — a stream at every valley
                         floor of the route's own elevation, a lake beside a
@@ -3346,6 +3353,7 @@ top of an issue **supersedes its body**.
 | How the ground beside the road follows the route's gradient, where its heights come from, and what keeps it out of the carriageway | `apps/web/src/game/landform.ts`, [#458](https://github.com/openzigs/onyourleft/issues/458) |
 | Where a stream or a lake goes, why a bridge's deck is the road, and why there are no tunnels | `apps/web/src/game/waterways.ts`, [#459](https://github.com/openzigs/onyourleft/issues/459) |
 | Where a village or a farmstead stands, which way its buildings face, and what divides the fields | `apps/web/src/game/settlements.ts`, [#460](https://github.com/openzigs/onyourleft/issues/460) |
+| Why a frame's ground and water arrays are the same arrays next frame, and how to hold two frames at once | `apps/web/src/game/landform.ts` §`TerrainMesh.lease`, `apps/web/src/game/frame-testing.ts` §`retainedFrame`, `apps/web/src/game/lent-buffers.test.ts`, [#469](https://github.com/openzigs/onyourleft/issues/469) |
 | How the grouping of buildings is measured, and against what | `apps/web/src/game/settlements.test.ts` §"clusters them, where the scatter they replaced spread them out" |
 | What the water shader does without a texture or a second pass, and what it costs | `apps/web/src/game/three-renderer.ts` §`WATER_FRAGMENT`, §`WaterBelt`, `apps/web/browser/game-harness.ts` §`waterProbe` |
 | Why the road and the ground have a surface with no texture, and what bounds the road's grain against its gradient tint | `apps/web/src/game/three-renderer.ts` §`DETAIL_COMMON`, `apps/web/src/game/terrain.ts` §`ROAD_SURFACE_GRAIN`, [#425](https://github.com/openzigs/onyourleft/issues/425) |
