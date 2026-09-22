@@ -1573,11 +1573,21 @@ Apache-2.0; a devDependency of `apps/web`, and the only dependency in the worksp
 devDependency, because `three` ships no types of its own) are
 installed;
 
-⚠️ **`three` is pinned at 0.185.1 rather than at the current 0.186.0 deliberately.** 0.186.0 was
-published on 2026-09-08, the same day it was wanted, and pnpm's `minimumReleaseAge` refuses a
-lockfile entry younger than 24 hours — §8 says to pin something older rather than add a
-`minimumReleaseAgeExclude`, which would turn the protection off for that package permanently.
-0.185.x is also the version ADR 0008's engine table names. **nothing else from ADR 0005's runtime list is**, `react-router` included. Add each in
+⚠️ **`three` is pinned at 0.185.1 rather than at the current 0.186.0 deliberately, and since #489
+the reason is the ADRs alone.** This paragraph used to give two reasons and **one of them has
+expired**: 0.186.0 was published on 2026-09-08, the same day it was wanted, and pnpm's
+`minimumReleaseAge` refuses a lockfile entry younger than 24 hours — that release is two weeks old
+now and no longer bites, so a reviewer who remembers the pin resting partly on it is reading the
+old file. (§8's rule stands and is unrelated to this package: pin something older rather than add a
+`minimumReleaseAgeExclude`, which turns the protection off for that package permanently.) What
+holds the pin is that **ADR 0008's engine table names 0.185.x** and **[ADR 0026](docs/adr/0026-realistic-game-world.md) D-2
+pins it by version** under the heading *"What does NOT change"*, and an ADR is not reversed by a
+dependency bump — [#453](https://github.com/openzigs/onyourleft/pull/453) was declined on exactly
+that ground. Moving it is its own issue and it owes: `test:browser` re-run with the figures the gate
+prints restated; ADR 0026 **D-8**'s 527 333-byte `KTX2Loader`/`basis_transcoder.wasm` measurement
+retaken from the installed tree; and a check that `PMREMGenerator`, the HDR loader, `GLTFLoader` and
+`KTX2Loader` all still resolve out of `examples/jsm/`, which is the least stable part of that
+package's surface. **nothing else from ADR 0005's runtime list is**, `react-router` included. Add each in
 the issue that first needs it, after checking its licence against the
 directory it lands in (CONTRIBUTING.md).
 
