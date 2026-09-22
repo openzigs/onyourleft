@@ -408,6 +408,32 @@ whether Zwift's '671 matters today (it is a team-objective claim and #16 propose
 ask it *then*, per §3.5); and whether any of these would survive a validity challenge (this project
 will not fund one, so the answer changes nothing it would do).
 
+### What was bought — added 2026-09-22, nothing above it edited
+
+**Question A was NOT bought, and is not going to be.** The owner decided on **2026-09-22**
+([#488](https://github.com/openzigs/onyourleft/issues/488), Q6) to proceed on this spike's claim
+reading rather than to commission a targeted opinion, and to accept the residual risk.
+[ADR 0028](../adr/0028-racing-fairness.md)'s D-0 counsel block is lifted by that decision and its
+2026-09-22 amendment records it; D-0's other block — there is no server in Phase 1,
+[#7](https://github.com/openzigs/onyourleft/issues/7), owner decision D6 — stands, so no racing code
+may be written today for a reason that has nothing to do with patents.
+
+⚠️ **Nothing in §§1–4 above changes, and none of it becomes stronger by being relied on.** A spike
+is a dated measurement (`CLAUDE.md` §7) and this note is the record of what was done with it, not a
+revision of it. In particular, every warning in the box at the top of this file stands word for
+word: **this is not legal advice and it is not a freedom-to-operate opinion**, *"no systematic
+landscape search was performed"*, **no lawyer has reviewed any of it**, and **no pending
+application was read** — §1.4 records seven granted US members of the Peloton family from one
+2012-07-31 priority, and Question C is the one that would have asked what that implies. **Anyone
+citing this decision as clearance is misusing it**, exactly as this file already says of anyone
+citing the spike that way.
+
+**Questions B and C are not bought either**, by the same decision. B's subject — whether a finish
+order or live standings read on the *ranked list* limitation — therefore stays a design question
+answered by ADR 0028 D-7.7 rather than by counsel: a finish order **after** a race is decided, a
+dynamically updating ranked list **during** one is not. ADR 0007's Open Question 1, the
+IPR2020-01541 K1 certificate for '026, is still unread and stays open where ADR 0007 records it.
+
 ---
 
 ## 6. Recommendation

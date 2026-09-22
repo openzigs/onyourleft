@@ -3049,9 +3049,15 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   clean at exit 0. Numbers are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
   **and which are claimed by open issues** before you pick one. **The next free number is 0029.**
   ⚠️ **0028 is [ADR 0028](docs/adr/0028-racing-fairness.md)**, taken by
-  [#465](https://github.com/openzigs/onyourleft/issues/465) for how a race between riders is fair —
-  and ⚠️ it is **Accepted with five questions explicitly left to the owner**, which is a shape no
-  other ADR here has; read its §"What the owner has not decided" before acting on it.
+  [#465](https://github.com/openzigs/onyourleft/issues/465) for how a race between riders is fair.
+  ⚠️ It was **Accepted with five questions explicitly left to the owner**, which is a shape no other
+  ADR here has — and a reviewer who remembers those questions being OPEN is reading the old file:
+  [#488](https://github.com/openzigs/onyourleft/issues/488) appended a dated amendment on
+  2026-09-22 answering all six. Read the **amendment** rather than §"What the owner has not
+  decided", which is now a record of what was asked: **Q5 changed D-4** (W/kg categories are
+  deferred, not shipped, so the Q3 plausibility flags are the only guard in the first cut) and
+  **Q6 lifted D-0's counsel block** while its "#7, no server in Phase 1" block stands, so nothing
+  may still be built.
   ⚠️ **0027 is [ADR 0027](docs/adr/0027-a-tab-left-behind-by-another-tabs-update.md)**, taken by
   [#483](https://github.com/openzigs/onyourleft/issues/483) for the state a tab is left in when
   ANOTHER tab's update takes over — a reviewer who remembers this sentence offering 0027 is reading
@@ -3297,7 +3303,10 @@ top of an issue **supersedes its body**.
 | What stops a widened endpoint radius or a sparse ride outrunning that margin, and what a ride coarser than the ceiling loses | `packages/domain/src/segment/segment.ts` §`MAXIMUM_ENDPOINT_REACH_METRES`, `packages/domain/src/segment/match.ts` §`GAP_SECONDS` |
 | What a test fixture at latitude 51.5, longitude -0.12 used to break, and what fixed it | `packages/domain/src/segment/cells.test.ts`, `apps/web/src/segments/sweep.store.test.ts` §`ORIGIN_LONGITUDE` |
 | Where a device's capability set comes from, and what happens when a device contradicts itself | [`packages/sensors/README.md`](packages/sensors/README.md) §"What a device says it can do", `packages/sensors/web-bluetooth/src/transport.ts` §`declaredBy`, §`noteUndeclared` |
-| What decides who is faster in a race, and which five questions about that are the owner's | [ADR 0028](docs/adr/0028-racing-fairness.md), §"What the owner has not decided", [#465](https://github.com/openzigs/onyourleft/issues/465) |
+| What decides who is faster in a race, and what the owner answered when asked | [ADR 0028](docs/adr/0028-racing-fairness.md) §Amendments (2026-09-22), [#465](https://github.com/openzigs/onyourleft/issues/465), [#488](https://github.com/openzigs/onyourleft/issues/488) |
+| Why a race has no categories in its first cut, and what that leaves as the only guard | [ADR 0028](docs/adr/0028-racing-fairness.md) §Amendments §"What Q5 costs, said plainly", D-4 |
+| Where a W/kg plausibility ceiling came from, which of the four is sourced first-hand, and the one that sits below a world record | [ADR 0028](docs/adr/0028-racing-fairness.md) §Amendments §"Q3's four ceilings", [ADR 0006](docs/adr/0006-fit-codec-licensing.md) R1 |
+| Why no patent counsel was bought before racing was designed, and what that decision does NOT establish | [`docs/spikes/0005-live-racing-patent-read.md`](docs/spikes/0005-live-racing-patent-read.md) §5 §"What was bought", [ADR 0028](docs/adr/0028-racing-fairness.md) D-0 |
 | Why a race fixes the riding position instead of deriving frontal area from a rider's height | [ADR 0028](docs/adr/0028-racing-fairness.md) D-1, `apps/web/src/game/rider.ts` §`RIDING_POSITIONS` |
 | What a room would check before it believes a reported power, and why that rule is in an ADR rather than in code | [ADR 0028](docs/adr/0028-racing-fairness.md) D-2 §"What a room checks", [#69](https://github.com/openzigs/onyourleft/issues/69) |
 | What pins the arithmetic two builds must share, and why a red assertion there is probably not a bug | `packages/physics/src/agreement.test.ts`, [ADR 0028](docs/adr/0028-racing-fairness.md) D-2 rule 5 |
