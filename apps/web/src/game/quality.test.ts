@@ -40,6 +40,7 @@ import {
   worldRung,
   type QualityLevel,
   type QualitySample,
+  type QualitySettings,
   type QualityState,
   type WorldQualityState,
 } from './quality';
@@ -71,13 +72,16 @@ describe('the reduction path', () => {
 
   it('reduces resolution before it reduces frame rate', () => {
     // #91 quotes Google naming both parameters; the order is this repository's
-    // choice and is stated in `quality.ts`.
+    // choice and is stated in `quality.ts`. Since #482 the first step down
+    // keeps the display's rate outright, and the second caps at #91's 30.
     const first = qualitySettings(1);
     const second = qualitySettings(2);
+    const third = qualitySettings(3);
 
     expect(first.renderScale).toBeLessThan(1);
-    expect(first.frameCap).toBe(30);
-    expect(second.frameCap).toBeLessThan(30);
+    expect(first.frameCap).toBe(DISPLAY_RATE);
+    expect(second.frameCap).toBe(TARGET_FRAMES_PER_SECOND);
+    expect(third.frameCap).toBeLessThan(TARGET_FRAMES_PER_SECOND);
   });
 
   it('walks all the way down under sustained heat, and stops at the bottom', () => {
@@ -185,9 +189,15 @@ describe('recovery, and the hysteresis that stops it oscillating', () => {
     expect(qualitySettings(state.level).frameCap).toBe(DISPLAY_RATE);
   });
 
-  it('caps the rungs below the top at 30, 24 and 20 — the owner’s ruling, #476', () => {
-    expect(QUALITY_LADDER.map((rung) => rung.frameCap)).toEqual([DISPLAY_RATE, 30, 24, 20]);
-    expect(qualitySettings(1).frameCap).toBe(TARGET_FRAMES_PER_SECOND);
+  it('caps only the three rungs below the display-rate pair, at 30, 24 and 20 — #476, #482', () => {
+    expect(QUALITY_LADDER.map((rung) => rung.frameCap)).toEqual([
+      DISPLAY_RATE,
+      DISPLAY_RATE,
+      30,
+      24,
+      20,
+    ]);
+    expect(qualitySettings(2).frameCap).toBe(TARGET_FRAMES_PER_SECOND);
   });
 });
 
@@ -287,15 +297,18 @@ describe('the scenery budget is a rung on the ladder — #245', () => {
     for (let step = 0; step < QUALITY_LADDER.length; step += 1) {
       state = sustain(state, HOT, SUSTAINED_SAMPLES);
       const settings = qualitySettings(state.level);
-      if (settings.frameCap < 30 && firstFrameRateDrop === undefined) {
+      // "Frame rate given up" is a cap below the display's rate — #482, and
+      // `quality.ts` §`QUALITY_LADDER` "What frame rate given up means".
+      if (settings.frameCap < DISPLAY_RATE && firstFrameRateDrop === undefined) {
         firstFrameRateDrop = settings.scatterItems;
       }
     }
 
     expect(firstFrameRateDrop).toBeDefined();
     expect(firstFrameRateDrop).toBeLessThan(full);
-    // And the first rung down gave up scenery without giving up a frame.
-    expect(qualitySettings(1).frameCap).toBe(30);
+    // And the first rung down gave up scenery without giving up a frame: it
+    // still draws at the display's rate (#482).
+    expect(qualitySettings(1).frameCap).toBe(DISPLAY_RATE);
     expect(qualitySettings(1).scatterItems).toBeLessThan(full);
   });
 
@@ -363,7 +376,7 @@ describe('the scenery gives up its variety before it gives up its items — #367
   it('never falls below one, which is a shape rather than none', () => {
     // ⚠️ `ScatterBelt` takes an item's variant modulo this, so a zero would be
     // a division by zero and a world with nothing standing beside the road.
-    for (const level of [0, 1, 2, 3] as const) {
+    for (const level of [0, 1, 2, 3, 4] as const) {
       expect(qualitySettings(level).sceneryVariants).toBeGreaterThanOrEqual(1);
       expect(Number.isInteger(qualitySettings(level).sceneryVariants)).toBe(true);
     }
@@ -426,11 +439,9 @@ describe('the water shader is a rung on the ladder — #459', () => {
   it('shades water at the target only, and gives it up before any frame rate', () => {
     expect(qualitySettings(0).water).toBe('shaded');
     const firstFlat = QUALITY_LADDER.findIndex((rung) => rung.water === 'flat');
-    // Below #91's target, which is what "frame rate given up" means since
-    // the top rung went above it (#476). @see TARGET_FRAMES_PER_SECOND
-    const firstSlower = QUALITY_LADDER.findIndex(
-      (rung) => rung.frameCap < TARGET_FRAMES_PER_SECOND,
-    );
+    // Below the display's rate, which is what "frame rate given up" means
+    // since #482 — between #476 and #482 it had to be read as "below 30".
+    const firstSlower = QUALITY_LADDER.findIndex((rung) => rung.frameCap < DISPLAY_RATE);
     expect(firstFlat).toBeGreaterThan(0);
     expect(firstFlat).toBeLessThan(firstSlower);
     // Never back on as the ladder goes down.
@@ -461,10 +472,8 @@ describe('the surface detail is a rung on the ladder — #425', () => {
     // #425: "a throttling phone drops textures before it drops frame rate".
     expect(qualitySettings(0).surfaceDetail).toBe(true);
     const firstPlain = QUALITY_LADDER.findIndex((rung) => !rung.surfaceDetail);
-    // Below #91's target. @see TARGET_FRAMES_PER_SECOND
-    const firstSlower = QUALITY_LADDER.findIndex(
-      (rung) => rung.frameCap < TARGET_FRAMES_PER_SECOND,
-    );
+    // Below the display's rate — #482. @see DISPLAY_RATE
+    const firstSlower = QUALITY_LADDER.findIndex((rung) => rung.frameCap < DISPLAY_RATE);
     expect(firstPlain).toBeGreaterThan(0);
     expect(firstPlain).toBeLessThan(firstSlower);
     for (let level = firstPlain; level < QUALITY_LADDER.length; level += 1) {
@@ -504,7 +513,7 @@ describe('the riders’ shadows on the ladder — #426', () => {
   it('is given to a device that asked, at level 0 only, and taken away by the first step down', () => {
     expect(rungFor(0, true)).toBe(RIDER_SHADOW_MAP_RUNG);
     expect(rungFor(0, false)).toBe(qualitySettings(0));
-    for (const level of [1, 2, 3] as const) {
+    for (const level of [1, 2, 3, 4] as const) {
       expect(rungFor(level, true)).toBe(qualitySettings(level));
     }
   });
@@ -616,5 +625,91 @@ describe('the realistic world is a ladder above the stylised one — ADR 0026 D-
   it('is never reached from a stylised start, however cool the device', () => {
     const stylised: WorldQualityState = { realistic: false, quality: INITIAL_QUALITY };
     expect(sustainWorld(stylised, COOL, SUSTAINED_SAMPLES * 10).realistic).toBe(false);
+  });
+});
+
+/**
+ * The owner's ruling — #482: *"I want the extra 60 fps step."* A warming
+ * device sheds resolution and scenery AT the display's rate first, and only
+ * then caps 30 → 24 → 20. @see QUALITY_LADDER §"The owner's rulings"
+ */
+describe('the extra display-rate step — the owner’s ruling, #482', () => {
+  /** Every rung a device arrives at, in order, walked from the target under sustained heat. */
+  function heatWalk(): QualitySettings[] {
+    let state = INITIAL_QUALITY;
+    const seen = [qualitySettings(state.level)];
+    for (let step = 0; step < QUALITY_LADDER.length + 2; step += 1) {
+      state = sustain(state, HOT, SUSTAINED_SAMPLES);
+      const rung = qualitySettings(state.level);
+      if (rung !== seen[seen.length - 1]) seen.push(rung);
+    }
+    return seen;
+  }
+
+  it('walks full → reduced at the display’s rate → 30 → 24 → 20, one rung per sustained run', () => {
+    // Walked with `nextQuality`, not read off the table: the claim is about the
+    // order a warming device arrives at the rungs in.
+    const walk = heatWalk();
+    expect(walk.map((rung) => rung.frameCap)).toEqual([DISPLAY_RATE, DISPLAY_RATE, 30, 24, 20]);
+    const [full, first] = walk;
+    // The first step down sheds resolution and scenery and keeps every frame.
+    expect(first?.renderScale).toBeLessThan(full?.renderScale ?? 0);
+    expect(first?.scatterItems).toBeLessThan(full?.scatterItems ?? 0);
+    expect(first?.structureItems).toBeLessThan(full?.structureItems ?? 0);
+    expect(first?.frameCap).toBe(full?.frameCap);
+  });
+
+  it('makes the first capped rung a frame-rate step and nothing else', () => {
+    // ⚠️ The non-vacuity half. A 30 fps rung that also cut resolution again
+    // would satisfy the walk above and put two visible reductions back into
+    // one step, which is what the ruling took apart.
+    const firstCapped = QUALITY_LADDER.findIndex((rung) => rung.frameCap < DISPLAY_RATE);
+    expect(firstCapped).toBe(2);
+    const capped = QUALITY_LADDER[firstCapped] as QualitySettings;
+    const above = QUALITY_LADDER[firstCapped - 1] as QualitySettings;
+    expect(capped.frameCap).toBe(TARGET_FRAMES_PER_SECOND);
+    expect(above.frameCap).toBe(DISPLAY_RATE);
+    expect({ ...capped, frameCap: above.frameCap, label: '' }).toEqual({ ...above, label: '' });
+    expect(capped.label).not.toBe(above.label);
+  });
+
+  it('gives every rung a cap the pacer can honour: the display’s rate, or a positive number', () => {
+    // #481's review, finding 3: a mistyped cap must be a red test here rather
+    // than a rung that quietly draws at the display's rate. @see frame-pacer.ts
+    for (const rung of [...QUALITY_LADDER, ...REALISTIC_LADDER, RIDER_SHADOW_MAP_RUNG]) {
+      const honoured =
+        rung.frameCap === DISPLAY_RATE || (Number.isFinite(rung.frameCap) && rung.frameCap > 0);
+      expect(honoured, rung.label).toBe(true);
+    }
+  });
+
+  it('keeps D-3: the realistic rungs are stylised 0 and 1 with the world swapped, and realism goes two steps before any frame rate', () => {
+    REALISTIC_LADDER.forEach((rung, level) => {
+      expect({ ...rung, world: 'stylised', label: '' }, rung.label).toEqual({
+        ...QUALITY_LADDER[level],
+        label: '',
+      });
+    });
+    let state: WorldQualityState = INITIAL_REALISTIC_QUALITY;
+    const walk = [worldRung(state)];
+    for (let step = 0; step < REALISTIC_LADDER.length + QUALITY_LADDER.length + 2; step += 1) {
+      for (let sample = 0; sample < SUSTAINED_SAMPLES; sample += 1) {
+        state = nextWorldQuality(state, HOT);
+      }
+      const rung = worldRung(state);
+      if (rung !== walk[walk.length - 1]) walk.push(rung);
+    }
+    expect(walk.map((rung) => `${rung.world}:${String(rung.frameCap)}`)).toEqual([
+      'realistic:Infinity',
+      'realistic:Infinity',
+      'stylised:Infinity',
+      'stylised:Infinity',
+      'stylised:30',
+      'stylised:24',
+      'stylised:20',
+    ]);
+    const leftRealism = walk.findIndex((rung) => rung.world === 'stylised');
+    const firstCapped = walk.findIndex((rung) => rung.frameCap < DISPLAY_RATE);
+    expect(firstCapped - leftRealism).toBe(2);
   });
 });

@@ -44,7 +44,7 @@ import { STRUCTURE_MAX_ITEMS } from './settlements';
 import { MAXIMUM_SCENERY_VARIANTS } from './scenery-models';
 
 /** How hard the renderer is working. Lower is cooler. */
-export type QualityLevel = 0 | 1 | 2 | 3;
+export type QualityLevel = 0 | 1 | 2 | 3 | 4;
 
 /** What one quality level means to the renderer. */
 export interface QualitySettings {
@@ -107,12 +107,14 @@ export interface QualitySettings {
    *   argument for the hysteresis. Fewer rungs that each do something beat
    *   more rungs that each do little.
    * - **Not after the frame rate.** #245's FR-4 fixes that outer bound
-   *   directly — scenery is reduced before frame rate is — and the first rung
-   *   whose `frameCap` drops below {@link TARGET_FRAMES_PER_SECOND} is the
-   *   **second step down**, by which point this budget has already fallen
-   *   twice. (The first step down also leaves the display's rate for 30 since
-   *   #476, which is a return to #91's target rather than a frame rate given
-   *   up below it — {@link QUALITY_LADDER} §"The owner's ruling".)
+   *   directly — scenery is reduced before frame rate is — and since #482 the
+   *   first step down gives up NO frame rate at all: it sheds this budget at
+   *   the display's rate, and the first rung that caps below the display's
+   *   rate is the **second step down**, which gives up only the frame rate.
+   *   "Frame rate given up" means exactly that — a `frameCap` below
+   *   {@link DISPLAY_RATE} — and not, as between #476 and #482, "below
+   *   {@link TARGET_FRAMES_PER_SECOND}". {@link QUALITY_LADDER} §"The owner's
+   *   rulings".
    *
    * ## Why the floor rung is sixty and not zero
    *
@@ -125,9 +127,10 @@ export interface QualitySettings {
    *
    * ## ⚠️ Provenance — BR-1, and none of these numbers is a measurement
    *
-   * 240 → 160 → 100 → 60. Each rung keeps about two-thirds of the one above and
-   * the floor keeps a quarter of the top, which is the shape {@link renderScale}
-   * already takes in *pixels*: 1, 0.83, 0.67 and 0.5 square to 1, 0.69, 0.45
+   * 240 → 160 → 160 → 100 → 60 — level 2 is level 1 capped at 30 (#482), so
+   * the figure repeats there. Each step that cuts it keeps about two-thirds of
+   * the one above and the floor keeps a quarter of the top, which is the shape
+   * {@link renderScale} already takes in *pixels*: 1, 0.83, 0.67 and 0.5 square to 1, 0.69, 0.45
    * and 0.25. That shape is **chosen, not measured.** ADR 0008 D-2's rendering
    * gate was waived rather than passed and
    * [#247](https://github.com/openzigs/onyourleft/issues/247) is the 60-minute
@@ -174,8 +177,8 @@ export interface QualitySettings {
    *
    * ## ⚠️ Provenance — BR-1, and this number is not a measurement either
    *
-   * 3 → 2 → 1 → 1, on the same footing as every other figure on this ladder:
-   * ADR 0008 D-2's rendering gate was waived rather than passed and
+   * 3 → 2 → 2 → 1 → 1 (level 2 repeats level 1, #482), on the same footing
+   * as every other figure on this ladder: ADR 0008 D-2's rendering gate was waived rather than passed and
    * [#247](https://github.com/openzigs/onyourleft/issues/247) is the run that
    * would settle it. What *is* measured is the draw-call arithmetic itself —
    * `game.browser.spec.ts` counts the meshes a frame actually submits at each
@@ -250,8 +253,8 @@ export interface QualitySettings {
    *
    * ## ⚠️ Provenance — BR-1, and this is not a measurement either
    *
-   * 12 → 10 → 9 → 8, on the same footing as every figure on this ladder. What
-   * the browser gate measures is the vertex and index counts and the draw
+   * 12 → 10 → 10 → 9 → 8 (level 2 repeats level 1, #482), on the same footing
+   * as every figure on this ladder. What the browser gate measures is the vertex and index counts and the draw
    * range, and `docs/validation/0002-android-shell-and-game.md` Part V is the
    * frame time on a phone.
    */
@@ -292,8 +295,9 @@ export interface QualitySettings {
    *
    * ## ⚠️ Provenance — BR-1, and not a measurement
    *
-   * 240 → 120 → 60 → 40: halved at each of the first two steps, faster than
-   * the scenery's own two-thirds, because what a structure budget takes first
+   * 240 → 120 → 120 → 60 → 40 (level 2 repeats level 1, #482): halved at
+   * each of the first two steps that cut it, faster than the scenery's own
+   * two-thirds, because what a structure budget takes first
    * is a field's far boundary and a wall 40 m from the road reads as the same
    * field without it. The houses are never what goes: they lead the list.
    * Validation 0002 Part X is the frame time on a phone with the new kinds in
@@ -313,8 +317,8 @@ export interface QualitySettings {
    *
    * ⚠️ **On the target rung only**, which is #425's own criterion: *"a
    * throttling phone drops textures before it drops frame rate"* — the first
-   * step down takes it, and the first rung that lowers the frame cap is the
-   * one after. Detail is what goes first because nothing a rider needs lives
+   * step down takes it at the display's rate, and the first rung that caps
+   * below the display's rate is the one after (#482). Detail is what goes first because nothing a rider needs lives
    * in it: the gradient is in the road's own colour, which the grain is
    * bounded against (`terrain.ts` §`ROAD_SURFACE_GRAIN`).
    *
@@ -359,41 +363,98 @@ export interface QualitySettings {
 export const DISPLAY_RATE = Number.POSITIVE_INFINITY;
 
 /**
- * #91's target frame rate. The rungs BELOW the top step down from here; the
- * top rung draws above it where the device sustains that — see
- * {@link QUALITY_LADDER}.
+ * #91's target frame rate, and the cap of the first rung that gives up frame
+ * rate at all. The two rungs above it draw at the display's rate where the
+ * device sustains that — see {@link QUALITY_LADDER}.
  */
 export const TARGET_FRAMES_PER_SECOND = 30;
 
 /**
+ * The ladder's first step down — resolution, scenery and the other detail —
+ * at the display's rate (#482). Named because two rungs are built from it:
+ * level 1 is this, and level 2 is this capped at 30. @see QUALITY_LADDER
+ */
+const REDUCED_AT_DISPLAY_RATE: QualitySettings = {
+  renderScale: 0.83,
+  frameCap: DISPLAY_RATE,
+  scatterItems: 160,
+  sceneryVariants: 2,
+  terrainBands: 10,
+  water: 'flat',
+  structureItems: 120,
+  surfaceDetail: false,
+  shading: 'lit',
+  riderShadows: 'contact',
+  world: 'stylised',
+  label: 'reduced resolution and scenery',
+};
+
+/**
  * The ladder, coolest last.
  *
- * ## The owner's ruling on frame rate — #476, 2026-09-22
+ * ## The owner's rulings on frame rate — #476 and #482, 2026-09-22
  *
- * ⚠️ **The top rung is uncapped, at the display's rate** ({@link DISPLAY_RATE}
- * — 60 Hz on the tablet, and never above the display's own rate), **and the
- * rungs below cap at 30 → 24 → 20 as the ladder steps down.** The owner chose
- * this ("allow 60 fps at the top quality rung where the device sustains it,
- * then step down 30 → 24 → 20 as it heats") when #476 found the cap was read
- * by nothing — so every rung had in fact been drawing at the display's rate.
- * **A reviewer who remembers every rung capping at 30 at the top is reading
- * the old file**, and so is one who remembers this paragraph saying *"there is
- * deliberately no 60 fps rung"*.
+ * ⚠️ **The top TWO rungs are uncapped, at the display's rate**
+ * ({@link DISPLAY_RATE} — 60 Hz on the tablet, and never above the display's
+ * own rate), **and only the three below them cap, at 30 → 24 → 20.** So a
+ * warming device first gives up resolution and scenery AT the display's rate,
+ * and only after that gives up frame rate. **A reviewer who remembers the first
+ * step down cutting to 30 fps is reading the old file**: between #476 and #482
+ * level 1 took the resolution, the scenery AND the drop from 60 to 30 in one
+ * step, and #481's review (finding 4) put that to the owner, who ruled *"I want
+ * the extra 60 fps step."* And a reviewer who remembers every rung capping at
+ * 30, or this paragraph saying *"there is deliberately no 60 fps rung"*, is
+ * reading an older one still — #476 found the cap was read by nothing, so every
+ * rung had in fact been drawing at the display's rate, and the owner chose
+ * *"allow 60 fps at the top quality rung where the device sustains it, then
+ * step down 30 → 24 → 20 as it heats"*.
  *
- * That paragraph quoted #91 — *"30 fps is the right target, not a
- * compromise"*, and 60 *"doubles the thermal bill for the entire ride"* — and
- * the ruling does not contradict the arithmetic; it moves who pays it. A cool
- * device draws at the display's rate, and the first step down (thermal
- * forecast or frame time, the same two signals as always) returns to #91's
- * 30. **What "sustains it" means is the ladder's existing policy, unchanged**:
- * a device is stepped down when its forecast or its frame times say it is hot
- * ({@link HEADROOM_REDUCE_ABOVE}, {@link FRAME_MS_REDUCE_ABOVE}); a device
- * drawing 40 fps at the top rung that is neither is left there, which is still
- * smoother than the 30 it would be stepped down to.
+ * | Level | Label | Frame cap | What that step gives up |
+ * |---|---|---|---|
+ * | 0 | full | display rate | — |
+ * | 1 | reduced resolution and scenery | display rate | resolution, scenery, variety, far ground, structures, water shader, surface detail |
+ * | 2 | reduced resolution and scenery, 30 fps | 30 | frame rate **only** — every other figure is level 1's |
+ * | 3 | reduced resolution, scenery and frame rate | 24 | resolution, scenery, variety, far ground, structures, frame rate |
+ * | 4 | minimum | 20 | resolution, scenery, far ground, structures, frame rate, shading |
  *
- * "Frame rate given up" elsewhere in this file — #245 FR-4, #425, #459 — means
- * given up below {@link TARGET_FRAMES_PER_SECOND}, and each of those orderings
- * still holds: the first rung below the target is level 2.
+ * ⚠️ **Level 2 is a frame-rate step and nothing else, on purpose.** The
+ * ruling is "shed resolution and scenery at 60, THEN cap 30 → 24 → 20", and a
+ * step that capped at 30 and also cut resolution again would be two
+ * reductions a rider sees at once, which is exactly what the ruling took
+ * apart. Every figure on it is level 1's; `quality.test.ts` §"#482" asserts
+ * that, so a later tuning that slips a second change into it is a red test.
+ *
+ * #91's arithmetic — *"30 fps is the right target, not a compromise"*, and 60
+ * *"doubles the thermal bill for the entire ride"* — is not contradicted; the
+ * rulings move who pays it. A cool device draws at the display's rate, and it
+ * now takes TWO steps down (thermal forecast or frame time, the same two
+ * signals as always) to return to #91's 30. **What "sustains it" means is the
+ * ladder's existing policy, unchanged**: a device is stepped down when its
+ * forecast or its frame times say it is hot ({@link HEADROOM_REDUCE_ABOVE},
+ * {@link FRAME_MS_REDUCE_ABOVE}); a device drawing 40 fps at the top rung that
+ * is neither is left there, which is still smoother than the 30 it would be
+ * stepped down to.
+ *
+ * ## What "frame rate given up" means, precisely — #482
+ *
+ * **A rung gives up frame rate when its `frameCap` is below
+ * {@link DISPLAY_RATE}.** #245 FR-4 (scenery before frame rate), #425 (surface
+ * detail before frame rate) and #459 (the water shader before frame rate) are
+ * each stated against that, and each holds: all three are given up at level 1
+ * and the first capped rung is level 2. Between #476 and #482 the three were
+ * read as "below {@link TARGET_FRAMES_PER_SECOND}", which they passed only
+ * because level 1's own drop from 60 to 30 was not counted; the stricter
+ * reading is back because the ladder now meets it.
+ *
+ * ## Where the realistic rungs sit — ADR 0026 D-3
+ *
+ * {@link REALISTIC_LADDER} is this ladder's levels 0 and 1 with the world
+ * swapped, figure for figure, so both realistic rungs draw at the display's
+ * rate and neither needs an exception any more. The heat walk from the
+ * realistic top is realistic full (display) → realistic reduced (display) →
+ * stylised full (display) → stylised reduced (display) → 30 → 24 → 20:
+ * realism is given up two steps before any frame rate is, which is D-3's order
+ * with room to spare.
  */
 export const QUALITY_LADDER: readonly QualitySettings[] = [
   {
@@ -418,21 +479,16 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     label: 'full',
   },
   // ⚠️ The scenery goes here, WITH the first resolution step rather than as a
-  // rung of its own — {@link QualitySettings.scatterItems} argues why, and #245
-  // FR-4's outer bound is discharged by the rung below rather than by this one.
+  // rung of its own — {@link QualitySettings.scatterItems} argues why — and AT
+  // the display's rate, which is #482's ruling: this step gives up no frame
+  // rate at all. @see QUALITY_LADDER
+  REDUCED_AT_DISPLAY_RATE,
+  // ⚠️ #482: the frame-rate step, and NOTHING else — level 1 with a 30 fps
+  // cap. @see QUALITY_LADDER §"Level 2 is a frame-rate step and nothing else"
   {
-    renderScale: 0.83,
+    ...REDUCED_AT_DISPLAY_RATE,
     frameCap: TARGET_FRAMES_PER_SECOND,
-    scatterItems: 160,
-    sceneryVariants: 2,
-    terrainBands: 10,
-    water: 'flat',
-    structureItems: 120,
-    surfaceDetail: false,
-    shading: 'lit',
-    riderShadows: 'contact',
-    world: 'stylised',
-    label: 'reduced resolution and scenery',
+    label: 'reduced resolution and scenery, 30 fps',
   },
   {
     renderScale: 0.67,
@@ -690,10 +746,13 @@ export function readShadowMapChoice(
  * realistic world, before the world itself is given up: D-3's *"the realistic
  * rungs reduce within themselves"*. Neither lowers the frame cap, so a hot
  * device gives up realism before it gives up frame rate, which is what the
- * owner's brief for #430's pull request asked of the ladder. ⚠️ **Since #476
- * the cap is honoured**, and both realistic rungs draw at the display's rate —
- * the second one keeps the TOP rung's cap rather than taking level 1's 30 with
- * the rest of level 1, which is the one figure on it that is not a copy.
+ * owner's brief for #430's pull request asked of the ladder. ⚠️ **Since #482
+ * both are exact copies of stylised levels 0 and 1 with the world swapped.**
+ * Between #476 and #482 the second kept the top rung's cap by exception,
+ * because the stylised level 1 it copied capped at 30; that level now draws at
+ * the display's rate itself, so the exception is gone, and the realistic walk
+ * reaches its first capped rung two steps after it leaves realism —
+ * {@link QUALITY_LADDER} §"Where the realistic rungs sit".
  *
  * ⚠️ **Nothing in the shipped app selects either.** D-12: the realistic world
  * is offered to riders only when it is whole, and layer 3 (structures) has not
@@ -711,13 +770,11 @@ export function readShadowMapChoice(
  */
 export const REALISTIC_LADDER: readonly QualitySettings[] = [
   { ...(QUALITY_LADDER[0] as QualitySettings), world: 'realistic', label: 'realistic' },
+  // The stylised first step down, at the display's rate, with the world
+  // swapped — #482. The heat walk never raises the cap: realistic 60 → 60 →
+  // stylised full 60 → reduced 60 → 30 → 24 → 20.
   {
     ...(QUALITY_LADDER[1] as QualitySettings),
-    // ⚠️ The top rung's cap, NOT level 1's 30 — #476. The rest of this rung
-    // is the stylised first step down; the frame rate is not, so that a hot
-    // device gives up realism before it gives up frame rate, and the heat walk
-    // never raises the cap (realistic 60 → 60 → stylised top 60 → 30 → 24 → 20).
-    frameCap: (QUALITY_LADDER[0] as QualitySettings).frameCap,
     world: 'realistic',
     label: 'realistic, reduced resolution and scenery',
   },

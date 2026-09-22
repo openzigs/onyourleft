@@ -51,10 +51,11 @@ describe('the frame cap, applied — #476', () => {
     expect(drawn(ride(20, 10))).toBe(200);
   });
 
-  it('draws what each rung of the ladder caps it at, and each lower rung draws fewer', () => {
+  it('draws what each rung of the ladder caps it at, and each capped rung draws fewer', () => {
+    // #482: the top two rungs both draw at the display's rate.
     const counts = QUALITY_LADDER.map((rung) => drawn(ride(rung.frameCap, 10)));
-    expect(counts).toEqual([600, 300, expect.any(Number) as number, 200]);
-    for (let level = 1; level < counts.length; level += 1) {
+    expect(counts).toEqual([600, 600, 300, expect.any(Number) as number, 200]);
+    for (let level = 2; level < counts.length; level += 1) {
       expect(counts[level] ?? 0, QUALITY_LADDER[level]?.label).toBeLessThan(counts[level - 1] ?? 0);
     }
   });

@@ -578,7 +578,7 @@ describe('the frame carries the scenery for the road it drew', () => {
     // candidates does not run on the thread GATT notifications arrive on. A
     // rung applied only in the renderer leaves that cost exactly where it was.
     const setup = straightRoute();
-    const floor = qualitySettings(3).scatterItems;
+    const floor = qualitySettings(4).scatterItems;
 
     const atTheTop = natural(frameAt(setup, 600)).length;
     const atTheFloor = natural(frameAt(setup, 600, floor)).length;

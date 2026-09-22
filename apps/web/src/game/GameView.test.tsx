@@ -718,7 +718,8 @@ describe('GameView — the world moves rather than steps (#323)', () => {
    *
    * ⚠️ **It was sixty, and since #476 sixty is a different test.** A 250 ms
    * frame is a hot sample, and sixty of them walk the ladder to level 2, whose
-   * 24 fps cap now does what it says: three frames 8 ms apart draw ONE. That
+   * 30 fps cap (24 before #482) does what it says: three frames 8 ms apart
+   * draw ONE. That
    * is the cap working, not interpolation failing — so the warm-up stays on
    * the uncapped top rung, where every animation frame is drawn, which is the
    * rung whose frames land several to a simulation step.
@@ -927,8 +928,14 @@ describe('GameView — a hot phone sheds scenery before frame rate (#245)', () =
     // does not bind on it at all, and a test that stopped there would watch the
     // view hand the renderer a smaller number and shed nothing. Two windows
     // reach a rung that does bind, which is what makes the equality below an
-    // assertion rather than a coincidence.
-    await pump(2 * (SUSTAINED_SAMPLES + 5));
+    // assertion rather than a coincidence. ⚠️ **Three since #482**: level 2 is
+    // level 1 capped at 30 and carries the same 160, so the first rung whose
+    // budget binds here is level 3. The frames are shorter than
+    // FRAME_PERIOD_MS but still hot, so the rider is no further up the road
+    // than two windows used to leave them — further, and this fixture's view
+    // holds fewer structures than level 3's budget and the equality below
+    // stops binding.
+    await pump(3 * (SUSTAINED_SAMPLES + 5), FRAME_MS_REDUCE_ABOVE + 5);
     const told = rungs[rungs.length - 1];
     const drawn = frames[frames.length - 1] as SceneFrame;
 
@@ -1001,13 +1008,14 @@ describe('GameView — a hot phone sheds scenery before frame rate (#245)', () =
     const drawn = frames[frames.length - 1] as SceneFrame;
 
     expect(rungs.every((rung) => rung.scatterItems === qualitySettings(0).scatterItems)).toBe(true);
-    // ⚠️ Against rung **2** since #348, for the reason the test above gives:
-    // this fixture's view no longer clears rung 1's budget of 160, so a
-    // comparison against that one would be red on a view that is behaving
-    // perfectly. What it still catches is the failure it was written for — a
-    // view that thinned on every frame would fall under this.
+    // ⚠️ Against rung **3** — rung 2 since #348, for the reason the test
+    // above gives: this fixture's view no longer clears rung 1's budget of 160,
+    // so a comparison against that one would be red on a view that is behaving
+    // perfectly, and since #482 rung 2 is rung 1 capped at 30 with the same
+    // 160. What it still catches is the failure it was written for — a view
+    // that thinned on every frame would fall under this.
     expect(drawn.scatter.length).toBeGreaterThan(
-      QUALITY_LADDER[2]?.scatterItems ?? Number.POSITIVE_INFINITY,
+      QUALITY_LADDER[3]?.scatterItems ?? Number.POSITIVE_INFINITY,
     );
   });
 });
@@ -1021,10 +1029,15 @@ describe('GameView — a hot phone sheds scenery before frame rate (#245)', () =
  */
 describe('GameView — each rung draws at its own frame cap (#476)', () => {
   const VSYNC_MS = 1000 / 60;
-  /** Two-thirds of a second of a 60 Hz display: short of the 30 cool samples a climb needs. */
-  const MEASURED_VSYNCS = 40;
+  /**
+   * Nine-twentieths of a second of a 60 Hz display: short of the 30 cool
+   * samples a climb needs, ON EVERY RUNG. ⚠️ It was 40 until #482, which was
+   * short of 30 only on the capped rungs; level 1 now draws every frame, so
+   * 40 cool samples there climbed it straight back to level 0 mid-measure.
+   */
+  const MEASURED_VSYNCS = 27;
 
-  it('draws every animation frame at the top rung, then 30, 24 and 20 a second', async () => {
+  it('draws every animation frame at the top two rungs, then 30, 24 and 20 a second — #482', async () => {
     const frames = await startRiding({ pacer: false });
     const drawnPerMeasure = async (): Promise<number> => {
       frames.length = 0;
@@ -1039,14 +1052,17 @@ describe('GameView — each rung draws at its own frame cap (#476)', () => {
       // …and the rung it reached decides how many of the next frames are drawn.
       counts.push(await drawnPerMeasure());
     }
+    // The owner's ruling (#482): the first step down keeps every frame.
     expect(counts[0]).toBe(MEASURED_VSYNCS);
-    expect(counts[1]).toBe(MEASURED_VSYNCS / 2);
-    // 24 and 20 a second over two-thirds of a second: 16 and 13 or 14.
-    expect(counts[2]).toBeGreaterThanOrEqual(15);
-    expect(counts[2]).toBeLessThanOrEqual(17);
-    expect(counts[3]).toBeGreaterThanOrEqual(13);
-    expect(counts[3]).toBeLessThanOrEqual(14);
-    // The two rungs whose deepest cut is the frame rate now cut it.
+    expect(counts[1]).toBe(MEASURED_VSYNCS);
+    // 30, 24 and 20 a second over 27 vsyncs: 13 or 14, 10 or 11, and 9.
+    expect(counts[2]).toBeGreaterThanOrEqual(13);
+    expect(counts[2]).toBeLessThanOrEqual(14);
+    expect(counts[3]).toBeGreaterThanOrEqual(10);
+    expect(counts[3]).toBeLessThanOrEqual(11);
+    expect(counts[4]).toBe(9);
+    // Each capped rung draws fewer than the one above it.
+    expect(counts[4] ?? 0).toBeLessThan(counts[3] ?? 0);
     expect(counts[3] ?? 0).toBeLessThan(counts[2] ?? 0);
     expect(counts[2] ?? 0).toBeLessThan(counts[1] ?? 0);
   });
@@ -1072,7 +1088,7 @@ describe('GameView — each rung draws at its own frame cap (#476)', () => {
       });
     }
     const capped = measured.filter((each) => each.drawn < MEASURED_VSYNCS);
-    expect(capped.length).toBeGreaterThanOrEqual(3);
+    expect(capped.map((each) => each.label)).toEqual(QUALITY_LADDER.slice(2).map((r) => r.label));
     for (const each of measured) expect(each.renders, each.label).toBe(each.drawn);
   });
 
@@ -1084,25 +1100,26 @@ describe('GameView — each rung draws at its own frame cap (#476)', () => {
     frames.length = 0;
     await pump(MEASURED_VSYNCS, VSYNC_MS);
     const along = frames.map((frame) => frame.markers.find((each) => each.kind === 'rider')?.z);
-    expect(along.length).toBeGreaterThan(10);
+    expect(along.length).toBeGreaterThanOrEqual(8);
     for (let index = 1; index < along.length; index += 1) {
       expect(along[index] as number).toBeGreaterThan(along[index - 1] as number);
     }
   });
 
   it('does not read a skipped animation frame as a fast frame', async () => {
-    // Level 1 caps at 30, so on a 60 Hz display every other animation frame
-    // is skipped. The ladder climbs back after SUSTAINED_SAMPLES cool samples;
-    // a loop that fed it every animation frame's gap would climb after 30
-    // animation frames, when only 15 frames have been drawn.
+    // Level 2 caps at 30 (level 1 since #482 draws at the display's rate), so
+    // on a 60 Hz display every other animation frame is skipped. The ladder
+    // climbs back after SUSTAINED_SAMPLES cool samples; a loop that fed it
+    // every animation frame's gap would climb after 30 animation frames, when
+    // only 15 frames have been drawn.
     await startRiding({ pacer: false });
-    await pump(SUSTAINED_SAMPLES + 2);
-    expect(rungs[rungs.length - 1]).toEqual(QUALITY_LADDER[1]);
+    await pump(2 * (SUSTAINED_SAMPLES + 2));
+    expect(rungs[rungs.length - 1]).toEqual(QUALITY_LADDER[2]);
     await pump(SUSTAINED_SAMPLES + 2, VSYNC_MS);
-    expect(rungs[rungs.length - 1]).toEqual(QUALITY_LADDER[1]);
+    expect(rungs[rungs.length - 1]).toEqual(QUALITY_LADDER[2]);
     // Twice as many animation frames is as many drawn frames: now it climbs.
     await pump(SUSTAINED_SAMPLES + 2, VSYNC_MS);
-    expect(rungs[rungs.length - 1]).toEqual(QUALITY_LADDER[0]);
+    expect(rungs[rungs.length - 1]).toEqual(QUALITY_LADDER[1]);
   });
 });
 
