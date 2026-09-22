@@ -117,11 +117,14 @@ function pedallingPort(
   return {
     listRoutes: () => Promise.resolve([route]),
     loadGhost: () => Promise.resolve(ghost),
-    readSensors: () => ({
-      rider: { power: watts(220), live: true, paired: true },
-      cadence: cadence(),
-      heartRate: { value: 142, live: true, paired: true },
-    }),
+    readSensors: () => {
+      sensorReads += 1;
+      return {
+        rider: { power: watts(220), live: true, paired: true },
+        cadence: cadence(),
+        heartRate: { value: 142, live: true, paired: true },
+      };
+    },
   };
 }
 
@@ -155,10 +158,17 @@ let nowMs = 0;
 let mounted: Mounted | undefined;
 /** Every quality rung a renderer was handed this test. @see capturingRenderer */
 let rungs: QualitySettings[] = [];
+/**
+ * How many times the port's sensors were read this test — once per animation
+ * frame by the loop and once per render by the HUD, which is how #482's first
+ * finding counts renders without reaching into React.
+ */
+let sensorReads = 0;
 
 beforeEach(() => {
   pending = [];
   rungs = [];
+  sensorReads = 0;
   nowMs = 1_000_000;
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
     pending.push(callback);
@@ -1039,6 +1049,31 @@ describe('GameView — each rung draws at its own frame cap (#476)', () => {
     // The two rungs whose deepest cut is the frame rate now cut it.
     expect(counts[3] ?? 0).toBeLessThan(counts[2] ?? 0);
     expect(counts[2] ?? 0).toBeLessThan(counts[1] ?? 0);
+  });
+
+  it('re-renders the HUD only on the frames it draws, at every capped rung — #482', async () => {
+    // ⚠️ #481's review: `if (paced.draw)` → `if (true)` left every test here
+    // green, because only the world's draw was counted. The HUD is the other
+    // half of what a cap skips, and a HUD reconciling at 60 Hz on a 20 fps
+    // rung is heat the cap exists to save. `sensorReads` counts one read per
+    // animation frame (the loop) plus one per render (the HUD).
+    const frames = await startRiding({ pacer: false });
+    const measured: { label: string; drawn: number; renders: number }[] = [];
+    for (let level = 1; level < QUALITY_LADDER.length; level += 1) {
+      await pump(SUSTAINED_SAMPLES + 2);
+      expect(rungs[rungs.length - 1]).toEqual(QUALITY_LADDER[level]);
+      frames.length = 0;
+      sensorReads = 0;
+      await pump(MEASURED_VSYNCS, VSYNC_MS);
+      measured.push({
+        label: QUALITY_LADDER[level]?.label ?? '',
+        drawn: frames.length,
+        renders: sensorReads - MEASURED_VSYNCS,
+      });
+    }
+    const capped = measured.filter((each) => each.drawn < MEASURED_VSYNCS);
+    expect(capped.length).toBeGreaterThanOrEqual(3);
+    for (const each of measured) expect(each.renders, each.label).toBe(each.drawn);
   });
 
   it('still moves the rider on every frame it draws at the floor rung — #323 under a cap', async () => {

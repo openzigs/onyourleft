@@ -53,6 +53,7 @@ import {
   qualitySettings,
   readShadowMapChoice,
   rungFor,
+  type QualityLevel,
   type QualityState,
 } from './quality';
 import { createGradientSession, type GradientSession, type GradientSessionState } from './gradient';
@@ -322,7 +323,23 @@ export function GameView(props: GameViewProps): JSX.Element {
   const [windFrom, setWindFrom] = useState(String(DEFAULT_WIND_FROM_BEARING));
   const [phase, setPhase] = useState<Phase>('choosing');
   const [state, setState] = useState<GameState | undefined>(undefined);
-  const [quality, setQuality] = useState<QualityState>(INITIAL_QUALITY);
+  /**
+   * The rung the ride is drawing at. Only the LEVEL is state — #482.
+   *
+   * ⚠️ **It used to be the whole `QualityState`, and that re-rendered the HUD
+   * on the frames a cap skips.** `nextQuality` returns a new object on every
+   * sample, because its `pressure` counter moves on every sample, so each
+   * sample was a render — and a sample is taken on the animation frame AFTER a
+   * drawn frame, which under a 30 fps cap on a 60 Hz display is every skipped
+   * frame. `if (paced.draw)` around the tick's `setState` therefore skipped
+   * nothing at 30 fps and a third of what it should at 20; #481's review found
+   * the gate untested, and the test written for it (`GameView.test.tsx`
+   * §"re-renders the HUD only on the frames it draws") found this. The counter
+   * lives in {@link qualityRef}, which nothing renders from.
+   */
+  const [qualityLevel, setQualityLevel] = useState<QualityLevel>(INITIAL_QUALITY.level);
+  /** The ladder's full state, pressure included — {@link qualityLevel} says why it is a ref. */
+  const qualityRef = useRef<QualityState>(INITIAL_QUALITY);
   /**
    * What the trainer could be told when this ride started — #362.
    *
@@ -422,10 +439,10 @@ export function GameView(props: GameViewProps): JSX.Element {
   /**
    * How much scenery the current rung allows — #245.
    *
-   * ⚠️ **A ref rather than the `quality` state, for the same reason the loop
-   * below does not depend on `quality`.** That effect is deliberately not
-   * re-run on a rung change, so the `quality` it closes over is the one the
-   * ride started at — reading `qualitySettings(quality.level).scatterItems`
+   * ⚠️ **A ref rather than the `qualityLevel` state, for the same reason the
+   * loop below does not depend on it.** That effect is deliberately not
+   * re-run on a rung change, so the level it closes over is the one the
+   * ride started at — reading `qualitySettings(qualityLevel).scatterItems`
    * inside `tick` would hand `sceneFrame` the target rung's budget for the
    * whole ride and every test of it would pass. The effect that tells the
    * renderer about the new rung is the one place the two are kept together.
@@ -687,7 +704,10 @@ export function GameView(props: GameViewProps): JSX.Element {
       // context still gets a HUD and a ride.
       void load().then((renderer) => {
         if (viewRef.current === undefined) {
-          viewRef.current = renderer.create(canvas, rungFor(quality.level, shadowMapRef.current));
+          viewRef.current = renderer.create(
+            canvas,
+            rungFor(qualityRef.current.level, shadowMapRef.current),
+          );
           viewRef.current.resize(canvas.clientWidth || 320, canvas.clientHeight || 180);
         }
       });
@@ -898,8 +918,9 @@ export function GameView(props: GameViewProps): JSX.Element {
       // the cap itself, 50 ms at 20 fps, which the ladder would read as heat
       // for ever. `frame-pacer.ts` samples only the gap that follows a DRAWN
       // frame, which on the uncapped top rung is exactly what this was.
-      // ⚠️ **Read and closed over BEFORE the updater, and that is the whole
-      // of #245's second finding.** `lastFrameAt` is a `let` in this effect's
+      // ⚠️ **Read and closed over BEFORE the updater, and that was the whole
+      // of #245's second finding** — there has been no updater since #482,
+      // which feeds the ladder synchronously through `qualityRef`. `lastFrameAt` is a `let` in this effect's
       // scope, so an updater that subtracted it *inside* the closure would be
       // captured by reference — and React invokes an updater during the next
       // render, by which time the line below has already moved it to `at`. The
@@ -911,7 +932,13 @@ export function GameView(props: GameViewProps): JSX.Element {
       const frameMs = paced.frameMs;
       lastFrameAt = at;
       if (frameMs !== undefined) {
-        setQuality((previous) => nextQuality(previous, { frameMs }));
+        const previous = qualityRef.current;
+        const next = nextQuality(previous, { frameMs });
+        qualityRef.current = next;
+        // A render only when the RUNG changes — #482. @see qualityLevel
+        if (next.level !== previous.level) {
+          setQualityLevel(next.level);
+        }
       }
       frame = requestAnimationFrame(tick);
     };
@@ -920,12 +947,13 @@ export function GameView(props: GameViewProps): JSX.Element {
       cancelAnimationFrame(frame);
       observer?.disconnect();
     };
-    // ⚠️ `quality` is read inside `tick` and is deliberately NOT a dependency.
-    // Re-running this effect on every quality change would cancel the frame,
-    // destroy the renderer and rebuild it mid-ride — and quality changes exactly
-    // when the phone is least able to afford that. It is read through
-    // `setQuality`'s updater form, which does not close over a stale value, and
-    // the level is applied to the live renderer by the effect below instead.
+    // ⚠️ The quality level is read inside `tick` and is deliberately NOT a
+    // dependency. Re-running this effect on every quality change would cancel
+    // the frame, destroy the renderer and rebuild it mid-ride — and quality
+    // changes exactly when the phone is least able to afford that. It is read
+    // through `qualityRef`, which does not go stale (#482; it was `setQuality`'s
+    // updater form until then), and the level is applied to the live renderer
+    // by the effect below instead.
   }, [phase, chosen, port, props.renderer, props.now]);
 
   useEffect(() => {
@@ -933,8 +961,8 @@ export function GameView(props: GameViewProps): JSX.Element {
     // the ride, and climbing back to level 0 does not return it. Only the next
     // ride's start re-reads the device's choice. `quality.ts` §`keepsShadowMap`
     // says why a rung that came back would flap.
-    shadowMapRef.current = keepsShadowMap(shadowMapRef.current, quality.level);
-    const settings = rungFor(quality.level, shadowMapRef.current);
+    shadowMapRef.current = keepsShadowMap(shadowMapRef.current, qualityLevel);
+    const settings = rungFor(qualityLevel, shadowMapRef.current);
     // ⚠️ Both halves of the rung, from one place. The renderer stops submitting
     // the instances and `sceneFrame` stops placing them — #245, and
     // `ScatterBelt.setBudget` says why neither alone is the whole of it.
@@ -943,7 +971,7 @@ export function GameView(props: GameViewProps): JSX.Element {
     // #476: the loop reads this on its next animation frame.
     frameCapRef.current = settings.frameCap;
     viewRef.current?.setQuality(settings);
-  }, [quality.level]);
+  }, [qualityLevel]);
 
   if (!onTheStage) {
     // One snapshot read for both notices, so they describe the same moment.
