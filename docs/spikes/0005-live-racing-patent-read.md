@@ -5,6 +5,13 @@
   §1.3
 - **Issue**: [#466](https://github.com/openzigs/onyourleft/issues/466). Parent
   [#16](https://github.com/openzigs/onyourleft/issues/16)
+- **Where the chart is posted**: #466's first acceptance criterion asks for *"a dated claim chart
+  posted here and linked from #16"*, and a file in this repository is not that. It is posted as
+  [#466 comment 5782720581](https://github.com/openzigs/onyourleft/issues/466#issuecomment-5782720581)
+  — the eleven-patent verdict table, §3.1's chart in full and §6's recommendation — and linked from
+  [#16 comment 5782722227](https://github.com/openzigs/onyourleft/issues/16#issuecomment-5782722227),
+  which carries §5's purchase decision and the constraints this epic inherits. ⚠️ **This file is the
+  full version and those comments are summaries**; where they differ, read this one
 - **Status of this document**: a **spike write-up**. `CLAUDE.md` §7: *"A spike write-up is not an ADR
   and does not decide anything — it is a dated measurement that an ADR or an issue may then rest on,
   and it ages the way a measurement does."* The recommendation in §6 is a recommendation. The
@@ -81,6 +88,14 @@ m=re.search(r'<section itemprop=\"claims\".*?</section>', s, re.S); \
 print(html.unescape(re.sub(r'<[^>]+>',' ', m.group(0))))"
 ```
 
+⚠️ **That command is not reliable and its failure is silent-looking.** Re-run later the same day it
+returned Google's *"your computer or network may be sending automated queries"* page, from which the
+regex finds no `claims` section. The fallback is the USPTO's own print server —
+`curl -sL https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/<number>` — which needs no
+user agent and is the *granted document* rather than a rendering of it, but is a **scanned image**:
+`pdftotext` extracts nothing and it has to be read by eye. §1.4 records the one passage in this
+document that came from it.
+
 The four searches that produced the non-Peloton four, all run 2026-09-22 against
 `patents.google.com/xhr/query`, US grants only:
 
@@ -101,6 +116,43 @@ The four searches that produced the non-Peloton four, all run 2026-09-22 against
   least seven times from one 2012 priority and a design checked against granted claims is not
   checked against claims still in prosecution. **In a family with this continuation record that is
   the most important gap in this document.**
+
+  ⚠️ **And what a continuation may claim is bounded by what the specification already discloses, so
+  the gap is worth sizing rather than only naming.** '085's specification discloses peer competition
+  and cross-rider normalisation closely enough to be worth quoting. Read 2026-09-22 from the granted
+  patent's own USPTO print, page 26 — col. 14, under the heading *Gamification*:
+
+  > *"the instructor or users can create mini-competitions for participation by all users or just a
+  > selected subset of users such as a group of friends. Competitions such as sprints, hill climbs,
+  > maximum power output, etc. can be preset or created in real-time … Competitions can be created
+  > within a class or session, or across multiple classes or sessions like **multi-stage bicycle
+  > races**. A wide range of **direct competitions can be created between and among users**, with the
+  > different performance characteristics of different bikes **calibrated and normalized** to account
+  > for differences in bikes based on different riders … the system provides locations or
+  > technologies to validate stationary bikes to assure that the bikes in a particular competition
+  > are properly **calibrated and normalized to establish a level playing field**."*
+
+  and, in the same document at col. 13 (line 30 of the print's own numbering):
+
+  > *"the system may also allow users to establish **handicapping systems to equalize the
+  > competition** among different users or user groups allowing for broad based competitions."*
+
+  ⚠️ **This changes no conclusion in §3 or §6, and must not be read as one.** Disclosure is not claim
+  scope: every granted claim charted below still carries the *cycling class* limitation, and §3.1's
+  reading is unchanged. It is recorded here for two reasons. It is concrete evidence for **§5
+  Question C** — whether the continuation practice in this family is of a kind a design should be
+  built to survive — and the disclosed subject matter is recognisably
+  [ADR 0028](../adr/0028-racing-fairness.md) D-1 and D-2 (peer competition, normalisation across
+  riders, a level playing field), so a lawyer answering **§5 Question A** should see this text
+  alongside the claim rather than the claim alone.
+
+  ⚠️ **Provenance, because it differs from everything else here.** The two passages above were read
+  from the USPTO print at
+  `image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/9174085`, which is a **scanned image**:
+  `pdftotext` extracts nothing from it and it was read by eye, page 26 of 28, on 2026-09-22. They are
+  from the **specification**, not the claims; every claim quoted elsewhere in this document came from
+  the source in §1.3. The line citations are the print's own centre-gutter numbering and are
+  approximate to within a line or two.
 - **The IPR2020-01541 certificate is still not read**, so ADR 0007's Open Question 1 stands
   verbatim. `patents.google.com/patent/US10486026K1/en` returned **404** and
   `patentimages.storage.googleapis.com` **403** on 2026-09-22 — the same two failures ADR 0007
