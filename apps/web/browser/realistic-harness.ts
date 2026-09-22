@@ -52,7 +52,7 @@ import {
 } from '../src/game/three-renderer';
 import { configQuery, parseConfig, percentiles, type Percentiles } from './realistic/config';
 import { rideFrame, RIDE_METRES_PER_SECOND } from './realistic/frame';
-import { describe, guarded, MeasurementClock } from './realistic/loop';
+import { describe, guarded, MeasurementClock, readoutMs } from './realistic/loop';
 import { realisticRoute } from './realistic/route';
 
 /** How long the scene runs before anything is sampled: shader compiles, first uploads. */
@@ -74,11 +74,32 @@ export interface RealisticSample {
   readonly userAgent: string;
 }
 
+/**
+ * What `realistic.html`'s first, classic script records before this module
+ * runs — #478. @see realistic.html
+ */
+export interface EarlyRecord {
+  /** `typeof window.Capacitor` before any script of ours ran: `'object'` when the shell's bridge was injected. */
+  readonly capacitorAtStart: string;
+  /** `typeof window.androidBridge`: the interface the bridge talks through, which the WebView provides. */
+  readonly androidBridgeAtStart: string;
+  /** Whether the page stood in for a missing bridge's `triggerEvent`. */
+  readonly standIn: boolean;
+  /** Every lifecycle event the shell sent to the stand-in. */
+  readonly events: readonly { readonly event: string; readonly target: string }[];
+  /** Errors caught before this module took over reporting. */
+  readonly errors: string[];
+  report: ((message: string) => void) | undefined;
+}
+
 declare global {
   interface Window {
+    __oylRealisticEarly?: EarlyRecord;
     __oylRealistic?: {
       readonly ready: boolean;
       readonly errors: readonly string[];
+      /** What the first script saw of Capacitor's bridge, and what the shell sent it. @see EarlyRecord */
+      readonly bridge: Omit<EarlyRecord, 'errors' | 'report'> | undefined;
       readonly query: string;
       readonly outcome: RealisticWorldOutcome | undefined;
       readonly notice: string | undefined;
@@ -89,9 +110,20 @@ declare global {
 }
 
 const errors: string[] = [];
+const early = window.__oylRealisticEarly;
 let published: NonNullable<Window['__oylRealistic']> = {
   ready: false,
   errors,
+  bridge:
+    early === undefined
+      ? undefined
+      : {
+          capacitorAtStart: early.capacitorAtStart,
+          androidBridgeAtStart: early.androidBridgeAtStart,
+          standIn: early.standIn,
+          // The same array the stand-in appends to, so it is live.
+          events: early.events,
+        },
   query: location.search,
   outcome: undefined,
   notice: undefined,
@@ -267,11 +299,14 @@ async function run(): Promise<void> {
     }
     if (controls !== undefined && now - shownAt > 1_000) {
       shownAt = now;
-      const live = percentiles(clock.samples.slice(-120));
+      // The clock's own rolling window, never the measurement window: that one
+      // is emptied every frame once measured, which is the `NaN` the tablet
+      // showed. @see MeasurementClock.recent
+      const live = percentiles(clock.recent);
       controls.line.textContent =
         `${drawnWorldOf(view)} world · ${worldRung(state).label}` +
         `${measured ? ' · measured' : elapsed < WARM_UP_SECONDS ? ' · warming up' : ' · sampling'}` +
-        ` · frame p50 ${live.p50.toFixed(1)} ms · ` +
+        ` · frame p50 ${readoutMs(live.p50)} · ` +
         `buffer ${String(gl?.drawingBufferWidth ?? 0)}×${String(gl?.drawingBufferHeight ?? 0)}` +
         (notice === undefined ? '' : `\n${notice}`);
     }
@@ -295,12 +330,26 @@ function fail(message: string): void {
   document.body.append(shown);
 }
 
-addEventListener('error', (event) => {
-  fail(describe(event.error ?? event.message));
-});
-addEventListener('unhandledrejection', (event) => {
-  fail(describe(event.reason));
-});
+// #478. `realistic.html`'s first script has been catching errors since before
+// this module existed; from here on it hands them to `fail`, and what it caught
+// meanwhile is reported now. Without that script — a page built from an old
+// `realistic.html` — this module listens for itself, as it always did.
+if (early === undefined) {
+  addEventListener('error', (event) => {
+    fail(describe(event.error ?? event.message));
+  });
+  addEventListener('unhandledrejection', (event) => {
+    fail(describe(event.reason));
+  });
+} else {
+  early.report = fail;
+  for (const message of early.errors.splice(0)) fail(message);
+}
+// One line for `adb logcat`, whatever else happens: whether the shell's bridge
+// reached this page is the question the tablet's `triggerEvent` error asks.
+console.log(
+  `OYL-REALISTIC-LOAD ${JSON.stringify({ bridge: published.bridge ?? 'no early script' })}`,
+);
 
 run().catch((error: unknown) => {
   fail(describe(error));

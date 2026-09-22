@@ -2213,6 +2213,40 @@ The page rides a 4 km route through a valley, over a bridge and past a farmstead
 buttons switch between the realistic and the stylised world, hold or free the quality ladder, and
 start one rung down. Back to the app: `node apps/mobile/tools/webview-probe.mjs "location.href = '/'"`.
 
+⚠️ **Since [#478](https://github.com/openzigs/onyourleft/issues/478) the page says three more things
+in `logcat`, and the first run after it should record them.** On 2026-09-22 (main `eacc152`) the
+tablet's WebView logged `Uncaught TypeError: Cannot read properties of undefined (reading
+'triggerEvent')` on this page, and its readout showed `frame p50 NaN ms`. The `NaN` was the page's own:
+the readout was computed over the measurement window, which the page empties every frame once the
+30-second figure is published — so it was `NaN` during the warm-up and for the rest of every ride.
+It reads the clock's own rolling window now. The `TypeError` is Capacitor's: the shell sends its
+lifecycle events by evaluating `window.Capacitor.triggerEvent("resume", "document")` in the page
+(`MockCordovaWebViewImpl`, when the app resumes after a pause), and on this page there was no
+`window.Capacitor` — which the product's own page does have. **Why it was absent is the device's to
+answer**, and the page now records the evidence before any other script runs:
+
+```bash
+"$ADB" logcat -d -s chromium | grep -E 'OYL-REALISTIC-(LOAD|BRIDGE|ERROR)'
+```
+
+- `OYL-REALISTIC-LOAD {"bridge":{"capacitorAtStart":…,"androidBridgeAtStart":…,"standIn":…}}` — one
+  line per load. `capacitorAtStart: "object"` means Capacitor's bridge reached this page and the
+  `TypeError` should not recur. `"undefined"` with `androidBridgeAtStart: "object"` means the WebView
+  gave the page Capacitor's message channel but Capacitor's document-start script did not run on it;
+  both `"undefined"` means neither reached it.
+- `OYL-REALISTIC-BRIDGE {"event":"resume","target":"document"}` — a lifecycle event the shell sent to a
+  page with no bridge. The page stands in for `triggerEvent` alone, so the event is recorded and still
+  dispatched instead of thrown; it defines no `isNativePlatform`, so the page does not claim to be the
+  shell.
+- `OYL-REALISTIC-ERROR …` — any error, including one before the page's own module ran. The same list
+  is on `window.__oylRealistic.errors` and in the red box at the foot of the page.
+
+⚠️ Since #478 the page also builds each frame at the **rung's own scenery budget**, as `GameView`
+does, and the realistic world's trees, shrubs and rocks spend that budget with the posts and
+buildings rather than beside it. Before it, the second realistic rung reduced the resolution and the
+water and drew every tree — so a soak on the page before #478 measured a ladder the product does not
+run, and its Z6/Z7 numbers should not be compared with one after it.
+
 ### The procedure
 
 Landscape, full brightness, on charge, nothing else running; let the tablet cool first.
@@ -2282,6 +2316,9 @@ done
 **Trees near and far (Z4)?** ______________
 
 **Legs follow the pedals, and stop when held (Z5)?** ______________
+
+**`OYL-REALISTIC-LOAD` — `capacitorAtStart` / `androidBridgeAtStart`, and any `OYL-REALISTIC-BRIDGE` or
+`OYL-REALISTIC-ERROR` line (#478):** ______________
 
 **Does the realistic top rung hold for twenty minutes with headroom?** ______________ — ⚠️ this is
 ADR 0026 D-3's condition for ever changing the default, and D-6's for re-setting
