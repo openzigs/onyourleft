@@ -1921,11 +1921,14 @@ describe('the scenery belt spends a budget it never sets — #245', () => {
     });
 
     expect(counts).toEqual(QUALITY_LADDER.map((rung) => rung.scatterItems));
-    // Non-vacuity: the counts have to have actually moved, or the three
+    // Non-vacuity: the counts have to have actually MOVED, or the three
     // identity assertions below are a claim about a belt nobody disturbed.
-    // Level 2 is level 1 capped at 30 (#482), so the ladder holds one figure
-    // fewer than it has rungs; every distinct figure must have been submitted.
-    expect(new Set(counts).size).toBe(new Set(QUALITY_LADDER.map((r) => r.scatterItems)).size);
+    // ⚠️ This is a claim about the LADDER, which the `toEqual` above does not
+    // make: level 2 is level 1 capped at 30 (#482), so one figure repeats and
+    // at most one may. A ladder flattened to one budget would pass the line
+    // above and fail here. (#484's review, finding 3, removed a third line
+    // between the two that compared the two sets' sizes — after `toEqual` that
+    // is an identity, so it asserted nothing at all. #485.)
     expect(new Set(counts).size).toBeGreaterThanOrEqual(QUALITY_LADDER.length - 1);
     expect(meshFor(scenery, 'tree-conifer')).toBe(mesh);
     expect(meshFor(scenery, 'tree-conifer')?.instanceMatrix).toBe(attributeAtTheTop);

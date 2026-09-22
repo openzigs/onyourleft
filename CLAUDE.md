@@ -176,7 +176,19 @@ apps/                 AGPL-3.0-or-later, without exception
                         to activate while a ride is recording OR PAUSED, which
                         lives in the watcher rather than in the button, because
                         a refusal in a view is one `disabled` attribute away
-                        from being no refusal at all
+                        from being no refusal at all. ⚠️ Since #483 there are
+                        SIX rider-facing states rather than four, and the two
+                        new ones are about the tab that did NOT ask: an
+                        activation takes over every client of the registration,
+                        so a tab left behind runs an old bundle under the new
+                        worker's cache and any lazy chunk it has not loaded is
+                        a URL nothing serves. It is told so
+                        ([ADR 0027](docs/adr/0027-a-tab-left-behind-by-another-tabs-update.md)),
+                        the repair is a rider's reload rather than an automatic
+                        one — `controllerchange` cannot be the signal, because
+                        it fires with nobody having asked on a first visit
+                        (#467) — and the same interlock holds it back over a
+                        ride that is recording OR PAUSED
     src/privacy/        the boundaries where data leaves the athlete's control
                         (#34) — the two directions a payload can face, the walk
                         that finds a coordinate in a field nobody declared, and
@@ -3035,7 +3047,15 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   prose. ⚠️ A reviewer who remembers this sentence being unenforced is reading the old file:
   deleting an ADR's `- **Status**: Accepted` line used to leave `check-repo-rules.sh` reporting
   clean at exit 0. Numbers are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. **The next free number is 0027.**
+  **and which are claimed by open issues** before you pick one. **The next free number is 0029.**
+  ⚠️ **0028 is [ADR 0028](docs/adr/0028-racing-fairness.md)**, taken by
+  [#465](https://github.com/openzigs/onyourleft/issues/465) for how a race between riders is fair —
+  and ⚠️ it is **Accepted with five questions explicitly left to the owner**, which is a shape no
+  other ADR here has; read its §"What the owner has not decided" before acting on it.
+  ⚠️ **0027 is [ADR 0027](docs/adr/0027-a-tab-left-behind-by-another-tabs-update.md)**, taken by
+  [#483](https://github.com/openzigs/onyourleft/issues/483) for the state a tab is left in when
+  ANOTHER tab's update takes over — a reviewer who remembers this sentence offering 0027 is reading
+  the old file.
   ⚠️ **0026 is [ADR 0026](docs/adr/0026-realistic-game-world.md)**, taken by
   [#431](https://github.com/openzigs/onyourleft/issues/431) for the realistic game world; a reviewer
   who remembers this sentence offering 0026 is reading the old file.
@@ -3277,6 +3297,14 @@ top of an issue **supersedes its body**.
 | What stops a widened endpoint radius or a sparse ride outrunning that margin, and what a ride coarser than the ceiling loses | `packages/domain/src/segment/segment.ts` §`MAXIMUM_ENDPOINT_REACH_METRES`, `packages/domain/src/segment/match.ts` §`GAP_SECONDS` |
 | What a test fixture at latitude 51.5, longitude -0.12 used to break, and what fixed it | `packages/domain/src/segment/cells.test.ts`, `apps/web/src/segments/sweep.store.test.ts` §`ORIGIN_LONGITUDE` |
 | Where a device's capability set comes from, and what happens when a device contradicts itself | [`packages/sensors/README.md`](packages/sensors/README.md) §"What a device says it can do", `packages/sensors/web-bluetooth/src/transport.ts` §`declaredBy`, §`noteUndeclared` |
+| What decides who is faster in a race, and which five questions about that are the owner's | [ADR 0028](docs/adr/0028-racing-fairness.md), §"What the owner has not decided", [#465](https://github.com/openzigs/onyourleft/issues/465) |
+| Why a race fixes the riding position instead of deriving frontal area from a rider's height | [ADR 0028](docs/adr/0028-racing-fairness.md) D-1, `apps/web/src/game/rider.ts` §`RIDING_POSITIONS` |
+| What a room would check before it believes a reported power, and why that rule is in an ADR rather than in code | [ADR 0028](docs/adr/0028-racing-fairness.md) D-2 §"What a room checks", [#69](https://github.com/openzigs/onyourleft/issues/69) |
+| What pins the arithmetic two builds must share, and why a red assertion there is probably not a bug | `packages/physics/src/agreement.test.ts`, [ADR 0028](docs/adr/0028-racing-fairness.md) D-2 rule 5 |
+| Why the first races have no drafting, and the one thing about it that IS decided | [ADR 0028](docs/adr/0028-racing-fairness.md) D-5, [#327](https://github.com/openzigs/onyourleft/issues/327) |
+| Why a public race room is blocked rather than merely wanting moderation | [ADR 0028](docs/adr/0028-racing-fairness.md) D-6, [ADR 0014](docs/adr/0014-portable-identity.md), [#83](https://github.com/openzigs/onyourleft/issues/83) |
+| Whether a LIVE race between riders is inside the claims ADR 0007 read, and the one limitation carrying the whole distance | [`docs/spikes/0005-live-racing-patent-read.md`](docs/spikes/0005-live-racing-patent-read.md) §3.1, §6, [#466](https://github.com/openzigs/onyourleft/issues/466) |
+| Why ADR 0007 D4's ghost line does not answer the live-racing question, and what does | [ADR 0007](docs/adr/0007-patent-posture.md) D4, D5, [`docs/spikes/0005-live-racing-patent-read.md`](docs/spikes/0005-live-racing-patent-read.md) §6 |
 | What a segment matcher may not do, and the prior art the design-around cites | [ADR 0007](docs/adr/0007-patent-posture.md) D-2 and D-6, `docs/spikes/0001-segment-matching.md` §7 |
 | Which time basis a segment board ranks by, and why moving time is not it | `packages/domain/src/segment/effort.ts` §`RANKING_BASIS` |
 | How two efforts recorded at different rates are compared without truncating either | `packages/domain/src/segment/comparison.ts`, §`overlayEfforts` |
@@ -3474,6 +3502,9 @@ top of an issue **supersedes its body**.
 | Why two deadlines in two packages have to expire in one order, and what asserts it | `apps/mobile/src/ble/transport.ts` §`INITIALIZE_ANSWER_WINDOW`, `apps/web/src/support/shell-support.test.ts` |
 | Why an unanswered `initialize()` stops being shared rather than being rejected | `apps/mobile/src/ble/transport.ts` §`INITIALIZE_ANSWER_WINDOW`, [#322](https://github.com/openzigs/onyourleft/issues/322) |
 | Which of the two causes the Android Devices-screen hang turned out to be | [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part G |
+| What a tab is told when ANOTHER tab took the update, and why it is not "nothing to do" | [ADR 0027](docs/adr/0027-a-tab-left-behind-by-another-tabs-update.md), `apps/web/src/offline/update.ts` §`UpdateStatus` member `superseded`, [#483](https://github.com/openzigs/onyourleft/issues/483) |
+| Why a left-behind tab reloads on the rider's press and never on `controllerchange` | [ADR 0027](docs/adr/0027-a-tab-left-behind-by-another-tabs-update.md) D-2, D-4, [#467](https://github.com/openzigs/onyourleft/issues/467) |
+| Which exit from `installed` means a tab was left behind, and which one deliberately does not | `apps/web/src/offline/update.ts` §`follow`, [ADR 0027](docs/adr/0027-a-tab-left-behind-by-another-tabs-update.md) D-4 |
 | Whether the APK really cold-starts with no network, and the four ways that measurement goes wrongly green | [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part P, [ADR 0024](docs/adr/0024-offline-and-caching-posture.md) D-4 |
 | Why `navigator.onLine` is `true` inside the shell with no network at all, and what still reads it | [`docs/validation/0002-android-shell-and-game.md`](docs/validation/0002-android-shell-and-game.md) Part P §"What Part P found along the way" |
 | How to read the origin, `crypto.subtle` or a service-worker registration inside the shell's WebView | [`apps/mobile/tools/webview-probe.mjs`](apps/mobile/tools/webview-probe.mjs) |

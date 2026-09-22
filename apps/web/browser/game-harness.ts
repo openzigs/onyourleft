@@ -490,7 +490,7 @@ declare global {
        *
        * ⚠️ **Same scene, same route, same drawing-buffer size; the only
        * difference is the material.** The floor rung also halves the render
-       * scale, so timing rung 0 against rung 3 would be measuring two things
+       * scale, so timing rung 0 against rung 4 would be measuring two things
        * at once — these two sweeps run at rung 0's own settings with
        * `shading` overridden, which is the *"before and after"* the owner's
        * decision on #286 asks for and is the only frame-cost claim this
@@ -598,8 +598,15 @@ declare global {
        *
        * Measured on {@link variantFrame}, which carries an item in every
        * variant slot of every kind, so this is the belt's real width rather
-       * than whatever one stretch of the harness route happened to place. The
-       * three entries are rungs 3, 2 and 1.
+       * than whatever one stretch of the harness route happened to place.
+       *
+       * ⚠️ **The three entries are `sceneryVariants` of 3, 2 and 1 — variant
+       * counts, not rung numbers**, and this line said *"rungs 3, 2 and 1"*
+       * until #485. It never was a rung index: `sceneryCallsAcrossRungs`
+       * overrides that one figure on rung 0's settings and sweeps the three
+       * values the ladder uses, so no rung is entered at all. Since #482 the
+       * ladder is five rungs and rung 3's own count is 1, which is what made
+       * the old wording read as a statement that is simply false.
        */
       readonly sceneryCallsByVariants: readonly number[];
       /**

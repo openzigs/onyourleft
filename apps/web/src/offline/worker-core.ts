@@ -231,7 +231,15 @@ export function attachWorker(scope: WorkerScope, options: WorkerOptions): void {
         // page that asked for it reloads on `controllerchange`; ⚠️ a SECOND
         // tab that did not ask is controlled by this worker too (the spec's
         // Activate does that, claim or no claim) and keeps its old bundle
-        // after the line above deleted that bundle's cache — #483.
+        // after the line above deleted that bundle's cache.
+        //
+        // ⚠️ **That second tab is told, since #483.** The line above is still
+        // right — ADR 0024 D-3 rule 4 — and the repair is not here: nothing
+        // this worker can do makes the old bundle work, and keeping the
+        // previous precache until its last client goes needs a signal Cache
+        // Storage does not offer. `update.ts` gives the left-behind tab a
+        // state of its own instead, and the rider reloads it.
+        // [ADR 0027](../../../../docs/adr/0027-a-tab-left-behind-by-another-tabs-update.md).
         await scope.clients.claim();
       })(),
     );
