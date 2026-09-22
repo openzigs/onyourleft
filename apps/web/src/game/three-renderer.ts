@@ -206,6 +206,7 @@ import {
   HORIZON_RADIUS_METRES,
   HORIZON_SEGMENTS,
   TERRAIN_BANDS,
+  terrainMeshIsCurrent,
   type HorizonRelief,
   type TerrainMesh,
 } from './landform';
@@ -241,7 +242,12 @@ import {
   VIEW_BEHIND_METRES,
 } from './terrain';
 import { FIELD_DEPTH_METRES, FIELD_EDGE_LATERAL_METRES } from './settlements';
-import { MAXIMUM_BRIDGE_PARTS, type BridgePart, type WaterSurface } from './waterways';
+import {
+  MAXIMUM_BRIDGE_PARTS,
+  waterSurfaceIsCurrent,
+  type BridgePart,
+  type WaterSurface,
+} from './waterways';
 import type { SunStyle, WorldStyle } from './world';
 
 /*
@@ -2746,6 +2752,16 @@ export class TerrainBelt {
    * never shrinks them, for the road's reason (#240's NFR-3).
    */
   update(ground: TerrainMesh, groundColour: number): void {
+    // ⚠️ #469: the mesh's arrays are lent, and a later build has written over
+    // them. Drawing it would draw that build's ground under this frame's road
+    // — silently, and only in a caller that holds two frames, which is every
+    // test that compares a lap with the next. A throw is what makes that a
+    // finding rather than a wrong picture. @see TerrainMesh.lease
+    if (!terrainMeshIsCurrent(ground)) {
+      throw new Error(
+        'this terrain mesh was built before the latest terrainCorridor, which has reused its buffers; take a retainedFrame to hold two frames at once',
+      );
+    }
     this.#materials.lit.color.setHex(groundColour);
     this.#materials.flat.color.setHex(groundColour);
     if (ground.vertices.length > this.#vertexCapacity) {
@@ -3275,6 +3291,12 @@ export class WaterBelt {
 
   /** This frame's water, under this frame's sky, at this frame's time. */
   update(surface: WaterSurface, world: WorldStyle, seconds: number): void {
+    // ⚠️ #469, for {@link TerrainBelt.update}'s reason. @see WaterSurface.lease
+    if (!waterSurfaceIsCurrent(surface)) {
+      throw new Error(
+        'this water surface was built before the latest waterSurface, which has reused its buffers; take a retainedFrame to hold two frames at once',
+      );
+    }
     const uniforms = this.#shaded.uniforms as Record<string, { value: unknown } | undefined>;
     (uniforms['skyColour']?.value as Color).setHex(world.skyColour);
     (uniforms['horizonColour']?.value as Color).setHex(world.horizonColour);

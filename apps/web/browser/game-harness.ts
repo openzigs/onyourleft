@@ -72,7 +72,8 @@ import { cameraRig, verticalHalfTangent } from '../src/game/camera';
 import type { CameraPose, SceneFrame } from '../src/game/port';
 import type { WorldStyle } from '../src/game/world';
 
-import { sceneFrame } from '../src/game/scene';
+import { sceneFrame as builtSceneFrame } from '../src/game/scene';
+import { retainedFrame } from '../src/game/frame-testing';
 import { corridorOrigin } from '../src/game/terrain';
 import {
   QUALITY_LADDER,
@@ -99,6 +100,23 @@ import {
   type SceneryKind,
 } from '../src/game/scatter';
 import { atStartLine } from '../src/game/simulation';
+
+/**
+ * A frame this page may hold while it builds others — #469.
+ *
+ * Since #469 the ground's and the water's arrays are LENT by the build that
+ * made them and written over by the next (`landform.ts` §`TerrainMesh.lease`).
+ * The ride loop draws each frame as soon as it is built; this page does not —
+ * it compares a climb with a descent and lap one with lap three, and draws a
+ * frame again after a sweep of a hundred others. Every frame here is
+ * therefore a {@link retainedFrame}, a copy that owns its arrays, which is the
+ * one difference from what `GameView` draws. The renderer refuses a lent
+ * frame that has been written over, so a builder here that skipped the copy
+ * would throw rather than draw the wrong ground.
+ */
+function sceneFrame(input: Parameters<typeof builtSceneFrame>[0]): SceneFrame {
+  return retainedFrame(builtSceneFrame(input));
+}
 
 /** What {@link gradientProbe} publishes — #458. */
 interface GradientMeasurement {

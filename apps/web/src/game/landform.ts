@@ -309,6 +309,22 @@ export interface TerrainMesh {
    * field between them — #440's lesson, in a varying.
    */
   readonly fieldCount: number;
+  /**
+   * Which build lent {@link vertices}, {@link normals}, {@link colours} and
+   * {@link fields} — #469. Absent on a mesh somebody owns outright (a copy, or
+   * one built by hand in a test).
+   *
+   * ⚠️ **Those four arrays are BORROWED, and valid until the next
+   * {@link terrainCorridor}.** They are storage this module keeps and writes
+   * again on the next build, for the reason {@link indices} already was: a
+   * frame that allocates four fresh arrays sixty times a second is a GC pause
+   * every few seconds on a phone, which is #323's stutter arriving from the
+   * other side. So a mesh held across another build reads the NEWER build's
+   * ground. `three-renderer.ts` §`TerrainBelt.update` refuses a stale lease
+   * rather than drawing it, and `frame-testing.ts` §`retainedFrame` is how a
+   * caller that must hold two frames at once takes a copy.
+   */
+  readonly lease?: number | undefined;
 }
 
 /**
@@ -426,11 +442,13 @@ export function terrainCorridor(
   const centre = corridor.centre;
   const rows = centre.length;
   const normals2d = ribbonNormals(centre);
-  const reach = steadied(clearReach(centre, normals2d, foldReach(centre, normals2d)));
+  const lent = terrainScratchFor(rows);
+  const reach = steadied(
+    clearReach(centre, normals2d, foldReach(centre, normals2d, lent.reach)),
+    lent.steadied,
+  );
   const perRow = COLUMNS * 2;
-  const vertices = new Float32Array(rows * perRow * 3);
-  const colours = new Float32Array(rows * perRow * 3);
-  const fields = new Float32Array(rows * perRow * 2);
+  const { vertices, colours, fields, normals } = lent;
 
   for (let row = 0; row < rows; row += 1) {
     const point = centre[row] as CorridorPoint;
@@ -471,9 +489,11 @@ export function terrainCorridor(
   }
 
   const indices = terrainIndices(rows);
+  gridNormals(vertices, rows, normals);
+  terrainLease += 1;
   return {
     vertices,
-    normals: gridNormals(vertices, rows),
+    normals,
     colours,
     fields,
     indices,
@@ -481,7 +501,59 @@ export function terrainCorridor(
     indicesPerBand: Math.max(0, rows - 1) * 2 * 6,
     fieldSpan: fieldSpanMetres(profile),
     fieldCount: Math.max(1, Math.round(profile.totalDistance / FIELD_SPAN_METRES)),
+    lease: terrainLease,
   };
+}
+
+/**
+ * The storage {@link terrainCorridor} writes into, and the row count it is
+ * sized for — #469.
+ *
+ * ⚠️ **Lent, not owned**, which is {@link terrainIndices}' pattern extended to
+ * the four arrays that change every frame and the two a frame works in. A
+ * corridor's row count is fixed for its configuration (`terrain.ts`
+ * §`roadCorridor` strides to stay inside `MAXIMUM_CORRIDOR_QUADS`), so after
+ * the first frame of a ride nothing here is allocated again; a row count that
+ * does change — a different route, a different corridor — replaces the lot.
+ * Until #469 a frame allocated all six, about 66 KiB, measured.
+ */
+let terrainScratch:
+  | {
+      readonly rows: number;
+      readonly vertices: Float32Array;
+      readonly normals: Float32Array;
+      readonly colours: Float32Array;
+      readonly fields: Float32Array;
+      /** {@link foldReach}'s answer, which {@link clearReach} then tightens in place. */
+      readonly reach: Float64Array;
+      /** {@link steadied}'s answer. */
+      readonly steadied: Float64Array;
+    }
+  | undefined;
+
+/** The build that lent {@link terrainScratch} last. @see TerrainMesh.lease */
+let terrainLease = 0;
+
+function terrainScratchFor(rows: number): NonNullable<typeof terrainScratch> {
+  if (terrainScratch?.rows === rows) {
+    return terrainScratch;
+  }
+  const vertexCount = rows * COLUMNS * 2;
+  terrainScratch = {
+    rows,
+    vertices: new Float32Array(vertexCount * 3),
+    normals: new Float32Array(vertexCount * 3),
+    colours: new Float32Array(vertexCount * 3),
+    fields: new Float32Array(vertexCount * 2),
+    reach: new Float64Array(rows * 2),
+    steadied: new Float64Array(rows * 2),
+  };
+  return terrainScratch;
+}
+
+/** Whether a mesh's buffers are still the ones its build wrote. @see TerrainMesh.lease */
+export function terrainMeshIsCurrent(mesh: TerrainMesh): boolean {
+  return mesh.lease === undefined || mesh.lease === terrainLease;
 }
 
 /**
@@ -624,8 +696,12 @@ function groundHeight(
  * The turn is read from the corridor's own normals either side of the row, so
  * it is the bend the road is actually drawn round.
  */
-function foldReach(centre: readonly CorridorPoint[], normals: Float64Array): Float64Array {
-  const reach = new Float64Array(centre.length * 2).fill(Number.POSITIVE_INFINITY);
+function foldReach(
+  centre: readonly CorridorPoint[],
+  normals: Float64Array,
+  reach: Float64Array,
+): Float64Array {
+  reach.fill(Number.POSITIVE_INFINITY);
   for (let row = 0; row < centre.length; row += 1) {
     const before = Math.max(0, row - 1);
     const after = Math.min(centre.length - 1, row + 1);
@@ -777,9 +853,8 @@ function clearReach(
  * alone left one such triangle; taking the least of three rows removes it, at
  * the cost of stopping the ground one row early either side of a bend.
  */
-function steadied(reach: Float64Array): Float64Array {
+function steadied(reach: Float64Array, out: Float64Array): Float64Array {
   const rows = reach.length / 2;
-  const out = new Float64Array(reach.length);
   for (let row = 0; row < rows; row += 1) {
     for (let side = 0; side < 2; side += 1) {
       const at = (index: number): number =>
@@ -840,9 +915,8 @@ function terrainIndices(rows: number): Uint32Array {
  * Upward unit normals from the height grid: across the columns and along the
  * rows, one step either side, crossed.
  */
-function gridNormals(vertices: Float32Array, rows: number): Float32Array {
+function gridNormals(vertices: Float32Array, rows: number, normals: Float32Array): void {
   const perRow = COLUMNS * 2;
-  const normals = new Float32Array(vertices.length);
   const point = (row: number, side: number, column: number, axis: number): number =>
     vertices[(row * perRow + side * COLUMNS + column) * 3 + axis] as number;
   for (let row = 0; row < rows; row += 1) {
@@ -866,8 +940,12 @@ function gridNormals(vertices: Float32Array, rows: number): Float32Array {
         if (!(length > 0)) {
           // A collapsed cross-section — behind the start of a point-to-point
           // route, where every row is the same point. Straight up is what a
-          // surface there would face.
+          // surface there would face. ⚠️ All three written: the array is
+          // lent again every frame (#469), so an unwritten component holds
+          // whatever the last frame put there rather than a zero.
+          normals[at] = 0;
           normals[at + 1] = 1;
+          normals[at + 2] = 0;
           continue;
         }
         const up = ny >= 0 ? 1 : -1;
@@ -880,7 +958,6 @@ function gridNormals(vertices: Float32Array, rows: number): Float32Array {
       }
     }
   }
-  return normals;
 }
 
 function smoothstep01(value: number): number {

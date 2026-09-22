@@ -30,6 +30,7 @@ import {
   SETBACK_METRES,
   STRUCTURE_FOOTPRINTS,
   STRUCTURE_MAX_ITEMS,
+  distinctPlaces,
   structureClearance,
   structuresAt,
 } from './settlements';
@@ -262,6 +263,45 @@ describe('a hostile route costs no more than a real one — #460', () => {
     expect(items.length).toBeGreaterThan(0);
     expect(items.length).toBe(plan.size);
     expect(items.length).toBeLessThan(40);
+  });
+});
+
+describe('one of every place, keyed by a number — #469', () => {
+  const at = (kind: ScatterItem['kind'], x: number, z: number, rotation = 0): ScatterItem => ({
+    kind,
+    x,
+    y: 0,
+    z,
+    rotation,
+    scale: 1,
+    variant: 0,
+  });
+
+  it('drops a repeat to the millimetre, keeps the first, and keeps the order', () => {
+    const wall = at('wall', 12.3456, -40.0001);
+    const hedge = at('hedge', 3, 4);
+    const again = at('wall', 12.3459, -40.0004, 1.2);
+    expect(distinctPlaces([wall, hedge, again])).toEqual([wall, hedge]);
+    // A millimetre apart is a different place, and a different kind at one
+    // place is a different structure.
+    const beside = at('wall', 12.3476, -40.0001);
+    const fence = at('fence', 12.3456, -40.0001);
+    expect(distinctPlaces([wall, beside, fence])).toEqual([wall, beside, fence]);
+  });
+
+  it('tells apart two places that share a key, and still drops a repeat of the second', () => {
+    // ⚠️ The key is a hash: one millimetre east and 92 821 millimetres south
+    // lands on the same number as the origin. Trusting the key would drop the
+    // second wall; ignoring the collision would keep its repeat.
+    const origin = at('wall', 0, 0);
+    const colliding = at('wall', 0.001, -92.821);
+    expect(distinctPlaces([origin, colliding, origin, colliding])).toEqual([origin, colliding]);
+  });
+
+  it('carries nothing from one call to the next', () => {
+    const wall = at('wall', 7, 7);
+    expect(distinctPlaces([wall])).toEqual([wall]);
+    expect(distinctPlaces([wall])).toEqual([wall]);
   });
 });
 

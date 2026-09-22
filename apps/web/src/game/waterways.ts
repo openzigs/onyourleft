@@ -400,6 +400,19 @@ export interface WaterSurface {
    */
   readonly shore: Float32Array;
   readonly indices: Uint32Array;
+  /**
+   * Which build lent these buffers — #469. Absent on a surface somebody owns
+   * outright (a copy, or one built by hand in a test).
+   *
+   * ⚠️ **The three arrays are BORROWED, and valid until the next
+   * {@link waterSurface}.** They are views over storage this module keeps and
+   * writes again on the next build, so a surface held across another build
+   * reads the newer one's water. `three-renderer.ts` §`WaterBelt.update`
+   * refuses a stale lease rather than drawing it, and
+   * `frame-testing.ts` §`retainedFrame` is how a caller that must hold two
+   * frames at once takes a copy.
+   */
+  readonly lease?: number | undefined;
 }
 
 /** The lateral stations a stream's surface is built at, either side of the road. */
@@ -431,28 +444,59 @@ export function waterSurface(
   corridor: RoadCorridor,
   ways: Waterways,
 ): WaterSurface {
-  const vertices: number[] = [];
-  const shore: number[] = [];
-  const indices: number[] = [];
+  waterLease += 1;
+  let vertexCount = 0;
+  let indexCount = 0;
   const centre = corridor.centre;
   const first = centre[0] as CorridorPoint;
   const last = centre[centre.length - 1] as CorridorPoint;
-  const strip = (points: readonly (readonly [number, number, number, number])[]): void => {
-    // Three vertices a station — shore, middle, shore — and two quads between
-    // each station and the next.
-    const base = vertices.length / 3;
-    for (const [x, y, z, weight] of points) {
-      vertices.push(x, y, z);
-      shore.push(weight);
+  /** One station — shore, middle, shore — its three points written in place. */
+  const station = (
+    x: number,
+    y: number,
+    z: number,
+    acrossX: number,
+    acrossZ: number,
+    near: number,
+    far: number,
+  ): void => {
+    reserveWater(vertexCount + 3, indexCount);
+    const { vertices, shore } = waterScratch;
+    const middle = (near + far) / 2;
+    for (let point = 0; point < 3; point += 1) {
+      const across = point === 0 ? near : point === 1 ? middle : far;
+      vertices[vertexCount * 3] = x + acrossX * across;
+      vertices[vertexCount * 3 + 1] = y;
+      vertices[vertexCount * 3 + 2] = z + acrossZ * across;
+      shore[vertexCount] = point === 1 ? 1 : 0;
+      vertexCount += 1;
     }
-    const stations = points.length / 3;
-    for (let station = 0; station + 1 < stations; station += 1) {
+  };
+  /**
+   * Two quads between each station of a run and the next, from vertex `base`.
+   * A run of fewer than two stations draws nothing and gives its vertices back.
+   */
+  const strip = (base: number): void => {
+    const stations = (vertexCount - base) / 3;
+    if (stations < 2) {
+      vertexCount = base;
+      return;
+    }
+    reserveWater(vertexCount, indexCount + (stations - 1) * 12);
+    const indices = waterScratch.indices;
+    for (let at = 0; at + 1 < stations; at += 1) {
       for (let lane = 0; lane < 2; lane += 1) {
-        const a = base + station * 3 + lane;
+        const a = base + at * 3 + lane;
         const b = a + 1;
         const c = a + 3;
         const d = c + 1;
-        indices.push(a, b, c, b, d, c);
+        indices[indexCount] = a;
+        indices[indexCount + 1] = b;
+        indices[indexCount + 2] = c;
+        indices[indexCount + 3] = b;
+        indices[indexCount + 4] = d;
+        indices[indexCount + 5] = c;
+        indexCount += 6;
       }
     }
   };
@@ -478,69 +522,113 @@ export function waterSurface(
       const tx = dx / length;
       const tz = dz / length;
       const y = crossing.waterElevation - origin.elevation;
-      const points: (readonly [number, number, number, number])[] = [];
-      const laterals = [
-        ...STREAM_STATIONS.slice(1)
-          .map((each) => -each)
-          .reverse(),
-        ...STREAM_STATIONS,
-      ];
-      for (const lateral of laterals) {
-        // The left normal is (−tz, tx): `terrain.ts`'s convention.
-        const cx = here.x - tz * lateral;
-        const cz = here.z + tx * lateral;
-        for (const [across, weight] of [
-          [-STREAM_HALF_WIDTH_METRES, 0],
-          [0, 1],
-          [STREAM_HALF_WIDTH_METRES, 0],
-        ] as const) {
-          points.push([cx + tx * across, y, cz + tz * across, weight]);
-        }
+      const base = vertexCount;
+      for (const lateral of STREAM_LATERALS) {
+        // The left normal is (−tz, tx): `terrain.ts`'s convention. Across the
+        // stream is along the road.
+        station(
+          here.x - tz * lateral,
+          y,
+          here.z + tx * lateral,
+          tx,
+          tz,
+          -STREAM_HALF_WIDTH_METRES,
+          STREAM_HALF_WIDTH_METRES,
+        );
       }
-      strip(points);
+      strip(base);
     }
   }
 
   if (ways.lakes.length > 0) {
     const normals = ribbonNormals(centre);
     for (const lake of ways.lakes) {
-      let run: (readonly [number, number, number, number])[] = [];
-      const flush = (): void => {
-        if (run.length >= 6) strip(run);
-        run = [];
-      };
+      let base = vertexCount;
       const y = lake.waterElevation - origin.elevation;
       for (let row = 0; row < centre.length; row += 1) {
         const point = centre[row] as CorridorPoint;
         const shoreAt = lakeShore(lake, profile, point.distance);
         if (shoreAt === undefined) {
-          flush();
+          strip(base);
+          base = vertexCount;
           continue;
         }
-        const nx = (normals[row * 2] as number) * lake.side;
-        const nz = (normals[row * 2 + 1] as number) * lake.side;
         // Two metres past each shore, under the bank, so the water meets the
         // ground rather than stopping short of it; the bank hides the rest.
-        const near = shoreAt.near - 2;
-        const far = shoreAt.far + 2;
-        const middle = (near + far) / 2;
-        for (const [lateral, weight] of [
-          [near, 0],
-          [middle, 1],
-          [far, 0],
-        ] as const) {
-          run.push([point.x + nx * lateral, y, point.z + nz * lateral, weight]);
-        }
+        station(
+          point.x,
+          y,
+          point.z,
+          (normals[row * 2] as number) * lake.side,
+          (normals[row * 2 + 1] as number) * lake.side,
+          shoreAt.near - 2,
+          shoreAt.far + 2,
+        );
       }
-      flush();
+      strip(base);
     }
   }
 
   return {
-    vertices: new Float32Array(vertices),
-    shore: new Float32Array(shore),
-    indices: new Uint32Array(indices),
+    vertices: waterScratch.vertices.subarray(0, vertexCount * 3),
+    shore: waterScratch.shore.subarray(0, vertexCount),
+    indices: waterScratch.indices.subarray(0, indexCount),
+    lease: waterLease,
   };
+}
+
+/**
+ * The stream's stations across the road, from the far bank on one side to the
+ * far bank on the other: {@link STREAM_STATIONS} mirrored. Built once rather
+ * than per crossing per frame — #469.
+ */
+const STREAM_LATERALS: readonly number[] = [
+  ...STREAM_STATIONS.slice(1)
+    .map((each) => -each)
+    .reverse(),
+  ...STREAM_STATIONS,
+];
+
+/**
+ * The storage every {@link waterSurface} writes into and lends views of — #469.
+ *
+ * ⚠️ **Grown, never shrunk, and never allocated on a frame that fits.** Until
+ * #469 a frame built three JavaScript arrays, a tuple a point and three typed
+ * arrays copied out of them, sixty times a second on the thread GATT
+ * notifications arrive on (#240's NFR-2), and #323 is what per-frame garbage
+ * looks like on a phone: a periodic stall. The renderer copies what it is
+ * handed (`three-renderer.ts` §`upload`), so lending is safe for it; the lease
+ * is what makes it safe for everyone else.
+ */
+let waterScratch: {
+  vertices: Float32Array;
+  shore: Float32Array;
+  indices: Uint32Array;
+} = { vertices: new Float32Array(0), shore: new Float32Array(0), indices: new Uint32Array(0) };
+
+/** The build that lent {@link waterScratch} last. @see WaterSurface.lease */
+let waterLease = 0;
+
+/** Whether a surface's buffers are still the ones its build wrote. @see WaterSurface.lease */
+export function waterSurfaceIsCurrent(surface: WaterSurface): boolean {
+  return surface.lease === undefined || surface.lease === waterLease;
+}
+
+/** Room for `vertices` vertices and `indices` indices, keeping what is written. */
+function reserveWater(vertices: number, indices: number): void {
+  if (waterScratch.shore.length < vertices) {
+    const room = Math.max(vertices, waterScratch.shore.length * 2, 64);
+    const grown = { vertices: new Float32Array(room * 3), shore: new Float32Array(room) };
+    grown.vertices.set(waterScratch.vertices);
+    grown.shore.set(waterScratch.shore);
+    waterScratch = { ...waterScratch, ...grown };
+  }
+  if (waterScratch.indices.length < indices) {
+    const room = Math.max(indices, waterScratch.indices.length * 2, 256);
+    const grown = new Uint32Array(room);
+    grown.set(waterScratch.indices);
+    waterScratch = { ...waterScratch, indices: grown };
+  }
 }
 
 /**
