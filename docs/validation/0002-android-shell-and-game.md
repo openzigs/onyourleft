@@ -1939,8 +1939,11 @@ fetched, and the gradient sent to a trainer is unchanged (it comes from the rout
 ⚠️ **What the pinned Chromium measured, and what it cannot.** The browser gate reads a height off
 the drawing buffer by occlusion and publishes the landform's cost — **1 222 vertices, 6 624 indices,
 one draw call**, and **7 draw calls** for the scenery-free scene where there were 6 (the ring is the
-new one). Each rung of the quality ladder draws fewer bands of ground: 6 624 / 5 520 / 4 968 / 4 416
-indices. A software rasteriser says nothing about a phone's GPU, which is what V3 is for.
+new one). Each rung of the quality ladder draws fewer bands of ground: 6 624 / 5 520 / 5 520 / 4 968
+/ 4 416 indices. ⚠️ **Five figures since #482, and a reader who remembers four —
+6 624 / 5 520 / 4 968 / 4 416 — is reading the pre-#484 file**: the ladder gained a rung, level 2
+repeats level 1's ten bands, and only its frame cap differs (#485). A software rasteriser says
+nothing about a phone's GPU, which is what V3 is for.
 
 ⚠️ **V3 is also [#469](https://github.com/openzigs/onyourleft/issues/469)'s device check, and it is
 PENDING.** #469 stopped the ground, the water and the settlements allocating fresh storage every

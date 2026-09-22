@@ -920,7 +920,8 @@ export function GameView(props: GameViewProps): JSX.Element {
       // frame, which on the uncapped top rung is exactly what this was.
       // ⚠️ **Read and closed over BEFORE the updater, and that was the whole
       // of #245's second finding** — there has been no updater since #482,
-      // which feeds the ladder synchronously through `qualityRef`. `lastFrameAt` is a `let` in this effect's
+      // which feeds the ladder synchronously through `qualityRef`.
+      // `lastFrameAt` is a `let` in this effect's
       // scope, so an updater that subtracted it *inside* the closure would be
       // captured by reference — and React invokes an updater during the next
       // render, by which time the line below has already moved it to `at`. The

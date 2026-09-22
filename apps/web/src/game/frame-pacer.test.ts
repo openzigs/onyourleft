@@ -140,6 +140,21 @@ describe('a cap that is not a frame rate fails closed — #482', () => {
     for (const rung of QUALITY_LADDER) expect(honouredCap(rung.frameCap)).toBe(rung.frameCap);
     expect(honouredCap(0.5)).toBe(0.5);
   });
+
+  it('rests on the ladder holding a finite cap at all, which is asserted rather than assumed — #485', () => {
+    // ⚠️ #484's review, finding 2: "fails closed" is a property of this
+    // ladder rather than of the expression. `Math.min()` over an empty list is
+    // `Infinity`, and `Infinity` IS `DISPLAY_RATE` — so a ladder whose every
+    // rung drew at the display's rate would make the invalid-cap fallback mean
+    // "uncapped" and fail OPEN again, by the arithmetic that was meant to close
+    // it. The top two rungs are already `DISPLAY_RATE` (#482); this is what
+    // makes the day the last finite one leaves a red build rather than a hot
+    // device drawing every frame.
+    expect(Number.isFinite(INVALID_CAP_READ_AS)).toBe(true);
+    expect(QUALITY_LADDER.some((rung) => Number.isFinite(rung.frameCap))).toBe(true);
+    // And the fallback is not the thing it exists to avoid.
+    expect(INVALID_CAP_READ_AS).not.toBe(DISPLAY_RATE);
+  });
 });
 
 describe('how long the ladder takes to react, rung by rung — #482', () => {

@@ -64,6 +64,27 @@ export const PACING_SLACK_MS = 2;
  * where it can be made instead — `quality.test.ts` §"gives every rung a cap the
  * pacer can honour" is red for any rung whose cap is neither
  * {@link DISPLAY_RATE} nor a positive number.
+ *
+ * ## ⚠️ What "fails closed" here rests on — #485, from #484's review
+ *
+ * **Two conditions, and neither is a property of this expression.**
+ *
+ * 1. **The ladder must hold at least one finite cap.** `Math.min()` over an
+ *    empty list is `Infinity`, which *is* {@link DISPLAY_RATE} — so a ladder
+ *    whose every rung drew at the display's rate would make this constant mean
+ *    "uncapped" and fail OPEN again, by the same arithmetic that was meant to
+ *    close it. That is not hypothetical arithmetic: the ladder's top two rungs
+ *    are already `DISPLAY_RATE` (#482), and a ruling that took the remaining
+ *    three there would do it. `frame-pacer.test.ts` §"#485" asserts this is a
+ *    finite number, so the day the ladder stops holding one the build is red
+ *    here rather than silently uncapped on a hot device.
+ * 2. **The floor is the lowest cap, not a safe one.** {@link honouredCap}
+ *    admits any positive finite number, so a rung mistyped as `0.001` is
+ *    honoured as one frame every sixteen minutes rather than clamped. That is
+ *    deliberate — this function cannot tell an unusual cap from a mistyped one,
+ *    and inventing a floor here would silently override a future rung — and it
+ *    is why the guard `quality.test.ts` runs over the shipped ladder is the
+ *    real check rather than this one.
  */
 export const INVALID_CAP_READ_AS = Math.min(
   // Over the VALID caps only, or a mistyped floor rung would make this NaN too.

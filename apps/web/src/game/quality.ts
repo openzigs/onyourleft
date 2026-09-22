@@ -130,9 +130,9 @@ export interface QualitySettings {
    * 240 → 160 → 160 → 100 → 60 — level 2 is level 1 capped at 30 (#482), so
    * the figure repeats there. Each step that cuts it keeps about two-thirds of
    * the one above and the floor keeps a quarter of the top, which is the shape
-   * {@link renderScale} already takes in *pixels*: 1, 0.83, 0.67 and 0.5 square to 1, 0.69, 0.45
-   * and 0.25. That shape is **chosen, not measured.** ADR 0008 D-2's rendering
-   * gate was waived rather than passed and
+   * {@link renderScale} already takes in *pixels*: 1, 0.83, 0.67 and 0.5 square
+   * to 1, 0.69, 0.45 and 0.25. That shape is **chosen, not measured.** ADR 0008
+   * D-2's rendering gate was waived rather than passed and
    * [#247](https://github.com/openzigs/onyourleft/issues/247) is the 60-minute
    * run on the device floor that would settle it, so every figure here is a
    * **starting position for that measurement to revise** rather than a result
@@ -178,7 +178,8 @@ export interface QualitySettings {
    * ## ⚠️ Provenance — BR-1, and this number is not a measurement either
    *
    * 3 → 2 → 2 → 1 → 1 (level 2 repeats level 1, #482), on the same footing
-   * as every other figure on this ladder: ADR 0008 D-2's rendering gate was waived rather than passed and
+   * as every other figure on this ladder: ADR 0008 D-2's rendering gate was
+   * waived rather than passed and
    * [#247](https://github.com/openzigs/onyourleft/issues/247) is the run that
    * would settle it. What *is* measured is the draw-call arithmetic itself —
    * `game.browser.spec.ts` counts the meshes a frame actually submits at each
@@ -254,9 +255,10 @@ export interface QualitySettings {
    * ## ⚠️ Provenance — BR-1, and this is not a measurement either
    *
    * 12 → 10 → 10 → 9 → 8 (level 2 repeats level 1, #482), on the same footing
-   * as every figure on this ladder. What the browser gate measures is the vertex and index counts and the draw
-   * range, and `docs/validation/0002-android-shell-and-game.md` Part V is the
-   * frame time on a phone.
+   * as every figure on this ladder. What the browser gate measures is the
+   * vertex and index counts and the draw range, and
+   * `docs/validation/0002-android-shell-and-game.md` Part V is the frame time
+   * on a phone.
    */
   readonly terrainBands: number;
   /**
@@ -318,9 +320,10 @@ export interface QualitySettings {
    * ⚠️ **On the target rung only**, which is #425's own criterion: *"a
    * throttling phone drops textures before it drops frame rate"* — the first
    * step down takes it at the display's rate, and the first rung that caps
-   * below the display's rate is the one after (#482). Detail is what goes first because nothing a rider needs lives
-   * in it: the gradient is in the road's own colour, which the grain is
-   * bounded against (`terrain.ts` §`ROAD_SURFACE_GRAIN`).
+   * below the display's rate is the one after (#482). Detail is what goes
+   * first because nothing a rider needs lives in it: the gradient is in the
+   * road's own colour, which the grain is bounded against (`terrain.ts`
+   * §`ROAD_SURFACE_GRAIN`).
    *
    * ## ⚠️ Provenance — BR-1, and not a measurement
    *
