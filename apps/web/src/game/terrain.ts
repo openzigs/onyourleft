@@ -240,6 +240,20 @@ export const MARKING_COLOUR = 0xf2f0e6;
  */
 export const MINIMUM_TINT_CONTRAST_RATIO = 3;
 
+/**
+ * How much the road's procedural surface detail may lighten or darken it, as a
+ * share either way: **0.15** — #425.
+ *
+ * ⚠️ **The road's colour is information** — {@link roadTint} is how a rider
+ * reads the climb ahead — so the grain `three-renderer.ts` draws over it is
+ * bounded here, beside the tint it modulates, and `terrain.test.ts` holds the
+ * worst case to {@link MINIMUM_TINT_CONTRAST_RATIO}: the steepest descent
+ * darkened by this much against the steepest climb lightened by it. At 0.15
+ * the pair still measures about 3.6 against the 3 the cue needs; 0.08 was
+ * tried first and the browser gate could barely find it on the tarmac.
+ */
+export const ROAD_SURFACE_GRAIN = 0.15;
+
 /** Half the road, in metres, since every offset below is measured from the centre. */
 const ROAD_HALF_WIDTH_METRES = ROAD_WIDTH_METRES / 2;
 
@@ -526,8 +540,15 @@ function markSlotCount(spanMetres: number): number {
  * array and produces `NaN` vertices. `NaN` in a vertex buffer does not throw; it
  * silently removes the triangle, which is the kind of rendering bug that gets
  * diagnosed as "the road flickers".
+ *
+ * ⚠️ **Exported since #458, and the export is the whole of the no-crack
+ * guarantee.** `landform.ts` builds the ground beside the road from the SAME
+ * centreline and these SAME normals, so its innermost column lands on the
+ * road's outermost one to the bit — at distance 0, across a loop's wrap and
+ * everywhere between — rather than on a second calculation that agrees with
+ * this one to a tolerance. #440 is what a second calculation cost.
  */
-function ribbonNormals(centre: readonly CorridorPoint[]): Float64Array {
+export function ribbonNormals(centre: readonly CorridorPoint[]): Float64Array {
   const normals = new Float64Array(centre.length * 2);
   let normalX = 1;
   let normalZ = 0;

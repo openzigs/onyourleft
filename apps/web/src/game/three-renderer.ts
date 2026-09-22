@@ -29,7 +29,8 @@
  *
  * #241 gives the scene a ground plane, a sky and exponential fog, all three
  * coloured from `world.ts`'s `WorldStyle` and therefore from the rider's own
- * route.
+ * route. ⚠️ Since #458 the ground is not a plane: it is the route's own
+ * landform, {@link TerrainBelt}, with the hills of {@link HorizonRing} beyond.
  *
  * ⚠️ **This section used to say "and still no illumination", and that no lamp
  * "is wanted". A reviewer who remembers that is reading the old file.** #286
@@ -45,13 +46,15 @@
  *
  * **What is lit, and what deliberately is not.** The scenery and the three
  * markers wear a `MeshLambertMaterial`, because a cone, a sphere, a box and an
- * octahedron all have a form for a light to find. The **ground** and the
- * **road** stay `MeshBasicMaterial`:
+ * octahedron all have a form for a light to find. The **road** stays
+ * `MeshBasicMaterial`:
  *
- * - The ground is one horizontal quad, and `world.ts` solves the two
- *   intensities so that a horizontal surface receives **exactly** 1. Putting
- *   a lamp on it is therefore a provable no-op that costs a shading pass
- *   over the whole backdrop — the largest fill in the frame.
+ * - ⚠️ **The ground used to be on this list and is not since #458**, and a
+ *   reviewer who remembers "the ground is one horizontal quad, and a lamp on
+ *   it is a provable no-op" is reading the old file. That was true of a
+ *   horizontal quad; the ground is a landform now, and an unlit slope reads
+ *   flat, which is the defect #458 is. {@link TerrainBelt} says what it
+ *   costs and why it also writes depth.
  * - The road is within a few degrees of horizontal everywhere a bicycle goes,
  *   and it carries **no normal attribute**: `terrain.ts` emits positions,
  *   colours and indices, and computing normals for a ribbon that is rebuilt
@@ -136,6 +139,7 @@
 
 import {
   AmbientLight,
+  BackSide,
   Box3,
   BoxGeometry,
   BufferAttribute,
@@ -160,9 +164,12 @@ import {
   PlaneGeometry,
   Quaternion,
   Scene,
+  ShaderMaterial,
   ShadowMaterial,
   SphereGeometry,
   TorusGeometry,
+  UniformsLib,
+  UniformsUtils,
   Vector3,
   WebGLRenderer,
   type Material,
@@ -195,6 +202,13 @@ import {
   placeContactShadow,
   type ContactShadow,
 } from './contact-shadow';
+import {
+  HORIZON_RADIUS_METRES,
+  HORIZON_SEGMENTS,
+  TERRAIN_BANDS,
+  type HorizonRelief,
+  type TerrainMesh,
+} from './landform';
 import type { QualitySettings } from './quality';
 import {
   MAXIMUM_SCENERY_VARIANTS,
@@ -206,11 +220,12 @@ import { atlasColourAt, tonedForTheSun, type AtlasImage, type LinearRgb } from '
 import type { CameraPose, GameRenderer, GameView, RiderMarker, SceneFrame } from './port';
 import {
   SCATTER_BAND_METRES,
-  SCATTER_KINDS,
+  SCENERY_KINDS,
   SCATTER_MAX_ITEMS,
   SCATTER_VERGE_METRES,
+  type SceneryKind,
   type ScatterItem,
-  type ScatterKind,
+  type StructureKind,
 } from './scatter';
 import {
   CAMERA_BEHIND_METRES,
@@ -219,7 +234,14 @@ import {
   cameraRig,
   verticalFieldOfViewDegrees,
 } from './camera';
-import { ROAD_WIDTH_METRES, VIEW_AHEAD_METRES, VIEW_BEHIND_METRES } from './terrain';
+import {
+  ROAD_SURFACE_GRAIN,
+  ROAD_WIDTH_METRES,
+  VIEW_AHEAD_METRES,
+  VIEW_BEHIND_METRES,
+} from './terrain';
+import { FIELD_DEPTH_METRES, FIELD_EDGE_LATERAL_METRES } from './settlements';
+import { MAXIMUM_BRIDGE_PARTS, type BridgePart, type WaterSurface } from './waterways';
 import type { SunStyle, WorldStyle } from './world';
 
 /*
@@ -308,23 +330,15 @@ const POSE_KEY = ['x', 'y', 'z', 'yaw', 'crankAngle'] as const;
  */
 const TINTED_KINDS: readonly RiderMarker['kind'][] = ['bot', 'ghost'];
 
-/**
- * How far the ground plane reaches from the camera, in metres.
- *
- * Far enough that its edge is past where {@link WorldStyle.fogDensity} has
- * faded everything to the horizon colour, and inside the camera's own far plane
- * so a driver never clips it: the corner of a 2 × 1 200 m square is 1 697 m
- * away, against a far plane of 2 000.
- *
- * ⚠️ **It is one quad.** #240's NFR-2 is explicit that the budget here is draw
- * calls, overdraw and fill rate rather than triangles, and a ground made of a
- * grid would buy nothing — there is nothing shading it and no displacement on
- * it. Two triangles is the whole cost.
+/*
+ * ⚠️ **`GROUND_RADIUS_METRES` and `GROUND_BELOW_ROAD_METRES` lived here until
+ * #458 and do not any more** — a reviewer who remembers "the ground is one
+ * quad, 2 × 1 200 m, 0.25 m under the road at the rider" is reading the old
+ * file. That quad moved with the rider and stayed level with them, so a 10 %
+ * climb lifted the road off a flat world and a descent dived through it: the
+ * gradient could not be seen. {@link TerrainBelt} draws `landform.ts`'s ground
+ * instead, and {@link HorizonRing} the hills beyond it.
  */
-const GROUND_RADIUS_METRES = 1200;
-
-/** How far under the road the ground sits, so the road reads as a raised surface. */
-const GROUND_BELOW_ROAD_METRES = 0.25;
 
 /**
  * What the sky and the ground are before a frame has said what they are.
@@ -389,9 +403,10 @@ const SCATTER_BAND_REACH_METRES =
  * 2 m up the plane is seen at a shallower angle, so more of the frame's lower
  * half is ground that is far away and therefore fogged, and the near, unfogged
  * band under the rider is a thinner strip than it was from 3 m. That is a
- * change to how the frame looks and to no bound — the ground plane still ends
- * 1 200 m out, where the thinnest air this client models has faded it by more
- * than 99.999 %.
+ * change to how the frame looks and to no bound. ⚠️ This sentence went on to
+ * say the ground plane ended 1 200 m out; since #458 the corridor's own ground
+ * ends 420 m out, where it is at least three-quarters fogged, and the horizon
+ * ring's foot — in the horizon colour itself — stands behind it.
  *
  * ⚠️ **And the cap is a statement about lateral distance, where three's fog is
  * a function of depth.** An item 400 m to the side and 100 m deep is NOT
@@ -638,7 +653,199 @@ export const SCATTER_INSTANCE_CAPACITY = SCATTER_MAX_ITEMS;
  * primitive on its own origin, so a cone left alone is half buried.
  * {@link prepareSceneryGeometry} puts a model on the same footing.
  */
-const SCATTER_STYLE: Record<ScatterKind, { colour: number; geometry: () => BufferGeometry }> = {
+/** One coloured solid of a shape built from several — #460. */
+interface ShapePart {
+  readonly colour: number;
+  readonly geometry: () => BufferGeometry;
+}
+
+/**
+ * How a kind is drawn when no model stands in for it: one solid in one colour,
+ * or — since #460 — several solids in several colours merged into one shape.
+ */
+interface SceneryStyle {
+  /** The kind's main colour: its only one, or its walls'. */
+  readonly colour: number;
+  /** The whole shape, uncoloured: what a model is sized against. */
+  readonly geometry: () => BufferGeometry;
+  /** The coloured solids the shape is made of, where it is more than one. */
+  readonly parts?: readonly ShapePart[];
+}
+
+/**
+ * How deep a built shape reaches below the ground it stands on, in metres:
+ * **0.6** — a plinth, so a house on a gentle slope is set into it rather than
+ * floating off its downhill corner. The ground under a building is never
+ * steeper than `settlements.ts` allows.
+ */
+const FOUNDATION_METRES = 0.6;
+
+/** A box with its base at `bottom` and centred on `(x, z)`. */
+function block(
+  width: number,
+  height: number,
+  depth: number,
+  x = 0,
+  bottom = 0,
+  z = 0,
+): BufferGeometry {
+  return new BoxGeometry(width, height, depth).translate(x, bottom + height / 2, z);
+}
+
+/**
+ * A pitched roof: a triangular prism `length` along x, `span` across z and
+ * `rise` high, its eaves at `eaves`. Built by hand rather than from three's own
+ * classes because none of them is a prism; non-indexed, so its faces are flat.
+ */
+function gable(length: number, span: number, rise: number, eaves: number): BufferGeometry {
+  const x = length / 2;
+  const z = span / 2;
+  const top = eaves + rise;
+  const corners = {
+    a: [-x, eaves, z],
+    b: [x, eaves, z],
+    c: [x, eaves, -z],
+    d: [-x, eaves, -z],
+    e: [-x, top, 0],
+    f: [x, top, 0],
+  } as const;
+  const faces: (readonly (keyof typeof corners)[])[] = [
+    ['a', 'b', 'f'],
+    ['a', 'f', 'e'],
+    ['c', 'd', 'e'],
+    ['c', 'e', 'f'],
+    ['a', 'e', 'd'],
+    ['b', 'c', 'f'],
+  ];
+  const positions: number[] = [];
+  for (const face of faces) {
+    for (const corner of face) {
+      positions.push(...corners[corner]);
+    }
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/**
+ * The buildings, the field boundaries and the signpost #460 adds, each built
+ * from numbers typed here — nothing is downloaded and nothing traced, ADR 0009.
+ *
+ * ⚠️ **Every building's front is +z and its long side along x**, because
+ * `settlements.ts` turns +z to face the road: a barn or a row of shops lies
+ * along the road and a church puts its tower towards it. Every field boundary
+ * runs along +z, because a run is turned to follow the road or to leave it.
+ * ⚠️ And every one of them is set {@link FOUNDATION_METRES} into the ground.
+ */
+const STRUCTURE_STYLE = {
+  barn: [
+    {
+      colour: 0x8a3b2e,
+      geometry: () => block(14, 4.5 + FOUNDATION_METRES, 8, 0, -FOUNDATION_METRES),
+    },
+    { colour: 0x4a4038, geometry: () => gable(14.6, 8.6, 3.2, 4.5) },
+  ],
+  church: [
+    {
+      colour: 0xb8b2a4,
+      geometry: () => block(7, 6 + FOUNDATION_METRES, 14, 0, -FOUNDATION_METRES, -2),
+    },
+    {
+      colour: 0x55595e,
+      geometry: () =>
+        gable(14.6, 7.6, 3.8, 6)
+          .rotateY(Math.PI / 2)
+          .translate(0, 0, -2),
+    },
+    {
+      colour: 0xa9a394,
+      geometry: () => block(4, 13 + FOUNDATION_METRES, 4, 0, -FOUNDATION_METRES, 6.5),
+    },
+    {
+      colour: 0x4b4f54,
+      geometry: () => new ConeGeometry(3, 6, 4).rotateY(Math.PI / 4).translate(0, 13 + 3, 6.5),
+    },
+  ],
+  'shop-row': [
+    {
+      colour: 0xb58a68,
+      geometry: () => block(20, 7 + FOUNDATION_METRES, 7, 0, -FOUNDATION_METRES),
+    },
+    { colour: 0x4e4238, geometry: () => block(20.2, 2.8, 7.3, 0, 0) },
+    { colour: 0x6b6b6b, geometry: () => block(20.4, 0.5, 7.4, 0, 7) },
+  ],
+  shed: [
+    {
+      colour: 0x8c9296,
+      geometry: () => block(10, 3.2 + FOUNDATION_METRES, 8, 0, -FOUNDATION_METRES),
+    },
+    {
+      colour: 0x6f7478,
+      geometry: () => new BoxGeometry(10.4, 0.3, 8.8).rotateX(0.12).translate(0, 3.55, 0),
+    },
+  ],
+  wall: [{ colour: 0x9b9486, geometry: () => block(0.55, 1.1 + 0.5, 8, 0, -0.5) }],
+  hedge: [{ colour: 0x3e5e2e, geometry: () => block(1.1, 1.3 + 0.5, 8, 0, -0.5) }],
+  fence: [
+    {
+      colour: 0x8a6f4f,
+      geometry: () =>
+        merged([
+          ...[-4, -2, 0, 2, 4].map((z) => block(0.12, 1.3 + 0.4, 0.12, 0, -0.4, z)),
+          block(0.06, 0.1, 8, 0, 0.5),
+          block(0.06, 0.1, 8, 0, 0.95),
+        ]),
+    },
+  ],
+  signpost: [
+    {
+      colour: 0x5a5a5a,
+      geometry: () => new CylinderGeometry(0.06, 0.06, 3, 6).translate(0, 1.1, 0),
+    },
+    {
+      colour: 0xe0dccf,
+      geometry: () =>
+        merged([block(0.05, 0.28, 1, 0, 2.15, 0.45), block(0.05, 0.28, 1, 0, 1.8, -0.45)]),
+    },
+  ],
+} as const satisfies Record<StructureKindWithoutModels, readonly ShapePart[]>;
+
+/** The structures #460 draws only from numbers — every one but `building`. */
+type StructureKindWithoutModels = Exclude<StructureKind, 'building'>;
+
+/** Several solids as one geometry: position and normal only, flat-shaded. */
+function merged(parts: readonly BufferGeometry[]): BufferGeometry {
+  const flat = parts.map((part) => {
+    const each = part.index === null ? part : part.toNonIndexed();
+    for (const name of Object.keys(each.attributes)) {
+      if (name !== 'position' && name !== 'normal') {
+        each.deleteAttribute(name);
+      }
+    }
+    return each;
+  });
+  const joined = mergeGeometries(flat);
+  for (const part of new Set([...parts, ...flat])) {
+    part.dispose();
+  }
+  if (joined === null) {
+    throw new Error('a built shape could not be merged into one geometry');
+  }
+  return joined;
+}
+
+/** A style from coloured parts: its first part's colour, all of its solids. */
+function builtStyle(parts: readonly ShapePart[]): SceneryStyle {
+  return {
+    colour: (parts[0] as ShapePart).colour,
+    geometry: () => merged(parts.map((part) => part.geometry())),
+    parts,
+  };
+}
+
+const SCATTER_STYLE: Record<SceneryKind, SceneryStyle> = {
   'tree-broadleaf': {
     colour: 0x3f6b33,
     // A canopy, coarse on purpose: at the distances fog leaves visible, a
@@ -665,6 +872,15 @@ const SCATTER_STYLE: Record<ScatterKind, { colour: number; geometry: () => Buffe
     colour: 0xa8968a,
     geometry: () => new BoxGeometry(7, 6, 9).translate(0, 3, 0),
   },
+  // #460. Built from numbers — `STRUCTURE_STYLE` says how, and why they face +z.
+  barn: builtStyle(STRUCTURE_STYLE.barn),
+  church: builtStyle(STRUCTURE_STYLE.church),
+  'shop-row': builtStyle(STRUCTURE_STYLE['shop-row']),
+  shed: builtStyle(STRUCTURE_STYLE.shed),
+  wall: builtStyle(STRUCTURE_STYLE.wall),
+  hedge: builtStyle(STRUCTURE_STYLE.hedge),
+  fence: builtStyle(STRUCTURE_STYLE.fence),
+  signpost: builtStyle(STRUCTURE_STYLE.signpost),
 };
 
 /**
@@ -683,7 +899,7 @@ const SCATTER_STYLE: Record<ScatterKind, { colour: number; geometry: () => Buffe
  * 5.5 m wide. Matching the largest extent makes the model occupy the box the
  * solid occupied, whichever way round it is.
  */
-export function sceneryFitMetres(kind: ScatterKind): number {
+export function sceneryFitMetres(kind: SceneryKind): number {
   const solid = SCATTER_STYLE[kind].geometry();
   solid.computeBoundingBox();
   const size = solid.boundingBox?.getSize(new Vector3()) ?? new Vector3(1, 1, 1);
@@ -763,7 +979,7 @@ export function sceneryFitMetres(kind: ScatterKind): number {
  */
 export function prepareSceneryGeometry(
   source: Object3D,
-  kind: ScatterKind,
+  kind: SceneryKind,
   readImage: (image: unknown) => AtlasImage | undefined = readImagePixels,
 ): BufferGeometry {
   source.updateWorldMatrix(false, true);
@@ -965,7 +1181,7 @@ function readImagePixels(image: unknown): AtlasImage | undefined {
  * — `three-renderer.test.ts` §"the shapes the models bring" — and the browser
  * gate counts the vertices that actually reached a driver.
  */
-let sceneryGeometries: ReadonlyMap<ScatterKind, readonly BufferGeometry[]> = new Map();
+let sceneryGeometries: ReadonlyMap<SceneryKind, readonly BufferGeometry[]> = new Map();
 
 /** Reads one model's scene out of its file. Replaced in tests; @see loadSceneryModels. */
 async function readModelScene(url: string): Promise<Object3D> {
@@ -998,9 +1214,9 @@ export async function loadSceneryModels(
   load: (url: string) => Promise<Object3D> = readModelScene,
   readImage: (image: unknown) => AtlasImage | undefined = readImagePixels,
 ): Promise<void> {
-  const loaded = new Map<ScatterKind, readonly BufferGeometry[]>();
+  const loaded = new Map<SceneryKind, readonly BufferGeometry[]>();
   await Promise.all(
-    SCATTER_KINDS.map(async (kind) => {
+    SCENERY_KINDS.map(async (kind) => {
       const models: readonly SceneryModel[] = SCENERY_MODELS[kind] ?? [];
       // ⚠️ **Bounded here as well as asserted in `scenery-models.test.ts`.**
       // The test is what fails a pull request that adds a fourth shape without
@@ -1073,6 +1289,19 @@ function releaseLoadedScene(source: Object3D): void {
   });
 }
 
+/** The bridges' stone. This repository's own: a weathered grey. */
+export const BRIDGE_COLOUR = 0x8f8a80;
+
+/**
+ * Every colour a kind is drawn in when no model stands in for it: its own, and
+ * — since #460 — each part of a built shape's. {@link LIT_COLOURS} is built
+ * from it, and `three-renderer.test.ts` holds the list to it.
+ */
+export function sceneryColours(kind: SceneryKind): readonly number[] {
+  const style = SCATTER_STYLE[kind];
+  return [style.colour, ...(style.parts ?? []).map((part) => part.colour)];
+}
+
 /**
  * Every colour **this file** decides that a lit material carries — #286.
  *
@@ -1103,7 +1332,8 @@ function releaseLoadedScene(source: Object3D): void {
  * client reads it, because every material already holds its own colour.
  */
 export const LIT_COLOURS: readonly number[] = [
-  ...SCATTER_KINDS.map((kind) => SCATTER_STYLE[kind].colour),
+  // Every colour of every kind, the built shapes' parts included (#460), once.
+  ...new Set(SCENERY_KINDS.flatMap(sceneryColours)),
   // #368. The bot's and the ghost's, which are **tints** on the rider's own
   // palette rather than colours of their own since they became bicycles. Each
   // is a conservative bound on what it produces: a tint multiplies, and both
@@ -1112,6 +1342,8 @@ export const LIT_COLOURS: readonly number[] = [
   // #349. The rider's own four, from the file that decides them, for the reason
   // the two lines above read their tables rather than restating them.
   ...BICYCLE_COLOURS,
+  // #459. The bridges' stone, which is lit like the scenery.
+  BRIDGE_COLOUR,
 ];
 
 /**
@@ -1337,7 +1569,7 @@ const SHADOW_SUN_DISTANCE_METRES = 20;
  * and a map of maps would need a guard at each level for a lookup that can only
  * miss in one way.
  */
-function beltKey(kind: ScatterKind, variant: number): string {
+function beltKey(kind: SceneryKind, variant: number): string {
   return `${kind}:${String(variant)}`;
 }
 
@@ -1357,9 +1589,27 @@ function beltKey(kind: ScatterKind, variant: number): string {
  * `Color` and is converted from sRGB. A model's own factor does **not** take
  * that path, because it is linear already — `scenery-palette.ts` §`LinearRgb`.
  */
-function paintedPrimitive(kind: ScatterKind): BufferGeometry {
-  const geometry = SCATTER_STYLE[kind].geometry();
-  paintEveryVertex(geometry, SCATTER_STYLE[kind].colour);
+function paintedPrimitive(kind: SceneryKind): BufferGeometry {
+  const style = SCATTER_STYLE[kind];
+  if (style.parts !== undefined) {
+    // #460: each part painted in its own colour, then merged — one geometry,
+    // so still one mesh and one draw call however many colours it has.
+    const painted = style.parts.map((part) => {
+      const geometry = merged([part.geometry()]);
+      paintEveryVertex(geometry, part.colour);
+      return geometry;
+    });
+    const joined = mergeGeometries(painted);
+    for (const each of painted) {
+      each.dispose();
+    }
+    if (joined === null) {
+      throw new Error(`${kind}: its parts could not be merged into one geometry`);
+    }
+    return joined;
+  }
+  const geometry = style.geometry();
+  paintEveryVertex(geometry, style.colour);
   return geometry;
 }
 
@@ -1373,7 +1623,7 @@ export class ScatterBelt {
    */
   readonly #meshes = new Map<string, InstancedMesh>();
   /** Which variants each kind actually has a shape for, in order. */
-  readonly #shapes = new Map<ScatterKind, number>();
+  readonly #shapes = new Map<SceneryKind, number>();
   /**
    * The belt's lit material and its unlit twin, built once — #286, #366.
    *
@@ -1436,8 +1686,8 @@ export class ScatterBelt {
    * primitive, which is `post` always and any other kind whose files could not
    * be read.
    */
-  constructor(models: ReadonlyMap<ScatterKind, readonly BufferGeometry[]> = sceneryGeometries) {
-    for (const kind of SCATTER_KINDS) {
+  constructor(models: ReadonlyMap<SceneryKind, readonly BufferGeometry[]> = sceneryGeometries) {
+    for (const kind of SCENERY_KINDS) {
       const shapes = models.get(kind) ?? [];
       this.#shapes.set(kind, Math.max(1, Math.min(MAXIMUM_SCENERY_VARIANTS, shapes.length)));
       for (let variant = 0; variant < (this.#shapes.get(kind) ?? 1); variant += 1) {
@@ -1491,7 +1741,7 @@ export class ScatterBelt {
   }
 
   /** Every mesh one kind is drawn across. @see ScatterBelt.meshes */
-  meshesOf(kind: ScatterKind): readonly InstancedMesh[] {
+  meshesOf(kind: SceneryKind): readonly InstancedMesh[] {
     const found: InstancedMesh[] = [];
     for (let variant = 0; variant < (this.#shapes.get(kind) ?? 0); variant += 1) {
       const mesh = this.#meshes.get(beltKey(kind, variant));
@@ -2113,8 +2363,9 @@ export class RiderBelt {
  *   a hill a pacer has gone over.
  * - **Lifted {@link CONTACT_SHADOW_LIFT_METRES} and polygon-offset toward the
  *   camera**, so it does not fight the road's own triangles for the same depth.
- *   The ground plane writes no depth (`#groundMaterial`), so off the road
- *   nothing is under it to fight.
+ *   ⚠️ Since #458 the ground beside the road writes depth too, a quarter of a
+ *   metre under the road — so a blob that spills off the tarmac is lifted
+ *   clear of it by the same margin.
  *
  * ⚠️ **Black with a per-vertex ALPHA, not a texture.** A soft edge is usually
  * a radial texture; `game.browser.spec.ts` §"uploads no texture to the GPU"
@@ -2387,6 +2638,749 @@ function reserve(mesh: InstancedMesh, needed: number): void {
   mesh.instanceMatrix = grown;
 }
 
+/**
+ * The ground beside the road — #458. One mesh, one draw call, rebuilt from
+ * `landform.ts` every frame the way the road is.
+ *
+ * ## ⚠️ Lit, and writing depth — the two decisions #458 asks to be recorded
+ *
+ * The flat quad this replaces was a `MeshBasicMaterial` that wrote no depth
+ * and drew first: a **backdrop**. Both halves were right for a horizontal
+ * plane and both are wrong for a landform.
+ *
+ * - **Lit**, because an unlit slope reads flat — which is the defect itself.
+ *   `world.ts` solves its two intensities so a horizontal surface receives
+ *   exactly 1, so a level field is drawn at exactly the colour the quad was,
+ *   and only a hillside changes: its sunward face brighter, its far face
+ *   darker. `landform.ts` supplies the normals, from the grid.
+ * - **Writing depth**, because a hillside must hide what is behind it: a
+ *   pacer over the crest, a tree beyond a rise. A backdrop that is drawn under
+ *   everything whatever its height cannot. What that costs is the reason the
+ *   quad did not: the road now depth-tests against the ground, so the two are
+ *   built to share their edge exactly (`landform.ts` §"The innermost column IS
+ *   the road's edge") rather than one sitting a quarter of a metre under the
+ *   other everywhere.
+ *
+ * The contact shadows and the shadow catcher are unaffected: both are drawn
+ * on the road, over it, with no depth write of their own.
+ *
+ * ## What a quality rung takes from it
+ *
+ * Bands of ground, outermost first — {@link setBands}. The vertices are
+ * uploaded whole whatever the rung and the draw range stops short, because a
+ * rung that moved vertices would move the ground under the scenery; what the
+ * rung saves is the fill of the far ground, which is most of this mesh's
+ * fragments and is already fogged by the time a rider could see it.
+ *
+ * Exported for `three-renderer.test.ts`, for {@link ScatterBelt}'s reasons.
+ */
+export class TerrainBelt {
+  readonly #geometry = new BufferGeometry();
+  /** How long this route's fields are, for the patchwork — #425. @see TerrainMesh.fieldSpan */
+  readonly #fieldSpan = { value: 90 };
+  /** How many fields a lap has, which the patchwork wraps by — #468 review B3. @see TerrainMesh.fieldCount */
+  readonly #fieldCount = { value: 1 };
+  readonly #materials = {
+    lit: withSurfaceDetail(
+      new MeshLambertMaterial({ color: UNSET_COLOUR, vertexColors: true }),
+      'ground',
+      this.#fieldSpan,
+      this.#fieldCount,
+    ),
+    flat: withSurfaceDetail(
+      new MeshBasicMaterial({ color: UNSET_COLOUR, vertexColors: true }),
+      'ground',
+      this.#fieldSpan,
+      this.#fieldCount,
+    ),
+  };
+  readonly #mesh: Mesh;
+  #vertexCapacity = 0;
+  #indexCapacity = 0;
+  #bands = TERRAIN_BANDS;
+  #indicesPerBand = 0;
+  #indexCount = 0;
+  /**
+   * The index list last uploaded. `landform.ts` §`terrainIndices` lends the
+   * SAME array for every frame of one row count, so a frame that hands it
+   * back again needs no upload — 6 624 indices sent to the GPU sixty times a
+   * second for nothing, which #468's review noted.
+   */
+  #uploadedIndices: Uint32Array | undefined;
+
+  constructor() {
+    this.#mesh = new Mesh(this.#geometry, this.#materials.lit);
+    // For the road's reason: rebuilt in world coordinates every frame, always
+    // under the camera, and one mesh — a cull could only ever lose it.
+    this.#mesh.frustumCulled = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The one mesh. For `three-renderer.test.ts`. */
+  get mesh(): Mesh {
+    return this.#mesh;
+  }
+
+  /** @see QualitySettings.shading */
+  setShading(shading: QualitySettings['shading']): void {
+    this.#mesh.material = this.#materials[shading];
+  }
+
+  /** The surface detail, on or off — #425. @see QualitySettings.surfaceDetail */
+  setSurfaceDetail(on: boolean): void {
+    setSurfaceDetail(this.#materials.lit, on);
+    setSurfaceDetail(this.#materials.flat, on);
+  }
+
+  /** How many bands of ground this rung draws, innermost first. @see QualitySettings.terrainBands */
+  setBands(bands: number): void {
+    this.#bands = Math.max(1, Math.min(TERRAIN_BANDS, Math.floor(bands)));
+    this.#applyRange();
+  }
+
+  /**
+   * This frame's ground, in the world's ground colour. Grows its buffers and
+   * never shrinks them, for the road's reason (#240's NFR-3).
+   */
+  update(ground: TerrainMesh, groundColour: number): void {
+    this.#materials.lit.color.setHex(groundColour);
+    this.#materials.flat.color.setHex(groundColour);
+    if (ground.vertices.length > this.#vertexCapacity) {
+      this.#vertexCapacity = ground.vertices.length;
+      for (const [name, size] of [
+        ['position', 3],
+        ['normal', 3],
+        ['color', 3],
+        // #425: where on the route each vertex stands, for the patchwork.
+        ['fields', 2],
+      ] as const) {
+        this.#geometry.setAttribute(
+          name,
+          new BufferAttribute(new Float32Array((this.#vertexCapacity / 3) * size), size),
+        );
+      }
+    }
+    if (ground.indices.length > this.#indexCapacity) {
+      this.#indexCapacity = ground.indices.length;
+      this.#geometry.setIndex(new BufferAttribute(new Uint32Array(this.#indexCapacity), 1));
+      this.#uploadedIndices = undefined;
+    }
+    upload(this.#geometry.getAttribute('position') as BufferAttribute, ground.vertices);
+    upload(this.#geometry.getAttribute('normal') as BufferAttribute, ground.normals);
+    upload(this.#geometry.getAttribute('color') as BufferAttribute, ground.colours);
+    upload(this.#geometry.getAttribute('fields') as BufferAttribute, ground.fields);
+    if (ground.indices !== this.#uploadedIndices) {
+      upload(this.#geometry.getIndex() as BufferAttribute, ground.indices);
+      this.#uploadedIndices = ground.indices;
+    }
+    this.#fieldSpan.value = ground.fieldSpan;
+    this.#fieldCount.value = ground.fieldCount;
+    this.#indicesPerBand = ground.indicesPerBand;
+    this.#indexCount = ground.indices.length;
+    this.#applyRange();
+  }
+
+  dispose(): void {
+    this.#geometry.dispose();
+    this.#materials.lit.dispose();
+    this.#materials.flat.dispose();
+  }
+
+  /** Draw only the bands this rung allows, and only triangles this frame has. */
+  #applyRange(): void {
+    this.#geometry.setDrawRange(0, Math.min(this.#indexCount, this.#bands * this.#indicesPerBand));
+  }
+}
+
+/**
+ * The hills on the horizon — #458's "distant relief silhouette". One ring of
+ * {@link HORIZON_SEGMENTS} quads round the camera, one draw call.
+ *
+ * ⚠️ **Unfogged, and hazed by its own vertex colours instead.** At
+ * {@link HORIZON_RADIUS_METRES} `FogExp2` would take the whole ring into the
+ * horizon colour and it would be invisible, which is a draw call for nothing.
+ * So its FOOT is the horizon colour exactly — where the corridor's own ground
+ * ends it is already that colour, fogged, and the two meet without a seam —
+ * and its ridge is a little of the ground colour, which is what distance
+ * leaves of a hill.
+ *
+ * ⚠️ **A backdrop, and it is the only one left**: no depth write, drawn first,
+ * so everything nearer is drawn over it whatever its height. It reaches down to
+ * {@link HorizonRelief.base}, far below the route, so a ray that passes over
+ * the edge of the corridor's ground meets hazed hillside rather than sky.
+ */
+export class HorizonRing {
+  readonly #geometry = new BufferGeometry();
+  readonly #material = new MeshBasicMaterial({
+    vertexColors: true,
+    fog: false,
+    depthWrite: false,
+    side: DoubleSide,
+  });
+  readonly #mesh: Mesh;
+  readonly #positions = new Float32Array((HORIZON_SEGMENTS + 1) * 3 * 3);
+  readonly #colours = new Float32Array((HORIZON_SEGMENTS + 1) * 3 * 3);
+  readonly #haze = new Color();
+  readonly #horizon = new Color();
+  /** The relief the positions were last built for, so a frame that did not change it costs nothing. */
+  #built: HorizonRelief | undefined;
+
+  constructor() {
+    this.#geometry.setAttribute('position', new BufferAttribute(this.#positions, 3));
+    this.#geometry.setAttribute('color', new BufferAttribute(this.#colours, 3));
+    const indices: number[] = [];
+    for (let segment = 0; segment < HORIZON_SEGMENTS; segment += 1) {
+      for (let band = 0; band < 2; band += 1) {
+        const a = segment * 3 + band;
+        const b = a + 3;
+        indices.push(a, b, a + 1, a + 1, b, b + 1);
+      }
+    }
+    this.#geometry.setIndex(indices);
+    this.#mesh = new Mesh(this.#geometry, this.#material);
+    this.#mesh.frustumCulled = false;
+    this.#mesh.renderOrder = -2;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The one mesh. For `three-renderer.test.ts`. */
+  get mesh(): Mesh {
+    return this.#mesh;
+  }
+
+  /** Centres the ring on the camera, and colours it from this frame's world. */
+  update(relief: HorizonRelief, world: WorldStyle, pose: CameraPose): void {
+    if (this.#built !== relief) {
+      this.#built = relief;
+      for (let segment = 0; segment <= HORIZON_SEGMENTS; segment += 1) {
+        const angle = (segment / HORIZON_SEGMENTS) * Math.PI * 2;
+        const x = Math.cos(angle) * HORIZON_RADIUS_METRES;
+        const z = Math.sin(angle) * HORIZON_RADIUS_METRES;
+        const top = relief.tops[segment % HORIZON_SEGMENTS] as number;
+        const heights = [relief.base, relief.foot, top];
+        for (let row = 0; row < 3; row += 1) {
+          const at = (segment * 3 + row) * 3;
+          this.#positions[at] = x;
+          this.#positions[at + 1] = heights[row] as number;
+          this.#positions[at + 2] = z;
+        }
+      }
+      (this.#geometry.getAttribute('position') as BufferAttribute).needsUpdate = true;
+    }
+    this.#horizon.setHex(world.horizonColour);
+    this.#haze.setHex(world.groundColour).lerp(this.#horizon, HORIZON_HAZE_SHARE);
+    for (let segment = 0; segment <= HORIZON_SEGMENTS; segment += 1) {
+      for (let row = 0; row < 3; row += 1) {
+        const colour = row === 2 ? this.#haze : this.#horizon;
+        const at = (segment * 3 + row) * 3;
+        this.#colours[at] = colour.r;
+        this.#colours[at + 1] = colour.g;
+        this.#colours[at + 2] = colour.b;
+      }
+    }
+    (this.#geometry.getAttribute('color') as BufferAttribute).needsUpdate = true;
+    // Only the ground plane's position follows the camera; the heights are the
+    // route's, so a rider who climbs rises past the hills rather than with them.
+    this.#mesh.position.set(pose.x, 0, pose.z);
+  }
+
+  dispose(): void {
+    this.#geometry.dispose();
+    this.#material.dispose();
+  }
+}
+
+/**
+ * How much of the horizon colour the distant ridge carries: **0.7** — so 30 %
+ * of the ground colour is what is left of a hill 1.1 km away. This
+ * repository's own choice, by eye, against the 95 % `world.ts` fogs the
+ * corridor's own far end by.
+ */
+const HORIZON_HAZE_SHARE = 0.7;
+
+/**
+ * The procedural surface detail — #425's half that needs no asset.
+ *
+ * ## What it is, and what it is not
+ *
+ * A grain on the tarmac and a mottle on the ground, from two octaves of value
+ * noise over the fragment's own WORLD position, and on the ground a patchwork
+ * of fields on the grid the walls stand on (`landform.ts` §`fieldSpanMetres`,
+ * `settlements.ts` §`fieldEdgesAt`). Computed in the fragment shader from
+ * numbers: **no texture is sampled**, so #366's "no texture reaches the GPU"
+ * holds, ADR 0022's posture is unchanged and no amendment is owed. The
+ * photographic surfaces #425 also asks for wait for
+ * [#431](https://github.com/openzigs/onyourleft/issues/431).
+ *
+ * ⚠️ **It fades out with distance**, 12 m to 45 m on the road and 20 m to 90 m
+ * on the ground, because noise sampled at a grazing angle aliases — the
+ * shimmer #425 warns #424's low camera makes worse. A texture would have
+ * mipmaps to do this; arithmetic has to do it by hand.
+ *
+ * ⚠️ **The road's grain is bounded by `terrain.ts` §`ROAD_SURFACE_GRAIN`** and
+ * multiplies the gradient tint rather than replacing it: the colour is how a
+ * rider reads the climb ahead, and `terrain.test.ts` holds the worst case of
+ * the two together to `MINIMUM_TINT_CONTRAST_RATIO`.
+ *
+ * Injected into three's own materials with `onBeforeCompile`, behind a define
+ * a quality rung switches (`QualitySettings.surfaceDetail`), so the road is
+ * still one material and one draw call.
+ */
+const DETAIL_COMMON = /* glsl */ `
+float oylHash(vec2 p) {
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
+float oylNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(oylHash(i), oylHash(i + vec2(1.0, 0.0)), u.x),
+    mix(oylHash(i + vec2(0.0, 1.0)), oylHash(i + vec2(1.0, 1.0)), u.x),
+    u.y
+  );
+}
+`;
+
+/** What the road's fragment does with the grain, behind the define. */
+const ROAD_DETAIL = /* glsl */ `
+#ifdef SURFACE_DETAIL
+{
+  float fade = 1.0 - smoothstep(12.0, 45.0, distance(cameraPosition, vDetailWorld));
+  float grain = (oylNoise(vDetailWorld.xz * 5.3) - 0.5) * 1.4
+    + (oylNoise(vDetailWorld.xz * 1.1) - 0.5) * 1.0
+    + (oylNoise(vDetailWorld.xz * 0.21) - 0.5) * 0.8;
+  diffuseColor.rgb *= 1.0 + ${String(ROAD_SURFACE_GRAIN)} * clamp(grain, -1.0, 1.0) * fade;
+}
+#endif
+`;
+
+/**
+ * What the ground's fragment does: the mottle, and the patchwork of fields
+ * beyond the verge — some cropped and yellower, some pasture, some darker —
+ * one colour a field, hashed from which field it is.
+ */
+const GROUND_DETAIL = /* glsl */ `
+#ifdef SURFACE_DETAIL
+{
+  float fade = 1.0 - smoothstep(20.0, 90.0, distance(cameraPosition, vDetailWorld));
+  float mottle = (oylNoise(vDetailWorld.xz * 0.9) - 0.5) * 0.12
+    + (oylNoise(vDetailWorld.xz * 0.11) - 0.5) * 0.16;
+  // Wrapped by the lap's own field count, so lap two's field is lap one's —
+  // #468 review B3. Not mod(): its division is not exact on every GPU, and a
+  // whole multiple landing a hair under an integer would pick the neighbour.
+  float fieldOnLap = floor(vFields.x / fieldSpan);
+  float fieldIndex = fieldOnLap - fieldCount * floor((fieldOnLap + 0.5) / fieldCount);
+  float fieldSide = vFields.y >= 0.0 ? 1.0 : -1.0;
+  float fieldBand = floor(abs(vFields.y) / ${String(FIELD_DEPTH_METRES.toFixed(1))});
+  float fieldKind = oylHash(vec2(fieldIndex * 1.37 + fieldSide * 17.0, fieldBand * 3.1 + 7.0));
+  vec3 crop = vec3(1.18, 1.08, 0.72);
+  vec3 pasture = vec3(1.0);
+  vec3 fallow = vec3(0.86, 0.9, 0.84);
+  vec3 fieldTone = fieldKind < 0.35 ? crop : (fieldKind < 0.75 ? pasture : fallow);
+  float farmland = smoothstep(${String(FIELD_EDGE_LATERAL_METRES.toFixed(1))}, ${String((FIELD_EDGE_LATERAL_METRES + 1.5).toFixed(1))}, abs(vFields.y));
+  diffuseColor.rgb *= mix(vec3(1.0), fieldTone, farmland);
+  diffuseColor.rgb *= 1.0 + mottle * fade;
+}
+#endif
+`;
+
+/**
+ * Teaches one of three's materials the surface detail, behind the
+ * `SURFACE_DETAIL` define. @see DETAIL_COMMON
+ *
+ * ⚠️ `customProgramCacheKey` is what stops three handing a detailed road the
+ * program it compiled for a plain material of the same class — the cache key
+ * otherwise ignores `onBeforeCompile` entirely.
+ */
+function withSurfaceDetail<M extends MeshBasicMaterial | MeshLambertMaterial>(
+  material: M,
+  surface: 'road' | 'ground',
+  fieldSpan: { value: number },
+  fieldCount: { value: number },
+): M {
+  material.defines = { ...material.defines };
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms['fieldSpan'] = fieldSpan;
+    shader.uniforms['fieldCount'] = fieldCount;
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>\nvarying vec3 vDetailWorld;\n${
+          surface === 'ground' ? 'attribute vec2 fields;\nvarying vec2 vFields;\n' : ''
+        }`,
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>\nvDetailWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;\n${
+          surface === 'ground' ? 'vFields = fields;\n' : ''
+        }`,
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>\nvarying vec3 vDetailWorld;\n${
+          surface === 'ground'
+            ? 'varying vec2 vFields;\nuniform float fieldSpan;\nuniform float fieldCount;\n'
+            : ''
+        }${DETAIL_COMMON}`,
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>\n${surface === 'ground' ? GROUND_DETAIL : ROAD_DETAIL}`,
+      );
+  };
+  material.customProgramCacheKey = () => `oyl-surface-detail-${surface}`;
+  return material;
+}
+
+/** Switches a material's surface detail on or off, compiling it again once. */
+function setSurfaceDetail(material: Material, on: boolean): void {
+  const defines = { ...(material.defines ?? {}) };
+  if (on === Object.hasOwn(defines, 'SURFACE_DETAIL')) {
+    return;
+  }
+  if (on) {
+    defines['SURFACE_DETAIL'] = '';
+  } else {
+    delete defines['SURFACE_DETAIL'];
+  }
+  material.defines = defines;
+  material.needsUpdate = true;
+}
+
+/**
+ * The sky — #425: a vertical gradient from the route's own sky colour
+ * overhead to its haze at the horizon, where it used to be one flat colour.
+ *
+ * A sphere round the camera, unfogged, drawn first and writing no depth, whose
+ * vertex colours are worked out from the height of each vertex. **No HDRI and
+ * no texture**: the two colours are `world.ts`'s, so the sky is still a
+ * function of the route. The expensive version — an HDRI skybox — waits for
+ * [#431](https://github.com/openzigs/onyourleft/issues/431).
+ *
+ * Exported for `three-renderer.test.ts`, for {@link ScatterBelt}'s reasons.
+ */
+export class SkyDome {
+  readonly #geometry = new SphereGeometry(SKY_DOME_RADIUS_METRES, 24, 16);
+  readonly #material = new MeshBasicMaterial({
+    vertexColors: true,
+    fog: false,
+    depthWrite: false,
+    side: BackSide,
+  });
+  readonly #mesh: Mesh;
+  readonly #sky = new Color();
+  readonly #haze = new Color();
+  readonly #mixed = new Color();
+  /** The two colours last painted, so a frame whose world has not changed costs nothing. */
+  #painted = '';
+
+  constructor() {
+    const count = this.#geometry.getAttribute('position').count;
+    this.#geometry.setAttribute('color', new BufferAttribute(new Float32Array(count * 3), 3));
+    this.#mesh = new Mesh(this.#geometry, this.#material);
+    this.#mesh.frustumCulled = false;
+    this.#mesh.renderOrder = -3;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The one mesh. For `three-renderer.test.ts`. */
+  get mesh(): Mesh {
+    return this.#mesh;
+  }
+
+  /** Paints the gradient from this frame's world, and centres it on the eye. */
+  update(
+    world: WorldStyle,
+    eye: { readonly x: number; readonly y: number; readonly z: number },
+  ): void {
+    this.#mesh.position.set(eye.x, eye.y, eye.z);
+    const key = `${String(world.skyColour)}/${String(world.horizonColour)}`;
+    if (key === this.#painted) {
+      return;
+    }
+    this.#painted = key;
+    this.#sky.setHex(world.skyColour);
+    this.#haze.setHex(world.horizonColour);
+    const positions = this.#geometry.getAttribute('position') as BufferAttribute;
+    const colours = this.#geometry.getAttribute('color') as BufferAttribute;
+    for (let vertex = 0; vertex < positions.count; vertex += 1) {
+      this.#mixed
+        .copy(this.#haze)
+        .lerp(this.#sky, skyShare(positions.getY(vertex) / SKY_DOME_RADIUS_METRES));
+      colours.setXYZ(vertex, this.#mixed.r, this.#mixed.g, this.#mixed.b);
+    }
+    colours.needsUpdate = true;
+  }
+
+  dispose(): void {
+    this.#geometry.dispose();
+    this.#material.dispose();
+  }
+}
+
+/** How far out the sky is drawn, in metres: inside the camera's 2 000 m far plane. */
+const SKY_DOME_RADIUS_METRES = 1_800;
+
+/**
+ * How much of the sky's own colour, rather than the haze, a direction at
+ * height `rise` (the sine of its elevation) is painted: none at and below the
+ * horizon, all of it by about 30° up, easing between.
+ */
+export function skyShare(rise: number): number {
+  const t = Math.min(1, Math.max(0, rise / SKY_GRADIENT_RISE));
+  return Math.pow(t * t * (3 - 2 * t), SKY_GRADIENT_EASE);
+}
+
+/**
+ * The sine of the elevation by which the sky has reached its own colour:
+ * **0.5**, which is 30° up — the top of a chase camera's frame.
+ */
+export const SKY_GRADIENT_RISE = 0.5;
+
+/** How quickly the haze gives way near the horizon: **0.7**, a little faster than even. */
+const SKY_GRADIENT_EASE = 0.7;
+
+/**
+ * The water shader — #459. Vertex half: world position and the shore weight,
+ * and three's own fog chunk.
+ */
+const WATER_VERTEX = /* glsl */ `
+attribute float shore;
+varying vec3 vWorld;
+varying float vShore;
+#include <fog_pars_vertex>
+void main() {
+  vec4 world = modelMatrix * vec4(position, 1.0);
+  vWorld = world.xyz;
+  vShore = shore;
+  vec4 mvPosition = viewMatrix * world;
+  gl_Position = projectionMatrix * mvPosition;
+  #include <fog_vertex>
+}
+`;
+
+/**
+ * The water shader's fragment half: the sky reflected with a Fresnel term,
+ * ripples as an analytic normal that scrolls with the ride's clock, and the
+ * edges tinted shallow by the geometry's own shore weight.
+ *
+ * ⚠️ **No texture, and no second pass.** The ripple normal is two travelling
+ * waves differentiated by hand, so there is no normal map to fetch — #366's
+ * "no texture reaches the GPU" holds — and the reflection is the sky's own two
+ * colours along the reflected ray, so there is no planar reflection render.
+ * The fog and colour-space chunks are three's, in the order its own
+ * `meshbasic` shader uses them.
+ */
+const WATER_FRAGMENT = /* glsl */ `
+uniform vec3 skyColour;
+uniform vec3 horizonColour;
+uniform vec3 deepColour;
+uniform vec3 shallowColour;
+uniform float time;
+varying vec3 vWorld;
+varying float vShore;
+#include <fog_pars_fragment>
+void main() {
+  vec2 p = vWorld.xz;
+  vec2 d1 = vec2(0.83, 0.56);
+  vec2 d2 = vec2(-0.47, 0.88);
+  float a1 = dot(p, d1) * 1.7 + time * 1.3;
+  float a2 = dot(p, d2) * 2.9 - time * 1.9;
+  vec2 slope = 0.06 * cos(a1) * d1 + 0.058 * cos(a2) * d2;
+  vec3 n = normalize(vec3(-slope.x, 1.0, -slope.y));
+  vec3 v = normalize(cameraPosition - vWorld);
+  float facing = clamp(dot(n, v), 0.0, 1.0);
+  float fresnel = 0.02 + 0.98 * pow(1.0 - facing, 5.0);
+  vec3 r = reflect(-v, n);
+  vec3 sky = mix(horizonColour, skyColour, smoothstep(0.0, 0.4, r.y));
+  vec3 body = mix(shallowColour, deepColour, smoothstep(0.0, 1.0, vShore));
+  gl_FragColor = vec4(mix(body, sky, fresnel), 1.0);
+  #include <colorspace_fragment>
+  #include <fog_fragment>
+}
+`;
+
+/** Open water, where it is deep. This repository's own, a dark blue-green. */
+const WATER_DEEP_COLOUR = 0x1d4a55;
+
+/** Water at its edge, over the bed: lighter, and greener. This repository's own. */
+const WATER_SHALLOW_COLOUR = 0x557a68;
+
+/**
+ * The water — #459. One mesh for every stream and lake in view, one draw call,
+ * rebuilt from `waterways.ts` every frame the way the road is.
+ *
+ * Exported for `three-renderer.test.ts`, for {@link ScatterBelt}'s reasons.
+ */
+export class WaterBelt {
+  readonly #geometry = new BufferGeometry();
+  readonly #shaded = new ShaderMaterial({
+    vertexShader: WATER_VERTEX,
+    fragmentShader: WATER_FRAGMENT,
+    fog: true,
+    // ⚠️ **Both faces.** A stream's strip is laid out across the road and a
+    // lake's along it, on either side, so their windings disagree; one-sided,
+    // half of them faced the ground and were culled. The first browser run of
+    // #459 drew a bridge over a dry trench for exactly that reason.
+    side: DoubleSide,
+    uniforms: UniformsUtils.merge([
+      UniformsLib.fog,
+      {
+        skyColour: { value: new Color(UNSET_COLOUR) },
+        horizonColour: { value: new Color(UNSET_COLOUR) },
+        deepColour: { value: new Color(WATER_DEEP_COLOUR) },
+        shallowColour: { value: new Color(WATER_SHALLOW_COLOUR) },
+        time: { value: 0 },
+      },
+    ]),
+  });
+  readonly #flat = new MeshBasicMaterial({ color: WATER_DEEP_COLOUR, side: DoubleSide });
+  readonly #mesh: Mesh;
+  #vertexCapacity = 0;
+  #indexCapacity = 0;
+
+  constructor() {
+    this.#mesh = new Mesh(this.#geometry, this.#shaded);
+    // Rebuilt in world coordinates every frame, like the road.
+    this.#mesh.frustumCulled = false;
+    this.#mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The one mesh. For `three-renderer.test.ts`. */
+  get mesh(): Mesh {
+    return this.#mesh;
+  }
+
+  /** @see QualitySettings.water */
+  setDrawn(drawn: QualitySettings['water']): void {
+    this.#mesh.material = drawn === 'shaded' ? this.#shaded : this.#flat;
+  }
+
+  /** This frame's water, under this frame's sky, at this frame's time. */
+  update(surface: WaterSurface, world: WorldStyle, seconds: number): void {
+    const uniforms = this.#shaded.uniforms as Record<string, { value: unknown } | undefined>;
+    (uniforms['skyColour']?.value as Color).setHex(world.skyColour);
+    (uniforms['horizonColour']?.value as Color).setHex(world.horizonColour);
+    (uniforms['time'] as { value: number }).value = seconds;
+    if (surface.vertices.length > this.#vertexCapacity) {
+      this.#vertexCapacity = Math.max(surface.vertices.length, this.#vertexCapacity * 2);
+      this.#geometry.setAttribute(
+        'position',
+        new BufferAttribute(new Float32Array(this.#vertexCapacity), 3),
+      );
+      this.#geometry.setAttribute(
+        'shore',
+        new BufferAttribute(new Float32Array(this.#vertexCapacity / 3), 1),
+      );
+    }
+    if (surface.indices.length > this.#indexCapacity) {
+      this.#indexCapacity = Math.max(surface.indices.length, this.#indexCapacity * 2);
+      this.#geometry.setIndex(new BufferAttribute(new Uint32Array(this.#indexCapacity), 1));
+    }
+    if (surface.indices.length > 0) {
+      upload(this.#geometry.getAttribute('position') as BufferAttribute, surface.vertices);
+      upload(this.#geometry.getAttribute('shore') as BufferAttribute, surface.shore);
+      upload(this.#geometry.getIndex() as BufferAttribute, surface.indices);
+    }
+    this.#geometry.setDrawRange(0, surface.indices.length);
+    // No water in view is no draw call, not an empty one.
+    this.#mesh.visible = surface.indices.length > 0;
+  }
+
+  dispose(): void {
+    this.#geometry.dispose();
+    this.#shaded.dispose();
+    this.#flat.dispose();
+  }
+}
+
+/**
+ * The bridges — #459. Every parapet, deck slab and abutment in view is one
+ * instance of one box: one draw call however many bridges there are.
+ *
+ * Exported for `three-renderer.test.ts`, for {@link ScatterBelt}'s reasons.
+ */
+export class BridgeBelt {
+  readonly #materials = vertexColouredMaterials();
+  readonly #mesh: InstancedMesh;
+  readonly #matrix = new Matrix4();
+  readonly #along = new Vector3();
+  readonly #across = new Vector3();
+  readonly #up = new Vector3();
+  readonly #vertical = new Vector3(0, 1, 0);
+
+  constructor() {
+    const box = new BoxGeometry(1, 1, 1);
+    paintEveryVertex(box, BRIDGE_COLOUR);
+    this.#mesh = new InstancedMesh(box, this.#materials.lit, MAXIMUM_BRIDGE_PARTS);
+    this.#mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.#mesh.count = 0;
+    this.#mesh.frustumCulled = false;
+    this.#mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The one mesh. For `three-renderer.test.ts`. */
+  get mesh(): InstancedMesh {
+    return this.#mesh;
+  }
+
+  /** @see QualitySettings.shading */
+  setShading(shading: QualitySettings['shading']): void {
+    this.#mesh.material = this.#materials[shading];
+  }
+
+  /**
+   * One box a part: `length` along its axis, `width` across it level, and
+   * `height` up. Allocates nothing.
+   */
+  update(parts: readonly BridgePart[]): void {
+    const count = Math.min(parts.length, MAXIMUM_BRIDGE_PARTS);
+    for (let index = 0; index < count; index += 1) {
+      const part = parts[index] as BridgePart;
+      this.#along.set(part.axisX, part.axisY, part.axisZ).normalize();
+      this.#across.crossVectors(this.#vertical, this.#along).normalize();
+      this.#up.crossVectors(this.#along, this.#across).normalize();
+      this.#across.multiplyScalar(part.width);
+      this.#up.multiplyScalar(part.height);
+      this.#along.multiplyScalar(part.length);
+      this.#matrix.makeBasis(this.#across, this.#up, this.#along);
+      this.#matrix.setPosition(part.x, part.y, part.z);
+      this.#mesh.setMatrixAt(index, this.#matrix);
+    }
+    this.#mesh.count = count;
+    this.#mesh.instanceMatrix.needsUpdate = count > 0;
+    this.#mesh.visible = count > 0;
+  }
+
+  dispose(): void {
+    this.#mesh.geometry.dispose();
+    this.#mesh.dispose();
+    this.#materials.lit.dispose();
+    this.#materials.flat.dispose();
+  }
+}
+
 class ThreeGameView implements GameView {
   readonly hasContext: boolean;
   readonly #renderer: WebGLRenderer | undefined;
@@ -2439,7 +3433,16 @@ class ThreeGameView implements GameView {
    */
   readonly #sky = new Color(UNSET_COLOUR);
   readonly #fog = new FogExp2(UNSET_COLOUR, 0);
-  readonly #ground: Mesh;
+  /** The ground beside the road — #458. @see TerrainBelt */
+  readonly #terrain = new TerrainBelt();
+  /** The hills on the horizon — #458. @see HorizonRing */
+  readonly #horizon = new HorizonRing();
+  /** The sky's gradient — #425. @see SkyDome */
+  readonly #skyDome = new SkyDome();
+  /** The streams and lakes — #459. @see WaterBelt */
+  readonly #water = new WaterBelt();
+  /** The bridges over them — #459. @see BridgeBelt */
+  readonly #bridges = new BridgeBelt();
   /**
    * What stands beside the road — #244. One mesh per kind, built once.
    *
@@ -2455,17 +3458,15 @@ class ThreeGameView implements GameView {
    * every frame by `#updateWorld`, exactly as the fog is coloured every frame.
    */
   readonly #lighting = new WorldLamps();
-  readonly #groundMaterial = new MeshBasicMaterial({
-    color: UNSET_COLOUR,
-    // ⚠️ **Writes no depth, and draws first.** That is what lets a flat plane
-    // stand under a road that climbs and descends: the road, the markers and
-    // anything a later sub-issue adds are drawn over it whatever their height,
-    // so a rider descending never watches the road they are on disappear
-    // beneath a plane pinned to where they were. It is a backdrop, and a
-    // backdrop that occludes is a bug rather than a depth cue.
-    depthWrite: false,
-  });
   #quality: QualitySettings;
+  /** This frame's world, for the sky dome, which is placed with the camera. */
+  #world: WorldStyle = {
+    skyColour: UNSET_COLOUR,
+    groundColour: UNSET_COLOUR,
+    horizonColour: UNSET_COLOUR,
+    fogDensity: 0,
+    sun: { x: 0, y: 1, z: 0, ambient: 0, direct: 0 },
+  };
   #widthCssPixels = 1;
   #heightCssPixels = 1;
   #vertexCapacity = 0;
@@ -2486,22 +3487,26 @@ class ThreeGameView implements GameView {
     this.#scene.background = this.#sky;
     this.#scene.fog = this.#fog;
 
-    this.#ground = new Mesh(
-      new PlaneGeometry(GROUND_RADIUS_METRES * 2, GROUND_RADIUS_METRES * 2),
-      this.#groundMaterial,
-    );
-    // A `PlaneGeometry` stands up in the XY plane; this lays it down.
-    this.#ground.rotation.x = -Math.PI / 2;
-    this.#ground.frustumCulled = false;
-    this.#ground.renderOrder = -1;
-    this.#scene.add(this.#ground);
+    // #458. The ring first, as the backdrop it is; the ground after it writes
+    // depth like everything else.
+    this.#skyDome.addTo(this.#scene);
+    this.#horizon.addTo(this.#scene);
+    this.#terrain.addTo(this.#scene);
+    this.#water.addTo(this.#scene);
+    this.#bridges.addTo(this.#scene);
 
     this.#road = new Mesh(
       this.#roadGeometry,
       // `vertexColors` is what makes the surface, the two edge lines and the
       // broken centre line **one mesh and one draw call** (#242). Without it
       // each would need a material of its own, and a material is a draw call.
-      new MeshBasicMaterial({ side: DoubleSide, vertexColors: true }),
+      // #425: the road's grain, behind the rung's define. Still ONE material.
+      withSurfaceDetail(
+        new MeshBasicMaterial({ side: DoubleSide, vertexColors: true }),
+        'road',
+        { value: 0 },
+        { value: 1 },
+      ),
     );
     // The corridor is rebuilt in world coordinates every time, so three's own
     // frustum culling has nothing useful to test against and would occasionally
@@ -2540,7 +3545,12 @@ class ThreeGameView implements GameView {
     if (this.#renderer === undefined) {
       return;
     }
-    this.#updateWorld(frame.world, frame.camera);
+    this.#updateWorld(frame.world);
+    this.#world = frame.world;
+    this.#terrain.update(frame.terrain.mesh, frame.world.groundColour);
+    this.#horizon.update(frame.terrain.horizon, frame.world, frame.camera);
+    this.#water.update(frame.water.surface, frame.world, frame.water.seconds);
+    this.#bridges.update(frame.water.bridges);
     this.#updateRoad(frame);
     this.#scatter.update(frame.scatter, frame.camera);
     this.#updateMarkers(frame.markers);
@@ -2556,11 +3566,20 @@ class ThreeGameView implements GameView {
     // #245. Applied here rather than read in `render`, so that the rung is a
     // property of the belt between frames and the render loop takes no scenery
     // decision at all. @see ScatterBelt.setBudget
-    this.#scatter.setBudget(settings.scatterItems);
+    // ⚠️ Since #460 the frame carries the structures before the scenery, each
+    // with a budget of its own, so the belt's is the two together.
+    this.#scatter.setBudget(settings.scatterItems + settings.structureItems);
     // #367, and the same argument one line up: a rung is a property of the belt
     // between frames, so the render loop takes no decision about how many
     // distinct shapes it may draw. @see ScatterBelt.setVariants
     this.#scatter.setVariants(settings.sceneryVariants);
+    // #458. How much ground beyond the road this rung draws.
+    this.#terrain.setBands(settings.terrainBands);
+    // #459. The water shader, or one flat colour.
+    this.#water.setDrawn(settings.water);
+    // #425. The grain and the patchwork, on the target rung only.
+    this.#terrain.setSurfaceDetail(settings.surfaceDetail);
+    setSurfaceDetail(this.#road.material as Material, settings.surfaceDetail);
     this.#applySize();
   }
 
@@ -2574,6 +3593,8 @@ class ThreeGameView implements GameView {
     const { shading } = this.#quality;
     this.#scatter.setShading(shading);
     this.#riders.setShading(shading);
+    this.#terrain.setShading(shading);
+    this.#bridges.setShading(shading);
   }
 
   /**
@@ -2625,8 +3646,11 @@ class ThreeGameView implements GameView {
 
   destroy(): void {
     this.#roadGeometry.dispose();
-    this.#ground.geometry.dispose();
-    this.#groundMaterial.dispose();
+    this.#terrain.dispose();
+    this.#horizon.dispose();
+    this.#skyDome.dispose();
+    this.#water.dispose();
+    this.#bridges.dispose();
     disposeMaterial(this.#road.material);
     this.#scatter.dispose();
     this.#lighting.dispose();
@@ -2655,19 +3679,17 @@ class ThreeGameView implements GameView {
    * one flat reference the eye reads depth against; the **horizon** is the fog
    * colour, so every distant surface converges on it and the line where the
    * fogged ground meets the unfogged sky *is* the horizon; and the **ground**
-   * is the plane's own colour, near the camera where the fog has not reached.
+   * is the landform's own colour, near the camera where the fog has not
+   * reached — {@link TerrainBelt.update} takes it, since #458.
    *
-   * The plane follows the camera in the ground plane so it always reaches the
-   * horizon, and sits {@link GROUND_BELOW_ROAD_METRES} under the road at the
-   * rider rather than at a fixed height, so a climb does not leave the road
-   * hanging over a distant floor.
+   * ⚠️ **This method used to place a flat ground plane under the rider**, and a
+   * reviewer who remembers it following the camera 0.25 m under the road is
+   * reading the old file. The ground is the route's own landform since #458.
    */
-  #updateWorld(world: WorldStyle, pose: CameraPose): void {
+  #updateWorld(world: WorldStyle): void {
     this.#sky.setHex(world.skyColour);
     this.#fog.color.setHex(world.horizonColour);
     this.#fog.density = world.fogDensity;
-    this.#groundMaterial.color.setHex(world.groundColour);
-    this.#ground.position.set(pose.x, pose.y - GROUND_BELOW_ROAD_METRES, pose.z);
     // ⚠️ Every frame, like the fog and for the same reason: the world is a
     // function of the route and a renderer is handed a frame, not a route. A
     // sun pointed once in the constructor would be the previous route's sun
@@ -2746,6 +3768,9 @@ class ThreeGameView implements GameView {
     const { eye, target } = cameraRig(pose);
     this.#camera.position.set(eye.x, eye.y, eye.z);
     this.#camera.lookAt(this.#lookAt.set(target.x, target.y, target.z));
+    // #425. The sky is centred on the eye, so it is always the same distance
+    // away in every direction and only its colours carry any information.
+    this.#skyDome.update(this.#world, eye);
   }
 
   /**

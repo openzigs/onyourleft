@@ -36,6 +36,7 @@ import {
   type QualitySettings,
 } from './quality';
 import { DEFAULT_PACER_INTENSITY } from './pacer-choice';
+import { SCATTER_KINDS, STRUCTURE_KINDS } from './scatter';
 import { NO_READING, type SensorReading } from './hud/fields';
 import { NO_SENSORS } from './sensors';
 import { NO_ROUTES_YET } from '../routes/two-importers';
@@ -916,12 +917,28 @@ describe('GameView — a hot phone sheds scenery before frame rate (#245)', () =
     // ⚠️ Measured against the rung it *reached* rather than against a rung
     // index written down here, so a ladder that grows a rung cannot leave this
     // guard comparing against the wrong one.
-    expect(atTheTop.scatter.length).toBeGreaterThan(told?.scatterItems ?? 0);
+    //
+    // ⚠️ **Counted over the NATURAL scenery since #460**, which puts buildings
+    // and field boundaries in front of it on a budget of their own — asserted
+    // separately below.
+    const natural = (frame: SceneFrame) =>
+      frame.scatter.filter((item) => (SCATTER_KINDS as readonly string[]).includes(item.kind));
+    const built = (frame: SceneFrame) =>
+      frame.scatter.filter((item) => (STRUCTURE_KINDS as readonly string[]).includes(item.kind));
+    expect(natural(atTheTop).length).toBeGreaterThan(told?.scatterItems ?? 0);
     // **The budget bound.** `toBeLessThanOrEqual` alone is satisfied by a world
     // with nothing in it, which is exactly the shape the clustering can now
-    // produce on a stretch of open road.
-    expect(drawn.scatter.length).toBe(told?.scatterItems ?? 0);
-    expect(drawn.scatter.length).toBeLessThan(atTheTop.scatter.length);
+    // produce on a stretch of open road. ⚠️ Within a fifth of it rather than
+    // exactly it since #460: scenery that would stand in a village's gardens
+    // is taken out after the budget is spent (`settlements.ts`
+    // §`clearOfBuildings`).
+    expect(natural(drawn).length).toBeLessThanOrEqual(told?.scatterItems ?? 0);
+    expect(natural(drawn).length).toBeGreaterThan((told?.scatterItems ?? 0) * 0.8);
+    expect(natural(drawn).length).toBeLessThan(natural(atTheTop).length);
+    // #460. The structures' own rung reaches the frame too — and binds on this
+    // fixture, which is what makes it evidence that `GameView` passes it.
+    expect(built(atTheTop).length).toBeGreaterThan(told?.structureItems ?? 0);
+    expect(built(drawn).length).toBe(told?.structureItems ?? 0);
     // The rung it settled on is one of the ladder's, not a number this view
     // invented — `quality.ts` is where a scenery decision is taken.
     expect(QUALITY_LADDER).toContainEqual(told);

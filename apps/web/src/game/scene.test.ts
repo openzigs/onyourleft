@@ -15,7 +15,9 @@ import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES } from './camera';
 import { gapAgainst } from './hud/fields';
 import type { RiderMarker, SceneFrame } from './port';
 import { qualitySettings } from './quality';
-import { SCATTER_MAX_ITEMS, type ScatterItem } from './scatter';
+import { SCATTER_KINDS, SCATTER_MAX_ITEMS, STRUCTURE_KINDS, type ScatterItem } from './scatter';
+import { STRUCTURE_MAX_ITEMS } from './settlements';
+import { northRoute } from './route-fixtures-testing';
 import { cameraPose, ghostFinished, sceneFrame } from './scene';
 import { VIEW_AHEAD_METRES, VIEW_BEHIND_METRES, corridorOrigin, roadCorridor } from './terrain';
 import {
@@ -496,14 +498,37 @@ describe('a loop, once the rider has been round once (#253)', () => {
 });
 
 describe('the frame carries the scenery for the road it drew', () => {
-  function frameAt(setup: SimulationSetup, odometer: number, scatterItems?: number): SceneFrame {
+  function frameAt(
+    setup: SimulationSetup,
+    odometer: number,
+    scatterItems?: number,
+    structureItems?: number,
+  ): SceneFrame {
     const base = atStartLine(setup.profile);
     return sceneFrame({
       profile: setup.profile,
       origin: corridorOrigin(setup.profile),
       state: { ...base, ride: { ...base.ride, distance: metres(odometer) } },
       ...(scatterItems === undefined ? {} : { scatterItems }),
+      ...(structureItems === undefined ? {} : { structureItems }),
     });
+  }
+
+  /**
+   * The frame's natural scenery — what `scatter.ts` placed — without the
+   * structures `settlements.ts` puts in front of it since #460. The budget
+   * assertions below are about the scatter budget, and a structure is on a
+   * budget of its own.
+   */
+  function natural(frame: SceneFrame): readonly ScatterItem[] {
+    return frame.scatter.filter((item) => (SCATTER_KINDS as readonly string[]).includes(item.kind));
+  }
+
+  /** The structures a frame carries, which lead it — #460. */
+  function built(frame: SceneFrame): readonly ScatterItem[] {
+    return frame.scatter.filter((item) =>
+      (STRUCTURE_KINDS as readonly string[]).includes(item.kind),
+    );
   }
 
   /** Where a frame's scatter sits along the route: the fixture runs north. */
@@ -525,7 +550,25 @@ describe('the frame carries the scenery for the road it drew', () => {
   it('never hands the renderer more than the budget', () => {
     const setup = straightRoute();
 
-    expect(frameAt(setup, 600).scatter.length).toBeLessThanOrEqual(SCATTER_MAX_ITEMS);
+    expect(natural(frameAt(setup, 600)).length).toBeLessThanOrEqual(SCATTER_MAX_ITEMS);
+    // And since #460, the structures on their own budget.
+    expect(built(frameAt(setup, 600)).length).toBeLessThanOrEqual(STRUCTURE_MAX_ITEMS);
+  });
+
+  it('puts the structures first and on their own budget — #460', () => {
+    // The belt spends its budget in frame order, so a structure that came after
+    // the scenery could be the one a full belt dropped: a house lost to a tree
+    // on the far side of the fog. And the rung's structure budget is spent here,
+    // where the placing is, for #245's reason.
+    const profile = lakeValleyFarmland();
+    const setup = { ...straightRoute(), profile };
+    const frame = frameAt(setup, 1_200);
+    const kinds = frame.scatter.map((item) =>
+      (STRUCTURE_KINDS as readonly string[]).includes(item.kind) ? 'built' : 'natural',
+    );
+    expect(kinds.indexOf('natural')).toBeGreaterThan(kinds.lastIndexOf('built'));
+    expect(built(frame).length).toBeGreaterThan(10);
+    expect(built(frameAt(setup, 1_200, undefined, 10)).length).toBe(10);
   });
 
   it('spends the rung\u2019s budget rather than the target rung\u2019s \u2014 #245', () => {
@@ -537,10 +580,16 @@ describe('the frame carries the scenery for the road it drew', () => {
     const setup = straightRoute();
     const floor = qualitySettings(3).scatterItems;
 
-    const atTheTop = frameAt(setup, 600).scatter.length;
-    const atTheFloor = frameAt(setup, 600, floor).scatter.length;
+    const atTheTop = natural(frameAt(setup, 600)).length;
+    const atTheFloor = natural(frameAt(setup, 600, floor)).length;
 
-    expect(atTheFloor).toBe(floor);
+    // ⚠️ **At most the floor, where it used to be exactly the floor — #460.**
+    // The budget is spent on placing, and then the scenery that stands in a
+    // village's gardens is taken out (`settlements.ts` §`clearOfBuildings`),
+    // so a frame beside houses carries a few fewer than it placed. The rung is
+    // still what bounds it, and still binds: nowhere near the top rung's count.
+    expect(atTheFloor).toBeLessThanOrEqual(floor);
+    expect(atTheFloor).toBeGreaterThan(floor * 0.8);
     // Non-vacuity: the top rung has to be carrying more than the floor allows,
     // or this fixture is too sparse for the budget to bind and the assertion
     // above is about a route rather than about a rung.
@@ -555,7 +604,8 @@ describe('the frame carries the scenery for the road it drew', () => {
     const setup = straightRoute();
 
     expect(frameAt(setup, 600).scatter.length).toBe(
-      frameAt(setup, 600, qualitySettings(0).scatterItems).scatter.length,
+      frameAt(setup, 600, qualitySettings(0).scatterItems, qualitySettings(0).structureItems)
+        .scatter.length,
     );
   });
 
@@ -856,3 +906,11 @@ describe('a marker that has a front — #349', () => {
     expect('crankAngle' in (frame.markers[0] ?? {})).toBe(false);
   });
 });
+
+/**
+ * Level farmland with a village's worth of room on it — #460's own fixture for
+ * the frame's ordering: 3 km of dead-level road at 40 m, low and dry.
+ */
+function lakeValleyFarmland() {
+  return northRoute(3_000, () => 40);
+}

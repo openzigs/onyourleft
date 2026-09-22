@@ -36,7 +36,9 @@ import {
   type QualitySample,
   type QualityState,
 } from './quality';
+import { TERRAIN_BANDS, TERRAIN_COLUMN_OFFSETS } from './landform';
 import { MAXIMUM_SCENERY_VARIANTS } from './scenery-models';
+import { STRUCTURE_MAX_ITEMS } from './settlements';
 import { SCATTER_MAX_ITEMS } from './scatter';
 
 /** Feeds the same measurement `count` times, as a sustained condition would. */
@@ -377,6 +379,82 @@ describe('the scenery gives up its variety before it gives up its items — #367
       );
     }
     expect(QUALITY_LADDER[QUALITY_LADDER.length - 1]?.sceneryVariants).toBe(1);
+  });
+});
+
+describe('the ground beyond the road is a rung on the ladder — #458', () => {
+  it('draws every band at the target, and never more as the phone gets hotter', () => {
+    expect(qualitySettings(0).terrainBands).toBe(TERRAIN_BANDS);
+    for (let level = 1; level < QUALITY_LADDER.length; level += 1) {
+      expect(QUALITY_LADDER[level]?.terrainBands ?? 0).toBeLessThanOrEqual(
+        QUALITY_LADDER[level - 1]?.terrainBands ?? 0,
+      );
+    }
+  });
+
+  it('gives the far ground up with the first scenery step, and never the road’s edge', () => {
+    // The ordering argument `QualitySettings.terrainBands` makes, as a
+    // property: the first rung to draw less ground is the first to draw less
+    // scenery. And the floor keeps the verge and the relief beside the road —
+    // every band out to 90 m — because the first two are the road's own edge,
+    // and a rung that dropped them would open a crack under the tarmac.
+    const bands = QUALITY_LADDER.map((rung) => rung.terrainBands);
+    const items = QUALITY_LADDER.map((rung) => rung.scatterItems);
+    const firstDrop = (values: readonly number[]) =>
+      values.findIndex((value, at) => at > 0 && value < (values[at - 1] ?? value));
+    expect(firstDrop(bands)).toBe(firstDrop(items));
+    for (const rung of QUALITY_LADDER) {
+      expect(Number.isInteger(rung.terrainBands)).toBe(true);
+      expect(TERRAIN_COLUMN_OFFSETS[rung.terrainBands] ?? 0).toBeGreaterThanOrEqual(90);
+    }
+  });
+});
+
+describe('the water shader is a rung on the ladder — #459', () => {
+  it('shades water at the target only, and gives it up before any frame rate', () => {
+    expect(qualitySettings(0).water).toBe('shaded');
+    const firstFlat = QUALITY_LADDER.findIndex((rung) => rung.water === 'flat');
+    const firstSlower = QUALITY_LADDER.findIndex(
+      (rung) => rung.frameCap < QUALITY_LADDER[0]!.frameCap,
+    );
+    expect(firstFlat).toBeGreaterThan(0);
+    expect(firstFlat).toBeLessThan(firstSlower);
+    // Never back on as the ladder goes down.
+    for (let level = firstFlat; level < QUALITY_LADDER.length; level += 1) {
+      expect(QUALITY_LADDER[level]?.water).toBe('flat');
+    }
+  });
+});
+
+describe('the structures are a rung on the ladder — #460', () => {
+  it('carries every structure at the target, fewer down the ladder, and never none', () => {
+    expect(qualitySettings(0).structureItems).toBe(STRUCTURE_MAX_ITEMS);
+    const built = QUALITY_LADDER.map((rung) => rung.structureItems);
+    const items = QUALITY_LADDER.map((rung) => rung.scatterItems);
+    const firstDrop = (values: readonly number[]) =>
+      values.findIndex((value, at) => at > 0 && value < (values[at - 1] ?? value));
+    // With the scenery, on its argument: the far end of the view goes first.
+    expect(firstDrop(built)).toBe(firstDrop(items));
+    for (let level = 1; level < QUALITY_LADDER.length; level += 1) {
+      expect(built[level] ?? 0).toBeLessThanOrEqual(built[level - 1] ?? 0);
+    }
+    expect(Math.min(...built)).toBeGreaterThan(0);
+  });
+});
+
+describe('the surface detail is a rung on the ladder — #425', () => {
+  it('draws it at the target only, and drops it before any frame rate', () => {
+    // #425: "a throttling phone drops textures before it drops frame rate".
+    expect(qualitySettings(0).surfaceDetail).toBe(true);
+    const firstPlain = QUALITY_LADDER.findIndex((rung) => !rung.surfaceDetail);
+    const firstSlower = QUALITY_LADDER.findIndex(
+      (rung) => rung.frameCap < (QUALITY_LADDER[0]?.frameCap ?? 0),
+    );
+    expect(firstPlain).toBeGreaterThan(0);
+    expect(firstPlain).toBeLessThan(firstSlower);
+    for (let level = firstPlain; level < QUALITY_LADDER.length; level += 1) {
+      expect(QUALITY_LADDER[level]?.surfaceDetail).toBe(false);
+    }
   });
 });
 

@@ -24,8 +24,9 @@
 import { ghostDistanceAt, ghostHasFinished, type GhostTrack } from '@onyourleft/domain';
 
 import { simulatedCrankAngle } from './bicycle';
+import { horizonRelief, terrainCorridor } from './landform';
 import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES } from './camera';
-import type { CameraPose, RiderMarker, SceneFrame } from './port';
+import type { CameraPose, RiderMarker, SceneFrame, WaterFrame } from './port';
 import { SCATTER_MAX_ITEMS, scatterAt, scatterSeed, type ScatterItem } from './scatter';
 import { ghostClock, type GameState } from './simulation';
 import {
@@ -34,6 +35,8 @@ import {
   type CorridorPoint,
   type RoadCorridor,
 } from './terrain';
+import { STRUCTURE_MAX_ITEMS, clearOfBuildings, structuresAt } from './settlements';
+import { bridgeParts, waterSurface, waterways } from './waterways';
 import { worldStyle } from './world';
 import type { RouteProfile } from '@onyourleft/domain';
 
@@ -85,6 +88,12 @@ export interface SceneInput {
    */
   readonly scatterItems?: number | undefined;
   /**
+   * The most structures this frame may carry — the current rung's
+   * `structureItems`, #460. Optional for {@link scatterItems}' reason, and
+   * absent means the target rung.
+   */
+  readonly structureItems?: number | undefined;
+  /**
    * How far the rider's cranks have turned, in radians — #349.
    *
    * Integrated from the cadence reading by `GameView`, which is where the
@@ -99,6 +108,11 @@ export interface SceneInput {
 export function sceneFrame(input: SceneInput): SceneFrame {
   const riderDistance: number = input.riderDistance ?? input.state.ride.distance;
   const corridor = roadCorridor(input.profile, input.origin, riderDistance);
+  // O(1), and recomputed per frame for the reason `worldStyle` is: a cache
+  // keyed on a profile is a second source of truth a route change has to
+  // remember to clear. One seed for the scenery and the ground under it, so a
+  // tree and the hillside it stands on are hashed from the same route.
+  const seed = scatterSeed(input.profile);
   return {
     corridor,
     camera: cameraPose(corridor, riderDistance),
@@ -108,7 +122,30 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     // keyed on a profile is a second source of truth that a route change has
     // to remember to clear. `world.ts` says what the bound buys.
     world: worldStyle(input.profile),
-    scatter: scatter(corridor, input, riderDistance),
+    scatter: scatter(corridor, input, riderDistance, seed),
+    // #458. Built from the corridor just built, so the ground's innermost
+    // column is the road's outermost one — `landform.ts` says why that is the
+    // whole of the no-crack guarantee. Every band, whatever the rung: the
+    // renderer draws a prefix of them (`three-renderer.ts` §`TerrainBelt`), so
+    // the rung moves no vertex and the scenery stands on the same ground.
+    terrain: {
+      mesh: terrainCorridor(input.profile, input.origin, corridor, seed),
+      horizon: horizonRelief(input.profile, input.origin, seed),
+    },
+    // #459. The waterways are found once per route (`waterways.ts` §`computed`)
+    // and the surfaces and bridges built for this stretch of it, from the same
+    // corridor the ground and the road are built from.
+    water: water(input, corridor, seed),
+  };
+}
+
+/** The streams, lakes and bridges in view. @see SceneFrame.water */
+function water(input: SceneInput, corridor: RoadCorridor, seed: number): WaterFrame {
+  const ways = waterways(input.profile, seed);
+  return {
+    surface: waterSurface(input.profile, input.origin, corridor, ways),
+    bridges: bridgeParts(input.profile, input.origin, corridor, ways),
+    seconds: input.state.elapsed,
   };
 }
 
@@ -127,20 +164,22 @@ function scatter(
   corridor: RoadCorridor,
   input: SceneInput,
   riderDistance: number,
+  seed: number,
 ): readonly ScatterItem[] {
   const first = corridor.centre[0] as CorridorPoint;
   const last = corridor.centre[corridor.centre.length - 1] as CorridorPoint;
-  return scatterAt(
-    input.profile,
-    input.origin,
-    // O(1), and recomputed per frame for the reason `worldStyle` is: a cache
-    // keyed on a profile is a second source of truth a route change has to
-    // remember to clear.
-    scatterSeed(input.profile),
-    first.along,
-    last.along,
-    { maxItems: input.scatterItems ?? SCATTER_MAX_ITEMS, riderMetres: riderDistance },
-  );
+  const natural = scatterAt(input.profile, input.origin, seed, first.along, last.along, {
+    maxItems: input.scatterItems ?? SCATTER_MAX_ITEMS,
+    riderMetres: riderDistance,
+  });
+  // #460. The villages, farmsteads and field boundaries, FIRST — so that a belt
+  // spending its budget in frame order never loses a house to a far tree — and
+  // the natural scenery kept clear of every building.
+  const built = structuresAt(input.profile, input.origin, seed, first.along, last.along, {
+    maxItems: input.structureItems ?? STRUCTURE_MAX_ITEMS,
+    riderMetres: riderDistance,
+  });
+  return [...built, ...clearOfBuildings(natural, built)];
 }
 
 /**

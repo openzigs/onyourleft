@@ -18,6 +18,7 @@ import {
   GRADIENT_TINT_FULL_SCALE_PERCENT,
   MAXIMUM_CORRIDOR_QUADS,
   MINIMUM_TINT_CONTRAST_RATIO,
+  ROAD_SURFACE_GRAIN,
   MARKING_COLOUR,
   ROAD_COLOUR_STEEPEST_CLIMB,
   ROAD_COLOUR_STEEPEST_DESCENT,
@@ -664,6 +665,24 @@ describe('the gradient cue is readable without colour vision — #242', () => {
         hex(roadTint(-GRADIENT_TINT_FULL_SCALE_PERCENT)),
       ),
     ).toBeGreaterThanOrEqual(MINIMUM_TINT_CONTRAST_RATIO);
+  });
+
+  it('still separates them with the surface grain at its worst — #425', () => {
+    // The grain `three-renderer.ts` draws over the road MULTIPLIES the tint in
+    // linear light, so its worst case for the cue is the descent darkened by
+    // the whole of it and the climb lightened by the whole of it. Relative
+    // luminance is linear in the linear channels, so the grain scales each
+    // luminance by the same factor, and the contrast is taken on those.
+    const climb = relativeLuminance(hex(roadTint(GRADIENT_TINT_FULL_SCALE_PERCENT)));
+    const descent = relativeLuminance(hex(roadTint(-GRADIENT_TINT_FULL_SCALE_PERCENT)));
+    const worst =
+      (descent * (1 - ROAD_SURFACE_GRAIN) + 0.05) / (climb * (1 + ROAD_SURFACE_GRAIN) + 0.05);
+    expect(worst).toBeGreaterThanOrEqual(MINIMUM_TINT_CONTRAST_RATIO);
+    // Non-vacuity: the grain is real, and a grain that could not change the
+    // answer would be a number nobody had to check.
+    expect(ROAD_SURFACE_GRAIN).toBeGreaterThan(0);
+    const unbounded = (descent * 0.6 + 0.05) / (climb * 1.4 + 0.05);
+    expect(unbounded).toBeLessThan(MINIMUM_TINT_CONTRAST_RATIO);
   });
 
   it('states its threshold as WCAG 2.2’s own, rather than as an invented number', () => {

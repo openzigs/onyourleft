@@ -34,7 +34,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { readGlb } from './model-bytes-testing';
-import { SCATTER_KINDS, type ScatterKind } from './scatter';
+import { SCENERY_KINDS, type SceneryKind } from './scatter';
 import {
   MAXIMUM_SCENERY_VARIANTS,
   SCENERY_ATLAS,
@@ -58,9 +58,9 @@ function fileOf(url: string | undefined): string {
 }
 
 /** Every model in the table, flattened, with the kind it belongs to. */
-function everyModel(): readonly { kind: ScatterKind; name: string; url: string }[] {
+function everyModel(): readonly { kind: SceneryKind; name: string; url: string }[] {
   return Object.entries(SCENERY_MODELS).flatMap(([kind, models]) =>
-    models.map((model) => ({ kind: kind as ScatterKind, ...model })),
+    models.map((model) => ({ kind: kind as SceneryKind, ...model })),
   );
 }
 
@@ -83,11 +83,13 @@ describe('which shapes each kind is drawn with — ADR 0022 D-3, #367', () => {
     expect(SCENERY_MODELS.post).toBeUndefined();
   });
 
-  it('names a kind `scatter.ts` can actually place, for every entry', () => {
+  it('names a kind the world can actually place, for every entry', () => {
     // A table keyed on a kind that no longer exists is a model that is loaded,
-    // prepared, held in memory and drawn by nothing.
-    for (const kind of Object.keys(SCENERY_MODELS) as ScatterKind[]) {
-      expect(SCATTER_KINDS).toContain(kind);
+    // prepared, held in memory and drawn by nothing. ⚠️ Since #460 `building`
+    // is placed by `settlements.ts` rather than by `scatter.ts`, so the kinds
+    // checked against are every kind the renderer draws.
+    for (const kind of Object.keys(SCENERY_MODELS) as SceneryKind[]) {
+      expect(SCENERY_KINDS).toContain(kind);
     }
   });
 

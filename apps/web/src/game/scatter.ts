@@ -60,7 +60,7 @@
  * | {@link AMBIGUOUS_TURN_RADIUS_METRES}, {@link AMBIGUOUS_CHORD_SHARE} | **Derived, not chosen.** The radius at which a {@link CURVATURE_WINDOW_METRES} chord subtends more than π is `30 / π`; the first is a margin below it and the second is `\|sin θ\| / θ` at that radius, computed rather than written down |
  * | {@link SCATTER_CELL_METRES}, {@link CELL_FILL}, {@link CLUSTER_SPAN_METRES}, {@link OPEN_GROUND_SHARE}, {@link PLANTED_GROUND_SHARE} | **This repository's own**, and judged by eye on the device rather than measured — #348, whose whole content is that the numbers said the scenery was fine and it looked like a village. ⚠️ Since **#351** they also carry a *proxy* measurement, because #348 overshot far enough to empty the world and nothing here could see it: how many items stand in the nearest 60 m of road, and how often that is none. A proxy is not the device, and #351's own criterion is still by eye |
  * | The weights and densities | **This repository's own**, chosen so that each of the three named places — valley floor, above the trees, a steep pitch — reads as a different place, which is what `scatter.test.ts` asserts |
- * | {@link fmix32} | MurmurHash3's 32-bit finaliser, Austin Appleby, **placed in the public domain by its author**. Arithmetic, and the one piece of this file that is anybody else's idea |
+ * | `seeded.ts` §`fmix32` | MurmurHash3's 32-bit finaliser, Austin Appleby, **placed in the public domain by its author**. Arithmetic, and the one piece of this file that is anybody else's idea. ⚠️ Moved to `seeded.ts` by #458, unchanged, because the landform, the water and the settlements hash from it too |
  *
  * ## What it deliberately does not model
  *
@@ -80,6 +80,9 @@ import {
   type RouteProfile,
 } from '@onyourleft/domain';
 
+import { terrainHeightAt } from './landform';
+import { mixInto, slotHash, uniformFrom } from './seeded';
+import { inWater, waterways } from './waterways';
 import { ROAD_WIDTH_METRES, localGroundPosition, type CorridorOrigin } from './terrain';
 import { treeLineMetres } from './world';
 
@@ -91,15 +94,35 @@ import { treeLineMetres } from './world';
  * twice; a caller handed a kind leaves the renderer responsible for telling a
  * conifer from a rock, which is where that responsibility belongs.
  */
-export type ScatterKind =
-  'tree-broadleaf' | 'tree-conifer' | 'shrub' | 'rock' | 'post' | 'building';
+export type ScatterKind = 'tree-broadleaf' | 'tree-conifer' | 'shrub' | 'rock' | 'post';
 
 /**
- * Every kind, in a fixed order.
+ * What stands beside the road because somebody BUILT it there — #460.
+ *
+ * ⚠️ **`building` used to be a {@link ScatterKind}, and a reviewer who
+ * remembers six scatter kinds is reading the old file.** It was scattered by
+ * the same field as the trees, so a house stood anywhere a tree could: alone,
+ * at any angle, at any distance from the road. #460 moved it here, where
+ * `settlements.ts` places it in villages and farmsteads, facing the road at one
+ * setback, beside four more kinds of building and the walls, hedges and fences
+ * that divide the fields.
+ */
+export type StructureKind =
+  'building' | 'barn' | 'church' | 'shop-row' | 'shed' | 'wall' | 'hedge' | 'fence' | 'signpost';
+
+/** Everything a frame's scenery can be. */
+export type SceneryKind = ScatterKind | StructureKind;
+
+/**
+ * Every kind THIS file places, in a fixed order.
  *
  * The order is load-bearing: {@link pickKind} walks it to turn one uniform
  * number into a kind, so reordering it changes every world. It is also what
  * `scatter.test.ts` iterates to assert that no member is dead code.
+ *
+ * ⚠️ **Five since #460**: `building` went to {@link STRUCTURE_KINDS}. It was
+ * last, and carried no weight anywhere but a level valley floor, so the other
+ * five kinds are picked exactly as before everywhere else.
  */
 export const SCATTER_KINDS: readonly ScatterKind[] = [
   'tree-broadleaf',
@@ -107,8 +130,23 @@ export const SCATTER_KINDS: readonly ScatterKind[] = [
   'shrub',
   'rock',
   'post',
-  'building',
 ];
+
+/** Every kind `settlements.ts` places — #460. */
+export const STRUCTURE_KINDS: readonly StructureKind[] = [
+  'building',
+  'barn',
+  'church',
+  'shop-row',
+  'shed',
+  'wall',
+  'hedge',
+  'fence',
+  'signpost',
+];
+
+/** Every kind the renderer draws: the scattered ones and the built ones. */
+export const SCENERY_KINDS: readonly SceneryKind[] = [...SCATTER_KINDS, ...STRUCTURE_KINDS];
 
 /**
  * How many distinct shapes one kind's items are spread across: **6**.
@@ -129,7 +167,7 @@ export const SCATTER_VARIANT_SLOTS = 6;
 
 /** One thing standing beside the road. */
 export interface ScatterItem {
-  readonly kind: ScatterKind;
+  readonly kind: SceneryKind;
   /** Local metres, the same frame `terrain.ts` builds the corridor in. */
   readonly x: number;
   readonly y: number;
@@ -651,7 +689,11 @@ export const AMBIGUOUS_CHORD_SHARE =
  */
 export const DEGENERATE_TANGENT_METRES = 1e-6;
 
-/** How far up the local tree line people still build: a fifth of the way. */
+/**
+ * How far up the local tree line people still build: a fifth of the way.
+ * Read by `settlements.ts` since #460, which places every building; it stays
+ * here beside the tree line it is a share of.
+ */
 export const SETTLEMENT_TREE_LINE_FRACTION = 0.2;
 
 /** The gradient above which nobody builds beside the road, in percent. */
@@ -717,9 +759,6 @@ const WEIGHT_SHRUB_ABOVE_THE_TREES = 2;
 /** How much of a place a tight bend's posts take, at full curvature. */
 const WEIGHT_POST_AT_A_TIGHT_BEND = 4;
 
-/** How much of a valley floor is built on. Small: a building is an event. */
-const WEIGHT_BUILDING_ON_THE_VALLEY_FLOOR = 0.6;
-
 /** Every uniform this file draws, one stream each, so none of them correlate. */
 const STREAM_KEEP = 0;
 const STREAM_ALONG = 1;
@@ -749,12 +788,6 @@ const STREAM_VARIANT = 8;
  * correlate a stretch's openness with one item's own draws inside it.
  */
 const CLUSTER_KEY = 0x1_0000;
-
-/** An odd multiplier, so that `stream` reaches a different part of the hash. */
-const STREAM_STRIDE = 0x9e37_79b1;
-
-/** `2³²`, for turning a `uint32` into a number in `[0, 1)`. */
-const UINT32_SCALE = 0x1_0000_0000;
 
 /** An arbitrary non-zero start, so a route at (0, 0) of length 0 still mixes. */
 const SEED_BASIS = 0x6f79_6c00;
@@ -943,6 +976,8 @@ function fillCell(
   // to end — every cell filled to the same fraction, which is what makes a
   // hashed placement still read as a grid.
   const density = densityAt(place) * clusterAt(seed, cell);
+  // #459. Cached per profile, so this is a lookup. @see waterways
+  const ways = waterways(profile, seed);
   const weights = kindWeights(place);
   // ⚠️ **Whole bands, dropped rather than squeezed.** @see MINIMUM_SCATTER_SEPARATION_METRES
   const bands = bandsAt(place.curvature);
@@ -978,6 +1013,14 @@ function fillCell(
         continue;
       }
       const at = distanceOnRoute(profile, cell.wrapped * cell.span + alongInCell);
+      // ⚠️ **Nothing stands in water — #459.** Dropped after every draw is
+      // made, so a stream or a lake takes the items that would have stood in
+      // it and moves no other: every quantity is its own hash stream, and the
+      // plan of what survives is unchanged. `waterways.ts` §`inWater` is the
+      // rule, with its clearance.
+      if (inWater(ways, profile, at, lateral * side)) {
+        continue;
+      }
       const ground = localGroundPosition(origin, positionAt(profile, at));
       const normal = normalAt(profile, origin, at);
 
@@ -985,7 +1028,14 @@ function fillCell(
         item: {
           kind: pickKind(weights, uniform(base, STREAM_KIND)),
           x: ground.x + normal.x * lateral * side,
-          y: (elevationAt(profile, at) as number) - origin.elevation,
+          // ⚠️ **On the ground, not at the road's height — #458.** It was
+          // `elevationAt(at)` until then, which was right while the ground was
+          // a flat quad 0.25 m under the road and is wrong on a landform: a
+          // tree 18 m up a hillside would float over it or be buried in it.
+          // `terrainHeightAt` is the surface `landform.ts` builds the mesh
+          // from, column for column. Plan positions are untouched, and
+          // `arrangement-unchanged.test.ts`' plan digest is what says so.
+          y: terrainHeightAt(profile, origin, seed, at, lateral * side),
           z: ground.z + normal.z * lateral * side,
           rotation: uniform(base, STREAM_ROTATION) * Math.PI * 2,
           scale:
@@ -1306,7 +1356,7 @@ function aboveTheTrees(place: Place): boolean {
  */
 function kindWeights(place: Place): readonly number[] {
   // In SCATTER_KINDS order.
-  const weights = [0, 0, 0, 0, 0, 0];
+  const weights = [0, 0, 0, 0, 0];
 
   if (aboveTheTrees(place)) {
     weights[3] = WEIGHT_ROCK_ABOVE_THE_TREES;
@@ -1323,13 +1373,9 @@ function kindWeights(place: Place): readonly number[] {
     weights[0] = WEIGHT_TREES * (1 - conifer);
     weights[2] = WEIGHT_SHRUB_IN_TREES;
     weights[3] = WEIGHT_ROCK_IN_TREES;
-    if (
-      place.altitude <= place.treeLine * SETTLEMENT_TREE_LINE_FRACTION &&
-      place.steepness < SETTLEMENT_GRADE_PERCENT &&
-      place.curvature < TIGHT_BEND_RADIANS_PER_METRE
-    ) {
-      weights[5] = WEIGHT_BUILDING_ON_THE_VALLEY_FLOOR;
-    }
+    // ⚠️ **No building here since #460.** A valley floor used to take one in
+    // about seventeen of its items, anywhere a tree could stand; buildings are
+    // `settlements.ts`'s now, in villages and farmsteads facing the road.
   }
 
   weights[4] =
@@ -1435,44 +1481,19 @@ function thin(found: readonly Placed[], budget: ScatterBudget): readonly Scatter
     .map((scored) => scored.placed.item);
 }
 
-/**
- * MurmurHash3's 32-bit finaliser.
- *
- * Austin Appleby placed MurmurHash3 in the public domain, so this is the one
- * piece of arithmetic here that is anybody else's idea and it carries no licence
- * obligation. It is used rather than a bespoke mix because avalanche behaviour
- * is a property that is hard to get right and easy to get subtly wrong, and a
- * weak mix here shows up as scenery that visibly repeats.
- */
-function fmix32(value: number): number {
-  let mixed = value >>> 0;
-  mixed ^= mixed >>> 16;
-  mixed = Math.imul(mixed, 0x85eb_ca6b);
-  mixed ^= mixed >>> 13;
-  mixed = Math.imul(mixed, 0xc2b2_ae35);
-  mixed ^= mixed >>> 16;
-  return mixed >>> 0;
-}
-
-/** Fold one integer into a running hash. */
+/** Fold one integer into a running hash. @see mixInto */
 function mix(running: number, value: number): number {
-  return fmix32((running ^ Math.imul(value | 0, STREAM_STRIDE)) >>> 0);
+  return mixInto(running, value);
 }
 
-/** The hash of one slot: the route's seed, the cell, and which slot it is. */
+/** The hash of one slot. @see slotHash */
 function hash(seed: number, cell: number, slot: number): number {
-  return mix(mix(seed, cell), slot);
+  return slotHash(seed, cell, slot);
 }
 
-/**
- * One uniform number in `[0, 1)` from a slot's hash.
- *
- * ⚠️ Each quantity an item needs draws from its **own** stream. Reusing one
- * hash for two of them correlates them — every tall tree would also be a rotated
- * one — and the correlation is invisible in a unit test and obvious on screen.
- */
+/** One uniform number in `[0, 1)` from a slot's hash. @see uniformFrom */
 function uniform(base: number, stream: number): number {
-  return fmix32((base ^ Math.imul(stream + 1, STREAM_STRIDE)) >>> 0) / UINT32_SCALE;
+  return uniformFrom(base, stream);
 }
 
 function clamp01(value: number): number {

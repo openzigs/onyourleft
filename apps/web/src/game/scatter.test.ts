@@ -53,7 +53,7 @@ import {
   scatterSeed,
   type ScatterBudget,
   type ScatterItem,
-  type ScatterKind,
+  type SceneryKind,
 } from './scatter';
 import { ROAD_WIDTH_METRES, corridorOrigin, localGroundPosition, roadCorridor } from './terrain';
 
@@ -122,12 +122,12 @@ function place(
 }
 
 /** How many of each kind, so a "dominant kind" can be named. */
-function dominantKind(items: readonly ScatterItem[]): ScatterKind {
-  const tally = new Map<ScatterKind, number>();
+function dominantKind(items: readonly ScatterItem[]): SceneryKind {
+  const tally = new Map<SceneryKind, number>();
   for (const item of items) {
     tally.set(item.kind, (tally.get(item.kind) ?? 0) + 1);
   }
-  let best: ScatterKind = 'rock';
+  let best: SceneryKind = 'rock';
   let most = -1;
   for (const kind of SCATTER_KINDS) {
     const count = tally.get(kind) ?? 0;
@@ -372,9 +372,9 @@ describe('the kind comes from the geography', () => {
     // A kind no profile can produce is dead code the renderer would carry a
     // mesh for. The list is derived from SCATTER_KINDS rather than written out,
     // so a seventh kind added without a place to put it fails this.
-    const everywhere = new Set<ScatterKind>();
+    const everywhere = new Set<SceneryKind>();
     for (const profile of [
-      eastRoute({ latitude: 5, altitude: 0 }), // broadleaf, and a valley floor to build on
+      eastRoute({ latitude: 5, altitude: 0 }), // broadleaf
       eastRoute({ latitude: 55, altitude: 0 }), // conifer
       eastRoute({ latitude, altitude: 1800 }), // rock and shrub above the trees
       circuit(40), // a bend tight enough to be posted
@@ -1405,7 +1405,7 @@ describe("which of its kind's shapes an item is — #367", () => {
     // test and obvious on screen."* A variant that reused the kind's draw would
     // make every conifer the same conifer.
     const items = place(route, 0, 5_000);
-    const perKind = new Map<ScatterKind, Set<number>>();
+    const perKind = new Map<SceneryKind, Set<number>>();
     for (const item of items) {
       const seen = perKind.get(item.kind) ?? new Set<number>();
       seen.add(item.variant);

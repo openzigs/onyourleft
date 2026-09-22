@@ -111,9 +111,12 @@ export interface WorldStyle {
  * `port.ts` that ADR 0008 D-2's fallback would keep.
  *
  * ⚠️ **The two intensities are chosen so a horizontal surface receives exactly
- * 1**, which is what lets the ground plane and the road stay unlit and still
- * agree with the scenery standing on them: an unlit surface renders at its own
- * colour, and so does a lit horizontal one. `world.test.ts` asserts that
+ * 1**, which is what lets the road stay unlit and still agree with the
+ * scenery standing on it: an unlit surface renders at its own colour, and so
+ * does a lit horizontal one. ⚠️ Since #458 the GROUND is lit — it is a
+ * landform, and a slope is exactly what an unlit surface cannot show — and
+ * this identity is what makes a level field of it the colour the flat,
+ * unlit ground plane before it was. `world.test.ts` asserts that
  * identity on every route rather than leaving it to this paragraph, because it
  * is the property the whole change rests on.
  */

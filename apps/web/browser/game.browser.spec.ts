@@ -107,6 +107,48 @@ interface GameHarnessResult {
   readonly variantIndices: Readonly<Record<string, readonly number[]>>;
   readonly riderMeanColour: Readonly<Record<string, Pixel>>;
   readonly riderSilhouettePixels: Readonly<Record<string, number>>;
+  readonly riderBuriedPixels: number;
+  readonly settlement: {
+    readonly structures: number;
+    readonly kinds: number;
+    readonly pixels: number;
+    readonly drawCalls: number;
+    readonly drawCallsBare: number;
+    readonly withMs: number;
+    readonly withoutMs: number;
+  };
+  readonly water: {
+    readonly crossings: number;
+    readonly beside: Pixel;
+    readonly besideDry: Pixel;
+    readonly deck: Pixel;
+    readonly deckDry: Pixel;
+    readonly underDeck: Pixel;
+    readonly drawCalls: number;
+    readonly drawCallsDry: number;
+    readonly shadedMs: number;
+    readonly flatMs: number;
+  };
+  readonly gradient: {
+    readonly skyHigh: Pixel;
+    readonly skyLow: Pixel;
+    readonly flatSkyHigh: Pixel;
+    readonly flatSkyLow: Pixel;
+    readonly roadSpreadDetailed: number;
+    readonly roadSpreadPlain: number;
+    readonly groundChangedByDetail: number;
+    readonly lapChanged: number;
+    readonly lapChangedUnwrapped: number;
+    readonly horizonPixels: number;
+    readonly climbBuried: number;
+    readonly climbLifted: number;
+    readonly descentBelow: number;
+    readonly flatClimbBuried: number;
+    readonly flatDescentBelow: number;
+    readonly terrainVertices: number;
+    readonly terrainIndices: number;
+    readonly terrainIndicesByRung: readonly number[];
+  };
   readonly botCrankPixels: number;
   readonly contactShadowPixels: Readonly<Record<string, number>>;
   readonly contactShadowLuminance: Readonly<Record<string, readonly [number, number]>>;
@@ -197,11 +239,13 @@ const CHANNELS = ['red', 'green', 'blue'] as const;
 const RIDER_BOX_TOLERANCE = 0.02;
 
 /**
- * What one frame of the harness route costs, with the scenery taken out: **6**.
+ * What one frame of the harness route costs, with the scenery taken out: **7**.
  *
  * | | calls |
  * |---|--:|
- * | the ground | 1 |
+ * | the ground beside the road, lit — a landform since #458 (was one flat quad) | 1 |
+ * | the hills on the horizon (#458) | 1 |
+ * | the sky's gradient (#425) | 1 |
  * | the road, however many marks and edge lines it carries (#242) | 1 |
  * | every rider's merged body and bicycle, instanced (#349, #368) | 1 |
  * | every rider's crankset, which turns on its own axis (#349, #368) | 1 |
@@ -232,17 +276,39 @@ const RIDER_BOX_TOLERANCE = 0.02;
  * term moved: the road splitting into three meshes and the riders growing a
  * fourth mesh are very different findings and a bare `5` cannot tell them
  * apart.
+ *
+ * ⚠️ **6 → 7 with #458, deliberately.** The flat quad was replaced by the
+ * landform — one call for one call — and the hills on the horizon are the one
+ * that is new: a ring of 48 quads, unfogged, drawn first. What it buys is that
+ * the corridor's ground no longer ends in sky once it runs out, and that a
+ * route has a skyline at all. §"the gradient shows beside the road" publishes
+ * what the landform itself costs in vertices and indices.
+ *
+ * ⚠️ **7 → 8 with #425, deliberately**: the sky is a dome of vertex colours
+ * where it was the scene's background colour, which costs a draw call and no
+ * texture. The background is still set, underneath it.
  */
-const SCENE_DRAW_CALLS = 1 + 1 + 3 + 1;
+const SCENE_DRAW_CALLS = 1 + 1 + 1 + 1 + 3 + 1;
 
 /**
- * The most meshes the scenery belt may ever hold: **12**.
+ * The most meshes the scenery belt may ever hold: **20**.
  *
  * | kind | shapes |
  * |---|--:|
  * | `tree-broadleaf`, `tree-conifer`, `shrub`, `rock` | 2 each |
  * | `building` | 3 |
  * | `post`, which ADR 0022 D-3 leaves procedural | 1 |
+ * | `barn`, `church`, `shop-row`, `shed` — #460, built from numbers | 1 each |
+ * | `wall`, `hedge`, `fence`, `signpost` — #460, built from numbers | 1 each |
+ *
+ * ⚠️ **12 → 20 with #460, deliberately, and this is the line that says so.**
+ * Four kinds of building and four of roadside structure, each one shape and
+ * so one mesh and at most one draw call — a village and its walled fields for
+ * eight calls however many houses and walls it has. No model was added: every
+ * one of the eight is built in `three-renderer.ts` §`STRUCTURE_STYLE` from
+ * numbers, so ADR 0022's one-author pack and `MAXIMUM_SCENERY_VARIANTS` are
+ * untouched. What the calls cost on a phone is validation 0002 Part X, and a
+ * frame of a village is timed in §"a village and its fields".
  *
  * ⚠️ **A ceiling rather than the count, and #367's sixth criterion asks for
  * exactly that**: *"a budget that says how many variants may exist at all, so
@@ -254,7 +320,7 @@ const SCENE_DRAW_CALLS = 1 + 1 + 3 + 1;
  *
  * ⚠️ **It was 6 before #367**, one mesh a kind, which is what #244 spent.
  */
-const SCATTER_MESH_CEILING = 4 * 2 + 3 + 1;
+const SCATTER_MESH_CEILING = 4 * 2 + 3 + 1 + 4 + 4;
 
 /**
  * One load of the harness page, and every request it made on the way.
@@ -632,6 +698,185 @@ test.describe('the world #241 derives from the route reaches the screen', () => 
   });
 });
 
+/**
+ * #458 — *"the rider cannot see the gradient"*. `game-harness.ts`
+ * §`gradientProbe` reads a height off the drawing buffer by occlusion, and
+ * publishes the same two measurements over the flat quad's geometry as the
+ * criterion's control.
+ */
+test.describe('the gradient shows beside the road — #458', () => {
+  test('hides a block below the rider’s level beside a climb, and shows one beside a descent', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { gradient } = await harness(harnessRun);
+    const measured = `the hills on the horizon cover ${String(gradient.horizonPixels)} px; climb: buried ${String(gradient.climbBuried)} px, lifted clear ${String(gradient.climbLifted)} px; descent: below the rider ${String(gradient.descentBelow)} px. Over the flat quad: climb ${String(gradient.flatClimbBuried)} px, descent ${String(gradient.flatDescentBelow)} px. The landform: ${String(gradient.terrainVertices)} vertices, ${String(gradient.terrainIndices)} indices; drawn per rung ${gradient.terrainIndicesByRung.join(' / ')}`;
+    testInfo.annotations.push({ type: 'the gradient beside the road', description: measured });
+    console.log(`the gradient beside the road — ${measured}`);
+
+    // Non-vacuity: the block is on screen at that place — lifted clear of the
+    // hillside it is drawn, so the zero below is the hill and not a block that
+    // was never in the frame.
+    expect(gradient.climbLifted).toBeGreaterThan(100);
+    // The ground beside a 10 % climb stands ABOVE the rider's road level: a
+    // block standing from 1.5 m below it to about 0.5 m above is entirely
+    // inside the hillside.
+    expect(gradient.climbBuried).toBe(0);
+    // And beside a 10 % descent it falls BELOW it: a block whose base is 2.5 m
+    // under the rider's road is standing in the air over the valley.
+    expect(gradient.descentBelow).toBeGreaterThan(100);
+
+    // ⚠️ **The control, which the criterion requires**: the flat quad's
+    // geometry — a level plane 0.25 m under the rider — fails the same pair.
+    // On the climb the top of the block stands above that plane and is drawn,
+    // so a flat world cannot hide it…
+    expect(gradient.flatClimbBuried).toBeGreaterThan(0);
+    // …and on the descent the plane is ABOVE most of the block, so it hides
+    // what the landform shows. (The quad as it shipped wrote no depth and would
+    // have drawn this block; the climb half is the one it fails either way.)
+    expect(gradient.flatDescentBelow).toBeLessThan(gradient.descentBelow);
+    const passes = (buried: number, below: number) => buried === 0 && below > 100;
+    expect(passes(gradient.climbBuried, gradient.descentBelow)).toBe(true);
+    expect(passes(gradient.flatClimbBuried, gradient.flatDescentBelow)).toBe(false);
+  });
+
+  test('publishes what the landform costs, and takes its outer bands first down the ladder', async ({
+    harnessRun,
+  }) => {
+    const { gradient } = await harness(harnessRun);
+    // ⚠️ Folded in here (#456's rule: no new harness load, no new case where an
+    // existing one will carry it). The hills on the horizon reach the screen:
+    // against the same ridge sunk below the horizon, they cover some of it.
+    expect(gradient.horizonPixels).toBeGreaterThan(500);
+    // Published rather than bounded, like every GPU cost here — a software
+    // rasteriser says nothing about a phone (validation 0002 Part V).
+    expect(gradient.terrainVertices).toBeGreaterThan(0);
+    const [full, ...lower] = gradient.terrainIndicesByRung;
+    expect(full).toBe(gradient.terrainIndices);
+    let previous = full ?? 0;
+    for (const each of lower) {
+      expect(each).toBeLessThanOrEqual(previous);
+      previous = each;
+    }
+    expect(previous).toBeLessThan(full ?? 0);
+  });
+});
+
+/**
+ * #459 — a stream in the route's own valley, and the road carried over it on a
+ * bridge. `game-harness.ts` §`waterProbe` reads the pixels.
+ */
+/**
+ * #425's no-asset half — the sky's gradient and the road's and ground's
+ * surface detail, both drawn by arithmetic. The photographic surfaces, KTX2 and
+ * the HDRI wait for #431; this block is what can be claimed without them.
+ */
+test.describe('a sky with a gradient, and surfaces with detail — #425', () => {
+  test('grades the sky from overhead to the haze, where it used to be one colour', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { gradient } = await harness(harnessRun);
+    const key = (pixel: Pixel) => pixel.slice(0, 3).join(',');
+    const measured = `sky 25° up ${key(gradient.skyHigh)}, 8° up ${key(gradient.skyLow)}; with the haze set to the sky ${key(gradient.flatSkyHigh)} and ${key(gradient.flatSkyLow)}. Road patch deviation ${gradient.roadSpreadDetailed.toFixed(2)} levels with detail, ${gradient.roadSpreadPlain.toFixed(2)} without; the ground's detail changes ${String(gradient.groundChangedByDetail)} px`;
+    testInfo.annotations.push({ type: 'the sky and the surfaces', description: measured });
+    console.log(`the sky and the surfaces — ${measured}`);
+
+    // Two heights of one sky are two colours…
+    expect(key(gradient.skyHigh)).not.toBe(key(gradient.skyLow));
+    // …the higher one bluer, as overhead is…
+    expect(gradient.skyHigh[2] - gradient.skyHigh[0]).toBeGreaterThan(
+      gradient.skyLow[2] - gradient.skyLow[0],
+    );
+    // …and the control: with the haze set to the sky, which is the flat sky
+    // this replaced, the two are one colour. What made them differ is the
+    // gradient and nothing else.
+    expect(key(gradient.flatSkyHigh)).toBe(key(gradient.flatSkyLow));
+  });
+
+  test('gives the road and the ground a surface, and takes it away on the next rung', async ({
+    harnessRun,
+  }) => {
+    const { gradient } = await harness(harnessRun);
+    // The road was one vertex colour across a patch this size: the grain is
+    // what makes it vary, and the rung that drops the detail flattens it again.
+    expect(gradient.roadSpreadDetailed).toBeGreaterThan(gradient.roadSpreadPlain + 0.5);
+    expect(gradient.roadSpreadPlain).toBeLessThan(0.5);
+    // The ground's mottle and patchwork reach the screen.
+    expect(gradient.groundChangedByDetail).toBeGreaterThan(5_000);
+    // #468's review, B3: the same place on lap three is the same colour as on
+    // lap one — and the control, the patchwork with its lap wrap defeated,
+    // which is what the first head drew, repaints the fields.
+    console.log(
+      `the patchwork a lap later — ${String(gradient.lapChanged)} px changed, ${String(gradient.lapChangedUnwrapped)} px unwrapped`,
+    );
+    expect(gradient.lapChangedUnwrapped).toBeGreaterThan(2_000);
+    expect(gradient.lapChanged).toBeLessThan(gradient.lapChangedUnwrapped / 50);
+  });
+});
+
+test.describe('water under a bridge — #459', () => {
+  test('draws the stream beside the bridge, and the road’s deck above it', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { water } = await harness(harnessRun);
+    const key = (pixel: Pixel) => pixel.slice(0, 3).join(',');
+    const measured = `beside the bridge ${key(water.beside)} (dry ${key(water.besideDry)}); on the deck ${key(water.deck)} (dry ${key(water.deckDry)}), under it ${key(water.underDeck)}; ${String(water.drawCalls)} draw calls against ${String(water.drawCallsDry)} with no water or bridge; a frame of the valley ${water.shadedMs.toFixed(2)} ms with the water shaded, ${water.flatMs.toFixed(2)} ms flat`;
+    testInfo.annotations.push({ type: 'water under a bridge', description: measured });
+    console.log(`water under a bridge — ${measured}`);
+
+    // Non-vacuity: the valley route has its stream.
+    expect(water.crossings).toBeGreaterThan(0);
+    // The stream is drawn beside the bridge: taking it away changes the pixel,
+    // and what is there is water — blue over red, which ground is not.
+    expect(key(water.beside)).not.toBe(key(water.besideDry));
+    expect(water.beside[2]).toBeGreaterThan(water.beside[0]);
+    // The deck is drawn ABOVE the water: taking the water away changes nothing
+    // on the deck…
+    expect(key(water.deck)).toBe(key(water.deckDry));
+    // …and taking the ROAD away shows water there: it was under the deck all
+    // along, which is what a bridge over a stream is.
+    expect(key(water.underDeck)).not.toBe(key(water.deck));
+    expect(water.underDeck[2]).toBeGreaterThan(water.underDeck[0]);
+    // Two draw calls, whatever is in view: the water and the bridges.
+    expect(water.drawCalls - water.drawCallsDry).toBe(2);
+    // Published, never bounded: a software rasteriser says nothing about a
+    // phone's GPU. Validation 0002 Part W is the phone.
+    expect(water.shadedMs).toBeGreaterThan(0);
+    expect(water.flatMs).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * #460 — places, not houses. `game-harness.ts` §`settlementProbe` draws a
+ * village and its fields and times the frame with and without them.
+ */
+test.describe('a village and its fields — #460', () => {
+  test('draws the structures, one call a kind, and publishes what they cost', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { settlement } = await harness(harnessRun);
+    const measured = `${String(settlement.structures)} structures of ${String(settlement.kinds)} kinds cover ${String(settlement.pixels)} px; ${String(settlement.drawCalls)} draw calls against ${String(settlement.drawCallsBare)} without them; a frame ${settlement.withMs.toFixed(2)} ms with them, ${settlement.withoutMs.toFixed(2)} ms without`;
+    testInfo.annotations.push({ type: 'a village and its fields', description: measured });
+    console.log(`a village and its fields — ${measured}`);
+
+    // Non-vacuity: the frame is a village, with more than one kind in it.
+    expect(settlement.structures).toBeGreaterThan(10);
+    expect(settlement.kinds).toBeGreaterThanOrEqual(3);
+    // It reaches the drawing buffer — the named defect shape of this epic is a
+    // list the renderer never draws.
+    expect(settlement.pixels).toBeGreaterThan(500);
+    // One call a mesh at most, however many items: never one per item. A
+    // kind is one mesh, but a house is up to three (#367's variants), so the
+    // bound is the kinds plus the two extra shapes a house can take.
+    expect(settlement.drawCalls - settlement.drawCallsBare).toBeGreaterThan(0);
+    expect(settlement.drawCalls - settlement.drawCallsBare).toBeLessThanOrEqual(
+      settlement.kinds + 2,
+    );
+    expect(settlement.drawCalls - settlement.drawCallsBare).toBeLessThan(settlement.structures);
+    // Published, never bounded — validation 0002 Part X is the phone.
+    expect(settlement.withMs).toBeGreaterThan(0);
+  });
+});
+
 test.describe('the road reads as a road — #242', () => {
   /**
    * ⚠️ **The criterion that catches #240's named defect one layer down.** A
@@ -787,7 +1032,12 @@ test.describe('the scenery reaches the screen, and costs one call a kind — #24
     const result = await harness(harnessRun);
 
     expect(result.sceneryColumnFraction).toBeLessThan(0.375);
-    expect(result.sceneryRowFraction).toBeGreaterThan(0.4);
+    // ⚠️ **Inclusive since #458**, and the reason is the region rather than
+    // the scenery: the search starts 40 % up the frame, and since the scenery
+    // stands on the landform the strongest change is a near item whose lower
+    // half runs off the bottom of that region — measured at exactly 0.4, the
+    // region's own first row. A change found there is still inside it.
+    expect(result.sceneryRowFraction).toBeGreaterThanOrEqual(0.4);
     expect(result.sceneryRowFraction).toBeLessThan(0.85);
   });
 
@@ -1359,8 +1609,9 @@ test.describe('a kind is drawn as several shapes, and it is measured — #367', 
     const result = await harness(harnessRun);
 
     for (const [kind, counts] of Object.entries(result.variantIndices)) {
-      if (kind === 'post') {
-        // ADR 0022 D-3 leaves it a cylinder, so every slot is the same shape.
+      if (!(MODELLED_KINDS as readonly string[]).includes(kind)) {
+        // ADR 0022 D-3 leaves `post` a cylinder, and #460's eight structures
+        // are built from numbers as one shape each: every slot is the same.
         continue;
       }
       const drawn = counts.filter((count) => count > 0);
@@ -1395,8 +1646,9 @@ test.describe('a kind is drawn as several shapes, and it is measured — #367', 
     // step", and the two together are the claim.
     expect(atTwo).toBeLessThan(atThree ?? 0);
     expect(atOne).toBeLessThan(atTwo ?? 0);
-    // One shape a kind is what #244 spent, which is the floor rung's cost.
-    expect(atOne).toBe(6);
+    // One shape a kind is what #244 spent, which is the floor rung's cost —
+    // six then, and fourteen since #460 added eight kinds of one shape each.
+    expect(atOne).toBe(14);
 
     const measured =
       `scenery draw calls at 3, 2 and 1 shapes a kind: ` +
@@ -1452,7 +1704,11 @@ test.describe('the pacer and the ghost are bicycles — #368', () => {
       expect(pixels, `${kind} silhouette`).toBeGreaterThan(50);
     }
     const key = (pixel: Pixel | undefined) => (pixel ?? []).slice(0, 3).join(',');
-    const measured = `mean silhouette colour — rider ${key(rider)}, bot ${key(bot)}, ghost ${key(ghost)}`;
+    const measured = `mean silhouette colour — rider ${key(rider)}, bot ${key(bot)}, ghost ${key(ghost)}; silhouettes ${Object.entries(
+      result.riderSilhouettePixels,
+    )
+      .map(([kind, pixels]) => `${kind} ${String(pixels)} px`)
+      .join(', ')}, rider 0.4 m under the road ${String(result.riderBuriedPixels)} px`;
     // ⚠️ **Printed before the assertions rather than after them**, so a red run
     // reports the colours it actually read. Every other measurement in this
     // file logs on the way out, and every one of them is silent on the run
@@ -1461,6 +1717,17 @@ test.describe('the pacer and the ghost are bicycles — #368', () => {
     console.log(`telling the three apart — ${measured}`);
 
     expect(new Set([key(rider), key(bot), key(ghost)]).size).toBe(3);
+
+    // ⚠️ **#455: the probe stands the riders ON the road.** It used the camera
+    // pose's height, which on this 5 % route is 0.4 m under the tarmac 8 m on,
+    // so every mean below was taken over a bicycle whose wheels and lower frame
+    // were inside the road. The control is that placement, drawn in the same
+    // run: the rider on the tarmac shows clearly more of itself than the rider
+    // buried in it — which is what says the colours are the whole bicycle's.
+    expect(result.riderBuriedPixels).toBeGreaterThan(50);
+    expect(result.riderSilhouettePixels['rider'] ?? 0).toBeGreaterThan(
+      result.riderBuriedPixels * 1.1,
+    );
 
     // ⚠️ **Three of them being different is not the claim; each PAIR being
     // told apart is, and the two pairs are told apart by different

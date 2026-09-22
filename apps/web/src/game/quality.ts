@@ -38,7 +38,9 @@
  * is not the reduction threshold.
  */
 
+import { TERRAIN_BANDS } from './landform';
 import { SCATTER_MAX_ITEMS } from './scatter';
+import { STRUCTURE_MAX_ITEMS } from './settlements';
 import { MAXIMUM_SCENERY_VARIANTS } from './scenery-models';
 
 /** How hard the renderer is working. Lower is cooler. */
@@ -214,6 +216,101 @@ export interface QualitySettings {
    *   part of them.
    */
   readonly riderShadows: 'contact' | 'map' | 'none';
+  /**
+   * How many bands of ground either side of the road are drawn, innermost
+   * first — #458. `landform.ts` §`TERRAIN_BANDS` is the most there are.
+   *
+   * ⚠️ **The ground is the largest fill in the frame since #458**, which is why
+   * it is on the ladder at all: the flat quad it replaced was two triangles,
+   * and a landform out to 420 m either side of 460 m of road is about two
+   * thousand, lit, most of them far away. What goes first is the OUTSIDE —
+   * the bands beyond 300 m, and then beyond 200 m and 135 m — which is the
+   * ground `world.ts` has already faded most of the way into the horizon
+   * colour, and which the horizon ring's own foot, in that same colour, stands
+   * in for once it is gone. So it goes with the first resolution step, on
+   * {@link scatterItems}' argument: the slice that costs least to look at is
+   * the slice taken first.
+   *
+   * ⚠️ **It never moves a vertex.** The rung shortens a draw range over the
+   * same mesh (`three-renderer.ts` §`TerrainBelt.setBands`), so a tree standing
+   * on the ground stands on the same ground at every rung, and the ground at
+   * the road's edge — the no-crack guarantee — is in every rung's first band.
+   *
+   * ## ⚠️ Provenance — BR-1, and this is not a measurement either
+   *
+   * 12 → 10 → 9 → 8, on the same footing as every figure on this ladder. What
+   * the browser gate measures is the vertex and index counts and the draw
+   * range, and `docs/validation/0002-android-shell-and-game.md` Part V is the
+   * frame time on a phone.
+   */
+  readonly terrainBands: number;
+  /**
+   * How water is drawn — #459.
+   *
+   * - `'shaded'` — the water shader: the sky reflected with a Fresnel term,
+   *   ripples scrolling in the fragment, the edges tinted by depth. No second
+   *   render of the scene, which is what a planar reflection would be.
+   * - `'flat'` — one colour, unlit, the cheapest thing that still reads as
+   *   water beside a road.
+   *
+   * ⚠️ **Shaded on the target rung only.** Every fragment of water runs the
+   *   shader, and it is detail rather than information — nothing about where
+   *   the water is changes — so it goes on the first step down, with the
+   *   scenery and the far ground, before any rung gives up frame rate. The
+   *   browser gate publishes what the shader costs on the valley frame.
+   *
+   * ## ⚠️ Provenance — BR-1, and this is not a measurement either
+   *
+   * The rung is chosen, not measured; validation 0002 Part W is the phone.
+   */
+  readonly water: 'shaded' | 'flat';
+  /**
+   * How many structures a frame may carry — buildings, signposts and field
+   * boundaries, #460.
+   *
+   * ⚠️ **Its own budget rather than a share of {@link scatterItems}**, because
+   * the two are thinned differently: the scenery by a distance-biased rank
+   * (`scatter.ts` §`thin`), the structures by keeping every building and then
+   * the field boundaries nearest the rider (`settlements.ts` §`structuresAt`).
+   * A shared budget would let a forest cost a village its houses.
+   *
+   * It goes on the same rungs as the scenery, for the same reason: what is
+   * taken first is the far end of the view, which the fog has mostly taken
+   * already.
+   *
+   * ## ⚠️ Provenance — BR-1, and not a measurement
+   *
+   * 240 → 120 → 60 → 40: halved at each of the first two steps, faster than
+   * the scenery's own two-thirds, because what a structure budget takes first
+   * is a field's far boundary and a wall 40 m from the road reads as the same
+   * field without it. The houses are never what goes: they lead the list.
+   * Validation 0002 Part X is the frame time on a phone with the new kinds in
+   * view.
+   */
+  readonly structureItems: number;
+  /**
+   * Whether the road and the ground carry their procedural surface detail —
+   * #425: a grain on the tarmac, a mottle and a patchwork of fields on the
+   * ground, computed in the fragment from where it is.
+   *
+   * ⚠️ **No texture.** #425 asked for tiled textures, and the photographic
+   * ones wait for [#431](https://github.com/openzigs/onyourleft/issues/431);
+   * what ships is the half that needs no asset, drawn by arithmetic in the
+   * shader, so "no texture reaches the GPU" (#366) still holds and ADR 0022 is
+   * not amended.
+   *
+   * ⚠️ **On the target rung only**, which is #425's own criterion: *"a
+   * throttling phone drops textures before it drops frame rate"* — the first
+   * step down takes it, and the first rung that lowers the frame cap is the
+   * one after. Detail is what goes first because nothing a rider needs lives
+   * in it: the gradient is in the road's own colour, which the grain is
+   * bounded against (`terrain.ts` §`ROAD_SURFACE_GRAIN`).
+   *
+   * ## ⚠️ Provenance — BR-1, and not a measurement
+   *
+   * Validation 0002 Part Y measures the frame time on a phone.
+   */
+  readonly surfaceDetail: boolean;
   /** A human-readable name, for the diagnostic line #91 asks to be recorded. */
   readonly label: string;
 }
@@ -239,6 +336,10 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     // `scenery-models.ts`'s own constant rather than a copy of it, for the
     // reason `scatterItems` above takes `SCATTER_MAX_ITEMS`.
     sceneryVariants: MAXIMUM_SCENERY_VARIANTS,
+    terrainBands: TERRAIN_BANDS,
+    water: 'shaded',
+    structureItems: STRUCTURE_MAX_ITEMS,
+    surfaceDetail: true,
     shading: 'lit',
     riderShadows: 'contact',
     label: 'full',
@@ -251,6 +352,10 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     frameCap: 30,
     scatterItems: 160,
     sceneryVariants: 2,
+    terrainBands: 10,
+    water: 'flat',
+    structureItems: 120,
+    surfaceDetail: false,
     shading: 'lit',
     riderShadows: 'contact',
     label: 'reduced resolution and scenery',
@@ -260,6 +365,10 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     frameCap: 24,
     scatterItems: 100,
     sceneryVariants: 1,
+    terrainBands: 9,
+    water: 'flat',
+    structureItems: 60,
+    surfaceDetail: false,
     shading: 'lit',
     riderShadows: 'contact',
     label: 'reduced resolution, scenery and frame rate',
@@ -279,6 +388,10 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     frameCap: 20,
     scatterItems: 60,
     sceneryVariants: 1,
+    terrainBands: 8,
+    water: 'flat',
+    structureItems: 40,
+    surfaceDetail: false,
     shading: 'flat',
     riderShadows: 'contact',
     label: 'minimum',

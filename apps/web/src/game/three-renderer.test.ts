@@ -51,16 +51,18 @@ import {
 
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
-import { corridorOrigin } from './terrain';
+import { corridorOrigin, roadCorridor } from './terrain';
+import { horizonRelief, terrainCorridor } from './landform';
 
 import { QUALITY_LADDER, qualitySettings } from './quality';
 import {
   SCATTER_BAND_METRES,
   SCATTER_KINDS,
+  SCENERY_KINDS,
   SCATTER_MAX_ITEMS,
   SCATTER_VERGE_METRES,
   type ScatterItem,
-  type ScatterKind,
+  type SceneryKind,
 } from './scatter';
 import { ROAD_WIDTH_METRES, VIEW_AHEAD_METRES, VIEW_BEHIND_METRES } from './terrain';
 import {
@@ -98,6 +100,8 @@ import {
   threeGameRenderer,
   WorldLamps,
   LIT_COLOURS,
+  BRIDGE_COLOUR,
+  sceneryColours,
 } from './three-renderer';
 import type { CameraPose, RiderMarker, SceneFrame } from './port';
 import {
@@ -133,7 +137,7 @@ function item(overrides: Partial<ScatterItem> = {}): ScatterItem {
  */
 function meshFor(
   belt: ScatterBelt,
-  kind: ScatterKind,
+  kind: SceneryKind,
   variant = 0,
 ): ReturnType<ScatterBelt['meshesOf']>[number] | undefined {
   // ⚠️ The type is read off the belt rather than named: `three-seam.test.ts`
@@ -177,7 +181,7 @@ function submitted(belt: ScatterBelt): number {
  */
 function instancePosition(
   belt: ScatterBelt,
-  kind: ScatterKind,
+  kind: SceneryKind,
   index: number,
 ): readonly [number, number, number] {
   const mesh = meshFor(belt, kind);
@@ -190,7 +194,7 @@ function instancePosition(
 }
 
 describe('the scenery belt is one mesh per kind, not one per item', () => {
-  it('holds six meshes for five hundred items', () => {
+  it('holds one mesh a kind for five hundred items', () => {
     // #244's first criterion, and the failure it prevents is invisible until a
     // phone is in hand: a per-item `Mesh` is a per-item draw call, and #240's
     // NFR-2 says draw calls are the budget.
@@ -199,7 +203,7 @@ describe('the scenery belt is one mesh per kind, not one per item', () => {
     for (let index = 0; index < 500; index += 1) {
       items.push(
         item({
-          kind: SCATTER_KINDS[index % SCATTER_KINDS.length] as ScatterKind,
+          kind: SCENERY_KINDS[index % SCENERY_KINDS.length] as SceneryKind,
           x: (index % 21) - 10,
           z: index % 300,
         }),
@@ -208,17 +212,20 @@ describe('the scenery belt is one mesh per kind, not one per item', () => {
 
     belt.update(items, POSE);
 
-    expect(belt.meshes.size).toBeLessThanOrEqual(SCATTER_KINDS.length);
-    expect(belt.meshes.size).toBe(6);
-    // Non-vacuity: six meshes holding nothing would pass the line above.
+    // ⚠️ **Fourteen since #460, where it was six**: five scattered kinds, and
+    // `building` beside the eight kinds `settlements.ts` added — every one of
+    // them still one mesh, however many items.
+    expect(belt.meshes.size).toBeLessThanOrEqual(SCENERY_KINDS.length);
+    expect(belt.meshes.size).toBe(14);
+    // Non-vacuity: meshes holding nothing would pass the line above.
     expect(submitted(belt)).toBe(500);
   });
 
-  it('has a mesh for every kind `scatter.ts` can place', () => {
+  it('has a mesh for every kind `scatter.ts` and `settlements.ts` can place', () => {
     // A kind with no mesh is scenery that is placed and never drawn, silently.
     const belt = new ScatterBelt();
 
-    for (const kind of SCATTER_KINDS) {
+    for (const kind of SCENERY_KINDS) {
       expect(meshFor(belt, kind)).toBeDefined();
     }
   });
@@ -255,7 +262,7 @@ describe('the scenery belt is one mesh per kind, not one per item', () => {
     // and for any kind whose model failed to load.
     const belt = new ScatterBelt();
 
-    for (const kind of SCATTER_KINDS) {
+    for (const kind of SCENERY_KINDS) {
       const geometry = meshFor(belt, kind)?.geometry;
       const colour = geometry?.getAttribute('color');
 
@@ -312,7 +319,7 @@ describe('the belt is reused rather than reallocated', () => {
     // enough that no gate would catch it.
     const belt = new ScatterBelt();
 
-    for (const kind of SCATTER_KINDS) {
+    for (const kind of SCENERY_KINDS) {
       expect(meshFor(belt, kind)?.instanceMatrix.count).toBe(SCATTER_INSTANCE_CAPACITY);
     }
   });
@@ -796,7 +803,18 @@ describe('the cull against what `scene.ts` actually hands it', () => {
     readonly onScreenAndClear: number;
   }
 
-  const keptAlongTheRoute = (radius: number | null): Sweep => {
+  /**
+   * @param scenery which items the SHARE is taken over. ⚠️ Since #460 a frame
+   * carries buildings and field boundaries in front of its scenery, and the
+   * shares recorded below — 0.4390, 0.5514, 0.5243, 0.5568 — are measurements
+   * of the natural scenery's cull over five issues; they are kept comparable by
+   * measuring the same population. The PROPERTY (nothing on screen culled) is
+   * held over everything, structures included.
+   */
+  const keptAlongTheRoute = (
+    radius: number | null,
+    scenery: 'everything' | 'natural' = 'everything',
+  ): Sweep => {
     const { points, local } = arcRoute(radius);
     // ⚠️ Non-vacuity of the *fixture*, checked before the cull is measured at
     // all: this is the assertion the parabola would have failed.
@@ -817,11 +835,20 @@ describe('the cull against what `scene.ts` actually hands it', () => {
     let onScreenButCulled = 0;
     let onScreenAndClear = 0;
     for (let at = 0; at < 1500; at += 47) {
-      const frame = sceneFrame({
+      const whole = sceneFrame({
         profile,
         origin,
         state: { ...start, ride: { ...start.ride, distance: metres(at) } },
       });
+      const frame =
+        scenery === 'natural'
+          ? {
+              ...whole,
+              scatter: whole.scatter.filter((each) =>
+                (SCATTER_KINDS as readonly string[]).includes(each.kind),
+              ),
+            }
+          : whole;
       belt.update(frame.scatter, frame.camera);
       items = Math.min(items === 0 ? frame.scatter.length : items, frame.scatter.length);
       lowest = Math.min(lowest, submitted(belt) / Math.max(1, frame.scatter.length));
@@ -942,7 +969,7 @@ describe('the cull against what `scene.ts` actually hands it', () => {
    */
   it('drops a measured share of a 100 m hairpin, all of it off screen', () => {
     const { lowest, items, tightestRadius, onScreenButCulled, onScreenAndClear } =
-      keptAlongTheRoute(100);
+      keptAlongTheRoute(100, 'natural');
 
     expect(items).toBeGreaterThan(40);
     expect(tightestRadius).toBeGreaterThan(99);
@@ -1213,13 +1240,21 @@ describe('the verge and the camera cone — #355, re-derived for #423 and #424',
     const start = atStartLine(profile);
     const built: SceneFrame[] = [];
     for (let step = 0; step < 100; step += 1) {
-      built.push(
-        sceneFrame({
-          profile,
-          origin,
-          state: { ...start, ride: { ...start.ride, distance: metres(500 + step * 100) } },
-        }),
-      );
+      const frame = sceneFrame({
+        profile,
+        origin,
+        state: { ...start, ride: { ...start.ride, distance: metres(500 + step * 100) } },
+      });
+      // ⚠️ The natural scenery only, since #460: every floor below was set on
+      // it, and a field wall on the verge or a village's houses would count as
+      // "scenery in shot" in the first 25 m and move the floors for a reason
+      // #355 never measured.
+      built.push({
+        ...frame,
+        scatter: frame.scatter.filter((each) =>
+          (SCATTER_KINDS as readonly string[]).includes(each.kind),
+        ),
+      });
     }
     return built;
   })();
@@ -1475,6 +1510,25 @@ function frameWithScatter(): SceneFrame {
       sun: worldStyle(routeProfile(flatRouteAt(120))).sun,
     },
     scatter: [item({ kind: 'tree-conifer', z: 30 }), item({ kind: 'rock', z: 60 })],
+    // #458. A real landform, from a real corridor, so this frame is one the
+    // program can produce rather than one with the ground left out.
+    terrain: (() => {
+      const profile = routeProfile(flatRouteAt(120));
+      const origin = corridorOrigin(profile);
+      return {
+        mesh: terrainCorridor(profile, origin, roadCorridor(profile, origin, 100), 7),
+        horizon: horizonRelief(profile, origin, 7),
+      };
+    })(),
+    water: {
+      surface: {
+        vertices: new Float32Array(0),
+        shore: new Float32Array(0),
+        indices: new Uint32Array(0),
+      },
+      bridges: [],
+      seconds: 0,
+    },
   };
 }
 
@@ -1599,7 +1653,22 @@ describe('the world has a light direction — #286', () => {
     //
     // ⚠️ **Two solid markers rather than three, since #349** — the rider is a
     // bicycle now, and its four colours arrive from `bicycle.ts` instead.
-    expect(LIT_COLOURS).toHaveLength(SCATTER_KINDS.length + 2 + BICYCLE_COLOURS.length);
+    //
+    // ⚠️ **And one more since #459: the bridges' stone**, which is lit like
+    // the scenery and is this file's own colour. (The ground is lit too since
+    // #458, but its colour is `world.ts`'s ground colour, a horizontal
+    // surface's, which `world.test.ts` bounds.)
+    //
+    // ⚠️ **And since #460 a built shape has several colours**, so the length
+    // is no longer one a kind: every kind's colours are required to be there
+    // instead, which is the same claim without the count.
+    expect(LIT_COLOURS).toContain(BRIDGE_COLOUR);
+    expect(LIT_COLOURS.length).toBeGreaterThan(SCENERY_KINDS.length + 2 + BICYCLE_COLOURS.length);
+    for (const kind of SCENERY_KINDS) {
+      for (const colour of sceneryColours(kind)) {
+        expect(LIT_COLOURS, kind).toContain(colour);
+      }
+    }
     expect(new Set(LIT_COLOURS).size).toBe(LIT_COLOURS.length);
   });
 });
@@ -1617,7 +1686,7 @@ describe('the scenery can lose its shading — #286', () => {
     const belt = new ScatterBelt();
     belt.setShading(qualitySettings(0).shading);
 
-    for (const kind of SCATTER_KINDS) {
+    for (const kind of SCENERY_KINDS) {
       expect(materialTypeOf(belt, kind)).toBe('MeshLambertMaterial');
     }
   });
@@ -1626,7 +1695,7 @@ describe('the scenery can lose its shading — #286', () => {
     const belt = new ScatterBelt();
     belt.setShading(qualitySettings(3).shading);
 
-    for (const kind of SCATTER_KINDS) {
+    for (const kind of SCENERY_KINDS) {
       expect(materialTypeOf(belt, kind)).toBe('MeshBasicMaterial');
     }
   });
@@ -1733,7 +1802,7 @@ describe('the scenery can lose its shading — #286', () => {
  * Read as a string rather than with an `instanceof`, because this file must
  * not import `three` — `three-seam.test.ts` is what says so.
  */
-function materialTypeOf(belt: ScatterBelt, kind: ScatterKind): string {
+function materialTypeOf(belt: ScatterBelt, kind: SceneryKind): string {
   const material = meshFor(belt, kind)?.material;
   if (material === undefined || Array.isArray(material)) {
     return 'none';
@@ -1790,7 +1859,7 @@ describe('the scenery belt spends a budget it never sets — #245', () => {
    * the count. Spaced two metres apart the first of these assertions read 201
    * rather than 240 and would have been a test of the corridor's length.
    */
-  function belt(count: number, kind: ScatterKind = 'shrub'): readonly ScatterItem[] {
+  function belt(count: number, kind: SceneryKind = 'shrub'): readonly ScatterItem[] {
     return Array.from({ length: count }, (_, at) => item({ kind, x: 3, z: at }));
   }
 
@@ -1977,7 +2046,7 @@ describe('the scenery belt spends a budget it never sets — #245', () => {
  */
 describe('the shapes the models bring — #341', () => {
   /** A belt's own primitive for a kind, cloned so the belt keeps its own. */
-  const primitiveOf = (belt: ScatterBelt, kind: ScatterKind) => {
+  const primitiveOf = (belt: ScatterBelt, kind: SceneryKind) => {
     const geometry = meshFor(belt, kind)?.geometry;
     if (geometry === undefined) {
       throw new Error(`no geometry for ${kind}`);
@@ -2016,7 +2085,7 @@ describe('the shapes the models bring — #341', () => {
   };
 
   /** Everything `loadSceneryModels` needs from a loader, over one fake part. */
-  const loaderFrom = (belt: ScatterBelt, donor: ScatterKind) => {
+  const loaderFrom = (belt: ScatterBelt, donor: SceneryKind) => {
     const mesh = meshFor(belt, donor);
     if (mesh === undefined) {
       throw new Error(`no mesh for ${donor}`);
@@ -2289,7 +2358,7 @@ describe('the shapes the models bring — #341', () => {
       const belt = new ScatterBelt();
 
       // Every kind with a model in the table now draws the loaded shape…
-      for (const kind of Object.keys(SCENERY_MODELS) as ScatterKind[]) {
+      for (const kind of Object.keys(SCENERY_MODELS) as SceneryKind[]) {
         expect(meshFor(belt, kind)?.geometry.getAttribute('position').count).toBe(modelVertices);
       }
       // …and `post`, which ADR 0022 D-3 leaves alone, still draws its cylinder.
@@ -2308,7 +2377,7 @@ describe('the shapes the models bring — #341', () => {
     // what stops that graceful fallback becoming the shipped world in silence.
     const donor = new ScatterBelt();
     const counts = new Map(
-      SCATTER_KINDS.map((kind) => [
+      SCENERY_KINDS.map((kind) => [
         kind,
         meshFor(donor, kind)?.geometry.getAttribute('position').count,
       ]),
@@ -2317,7 +2386,7 @@ describe('the shapes the models bring — #341', () => {
     return loadSceneryModels(() => Promise.reject(new Error('404'))).then(() => {
       const belt = new ScatterBelt();
 
-      for (const kind of SCATTER_KINDS) {
+      for (const kind of SCENERY_KINDS) {
         expect(meshFor(belt, kind)?.geometry.getAttribute('position').count).toBe(counts.get(kind));
       }
       belt.dispose();
@@ -2838,7 +2907,7 @@ describe('a kind is drawn as several shapes — #367', () => {
   type Shape = NonNullable<ReturnType<typeof meshFor>>['geometry'];
 
   /** Distinct geometries, one per variant, so a belt can tell them apart. */
-  function shapesFor(kind: ScatterKind, count: number): ReadonlyMap<ScatterKind, readonly Shape[]> {
+  function shapesFor(kind: SceneryKind, count: number): ReadonlyMap<SceneryKind, readonly Shape[]> {
     const donor = new ScatterBelt();
     const built: Shape[] = [];
     for (let at = 0; at < count; at += 1) {
@@ -2846,7 +2915,7 @@ describe('a kind is drawn as several shapes — #367', () => {
       // count and an item drawn by the wrong one is visible as a number.
       const geometry = meshFor(
         donor,
-        SCATTER_KINDS[at % SCATTER_KINDS.length] as ScatterKind,
+        SCENERY_KINDS[at % SCENERY_KINDS.length] as SceneryKind,
       )?.geometry;
       if (geometry === undefined) {
         throw new Error('no geometry to clone');
@@ -2862,8 +2931,8 @@ describe('a kind is drawn as several shapes — #367', () => {
 
     expect(belt.meshesOf('rock')).toHaveLength(3);
     expect(belt.meshesOf('shrub')).toHaveLength(1);
-    // Six kinds, of which one has three shapes.
-    expect(belt.meshes.size).toBe(SCATTER_KINDS.length + 2);
+    // Every kind, of which one has three shapes.
+    expect(belt.meshes.size).toBe(SCENERY_KINDS.length + 2);
     belt.dispose();
   });
 

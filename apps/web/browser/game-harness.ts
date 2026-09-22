@@ -59,6 +59,7 @@
 
 import {
   altitudeMetres,
+  elevationAt,
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
@@ -73,15 +74,111 @@ import type { WorldStyle } from '../src/game/world';
 
 import { sceneFrame } from '../src/game/scene';
 import { corridorOrigin } from '../src/game/terrain';
-import { qualitySettings, RIDER_SHADOW_MAP_RUNG, type QualitySettings } from '../src/game/quality';
+import {
+  QUALITY_LADDER,
+  qualitySettings,
+  RIDER_SHADOW_MAP_RUNG,
+  type QualitySettings,
+} from '../src/game/quality';
+import {
+  circuitRoute,
+  hillRoute,
+  northRoute,
+  valleyRoute,
+} from '../src/game/route-fixtures-testing';
+import { structuresAt } from '../src/game/settlements';
+import { waterways } from '../src/game/waterways';
+import { VERGE_DROP_METRES } from '../src/game/landform';
 import { loadSceneryModels, threeGameRenderer } from '../src/game/three-renderer';
 import {
-  SCATTER_KINDS,
+  scatterSeed,
+  STRUCTURE_KINDS,
+  SCENERY_KINDS,
   SCATTER_VARIANT_SLOTS,
   type ScatterItem,
-  type ScatterKind,
+  type SceneryKind,
 } from '../src/game/scatter';
 import { atStartLine } from '../src/game/simulation';
+
+/** What {@link gradientProbe} publishes — #458. */
+interface GradientMeasurement {
+  /**
+   * #425: two sky pixels, straight ahead 25° and 8° above the horizon — and
+   * the same two with the route's haze set to its sky, which is the flat sky
+   * this replaced.
+   */
+  readonly skyHigh: Pixel;
+  readonly skyLow: Pixel;
+  readonly flatSkyHigh: Pixel;
+  readonly flatSkyLow: Pixel;
+  /**
+   * #425: how much the road varies across a patch of carriageway, with the
+   * surface detail on and off — the standard deviation of luminance, in
+   * levels — and how many pixels of the frame the ground's detail changes.
+   */
+  readonly roadSpreadDetailed: number;
+  readonly roadSpreadPlain: number;
+  readonly groundChangedByDetail: number;
+  /**
+   * #468's review, B3: pixels that differ between the same place on a loop
+   * seen on lap one and on lap three, with the surface detail on — and the
+   * same comparison with the patchwork's lap wrap defeated, which is the field
+   * colours as #468's first head drew them.
+   */
+  readonly lapChanged: number;
+  readonly lapChangedUnwrapped: number;
+  /** Pixels the hills on the horizon cover, against the same ridge sunk below it. */
+  readonly horizonPixels: number;
+  /** Pixels a block BELOW the rider's road level changes, 40 m up a 10 % climb. */
+  readonly climbBuried: number;
+  /** The same block lifted clear of that hillside: that it is drawn at all. */
+  readonly climbLifted: number;
+  /** Pixels a block below the rider's road level changes, 40 m down a 10 % descent. */
+  readonly descentBelow: number;
+  /** The climb's buried block again, over the flat quad's geometry. */
+  readonly flatClimbBuried: number;
+  /** The descent's block again, over the flat quad's geometry. */
+  readonly flatDescentBelow: number;
+  /** Vertices and indices the landform uploads, and the indices each rung draws. */
+  readonly terrainVertices: number;
+  readonly terrainIndices: number;
+  readonly terrainIndicesByRung: readonly number[];
+}
+
+/** What {@link waterProbe} publishes — #459. */
+interface WaterMeasurement {
+  /** How many streams and lakes the valley route has. */
+  readonly crossings: number;
+  /** A pixel on the stream beside the bridge, with the water drawn and without. */
+  readonly beside: Pixel;
+  readonly besideDry: Pixel;
+  /** A pixel on the bridge's deck, with the water drawn and without. */
+  readonly deck: Pixel;
+  readonly deckDry: Pixel;
+  /** The same deck pixel with the ROAD taken out: what is under the deck. */
+  readonly underDeck: Pixel;
+  /** Draw calls on the valley frame, and on the same frame with no water or bridge. */
+  readonly drawCalls: number;
+  readonly drawCallsDry: number;
+  /** Milliseconds a frame of the valley, water shaded and flat. */
+  readonly shadedMs: number;
+  readonly flatMs: number;
+}
+
+/** What {@link settlementProbe} publishes — #460. */
+interface SettlementMeasurement {
+  /** How many structures the village frame carries, and of how many kinds. */
+  readonly structures: number;
+  readonly kinds: number;
+  /** Pixels the structures change, against the same frame without them. */
+  readonly pixels: number;
+  /** Draw calls with the structures, and without. */
+  readonly drawCalls: number;
+  readonly drawCallsBare: number;
+  /** Milliseconds a frame, with the structures and without. */
+  readonly withMs: number;
+  readonly withoutMs: number;
+}
 
 /** What {@link shadowMapProbe} publishes. */
 type ShadowMapMeasurement = NonNullable<Window['__oylGameHarness']>['shadowMap'];
@@ -477,6 +574,25 @@ declare global {
       /** How many pixels each rider covers, drawn alone. @see riderMeanColour */
       readonly riderSilhouettePixels: Readonly<Record<string, number>>;
       /**
+       * The rider's silhouette drawn where `alone` put it before #455 — at the
+       * camera pose's height, 0.4 m under the tarmac 8 m up a 5 % road. The
+       * CONTROL for {@link riderSilhouettePixels}: the placement fix is what
+       * made the probe see the whole bicycle, and this says by how much.
+       */
+      readonly riderBuriedPixels: number;
+      /**
+       * #458 — does the ground beside the road show the gradient? A probe
+       * object is drawn beside a 10 % climb and a 10 % descent, and the pixels
+       * it changes are counted. @see gradientProbe
+       */
+      readonly gradient: GradientMeasurement;
+      /**
+       * #459 — the stream under the bridge, and the deck above it. @see waterProbe
+       */
+      readonly water: WaterMeasurement;
+      /** #460 — a village and its fields, drawn and timed. @see settlementProbe */
+      readonly settlement: SettlementMeasurement;
+      /**
        * Pixels the bot's own cranks move over half a development — #368.
        *
        * ⚠️ **From its odometer, not from a cadence it does not have.** The two
@@ -861,19 +977,19 @@ function sceneryIndicesByKind(frame: SceneFrame): Record<string, number> {
   countingIndices((indices) => {
     const view = threeGameRenderer.create(canvas, qualitySettings(0));
     view.resize(600, 400);
-    const only = (kind: ScatterKind | null): SceneFrame => ({
+    const only = (kind: SceneryKind | null): SceneFrame => ({
       ...frame,
       markers: [],
       scatter: kind === null ? [] : frame.scatter.filter((item) => item.kind === kind),
     });
-    const drawnBy = (kind: ScatterKind | null): number => {
+    const drawnBy = (kind: SceneryKind | null): number => {
       view.render(only(kind));
       const before = indices();
       view.render(only(kind));
       return indices() - before;
     };
     const road = drawnBy(null);
-    for (const kind of SCATTER_KINDS) {
+    for (const kind of SCENERY_KINDS) {
       counts[kind] = drawnBy(kind) - road;
     }
     view.destroy();
@@ -891,7 +1007,7 @@ function sceneryIndicesByKind(frame: SceneFrame): Record<string, number> {
  */
 function placedAhead(
   pose: CameraPose,
-  kind: ScatterKind,
+  kind: SceneryKind,
   variant: number,
   along: number,
   across: number,
@@ -1018,7 +1134,7 @@ function variantIndicesByKind(frame: SceneFrame): Record<string, readonly number
   countingIndices((indices) => {
     const view = threeGameRenderer.create(canvas, qualitySettings(0));
     view.resize(600, 400);
-    const only = (kind: ScatterKind | null, variant: number): SceneFrame => ({
+    const only = (kind: SceneryKind | null, variant: number): SceneFrame => ({
       ...frame,
       markers: [],
       scatter:
@@ -1026,14 +1142,14 @@ function variantIndicesByKind(frame: SceneFrame): Record<string, readonly number
           ? []
           : frame.scatter.filter((item) => item.kind === kind && item.variant === variant),
     });
-    const drawnBy = (kind: ScatterKind | null, variant: number): number => {
+    const drawnBy = (kind: SceneryKind | null, variant: number): number => {
       view.render(only(kind, variant));
       const before = indices();
       view.render(only(kind, variant));
       return indices() - before;
     };
     const road = drawnBy(null, 0);
-    for (const kind of SCATTER_KINDS) {
+    for (const kind of SCENERY_KINDS) {
       counts[kind] = Array.from(
         { length: SCATTER_VARIANT_SLOTS },
         (_, slot) => drawnBy(kind, slot) - road,
@@ -1081,6 +1197,488 @@ function sceneryCallsAcrossRungs(frame: SceneFrame): readonly number[] {
   return found;
 }
 
+/**
+ * #458's first criterion, read off pixels: *"the ground beside the road is
+ * higher than the rider's road level on the climb and lower on the descent —
+ * with a control: the flat-quad ground must fail the same assertion."*
+ *
+ * ## How a height is read off a picture
+ *
+ * By **occlusion**, which is the one thing about a height a drawing buffer
+ * states outright. A block is stood 14 m to the left of the road and 40 m
+ * ahead of the rider, and the pixels it changes are counted:
+ *
+ * - **On the climb** it stands from 1.5 m below the rider's road level to about
+ *   half a metre above it, and it is hidden — so the ground there is higher
+ *   than the rider's road. The
+ *   same block lifted 5 m clear of that hillside is drawn, which is what says
+ *   the zero is the hill and not a block that was never on screen.
+ * - **On the descent** its base is 2.5 m BELOW the rider's road level and it
+ *   is drawn — so the ground there is lower still.
+ *
+ * ## The control, and what it is
+ *
+ * The same two blocks over **the flat quad's geometry**: a level plane 0.25 m
+ * under the rider, put through the same renderer in place of the landform.
+ * On the climb the block's top stands above it and is drawn, and on the
+ * descent the plane hides what the landform shows — so the pair of
+ * assertions fails, which is the criterion's control. Measured: 87 px and
+ * 0 px, against the landform's 0 px and 266 px. ⚠️ The quad as it
+ * shipped also wrote NO depth, which could only make it hide less, so a plane
+ * that does write depth is the stronger version of it rather than a weaker
+ * one.
+ *
+ * On its own canvas, for {@link sceneryIndicesByKind}'s reason.
+ */
+function gradientProbe(): GradientMeasurement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 600;
+  canvas.height = 400;
+  const view = threeGameRenderer.create(canvas, NO_RIDER_SHADOWS);
+  view.resize(600, 400);
+  const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+  const profile = hillRoute();
+  const origin = corridorOrigin(profile);
+  const start = atStartLine(profile);
+  const riding = (distance: number): SceneFrame => {
+    const frame = sceneFrame({
+      profile,
+      origin,
+      state: { ...start, ride: { ...start.ride, distance: metres(distance) } },
+    });
+    return { ...frame, markers: [], scatter: [] };
+  };
+  /** The flat quad's geometry: every vertex of the landform on a level plane under the rider. */
+  const flattened = (frame: SceneFrame): SceneFrame => {
+    const vertices = Float32Array.from(frame.terrain.mesh.vertices);
+    const normals = new Float32Array(vertices.length);
+    for (let at = 0; at < vertices.length; at += 3) {
+      vertices[at + 1] = frame.camera.y - 0.25;
+      normals[at + 1] = 1;
+    }
+    return {
+      ...frame,
+      terrain: { ...frame.terrain, mesh: { ...frame.terrain.mesh, vertices, normals } },
+    };
+  };
+  /** A block 14 m left of the road, 40 m up it, its base `base` metres from the rider's road. */
+  const block = (frame: SceneFrame, base: number): ScatterItem => ({
+    ...placedAhead(frame.camera, 'building', 0, 40, -14),
+    y: frame.camera.y + base,
+    scale: 0.35,
+  });
+  const changed = (frame: SceneFrame, base: number): number => {
+    if (gl === null) return 0;
+    const bare = frame;
+    const withBlock: SceneFrame = { ...frame, scatter: [block(frame, base)] };
+    view.render(bare);
+    view.render(bare);
+    const absent = readRegion(gl, 0, 0, canvas.width, canvas.height);
+    view.render(withBlock);
+    view.render(withBlock);
+    const present = readRegion(gl, 0, 0, canvas.width, canvas.height);
+    return shadingAcross(present, absent).pixels;
+  };
+  // 100 m into the climb and 100 m into the descent: 40 m on is still on it.
+  const climb = riding(400);
+  const descent = riding(900);
+  // The hills on the horizon, by difference: the same level frame with the
+  // ridge sunk to its own foot, which is below the horizon, draws none.
+  const level = riding(100);
+  const sunk: SceneFrame = {
+    ...level,
+    terrain: {
+      ...level.terrain,
+      horizon: {
+        ...level.terrain.horizon,
+        tops: new Float32Array(level.terrain.horizon.tops.length).fill(level.terrain.horizon.foot),
+      },
+    },
+  };
+  let horizonPixels = 0;
+  if (gl !== null) {
+    view.render(sunk);
+    view.render(sunk);
+    const without = readRegion(gl, 0, 0, canvas.width, canvas.height);
+    view.render(level);
+    view.render(level);
+    horizonPixels = shadingAcross(
+      readRegion(gl, 0, 0, canvas.width, canvas.height),
+      without,
+    ).pixels;
+  }
+  // ------------------------------------------------ the sky — #425
+  const skyPoint = (frame: SceneFrame, degrees: number) => {
+    const { eye } = cameraRig(frame.camera);
+    const far = 1_500;
+    return pixelFor(frame, canvas, {
+      x: eye.x + frame.camera.headingX * far,
+      y: eye.y + far * Math.tan((degrees * Math.PI) / 180),
+      z: eye.z + frame.camera.headingZ * far,
+    });
+  };
+  const flatSky: SceneFrame = {
+    ...level,
+    world: { ...level.world, horizonColour: level.world.skyColour },
+  };
+  const skyAt = (frame: SceneFrame): readonly [Pixel, Pixel] => {
+    if (gl === null) return [NOWHERE, NOWHERE];
+    view.render(frame);
+    view.render(frame);
+    const high = skyPoint(frame, 25);
+    const low = skyPoint(frame, 8);
+    return [readPixel(gl, high.x, high.y), readPixel(gl, low.x, low.y)];
+  };
+  const [skyHigh, skyLow] = skyAt(level);
+  const [flatSkyHigh, flatSkyLow] = skyAt(flatSky);
+
+  // -------------------------------- the road's and ground's detail — #425
+  const patchSpread = (frame: SceneFrame, ahead: number, across: number): number => {
+    if (gl === null) return 0;
+    view.render(frame);
+    view.render(frame);
+    // Clear of the centre line and the edge line — a patch of carriageway
+    // alone, whose one vertex colour made it flat before #425.
+    const centre = pixelFor(frame, canvas, onTheRoad(frame, ahead, across));
+    const region = readRegion(gl, Math.floor(centre.x) - 7, Math.floor(centre.y) - 6, 14, 12);
+    const levels: number[] = [];
+    for (let at = 0; at + 3 < region.length; at += 4) {
+      levels.push(luminanceOf([region[at] ?? 0, region[at + 1] ?? 0, region[at + 2] ?? 0, 255]));
+    }
+    const mean = levels.reduce((sum, each) => sum + each, 0) / levels.length;
+    // The standard deviation, in levels: a patch of one colour reads nought.
+    return Math.sqrt(levels.reduce((sum, each) => sum + (each - mean) ** 2, 0) / levels.length);
+  };
+  view.setQuality({ ...NO_RIDER_SHADOWS, surfaceDetail: true });
+  const roadSpreadDetailed = patchSpread(level, 16, 1.8);
+  const groundDetailed =
+    gl === null
+      ? undefined
+      : (view.render(level), view.render(level), readRegion(gl, 0, 0, canvas.width, canvas.height));
+  // ------------------------- the patchwork on lap three — #468 review B3
+  // A level loop, so nothing but the lap can differ between the two frames.
+  const circuit = circuitRoute(400, () => 20);
+  const circuitOrigin = corridorOrigin(circuit);
+  const circuitStart = atStartLine(circuit);
+  const onCircuit = (odometer: number): SceneFrame => {
+    const frame = sceneFrame({
+      profile: circuit,
+      origin: circuitOrigin,
+      state: { ...circuitStart, ride: { ...circuitStart.ride, distance: metres(odometer) } },
+    });
+    return { ...frame, markers: [], scatter: [] };
+  };
+  /** The first head's patchwork: a field count no lap reaches wraps nothing. */
+  const unwrapped = (frame: SceneFrame): SceneFrame => ({
+    ...frame,
+    terrain: { ...frame.terrain, mesh: { ...frame.terrain.mesh, fieldCount: 1e9 } },
+  });
+  const whole = (frame: SceneFrame): Uint8Array | undefined => {
+    if (gl === null) return undefined;
+    view.render(frame);
+    view.render(frame);
+    return readRegion(gl, 0, 0, canvas.width, canvas.height);
+  };
+  const lapsApart = (first: SceneFrame, third: SceneFrame): number => {
+    const one = whole(first);
+    const three = whole(third);
+    return one === undefined || three === undefined ? 0 : shadingAcross(three, one).pixels;
+  };
+  const lapOne = onCircuit(600);
+  const lapThree = onCircuit(600 + 2 * circuit.totalDistance);
+  const lapChanged = lapsApart(lapOne, lapThree);
+  const lapChangedUnwrapped = lapsApart(unwrapped(lapOne), unwrapped(lapThree));
+  view.setQuality({ ...NO_RIDER_SHADOWS, surfaceDetail: false });
+  const roadSpreadPlain = patchSpread(level, 16, 1.8);
+  const groundPlain =
+    gl === null
+      ? undefined
+      : (view.render(level), view.render(level), readRegion(gl, 0, 0, canvas.width, canvas.height));
+  const groundChangedByDetail =
+    groundDetailed === undefined || groundPlain === undefined
+      ? 0
+      : shadingAcross(groundDetailed, groundPlain).pixels;
+  view.setQuality(NO_RIDER_SHADOWS);
+
+  const measured = {
+    skyHigh,
+    skyLow,
+    flatSkyHigh,
+    flatSkyLow,
+    roadSpreadDetailed,
+    roadSpreadPlain,
+    groundChangedByDetail,
+    lapChanged,
+    lapChangedUnwrapped,
+    horizonPixels,
+    climbBuried: changed(climb, -1.5),
+    climbLifted: changed(climb, 9),
+    descentBelow: changed(descent, -2.5),
+    flatClimbBuried: changed(flattened(climb), -1.5),
+    flatDescentBelow: changed(flattened(descent), -2.5),
+    terrainVertices: climb.terrain.mesh.vertices.length / 3,
+    terrainIndices: climb.terrain.mesh.indices.length,
+    terrainIndicesByRung: QUALITY_LADDER.map((rung) =>
+      Math.min(
+        climb.terrain.mesh.indices.length,
+        rung.terrainBands * climb.terrain.mesh.indicesPerBand,
+      ),
+    ),
+  };
+  view.destroy();
+  return measured;
+}
+
+/** What {@link gradientProbe} reports when it did not run. */
+const NO_GRADIENT: GradientMeasurement = {
+  skyHigh: NOWHERE,
+  skyLow: NOWHERE,
+  flatSkyHigh: NOWHERE,
+  flatSkyLow: NOWHERE,
+  roadSpreadDetailed: 0,
+  roadSpreadPlain: 0,
+  groundChangedByDetail: 0,
+  lapChanged: 0,
+  lapChangedUnwrapped: 0,
+  horizonPixels: 0,
+  climbBuried: -1,
+  climbLifted: 0,
+  descentBelow: 0,
+  flatClimbBuried: -1,
+  flatDescentBelow: 0,
+  terrainVertices: 0,
+  terrainIndices: 0,
+  terrainIndicesByRung: [],
+};
+
+/**
+ * #459's fourth criterion, off pixels: *"the browser gate reads a water pixel
+ * under the bridge and proves the road deck is drawn above it"*.
+ *
+ * The rider is 40 m short of the valley route's bridge. Two points are probed,
+ * each with the water drawn and without it:
+ *
+ * - **beside the bridge**, on the stream 20 m out from the road: the water is
+ *   drawn there, so taking it away changes the pixel;
+ * - **on the deck**, over the stream's centre: the ROAD is drawn there, above
+ *   the water, so taking the water away changes nothing — and taking the ROAD
+ *   away shows water, which is what says the water really is under the deck
+ *   rather than absent from it.
+ *
+ * Draw calls and the shader's cost are published, the frame timed with the
+ * water shaded and flat.
+ */
+function waterProbe(): WaterMeasurement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 600;
+  canvas.height = 400;
+  const profile = valleyRoute();
+  const origin = corridorOrigin(profile);
+  const ways = waterways(profile, scatterSeed(profile));
+  const crossing = ways.crossings[0]?.distance ?? 1_000;
+  const start = atStartLine(profile);
+  const riding = (distance: number): SceneFrame => {
+    const frame = sceneFrame({
+      profile,
+      origin,
+      state: { ...start, ride: { ...start.ride, distance: metres(distance) } },
+    });
+    return { ...frame, markers: [], scatter: [] };
+  };
+  const frame = riding(crossing - 40);
+  const dry: SceneFrame = {
+    ...frame,
+    water: {
+      ...frame.water,
+      surface: { ...frame.water.surface, indices: new Uint32Array(0) },
+      bridges: [],
+    },
+  };
+  // The road AND the bridge's slab under it taken out: what is beneath the deck.
+  const noRoad: SceneFrame = {
+    ...frame,
+    corridor: { ...frame.corridor, indices: new Uint32Array(0) },
+    water: { ...frame.water, bridges: [] },
+  };
+  // The route runs due north from its origin: x is across it, z along it.
+  const water = (ways.crossings[0]?.waterElevation ?? 0) - origin.elevation;
+  const deckY = elevationAt(profile, crossing) - origin.elevation;
+  const empty: WaterMeasurement = {
+    crossings: ways.crossings.length + ways.lakes.length,
+    beside: NOWHERE,
+    besideDry: NOWHERE,
+    deck: NOWHERE,
+    deckDry: NOWHERE,
+    underDeck: NOWHERE,
+    drawCalls: 0,
+    drawCallsDry: 0,
+    shadedMs: 0,
+    flatMs: 0,
+  };
+  let measured = empty;
+  countingDrawCalls((calls) => {
+    const view = threeGameRenderer.create(canvas, NO_RIDER_SHADOWS);
+    view.resize(600, 400);
+    const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+    if (gl === null) {
+      view.destroy();
+      return;
+    }
+    const besideAt = pixelFor(frame, canvas, { x: -20, y: water, z: crossing });
+    const deckAt = pixelFor(frame, canvas, { x: 1.5, y: deckY, z: crossing });
+    const read = (scene: SceneFrame): readonly [Pixel, Pixel, number] => {
+      view.render(scene);
+      const before = calls();
+      view.render(scene);
+      const drawn = calls() - before;
+      return [readPixel(gl, besideAt.x, besideAt.y), readPixel(gl, deckAt.x, deckAt.y), drawn];
+    };
+    const [beside, deck, drawCalls] = read(frame);
+    const [besideDry, deckDry, drawCallsDry] = read(dry);
+    const [, underDeck] = read(noRoad);
+    const timed = (settings: QualitySettings): number => {
+      view.setQuality(settings);
+      for (let index = 0; index < 5; index += 1) view.render(frame);
+      awaitTheGpu(gl);
+      const started = performance.now();
+      for (let index = 0; index < SHADING_FRAMES; index += 1) {
+        view.render({ ...frame, water: { ...frame.water, seconds: index / 30 } });
+      }
+      awaitTheGpu(gl);
+      return (performance.now() - started) / SHADING_FRAMES;
+    };
+    const shaded = { ...NO_RIDER_SHADOWS, water: 'shaded' as const };
+    const flat = { ...NO_RIDER_SHADOWS, water: 'flat' as const };
+    // Alternating, for the reason `run` alternates the shading rounds: what
+    // the machine does at the start of a round is charged to both.
+    const rounds = [timed(shaded), timed(flat), timed(flat), timed(shaded)];
+    measured = {
+      ...empty,
+      beside,
+      besideDry,
+      deck,
+      deckDry,
+      underDeck,
+      drawCalls,
+      drawCallsDry,
+      shadedMs: ((rounds[0] ?? 0) + (rounds[3] ?? 0)) / 2,
+      flatMs: ((rounds[1] ?? 0) + (rounds[2] ?? 0)) / 2,
+    };
+    view.destroy();
+  });
+  return measured;
+}
+
+/**
+ * #460: a village and its walled fields, on level farmland, 60 m short of the
+ * first house. The structures are drawn — the pixels they change against the
+ * same frame without them — and the frame is timed both ways, which is the
+ * browser's half of "frame time with the new kinds on"; the phone's is
+ * validation 0002 Part X.
+ */
+function settlementProbe(): SettlementMeasurement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 600;
+  canvas.height = 400;
+  const profile = northRouteForHarness();
+  const origin = corridorOrigin(profile);
+  const seed = scatterSeed(profile);
+  const firstHouse = structuresAt(profile, origin, seed, 0, profile.totalDistance, {
+    maxItems: 100_000,
+    riderMetres: 0,
+  }).find((item) => item.kind === 'building');
+  const start = atStartLine(profile);
+  const frame = sceneFrame({
+    profile,
+    origin,
+    state: {
+      ...start,
+      ride: { ...start.ride, distance: metres(Math.max(0, (firstHouse?.z ?? 500) - 60)) },
+    },
+  });
+  const structural = new Set<string>(STRUCTURE_KINDS);
+  const bare: SceneFrame = {
+    ...frame,
+    scatter: frame.scatter.filter((item) => !structural.has(item.kind)),
+  };
+  const built = frame.scatter.filter((item) => structural.has(item.kind));
+  let measured: SettlementMeasurement = {
+    structures: built.length,
+    kinds: new Set(built.map((item) => item.kind)).size,
+    pixels: 0,
+    drawCalls: 0,
+    drawCallsBare: 0,
+    withMs: 0,
+    withoutMs: 0,
+  };
+  countingDrawCalls((calls) => {
+    const view = threeGameRenderer.create(canvas, NO_RIDER_SHADOWS);
+    view.resize(600, 400);
+    const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+    if (gl === null) {
+      view.destroy();
+      return;
+    }
+    const drawn = (scene: SceneFrame): readonly [Uint8Array, number] => {
+      view.render(scene);
+      const before = calls();
+      view.render(scene);
+      return [readRegion(gl, 0, 0, canvas.width, canvas.height), calls() - before];
+    };
+    const [present, drawCalls] = drawn(frame);
+    const [absent, drawCallsBare] = drawn(bare);
+    const timed = (scene: SceneFrame): number => {
+      for (let index = 0; index < 5; index += 1) view.render(scene);
+      awaitTheGpu(gl);
+      const started = performance.now();
+      for (let index = 0; index < SHADING_FRAMES; index += 1) view.render(scene);
+      awaitTheGpu(gl);
+      return (performance.now() - started) / SHADING_FRAMES;
+    };
+    const rounds = [timed(frame), timed(bare), timed(bare), timed(frame)];
+    measured = {
+      ...measured,
+      pixels: shadingAcross(present, absent).pixels,
+      drawCalls,
+      drawCallsBare,
+      withMs: ((rounds[0] ?? 0) + (rounds[3] ?? 0)) / 2,
+      withoutMs: ((rounds[1] ?? 0) + (rounds[2] ?? 0)) / 2,
+    };
+    view.destroy();
+  });
+  return measured;
+}
+
+/** Six kilometres of level, low farmland — somewhere a village stands. */
+function northRouteForHarness(): ReturnType<typeof routeProfile> {
+  return northRoute(6_000, () => 40);
+}
+
+/** What {@link settlementProbe} reports when it did not run. */
+const NO_SETTLEMENT: SettlementMeasurement = {
+  structures: 0,
+  kinds: 0,
+  pixels: 0,
+  drawCalls: 0,
+  drawCallsBare: 0,
+  withMs: 0,
+  withoutMs: 0,
+};
+
+/** What {@link waterProbe} reports when it did not run. */
+const NO_WATER: WaterMeasurement = {
+  crossings: 0,
+  beside: NOWHERE,
+  besideDry: NOWHERE,
+  deck: NOWHERE,
+  deckDry: NOWHERE,
+  underDeck: NOWHERE,
+  drawCalls: 0,
+  drawCallsDry: 0,
+  shadedMs: 0,
+  flatMs: 0,
+};
+
 /** What one rider's silhouette looks like, drawn alone. @see colourProbes */
 interface RiderProbe {
   readonly mean: Pixel;
@@ -1103,6 +1701,7 @@ function colourProbes(probe: SceneFrame): {
   readonly buildingGreen: number;
   readonly buildingBlue: number;
   readonly riders: Readonly<Record<string, RiderProbe>>;
+  readonly riderBuriedPixels: number;
   readonly botCrankPixels: number;
   readonly contactShadowPixels: Readonly<Record<string, number>>;
   readonly contactShadowLuminance: Readonly<Record<string, readonly [number, number]>>;
@@ -1116,6 +1715,7 @@ function colourProbes(probe: SceneFrame): {
   let buildingGreen = 0;
   let buildingBlue = 0;
   let botCrankPixels = 0;
+  let riderBuriedPixels = 0;
   const riders: Record<string, RiderProbe> = {};
   let textures = 0;
   let baselineTextures = 0;
@@ -1148,7 +1748,7 @@ function colourProbes(probe: SceneFrame): {
     // mostly fog. Each is moved to 12 m and scaled up, which changes nothing
     // about what colour it is.
     const pose = probe.camera;
-    const closeUp = (kind: ScatterKind): SceneFrame => ({
+    const closeUp = (kind: SceneryKind): SceneFrame => ({
       ...probe,
       markers: [],
       scatter: [{ ...placedAhead(pose, kind, 0, 14, 0), scale: 1.4 }],
@@ -1170,6 +1770,16 @@ function colourProbes(probe: SceneFrame): {
     // ⚠️ **Each alone, at the same place, on the same frame**, so the only
     // thing that differs between the three is the tint. Drawing them together
     // would measure whichever happened to be in front.
+    //
+    // ⚠️ **At the road's own height 8 m up it — #455.** This used the camera
+    // pose's `y`, the road height at the RIDER, and the harness route climbs
+    // at 5 %: 8 m on, the tarmac is 0.4 m higher, so every rider this probe
+    // drew stood with its wheels and the lower half of its frame inside the
+    // road. #448 moved the shadow probe below onto the tarmac and left the
+    // colour probes measuring half-buried bicycles; this puts all of them on
+    // it. `game.browser.spec.ts` §"draws each of the three in its own colour"
+    // publishes the silhouette sizes, which grew when this landed.
+    const onTarmac = onTheRoad(probe, 8, 0);
     const alone = (kind: 'rider' | 'bot' | 'ghost', at: number): SceneFrame => ({
       ...probe,
       scatter: [],
@@ -1177,7 +1787,7 @@ function colourProbes(probe: SceneFrame): {
         {
           kind,
           x: pose.x + 8 * pose.headingX,
-          y: pose.y,
+          y: onTarmac.y,
           z: pose.z + 8 * pose.headingZ,
           headingX: pose.headingX,
           headingZ: pose.headingZ,
@@ -1190,6 +1800,10 @@ function colourProbes(probe: SceneFrame): {
       const found = meanOver(whole(), nothing);
       riders[kind] = { mean: found.mean, pixels: found.pixels };
     }
+    // The control for #455: the rider where `alone` used to stand it.
+    const buried = alone('rider', 0);
+    view.render({ ...buried, markers: buried.markers.map((each) => ({ ...each, y: pose.y })) });
+    riderBuriedPixels = meanOver(whole(), nothing).pixels;
     // Half a turn of the bot's own cranks, which is what half a development of
     // road does to them. A quarter, for the reason the rider's probe gives.
     view.render(alone('bot', 0));
@@ -1205,16 +1819,13 @@ function colourProbes(probe: SceneFrame): {
     // ⚠️ And inside the texture count on purpose: the soft edge is a vertex
     // ALPHA, and #366's "no texture reaches the GPU" is asserted over this.
     //
-    // ⚠️ **At the road's own height 8 m up it**, where `alone` above uses the
-    // camera pose's: the harness route climbs at 5 %, so `alone`'s rider stands
-    // 0.4 m under the tarmac — invisible to a colour mean, and fatal to a blob
-    // that is depth-tested against that tarmac. The first version of this probe
-    // read 0 px for all three for exactly that reason.
-    const onTarmac = onTheRoad(probe, 8, 0);
-    const grounded = (kind: 'rider' | 'bot' | 'ghost'): SceneFrame => {
-      const frame = alone(kind, 0);
-      return { ...frame, markers: frame.markers.map((each) => ({ ...each, y: onTarmac.y })) };
-    };
+    // ⚠️ **On the tarmac, as `alone` now is for every probe — #455.** Until
+    // then this was the only probe that put its rider there: `alone` used the
+    // camera pose's height and stood the riders 0.4 m under the road, which is
+    // invisible to a colour mean and fatal to a blob depth-tested against that
+    // road. The first version of this probe read 0 px for all three for
+    // exactly that reason.
+    const grounded = (kind: 'rider' | 'bot' | 'ghost'): SceneFrame => alone(kind, 0);
     for (const kind of ['rider', 'bot', 'ghost'] as const) {
       view.setQuality(NO_RIDER_SHADOWS);
       view.render(grounded(kind));
@@ -1239,6 +1850,7 @@ function colourProbes(probe: SceneFrame): {
     buildingGreen,
     buildingBlue,
     riders,
+    riderBuriedPixels,
     botCrankPixels,
     contactShadowPixels,
     contactShadowLuminance,
@@ -1911,6 +2523,10 @@ async function run(): Promise<void> {
       variantIndices: {},
       riderMeanColour: {},
       riderSilhouettePixels: {},
+      riderBuriedPixels: 0,
+      gradient: NO_GRADIENT,
+      water: NO_WATER,
+      settlement: NO_SETTLEMENT,
       botCrankPixels: 0,
       contactShadowPixels: {},
       contactShadowLuminance: {},
@@ -1982,6 +2598,10 @@ async function run(): Promise<void> {
   let variantIndices: Record<string, readonly number[]> = {};
   const riderMeanColour: Record<string, Pixel> = {};
   const riderSilhouettePixels: Record<string, number> = {};
+  let riderBuriedPixels = 0;
+  let gradient: GradientMeasurement = NO_GRADIENT;
+  let water: WaterMeasurement = NO_WATER;
+  let settlement: SettlementMeasurement = NO_SETTLEMENT;
   let botCrankPixels = 0;
   let contactShadowPixels: Record<string, number> = {};
   let contactShadowLuminance: Record<string, readonly [number, number]> = {};
@@ -2031,7 +2651,7 @@ async function run(): Promise<void> {
         const pose = frame.camera;
         probeFrame = {
           ...frame,
-          scatter: SCATTER_KINDS.map((kind, at) => placedAhead(pose, kind, 0, 40 + at * 15, 8)),
+          scatter: SCENERY_KINDS.map((kind, at) => placedAhead(pose, kind, 0, 40 + at * 15, 8)),
         };
         // ⚠️ **A second probe, for #367, and it is a different shape of
         // frame.** The one above carries exactly one item of each kind, which
@@ -2043,7 +2663,7 @@ async function run(): Promise<void> {
         variantFrame = {
           ...frame,
           markers: [],
-          scatter: SCATTER_KINDS.flatMap((kind, at) =>
+          scatter: SCENERY_KINDS.flatMap((kind, at) =>
             Array.from({ length: SCATTER_VARIANT_SLOTS }, (_, slot) =>
               placedAhead(pose, kind, slot, 40 + at * 15, 8 + slot * 4),
             ),
@@ -2102,10 +2722,13 @@ async function run(): Promise<void> {
           // fraction, because it is the one with no geometry to aim at: 5 %
           // down a frame whose horizon is about half way down it.
           skyPixel = readPixel(gl, canvas.width * 0.5, canvas.height * 0.95);
+          const beside = onTheRoad(frame, GROUND_PROBE.ahead, GROUND_PROBE.across);
           const ground = pixelFor(frame, canvas, {
-            ...onTheRoad(frame, GROUND_PROBE.ahead, GROUND_PROBE.across),
-            // The ground is a flat plane at the RIDER's height, not the road's.
-            y: frame.camera.y - 0.25,
+            ...beside,
+            // ⚠️ Since #458 the ground is the ROAD's height less the verge
+            // drop, at the probe's own distance up the road — it used to be a
+            // flat plane at the RIDER's height, and this read `camera.y`.
+            y: beside.y - VERGE_DROP_METRES,
           });
           groundPixel = readPixel(gl, ground.x, ground.y);
           const near = pixelFor(
@@ -2473,6 +3096,7 @@ async function run(): Promise<void> {
         riderSilhouettePixels[kind] = each.pixels;
       }
       botCrankPixels = found.botCrankPixels;
+      riderBuriedPixels = found.riderBuriedPixels;
       contactShadowPixels = found.contactShadowPixels;
       contactShadowLuminance = found.contactShadowLuminance;
       contactShadowNoise = found.contactShadowNoise;
@@ -2480,6 +3104,12 @@ async function run(): Promise<void> {
         shadowMap = shadowMapProbe(probeFrame);
       }
     }
+    // #458, on a canvas of its own. @see gradientProbe
+    gradient = gradientProbe();
+    // #459. @see waterProbe
+    water = waterProbe();
+    // #460. @see settlementProbe
+    settlement = settlementProbe();
     // #424, on canvases of their own — @see riderExtent. 16 : 9 is the
     // criterion's own frame; 10 : 16 is a tablet held upright.
     riderFrame = { landscape: riderExtent(640, 360), portrait: riderExtent(400, 640) };
@@ -2550,6 +3180,10 @@ async function run(): Promise<void> {
     variantIndices,
     riderMeanColour,
     riderSilhouettePixels,
+    riderBuriedPixels,
+    gradient,
+    water,
+    settlement,
     botCrankPixels,
     contactShadowPixels,
     contactShadowLuminance,

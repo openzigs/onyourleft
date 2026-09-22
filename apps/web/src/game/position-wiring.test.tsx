@@ -179,41 +179,56 @@ async function rideSittingAs(position: string | undefined): Promise<number> {
   return hudSpeed();
 }
 
-describe('a riding position a rider chose on the picker reaches the physics', () => {
-  it('offers the choice at all, in words about hands rather than square metres', async () => {
-    mounted = await mount(<GameView port={pedallingPort(flatRoute())} now={() => nowMs} />);
-    await settle();
-    const text = mounted.container.textContent ?? '';
-    expect(text).toContain('How you are riding');
-    expect(text).toContain(RIDING_POSITIONS.hoods.label);
-    // A drag area is a wind-tunnel measurement nobody knows about themselves.
-    expect(text).not.toContain('drag');
-    expect(text).not.toContain('m²');
-  });
+/**
+ * ⚠️ **Fifteen seconds rather than Vitest's five, since #458–#460**, and the
+ * number is a stop on a hung ride rather than a budget. Every case here rides
+ * two or three hundred frames, and each frame now builds a landform, the water
+ * and the villages beside the road as well as the road: about 0.4 ms of
+ * `sceneFrame` where it was 0.17 ms, measured in Node, and several times that
+ * under coverage on a CI runner, where the slowest case took more than five
+ * seconds on #468's first run. The assertions are unchanged.
+ */
+const RIDE_TIMEOUT_MS = 15_000;
 
-  it('makes the same rider at the same power faster in the drops than sitting up', async () => {
-    // ⚠️ **The assertion that goes red the moment `GameView.start` stops
-    // passing the position to `rideConditionsFor`.** Everything else about the
-    // two rides is identical: same route, same power, same frames, same clock.
-    const upright = await rideSittingAs('upright');
-    const drops = await rideSittingAs('drops');
+describe(
+  'a riding position a rider chose on the picker reaches the physics',
+  { timeout: RIDE_TIMEOUT_MS },
+  () => {
+    it('offers the choice at all, in words about hands rather than square metres', async () => {
+      mounted = await mount(<GameView port={pedallingPort(flatRoute())} now={() => nowMs} />);
+      await settle();
+      const text = mounted.container.textContent ?? '';
+      expect(text).toContain('How you are riding');
+      expect(text).toContain(RIDING_POSITIONS.hoods.label);
+      // A drag area is a wind-tunnel measurement nobody knows about themselves.
+      expect(text).not.toContain('drag');
+      expect(text).not.toContain('m²');
+    });
 
-    expect(drops).toBeGreaterThan(upright);
-    // And by an amount a rider reads on the HUD rather than a rounding. The
-    // HUD is rendered to one decimal place, so anything below about 0.1 would
-    // be invisible on the screen this is read from.
-    expect(drops - upright).toBeGreaterThan(1);
-  });
+    it('makes the same rider at the same power faster in the drops than sitting up', async () => {
+      // ⚠️ **The assertion that goes red the moment `GameView.start` stops
+      // passing the position to `rideConditionsFor`.** Everything else about the
+      // two rides is identical: same route, same power, same frames, same clock.
+      const upright = await rideSittingAs('upright');
+      const drops = await rideSittingAs('drops');
 
-  it('rides a rider who touched nothing at the hoods, not at Martin’s track racer', async () => {
-    // The default is the middle rung, so a rider who never opens the control
-    // sits between the two above — which is also the evidence that the default
-    // is a *road* position rather than the paper's time-trial one.
-    const untouched = await rideSittingAs(undefined);
-    const upright = await rideSittingAs('upright');
-    const drops = await rideSittingAs('drops');
+      expect(drops).toBeGreaterThan(upright);
+      // And by an amount a rider reads on the HUD rather than a rounding. The
+      // HUD is rendered to one decimal place, so anything below about 0.1 would
+      // be invisible on the screen this is read from.
+      expect(drops - upright).toBeGreaterThan(1);
+    });
 
-    expect(untouched).toBeGreaterThan(upright);
-    expect(untouched).toBeLessThan(drops);
-  });
-});
+    it('rides a rider who touched nothing at the hoods, not at Martin’s track racer', async () => {
+      // The default is the middle rung, so a rider who never opens the control
+      // sits between the two above — which is also the evidence that the default
+      // is a *road* position rather than the paper's time-trial one.
+      const untouched = await rideSittingAs(undefined);
+      const upright = await rideSittingAs('upright');
+      const drops = await rideSittingAs('drops');
+
+      expect(untouched).toBeGreaterThan(upright);
+      expect(untouched).toBeLessThan(drops);
+    });
+  },
+);

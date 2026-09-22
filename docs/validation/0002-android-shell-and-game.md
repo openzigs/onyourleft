@@ -21,6 +21,17 @@ otherwise.
 **Part S added 2026-09-21** by [#441](https://github.com/openzigs/onyourleft/issues/441): whether a
 struggling rider in ERG is actually eased, now that the ease is a lower target rather than a Stop.
 Checked with `grep '^## Part'` for a duplicate letter first — S was free.
+**Parts U to Y added 2026-09-21** by one pull request for
+[#455](https://github.com/openzigs/onyourleft/issues/455),
+[#458](https://github.com/openzigs/onyourleft/issues/458),
+[#459](https://github.com/openzigs/onyourleft/issues/459),
+[#460](https://github.com/openzigs/onyourleft/issues/460) and the no-asset half of
+[#425](https://github.com/openzigs/onyourleft/issues/425) — one part each, in that order, every
+result cell empty. Checked with `grep '^## Part'` for a duplicate letter first — T was the last, and
+U to Y were free. ⚠️ **V to Y are looks and frame times, and they need a ride**: ride them with the
+trainer **not** handed to the game (a power meter, or a trainer with control not granted), so they
+change no resistance and stay in rule 1's group below. A rider who gives the game the trainer for
+them is running Part L as well, and runs them after it.
 **Discharges, when run:** [#87](https://github.com/openzigs/onyourleft/issues/87) criteria 2, 3, 5
 and 6 and its two-OEM line; the Android half of
 [#85](https://github.com/openzigs/onyourleft/issues/85); and
@@ -51,7 +62,9 @@ behaviour; this establishes that Android reproduces it.
 The same rule as 0001, for the same reason — CLAUDE.md §6: *a smart trainer applies physical
 resistance to a person who is pedalling*.
 
-1. **Parts A, B, C, E to K and P write nothing that changes resistance.** They run first. ⚠️ **`P`
+1. **Parts A, B, C, E to K, P and U to Y write nothing that changes resistance.** They run first.
+   ⚠️ **U to Y are in that list only when ridden without the trainer handed to the game** — see
+   the header. ⚠️ **`P`
    is in that list and this line used to stop at `K`** — Part P
    ([#410](https://github.com/openzigs/onyourleft/issues/410)) is an offline cold-start measurement
    that pairs no trainer at all, and a part missing from this list is as ambiguous as two parts
@@ -1868,6 +1881,230 @@ adb shell dumpsys gfxinfo dev.openzigs.onyourleft | grep -iE "Total frames|Janky
 **lands as a rung** (and on which devices it is offered), or it is recorded as **"measured, not
 worth it"** with the numbers above and the rung is removed. #426 stays open until one of the two is
 written down; it was opened with `Refs`, not `Closes`, for exactly this.
+
+---
+
+## Part U — the audio lets go even when a ride ends as it starts ([#455](https://github.com/openzigs/onyourleft/issues/455))
+
+#447 let the platform stop running the audio when a ride ends. #448's review found the one window it
+missed: a `suspend()` asked for while a `resume()` was still in flight did nothing, because the
+context still said *suspended* — and the resume then landed and left the audio running with nobody
+riding. `apps/web/src/game/web-audio.ts` §`waking` now honours the suspend in that window.
+⚠️ **Practically unreachable by hand**, which is why the fix is tested against the injected port and
+not argued from a device. What a phone can check is that the ordinary path still behaves, and that a
+fast end does not leave the audio held.
+
+Sounds **on** (Settings → Sounds). Headphones as in
+[validation 0003](0003-screen-reader-and-assistive-technology.md) Part I.
+
+| Step | What to do | What should happen |
+|---|---|---|
+| U1 | Start a game ride and press **End ride** as fast as you can after **Ride** | Nothing left sounding, and — the check — music started in another app straight afterwards is **not** ducked or interrupted |
+| U2 | Straight after U1, start another game ride | Its distance sound is heard at the first mark: the press on *Ride* woke the audio |
+| U3 | Repeat U1 five times in a row | The same every time. A single run where the music stays ducked is the finding |
+
+### U results
+
+| Step | As described? | What was heard | Headphones (wired / Bluetooth, model) |
+|---|---|---|---|
+| U1 | | | |
+| U2 | | | |
+| U3 | | | |
+
+**Phone (OEM, model, Android):** ______________  **Build:** ______________
+
+---
+
+## Part V — does a climb look like a climb? ([#458](https://github.com/openzigs/onyourleft/issues/458))
+
+Until #458 the ground was one flat quad at the rider's own height that moved with them, so a 10 %
+climb lifted the road off a level world and a descent dived through it. Since #458 the ground either
+side of the road is a **landform** (`apps/web/src/game/landform.ts`): it stands at the height of the
+road beside it, it rises on one side of a climb and falls away on the other (a road cut across a
+hillside), it is **lit**, and it **writes depth** — so a hillside hides what is behind it. A ring of
+hazed hills stands on the horizon. **Heights come from the route and a seeded hash only**; nothing is
+fetched, and the gradient sent to a trainer is unchanged (it comes from the route profile, #362).
+
+⚠️ **What the pinned Chromium measured, and what it cannot.** The browser gate reads a height off
+the drawing buffer by occlusion and publishes the landform's cost — **1 222 vertices, 6 624 indices,
+one draw call**, and **7 draw calls** for the scenery-free scene where there were 6 (the ring is the
+new one). Each rung of the quality ladder draws fewer bands of ground: 6 624 / 5 520 / 4 968 / 4 416
+indices. A software rasteriser says nothing about a phone's GPU, which is what V3 is for.
+
+| Step | What to do | What to record |
+|---|---|---|
+| V1 | Ride a **real hilly route** — one with a sustained climb of 6 % or more and a descent | Does the climb read as a **climb**: ground rising beside the road ahead, a hillside on one side? Does the descent open a **valley** in front of you? In your words |
+| V2 | On the same route, watch the edge of the road for a minute on the climb and on a bend | Any **crack** between the road's edge and the ground — sky or a light line showing through? Any ground **over** the road on a bend? (Neither should happen: the ground is built on the road's own edge) |
+| V3 | 12 s of riding at the target rung, the `dumpsys` block from Part T | Frame times with the landform on |
+| V4 | Look at the horizon on a flat stretch | Are there hills on the horizon, or a hard line where the near ground ends? |
+| V5 | Ride past the same stretch on lap two of a loop | The same hills and hillsides in the same places |
+
+### V results
+
+| | V3 |
+|---|--:|
+| Total frames rendered | |
+| Janky frames (legacy, > 16 ms) | |
+| Frame time 50th / 90th | |
+| **GPU time 50th / 90th** | |
+
+**Does a climb read as a climb, and a descent as a valley (V1)?** ______________
+
+**Any crack at the road's edge, or ground over the road (V2)?** ______________
+
+**Hills on the horizon, or a hard edge (V4)?** ______________
+
+**The same place on lap two (V5)?** ______________
+
+**Route ridden:** ______________  **Phone (OEM, model, Android):** ______________  **Build:** ______________
+
+---
+
+## Part W — water in the route's valleys, and the bridges over it ([#459](https://github.com/openzigs/onyourleft/issues/459))
+
+#459 puts a **stream across the road at every valley floor** of a route — a point that is the lowest
+for 300 m either way, with the road climbing at least 8 m out of it on both sides — and a **bridge**
+carrying the road over it: stone parapets, a slab under the deck and two abutments. A **lake** lies
+beside a long, level, low stretch that the road climbs out of at both ends. All of it is placed from
+the route's own elevation and a seeded hash (`apps/web/src/game/waterways.ts`); nothing is fetched.
+⚠️ **The deck is the road, unchanged, and the gradient a trainer is sent there is the route's** —
+`waterways.test.ts` rides the gradient session across the bridge and compares every grade it sends.
+Nothing from the scenery stands in the water or on its banks.
+
+The water is a **shader**, not a texture and not a second render: the sky reflected with a Fresnel
+term, ripples scrolling on the ride's own clock, and the edges tinted shallow. On the quality ladder
+it is shaded on the target rung only and one flat colour below it. The pinned Chromium measured the
+valley frame at **1.05 ms shaded against 1.04 ms flat** on a software rasteriser — which says nothing
+about a phone, and is why W3 exists. Water and bridges are **two draw calls** when either is in view,
+and none when neither is.
+
+| Step | What to do | What to record |
+|---|---|---|
+| W1 | Ride a **real route that crosses a valley** — down into it and out again | Is there a stream at the bottom, and a bridge carrying the road over it? Does the water read as water — does it move, does it reflect the sky? |
+| W2 | Look at the bridge as you ride over it | The parapets on both sides; nothing floating, nothing buried; the road surface itself exactly as on either side of it. ⚠️ And **either side of the bridge** (#468's review, B2): the road runs on a solid stone approach down to where the bank meets it — never a strip of tarmac over an open trench |
+| W3 | 12 s of riding with the bridge and water in view, target rung, the `dumpsys` block from Part T | Frame times with the water shaded |
+| W4 | If the route has a long level valley floor: ride along it | A lake beside the road? No trees standing in it? |
+| W5 | ⚠️ **Only after Part L, with the trainer handed to the game.** Ride across the bridge | The resistance through the valley follows the ROAD — down the approach, up the far side — and does not go flat over the bridge |
+| W6 | Ride a route with **no valley** | No stream, no bridge |
+
+### W results
+
+| | W3 |
+|---|--:|
+| Total frames rendered | |
+| Janky frames (legacy, > 16 ms) | |
+| Frame time 50th / 90th | |
+| **GPU time 50th / 90th** | |
+
+**Stream and bridge where the valley is, and solid road either side of it (W1, W2)?** ______________
+
+**A lake beside a level valley floor, nothing standing in it (W4)?** ______________
+
+**Resistance followed the road across the bridge (W5)?** ______________
+
+**Nothing on a route with no valley (W6)?** ______________
+
+**Routes ridden:** ______________  **Phone (OEM, model, Android):** ______________  **Build:** ______________
+
+---
+
+## Part X — villages, farmsteads, and fields with walls ([#460](https://github.com/openzigs/onyourleft/issues/460))
+
+Until #460 every building was one scatter kind, placed wherever a tree could stand: alone, at any
+angle, anywhere in the band. Since #460 buildings stand in **places** (`apps/web/src/game/settlements.ts`):
+on level, low, dry stretches of the route a seeded field puts a **village** — a street of houses at
+one setback, all facing the road, a **row of shops** at its middle, a **church** at one end and a
+**signpost** at each way in — or a **farmstead**: a farmhouse, a **barn** and a **shed** grouped on
+one side. Fields beside the road are **walled** on higher or steeper ground and **hedged** or
+**fenced** on the low flat land, along the verge and out from the road. ⚠️ **Signposts carry no
+words** — no real name, brand or signage. Everything new is built from numbers in
+`three-renderer.ts` §`STRUCTURE_STYLE`; no model was added.
+
+⚠️ **What the pinned Chromium measured.** The scenery belt's ceiling is **20** meshes where it was 12
+(eight new kinds of one shape each), so the scenery can spend up to 20 draw calls; a village frame
+drew **21 calls against 14** without its structures, and timed **4.48 ms against 3.04 ms** — on a
+software rasteriser, which is not a phone. On the quality ladder the structures have their own
+budget, 240 → 120 → 60 → 40: houses are kept and the far field boundaries go first.
+
+| Step | What to do | What to record |
+|---|---|---|
+| X1 | Ride a **real route with a long level stretch low down** — a valley road | Villages and farmsteads, rather than houses one at a time? Do the houses face the road? Is the church a landmark you can see coming? |
+| X2 | Look at the five kinds of building as you pass | Can you tell a house, a barn, a church, a row of shops and a shed apart by their shape? |
+| X3 | Look along the fields | Walls, hedges or fences along the verge and out from the road; walls on the higher ground. ⚠️ On a **hairpin or a tight bend** (#468's review, B1): no wall, hedge, fence or building standing on the road — the other leg of the hairpin included |
+| X4 | The signposts at a village's ends | A blank board: no words, no name |
+| X5 | 12 s of riding through a village with its fields in view, target rung, the `dumpsys` block from Part T | Frame times with the new kinds on |
+| X6 | Ride through the same village on lap two of a loop | The same houses in the same places — and ⚠️ the **same field colours** between the same walls (#468's review, B3: on its first head every field changed colour on lap two) |
+
+### X results
+
+| | X5 |
+|---|--:|
+| Total frames rendered | |
+| Janky frames (legacy, > 16 ms) | |
+| Frame time 50th / 90th | |
+| **GPU time 50th / 90th** | |
+
+**Places rather than houses, facing the road (X1)?** ______________
+
+**Five buildings told apart by shape (X2)?** ______________
+
+**Walls, hedges and fences where described (X3); nothing on the road at a hairpin; blank signposts (X4)?** ______________
+
+**The same village, and the same field colours, on lap two (X6)?** ______________
+
+**Route ridden:** ______________  **Phone (OEM, model, Android):** ______________  **Build:** ______________
+
+---
+
+## Part Y — a sky with a gradient, and surfaces with detail ([#425](https://github.com/openzigs/onyourleft/issues/425), the no-asset half)
+
+#425 asked for the road and the ground to be textured and the sky to be more than one colour. What
+ships is **the half that needs no asset**; the photographic surfaces, KTX2 and an HDRI sky wait for
+[#431](https://github.com/openzigs/onyourleft/issues/431), the ADR that decides whether the world goes
+realistic.
+
+- **The sky** is a vertical gradient from the route's own sky colour overhead to its haze at the
+  horizon — a dome of vertex colours, one draw call, no texture.
+- **The road** carries a grain and **the ground** a mottle, both computed in the fragment shader from
+  where the pixel is, and the ground a **patchwork of fields** on the same grid the walls stand on
+  (#460). ⚠️ **No texture is sampled**, so "no texture reaches the GPU" (#366) still holds and
+  ADR 0022 is not amended. The grain **multiplies** the road's gradient tint and is bounded so the
+  steepest climb and descent still differ by the WCAG contrast the cue needs.
+- It **fades out with distance** — noise at a grazing angle shimmers, and #424's low camera makes
+  that worse — and it is on the **target rung only**: the first step down the quality ladder drops
+  it, one step before any rung lowers the frame rate.
+
+⚠️ **What the pinned Chromium measured**: the sky 25° up and 8° up are two colours (and one colour
+with the haze set to the sky, the control); a patch of carriageway varies by 1.82 levels with the
+detail and 0.00 without; the ground's detail changes 120 000 pixels of a 600 × 400 frame. The
+scenery-free scene is **8 draw calls** (the dome is the new one).
+
+| Step | What to do | What to record |
+|---|---|---|
+| Y1 | Ride any route in daylight on the target rung | Is the sky darker and bluer overhead and paler at the horizon? |
+| Y2 | Watch the road just ahead of the bicycle, and the ground beside it, at speed | A surface, or noise? ⚠️ **Any shimmer or crawling** — especially further ahead, at a grazing angle — is the finding |
+| Y3 | Watch a climb and a descent | Is the gradient tint on the road still as easy to read as before? |
+| Y4 | Look at the fields beside the road on a level stretch | Fields of different greens and a yellower crop, meeting where the walls and hedges are? |
+| Y5 | 12 s of riding, target rung, the `dumpsys` block from Part T; then the same with the quality ladder one rung down (a hot phone, or Part E's forcing) | Frame times with the detail on, and off |
+
+### Y results
+
+| | Y5 — detail on | Y5 — one rung down |
+|---|--:|--:|
+| Total frames rendered | | |
+| Janky frames (legacy, > 16 ms) | | |
+| Frame time 50th / 90th | | |
+| **GPU time 50th / 90th** | | |
+
+**Sky graded (Y1)?** ______________
+
+**Surface or noise; any shimmer, and where (Y2)?** ______________
+
+**Gradient tint still legible (Y3)?** ______________
+
+**Fields meeting at the walls (Y4)?** ______________
+
+**Phone (OEM, model, Android):** ______________  **Build:** ______________
 
 ---
 
