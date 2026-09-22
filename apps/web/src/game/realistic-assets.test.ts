@@ -72,7 +72,11 @@ describe('what a rider is told when the realistic world is not what they ride in
   });
 
   it('says it is not kept offline, when the browser was offline — the expected case', () => {
-    const notice = realisticWorldNotice({ loaded: false, offline: true, detail: 'Failed to fetch' });
+    const notice = realisticWorldNotice({
+      loaded: false,
+      offline: true,
+      detail: 'Failed to fetch',
+    });
     expect(notice).toMatch(/offline/);
     expect(notice).toMatch(/standard world/);
   });
