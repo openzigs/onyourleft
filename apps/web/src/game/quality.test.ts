@@ -19,6 +19,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DISPLAY_RATE,
   FRAME_MS_REDUCE_ABOVE,
   HEADROOM_REDUCE_ABOVE,
   HEADROOM_RESTORE_BELOW,
@@ -29,6 +30,7 @@ import {
   RIDER_SHADOW_MAP_RUNG,
   RIDER_SHADOW_MAP_STORAGE_KEY,
   SUSTAINED_SAMPLES,
+  TARGET_FRAMES_PER_SECOND,
   keepsShadowMap,
   nextQuality,
   nextWorldQuality,
@@ -174,13 +176,18 @@ describe('recovery, and the hysteresis that stops it oscillating', () => {
     expect(further.level).not.toBe(0);
   });
 
-  it('never climbs above the target quality', () => {
-    // There is no 60 fps rung to be found by a cold phone — #91 is explicit that
-    // 30 fps is the target rather than a compromise.
+  it('never climbs above the top rung, which draws at the display’s rate — #476', () => {
+    // The owner's ruling (2026-09-22): the top rung is uncapped at the
+    // display's own rate, and a cold phone finds nothing above it.
     const state = sustain(INITIAL_QUALITY, COOL, SUSTAINED_SAMPLES * 5);
 
     expect(state.level).toBe(0);
-    expect(qualitySettings(state.level).frameCap).toBe(30);
+    expect(qualitySettings(state.level).frameCap).toBe(DISPLAY_RATE);
+  });
+
+  it('caps the rungs below the top at 30, 24 and 20 — the owner’s ruling, #476', () => {
+    expect(QUALITY_LADDER.map((rung) => rung.frameCap)).toEqual([DISPLAY_RATE, 30, 24, 20]);
+    expect(qualitySettings(1).frameCap).toBe(TARGET_FRAMES_PER_SECOND);
   });
 });
 
@@ -419,8 +426,10 @@ describe('the water shader is a rung on the ladder — #459', () => {
   it('shades water at the target only, and gives it up before any frame rate', () => {
     expect(qualitySettings(0).water).toBe('shaded');
     const firstFlat = QUALITY_LADDER.findIndex((rung) => rung.water === 'flat');
+    // Below #91's target, which is what "frame rate given up" means since
+    // the top rung went above it (#476). @see TARGET_FRAMES_PER_SECOND
     const firstSlower = QUALITY_LADDER.findIndex(
-      (rung) => rung.frameCap < QUALITY_LADDER[0]!.frameCap,
+      (rung) => rung.frameCap < TARGET_FRAMES_PER_SECOND,
     );
     expect(firstFlat).toBeGreaterThan(0);
     expect(firstFlat).toBeLessThan(firstSlower);
@@ -452,8 +461,9 @@ describe('the surface detail is a rung on the ladder — #425', () => {
     // #425: "a throttling phone drops textures before it drops frame rate".
     expect(qualitySettings(0).surfaceDetail).toBe(true);
     const firstPlain = QUALITY_LADDER.findIndex((rung) => !rung.surfaceDetail);
+    // Below #91's target. @see TARGET_FRAMES_PER_SECOND
     const firstSlower = QUALITY_LADDER.findIndex(
-      (rung) => rung.frameCap < (QUALITY_LADDER[0]?.frameCap ?? 0),
+      (rung) => rung.frameCap < TARGET_FRAMES_PER_SECOND,
     );
     expect(firstPlain).toBeGreaterThan(0);
     expect(firstPlain).toBeLessThan(firstSlower);

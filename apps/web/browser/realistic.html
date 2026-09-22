@@ -11,16 +11,18 @@
       console and nothing else. It does three things and names no module:
 
       1. It records whether Capacitor's native bridge is on this page. The
-         shell injects `window.Capacitor` before any script runs; on the
-         owner's tablet it was NOT here, and the shell's lifecycle events
-         (`window.Capacitor.triggerEvent("resume", "document")`, sent by
-         Capacitor's `MockCordovaWebViewImpl` when the app resumes after a
-         pause) threw `Cannot read properties of undefined (reading
-         'triggerEvent')` into the console. Which of the two is absent here -
-         the bridge object, or also the `androidBridge` interface under it -
-         is what says why, and only the device can answer it.
-      2. Where the bridge is absent it stands in for `triggerEvent` alone, so a
-         lifecycle event is RECORDED (and still dispatched, as the bridge
+         shell injects `window.Capacitor` before any script runs, and on the
+         owner's tablet it IS here (#480: `capacitorAtStart: "object"`).
+         #478 wrote this script believing otherwise, because the tablet had
+         logged `Cannot read properties of undefined (reading
+         'triggerEvent')`; that error comes from the app's LAUNCH, before this
+         page exists - Capacitor's pause/resume `eval` reaching the WebView's
+         first, blank document - and not from this page at all.
+         `apps/mobile/src/android/lifecycle-events.test.ts` is the argument.
+         The record stays, because it is how that was settled.
+      2. Where the bridge is absent (it has not been) it stands in for
+         `triggerEvent` alone, so a lifecycle event is RECORDED (and still
+         dispatched, as the bridge
          would) instead of thrown. It defines no `isNativePlatform`, so
          `support/capacitor.ts` still reads this page as not the shell, which
          is the truth about a page the bridge never reached.

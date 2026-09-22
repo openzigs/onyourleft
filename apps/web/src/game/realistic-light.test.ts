@@ -8,8 +8,12 @@ import {
   environmentIntensity,
   halfToFloat,
   PHOTOGRAPHIC_ROAD_GRAIN,
+  reflectedSkyColour,
+  skyBandRadiance,
   skyRotation,
   skySunU,
+  WATER_HORIZON_BAND,
+  WATER_ZENITH_BAND,
   upwardRadiance,
   type SkyPixels,
 } from './realistic-light';
@@ -168,5 +172,60 @@ describe('the photograph is a grain on the road’s gradient tint, never its col
       (climb * (1 + PHOTOGRAPHIC_ROAD_GRAIN) + 0.05);
     expect(worst).toBeGreaterThanOrEqual(MINIMUM_TINT_CONTRAST_RATIO);
     expect(MINIMUM_TINT_CONTRAST_RATIO).toBe(AA_LARGE_TEXT_OR_NON_TEXT);
+  });
+});
+
+describe('what the realistic water reflects — #475', () => {
+  /** A sky whose three channels differ, so a hue is something to get wrong. */
+  function coloured(
+    width: number,
+    height: number,
+    colour: (row: number) => readonly [number, number, number],
+  ): SkyPixels {
+    return {
+      width,
+      height,
+      channel: (index) => {
+        const texel = Math.floor(index / 4);
+        const channel = index % 4;
+        return channel === 3 ? 1 : (colour(Math.floor(texel / width))[channel] ?? 0);
+      },
+    };
+  }
+
+  it('averages only the rows inside the band, as the rows of the picture they are', () => {
+    // 180 rows: a degree each. Above 30° is blue, below it is orange.
+    const picture = coloured(8, 180, (row) => (90 - (row + 0.5) > 30 ? [0, 0, 1] : [1, 0.5, 0]));
+    expect(skyBandRadiance(picture, WATER_ZENITH_BAND[0], WATER_ZENITH_BAND[1])).toEqual([0, 0, 1]);
+    expect(skyBandRadiance(picture, WATER_HORIZON_BAND[0], WATER_HORIZON_BAND[1])).toEqual([
+      1, 0.5, 0,
+    ]);
+  });
+
+  it('weights a row by the sky it covers, which shrinks towards the zenith', () => {
+    // Half the band bright and half dark: the lower, wider rows win.
+    const picture = coloured(4, 180, (row) => (90 - (row + 0.5) > 60 ? [1, 1, 1] : [0, 0, 0]));
+    const [r] = skyBandRadiance(picture, 30, 90);
+    expect(r).toBeLessThan(0.5);
+    expect(r).toBeGreaterThan(0.2);
+  });
+
+  it('reads a sky too coarse to have a row in the band at the nearest row', () => {
+    const picture = coloured(4, 8, (row) => [row, row, row]);
+    // 0° to 10°: no row centre falls inside 8 rows' 22.5° spacing; row 3 (11.25°) is nearest.
+    expect(skyBandRadiance(picture, 0, 10)).toEqual([3, 3, 3]);
+  });
+
+  it('refuses a band with nothing finite in it', () => {
+    const picture = coloured(4, 180, () => [Number.NaN, 0, 0]);
+    expect(() => skyBandRadiance(picture, 0, 10)).toThrow(/no texel/);
+  });
+
+  it('keeps the band’s hue and takes the brightness it is asked for', () => {
+    const [r, g, b] = reflectedSkyColour([4, 2, 1], 0.3);
+    expect(0.2126 * r + 0.7152 * g + 0.0722 * b).toBeCloseTo(0.3, 10);
+    expect(r / g).toBeCloseTo(2, 10);
+    expect(g / b).toBeCloseTo(2, 10);
+    expect(reflectedSkyColour([0, 0, 0], 0.3)).toEqual([0, 0, 0]);
   });
 });

@@ -1,0 +1,121 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * The frame cap, applied — #476. @see frame-pacer.ts
+ */
+
+import { describe, expect, it } from 'vitest';
+
+import { FramePacer, type PacedFrame } from './frame-pacer';
+import {
+  DISPLAY_RATE,
+  FRAME_MS_REDUCE_ABOVE,
+  FRAME_MS_RESTORE_BELOW,
+  QUALITY_LADDER,
+} from './quality';
+
+const VSYNC_MS = 1000 / 60;
+
+/** `seconds` of a 60 Hz display under one cap, with a jitter of up to ±0.4 ms. */
+function ride(
+  cap: number,
+  seconds: number,
+  cost: (drawn: boolean) => number = () => 0,
+): PacedFrame[] {
+  const pacer = new FramePacer();
+  const frames: PacedFrame[] = [];
+  let at = 1_000;
+  for (let vsync = 0; vsync < seconds * 60; vsync += 1) {
+    const jitter = ((vsync * 7919) % 9) / 10 - 0.4;
+    const frame = pacer.frame(at + jitter, cap);
+    frames.push(frame);
+    // A drawn frame that costs more than a vsync delays the next animation frame.
+    at += Math.ceil(Math.max(VSYNC_MS, cost(frame.draw)) / VSYNC_MS) * VSYNC_MS;
+  }
+  return frames;
+}
+
+const drawn = (frames: readonly PacedFrame[]): number => frames.filter((each) => each.draw).length;
+
+describe('the frame cap, applied — #476', () => {
+  it('draws every animation frame at the display’s rate, and never more', () => {
+    expect(drawn(ride(DISPLAY_RATE, 10))).toBe(600);
+  });
+
+  it('draws 30, 24 and 20 a second on a 60 Hz display', () => {
+    expect(drawn(ride(30, 10))).toBe(300);
+    // Carried forward from when each was due: two and three vsyncs alternate.
+    // Measured from the last draw instead, this would be 200 — 20 fps.
+    expect(drawn(ride(24, 10))).toBeGreaterThanOrEqual(239);
+    expect(drawn(ride(24, 10))).toBeLessThanOrEqual(241);
+    expect(drawn(ride(20, 10))).toBe(200);
+  });
+
+  it('draws what each rung of the ladder caps it at, and each lower rung draws fewer', () => {
+    const counts = QUALITY_LADDER.map((rung) => drawn(ride(rung.frameCap, 10)));
+    expect(counts).toEqual([600, 300, expect.any(Number) as number, 200]);
+    for (let level = 1; level < counts.length; level += 1) {
+      expect(counts[level] ?? 0, QUALITY_LADDER[level]?.label).toBeLessThan(counts[level - 1] ?? 0);
+    }
+  });
+
+  it('does not catch up with a burst after a stall', () => {
+    const pacer = new FramePacer();
+    expect(pacer.frame(0, 30).draw).toBe(true);
+    expect(pacer.frame(33.4, 30).draw).toBe(true);
+    // Half a second of nothing, then the display resumes.
+    expect(pacer.frame(533.4, 30).draw).toBe(true);
+    expect(pacer.frame(550, 30).draw).toBe(false);
+    expect(pacer.frame(566.7, 30).draw).toBe(true);
+  });
+
+  it('follows a change of cap on the next frame', () => {
+    const pacer = new FramePacer();
+    let at = 0;
+    const next = (cap: number): boolean => {
+      at += VSYNC_MS;
+      return pacer.frame(at, cap).draw;
+    };
+    expect([next(DISPLAY_RATE), next(DISPLAY_RATE), next(DISPLAY_RATE)]).toEqual([
+      true,
+      true,
+      true,
+    ]);
+    expect([next(20), next(20), next(20), next(20)]).toEqual([true, false, false, true]);
+    expect([next(DISPLAY_RATE), next(DISPLAY_RATE)]).toEqual([true, true]);
+  });
+});
+
+describe('what the ladder is told under a cap — #476', () => {
+  it('reports nothing after a skipped frame, so a skipped frame never reads as a fast one', () => {
+    const frames = ride(30, 2);
+    frames.forEach((frame, index) => {
+      const previous = frames[index - 1];
+      if (previous === undefined || !previous.draw) expect(frame.frameMs).toBeUndefined();
+      else expect(frame.frameMs).toBeDefined();
+    });
+  });
+
+  it('reads a cheap frame as cheap under every cap, not as the cap itself', () => {
+    // 20 fps is 50 ms between drawn frames — over the reduce threshold. What is
+    // sampled is the gap that FOLLOWS a drawn frame, which is a vsync.
+    for (const cap of [DISPLAY_RATE, 30, 24, 20]) {
+      const samples = ride(cap, 2)
+        .map((frame) => frame.frameMs)
+        .filter((ms): ms is number => ms !== undefined);
+      expect(samples.length).toBeGreaterThan(30);
+      expect(Math.max(...samples), String(cap)).toBeLessThan(FRAME_MS_RESTORE_BELOW);
+    }
+  });
+
+  it('reads an expensive drawn frame as expensive under every cap', () => {
+    // A drawn frame that holds the thread for 60 ms, whatever the cap.
+    for (const cap of [DISPLAY_RATE, 30, 24, 20]) {
+      const samples = ride(cap, 3, (drew) => (drew ? 60 : 0))
+        .map((frame) => frame.frameMs)
+        .filter((ms): ms is number => ms !== undefined);
+      expect(samples.length).toBeGreaterThan(10);
+      expect(Math.min(...samples), String(cap)).toBeGreaterThan(FRAME_MS_REDUCE_ABOVE);
+    }
+  });
+});

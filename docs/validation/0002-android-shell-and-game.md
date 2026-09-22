@@ -32,6 +32,12 @@ U to Y were free. ⚠️ **V to Y are looks and frame times, and they need a rid
 trainer **not** handed to the game (a power meter, or a trainer with control not granted), so they
 change no resistance and stay in rule 1's group below. A rider who gives the game the trainer for
 them is running Part L as well, and runs them after it.
+**Frame rates corrected 2026-09-22** by [#476](https://github.com/openzigs/onyourleft/issues/476):
+until then `quality.ts`'s frame cap was read by nothing and **every rung drew at the display's
+rate**. Now the top rung — "the target rung" in every Part below — draws at the display's rate
+(60 Hz on the tablet) and the rungs below cap at 30, 24 and 20. A row taken at the target rung before
+#476 is comparable with one after it; a row taken at a lower rung ("the floor rung", K7, M6) is not.
+Part Z's frame-rate note has the table.
 **Discharges, when run:** [#87](https://github.com/openzigs/onyourleft/issues/87) criteria 2, 3, 5
 and 6 and its two-OEM line; the Android half of
 [#85](https://github.com/openzigs/onyourleft/issues/85); and
@@ -1816,7 +1822,7 @@ adb logcat | grep -i "BluetoothLe"
 | | on by default? | what it costs, by construction | where it is measured |
 |---|---|---|---|
 | **Contact shadows** — a soft blob under the rider and the pacer, placed from `world.ts`'s own sun | **yes, on every rung** | one transparent instanced draw call for all of them (the scenery-free frame is 6 calls, from 5) | `game.browser.spec.ts` §"draws each of the three in its own colour" reads it back, with the shadows off as its control |
-| **A shadow map** for the riders only, caught by a shadow-catching plane under them | **no** — `quality.ts` §`RIDER_SHADOW_MAP_RUNG`, above the ladder, and the first thing the ladder gives up — for the rest of the ride, `quality.ts` §`keepsShadowMap` | a shadow pass of the three rider meshes into a 512² depth map, plus the catcher | the pinned Chromium publishes a frame time on a software rasteriser, which says nothing about a phone. **This part is the measurement #426 closes on** |
+| **A shadow map** for the riders only, caught by a shadow-catching plane under them | **no** — `quality.ts` §`RIDER_SHADOW_MAP_RUNG`, above the ladder, and the first thing the ladder gives up — for the rest of the ride, `quality.ts` §`keepsShadowMap` | a shadow pass of the three rider meshes into a 512² depth map, plus the catcher | the pinned Chromium publishes a frame time on a software rasteriser, which says nothing about a phone. ⚠️ Since [#473](https://github.com/openzigs/onyourleft/issues/473) the harness times frames built as `GameView` builds them (lent, no copy); a figure published before it also paid for a ~55 KB copy a frame the product never makes, so the two are not comparable. **This part is the measurement #426 closes on** |
 
 ⚠️ **The ghost casts neither, on purpose** (`contact-shadow.ts` §`CASTS_CONTACT_SHADOW`): a bicycle
 with no shadow reads as *not really here*, which is #93's at-a-glance criterion. T2 asks whether it
@@ -2097,7 +2103,9 @@ realistic.
   steepest climb and descent still differ by the WCAG contrast the cue needs.
 - It **fades out with distance** — noise at a grazing angle shimmers, and #424's low camera makes
   that worse — and it is on the **target rung only**: the first step down the quality ladder drops
-  it, one step before any rung lowers the frame rate.
+  it, one step before any rung lowers the frame rate below #91's 30 fps. (That first step also takes
+  the frame rate from the display's 60 to 30 since [#476](https://github.com/openzigs/onyourleft/issues/476)
+  — see Part Z's frame-rate note.)
 
 ⚠️ **What the pinned Chromium measured**: the sky 25° up and 8° up are two colours (and one colour
 with the haze set to the sky, the control); a patch of carriageway varies by 1.82 levels with the
@@ -2142,6 +2150,17 @@ and layer 3 (structures) is [#475](https://github.com/openzigs/onyourleft/issues
 to it is the owner's page, `apps/web/browser/realistic.html`, staged into a **local debug APK**.
 This Part is what that page is for.
 
+⚠️ **Since #475's build half, layer 3 is in too, and the soak now follows it.** Every structure
+kind is drawn on the realistic rungs in **CC0 photographic surfaces** — brick and clay tile on a
+house and a row of shops, boards and corrugated iron on a barn, stone and slate on a church, stone
+on a field wall, boards on a fence, leaves on a hedge (`realistic-assets.ts`
+§`REALISTIC_STRUCTURE_SURFACES`). ⚠️ **The shapes are this repository's own, built from numbers**:
+no source in ADR 0026 D-4's list publishes a whole country building (Poly Haven's "buildings" are
+urban facade kits of 118 000–175 000 triangles), so what is photographic is what covers them. The
+water stays #459's procedural shader and now **reflects the realistic sky's own colour**
+(`three-renderer.ts` §`WaterBelt.update` argues why it stays procedural). Z9 and Z10 below are the
+two looks that change, and the rider control still waits for the soak — #475.
+
 ### What is already measured, and where it came from
 
 The provisional budget in `apps/web/src/game/realistic-budget.ts` (ADR 0026 D-6) rests on the one
@@ -2172,9 +2191,31 @@ its gradient tint survives AgX (`three-renderer.ts` §`ROAD_SHEEN`). The estimat
 holds it to is under 160 MiB of textures and 300 000 triangles; what that costs on the tablet is
 Z5–Z8 below, and **no part of it has been measured on a device yet**.
 
-⚠️ **`quality.ts`'s 30 fps frame cap is read by nothing** —
-[#476](https://github.com/openzigs/onyourleft/issues/476) — so the product and this page both draw
-at the display's rate. Read every frame time here against 16.7 ms, not 33.3.
+⚠️ **The frame cap is honoured since [#476](https://github.com/openzigs/onyourleft/issues/476),
+and this paragraph used to say it was read by nothing — a reader who remembers "every rung draws
+at the display's rate" is reading the old file.** The owner's ruling (2026-09-22): **the top rung
+of each ladder draws at the display's rate — 60 Hz on the tablet, and never above it — and the
+stylised rungs below cap at 30 → 24 → 20** (`quality.ts` §`QUALITY_LADDER`). Both **realistic**
+rungs draw at the display's rate, so a hot tablet gives up realism before it gives up frame rate;
+the first capped rung it can reach is the stylised ladder's level 1, at 30. What that means for a
+number read here:
+
+| Rung (`world` · `rung` on the page) | Frame cap | Frame p50 on a 60 Hz display that keeps up |
+|---|---|--:|
+| realistic · realistic | display rate | 16.7 ms |
+| realistic · realistic, reduced resolution and scenery | display rate | 16.7 ms |
+| stylised · full | display rate | 16.7 ms |
+| stylised · reduced resolution and scenery | 30 fps | 33.3 ms |
+| stylised · reduced resolution, scenery and frame rate | 24 fps | 41.7 ms (33 and 50 alternating) |
+| stylised · minimum | 20 fps | 50 ms |
+
+**The page's frame p50/p90/p99 are the time between DRAWN frames**, so on a capped rung they read the
+cap, not a fault; `frameCap` is in every `OYL-REALISTIC` and `OYL-REALISTIC-SOAK` line and on the
+readout, so a row always says which it was. `dumpsys gfxinfo` counts what the WebView presents, which
+at a capped rung includes the vsyncs this page skipped. The quality ladder is fed the time a drawn frame
+held the next one off (`frame-pacer.ts`), never a skipped frame's idle vsync and never the cap, so a
+capped rung does not read itself as hot or as cool. ⚠️ **A soak run before #476 drew every rung at
+the display's rate**; its rows at a stylised rung below the top are not comparable with one after it.
 
 ### Build and install
 
@@ -2221,17 +2262,41 @@ the readout was computed over the measurement window, which the page empties eve
 30-second figure is published — so it was `NaN` during the warm-up and for the rest of every ride.
 It reads the clock's own rolling window now. The `TypeError` is Capacitor's: the shell sends its
 lifecycle events by evaluating `window.Capacitor.triggerEvent("resume", "document")` in the page
-(`MockCordovaWebViewImpl`, when the app resumes after a pause), and on this page there was no
-`window.Capacitor` — which the product's own page does have. **Why it was absent is the device's to
-answer**, and the page now records the evidence before any other script runs:
+(`MockCordovaWebViewImpl`, when the app resumes after a pause).
+
+⚠️ **This paragraph used to say "on this page there was no `window.Capacitor`", and blamed the
+harness page — a reader who remembers that is reading the old file.** [#480](https://github.com/openzigs/onyourleft/issues/480)
+settled it the other way. On 2026-09-22 (main `89a5d9b`) the tablet logged the same `TypeError`
+**twice within the first second of launching the app**, with logcat cleared just before, and
+**before anything navigated to this page**; the page itself then reported
+`capacitorAtStart: "object"`. So the bridge reaches this page, and the error is the app's launch. In
+Capacitor 8.5.2 the only code that evaluates `triggerEvent` in a page is `MockCordovaWebViewImpl`'s
+`pause` and its `resume`-after-a-pause, posted to the main looper to run against whatever document
+the WebView holds by then; the bridge is injected for the app's origin only, so a `window` without
+it in the first second is the WebView's initial blank document, before the app's page has
+committed. Two errors are one pause and one resume at launch. It is **harmless**: that document is
+discarded, and nothing in this client listens for Capacitor's `pause` or `resume` — the app reads
+`visibilitychange`. `apps/mobile/src/android/lifecycle-events.test.ts` asserts both premises
+against the installed Capacitor and this repository's sources. **What only the device can confirm**,
+on the next launch with logcat cleared:
+
+```bash
+"$ADB" logcat -d -b events | grep -E 'wm_on_(paused|resume)_called.*MainActivity'   # a pause and a resume at launch
+"$ADB" logcat -d -s chromium | grep triggerEvent                                     # its source: is NOT https://localhost/…
+```
+
+If the two errors do **not** sit beside a pause and a resume, or their `source:` is the app's own
+page, the argument above is wrong and #480's third item is open again.
+
+The page still records the bridge before any other script runs, which is how this was settled:
 
 ```bash
 "$ADB" logcat -d -s chromium | grep -E 'OYL-REALISTIC-(LOAD|BRIDGE|ERROR)'
 ```
 
 - `OYL-REALISTIC-LOAD {"bridge":{"capacitorAtStart":…,"androidBridgeAtStart":…,"standIn":…}}` — one
-  line per load. `capacitorAtStart: "object"` means Capacitor's bridge reached this page and the
-  `TypeError` should not recur. `"undefined"` with `androidBridgeAtStart: "object"` means the WebView
+  line per load. `capacitorAtStart: "object"` means Capacitor's bridge reached this page, which is
+  what the tablet reported on 2026-09-22. `"undefined"` with `androidBridgeAtStart: "object"` means the WebView
   gave the page Capacitor's message channel but Capacitor's document-start script did not run on it;
   both `"undefined"` means neither reached it.
 - `OYL-REALISTIC-BRIDGE {"event":"resume","target":"document"}` — a lifecycle event the shell sent to a
@@ -2258,9 +2323,11 @@ Landscape, full brightness, on charge, nothing else running; let the tablet cool
 | Z3 | Watch a climb and a descent (the route has both) | Is the gradient tint on the road still as easy to read as the stylised world's? The browser gate measured 3.97 : 1 between the steepest climb and descent; the eye is the check |
 | Z4 | Look at the trees near and far, and at the point where a tree changes from a mesh to a picture | Do the near trees look sparse beside the far ones (the thinned canopy — spike 0005 §2)? Is the switch visible? |
 | Z5 | Look at the rider from behind, and hold the ride still: `location.href = '/harness/realistic.html?at=900&panel=0'` | Do the legs follow the pedals? With the ride held (`?at=`), do the legs STOP? — #349's rule for the realistic rider |
-| Z6 | `?panel=0&ladder=0`, 30 s; then `?world=stylised&panel=0&ladder=0`, 30 s — each with the `dumpsys` block below | Frame and GPU percentiles, realistic against stylised |
-| Z7 | **The soak**: `?soak=20&panel=0` — the ladder free, as a rider would have it | One line a minute; thermal status; the rung it ends on |
-| Z8 | During Z7, once at minute 10: `"$ADB" shell dumpsys meminfo dev.openzigs.onyourleft \| grep -iE "Graphics\|GL mtrack\|TOTAL"` | What the driver actually holds, against the 160 MiB estimate |
+| Z6 | `?panel=0&ladder=0`, 30 s; then `?world=stylised&panel=0&ladder=0`, 30 s — each with the `dumpsys` block below. ⚠️ **Both are TOP rungs, so both draw at the display's rate, 60 Hz** (#476) — this is realistic against stylised at 60, and nothing about a cap | Frame and GPU percentiles, realistic against stylised |
+| Z7 | **The soak**: `?soak=20&panel=0` — the ladder free, as a rider would have it. ⚠️ **It starts at the realistic top rung, at the display's rate (60 Hz)**, and every minute's line says the rung and its `frameCap`: while it says `display` it is measuring 60 fps realism; a minute that says `30`, `24` or `20` is a stylised rung the ladder stepped to, and its frame times read that cap | One line a minute; thermal status; the rung **and frame cap** it ends on |
+| Z8 | During Z7, once at minute 10: `"$ADB" shell dumpsys meminfo dev.openzigs.onyourleft \| grep -iE "Graphics\|GL mtrack\|TOTAL"` | What the driver actually holds, against the 160 MiB estimate (the estimate is **136 MiB** since #475's structures) |
+| Z9 | Ride past the farmstead and any village: `?panel=0&ladder=0`. Look at a house, a barn, a wall and a hedge from the road | Do the walls read as brick, board and stone, and the roofs as tile, slate and iron? Is a brick the same size on every wall (it should be — the photographs are laid out in metres)? ⚠️ **The hedge is the weakest**: it wears leaf litter tinted green, the nearest photograph any admitted source publishes — say whether it reads as a hedge |
+| Z10 | Ride over the bridge and past the lake | Does the water take the sky's colour — grey under grey cloud, not the stylised world's blue? Any seam where it meets the bank? |
 
 Each 30-second row:
 
@@ -2297,7 +2364,7 @@ done
 
 **The 20-minute soak** (Z7):
 
-| Minute | Frame p50 / p90 / p99 | Rung (`world` · `rung`) | Thermal status | Skin / CPU temperature |
+| Minute | Frame p50 / p90 / p99 | Rung (`world` · `rung` · `frameCap`) | Thermal status | Skin / CPU temperature |
 |--:|---|---|---|---|
 | 1 | | | | |
 | 5 | | | | |
@@ -2317,10 +2384,14 @@ done
 
 **Legs follow the pedals, and stop when held (Z5)?** ______________
 
+**Structures: brick, board, stone, tile, slate, iron; the hedge (Z9)?** ______________
+
+**The water's reflection (Z10)?** ______________
+
 **`OYL-REALISTIC-LOAD` — `capacitorAtStart` / `androidBridgeAtStart`, and any `OYL-REALISTIC-BRIDGE` or
 `OYL-REALISTIC-ERROR` line (#478):** ______________
 
-**Does the realistic top rung hold for twenty minutes with headroom?** ______________ — ⚠️ this is
+**Does the realistic top rung hold for twenty minutes, at 60 fps, with headroom?** ______________ — ⚠️ this is
 ADR 0026 D-3's condition for ever changing the default, and D-6's for re-setting
 `realistic-budget.ts` from a soak rather than from 30-second windows. #475 owns acting on it.
 

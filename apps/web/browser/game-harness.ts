@@ -99,6 +99,7 @@ import {
   sceneMaterialsOf,
   sceneryDrawnOf,
   threeGameRenderer,
+  waterSkyOf,
 } from '../src/game/three-renderer';
 import { realisticWorldNotice } from '../src/game/realistic-assets';
 import {
@@ -118,15 +119,35 @@ import { atStartLine } from '../src/game/simulation';
  * made them and written over by the next (`landform.ts` §`TerrainMesh.lease`).
  * The ride loop draws each frame as soon as it is built; this page does not —
  * it compares a climb with a descent and lap one with lap three, and draws a
- * frame again after a sweep of a hundred others. Every frame here is
- * therefore a {@link retainedFrame}, a copy that owns its arrays, which is the
- * one difference from what `GameView` draws. The renderer refuses a lent
+ * frame again after a sweep of a hundred others. Every frame this page HOLDS
+ * is therefore a {@link retainedFrame}, a copy that owns its arrays, which is
+ * the one difference from what `GameView` draws — and every frame it TIMES is
+ * not, since #473: {@link lentSceneFrame}. The renderer refuses a lent
  * frame that has been written over, so a builder here that skipped the copy
  * would throw rather than draw the wrong ground.
  */
 function sceneFrame(input: Parameters<typeof builtSceneFrame>[0]): SceneFrame {
   return retainedFrame(builtSceneFrame(input));
 }
+
+/** How a frame is built: {@link sceneFrame}'s copy, or {@link lentSceneFrame}. */
+type FrameBuild = (input: Parameters<typeof builtSceneFrame>[0]) => SceneFrame;
+
+/**
+ * A frame built exactly as `GameView` builds one — LENT, drawn at once and
+ * never held — #473.
+ *
+ * ⚠️ **Every TIMED frame on this page is one of these, and until #473 none
+ * was.** {@link sceneFrame}'s copy is about 55 KB a frame that the product
+ * never makes, and every frame-time figure this page published — the shading
+ * cost, the shadow-map cost, the realistic world's frame time — carried it.
+ * {@link timeFrames} is the one place a frame is built and drawn in the same
+ * breath, so it is the one place a lent frame is safe here, and it is also
+ * what puts the product's lending path back in front of a real browser: the
+ * renderer refuses a lent frame that has been written over, so a sweep here
+ * that held one would throw rather than draw the wrong ground.
+ */
+const lentSceneFrame: FrameBuild = builtSceneFrame;
 
 /** What {@link gradientProbe} publishes — #458. */
 interface GradientMeasurement {
@@ -1987,8 +2008,8 @@ function shadowMapProbe(probe: SceneFrame): ShadowMapMeasurement {
   const profile = harnessRoute();
   const origin = corridorOrigin(profile);
   const start = atStartLine(profile);
-  const frameAt = (distance: number) =>
-    sceneFrame({
+  const frameAt = (distance: number, build: FrameBuild = sceneFrame) =>
+    build({
       profile,
       origin,
       state: { ...start, ride: { ...start.ride, distance: metres(distance) } },
@@ -2403,7 +2424,8 @@ const SWEEP_STEP_METRES = 3.7;
 /**
  * How many frames each of #286's two frame-cost means is taken over: **60**.
  *
- * Two seconds of riding at the 30 fps `QUALITY_LADDER` targets, which is long
+ * Two seconds of riding at 30 fps (`QUALITY_LADDER`'s first step down; the top
+ * rung draws at the display's rate since #476), which is long
  * enough that one slow frame is a sixtieth of the answer and short enough that
  * the whole measurement — four sweeps, two at each shading — is under a second
  * on top of a gate that already runs for twenty.
@@ -2487,12 +2509,13 @@ function awaitTheGpu(gl: WebGL2RenderingContext | WebGLRenderingContext | null):
  */
 function timeFrames(
   view: { render: (frame: SceneFrame) => void },
-  frameAt: (at: number) => SceneFrame,
+  frameAt: (at: number, build: FrameBuild) => SceneFrame,
   gl: WebGL2RenderingContext | WebGLRenderingContext | null,
 ): number {
   const started = performance.now();
   for (let index = 1; index <= SHADING_FRAMES; index += 1) {
-    view.render(frameAt(index * SWEEP_STEP_METRES));
+    // Built and drawn in one breath, as `GameView` does: lent, not copied (#473).
+    view.render(frameAt(index * SWEEP_STEP_METRES, lentSceneFrame));
   }
   awaitTheGpu(gl);
   return (performance.now() - started) / SHADING_FRAMES;
@@ -2570,6 +2593,13 @@ export interface RealisticMeasurement {
   /** SwiftShader milliseconds a frame — published, never asserted. */
   readonly realisticFrameMs: number;
   readonly stylisedFrameMs: number;
+  /**
+   * #475: the sky colour the water reflected in the last realistic frame and
+   * in the last stylised one, linear RGB — the realistic sky's hue at the
+   * stylised sky's brightness. @see waterSkyOf
+   */
+  readonly waterSkyRealistic: readonly number[];
+  readonly waterSkyStylised: readonly number[];
 }
 
 const NO_REALISTIC: RealisticMeasurement = {
@@ -2602,6 +2632,8 @@ const NO_REALISTIC: RealisticMeasurement = {
   afterStepDownStandard: 0,
   realisticFrameMs: 0,
   stylisedFrameMs: 0,
+  waterSkyRealistic: [],
+  waterSkyStylised: [],
 };
 
 /** Relative luminance of an sRGB pixel, WCAG 2.2's own formula. */
@@ -2694,9 +2726,13 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const climb = northRoute(2_000, (along) => along * steepness);
   const descent = northRoute(2_000, (along) => 2_000 * steepness - along * steepness);
   const level = northRoute(2_000, () => 10);
-  const riding = (profile: ReturnType<typeof northRoute>, distance: number): SceneFrame => {
+  const riding = (
+    profile: ReturnType<typeof northRoute>,
+    distance: number,
+    build: FrameBuild = sceneFrame,
+  ): SceneFrame => {
     const start = atStartLine(profile);
-    return sceneFrame({
+    return build({
       profile,
       origin: corridorOrigin(profile),
       state: { ...start, ride: { ...start.ride, distance: metres(distance) } },
@@ -2811,9 +2847,13 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const sceneryDrawnBudgeted = sceneryDrawnOf(view);
   view.setQuality(top);
 
-  const frameAt = (distance: number): SceneFrame => riding(valleyRoute(), 800 + distance);
+  const frameAt = (distance: number, build: FrameBuild): SceneFrame =>
+    riding(valleyRoute(), 800 + distance, build);
   const realisticFrameMs = timeFrames(view, frameAt, gl);
   const stylisedFrameMs = timeFrames(plain, frameAt, plainGl);
+  // #475: each view's last frame was its own world's. @see waterSkyOf
+  const waterSkyRealistic = waterSkyOf(view);
+  const waterSkyStylised = waterSkyOf(plain);
   plain.destroy();
 
   // D-3's step down: the stylised ladder's top, whole.
@@ -2864,6 +2904,8 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     afterStepDownStandard,
     realisticFrameMs,
     stylisedFrameMs,
+    waterSkyRealistic,
+    waterSkyStylised,
   };
 }
 
@@ -3055,8 +3097,8 @@ async function run(): Promise<void> {
     const origin = corridorOrigin(profile);
 
     const start = atStartLine(profile);
-    const frameAt = (distance: number) =>
-      sceneFrame({
+    const frameAt = (distance: number, build: FrameBuild = sceneFrame) =>
+      build({
         profile,
         origin,
         state: { ...start, ride: { ...start.ride, distance: metres(distance) } },

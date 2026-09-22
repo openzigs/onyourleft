@@ -19,8 +19,10 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import {
+  PHOTOGRAPHIC_STRUCTURE_SURFACES,
   REALISTIC_RIDER,
   REALISTIC_SKY,
+  REALISTIC_STRUCTURE_SURFACES,
   REALISTIC_SURFACES,
   REALISTIC_VEGETATION,
   REALISTIC_VEGETATION_KINDS,
@@ -38,7 +40,11 @@ import {
   REALISTIC_TEXTURE_PIXELS,
   REALISTIC_TRIANGLES,
 } from './realistic-budget';
+import { readGlb } from './model-bytes-testing';
 import { fileImageSize, modelFacts } from './realistic-bytes-testing';
+import { STRUCTURE_KINDS } from './scatter';
+import { SCENERY_MODELS } from './scenery-models';
+import { realisticStructureTriangles, ScatterBelt } from './three-renderer';
 
 const SHIPPED = fileURLToPath(new URL('../../public/realistic/', import.meta.url));
 const at = (file: string): string => join(SHIPPED, file);
@@ -94,6 +100,14 @@ describe('each committed file inside its class’s budget — ADR 0026 D-6', () 
         );
       }
     }
+    // #475: the structures' surfaces.
+    for (const surface of PHOTOGRAPHIC_STRUCTURE_SURFACES) {
+      const maps = REALISTIC_STRUCTURE_SURFACES[surface];
+      for (const file of [maps.colour, maps.normal]) {
+        expect(largest(file), file).toBeLessThanOrEqual(REALISTIC_TEXTURE_PIXELS.structure);
+        expect(largest(file), file).toBeGreaterThan(0);
+      }
+    }
     for (const limit of Object.values(REALISTIC_TEXTURE_PIXELS)) {
       expect(limit).toBeLessThanOrEqual(REALISTIC_TEXTURE_CEILING_PIXELS);
     }
@@ -134,6 +148,13 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
         shapes.push({ ...fileImageSize(at(file)), bytesPerTexel: 4, mipmapped: true });
       }
     }
+    // #475: the structures' surfaces, 8-bit and mipmapped like the ground's.
+    for (const surface of PHOTOGRAPHIC_STRUCTURE_SURFACES) {
+      const maps = REALISTIC_STRUCTURE_SURFACES[surface];
+      for (const file of [maps.colour, maps.normal]) {
+        shapes.push({ ...fileImageSize(at(file)), bytesPerTexel: 4, mipmapped: true });
+      }
+    }
     for (const kind of REALISTIC_VEGETATION_KINDS) {
       for (const model of REALISTIC_VEGETATION[kind]) {
         for (const image of modelFacts(at(model.file)).images) {
@@ -157,6 +178,65 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     const bytes = realisticFiles().reduce((sum, file) => sum + statSync(at(file)).size, 0);
     expect(bytes).toBeLessThanOrEqual(REALISTIC_BUILD_BYTES);
     expect(bytes).toBeGreaterThan(REALISTIC_BUILD_BYTES / 4);
+  });
+});
+
+describe('the realistic structures — #475, ADR 0026 D-12 layer 3', () => {
+  /** How many triangles a mesh's geometry draws. */
+  const trianglesOf = (geometry: {
+    readonly index: { readonly count: number } | null;
+    getAttribute: (name: 'position') => { readonly count: number };
+  }): number => (geometry.index?.count ?? geometry.getAttribute('position').count) / 3;
+
+  const NO_GEOMETRY = { index: null, getAttribute: () => ({ count: 0 }) };
+
+  /**
+   * A Kenney model's triangles, off its own JSON: every primitive's index
+   * count, or its vertex count where it has none. The building models carry
+   * their colour in an external atlas, which `modelFacts` refuses, so this
+   * reads the geometry alone.
+   */
+  const glbTriangles = (path: string): number => {
+    const json = readGlb(path).json as unknown as {
+      readonly meshes: readonly {
+        readonly primitives: readonly {
+          readonly indices?: number;
+          readonly attributes: { readonly POSITION: number };
+        }[];
+      }[];
+      readonly accessors: readonly { readonly count: number }[];
+    };
+    let total = 0;
+    for (const mesh of json.meshes) {
+      for (const primitive of mesh.primitives) {
+        const accessor = json.accessors[primitive.indices ?? primitive.attributes.POSITION];
+        total += (accessor?.count ?? 0) / 3;
+      }
+    }
+    return total;
+  };
+
+  it('keeps every structure at or under its triangles', () => {
+    for (const kind of STRUCTURE_KINDS) {
+      const triangles = realisticStructureTriangles(kind);
+      expect(triangles, kind).toBeGreaterThan(0);
+      expect(triangles, kind).toBeLessThanOrEqual(REALISTIC_TRIANGLES.structure);
+    }
+  });
+
+  it('draws no structure heavier than the stylised world draws at the same place', () => {
+    // Which is why the frame's triangles need not count them. @see REALISTIC_FRAME_TRIANGLES
+    const stylised = new ScatterBelt(new Map());
+    const models = fileURLToPath(new URL('./models/', import.meta.url));
+    for (const kind of STRUCTURE_KINDS) {
+      const packed = SCENERY_MODELS[kind];
+      const heaviestStylised =
+        packed === undefined
+          ? trianglesOf(stylised.meshesOf(kind)[0]?.geometry ?? NO_GEOMETRY)
+          : Math.min(...packed.map((model) => glbTriangles(join(models, `${model.name}.glb`))));
+      expect(heaviestStylised, kind).toBeGreaterThan(0);
+      expect(realisticStructureTriangles(kind), kind).toBeLessThanOrEqual(heaviestStylised);
+    }
   });
 });
 

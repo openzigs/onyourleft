@@ -36,7 +36,9 @@
  * debugger attached, as #457's did.
  */
 
+import { FramePacer } from '../src/game/frame-pacer';
 import {
+  DISPLAY_RATE,
   INITIAL_QUALITY,
   nextWorldQuality,
   worldRung,
@@ -52,7 +54,8 @@ import {
 } from '../src/game/three-renderer';
 import { configQuery, parseConfig, percentiles, type Percentiles } from './realistic/config';
 import { rideFrame, RIDE_METRES_PER_SECOND } from './realistic/frame';
-import { describe, guarded, MeasurementClock, readoutMs } from './realistic/loop';
+import { describe, guarded, MAXIMUM_FRAME_GAP_MS, MeasurementClock } from './realistic/loop';
+import { readoutLine, takeOverReporting } from './realistic/reporting';
 import { realisticRoute } from './realistic/route';
 
 /** How long the scene runs before anything is sampled: shader compiles, first uploads. */
@@ -66,6 +69,12 @@ const LOOP_METRES = 3_500;
 export interface RealisticSample {
   readonly world: string;
   readonly rung: string;
+  /**
+   * The rung's frame cap — #476: `'display'` for the display's own rate, which
+   * is both realistic rungs and the stylised top; 30, 24 or 20 below that.
+   */
+  readonly frameCap: 'display' | number;
+  /** The time between DRAWN frames — at a capped rung, at least the cap's interval. */
   readonly frameMs: Percentiles;
   readonly drawCalls: number;
   readonly drawingBuffer: readonly [number, number];
@@ -235,6 +244,7 @@ async function run(): Promise<void> {
   const sample = (frames: readonly number[], stalls: number): RealisticSample => ({
     world: drawnWorldOf(view),
     rung: worldRung(state).label,
+    frameCap: worldRung(state).frameCap === DISPLAY_RATE ? 'display' : worldRung(state).frameCap,
     frameMs: percentiles(frames),
     drawCalls: framesInWindow === 0 ? 0 : Math.round(callsInWindow / framesInWindow),
     drawingBuffer: [gl?.drawingBufferWidth ?? 0, gl?.drawingBufferHeight ?? 0],
@@ -243,8 +253,32 @@ async function run(): Promise<void> {
     userAgent: navigator.userAgent,
   });
 
+  // #476: the rung's frame cap, applied as `GameView` applies it, and the
+  // ladder fed what `GameView` feeds it. @see FramePacer
+  const pacer = new FramePacer();
+  let warmedUp = false;
   const step = (now: number): void => {
-    const { elapsedSeconds: elapsed, sampledMs } = clock.frame(now);
+    const paced = pacer.frame(now, worldRung(state).frameCap);
+    // The product's own two-ladder policy, fed the product's own signal: the
+    // gap after a DRAWN frame, never a skipped one's. Not during the warm-up,
+    // and not across a stall, as this page always did.
+    if (
+      config.ladder &&
+      warmedUp &&
+      paced.frameMs !== undefined &&
+      paced.frameMs <= MAXIMUM_FRAME_GAP_MS
+    ) {
+      const next = nextWorldQuality(state, { frameMs: paced.frameMs });
+      if (next.realistic !== state.realistic || next.quality.level !== state.quality.level) {
+        view.setQuality(worldRung(next));
+      }
+      state = next;
+    }
+    if (!paced.draw) return;
+    // Only drawn frames reach the clock, so what it publishes is the time
+    // between frames a rider SEES — at a capped rung, at least the cap.
+    const { elapsedSeconds: elapsed } = clock.frame(now);
+    warmedUp = elapsed > WARM_UP_SECONDS;
     const distance =
       config.at ??
       LOOP_FROM_METRES +
@@ -263,14 +297,6 @@ async function run(): Promise<void> {
     callsInWindow += takeCalls();
     framesInWindow += 1;
     if (!published.ready) publish({ ready: true });
-    // The product's own two-ladder policy, fed the product's own signal.
-    if (config.ladder && sampledMs !== undefined) {
-      const next = nextWorldQuality(state, { frameMs: sampledMs });
-      if (next.realistic !== state.realistic || next.quality.level !== state.quality.level) {
-        view.setQuality(worldRung(next));
-      }
-      state = next;
-    }
     if (!measured && clock.windowFull(config.seconds)) {
       measured = true;
       windowFrom = elapsed;
@@ -301,14 +327,17 @@ async function run(): Promise<void> {
       shownAt = now;
       // The clock's own rolling window, never the measurement window: that one
       // is emptied every frame once measured, which is the `NaN` the tablet
-      // showed. @see MeasurementClock.recent
-      const live = percentiles(clock.recent);
-      controls.line.textContent =
-        `${drawnWorldOf(view)} world · ${worldRung(state).label}` +
-        `${measured ? ' · measured' : elapsed < WARM_UP_SECONDS ? ' · warming up' : ' · sampling'}` +
-        ` · frame p50 ${readoutMs(live.p50)} · ` +
-        `buffer ${String(gl?.drawingBufferWidth ?? 0)}×${String(gl?.drawingBufferHeight ?? 0)}` +
-        (notice === undefined ? '' : `\n${notice}`);
+      // showed. @see readoutLine
+      controls.line.textContent = readoutLine({
+        world: drawnWorldOf(view),
+        rung: worldRung(state).label,
+        frameCap:
+          worldRung(state).frameCap === DISPLAY_RATE ? 'display' : worldRung(state).frameCap,
+        phase: measured ? 'measured' : elapsed < WARM_UP_SECONDS ? 'warming up' : 'sampling',
+        clock,
+        buffer: [gl?.drawingBufferWidth ?? 0, gl?.drawingBufferHeight ?? 0],
+        notice,
+      });
     }
   };
   const safeStep = guarded(step, fail);
@@ -334,19 +363,11 @@ function fail(message: string): void {
 // this module existed; from here on it hands them to `fail`, and what it caught
 // meanwhile is reported now. Without that script — a page built from an old
 // `realistic.html` — this module listens for itself, as it always did.
-if (early === undefined) {
-  addEventListener('error', (event) => {
-    fail(describe(event.error ?? event.message));
-  });
-  addEventListener('unhandledrejection', (event) => {
-    fail(describe(event.reason));
-  });
-} else {
-  early.report = fail;
-  for (const message of early.errors.splice(0)) fail(message);
-}
+// @see takeOverReporting
+takeOverReporting(early, fail, (type, listener) => addEventListener(type, listener), describe);
 // One line for `adb logcat`, whatever else happens: whether the shell's bridge
-// reached this page is the question the tablet's `triggerEvent` error asks.
+// reached this page. It does (#480) — the tablet's `triggerEvent` error is the
+// app's launch, not this page. @see apps/mobile/src/android/lifecycle-events.test.ts
 console.log(
   `OYL-REALISTIC-LOAD ${JSON.stringify({ bridge: published.bridge ?? 'no early script' })}`,
 );

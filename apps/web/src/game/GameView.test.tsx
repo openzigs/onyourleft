@@ -703,6 +703,19 @@ describe('GameView — the world moves rather than steps (#323)', () => {
   const INSIDE_ONE_STEP_MS = 8;
 
   /**
+   * How many {@link FRAME_PERIOD_MS} frames get the rider moving — one fewer
+   * than the ladder needs to step down.
+   *
+   * ⚠️ **It was sixty, and since #476 sixty is a different test.** A 250 ms
+   * frame is a hot sample, and sixty of them walk the ladder to level 2, whose
+   * 24 fps cap now does what it says: three frames 8 ms apart draw ONE. That
+   * is the cap working, not interpolation failing — so the warm-up stays on
+   * the uncapped top rung, where every animation frame is drawn, which is the
+   * rung whose frames land several to a simulation step.
+   */
+  const WARM_UP_FRAMES = SUSTAINED_SAMPLES - 1;
+
+  /**
    * How far up the road a frame put something, in the corridor's own metres.
    *
    * ⚠️ **`z` alone, and NOT a key built from `x`, `y` and `z` — which is what
@@ -734,8 +747,8 @@ describe('GameView — the world moves rather than steps (#323)', () => {
 
   it('hands the renderer a different rider and camera on every frame of a step', async () => {
     const frames = await startRiding({ pacer: false });
-    // Fifteen seconds of riding, so the rider is moving at a real speed.
-    await pump(60);
+    // Seven seconds of riding, so the rider is moving at a real speed. @see WARM_UP_FRAMES
+    await pump(WARM_UP_FRAMES);
     frames.length = 0;
 
     await pump(3, INSIDE_ONE_STEP_MS);
@@ -751,7 +764,7 @@ describe('GameView — the world moves rather than steps (#323)', () => {
     // because it is the only thing on the road that is not directly under the
     // camera.
     const frames = await startRiding({ pacer: true, intensity: '2.5' });
-    await pump(60);
+    await pump(WARM_UP_FRAMES);
     frames.length = 0;
 
     await pump(3, INSIDE_ONE_STEP_MS);
@@ -986,6 +999,75 @@ describe('GameView — a hot phone sheds scenery before frame rate (#245)', () =
     expect(drawn.scatter.length).toBeGreaterThan(
       QUALITY_LADDER[2]?.scatterItems ?? Number.POSITIVE_INFINITY,
     );
+  });
+});
+
+/**
+ * The frame cap, through the real loop — #476.
+ *
+ * `QualitySettings.frameCap` was declared on every rung and read by nothing,
+ * so every rung drew at the display's rate. These count what the renderer is
+ * actually handed, on a 60 Hz display, at each rung the ladder walks to.
+ */
+describe('GameView — each rung draws at its own frame cap (#476)', () => {
+  const VSYNC_MS = 1000 / 60;
+  /** Two-thirds of a second of a 60 Hz display: short of the 30 cool samples a climb needs. */
+  const MEASURED_VSYNCS = 40;
+
+  it('draws every animation frame at the top rung, then 30, 24 and 20 a second', async () => {
+    const frames = await startRiding({ pacer: false });
+    const drawnPerMeasure = async (): Promise<number> => {
+      frames.length = 0;
+      await pump(MEASURED_VSYNCS, VSYNC_MS);
+      return frames.length;
+    };
+    const counts = [await drawnPerMeasure()];
+    for (let level = 1; level < QUALITY_LADDER.length; level += 1) {
+      // Hot frames walk the ladder one rung down…
+      await pump(SUSTAINED_SAMPLES + 2);
+      expect(rungs[rungs.length - 1]).toEqual(QUALITY_LADDER[level]);
+      // …and the rung it reached decides how many of the next frames are drawn.
+      counts.push(await drawnPerMeasure());
+    }
+    expect(counts[0]).toBe(MEASURED_VSYNCS);
+    expect(counts[1]).toBe(MEASURED_VSYNCS / 2);
+    // 24 and 20 a second over two-thirds of a second: 16 and 13 or 14.
+    expect(counts[2]).toBeGreaterThanOrEqual(15);
+    expect(counts[2]).toBeLessThanOrEqual(17);
+    expect(counts[3]).toBeGreaterThanOrEqual(13);
+    expect(counts[3]).toBeLessThanOrEqual(14);
+    // The two rungs whose deepest cut is the frame rate now cut it.
+    expect(counts[3] ?? 0).toBeLessThan(counts[2] ?? 0);
+    expect(counts[2] ?? 0).toBeLessThan(counts[1] ?? 0);
+  });
+
+  it('still moves the rider on every frame it draws at the floor rung — #323 under a cap', async () => {
+    const frames = await startRiding({ pacer: false });
+    for (let level = 1; level < QUALITY_LADDER.length; level += 1) {
+      await pump(SUSTAINED_SAMPLES + 2);
+    }
+    frames.length = 0;
+    await pump(MEASURED_VSYNCS, VSYNC_MS);
+    const along = frames.map((frame) => frame.markers.find((each) => each.kind === 'rider')?.z);
+    expect(along.length).toBeGreaterThan(10);
+    for (let index = 1; index < along.length; index += 1) {
+      expect(along[index] as number).toBeGreaterThan(along[index - 1] as number);
+    }
+  });
+
+  it('does not read a skipped animation frame as a fast frame', async () => {
+    // Level 1 caps at 30, so on a 60 Hz display every other animation frame
+    // is skipped. The ladder climbs back after SUSTAINED_SAMPLES cool samples;
+    // a loop that fed it every animation frame's gap would climb after 30
+    // animation frames, when only 15 frames have been drawn.
+    await startRiding({ pacer: false });
+    await pump(SUSTAINED_SAMPLES + 2);
+    expect(rungs[rungs.length - 1]).toEqual(QUALITY_LADDER[1]);
+    await pump(SUSTAINED_SAMPLES + 2, VSYNC_MS);
+    expect(rungs[rungs.length - 1]).toEqual(QUALITY_LADDER[1]);
+    // Twice as many animation frames is as many drawn frames: now it climbs.
+    await pump(SUSTAINED_SAMPLES + 2, VSYNC_MS);
+    expect(rungs[rungs.length - 1]).toEqual(QUALITY_LADDER[0]);
   });
 });
 

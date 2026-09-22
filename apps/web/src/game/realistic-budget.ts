@@ -28,11 +28,11 @@
  *   else.
  * - **Triangles at about 1.2 times** the all-on count, and bounded by the
  *   near-mesh caps below rather than by the scenery density. The run's p90 of
- *   19 ms was over the 16.7 ms frame at the tail. ⚠️ `quality.ts` declares a
- *   30 fps cap that would double that budget, and **nothing in the product
- *   reads it** — found while writing this, and filed as
- *   [#476](https://github.com/openzigs/onyourleft/issues/476) — so the frame is
- *   drawn at the display's rate and no figure here leans on the cap.
+ *   19 ms was over the 16.7 ms frame at the tail. ⚠️ Since
+ *   [#476](https://github.com/openzigs/onyourleft/issues/476) the cap is
+ *   honoured, and **both realistic rungs draw at the display's rate** by the
+ *   owner's ruling (`quality.ts` §`QUALITY_LADDER`), so the 16.7 ms frame is
+ *   the budget these figures answer to and no figure here leans on a cap.
  *
  * `docs/validation/0002-android-shell-and-game.md` Part Z is the soak, with
  * its cells empty; [#475](https://github.com/openzigs/onyourleft/issues/475)
@@ -65,7 +65,12 @@ export const REALISTIC_TEXTURE_CEILING_PIXELS = 2048;
  * - `sky` 2048 — the equirectangular HDR, the size the owner looked at;
  * - `surface` 1024 — #457's device run put 2K surfaces at 128 MiB and 1K at 32;
  * - `model` 512 — every map inside a tree, shrub or rock GLB;
- * - `impostor` 2048 — the strip is eight 256-pixel frames side by side.
+ * - `impostor` 2048 — the strip is eight 256-pixel frames side by side;
+ * - `structure` 512 — #475: a structure's photographic surfaces, colour and
+ *   normal, downsized by the pipeline. A wall a rider passes at 10 m fills
+ *   about a tenth of the screen's height, and 512 px over Poly Haven's 2 m
+ *   repeat is 4 mm a texel, which is finer than the tablet can show there.
+ *   Chosen, like every figure here, not measured on a device.
  *
  * @test-facing held by `realistic-budget.test.ts`, which reads every committed
  * realistic file back off disk against it; the renderer spends it only on the
@@ -76,6 +81,7 @@ export const REALISTIC_TEXTURE_PIXELS = {
   surface: 1024,
   model: 512,
   impostor: 2048,
+  structure: 512,
 } as const;
 
 /**
@@ -91,12 +97,28 @@ export const REALISTIC_TEXTURE_PIXELS = {
  * realistic file back off disk against it; the renderer spends it only on the
  * realistic path, which nothing the shipped app runs reaches until #475
  */
-export const REALISTIC_TRIANGLES: Readonly<Record<RealisticVegetationKind | 'rider', number>> = {
+export const REALISTIC_TRIANGLES: Readonly<
+  Record<RealisticVegetationKind | 'rider' | 'structure', number>
+> = {
   'tree-broadleaf': 28_000,
   'tree-conifer': 24_000,
   shrub: 6_500,
   rock: 2_500,
   rider: 9_000,
+  /**
+   * One realistic structure, every surface together — #475. Built in
+   * `three-renderer.ts` from numbers rather than read off a file, so it is
+   * held there (`realisticStructureTriangles`), and it is 96 because the
+   * heaviest built shape — a fence's five posts and two rails — is 84.
+   *
+   * ⚠️ **Why the frame's triangles do not count the structures**, which
+   * {@link REALISTIC_FRAME_TRIANGLES} says of the stylised world's: a realistic
+   * structure is drawn with **no more** triangles than the stylised world draws
+   * at the same place — the same built shape for eight kinds, and for a house
+   * 18 triangles where the stylised world draws a Kenney model of hundreds —
+   * and `realistic-budget.test.ts` holds that, kind by kind.
+   */
+  structure: 96,
 };
 
 /**
@@ -138,7 +160,9 @@ export const REALISTIC_NEAR_MESHES: Readonly<Record<RealisticVegetationKind, num
  * worst case the caps above allow — every near slot filled with the heaviest
  * shape of its kind, and three riders — rather than any frame in particular.
  * The stylised world's corridor, terrain and structures sit under it on both
- * worlds and are not counted here, because they do not change with the world.
+ * worlds and are not counted here, because they do not change with the world
+ * — and since #475 the realistic structures are no heavier than the stylised
+ * ones at the same place ({@link REALISTIC_TRIANGLES}' `structure`).
  *
  * @test-facing held by `realistic-budget.test.ts`, which reads every committed
  * realistic file back off disk against it; the renderer spends it only on the

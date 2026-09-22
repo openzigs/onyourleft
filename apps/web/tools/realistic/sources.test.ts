@@ -11,8 +11,12 @@ import {
   safeRelativePath,
   shippedFiles,
   SOURCES,
+  STRUCTURE_TEXTURES,
+  structureMapFiles,
+  TEXTURE_SCRIPT,
   type AssetSource,
 } from './sources';
+import { sameFiles } from './fetch-assets';
 
 const polyHaven = SOURCES.find((source) => source.id === 'farm_field') as AssetSource;
 const makeHuman = SOURCES.find((source) => source.id === 'makehuman') as AssetSource;
@@ -180,5 +184,55 @@ describe('the pipeline’s own table', () => {
   it('names each shipped file once', () => {
     const files = shippedFiles();
     expect(new Set(files).size).toBe(files.length);
+  });
+});
+
+describe('re-locking dates only what moved — #475', () => {
+  const a = { path: 'a.jpg', sha256: '1' };
+  const b = { path: 'b.jpg', sha256: '2' };
+
+  it('calls the same files in any order the same', () => {
+    expect(sameFiles([a, b], [b, a])).toBe(true);
+  });
+
+  it('calls a changed byte, a lost file or an added one different', () => {
+    expect(sameFiles([a, b], [a, { ...b, sha256: '3' }])).toBe(false);
+    expect(sameFiles([a, b], [a])).toBe(false);
+    expect(sameFiles([a], [a, b])).toBe(false);
+    expect(sameFiles([a, b], [a, { ...b, path: 'c.jpg' }])).toBe(false);
+  });
+});
+
+describe('the structures’ surfaces — #475, ADR 0026 D-12 layer 3', () => {
+  it('takes each from Poly Haven under CC0, colour and normal map at 1K', () => {
+    for (const texture of STRUCTURE_TEXTURES) {
+      const source = SOURCES.find((each) => each.id === texture.id);
+      expect(source?.licence, texture.id).toBe('CC0-1.0');
+      expect(source?.origin, texture.id).toEqual({
+        from: 'polyhaven',
+        select: { type: 'texture', resolution: '1k', maps: ['Diffuse', 'nor_gl'] },
+      });
+    }
+  });
+
+  it('makes two files from each, downsized by the committed texture script', () => {
+    for (const texture of STRUCTURE_TEXTURES) {
+      const made = OUTPUTS.filter((output) => output.from === texture.id);
+      expect(made.map((output) => output.file).sort(), texture.id).toEqual(
+        [structureMapFiles(texture.id).colour, structureMapFiles(texture.id).normal].sort(),
+      );
+      for (const output of made) {
+        expect(output.recipe, output.file).toMatchObject({
+          how: 'blender',
+          script: TEXTURE_SCRIPT,
+        });
+        // The colour map is read as colour and the normal map as data, never the other way.
+        const args = output.recipe.how === 'blender' ? output.recipe.args : [];
+        expect(args[2], output.file).toBe(output.file.includes('_nor_gl_') ? 'data' : 'colour');
+        expect(args[0], output.file).toBe(
+          output.file.includes('_nor_gl_') ? `${texture.id}_nor_gl_1k.jpg` : texture.colourFile,
+        );
+      }
+    }
   });
 });

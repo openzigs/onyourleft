@@ -83,6 +83,19 @@ async function authorsOf(source: AssetSource): Promise<string> {
   return polyHavenAuthors(source.id, info);
 }
 
+/** Whether two lists of locked files are the same files with the same bytes. */
+export function sameFiles(
+  was: readonly { readonly path: string; readonly sha256: string }[],
+  now: readonly { readonly path: string; readonly sha256: string }[],
+): boolean {
+  const key = (files: typeof was): string =>
+    files
+      .map((file) => `${file.path} ${file.sha256}`)
+      .sort()
+      .join('\n');
+  return was.length === now.length && key(was) === key(now);
+}
+
 const md5 = (data: Buffer): string => createHash('md5').update(data).digest('hex');
 const sha256 = (data: Buffer): string => createHash('sha256').update(data).digest('hex');
 
@@ -140,7 +153,14 @@ async function main(): Promise<void> {
       licence: verdict.licence,
       licencePage: source.licencePage,
       evidence: verdict.evidence,
-      read: relock ? read : (expected?.read ?? read),
+      // ⚠️ **Re-locking re-dates only what moved** (#475). A source whose
+      // files are exactly the ones the lock already records keeps the date its
+      // licence was read; before, adding one source re-dated every other and
+      // moved the `read` of every committed asset's record with it.
+      read:
+        relock && (expected === undefined || !sameFiles(expected.files, files))
+          ? read
+          : (expected?.read ?? read),
       authors: await authorsOf(source),
       files,
     });
