@@ -36,9 +36,6 @@
  * debugger attached, as #457's did.
  */
 
-import { metres, metresPerSecond, seconds } from '@onyourleft/domain';
-
-import { simulatedCrankAngle } from '../src/game/bicycle';
 import {
   INITIAL_QUALITY,
   nextWorldQuality,
@@ -46,8 +43,6 @@ import {
   type WorldQualityState,
 } from '../src/game/quality';
 import { realisticWorldNotice, type RealisticWorldOutcome } from '../src/game/realistic-assets';
-import { sceneFrame } from '../src/game/scene';
-import { atStartLine } from '../src/game/simulation';
 import { corridorOrigin } from '../src/game/terrain';
 import {
   drawnWorldOf,
@@ -56,13 +51,12 @@ import {
   threeGameRenderer,
 } from '../src/game/three-renderer';
 import { configQuery, parseConfig, percentiles, type Percentiles } from './realistic/config';
-import { describe, guarded, MeasurementClock } from './realistic/loop';
+import { rideFrame, RIDE_METRES_PER_SECOND } from './realistic/frame';
+import { describe, guarded, MeasurementClock, readoutMs } from './realistic/loop';
 import { realisticRoute } from './realistic/route';
 
 /** How long the scene runs before anything is sampled: shader compiles, first uploads. */
 const WARM_UP_SECONDS = 3;
-/** How fast the rider goes: about 32 km/h. */
-const RIDE_METRES_PER_SECOND = 9;
 /** Where a long ride starts, wraps back to, and how much road it rides before it does. */
 const START_METRES = 2_550;
 const LOOP_FROM_METRES = 300;
@@ -80,11 +74,32 @@ export interface RealisticSample {
   readonly userAgent: string;
 }
 
+/**
+ * What `realistic.html`'s first, classic script records before this module
+ * runs — #478. @see realistic.html
+ */
+export interface EarlyRecord {
+  /** `typeof window.Capacitor` before any script of ours ran: `'object'` when the shell's bridge was injected. */
+  readonly capacitorAtStart: string;
+  /** `typeof window.androidBridge`: the interface the bridge talks through, which the WebView provides. */
+  readonly androidBridgeAtStart: string;
+  /** Whether the page stood in for a missing bridge's `triggerEvent`. */
+  readonly standIn: boolean;
+  /** Every lifecycle event the shell sent to the stand-in. */
+  readonly events: readonly { readonly event: string; readonly target: string }[];
+  /** Errors caught before this module took over reporting. */
+  readonly errors: string[];
+  report: ((message: string) => void) | undefined;
+}
+
 declare global {
   interface Window {
+    __oylRealisticEarly?: EarlyRecord;
     __oylRealistic?: {
       readonly ready: boolean;
       readonly errors: readonly string[];
+      /** What the first script saw of Capacitor's bridge, and what the shell sent it. @see EarlyRecord */
+      readonly bridge: Omit<EarlyRecord, 'errors' | 'report'> | undefined;
       readonly query: string;
       readonly outcome: RealisticWorldOutcome | undefined;
       readonly notice: string | undefined;
@@ -95,9 +110,20 @@ declare global {
 }
 
 const errors: string[] = [];
+const early = window.__oylRealisticEarly;
 let published: NonNullable<Window['__oylRealistic']> = {
   ready: false,
   errors,
+  bridge:
+    early === undefined
+      ? undefined
+      : {
+          capacitorAtStart: early.capacitorAtStart,
+          androidBridgeAtStart: early.androidBridgeAtStart,
+          standIn: early.standIn,
+          // The same array the stand-in appends to, so it is live.
+          events: early.events,
+        },
   query: location.search,
   outcome: undefined,
   notice: undefined,
@@ -197,22 +223,6 @@ async function run(): Promise<void> {
   addEventListener('resize', resize);
   const gl = canvas.getContext('webgl2');
 
-  const frameAt = (distance: number, elapsed: number) => {
-    const start = atStartLine(profile);
-    return sceneFrame({
-      profile,
-      origin,
-      state: {
-        ...start,
-        ride: { speed: metresPerSecond(RIDE_METRES_PER_SECOND), distance: metres(distance) },
-        elapsed: seconds(elapsed),
-        ridden: seconds(elapsed),
-      },
-      botDistance: distance + 25,
-      crankAngle: simulatedCrankAngle(distance),
-    });
-  };
-
   const clock = new MeasurementClock(WARM_UP_SECONDS);
   let measured = false;
   let windowFrom = 0;
@@ -239,7 +249,17 @@ async function run(): Promise<void> {
       config.at ??
       LOOP_FROM_METRES +
         ((START_METRES - LOOP_FROM_METRES + elapsed * RIDE_METRES_PER_SECOND) % LOOP_METRES);
-    view.render(frameAt(distance, config.at === undefined ? elapsed : 0));
+    // The rung the ladder is on decides how much scenery the frame carries, as
+    // it does in `GameView` — #478. @see rideFrame
+    view.render(
+      rideFrame({
+        profile,
+        origin,
+        distance,
+        elapsed: config.at === undefined ? elapsed : 0,
+        rung: worldRung(state),
+      }),
+    );
     callsInWindow += takeCalls();
     framesInWindow += 1;
     if (!published.ready) publish({ ready: true });
@@ -279,11 +299,14 @@ async function run(): Promise<void> {
     }
     if (controls !== undefined && now - shownAt > 1_000) {
       shownAt = now;
-      const live = percentiles(clock.samples.slice(-120));
+      // The clock's own rolling window, never the measurement window: that one
+      // is emptied every frame once measured, which is the `NaN` the tablet
+      // showed. @see MeasurementClock.recent
+      const live = percentiles(clock.recent);
       controls.line.textContent =
         `${drawnWorldOf(view)} world · ${worldRung(state).label}` +
         `${measured ? ' · measured' : elapsed < WARM_UP_SECONDS ? ' · warming up' : ' · sampling'}` +
-        ` · frame p50 ${live.p50.toFixed(1)} ms · ` +
+        ` · frame p50 ${readoutMs(live.p50)} · ` +
         `buffer ${String(gl?.drawingBufferWidth ?? 0)}×${String(gl?.drawingBufferHeight ?? 0)}` +
         (notice === undefined ? '' : `\n${notice}`);
     }
@@ -307,12 +330,26 @@ function fail(message: string): void {
   document.body.append(shown);
 }
 
-addEventListener('error', (event) => {
-  fail(describe(event.error ?? event.message));
-});
-addEventListener('unhandledrejection', (event) => {
-  fail(describe(event.reason));
-});
+// #478. `realistic.html`'s first script has been catching errors since before
+// this module existed; from here on it hands them to `fail`, and what it caught
+// meanwhile is reported now. Without that script — a page built from an old
+// `realistic.html` — this module listens for itself, as it always did.
+if (early === undefined) {
+  addEventListener('error', (event) => {
+    fail(describe(event.error ?? event.message));
+  });
+  addEventListener('unhandledrejection', (event) => {
+    fail(describe(event.reason));
+  });
+} else {
+  early.report = fail;
+  for (const message of early.errors.splice(0)) fail(message);
+}
+// One line for `adb logcat`, whatever else happens: whether the shell's bridge
+// reached this page is the question the tablet's `triggerEvent` error asks.
+console.log(
+  `OYL-REALISTIC-LOAD ${JSON.stringify({ bridge: published.bridge ?? 'no early script' })}`,
+);
 
 run().catch((error: unknown) => {
   fail(describe(error));

@@ -33,6 +33,9 @@
 /** A step longer than this is not a frame; it is the page not being drawn. */
 export const MAXIMUM_FRAME_GAP_MS = 1_000;
 
+/** How many of the latest frames the on-screen readout is taken over: about two seconds at 60 Hz. */
+export const RECENT_FRAMES = 120;
+
 /** What one frame is, as the clock sees it. */
 export interface ClockFrame {
   /** Seconds since the first frame drawn; never negative. */
@@ -48,6 +51,13 @@ export class MeasurementClock {
   #samples: number[] = [];
   #sampledMs = 0;
   #stalls = 0;
+  /**
+   * The latest {@link RECENT_FRAMES} sampled steps, as a ring — the readout's
+   * own window, which {@link take} does not empty. @see recent
+   */
+  readonly #recent = new Float64Array(RECENT_FRAMES);
+  #recentCount = 0;
+  #recentNext = 0;
 
   constructor(warmUpSeconds: number) {
     this.#warmUpSeconds = warmUpSeconds;
@@ -72,6 +82,9 @@ export class MeasurementClock {
     }
     this.#samples.push(step);
     this.#sampledMs += step;
+    this.#recent[this.#recentNext] = step;
+    this.#recentNext = (this.#recentNext + 1) % RECENT_FRAMES;
+    this.#recentCount = Math.min(RECENT_FRAMES, this.#recentCount + 1);
     return { elapsedSeconds, sampledMs: step };
   }
 
@@ -87,6 +100,27 @@ export class MeasurementClock {
   /** The frames sampled so far, without ending the window. */
   get samples(): readonly number[] {
     return this.#samples;
+  }
+
+  /**
+   * The latest frames sampled, oldest first, whatever windows have been taken
+   * — what the page's on-screen readout is computed over (#478).
+   *
+   * ⚠️ **Not {@link samples}, which is what the readout used to read, and that
+   * is why the tablet showed `frame p50 NaN ms`.** Once the measurement window
+   * is published the page {@link take}s every frame, so `samples` is empty at
+   * every readout for the rest of the ride; and with `?soak=` it is emptied
+   * each minute. A readout over the window being measured is a readout of a
+   * window that is almost always empty. This one is never emptied, so it is
+   * empty only before the first frame after the warm-up.
+   */
+  get recent(): readonly number[] {
+    const found: number[] = [];
+    const first = (this.#recentNext - this.#recentCount + RECENT_FRAMES) % RECENT_FRAMES;
+    for (let at = 0; at < this.#recentCount; at += 1) {
+      found.push(this.#recent[(first + at) % RECENT_FRAMES] ?? 0);
+    }
+    return found;
   }
 
   /** Ends the window: returns what it held and starts an empty one. */
@@ -117,6 +151,15 @@ export function guarded<A extends unknown[]>(
       return false;
     }
   };
+}
+
+/**
+ * A frame time for the readout: one decimal place, or a dash when nothing has
+ * been timed — `percentiles` answers an empty sample with `NaN`, which is right
+ * for a published figure and meaningless on a screen (#478).
+ */
+export function readoutMs(value: number): string {
+  return Number.isFinite(value) ? `${value.toFixed(1)} ms` : '— (not timed yet)';
 }
 
 /** An error's message, with its name when it has one worth reading. */

@@ -1732,6 +1732,22 @@ export class ScatterBelt {
   #budget = Number.POSITIVE_INFINITY;
 
   /**
+   * The kinds another belt draws — ADR 0026 D-3, and the realistic world's
+   * primitives belt only; the stylised belt skips nothing.
+   *
+   * ⚠️ **A skipped kind in view still SPENDS this belt's budget** (#478). The
+   * budget is the rung's for the whole frame, and the realistic world splits
+   * the frame's scenery between this belt and
+   * {@link RealisticVegetationBelt}. Counted only here, the trees would be
+   * free: the second realistic rung's `scatterItems: 160` would have cut the
+   * posts and the buildings and drawn all 240 items' worth of trees — which the
+   * spike found to be the realistic world's cost. So both belts walk the list
+   * in the same order, count the same items against the same number, and
+   * between them admit exactly the items the stylised belt would.
+   */
+  readonly #skip: ReadonlySet<SceneryKind>;
+
+  /**
    * The most distinct shapes one kind may be drawn as this frame — #367.
    *
    * The quality rung's `sceneryVariants`, applied by
@@ -1761,6 +1777,7 @@ export class ScatterBelt {
     options: { readonly skip?: ReadonlySet<SceneryKind>; readonly physical?: boolean } = {},
   ) {
     this.#materials = options.physical === true ? physicalMaterials() : vertexColouredMaterials();
+    this.#skip = options.skip ?? new Set();
     for (const kind of SCENERY_KINDS) {
       if (options.skip?.has(kind) === true) {
         continue;
@@ -1815,6 +1832,19 @@ export class ScatterBelt {
    */
   get meshes(): ReadonlyMap<string, InstancedMesh> {
     return this.#meshes;
+  }
+
+  /**
+   * How many items the last frame drew — one instance each, across every mesh.
+   *
+   * @test-facing held by `realistic-renderer.test.ts` and, through
+   * `sceneryDrawnOf`, by the browser gate: what a rung's budget is checked
+   * against (#478)
+   */
+  get drawnItems(): number {
+    let drawn = 0;
+    for (const mesh of this.#meshes.values()) drawn += mesh.count;
+    return drawn;
   }
 
   /** Every mesh one kind is drawn across. @see ScatterBelt.meshes */
@@ -1972,13 +2002,17 @@ export class ScatterBelt {
     for (const item of items) {
       const key = this.#keyFor(item);
       const mesh = this.#meshes.get(key);
-      if (mesh === undefined || !inView(item, pose)) {
+      if ((mesh === undefined && !this.#skip.has(item.kind)) || !inView(item, pose)) {
         continue;
       }
       if (admitted >= this.#budget) {
         break;
       }
       admitted += 1;
+      if (mesh === undefined) {
+        // Another belt draws it; it has spent this frame's budget all the same.
+        continue;
+      }
       this.#counts.set(key, (this.#counts.get(key) ?? 0) + 1);
     }
     for (const [key, mesh] of this.#meshes) {
@@ -1990,13 +2024,16 @@ export class ScatterBelt {
     admitted = 0;
     for (const item of items) {
       const mesh = this.#meshes.get(this.#keyFor(item));
-      if (mesh === undefined || !inView(item, pose)) {
+      if ((mesh === undefined && !this.#skip.has(item.kind)) || !inView(item, pose)) {
         continue;
       }
       if (admitted >= this.#budget) {
         break;
       }
       admitted += 1;
+      if (mesh === undefined) {
+        continue;
+      }
       this.#position.set(item.x, item.y, item.z);
       this.#quaternion.setFromAxisAngle(this.#up, item.rotation);
       this.#scale.setScalar(item.scale);
@@ -3648,8 +3685,16 @@ export interface RealisticLoaders {
  * URLs of its own making, so any other URL a file declared would be the
  * network — the posture `scenery-models.ts` §`sceneryResourceUrl` takes for the
  * stylised pack.
+ *
+ * ⚠️ **No committed file exercises the refusal**, because every realistic GLB
+ * embeds its images — so the browser gate cannot see it, and a pipeline change
+ * that wrote an external `.png` URI would reach the network with every gate
+ * green. That is why it is tested as a function (#478).
+ *
+ * @test-facing held by `realistic-renderer.test.ts` §"what a realistic model may
+ * fetch"; the shipped path calls it only from {@link THREE_LOADERS}
  */
-function realisticResourceUrl(own: string): (url: string) => string {
+export function realisticResourceUrl(own: string): (url: string) => string {
   return (url) =>
     url === own || url.startsWith('blob:') || url.startsWith('data:')
       ? url
@@ -3682,50 +3727,85 @@ const THREE_LOADERS: RealisticLoaders = {
 export async function loadRealisticWorld(
   loaders: RealisticLoaders = THREE_LOADERS,
 ): Promise<RealisticWorldOutcome> {
-  const loaded: { textures: Texture[]; objects: Object3D[] } = { textures: [], objects: [] };
+  // Everything that has been loaded or built so far, so that a failure can
+  // release all of it. @see the ⚠️ on settling below
+  const loaded: { textures: Texture[]; objects: Object3D[]; shapes: RealisticShape[] } = {
+    textures: [],
+    objects: [],
+    shapes: [],
+  };
+  const texture = <T extends Texture>(load: () => Promise<T>): Promise<T> =>
+    started(load).then((each) => {
+      loaded.textures.push(each);
+      return each;
+    });
+  const model = (load: () => Promise<Object3D>): Promise<Object3D> =>
+    started(load).then((each) => {
+      loaded.objects.push(each);
+      return each;
+    });
   try {
-    const keep = <T extends Texture>(texture: T): T => {
-      loaded.textures.push(texture);
-      return texture;
+    const sky = texture(() => loaders.sky(realisticUrl(REALISTIC_SKY)));
+    const road = {
+      colour: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.road.colour))),
+      normal: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.road.normal))),
     };
-    const [skyTexture, roadColour, roadNormal, groundColour, groundNormal, body] =
-      await Promise.all([
-        loaders.sky(realisticUrl(REALISTIC_SKY)).then(keep),
-        loaders.texture(realisticUrl(REALISTIC_SURFACES.road.colour)).then(keep),
-        loaders.texture(realisticUrl(REALISTIC_SURFACES.road.normal)).then(keep),
-        loaders.texture(realisticUrl(REALISTIC_SURFACES.ground.colour)).then(keep),
-        loaders.texture(realisticUrl(REALISTIC_SURFACES.ground.normal)).then(keep),
-        loaders.model(realisticUrl(REALISTIC_RIDER)).then((scene) => {
-          loaded.objects.push(scene);
-          return scene;
-        }),
-      ]);
-    const vegetation = new Map<RealisticVegetationKind, readonly RealisticShape[]>();
-    for (const kind of REALISTIC_VEGETATION_KINDS) {
-      const shapes = await Promise.all(
-        REALISTIC_VEGETATION[kind].map(async (model) => {
-          const [scene, strip] = await Promise.all([
-            loaders.model(realisticUrl(model.file)),
-            model.impostor === undefined
-              ? Promise.resolve(undefined)
-              : loaders.texture(realisticUrl(model.impostor)).then(keep),
-          ]);
-          loaded.objects.push(scene);
-          return prepareRealisticShape(scene, model.name, strip);
-        }),
-      );
-      vegetation.set(kind, shapes);
+    const ground = {
+      colour: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.ground.colour))),
+      normal: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.ground.normal))),
+    };
+    const rider = model(() => loaders.model(realisticUrl(REALISTIC_RIDER)));
+    const shapes = REALISTIC_VEGETATION_KINDS.map((kind) => ({
+      kind,
+      models: REALISTIC_VEGETATION[kind].map(({ name, file, impostor }) => ({
+        name,
+        scene: model(() => loaders.model(realisticUrl(file))),
+        strip:
+          impostor === undefined
+            ? Promise.resolve(undefined)
+            : texture(() => loaders.texture(realisticUrl(impostor))),
+      })),
+    }));
+    // ⚠️ **Every load is SETTLED before anything is decided — #478.** This was
+    // a `Promise.all`, which rejects on the first failure while every other
+    // load carries on: a texture that arrived after the `catch` below had run
+    // was kept by nobody and released by nobody, and on a flaky network (#475
+    // makes this a rider's path) that is most of the set. So a failure waits
+    // for the loads still in flight, and then releases all of them.
+    const settled = await Promise.allSettled([
+      sky,
+      road.colour,
+      road.normal,
+      ground.colour,
+      ground.normal,
+      rider,
+      ...shapes.flatMap((each) => each.models.flatMap((one) => [one.scene, one.strip])),
+    ]);
+    for (const outcome of settled) {
+      if (outcome.status === 'rejected') throw outcome.reason;
     }
-    for (const texture of [roadColour, roadNormal, groundColour, groundNormal]) {
-      texture.wrapS = RepeatWrapping;
-      texture.wrapT = RepeatWrapping;
-      texture.minFilter = LinearMipmapLinearFilter;
+    const vegetation = new Map<RealisticVegetationKind, readonly RealisticShape[]>();
+    for (const each of shapes) {
+      const prepared: RealisticShape[] = [];
+      for (const one of each.models) {
+        const shape = prepareRealisticShape(await one.scene, one.name, await one.strip);
+        loaded.shapes.push(shape);
+        prepared.push(shape);
+      }
+      vegetation.set(each.kind, prepared);
+    }
+    const [skyTexture, roadColour, roadNormal, groundColour, groundNormal, body] =
+      await Promise.all([sky, road.colour, road.normal, ground.colour, ground.normal, rider]);
+    for (const surface of [roadColour, roadNormal, groundColour, groundNormal]) {
+      surface.wrapS = RepeatWrapping;
+      surface.wrapT = RepeatWrapping;
+      surface.minFilter = LinearMipmapLinearFilter;
     }
     roadColour.colorSpace = SRGBColorSpace;
     groundColour.colorSpace = SRGBColorSpace;
     skyTexture.mapping = EquirectangularReflectionMapping;
     const pixels = skyPixelsOf(skyTexture);
-    const sky = { texture: skyTexture, upward: upwardRadiance(pixels), sunU: skySunU(pixels) };
+    const skyRead = { texture: skyTexture, upward: upwardRadiance(pixels), sunU: skySunU(pixels) };
     // ⚠️ Swapped in only once the new world is whole, and the old one released
     // only after the swap: a reload that failed half-way, or whose release
     // threw, must leave the world a view draws intact — the first version of
@@ -3733,7 +3813,7 @@ export async function loadRealisticWorld(
     // §"never half a world" caught.
     const previous = realisticWorld;
     realisticWorld = {
-      sky,
+      sky: skyRead,
       road: { colour: roadColour, normal: roadNormal },
       ground: { colour: groundColour, normal: groundNormal },
       vegetation,
@@ -3750,14 +3830,51 @@ export async function loadRealisticWorld(
     }
     return { loaded: true };
   } catch (error: unknown) {
-    for (const texture of loaded.textures) texture.dispose();
-    for (const scene of loaded.objects) releaseLoadedScene(scene);
+    // Each release on its own, so that one that throws does not keep the rest
+    // held — the same fixtures that found the swap-order defect have textures
+    // that refuse to let go.
+    for (const shape of loaded.shapes) attempt(() => releaseRealisticShape(shape));
+    for (const each of loaded.textures) attempt(() => each.dispose());
+    for (const scene of loaded.objects) attempt(() => releaseLoadedScene(scene));
     return {
       loaded: false,
       offline: typeof navigator !== 'undefined' && navigator.onLine === false,
       detail: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+/** A load started, with a loader that throws rather than rejecting turned into a rejection. */
+function started<T>(load: () => Promise<T>): Promise<T> {
+  try {
+    return load();
+  } catch (error: unknown) {
+    return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+  }
+}
+
+/** Runs a release, and carries on if it throws: a leak is not a reason to leak more. */
+function attempt(release: () => void): void {
+  try {
+    release();
+  } catch {
+    // Nothing to do: the object is held by nothing now, and the rest still go.
+  }
+}
+
+/**
+ * Releases one prepared realistic shape: the geometry it cloned, the material
+ * it constructed, the textures that material holds, and its impostor's.
+ */
+function releaseRealisticShape(shape: RealisticShape): void {
+  for (const part of shape.parts) {
+    part.geometry.dispose();
+    part.material.map?.dispose();
+    part.material.normalMap?.dispose();
+    part.material.dispose();
+  }
+  shape.impostor?.texture.dispose();
+  shape.impostor?.material.dispose();
 }
 
 /**
@@ -3782,16 +3899,7 @@ function releaseRealisticWorld(world: RealisticWorld): void {
     texture.dispose();
   }
   for (const shapes of world.vegetation.values()) {
-    for (const shape of shapes) {
-      for (const part of shape.parts) {
-        part.geometry.dispose();
-        part.material.map?.dispose();
-        part.material.normalMap?.dispose();
-        part.material.dispose();
-      }
-      shape.impostor?.texture.dispose();
-      shape.impostor?.material.dispose();
-    }
+    for (const shape of shapes) releaseRealisticShape(shape);
   }
   releaseLoadedScene(world.body);
 }
@@ -4042,6 +4150,15 @@ export class RealisticVegetationBelt {
   readonly #scale = new Vector3();
   readonly #up = new Vector3(0, 1, 0);
   #shown = true;
+  /**
+   * The rung's scenery budget — #245's, shared with the primitives belt (#478).
+   *
+   * Unbounded until a rung says otherwise, for {@link ScatterBelt}'s reason: a
+   * belt is a mechanism and a rung is a policy.
+   */
+  #budget = Number.POSITIVE_INFINITY;
+  /** How many items the last frame drew, as meshes or impostors. @see drawnItems */
+  #drawn = 0;
 
   constructor(vegetation: ReadonlyMap<RealisticVegetationKind, readonly RealisticShape[]>) {
     for (const kind of REALISTIC_VEGETATION_KINDS) {
@@ -4084,16 +4201,65 @@ export class RealisticVegetationBelt {
     if (!on) for (const mesh of this.meshes) mesh.visible = false;
   }
 
+  /**
+   * The most scenery items one frame may draw, from the quality rung — #478.
+   *
+   * ⚠️ **It is the SAME number the primitives belt beside it is given, and it
+   * counts every kind, not only the four this belt draws.** The rung's budget
+   * is for the frame's scenery, and the stylised belt spends it on the first
+   * items in the frame's order that are in view, whatever their kind. This belt
+   * admits exactly those items too — it stops at the item the budget runs out
+   * on, posts and buildings included — and the primitives belt counts the trees
+   * it skips, so the two together admit what the stylised belt would, and no
+   * more. Until #478 this belt had no budget at all, and the second realistic
+   * rung's reduction landed on the posts and never on the trees.
+   *
+   * What it admits is then drawn by this belt's own rule: the nearest of each
+   * kind as meshes, the rest of the trees as impostors, the rest of the shrubs
+   * and rocks not at all. So it is a ceiling on what is drawn, never a count of
+   * it. Allocates nothing.
+   */
+  setBudget(items: number): void {
+    this.#budget = items;
+  }
+
+  /**
+   * How many scenery items the last frame drew — as a mesh or as an impostor,
+   * one per item however many parts its shape has.
+   *
+   * @test-facing held by `realistic-renderer.test.ts` and, through
+   * `sceneryDrawnOf`, by the browser gate: what a rung's budget is checked
+   * against
+   */
+  get drawnItems(): number {
+    return this.#drawn;
+  }
+
   /** This frame's vegetation: the nearest of each kind as meshes, the rest of the trees as impostors. */
   update(items: readonly ScatterItem[], pose: CameraPose): void {
+    this.#drawn = 0;
     if (!this.#shown) return;
     for (const each of this.#kinds) {
       each.count = 0;
       for (const meshes of each.near) for (const mesh of meshes) mesh.count = 0;
       for (const mesh of each.far) if (mesh !== undefined) mesh.count = 0;
     }
+    // Pass 0: where the budget runs out — the first item in the frame's order,
+    // of ANY kind, that the budget has no room for. @see setBudget
+    let end = items.length;
+    if (Number.isFinite(this.#budget)) {
+      let admitted = 0;
+      for (let index = 0; index < items.length; index += 1) {
+        if (!inView(items[index] as ScatterItem, pose)) continue;
+        if (admitted >= this.#budget) {
+          end = index;
+          break;
+        }
+        admitted += 1;
+      }
+    }
     // Pass 1: the nearest N of each kind, by distance from the rider.
-    for (let index = 0; index < items.length; index += 1) {
+    for (let index = 0; index < end; index += 1) {
       const item = items[index] as ScatterItem;
       const each = this.#slotFor(item);
       if (each === undefined || !inView(item, pose)) continue;
@@ -4112,7 +4278,7 @@ export class RealisticVegetationBelt {
       each.count = Math.min(cap, each.count + 1);
     }
     // Pass 2: every item into the mesh or the impostor it is drawn with.
-    for (let index = 0; index < items.length; index += 1) {
+    for (let index = 0; index < end; index += 1) {
       const item = items[index] as ScatterItem;
       const each = this.#slotFor(item);
       if (each === undefined || each.shapes.length === 0 || !inView(item, pose)) continue;
@@ -4137,9 +4303,11 @@ export class RealisticVegetationBelt {
           mesh.setMatrixAt(mesh.count, this.#matrix);
           mesh.count += 1;
         }
+        this.#drawn += 1;
       } else if (target !== undefined && target.count < SCATTER_INSTANCE_CAPACITY) {
         target.setMatrixAt(target.count, this.#matrix);
         target.count += 1;
+        this.#drawn += 1;
       }
     }
     for (const mesh of this.meshes) {
@@ -4951,6 +5119,24 @@ class RealisticDrawing {
     this.riders.setShown(on);
   }
 
+  /**
+   * The rung's scenery budget, handed to BOTH belts that draw scenery — #478.
+   *
+   * One method so that the two cannot be given different numbers, and so that
+   * a view has one line to call: until #478 the view budgeted the primitives
+   * belt alone, and the trees — the realistic world's cost — were free.
+   * @see RealisticVegetationBelt.setBudget
+   */
+  setBudget(items: number): void {
+    this.vegetation.setBudget(items);
+    this.primitives.setBudget(items);
+  }
+
+  /** How many scenery items the last frame drew, both belts together. */
+  get sceneryDrawn(): number {
+    return this.vegetation.drawnItems + this.primitives.drawnItems;
+  }
+
   dispose(): void {
     this.vegetation.dispose();
     this.primitives.dispose();
@@ -5014,6 +5200,17 @@ export interface SceneMaterial {
  */
 export function drawnWorldOf(view: GameView): QualitySettings['world'] {
   return view instanceof ThreeGameView ? view.drawnWorld : 'stylised';
+}
+
+/**
+ * How many scenery items a view's last frame drew, in whichever world it drew —
+ * what the browser gate holds a rung's budget against (#478).
+ *
+ * @unwired reached only from the browser gate's harness; nothing in the render
+ * path needs to ask.
+ */
+export function sceneryDrawnOf(view: GameView): number {
+  return view instanceof ThreeGameView ? view.sceneryDrawn : 0;
 }
 
 /**
@@ -5232,7 +5429,7 @@ class ThreeGameView implements GameView {
     // ⚠️ Since #460 the frame carries the structures before the scenery, each
     // with a budget of its own, so the belt's is the two together.
     this.#scatter.setBudget(settings.scatterItems + settings.structureItems);
-    this.#realistic?.primitives.setBudget(settings.scatterItems + settings.structureItems);
+    this.#realistic?.setBudget(settings.scatterItems + settings.structureItems);
     // #367, and the same argument one line up: a rung is a property of the belt
     // between frames, so the render loop takes no decision about how many
     // distinct shapes it may draw. @see ScatterBelt.setVariants
@@ -5278,9 +5475,7 @@ class ThreeGameView implements GameView {
       if (this.#realistic === undefined) {
         this.#realistic = new RealisticDrawing(loaded, this.#renderer, this.#terrain.fields);
         this.#realistic.addTo(this.#scene);
-        this.#realistic.primitives.setBudget(
-          this.#quality.scatterItems + this.#quality.structureItems,
-        );
+        this.#realistic.setBudget(this.#quality.scatterItems + this.#quality.structureItems);
       }
     }
     const drawing = realistic ? this.#realistic : undefined;
@@ -5303,6 +5498,11 @@ class ThreeGameView implements GameView {
       this.#realistic = undefined;
       evictRealisticWorldFromGpu();
     }
+  }
+
+  /** How many scenery items the last frame drew, in the world it drew. @see sceneryDrawnOf */
+  get sceneryDrawn(): number {
+    return this.#realistic?.sceneryDrawn ?? this.#scatter.drawnItems;
   }
 
   /** Which world the last rung this view was given is drawn in. @see drawnWorldOf */

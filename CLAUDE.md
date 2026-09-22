@@ -68,7 +68,7 @@ apps/                 AGPL-3.0-or-later, without exception
                         Ride SCREEN at `#/`, which is a different route, where a
                         prose reading measure hid the workout below the fold.
                         ⚠️ Since #430/#425/#474/#369 it also holds realistic.html
-                        and realistic-harness.tsx — NOT a gate: the OWNER's page,
+                        and realistic-harness.ts — NOT a gate: the OWNER's page,
                         the one place ADR 0026 D-12 lets the realistic world be
                         reached until #475, staged into a local debug APK by
                         `realistic:stage`. The gate is game.html?realistic

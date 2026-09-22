@@ -4,6 +4,81 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>On Your Left — the realistic world, for the owner to look at (ADR 0026 D-12)</title>
+    <!--
+      #478. The FIRST script on the page, and a classic one, because a module
+      runs only after the document is parsed and its chunks fetched: an error
+      before then, or an event the Android shell sends before then, reached the
+      console and nothing else. It does three things and names no module:
+
+      1. It records whether Capacitor's native bridge is on this page. The
+         shell injects `window.Capacitor` before any script runs; on the
+         owner's tablet it was NOT here, and the shell's lifecycle events
+         (`window.Capacitor.triggerEvent("resume", "document")`, sent by
+         Capacitor's `MockCordovaWebViewImpl` when the app resumes after a
+         pause) threw `Cannot read properties of undefined (reading
+         'triggerEvent')` into the console. Which of the two is absent here -
+         the bridge object, or also the `androidBridge` interface under it -
+         is what says why, and only the device can answer it.
+      2. Where the bridge is absent it stands in for `triggerEvent` alone, so a
+         lifecycle event is RECORDED (and still dispatched, as the bridge
+         would) instead of thrown. It defines no `isNativePlatform`, so
+         `support/capacitor.ts` still reads this page as not the shell, which
+         is the truth about a page the bridge never reached.
+      3. It catches every error from the first moment and buffers it until the
+         page's module takes over reporting (`realistic-harness.ts` `fail`).
+
+      `realistic/early.test.ts` runs this script against a fake window.
+    -->
+    <script id="oyl-early">
+      (function () {
+        'use strict';
+        var early = {
+          capacitorAtStart: typeof window.Capacitor,
+          androidBridgeAtStart: typeof window.androidBridge,
+          standIn: false,
+          events: [],
+          errors: [],
+          report: undefined,
+        };
+        window.__oylRealisticEarly = early;
+        function reported(message) {
+          if (typeof early.report === 'function') early.report(message);
+          else early.errors.push(message);
+        }
+        function describe(error) {
+          if (error !== null && typeof error === 'object' && 'message' in error) {
+            return error.name && error.name !== 'Error'
+              ? error.name + ': ' + error.message
+              : String(error.message);
+          }
+          return String(error);
+        }
+        window.addEventListener('error', function (event) {
+          reported(
+            describe(
+              event.error !== undefined && event.error !== null ? event.error : event.message,
+            ),
+          );
+        });
+        window.addEventListener('unhandledrejection', function (event) {
+          reported(describe(event.reason));
+        });
+        if (window.Capacitor === undefined) {
+          early.standIn = true;
+          window.Capacitor = {
+            triggerEvent: function (eventName, target) {
+              var received = { event: String(eventName), target: String(target) };
+              early.events.push(received);
+              console.log('OYL-REALISTIC-BRIDGE ' + JSON.stringify(received));
+              var dispatched = new Event(String(eventName));
+              if (target === 'document') return document.dispatchEvent(dispatched);
+              if (target === 'window') return window.dispatchEvent(dispatched);
+              return false;
+            },
+          };
+        }
+      })();
+    </script>
   </head>
   <body>
     <script type="module" src="./realistic-harness.ts"></script>

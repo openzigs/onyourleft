@@ -3,7 +3,14 @@
 import { seconds } from '@onyourleft/domain';
 import { describe, expect, it } from 'vitest';
 
-import { describe as describeError, guarded, MAXIMUM_FRAME_GAP_MS, MeasurementClock } from './loop';
+import {
+  describe as describeError,
+  guarded,
+  MAXIMUM_FRAME_GAP_MS,
+  MeasurementClock,
+  readoutMs,
+  RECENT_FRAMES,
+} from './loop';
 
 describe('the realistic page’s clock — #457, #430', () => {
   it('never hands out a negative elapsed time, whatever order the timestamps arrive in', () => {
@@ -75,6 +82,61 @@ describe('the realistic page’s clock — #457, #430', () => {
     expect(clock.samples.length).toBe(63);
     expect(clock.take().samples.reduce((sum, each) => sum + each, 0)).toBeGreaterThanOrEqual(1_000);
     expect(clock.samples).toEqual([]);
+  });
+});
+
+describe('the realistic page’s on-screen readout — #478', () => {
+  /** A clock past its warm-up, fed `frames` frames 16 ms apart. */
+  function ridden(frames: number): { clock: MeasurementClock; now: number } {
+    const clock = new MeasurementClock(0);
+    let now = 0;
+    clock.frame(now);
+    for (let each = 0; each < frames; each += 1) {
+      now += 16;
+      clock.frame(now);
+    }
+    return { clock, now };
+  }
+
+  it('keeps the latest frames when the measurement window is taken — the tablet’s NaN', () => {
+    // The page publishes its measurement and then takes the window EVERY frame
+    // (no soak), so the window it used to read the readout from was empty at
+    // every readout for the rest of the ride.
+    const { clock, now } = ridden(40);
+    clock.take();
+    let at = now;
+    for (let each = 0; each < 5; each += 1) {
+      at += 16;
+      clock.frame(at);
+      clock.take();
+    }
+    expect(clock.samples).toEqual([]);
+    expect(clock.recent).toHaveLength(45);
+    expect(clock.recent.every((step) => step === 16)).toBe(true);
+  });
+
+  it('holds only the latest frames, oldest first', () => {
+    const clock = new MeasurementClock(0);
+    let now = 0;
+    clock.frame(now);
+    for (let each = 1; each <= RECENT_FRAMES + 10; each += 1) {
+      // Each step one millisecond longer than the last, so order is visible.
+      now += 10 + each;
+      clock.frame(now);
+    }
+    const recent = clock.recent;
+    expect(recent).toHaveLength(RECENT_FRAMES);
+    expect(recent[0]).toBe(10 + 11);
+    expect(recent[recent.length - 1]).toBe(10 + RECENT_FRAMES + 10);
+  });
+
+  it('holds nothing before the first timed frame, and says so rather than NaN', () => {
+    const clock = new MeasurementClock(3);
+    clock.frame(0);
+    clock.frame(16);
+    expect(clock.recent).toEqual([]);
+    expect(readoutMs(NaN)).not.toMatch(/NaN/);
+    expect(readoutMs(16.66)).toBe('16.7 ms');
   });
 });
 

@@ -3,7 +3,7 @@
 import { readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { shippedFiles } from '../../tools/realistic/sources';
 import {
@@ -90,5 +90,35 @@ describe('what a rider is told when the realistic world is not what they ride in
     expect(notice).toMatch(/could not be loaded/);
     expect(notice).toMatch(/standard world/);
     expect(notice).not.toMatch(/404|shrub/);
+  });
+});
+
+describe('what a rider is told inside the Android shell, where the set ships in the APK — #478', () => {
+  const offline = { loaded: false, offline: true, detail: 'Failed to fetch' } as const;
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('never says it is not kept on the device, because in the shell it is', () => {
+    const notice = realisticWorldNotice(offline, true);
+    expect(notice).not.toMatch(/offline|not kept/);
+    expect(notice).toMatch(/could not be loaded/);
+    expect(notice).toMatch(/standard world/);
+  });
+
+  it('still says so in a browser, which is the case the sentence is for', () => {
+    expect(realisticWorldNotice(offline, false)).toMatch(/not kept on this device/);
+  });
+
+  it('asks the shell question the way this client does — the Capacitor global', () => {
+    // Inside the shell, with no second argument: the global decides.
+    vi.stubGlobal('Capacitor', { isNativePlatform: () => true, getPlatform: () => 'android' });
+    expect(realisticWorldNotice(offline)).toMatch(/could not be loaded/);
+    // Capacitor's WEB build defines the global too, and says it is not native.
+    vi.stubGlobal('Capacitor', { isNativePlatform: () => false, getPlatform: () => 'web' });
+    expect(realisticWorldNotice(offline)).toMatch(/not kept on this device/);
+    vi.unstubAllGlobals();
+    expect(realisticWorldNotice(offline)).toMatch(/not kept on this device/);
   });
 });

@@ -97,6 +97,7 @@ import {
   loadRealisticWorld,
   loadSceneryModels,
   sceneMaterialsOf,
+  sceneryDrawnOf,
   threeGameRenderer,
 } from '../src/game/three-renderer';
 import { realisticWorldNotice } from '../src/game/realistic-assets';
@@ -2517,6 +2518,9 @@ function sweep(
   return drawn;
 }
 
+/** The scenery budget the `?realistic` run draws one frame at — #478. @see RealisticMeasurement.sceneryDrawnBudgeted */
+const REALISTIC_PROBE_BUDGET = 6;
+
 /** What the `?realistic` run measures — ADR 0026. @see realisticProbe */
 export interface RealisticMeasurement {
   readonly measured: boolean;
@@ -2551,6 +2555,15 @@ export interface RealisticMeasurement {
   readonly crankHeldPixels: number;
   /** How far the realistic frame differs from the stylised one across the whole picture, as a share. */
   readonly worldChangedShare: number;
+  /**
+   * #478: the scenery items the realistic world drew for the same frame at the
+   * top rung, and at a rung whose budget is `sceneryProbeBudget` — the line in
+   * `setQuality` that hands both belts the rung's budget, which jsdom cannot
+   * reach because it has no view without a GL context.
+   */
+  readonly sceneryProbeBudget: number;
+  readonly sceneryDrawnTop: number;
+  readonly sceneryDrawnBudgeted: number;
   /** After stepping down to the stylised ladder: which world, and how many physically based meshes remain visible. */
   readonly afterStepDownWorld: string;
   readonly afterStepDownStandard: number;
@@ -2582,6 +2595,9 @@ const NO_REALISTIC: RealisticMeasurement = {
   crankTurnPixels: 0,
   crankHeldPixels: 0,
   worldChangedShare: 0,
+  sceneryProbeBudget: 0,
+  sceneryDrawnTop: 0,
+  sceneryDrawnBudgeted: 0,
   afterStepDownWorld: '',
   afterStepDownStandard: 0,
   realisticFrameMs: 0,
@@ -2782,6 +2798,19 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
       ? pixelsChanged(stylisedPixels, realisticPixels) / (canvas.width * canvas.height)
       : 0;
 
+  // #478: the same frame at the top rung and at a rung with a budget of six.
+  // Only the budget differs, so the world is not rebuilt between the two.
+  view.render(wooded);
+  const sceneryDrawnTop = sceneryDrawnOf(view);
+  view.setQuality({
+    ...top,
+    scatterItems: REALISTIC_PROBE_BUDGET,
+    structureItems: 0,
+  });
+  view.render(wooded);
+  const sceneryDrawnBudgeted = sceneryDrawnOf(view);
+  view.setQuality(top);
+
   const frameAt = (distance: number): SceneFrame => riding(valleyRoute(), 800 + distance);
   const realisticFrameMs = timeFrames(view, frameAt, gl);
   const stylisedFrameMs = timeFrames(plain, frameAt, plainGl);
@@ -2828,6 +2857,9 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     crankTurnPixels: pixelsChanged(atRest, turned),
     crankHeldPixels: pixelsChanged(turned, held),
     worldChangedShare,
+    sceneryProbeBudget: REALISTIC_PROBE_BUDGET,
+    sceneryDrawnTop,
+    sceneryDrawnBudgeted,
     afterStepDownWorld,
     afterStepDownStandard,
     realisticFrameMs,
