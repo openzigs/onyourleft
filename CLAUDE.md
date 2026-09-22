@@ -295,7 +295,8 @@ apps/                 AGPL-3.0-or-later, without exception
                         old file**: a realistic rider — a MakeHuman CC0 body on
                         a CC0 or verified CC-BY-4.0 bicycle (#369) — is ADR 0026
                         D-12's fourth layer, and is posed from THIS file's crank
-                        angle, so the cadence rule above binds it unchanged. ⚠️ **Since #368 the bot and the ghost
+                        angle, so the cadence rule above binds it unchanged.
+                        ⚠️ **Since #368 the bot and the ghost
                         DO get one, and a reviewer who remembers "the bot and
                         the ghost deliberately do NOT get one: three
                         silhouettes beat three bicycles in three colours" is
@@ -3298,7 +3299,7 @@ top of an issue **supersedes its body**.
 | Why the scenery is models at all, which pack, and which kind deliberately stays a cylinder | [ADR 0022](docs/adr/0022-game-scenery-model-pack.md) D-1, D-2, D-3, `apps/web/src/game/scenery-models.ts` |
 | Why the world goes realistic, what does NOT change, and which of the two worlds a rung draws | [ADR 0026](docs/adr/0026-realistic-game-world.md) D-2, D-3, D-10 |
 | Which sources a realistic asset may come from, and why one converted from them is still traceable | [ADR 0026](docs/adr/0026-realistic-game-world.md) D-4, D-5, [#430](https://github.com/openzigs/onyourleft/issues/430) |
-| Why the realistic world is not precached, and what an offline rider who chose it gets | [ADR 0026](docs/adr/0026-realistic-game-world.md) D-7, [ADR 0024](docs/adr/0024-offline-and-caching-posture.md) §Amendments |
+| Why the realistic world is not precached, and what an offline rider who chose it gets | [ADR 0026](docs/adr/0026-realistic-game-world.md) D-7, [ADR 0024](docs/adr/0024-offline-and-caching-posture.md) D-2 |
 | What enumerates the scene's colours now that a pack decides them, and why a table in source is still a gate | `apps/web/src/game/scenery-palette.ts` §`SCENERY_PALETTE`, [ADR 0022](docs/adr/0022-game-scenery-model-pack.md) §Amendments, [#366](https://github.com/openzigs/onyourleft/issues/366) |
 | Why a pack's own colour is darkened before it is drawn, and why the rule is applied rather than checked | `apps/web/src/game/scenery-palette.ts` §`tonedForTheSun`, §`MAXIMUM_LIT_CHANNEL` |
 | Which way up a glTF's texture coordinates are, and the measurement that settled it | `apps/web/src/game/scenery-palette.ts` §`atlasColourAt`, `scenery-palette.test.ts` §"an unused black quarter" |

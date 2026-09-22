@@ -337,17 +337,3 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   evaluation; its comments carry these numbers, and the apparatus is described here and in the pull
   request that closes #418 rather than committed as a gate, because a timing gate on a GPU-less CI runner is
   the flaky kind.
-- **2026-09-21** — **D-2 is narrowed to the stylised world by
-  [ADR 0026](0026-realistic-game-world.md) D-7**, which is the decision record for the change; this
-  entry is the pointer. The trainer game's world goes realistic, and the realistic asset set is
-  plausibly tens of megabytes against the 3.09 MiB measured above. So *"the whole asset graph is
-  precached"* now means the whole **stylised** graph: realistic assets are excluded from the
-  precache by a rule in `apps/web/tools/precache/precache.ts` §`PRECACHE_EXCLUSIONS` (never by a
-  list of names, for D-2's own reason), fetched from the same origin only when the rider chooses the
-  realistic world, and not held for offline use — an offline rider who chose realism gets the
-  stylised world and is told so. §Constraints' *"A new asset imported as `?url` must reach the
-  precache with no edit to the worker"* therefore holds for the stylised world only. ⚠️ **Nothing
-  here is false of the shipped artefact today**: no realistic asset exists yet, so the precache is
-  still the whole graph and #408's offline proof still describes it. D-1, D-3, D-4 and D-5 are
-  untouched, and inside the Android shell the realistic set ships in the APK with no worker, as D-4
-  already provides. ([#431](https://github.com/openzigs/onyourleft/issues/431))

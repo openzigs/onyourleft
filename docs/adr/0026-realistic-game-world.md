@@ -25,7 +25,10 @@
   line are unedited, because [ADR 0013](0013-adr-amendments.md) D-2 says `Status` is part of the
   body and an amendment does not change it
 - **Narrows**: [ADR 0024](0024-offline-and-caching-posture.md) **D-2** — *"the whole asset graph is
-  precached"* — to the **stylised** world (D-7 below). ADR 0024 carries a dated amendment
+  precached"* — to the **stylised** world (D-7 below). ADR 0024 carries **no** amendment yet, and
+  that is [ADR 0013](0013-adr-amendments.md) D-3: nothing it says of the shipped artefact is false
+  until a realistic asset is excluded from the precache, and the pull request that does that appends
+  it
 - **Relates to**: [ADR 0008](0008-mobile-client-architecture.md) D-1, D-3, D-4 (the engine, the
   foreclosures and the device floor, all unchanged); [ADR 0009](0009-clean-room-posture.md) L1 and L2
   (unchanged, and newly load-bearing); [ADR 0023](0023-cc-by-assets-and-attribution.md) (the licence
@@ -46,7 +49,7 @@ ADR 0022 made three decisions that realism cannot live with:
 
 | ADR 0022 | What it decided | Why realism breaks it |
 |---|---|---|
-| **D-1** | the shapes come from **Kenney.nl**, committed *"verbatim and unconverted"*, so `ASSETS.toml`'s `source` and `sha256` describe the same file | every realistic source is too heavy to ship as published — a *"hyperreal"* Poly Haven scan is scan-density geometry with maps up to 8K (#430) — so the committed file is necessarily a **derived** one |
+| **D-1** | the shapes come from **Kenney.nl**, committed as upstream bytes — D-1(a): *"the committed bytes can be the upstream bytes"* — so `ASSETS.toml`'s `source` and `sha256` describe the same file | every realistic source is too heavy to ship as published — a *"hyperreal"* Poly Haven scan is scan-density geometry with maps up to 8K (#430) — so the committed file is necessarily a **derived** one |
 | **D-2** | **one author, one house style** | no single author publishes a realistic set covering trees, ground, sky, buildings and a rider |
 | **D-7** (second bullet) | every model wears this repository's own `MeshLambertMaterial` and colour; since #366, a pack's colour baked into vertices and **no texture reaching the GPU** | realism is mostly **surface**, and surface is textures |
 
@@ -140,7 +143,11 @@ ADR 0022 D-1(b)'s own finding). So the rule is **coherence per rung**, not per a
   for, and — like that rung — it is never entered by the thermal logic on its own.
 - **Stepping down is by whole world.** Under thermal pressure the realistic rungs reduce within
   themselves, and the realistic ladder's floor steps to the stylised ladder's **top** — every kind
-  at once. No rung ever draws a stylised kind beside a realistic one.
+  at once. No rung ever draws a **pack asset** from one world beside a pack asset from the other.
+  Two things are not pack assets and are drawn in both worlds, and both are named rather than
+  implied: ADR 0022 D-3's `post`, which stays procedural in both (D-12), and the rider, which is
+  `bicycle.ts`'s own geometry until D-12's fourth layer lands (#369) — a stated, temporary
+  exception, not a mixed pack.
 - **The default is the stylised world on every device**, until a measurement taken with #457's
   procedure shows a device class holding the realistic top rung for twenty minutes with the headroom
   #457 states. Changing a default cites that measurement. **ADR 0008 D-4's floor device is never
@@ -160,7 +167,7 @@ fallback.*
 | **Poly Haven** | `CC0-1.0` — *"All assets (HDRIs, textures and 3D models) on this site are licensed as CC0"* | HDRI skies, ground and road materials, photoscanned vegetation and rocks |
 | **ambientCG** | `CC0-1.0` — *"All ambientCG assets are provided under the Creative Commons CC0 1.0 Universal License"* | PBR materials |
 | **MakeHuman**, exports only | `CC0-1.0` for exports (#430, read 2026-09-20) | the rider's body |
-| **Kenney**, **Quaternius** | `CC0-1.0` | the stylised world; Kenney stays its source |
+| **Kenney** | `CC0-1.0` | the stylised world, which stays Kenney's alone — ADR 0022 D-1 and D-2 still describe it exactly, and a second stylised author is the mixed house style D-2 exists to refuse |
 | An individual model under `CC-BY-4.0`, verified per asset | `CC-BY-4.0`, under ADR 0023 | chiefly a road bicycle (#369) |
 
 **Out**, whatever the convenience: **Mixamo** (Adobe forbids distributing the raw character and
@@ -180,10 +187,10 @@ ADR 0023 D-4, and `modified` says which in words.
 
 ### D-5 — A derived asset is reproducible from a recorded input by a committed script
 
-This **replaces ADR 0022 D-1's "verbatim and unconverted"** for the realistic world, and it keeps
-the property D-1 was protecting rather than abandoning it. D-1 required that `source` and `sha256`
-describe the same file; a derived file breaks that by construction, so the property is restated for
-one:
+This **replaces ADR 0022 D-1's rule that *"the committed bytes can be the upstream bytes"*** for the
+realistic world, and it keeps the property D-1 was protecting rather than abandoning it. D-1
+required that `source` and `sha256` describe the same file; a derived file breaks that by
+construction, so the property is restated for one:
 
 - `ASSETS.toml` records the **upstream URL and digest of the input**, the **script** that produced
   the output, the **pinned tool version**, and the **output digest**.
@@ -196,7 +203,10 @@ one:
   wants, and it is enforced rather than hoped for.
 - **Blender is a tool, never a dependency.** Its GPL does not reach its output. Scripts that
   `import bpy` live under `apps/` (`AGPL-3.0-or-later`, GPL-3.0-compatible), never under
-  `packages/` without an ADR — #430 records the reasoning.
+  `packages/` without an ADR — #430 records the reasoning. ⚠️ `LIC001`/`LIC002` do **not** scan
+  `.py` today, so a Blender script under `apps/` would pass with no SPDX header at all: the pull
+  request that commits the first one adds `.py` to the scanned extensions, with a fixture that goes
+  red on a headerless script, in the same change.
 
 The stylised world's Kenney files are untouched by this: they remain upstream bytes, and ADR 0022
 D-5's row-before-commit rule applies to both worlds.
@@ -241,6 +251,12 @@ and 3.09 MiB uncompressed as #418 measured it — which cannot stay implicit.
 - **The worker does not hold it for offline use.** A rider-initiated "keep the realistic world on
   this device" would be a second cache strategy, which ADR 0024 names as the signal that its own
   choice has gone wrong. It is **not decided here**; it is its own issue, if riders ask.
+- **ADR 0024 is amended when this becomes true of the build, not before.** Today no realistic asset
+  exists, so its D-2 still describes the shipped precache exactly, and an amendment now would record
+  a decision rather than a fact — which [ADR 0013](0013-adr-amendments.md) D-3 reserves for a
+  superseding ADR, and this is that ADR. The pull request whose `PRECACHE_EXCLUSIONS` entry first
+  excludes an asset appends a dated amendment to ADR 0024 saying that the whole graph is no longer
+  precached, pointing here.
 - **Offline with the realistic world chosen, the game falls back to the stylised world and says
   so.** A silent downgrade is a rider wondering whether the setting broke.
 - **Inside the Android shell** nothing is downloaded: `capacitor.config.ts` copies `apps/web/dist`
@@ -302,8 +318,10 @@ surface owes it** — the palette gate does not cover a texture and must not be 
 ### D-11 — A loader-built material still never reaches the scene unasserted
 
 ADR 0022 D-7 had two bullets. **The first stands** — one file names three. **The second is
-superseded in its means and kept in its end.** Its means were *"every model wears our Lambert
-material and our colour, and nothing is sampled"*; realism reverses that. Its end was the reason it
+superseded in its means and kept in its end.** Its means — in paraphrase, not ADR 0022's words —
+were that every scenery model is drawn with a `MeshLambertMaterial` this repository constructs
+(#341's criterion, which D-7 names as its discharge) and that no texture is sampled; realism
+reverses that. Its end was the reason it
 existed: *"a `MeshStandardMaterial` constructed by `GLTFLoader` from a glTF's own material block is
 not in any source file … and would change how the whole scene is shaded without a single gate going
 red."* That remains true and remains forbidden. The realistic path reads a glTF's textures and
@@ -325,8 +343,11 @@ layers and **offered to riders only when the world is whole**:
    `bicycle.ts`'s crank angle; the bot and the ghost wear the same model, told apart as #368 tells
    them apart today.
 
-**The realistic world is reachable only from a harness or a debug build until layers 1–3 have
-landed.** Layer 4 may follow them: the rider is this repository's own `bicycle.ts` geometry rather
+**The realistic world is reachable only from a harness page under `apps/web/browser/` — built by
+`vite.browser.config.ts`, which can never ship — and from no control in the shipped app, until
+layers 1–3 have landed.** There is no "debug build" of the web client to hide it behind, and the
+Android debug APK wraps the same `apps/web/dist`, so a harness page is the only place that is not
+the product. Layer 4 may follow them: the rider is this repository's own `bicycle.ts` geometry rather
 than a pack asset, so a realistic world with the procedural rider in it is a stated, temporary
 incoherence rather than a mixed pack — and #369 is the issue that ends it. ADR 0022 D-3's `post`
 stays procedural in both worlds for the reason D-3 gave, and a new kind still arrives as its own
@@ -415,7 +436,7 @@ issue.
 | `apps/web/src/game/quality.ts` | 2026-09-21 | the four-rung `QUALITY_LADDER`, `surfaceDetail` (#425's no-asset half), and `RIDER_SHADOW_MAP_RUNG` as the precedent for a rung a rider asks for |
 | `apps/web/src/game/three-seam.test.ts` | 2026-09-21 | exactly `AmbientLight` and `DirectionalLight`, matched anywhere in the renderer's source |
 | `apps/web/tools/precache/precache.ts` | 2026-09-21 | the precache is the build's output less `PRECACHE_EXCLUSIONS`, a list of patterns |
-| [ADR 0022](0022-game-scenery-model-pack.md), [ADR 0024](0024-offline-and-caching-posture.md) and its 2026-09-21 amendment, [ADR 0008](0008-mobile-client-architecture.md), [ADR 0009](0009-clean-room-posture.md), [ADR 0013](0013-adr-amendments.md), [ADR 0023](0023-cc-by-assets-and-attribution.md) | 2026-09-21 | what is superseded, what is narrowed, and what stands |
+| [ADR 0022](0022-game-scenery-model-pack.md), [ADR 0024](0024-offline-and-caching-posture.md), [ADR 0008](0008-mobile-client-architecture.md), [ADR 0009](0009-clean-room-posture.md), [ADR 0013](0013-adr-amendments.md), [ADR 0023](0023-cc-by-assets-and-attribution.md) | 2026-09-21 | what is superseded, what is narrowed, and what stands |
 
 ⚠️ **No competitor's product, asset, screenshot or source was consulted**, and no asset was
 downloaded, converted or committed in the course of writing this. ADR 0009 L2 and R2 are untouched.
