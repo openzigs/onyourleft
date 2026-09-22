@@ -676,6 +676,9 @@ test.describe('a second version arrives', () => {
           if (!String(script).endsWith('/sw.js')) {
             return pending;
           }
+          // Published for the ordering assertion below: when the app asked.
+          (globalThis as unknown as { __oylAppRegisteredAt?: string }).__oylAppRegisteredAt =
+            document.readyState;
           // The app's own registration: hand it over only once an update has
           // been found on it, so the watcher is made after `updatefound`.
           return pending.then(
@@ -693,6 +696,23 @@ test.describe('a second version arrives', () => {
         };
       });
       await opened.page.reload();
+      // ⚠️ **The ordering this case stands on, asserted rather than assumed** —
+      // #472's review. The hold above only forces the race if the app's own
+      // `register('/sw.js')` is already in flight, with its `updatefound`
+      // listener attached, before the next line registers the second worker.
+      // That is true because `main.tsx` registers during module evaluation,
+      // before `load`, and `reload()` waits for `load`. ADR 0024's 2026-09-21
+      // amendment measured deferring registration to `window.load`; were that
+      // adopted, the app's call would land AFTER the second worker's, start an
+      // update job of its own back to `sw.js`, and this case would time out
+      // with no reason given or pass for a different one. So it fails here,
+      // naming the dependency, instead.
+      expect(
+        await opened.page.evaluate(
+          () => (globalThis as unknown as { __oylAppRegisteredAt?: string }).__oylAppRegisteredAt,
+        ),
+        'the app must call register("/sw.js") before `load` for this case to force #467’s race',
+      ).toMatch(/^(loading|interactive)$/);
       await opened.page.evaluate(async (script: string) => {
         await navigator.serviceWorker.register(`/${script}`);
       }, nextName);
