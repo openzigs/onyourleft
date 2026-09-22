@@ -125,6 +125,14 @@ describe('each committed file inside its class’s budget — ADR 0026 D-6', () 
 });
 
 describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
+  // ⚠️ **The bicycle's own count is asserted in `realistic-renderer.test.ts`
+  // §"the realistic bicycle — #369", NOT here, and #369's first pass put a
+  // weaker copy of it in this file on the strength of a claim that turned out
+  // to be false.** That copy is deleted rather than kept: it bounded the count
+  // below at `> 0` where the existing one bounds it at `> 1 000`, so the two
+  // together were the older assertion plus a line that could not fail. The
+  // frame sum below reads `REALISTIC_BICYCLE_TRIANGLES`, and what holds that
+  // constant to the geometry the renderer actually builds is that other file.
   it('holds the worst frame the near-mesh caps allow under the frame’s triangles', () => {
     const heaviest = (kind: (typeof REALISTIC_VEGETATION_KINDS)[number]): number =>
       Math.max(...REALISTIC_VEGETATION[kind].map((model) => modelFacts(at(model.file)).triangles));

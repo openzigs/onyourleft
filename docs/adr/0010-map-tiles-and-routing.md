@@ -730,3 +730,16 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   costs nothing. Method, environment and the full figures are in
   [spike 0004](../spikes/0004-cold-load-first-painted-tile.md).
   ([#63](https://github.com/openzigs/onyourleft/issues/63))
+- **2026-09-22** — D-1's client library has moved a minor version and the *Decision* table's
+  `v6.7.0` no longer describes the installed tree. **MapLibre GL JS is `6.10.0`**, taken from
+  [Dependabot #452](https://github.com/openzigs/onyourleft/pull/452) under
+  [#489](https://github.com/openzigs/onyourleft/issues/489) with §4f's browser gate re-run against
+  it, green. The decision is unaffected in every part that matters to it: the licence is still
+  BSD-3-Clause, the package still lands in `apps/web` on the DOM argument rather than the licence
+  one, and the closure still carries no GPL, AGPL or non-OSI licence — the bump added `bidi-js` and
+  `require-from-string`, both MIT. ⚠️ Two figures elsewhere moved with it and are corrected in
+  [`docs/architecture.md`](../architecture.md) §"The map dependencies" rather than here, since the
+  body is never edited: the bundle is **1 006 kB minified** against the 977 kB measured at 6.7.0,
+  and the licence table's read date is 2026-09-22. The dated read at `v6.7.0` in the *Options
+  considered* table above is a **record of what was read on 2026-09-02** and is correct as such.
+  ([#489](https://github.com/openzigs/onyourleft/issues/489))

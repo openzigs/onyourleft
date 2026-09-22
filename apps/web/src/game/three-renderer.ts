@@ -2673,6 +2673,15 @@ function solidGeometry(solid: RiderPart['solid']): BufferGeometry {
       return new CylinderGeometry(solid.radius, solid.radius, solid.length, LIMB_SEGMENTS);
     case 'ring':
       return new TorusGeometry(solid.radius, solid.thickness, 5, 12);
+    case 'bend':
+      // ⚠️ `rotateZ(start)` is applied to the geometry HERE, before the part's
+      // own X→Y→Z rotations — which is exactly what `RiderSolid.bend` says it
+      // is for. Folding it into the part's `roll` would apply it last, after
+      // the yaw that stands the arc up, and spin the bar out of the bicycle's
+      // plane entirely.
+      return new TorusGeometry(solid.radius, solid.thickness, 5, 12, solid.sweep).rotateZ(
+        solid.start,
+      );
     case 'ball':
       return new SphereGeometry(solid.radius, 8, 6);
   }
@@ -5054,6 +5063,41 @@ function tintable(geometry: BufferGeometry, material: Material, capacity: number
   return mesh;
 }
 
+/**
+ * Which of the two merges a part drawn in one piece belongs in — #369.
+ *
+ * Bar tape, a saddle and a tyre are rubber; a frame tube is not. The test is
+ * the part's own **colour**, which is the one place `bicycle.ts` already states
+ * that difference: `RIDER_PALETTE.tyre` is documented there as *"tyres, saddle
+ * and cranks"*, and the bar joined it when #369 taped it.
+ *
+ * ⚠️ **It was `part.name === 'handlebar'`, then briefly
+ * `part.name.startsWith('bar ')`, and both were the wrong kind of test.** The
+ * first was a whole-bar match that matched nothing the moment the bar became
+ * four parts; the second was stringly-typed dispatch on a field `RiderPart`
+ * documents as being for failure messages, and it left the `bend` branch
+ * stating "the bar is rubber" a *second* time, unconditionally — two
+ * statements of one fact in the change whose thesis was that there should be
+ * one. `bicycle.test.ts` §"tapes the bar, which is what puts it in the
+ * renderer's rubber" holds the bar to that colour, so the dispatch and its
+ * premise now fail together.
+ *
+ * ⚠️ **Which geometry gets which material is still NOT asserted in a
+ * browser**, and #369 measured that rather than assuming it: sorting every
+ * part into `frame` leaves all 1 221 tests in `src/game` green. The browser
+ * gate's ADR 0026 D-11 assertion covers the material *class* on each mesh and
+ * says nothing about which parts landed in which merge. It is a look, and this
+ * repository has no look gate (ADR 0009 forbids deriving one from another
+ * product).
+ */
+function softly(
+  part: RiderPart,
+  frame: BufferGeometry[],
+  rubber: BufferGeometry[],
+): BufferGeometry[] {
+  return part.colour === RIDER_PALETTE.tyre ? rubber : frame;
+}
+
 /** A tube part's two ends, in the bicycle's own frame. */
 function placedPart(geometry: BufferGeometry, part: RiderPart): BufferGeometry {
   return geometry
@@ -5104,23 +5148,42 @@ function realisticBicycle(): {
         );
       }
     } else if (solid.shape === 'tube') {
-      const geometry = placedPart(
-        new CylinderGeometry(solid.radius, solid.radius, solid.length, 12),
-        part,
+      softly(part, frame, rubber).push(
+        placedPart(new CylinderGeometry(solid.radius, solid.radius, solid.length, 12), part),
       );
-      (part.name === 'handlebar' ? rubber : frame).push(geometry);
+    } else if (solid.shape === 'bend') {
+      // ⚠️ **The drops come from `bicycle.ts` since #369, and a reviewer who
+      // remembers a `TorusGeometry(0.07, 0.012, 8, 16, Math.PI)` written out
+      // here is reading the old file.** They were four literals in this
+      // function while the hands were placed from two more in `bicycle.ts`,
+      // which is why the two never met.
+      softly(part, frame, rubber).push(
+        placedPart(
+          new TorusGeometry(solid.radius, solid.thickness, 8, 16, solid.sweep).rotateZ(solid.start),
+          part,
+        ),
+      );
     } else if (solid.shape === 'box') {
-      rubber.push(placedPart(new BoxGeometry(solid.width * 0.8, solid.height, solid.depth), part));
+      softly(part, frame, rubber).push(
+        placedPart(new BoxGeometry(solid.width * 0.8, solid.height, solid.depth), part),
+      );
+    } else if (solid.shape === 'ball') {
+      // Only the helmet is a ball and the filter above dropped it, so this is
+      // unreachable — and it is spelled out rather than left to the `else`
+      // below, which is what makes that `else` a `never`.
+      throw new Error('the realistic bicycle has no ball to draw');
+    } else {
+      // ⚠️ **A shape this chain does not know is a COMPILE error, since #369's
+      // review.** It used to fall out of an `if`/`else if` chain in silence, so
+      // #369's `bend` would have left the realistic bicycle with no drops at
+      // all and every gate green — the defect shape this repository keeps
+      // finding. A `throw` alone moves that to run time, where `solidGeometry`
+      // §`switch` catches the same mistake at the typechecker; the narrowing
+      // above is what buys the same answer here. A sixth `RiderSolid` fails to
+      // assign on the line below, before any test runs.
+      const unreachable: never = solid;
+      throw new Error(`the realistic bicycle cannot draw a ${JSON.stringify(unreachable)}`);
     }
-  }
-  // Drops: a half-torus each side of the bar, curling down and back.
-  for (const side of [-1, 1]) {
-    rubber.push(
-      new TorusGeometry(0.07, 0.012, 8, 16, Math.PI)
-        .rotateY(Math.PI / 2)
-        .rotateX(Math.PI / 2)
-        .translate(side * 0.2, 0.91, 0.34),
-    );
   }
   return { frame: merged(frame), rubber: merged(rubber), metal: merged(metal) };
 }
@@ -5138,6 +5201,18 @@ function realisticCrankset(): BufferGeometry {
       );
     } else if (solid.shape === 'box') {
       parts.push(placedPart(new BoxGeometry(solid.width, solid.height, solid.depth), part));
+    } else {
+      // ⚠️ **The same refusal as `realisticBicycle` above, for the same
+      // reason.** This chain kept the silent skip after #369 fixed its
+      // neighbour, in the very change that added a fifth shape to the
+      // vocabulary both of them read — so a `bend` or a `tube` added to
+      // `RIDER_CRANK_PARTS` would have drawn nothing here, with every gate
+      // green, which is the defect that had just been fixed one function up.
+      // Measured: a `tube` crank part is `Error: the realistic crankset cannot
+      // draw a tube` with this branch and a silently missing spider without it.
+      // There is no `never` to take — `ring` and `box` are two of five, and the
+      // other three are legitimately not crank parts.
+      throw new Error(`the realistic crankset cannot draw a ${solid.shape}`);
     }
   }
   return merged(parts);
@@ -5147,8 +5222,31 @@ function realisticCrankset(): BufferGeometry {
  * How many triangles the realistic bicycle and crankset have — what
  * `realistic-budget.ts` §`REALISTIC_BICYCLE_TRIANGLES` holds them to.
  *
- * @test-facing: `three-renderer.test.ts` holds the geometry this file builds
- * to the budget, since it is built here rather than read off a file.
+ * ⚠️ **This tag said `three-renderer.test.ts` until #369's review and the
+ * reader has always been `realistic-renderer.test.ts`** — a reviewer who
+ * remembers the old filename is reading the old file, and one who remembers
+ * #369's first pass claiming *"NOTHING DID"* is reading a **retracted** one.
+ * That claim was false and it was measured false: the assertion has been in
+ * `realistic-renderer.test.ts` §"the realistic bicycle — #369" since
+ * `fcc4a67`, the very commit that created this export, and it is *stronger*
+ * than the duplicate #369 briefly added beside it. Applying #369's own M9
+ * (`spokes = 20` → `900`) to `b4f789a`, with no part of #369 present, is red:
+ * `expected 26332 to be less than or equal to 12000` at
+ * `realistic-renderer.test.ts:923`.
+ *
+ * ⚠️ **The real defect is the misdirection, and it is worth keeping.** A
+ * `@test-facing` tag is trusted twice over and only one of the two is
+ * mechanical: `check:wiring` holds the exemption on any gate file *naming the
+ * identifier* (`WIRE004`, §`identifiersIn`) and never reads the filename in
+ * the tag at all — so a tag pointing at the wrong file costs nothing there and
+ * costs a **human** the answer to "is this asserted anywhere?". Grep the
+ * symbol across the tree and mutate on the base commit before writing a
+ * `⚠️ nothing held this` here; the check is two minutes and the claim, once
+ * committed, is read as settled fact for years.
+ *
+ * @test-facing: `realistic-renderer.test.ts` §"the realistic bicycle — #369"
+ * holds the geometry this file builds to the budget, since it is built here
+ * rather than read off a file.
  */
 export function realisticBicycleTriangles(): number {
   const bike = realisticBicycle();

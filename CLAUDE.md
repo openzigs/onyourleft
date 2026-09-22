@@ -324,6 +324,27 @@ apps/                 AGPL-3.0-or-later, without exception
                         a CC0 or verified CC-BY-4.0 bicycle (#369) — is ADR 0026
                         D-12's fourth layer, and is posed from THIS file's crank
                         angle, so the cadence rule above binds it unchanged.
+                        ⚠️ **Since #369 the BICYCLE is a race bike and is still
+                        nobody's asset**, and the search that settled it is
+                        written out in the file's own header so it is not run a
+                        third time: ten sources on 2026-09-22, of which six hold
+                        no bicycle at all, OpenGameArt's two are `CC-BY 3.0`
+                        (which `ASSET004` fails closed and ADR 0023 admits only
+                        at 4.0), and Sketchfab — whose "CC Attribution" **is**
+                        `CC-BY-4.0`, read from the grant — holds exactly one CC0
+                        bicycle in its whole downloadable corpus, a museum scan
+                        of a wooden velocipede. ⚠️ And its downloads answer
+                        `401` without an account, so ADR 0026 D-5's input digest
+                        cannot be taken for any of them. What landed instead is
+                        #369's own named answer: a drop bar from one number,
+                        `BAR_BEND_RADIUS`, with `HAND_POSITIONS` a point ON it
+                        per `RidingPosition` — because the hands used to be two
+                        constants here and the drops four literals in
+                        `three-renderer.ts`, 50 mm apart, with every gate green.
+                        ⚠️ The stylised world's budget is DRAW CALLS rather
+                        than triangles (#240 NFR-2), and the bar leaves that
+                        at six; the realistic world's is triangles, and the
+                        bar costs 96 of its 12 000.
                         ⚠️ **Since #368 the bot and the ghost
                         DO get one, and a reviewer who remembers "the bot and
                         the ghost deliberately do NOT get one: three
@@ -1540,9 +1561,11 @@ Apache-2.0, both zero-dependency, both under `packages/store`) and — since #40
 `@types/web-bluetooth` 0.0.21 (MIT, zero-dependency, types only, a devDependency of
 `packages/sensors`) and — since #31 — `fit-file-parser` 5.0.2 (MIT, a devDependency of
 `packages/fit` **and, since #51, of `apps/web` too**, whose closure is `buffer` MIT → `base64-js`
-MIT and `ieee754` BSD-3-Clause) and — since #63 — `maplibre-gl` 6.7.0 and `pmtiles` 4.5.0 (both
+MIT and `ieee754` BSD-3-Clause) and — since #63 — `maplibre-gl` **6.10.0** and `pmtiles` 4.5.0 (both
 BSD-3-Clause, both runtime dependencies of `apps/web`, whose closure adds BSD-2-Clause, ISC, MIT and
-one `(MIT OR Apache-2.0)` and no GPL, AGPL or non-OSI licence) and — also since #63 —
+one `(MIT OR Apache-2.0)` and no GPL, AGPL or non-OSI licence — ⚠️ **this said 6.7.0 until #489**,
+which took 6.10.0 with the browser gate re-run; the bump added `bidi-js` and `require-from-string`
+to that closure, both MIT, so the sentence above still describes it) and — also since #63 —
 `@playwright/test` 1.63.0 (Apache-2.0, with `playwright` and `playwright-core`, all three
 Apache-2.0; a devDependency of `apps/web`, and the only dependency in the workspace that pins a
 **browser** as well as a version — see §4f) and — since #91 — `three` **0.185.1** (MIT,
@@ -1550,11 +1573,21 @@ Apache-2.0; a devDependency of `apps/web`, and the only dependency in the worksp
 devDependency, because `three` ships no types of its own) are
 installed;
 
-⚠️ **`three` is pinned at 0.185.1 rather than at the current 0.186.0 deliberately.** 0.186.0 was
-published on 2026-09-08, the same day it was wanted, and pnpm's `minimumReleaseAge` refuses a
-lockfile entry younger than 24 hours — §8 says to pin something older rather than add a
-`minimumReleaseAgeExclude`, which would turn the protection off for that package permanently.
-0.185.x is also the version ADR 0008's engine table names. **nothing else from ADR 0005's runtime list is**, `react-router` included. Add each in
+⚠️ **`three` is pinned at 0.185.1 rather than at the current 0.186.0 deliberately, and since #489
+the reason is the ADRs alone.** This paragraph used to give two reasons and **one of them has
+expired**: 0.186.0 was published on 2026-09-08, the same day it was wanted, and pnpm's
+`minimumReleaseAge` refuses a lockfile entry younger than 24 hours — that release is two weeks old
+now and no longer bites, so a reviewer who remembers the pin resting partly on it is reading the
+old file. (§8's rule stands and is unrelated to this package: pin something older rather than add a
+`minimumReleaseAgeExclude`, which turns the protection off for that package permanently.) What
+holds the pin is that **ADR 0008's engine table names 0.185.x** and **[ADR 0026](docs/adr/0026-realistic-game-world.md) D-2
+pins it by version** under the heading *"What does NOT change"*, and an ADR is not reversed by a
+dependency bump — [#453](https://github.com/openzigs/onyourleft/pull/453) was declined on exactly
+that ground. Moving it is its own issue and it owes: `test:browser` re-run with the figures the gate
+prints restated; ADR 0026 **D-8**'s 527 333-byte `KTX2Loader`/`basis_transcoder.wasm` measurement
+retaken from the installed tree; and a check that `PMREMGenerator`, the HDR loader, `GLTFLoader` and
+`KTX2Loader` all still resolve out of `examples/jsm/`, which is the least stable part of that
+package's surface. **nothing else from ADR 0005's runtime list is**, `react-router` included. Add each in
 the issue that first needs it, after checking its licence against the
 directory it lands in (CONTRIBUTING.md).
 
@@ -3392,6 +3425,9 @@ top of an issue **supersedes its body**.
 | Which of the two scenery rungs has its call site covered, and which does not | `apps/web/src/game/three-renderer.ts` §`ScatterBelt.setVariants`, §`ScatterBelt.setBudget` |
 | Why the bot and the ghost are bicycles now, and what tells the three apart without a silhouette | `apps/web/src/game/three-renderer.ts` §`RIDER_TINTS`, `apps/web/src/game/bicycle.ts`, [#368](https://github.com/openzigs/onyourleft/issues/368) |
 | Why a simulated rider's cranks come from its odometer rather than from a cadence | `apps/web/src/game/bicycle.ts` §`simulatedCrankAngle`, `apps/web/src/game/scene.ts` §`pedalling` |
+| Which ten sources were searched for a road bicycle, what each one's licence actually said, and why none of them supplied one | `apps/web/src/game/bicycle.ts` §"What was searched for a road bicycle", [#369](https://github.com/openzigs/onyourleft/issues/369) |
+| Where the rider's hands are, and what stops them being somewhere the bar is not | `apps/web/src/game/bicycle.ts` §`HAND_POSITIONS`, §`BAR_BEND_RADIUS`, `apps/web/src/game/bicycle.test.ts` §"the rider sits on the bicycle" |
+| Why a `@test-facing` tag naming the wrong file reads as no test at all, and what to measure before writing "nothing held this" | `apps/web/src/game/three-renderer.ts` §`realisticBicycleTriangles`, `apps/web/src/game/realistic-renderer.test.ts` §"the realistic bicycle — #369", `scripts/check-wiring.mjs` §`identifiersIn` |
 | At what distances three bicycles were actually told apart, and what happens if they were not | [validation 0002](docs/validation/0002-android-shell-and-game.md) Part N |
 | What a model file is allowed to fetch, and which one of them is allowed an atlas | `apps/web/src/game/scenery-models.ts` §`sceneryResourceUrl`, `apps/web/browser/game.browser.spec.ts` §"fetches the committed models and its one atlas, and nothing else" |
 | Why a model's colour is its own since #366, and what it used to be | `apps/web/src/game/three-renderer.ts` §`prepareSceneryGeometry`, [ADR 0022](docs/adr/0022-game-scenery-model-pack.md) D-7 and its 2026-09-18 amendment |
