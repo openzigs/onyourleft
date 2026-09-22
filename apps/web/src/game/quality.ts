@@ -562,6 +562,36 @@ export const FRAME_MS_RESTORE_BELOW = 30;
  * must not change the renderer's settings. #91's criterion is about a *sustained*
  * condition, and a single-sample trigger would make the resolution flicker on
  * ordinary jitter.
+ *
+ * ## ⚠️ A sample is a DRAWN frame, so the window is longer lower down — #482
+ *
+ * Since #476 the ladder is fed one sample per drawn frame (`frame-pacer.ts`
+ * §"What the ladder is told"), so thirty samples are not a fixed duration. On
+ * a 60 Hz display, with frames that cost less than a vsync:
+ *
+ * | Rung | Cap | Thirty samples take |
+ * |---|---|---|
+ * | 0, 1 | display rate | 0.5 s |
+ * | 2 | 30 | 1.0 s |
+ * | 3 | 24 | 1.25 s |
+ * | 4 | 20 | 1.5 s |
+ *
+ * **Decided, not merely noted: this stays a count of drawn frames rather than
+ * a duration.** #481's review (finding 2) asked for one or the other, and the
+ * count wins on three grounds. (1) Lower rungs are cheaper, so the heat they
+ * are reacting to builds more slowly; a window that lengthens as the ladder
+ * descends asks a hot device to be hot for longer before it gives up more,
+ * which is the direction Google's recovery guidance leans, and it lengthens
+ * the recovery window by the same factor, which damps the 30 ↔ 24 flicker
+ * {@link HEADROOM_RESTORE_BELOW} exists to prevent. (2) A duration would need a
+ * clock inside {@link nextQuality}, which is pure and is handed two numbers;
+ * the time between samples is the pacer's, not the ladder's, and a second
+ * clock is how the two would come to disagree. (3) Since #482 the first two
+ * steps down — the ones a warming device takes first — both happen at the
+ * display's rate, so the slower windows are only ever reached by a device that
+ * has already been stepped down twice. The slowest is a second and a half, at
+ * the floor. `frame-pacer.test.ts` §"how long the ladder takes to react"
+ * pins the table, so changing this number or a cap changes it visibly.
  */
 export const SUSTAINED_SAMPLES = 30;
 

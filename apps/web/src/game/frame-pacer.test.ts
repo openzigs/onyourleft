@@ -6,12 +6,13 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { FramePacer, type PacedFrame } from './frame-pacer';
+import { FramePacer, INVALID_CAP_READ_AS, honouredCap, type PacedFrame } from './frame-pacer';
 import {
   DISPLAY_RATE,
   FRAME_MS_REDUCE_ABOVE,
   FRAME_MS_RESTORE_BELOW,
   QUALITY_LADDER,
+  SUSTAINED_SAMPLES,
 } from './quality';
 
 const VSYNC_MS = 1000 / 60;
@@ -118,5 +119,50 @@ describe('what the ladder is told under a cap — #476', () => {
       expect(samples.length).toBeGreaterThan(10);
       expect(Math.min(...samples), String(cap)).toBeGreaterThan(FRAME_MS_REDUCE_ABOVE);
     }
+  });
+});
+
+describe('a cap that is not a frame rate fails closed — #482', () => {
+  it('reads 0, a negative number, NaN and −∞ as the floor rung’s cap, not as uncapped', () => {
+    // #481's review, finding 3: these all used to draw every animation frame.
+    const floor = QUALITY_LADDER[QUALITY_LADDER.length - 1]?.frameCap;
+    expect(INVALID_CAP_READ_AS).toBe(floor);
+    expect(INVALID_CAP_READ_AS).toBe(20);
+    for (const cap of [0, -0, -5, Number.NaN, Number.NEGATIVE_INFINITY]) {
+      expect(honouredCap(cap), String(cap)).toBe(INVALID_CAP_READ_AS);
+      expect(drawn(ride(cap, 10)), String(cap)).toBe(drawn(ride(INVALID_CAP_READ_AS, 10)));
+    }
+    expect(drawn(ride(Number.NaN, 10))).toBe(200);
+  });
+
+  it('leaves every cap that is a frame rate as it is', () => {
+    expect(honouredCap(DISPLAY_RATE)).toBe(DISPLAY_RATE);
+    for (const rung of QUALITY_LADDER) expect(honouredCap(rung.frameCap)).toBe(rung.frameCap);
+    expect(honouredCap(0.5)).toBe(0.5);
+  });
+});
+
+describe('how long the ladder takes to react, rung by rung — #482', () => {
+  it('takes SUSTAINED_SAMPLES drawn frames, which is 0.5, 0.5, 1.0, 1.25 and 1.5 s on a 60 Hz display', () => {
+    // #481's review, finding 2, and `quality.ts` §`SUSTAINED_SAMPLES` is the
+    // decision: the window is a count of DRAWN frames, so it lengthens as the
+    // cap falls. This pins the table written there.
+    const seconds = QUALITY_LADDER.map((rung) => {
+      const frames = ride(rung.frameCap, 5);
+      let samples = 0;
+      const vsyncs = frames.findIndex((frame) => {
+        if (frame.frameMs !== undefined) samples += 1;
+        return samples === SUSTAINED_SAMPLES;
+      });
+      return (vsyncs + 1) / 60;
+    });
+    const expected = [0.5, 0.5, 1.0, 1.25, 1.5];
+    seconds.forEach((measured, level) => {
+      // Within two vsyncs: the first sample needs a drawn frame before it.
+      expect(
+        Math.abs(measured - (expected[level] ?? 0)),
+        QUALITY_LADDER[level]?.label,
+      ).toBeLessThan(2.5 / 60);
+    });
   });
 });
