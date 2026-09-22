@@ -39,6 +39,8 @@
 
  */
 
+import { isNativeShell, platformCapacitor } from '../support/capacitor';
+
 import type { ScatterKind } from './scatter';
 
 /**
@@ -232,12 +234,27 @@ export type RealisticWorldOutcome =
  * out of memory — and says only what happened, not why, because the rider
  * cannot act on why.
  *
+ * ⚠️ **The offline sentence is a BROWSER's, and is never said inside the
+ * Android shell** (#478). There the realistic set ships inside the APK (D-7),
+ * so "not kept on this device" is false, and a failure there is not the
+ * network's; and the shell's WebView reports `navigator.onLine === true` with
+ * no network at all (validation 0002 Part P), so `outcome.offline` cannot be
+ * trusted to say anything there either. In the shell a failure is always the
+ * other sentence. Which one this is running in is `support/capacitor.ts`'s
+ * question, asked the one way this client asks it.
+ *
+ * @param inShell whether this is the Android shell; read from the real
+ * Capacitor global unless a caller says
+ *
  * @unwired reached only from the owner's harness page until #475 offers the
  * realistic world to a rider and puts this in the ride UI.
  */
-export function realisticWorldNotice(outcome: RealisticWorldOutcome): string | undefined {
+export function realisticWorldNotice(
+  outcome: RealisticWorldOutcome,
+  inShell: boolean = isNativeShell(platformCapacitor()),
+): string | undefined {
   if (outcome.loaded) return undefined;
-  return outcome.offline
+  return outcome.offline && !inShell
     ? 'The realistic world is not kept on this device for use offline, so this ride is in the standard world.'
     : 'The realistic world could not be loaded, so this ride is in the standard world.';
 }
