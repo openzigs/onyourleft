@@ -138,8 +138,9 @@ The four searches that produced the non-Peloton four, all run 2026-09-22 against
   > competition** among different users or user groups allowing for broad based competitions."*
 
   ⚠️ **This changes no conclusion in §3 or §6, and must not be read as one.** Disclosure is not claim
-  scope: every granted claim charted below still carries the *cycling class* limitation, and §3.1's
-  reading is unchanged. It is recorded here for two reasons. It is concrete evidence for **§5
+  scope, and it is one family's specification rather than all seven documents': every granted claim
+  in the **Peloton** family still carries the *cycling class* or *archived class* limitation, §3.1's
+  reading is unchanged, and the other four patents fail on elements this text does not touch at all. It is recorded here for two reasons. It is concrete evidence for **§5
   Question C** — whether the continuation practice in this family is of a kind a design should be
   built to survive — and the disclosed subject matter is recognisably
   [ADR 0028](../adr/0028-racing-fairness.md) D-1 and D-2 (peer competition, normalisation across
