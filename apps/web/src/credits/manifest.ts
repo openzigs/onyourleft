@@ -68,6 +68,17 @@ export interface AssetEntry {
   readonly url?: string;
   /** ADR 0023 D-3: what this repository changed, or `"no"`. §3(a)(1)(B). */
   readonly modified?: string;
+  /**
+   * ADR 0026 D-5, for a DERIVED file (#430): the upstream page the input came
+   * from, the digest of everything downloaded from it, the committed script
+   * that made the file and the pinned tool that ran it. The shell reader's
+   * `ASSET007` requires the four together; this reader carries them so that a
+   * derived row is read rather than refused, and the credits screen needs none.
+   */
+  readonly input?: string;
+  readonly inputsha256?: string;
+  readonly script?: string;
+  readonly tool?: string;
 }
 
 /** A line the reader could not make sense of, and where it was. */
@@ -83,7 +94,20 @@ export interface ParsedManifest {
 }
 
 /** The keys an entry may carry. Anything else is refused — ADR 0017 D-4. */
-const KEYS = ['path', 'source', 'licence', 'read', 'sha256', 'creator', 'url', 'modified'] as const;
+const KEYS = [
+  'path',
+  'source',
+  'licence',
+  'read',
+  'sha256',
+  'creator',
+  'url',
+  'modified',
+  'input',
+  'inputsha256',
+  'script',
+  'tool',
+] as const;
 
 type Key = (typeof KEYS)[number];
 
@@ -151,6 +175,10 @@ export function parseAssetManifest(text: string): ParsedManifest {
       ...(fields.creator === undefined ? {} : { creator: fields.creator }),
       ...(fields.url === undefined ? {} : { url: fields.url }),
       ...(fields.modified === undefined ? {} : { modified: fields.modified }),
+      ...(fields.input === undefined ? {} : { input: fields.input }),
+      ...(fields.inputsha256 === undefined ? {} : { inputsha256: fields.inputsha256 }),
+      ...(fields.script === undefined ? {} : { script: fields.script }),
+      ...(fields.tool === undefined ? {} : { tool: fields.tool }),
     });
   };
 

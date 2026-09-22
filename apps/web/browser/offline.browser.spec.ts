@@ -132,7 +132,15 @@ const EXPECTED_PRECACHE = distFiles()
   // several workers — how #467 was measured — runs this file in parallel with
   // itself, and a stray `sw-next-*` then asked for a precache of 29 files.
   .filter((file) => file !== 'sw.js' && !file.startsWith('sw-next-') && !file.endsWith('.map'))
+  // ⚠️ ADR 0026 D-7: the realistic world is in `dist` — it ships in the APK —
+  // and is deliberately NOT precached. Written here as the directory, which is
+  // the rule, rather than read out of `precache.ts`, so this spec states the
+  // decision independently of the code that implements it.
+  .filter((file) => !file.startsWith('realistic/'))
   .sort();
+
+/** The realistic world's files in `dist`: there, and not to be cached. ADR 0026 D-7. */
+const REALISTIC_IN_DIST = distFiles().filter((file) => file.startsWith('realistic/'));
 
 /**
  * What the worker actually cached, read out of the browser.
@@ -263,6 +271,16 @@ test.describe('what the worker actually cached', () => {
 
   test('does not hold the worker itself, which could only ever cache a stale worker', () => {
     expect(precached).not.toContain('sw.js');
+  });
+
+  test('holds none of the realistic world, which IS in the build — ADR 0026 D-7', () => {
+    // Both halves, so neither can pass by the other being empty: the set is
+    // really in `dist` (it ships in the APK), and not one file of it reached
+    // the cache a real browser filled. The stylised half is the two cases
+    // above: every other file in `dist`, and all eleven models by count.
+    expect(REALISTIC_IN_DIST.length).toBeGreaterThan(10);
+    expect(precached.filter((entry) => entry.startsWith('realistic/'))).toEqual([]);
+    for (const file of REALISTIC_IN_DIST) expect(precached).not.toContain(file);
   });
 
   test('leaves the control outside the cache, and outside dist entirely', () => {
