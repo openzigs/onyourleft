@@ -289,7 +289,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         `ASSETS.toml` gains no row, and ADR 0022 D-1's "one CC0
                         source" is untouched, because there is no CC0 rigged
                         cyclist to download and a pedalling clip would have had
-                        to be authored. ⚠️ **Since #368 the bot and the ghost
+                        to be authored. ⚠️ **Since ADR 0026 (#431) D-1's "one
+                        CC0 source" is superseded, and a reviewer who remembers
+                        it as the reason there is no rider asset is reading the
+                        old file**: a realistic rider — a MakeHuman CC0 body on
+                        a CC0 or verified CC-BY-4.0 bicycle (#369) — is ADR 0026
+                        D-12's fourth layer, and is posed from THIS file's crank
+                        angle, so the cadence rule above binds it unchanged.
+                        ⚠️ **Since #368 the bot and the ghost
                         DO get one, and a reviewer who remembers "the bot and
                         the ghost deliberately do NOT get one: three
                         silhouettes beat three bicycles in three colours" is
@@ -413,7 +420,17 @@ apps/                 AGPL-3.0-or-later, without exception
                         resource rule is a REDIRECTION rather than a refusal —
                         the buildings' atlas is committed and every answer the
                         rule gives is a URL of ours, which is a stronger
-                        statement than the identity-only one it made before
+                        statement than the identity-only one it made before.
+                        ⚠️ **Since ADR 0026 (#431) the world goes realistic,
+                        and a reviewer who remembers "the geometry is bought
+                        and nothing else" or "one CC0 source, one house style"
+                        as the rule is reading the old file.** What this file
+                        maps is the STYLISED world, which is kept — the low
+                        rung, the default and the precached world — and a
+                        realistic world of textured, physically based assets
+                        is built beside it, a rung a rider chooses (ADR 0026
+                        D-3). No rung mixes the two. The engine, this renderer
+                        and every placement decision are unchanged
     src/game/scenery-palette.ts
                         what colour the scenery is, now that the models decide
                         (#366) — the linear space a `baseColorFactor` is
@@ -429,7 +446,16 @@ apps/                 AGPL-3.0-or-later, without exception
                         glTF and PNG reader the gate reproduces that table with
                         — the same argument `identity-verifier.test.ts` makes
     src/game/models/    the committed .glb files — Kenney CC0, upstream bytes,
-                        one ASSETS.toml row each (ADR 0022 D-5). ⚠️ The first
+                        one ASSETS.toml row each (ADR 0022 D-5). ⚠️ **"Kenney
+                        CC0, upstream bytes" describes the STYLISED world only
+                        since ADR 0026 (#431)**, and a reviewer who remembers it
+                        as the rule for every model is reading the old file: a
+                        realistic asset comes from ADR 0026 D-4's source list
+                        and is DERIVED — reproducible from a recorded input by a
+                        committed headless-Blender script (#430), never
+                        committed verbatim at source resolution, and none may be
+                        committed until #430 teaches ASSET005 the keys that
+                        record it. ⚠️ The first
                         binaries in this repository that anything SHIPS, so
                         they land under apps/ and could not land under
                         packages/: ASSET004 admits CC0-1.0 under apps/ only.
@@ -2955,7 +2981,10 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   prose. ⚠️ A reviewer who remembers this sentence being unenforced is reading the old file:
   deleting an ADR's `- **Status**: Accepted` line used to leave `check-repo-rules.sh` reporting
   clean at exit 0. Numbers are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. **The next free number is 0026.**
+  **and which are claimed by open issues** before you pick one. **The next free number is 0027.**
+  ⚠️ **0026 is [ADR 0026](docs/adr/0026-realistic-game-world.md)**, taken by
+  [#431](https://github.com/openzigs/onyourleft/issues/431) for the realistic game world; a reviewer
+  who remembers this sentence offering 0026 is reading the old file.
   ⚠️ **0025 is [ADR 0025](docs/adr/0025-app-store-additional-permission.md)**, taken by
   [#432](https://github.com/openzigs/onyourleft/issues/432) for the app-store additional permission.
   ⚠️ **0024 is [ADR 0024](docs/adr/0024-offline-and-caching-posture.md)**, taken by
@@ -3268,6 +3297,9 @@ top of an issue **supersedes its body**.
 | Why the ghost does not gain road while the phone is backgrounded, and which clock it is raced against | `apps/web/src/game/simulation.ts` §`ghostClock`, §`GameState.ridden` |
 | Why the road is a corridor rather than a world, and where its vertices come from | `apps/web/src/game/terrain.ts`, [ADR 0008](docs/adr/0008-mobile-client-architecture.md) D-5 |
 | Why the scenery is models at all, which pack, and which kind deliberately stays a cylinder | [ADR 0022](docs/adr/0022-game-scenery-model-pack.md) D-1, D-2, D-3, `apps/web/src/game/scenery-models.ts` |
+| Why the world goes realistic, what does NOT change, and which of the two worlds a rung draws | [ADR 0026](docs/adr/0026-realistic-game-world.md) D-2, D-3, D-10 |
+| Which sources a realistic asset may come from, and why one converted from them is still traceable | [ADR 0026](docs/adr/0026-realistic-game-world.md) D-4, D-5, [#430](https://github.com/openzigs/onyourleft/issues/430) |
+| Why the realistic world is not precached, and what an offline rider who chose it gets | [ADR 0026](docs/adr/0026-realistic-game-world.md) D-7, [ADR 0024](docs/adr/0024-offline-and-caching-posture.md) D-2 |
 | What enumerates the scene's colours now that a pack decides them, and why a table in source is still a gate | `apps/web/src/game/scenery-palette.ts` §`SCENERY_PALETTE`, [ADR 0022](docs/adr/0022-game-scenery-model-pack.md) §Amendments, [#366](https://github.com/openzigs/onyourleft/issues/366) |
 | Why a pack's own colour is darkened before it is drawn, and why the rule is applied rather than checked | `apps/web/src/game/scenery-palette.ts` §`tonedForTheSun`, §`MAXIMUM_LIT_CHANNEL` |
 | Which way up a glTF's texture coordinates are, and the measurement that settled it | `apps/web/src/game/scenery-palette.ts` §`atlasColourAt`, `scenery-palette.test.ts` §"an unused black quarter" |

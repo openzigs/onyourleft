@@ -442,3 +442,26 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   `arrangement-unchanged.test.ts`' digest did not move, because a variant is drawn from a hash
   stream of its own. Variants change what stands somewhere, never where.
   ([#367](https://github.com/openzigs/onyourleft/issues/367))
+
+- **2026-09-21** — **D-1 and D-2 are superseded, and so is D-7's second bullet in its means, by
+  [ADR 0026](0026-realistic-game-world.md).** On the owner's ruling of 2026-09-20 on
+  [#430](https://github.com/openzigs/onyourleft/issues/430), reaffirmed on 2026-09-21, the trainer
+  game's world goes realistic. That reverses three decisions above, which
+  [ADR 0013](0013-adr-amendments.md) D-3 says only a superseding ADR may do, so this entry records the
+  supersession and decides nothing: D-1's rule that *"the committed bytes can be the upstream
+  bytes"* and its Kenney-only source are replaced by ADR 0026 D-4's source list and D-5's rule that
+  a derived asset is reproducible from a recorded input by a committed script; D-2's *"one author,
+  one house style"* is replaced by coherence **per quality rung** (ADR 0026 D-3); and D-7's means —
+  in paraphrase, every scenery mesh wearing a `MeshLambertMaterial` this repository constructs, with
+  no texture sampled — are reversed for the realistic world while its purpose — no material
+  `GLTFLoader` builds reaches the scene unasserted — stands (ADR 0026 D-11). ⚠️ **The `Status` line
+  above still reads *Accepted*, and that is ADR 0013 D-2 rather than an oversight**: `Status` is
+  part of the body and an amendment does not change it. Read it as *superseded in part*. **D-1 and
+  D-2 still describe the stylised world exactly** — its Kenney files stay upstream bytes and it is
+  kept as the low rung, not deleted. **D-3, D-4's list, D-5 and D-6 stand**, as does D-7's first
+  bullet. One fact in D-3 is separately out of date: *"`scatter.ts` places exactly six kinds"*
+  stopped being true with [#460](https://github.com/openzigs/onyourleft/issues/460), which moved
+  `building` into a `StructureKind` beside eight new ones placed by `settlements.ts`; there are five
+  scatter kinds, and of the fourteen kinds only the five D-3 named wear a model. D-3's rule that a
+  new kind arrives as its own issue is what #460 followed, and it stands.
+  ([#431](https://github.com/openzigs/onyourleft/issues/431))
