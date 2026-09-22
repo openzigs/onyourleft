@@ -339,6 +339,40 @@ The page has tappable toggles for every item; each change reloads it with the ne
 To go back to the app: `node apps/mobile/tools/webview-probe.mjs "location.href = '/'"`. When the
 measurement is done, `pnpm run build` again and re-sync, so the next APK carries no spike.
 
+### ⚠️ The first tablet run crashed every realism configuration, and why
+
+2026-09-21, the APK staged from `ec3251f`: every configuration except the bare baseline stayed
+black. `__oylRealism.ready` was `false` and `errors` was `[]` for over 120 s, while
+`requestAnimationFrame` ran at 60 fps. `logcat -s Capacitor/Console` showed the cause: `Uncaught
+UnitError: duration in seconds must not be negative, received -0.0020999999999999092`.
+
+- **The cause.** The loop's origin was a `performance.now()` read after the assets loaded, and each
+  frame was measured from `requestAnimationFrame`'s timestamp. That timestamp is the frame's
+  *start*, so it can be earlier than the origin. The first elapsed time came out negative,
+  `seconds()` threw, the throw escaped the rAF callback, and the loop died with nothing published.
+- **The baseline was lucky, and wrong anyway.** It survived the timing, but its one result was
+  `{p50: 43530, count: 1}`: one 43-second sample.
+
+The fix is [`browser/realism/loop.ts`](../../apps/web/browser/realism/loop.ts):
+
+- **One clock.** Everything is timed from the rAF timestamp, with its origin at the first frame
+  drawn after loading. Warm-up counts from that frame, and a step is never negative.
+- **Stalls are counted, not sampled.** A gap over 1 s is published as `stalls` and left out of the
+  frame-time sample.
+- **A window closes on sampled time.** It closes only once it holds more than one frame and has
+  sampled `?seconds=` of them.
+- **Errors are reported.** Every frame runs inside `guarded`, so a throw goes to
+  `__oylRealism.errors` and a red banner, and logs as `OYL-REALISM-ERROR`. Window `error` and
+  `unhandledrejection` events land in `errors` too.
+
+This is pinned by `loop.test.ts`, which reproduces the tablet's backwards timestamp and its
+43-second sample. `screenshots.ts` now fails unless every row of the matrix reaches `ready` with
+no error and more than one sampled frame. Headless, every row did: 241 frames for the single
+items, 42 for all on, and 70 and 21 at scales 0.75 and 0.5 — SwiftShader rates, not device ones.
+A deliberate `seconds(-0.0021)` inside the frame showed up in `errors` as `UnitError: duration in
+seconds must not be negative`. ⚠️ The SwiftShader table above was taken with the old loop, and it
+sampled rAF steps the same way after its warm-up. It is meaningless for a phone either way.
+
 ## The device procedure — for the owner's run
 
 Landscape, full brightness, on charge, Wi-Fi on, nothing else running. Let the tablet cool to room

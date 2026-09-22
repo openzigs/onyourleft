@@ -11,9 +11,10 @@
  *
  * Serves `browser/dist` itself on 127.0.0.1 (the harness server binds that
  * address for §4f's reason) and opens `realism.html` with the rider held at
- * one distance and the panel hidden, in each configuration of
- * `MEASUREMENT_MATRIX` except the render-scale rows (a scale changes
- * sharpness, and at 960 px wide that is not what a reader is looking for).
+ * one distance and the panel hidden, in every configuration of
+ * `MEASUREMENT_MATRIX`. It FAILS unless each one reaches `ready`, reports no
+ * error and publishes more than one sampled frame. The render-scale rows are
+ * checked and not photographed.
  *
  * ⚠️ **What these are NOT**: a performance number. SwiftShader rasterises on
  * the CPU; its frame time says nothing about a Mali GPU and is published only
@@ -72,7 +73,6 @@ async function main(): Promise<void> {
   const results: unknown[] = [];
   try {
     for (const [index, row] of MEASUREMENT_MATRIX.entries()) {
-      if (row.config.scale !== 1) continue;
       const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
       const query = configQuery({ ...row.config, at: Number(at), panel: false, seconds: 4 });
       await page.goto(`http://${HOST}:${PORT}/realism.html${query}`);
@@ -88,6 +88,23 @@ async function main(): Promise<void> {
       await page.waitForFunction(() => window.__oylRealism?.result !== undefined, undefined, {
         timeout: 180_000,
       });
+      const result = (await page.evaluate(() => window.__oylRealism?.result)) as
+        { frameMs: { count: number } } | undefined;
+      // ⚠️ A result of ONE frame is not a measurement: the tablet's first run
+      // published `{p50: 43530, count: 1}` for the baseline. Every row must
+      // reach `ready` and publish a distribution, or this run fails.
+      const count = result?.frameMs.count ?? 0;
+      if (count <= 1)
+        throw new Error(`${row.name}: published ${count} frame(s), not a distribution`);
+      const late = await page.evaluate(() => window.__oylRealism?.errors ?? []);
+      if (late.length > 0) throw new Error(`${row.name}: ${late.join('; ')}`);
+      console.log(`${row.name}: ready, ${count} frames sampled`);
+      // The render-scale rows are checked but not photographed: at 960 px wide
+      // a scale changes sharpness, which is not what a reader is looking for.
+      if (row.config.scale !== 1) {
+        await page.close();
+        continue;
+      }
       const name = `${String(index).padStart(2, '0')}-${row.name
         .replace(/[^a-z0-9]+/gi, '-')
         .replace(/^-|-$/g, '')
@@ -96,7 +113,7 @@ async function main(): Promise<void> {
       results.push({
         name: row.name,
         file: name,
-        result: await page.evaluate(() => window.__oylRealism?.result),
+        result,
       });
       console.log(`${row.name}: ${name}`);
       await page.close();

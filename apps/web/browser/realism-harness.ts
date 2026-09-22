@@ -48,6 +48,7 @@ import {
   type Percentiles,
   type RealismConfig,
 } from './realism/config';
+import { describe, guarded, MeasurementClock } from './realism/loop';
 import { realismRoute } from './realism/route';
 import { RealismView, type AssetManifest, type FrameCounts } from './realism/view';
 import { worldStyle } from '../src/game/world';
@@ -77,6 +78,8 @@ export interface RealismResult {
   readonly counts: FrameCounts;
   readonly spikeTextureBytesEstimate: number;
   readonly notes: Record<string, unknown>;
+  /** Steps longer than `MAXIMUM_FRAME_GAP_MS`, counted and NOT sampled. */
+  readonly stalls: number;
 }
 
 declare global {
@@ -236,15 +239,20 @@ async function run(): Promise<void> {
     counts,
     spikeTextureBytesEstimate: Math.round(view.textureBytes),
     notes: view.notes,
+    stalls: lastStalls,
   });
 
-  const started = performance.now();
-  let last = started;
+  // ONE clock: requestAnimationFrame's own timestamp, whose origin is the
+  // first frame drawn after every asset has loaded — `realism/loop.ts` says
+  // why a `performance.now()` origin put a negative duration into `seconds()`
+  // on the tablet and killed the loop.
+  const clock = new MeasurementClock(WARM_UP_SECONDS);
   let minute = 0;
+  let soakFrom = 0;
   const soak: (RealismResult & { minute: number })[] = [];
   let measured = false;
-  const measureEnd = WARM_UP_SECONDS + config.seconds;
   let shownAt = 0;
+  let lastStalls = 0;
 
   const frameAt = (distance: number, elapsed: number) => {
     const state = atStartLine(profile);
@@ -261,11 +269,9 @@ async function run(): Promise<void> {
     });
   };
 
-  const tick = (now: number): void => {
-    const elapsed = (now - started) / 1000;
-    const sampling = elapsed > WARM_UP_SECONDS && (!measured || config.soakMinutes > 0);
-    if (sampling) frameSamples.push(now - last);
-    last = now;
+  const step = (now: number): void => {
+    const { elapsedSeconds: elapsed, sampledMs } = clock.frame(now);
+    const sampling = sampledMs !== undefined && (!measured || config.soakMinutes > 0);
     collectGpu(sampling);
     const distance =
       config.at ??
@@ -283,31 +289,37 @@ async function run(): Promise<void> {
       gl.endQuery(timer.TIME_ELAPSED_EXT);
       pending.push(query);
     }
-    if (!measured && elapsed >= measureEnd) {
+    if (!measured && clock.windowFull(config.seconds)) {
       measured = true;
+      soakFrom = elapsed;
+      const taken = clock.take();
+      frameSamples = [...taken.samples];
+      lastStalls = taken.stalls;
       const result = summary();
       publish({ result });
       console.log(`OYL-REALISM ${JSON.stringify(result)}`);
-      frameSamples = [];
       gpuSamples = [];
-    }
-    if (
+    } else if (
       config.soakMinutes > 0 &&
       measured &&
-      elapsed >= measureEnd + (minute + 1) * 60 &&
-      minute < config.soakMinutes
+      minute < config.soakMinutes &&
+      elapsed >= soakFrom + (minute + 1) * 60
     ) {
       minute += 1;
+      const taken = clock.take();
+      frameSamples = [...taken.samples];
+      lastStalls = taken.stalls;
       const sample = { ...summary(), minute };
       soak.push(sample);
       publish({ soak: [...soak] });
       console.log(`OYL-REALISM-SOAK ${JSON.stringify(sample)}`);
-      frameSamples = [];
       gpuSamples = [];
+    } else if (measured && config.soakMinutes === 0) {
+      clock.take();
     }
     if (box !== undefined && now - shownAt > 1000) {
       shownAt = now;
-      const live = percentiles(frameSamples.slice(-120));
+      const live = percentiles(clock.samples.slice(-120));
       const stats = document.getElementById('oyl-realism-stats');
       if (stats !== null) {
         stats.textContent =
@@ -317,16 +329,35 @@ async function run(): Promise<void> {
           (assets === undefined ? ' · ASSETS NOT IN THIS BUILD' : '');
       }
     }
-    requestAnimationFrame(tick);
+  };
+  const safeStep = guarded(step, fail);
+  const tick = (now: number): void => {
+    if (safeStep(now)) requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
 }
 
-run().catch((error: unknown) => {
-  errors.push(error instanceof Error ? error.message : String(error));
+/** Puts an error where the procedure reads it, and on the screen. Never throws. */
+function fail(message: string): void {
+  errors.push(message);
   publish({ errors: [...errors] });
-  const message = document.createElement('p');
-  message.textContent = errors.join('\n');
-  message.style.cssText = 'color:#fff;background:#700;padding:12px;font:16px system-ui';
-  document.body.append(message);
+  console.log(`OYL-REALISM-ERROR ${message}`);
+  const shown = document.createElement('p');
+  shown.textContent = errors.join('\n');
+  shown.style.cssText =
+    'position:fixed;bottom:0;left:0;margin:0;z-index:2;color:#fff;background:#700;padding:12px;font:16px system-ui';
+  document.body.append(shown);
+}
+
+// Whatever throws outside the guarded frame — a loader callback, a rejected
+// promise nothing awaited — lands in `errors` too.
+addEventListener('error', (event) => {
+  fail(describe(event.error ?? event.message));
+});
+addEventListener('unhandledrejection', (event) => {
+  fail(describe(event.reason));
+});
+
+run().catch((error: unknown) => {
+  fail(describe(error));
 });
