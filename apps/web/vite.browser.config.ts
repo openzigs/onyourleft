@@ -60,6 +60,12 @@ function pmtilesFixture(): Plugin {
 export default defineConfig({
   plugins: [pmtilesFixture()],
   root: 'browser',
+  // ⚠️ The APP's `public/`, not a `browser/public/` of the harness's own —
+  // since ADR 0026. The realistic world's files are committed there and served
+  // at `/realistic/…`, and `game.browser.spec.ts` §"the realistic world" and the
+  // owner's `realistic.html` both load them from the path the product would.
+  // It also copies the web app manifest and its icons, which nothing here reads.
+  publicDir: '../public',
   // ⚠️ A **multi-page** app, which here means "a static file server". Vite's
   // default single-page mode rewrites every unknown path to `index.html`, so a
   // request for a missing archive comes back `200` with a page of HTML in it —
@@ -112,6 +118,11 @@ export default defineConfig({
         loop: 'browser/loop.html',
         // #428: the home screen, laid out at a tablet's width and at 320 px.
         home: 'browser/home.html',
+        // ADR 0026 D-12: the ONE place the realistic world can be reached until
+        // #475 offers it to riders — the owner's page, ridden automatically,
+        // with the stylised world a tap away and a twenty-minute soak.
+        // `realistic-harness.ts` says what it does; it asserts nothing.
+        realistic: 'browser/realistic.html',
         // Not a gate the way the other two are: `capture.html` is the tool a
         // person opens with a trainer in front of them (#111), and a headless
         // runner has no Bluetooth adapter. It is built and loaded here so that

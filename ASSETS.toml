@@ -48,6 +48,27 @@
 # as long as it ships — so these three keys are the data the credits screen is
 # generated from (#358), not decoration. ADR 0023 §Consequences states the trade.
 #
+# and, for a DERIVED file — one this repository made from an upstream input
+# rather than committed as the upstream bytes (ADR 0026 D-5, #430) — four more,
+# required together, with `modified` saying in words what was changed (ASSET007):
+#
+#   input        the upstream page the input came from, which is also the page
+#                whose licence statement was read
+#   inputsha256  SHA-256 over every file downloaded from it, as
+#                `apps/web/tools/realistic/sources.ts` §`inputDigest` defines it
+#                and `inputs.lock.json` beside it records file by file
+#   script       the committed file that made the output, repository-relative
+#   tool         the pinned version of what ran it — a different Blender may
+#                decimate differently, so the version is part of the recipe
+#
+# ⚠️ **What these do and do not prove.** `sha256` still pins the committed
+# bytes. What the four add is that the bytes can be MADE AGAIN: `pnpm --filter
+# @onyourleft/web run realistic:process --check` re-runs the pipeline from the
+# locked inputs and compares byte for byte, and `provenance.test.ts` holds each
+# row to the lock and to the pipeline's own table. Neither runs Blender in CI;
+# the check is run by hand, and its output is quoted in the pull request that
+# changes a script or an input.
+#
 # ⚠️ An unrecognised key is REFUSED rather than ignored (ASSET005), the choice
 # ADR 0017 D-4 made for the workout file and for the same reason: a key nobody
 # reads is a claim about an asset that silently has no effect.
@@ -486,3 +507,190 @@ source = "This repository, #107 — written by `pnpm --filter @onyourleft/fit ru
 licence = "Apache-2.0"
 read = "2026-09-16"
 sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+# --- The realistic world (#430, #425, #474, #369; ADR 0026) -------------------
+#
+# Made by `apps/web/tools/realistic/`: the textures and the sky are Poly Haven's
+# own bytes; every model and impostor is DERIVED, and carries the four keys
+# ASSET007 requires. `pnpm --filter @onyourleft/web run realistic:process
+# --records` prints these entries from the pipeline's own table, and
+# `provenance.test.ts` fails if they drift from it.
+
+[[asset]]
+path = "apps/web/public/realistic/farm_field_2k.hdr"
+source = "Poly Haven, farm_field by Dimitrios Savva (Photography); Jarod Guest (Processing); upstream bytes, unmodified — https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/2k/farm_field_2k.hdr"
+licence = "CC0-1.0"
+read = "2026-09-22"
+sha256 = "d5d5ea57e929a3b938b44a9f7788d08d2ae85f1849ae0b4cd6eb538be1475b52"
+
+[[asset]]
+path = "apps/web/public/realistic/asphalt_02_diff_1k.jpg"
+source = "Poly Haven, asphalt_02 by Rob Tuytel (All); upstream bytes, unmodified — https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/asphalt_02/asphalt_02_diff_1k.jpg"
+licence = "CC0-1.0"
+read = "2026-09-22"
+sha256 = "1aa5ce99f58a625c71d48cfc3e68b65ca85ccb00f39e045c0a928608a0ea25ed"
+
+[[asset]]
+path = "apps/web/public/realistic/asphalt_02_nor_gl_1k.jpg"
+source = "Poly Haven, asphalt_02 by Rob Tuytel (All); upstream bytes, unmodified — https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/asphalt_02/asphalt_02_nor_gl_1k.jpg"
+licence = "CC0-1.0"
+read = "2026-09-22"
+sha256 = "42a1c381b53204e83a982db2864479a30bc127bbdeebb1006f8ee51bff099df3"
+
+[[asset]]
+path = "apps/web/public/realistic/sparse_grass_diff_1k.jpg"
+source = "Poly Haven, sparse_grass by Amal Kumar (All); upstream bytes, unmodified — https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/sparse_grass/sparse_grass_diff_1k.jpg"
+licence = "CC0-1.0"
+read = "2026-09-22"
+sha256 = "ae94f2b34597b9108eefd88217f55eccaec6d6b382e858a478ee92df90e66617"
+
+[[asset]]
+path = "apps/web/public/realistic/sparse_grass_nor_gl_1k.jpg"
+source = "Poly Haven, sparse_grass by Amal Kumar (All); upstream bytes, unmodified — https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/sparse_grass/sparse_grass_nor_gl_1k.jpg"
+licence = "CC0-1.0"
+read = "2026-09-22"
+sha256 = "1c840a24807346ddaaf94a5057aee4078fcec3a4cd84bfe45da7d3b480ef460b"
+
+[[asset]]
+path = "apps/web/public/realistic/island_tree_02.glb"
+source = "Poly Haven, island_tree_02 by Rob Tuytel (scanning, processing); Rico Cilliers (cleanup, processing); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
+licence = "CC0-1.0"
+read = "2026-09-22"
+sha256 = "3f8f34c99c78806966cb684fa581ecd28bef9df0aa8cc2da82474398d0a0d82c"
+modified = "one object of the pack (island_tree_02); foliage thinned by whole cards and each survivor grown, wood collapse-decimated, textures downsized to 512 px and roughness maps dropped, ambient occlusion baked into a vertex colour; an eight-view impostor strip rendered from the full scan before any of that"
+input = "https://polyhaven.com/a/island_tree_02"
+inputsha256 = "2ed204e29ceb0eb63be4c656c9d2c2f93c9a785adabbce56a1ae9a55b49535a1"
+script = "apps/web/tools/realistic/blender/process_tree.py"
+tool = "Blender 4.4.3"
+
+[[asset]]
+path = "apps/web/public/realistic/island_tree_02-impostor.png"
+source = "Poly Haven, island_tree_02 by Rob Tuytel (scanning, processing); Rico Cilliers (cleanup, processing); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
+licence = "CC0-1.0"
+read = "2026-09-22"
+sha256 = "72b479f95776dd6aeb7a1fbbee8e6c126b0f22114db5539c383e0fb8d712ac9f"
+modified = "an eight-view impostor strip of one object of the pack, rendered from the full scan"
+input = "https://polyhaven.com/a/island_tree_02"
+inputsha256 = "2ed204e29ceb0eb63be4c656c9d2c2f93c9a785adabbce56a1ae9a55b49535a1"
+script = "apps/web/tools/realistic/blender/process_tree.py"
+tool = "Blender 4.4.3"
+
+[[asset]]
+path = "apps/web/public/realistic/tree_small_02.glb"
+source = "Poly Haven, tree_small_02 by Rico Cilliers (All); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
+licence = "CC0-1.0"
+read = "2026-09-22"
+sha256 = "583ffa865091f841ad5ddd675e206c4f131c3f382806eef5e1d4608cbb85d0fb"
+modified = "one object of the pack (tree_small_02); foliage thinned by whole cards and each survivor grown, wood collapse-decimated, textures downsized to 512 px and roughness maps dropped, ambient occlusion baked into a vertex colour; an eight-view impostor strip rendered from the full scan before any of that"
+input = "https://polyhaven.com/a/tree_small_02"
+inputsha256 = "8a3d11cb7afb06eb0ce7245204efe3b89d4c1fa39206e1585f2edf7fdca2e48c"
+script = "apps/web/tools/realistic/blender/process_tree.py"
+tool = "Blender 4.4.3"
+
+[[asset]]
+path = "apps/web/public/realistic/tree_small_02-impostor.png"
+source = "Poly Haven, tree_small_02 by Rico Cilliers (All); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
+licence = "CC0-1.0"
+read = "2026-09-22"
+sha256 = "6d3b5dea98e2bca8411fadce0938bd7d7be49874af7d7551625a860431ecbcde"
+modified = "an eight-view impostor strip of one object of the pack, rendered from the full scan"
+input = "https://polyhaven.com/a/tree_small_02"
+inputsha256 = "8a3d11cb7afb06eb0ce7245204efe3b89d4c1fa39206e1585f2edf7fdca2e48c"
+script = "apps/web/tools/realistic/blender/process_tree.py"
+tool = "Blender 4.4.3"
+
+[[asset]]
+path = "apps/web/public/realistic/fir_sapling_medium_a.glb"
+source = "Poly Haven, fir_sapling_medium by Rob Tuytel (photography); Rico Cilliers (modeling); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
+licence = "CC0-1.0"
+read = "2026-09-22"
+sha256 = "1223af1d090172b6bdea2b0e15dfe5c16f5f2e4ddbd2474600c0b0c661e6aed5"
+modified = "one object of the pack (fir_sapling_medium_a); foliage thinned by whole cards and each survivor grown, wood collapse-decimated, textures downsized to 512 px and roughness maps dropped, ambient occlusion baked into a vertex colour; an eight-view impostor strip rendered from the full scan before any of that"
+input = "https://polyhaven.com/a/fir_sapling_medium"
+inputsha256 = "1f989c2eac759273e9d847a4df26a92e46448483cf0633485dcbce6e4a47010b"
+script = "apps/web/tools/realistic/blender/process_tree.py"
+tool = "Blender 4.4.3"
+
+[[asset]]
+path = "apps/web/public/realistic/fir_sapling_medium_a-impostor.png"
+source = "Poly Haven, fir_sapling_medium by Rob Tuytel (photography); Rico Cilliers (modeling); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
+licence = "CC0-1.0"
+read = "2026-09-22"
+sha256 = "86b847a8c2d3bbb70c419fd55f7d0c401c976ea27053c7eb250075e86620d057"
+modified = "an eight-view impostor strip of one object of the pack, rendered from the full scan"
+input = "https://polyhaven.com/a/fir_sapling_medium"
+inputsha256 = "1f989c2eac759273e9d847a4df26a92e46448483cf0633485dcbce6e4a47010b"
+script = "apps/web/tools/realistic/blender/process_tree.py"
+tool = "Blender 4.4.3"
+
+[[asset]]
+path = "apps/web/public/realistic/fir_sapling_medium_b.glb"
+source = "Poly Haven, fir_sapling_medium by Rob Tuytel (photography); Rico Cilliers (modeling); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
+licence = "CC0-1.0"
+read = "2026-09-22"
+sha256 = "ddeebfda547ac820a9d30a90a59c40fe89dfd1a27c1789a285f1c0205a883ca7"
+modified = "one object of the pack (fir_sapling_medium_b); foliage thinned by whole cards and each survivor grown, wood collapse-decimated, textures downsized to 512 px and roughness maps dropped, ambient occlusion baked into a vertex colour; an eight-view impostor strip rendered from the full scan before any of that"
+input = "https://polyhaven.com/a/fir_sapling_medium"
+inputsha256 = "1f989c2eac759273e9d847a4df26a92e46448483cf0633485dcbce6e4a47010b"
+script = "apps/web/tools/realistic/blender/process_tree.py"
+tool = "Blender 4.4.3"
+
+[[asset]]
+path = "apps/web/public/realistic/fir_sapling_medium_b-impostor.png"
+source = "Poly Haven, fir_sapling_medium by Rob Tuytel (photography); Rico Cilliers (modeling); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
+licence = "CC0-1.0"
+read = "2026-09-22"
+sha256 = "0c45e817d004fed0452f24a1d11962abb2b9dff2dd05bd18b14aa19e5514be51"
+modified = "an eight-view impostor strip of one object of the pack, rendered from the full scan"
+input = "https://polyhaven.com/a/fir_sapling_medium"
+inputsha256 = "1f989c2eac759273e9d847a4df26a92e46448483cf0633485dcbce6e4a47010b"
+script = "apps/web/tools/realistic/blender/process_tree.py"
+tool = "Blender 4.4.3"
+
+[[asset]]
+path = "apps/web/public/realistic/shrub_02_a.glb"
+source = "Poly Haven, shrub_02 by Rico Cilliers (All); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
+licence = "CC0-1.0"
+read = "2026-09-22"
+sha256 = "dea191ff1983b62f95a1f4ebe6a1d5b263facec53d21382c4b924a444e9d4c14"
+modified = "one object of the pack (shrub_02_a); foliage thinned by whole cards and each survivor grown, textures downsized to 512 px and roughness maps dropped, ambient occlusion baked into a vertex colour"
+input = "https://polyhaven.com/a/shrub_02"
+inputsha256 = "b3233214813ffe0e7d6c58fa567689f9dec5e3fd7400f4ace8a629506eabb50c"
+script = "apps/web/tools/realistic/blender/process_tree.py"
+tool = "Blender 4.4.3"
+
+[[asset]]
+path = "apps/web/public/realistic/shrub_02_c.glb"
+source = "Poly Haven, shrub_02 by Rico Cilliers (All); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
+licence = "CC0-1.0"
+read = "2026-09-22"
+sha256 = "1a655c1de012a46a8001054d75b920926737a19afc0dc2b83d7327201e05c2f6"
+modified = "one object of the pack (shrub_02_c); foliage thinned by whole cards and each survivor grown, textures downsized to 512 px and roughness maps dropped, ambient occlusion baked into a vertex colour"
+input = "https://polyhaven.com/a/shrub_02"
+inputsha256 = "b3233214813ffe0e7d6c58fa567689f9dec5e3fd7400f4ace8a629506eabb50c"
+script = "apps/web/tools/realistic/blender/process_tree.py"
+tool = "Blender 4.4.3"
+
+[[asset]]
+path = "apps/web/public/realistic/boulder_01.glb"
+source = "Poly Haven, boulder_01 by Rico Cilliers (All); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
+licence = "CC0-1.0"
+read = "2026-09-22"
+sha256 = "016a4a2437e9c0e89e14e73927579c7c7557953c4604b5e4f21a264f9598fce2"
+modified = "collapse-decimated from 66 122 to about 2 400 triangles, its colour and normal maps downsized to 512 px and its roughness map dropped; stood on its base"
+input = "https://polyhaven.com/a/boulder_01"
+inputsha256 = "aeaed7a3154095e525ff45a5342bcd95240ec024ba44eb491a42867acbec1fd2"
+script = "apps/web/tools/realistic/blender/process_rock.py"
+tool = "Blender 4.4.3"
+
+[[asset]]
+path = "apps/web/public/realistic/rider.glb"
+source = "MakeHuman, makehuman by The MakeHuman team; made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
+licence = "CC0-1.0"
+read = "2026-09-22"
+sha256 = "ee0e69d0a6ca77eb0b7b5a7256bb1a7e2634da70e5f3c61bfab058764261a899"
+modified = "the body mesh only, its skeleton reduced from 163 bones to 24 with each dropped bone’s weights merged into its nearest kept ancestor, coloured as cycling kit by dominant bone, collapse-decimated to about 9 000 triangles, in its rest pose"
+input = "https://raw.githubusercontent.com/makehumancommunity/makehuman/a8bc2d54ff0ac92e78ff71431b1023eda42bf482/LICENSE.md"
+inputsha256 = "a2d7325a33b07e60824eb2847a3f6fd35b35a702af86fe4c2189069597b189cc"
+script = "apps/web/tools/realistic/blender/process_rider.py"
+tool = "Blender 4.4.3"

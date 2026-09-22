@@ -1,0 +1,94 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+import { readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+import { describe, expect, it } from 'vitest';
+
+import { shippedFiles } from '../../tools/realistic/sources';
+import {
+  isRealisticVegetation,
+  REALISTIC_DIRECTORY,
+  REALISTIC_VEGETATION,
+  REALISTIC_VEGETATION_KINDS,
+  realisticFiles,
+  realisticUrl,
+  realisticWorldNotice,
+} from './realistic-assets';
+import { SCATTER_KINDS } from './scatter';
+
+const COMMITTED = readdirSync(fileURLToPath(new URL('../../public/realistic/', import.meta.url)));
+
+describe('what the renderer loads is what the pipeline ships — #430', () => {
+  it('names exactly the committed files, in both directions', () => {
+    // A file the pipeline ships and the renderer never loads is APK weight for
+    // nothing; a file the renderer loads and nothing ships is a 404 on the
+    // tablet and a world that silently stays stylised.
+    expect([...realisticFiles()].sort()).toEqual([...COMMITTED].sort());
+    expect([...realisticFiles()].sort()).toEqual([...shippedFiles()].sort());
+  });
+
+  it('names each file once', () => {
+    expect(new Set(realisticFiles()).size).toBe(realisticFiles().length);
+  });
+
+  it('serves them under one directory, which is what the precache excludes', () => {
+    for (const file of realisticFiles()) {
+      expect(realisticUrl(file)).toBe(`/${REALISTIC_DIRECTORY}${file}`);
+    }
+  });
+});
+
+describe('the kinds layer 2 replaces — ADR 0026 D-12, #474', () => {
+  it('are the trees, the shrub and the rock, and not the post', () => {
+    // ADR 0022 D-3's `post` stays procedural in both worlds (ADR 0026 D-3).
+    expect([...REALISTIC_VEGETATION_KINDS].sort()).toEqual([
+      'rock',
+      'shrub',
+      'tree-broadleaf',
+      'tree-conifer',
+    ]);
+    expect(isRealisticVegetation('post')).toBe(false);
+    expect(isRealisticVegetation('building')).toBe(false);
+    for (const kind of REALISTIC_VEGETATION_KINDS) {
+      expect(SCATTER_KINDS, kind).toContain(kind);
+      expect(isRealisticVegetation(kind)).toBe(true);
+      expect(REALISTIC_VEGETATION[kind].length, kind).toBeGreaterThan(0);
+    }
+  });
+
+  it('gives every tree an impostor and nothing else one', () => {
+    for (const kind of REALISTIC_VEGETATION_KINDS) {
+      for (const model of REALISTIC_VEGETATION[kind]) {
+        expect(model.impostor !== undefined, model.name).toBe(kind.startsWith('tree-'));
+      }
+    }
+  });
+});
+
+describe('what a rider is told when the realistic world is not what they ride in — ADR 0026 D-7', () => {
+  it('says nothing when it loaded', () => {
+    expect(realisticWorldNotice({ loaded: true })).toBeUndefined();
+  });
+
+  it('says it is not kept offline, when the browser was offline — the expected case', () => {
+    const notice = realisticWorldNotice({
+      loaded: false,
+      offline: true,
+      detail: 'Failed to fetch',
+    });
+    expect(notice).toMatch(/offline/);
+    expect(notice).toMatch(/standard world/);
+  });
+
+  it('says only that it could not load otherwise, and never the failure’s own words', () => {
+    const notice = realisticWorldNotice({
+      loaded: false,
+      offline: false,
+      detail: 'shrub_02_c.glb: 404 Not Found',
+    });
+    expect(notice).toMatch(/could not be loaded/);
+    expect(notice).toMatch(/standard world/);
+    expect(notice).not.toMatch(/404|shrub/);
+  });
+});

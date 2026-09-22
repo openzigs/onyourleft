@@ -45,16 +45,28 @@ export interface PrecacheFile {
  *
  * ⚠️ An **exclusion** list, which is the opposite failure mode from the
  * inclusion list the header refuses: a pattern nobody updates leaves a new file
- * *in* the precache, which is the safe direction. Two entries, and both are
- * about files that are not part of the application:
+ * *in* the precache, which is the safe direction. Three entries:
  *
  * - a source map is a debugging artefact a rider never requests, and the
  *   product build emits none today, so this is insurance rather than a filter;
  * - `sw.js` is the worker itself, and a worker that precached its own script
  *   would serve a rider the old worker for ever — the browser fetches it
- *   bypassing the worker anyway, so caching it can only be wrong.
+ *   bypassing the worker anyway, so caching it can only be wrong;
+ * - ⚠️ **`realistic/`, since ADR 0026 D-7** — the realistic world's whole set,
+ *   about 31 MiB, which would multiply what a first visit downloads by ten for
+ *   a world no rider can yet choose (D-12) and most never will. It is selected
+ *   by **where it lives in the build** — every file Vite copies out of
+ *   `public/realistic/` lands under `realistic/` — and never by name, so a
+ *   realistic asset added later is excluded with no edit here, which is D-2's
+ *   own argument applied to the exclusion. It is fetched when the rider
+ *   chooses the realistic world; offline, the game falls back to the stylised
+ *   world and says so. Inside the Android shell there is no worker at all and
+ *   the set ships in the APK. `precache.test.ts` holds the rule both ways —
+ *   every stylised asset cached, no realistic one — and
+ *   `offline.browser.spec.ts` does the same against the cache a real browser
+ *   filled from the real build.
  */
-export const PRECACHE_EXCLUSIONS: readonly RegExp[] = [/\.map$/, /^sw\.js$/];
+export const PRECACHE_EXCLUSIONS: readonly RegExp[] = [/\.map$/, /^sw\.js$/, /^realistic\//];
 
 function included(name: string): boolean {
   return !PRECACHE_EXCLUSIONS.some((pattern) => pattern.test(name));

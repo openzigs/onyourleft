@@ -68,6 +68,32 @@ describe('reading an entry', () => {
     expect(entries[0]?.modified).toBe('rescaled and merged into one geometry');
   });
 
+  it('reads the four keys a derived asset carries — #430, ADR 0026 D-5', () => {
+    // ⚠️ Accepted here because the shell reader accepts them: a row the shell
+    // passes and this reader refuses is a problem on the credits screen for a
+    // manifest CI called clean, which is the drift this file's header forbids.
+    const { entries, problems } = parseAssetManifest(
+      [
+        '[[asset]]',
+        'path = "apps/web/public/realistic/tree.glb"',
+        'source = "a scan"',
+        'licence = "CC0-1.0"',
+        'read = "2026-09-22"',
+        'sha256 = "aa"',
+        'modified = "decimated"',
+        'input = "https://example.invalid/a/tree"',
+        `inputsha256 = "${'0'.repeat(64)}"`,
+        'script = "apps/web/tools/realistic/blender/process_tree.py"',
+        'tool = "Blender 4.4.3"',
+      ].join('\n'),
+    );
+    expect(problems).toEqual([]);
+    expect(entries[0]?.input).toBe('https://example.invalid/a/tree');
+    expect(entries[0]?.inputsha256).toBe('0'.repeat(64));
+    expect(entries[0]?.script).toBe('apps/web/tools/realistic/blender/process_tree.py');
+    expect(entries[0]?.tool).toBe('Blender 4.4.3');
+  });
+
   it('reads several entries, keeping the order the manifest gives them', () => {
     const { entries } = parseAssetManifest(
       `${ONE_ENTRY}\n${ONE_ENTRY.replace('tree_default', 'plant_bush')}`,

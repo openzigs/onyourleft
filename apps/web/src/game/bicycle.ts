@@ -9,40 +9,53 @@
  * in the frame for the whole of every ride; #341 gave everything *beside* the
  * road a silhouette and left the thing in the middle of it a ball.
  *
- * ## Why this is built from numbers rather than loaded from a pack
+ * ## Two riders now, and which of them is built from numbers — #369
  *
- * #349 was filed asking for a **rigged** model with a pedalling clip, driven by
- * an `AnimationMixer`. Its own two surveys then found there is no such thing to
- * download: ADR 0022's pack (Kenney) has no bicycle at all, Quaternius'
- * universal animation library has no pedalling clip, and the rigged-and-animated
- * cyclists that do exist are on marketplaces whose licence has to be read per
- * model from its own page. So a pedalling animation would have to be *authored*.
+ * ⚠️ **This section used to be titled "Why this is built from numbers rather
+ * than loaded from a pack", and argued that there was no model to load. A
+ * reviewer who remembers it is reading the old file.** It was right about the
+ * animation and wrong, as it turned out, about the body. #349 asked for a
+ * rigged model with a pedalling clip; its surveys found no pedalling clip to
+ * download, so the pedalling was solved here instead — the crank angle is the
+ * integral of the cadence and each foot is on its own pedal. #369 then saw
+ * what that bought: **a clip was never needed, only a rigged body to hang the
+ * solve on**, and a rigged body IS downloadable.
  *
- * The survey's own alternative is what is built here, and it is better on the
- * axis the issue cares most about rather than merely cheaper:
+ * So, since ADR 0026, there are two riders, one per world:
  *
- * | | a rigged clip | **this** |
+ * | | the stylised rider | the realistic rider (#369) |
  * |---|---|---|
- * | asset | rigged, skinned, with a pedalling clip | **none** |
- * | three API | `SkinnedMesh`, `AnimationMixer`, a per-frame `update` | ⚠️ nothing new |
- * | honest at `—` rpm | the clip has to be paused deliberately | ⚠️ **falls out** — no cadence, no rotation |
- * | driven by real cadence | a clip's playback rate, retargeted | **exactly**: the angle *is* the integral of the cadence |
+ * | body | these parts, as solids | MakeHuman's CC0 base mesh, rigged, cut to 24 bones (`tools/realistic/blender/process_rider.py`) |
+ * | bicycle | these parts, as solids | **these parts**, drawn round and spoked by `three-renderer.ts` §`RealisticRiderBelt` |
+ * | legs | {@link legBones}, as instanced tubes | {@link riderJoints} — the same solve — with each bone of the body aimed at it every frame |
+ * | where it ships | every rung | the realistic rungs, which no rider can reach until #475 |
  *
- * ⚠️ **The last two rows are the argument, and they are the issue's own.** #349
- * worries that *"a rider pedalling at a fixed rate while the HUD reads 92 rpm is
- * worse than a sphere, because it claims something false"*. Deriving the crank
- * angle from the cadence reading makes that structurally impossible: the cranks
- * turn **exactly when the HUD shows a cadence number**, at exactly that number,
- * and `bicycle.test.ts` asserts the first half against `hud/fields.ts` itself
- * rather than against a restatement of its rule.
+ * ⚠️ **The bicycle is still these numbers in both worlds, and that is a
+ * finding rather than a shortcut.** #369 went looking for a road bicycle whose
+ * own page states CC0 or CC-BY-4.0; on 2026-09-22 neither source ADR 0026 D-4
+ * names that states a licence per asset had one — Poly Haven's 521 models and
+ * ambientCG hold no bicycle at all — and a marketplace's label is not a grant.
+ * #369 named the cheapest good answer itself: *"give the existing parametric
+ * bike drop bars and race geometry"*. It is also the only answer that is right
+ * about where the crank is, which a downloaded frame would have had to be
+ * re-fitted to: `CRANK_AXIS_Y`, `CRANK_AXIS_Z`, `CRANK_LENGTH_METRES` and the
+ * hip-to-pedal reach below stay load-bearing for both riders.
  *
- * It also settles two licence questions by not raising them. Nothing here is
- * anybody's asset, so ADR 0022 D-1's *"one CC0 source"* is untouched, ADR 0023's
- * attribution obligation is not engaged, and `ASSETS.toml` gains no row —
- * ⚠️ which is the **stronger** answer to ADR 0009 L2 than a provenance record
- * would have been. An animated cyclist avatar is the single most recognisable
- * element of this product category, and the defence that it is derived from
- * nobody is a property of the file rather than a claim about a download.
+ * ⚠️ **#349's honesty rule holds for both, by construction**: the realistic
+ * legs are aimed at {@link riderJoints}, which is {@link legBones}' own solve,
+ * from the same marker crank angle — so they turn exactly when the HUD shows a
+ * cadence, at exactly that cadence, and stop when it goes.
+ * `bicycle.test.ts` §"the joints a realistic body is posed onto" holds the two
+ * solves to each other, and `game.browser.spec.ts` §"the realistic world" holds
+ * the drawn legs to the crank angle.
+ *
+ * What is unchanged from the old section: the stylised rider still settles two
+ * licence questions by not raising them — nothing in it is anybody's asset, so
+ * `ASSETS.toml` has no row for it. The realistic body has one, as CC0
+ * `modified` with the pipeline's own record (ADR 0026 D-5); being CC0 it owes
+ * no attribution, so the credits screen is unchanged. ADR 0009 L2 is answered
+ * the same way for both: the body is a parametric human from a general-purpose
+ * tool, and the bicycle is this repository's own geometry.
  *
  * ## The seam, which is the same one everything else in `game/` observes
  *
@@ -641,6 +654,76 @@ export function legBones(crankAngle: number): readonly LimbBone[] {
       },
     ];
   });
+}
+
+/** A point in the bicycle's own frame. @see RiderJoints */
+export interface JointPoint {
+  x: number;
+  y: number;
+  z: number;
+}
+
+/**
+ * The joints a realistic body is posed onto — #369.
+ *
+ * ⚠️ **The same numbers {@link legBones} and {@link RIDER_BODY_PARTS} are
+ * built from, not a second statement of them.** The realistic rider is
+ * MakeHuman's rigged body (`three-renderer.ts` §`RealisticRiderBelt`), and each
+ * of its bones is aimed at a joint here every frame: the hips on the saddle,
+ * the shoulders where the stylised torso ends, the hands on the hoods, and each
+ * knee and foot from the same two-bone solve the stylised legs use. So the
+ * realistic legs turn **exactly when the HUD shows a cadence**, at exactly that
+ * cadence — #349's rule, which #369 says must survive whatever replaces the
+ * geometry — because there is one source for where a leg is.
+ *
+ * ⚠️ **Mutable, and written into rather than returned**, because it runs once
+ * per rider per frame and #240's NFR-3 is that a frame allocates as little as
+ * it can: the joints are one set made once, and the knee solve's two-number
+ * result is the only thing a call makes — which is what {@link legBones}
+ * already costs the stylised rider. Index 0 of each pair is the rider's `+X`
+ * side, which is `legBones`' side `1`.
+ */
+export interface RiderJoints {
+  readonly hips: JointPoint;
+  readonly shoulders: JointPoint;
+  readonly knee: readonly [JointPoint, JointPoint];
+  readonly foot: readonly [JointPoint, JointPoint];
+  readonly grip: readonly [JointPoint, JointPoint];
+}
+
+/** A set of joints to write into, made once. @see riderJoints */
+export function emptyRiderJoints(): RiderJoints {
+  const point = (): JointPoint => ({ x: 0, y: 0, z: 0 });
+  return {
+    hips: point(),
+    shoulders: point(),
+    knee: [point(), point()],
+    foot: [point(), point()],
+    grip: [point(), point()],
+  };
+}
+
+/** Where the rider's joints are at a crank angle, written into `into`. @see RiderJoints */
+export function riderJoints(crankAngle: number, into: RiderJoints): RiderJoints {
+  set(into.hips, 0, HIP_Y, HIP_Z);
+  set(into.shoulders, 0, SHOULDER_Y, SHOULDER_Z);
+  for (const index of [0, 1] as const) {
+    const side = index === 0 ? 1 : -1;
+    const pedalAngle = side === 1 ? crankAngle : crankAngle + Math.PI;
+    const footY = CRANK_AXIS_Y + CRANK_LENGTH_METRES * Math.cos(pedalAngle);
+    const footZ = CRANK_AXIS_Z + CRANK_LENGTH_METRES * Math.sin(pedalAngle);
+    const knee = kneeBetween(HIP_Y, HIP_Z, footY, footZ);
+    set(into.foot[index], side * HIP_ACROSS, footY, footZ);
+    set(into.knee[index], side * HIP_ACROSS, knee.y, knee.z);
+    set(into.grip[index], side * SHOULDER_ACROSS, GRIP_Y, GRIP_Z);
+  }
+  return into;
+}
+
+function set(point: JointPoint, x: number, y: number, z: number): void {
+  point.x = x;
+  point.y = y;
+  point.z = z;
 }
 
 /** The knee, forward of the hip–foot line. @see legBones */

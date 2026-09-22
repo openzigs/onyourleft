@@ -337,3 +337,21 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   evaluation; its comments carry these numbers, and the apparatus is described here and in the pull
   request that closes #418 rather than committed as a gate, because a timing gate on a GPU-less CI runner is
   the flaky kind.
+
+- **2026-09-22** — **D-2's *"the whole asset graph is precached"* is no longer true of the build.**
+  [ADR 0026](0026-realistic-game-world.md) D-7 narrowed it to the **stylised** world, and this entry
+  records the day that became a fact rather than a decision: the pull request that lands the
+  realistic world's first layers (#430, #425, #474, #369) commits its assets under
+  `apps/web/public/realistic/`, which Vite copies to `dist/realistic/`, and
+  `apps/web/tools/precache/precache.ts` §`PRECACHE_EXCLUSIONS` excludes that directory by a rule —
+  never a list of names, for this ADR's own D-2 argument. **Measured on that branch**: 17 files,
+  32 306 793 bytes (30.8 MiB), in `dist` and in no cache; the precache itself is unchanged in what it holds, and
+  every stylised asset is still in it. Both halves are gated: `precache.test.ts` holds the rule both
+  ways over the real asset tables, and `offline.browser.spec.ts` holds it against the cache a real
+  browser filled from the real build. **What is unchanged**: D-2's derivation (the precache is still
+  the build's output, less the exclusions), D-4 (no worker inside the Android shell, where the
+  realistic set ships in the APK), and the offline promise for the world a rider can actually
+  choose, which is still only the stylised one (ADR 0026 D-12). Offline with the realistic world
+  chosen, the game falls back to the stylised world and says so (ADR 0026 D-7) — today only on the
+  owner's harness page, because nothing in the shipped app can choose it yet
+  ([#475](https://github.com/openzigs/onyourleft/issues/475)).

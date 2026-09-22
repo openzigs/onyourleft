@@ -43,6 +43,9 @@
 #   ASSET005 ASSETS.toml itself is present and parses (#339)
 #   ASSET006 an entry under a licence that REQUIRES attribution records it
 #           -- creator, url and whether it was modified (#357, ADR 0023)
+#   ASSET007 a DERIVED entry records everything its derivation needs --
+#           input, inputsha256, script and tool together, and modified -- and
+#           the script it names is committed (#430, ADR 0026 D-5)
 #
 # Usage: scripts/check-repo-rules.sh [ROOT]   (ROOT defaults to the repo root)
 # Exit:  0 clean, 1 if any rule is violated.
@@ -153,6 +156,13 @@ repo_files_z() {
 # template is not ours and must not claim to be. Those are named, one exact path
 # at a time, in `.spdx-exempt` -- see LIC006, which is what stops that list
 # growing into a blanket.
+#
+# ⚠️ `.py` since #430. ADR 0026 D-5 puts the asset pipeline's Blender scripts
+# under `apps/` -- a script that does `import bpy` is the one place a GPL
+# program's API is named, and `apps/` is the AGPL tree whose licence is
+# compatible with it -- and until this line a Python file there passed with no
+# header at all. `# SPDX-License-Identifier: ...` is the comment form, and a
+# shebang on line 1 leaves four lines for it, which `spdx_of` already reads.
 source_files() {
   local dir="$1"
   [ -d "${dir}" ] || return 0
@@ -161,7 +171,7 @@ source_files() {
     -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' \
                -o -name '*.mjs' -o -name '*.cjs' -o -name '*.css' -o -name '*.sh' \
                -o -name '*.kt' -o -name '*.kts' -o -name '*.java' \
-               -o -name '*.gradle' -o -name '*.xml' \) -print
+               -o -name '*.gradle' -o -name '*.xml' -o -name '*.py' \) -print
 }
 
 # --- .spdx-exempt: generated scaffolding, named one exact path at a time ------
@@ -1329,6 +1339,28 @@ asset_manifest_records() {
     function reset() {
       k_path = ""; k_source = ""; k_licence = ""; k_read = ""; k_sha = ""
       k_creator = ""; k_url = ""; k_modified = ""
+      k_input = ""; k_inputsha = ""; k_script = ""; k_tool = ""
+    }
+
+    # Whether this entry is DERIVED -- ADR 0026 D-5 -- and if so, what its
+    # record lacks: "none" for an entry that names no derivation key at all,
+    # "complete" for one that names all of them, and otherwise the missing
+    # keys. The four travel together because each is useless without the
+    # others: an input digest nobody can reproduce without the script, a script
+    # whose tool version is unknown, a tool with no input to run it on. And a
+    # derived file is by construction a modified one, so `modified` is required
+    # here whatever the licence -- which `absentAttribution` asks only of CC-BY.
+    function derivation(  named, missing) {
+      named = (k_input != "") + (k_inputsha != "") + (k_script != "") + (k_tool != "")
+      if (named == 0) return "none"
+      missing = ""
+      if (k_input == "") missing = "input"
+      if (k_inputsha == "") missing = missing (missing == "" ? "" : ", ") "inputsha256"
+      else if (k_inputsha !~ /^[0-9a-f]+$/ || length(k_inputsha) != 64) missing = missing (missing == "" ? "" : ", ") "inputsha256 as 64 lowercase hex digits"
+      if (k_script == "") missing = missing (missing == "" ? "" : ", ") "script"
+      if (k_tool == "") missing = missing (missing == "" ? "" : ", ") "tool"
+      if (k_modified == "") missing = missing (missing == "" ? "" : ", ") "modified"
+      return missing == "" ? "complete" : missing
     }
 
     # Which of the attribution keys this entry does NOT carry, as a comma-
@@ -1363,7 +1395,7 @@ asset_manifest_records() {
         print "E" SEP startline SEP "the entry for " k_path " records no read date in the form YYYY-MM-DD"
         reset(); return
       }
-      print "A" SEP startline SEP k_path SEP k_licence SEP k_sha SEP absentAttribution()
+      print "A" SEP startline SEP k_path SEP k_licence SEP k_sha SEP absentAttribution() SEP derivation() SEP k_script
       reset()
     }
 
@@ -1400,7 +1432,7 @@ asset_manifest_records() {
       # and `modified` -- so the restriction names what it restricts rather than
       # exempting what it does not, which is what stops a key added later
       # inheriting a rule that has nothing to do with it.
-      if (k ~ /^(path|licence|sha256)$/ && (index(v, "|") > 0 || index(v, "\t") > 0)) {
+      if (k ~ /^(path|licence|sha256|script)$/ && (index(v, "|") > 0 || index(v, "\t") > 0)) {
         print "E" SEP NR SEP "key \"" k "\" has a \"|\" or a tab in its value"
         next
       }
@@ -1441,6 +1473,26 @@ asset_manifest_records() {
         if (k_modified != "") { print "E" SEP NR SEP "duplicate key \"modified\" in one entry"; next }
         k_modified = v; next
       }
+      # The four keys ADR 0026 D-5 names for a derived asset (#430). `input` is
+      # the upstream page, `inputsha256` the digest of everything downloaded
+      # from it, `script` the committed file that made the output, and `tool`
+      # the pinned version of what ran it.
+      if (k == "input") {
+        if (k_input != "") { print "E" SEP NR SEP "duplicate key \"input\" in one entry"; next }
+        k_input = v; next
+      }
+      if (k == "inputsha256") {
+        if (k_inputsha != "") { print "E" SEP NR SEP "duplicate key \"inputsha256\" in one entry"; next }
+        k_inputsha = v; next
+      }
+      if (k == "script") {
+        if (k_script != "") { print "E" SEP NR SEP "duplicate key \"script\" in one entry"; next }
+        k_script = v; next
+      }
+      if (k == "tool") {
+        if (k_tool != "") { print "E" SEP NR SEP "duplicate key \"tool\" in one entry"; next }
+        k_tool = v; next
+      }
       print "E" SEP NR SEP "unknown key \"" k "\"; an unrecognised key is refused rather than ignored, so that a claim about an asset cannot be one nothing reads (ADR 0017 D-4)"
     }
 
@@ -1478,7 +1530,7 @@ asset_attribution_required() {
 }
 
 check_assets() {
-  local record kind line rest path licence sha absent got relative errors=0
+  local record kind line rest path licence sha absent derived script got relative errors=0
   local -a asset_paths=() asset_lines=()
   local i named
 
@@ -1533,7 +1585,11 @@ check_assets() {
         licence="${rest%%|*}"
         rest="${rest#*|}"
         sha="${rest%%|*}"
-        absent="${rest#*|}"
+        rest="${rest#*|}"
+        absent="${rest%%|*}"
+        rest="${rest#*|}"
+        derived="${rest%%|*}"
+        script="${rest#*|}"
         asset_paths[${#asset_paths[@]}]="${path}"
         asset_lines[${#asset_lines[@]}]="${line}"
 
@@ -1564,6 +1620,23 @@ check_assets() {
           # screen #358 generates ever drops this asset, the app is shipping it
           # unlicensed -- so the data it is generated FROM is checked here.
           report ASSET006 "${ASSET_MANIFEST_NAME}:${line}: ${path}: licence ${licence} requires attribution wherever the work is shared, and this entry records no ${absent}; CC BY 4.0 §3(a)(1) wants the creator and a link to the material, §3(a)(1)(B) wants any modification indicated, and #358 generates the in-app credits from exactly these keys (ADR 0023 D-3)"
+        fi
+
+        # ASSET007 -- a derived file's record is its reproduction recipe, so an
+        # incomplete one is a file nobody can make again, and a script that is
+        # not committed is a recipe that exists only on somebody's machine.
+        if [ "${derived}" != "none" ] && [ "${derived}" != "complete" ]; then
+          report ASSET007 "${ASSET_MANIFEST_NAME}:${line}: ${path}: a derived asset records no ${derived}; ADR 0026 D-5 makes a derived file reproducible from a recorded input by a committed script, and these keys are that record (#430)"
+        elif [ "${derived}" = "complete" ]; then
+          case "${script}" in
+            /* | *'..'*)
+              report ASSET007 "${ASSET_MANIFEST_NAME}:${line}: ${path}: script ${script} is not a repository-relative path"
+              ;;
+            *)
+              [ -f "${ROOT}/${script}" ] || \
+                report ASSET007 "${ASSET_MANIFEST_NAME}:${line}: ${path}: script ${script} is not in the repository; a derivation whose script is not committed cannot be repeated (ADR 0026 D-5)"
+              ;;
+          esac
         fi
 
         if [ ! -f "${ROOT}/${path}" ]; then

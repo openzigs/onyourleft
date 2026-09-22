@@ -78,6 +78,7 @@ import { corridorOrigin } from '../src/game/terrain';
 import {
   QUALITY_LADDER,
   qualitySettings,
+  REALISTIC_LADDER,
   RIDER_SHADOW_MAP_RUNG,
   type QualitySettings,
 } from '../src/game/quality';
@@ -87,10 +88,18 @@ import {
   northRoute,
   valleyRoute,
 } from '../src/game/route-fixtures-testing';
+import { GRADIENT_TINT_FULL_SCALE_PERCENT } from '../src/game/terrain';
 import { structuresAt } from '../src/game/settlements';
 import { waterways } from '../src/game/waterways';
 import { VERGE_DROP_METRES } from '../src/game/landform';
-import { loadSceneryModels, threeGameRenderer } from '../src/game/three-renderer';
+import {
+  drawnWorldOf,
+  loadRealisticWorld,
+  loadSceneryModels,
+  sceneMaterialsOf,
+  threeGameRenderer,
+} from '../src/game/three-renderer';
+import { realisticWorldNotice } from '../src/game/realistic-assets';
 import {
   scatterSeed,
   STRUCTURE_KINDS,
@@ -661,6 +670,8 @@ declare global {
         /** Pixels the map shadow darkens under the rider alone, against `'none'`. */
         readonly shadowPixels: number;
       };
+      /** The realistic world — ADR 0026. Measured only by `?realistic`. @see realisticProbe */
+      readonly realistic: RealisticMeasurement;
       readonly errors: readonly string[];
     };
   }
@@ -913,6 +924,43 @@ function countingDrawCalls(body: (calls: () => number) => void): void {
   } finally {
     for (const name of names) {
       (gl as unknown as Record<string, unknown>)[name] = originals.get(name);
+    }
+  }
+}
+
+/**
+ * {@link countingDrawCalls}, counting only the calls that draw something — a
+ * non-zero element count and, for an instanced call, a non-zero instance
+ * count. three submits a mesh whose draw range is empty as a call of count
+ * zero, which a plain count reads as a mesh that drew.
+ */
+function countingNonEmptyDrawCalls(body: (calls: () => number) => void): void {
+  const gl = WebGL2RenderingContext.prototype;
+  const counts: Record<string, (args: readonly number[]) => boolean> = {
+    drawElements: (args) => (args[1] ?? 0) > 0,
+    drawArrays: (args) => (args[2] ?? 0) > 0,
+    drawElementsInstanced: (args) => (args[1] ?? 0) > 0 && (args[4] ?? 0) > 0,
+    drawArraysInstanced: (args) => (args[2] ?? 0) > 0 && (args[3] ?? 0) > 0,
+  };
+  const originals = new Map<string, (...args: never[]) => unknown>();
+  let calls = 0;
+  for (const [name, drawsSomething] of Object.entries(counts)) {
+    const original = (gl as unknown as Record<string, (...args: never[]) => unknown>)[name];
+    if (original === undefined) continue;
+    originals.set(name, original);
+    (gl as unknown as Record<string, unknown>)[name] = function patched(
+      this: WebGL2RenderingContext,
+      ...args: never[]
+    ): unknown {
+      if (drawsSomething(args)) calls += 1;
+      return original.apply(this, args);
+    };
+  }
+  try {
+    body(() => calls);
+  } finally {
+    for (const [name, original] of originals) {
+      (gl as unknown as Record<string, unknown>)[name] = original;
     }
   }
 }
@@ -2469,6 +2517,407 @@ function sweep(
   return drawn;
 }
 
+/** What the `?realistic` run measures — ADR 0026. @see realisticProbe */
+export interface RealisticMeasurement {
+  readonly measured: boolean;
+  /** Which world a realistic rung drew BEFORE anything was loaded: D-7's fallback. */
+  readonly fallbackWorld: string;
+  /** What a load that could not reach its files reported, and what a rider is told. */
+  readonly failedLoad: { readonly loaded: boolean; readonly offline: boolean };
+  readonly failedNotice: string;
+  /** The real load: whether it succeeded, and how long it took on this machine. */
+  readonly loaded: boolean;
+  readonly loadMs: number;
+  /** Which world a realistic rung drew once the world was loaded. */
+  readonly drawnWorld: string;
+  /** Visible meshes by material class, and how many of the physically based ones this file constructed. */
+  readonly visibleStandard: number;
+  readonly visibleStandardConstructed: number;
+  readonly visiblePhysical: number;
+  readonly visibleImpostors: number;
+  readonly visibleImpostorsConstructed: number;
+  /** Textures three created for the first realistic frame. */
+  readonly texturesCreated: number;
+  /** Draw calls for a realistic frame, and for the same frame with the road emptied. */
+  readonly drawCalls: number;
+  readonly drawCallsWithoutRoad: number;
+  /** Mean relative luminance of the road 20 m ahead, on the steepest climb and descent, and on the level. */
+  readonly climbLuminance: number;
+  readonly descentLuminance: number;
+  readonly levelClimbLuminance: number;
+  readonly levelDescentLuminance: number;
+  /** Pixels that changed when the rider's cranks turned, and when the cadence went and they were held. */
+  readonly crankTurnPixels: number;
+  readonly crankHeldPixels: number;
+  /** How far the realistic frame differs from the stylised one across the whole picture, as a share. */
+  readonly worldChangedShare: number;
+  /** After stepping down to the stylised ladder: which world, and how many physically based meshes remain visible. */
+  readonly afterStepDownWorld: string;
+  readonly afterStepDownStandard: number;
+  /** SwiftShader milliseconds a frame — published, never asserted. */
+  readonly realisticFrameMs: number;
+  readonly stylisedFrameMs: number;
+}
+
+const NO_REALISTIC: RealisticMeasurement = {
+  measured: false,
+  fallbackWorld: '',
+  failedLoad: { loaded: false, offline: false },
+  failedNotice: '',
+  loaded: false,
+  loadMs: 0,
+  drawnWorld: '',
+  visibleStandard: 0,
+  visibleStandardConstructed: 0,
+  visiblePhysical: 0,
+  visibleImpostors: 0,
+  visibleImpostorsConstructed: 0,
+  texturesCreated: 0,
+  drawCalls: 0,
+  drawCallsWithoutRoad: 0,
+  climbLuminance: 0,
+  descentLuminance: 0,
+  levelClimbLuminance: 0,
+  levelDescentLuminance: 0,
+  crankTurnPixels: 0,
+  crankHeldPixels: 0,
+  worldChangedShare: 0,
+  afterStepDownWorld: '',
+  afterStepDownStandard: 0,
+  realisticFrameMs: 0,
+  stylisedFrameMs: 0,
+};
+
+/** Relative luminance of an sRGB pixel, WCAG 2.2's own formula. */
+function relativeLuminanceOf(red: number, green: number, blue: number): number {
+  const linear = (byte: number): number => {
+    const channel = byte / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue);
+}
+
+/** The mean relative luminance of a small square of the drawing buffer around a pixel. */
+function meanLuminanceAround(
+  gl: WebGL2RenderingContext | WebGLRenderingContext,
+  centre: { readonly x: number; readonly y: number },
+  half: number,
+): number {
+  const side = half * 2 + 1;
+  const pixels = readRegion(
+    gl,
+    Math.round(centre.x) - half,
+    Math.round(centre.y) - half,
+    side,
+    side,
+  );
+  let total = 0;
+  for (let at = 0; at < pixels.length; at += 4) {
+    total += relativeLuminanceOf(pixels[at] ?? 0, pixels[at + 1] ?? 0, pixels[at + 2] ?? 0);
+  }
+  return total / (side * side);
+}
+
+/** How many pixels two read-backs of the same size disagree about. */
+function pixelsChanged(a: Uint8Array, b: Uint8Array): number {
+  let changed = 0;
+  for (let at = 0; at < a.length; at += 4) {
+    if (a[at] !== b[at] || a[at + 1] !== b[at + 1] || a[at + 2] !== b[at + 2]) changed += 1;
+  }
+  return changed;
+}
+
+/**
+ * The realistic world, measured in a real engine — ADR 0026, #425, #474, #369.
+ *
+ * What jsdom cannot see, and each is one field of {@link RealisticMeasurement}:
+ *
+ * - **D-7's fallback**: a realistic rung given to a view before any world is
+ *   loaded draws the stylised world, and a load that cannot reach its files
+ *   says so in the sentence a rider would read.
+ * - **D-11 over a real scene**: every physically based material on a visible
+ *   mesh is one `three-renderer.ts` constructed, and nothing is the
+ *   `MeshPhysicalMaterial` a glTF's extensions would have made `GLTFLoader`
+ *   build.
+ * - **#242 after light and tone mapping**: the road 20 m ahead on the
+ *   steepest climb and the steepest descent, read back off the drawing
+ *   buffer, with the control — the same two routes level, which must read
+ *   alike, so the contrast measured is the tint's and not the probe's.
+ * - **One draw call for the road**, by emptying it.
+ * - **#349 for the realistic rider**: the cranks turned, the picture changed;
+ *   the cadence gone, the legs held.
+ * - **D-3's step down** to the stylised ladder's top, whole.
+ */
+async function realisticProbe(): Promise<RealisticMeasurement> {
+  const WIDTH = 640;
+  const HEIGHT = 360;
+  // ⚠️ Sized through the VIEW, never by reading the canvas back: `create`
+  // applies the view's own size, one CSS pixel, to the canvas before anything
+  // resizes it, so `view.resize(canvas.width, …)` asks for a 1 × 1 buffer —
+  // which the first version of this probe did, and read four black pixels.
+  const canvasOf = (): HTMLCanvasElement => document.createElement('canvas');
+  const top = REALISTIC_LADDER[0] as QualitySettings;
+
+  // D-7, before anything is loaded: the rung asks for realism and gets the stylised world.
+  const early = threeGameRenderer.create(canvasOf(), top);
+  const fallbackWorld = drawnWorldOf(early);
+  early.destroy();
+  const unreachable = (): Promise<never> => Promise.reject(new Error('Failed to fetch'));
+  const failed = await loadRealisticWorld({
+    model: unreachable,
+    texture: unreachable,
+    sky: unreachable,
+  });
+  const failedNotice = realisticWorldNotice(failed) ?? '';
+
+  const started = performance.now();
+  const outcome = await loadRealisticWorld();
+  const loadMs = performance.now() - started;
+
+  const steepness = GRADIENT_TINT_FULL_SCALE_PERCENT / 100 + 0.02;
+  const climb = northRoute(2_000, (along) => along * steepness);
+  const descent = northRoute(2_000, (along) => 2_000 * steepness - along * steepness);
+  const level = northRoute(2_000, () => 10);
+  const riding = (profile: ReturnType<typeof northRoute>, distance: number): SceneFrame => {
+    const start = atStartLine(profile);
+    return sceneFrame({
+      profile,
+      origin: corridorOrigin(profile),
+      state: { ...start, ride: { ...start.ride, distance: metres(distance) } },
+      crankAngle: 0.4,
+    });
+  };
+
+  const canvas = canvasOf();
+  const view = threeGameRenderer.create(canvas, top);
+  view.resize(WIDTH, HEIGHT);
+  const gl = canvas.getContext('webgl2');
+  if (gl === null) {
+    view.destroy();
+    return {
+      ...NO_REALISTIC,
+      fallbackWorld,
+      failedLoad: failed.loaded
+        ? { loaded: true, offline: false }
+        : { loaded: false, offline: failed.offline },
+      failedNotice,
+    };
+  }
+  const drawnWorld = drawnWorldOf(view);
+  const wooded = riding(valleyRoute(), 900);
+
+  let texturesCreated = 0;
+  countingTextures((textures) => {
+    view.render(wooded);
+    texturesCreated = textures();
+  });
+  const materials = sceneMaterialsOf(view).filter((each) => each.visible);
+  const standard = materials.filter((each) => each.type === 'MeshStandardMaterial');
+  const impostors = materials.filter((each) => each.type === 'ShaderMaterial' && each.constructed);
+
+  let drawCalls = 0;
+  let drawCallsWithoutRoad = 0;
+  // ⚠️ Non-empty calls only: three still issues a road's draw with a count of
+  // zero when its index list is empty, so a plain count cannot tell a road
+  // from no road. @see countingNonEmptyDrawCalls
+  countingNonEmptyDrawCalls((calls) => {
+    view.render(wooded);
+    const before = calls();
+    view.render(wooded);
+    drawCalls = calls() - before;
+    const roadless: SceneFrame = {
+      ...wooded,
+      corridor: { ...wooded.corridor, indices: new Uint32Array(0) },
+    };
+    view.render(roadless);
+    const middle = calls();
+    view.render(roadless);
+    drawCallsWithoutRoad = calls() - middle;
+  });
+
+  const roadLuminance = (frame: SceneFrame): number => {
+    const bare: SceneFrame = { ...frame, markers: [], scatter: [] };
+    view.render(bare);
+    view.render(bare);
+    return meanLuminanceAround(gl, pixelFor(bare, canvas, onTheRoad(bare, 20, 1.5)), 3);
+  };
+  const climbLuminance = roadLuminance(riding(climb, 400));
+  const descentLuminance = roadLuminance(riding(descent, 400));
+  const levelClimbLuminance = roadLuminance(riding(level, 400));
+  const levelDescentLuminance = roadLuminance(riding(level, 400));
+
+  // #349 for the realistic rider: a quarter turn changes the picture; a frame
+  // that carries no angle holds the last one.
+  const withCrank = (angle: number | undefined): SceneFrame => ({
+    ...wooded,
+    scatter: [],
+    markers: wooded.markers.map((marker) =>
+      marker.kind === 'rider' ? { ...marker, crankAngle: angle } : marker,
+    ),
+  });
+  const whole = (): Uint8Array => readRegion(gl, 0, 0, canvas.width, canvas.height);
+  view.render(withCrank(0.4));
+  view.render(withCrank(0.4));
+  const atRest = whole();
+  view.render(withCrank(0.4 + Math.PI / 2));
+  const turned = whole();
+  view.render(withCrank(undefined));
+  const held = whole();
+
+  // The same frame in the stylised world, on a view of its own: how much of the
+  // picture the realistic world actually changed.
+  const plainCanvas = canvasOf();
+  const plain = threeGameRenderer.create(plainCanvas, qualitySettings(0));
+  plain.resize(WIDTH, HEIGHT);
+  const plainGl = plainCanvas.getContext('webgl2');
+  plain.render(wooded);
+  const stylisedPixels =
+    plainGl === null
+      ? new Uint8Array(0)
+      : readRegion(plainGl, 0, 0, plainCanvas.width, plainCanvas.height);
+  view.render(wooded);
+  const realisticPixels = whole();
+  const worldChangedShare =
+    stylisedPixels.length === realisticPixels.length
+      ? pixelsChanged(stylisedPixels, realisticPixels) / (canvas.width * canvas.height)
+      : 0;
+
+  const frameAt = (distance: number): SceneFrame => riding(valleyRoute(), 800 + distance);
+  const realisticFrameMs = timeFrames(view, frameAt, gl);
+  const stylisedFrameMs = timeFrames(plain, frameAt, plainGl);
+  plain.destroy();
+
+  // D-3's step down: the stylised ladder's top, whole.
+  view.setQuality(QUALITY_LADDER[0] as QualitySettings);
+  view.render(wooded);
+  const afterStepDownWorld = drawnWorldOf(view);
+  const afterStepDownStandard = sceneMaterialsOf(view).filter(
+    (each) => each.visible && each.type === 'MeshStandardMaterial',
+  ).length;
+  view.destroy();
+
+  console.log(
+    `realistic: loaded in ${loadMs.toFixed(0)} ms; a frame ${realisticFrameMs.toFixed(1)} ms against ` +
+      `${stylisedFrameMs.toFixed(1)} ms stylised (SwiftShader); ${String(drawCalls)} draw calls; ` +
+      `${String(texturesCreated)} textures; road ${climbLuminance.toFixed(4)} climbing, ` +
+      `${descentLuminance.toFixed(4)} descending`,
+  );
+
+  return {
+    measured: true,
+    fallbackWorld,
+    failedLoad: failed.loaded
+      ? { loaded: true, offline: false }
+      : { loaded: false, offline: failed.offline },
+    failedNotice,
+    loaded: outcome.loaded,
+    loadMs,
+    drawnWorld,
+    visibleStandard: standard.length,
+    visibleStandardConstructed: standard.filter((each) => each.constructed).length,
+    visiblePhysical: materials.filter((each) => each.type === 'MeshPhysicalMaterial').length,
+    visibleImpostors: materials.filter((each) => each.type === 'ShaderMaterial').length,
+    visibleImpostorsConstructed: impostors.length,
+    texturesCreated,
+    drawCalls,
+    drawCallsWithoutRoad,
+    climbLuminance,
+    descentLuminance,
+    levelClimbLuminance,
+    levelDescentLuminance,
+    crankTurnPixels: pixelsChanged(atRest, turned),
+    crankHeldPixels: pixelsChanged(turned, held),
+    worldChangedShare,
+    afterStepDownWorld,
+    afterStepDownStandard,
+    realisticFrameMs,
+    stylisedFrameMs,
+  };
+}
+
+/**
+ * Every measurement at its "nothing was measured" value — what a run that
+ * could not measure publishes, and what the `?realistic` run publishes beside
+ * the one measurement it takes.
+ */
+function emptyHarness(errors: readonly string[]): NonNullable<Window['__oylGameHarness']> {
+  return {
+    created: false,
+    hasContext: false,
+    framesDrawn: 0,
+    quadCount: 0,
+    vertexCount: 0,
+    indexCount: 0,
+    highestIndex: 0,
+    drawCallsPerFrame: 0,
+    markerKinds: [],
+    world: NO_WORLD,
+    skyPixel: NOWHERE,
+    groundPixel: NOWHERE,
+    roadPixel: NOWHERE,
+    roadFarPixel: NOWHERE,
+    roadProbeRows: [0, 0],
+    riderFrame: { landscape: NO_RIDER, portrait: NO_RIDER },
+    resourcesAfterFirstFrame: 0,
+    resourcesAfterAllFrames: 0,
+    resourcesAfterSecondSweep: 0,
+    centreLinePixel: NOWHERE,
+    roadBesidePixel: NOWHERE,
+    centreLineRowFraction: 0,
+    roadOnDescentPixel: NOWHERE,
+    scatterItemCount: 0,
+    scatterKindCount: 0,
+    drawCallsWithScatter: 0,
+    drawCallsWithoutScatter: 0,
+    sceneryPixelsChanged: 0,
+    sceneryPixelWith: NOWHERE,
+    sceneryPixelWithout: NOWHERE,
+    sceneryColumnFraction: 0,
+    sceneryRowFraction: 0,
+    litMarkerPixels: 0,
+    flatMarkerPixels: 0,
+    litMarkerSpread: 0,
+    flatMarkerSpread: 0,
+    litMarkerBrightest: NOWHERE,
+    litMarkerDarkest: NOWHERE,
+    crankTurnPixels: 0,
+    crankStillPixels: 0,
+    riderPixels: 0,
+    riderLeftBehindPixels: 0,
+    riderMovePixels: 0,
+    litFrameMs: 0,
+    flatFrameMs: 0,
+    shadedFrames: SHADING_FRAMES,
+    frameMsNoise: 0,
+    litDrawCalls: 0,
+    flatDrawCalls: 0,
+    sceneryIndicesModelled: {},
+    sceneryIndicesPlain: {},
+    sceneryInstances: {},
+    texturesCreated: 0,
+    texturesBaseline: 0,
+    treeRedPixels: 0,
+    treeGreenPixels: 0,
+    buildingGreenPixels: 0,
+    buildingBluePixels: 0,
+    sceneryCallsByVariants: [],
+    variantIndices: {},
+    riderMeanColour: {},
+    riderSilhouettePixels: {},
+    riderBuriedPixels: 0,
+    gradient: NO_GRADIENT,
+    water: NO_WATER,
+    settlement: NO_SETTLEMENT,
+    botCrankPixels: 0,
+    contactShadowPixels: {},
+    contactShadowLuminance: {},
+    contactShadowNoise: 0,
+    shadowMap: NO_SHADOW_MAP,
+    realistic: NO_REALISTIC,
+    errors,
+  };
+}
+
 async function run(): Promise<void> {
   const canvas = document.querySelector<HTMLCanvasElement>('#world');
   const errors: string[] = [];
@@ -2477,81 +2926,20 @@ async function run(): Promise<void> {
   // the same place and for exactly the same reason. A harness that skipped it
   // would draw the primitive world and every assertion below would pass.
   await loadSceneryModels();
+  // ADR 0026. A run of its own, so the default run fetches none of the
+  // realistic set — which `game.browser.spec.ts` asserts off the requests it
+  // makes — and so the realistic world's load is paid by one page load only.
+  if (new URLSearchParams(location.search).has('realistic')) {
+    try {
+      window.__oylGameHarness = { ...emptyHarness(errors), realistic: await realisticProbe() };
+    } catch (error: unknown) {
+      errors.push(error instanceof Error ? error.message : String(error));
+      window.__oylGameHarness = emptyHarness(errors);
+    }
+    return;
+  }
   if (canvas === null) {
-    window.__oylGameHarness = {
-      created: false,
-      hasContext: false,
-      framesDrawn: 0,
-      quadCount: 0,
-      vertexCount: 0,
-      indexCount: 0,
-      highestIndex: 0,
-      drawCallsPerFrame: 0,
-      markerKinds: [],
-      world: NO_WORLD,
-      skyPixel: NOWHERE,
-      groundPixel: NOWHERE,
-      roadPixel: NOWHERE,
-      roadFarPixel: NOWHERE,
-      roadProbeRows: [0, 0],
-      riderFrame: { landscape: NO_RIDER, portrait: NO_RIDER },
-      resourcesAfterFirstFrame: 0,
-      resourcesAfterAllFrames: 0,
-      resourcesAfterSecondSweep: 0,
-      centreLinePixel: NOWHERE,
-      roadBesidePixel: NOWHERE,
-      centreLineRowFraction: 0,
-      roadOnDescentPixel: NOWHERE,
-      scatterItemCount: 0,
-      scatterKindCount: 0,
-      drawCallsWithScatter: 0,
-      drawCallsWithoutScatter: 0,
-      sceneryPixelsChanged: 0,
-      sceneryPixelWith: NOWHERE,
-      sceneryPixelWithout: NOWHERE,
-      sceneryColumnFraction: 0,
-      sceneryRowFraction: 0,
-      litMarkerPixels: 0,
-      flatMarkerPixels: 0,
-      litMarkerSpread: 0,
-      flatMarkerSpread: 0,
-      litMarkerBrightest: NOWHERE,
-      litMarkerDarkest: NOWHERE,
-      crankTurnPixels: 0,
-      crankStillPixels: 0,
-      riderPixels: 0,
-      riderLeftBehindPixels: 0,
-      riderMovePixels: 0,
-      litFrameMs: 0,
-      flatFrameMs: 0,
-      shadedFrames: SHADING_FRAMES,
-      frameMsNoise: 0,
-      litDrawCalls: 0,
-      flatDrawCalls: 0,
-      sceneryIndicesModelled: {},
-      sceneryIndicesPlain: {},
-      sceneryInstances: {},
-      texturesCreated: 0,
-      texturesBaseline: 0,
-      treeRedPixels: 0,
-      treeGreenPixels: 0,
-      buildingGreenPixels: 0,
-      buildingBluePixels: 0,
-      sceneryCallsByVariants: [],
-      variantIndices: {},
-      riderMeanColour: {},
-      riderSilhouettePixels: {},
-      riderBuriedPixels: 0,
-      gradient: NO_GRADIENT,
-      water: NO_WATER,
-      settlement: NO_SETTLEMENT,
-      botCrankPixels: 0,
-      contactShadowPixels: {},
-      contactShadowLuminance: {},
-      contactShadowNoise: 0,
-      shadowMap: NO_SHADOW_MAP,
-      errors: ['no canvas'],
-    };
+    window.__oylGameHarness = emptyHarness(['no canvas']);
     return;
   }
 
@@ -3207,6 +3595,7 @@ async function run(): Promise<void> {
     contactShadowLuminance,
     contactShadowNoise,
     shadowMap,
+    realistic: NO_REALISTIC,
     errors,
   };
 }

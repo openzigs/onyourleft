@@ -2133,6 +2133,164 @@ scenery-free scene is **8 draw calls** (the dome is the new one).
 
 ---
 
+## Part Z — the realistic world on the tablet, and the twenty-minute soak ([#430](https://github.com/openzigs/onyourleft/issues/430), [#425](https://github.com/openzigs/onyourleft/issues/425), [#474](https://github.com/openzigs/onyourleft/issues/474), [#369](https://github.com/openzigs/onyourleft/issues/369); [ADR 0026](../adr/0026-realistic-game-world.md))
+
+The realistic world's first three layers — ground, road and sky (#425), trees, shrubs and rocks
+(#474), and the rider (#369) — are in the product, built by #430's pipeline, and **reachable from
+no control in the shipped app**: ADR 0026 D-12 offers the world to riders only when it is whole,
+and layer 3 (structures) is [#475](https://github.com/openzigs/onyourleft/issues/475). The one way
+to it is the owner's page, `apps/web/browser/realistic.html`, staged into a **local debug APK**.
+This Part is what that page is for.
+
+### What is already measured, and where it came from
+
+The provisional budget in `apps/web/src/game/realistic-budget.ts` (ADR 0026 D-6) rests on the one
+device run there is: #457's spike on the owner's Pixel Tablet, **2026-09-22**, posted on
+[#471](https://github.com/openzigs/onyourleft/pull/471), one page load per configuration, **30-second
+windows**, `?panel=0`, no errors and no stalls in any configuration.
+
+| Configuration (spike page) | Frame p50 / p90 / p99, page | Draw calls | Triangles | Textures | Texture estimate |
+|---|---|--:|--:|--:|--:|
+| baseline (the product) | 16.6 / 16.7 / 16.8 ms | 21 | 29 376 | 0 | 0 |
+| sky + environment, AgX | 16.6 / 16.7 / 16.8 ms | 21 | 28 668 | 3 | 40 MiB |
+| surfaces 1K | 16.6 / 16.7 / 16.8 ms | 21 | 29 376 | 7 | 32 MiB |
+| surfaces 2K | 16.6 / 16.7 / 16.8 ms | 21 | 29 376 | 7 | 128 MiB |
+| trees + impostors | 16.6 / 16.7 / 16.8 ms | 28 | 239 060 | 28 | 187 MiB |
+| rider | 16.6 / 16.7 / 16.8 ms | 24 | 43 034 | 2 | 0 |
+| all on, scale 1 | 16.6 / 16.7 / 16.8 ms | 45 | 252 024 | 51 | 355 MiB |
+
+| `dumpsys gfxinfo`, ≈ 1 000 frames | Frame p50 / p90 / p99 | **GPU p50 / p90 / p99** | Janky (modern) |
+|---|---|---|--:|
+| baseline | 9 / 31 / 32 ms | **3 / 14 / 15 ms** | 0.19 % |
+| all on, scale 1 | 26 / 30 / 61 ms | **10 / 19 / 4 950 ms** (the p99 is the asset upload) | 0.60 % |
+
+Every row held the 60 Hz vsync; the GPU column is what reads the headroom, and all-on was **over
+the 16.7 ms frame at its p90**. Thermal status 0 throughout. ⚠️ **What this PR ships is not the
+spike's all-on**: 1K surfaces rather than 2K, trees at 512 px with their roughness maps dropped, the
+near-mesh band capped by count (`REALISTIC_NEAR_MESHES`), and the road's sheen cut to a quarter so
+its gradient tint survives AgX (`three-renderer.ts` §`ROAD_SHEEN`). The estimate this PR's own gate
+holds it to is under 160 MiB of textures and 300 000 triangles; what that costs on the tablet is
+Z5–Z8 below, and **no part of it has been measured on a device yet**.
+
+⚠️ **`quality.ts`'s 30 fps frame cap is read by nothing** —
+[#476](https://github.com/openzigs/onyourleft/issues/476) — so the product and this page both draw
+at the display's rate. Read every frame time here against 16.7 ms, not 33.3.
+
+### Build and install
+
+On the developer machine (macOS paths; Node 24 and pnpm 11 as CLAUDE.md §4a):
+
+```bash
+ADB=/opt/homebrew/share/android-commandlinetools/platform-tools/adb
+export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
+
+pnpm install --frozen-lockfile
+pnpm run build                                          # the product, into apps/web/dist
+pnpm --filter @onyourleft/web run realistic:stage       # the owner's page, into apps/web/dist/harness/
+( cd apps/mobile && pnpm exec cap sync android )
+pnpm run check:capacitor                                # cap sync must not have changed a committed file
+( cd apps/mobile/android && ./gradlew assembleDebug )
+unzip -l apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk | grep 'public/harness/realistic.html'
+"$ADB" install -r apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+⚠️ `install -r` keeps the app's data only when the installed build is signed with the same debug key.
+If it fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, **stop** — uninstalling erases the rides on the
+tablet. ⚠️ The staged page is gone after the next `pnpm run build`; a release is built from a clean
+checkout and has never had it in it.
+
+Open the page in the app's own WebView (Part P's probe):
+
+```bash
+"$ADB" shell svc power stayon true
+"$ADB" shell monkey -p dev.openzigs.onyourleft -c android.intent.category.LAUNCHER 1
+PID=$("$ADB" shell pidof dev.openzigs.onyourleft)
+"$ADB" forward tcp:9222 localabstract:webview_devtools_remote_"$PID"
+node apps/mobile/tools/webview-probe.mjs "location.href = '/harness/realistic.html'"
+```
+
+The page rides a 4 km route through a valley, over a bridge and past a farmstead, at 9 m/s. Its
+buttons switch between the realistic and the stylised world, hold or free the quality ladder, and
+start one rung down. Back to the app: `node apps/mobile/tools/webview-probe.mjs "location.href = '/'"`.
+
+### The procedure
+
+Landscape, full brightness, on charge, nothing else running; let the tablet cool first.
+
+| Step | What to do | What to record |
+|---|---|---|
+| Z1 | Open the page. Let it ride for a minute | Does the realistic world load at all? The line at the top says **realistic world · realistic** — if it says **stylised** with a sentence under it, that sentence is the finding |
+| Z2 | Look at the **road** just ahead and far ahead, at speed | A surface, or noise? ⚠️ **Any shimmer or crawling at a grazing angle** is #425's criterion, and it is the owner's to judge — nothing in CI can see it |
+| Z3 | Watch a climb and a descent (the route has both) | Is the gradient tint on the road still as easy to read as the stylised world's? The browser gate measured 3.97 : 1 between the steepest climb and descent; the eye is the check |
+| Z4 | Look at the trees near and far, and at the point where a tree changes from a mesh to a picture | Do the near trees look sparse beside the far ones (the thinned canopy — spike 0005 §2)? Is the switch visible? |
+| Z5 | Look at the rider from behind, and hold the ride still: `location.href = '/harness/realistic.html?at=900&panel=0'` | Do the legs follow the pedals? With the ride held (`?at=`), do the legs STOP? — #349's rule for the realistic rider |
+| Z6 | `?panel=0&ladder=0`, 30 s; then `?world=stylised&panel=0&ladder=0`, 30 s — each with the `dumpsys` block below | Frame and GPU percentiles, realistic against stylised |
+| Z7 | **The soak**: `?soak=20&panel=0` — the ladder free, as a rider would have it | One line a minute; thermal status; the rung it ends on |
+| Z8 | During Z7, once at minute 10: `"$ADB" shell dumpsys meminfo dev.openzigs.onyourleft \| grep -iE "Graphics\|GL mtrack\|TOTAL"` | What the driver actually holds, against the 160 MiB estimate |
+
+Each 30-second row:
+
+```bash
+"$ADB" shell dumpsys gfxinfo dev.openzigs.onyourleft reset
+node apps/mobile/tools/webview-probe.mjs "location.href = '/harness/realistic.html?panel=0&ladder=0'"
+sleep 40
+"$ADB" logcat -d -s chromium | grep 'OYL-REALISTIC ' | tail -1
+"$ADB" shell dumpsys gfxinfo dev.openzigs.onyourleft | grep -iE "Total frames|Janky|percentile|GPU"
+"$ADB" exec-out screencap -p > realistic-z6.png
+```
+
+The soak:
+
+```bash
+"$ADB" shell dumpsys gfxinfo dev.openzigs.onyourleft reset
+node apps/mobile/tools/webview-probe.mjs "location.href = '/harness/realistic.html?soak=20&panel=0'"
+for minute in $(seq 1 20); do
+  sleep 60
+  "$ADB" logcat -d -s chromium | grep 'OYL-REALISTIC-SOAK ' | tail -1
+  "$ADB" shell dumpsys thermalservice | grep -iE "mThermalStatus|Temperature\{" | head -5
+done
+```
+
+### Z results
+
+| | Z6 — realistic | Z6 — stylised |
+|---|--:|--:|
+| Frame p50 / p90 / p99 (page) | | |
+| Frame p50 / p90 (gfxinfo) | | |
+| **GPU p50 / p90 / p99** | | |
+| Janky (modern) | | |
+| Draw calls (page) | | |
+
+**The 20-minute soak** (Z7):
+
+| Minute | Frame p50 / p90 / p99 | Rung (`world` · `rung`) | Thermal status | Skin / CPU temperature |
+|--:|---|---|---|---|
+| 1 | | | | |
+| 5 | | | | |
+| 10 | | | | |
+| 15 | | | | |
+| 20 | | | | |
+
+**GPU memory at minute 10 (Z8):** ______________
+
+**Loads and draws realistic (Z1)?** ______________
+
+**Road: surface or noise; any shimmer, and where (Z2)?** ______________
+
+**Gradient tint legible (Z3)?** ______________
+
+**Trees near and far (Z4)?** ______________
+
+**Legs follow the pedals, and stop when held (Z5)?** ______________
+
+**Does the realistic top rung hold for twenty minutes with headroom?** ______________ — ⚠️ this is
+ADR 0026 D-3's condition for ever changing the default, and D-6's for re-setting
+`realistic-budget.ts` from a soak rather than from 30-second windows. #475 owns acting on it.
+
+**Phone (OEM, model, Android, WebView):** ______________  **Build:** ______________
+
+---
+
 ## After the session
 
 1. **Fill the tables in this file and commit it.** An empty table in `main` is the honest state; a

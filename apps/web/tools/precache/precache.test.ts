@@ -2,6 +2,8 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { REALISTIC_DIRECTORY, realisticFiles } from '../../src/game/realistic-assets';
+import { SCENERY_ATLAS, SCENERY_MODELS } from '../../src/game/scenery-models';
 import { cacheVersion, precacheEntries, PRECACHE_EXCLUSIONS, type PrecacheFile } from './precache';
 
 /** A stand-in hash: distinguishing, cheap, and obviously not cryptographic. */
@@ -79,6 +81,57 @@ describe('what the worker precaches', () => {
 
   it('deduplicates, because `public/` and the bundle can name the same file', () => {
     expect(precacheEntries([...BUILD, file('index.html')])).toEqual(precacheEntries(BUILD));
+  });
+});
+
+describe('the realistic world is not precached, and the stylised one all is — ADR 0026 D-7', () => {
+  /**
+   * The build as it really is: the stylised world's `?url` assets under
+   * `assets/` with a content hash, and every realistic file copied verbatim
+   * out of `public/realistic/`.
+   */
+  const stylised = [
+    ...Object.values(SCENERY_MODELS).flatMap((models) => models.map((model) => model.name)),
+    SCENERY_ATLAS.name,
+  ].map((name) => file(`assets/${name}-h4sh.${name === SCENERY_ATLAS.name ? 'png' : 'glb'}`));
+  const realistic = realisticFiles().map((name) => file(`${REALISTIC_DIRECTORY}${name}`));
+  const build = [...BUILD, ...stylised, ...realistic];
+
+  it('holds every stylised model and the atlas — the world a rider has offline', () => {
+    expect(stylised.length).toBe(12);
+    for (const each of stylised) {
+      expect(precacheEntries(build), each.name).toContain(each.name);
+    }
+  });
+
+  it('holds no realistic file, whatever it is called', () => {
+    expect(realistic.length).toBeGreaterThan(10);
+    for (const each of realistic) {
+      expect(precacheEntries(build), each.name).not.toContain(each.name);
+    }
+  });
+
+  it('excludes a realistic file added later, with no edit to the rule', () => {
+    // ⚠️ The criterion that fails if the exclusion is a list of names: D-7's
+    // *"never by a list of file names, which would fail open against adding
+    // an asset"*.
+    const added = file(`${REALISTIC_DIRECTORY}a_new_scan.glb`);
+    expect(precacheEntries([...build, added])).not.toContain(added.name);
+  });
+
+  it('excludes by the directory, and nothing that merely mentions the word', () => {
+    // A stylised chunk that happens to be called `realistic-…` is the product.
+    const chunk = file('assets/realistic-assets-abc.js');
+    expect(precacheEntries([...build, chunk])).toContain(chunk.name);
+  });
+
+  it('does not move the cache version when only the realistic set changes', () => {
+    // A first visit's download and a rider's cache eviction are the stylised
+    // world's business; a re-processed tree is not a reason to evict it.
+    const changed = realistic.map((each) => file(each.name, 'zz'));
+    expect(cacheVersion([...BUILD, ...stylised, ...changed], fakeDigest)).toBe(
+      cacheVersion(build, fakeDigest),
+    );
   });
 });
 

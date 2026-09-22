@@ -1278,6 +1278,42 @@ printf '<?xml version="1.0" encoding="utf-8"?>\n<!-- SPDX-License-Identifier: AG
   > "${fixture_root}/apps/mobile/res/probe.xml"
 assert_clean "an .xml header on line 2, after the XML declaration, is accepted"
 
+# --- LIC001/LIC002 reach Python (#430, ADR 0026 D-5) -------------------------
+#
+# The asset pipeline's Blender scripts are the first Python in the tree, and
+# ADR 0026 D-5 says outright that LIC001/LIC002 did not scan `.py`: a script
+# under `apps/` with no header, or with a header claiming Blender's GPL, would
+# have passed. One case per direction, and the comment form a Python file uses.
+
+new_fixture
+write_good_app web
+mkdir -p "${fixture_root}/apps/web/tools"
+printf 'import bpy\n' > "${fixture_root}/apps/web/tools/process.py"
+assert_violation "a .py file without a header is rejected" LIC002 \
+  "apps/web/tools/process.py: no SPDX-License-Identifier"
+
+new_fixture
+write_good_app web
+mkdir -p "${fixture_root}/apps/web/tools"
+printf '# SPDX-License-Identifier: GPL-3.0-or-later\nimport bpy\n' \
+  > "${fixture_root}/apps/web/tools/process.py"
+assert_violation "a .py file under apps/ carrying the WRONG identifier is rejected" LIC002 \
+  "apps/web/tools/process.py: SPDX header is GPL-3.0-or-later"
+
+new_fixture
+write_good_package fit
+printf 'print(1)\n' > "${fixture_root}/packages/fit/probe.py"
+assert_violation "a .py file under packages/ without a header is rejected" LIC001 \
+  "packages/fit/probe.py: no SPDX-License-Identifier"
+
+# The shape the pipeline's scripts actually take: a shebang, then the header.
+new_fixture
+write_good_app web
+mkdir -p "${fixture_root}/apps/web/tools"
+printf '#!/usr/bin/env python3\n# SPDX-License-Identifier: AGPL-3.0-or-later\nimport bpy\n' \
+  > "${fixture_root}/apps/web/tools/process.py"
+assert_clean "a .py header after a shebang is accepted"
+
 # --- LIC006: .spdx-exempt, and the ways it must not become a blanket ---------
 
 new_fixture
@@ -2235,6 +2271,87 @@ write_binary_asset apps/web/public/models/rider.glb
 append_asset_entry apps/web/public/models/rider.glb CC0-1.0 \
   "$(fixture_digest apps/web/public/models/rider.glb)"
 assert_clean "an asset under a licence that requires no attribution owes none"
+
+# --- ASSET007: a derived asset records how to make it again (#430) ---------
+#
+# ADR 0026 D-5: a derived file is reproducible from a recorded input by a
+# committed script, so its entry carries four keys ADR 0022's upstream-bytes
+# entries never needed -- input, inputsha256, script and tool -- plus modified,
+# because a derived file is a modified one whatever its licence. The pairing is
+# the point again: a complete record passes, and removing any one key fails
+# naming it. Without the red half, "the parser accepts the new keys" would be
+# satisfied by a parser that accepted them and checked nothing.
+
+# append_derived_entry <path> <sha256> <script> [omit]
+append_derived_entry() {
+  local path="$1" sha="$2" script="$3" omit="${4:-}"
+  {
+    printf '\n[[asset]]\npath = "%s"\n' "${path}"
+    printf 'source = "Some Scan, processed by this repository"\n'
+    printf 'licence = "CC0-1.0"\nread = "2026-09-22"\nsha256 = "%s"\n' "${sha}"
+    [ "${omit}" = "modified" ] || printf 'modified = "decimated"\n'
+    [ "${omit}" = "input" ] || printf 'input = "https://example.invalid/a/scan"\n'
+    [ "${omit}" = "inputsha256" ] || \
+      printf 'inputsha256 = "%s"\n' 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    [ "${omit}" = "script" ] || printf 'script = "%s"\n' "${script}"
+    [ "${omit}" = "tool" ] || printf 'tool = "Blender 4.4.3"\n'
+  } >> "${fixture_root}/ASSETS.toml"
+}
+
+write_pipeline_script() {
+  mkdir -p "${fixture_root}/apps/web/tools"
+  printf '# SPDX-License-Identifier: AGPL-3.0-or-later\nimport bpy\n' \
+    > "${fixture_root}/apps/web/tools/process.py"
+}
+
+new_fixture
+write_good_app web
+write_pipeline_script
+write_binary_asset apps/web/public/realistic/tree.glb
+append_derived_entry apps/web/public/realistic/tree.glb \
+  "$(fixture_digest apps/web/public/realistic/tree.glb)" apps/web/tools/process.py
+assert_clean "a derived asset passes when it records its input, digest, script, tool and change"
+
+for omitted in input inputsha256 script tool modified; do
+  new_fixture
+  write_good_app web
+  write_pipeline_script
+  write_binary_asset apps/web/public/realistic/tree.glb
+  append_derived_entry apps/web/public/realistic/tree.glb \
+    "$(fixture_digest apps/web/public/realistic/tree.glb)" apps/web/tools/process.py "${omitted}"
+  assert_violation "a derived asset recording no ${omitted} is rejected" ASSET007 \
+    "a derived asset records no ${omitted}"
+done
+
+# A script named but not committed: the recipe exists only on somebody's machine.
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/realistic/tree.glb
+append_derived_entry apps/web/public/realistic/tree.glb \
+  "$(fixture_digest apps/web/public/realistic/tree.glb)" apps/web/tools/process.py
+assert_violation "a derived asset whose script is not in the repository is rejected" ASSET007 \
+  "script apps/web/tools/process.py is not in the repository"
+
+# The digest has a shape, and a typo in it is a record nobody can check.
+new_fixture
+write_good_app web
+write_pipeline_script
+write_binary_asset apps/web/public/realistic/tree.glb
+append_derived_entry apps/web/public/realistic/tree.glb \
+  "$(fixture_digest apps/web/public/realistic/tree.glb)" apps/web/tools/process.py
+sed -i.bak 's/^inputsha256 = .*/inputsha256 = "not-a-digest"/' "${fixture_root}/ASSETS.toml"
+rm -f "${fixture_root}/ASSETS.toml.bak"
+assert_violation "a derived asset whose input digest is not 64 hex digits is rejected" ASSET007 \
+  "inputsha256 as 64 lowercase hex digits"
+
+# ...and the complement: an upstream-bytes entry names none of the four, and
+# owes none of them. ASSET007 is a rule about derived files, not every file.
+new_fixture
+write_good_app web
+write_binary_asset apps/web/public/realistic/sky.hdr
+append_asset_entry apps/web/public/realistic/sky.hdr CC0-1.0 \
+  "$(fixture_digest apps/web/public/realistic/sky.hdr)"
+assert_clean "an asset committed as its upstream bytes owes no derivation record"
 
 # --- ASSET005: the manifest itself ------------------------------------------
 #
