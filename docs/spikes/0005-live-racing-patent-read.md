@@ -8,7 +8,7 @@
 - **Status of this document**: a **spike write-up**. `CLAUDE.md` §7: *"A spike write-up is not an ADR
   and does not decide anything — it is a dated measurement that an ADR or an issue may then rest on,
   and it ages the way a measurement does."* The recommendation in §6 is a recommendation. The
-  decision is [#465](https://github.com/openzigs/onyourleft/issues/465)'s ADR and the owner's
+  decision is [ADR 0028](../adr/0028-racing-fairness.md)'s and the owner's
 
 > ## ⚠️ This is not legal advice, and it is not a freedom-to-operate opinion
 >
@@ -377,7 +377,7 @@ In three parts, because "outside D4" on its own would be read as more than it is
    archived or previously recorded performance parameters in a race; no performance-zone or
    threshold-derived leaderboard; no team-versus-team win condition spanning two locations; and
    deliberate care with live standings during a race.**
-   [#465](https://github.com/openzigs/onyourleft/issues/465)'s ADR is the natural home for them.
+   [ADR 0028](../adr/0028-racing-fairness.md) D-7 is where they landed.
 3. **Counsel before a public live race ships, not before the ADR is written.** Question A is the
    purchase; it is worth making once the room's shape is settled and before it is built, which is
    exactly the timing ADR 0007's own Question 1 recommends (*"a chart against a hypothetical design
