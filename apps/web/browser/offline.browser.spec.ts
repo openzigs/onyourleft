@@ -71,7 +71,7 @@
  *   ride is validation 0002's job and it needs a trainer.
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -126,7 +126,12 @@ function distFiles(directory = DIST, prefix = ''): string[] {
  * script into `dist` and removes it again.
  */
 const EXPECTED_PRECACHE = distFiles()
-  .filter((file) => file !== 'sw.js' && !file.endsWith('.map'))
+  // `sw-next-*` is a case's second worker, in `dist` only while that case runs.
+  // Capturing at module load keeps THIS copy of the file from reading its own,
+  // and the prefix keeps it from reading another copy's: `--repeat-each` over
+  // several workers — how #467 was measured — runs this file in parallel with
+  // itself, and a stray `sw-next-*` then asked for a precache of 29 files.
+  .filter((file) => file !== 'sw.js' && !file.startsWith('sw-next-') && !file.endsWith('.map'))
   .sort();
 
 /**
@@ -518,21 +523,36 @@ test.describe('a cold start with the network off', () => {
   });
 });
 
+/**
+ * Write a second version of the worker into `dist`, and say where.
+ *
+ * ⚠️ A second worker script is written into `dist` for a test and removed
+ * again. `dist` is gitignored and rebuilt by `test:browser`, and the
+ * alternative — a second whole build — costs seconds for no extra claim. It is
+ * a copy of the real worker with its cache version changed, so it is a
+ * genuinely different worker precaching the same, present, assets.
+ *
+ * The name carries a random part as well as the content hash: two cases that
+ * each write one — or one case run with `--repeat-each` over several workers,
+ * which is how #467 was measured — must not remove a script the other is still
+ * installing from.
+ */
+function writeNextWorker(): { readonly name: string; readonly path: string } {
+  const source = readFileSync(join(DIST, 'sw.js'), 'utf8');
+  const next = source.replace(/oyl-precache-/g, 'oyl-precache-next-');
+  expect(next, 'the worker does not name its cache prefix; this test rewrites nothing').not.toBe(
+    source,
+  );
+  const digest = createHash('sha256').update(next).digest('hex').slice(0, 8);
+  const name = `sw-next-${digest}-${randomUUID().slice(0, 8)}.js`;
+  const path = join(DIST, name);
+  writeFileSync(path, next);
+  return { name, path };
+}
+
 test.describe('a second version arrives', () => {
   test('waits, does not take over, and steps aside only when asked', async () => {
-    // ⚠️ A second worker script is written into `dist` for this test and
-    // removed again. `dist` is gitignored and rebuilt by `test:browser`, and the
-    // alternative — a second whole build — costs seconds for no extra claim.
-    // It is a copy of the real worker with its cache version changed, so it is
-    // a genuinely different worker precaching the same, present, assets.
-    const source = readFileSync(join(DIST, 'sw.js'), 'utf8');
-    const next = source.replace(/oyl-precache-/g, 'oyl-precache-next-');
-    expect(next, 'the worker does not name its cache prefix; this test rewrites nothing').not.toBe(
-      source,
-    );
-    const nextName = `sw-next-${createHash('sha256').update(next).digest('hex').slice(0, 8)}.js`;
-    const nextPath = join(DIST, nextName);
-    writeFileSync(nextPath, next);
+    const { name: nextName, path: nextPath } = writeNextWorker();
 
     const opened = await session(profile);
     try {
@@ -612,6 +632,78 @@ test.describe('a second version arrives', () => {
         .catch(() => undefined);
       await opened.close();
       rmSync(nextPath, { force: true });
+    }
+  });
+
+  test('is offered even when it began installing before the app was listening — #467', async () => {
+    // ⚠️ **The race behind #467's flake, forced rather than waited for.** The
+    // update watcher reaches the page in `main.tsx`'s second render, once the
+    // app's own `register()` has resolved — measured locally at 20 to 75 ms
+    // before the case above registers its second worker, which is a margin a
+    // busy runner can eat. When it does, the second worker's `updatefound` has
+    // already fired with nobody listening, the worker is still installing when
+    // the watcher is made, and a watcher that read only `registration.waiting`
+    // never offered it. Here the app's `register()` is held until the second
+    // worker's `updatefound` has fired, which is that ordering every time.
+    //
+    // Its own profile, because the case above unregisters every worker in the
+    // shared one and a first visit is part of what this asserts.
+    const own = mkdtempSync(join(tmpdir(), 'oyl-offline-late-'));
+    const { name: nextName, path: nextPath } = writeNextWorker();
+    const opened = await session(own);
+    try {
+      await opened.page.goto(`${PRODUCT_ORIGIN}/`);
+      await waitForPrecache(opened.page, EXPECTED_PRECACHE.length);
+
+      // ⚠️ **And a first visit is not an update.** Chromium reports the first
+      // ever worker as `registration.waiting` at the moment it reaches
+      // `installed`, with no active worker yet. Before #467 a watcher that
+      // happened to be listening by then offered a new rider "Update now" to
+      // the version they were already running — one first visit in five,
+      // measured. The case above is the control: it requires the offer to
+      // appear when there IS an update, so this absence is not an app that
+      // renders no offer at all.
+      await expect(opened.page.getByRole('button', { name: 'Update now' })).toHaveCount(0);
+
+      await opened.context.addInitScript(() => {
+        const container = navigator.serviceWorker;
+        const register = container.register.bind(container);
+        container.register = async (
+          script: string | URL,
+          options?: RegistrationOptions,
+        ): Promise<ServiceWorkerRegistration> => {
+          const pending = register(script, options);
+          if (!String(script).endsWith('/sw.js')) {
+            return pending;
+          }
+          // The app's own registration: hand it over only once an update has
+          // been found on it, so the watcher is made after `updatefound`.
+          return pending.then(
+            (registration) =>
+              new Promise((resolve) => {
+                registration.addEventListener(
+                  'updatefound',
+                  () => {
+                    resolve(registration);
+                  },
+                  { once: true },
+                );
+              }),
+          );
+        };
+      });
+      await opened.page.reload();
+      await opened.page.evaluate(async (script: string) => {
+        await navigator.serviceWorker.register(`/${script}`);
+      }, nextName);
+
+      await expect(opened.page.getByRole('button', { name: 'Update now' })).toBeVisible({
+        timeout: 30_000,
+      });
+    } finally {
+      await opened.close();
+      rmSync(nextPath, { force: true });
+      rmSync(own, { recursive: true, force: true });
     }
   });
 });

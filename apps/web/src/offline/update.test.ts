@@ -47,30 +47,76 @@ class FakeRegistration implements ServiceWorkerRegistrationLike {
     this.found.push(listener);
   }
 
-  /** A new worker arrives and installs behind the one that is running. */
-  installUpdate(): FakeWorker {
+  /** A version already running and controlling the page. */
+  running(): FakeWorker {
     const worker = new FakeWorker();
-    this.installing = worker;
-    for (const listener of this.found) {
-      listener();
-    }
-    // The browser sets `waiting` before it dispatches `statechange`, which is
-    // the ordering the watcher reads — see its note about the first install.
-    this.waiting = worker;
-    worker.become('installed');
+    worker.state = 'activated';
+    this.active = worker;
     return worker;
   }
 
-  /** The FIRST ever worker: installed with nothing controlling the page. */
-  installFirstEver(): FakeWorker {
+  /** A new worker begins installing: `installing` is set and `updatefound` fires. */
+  beginInstalling(): FakeWorker {
     const worker = new FakeWorker();
     this.installing = worker;
+    this.dispatchUpdateFound();
+    return worker;
+  }
+
+  dispatchUpdateFound(): void {
     for (const listener of this.found) {
       listener();
     }
-    // ⚠️ `waiting` stays null. With no controlled client the browser takes the
-    // worker straight to `activating`.
+  }
+
+  /**
+   * That worker finishes installing behind the one that is running.
+   *
+   * `waiting` is set before `statechange` here; `finishInstallingUnordered`
+   * is the other order, because the watcher must not depend on which.
+   */
+  finishInstalling(worker: FakeWorker): void {
+    this.installing = null;
+    this.waiting = worker;
     worker.become('installed');
+  }
+
+  /** The same, with `statechange` delivered before the registration's attributes. */
+  finishInstallingUnordered(worker: FakeWorker): void {
+    worker.become('installed');
+    this.installing = null;
+    this.waiting = worker;
+  }
+
+  /** A new worker arrives and installs behind the one that is running. */
+  installUpdate(): FakeWorker {
+    if (this.active === null) {
+      this.running();
+    }
+    const worker = this.beginInstalling();
+    this.finishInstalling(worker);
+    return worker;
+  }
+
+  /**
+   * The FIRST ever worker: installed with nothing controlling the page.
+   *
+   * ⚠️ In the order the pinned Chromium actually delivers it, measured over
+   * five first visits (#467): at `statechange` → `installed` the registration
+   * already reports the worker as `waiting`, and `active` is still `null`.
+   * Only afterwards does it move to `active`. An earlier version of this fake
+   * left `waiting` null, which is what the watcher was written against — and
+   * is not what the browser does.
+   */
+  installFirstEver(): FakeWorker {
+    const worker = this.beginInstalling();
+    this.installing = null;
+    this.waiting = worker;
+    worker.become('installed');
+    this.waiting = null;
+    this.active = worker;
+    worker.become('activating');
+    worker.become('activated');
     return worker;
   }
 }
@@ -149,13 +195,34 @@ describe('nothing happens on its own', () => {
   });
 
   it('offers no update on a rider’s FIRST ever visit', () => {
-    // ⚠️ The case a naive reading of `installing.state === 'installed'` gets
-    // wrong: the first worker on an origin installs with nothing controlling
-    // the page, so `registration.waiting` is null and there is no old bundle to
-    // replace. Offering here would tell every new rider to update to the
-    // version they are already running.
+    // ⚠️ The first worker on an origin installs with nothing controlling the
+    // page, so there is no old bundle to replace. Offering here would tell a
+    // new rider to update to the version they are already running — which the
+    // pinned Chromium did on one first visit in five before #467, because
+    // `registration.waiting` IS the new worker at that moment.
     const { watcher, registration } = harness();
     registration.installFirstEver();
+    expect(watcher.status()).toBe('none');
+  });
+
+  it('offers no update on a first visit the watcher arrived in the middle of', () => {
+    // The watcher reaches the page after `register()` resolves, which is while
+    // the first ever worker is still installing — so it follows that worker
+    // from construction, and must still not mistake it for an update.
+    const registration = new FakeRegistration();
+    const worker = registration.beginInstalling();
+    const watcher = createUpdateWatcher({
+      registration,
+      controllerChanges: new FakeControllerChanges(),
+      recording: undefined,
+      reload: () => undefined,
+    });
+    registration.installing = null;
+    registration.waiting = worker;
+    worker.become('installed');
+    registration.waiting = null;
+    registration.active = worker;
+    worker.become('activating');
     expect(watcher.status()).toBe('none');
   });
 
@@ -254,6 +321,85 @@ describe('a ride is in progress', () => {
     expect(watcher.status()).toBe('available');
     recording.set(true);
     expect(watcher.status()).toBe('deferred');
+  });
+});
+
+describe('an update that was under way before the watcher existed — #467', () => {
+  function lateWatcher(registration: FakeRegistration): UpdateWatcher {
+    return createUpdateWatcher({
+      registration,
+      controllerChanges: new FakeControllerChanges(),
+      recording: undefined,
+      reload: () => undefined,
+    });
+  }
+
+  it('offers a worker that was still INSTALLING when the watcher was made', () => {
+    // ⚠️ The browser gate's flake. `main.tsx` builds the watcher in its second
+    // render, and an update registered before that has already fired the
+    // `updatefound` nobody was listening for. Reading `waiting` alone saw null
+    // and never looked again.
+    const registration = new FakeRegistration();
+    registration.running();
+    const worker = registration.beginInstalling();
+    const watcher = lateWatcher(registration);
+    let told = 0;
+    watcher.subscribe(() => {
+      told += 1;
+    });
+    expect(watcher.status()).toBe('none');
+    registration.finishInstalling(worker);
+    expect(watcher.status()).toBe('available');
+    expect(told).toBe(1);
+  });
+
+  it('offers a worker that was already WAITING when the watcher was made', () => {
+    const registration = new FakeRegistration();
+    registration.installUpdate();
+    expect(lateWatcher(registration).status()).toBe('available');
+  });
+
+  it('does not depend on the attribute arriving before the state change', () => {
+    // Two updates reach the page separately — the registration's attributes
+    // and the worker's state — and the watcher offers the worker it followed
+    // rather than re-reading `registration.waiting` in between.
+    const registration = new FakeRegistration();
+    registration.running();
+    const watcher = lateWatcher(registration);
+    const worker = registration.beginInstalling();
+    registration.finishInstallingUnordered(worker);
+    expect(watcher.status()).toBe('available');
+  });
+
+  it('offers a worker already INSTALLED that the registration still calls installing', () => {
+    // The same two separate updates, caught between them: the worker's state
+    // says `installed` and `registration.installing` has not moved yet. No
+    // further `statechange` is coming until the rider acts, so the worker is
+    // judged when it is first followed as well as on every change.
+    const registration = new FakeRegistration();
+    registration.running();
+    const worker = new FakeWorker();
+    worker.state = 'installed';
+    registration.installing = worker;
+    expect(lateWatcher(registration).status()).toBe('available');
+  });
+
+  it('tells a subscriber once, not twice, when it sees the worker both ways', () => {
+    // Constructed after `installing` is set and before `updatefound` is
+    // dispatched, the watcher meets the same worker twice. Following it twice
+    // would announce twice; harmless today, and a double offer tomorrow.
+    const registration = new FakeRegistration();
+    registration.running();
+    const worker = new FakeWorker();
+    registration.installing = worker;
+    const watcher = lateWatcher(registration);
+    let told = 0;
+    watcher.subscribe(() => {
+      told += 1;
+    });
+    registration.dispatchUpdateFound();
+    registration.finishInstalling(worker);
+    expect(told).toBe(1);
   });
 });
 
