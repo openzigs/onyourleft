@@ -82,6 +82,34 @@ function reachOf(solid: RiderPart['solid']): number {
   }
 }
 
+/**
+ * Every number a solid's shape is built out of, so that each can be required to
+ * be positive.
+ *
+ * ⚠️ **A `switch` rather than the ternary chain this replaced, and that is the
+ * whole repair.** The chain read `box ? … : tube ? … : ring ? … : [radius]`, so
+ * a shape it did not name fell through to the last arm and had only its
+ * `radius` checked. #369's `bend` landed there: its `thickness` and its `sweep`
+ * went unchecked, and a bar that swept **nothing** — a part that draws no
+ * geometry at all — passed the test whose name is that every part can be built
+ * from. A `switch` over the discriminant has no such arm, so a sixth
+ * `RiderSolid` is a compile error here rather than a silent exemption.
+ */
+function sizesOf(solid: RiderPart['solid']): readonly number[] {
+  switch (solid.shape) {
+    case 'box':
+      return [solid.width, solid.height, solid.depth];
+    case 'tube':
+      return [solid.radius, solid.length];
+    case 'ring':
+      return [solid.radius, solid.thickness];
+    case 'bend':
+      return [solid.radius, solid.thickness, solid.sweep];
+    case 'ball':
+      return [solid.radius];
+  }
+}
+
 /** The far end of a bone — the knee of a thigh, the ankle of a shin. */
 function farEnd(bone: LimbBone): { readonly y: number; readonly z: number } {
   return {
@@ -193,15 +221,7 @@ describe('the rider is a bicycle with somebody on it', () => {
 
   it('gives every part a solid something can actually be built from', () => {
     for (const each of [...RIDER_BODY_PARTS, ...RIDER_CRANK_PARTS]) {
-      const sizes =
-        each.solid.shape === 'box'
-          ? [each.solid.width, each.solid.height, each.solid.depth]
-          : each.solid.shape === 'tube'
-            ? [each.solid.radius, each.solid.length]
-            : each.solid.shape === 'ring'
-              ? [each.solid.radius, each.solid.thickness]
-              : [each.solid.radius];
-      for (const size of sizes) {
+      for (const size of sizesOf(each.solid)) {
         expect(size).toBeGreaterThan(0);
       }
       for (const number of [each.x, each.y, each.z, each.pitch, each.yaw, each.roll]) {
@@ -319,6 +339,39 @@ describe('the rider sits on the bicycle — #369', () => {
     for (const bend of bends) {
       expect(Math.abs(bend.x)).toBeGreaterThan(half * 0.8);
     }
+  });
+
+  it('stands the bar on the head tube rather than near where it happens to be', () => {
+    // ⚠️ **The link #369's first pass replaced with a coincidence of value.**
+    // The bar was placed at `{ y: HEAD_TUBE_TOP_Y + 0.02, z: HEAD_TUBE_TOP_Z }`
+    // and became the literals `0.98` and `0.34`, which are those two values
+    // today — so nothing moved, no gate could see it, and the one statement of
+    // where the bar is had quietly become two. The head tube moving is when it
+    // would have been found, with the bar left floating where it was.
+    const headTube = RIDER_BODY_PARTS.find((each) => each.name === 'head tube');
+    expect(headTube).toBeDefined();
+    const top = centreline(headTube as RiderPart).reduce((a, b) => (a.y > b.y ? a : b));
+    const tops = BAR_PARTS.find((each) => each.name === 'bar tops');
+    expect(tops).toBeDefined();
+    // Directly above it and at the same point fore and aft: a stem, not a boom.
+    expect((tops as RiderPart).z).toBeCloseTo(top.z, 9);
+    const rise = (tops as RiderPart).y - top.y;
+    expect(rise).toBeGreaterThan(0);
+    expect(rise).toBeLessThan(0.05);
+  });
+
+  it('tapes the bar, which is what puts it in the renderer’s rubber', () => {
+    // `three-renderer.ts` §`softly` sorts a part into the rubber merge or the
+    // frame merge by this colour and by nothing else, so the bar being
+    // tyre-coloured is a fact the drawing rests on rather than a taste. It was
+    // sorted by a `'bar '` name prefix until #369's review, which is a second
+    // statement of the same thing and drifts from this one in silence.
+    for (const part of BAR_PARTS) {
+      expect(part.colour, part.name).toBe(RIDER_PALETTE.tyre);
+    }
+    // …and a frame tube is not, or the whole bicycle would be bar tape.
+    const headTube = RIDER_BODY_PARTS.find((each) => each.name === 'head tube');
+    expect((headTube as RiderPart).colour).toBe(RIDER_PALETTE.frame);
   });
 
   it('curves the bar forward at the top and down to the drops, like a road bar', () => {

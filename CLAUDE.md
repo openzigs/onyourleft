@@ -340,7 +340,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         `BAR_BEND_RADIUS`, with `HAND_POSITIONS` a point ON it
                         per `RidingPosition` — because the hands used to be two
                         constants here and the drops four literals in
-                        `three-renderer.ts`, 50 mm apart, with every gate green
+                        `three-renderer.ts`, 50 mm apart, with every gate green.
+                        ⚠️ The stylised world's budget is DRAW CALLS rather
+                        than triangles (#240 NFR-2), and the bar leaves that
+                        at six; the realistic world's is triangles, and the
+                        bar costs 96 of its 12 000.
                         ⚠️ **Since #368 the bot and the ghost
                         DO get one, and a reviewer who remembers "the bot and
                         the ghost deliberately do NOT get one: three
@@ -3413,7 +3417,7 @@ top of an issue **supersedes its body**.
 | Why a simulated rider's cranks come from its odometer rather than from a cadence | `apps/web/src/game/bicycle.ts` §`simulatedCrankAngle`, `apps/web/src/game/scene.ts` §`pedalling` |
 | Which ten sources were searched for a road bicycle, what each one's licence actually said, and why none of them supplied one | `apps/web/src/game/bicycle.ts` §"What was searched for a road bicycle", [#369](https://github.com/openzigs/onyourleft/issues/369) |
 | Where the rider's hands are, and what stops them being somewhere the bar is not | `apps/web/src/game/bicycle.ts` §`HAND_POSITIONS`, §`BAR_BEND_RADIUS`, `apps/web/src/game/bicycle.test.ts` §"the rider sits on the bicycle" |
-| Why a budget that was checked against itself for three issues now is not | `apps/web/src/game/three-renderer.ts` §`realisticBicycleTriangles`, `apps/web/src/game/realistic-budget.test.ts` §"holds the bicycle the renderer actually builds under its own budget" |
+| Why a `@test-facing` tag naming the wrong file reads as no test at all, and what to measure before writing "nothing held this" | `apps/web/src/game/three-renderer.ts` §`realisticBicycleTriangles`, `apps/web/src/game/realistic-renderer.test.ts` §"the realistic bicycle — #369", `scripts/check-wiring.mjs` §`identifiersIn` |
 | At what distances three bicycles were actually told apart, and what happens if they were not | [validation 0002](docs/validation/0002-android-shell-and-game.md) Part N |
 | What a model file is allowed to fetch, and which one of them is allowed an atlas | `apps/web/src/game/scenery-models.ts` §`sceneryResourceUrl`, `apps/web/browser/game.browser.spec.ts` §"fetches the committed models and its one atlas, and nothing else" |
 | Why a model's colour is its own since #366, and what it used to be | `apps/web/src/game/three-renderer.ts` §`prepareSceneryGeometry`, [ADR 0022](docs/adr/0022-game-scenery-model-pack.md) D-7 and its 2026-09-18 amendment |

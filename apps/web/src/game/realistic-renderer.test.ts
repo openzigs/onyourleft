@@ -918,6 +918,17 @@ describe('a failed load releases everything it loaded, including what arrives la
 
 describe('the realistic bicycle — #369', () => {
   it('is built from bicycle.ts’s own parts inside its budget', () => {
+    // ⚠️ **This is the only reader of `realisticBicycleTriangles`, and it has
+    // been since the commit that created the export.** #369 proposed a second
+    // copy of it in `realistic-budget.test.ts` on the strength of a claim that
+    // nothing read the export; that claim was measured false against `b4f789a`
+    // — this assertion goes red there under `spokes = 20` → `900` with
+    // `expected 26332 to be less than or equal to 12000` — and the copy is
+    // gone. The tag on the export named the wrong file, which is a different
+    // and much smaller thing than no test existing.
+    //
+    // Measured across #369's drop bar: **5 212** triangles with one straight
+    // tube across, **5 308** with the bend and the drops. The bar costs 96.
     const triangles = realisticBicycleTriangles();
     expect(triangles).toBeGreaterThan(1_000);
     expect(triangles).toBeLessThanOrEqual(REALISTIC_BICYCLE_TRIANGLES);

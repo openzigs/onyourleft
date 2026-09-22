@@ -426,9 +426,36 @@ const BAR_BEND_RADIUS = 0.065;
 /** How thick the bar is. Under the tape, a road bar is 24 mm across. */
 const BAR_TUBE_RADIUS = 0.012;
 
-/** Where the straight section across the top of the bar is. */
-const BAR_Y = 0.98;
-const BAR_Z = 0.34;
+/**
+ * The top of the head tube — where the frame ends and the stem begins.
+ *
+ * ⚠️ **Declared here rather than beside the rest of the frame's coordinates**,
+ * which is where it used to be and where its `_FOOT_` siblings still are,
+ * because {@link BAR_Y} and {@link BAR_Z} are derived from it and a module-scope
+ * `const` is in its temporal dead zone until its own line runs.
+ */
+const HEAD_TUBE_TOP_Y = 0.96;
+const HEAD_TUBE_TOP_Z = 0.34;
+
+/** How far a road stem lifts the bar above the top of the head tube. */
+const BAR_STEM_RISE = 0.02;
+
+/**
+ * Where the straight section across the top of the bar is: on the head tube,
+ * {@link BAR_STEM_RISE} above it.
+ *
+ * ⚠️ **Derived rather than written out, and #369's first pass wrote it out.**
+ * The bar used to be placed at `{ y: HEAD_TUBE_TOP_Y + 0.02, z: HEAD_TUBE_TOP_Z }`
+ * and #369 replaced that with the literals `0.98` and `0.34` — which are those
+ * values *today*, so nothing moved and no gate could see it. A coincidence of
+ * value is not a link: moving the head tube would have left the bar floating
+ * where it was, in a change whose whole thesis is that there is **one**
+ * statement of where the bar is. `bicycle.test.ts` §"the rider sits on the
+ * bicycle" asserts the join, so the derivation cannot quietly be flattened back
+ * into two numbers.
+ */
+const BAR_Y = HEAD_TUBE_TOP_Y + BAR_STEM_RISE;
+const BAR_Z = HEAD_TUBE_TOP_Z;
 
 /** Half the bar, which is where each bend leaves the straight section. */
 const BAR_HALF_WIDTH = HANDLEBAR_LENGTH_METRES / 2;
@@ -606,8 +633,9 @@ export const BICYCLE_FRONT_METRES = FRONT_HUB_Z + WHEEL_RADIUS;
 export const BICYCLE_LENGTH_METRES = BICYCLE_FRONT_METRES - (REAR_HUB_Z - WHEEL_RADIUS);
 const SADDLE_Y = 0.94;
 const SADDLE_Z = -0.28;
-const HEAD_TUBE_TOP_Y = 0.96;
-const HEAD_TUBE_TOP_Z = 0.34;
+// ⚠️ `HEAD_TUBE_TOP_Y` and `HEAD_TUBE_TOP_Z` are declared **above**, with the
+// bar, because {@link BAR_Y} and {@link BAR_Z} are derived from them and a
+// module-scope `const` cannot be read before its own line.
 const HEAD_TUBE_FOOT_Y = 0.72;
 const HEAD_TUBE_FOOT_Z = 0.38;
 

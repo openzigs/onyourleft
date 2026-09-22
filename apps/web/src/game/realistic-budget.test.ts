@@ -44,11 +44,7 @@ import { readGlb } from './model-bytes-testing';
 import { fileImageSize, modelFacts } from './realistic-bytes-testing';
 import { STRUCTURE_KINDS } from './scatter';
 import { SCENERY_MODELS } from './scenery-models';
-import {
-  realisticBicycleTriangles,
-  realisticStructureTriangles,
-  ScatterBelt,
-} from './three-renderer';
+import { realisticStructureTriangles, ScatterBelt } from './three-renderer';
 
 const SHIPPED = fileURLToPath(new URL('../../public/realistic/', import.meta.url));
 const at = (file: string): string => join(SHIPPED, file);
@@ -129,24 +125,14 @@ describe('each committed file inside its class’s budget — ADR 0026 D-6', () 
 });
 
 describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
-  it('holds the bicycle the renderer actually builds under its own budget — #369', () => {
-    // ⚠️ **This assertion did not exist until #369 and the budget said it did.**
-    // `REALISTIC_BICYCLE_TRIANGLES`' own comment claimed *"its count is
-    // asserted against the geometry the renderer actually builds rather than
-    // read off a file"*, and `realisticBicycleTriangles()` — exported from
-    // `three-renderer.ts` with a `@test-facing` tag naming the test that would
-    // read it — had **no caller anywhere in the tree**. So the number below
-    // was compared with itself in the frame sum underneath, and a bicycle of
-    // any size at all would have passed. #369 grew that geometry (a drop bar
-    // in place of one straight tube), which is what made it worth having.
-    //
-    // Measured on the way in: 5 212 triangles before the drop bar, 5 308
-    // after — the bar costs 96.
-    const built = realisticBicycleTriangles();
-    expect(built).toBeGreaterThan(0);
-    expect(built).toBeLessThanOrEqual(REALISTIC_BICYCLE_TRIANGLES);
-  });
-
+  // ⚠️ **The bicycle's own count is asserted in `realistic-renderer.test.ts`
+  // §"the realistic bicycle — #369", NOT here, and #369's first pass put a
+  // weaker copy of it in this file on the strength of a claim that turned out
+  // to be false.** That copy is deleted rather than kept: it bounded the count
+  // below at `> 0` where the existing one bounds it at `> 1 000`, so the two
+  // together were the older assertion plus a line that could not fail. The
+  // frame sum below reads `REALISTIC_BICYCLE_TRIANGLES`, and what holds that
+  // constant to the geometry the renderer actually builds is that other file.
   it('holds the worst frame the near-mesh caps allow under the frame’s triangles', () => {
     const heaviest = (kind: (typeof REALISTIC_VEGETATION_KINDS)[number]): number =>
       Math.max(...REALISTIC_VEGETATION[kind].map((model) => modelFacts(at(model.file)).triangles));
