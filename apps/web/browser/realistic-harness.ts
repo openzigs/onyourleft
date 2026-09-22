@@ -1,0 +1,319 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * The owner's realistic page — [ADR 0026](../../../docs/adr/0026-realistic-game-world.md)
+ * D-12: *"the realistic world is reachable only from a harness page under
+ * `apps/web/browser/` … and from no control in the shipped app, until layers
+ * 1–3 have landed."* This is that page.
+ *
+ * ## What it is, and what it is not
+ *
+ * It rides the **product's own renderer** — `three-renderer.ts`, the same
+ * `threeGameRenderer` `main.tsx` hands `GameView` — along `realistic/route.ts`
+ * at 9 m/s, with the cranks turning at the pacer's gear, and lets the product's
+ * own two-ladder policy (`quality.ts` §`nextWorldQuality`) move the rung from
+ * the frame times, as `GameView` does with `nextQuality`. So what the owner
+ * sees on the tablet is what a rider would see if #475 offered it: the same
+ * code, the same assets, the same step down to the stylised world when the
+ * device runs hot — and the same "falls back and says so" when the world
+ * cannot load (D-7), shown on the page.
+ *
+ * It is **not** a gate: nothing asserts on what it measures, because the
+ * numbers that matter come from the tablet's GPU. `game.browser.spec.ts`
+ * §"the realistic world" is the gate, on its own page. It is **not** the
+ * product: the product's build never sees this directory, and the tablet
+ * reaches it only through a debug APK staged with
+ * `tools/realistic/stage-into-apk.ts` — validation 0002 Part Z has the steps.
+ *
+ * ## What it publishes
+ *
+ * `window.__oylRealistic` — the configuration, the load's outcome and the
+ * notice, which world is drawn and at which rung, and after `?seconds=` of
+ * riding the frame-time percentiles and the draw calls; with `?soak=20`, one
+ * sample a minute for twenty minutes. Each is also one console line,
+ * `OYL-REALISTIC {json}` and `OYL-REALISTIC-SOAK {json}`, which `adb logcat`
+ * shows under the `chromium` tag — so the numbers come off the device with no
+ * debugger attached, as #457's did.
+ */
+
+import { metres, metresPerSecond, seconds } from '@onyourleft/domain';
+
+import { simulatedCrankAngle } from '../src/game/bicycle';
+import {
+  INITIAL_QUALITY,
+  nextWorldQuality,
+  worldRung,
+  type WorldQualityState,
+} from '../src/game/quality';
+import { realisticWorldNotice, type RealisticWorldOutcome } from '../src/game/realistic-assets';
+import { sceneFrame } from '../src/game/scene';
+import { atStartLine } from '../src/game/simulation';
+import { corridorOrigin } from '../src/game/terrain';
+import {
+  drawnWorldOf,
+  loadRealisticWorld,
+  loadSceneryModels,
+  threeGameRenderer,
+} from '../src/game/three-renderer';
+import { configQuery, parseConfig, percentiles, type Percentiles } from './realistic/config';
+import { describe, guarded, MeasurementClock } from './realistic/loop';
+import { realisticRoute } from './realistic/route';
+
+/** How long the scene runs before anything is sampled: shader compiles, first uploads. */
+const WARM_UP_SECONDS = 3;
+/** How fast the rider goes: about 32 km/h. */
+const RIDE_METRES_PER_SECOND = 9;
+/** Where a long ride starts, wraps back to, and how much road it rides before it does. */
+const START_METRES = 2_550;
+const LOOP_FROM_METRES = 300;
+const LOOP_METRES = 3_500;
+
+/** One window's numbers. */
+export interface RealisticSample {
+  readonly world: string;
+  readonly rung: string;
+  readonly frameMs: Percentiles;
+  readonly drawCalls: number;
+  readonly drawingBuffer: readonly [number, number];
+  readonly devicePixelRatio: number;
+  readonly stalls: number;
+  readonly userAgent: string;
+}
+
+declare global {
+  interface Window {
+    __oylRealistic?: {
+      readonly ready: boolean;
+      readonly errors: readonly string[];
+      readonly query: string;
+      readonly outcome: RealisticWorldOutcome | undefined;
+      readonly notice: string | undefined;
+      readonly result: RealisticSample | undefined;
+      readonly soak: readonly (RealisticSample & { readonly minute: number })[];
+    };
+  }
+}
+
+const errors: string[] = [];
+let published: NonNullable<Window['__oylRealistic']> = {
+  ready: false,
+  errors,
+  query: location.search,
+  outcome: undefined,
+  notice: undefined,
+  result: undefined,
+  soak: [],
+};
+window.__oylRealistic = published;
+const publish = (patch: Partial<NonNullable<Window['__oylRealistic']>>): void => {
+  published = { ...published, ...patch };
+  window.__oylRealistic = published;
+};
+
+/** Counts the driver's draw calls for the life of the page, one frame at a time. */
+function drawCallCounter(): () => number {
+  const gl = WebGL2RenderingContext.prototype;
+  let calls = 0;
+  for (const name of [
+    'drawElements',
+    'drawArrays',
+    'drawElementsInstanced',
+    'drawArraysInstanced',
+  ] as const) {
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    const original: (...args: never[]) => unknown = gl[name];
+    (gl as unknown as Record<string, unknown>)[name] = function counted(
+      this: WebGL2RenderingContext,
+      ...args: never[]
+    ): unknown {
+      calls += 1;
+      return original.apply(this, args);
+    };
+  }
+  return () => {
+    const taken = calls;
+    calls = 0;
+    return taken;
+  };
+}
+
+/** The controls: which world, which rung, the ladder, and a line of numbers. */
+function panel(config: ReturnType<typeof parseConfig>): { box: HTMLElement; line: HTMLElement } {
+  const box = document.createElement('div');
+  box.style.cssText =
+    'position:fixed;top:0;left:0;max-width:100%;background:rgba(0,0,0,.72);color:#fff;font:15px/1.4 system-ui,sans-serif;padding:8px 10px;z-index:1';
+  const button = (label: string, next: Partial<ReturnType<typeof parseConfig>>): HTMLElement => {
+    const element = document.createElement('button');
+    element.textContent = label;
+    element.style.cssText = 'min-height:44px;margin:0 8px 6px 0;font:inherit';
+    element.addEventListener('click', () => {
+      location.search = configQuery({ ...config, ...next });
+    });
+    return element;
+  };
+  const line = document.createElement('pre');
+  line.style.cssText = 'margin:4px 0 0;white-space:pre-wrap;font:13px/1.3 ui-monospace,monospace';
+  box.append(
+    button(config.world === 'realistic' ? 'Show the stylised world' : 'Show the realistic world', {
+      world: config.world === 'realistic' ? 'stylised' : 'realistic',
+      rung: 0,
+    }),
+    button(config.ladder ? 'Hold this rung' : 'Let the ladder move', { ladder: !config.ladder }),
+    button(config.rung === 0 ? 'Start one rung down' : 'Start at the top rung', {
+      rung: config.rung === 0 ? 1 : 0,
+    }),
+    line,
+  );
+  return { box, line };
+}
+
+async function run(): Promise<void> {
+  const config = parseConfig(location.search);
+  const takeCalls = drawCallCounter();
+  await loadSceneryModels();
+  let outcome: RealisticWorldOutcome | undefined;
+  if (config.world === 'realistic') {
+    outcome = await loadRealisticWorld();
+  }
+  const notice = outcome === undefined ? undefined : realisticWorldNotice(outcome);
+  publish({ outcome, notice });
+
+  const profile = realisticRoute();
+  const origin = corridorOrigin(profile);
+  document.body.style.cssText = 'margin:0;background:#000;overflow:hidden';
+  const canvas = document.createElement('canvas');
+  canvas.style.cssText = 'display:block;width:100vw;height:100vh';
+  document.body.append(canvas);
+  const controls = config.panel ? panel(config) : undefined;
+  if (controls !== undefined) document.body.append(controls.box);
+
+  let state: WorldQualityState = {
+    realistic: config.world === 'realistic',
+    quality: { ...INITIAL_QUALITY, level: config.rung },
+  };
+  const view = threeGameRenderer.create(canvas, worldRung(state));
+  const resize = (): void => view.resize(canvas.clientWidth, canvas.clientHeight);
+  resize();
+  addEventListener('resize', resize);
+  const gl = canvas.getContext('webgl2');
+
+  const frameAt = (distance: number, elapsed: number) => {
+    const start = atStartLine(profile);
+    return sceneFrame({
+      profile,
+      origin,
+      state: {
+        ...start,
+        ride: { speed: metresPerSecond(RIDE_METRES_PER_SECOND), distance: metres(distance) },
+        elapsed: seconds(elapsed),
+        ridden: seconds(elapsed),
+      },
+      botDistance: distance + 25,
+      crankAngle: simulatedCrankAngle(distance),
+    });
+  };
+
+  const clock = new MeasurementClock(WARM_UP_SECONDS);
+  let measured = false;
+  let windowFrom = 0;
+  let minute = 0;
+  let callsInWindow = 0;
+  let framesInWindow = 0;
+  let shownAt = 0;
+  const soak: (RealisticSample & { minute: number })[] = [];
+
+  const sample = (frames: readonly number[], stalls: number): RealisticSample => ({
+    world: drawnWorldOf(view),
+    rung: worldRung(state).label,
+    frameMs: percentiles(frames),
+    drawCalls: framesInWindow === 0 ? 0 : Math.round(callsInWindow / framesInWindow),
+    drawingBuffer: [gl?.drawingBufferWidth ?? 0, gl?.drawingBufferHeight ?? 0],
+    devicePixelRatio,
+    stalls,
+    userAgent: navigator.userAgent,
+  });
+
+  const step = (now: number): void => {
+    const { elapsedSeconds: elapsed, sampledMs } = clock.frame(now);
+    const distance =
+      config.at ??
+      LOOP_FROM_METRES +
+        ((START_METRES - LOOP_FROM_METRES + elapsed * RIDE_METRES_PER_SECOND) % LOOP_METRES);
+    view.render(frameAt(distance, config.at === undefined ? elapsed : 0));
+    callsInWindow += takeCalls();
+    framesInWindow += 1;
+    if (!published.ready) publish({ ready: true });
+    // The product's own two-ladder policy, fed the product's own signal.
+    if (config.ladder && sampledMs !== undefined) {
+      const next = nextWorldQuality(state, { frameMs: sampledMs });
+      if (next.realistic !== state.realistic || next.quality.level !== state.quality.level) {
+        view.setQuality(worldRung(next));
+      }
+      state = next;
+    }
+    if (!measured && clock.windowFull(config.seconds)) {
+      measured = true;
+      windowFrom = elapsed;
+      const taken = clock.take();
+      const result = sample(taken.samples, taken.stalls);
+      callsInWindow = 0;
+      framesInWindow = 0;
+      publish({ result });
+      console.log(`OYL-REALISTIC ${JSON.stringify(result)}`);
+    } else if (
+      measured &&
+      config.soakMinutes > 0 &&
+      minute < config.soakMinutes &&
+      elapsed >= windowFrom + (minute + 1) * 60
+    ) {
+      minute += 1;
+      const taken = clock.take();
+      const each = { ...sample(taken.samples, taken.stalls), minute };
+      callsInWindow = 0;
+      framesInWindow = 0;
+      soak.push(each);
+      publish({ soak: [...soak] });
+      console.log(`OYL-REALISTIC-SOAK ${JSON.stringify(each)}`);
+    } else if (measured && config.soakMinutes === 0) {
+      clock.take();
+    }
+    if (controls !== undefined && now - shownAt > 1_000) {
+      shownAt = now;
+      const live = percentiles(clock.samples.slice(-120));
+      controls.line.textContent =
+        `${drawnWorldOf(view)} world · ${worldRung(state).label}` +
+        `${measured ? ' · measured' : elapsed < WARM_UP_SECONDS ? ' · warming up' : ' · sampling'}` +
+        ` · frame p50 ${live.p50.toFixed(1)} ms · ` +
+        `buffer ${String(gl?.drawingBufferWidth ?? 0)}×${String(gl?.drawingBufferHeight ?? 0)}` +
+        (notice === undefined ? '' : `\n${notice}`);
+    }
+  };
+  const safeStep = guarded(step, fail);
+  const tick = (now: number): void => {
+    if (safeStep(now)) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+/** Puts an error where the procedure reads it, and on the screen. Never throws. */
+function fail(message: string): void {
+  errors.push(message);
+  publish({ errors: [...errors] });
+  console.log(`OYL-REALISTIC-ERROR ${message}`);
+  const shown = document.createElement('p');
+  shown.textContent = errors.join('\n');
+  shown.style.cssText =
+    'position:fixed;bottom:0;left:0;margin:0;z-index:2;color:#fff;background:#700;padding:12px;font:16px system-ui';
+  document.body.append(shown);
+}
+
+addEventListener('error', (event) => {
+  fail(describe(event.error ?? event.message));
+});
+addEventListener('unhandledrejection', (event) => {
+  fail(describe(event.reason));
+});
+
+run().catch((error: unknown) => {
+  fail(describe(error));
+});

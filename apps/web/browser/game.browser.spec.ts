@@ -25,7 +25,8 @@ import { test as base, devices, expect } from '@playwright/test';
 import { HARNESS_ORIGIN } from '../playwright.config';
 import { MINIMUM_RIDER_FRAME_SHARE, riderFrameBox } from '../src/game/camera';
 
-import type { RiderExtent } from './game-harness';
+import type { RealisticMeasurement, RiderExtent } from './game-harness';
+import { MINIMUM_TINT_CONTRAST_RATIO } from '../src/game/terrain';
 
 /** One read-back pixel, as four bytes. */
 type Pixel = readonly [number, number, number, number];
@@ -162,6 +163,8 @@ interface GameHarnessResult {
     readonly mapDrawCalls: number;
     readonly shadowPixels: number;
   };
+  /** ADR 0026 — measured only by the `?realistic` load. */
+  readonly realistic: RealisticMeasurement;
   readonly errors: readonly string[];
 }
 
@@ -1874,6 +1877,107 @@ test.describe('the rider is prominent — #424', () => {
     // And the two predictions are far enough apart for that to mean something.
     expect(fixedLens.bottom - fixedLens.top - (expected.bottom - expected.top)).toBeGreaterThan(
       3 * RIDER_BOX_TOLERANCE,
+    );
+  });
+});
+
+/**
+ * The realistic world, in a real engine — ADR 0026, #425, #474, #369.
+ *
+ * ⚠️ **One page load for all of it** (#456's memo, `?realistic`): the realistic
+ * set is about 31 MiB and a prefiltered sky, and every case here reads the one
+ * run `game-harness.ts` §`realisticProbe` makes. The default load is the
+ * other half of D-7 and is asserted below too: it fetches none of the set.
+ */
+test.describe('the realistic world — ADR 0026', () => {
+  const realistic = async (
+    run: (query?: string) => Promise<HarnessRun>,
+  ): Promise<RealisticMeasurement> => {
+    const { result } = await run('?realistic');
+    expect(result.errors).toEqual([]);
+    expect(result.realistic.measured).toBe(true);
+    return result.realistic;
+  };
+
+  test('is drawn only when it is loaded, and otherwise falls back and says so — D-7', async ({
+    harnessRun,
+  }) => {
+    const measured = await realistic(harnessRun);
+    // Before anything was loaded, a realistic rung drew the stylised world…
+    expect(measured.fallbackWorld).toBe('stylised');
+    // …a load that could not reach its files said so in a rider's words…
+    expect(measured.failedLoad.loaded).toBe(false);
+    expect(measured.failedNotice).toMatch(/standard world/);
+    // …and once the real files loaded, the same rung drew the realistic world.
+    expect(measured.loaded).toBe(true);
+    expect(measured.drawnWorld).toBe('realistic');
+    // Non-vacuity: it is a different picture, not the stylised one relabelled.
+    expect(measured.worldChangedShare).toBeGreaterThan(0.5);
+  });
+
+  test('fetches the realistic set only when asked — the default world fetches none of it', async ({
+    harnessRun,
+  }) => {
+    const plain = await harnessRun();
+    expect(plain.requested.filter((url) => url.includes('/realistic/'))).toEqual([]);
+    const asked = await harnessRun('?realistic');
+    expect(asked.requested.filter((url) => url.includes('/realistic/')).length).toBeGreaterThan(10);
+  });
+
+  test('wears only materials three-renderer.ts constructed, on every visible mesh — D-11', async ({
+    harnessRun,
+  }) => {
+    const measured = await realistic(harnessRun);
+    expect(measured.visibleStandard).toBeGreaterThan(5);
+    expect(measured.visibleStandardConstructed).toBe(measured.visibleStandard);
+    // What a glTF's extensions would have made GLTFLoader build, had one got through.
+    expect(measured.visiblePhysical).toBe(0);
+    // The far band is drawn, and it too is this file's own material.
+    expect(measured.visibleImpostorsConstructed).toBeGreaterThan(0);
+  });
+
+  test('keeps the road one draw call, and its gradient readable after the light and AgX — #242, #425', async ({
+    harnessRun,
+  }) => {
+    const measured = await realistic(harnessRun);
+    expect(measured.drawCalls - measured.drawCallsWithoutRoad).toBe(1);
+    const contrast = (a: number, b: number): number =>
+      (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    // The criterion, read off the drawing buffer: the tint still separates the
+    // steepest climb from the steepest descent over the photographic road.
+    expect(measured.descentLuminance).toBeGreaterThan(measured.climbLuminance);
+    expect(contrast(measured.climbLuminance, measured.descentLuminance)).toBeGreaterThanOrEqual(
+      MINIMUM_TINT_CONTRAST_RATIO,
+    );
+    // The control: the same probe on two level roads reads alike, so what was
+    // measured above is the tint and not where the probe landed.
+    expect(contrast(measured.levelClimbLuminance, measured.levelDescentLuminance)).toBeLessThan(
+      1.05,
+    );
+    // And the photograph reached the GPU: this world samples textures.
+    expect(measured.texturesCreated).toBeGreaterThan(5);
+  });
+
+  test('turns the realistic rider’s legs with the cranks, and holds them when the cadence goes — #369, #349', async ({
+    harnessRun,
+  }) => {
+    const measured = await realistic(harnessRun);
+    expect(measured.crankTurnPixels).toBeGreaterThan(50);
+    expect(measured.crankHeldPixels).toBe(0);
+  });
+
+  test('steps down to the stylised world whole, and publishes what realism costs', async ({
+    harnessRun,
+  }) => {
+    const measured = await realistic(harnessRun);
+    expect(measured.afterStepDownWorld).toBe('stylised');
+    expect(measured.afterStepDownStandard).toBe(0);
+    // Published, never asserted: SwiftShader on a desktop says nothing about a
+    // Mali GPU. Validation 0002 Part Z is the tablet.
+    console.log(
+      `realistic world: loaded in ${measured.loadMs.toFixed(0)} ms; ` +
+        `${measured.realisticFrameMs.toFixed(1)} ms a frame against ${measured.stylisedFrameMs.toFixed(1)} ms stylised ` +
+        `(SwiftShader, not a phone); ${String(measured.drawCalls)} draw calls`,
     );
   });
 });

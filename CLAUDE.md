@@ -66,7 +66,12 @@ apps/                 AGPL-3.0-or-later, without exception
                         them, which no gate had ever measured. Since #422 it
                         also holds rideview.html and rideview-harness.tsx — the
                         Ride SCREEN at `#/`, which is a different route, where a
-                        prose reading measure hid the workout below the fold
+                        prose reading measure hid the workout below the fold.
+                        ⚠️ Since #430/#425/#474/#369 it also holds realistic.html
+                        and realistic-harness.tsx — NOT a gate: the OWNER's page,
+                        the one place ADR 0026 D-12 lets the realistic world be
+                        reached until #475, staged into a local debug APK by
+                        `realistic:stage`. The gate is game.html?realistic
     public/             what Vite copies verbatim into `dist` (#405) — the web app
                         manifest and the three icons it names. A `.webmanifest`
                         is on neither LIC001's nor LIC002's extension list and
@@ -74,7 +79,18 @@ apps/                 AGPL-3.0-or-later, without exception
                         records the icons is `ASSETS.toml`, and ⚠️ their licence
                         is `CC0-1.0` rather than this tree's own
                         `AGPL-3.0-or-later`, which `ASSET004` admits at no path
-                        at all (ADR 0024 D-5)
+                        at all (ADR 0024 D-5). ⚠️ Since #430 it also holds
+                        `realistic/` — the realistic world's 17 files, 30.8 MiB,
+                        CC0, made by `tools/realistic/`, in `dist` and so in the
+                        APK, and excluded from the precache BY THAT DIRECTORY
+                        (ADR 0026 D-7, and ADR 0024's 2026-09-22 amendment)
+    tools/realistic/    the asset pipeline (#430, ADR 0026 D-5) — which upstream
+                        pages were read and what they said, the input lock, the
+                        headless-Blender scripts that made every derived file,
+                        and `--check`, which re-makes them byte for byte. ⚠️ The
+                        first `.py` in the tree, which is why LIC001/LIC002 scan
+                        `.py` now. ⚠️ Blender is a TOOL: nothing in CI runs it,
+                        and a version other than the pinned 4.4.3 is refused
     tools/precache/     what the worker precaches, as a pure function over the
                         build's output (#406) — build-time code, so it lives
                         beside the icon generator rather than in `src/`
@@ -481,6 +497,15 @@ apps/                 AGPL-3.0-or-later, without exception
                         refusal (#237) — the one place in the client a
                         BotPacerPlan is built, and therefore the only place the
                         rider's own mass could get into one
+    src/game/realistic-*.ts
+                        the realistic world (ADR 0026, #425, #474, #369) that
+                        is NOT OFFERED to a rider until #475 — its asset table,
+                        its provisional D-6 budget, and the arithmetic that
+                        makes its sky and sun one sky. The renderer half is in
+                        `three-renderer.ts` (D-10). ⚠️ `realistic-offered.test.ts`
+                        fails the build if any module the product ships names a
+                        way into it, which is the whole of what keeps a
+                        half-built world from a rider
     src/game/gradient.ts
                         the gradient control loop (#362) — where #90's driver
                         meets a real trainer, and the answer to "the game
@@ -897,7 +922,9 @@ Every source file carries an SPDX identifier in its opening lines:
 
 `LIC001` and `LIC002` scan `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.css`, `.sh` and — since
 [#87](https://github.com/openzigs/onyourleft/issues/87) — `.kt`, `.kts`, `.java`, `.gradle` and
-`.xml`. The identifier may sit anywhere in the first **five** lines, not only the first, because a
+`.xml`, and — since [#430](https://github.com/openzigs/onyourleft/issues/430) — `.py`, because the
+realistic world's Blender scripts live under `apps/` (ADR 0026 D-5) and a Python file there passed
+with no header at all. The identifier may sit anywhere in the first **five** lines, not only the first, because a
 shebang and an XML declaration both legitimately precede it. An `AndroidManifest.xml` therefore
 carries `<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->` on line 2.
 
@@ -1178,6 +1205,21 @@ pnpm --filter @onyourleft/web run test
 # digests in the same commit.
 pnpm --filter @onyourleft/web run icons:generate
 
+# The realistic world's asset pipeline (#430, ADR 0026 D-5). NOT a gate and NOT
+# in CI: it needs the network and Blender 4.4.3 (set BLENDER to its path; the
+# default is the macOS app's), and it refuses any other Blender version.
+# `realistic:fetch` downloads the upstream inputs into tools/realistic/build/
+# (ignored) and fails unless every one matches inputs.lock.json; `--lock` re-bases
+# on new inputs, which then moves every derived ASSETS.toml row. `realistic:process`
+# re-makes apps/web/public/realistic/; with `--check` it writes nothing and fails
+# unless every committed file is reproduced BYTE FOR BYTE — measured twice running
+# on 2026-09-22. `--records` prints the ASSETS.toml entries the pipeline's own
+# table produces. `realistic:stage` copies the owner's harness page into a built
+# `dist` for a LOCAL debug APK (validation 0002 Part Z) — never a release.
+pnpm --filter @onyourleft/web run realistic:fetch
+pnpm --filter @onyourleft/web run realistic:process --check
+pnpm --filter @onyourleft/web run realistic:stage
+
 # Regenerate the #29 synthetic FIT fixture corpus from its generator. It is
 # DETERMINISTIC: running it on a clean tree leaves `git status` clean, which is
 # what makes a corpus that is committed and generated the same corpus. It writes
@@ -1261,6 +1303,7 @@ npm view typescript-eslint peerDependencies.typescript
 | `ASSET003` | a named file's SHA-256 does not reproduce, or none is recorded. ⚠️ It pins **what is committed**, so a substitution is visible; it does **not** establish that the bytes are the upstream artefact they name, which nothing offline can — `apps/mobile/README.md` §4 still stands on `gradle-wrapper.jar` |
 | `ASSET004` | an entry's licence is absent, on **no** list, or not permitted where the file lands. Permissive anywhere; weak (`CC0-1.0` and friends) and — since #357 — attribution-requiring (`CC-BY-4.0`) under `apps/` only. ADR 0015 D-2's distributed-closure table, applied to a committed file. ⚠️ Fails **closed**, and this row used to name `CC-BY-4.0` as an example of that: [ADR 0023](docs/adr/0023-cc-by-assets-and-attribution.md) ruled on it, so the examples are now GPL, AGPL, `CC-BY-SA-4.0` and **`CC-BY-NC-4.0`**, which is two letters from an admitted one and non-OSI |
 | `ASSET005` | `ASSETS.toml` is absent, or does not parse. ⚠️ Five ids where #339 names four, and the fifth is the reason the other four cannot pass vacuously — the same move `LIC006` made for `.spdx-exempt`. An unrecognised key is **refused rather than ignored** (ADR 0017 D-4's choice, for the same reason), and a manifest that does not parse **stops the walk** rather than reporting every entry after the bad line as unnamed |
+| `ASSET007` | a **derived** entry — one this repository made from an upstream input rather than committed as the upstream bytes — records its `input`, `inputsha256`, `script` and `tool` together, with `modified`, and the `script` it names is committed. #430, [ADR 0026](docs/adr/0026-realistic-game-world.md) D-5. ⚠️ The four keys are ACCEPTED on any entry and REQUIRED together, so a derived row cannot be half-recorded; what `ASSET003` pins is still the committed bytes, and what these add is that they can be **made again** — `realistic:process --check`, run by hand because CI has no Blender, and `provenance.test.ts` holding every row to the pipeline's own table |
 | `ASSET006` | an entry whose licence **requires attribution** records no `creator`, no `url` or no `modified`. #357, [ADR 0023](docs/adr/0023-cc-by-assets-and-attribution.md) D-3. ⚠️ It fires on a licence `ASSET004` has just **permitted**, which is what makes it a rule rather than a branch: CC-BY is the only identifier in either set whose obligation is **continuing** — discharged by the shipped app crediting the work every time it ships, not by the manifest row existing — so the data [#358](https://github.com/openzigs/onyourleft/issues/358) generates the credits screen from is checked where the asset enters the tree. Widening a list alone would have satisfied "a CC-BY asset now passes" and left the obligation unchecked, which is this repository's own recurring defect shape |
 
 `scripts/check-licence-hashes.sh` enforces one more, separately because it hashes files rather than
@@ -1837,7 +1880,7 @@ browser runs**.
 | `hosted-archive.ts` | what that third block decides **without** a network: which archive, which origins it may then reach, and where to put the ride inside whatever coverage the archive's own header declares. Pure, with `hosted-archive.test.ts` beside it in the Vitest suite — which is the answer to "a skipped block rots unseen" |
 | `pmtiles-fixture.ts` | a PMTiles v3 archive written from arithmetic, so the gate has a basemap to render. Emitted into `browser/dist` by `vite.browser.config.ts`, never committed, and carrying no OpenStreetMap data. ⚠️ It used to be the **only** file here with a Vitest test beside it; `hosted-archive.ts` is the second, and `apps/web/vitest.config.ts`'s `browser/**/*.test.ts` covers both |
 | `game.html`, `game-harness.ts` | since #91, the same idea for the renderer: a page that builds a scene through the **real** `game/three-renderer.ts` and the **real** `terrain.ts` |
-| `game.browser.spec.ts` | its spec — the renderer constructs against a live context, the geometry is one a driver accepts, and a frame reaches the drawing buffer (read back with `readPixels`, because `render` not throwing is a weaker claim) |
+| `game.browser.spec.ts` | its spec — the renderer constructs against a live context, the geometry is one a driver accepts, and a frame reaches the drawing buffer (read back with `readPixels`, because `render` not throwing is a weaker claim). ⚠️ Since #430's pull request it also has §"the realistic world", on **one** extra load, `game.html?realistic`: the D-7 fallback, D-11 over a live scene, the one-call road, the gradient tint's contrast read off the drawing buffer **after the light and AgX**, the realistic rider's legs against the cranks, and the step down — and that the DEFAULT load fetches none of the realistic set |
 | `hud.html`, `hud-harness.tsx` | since #266, the ride HUD: the **real** `game/hud/HudPanel.tsx` under the **real** `design/theme.css`, on the **real** stage `GameView` gives it, with every field populated and all three of #259's settled outcome words. ⚠️ **Until #423 that was the `oyl-shell` → `oyl-main` → `oyl-game` chain, and a reviewer who remembers it is reading the old file**: the HUD is laid over a `position: fixed` stage now, so its containing block is the viewport whatever is above it, and the old chain would have gone on measuring a stacked layout a rider only gets at 320×256. One thing on this page is the harness's own and it says so: each stage is `position: relative` and `100vh` tall, because six fixed stages are six panels on top of one another. A **`.tsx`**, and the first React in this directory |
 | `hud.browser.spec.ts` | its spec — no `.oyl-hud__value` overflows its grid track at a phone in either orientation, at **360 px** (where #423's first layout ran the third primary reading off the screen) and at a landscape tablet, read back from the browser's own layout. Its **control panels** are the half that makes a green run mean something; ⚠️ since #423 the control moves the words into the primary list as well as stripping #259's class, because every word is a secondary reading now and at 1.5 rem it would spill by under three pixels, which is not a control |
 | `shell.html`, `shell-harness.tsx` | since #307's review, the app **shell**: the **real** `shell/AppShell.tsx` with the **real** `ROUTES` table under the **real** `design/theme.css`. The second `.tsx` here. ⚠️ Its spacer goes **inside `.oyl-main`** and the file says why at length — after `.oyl-shell` the header scrolls out of its own sticky containing block and measures 0 px, and inside `.oyl-shell` `main` stays shorter than the viewport so a focus scroll never consults `scroll-margin-top`. Each mistake made a different assertion pass over nothing. ⚠️ Since #316 it also renders the **real** `design/Button.tsx` in both variants, with `RideView`'s own labels, because a shell handed no ports renders **zero** controls on all eleven routes and a size assertion over an empty list passes |
@@ -1976,10 +2019,14 @@ command and its own CI step.
 ⚠️ **`vite.browser.config.ts` names every entry explicitly, and must.** Vite's multi-page mode
 discovers only `index.html`; a page added without a line in `build.rollupOptions.input` is simply
 not built, and the failure is a 404 while the spec runs rather than a build error — which reads
-like a server fault and sends the next person to `playwright.config.ts`. There are **seven** entries
+like a server fault and sends the next person to `playwright.config.ts`. There are **ten** entries
 today, not two — the map, the game, the HUD, the app shell, the game's stage (#373, #423), the
-Ride screen (#422) and the capture tool — and this sentence said *four* until #373, so read
-`build.rollupOptions.input` rather than this line. #266 confirmed the trap by
+Ride screen (#422), the loop start (#440), the home screen (#428), the owner's realistic page
+(ADR 0026 D-12) and the capture tool — and this sentence said *four* until #373 and *seven* until
+#430's pull request, when it had been stale for two entries already, so read
+`build.rollupOptions.input` rather than this line. ⚠️ Since that pull request the harness build's
+`publicDir` is the app's own `public/`, so the realistic world is served to both builds at the
+same path. #266 confirmed the trap by
 deleting its own line — the run died sixty seconds later inside `waitForFunction` with no mention
 of the config, which is why `hud.browser.spec.ts` now checks the response status and names
 `build.rollupOptions.input` in the failure.
@@ -3514,6 +3561,15 @@ top of an issue **supersedes its body**.
 | Where the credits screen's rows come from, and why it is generated rather than listed | `apps/web/src/credits/credits.ts`, [ADR 0023](docs/adr/0023-cc-by-assets-and-attribution.md) D-3 |
 | Why a manifest line the client cannot read is shown to a rider rather than skipped | `apps/web/src/credits/manifest.ts`, `apps/web/src/views/CreditsView.tsx` |
 | Why the credits page has no navigation entry, and what that makes the About link | `apps/web/src/shell/routes.ts` §`CREDITS_ROUTE`, `apps/web/src/views/AboutView.tsx` |
+| What the realistic world is, what is built of it, and why no rider can reach it yet | [ADR 0026](docs/adr/0026-realistic-game-world.md), [`docs/architecture.md`](docs/architecture.md) §"The realistic world", `apps/web/src/game/realistic-offered.test.ts`, [#475](https://github.com/openzigs/onyourleft/issues/475) |
+| How a realistic asset is made, where its input came from, and how to make it again byte for byte | `apps/web/tools/realistic/sources.ts`, `inputs.lock.json`, `process-assets.ts` §"`--check`", `ASSETS.toml` §derived keys, `scripts/check-repo-rules.sh` §`ASSET007` |
+| Why the Blender scripts run on one thread, and what an unordered set did to a shrub | `apps/web/tools/realistic/blender/process_tree.py` §"ONE thread" and §"An ordered de-duplication" |
+| What the realistic world may cost, and why every number is provisional | `apps/web/src/game/realistic-budget.ts`, validation 0002 Part Z |
+| Why the photographic road barely shines, and what the full sheen did to the gradient cue | `apps/web/src/game/three-renderer.ts` §`ROAD_SHEEN`, `game.browser.spec.ts` §"the realistic world" |
+| Why every face of the photographic road is lit as facing up | `apps/web/src/game/three-renderer.ts` §`photographicRoadMaterial`, `terrain.ts` §`roadIndices` |
+| How bright the HDRI's environment is, and which way its sun faces | `apps/web/src/game/realistic-light.ts` §`environmentIntensity`, §`skyRotation` |
+| Why the realistic bicycle is built from numbers, and how the MakeHuman body pedals | `apps/web/src/game/bicycle.ts` §"Two riders now", §`riderJoints`, `three-renderer.ts` §`RealisticRiderBelt` |
+| Why the frame cap on the quality ladder does nothing | [#476](https://github.com/openzigs/onyourleft/issues/476) |
 | What stops an empty credits screen looking exactly like a correct one | `apps/web/src/views/CreditsView.test.tsx`, [#142](https://github.com/openzigs/onyourleft/issues/142) |
 | What a person with TalkBack runs, and which questions only they can answer | [`docs/validation/0003-screen-reader-and-assistive-technology.md`](docs/validation/0003-screen-reader-and-assistive-technology.md), [#393](https://github.com/openzigs/onyourleft/issues/393) |
 | How a climb ahead is found, and why the lookahead starts from the wrapped position | `apps/web/src/game/hud/climb-ahead.ts`, [#399](https://github.com/openzigs/onyourleft/issues/399) |
