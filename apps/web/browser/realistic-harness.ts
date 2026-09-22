@@ -36,9 +36,6 @@
  * debugger attached, as #457's did.
  */
 
-import { metres, metresPerSecond, seconds } from '@onyourleft/domain';
-
-import { simulatedCrankAngle } from '../src/game/bicycle';
 import {
   INITIAL_QUALITY,
   nextWorldQuality,
@@ -46,8 +43,6 @@ import {
   type WorldQualityState,
 } from '../src/game/quality';
 import { realisticWorldNotice, type RealisticWorldOutcome } from '../src/game/realistic-assets';
-import { sceneFrame } from '../src/game/scene';
-import { atStartLine } from '../src/game/simulation';
 import { corridorOrigin } from '../src/game/terrain';
 import {
   drawnWorldOf,
@@ -56,13 +51,12 @@ import {
   threeGameRenderer,
 } from '../src/game/three-renderer';
 import { configQuery, parseConfig, percentiles, type Percentiles } from './realistic/config';
+import { rideFrame, RIDE_METRES_PER_SECOND } from './realistic/frame';
 import { describe, guarded, MeasurementClock } from './realistic/loop';
 import { realisticRoute } from './realistic/route';
 
 /** How long the scene runs before anything is sampled: shader compiles, first uploads. */
 const WARM_UP_SECONDS = 3;
-/** How fast the rider goes: about 32 km/h. */
-const RIDE_METRES_PER_SECOND = 9;
 /** Where a long ride starts, wraps back to, and how much road it rides before it does. */
 const START_METRES = 2_550;
 const LOOP_FROM_METRES = 300;
@@ -197,22 +191,6 @@ async function run(): Promise<void> {
   addEventListener('resize', resize);
   const gl = canvas.getContext('webgl2');
 
-  const frameAt = (distance: number, elapsed: number) => {
-    const start = atStartLine(profile);
-    return sceneFrame({
-      profile,
-      origin,
-      state: {
-        ...start,
-        ride: { speed: metresPerSecond(RIDE_METRES_PER_SECOND), distance: metres(distance) },
-        elapsed: seconds(elapsed),
-        ridden: seconds(elapsed),
-      },
-      botDistance: distance + 25,
-      crankAngle: simulatedCrankAngle(distance),
-    });
-  };
-
   const clock = new MeasurementClock(WARM_UP_SECONDS);
   let measured = false;
   let windowFrom = 0;
@@ -239,7 +217,17 @@ async function run(): Promise<void> {
       config.at ??
       LOOP_FROM_METRES +
         ((START_METRES - LOOP_FROM_METRES + elapsed * RIDE_METRES_PER_SECOND) % LOOP_METRES);
-    view.render(frameAt(distance, config.at === undefined ? elapsed : 0));
+    // The rung the ladder is on decides how much scenery the frame carries, as
+    // it does in `GameView` — #478. @see rideFrame
+    view.render(
+      rideFrame({
+        profile,
+        origin,
+        distance,
+        elapsed: config.at === undefined ? elapsed : 0,
+        rung: worldRung(state),
+      }),
+    );
     callsInWindow += takeCalls();
     framesInWindow += 1;
     if (!published.ready) publish({ ready: true });

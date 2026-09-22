@@ -1913,6 +1913,14 @@ test.describe('the realistic world — ADR 0026', () => {
     expect(measured.drawnWorld).toBe('realistic');
     // Non-vacuity: it is a different picture, not the stylised one relabelled.
     expect(measured.worldChangedShare).toBeGreaterThan(0.5);
+    // #478: the rung's scenery budget reaches BOTH realistic belts — the trees
+    // as well as the posts — through the view's own `setQuality`. The control:
+    // the same frame at the top rung draws more than the budget, so the cut is
+    // the budget and not an empty frame.
+    expect(measured.sceneryProbeBudget).toBeGreaterThan(0);
+    expect(measured.sceneryDrawnTop).toBeGreaterThan(measured.sceneryProbeBudget);
+    expect(measured.sceneryDrawnBudgeted).toBeGreaterThan(0);
+    expect(measured.sceneryDrawnBudgeted).toBeLessThanOrEqual(measured.sceneryProbeBudget);
   });
 
   test('fetches the realistic set only when asked — the default world fetches none of it', async ({
@@ -1977,7 +1985,9 @@ test.describe('the realistic world — ADR 0026', () => {
     console.log(
       `realistic world: loaded in ${measured.loadMs.toFixed(0)} ms; ` +
         `${measured.realisticFrameMs.toFixed(1)} ms a frame against ${measured.stylisedFrameMs.toFixed(1)} ms stylised ` +
-        `(SwiftShader, not a phone); ${String(measured.drawCalls)} draw calls`,
+        `(SwiftShader, not a phone); ${String(measured.drawCalls)} draw calls; scenery drawn ` +
+        `${String(measured.sceneryDrawnTop)} at the top rung, ${String(measured.sceneryDrawnBudgeted)} ` +
+        `at a budget of ${String(measured.sceneryProbeBudget)}`,
     );
   });
 });

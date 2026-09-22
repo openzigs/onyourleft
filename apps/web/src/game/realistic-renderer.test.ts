@@ -20,8 +20,14 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { REALISTIC_LADDER, type QualitySettings } from './quality';
 import { REALISTIC_BICYCLE_TRIANGLES, REALISTIC_NEAR_MESHES } from './realistic-budget';
-import { REALISTIC_VEGETATION_KINDS, realisticUrl, REALISTIC_SKY } from './realistic-assets';
+import {
+  REALISTIC_SKY,
+  REALISTIC_VEGETATION,
+  REALISTIC_VEGETATION_KINDS,
+  realisticUrl,
+} from './realistic-assets';
 import type { CameraPose } from './port';
 import type { ScatterItem, SceneryKind } from './scatter';
 import {
@@ -29,6 +35,7 @@ import {
   loadRealisticWorld,
   prepareRealisticShape,
   realisticBicycleTriangles,
+  realisticResourceUrl,
   RealisticVegetationBelt,
   realisticWorldLoaded,
   ScatterBelt,
@@ -297,6 +304,145 @@ describe('the realistic world’s primitives belt — ADR 0026 D-3', () => {
   });
 });
 
+describe('what a realistic model may fetch besides itself — #478', () => {
+  const own = realisticUrl('trees/oak_01.glb');
+  const answer = realisticResourceUrl(own);
+
+  it('answers the model’s own URL, and the blob and data URLs three makes for embedded images', () => {
+    expect(answer(own)).toBe(own);
+    expect(answer('blob:https://localhost/0f3c')).toBe('blob:https://localhost/0f3c');
+    expect(answer('data:image/png;base64,iVBORw0KGgo=')).toBe('data:image/png;base64,iVBORw0KGgo=');
+  });
+
+  it('never answers with the network — whatever a file declares, it gets an empty buffer', () => {
+    // The claim over the function's RANGE, as `scenery-models.test.ts` states
+    // it for the stylised pack: nothing a glTF asks for comes back as a URL
+    // that leaves this device.
+    const hostile = [
+      'https://example.invalid/anything.png',
+      'http://127.0.0.1:9/probe',
+      '//example.invalid/protocol-relative.png',
+      'file:///etc/passwd',
+      '../../../secret.png',
+      'oak_01_bark.png',
+      realisticUrl('trees/oak_01_bark.png'),
+      `${own}.png`,
+      own.toUpperCase(),
+    ];
+    for (const asked of hostile) {
+      const answered = answer(asked);
+      expect(answered, asked).not.toBe(asked);
+      expect(answered, asked).toMatch(/^data:application\/octet-stream;base64,$/);
+    }
+  });
+});
+
+describe('the rung’s scenery budget, spent by both realistic belts together — #478', () => {
+  /** Both belts the realistic world draws scenery with, given one budget as a view gives it. */
+  function belts(budget?: number): {
+    readonly vegetation: RealisticVegetationBelt;
+    readonly primitives: ScatterBelt;
+  } {
+    const vegetation = aBelt();
+    const primitives = new ScatterBelt(new Map(), {
+      skip: new Set<SceneryKind>(REALISTIC_VEGETATION_KINDS),
+      physical: true,
+    });
+    if (budget !== undefined) {
+      vegetation.setBudget(budget);
+      primitives.setBudget(budget);
+    }
+    return { vegetation, primitives };
+  }
+
+  /**
+   * A frame's worth of trees and posts, every one in view, alternating so that
+   * the budget runs out in the middle of both kinds. Trees because every tree
+   * the vegetation belt admits is DRAWN — the near ones as meshes, the rest as
+   * impostors — so what it draws is a count of what it admitted.
+   */
+  function frame(count: number): ScatterItem[] {
+    return Array.from({ length: count }, (_, index) =>
+      item(index % 2 === 0 ? 'tree-broadleaf' : 'post', 5 + index * 0.5, index % 4 < 2 ? 3 : -3),
+    );
+  }
+
+  /** The z of every tree the vegetation belt drew, one per item whatever its parts. */
+  function drawnDepths(vegetation: RealisticVegetationBelt): number[] {
+    const found: number[] = [];
+    const firstPart = vegetation.meshes[0]?.material;
+    for (const mesh of vegetation.meshes) {
+      if (typeOf(mesh) !== 'ShaderMaterial' && mesh.material !== firstPart) continue;
+      for (let slot = 0; slot < mesh.count; slot += 1) {
+        found.push(mesh.instanceMatrix.array[slot * 16 + 14] as number);
+      }
+    }
+    return found;
+  }
+
+  const rungBudget = (rung: QualitySettings): number => rung.scatterItems + rung.structureItems;
+
+  it('draws no more than the second realistic rung allows, trees and posts together', () => {
+    const reduced = rungBudget(REALISTIC_LADDER[1] as QualitySettings);
+    const top = rungBudget(REALISTIC_LADDER[0] as QualitySettings);
+    expect(reduced).toBeLessThan(top);
+    const items = frame(top);
+    const { vegetation, primitives } = belts(reduced);
+    vegetation.update(items, POSE);
+    primitives.update(items, POSE);
+    // Exactly the rung's budget: half the admitted items are trees, which the
+    // vegetation belt draws every one of, and half are posts.
+    expect(vegetation.drawnItems + primitives.drawnItems).toBe(reduced);
+    expect(vegetation.drawnItems).toBe(reduced / 2);
+    expect(primitives.drawnItems).toBe(reduced / 2);
+  });
+
+  it('draws the whole frame at the top rung — the control, so the cut above is the budget', () => {
+    const top = rungBudget(REALISTIC_LADDER[0] as QualitySettings);
+    const items = frame(top);
+    const { vegetation, primitives } = belts(top);
+    vegetation.update(items, POSE);
+    primitives.update(items, POSE);
+    expect(vegetation.drawnItems + primitives.drawnItems).toBe(items.length);
+  });
+
+  it('admits the FIRST items in view in the frame’s order, as the stylised belt does', () => {
+    // The budget four: the first four in view are two trees and two posts, and
+    // an item out of view does not spend it.
+    const items = [item('tree-broadleaf', -400), ...frame(10)];
+    const { vegetation, primitives } = belts(4);
+    vegetation.update(items, POSE);
+    primitives.update(items, POSE);
+    expect(vegetation.drawnItems).toBe(2);
+    expect(primitives.drawnItems).toBe(2);
+    // …and the trees drawn are the first two in the frame.
+    expect(drawnDepths(vegetation).sort((a, b) => a - b)).toEqual([5, 6]);
+  });
+
+  it('draws nothing at a budget of nought, in either belt', () => {
+    const { vegetation, primitives } = belts(0);
+    vegetation.update(frame(20), POSE);
+    primitives.update(frame(20), POSE);
+    expect(vegetation.drawnItems + primitives.drawnItems).toBe(0);
+  });
+
+  it('is unbounded until a rung says otherwise, for ScatterBelt’s reason', () => {
+    const { vegetation, primitives } = belts();
+    vegetation.update(frame(40), POSE);
+    primitives.update(frame(40), POSE);
+    expect(vegetation.drawnItems + primitives.drawnItems).toBe(40);
+  });
+
+  it('reports nothing drawn while the stylised world is drawn', () => {
+    const { vegetation } = belts();
+    vegetation.update(frame(10), POSE);
+    expect(vegetation.drawnItems).toBe(5);
+    vegetation.setShown(false);
+    vegetation.update(frame(10), POSE);
+    expect(vegetation.drawnItems).toBe(0);
+  });
+});
+
 describe('loading the realistic world — ADR 0026 D-7', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -405,6 +551,145 @@ describe('loading the realistic world — ADR 0026 D-7', () => {
     vi.stubGlobal('navigator', { onLine: false });
     const outcome = await loadRealisticWorld(loaders('farm_field'));
     expect(outcome).toMatchObject({ loaded: false, offline: true });
+  });
+});
+
+describe('a failed load releases everything it loaded, including what arrives late — #478', () => {
+  /** Something the loader made, and whether anything let go of it. */
+  interface Held {
+    readonly url: string;
+    released: boolean;
+  }
+
+  /**
+   * Loaders whose every file answers LATE — a few milliseconds after the call —
+   * except the one whose URL contains `fail`, which is refused at once. That is
+   * the order a flaky network produces, and it is the one `Promise.all` lost:
+   * it rejected on the refusal and returned while everything else was still in
+   * flight, so what arrived afterwards was held by nobody.
+   */
+  function lateLoaders(options: { readonly fail?: string; readonly unsized?: string }): {
+    readonly loaders: RealisticLoaders;
+    readonly held: Held[];
+  } {
+    const held: Held[] = [];
+    const late = <T>(make: () => T): Promise<T> =>
+      new Promise((resolve) => {
+        setTimeout(() => {
+          resolve(make());
+        }, 5);
+      });
+    const answer = <T>(url: string, make: (one: Held) => T): Promise<T> => {
+      if (options.fail !== undefined && url.includes(options.fail)) {
+        return Promise.reject(new Error(`${url}: Failed to fetch`));
+      }
+      return late(() => {
+        const one: Held = { url, released: false };
+        held.push(one);
+        return make(one);
+      });
+    };
+    const texture = (one: Held): unknown => ({
+      image: { width: 64, height: 64 },
+      dispose: () => {
+        one.released = true;
+      },
+    });
+    const scene = (one: Held): unknown => {
+      const extras: Record<string, unknown> =
+        options.unsized !== undefined && one.url.includes(options.unsized)
+          ? {}
+          : {
+              oyl_scan_height: 8,
+              oyl_scan_width: 4,
+              oyl_impostor_scale: 8,
+              oyl_impostor_frames: 8,
+            };
+      const geometry = aGeometry();
+      const dispose = geometry.dispose.bind(geometry);
+      // `releaseLoadedScene` is what disposes a loaded scene's own geometry —
+      // `prepareRealisticShape` works on a clone of it — so this is "released".
+      geometry.dispose = () => {
+        one.released = true;
+        dispose();
+      };
+      const node = {
+        isMesh: true,
+        geometry,
+        material: loaderMaterial(),
+        matrixWorld: IDENTITY,
+        userData: {},
+      };
+      return {
+        userData: extras,
+        updateWorldMatrix: () => undefined,
+        traverse: (visit: (node: unknown) => void) => {
+          visit({ isMesh: false, userData: extras });
+          visit(node);
+        },
+      };
+    };
+    const sky = (one: Held): unknown => ({
+      image: { width: 16, height: 8, data: new Float32Array(16 * 8 * 4).fill(1) },
+      type: 'float',
+      dispose: () => {
+        one.released = true;
+      },
+    });
+    return {
+      held,
+      loaders: {
+        sky: (url) => answer(url, sky) as never,
+        texture: (url) => answer(url, texture) as never,
+        model: (url) => answer(url, scene) as never,
+      },
+    };
+  }
+
+  it('waits for the loads still in flight, and releases every one of them', async () => {
+    const { loaders, held } = lateLoaders({ fail: REALISTIC_SKY });
+    const outcome = await loadRealisticWorld(loaders);
+    expect(outcome.loaded).toBe(false);
+    // Past the last late answer, so that a load which returned early is judged
+    // on what arrived after it rather than on what had not arrived yet.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    // Every other file was asked for and answered…
+    expect(held.length).toBeGreaterThan(10);
+    // …and not one of them is still held.
+    expect(held.filter((one) => !one.released).map((one) => one.url)).toEqual([]);
+  });
+
+  it('releases the materials it had built for the trees before a later model failed', async () => {
+    const disposed: unknown[] = [];
+    const standard = Object.getPrototypeOf(
+      new ScatterBelt(new Map(), { physical: true }).meshesOf('post')[0]?.material,
+    ) as { dispose: () => void };
+    const spy = vi.spyOn(standard, 'dispose').mockImplementation(function (this: unknown) {
+      disposed.push(this);
+    });
+    try {
+      // Every file loads; the LAST vegetation model records no scan size, so
+      // `prepareRealisticShape` throws after every model before it was built.
+      const lastKind = REALISTIC_VEGETATION_KINDS[REALISTIC_VEGETATION_KINDS.length - 1];
+      const models = REALISTIC_VEGETATION[lastKind as (typeof REALISTIC_VEGETATION_KINDS)[number]];
+      const last = models[models.length - 1];
+      const { loaders } = lateLoaders({ unsized: last?.file ?? 'none' });
+      const outcome = await loadRealisticWorld(loaders);
+      expect(outcome).toMatchObject({ loaded: false });
+      expect(outcome.loaded ? '' : outcome.detail).toMatch(/records no scan size/);
+      const built = REALISTIC_VEGETATION_KINDS.reduce(
+        (sum, kind) => sum + REALISTIC_VEGETATION[kind].length,
+        0,
+      );
+      // One constructed material per model built (each fixture has one part),
+      // and every one of them let go of.
+      const constructedDisposed = disposed.filter((each) =>
+        isConstructedMaterial(each as never),
+      ).length;
+      expect(constructedDisposed).toBe(built - 1);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
