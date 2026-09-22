@@ -61,6 +61,7 @@ import {
   SCENERY_KINDS,
   SCATTER_MAX_ITEMS,
   SCATTER_VERGE_METRES,
+  STRUCTURE_KINDS,
   type ScatterItem,
   type SceneryKind,
 } from './scatter';
@@ -75,6 +76,12 @@ import {
 } from './bicycle';
 import { MAXIMUM_SCENERY_VARIANTS, SCENERY_MODELS } from './scenery-models';
 import { MAXIMUM_LIT_CHANNEL } from './scenery-palette';
+import { REALISTIC_STRUCTURE_MESHES } from './realistic-budget';
+import {
+  PHOTOGRAPHIC_STRUCTURE_SURFACES,
+  REALISTIC_STRUCTURE_PARTS,
+  type StructureSurface,
+} from './realistic-assets';
 import {
   CAMERA_ABOVE_METRES,
   CAMERA_BEHIND_METRES,
@@ -92,6 +99,7 @@ import {
   lateralReachMetres,
   loadSceneryModels,
   prepareSceneryGeometry,
+  RealisticStructureBelts,
   RiderBelt,
   SCATTER_INSTANCE_CAPACITY,
   sceneryFitMetres,
@@ -3075,5 +3083,30 @@ describe('a kind is drawn as several shapes — #367', () => {
     expect(belt.meshesOf('rock')).toHaveLength(1);
     expect(meshFor(belt, 'rock', 0)?.count).toBe(6);
     belt.dispose();
+  });
+});
+
+describe('what the realistic structures cost in meshes — #482', () => {
+  it('builds exactly REALISTIC_STRUCTURE_MESHES, one per surface a kind wears', () => {
+    // #481's review, finding 6: up to fifteen instanced meshes, bounded by
+    // nothing and stated nowhere. Counted off the REAL belts, so a new kind or
+    // surface is a red test here rather than a draw call nobody decided on.
+    const belts = new RealisticStructureBelts(new Map());
+    const surfaces: readonly StructureSurface[] = [...PHOTOGRAPHIC_STRUCTURE_SURFACES, 'painted'];
+    let built = 0;
+    for (const surface of surfaces) {
+      for (const kind of STRUCTURE_KINDS)
+        built += belts.beltOf(surface)?.meshesOf(kind).length ?? 0;
+    }
+    // An independent derivation: the distinct (surface, kind) pairs the parts
+    // table names. A church wears stone twice and is one stone mesh.
+    const pairs = new Set(
+      Object.entries(REALISTIC_STRUCTURE_PARTS).flatMap(([kind, parts]) =>
+        parts.map((surface) => `${surface}:${kind}`),
+      ),
+    );
+    expect(built).toBe(pairs.size);
+    expect(built).toBe(REALISTIC_STRUCTURE_MESHES);
+    belts.dispose();
   });
 });

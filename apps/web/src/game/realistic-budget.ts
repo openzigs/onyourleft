@@ -155,6 +155,31 @@ export const REALISTIC_NEAR_MESHES: Readonly<Record<RealisticVegetationKind, num
 };
 
 /**
+ * The most instanced meshes the realistic STRUCTURES may cost: **15** — #482,
+ * from #481's review (finding 6), which found the figure bounded and stated
+ * nowhere.
+ *
+ * `three-renderer.ts` §`RealisticStructureBelts` builds one belt a surface and,
+ * in each, one mesh for every kind that wears that surface — so the count is
+ * the number of (surface, kind) pairs in `realistic-assets.ts`
+ * §`REALISTIC_STRUCTURE_PARTS`: building 2, barn 2, church 2, shop-row 3,
+ * signpost 2, and shed, wall, hedge and fence 1 each. Each mesh is at most one
+ * draw call a frame; the stylised settlements are one mesh and one draw call,
+ * so the realistic structures cost up to fourteen more.
+ *
+ * ⚠️ **A statement of what is built, not a measurement of what it costs.** What
+ * fifteen draw calls cost on the tablet is #457's device run and validation
+ * 0002 Part Z, where the harness publishes draw calls. What this number buys is
+ * that a new structure kind or surface GROWS it visibly: the test counts the
+ * meshes the real belts build, so an added pair is a red test and an edit here,
+ * rather than a draw call nobody decided to spend.
+ *
+ * @test-facing held by `three-renderer.test.ts` §"#482", which counts the
+ * meshes `RealisticStructureBelts` actually builds against it
+ */
+export const REALISTIC_STRUCTURE_MESHES = 15;
+
+/**
  * The most triangles a realistic frame may submit: **300 000**, about 1.2 times
  * the all-on 252 024 #457 drew on the tablet. What it is held against is the
  * worst case the caps above allow — every near slot filled with the heaviest
