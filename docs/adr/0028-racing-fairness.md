@@ -417,3 +417,137 @@ spike's recommendation that it should be. It is a decision about money and risk 
   `CLAUDE.md` §4j exists for in a different domain: a rule nothing enforces. ⚠️ **Nothing mechanical
   checks any decision in this ADR** — ADR 0007's own §"Which of D1–D7 a machine checks: none of
   them" applies here verbatim, and a reviewer noticing is the entire mechanism.
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-09-22** — **The owner has answered all six questions, and one of the answers changes a
+  decision.** [#488](https://github.com/openzigs/onyourleft/issues/488) carries them verbatim.
+  **Only Q5 changes one**, and it defers D-4. Q1, Q2 and Q4 ratify what the body already decided,
+  **Q3** supplies the numbers D-2 rule 2 deliberately left blank, and **Q6** clears two of D-0's
+  three blocks without changing any decision above. §"What the owner has not
+  decided" is therefore no longer a list of open questions but a record of what was asked.
+  ⚠️ **A reader who remembers this ADR having five open questions is reading the old file.** Each
+  answer is below with exactly what it changes.
+
+  | | Question | Owner's answer | What it changes |
+  |---|---|---|---|
+  | **Q1** | Height-derived frontal area, or a fixed riding position? | **A fixed position for all riders.** No height is collected; every rider gets identical drag | **D-1 is unchanged and is now owner-ratified.** It was the author's engineering judgement and is now a decision. The cost D-1 names stands as written: a 1.55 m and a 1.95 m rider push the same air, which flatters the larger rider on the flat. Climbing is unaffected, because mass is each rider's own |
+  | **Q2** | Will a race ever carry a prize, a stake or a ranking worth cheating for? | **No stakes, for now.** Reversible: prizes, if they ever come, arrive with their own verification decision | **D-3 is unchanged.** Dual recording and the video weigh-in stay refused, and the weigh-in stays refused *outright* rather than deferred. D-2 rule 2's apparatus is sized for a friendly race and not for a prize |
+  | **Q3** | The W/kg ceilings, and what happens at one? | **The tighter set, and a breach flags only** — about **18 W/kg at 5 s, 10 at 1 min, 6.5 at 20 min, 5.5 at 1 h** | **D-2 rule 2 gains numbers and D-2 rule 3 is confirmed.** The table below is where they are written down, with what each is anchored to. A breach **flags for review and never rejects mid-race** |
+  | **Q4** | May declared mass be shown to other riders? | **No. The category only.** A rider may choose to share their own | **D-3's closing paragraph is unchanged and is now owner-ratified.** ⚠️ It interacts with Q5 — see the note under the table |
+  | **Q5** | The category boundaries and names? | **No categories in the first cut.** Everyone races together and results show power-to-weight | ⚠️ **D-4 IS CHANGED.** Its W/kg bands are **deferred, not shipped.** D-4's reasoning survives — bands rather than a results-based rating, named by their own numbers rather than by anybody's letters, with no competitor's scheme consulted — and it describes what the *second* cut does. The first cut has no category at all |
+  | **Q6** | Patent counsel before racing code? | **No counsel. Proceed on spike 0005's claim reading**, as the owner's decision on risk | **D-0 is down to one block of the three.** The counsel block is **lifted** by this answer. The third block — *"five questions are the owner's"* — is **discharged**, because Q1–Q5 above are those five and they are now answered. ⚠️ **Only the first block stands**: *"there is no server in Phase 1"* ([#7](https://github.com/openzigs/onyourleft/issues/7), owner decision D6), which is the one §"What is still blocked" names |
+
+  ### What Q5 costs, said plainly
+
+  **With no categories, the plausibility flags of Q3 are the only guard in the first cut.** D-3's
+  whole answer to a declared weight was *"categories and flags"*, and Q5 has removed one of the two.
+  What is left is D-2 rule 2's ceiling, and D-2 rule 3 says that a breach flags rather than ejects —
+  so a rider who under-declares by a plausible margin is not caught by anything at all. That is the
+  accepted position and it follows from Q2: nothing is at stake, so the apparatus is sized for a
+  friendly race.
+
+  ⚠️ **Q4 and Q5 together leave no category to show, and a power-to-weight standing where it would
+  have been.** D-3 shows the category rather than the mass, and Q5 says there is no category; so in
+  the first cut the only public quantity derived from a declared mass is the **power-to-weight shown
+  with a result**, which is Q5's own answer. That is more than D-3's default contemplated and less
+  than Q4 refused, and it is recorded here because neither question was asked about it.
+
+  ⚠️ **And one step further than either answer went: power-to-weight shown beside power IS the
+  declared mass.** `mass = watts ÷ (watts per kilogram)` is one division, so a screen carrying a
+  rider's watts and their W/kg over the same window has published the exact number Q4 refused to
+  show — not an estimate and not an inference, and rounding only narrows it to a band. D-2 rule 3
+  supplies a second route with no W/kg on screen at all: **a flag is visible to every rider in the
+  room**, and a flag says that rider's best mean power over the flagged duration exceeded
+  `ceiling × declared mass` — which bounds the mass above at `best mean power ÷ ceiling` for anybody
+  who can also see the power.
+
+  **So Q4 does not survive the first cut unless whoever builds the room honours this constraint:
+  for any one rider over any one window, a room publishes the power OR the power-to-weight, never
+  both**, and a visible flag is a publication of the ceiling that must be counted on the same side
+  of that choice as the power it bounds. A rider's own screen may show both, because both are their
+  own. **On a race HUD that means the figure beside somebody else's name is chosen once and is the
+  same choice for every rider in the room** — watts for everyone, or W/kg for everyone, live and in
+  the result alike, because two screens showing the two halves over one window is the same division.
+  ⚠️ **Q5's answer makes W/kg the published one**, so it is the live watts figure that has to give,
+  and that is a decision to take with Q4 in front of you rather than one to discover from a HUD that
+  already ships both.
+
+  ### Q3's four ceilings, and where each number comes from
+
+  ⚠️ **Each figure is anchored to ONE named individual's published performance or measurement, and
+  no power-profile table was consulted or copied.** [ADR 0006](0006-fit-codec-licensing.md) R1 permits
+  taking facts and forbids taking somebody's *compilation* of them, and a published power-profile
+  chart — a grid of durations against categories — is exactly such a compilation. So there is one
+  citation per number, chosen for being a single performance rather than a row in somebody's table,
+  and the provenance column says how it was read rather than merely that it exists.
+
+  **Provenance is one of two words and the distinction is load-bearing.** `first-hand` means the
+  page was fetched and the figure read from it on the date given. `unsourced` means a named
+  individual case study was *identified* and the figure is reported from search-result summaries of
+  it, with the article itself behind a paywall and **not read** — that is a lead, not a citation,
+  and the number stands as the owner's shape until somebody reads the paper.
+
+  | Duration | Ceiling | Anchored to | What the anchor actually measures | Provenance |
+  |---|---|---|---|---|
+  | **5 s** | **18 W/kg** | **Sir Chris Hoy — 2500 W, *"over 27 watts per kilo"*, 92 kg** — UCI, [*Track Sprinting: a question of watts?*](https://www.uci.org/article/track-sprinting-a-question-of-watts/6jKNDZjuB1oWJB57g8U0H8) (uci.org) | An **instantaneous peak**, not a 5 s mean. The same page gives **André Greipel** 1903 W peak and **1326 W averaged through the winning sprint** of stage 6 of the Tour Down Under, and gives no mass for him, so that one is not converted here | **first-hand**, read 2026-09-22 |
+  | **1 min** | **10 W/kg** | — | The one 1-minute figure for a named individual found first-hand is the UCI page's **Robert Förstemann**, *"around 700 W for just over a minute"*, which is a demonstration and not a maximal effort. It is recorded as what it is rather than pressed into service as a bound | **unsourced**, searched 2026-09-22 |
+  | **20 min** | **6.5 W/kg** | **Chris Froome** — Bell PG, Furber MJW, Van Someren KA, Antón-Solanas A, Swart J, *The Physiological Profile of a Multiple Tour de France Winning Cyclist*, Med Sci Sports Exerc **49(1):115–123**, January 2017 | The paper's own reported figures are VO₂peak 5.91 L·min⁻¹ (84 mL·kg⁻¹·min⁻¹) and a ramp **peak power output of 525 W** — neither of which is a 20-minute mean. The 20–40 minute figure that is widely reported from the same 2015 release is **419 W at a 67 kg racing weight**, about **6.25 W/kg** | **unsourced** — the article returned HTTP 402 and was not read; figures are from search-result summaries, 2026-09-22 |
+  | **1 h** | **5.5 W/kg** | **Miguel Indurain's 1994 hour record** — Padilla S, Mujika I, Angulo F, Goiriena JJ, *Scientific approach to the 1-h cycling world record: a case study*, J Appl Physiol **89(4):1522–1527**, 2000 | A subject of **81 kg** covering **53.040 km** at an estimated mean **509.5 W**, which is **6.29 W/kg sustained for a full hour** | **unsourced** — the article returned HTTP 403 and was not read; figures are from two independent search-result summaries that agreed, 2026-09-22 |
+
+  **Four things this table establishes, and they are not all comfortable.**
+
+  1. **Only one of the four numbers has a first-hand anchor, and it does not bound the ceiling.**
+     Hoy's 27 W/kg is an instantaneous peak; a 5 s *mean* is lower than a peak by an amount nothing
+     read here measures. So the 5 s row says where the number came from and does not claim the
+     ceiling sits above or below any performance.
+  2. ⚠️ **The 1 h ceiling is BELOW the hour-record lead, by about 13 %.** If 6.29 W/kg is right,
+     5.5 W/kg at 1 h flags a published world hour record. The owner's answer accepts that *"some
+     genuinely strong riders will be flagged"*; this is what that looks like at the top end, and it
+     is the row most likely to want revising once somebody reads the paper.
+  3. **The 1 min ceiling has no anchor at all and is marked so.** Inventing one would have been
+     worse than leaving it: a citation that does not support its number is how a figure stops being
+     re-examined.
+  4. **The 20 min ceiling clears its lead by about 4 %**, which is thinner than it looks: 6.5 W/kg
+     against 6.25, on a figure that is itself a *reported* 20–40 minute mean rather than a
+     20-minute maximal one. A rider whose best 20 minutes is genuinely at the top of the sport is
+     inside a rounding error of being flagged, which is the first row Q3's *"some genuinely strong
+     riders will be flagged"* actually bites in a race somebody might ride.
+
+  **What happens at a ceiling is unchanged from D-2 rule 3 and is restated because Q3 asked:** a
+  breach **flags the result for review**. It does not eject the rider, it does not delete the ride
+  and it never rejects mid-race. ⚠️ **A flag is a report somebody has to handle**, which the owner
+  accepted as the second named cost. [#69](https://github.com/openzigs/onyourleft/issues/69) owns
+  implausible-effort exclusion and is where a flag goes;
+  [#83](https://github.com/openzigs/onyourleft/issues/83) owns moderation and is what a public room
+  is blocked on. Neither is built, so **until one of them is, a flag has nowhere to go** — and with
+  Q5 removing categories, a room that flags into a void is the whole of the first cut's honesty
+  apparatus.
+
+  ### Q6, and the words that are not softened
+
+  The counsel block in D-0 is lifted **by a decision about risk appetite, not by a finding about
+  risk.** Nothing in [spike 0005](../spikes/0005-live-racing-patent-read.md) has changed and its own
+  warning is repeated here rather than paraphrased: **it is not legal advice and it is not a
+  freedom-to-operate opinion**, *"no systematic landscape search was performed"*, **no lawyer has
+  reviewed it**, and **no pending application in the Peloton family was read** — §1.4 records seven
+  granted US members from one 2012 priority, and a design-around verified against granted claims is
+  not verified against claims in prosecution. **Anyone citing this amendment as clearance is
+  misusing it exactly as §5 says anyone citing the spike that way would be.**
+
+  §"What would make this ADR wrong" is unchanged and its first bullet is now the residual risk the
+  owner has accepted rather than a question somebody was going to buy an answer to.
+
+  ### What is still blocked
+
+  **Everything.** D-0's first block stands: there is no server in Phase 1, so there is no room, and
+  [#7](https://github.com/openzigs/onyourleft/issues/7) is what clears it.
+  [#487](https://github.com/openzigs/onyourleft/issues/487) — D-2's rule as the pure function #465
+  asked for, and D-1's two constants moved into `packages/` where a room could read them — is
+  unblocked on Q3 by this entry and remains blocked on #7. **No racing code is written by this
+  amendment and none may be written now**, which is the same sentence as before Q6 was answered and
+  for a different reason.
