@@ -28,11 +28,11 @@
  *   else.
  * - **Triangles at about 1.2 times** the all-on count, and bounded by the
  *   near-mesh caps below rather than by the scenery density. The run's p90 of
- *   19 ms was over the 16.7 ms frame at the tail. ⚠️ `quality.ts` declares a
- *   30 fps cap that would double that budget, and **nothing in the product
- *   reads it** — found while writing this, and filed as
- *   [#476](https://github.com/openzigs/onyourleft/issues/476) — so the frame is
- *   drawn at the display's rate and no figure here leans on the cap.
+ *   19 ms was over the 16.7 ms frame at the tail. ⚠️ Since
+ *   [#476](https://github.com/openzigs/onyourleft/issues/476) the cap is
+ *   honoured, and **both realistic rungs draw at the display's rate** by the
+ *   owner's ruling (`quality.ts` §`QUALITY_LADDER`), so the 16.7 ms frame is
+ *   the budget these figures answer to and no figure here leans on a cap.
  *
  * `docs/validation/0002-android-shell-and-game.md` Part Z is the soak, with
  * its cells empty; [#475](https://github.com/openzigs/onyourleft/issues/475)

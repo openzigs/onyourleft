@@ -32,6 +32,12 @@ U to Y were free. ⚠️ **V to Y are looks and frame times, and they need a rid
 trainer **not** handed to the game (a power meter, or a trainer with control not granted), so they
 change no resistance and stay in rule 1's group below. A rider who gives the game the trainer for
 them is running Part L as well, and runs them after it.
+**Frame rates corrected 2026-09-22** by [#476](https://github.com/openzigs/onyourleft/issues/476):
+until then `quality.ts`'s frame cap was read by nothing and **every rung drew at the display's
+rate**. Now the top rung — "the target rung" in every Part below — draws at the display's rate
+(60 Hz on the tablet) and the rungs below cap at 30, 24 and 20. A row taken at the target rung before
+#476 is comparable with one after it; a row taken at a lower rung ("the floor rung", K7, M6) is not.
+Part Z's frame-rate note has the table.
 **Discharges, when run:** [#87](https://github.com/openzigs/onyourleft/issues/87) criteria 2, 3, 5
 and 6 and its two-OEM line; the Android half of
 [#85](https://github.com/openzigs/onyourleft/issues/85); and
@@ -2097,7 +2103,9 @@ realistic.
   steepest climb and descent still differ by the WCAG contrast the cue needs.
 - It **fades out with distance** — noise at a grazing angle shimmers, and #424's low camera makes
   that worse — and it is on the **target rung only**: the first step down the quality ladder drops
-  it, one step before any rung lowers the frame rate.
+  it, one step before any rung lowers the frame rate below #91's 30 fps. (That first step also takes
+  the frame rate from the display's 60 to 30 since [#476](https://github.com/openzigs/onyourleft/issues/476)
+  — see Part Z's frame-rate note.)
 
 ⚠️ **What the pinned Chromium measured**: the sky 25° up and 8° up are two colours (and one colour
 with the haze set to the sky, the control); a patch of carriageway varies by 1.82 levels with the
@@ -2172,9 +2180,31 @@ its gradient tint survives AgX (`three-renderer.ts` §`ROAD_SHEEN`). The estimat
 holds it to is under 160 MiB of textures and 300 000 triangles; what that costs on the tablet is
 Z5–Z8 below, and **no part of it has been measured on a device yet**.
 
-⚠️ **`quality.ts`'s 30 fps frame cap is read by nothing** —
-[#476](https://github.com/openzigs/onyourleft/issues/476) — so the product and this page both draw
-at the display's rate. Read every frame time here against 16.7 ms, not 33.3.
+⚠️ **The frame cap is honoured since [#476](https://github.com/openzigs/onyourleft/issues/476),
+and this paragraph used to say it was read by nothing — a reader who remembers "every rung draws
+at the display's rate" is reading the old file.** The owner's ruling (2026-09-22): **the top rung
+of each ladder draws at the display's rate — 60 Hz on the tablet, and never above it — and the
+stylised rungs below cap at 30 → 24 → 20** (`quality.ts` §`QUALITY_LADDER`). Both **realistic**
+rungs draw at the display's rate, so a hot tablet gives up realism before it gives up frame rate;
+the first capped rung it can reach is the stylised ladder's level 1, at 30. What that means for a
+number read here:
+
+| Rung (`world` · `rung` on the page) | Frame cap | Frame p50 on a 60 Hz display that keeps up |
+|---|---|--:|
+| realistic · realistic | display rate | 16.7 ms |
+| realistic · realistic, reduced resolution and scenery | display rate | 16.7 ms |
+| stylised · full | display rate | 16.7 ms |
+| stylised · reduced resolution and scenery | 30 fps | 33.3 ms |
+| stylised · reduced resolution, scenery and frame rate | 24 fps | 41.7 ms (33 and 50 alternating) |
+| stylised · minimum | 20 fps | 50 ms |
+
+**The page's frame p50/p90/p99 are the time between DRAWN frames**, so on a capped rung they read the
+cap, not a fault; `frameCap` is in every `OYL-REALISTIC` and `OYL-REALISTIC-SOAK` line and on the
+readout, so a row always says which it was. `dumpsys gfxinfo` counts what the WebView presents, which
+at a capped rung includes the vsyncs this page skipped. The quality ladder is fed the time a drawn frame
+held the next one off (`frame-pacer.ts`), never a skipped frame's idle vsync and never the cap, so a
+capped rung does not read itself as hot or as cool. ⚠️ **A soak run before #476 drew every rung at
+the display's rate**; its rows at a stylised rung below the top are not comparable with one after it.
 
 ### Build and install
 
@@ -2282,8 +2312,8 @@ Landscape, full brightness, on charge, nothing else running; let the tablet cool
 | Z3 | Watch a climb and a descent (the route has both) | Is the gradient tint on the road still as easy to read as the stylised world's? The browser gate measured 3.97 : 1 between the steepest climb and descent; the eye is the check |
 | Z4 | Look at the trees near and far, and at the point where a tree changes from a mesh to a picture | Do the near trees look sparse beside the far ones (the thinned canopy — spike 0005 §2)? Is the switch visible? |
 | Z5 | Look at the rider from behind, and hold the ride still: `location.href = '/harness/realistic.html?at=900&panel=0'` | Do the legs follow the pedals? With the ride held (`?at=`), do the legs STOP? — #349's rule for the realistic rider |
-| Z6 | `?panel=0&ladder=0`, 30 s; then `?world=stylised&panel=0&ladder=0`, 30 s — each with the `dumpsys` block below | Frame and GPU percentiles, realistic against stylised |
-| Z7 | **The soak**: `?soak=20&panel=0` — the ladder free, as a rider would have it | One line a minute; thermal status; the rung it ends on |
+| Z6 | `?panel=0&ladder=0`, 30 s; then `?world=stylised&panel=0&ladder=0`, 30 s — each with the `dumpsys` block below. ⚠️ **Both are TOP rungs, so both draw at the display's rate, 60 Hz** (#476) — this is realistic against stylised at 60, and nothing about a cap | Frame and GPU percentiles, realistic against stylised |
+| Z7 | **The soak**: `?soak=20&panel=0` — the ladder free, as a rider would have it. ⚠️ **It starts at the realistic top rung, at the display's rate (60 Hz)**, and every minute's line says the rung and its `frameCap`: while it says `display` it is measuring 60 fps realism; a minute that says `30`, `24` or `20` is a stylised rung the ladder stepped to, and its frame times read that cap | One line a minute; thermal status; the rung **and frame cap** it ends on |
 | Z8 | During Z7, once at minute 10: `"$ADB" shell dumpsys meminfo dev.openzigs.onyourleft \| grep -iE "Graphics\|GL mtrack\|TOTAL"` | What the driver actually holds, against the 160 MiB estimate |
 
 Each 30-second row:
@@ -2321,7 +2351,7 @@ done
 
 **The 20-minute soak** (Z7):
 
-| Minute | Frame p50 / p90 / p99 | Rung (`world` · `rung`) | Thermal status | Skin / CPU temperature |
+| Minute | Frame p50 / p90 / p99 | Rung (`world` · `rung` · `frameCap`) | Thermal status | Skin / CPU temperature |
 |--:|---|---|---|---|
 | 1 | | | | |
 | 5 | | | | |
@@ -2344,7 +2374,7 @@ done
 **`OYL-REALISTIC-LOAD` — `capacitorAtStart` / `androidBridgeAtStart`, and any `OYL-REALISTIC-BRIDGE` or
 `OYL-REALISTIC-ERROR` line (#478):** ______________
 
-**Does the realistic top rung hold for twenty minutes with headroom?** ______________ — ⚠️ this is
+**Does the realistic top rung hold for twenty minutes, at 60 fps, with headroom?** ______________ — ⚠️ this is
 ADR 0026 D-3's condition for ever changing the default, and D-6's for re-setting
 `realistic-budget.ts` from a soak rather than from 30-second windows. #475 owns acting on it.
 

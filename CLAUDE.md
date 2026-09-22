@@ -3569,7 +3569,8 @@ top of an issue **supersedes its body**.
 | Why every face of the photographic road is lit as facing up | `apps/web/src/game/three-renderer.ts` §`photographicRoadMaterial`, `terrain.ts` §`roadIndices` |
 | How bright the HDRI's environment is, and which way its sun faces | `apps/web/src/game/realistic-light.ts` §`environmentIntensity`, §`skyRotation` |
 | Why the realistic bicycle is built from numbers, and how the MakeHuman body pedals | `apps/web/src/game/bicycle.ts` §"Two riders now", §`riderJoints`, `three-renderer.ts` §`RealisticRiderBelt` |
-| Why the frame cap on the quality ladder does nothing | [#476](https://github.com/openzigs/onyourleft/issues/476) |
+| What frame rate each rung of the quality ladder draws at, and why the top one is the display's own | `apps/web/src/game/quality.ts` §`QUALITY_LADDER` "The owner's ruling", [#476](https://github.com/openzigs/onyourleft/issues/476) |
+| Why a skipped animation frame is not a fast frame, and what the ladder is told under a cap | `apps/web/src/game/frame-pacer.ts`, `apps/web/src/game/GameView.tsx` §`tick` |
 | What stops an empty credits screen looking exactly like a correct one | `apps/web/src/views/CreditsView.test.tsx`, [#142](https://github.com/openzigs/onyourleft/issues/142) |
 | What a person with TalkBack runs, and which questions only they can answer | [`docs/validation/0003-screen-reader-and-assistive-technology.md`](docs/validation/0003-screen-reader-and-assistive-technology.md), [#393](https://github.com/openzigs/onyourleft/issues/393) |
 | How a climb ahead is found, and why the lookahead starts from the wrapped position | `apps/web/src/game/hud/climb-ahead.ts`, [#399](https://github.com/openzigs/onyourleft/issues/399) |

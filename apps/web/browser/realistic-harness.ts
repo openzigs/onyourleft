@@ -36,7 +36,9 @@
  * debugger attached, as #457's did.
  */
 
+import { FramePacer } from '../src/game/frame-pacer';
 import {
+  DISPLAY_RATE,
   INITIAL_QUALITY,
   nextWorldQuality,
   worldRung,
@@ -52,7 +54,7 @@ import {
 } from '../src/game/three-renderer';
 import { configQuery, parseConfig, percentiles, type Percentiles } from './realistic/config';
 import { rideFrame, RIDE_METRES_PER_SECOND } from './realistic/frame';
-import { describe, guarded, MeasurementClock } from './realistic/loop';
+import { describe, guarded, MAXIMUM_FRAME_GAP_MS, MeasurementClock } from './realistic/loop';
 import { readoutLine, takeOverReporting } from './realistic/reporting';
 import { realisticRoute } from './realistic/route';
 
@@ -67,6 +69,12 @@ const LOOP_METRES = 3_500;
 export interface RealisticSample {
   readonly world: string;
   readonly rung: string;
+  /**
+   * The rung's frame cap — #476: `'display'` for the display's own rate, which
+   * is both realistic rungs and the stylised top; 30, 24 or 20 below that.
+   */
+  readonly frameCap: 'display' | number;
+  /** The time between DRAWN frames — at a capped rung, at least the cap's interval. */
   readonly frameMs: Percentiles;
   readonly drawCalls: number;
   readonly drawingBuffer: readonly [number, number];
@@ -236,6 +244,7 @@ async function run(): Promise<void> {
   const sample = (frames: readonly number[], stalls: number): RealisticSample => ({
     world: drawnWorldOf(view),
     rung: worldRung(state).label,
+    frameCap: worldRung(state).frameCap === DISPLAY_RATE ? 'display' : worldRung(state).frameCap,
     frameMs: percentiles(frames),
     drawCalls: framesInWindow === 0 ? 0 : Math.round(callsInWindow / framesInWindow),
     drawingBuffer: [gl?.drawingBufferWidth ?? 0, gl?.drawingBufferHeight ?? 0],
@@ -244,8 +253,32 @@ async function run(): Promise<void> {
     userAgent: navigator.userAgent,
   });
 
+  // #476: the rung's frame cap, applied as `GameView` applies it, and the
+  // ladder fed what `GameView` feeds it. @see FramePacer
+  const pacer = new FramePacer();
+  let warmedUp = false;
   const step = (now: number): void => {
-    const { elapsedSeconds: elapsed, sampledMs } = clock.frame(now);
+    const paced = pacer.frame(now, worldRung(state).frameCap);
+    // The product's own two-ladder policy, fed the product's own signal: the
+    // gap after a DRAWN frame, never a skipped one's. Not during the warm-up,
+    // and not across a stall, as this page always did.
+    if (
+      config.ladder &&
+      warmedUp &&
+      paced.frameMs !== undefined &&
+      paced.frameMs <= MAXIMUM_FRAME_GAP_MS
+    ) {
+      const next = nextWorldQuality(state, { frameMs: paced.frameMs });
+      if (next.realistic !== state.realistic || next.quality.level !== state.quality.level) {
+        view.setQuality(worldRung(next));
+      }
+      state = next;
+    }
+    if (!paced.draw) return;
+    // Only drawn frames reach the clock, so what it publishes is the time
+    // between frames a rider SEES — at a capped rung, at least the cap.
+    const { elapsedSeconds: elapsed } = clock.frame(now);
+    warmedUp = elapsed > WARM_UP_SECONDS;
     const distance =
       config.at ??
       LOOP_FROM_METRES +
@@ -264,14 +297,6 @@ async function run(): Promise<void> {
     callsInWindow += takeCalls();
     framesInWindow += 1;
     if (!published.ready) publish({ ready: true });
-    // The product's own two-ladder policy, fed the product's own signal.
-    if (config.ladder && sampledMs !== undefined) {
-      const next = nextWorldQuality(state, { frameMs: sampledMs });
-      if (next.realistic !== state.realistic || next.quality.level !== state.quality.level) {
-        view.setQuality(worldRung(next));
-      }
-      state = next;
-    }
     if (!measured && clock.windowFull(config.seconds)) {
       measured = true;
       windowFrom = elapsed;
@@ -306,6 +331,8 @@ async function run(): Promise<void> {
       controls.line.textContent = readoutLine({
         world: drawnWorldOf(view),
         rung: worldRung(state).label,
+        frameCap:
+          worldRung(state).frameCap === DISPLAY_RATE ? 'display' : worldRung(state).frameCap,
         phase: measured ? 'measured' : elapsed < WARM_UP_SECONDS ? 'warming up' : 'sampling',
         clock,
         buffer: [gl?.drawingBufferWidth ?? 0, gl?.drawingBufferHeight ?? 0],

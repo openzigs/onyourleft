@@ -69,6 +69,7 @@ import {
   rideConditionsFor,
   type RidingPosition,
 } from './rider';
+import { FramePacer } from './frame-pacer';
 import { sceneFrame } from './scene';
 import { GameSimulation, ghostClock, type GameState } from './simulation';
 import { corridorOrigin } from './terrain';
@@ -436,6 +437,11 @@ export function GameView(props: GameViewProps): JSX.Element {
    */
   const structureItemsRef = useRef<number>(qualitySettings(INITIAL_QUALITY.level).structureItems);
   /**
+   * The rung's frame cap — #476 — held the way {@link scatterItemsRef} is, for
+   * the same reason: the loop does not re-run on a rung change.
+   */
+  const frameCapRef = useRef<number>(qualitySettings(INITIAL_QUALITY.level).frameCap);
+  /**
    * How the race against the ghost ended, once it has — #259.
    *
    * ⚠️ **A ref rather than state, and one frame of memory rather than none.**
@@ -668,6 +674,9 @@ export function GameView(props: GameViewProps): JSX.Element {
     const clock = props.now ?? (() => performance.now());
     let frame = 0;
     let lastFrameAt = clock();
+    // #476: which animation frames are drawn under the rung's cap, and what the
+    // ladder is told about them. @see FramePacer
+    const pacer = new FramePacer();
 
     const canvas = canvasRef.current;
     const load = props.renderer;
@@ -731,6 +740,15 @@ export function GameView(props: GameViewProps): JSX.Element {
         return;
       }
       const at = clock();
+      // ⚠️ **The frame cap decides whether this animation frame is DRAWN — #476
+      // — and nothing else.** Everything the ride itself needs runs on every
+      // animation frame as it always has: the simulation advances to now (its
+      // step is fixed at 20 Hz and derived from its origin, so how often it is
+      // asked cannot move the rider), the cranks turn, the ghost's outcome is
+      // settled, the announcer listens and the gradient is sampled — so what is
+      // written to a trainer, and when, does not depend on the rung. What a cap
+      // skips is the picture: the HUD's re-render and the world's draw.
+      const paced = pacer.frame(at, frameCapRef.current);
       // ⚠️ **Read once**, and both halves used: the rider's power drives the
       // simulation and the cadence drives the cranks. Two calls would be two
       // samples of a live sensor on one frame, which is a HUD and a pair of
@@ -753,7 +771,9 @@ export function GameView(props: GameViewProps): JSX.Element {
         ghostRef.current,
         simulation.state,
       );
-      setState(simulation.state);
+      if (paced.draw) {
+        setState(simulation.state);
+      }
 
       // #397: the announcer, on the RIDE's clock (`elapsed`, which does not
       // run while the ride is paused — nor does this loop), from the same
@@ -837,36 +857,47 @@ export function GameView(props: GameViewProps): JSX.Element {
       // reasoning lives, because the conversion is there.
       gradientRef.current?.sample(simulation.state.elapsed, simulation.state.ride.distance);
 
-      const drawn = simulation.drawnAt(at);
-      viewRef.current?.render(
-        sceneFrame({
-          profile: chosen.profile,
-          origin,
-          state: simulation.state,
-          riderDistance: drawn.riderDistance,
-          // #237: the bot's odometer, from the state the simulation just
-          // advanced. `SceneInput.botDistance` was declared and optional and
-          // never supplied, which is why a built, tested and green pacer drew
-          // nothing on a real 47.53 km route.
-          ...(drawn.botDistance === undefined ? {} : { botDistance: drawn.botDistance }),
-          ghost: ghostRef.current,
-          // #245: the rung's scenery budget, so a throttling phone stops
-          // *placing* the scenery it is about to stop drawing. @see
-          // scatterItemsRef for why this is not read off `quality` here.
-          scatterItems: scatterItemsRef.current,
-          // #460, the same shape for the same reason. @see structureItemsRef
-          structureItems: structureItemsRef.current,
-          // #349: how far the cranks have turned. `port.ts`
-          // §`RiderMarker.crankAngle` records that an optional field nobody
-          // supplies is a hole this repository's gates cannot see, which is
-          // exactly what `botDistance` was before #237 — so `GameView.test.tsx`
-          // reads this back off the frame the renderer was handed.
-          crankAngle: crankRef.current,
-        }),
-      );
+      // #323's interpolation, on the frames that are drawn: `drawnAt` blends the
+      // last two simulation steps at THIS instant, so a frame drawn at 20 fps
+      // is placed exactly where one drawn at 60 would have been at that moment.
+      const drawn = paced.draw ? simulation.drawnAt(at) : undefined;
+      if (drawn !== undefined)
+        viewRef.current?.render(
+          sceneFrame({
+            profile: chosen.profile,
+            origin,
+            state: simulation.state,
+            riderDistance: drawn.riderDistance,
+            // #237: the bot's odometer, from the state the simulation just
+            // advanced. `SceneInput.botDistance` was declared and optional and
+            // never supplied, which is why a built, tested and green pacer drew
+            // nothing on a real 47.53 km route.
+            ...(drawn.botDistance === undefined ? {} : { botDistance: drawn.botDistance }),
+            ghost: ghostRef.current,
+            // #245: the rung's scenery budget, so a throttling phone stops
+            // *placing* the scenery it is about to stop drawing. @see
+            // scatterItemsRef for why this is not read off `quality` here.
+            scatterItems: scatterItemsRef.current,
+            // #460, the same shape for the same reason. @see structureItemsRef
+            structureItems: structureItemsRef.current,
+            // #349: how far the cranks have turned. `port.ts`
+            // §`RiderMarker.crankAngle` records that an optional field nobody
+            // supplies is a hole this repository's gates cannot see, which is
+            // exactly what `botDistance` was before #237 — so `GameView.test.tsx`
+            // reads this back off the frame the renderer was handed.
+            crankAngle: crankRef.current,
+          }),
+        );
 
       // The measurement `quality.ts` decides from. Taken here because this is
       // the only place that knows how long a frame took.
+      //
+      // ⚠️ **Since #476 it is the pacer's sample, not the gap since the last
+      // animation frame.** Under a cap that gap is either a skipped frame's
+      // idle vsync — a "fast frame" that would climb a hot device back up — or
+      // the cap itself, 50 ms at 20 fps, which the ladder would read as heat
+      // for ever. `frame-pacer.ts` samples only the gap that follows a DRAWN
+      // frame, which on the uncapped top rung is exactly what this was.
       // ⚠️ **Read and closed over BEFORE the updater, and that is the whole
       // of #245's second finding.** `lastFrameAt` is a `let` in this effect's
       // scope, so an updater that subtracted it *inside* the closure would be
@@ -877,9 +908,11 @@ export function GameView(props: GameViewProps): JSX.Element {
       // fire at all. `thermalHeadroom` is `undefined` in the shipped app
       // (`docs/validation/0002-android-shell-and-game.md` Part E), so this was
       // the only live input to the whole policy.
-      const frameMs = sinceLastFrame;
+      const frameMs = paced.frameMs;
       lastFrameAt = at;
-      setQuality((previous) => nextQuality(previous, { frameMs }));
+      if (frameMs !== undefined) {
+        setQuality((previous) => nextQuality(previous, { frameMs }));
+      }
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
@@ -907,6 +940,8 @@ export function GameView(props: GameViewProps): JSX.Element {
     // `ScatterBelt.setBudget` says why neither alone is the whole of it.
     scatterItemsRef.current = settings.scatterItems;
     structureItemsRef.current = settings.structureItems;
+    // #476: the loop reads this on its next animation frame.
+    frameCapRef.current = settings.frameCap;
     viewRef.current?.setQuality(settings);
   }, [quality.level]);
 

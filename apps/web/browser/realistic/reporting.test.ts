@@ -38,6 +38,7 @@ const line = (clock: MeasurementClock, patch: Partial<ReadoutInput> = {}): strin
   readoutLine({
     world: 'realistic',
     rung: 'realistic',
+    frameCap: 'display',
     phase: 'measured',
     clock,
     buffer: [2560, 1600],
@@ -61,15 +62,17 @@ describe('the realistic page’s readout line — #480', () => {
     expect(line(clock, { phase: 'warming up' })).toContain('frame p50 — (not timed yet)');
   });
 
-  it('carries the world, the rung, the phase, the buffer and the notice', () => {
+  it('carries the world, the rung, its frame cap, the phase, the buffer and the notice', () => {
     expect(
       line(measuredClock(), {
         world: 'stylised',
         rung: 'target',
+        frameCap: 30,
         notice: 'The world did not load.',
       }),
     ).toBe(
-      'stylised world · target · measured · frame p50 16.0 ms · buffer 2560×1600\nThe world did not load.',
+      'stylised world · target · capped at 30 fps · measured · frame p50 16.0 ms · buffer 2560×1600\nThe world did not load.',
     );
+    expect(line(measuredClock())).toContain('realistic · display rate · measured');
   });
 });

@@ -96,7 +96,10 @@ import {
  * so `advance` is not asked to divide an already-small interval. #91's target is
  * 30 fps, so 20 Hz ticks and 30 Hz frames interleave without either being a
  * multiple of the other — which is the case the accumulator exists for and the
- * reason the tests use frame rates that do not divide evenly into it.
+ * reason the tests use frame rates that do not divide evenly into it. (Since
+ * #476 the top quality rung draws at the display's rate and the lowest at
+ * 20 fps; neither changes this step, and #323's `drawnAt` is what keeps a frame
+ * between two steps from waiting on either.)
  *
  * ⚠️ Changing this changes the *trajectory*, not just the cost: the integrator
  * is deterministic per step, so a different step size gives a slightly different

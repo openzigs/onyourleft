@@ -138,9 +138,9 @@ describe('how a ride grounds its riders — #426', () => {
   it('does not come back when the ladder climbs back to level 0 — the latch, wired', async () => {
     localStorage.setItem(RIDER_SHADOW_MAP_STORAGE_KEY, 'on');
     await ride();
-    /** Frames of `ms` each, enough of them to move the ladder one rung. */
-    const frames = async (ms: number): Promise<void> => {
-      for (let index = 0; index < SUSTAINED_SAMPLES + 2; index += 1) {
+    /** `count` frames of `ms` each — by default enough to move the ladder one rung. */
+    const frames = async (ms: number, count = SUSTAINED_SAMPLES + 2): Promise<void> => {
+      for (let index = 0; index < count; index += 1) {
         clock += ms;
         await act(async () => {
           pending.shift()?.(clock);
@@ -149,10 +149,15 @@ describe('how a ride grounds its riders — #426', () => {
       }
       await settle();
     };
+    // ⚠️ Cool frames at a 60 Hz display's pace, and twice as many — #476.
+    // Level 1 caps at 30, so every other one is drawn, and the ladder is told
+    // only about the frames that follow a drawn one (`frame-pacer.ts`). The
+    // 5 ms frames this used to feed were the cap being ignored.
+    const cool = async (): Promise<void> => frames(1000 / 60, 2 * (SUSTAINED_SAMPLES + 2));
     await frames(FRAME_MS_REDUCE_ABOVE + 10);
-    await frames(5);
+    await cool();
     await frames(FRAME_MS_REDUCE_ABOVE + 10);
-    await frames(5);
+    await cool();
     // The renderer was told: the map, then a step down, then back to level 0
     // twice — each time WITHOUT the map.
     expect(told).toEqual([

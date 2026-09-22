@@ -2423,7 +2423,8 @@ const SWEEP_STEP_METRES = 3.7;
 /**
  * How many frames each of #286's two frame-cost means is taken over: **60**.
  *
- * Two seconds of riding at the 30 fps `QUALITY_LADDER` targets, which is long
+ * Two seconds of riding at 30 fps (`QUALITY_LADDER`'s first step down; the top
+ * rung draws at the display's rate since #476), which is long
  * enough that one slow frame is a sixtieth of the answer and short enough that
  * the whole measurement — four sweeps, two at each shading — is under a second
  * on top of a gate that already runs for twenty.

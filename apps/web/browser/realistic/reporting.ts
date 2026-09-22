@@ -18,6 +18,8 @@ import { readoutMs, type MeasurementClock } from './loop';
 export interface ReadoutInput {
   readonly world: string;
   readonly rung: string;
+  /** The rung's frame cap, as `RealisticSample.frameCap` publishes it — #476. */
+  readonly frameCap: 'display' | number;
   readonly phase: 'measured' | 'warming up' | 'sampling';
   readonly clock: MeasurementClock;
   readonly buffer: readonly [number, number];
@@ -37,7 +39,9 @@ export interface ReadoutInput {
 export function readoutLine(input: ReadoutInput): string {
   const live = percentiles(input.clock.recent);
   return (
-    `${input.world} world · ${input.rung} · ${input.phase}` +
+    `${input.world} world · ${input.rung} · ` +
+    `${input.frameCap === 'display' ? 'display rate' : `capped at ${String(input.frameCap)} fps`} · ` +
+    `${input.phase}` +
     ` · frame p50 ${readoutMs(live.p50)} · ` +
     `buffer ${String(input.buffer[0])}×${String(input.buffer[1])}` +
     (input.notice === undefined ? '' : `\n${input.notice}`)
