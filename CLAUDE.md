@@ -324,6 +324,23 @@ apps/                 AGPL-3.0-or-later, without exception
                         a CC0 or verified CC-BY-4.0 bicycle (#369) — is ADR 0026
                         D-12's fourth layer, and is posed from THIS file's crank
                         angle, so the cadence rule above binds it unchanged.
+                        ⚠️ **Since #369 the BICYCLE is a race bike and is still
+                        nobody's asset**, and the search that settled it is
+                        written out in the file's own header so it is not run a
+                        third time: ten sources on 2026-09-22, of which six hold
+                        no bicycle at all, OpenGameArt's two are `CC-BY 3.0`
+                        (which `ASSET004` fails closed and ADR 0023 admits only
+                        at 4.0), and Sketchfab — whose "CC Attribution" **is**
+                        `CC-BY-4.0`, read from the grant — holds exactly one CC0
+                        bicycle in its whole downloadable corpus, a museum scan
+                        of a wooden velocipede. ⚠️ And its downloads answer
+                        `401` without an account, so ADR 0026 D-5's input digest
+                        cannot be taken for any of them. What landed instead is
+                        #369's own named answer: a drop bar from one number,
+                        `BAR_BEND_RADIUS`, with `HAND_POSITIONS` a point ON it
+                        per `RidingPosition` — because the hands used to be two
+                        constants here and the drops four literals in
+                        `three-renderer.ts`, 50 mm apart, with every gate green
                         ⚠️ **Since #368 the bot and the ghost
                         DO get one, and a reviewer who remembers "the bot and
                         the ghost deliberately do NOT get one: three
@@ -3394,6 +3411,9 @@ top of an issue **supersedes its body**.
 | Which of the two scenery rungs has its call site covered, and which does not | `apps/web/src/game/three-renderer.ts` §`ScatterBelt.setVariants`, §`ScatterBelt.setBudget` |
 | Why the bot and the ghost are bicycles now, and what tells the three apart without a silhouette | `apps/web/src/game/three-renderer.ts` §`RIDER_TINTS`, `apps/web/src/game/bicycle.ts`, [#368](https://github.com/openzigs/onyourleft/issues/368) |
 | Why a simulated rider's cranks come from its odometer rather than from a cadence | `apps/web/src/game/bicycle.ts` §`simulatedCrankAngle`, `apps/web/src/game/scene.ts` §`pedalling` |
+| Which ten sources were searched for a road bicycle, what each one's licence actually said, and why none of them supplied one | `apps/web/src/game/bicycle.ts` §"What was searched for a road bicycle", [#369](https://github.com/openzigs/onyourleft/issues/369) |
+| Where the rider's hands are, and what stops them being somewhere the bar is not | `apps/web/src/game/bicycle.ts` §`HAND_POSITIONS`, §`BAR_BEND_RADIUS`, `apps/web/src/game/bicycle.test.ts` §"the rider sits on the bicycle" |
+| Why a budget that was checked against itself for three issues now is not | `apps/web/src/game/three-renderer.ts` §`realisticBicycleTriangles`, `apps/web/src/game/realistic-budget.test.ts` §"holds the bicycle the renderer actually builds under its own budget" |
 | At what distances three bicycles were actually told apart, and what happens if they were not | [validation 0002](docs/validation/0002-android-shell-and-game.md) Part N |
 | What a model file is allowed to fetch, and which one of them is allowed an atlas | `apps/web/src/game/scenery-models.ts` §`sceneryResourceUrl`, `apps/web/browser/game.browser.spec.ts` §"fetches the committed models and its one atlas, and nothing else" |
 | Why a model's colour is its own since #366, and what it used to be | `apps/web/src/game/three-renderer.ts` §`prepareSceneryGeometry`, [ADR 0022](docs/adr/0022-game-scenery-model-pack.md) D-7 and its 2026-09-18 amendment |
