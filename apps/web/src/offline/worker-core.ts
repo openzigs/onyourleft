@@ -227,9 +227,11 @@ export function attachWorker(scope: WorkerScope, options: WorkerOptions): void {
         await Promise.all(staleCaches(present, cacheName).map((name) => scope.caches.delete(name)));
         // Claim so that the very first load of the app — which happens in a
         // page the worker did not control — is controlled from its second
-        // request onwards rather than only after a reload. Safe on an update
-        // too: an update only activates after `SKIP_WAITING`, and the page that
-        // asked for it reloads on `controllerchange`.
+        // request onwards rather than only after a reload. On an update, the
+        // page that asked for it reloads on `controllerchange`; ⚠️ a SECOND
+        // tab that did not ask is controlled by this worker too (the spec's
+        // Activate does that, claim or no claim) and keeps its old bundle
+        // after the line above deleted that bundle's cache — #483.
         await scope.clients.claim();
       })(),
     );

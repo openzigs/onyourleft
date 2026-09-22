@@ -167,6 +167,12 @@ export function createUpdateWatcher(ports: UpdateWatcherPorts): UpdateWatcher {
         // `controllerchange` it waits for had already happened. What the
         // rider is told now is ADR 0024 D-3's `none` — there is nothing
         // waiting, deferred or otherwise.
+        //
+        // ⚠️ **`none` is true of the offer and not of the tab — #483.** When
+        // ANOTHER tab took the update, this one is now controlled by the new
+        // worker, whose activation deleted this tab's precache: a lazy chunk
+        // it has not loaded yet is a URL nothing serves. D-3 has no state for
+        // that, and choosing one is #483's; #481's review (finding 5) found it.
         waiting = null;
         announce();
       }
