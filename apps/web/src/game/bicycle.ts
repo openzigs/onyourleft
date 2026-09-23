@@ -157,9 +157,19 @@
  *
  * ## What this deliberately does not do
  *
- * - **No lean.** A bicycle leans into a corner, and the corridor gives no
- *   lateral acceleration to lean by; inventing one from the centreline's
- *   curvature would be a second source of truth about where the rider is.
+ * - ⚠️ **The "no lean" bullet that stood here is REPLACED — #499 — and a
+ *   reviewer who remembers it is reading the old file.** It read: *"No lean. A
+ *   bicycle leans into a corner, and the corridor gives no lateral
+ *   acceleration to lean by; inventing one from the centreline's curvature
+ *   would be a second source of truth about where the rider is."* That was an
+ *   argument, and #499 met it rather than going round it: every rider now rides
+ *   a LINE through the bend (`racing-line.ts`), which is the one source of truth
+ *   for where a rider is drawn, and the lean is `tan φ = v² / (g·R)` from THAT
+ *   line's curvature and the rider's own simulated speed — never the
+ *   centreline's. It is drawn by rolling this whole model about its own `+Z`,
+ *   the line between the tyre contacts, which is why the origin being on the
+ *   road between them matters (`three-renderer.ts` §`RiderBelt`). Nothing here
+ *   changed shape for it, and the cadence rule below is untouched.
  * - **No steering, and no pitch on a gradient.** Both are below what a 1.6 m
  *   object 8 m from the camera resolves, and both would need state this file
  *   does not have.

@@ -1511,7 +1511,7 @@ function frameWithScatter(): SceneFrame {
       quadCount: 1,
     },
     camera: POSE,
-    markers: [{ kind: 'rider', x: 0, y: 0, z: 0, headingX: 0, headingZ: 1 }],
+    markers: [{ kind: 'rider', x: 0, y: 0, z: 0, headingX: 0, headingZ: 1, lean: 0 }],
     world: {
       skyColour: 0x88aaff,
       groundColour: 0x557744,
@@ -2470,6 +2470,7 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
       z: over.z ?? 0,
       headingX: facing.headingX ?? 0,
       headingZ: facing.headingZ ?? 1,
+      lean: 0,
       ...(crankAngle === undefined ? {} : { crankAngle }),
     };
   }
@@ -3132,5 +3133,83 @@ describe('what the realistic structures cost in meshes — #482', () => {
     expect(built).toBe(pairs.size);
     expect(built).toBe(REALISTIC_STRUCTURE_MESHES);
     belts.dispose();
+  });
+});
+
+describe('the riders lean into a bend — #499', () => {
+  /** A rider facing `heading`, leaning `lean`, cranks at `crankAngle`. */
+  function leaning(
+    lean: number,
+    heading: readonly [number, number] = [0, 1],
+    crankAngle = 0,
+  ): RiderMarker {
+    return {
+      kind: 'rider',
+      x: 5,
+      y: 1,
+      z: 7,
+      headingX: heading[0],
+      headingZ: heading[1],
+      lean,
+      crankAngle,
+    };
+  }
+
+  /** The column of an instance matrix a direction was carried onto: 0 x, 1 y, 2 z. */
+  function axisOf(
+    mesh: { readonly instanceMatrix: { readonly array: ArrayLike<number> } },
+    slot: number,
+    column: number,
+  ): readonly [number, number, number] {
+    const at = slot * 16 + column * 4;
+    const matrix = mesh.instanceMatrix.array;
+    return [matrix[at] ?? NaN, matrix[at + 1] ?? NaN, matrix[at + 2] ?? NaN];
+  }
+
+  it.each([
+    ['north', [0, 1] as const],
+    ['east', [1, 0] as const],
+    ['south-west', [-Math.SQRT1_2, -Math.SQRT1_2] as const],
+  ])('tips the top of the bicycle toward the road’s normal when heading %s', (_, heading) => {
+    const belt = new RiderBelt();
+    belt.place([leaning(0.5, heading)]);
+    const [upX, upY, upZ] = axisOf(belt.meshes.bodies, 0, 1);
+    // Six places: an instance matrix is Float32.
+    // The normal is `(−headingZ, headingX)`; a positive lean tips `+Y` onto it
+    // by sin φ and leaves cos φ of it up.
+    expect(upY).toBeCloseTo(Math.cos(0.5), 6);
+    expect(upX).toBeCloseTo(-heading[1] * Math.sin(0.5), 6);
+    expect(upZ).toBeCloseTo(heading[0] * Math.sin(0.5), 6);
+    // …and still faces down the road: the roll is about the bicycle's own length.
+    const [forwardX, , forwardZ] = axisOf(belt.meshes.bodies, 0, 2);
+    expect(forwardX).toBeCloseTo(heading[0], 6);
+    expect(forwardZ).toBeCloseTo(heading[1], 6);
+    belt.dispose();
+  });
+
+  it('pivots about the tyres’ contact line, so the wheels stay on the road', () => {
+    const belt = new RiderBelt();
+    belt.place([leaning(0.6)]);
+    const at = belt.meshes.bodies.instanceMatrix.array;
+    expect([at[12], at[13], at[14]]).toEqual([5, 1, 7]);
+    belt.dispose();
+  });
+
+  it('rolls the crankset and the legs with the bicycle, even when nothing else moved', () => {
+    // ⚠️ The legs are skipped when nothing in `POSE_KEY` changed, and until
+    // #499 the lean was not in it: a lean that changed on a coasting rider
+    // would roll the frame and leave the legs upright beside it.
+    const belt = new RiderBelt();
+    belt.place([leaning(0)]);
+    const upright = Array.from(belt.meshes.limbs.instanceMatrix.array.slice(0, 16));
+    const cranksUpright = axisOf(belt.meshes.cranksets, 0, 1);
+    belt.place([leaning(0.5)]);
+    const leant = Array.from(belt.meshes.limbs.instanceMatrix.array.slice(0, 16));
+    expect(leant).not.toEqual(upright);
+    // The crankset's own up follows the bicycle's roll: sideways toward −x on a
+    // road heading north.
+    expect(cranksUpright[0]).toBeCloseTo(0, 6);
+    expect(axisOf(belt.meshes.cranksets, 0, 1)[0]).toBeLessThan(-0.3);
+    belt.dispose();
   });
 });

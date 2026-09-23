@@ -26,13 +26,14 @@ import type { SunStyle } from './world';
 
 const blank = (): ContactShadow => ({ x: 0, y: 0, z: 0, yaw: 0, halfAlong: 0, halfAcross: 0 });
 
-const marker = (kind: RiderMarker['kind'], x = 0, z = 0): RiderMarker => ({
+const marker = (kind: RiderMarker['kind'], x = 0, z = 0, lean = 0): RiderMarker => ({
   kind,
   x,
   y: 12,
   z,
   headingX: 0,
   headingZ: 1,
+  lean,
 });
 
 /**
@@ -295,5 +296,36 @@ describe('the sun as the shadow map’s camera — #426, the map rung only', () 
       directional.target.position.y,
       directional.target.position.z,
     ]).toEqual([0, 0, 0]);
+  });
+});
+
+describe('a leaning rider’s shadow — #499', () => {
+  // Straight overhead, so all of the difference is the lean's.
+  const NOON = { x: 0, y: 1, z: 0 };
+
+  it('moves toward the inside of the bend by where the rider’s middle now is', () => {
+    const upright = blank();
+    const leant = blank();
+    placeContactShadow(marker('rider', 0, 0, 0), NOON, upright);
+    placeContactShadow(marker('rider', 0, 0, 0.5), NOON, leant);
+    // Heading north, the normal — the side a positive lean tips toward — is −x.
+    // The middle is half the rider up, so sin 0.5 of that across.
+    expect(leant.x - upright.x).toBeCloseTo(-(RIDER_HEIGHT_METRES / 2) * Math.sin(0.5), 9);
+    expect(leant.z).toBeCloseTo(upright.z, 9);
+  });
+
+  it('grows across the bicycle by the length of rider now lying across it', () => {
+    const upright = blank();
+    const leant = blank();
+    placeContactShadow(marker('rider', 0, 0, 0), NOON, upright);
+    placeContactShadow(marker('rider', 0, 0, -0.5), NOON, leant);
+    expect(leant.halfAcross - upright.halfAcross).toBeCloseTo(
+      (RIDER_HEIGHT_METRES * Math.sin(0.5)) / 2,
+      9,
+    );
+  });
+
+  it('is still cast by nobody for the ghost, however far it leans', () => {
+    expect(placeContactShadow(marker('ghost', 0, 0, 0.5), SUN, blank())).toBe(false);
   });
 });

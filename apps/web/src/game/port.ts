@@ -52,7 +52,11 @@ import type { WorldStyle } from './world';
  * beside it.
  */
 export interface CameraPose {
-  /** The rider's position on the road. */
+  /**
+   * The rider's position on the road — ⚠️ since #499 on their LINE, moved
+   * across the road with them (`scene.ts` §`cameraPose`), so the rider stays
+   * in the middle of the frame where `camera.ts` §`riderFrameBox` puts them.
+   */
   readonly x: number;
   readonly y: number;
   readonly z: number;
@@ -98,6 +102,12 @@ export interface RiderMarker {
    * anybody's assertion here.
    */
   readonly kind: 'rider' | 'bot' | 'ghost';
+  /**
+   * Where the bicycle's origin is — on the road surface between its two tyre
+   * contacts. ⚠️ **On the rider's LINE since #499, not on the centreline**: up
+   * to 3.2 m across the road (`scene.ts` §`lateralOf`). How far along the road
+   * it is has not changed: that is still the odometer.
+   */
   readonly x: number;
   readonly y: number;
   readonly z: number;
@@ -119,6 +129,19 @@ export interface RiderMarker {
    */
   readonly headingX: number;
   readonly headingZ: number;
+  /**
+   * How far the bicycle leans, in radians from upright — #499. Positive leans
+   * its top toward the road's own normal, `(−headingZ, headingX)` — the side
+   * `terrain.ts` calls left — which is the side a bend toward that normal
+   * turns to, so a rider always leans INTO the bend. The renderer rolls the
+   * bicycle and whoever is on it about the line between its two tyre contacts.
+   *
+   * ⚠️ **Required, on {@link CameraPose.eyeRoadY}'s argument**: an optional
+   * lean nobody supplied would compile, render, and draw every rider bolt
+   * upright for ever — which is exactly what #499 was filed about.
+   * `racing-line.ts` §`leanAt` is where it comes from.
+   */
+  readonly lean: number;
   /**
    * How far the cranks have turned, in radians — #349, #368.
    *

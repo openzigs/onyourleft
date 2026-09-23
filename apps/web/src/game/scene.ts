@@ -21,15 +21,23 @@
  * replacement.
  */
 
-import { ghostDistanceAt, ghostHasFinished, type GhostTrack } from '@onyourleft/domain';
+import { ghostDistanceAt, ghostHasFinished, seconds, type GhostTrack } from '@onyourleft/domain';
 
-import { simulatedCrankAngle } from './bicycle';
+import { BICYCLE_LENGTH_METRES, RIDER_HALF_WIDTH_METRES, simulatedCrankAngle } from './bicycle';
 import { horizonRelief, terrainCorridor } from './landform';
 import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES } from './camera';
 import type { CameraPose, RiderMarker, SceneFrame, WaterFrame } from './port';
 import { SCATTER_MAX_ITEMS, scatterAt, scatterSeed, type ScatterItem } from './scatter';
+import {
+  LINE_LIMIT_METRES,
+  leanAt,
+  lineOffsetAt,
+  racingLine,
+  type RacingLine,
+} from './racing-line';
 import { ghostClock, type GameState } from './simulation';
 import {
+  ROAD_WIDTH_METRES,
   roadCorridor,
   type CorridorOrigin,
   type CorridorPoint,
@@ -102,6 +110,17 @@ export interface SceneInput {
    * start line and the browser harness build frames with no ride behind them.
    */
   readonly crankAngle?: number | undefined;
+  /**
+   * Draws every rider on the centreline, upright, as every frame did before
+   * #499 — the control the browser gate measures the line against, and
+   * nothing else. Absent, or `false`, is the line (`racing-line.ts`).
+   *
+   * ⚠️ **Optional the safe way round.** `check-wiring.mjs` §Limits is explicit
+   * that an optional field nobody supplies is a hole no gate here can see; that
+   * is a hole only when its absence switches something OFF. Absent here is the
+   * feature, so a ride that forgot it rides the line.
+   */
+  readonly centreline?: boolean | undefined;
 }
 
 /** Builds one frame. */
@@ -113,10 +132,16 @@ export function sceneFrame(input: SceneInput): SceneFrame {
   // remember to clear. One seed for the scenery and the ground under it, so a
   // tree and the hillside it stands on are hashed from the same route.
   const seed = scatterSeed(input.profile);
+  // #499. Computed once per route and cached against the profile object
+  // (`racing-line.ts` §`racingLine`), so this is the first frame's cost only.
+  const line = input.centreline === true ? undefined : racingLine(input.profile);
+  const riders = ridersOnTheRoad(corridor, input, riderDistance, line);
   return {
     corridor,
-    camera: cameraPose(corridor, riderDistance),
-    markers: markers(corridor, input, riderDistance),
+    // The camera follows the rider sideways — their drawn place, not the line's
+    // — so the rider stays where `camera.ts` §`riderFrameBox` says they are.
+    camera: cameraPose(corridor, riderDistance, (riders[0] as PlacedRider).lateral),
+    markers: riders.map((rider) => rider.marker),
     // Recomputed per frame rather than cached against the profile: it is two
     // bounded passes over at most `WORLD_SAMPLE_LIMIT` samples, and a cache
     // keyed on a profile is a second source of truth that a route change has
@@ -185,19 +210,31 @@ function scatter(
 /**
  * Where the chase camera looks from.
  *
+ * `lateralMetres` is how far across the road the rider is drawn, positive on
+ * the road's own normal side (#499); the camera is moved across with them.
+ *
  * The heading is taken from the corridor's own centreline rather than from a
  * stored bearing, so the camera and the road cannot disagree: if the corridor
  * turns, the camera turns with it by construction. A separately-computed bearing
  * is the kind of second source of truth that drifts by a frame and reads as the
  * camera lagging the corner.
  */
-export function cameraPose(corridor: RoadCorridor, atDistance: number): CameraPose {
+export function cameraPose(
+  corridor: RoadCorridor,
+  atDistance: number,
+  lateralMetres: number,
+): CameraPose {
   const here = placeOnCorridor(corridor, atDistance);
+  const heading = headingAt(corridor, here.index);
   return {
-    x: here.x,
+    // #499: moved across the road by as much as the rider is, along the road's
+    // own normal, and NOT turned: the camera still looks down the road, and it
+    // does not roll with the lean (out of scope, and a rolling horizon on a
+    // phone is the fastest way to make somebody feel ill).
+    x: here.x - heading.headingZ * lateralMetres,
     y: here.y,
-    z: here.z,
-    ...headingAt(corridor, here.index),
+    z: here.z + heading.headingX * lateralMetres,
+    ...heading,
     // #424 — the two heights the camera pitches by, read off the SAME corridor
     // the road is drawn from, so the gaze and the tarmac cannot disagree.
     // `camera.ts` §`cameraRig` says why these are the road's real heights and
@@ -247,25 +284,97 @@ function headingAt(
   };
 }
 
-/** The rider, and whichever of the bot and the ghost are in play. */
-function markers(
+/**
+ * How far apart, side to side, two riders level on the road are drawn: **1.2 m**
+ * between their middles — two handlebars 0.4 m wide and 0.8 m of air between
+ * them. #499: every rider used to be on the centreline, so two level riders
+ * were drawn inside each other.
+ */
+const SIDE_BY_SIDE_METRES = 1.2;
+
+/**
+ * Over how much road a pair stops being level: from {@link BICYCLE_LENGTH_METRES}
+ * apart, where a bicycle could first overlap another, to **2 m** beyond that.
+ * Inside the length they are {@link SIDE_BY_SIDE_METRES} apart; beyond the
+ * fade they ride the line; between, they ease across, so no rider jumps
+ * sideways as another passes. At every gap either the bicycles are a length
+ * apart along the road or they are a handlebar clear of each other across it.
+ */
+const LEVEL_FADE_METRES = 2;
+
+/**
+ * How far from the centre a rider is ever drawn: **3.2 m** — half a handlebar
+ * and 0.1 m inside the 7 m road's edge. Wider than the line's own
+ * {@link LINE_LIMIT_METRES}, because a rider moved aside for another has to go
+ * somewhere.
+ */
+const DRAWN_LIMIT_METRES = ROAD_WIDTH_METRES / 2 - RIDER_HALF_WIDTH_METRES - 0.1;
+
+/**
+ * How much of the line a level rider gives up to make room: the share that
+ * keeps a rider {@link SIDE_BY_SIDE_METRES} off the line on the road —
+ * `1 − (3.2 − 1.2) / 2.9 ≈ 0.31`. Derived, so the three constants above cannot
+ * disagree about whether a pair fits.
+ */
+const LINE_GIVEN_UP = 1 - (DRAWN_LIMIT_METRES - SIDE_BY_SIDE_METRES) / LINE_LIMIT_METRES;
+
+/**
+ * Which side of the line each kind moves to when it is level with another:
+ * the rider keeps to the line (brought toward the centre only by
+ * {@link LINE_GIVEN_UP}, to leave the others room), the bot moves to the
+ * normal's negative side and the ghost to its positive side, so all three level
+ * at once are three abreast.
+ */
+const LEVEL_LANES: Readonly<Record<RiderMarker['kind'], number>> = { rider: 0, bot: -1, ghost: 1 };
+
+/** A rider on the road, and how far across it they were drawn. */
+interface PlacedRider {
+  readonly marker: RiderMarker;
+  /** Metres across the road from the centreline, positive on the normal's side. */
+  readonly lateral: number;
+}
+
+/** One rider before it is placed: who, how far, and how fast. */
+interface Rider {
+  readonly kind: RiderMarker['kind'];
+  readonly distance: number;
+  readonly speed: number;
+  readonly crankAngle: number | undefined;
+}
+
+/**
+ * The rider, and whichever of the bot and the ghost are in play — on their
+ * line, leaning at their own speeds, and never drawn inside each other (#499).
+ * The rider is always first.
+ */
+function ridersOnTheRoad(
   corridor: RoadCorridor,
   input: SceneInput,
   riderDistance: number,
-): readonly RiderMarker[] {
-  const found: RiderMarker[] = [
-    // ⚠️ **The rider's crank angle is the only one that comes from outside this
-    // file — #349, #368.** It is the integral of a cadence *reading*, which
-    // needs a clock and the sensors, and `GameView` is where both are. The
-    // other two are derived below from their own odometers, which this file
-    // already has, because a simulated rider has no cadence to read.
+  line: RacingLine | undefined,
+): readonly PlacedRider[] {
+  // ⚠️ **The rider's crank angle is the only one that comes from outside this
+  // file — #349, #368.** It is the integral of a cadence *reading*, which needs
+  // a clock and the sensors, and `GameView` is where both are. The other two
+  // are derived from their own odometers, which this file already has, because
+  // a simulated rider has no cadence to read.
+  const riders: Rider[] = [
     {
-      ...markerAt(corridor, riderDistance, 'rider'),
-      ...(input.crankAngle === undefined ? {} : { crankAngle: input.crankAngle }),
+      kind: 'rider',
+      distance: riderDistance,
+      speed: input.state.ride.speed,
+      crankAngle: input.crankAngle,
     },
   ];
+  const bot = input.state.bot;
   if (input.botDistance !== undefined) {
-    found.push(pedalling(markerAt(corridor, input.botDistance, 'bot'), input.botDistance));
+    riders.push({
+      kind: 'bot',
+      distance: input.botDistance,
+      // The bot's own simulated speed, from the same step as its odometer.
+      speed: bot?.state.speed ?? 0,
+      crankAngle: pedalling(input.botDistance),
+    });
   }
   if (input.ghost !== undefined) {
     // ⚠️ The ghost is placed at where it had ridden **at this point in the
@@ -278,17 +387,75 @@ function markers(
     // clock here handed the ghost five minutes of road while the rider and the
     // bot covered ten seconds of it. `simulation.ts` §`ghostClock` states the
     // rule beside the bound that creates the difference.
-    const at = ghostDistanceAt(input.ghost, ghostClock(input.state));
-    found.push(pedalling(markerAt(corridor, at, 'ghost'), at));
+    const clock: number = ghostClock(input.state);
+    const at = ghostDistanceAt(input.ghost, seconds(clock));
+    riders.push({
+      kind: 'ghost',
+      distance: at,
+      speed: ghostSpeed(input.ghost, clock),
+      crankAngle: pedalling(at),
+    });
   }
-  return found;
+  return riders.map((rider) => {
+    const lateral = line === undefined ? 0 : lateralOf(rider, riders, line);
+    const lean = line === undefined ? 0 : leanAt(line, rider.distance, rider.speed);
+    const marker = markerAt(corridor, rider.distance, rider.kind, lateral, lean);
+    return {
+      marker: rider.crankAngle === undefined ? marker : { ...marker, crankAngle: rider.crankAngle },
+      lateral,
+    };
+  });
 }
 
 /**
- * A simulated rider's marker, with its cranks where its own odometer puts them
- * — #368.
+ * How far across the road one rider is drawn: the line, eased toward
+ * {@link LEVEL_LANES} by how level they are with the nearest other rider.
  *
- * ⚠️ **The marker's odometer, not the position it was clamped to.**
+ * `line·(1 − g·w) + lane·side·w`, where `w` runs from 1 within a bicycle's
+ * length of another rider to 0 at {@link LEVEL_FADE_METRES} beyond it, and `g`
+ * is {@link LINE_GIVEN_UP}. At `w = 1` that is at most
+ * `2.9·0.69 + 1.2 = 3.2 m` from the centre, which is {@link DRAWN_LIMIT_METRES}.
+ */
+function lateralOf(rider: Rider, riders: readonly Rider[], line: RacingLine): number {
+  let level = 0;
+  for (const other of riders) {
+    if (other === rider) continue;
+    const gap = Math.abs(other.distance - rider.distance);
+    level = Math.max(
+      level,
+      Math.min(
+        1,
+        Math.max(0, (BICYCLE_LENGTH_METRES + LEVEL_FADE_METRES - gap) / LEVEL_FADE_METRES),
+      ),
+    );
+  }
+  const onLine = lineOffsetAt(line, rider.distance);
+  return (
+    onLine * (1 - LINE_GIVEN_UP * level) + LEVEL_LANES[rider.kind] * SIDE_BY_SIDE_METRES * level
+  );
+}
+
+/**
+ * How fast the ghost was going at this point of its attempt, in metres a
+ * second: the replayed distance across a second either side. #499 asks for
+ * exactly this — a recording carries distance against time, and the lean needs
+ * a speed; a replay is not re-simulated (`packages/domain/src/ghost/replay.ts`).
+ * At the attempt's start and finish the window is one-sided, and at rest it is
+ * nought, which is no lean.
+ */
+function ghostSpeed(ghost: GhostTrack, clock: number): number {
+  const before = Math.max(0, clock - GHOST_SPEED_HALF_WINDOW_SECONDS);
+  const after = clock + GHOST_SPEED_HALF_WINDOW_SECONDS;
+  const covered =
+    (ghostDistanceAt(ghost, seconds(after)) as number) -
+    (ghostDistanceAt(ghost, seconds(before)) as number);
+  return after > before ? Math.max(0, covered / (after - before)) : 0;
+}
+
+/**
+ * A simulated rider's crank angle, where its own odometer puts it — #368.
+ *
+ * ⚠️ **The rider's odometer, not the position its marker was clamped to.**
  * {@link markerAt} clamps a bot or a ghost far up the road to the corridor's
  * far end, so its drawn position stops moving while the rider it belongs to
  * keeps riding — and cranks taken from that position would freeze with it,
@@ -298,9 +465,12 @@ function markers(
  * `bicycle.ts` §`simulatedCrankAngle` is where the one thing this asserts — a
  * fixed gear, and no invented rate — is argued.
  */
-function pedalling(marker: RiderMarker, atDistance: number): RiderMarker {
-  return { ...marker, crankAngle: simulatedCrankAngle(atDistance) };
+function pedalling(atDistance: number): number {
+  return simulatedCrankAngle(atDistance);
 }
+
+/** Half the window {@link ghostSpeed} differences the replay over: half a second. */
+const GHOST_SPEED_HALF_WINDOW_SECONDS = 0.5;
 
 /**
  * A marker on the road at a distance.
@@ -315,11 +485,24 @@ function markerAt(
   corridor: RoadCorridor,
   atDistance: number,
   kind: RiderMarker['kind'],
+  lateral: number,
+  lean: number,
 ): RiderMarker {
   const at = placeOnCorridor(corridor, atDistance);
   // ⚠️ The heading is the road's at **this** marker's own distance, not the
   // camera's — #349. @see RiderMarker.headingX
-  return { kind, x: at.x, y: at.y, z: at.z, ...headingAt(corridor, at.index) };
+  const heading = headingAt(corridor, at.index);
+  // #499: across the road along its own normal, `(−headingZ, headingX)` —
+  // the side `terrain.ts` §`ribbonNormals` calls left — and at the road's
+  // height, which is flat across its width (`ribbonNormals` says why).
+  return {
+    kind,
+    x: at.x - heading.headingZ * lateral,
+    y: at.y,
+    z: at.z + heading.headingX * lateral,
+    ...heading,
+    lean,
+  };
 }
 
 /** A position on the corridor, and the centreline point it follows. */

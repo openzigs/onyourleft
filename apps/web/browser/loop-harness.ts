@@ -151,12 +151,24 @@ function loopPoints(): RoutePoint[] {
   }));
 }
 
-/** The frame at the start line, with nothing on the road but the road. */
+/**
+ * The frame at the start line, with nothing on the road but the road.
+ *
+ * ⚠️ **Through the CENTRELINE's camera since #499** (`centreline: true`). The
+ * product's camera now stands on the rider's racing line, and at this loop's
+ * start the line is off the centre of the road, so the far road it looks down
+ * sits off the middle of the frame — measured at 44.0 % of the width against
+ * this spec's 5 % tolerance of the middle. That is the camera following the
+ * rider across the road, which is #499's intent, and says nothing about the
+ * road's continuity at the wrap or which way the camera faces, which is what
+ * #440's claim is about and what this page measures.
+ */
 function startFrame(profile: RouteProfile): SceneFrame {
   const frame = sceneFrame({
     profile,
     origin: corridorOrigin(profile),
     state: atStartLine(profile),
+    centreline: true,
   });
   return { ...frame, scatter: [], markers: [] };
 }
