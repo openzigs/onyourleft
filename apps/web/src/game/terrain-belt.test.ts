@@ -31,7 +31,11 @@ import {
   buildingPlan,
   type BuildingRole,
 } from './buildings';
-import { REALISTIC_BOUNDARY_PARTS, REALISTIC_BUILDING_SURFACES } from './realistic-assets';
+import {
+  REALISTIC_BOUNDARY_PARTS,
+  REALISTIC_BUILDING_SURFACES,
+  REALISTIC_STRUCTURE_SURFACES,
+} from './realistic-assets';
 import {
   BridgeBelt,
   GROUNDED_SHADE,
@@ -44,6 +48,7 @@ import {
   SkyDome,
   TerrainBelt,
   WaterBelt,
+  isConstructedMaterial,
   skyShare,
 } from './three-renderer';
 import { bridgeParts, waterSurface, waterways } from './waterways';
@@ -275,6 +280,25 @@ describe('the water and the bridges a view draws — #459', () => {
     );
   });
 
+  it('band-limits its ripples, and can have that turned off for the gate’s control — #501', () => {
+    const belt = new WaterBelt();
+    const material = belt.mesh.material as unknown as {
+      readonly fragmentShader: string;
+      readonly uniforms: Record<string, { value: number }>;
+    };
+    // Each ripple's amplitude is weighted by how far its phase turns across a
+    // pixel — a screen-space derivative — and the weight is on by default.
+    expect(material.fragmentShader).toContain('fwidth(phase)');
+    expect(material.fragmentShader).toContain('oylRippleWeight(a1) * cos(a1)');
+    expect(material.fragmentShader).toContain('oylRippleWeight(a2) * cos(a2)');
+    expect(material.uniforms['rippleFilter']?.value).toBe(1);
+    belt.setRippleFilter(false);
+    expect(material.uniforms['rippleFilter']?.value).toBe(0);
+    belt.setRippleFilter(true);
+    expect(material.uniforms['rippleFilter']?.value).toBe(1);
+    belt.dispose();
+  });
+
   it('draws every block of every bridge in view as one instance of one box', () => {
     const belt = new BridgeBelt();
     const parts = bridgeParts(profile, origin, corridor, ways);
@@ -299,6 +323,48 @@ describe('the water and the bridges a view draws — #459', () => {
     expect(matrix.elements[13]).toBeCloseTo(first?.y ?? 0, 4);
     belt.update([]);
     expect(belt.mesh.visible).toBe(false);
+  });
+
+  it('dresses the bridge in the photographed stone on a realistic rung — #501', () => {
+    const belt = new BridgeBelt();
+    const stylised = belt.mesh.material;
+    // Stand-ins: this file may not import three (`three-seam.test.ts`), and a
+    // material only holds its maps until it is compiled.
+    const stone = { colour: { name: 'colour' } as never, normal: { name: 'normal' } as never };
+    belt.setWorld('realistic', stone);
+    const dressed = belt.mesh.material as unknown as {
+      readonly map: unknown;
+      readonly normalMap: unknown;
+      onBeforeCompile: (shader: {
+        uniforms: Record<string, { value: number }>;
+        vertexShader: string;
+      }) => void;
+    };
+    expect(dressed.map).toBe(stone.colour);
+    expect(dressed.normalMap).toBe(stone.normal);
+    expect(isConstructedMaterial(belt.mesh.material as never)).toBe(true);
+    // Projected in the world's metres, at the stone's own tile — not the unit
+    // cube's 0-to-1, which would stretch one photograph along a parapet.
+    const shader = {
+      uniforms: {} as Record<string, { value: number }>,
+      vertexShader: '#include <common>\n#include <project_vertex>',
+    };
+    dressed.onBeforeCompile(shader);
+    expect(shader.uniforms['tileMetres']?.value).toBe(
+      REALISTIC_STRUCTURE_SURFACES.stone.tileMetres,
+    );
+    expect(shader.vertexShader).toContain('vMapUv = oylStone');
+    expect(shader.vertexShader).toContain('instanceMatrix * oylWorld');
+    // The same maps again build nothing new.
+    belt.setWorld('realistic', stone);
+    expect(belt.mesh.material).toBe(dressed);
+    // No photograph to wear: the plain physical stone, with no map.
+    belt.setWorld('realistic');
+    expect((belt.mesh.material as unknown as { readonly map: unknown }).map).toBeNull();
+    // And the stylised world keeps its own, whatever it is handed.
+    belt.setWorld('stylised', stone);
+    expect(belt.mesh.material).toBe(stylised);
+    belt.dispose();
   });
 });
 

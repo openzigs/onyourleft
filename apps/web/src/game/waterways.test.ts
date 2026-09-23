@@ -22,9 +22,15 @@ import {
 } from '@onyourleft/domain';
 
 import { createGradientSession } from './gradient';
-import { TERRAIN_COLUMN_OFFSETS, VERGE_DROP_METRES, terrainHeightAt } from './landform';
+import {
+  TERRAIN_COLUMN_OFFSETS,
+  VERGE_DROP_METRES,
+  WET_GROUND_TINT,
+  terrainHeightAt,
+} from './landform';
 import {
   circuitRoute,
+  flatFloorValleyRoute,
   hillRoute,
   lakeValleyRoute,
   northRoute,
@@ -35,14 +41,19 @@ import {
 import { scatterSeed } from './scatter';
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
-import { corridorOrigin, roadCorridor } from './terrain';
+import { ROAD_WIDTH_METRES, corridorOrigin, roadCorridor } from './terrain';
 import type { GradientTrainer } from './trainer-port';
+import { auditWetGround } from './wet-ground-testing';
 import {
   BRIDGE_CLEARANCE_METRES,
   BRIDGE_HALF_SPAN_METRES,
   CHANNEL_BANK_METRES,
+  COPING_DEPTH_METRES,
+  COPING_OVERHANG_METRES,
   PARAPET_HEIGHT_METRES,
+  PARAPET_THICKNESS_METRES,
   STREAM_DEPTH_METRES,
+  STREAM_SURFACE_HALF_WIDTH_METRES,
   bridgeParts,
   inWater,
   waterSurface,
@@ -333,5 +344,261 @@ describe('nothing stands in the water — #459', () => {
     expect(inWater(ways, profile, crossing + 25, -18)).toBe(true);
     expect(inWater(ways, profile, crossing + 80, 10)).toBe(false);
     expect(inWater(ways, profile, 200, 10)).toBe(false);
+  });
+});
+
+describe('the road is continuous across the bridge — #501', () => {
+  // Validation 0002 Z10: *"a light seam runs across the road where the bridge
+  // deck starts"*. The deck is the road, so a line across it is something of
+  // the bridge's showing THROUGH it. What was found: the abutment was a LEVEL
+  // box three metres long under a road that slopes down into the valley, so
+  // its top stood above the road over the half of it on the downhill side —
+  // 4.5 cm on this 5 % valley, 9 cm on the soak route's 8 %, and a lit stone
+  // face is lighter than tarmac. So: no part of any bridge may stand above the
+  // road DRAWN over it, anywhere under the carriageway.
+
+  /** How far a bridge part's top stands above the drawn road, at worst, under the carriageway. */
+  function worstRise(profile: RouteProfile, rider: number): { rise: number; sampled: number } {
+    const frame = frameAt(profile, rider);
+    const rows = frame.corridor.centre;
+    let rise = Number.NEGATIVE_INFINITY;
+    let sampled = 0;
+    for (const part of frame.water.bridges) {
+      // The box's own frame, as `three-renderer.ts` §`BridgeBelt.update` builds it.
+      const length = Math.hypot(part.axisX, part.axisY, part.axisZ);
+      const along = [part.axisX / length, part.axisY / length, part.axisZ / length] as const;
+      const flat = Math.hypot(along[0], along[2]);
+      const across = [along[2] / flat, 0, -along[0] / flat] as const;
+      const up = [
+        along[1] * across[2] - along[2] * across[1],
+        along[2] * across[0] - along[0] * across[2],
+        along[0] * across[1] - along[1] * across[0],
+      ] as const;
+      for (let i = -1; i <= 1; i += 0.25) {
+        for (let j = -1; j <= 1; j += 0.25) {
+          const x =
+            part.x +
+            (along[0] * i * part.length + across[0] * j * part.width + up[0] * part.height) / 2;
+          const y =
+            part.y +
+            (along[1] * i * part.length + across[1] * j * part.width + up[1] * part.height) / 2;
+          const z =
+            part.z +
+            (along[2] * i * part.length + across[2] * j * part.width + up[2] * part.height) / 2;
+          // The route runs north: across the carriageway is x, along it z.
+          // (A parapet's inner face stands ON the road's edge, and above it.)
+          if (Math.abs(x) >= ROAD_WIDTH_METRES / 2 - 0.01) continue;
+          const next = rows.findIndex((row) => row.z >= z);
+          if (next <= 0) continue;
+          const [a, b] = [rows[next - 1], rows[next]] as const;
+          if (a === undefined || b === undefined) continue;
+          const road = a.y + ((b.y - a.y) * (z - a.z)) / (b.z - a.z);
+          rise = Math.max(rise, y - road);
+          sampled += 1;
+        }
+      }
+    }
+    return { rise, sampled };
+  }
+
+  it('stands no part of a bridge above the road drawn over it, wherever the rows fall', () => {
+    // The 5 % valley, and a rolling road whose troughs are 12 % either side.
+    for (const profile of [valleyRoute(), rollingRoute()]) {
+      const crossing = waysOf(profile).crossings[0]?.distance ?? 0;
+      let sampled = 0;
+      for (let rider = crossing - 80; rider <= crossing - 70; rider += 1) {
+        const worst = worstRise(profile, rider);
+        expect(worst.rise, `rider at ${rider.toFixed(0)} m`).toBeLessThanOrEqual(0);
+        sampled += worst.sampled;
+      }
+      // Non-vacuity: points under the carriageway were read — the deck slab's
+      // and the abutments' tops among them.
+      expect(sampled).toBeGreaterThan(100);
+    }
+  });
+
+  it('sinks an approach piece that spans a bend under the road — #501 review', () => {
+    // Where a valley's floor meets its wall inside the approach, a straight
+    // piece between two points on the road stands above the road at its
+    // middle by more than the 3 cm the deck keeps under it. Measured with the
+    // sink taken out: the piece's top stood 6.5 mm above the drawn road. Neither
+    // route above bends inside an approach by that much.
+    const profile = flatFloorValleyRoute();
+    const crossing = waysOf(profile).crossings[0]?.distance ?? 0;
+    expect(crossing).toBeCloseTo(1_000, -1);
+    let sampled = 0;
+    for (let rider = crossing - 80; rider <= crossing - 70; rider += 1) {
+      const worst = worstRise(profile, rider);
+      expect(worst.rise, `rider at ${rider.toFixed(0)} m`).toBeLessThanOrEqual(0);
+      sampled += worst.sampled;
+    }
+    expect(sampled).toBeGreaterThan(100);
+  });
+});
+
+describe('the water has a bank — #501', () => {
+  // Validation 0002 Z10: *"the water meets the grass with a hard, straight
+  // edge and no bank"*. The surface now runs on under the bank, so the edge of
+  // the quad is never what a rider sees: the drawn ground comes up out of the
+  // water, and stands a visible height over it a little further out.
+
+  /** The drawn ground at `u` metres along the road from the stream, column by column. */
+  function groundAcross(
+    profile: RouteProfile,
+    rider: number,
+    crossing: number,
+    u: number,
+  ): readonly number[] {
+    const frame = frameAt(profile, rider);
+    const rows = frame.corridor.centre;
+    const mesh = frame.terrain.mesh;
+    const columns = TERRAIN_COLUMN_OFFSETS.length;
+    const next = rows.findIndex((row) => row.along >= crossing + u);
+    const [a, b] = [rows[next - 1], rows[next]];
+    if (next <= 0 || a === undefined || b === undefined) return [];
+    const share = (crossing + u - a.along) / (b.along - a.along);
+    const heights: number[] = [];
+    for (let side = 0; side < 2; side += 1) {
+      // From the foot of the verge out: the road's edge is the road's.
+      for (let column = 2; column < columns; column += 1) {
+        const y = (row: number): number =>
+          mesh.vertices[(row * columns * 2 + side * columns + column) * 3 + 1] as number;
+        heights.push(y(next - 1) + (y(next) - y(next - 1)) * share);
+      }
+    }
+    return heights;
+  }
+
+  it('hides the edge of the stream’s surface under the ground, and rises out of it', () => {
+    for (const profile of [valleyRoute(), rollingRoute()]) {
+      const origin = corridorOrigin(profile);
+      const ways = waysOf(profile);
+      const crossing = ways.crossings[0]?.distance ?? 0;
+      const water = (ways.crossings[0]?.waterElevation ?? 0) - origin.elevation;
+      let read = 0;
+      // The rows slide with the rider: every phase of them.
+      for (let rider = crossing - 80; rider <= crossing - 70; rider += 1) {
+        for (const side of [-1, 1]) {
+          const edge = groundAcross(
+            profile,
+            rider,
+            crossing,
+            side * STREAM_SURFACE_HALF_WIDTH_METRES,
+          );
+          for (const height of edge) expect(height).toBeGreaterThan(water);
+          // A visible drop: ten metres further out the ground stands over the
+          // water by more than a rider on a bicycle's wheel is tall.
+          const bank = groundAcross(
+            profile,
+            rider,
+            crossing,
+            side * (STREAM_SURFACE_HALF_WIDTH_METRES + 10),
+          );
+          for (const height of bank) expect(height).toBeGreaterThan(water + 1);
+          read += edge.length + bank.length;
+        }
+      }
+      expect(read).toBeGreaterThan(400);
+      // And the water really is water where it is seen: the ground at the
+      // stream itself is under it.
+      for (const height of groundAcross(profile, crossing - 75, crossing, 0)) {
+        expect(height).toBeLessThan(water);
+      }
+    }
+  });
+
+  it('darkens the ground just above the water to a wet margin, and nowhere dry', () => {
+    const profile = valleyRoute();
+    const frame = frameAt(profile, (waysOf(profile).crossings[0]?.distance ?? 0) - 75);
+    const { colours } = frame.terrain.mesh;
+    let wet = 0;
+    let grey = 0;
+    for (let at = 0; at < colours.length; at += 3) {
+      const [r, g, b] = [colours[at], colours[at + 1], colours[at + 2]] as [number, number, number];
+      if (r === g && g === b) {
+        grey += 1;
+        continue;
+      }
+      // Browner as well as darker: red over green over blue, as the tint is.
+      expect(r).toBeGreaterThan(g);
+      expect(g).toBeGreaterThan(b);
+      if (r < 0.7) wet += 1;
+    }
+    expect(wet).toBeGreaterThan(4);
+    expect(grey).toBeGreaterThan(wet);
+    // The ground under the water and at its edge is the wet tint itself.
+    let darkest = 0;
+    for (let at = 3; at < colours.length; at += 3) {
+      if ((colours[at] as number) < (colours[darkest] as number)) darkest = at;
+    }
+    expect((colours[darkest + 2] as number) / (colours[darkest] as number)).toBeCloseTo(
+      WET_GROUND_TINT[2] / WET_GROUND_TINT[0],
+      3,
+    );
+    // The control: ground with no water near it is its own mottle, grey.
+    const dry = frameAt(hillRoute(), 600).terrain.mesh.colours;
+    for (let at = 0; at < dry.length; at += 3) {
+      expect(dry[at]).toBe(dry[at + 2]);
+    }
+  });
+});
+
+describe('the wet margin stays on the shore — #501 review', () => {
+  // ⚠️ The control above rides a route with NO water, so it could not see the
+  // tint reach dry ground on a route that HAS water — and on the soak route it
+  // reached a hillside 200 to 420 m past a lake's far shore, because a lake's
+  // level was reported at any distance on its side and every ground below it
+  // was "wet". These ride routes with a lake and with a stream.
+  it('darkens no ground far from a lake, even ground that lies below it', () => {
+    for (const odometer of [1_400, 1_500, 1_600]) {
+      const audit = auditWetGround(lakeValleyRoute(), odometer);
+      expect(audit.far).toBeGreaterThan(50);
+      expect(audit.farTinted).toBe(0);
+      // The margin is still there, by the lake.
+      expect(audit.tinted).toBeGreaterThan(0);
+    }
+  });
+
+  it('darkens no ground far from a stream', () => {
+    for (const profile of [valleyRoute(), rollingRoute()]) {
+      const crossing = waysOf(profile).crossings[0]?.distance ?? 0;
+      const audit = auditWetGround(profile, crossing - 75);
+      expect(audit.far).toBeGreaterThan(50);
+      expect(audit.farTinted).toBe(0);
+      expect(audit.tinted).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('the parapets are a country bridge’s — #501', () => {
+  it('lays a coping along the top of every parapet, proud of its outer face only', () => {
+    const profile = valleyRoute();
+    const origin = corridorOrigin(profile);
+    const ways = waysOf(profile);
+    const crossing = ways.crossings[0]?.distance ?? 0;
+    const parts = bridgeParts(profile, origin, roadCorridor(profile, origin, crossing - 50), ways);
+    const parapets = parts.filter(
+      (part) => Math.abs(part.height - (PARAPET_HEIGHT_METRES + 0.1)) < 1e-9,
+    );
+    const copings = parts.filter((part) => Math.abs(part.height - COPING_DEPTH_METRES) < 1e-9);
+    expect(parapets.length).toBeGreaterThan(4);
+    expect(copings).toHaveLength(parapets.length);
+    for (const parapet of parapets) {
+      const coping = copings.find(
+        (each) => Math.abs(each.z - parapet.z) < 1e-6 && Math.sign(each.x) === Math.sign(parapet.x),
+      );
+      expect(coping).toBeDefined();
+      if (coping === undefined) continue;
+      // Its top is the parapet's: no taller a wall.
+      expect(coping.y + coping.height / 2).toBeCloseTo(parapet.y + parapet.height / 2, 6);
+      // Wider, and the extra is all on the outside.
+      expect(coping.width).toBeCloseTo(PARAPET_THICKNESS_METRES + COPING_OVERHANG_METRES, 9);
+      const inner = (part: { x: number; width: number }): number =>
+        Math.abs(part.x) - part.width / 2;
+      expect(inner(coping)).toBeCloseTo(inner(parapet), 6);
+      expect(Math.abs(coping.x) + coping.width / 2).toBeGreaterThan(
+        Math.abs(parapet.x) + parapet.width / 2,
+      );
+    }
   });
 });

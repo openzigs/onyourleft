@@ -95,6 +95,7 @@ import { VERGE_DROP_METRES } from '../src/game/landform';
 import { buildingPlan, onFace, OPENING_RECESS_METRES } from '../src/game/buildings';
 import {
   drawnWorldOf,
+  bridgesWearStoneOf,
   loadRealisticWorld,
   loadSceneryModels,
   sceneMaterialsOf,
@@ -102,6 +103,7 @@ import {
   setBuildingOpenings,
   threeGameRenderer,
   waterSkyOf,
+  filterWaterRipplesOf,
 } from '../src/game/three-renderer';
 import { realisticWorldNotice } from '../src/game/realistic-assets';
 import {
@@ -214,6 +216,15 @@ interface WaterMeasurement {
   /** Milliseconds a frame of the valley, water shaded and flat. */
   readonly shadedMs: number;
   readonly flatMs: number;
+  /**
+   * #501: how much the water's pixels differ from the pixel above them — the
+   * mean squared difference in luminance, 0–255 — with the ripple band-limit
+   * on, and off as the control; and how many pixel pairs that was over.
+   * @see rippleBanding
+   */
+  readonly rippleBanding: number;
+  readonly rippleBandingUnfiltered: number;
+  readonly ripplePairs: number;
 }
 
 /** What {@link settlementProbe} publishes — #460. */
@@ -1611,6 +1622,9 @@ function waterProbe(): WaterMeasurement {
     drawCallsDry: 0,
     shadedMs: 0,
     flatMs: 0,
+    rippleBanding: 0,
+    rippleBandingUnfiltered: 0,
+    ripplePairs: 0,
   };
   let measured = empty;
   countingDrawCalls((calls) => {
@@ -1633,6 +1647,19 @@ function waterProbe(): WaterMeasurement {
     const [beside, deck, drawCalls] = read(frame);
     const [besideDry, deckDry, drawCallsDry] = read(dry);
     const [, underDeck] = read(noRoad);
+    // #501: the banding, off the whole frame. The water is wherever drawing
+    // it changed the pixel, with the band-limit on or off.
+    const whole = (scene: SceneFrame): Uint8Array => {
+      view.render(scene);
+      view.render(scene);
+      return readRegion(gl, 0, 0, canvas.width, canvas.height);
+    };
+    const withoutWater = whole(dry);
+    const filtered = whole(frame);
+    filterWaterRipplesOf(view, false);
+    const unfiltered = whole(frame);
+    filterWaterRipplesOf(view, true);
+    const banding = rippleBanding(filtered, unfiltered, withoutWater, canvas.width);
     const timed = (settings: QualitySettings): number => {
       view.setQuality(settings);
       for (let index = 0; index < 5; index += 1) view.render(frame);
@@ -1660,10 +1687,51 @@ function waterProbe(): WaterMeasurement {
       drawCallsDry,
       shadedMs: ((rounds[0] ?? 0) + (rounds[3] ?? 0)) / 2,
       flatMs: ((rounds[1] ?? 0) + (rounds[2] ?? 0)) / 2,
+      rippleBanding: banding.filtered,
+      rippleBandingUnfiltered: banding.unfiltered,
+      ripplePairs: banding.pairs,
     };
     view.destroy();
   });
   return measured;
+}
+
+/**
+ * #501: the banding validation 0002 Z10 found on the stream, as a number —
+ * the mean squared difference in luminance between a water pixel and the one
+ * directly above it, over every such pair that is water in both frames.
+ *
+ * ⚠️ **Vertical neighbours, because the bands are horizontal**: a ripple finer
+ * than a pixel at a grazing angle aliases into stripes across the screen, so
+ * one row disagrees with the next. Water is where drawing it changed the pixel
+ * in BOTH frames, so the two figures are over the same pixels.
+ */
+function rippleBanding(
+  filtered: Uint8Array,
+  unfiltered: Uint8Array,
+  dry: Uint8Array,
+  width: number,
+): { readonly filtered: number; readonly unfiltered: number; readonly pairs: number } {
+  const luma = (pixels: Uint8Array, at: number): number =>
+    0.2126 * (pixels[at] ?? 0) + 0.7152 * (pixels[at + 1] ?? 0) + 0.0722 * (pixels[at + 2] ?? 0);
+  const water = (at: number): boolean =>
+    [filtered, unfiltered].every(
+      (pixels) =>
+        pixels[at] !== dry[at] || pixels[at + 1] !== dry[at + 1] || pixels[at + 2] !== dry[at + 2],
+    );
+  let pairs = 0;
+  let on = 0;
+  let off = 0;
+  const row = width * 4;
+  for (let at = 0; at + row < filtered.length; at += 4) {
+    if (!water(at) || !water(at + row)) continue;
+    pairs += 1;
+    on += (luma(filtered, at) - luma(filtered, at + row)) ** 2;
+    off += (luma(unfiltered, at) - luma(unfiltered, at + row)) ** 2;
+  }
+  return pairs === 0
+    ? { filtered: 0, unfiltered: 0, pairs }
+    : { filtered: on / pairs, unfiltered: off / pairs, pairs };
 }
 
 /**
@@ -1774,6 +1842,9 @@ const NO_WATER: WaterMeasurement = {
   drawCallsDry: 0,
   shadedMs: 0,
   flatMs: 0,
+  rippleBanding: 0,
+  rippleBandingUnfiltered: 0,
+  ripplePairs: 0,
 };
 
 /** What one rider's silhouette looks like, drawn alone. @see colourProbes */
@@ -2599,6 +2670,13 @@ export interface RealisticMeasurement {
   /** After stepping down to the stylised ladder: which world, and how many physically based meshes remain visible. */
   readonly afterStepDownWorld: string;
   readonly afterStepDownStandard: number;
+  /**
+   * #501's review: whether the bridges wore the photographed stone on the
+   * realistic rung, and — the control — whether they still did after the step
+   * down. @see bridgesWearStoneOf
+   */
+  readonly bridgesWearStone: boolean;
+  readonly bridgesWearStoneAfterStepDown: boolean;
   /** SwiftShader milliseconds a frame — published, never asserted. */
   readonly realisticFrameMs: number;
   readonly stylisedFrameMs: number;
@@ -2648,6 +2726,8 @@ const NO_REALISTIC: RealisticMeasurement = {
   sceneryDrawnBudgeted: 0,
   afterStepDownWorld: '',
   afterStepDownStandard: 0,
+  bridgesWearStone: false,
+  bridgesWearStoneAfterStepDown: false,
   realisticFrameMs: 0,
   stylisedFrameMs: 0,
   waterSkyRealistic: [],
@@ -2781,6 +2861,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     };
   }
   const drawnWorld = drawnWorldOf(view);
+  const bridgesWearStone = bridgesWearStoneOf(view);
   const wooded = riding(valleyRoute(), 900);
 
   let texturesCreated = 0;
@@ -2966,6 +3047,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   view.setQuality(QUALITY_LADDER[0] as QualitySettings);
   view.render(wooded);
   const afterStepDownWorld = drawnWorldOf(view);
+  const bridgesWearStoneAfterStepDown = bridgesWearStoneOf(view);
   const afterStepDownStandard = sceneMaterialsOf(view).filter(
     (each) => each.visible && each.type === 'MeshStandardMaterial',
   ).length;
@@ -3010,6 +3092,8 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     sceneryDrawnBudgeted,
     afterStepDownWorld,
     afterStepDownStandard,
+    bridgesWearStone,
+    bridgesWearStoneAfterStepDown,
     realisticFrameMs,
     stylisedFrameMs,
     waterSkyRealistic,

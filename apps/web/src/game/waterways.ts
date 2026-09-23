@@ -116,7 +116,11 @@ export const BRIDGE_CLEARANCE_METRES = 3;
 /** How deep the stream's bed is under its surface, in metres: **0.8**. */
 export const STREAM_DEPTH_METRES = 0.8;
 
-/** Half the width of the stream's surface, along the road, in metres: **4**. */
+/**
+ * Half the width of the stream's deep middle, along the road, in metres: **4**
+ * — what {@link CHANNEL_FLAT_METRES} is measured against. The water's SURFACE
+ * is wider: {@link STREAM_SURFACE_HALF_WIDTH_METRES}.
+ */
 export const STREAM_HALF_WIDTH_METRES = 4;
 
 /**
@@ -124,13 +128,38 @@ export const STREAM_HALF_WIDTH_METRES = 4;
  * in metres: **8** — twice the stream's half-width, so the water always lies
  * on bed rather than on a bank however the ground's rows slide under it.
  */
-export const CHANNEL_FLAT_METRES = 8;
+export const CHANNEL_FLAT_METRES = STREAM_HALF_WIDTH_METRES * 2;
 
 /**
  * Where the channel's banks meet the ground again, in metres along the road
  * either side of the stream: **30**. The bridge's abutments stand on the banks.
  */
 export const CHANNEL_BANK_METRES = 30;
+
+/**
+ * How far along the road either side of the stream its surface reaches, in
+ * metres: **16** — #501. ⚠️ **Past where the bank rises out of it, on purpose.**
+ *
+ * Until #501 the surface was {@link STREAM_HALF_WIDTH_METRES} wide and the
+ * flat bed twice that, so beyond the water's straight edge lay four metres of
+ * dry bed BELOW the water, and past that a bank rising over 22 m — on the
+ * owner's tablet, *"a band laid on a meadow, not a stream in a channel"*
+ * (validation 0002 Z10). The ground's rows are ten metres apart and slide with
+ * the rider, so no bank the ground mesh draws can be steep enough to sit a
+ * straight edge on; what it CAN do is rise through a level surface. So the
+ * surface runs on under the bank, as a lake's does (`waterSurface`), and the
+ * shoreline a rider sees is where the drawn ground comes up out of the water —
+ * never the edge of a quad. `waterways.test.ts` §"the water has a bank" holds
+ * the ground above the surface's edge for every place the rows can fall, and
+ * risen a visible height above the water a few metres further out.
+ *
+ * 16 m is where {@link bankCeiling} stands above the water with the shallowest
+ * bank a valley can have ({@link BRIDGE_CLEARANCE_METRES} plus the bed's depth
+ * of fall), even when a row sits at the foot of the flat bed and the next one
+ * ten metres on: the ground there is then 1.14 m over the bed, which is 0.34 m
+ * over the surface.
+ */
+export const STREAM_SURFACE_HALF_WIDTH_METRES = 16;
 
 /** How far out from the road the stream runs, either side, in metres: the ground's own reach. */
 export const STREAM_REACH_METRES = 420;
@@ -147,6 +176,21 @@ export const PARAPET_HEIGHT_METRES = 0.9;
 
 /** How thick a parapet is, in metres: **0.35** — a stone wall a rider could sit on. */
 export const PARAPET_THICKNESS_METRES = 0.35;
+
+/**
+ * How deep a parapet's coping is, in metres: **0.12** — #501. The flat stones
+ * laid along the top of a country bridge's wall, set within
+ * {@link PARAPET_HEIGHT_METRES} rather than on it, so the parapet is no taller.
+ */
+export const COPING_DEPTH_METRES = 0.12;
+
+/**
+ * How far a coping stands out past the parapet's OUTER face, in metres:
+ * **0.1**. Outward only: its inner face is the parapet's, so nothing of the
+ * bridge overhangs the carriageway (`waterways.test.ts` §"the road is
+ * continuous across the bridge").
+ */
+export const COPING_OVERHANG_METRES = 0.1;
 
 /** How deep the slab under the deck is, in metres: **0.8**. */
 export const DECK_DEPTH_METRES = 0.8;
@@ -289,10 +333,50 @@ export interface WaterShaping {
   readonly ceiling: number;
   /** How much of the invented relief survives here, 0 to 1. */
   readonly relief: number;
+  /**
+   * The surface of the water whose shore this is, as a local height, or
+   * `-Infinity` where no water is near — #501. What `landform.ts` darkens the
+   * ground just above it by: the wet margin where water meets grass.
+   *
+   * ⚠️ **Reported on the SHORE only, never across a whole side of the road**
+   * — #501's review. It used to be a lake's level at any distance on the
+   * lake's side, and `wetness` darkens any ground below the level, so on the
+   * soak route a hillside 200 to 420 m past the far shore, falling 6 to 31 m
+   * below the lake, wore the full tint. Ground far from water is dry however
+   * low it lies; {@link shore} is how near the water this point is.
+   */
+  readonly level: number;
+  /**
+   * How much of the wet margin applies here, 0 to 1 — #501's review: 1 on and
+   * near the water, falling to 0 by {@link WET_REACH_METRES} past its edge.
+   * `landform.ts` multiplies its wetness by this, so the margin fades out
+   * rather than stopping at a line.
+   */
+  readonly shore: number;
+}
+
+/**
+ * How far past the water's edge the wet margin may reach, in metres: **14** —
+ * #501's review. One lake bank ({@link LAKE_BANK_METRES}), which is also how
+ * far a stream's bank rises past its surface
+ * ({@link CHANNEL_BANK_METRES} − {@link STREAM_SURFACE_HALF_WIDTH_METRES}): the
+ * margin lives on the bank the water sits in, and fades out over its outer
+ * half. `WaterShaping.shore`.
+ */
+export const WET_REACH_METRES = LAKE_BANK_METRES;
+
+/** How much of the wet margin applies `outside` metres past the water's edge. */
+function shoreWeight(outside: number): number {
+  return 1 - smoothstep(WET_REACH_METRES / 2, WET_REACH_METRES, outside);
 }
 
 /** No water anywhere near. */
-export const DRY: WaterShaping = { ceiling: Number.POSITIVE_INFINITY, relief: 1 };
+export const DRY: WaterShaping = {
+  ceiling: Number.POSITIVE_INFINITY,
+  relief: 1,
+  level: Number.NEGATIVE_INFINITY,
+  shore: 0,
+};
 
 /**
  * The channel and lake beds as a ceiling on the ground, and how much relief
@@ -309,6 +393,15 @@ export function waterShaping(
 ): WaterShaping {
   let ceiling = Number.POSITIVE_INFINITY;
   let relief = 1;
+  let level = Number.NEGATIVE_INFINITY;
+  let shore = 0;
+  // The nearest water's level, where more than one is in reach.
+  const wet = (weight: number, surface: number): void => {
+    if (weight > shore) {
+      shore = weight;
+      level = surface;
+    }
+  };
   const lateral = Math.abs(signedLateral);
   for (const crossing of ways.crossings) {
     const u = Math.abs(routeOffset(profile, wrapped, crossing.distance));
@@ -324,6 +417,10 @@ export function waterShaping(
       bankCeiling(bed, road, u - CHANNEL_FLAT_METRES, CHANNEL_BANK_METRES - CHANNEL_FLAT_METRES),
     );
     relief = Math.min(relief, smoothstep(CHANNEL_BANK_METRES, CHANNEL_BANK_METRES * 3, u));
+    wet(
+      shoreWeight(u - STREAM_SURFACE_HALF_WIDTH_METRES),
+      crossing.waterElevation - origin.elevation,
+    );
   }
   for (const lake of ways.lakes) {
     if (Math.sign(signedLateral) !== lake.side) {
@@ -337,8 +434,9 @@ export function waterShaping(
     const bed = lake.waterElevation - LAKE_DEPTH_METRES - origin.elevation;
     ceiling = Math.min(ceiling, bankCeiling(bed, road, outside, LAKE_BANK_METRES));
     relief = Math.min(relief, smoothstep(LAKE_BANK_METRES, LAKE_BANK_METRES * 4, outside));
+    wet(shoreWeight(outside), lake.waterElevation - origin.elevation);
   }
-  return { ceiling, relief };
+  return { ceiling, relief, level, shore };
 }
 
 /**
@@ -433,7 +531,7 @@ const STREAM_STATIONS: readonly number[] = [
  * Every stream and lake surface in view of this frame's corridor.
  *
  * A stream is a straight strip along the road's own normal at the crossing,
- * {@link STREAM_HALF_WIDTH_METRES} either side of it, out to
+ * {@link STREAM_SURFACE_HALF_WIDTH_METRES} either side of it, out to
  * {@link STREAM_REACH_METRES} — under the bridge and across the road's width
  * too, which is what the rider looks down at over the parapet. A lake is a
  * strip beside the corridor's own rows, between its shores.
@@ -532,8 +630,8 @@ export function waterSurface(
           here.z + tx * lateral,
           tx,
           tz,
-          -STREAM_HALF_WIDTH_METRES,
-          STREAM_HALF_WIDTH_METRES,
+          -STREAM_SURFACE_HALF_WIDTH_METRES,
+          STREAM_SURFACE_HALF_WIDTH_METRES,
         );
       }
       strip(base);
@@ -652,7 +750,8 @@ export const MAXIMUM_BRIDGE_PARTS = 128;
 
 /**
  * The bridges in view of this frame's corridor: parapets along both edges of
- * the road over the span, a slab under the deck, an abutment at each end, and
+ * the road over the span, each with a coping along its top (#501), a slab
+ * under the deck, an abutment at each end, and
  * the approach beyond each abutment out to {@link CHANNEL_BANK_METRES}.
  *
  * ⚠️ **The deck is the road**, drawn by `terrain.ts` exactly as everywhere
@@ -712,10 +811,33 @@ export function bridgeParts(
             width: PARAPET_THICKNESS_METRES,
             height: PARAPET_HEIGHT_METRES + 0.1,
           });
+          // #501: the coping along its top, a little proud of its outer face.
+          const coping = out + COPING_OVERHANG_METRES / 2;
+          parts.push({
+            x: mid.x + nx * coping * side,
+            y: mid.y + PARAPET_HEIGHT_METRES - COPING_DEPTH_METRES / 2,
+            z: mid.z + nz * coping * side,
+            axisX: ax,
+            axisY: ay,
+            axisZ: az,
+            length,
+            width: PARAPET_THICKNESS_METRES + COPING_OVERHANG_METRES,
+            height: COPING_DEPTH_METRES,
+          });
         }
+        // ⚠️ **Under the road, not under the chord** — #501. A piece is
+        // straight between its two ends; where the valley's slope meets its
+        // floor it spans the bend, and its middle stood above the road there —
+        // 1.25 cm over the 5 % valley's floor, with the 3 cm clearance spent.
+        // So a piece sinks by however far its chord stands over the road at
+        // its own middle.
+        const sink = Math.max(
+          0,
+          mid.y - roadAt(centre - BRIDGE_HALF_SPAN_METRES + (piece + 0.5) * step).y,
+        );
         parts.push({
           x: mid.x,
-          y: mid.y - DECK_DEPTH_METRES / 2 - 0.03,
+          y: mid.y - sink - DECK_DEPTH_METRES / 2 - 0.03,
           z: mid.z,
           axisX: ax,
           axisY: ay,
@@ -731,18 +853,26 @@ export function bridgeParts(
         const before = roadAt(centre + end * BRIDGE_HALF_SPAN_METRES - 1);
         const after = roadAt(centre + end * BRIDGE_HALF_SPAN_METRES + 1);
         const dx = after.x - before.x;
+        const dy = after.y - before.y;
         const dz = after.z - before.z;
-        const flat = Math.hypot(dx, dz);
-        if (!(flat > 0)) continue;
+        const run = Math.hypot(dx, dy, dz);
+        if (!(Math.hypot(dx, dz) > 0)) continue;
         const top = at.y - 0.03;
         const bottom = bed - 1;
+        // ⚠️ **Along the road's own slope, not level** — #501. This box was
+        // level until then, three metres long under a road sloping down into
+        // the valley, so its top stood above the road over the downhill half
+        // of it: 4.5 cm on a 5 % approach, 9 cm on the soak route's 8 %. A lit
+        // stone face through tarmac is the *"light seam across the road where
+        // the bridge deck starts"* validation 0002 Z10 found on the tablet.
+        // `waterways.test.ts` §"the road is continuous across the bridge".
         parts.push({
           x: at.x,
           y: (top + bottom) / 2,
           z: at.z,
-          axisX: dx / flat,
-          axisY: 0,
-          axisZ: dz / flat,
+          axisX: dx / run,
+          axisY: dy / run,
+          axisZ: dz / run,
           length: 3,
           width: ROAD_WIDTH_METRES + PARAPET_THICKNESS_METRES * 4,
           height: top - bottom,
@@ -770,7 +900,11 @@ export function bridgeParts(
           const ez = far.z - near.z;
           const length = Math.hypot(ex, ey, ez);
           if (!(length > 0)) continue;
-          const middle = (near.y + far.y) / 2;
+          // Sunk under the road at its middle, as the deck's pieces are.
+          const middle = Math.min(
+            (near.y + far.y) / 2,
+            roadAt(centre + end * (BRIDGE_HALF_SPAN_METRES + ((piece + 0.5) * approach) / steps)).y,
+          );
           const height = middle - 0.03 - bottom;
           parts.push({
             x: (near.x + far.x) / 2,
