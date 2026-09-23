@@ -100,12 +100,16 @@ function productionSources(): readonly string[] {
 }
 
 /**
- * Which of `WAYS_IN` a text's CODE names, as their sources. Comments are
- * blanked first: a note saying where the way in is, like the `@unwired` reasons
- * beside the realistic path, is not a way in.
+ * A text with its comments blanked: a note saying where the way in is, like
+ * the `@unwired` reasons beside the realistic path, is not a way in.
  */
+function codeOf(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1');
+}
+
+/** Which of `WAYS_IN` a text's CODE names, as their sources. */
 function waysInOf(text: string): readonly string[] {
-  const code = text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const code = codeOf(text);
   return WAYS_IN.filter((pattern) => pattern.test(code)).map((pattern) => pattern.source);
 }
 
@@ -134,7 +138,11 @@ describe('the realistic world is offered only through the rider’s choice — A
     // offer turns the first half red; deleting the read, the second.
     const offer = readFileSync(join(APPS, OFFERED_FROM), 'utf8');
     expect(waysInOf(offer)).not.toEqual([]);
-    expect(offer).toMatch(/\breadRealisticWorldChoice\(/);
+    // In the CODE — #475's review: a comment naming the read satisfied this.
+    expect(codeOf(offer)).toMatch(/\breadRealisticWorldChoice\(/);
+    expect(codeOf('// readRealisticWorldChoice(storage)')).not.toMatch(
+      /\breadRealisticWorldChoice\(/,
+    );
   });
 
   it('is off unless the device holds exactly the choice the setting writes', () => {

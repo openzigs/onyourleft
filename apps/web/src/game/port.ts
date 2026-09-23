@@ -257,6 +257,11 @@ export interface GameRenderer {
    * did not load is D-7's fallback, and `realistic-assets.ts`
    * §`realisticWorldNotice` is what the rider is told.
    *
+   * ⚠️ **Asked once per RIDE, answered once per VISIT**: a world already
+   * loaded is answered `{ loaded: true }` at once and a load in flight is
+   * joined, because the world outlives the view and a reload would release it
+   * under one (`three-renderer.ts` §`loadRealisticWorldOnce`).
+   *
    * ⚠️ **Required rather than optional**, on `RiderMarker.crankAngle`'s
    * reasoning: an optional member nobody supplies is green in every gate here,
    * and a renderer that could not load the world would then offer a rider a

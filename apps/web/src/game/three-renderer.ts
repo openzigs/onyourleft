@@ -3955,6 +3955,44 @@ export async function loadRealisticWorld(
   }
 }
 
+/** The load a ride is waiting on, if one is in flight. @see loadRealisticWorldOnce */
+let realisticLoading: Promise<RealisticWorldOutcome> | undefined;
+
+/**
+ * The realistic world for a RIDE: the one already loaded, or the load already
+ * in flight, or a new one — never a second copy. #475's review.
+ *
+ * ⚠️ **`loadRealisticWorld` REPLACES a loaded world and releases the old one**,
+ * which is right for the owner's harness and wrong for a rider: the world is
+ * module state that outlives a view, so a second realistic ride in one visit
+ * builds a view that is already drawing the loaded world (`#applyWorld`), and a
+ * reload would then fetch and decode ~33 MB again, hold two copies while it
+ * did, and release the textures, geometries and materials that view was still
+ * drawing — and offline it would fail and tell the rider the world is not kept
+ * on the device while it sat in memory. So a ride asks through here, and a
+ * world that is loaded is answered at once.
+ *
+ * ⚠️ **A load in flight is JOINED rather than repeated**: a rider who ends a
+ * ride and starts another before ~33 MB have arrived would otherwise start a
+ * second load whose swap releases the first world under whichever view drew it.
+ * A load that FAILED leaves nothing loaded and nothing in flight, so the next
+ * ride tries again — which is D-7's fallback being per ride, not per visit.
+ *
+ * @param loaders the same seam `loadRealisticWorld` takes; only the call that
+ *   starts a load uses it, and a call that joins or finds a world ignores it.
+ */
+export function loadRealisticWorldOnce(
+  loaders: RealisticLoaders = THREE_LOADERS,
+): Promise<RealisticWorldOutcome> {
+  if (realisticWorld !== undefined) {
+    return Promise.resolve({ loaded: true });
+  }
+  realisticLoading ??= loadRealisticWorld(loaders).finally(() => {
+    realisticLoading = undefined;
+  });
+  return realisticLoading;
+}
+
 /** A load started, with a loader that throws rather than rejecting turned into a rejection. */
 function started<T>(load: () => Promise<T>): Promise<T> {
   try {
@@ -6304,5 +6342,8 @@ export const threeGameRenderer: GameRenderer = {
   },
   // #475: the one way the shipped app reaches the realistic world, and only
   // for a rider who chose it. @see GameRenderer.loadRealisticWorld
-  loadRealisticWorld: () => loadRealisticWorld(),
+  // ⚠️ Through `loadRealisticWorldOnce`, never the raw loader: a second
+  // realistic ride in one visit must reuse the world, not replace it under a
+  // view that is drawing it — #475's review.
+  loadRealisticWorld: () => loadRealisticWorldOnce(),
 };

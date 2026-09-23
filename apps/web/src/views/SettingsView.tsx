@@ -595,8 +595,12 @@ function GameWorldPanel({
 }): JSX.Element {
   const [chosen, setChosen] = useState(() => readRealisticWorldChoice(storage));
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
+  // ⚠️ `oyl-announce` for its switch's declared 24×24 target (`theme.css`
+  // §`.oyl-announce input[type='checkbox']`), as the Sounds panel carries it:
+  // without it this checkbox was a browser's own ~13 px, under WCAG 2.2 SC
+  // 2.5.8 — #475's review. `oyl-world` is the hook the tests find it by.
   return (
-    <section className="oyl-panel oyl-world" aria-labelledby="oyl-world-heading">
+    <section className="oyl-panel oyl-announce oyl-world" aria-labelledby="oyl-world-heading">
       <h2 id="oyl-world-heading">Game world</h2>
       <p className="oyl-muted">
         The trainer game draws a standard world unless you choose the realistic one: photographic

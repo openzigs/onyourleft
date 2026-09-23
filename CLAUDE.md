@@ -3716,7 +3716,7 @@ top of an issue **supersedes its body**.
 | Why a view is never built for a ride that ended before the renderer arrived | `apps/web/src/game/GameView.tsx` §"Not after this effect has been cleaned up", `apps/web/src/game/realistic-choice.test.tsx` |
 | How a realistic asset is made, where its input came from, and how to make it again byte for byte | `apps/web/tools/realistic/sources.ts`, `inputs.lock.json`, `process-assets.ts` §"`--check`", `ASSETS.toml` §derived keys, `scripts/check-repo-rules.sh` §`ASSET007` |
 | Why the Blender scripts run on one thread, and what an unordered set did to a shrub | `apps/web/tools/realistic/blender/process_tree.py` §"ONE thread" and §"An ordered de-duplication" |
-| What the realistic world may cost, and why every number is provisional | `apps/web/src/game/realistic-budget.ts`, validation 0002 Part Z |
+| What the realistic world may cost, what the soak re-set it from, and why nothing moved | `apps/web/src/game/realistic-budget.ts`, validation 0002 Part Z |
 | Why the photographic road barely shines, and what the full sheen did to the gradient cue | `apps/web/src/game/three-renderer.ts` §`ROAD_SHEEN`, `game.browser.spec.ts` §"the realistic world" |
 | Why every face of the photographic road is lit as facing up | `apps/web/src/game/three-renderer.ts` §`photographicRoadMaterial`, `terrain.ts` §`roadIndices` |
 | How bright the HDRI's environment is, and which way its sun faces | `apps/web/src/game/realistic-light.ts` §`environmentIntensity`, §`skyRotation` |

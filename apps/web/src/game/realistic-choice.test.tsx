@@ -250,6 +250,26 @@ describe('which world a ride draws — #475', () => {
     expect(told.at(-1)).toEqual(qualitySettings(0));
   });
 
+  it('does not hand realism back, or say a load failed, to a ride that already left it — #475’s review', async () => {
+    localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
+    await ride();
+    // Hot while the world is still arriving: out of realism for the ride.
+    const hot = FRAME_MS_REDUCE_ABOVE + 10;
+    await frames(hot, SUSTAINED_SAMPLES + 2);
+    await frames(hot, SUSTAINED_SAMPLES + 2);
+    expect(told.at(-1)).toEqual(qualitySettings(0));
+    expect(mounted?.container.textContent).toContain(REALISTIC_WORLD_LEFT_NOTICE);
+    const before = told.length;
+    // A load that fails now must not replace the notice the rider has with
+    // one about a world the ride is no longer asking for.
+    await settleLoad(OFFLINE);
+    expect(told.length).toBe(before);
+    expect(mounted?.container.textContent).toContain(REALISTIC_WORLD_LEFT_NOTICE);
+    const said = realisticWorldNotice(OFFLINE, false);
+    expect(said).toBeDefined();
+    expect(mounted?.container.textContent).not.toContain(said);
+  });
+
   it('does not touch a ride that ended before the world arrived', async () => {
     localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
     await ride();
