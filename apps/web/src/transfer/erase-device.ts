@@ -130,29 +130,22 @@ export const ERASE_REMOVES: readonly string[] = [
 export const ERASE_CANNOT_REACH: readonly string[] = [
   'files you have already exported — they are yours, and they are wherever you put them',
   'a ride you have already shared with somebody, which is a copy they hold',
-  // ⚠️ **ADR 0029 D-4's two lines are NOT here, and their absence is the rule
-  // this list states about itself being obeyed.** The ADR writes them:
+  // ⚠️ **ADR 0029 D-4's first line, verbatim, since #387 — and NOT its second.**
+  // This list said until #387 that neither was here, because nothing in the
+  // build could send a picture anywhere, and that #387 *"lands both lines"*.
+  // It lands one. #387 sends a picture to the rider's OWN computer, at an
+  // address they typed and switched on (`camera/analysis-endpoint.ts`), so the
+  // first line is now true and is said before the rider presses anything:
   //
   //   > a photograph you sent to your own machine to be analysed, which is a
   //   > copy that machine holds
-  //   > a photograph you sent to a hosted model, which is a copy that service
-  //   > holds
   //
-  // Both describe a frame that **left the device**, and nothing in this build
-  // can send one anywhere: `privacy/no-network.test.ts` asserts this client
-  // contains no `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource` or
-  // `sendBeacon` at all. Putting them here now would be this list ageing into a
-  // lie in the *frightening* direction — telling a rider that copies of their
-  // photographs are on machines that have never received one.
-  //
-  // The header above is the rule: *"If one stops being true — the day there is
-  // an instance, or a second device — the line changes in the same pull request
-  // that makes it false."* #387 is that pull request, it is the one that lands
-  // the first byte, and it lands both lines.
-  //
-  // What IS true today and is worth a rider reading before they press
-  // anything: a picture that never left still had a moment on this device's
-  // disk, and an erase is what removes it — which is the line above it.
+  // The second — *"a photograph you sent to a hosted model"* — is still false:
+  // the hosted path is not built, because ADR 0029's 2026-09-23 amendment left
+  // whether the policy may cover it to the owner, and the address rule refuses
+  // anything off the rider's own network. Putting it here would be this list
+  // ageing into a lie in the frightening direction, which the header forbids.
+  'a photograph you sent to your own machine to be analysed, which is a copy that machine holds',
   'a photograph you copied off this device yourself, which is wherever you copied it to',
 ];
 

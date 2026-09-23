@@ -51,6 +51,8 @@ import {
   canvasFrameGrabber,
   platformMediaDevices,
 } from './camera/browser-camera';
+import { readAnalysisEndpoint } from './camera/analysis-endpoint';
+import { riderAnalysisPort } from './camera/analysis-transport';
 import { keepThisRide } from './camera/keep';
 import { shellCameraNotice } from './camera/shell-camera';
 import { CameraController } from './camera/session';
@@ -741,8 +743,13 @@ async function buildCameraController(): Promise<CameraController | undefined> {
     newFrameId: () => cameraFrameId(globalThis.crypto.randomUUID()),
     now: browserClock,
   });
+  // #387. The rider's own computer, looked up on every press rather than once
+  // here, so switching it off on the Camera screen stops the next request.
+  // With nothing saved this answers `undefined` and nothing can be sent.
+  const analysis = (): ReturnType<typeof riderAnalysisPort> =>
+    riderAnalysisPort(readAnalysisEndpoint());
   if (!isNativeShell(platformCapacitor())) {
-    return new CameraController({ port, keep });
+    return new CameraController({ port, keep, analysis });
   }
   // #383. The **only** thing the shell changes is what a rider is told when
   // Android refuses: "open this device's settings" is right for a browser and
@@ -757,6 +764,7 @@ async function buildCameraController(): Promise<CameraController | undefined> {
   return new CameraController({
     port,
     keep,
+    analysis,
     notices: (kind) => shellCameraNotice(kind, mobile.ANDROID_CAMERA_DENIED),
   });
 }

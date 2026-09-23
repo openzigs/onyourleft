@@ -60,6 +60,9 @@ import {
 } from '@onyourleft/domain';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { analysisRequestBody } from '../camera/analysis-transport';
+import { capturedFrame } from '../camera/frame';
+import { cleanFrameBytes } from '../camera/testing';
 import { sharedTrack } from '../detail/privacy';
 import { routeShare } from '../routes/share';
 import { exportActivity } from '../transfer/export-activity';
@@ -118,6 +121,18 @@ const BOUNDARIES: readonly Boundary[] = [
     direction: 'retained',
   },
   {
+    module: 'camera/analysis-transport.ts',
+    what: "one picture and a fixed question, sent to the rider's own computer on a press (#387)",
+    // ⚠️ Departing, and the first departing boundary that crosses a network.
+    // ADR 0029 D-9's table: *"A frame to the rider's own machine for analysis —
+    // departing. It is leaving the athlete's control."* The walk below finds no
+    // coordinate in any field around the picture; what it cannot do is look
+    // inside the picture, which is why D-9 re-encodes it at capture — see
+    // `boundaries.ts`' own header, and `analysis-transport.test.ts` for the key
+    // set the body is pinned to.
+    direction: 'departing',
+  },
+  {
     module: 'transfer/export-activity.ts',
     what: "the athlete's own ride, written to a file they asked for",
     // ⚠️ Not a mistake, and the one entry in this table worth reading twice.
@@ -149,11 +164,17 @@ function boundaryModulesOnDisk(): readonly string[] {
       // that had been in the tree the whole time. A registry that claims to
       // fail closed and does not is worse than no registry, because #218's
       // pull request said it did.
+      // ⚠️ And `*-transport.ts` since #387: a module that sends something off
+      // the device is a boundary by definition, and a name that says so is
+      // the only signal this walk has. `privacy/no-network.test.ts` is the
+      // stronger check — it pins WHICH module may send at all — and this one
+      // makes that module declare which way it faces.
       if (
         entry === 'share.ts' ||
         entry === 'privacy.ts' ||
         entry === 'export.ts' ||
-        entry.startsWith('export-')
+        entry.startsWith('export-') ||
+        entry.endsWith('-transport.ts')
       ) {
         found.push(`${prefix}${entry}`);
       }
@@ -298,6 +319,37 @@ describe('a departing payload carries no coordinate inside a privacy zone', () =
     expect(shared.segments).toStrictEqual([]);
     expect(shared.startsAtIndex).toBeUndefined();
     expect(coordinatesIn(shared)).toStrictEqual([]);
+  });
+});
+
+describe('the picture sent to the rider’s own computer carries no coordinate beside it — #387', () => {
+  it('has none in any field, even when the ride it came from had a home zone', () => {
+    const frame = capturedFrame({
+      bytes: cleanFrameBytes(2048),
+      mediaType: 'image/jpeg',
+      width: 640,
+      height: 480,
+    });
+    const body = analysisRequestBody('a-model', { frame, question: 'connection-check' });
+    // Departing: no coordinate may lie inside a zone — and there is no
+    // coordinate at all, which is the stronger statement and the true one.
+    expect(coordinatesIn(body)).toStrictEqual([]);
+  });
+
+  it('would find one if a field carried it — the walk is not blind to this payload', () => {
+    // The control: the same body with a position added where a careless change
+    // would put one. Without this, an empty walk proves only that the walk ran.
+    const frame = capturedFrame({
+      bytes: cleanFrameBytes(2048),
+      mediaType: 'image/jpeg',
+      width: 640,
+      height: 480,
+    });
+    const body = {
+      ...analysisRequestBody('a-model', { frame, question: 'connection-check' }),
+      where: { latitude: 51.5, longitude: -0.12 },
+    };
+    expect(coordinatesIn(body)).toHaveLength(1);
   });
 });
 

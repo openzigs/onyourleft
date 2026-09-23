@@ -166,6 +166,17 @@ describe('what the About page claims about the network — #404, then #408', () 
     expect(text).toContain(DATA_IS_LOCAL);
     expect(text).toContain('nothing is uploaded');
   });
+
+  it('names the one thing the app can send, and to whose computer — #387', async () => {
+    // The About page is the in-app half of the privacy policy. It said
+    // "Nothing is collected" until #387 gave the client one network call, and
+    // a page that went on saying so would be false for any rider who set up
+    // their own computer.
+    const text = await aboutText();
+    expect(text).toContain('Nothing is sent to us');
+    expect(text).toContain('a computer of your own');
+    expect(text).not.toContain('Nothing is collected');
+  });
 });
 
 describe('what the About page says about a ride the app closed on — #411', () => {

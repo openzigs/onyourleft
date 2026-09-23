@@ -60,6 +60,8 @@ import {
   canvasFrameGrabber,
   platformMediaDevices,
 } from '../src/camera/browser-camera';
+import { endpointDecision } from '../src/camera/analysis-endpoint';
+import { riderAnalysisPort } from '../src/camera/analysis-transport';
 import { CameraController } from '../src/camera/session';
 import { Button } from '../src/design/Button';
 import { AppShell } from '../src/shell/AppShell';
@@ -294,6 +296,51 @@ async function probeTheRealCamera(): Promise<unknown> {
   }
 }
 
+/**
+ * #387's real-engine probe: a real camera, a real capture, the REAL transport
+ * and the platform's own `fetch`, sent to whatever address the spec hands in.
+ *
+ * `address === null` is the control — a controller with nothing configured —
+ * and the spec asserts that it produces no request at all. Everything else is
+ * the shipping chain `main.tsx` builds, with the endpoint decided by the same
+ * `endpointDecision` the Camera screen uses.
+ *
+ * What comes back is the outcome's KIND and nothing of the answer's words.
+ */
+async function probeTheAnalysis(address: string | null): Promise<unknown> {
+  const devices = platformMediaDevices();
+  if (devices === undefined) {
+    return { asked: false, why: 'no mediaDevices in this browser' };
+  }
+  const endpoint =
+    address === null
+      ? undefined
+      : endpointDecision({ address, model: 'harness-model', switchedOn: true }).endpoint;
+  const controller = new CameraController({
+    port: browserCameraPort({
+      devices,
+      grabber: canvasFrameGrabber(),
+      secureContext: globalThis.isSecureContext,
+    }),
+    schedule: () => () => undefined,
+    analysis: () => riderAnalysisPort(endpoint),
+  });
+  controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+  await controller.turnOn();
+  try {
+    const outcome = await controller.askAboutPicture('connection-check').outcome;
+    return {
+      asked: true,
+      configured: endpoint !== undefined,
+      kind: outcome.kind,
+      failure: outcome.kind === 'failed' ? outcome.failure : undefined,
+      captured: controller.state().captured,
+    };
+  } finally {
+    controller.turnOff();
+  }
+}
+
 function main(): void {
   const host = document.querySelector('#shell');
   if (host === null) {
@@ -377,6 +424,11 @@ function main(): void {
   // #382's real-engine probe, reachable by name from the spec. @see probeTheRealCamera
   (globalThis as unknown as { __oylCamera?: () => Promise<unknown> }).__oylCamera =
     probeTheRealCamera;
+
+  // #387's real-engine probe. @see probeTheAnalysis
+  (
+    globalThis as unknown as { __oylAnalysis?: (address: string | null) => Promise<unknown> }
+  ).__oylAnalysis = probeTheAnalysis;
 
   document.documentElement.setAttribute(READY_ATTRIBUTE, 'true');
 }

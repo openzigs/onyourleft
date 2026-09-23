@@ -116,9 +116,11 @@ export function AboutView(): JSX.Element {
 
       <h2>Privacy</h2>
       <p>
-        Nothing is collected. There is no account, no analytics and no server to send anything to,
+        Nothing is sent to us. There is no account, no analytics and no server to send anything to,
         and the app contains no code that transmits your rides, your heart rate or your position
-        anywhere.
+        anywhere. The one thing it can send is a picture from the camera, to a computer of your own
+        on your own network — and only if you set that computer up on the Camera page, switch it on,
+        and press the button that sends the picture.
       </p>
       <p>
         {/* target="_blank" so that following it inside the Android shell hands

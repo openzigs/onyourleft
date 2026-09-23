@@ -214,7 +214,7 @@ export const REVIEWED_PERMISSIONS: readonly ReviewedPermission[] = [
     maxSdkVersion: null,
     flags: null,
     contributor: 'ours',
-    why: '#383. A rider points a phone at themselves on a trainer and takes still pictures on this device. It is NOT for scanning, not for a QR code and not for video calling; nothing is uploaded, and the frame is thrown away once it has been looked at unless the rider turns on this ride’s keep (ADR 0029 D-2). Unbounded because a camera is not a legacy permission: there is no API level at which it stops being needed. The uses-feature beside it is required="false" so the app stays installable on a device with no camera — see REVIEWED_FEATURES',
+    why: '#383. A rider points a phone at themselves on a trainer and takes still pictures on this device. It is NOT for scanning, not for a QR code and not for video calling; nothing is uploaded on the app’s own initiative — since #387 one picture can be sent, on a press, to a computer of the rider’s own that they configured on their own network and switched on — and the frame is thrown away once it has been looked at unless the rider turns on this ride’s keep (ADR 0029 D-2). Unbounded because a camera is not a legacy permission: there is no API level at which it stops being needed. The uses-feature beside it is required="false" so the app stays installable on a device with no camera — see REVIEWED_FEATURES',
   },
   {
     name: 'android.permission.FOREGROUND_SERVICE',

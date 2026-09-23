@@ -92,7 +92,13 @@ apps/                 AGPL-3.0-or-later, without exception
                         consent.ts is D-5's, VERBATIM, and consent.test.ts reads
                         the ADR off disk to keep it so. No platform camera type
                         leaves the directory — boundary.test.ts, in the shape
-                        packages/sensors states about Web Bluetooth
+                        packages/sensors states about Web Bluetooth. Since #387
+                        it also holds the ONE module in the client permitted a
+                        network call — analysis-transport.ts, one picture to a
+                        computer of the RIDER's that they configured on their
+                        own network and switched on — with the port it
+                        implements, the address rule, the answer read as
+                        untrusted input, and the deadline in useAnalysis.ts
     src/credits/        the in-app attribution, generated from ASSETS.toml (#358):
                         the reader for the manifest's own TOML subset, which
                         entries are credited and why, and the one line that
@@ -986,6 +992,7 @@ catch a duplicate: two wired modules are both wired.**
 | The export (D-3) | `transfer/export-everything.ts` §`CameraManifest` — every kept picture as its own file, untrimmed, named in the manifest with what an activity file cannot carry | `export-everything.test.ts`, including that no ride file contains the picture's bytes |
 | The erase (D-4) | `transfer/erase-device.ts` — `ERASE_REMOVES` names the pictures **and everything derived from one** | `erase-device.test.ts`, reading back through a fresh connection |
 | The walk's blindness (D-9) | `privacy/boundaries.ts`'s header, and it is an acceptance criterion rather than a courtesy | `boundaries.test.ts` §"the walk cannot see inside image bytes", which demonstrates it rather than describing it |
+| The one network call (#387, D-6, D-7, D-8, D-10) | `camera/analysis-port.ts` the seam; `analysis-endpoint.ts` nothing by default and only an address on the rider's own network; `analysis-transport.ts` a `POST`, no cache, no credentials, **no redirect**, no referrer; `analysis-response.ts` the answer as untrusted input; `useAnalysis.ts` the deadline, and the words dropped before anything renders | `privacy/no-network.test.ts` permits exactly one `fetch`, in that one file, with fixtures that go red for any other; `analysis-session.test.ts` for "no configuration, no request"; `analysis-safety.test.ts` for the trainer; `analysis-boundary.test.ts` for the transport types; `shell.browser.spec.ts` §"the rider’s own computer, in a real engine" for the origin |
 | Presence (#390) | `camera/presence.ts` — two 32 × 24 brightness grids 150 ms apart, compared and dropped, every two seconds; `present`, `absent` after 15 s of unbroken stillness, or `unknown`. Through the **same** session and consent, off at every switch-on, and given up on the ladder's first step down (`quality.ts` §`QualitySettings.presence`) | `presence.test.ts` for the three states; `presence-session.test.ts` for the one port, the one consent and the indicator; `boundary.test.ts` holds the grid inside `camera/`; `game.browser.spec.ts` §"what a presence check costs" publishes the combined cost |
 
 ⚠️ **The camera never pauses a ride — it takes movement away, and the recording engine pauses.**
@@ -1014,6 +1021,43 @@ and the one every other pause already sends. It is also why a **false** `absent`
 picture (a muted track, a stalled webcam, a hidden tab) used to read as a still room, so
 `presence.ts` §`observePair` now reads a pair of one frame as `unreadable`, and `browser-camera.ts`
 refuses a sample from a muted track or a hidden page.
+
+### The one network call: a picture to the rider's own computer (#387)
+
+⚠️ **Until #387 this client contained no network primitive at all, and a reviewer who remembers
+`no-network.test.ts` asserting that is reading the old file.** The owner amended the promise on
+2026-09-23 (ADR 0029 §Amendments, Q1) to *"no network except a local endpoint the rider configured and
+switched on"*, and #387 built exactly that and nothing wider. `docs/privacy-policy.md`,
+`apps/mobile/src/android/data-safety.ts` (Photos and videos: collected, optional, not shared) and the
+About page changed in the same pull request.
+
+**The new origin, reconciled with the old ones.** Before #387 the only origins this client could
+contact were its own and a configured basemap host — `map/basemap.ts` §`styleOrigins` for what is
+declared, `map.browser.spec.ts` for what is contacted. The analysis adds exactly one more: **the
+address the rider typed**, which is not in the map's context (the style names no analysis address,
+and the transport names no map), so neither of those gates changed. It has its own pair instead:
+`analysis-endpoint.ts` decides what may be declared — only an address that is on the rider's own
+network **by its spelling**, and nothing by default — and `shell.browser.spec.ts` §"the rider’s own
+computer, in a real engine" records every request a real Chromium makes and requires the only one
+leaving the harness origin to be the one `POST`, with a control that configures nothing and must
+contact nothing.
+
+**The transport decision, restated where the code is**, because ADR 0029 D-6 is where it was made
+and a module header is where a change would be proposed:
+
+| Transport | Ruling |
+|---|---|
+| Plain LAN | **the default** — the phone and the machine are in the same room during an indoor ride. ⚠️ Plain `http:` is **not encrypted on the way**, and the rider-facing document says so |
+| WireGuard-class overlay (Tailscale, NetBird, WireGuard) | **permitted** for the remote case; the relay forwards ciphertext. Its `100.64.0.0/10` peers are accepted by the address rule, and nothing else is needed |
+| **Cloudflare Tunnel** | ⚠️ **rejected for this payload, by name** — Cloudflare terminates TLS at its edge, so a photograph of the rider at home would be plaintext on a third party's infrastructure on every capture. The address rule refuses its public names anyway |
+| WebRTC | **out** — it needs signalling infrastructure, which is a server (owner decision D6) |
+| A hosted model (D-7) | ⚠️ **not built.** The owner's sentence says *local*; ADR 0029's amendment leaves whether the policy may gain a second exception to the owner. The address rule refuses a public address, so a rider cannot reach one by typing its URL |
+
+⚠️ **Unverified on a device**: Chromium relaxes mixed content for a private-IP or `.local` target
+once its Local Network Access permission is granted, and the transport annotates each request with
+`targetAddressSpace`; whether the Android shell's WebView (`allowMixedContent: false`) reaches a
+plain-`http:` LAN address at all has not been measured. `docs/analysis-on-your-own-computer.md` says
+so to the rider.
 
 ⚠️ **The interface and both implementations are in `apps/web`, and that is CLAUDE.md §4h rather than
 an oversight.** `apps/mobile/capacitor.config.ts` sets `webDir: '../web/dist'`, so a capture

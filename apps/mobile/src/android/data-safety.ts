@@ -43,6 +43,13 @@ export interface DataSafetyAnswer {
   readonly collected: boolean;
   /** Whether it is transferred to a third party. */
   readonly shared: boolean;
+  /**
+   * Whether collecting it is **optional** — Play's own word: *"a user has
+   * control over its collection and can use the app without providing it."*
+   * Absent on a row that is not collected at all, where the question does not
+   * arise. #387.
+   */
+  readonly optional?: boolean;
   /** Why the answer is what it is. Read in review; never asserted. */
   readonly why: string;
 }
@@ -50,13 +57,19 @@ export interface DataSafetyAnswer {
 /**
  * The declaration filed for this app.
  *
- * ⚠️ Every row is `collected: false`, and that is a statement about the
- * PRODUCT, not a convenience: Phase 1 has no server, no account and no
- * analytics (CLAUDE.md §1, owner decision D6), and `apps/web/src` contains no
- * `fetch`, `XMLHttpRequest`, `WebSocket` or `sendBeacon` at all. Play's
- * definition of "collected" is data transferred off the device; a ride the
- * athlete exports to a file themselves is not a collection, and neither is a
- * measurement written to IndexedDB on the phone.
+ * ⚠️ Every row but one is `collected: false`, and that is a statement about
+ * the PRODUCT, not a convenience: Phase 1 has no server, no account and no
+ * analytics (CLAUDE.md §1, owner decision D6). Play's definition of
+ * "collected" is data transferred off the device; a ride the athlete exports
+ * to a file themselves is not a collection, and neither is a measurement
+ * written to IndexedDB on the phone.
+ *
+ * ⚠️ **The one is Photos and videos, since #387, and this paragraph said
+ * "every row" until then.** `apps/web/src` now contains exactly one network
+ * call — `camera/analysis-transport.ts`, pinned by
+ * `privacy/no-network.test.ts` — which sends one picture to a computer the
+ * rider configured on their own network and switched on. That is data
+ * transferred off the device, so it is collected; see the row.
  *
  * ⚠️ The health rows are here because Play's Health Content and Services policy
  * covers apps that are not primarily health apps — its own example is a game
@@ -101,39 +114,35 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     why: 'no analytics SDK, no crash reporter and no telemetry of any kind is linked into this app',
   },
   {
-    // ⚠️ **The row #383 added, and it is a RE-READ recorded rather than an
-    // answer changed.**
+    // ⚠️ **Re-answered by #387, and the answer CHANGED — collected: true.**
+    // A reviewer who remembers this row answering `false` is reading #383's
+    // file, which said in terms that the answer would change "on the day a
+    // frame first leaves" and that #387 was that day. It is: a picture can now
+    // be sent to the rider's own computer, and Play's definition of
+    // *collected* is transmission off the device — Google Play Console Help,
+    // "Provide information for Google Play's Data safety section", read
+    // 2026-09-23. None of its exemptions fits honestly: the request is not
+    // end-to-end encrypted on a plain-`http:` home network, and the
+    // *ephemeral processing* exemption describes the developer's own handling,
+    // not a machine this project never sees.
     //
-    // The manifest gained `CAMERA` (#383) and the client gained a camera
-    // (#382), so the question "does this app collect photos or videos?" now has
-    // a subject where before it had none. Play's definition of *collected* is
-    // **data transferred off the device**, and nothing here transfers anything:
-    // `apps/web/src/privacy/no-network.test.ts` asserts the client contains no
-    // `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource` or `sendBeacon` at
-    // all, and it is green on the commit that added the camera. A picture is
-    // held in memory for one analysis and thrown away — ADR 0029 D-2, which the
-    // owner ratified on 2026-09-23 — unless the rider turns on this ride's
-    // keep, and then it is a row in IndexedDB on the phone.
+    // ⚠️ **`shared: false`**, and the reasoning is two of Play's own words.
+    // *Sharing* is *"transferring user data collected from your app to a third
+    // party"*, and the destination is the rider's own computer; and Play
+    // exempts a transfer *"based on a specific user-initiated action, where
+    // the user reasonably expects the data to be shared"*, which a press of
+    // "Send one picture" to an address the rider typed is. ⚠️ **ADR 0029's
+    // amendment names `shared: yes` for the HOSTED path**, which is a third
+    // party by any reading — that path is not built (the address rule refuses
+    // anything off the rider's own network), and building it re-files this row.
     //
-    // ⚠️ **So the answers are `false`, and the state that would change them is
-    // named rather than left to be discovered.** ADR 0029's 2026-09-23
-    // amendment: *"**Photos and videos** becomes a row. Under Play's taxonomy
-    // the honest answers are collected: yes / shared: yes for the hosted path,
-    // optional, user can request deletion — and the shared answer is the one
-    // that changes the listing's face."* That is
-    // [#387](https://github.com/openzigs/onyourleft/issues/387)'s pull request,
-    // which lands the first byte, this re-filing, and the privacy-policy change
-    // **together or not at all** — #377's epic criterion that the declaration is
-    // true of the shipped app *at every point, not only at the end*.
-    //
-    // The row is declared rather than omitted for the reason the two health
-    // rows above are: this repository insists on telling *"we checked and
-    // nothing changed"* apart from *"nobody looked"*, and only one of those has
-    // a row in it.
+    // **`optional: true`**: off until the rider sets up a computer and
+    // switches it on, and the app works in full without it.
     dataType: 'Photos and videos',
-    collected: false,
+    collected: true,
     shared: false,
-    why: 'the camera (#382, #383) takes still pictures on the device and nothing transmits them — the client contains no network primitive at all. A picture is discarded after it has been looked at unless the rider turns on this ride’s keep (ADR 0029 D-2), and a kept one is a row in IndexedDB on the phone. This answer becomes collected: yes / shared: yes on the day a frame first leaves, which is #387 and which re-files this declaration in the same pull request',
+    optional: true,
+    why: 'a still picture from the camera (#382, #383) is sent — only when the rider presses the button that sends it — to one computer the rider configured at an address on their own network and switched on (#387). Nothing is set up by default and nothing is sent until it is. It is not sent to this project, which runs no server, and not to any third party: an address that is not on the rider’s own network is refused. A picture is otherwise discarded after it has been looked at unless the rider turns on this ride’s keep (ADR 0029 D-2)',
   },
   {
     dataType: 'Device or other IDs',
