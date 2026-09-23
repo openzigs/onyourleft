@@ -25,6 +25,19 @@
  * `main.tsx`. What is covered is everything after it: `ride/controller.test.ts`
  * §"#390" hands a port to a real controller and watches a real recorder pause.
  *
+ * ## ⚠️ What the answer can send a trainer (#516)
+ *
+ * **One thing: the ease.** `absent` takes movement away, the recording engine
+ * pauses itself, the ride controller pauses a running workout with it, and a
+ * paused workout writes the machine's own Supported Power Range minimum —
+ * #441's ease. #515 said presence did not reach the trainer; through that
+ * chain it does. The direction is allowed because it is the safe one — less
+ * resistance at a bike nobody is on — and because it is exactly what every
+ * other pause already sends. No answer raises a target, sends a Stop or a
+ * Reset, or requests control: `unknown` and `present` write exactly what a
+ * ride with no camera writes, and `ride/controller.test.ts` §"#516" holds all
+ * three as octets on the #44 simulated trainer.
+ *
  * The method carries a distinctive name for the reason `camera-port.ts` gives:
  * `check-wiring.mjs` matches member names as names, so a `presence()` would be
  * kept alive by any other `presence` anywhere in the client.

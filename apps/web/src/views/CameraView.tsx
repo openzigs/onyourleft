@@ -182,6 +182,12 @@ function Camera({ controller }: { readonly controller: CameraController }): JSX.
     () => controller.state().presence,
     () => 'unknown' as const,
   );
+  /** #516: whether the quality ladder still lets presence run, for the sentence. */
+  const presenceAllowed = useSyncExternalStore(
+    (listener) => controller.subscribe(listener),
+    () => controller.state().presenceAllowed,
+    () => true,
+  );
 
   const [acknowledged, setAcknowledged] = useState(false);
   const [kept, setKept] = useState<number | undefined>(undefined);
@@ -377,7 +383,7 @@ function Camera({ controller }: { readonly controller: CameraController }): JSX.
               </label>
             </p>
           ) : null}
-          {live && watchingPresence ? <p>{presenceSentence(presence)}</p> : null}
+          {live && watchingPresence ? <p>{presenceSentence(presence, presenceAllowed)}</p> : null}
           {outcome === undefined ? null : (
             <StatusMessage tone={outcome.taken && !outcome.keepFailed ? 'success' : 'warning'} live>
               {/*

@@ -1000,7 +1000,20 @@ with its own `automatic` reason, and is woken by its own rule when the rider com
 a dark room, a throttled phone, a camera that is off — changes nothing. The ride controller hands the
 port (`ride/presence-port.ts`) to every recorder it builds or recovers and does nothing else with
 it; `recording/one-pauser.test.ts` holds that line by line, because a controller that already has a
-`pause()` is one `if` away from being a second pauser.
+`pause()` is one `if` away from being a second pauser — and, since
+[#516](https://github.com/openzigs/onyourleft/issues/516), enumerates every production `.pause(` and
+`.resume(` call so a second pauser is red whatever vocabulary it uses.
+
+⚠️ **The camera's answer can ease a trainer, and #390's pull request said it could not.** The
+engine's pause pauses a running workout, and a paused workout writes the machine's own Supported
+Power Range minimum (#441's ease). So `absent` reaches the trainer as one Set Target Power at the
+floor; `unknown` and `present` write exactly what a ride with no camera writes; and no answer raises
+a target, sends a Stop or a Reset, or requests control — `ride/controller.test.ts` §"#516" holds all
+of that as octets on the #44 simulated trainer. The direction is allowed because it is the safe one
+and the one every other pause already sends. It is also why a **false** `absent` matters: a frozen
+picture (a muted track, a stalled webcam, a hidden tab) used to read as a still room, so
+`presence.ts` §`observePair` now reads a pair of one frame as `unreadable`, and `browser-camera.ts`
+refuses a sample from a muted track or a hidden page.
 
 ⚠️ **The interface and both implementations are in `apps/web`, and that is CLAUDE.md §4h rather than
 an oversight.** `apps/mobile/capacitor.config.ts` sets `webDir: '../web/dist'`, so a capture

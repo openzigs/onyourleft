@@ -32,12 +32,22 @@
  * - `absent` — nothing has moved, in a picture the camera could read, for
  *   {@link PRESENCE_ABSENCE_MILLISECONDS} without a break.
  * - `unknown` — everything else: too dark, washed out, a featureless wall, a
- *   camera that is off, refused, throttled or has not answered lately.
+ *   camera that is off, refused, throttled, frozen or has not answered lately.
  *
  * ⚠️ **`unknown` is the answer that changes nothing**, and every failure here
  * lands on it rather than on `absent`: a rider mid-interval must not be paused
  * because somebody switched a light off. `recording/channels.ts`
  * §`presenceAwareMovement` is where that becomes behaviour.
+ *
+ * ⚠️ **`absent` reaches the trainer**, which is why a false one matters more
+ * than a missed one (#516). The pause it causes pauses a running workout, and
+ * a paused workout eases the machine to its own power floor — so a camera that
+ * reads a pedalling rider as absent eases them to the floor mid-interval and
+ * keeps them there. A frozen picture is the likeliest way to get one:
+ * {@link observePair} reads a pair of one frame as `unreadable`, and
+ * `browser-camera.ts` refuses a sample from a muted track or a hidden page.
+ * `ride/presence-port.ts` §"What the answer can send a trainer" says why the
+ * ease is the one direction allowed.
  *
  * ## ⚠️ What is NOT measured, said before anybody quotes a threshold
  *
@@ -112,9 +122,20 @@ export const PRESENCE_ABSENCE_MILLISECONDS = 15_000;
  *
  * Three missed checks. ⚠️ **This is what stops a stale `absent` pausing a ride
  * for ever**: a camera that stops being sampled — turned off, throttled by the
- * quality ladder, a tab in the background — leaves its last observation
+ * quality ladder, a timer that stops firing — leaves its last observation
  * behind, and a reading of that observation a minute later would be the
  * camera's opinion of a room it is no longer looking at.
+ *
+ * ⚠️ **A tab in the background is NOT that case, and this comment used to say
+ * it was** (#516). Chrome keeps a hidden tab's `setInterval` firing — at once a
+ * second or slower, and only after about five minutes does intensive
+ * throttling stretch it to once a minute — so a two-second check goes on
+ * producing FRESH observations, and staleness never arrives. What those
+ * observations would have been is a frozen picture: Chrome may stop decoding a
+ * hidden tab's video. So a hidden tab is answered where it happens instead:
+ * `browser-camera.ts` refuses the sample while the document is hidden or the
+ * track is muted, and {@link observePair} reads a pair of one frame as
+ * `unreadable` — both `unknown`, which pauses nothing.
  */
 export const PRESENCE_STALE_MILLISECONDS = 3 * PRESENCE_CHECK_MILLISECONDS;
 
@@ -196,6 +217,20 @@ export function lumaGrid(rgba: ArrayLike<number>, columns: number, rows: number)
  * light switched off between the two samples changes every cell and would
  * otherwise read as the biggest movement of the ride. The order is what makes
  * "the room went dark" `unknown` rather than `present` or `absent`.
+ *
+ * ⚠️ **A pair of the SAME frame is `unreadable`, never `still`** — #516. A
+ * `<video>` whose source has stopped delivering frames goes on drawing the
+ * last one it presented, so a muted track, a stalled webcam or a hidden tab
+ * would hand this two identical grids of a lit room: they pass the dark and
+ * flat checks, compare equal, and fifteen seconds later a pedalling rider is
+ * `absent` and their ride pauses. {@link LuminanceGrid.frame} is how the
+ * sampler says where the source had got; a second grid that is no further on
+ * than the first measured nothing at all. The same is true of a camera
+ * running below about seven frames a second, whose two samples 150 ms apart
+ * can land on one frame — and `unreadable` is the honest answer there too,
+ * because a still picture of a moving rider is exactly what such a pair would
+ * show. Where the platform cannot say, `frame` is `undefined` and nothing is
+ * inferred.
  */
 export function observePair(first: LuminanceGrid, second: LuminanceGrid): PresenceObservation {
   if (
@@ -204,6 +239,9 @@ export function observePair(first: LuminanceGrid, second: LuminanceGrid): Presen
     first.values.length !== second.values.length ||
     first.values.length === 0
   ) {
+    return 'unreadable';
+  }
+  if (first.frame !== undefined && second.frame !== undefined && second.frame <= first.frame) {
     return 'unreadable';
   }
   if (!readable(first) || !readable(second)) {
@@ -309,14 +347,29 @@ export function presenceAt(tracker: PresenceTracker, now: number): RiderPresence
  *
  * ⚠️ **`unknown` says what it does NOT do**, because that is the thing a rider
  * would otherwise worry about: a dark room does not pause their ride.
+ *
+ * Two corrections, both #516:
+ *
+ * - **`absent` does not promise a pause.** This screen does not know whether a
+ *   ride is recording — nothing is, on a device where the rider opened the
+ *   Camera screen to try the switch — and it used to say *"your ride will pause
+ *   shortly"* regardless. It now says what the answer does to a ride IF there
+ *   is one.
+ * - **A check the quality ladder took away is not "cannot tell YET".** Once a
+ *   game ride has stepped the ladder down, `presenceAllowed` stays `false` for
+ *   the rest of the tab's life (#514 owns the reset), so *"yet"* promised an
+ *   answer that was not coming. `presenceAllowed` is on the camera's state
+ *   already; the screen passes it.
  */
-export function presenceSentence(presence: RiderPresence): string {
+export function presenceSentence(presence: RiderPresence, presenceAllowed = true): string {
   switch (presence) {
     case 'present':
       return 'Somebody is on the bike.';
     case 'absent':
-      return 'Nobody has moved on the bike for a while, so your ride will pause shortly.';
+      return 'Nobody has moved on the bike for a while. If a ride is recording, it will pause shortly.';
     case 'unknown':
-      return 'The camera cannot tell yet whether anybody is on the bike, so it will not pause your ride.';
+      return presenceAllowed
+        ? 'The camera cannot tell yet whether anybody is on the bike, so it will not pause your ride.'
+        : 'The check for somebody on the bike has stopped to spare this device during a ride, so the camera will not pause your ride.';
   }
 }

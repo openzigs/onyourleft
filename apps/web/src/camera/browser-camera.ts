@@ -65,6 +65,16 @@ export interface VideoTrackLike {
   /** `'live'` while the camera is running; `'ended'` once it is not. */
   readonly readyState: string;
   /**
+   * `true` while the track is live but delivering no frames — #516.
+   *
+   * ⚠️ **`readyState` stays `'live'` through this**, which is why it is read
+   * separately: the operating system suspending the camera, or another
+   * application taking it, mutes the track rather than ending it, and the
+   * `<video>` goes on drawing the last frame it had. Optional, because a
+   * double that says nothing about it is a track that is not muted.
+   */
+  readonly muted?: boolean;
+  /**
    * ⚠️ `stop`, not `stopCamera` — this mirrors `MediaStreamTrack`, whose method
    * is called `stop`, and a name of our own would stop the real object being
    * assignable to it. {@link CameraSession.stopCamera} is the one that carries
@@ -155,6 +165,25 @@ export interface BrowserCameraOptions {
    * no control that looks like the way in and cannot work.
    */
   readonly secureContext: boolean;
+  /**
+   * Whether the page is hidden right now — #516. Omitted, it reads
+   * `document.hidden`; injected so a test can hide a page jsdom will not.
+   *
+   * ⚠️ **A hidden page's sample is refused**, which is `unreadable`, which is
+   * `unknown`. Chrome keeps a hidden tab's timers running, so the presence
+   * check would otherwise go on taking fresh-looking samples of a `<video>`
+   * the browser may have stopped decoding — two grids of one frozen frame,
+   * `still`, and fifteen seconds later a rider who is pedalling is `absent`.
+   * `presence.ts` §`observePair`'s frame check catches the same picture from
+   * the other side; this one does not depend on the platform saying where
+   * the video had got.
+   */
+  readonly hidden?: (() => boolean) | undefined;
+}
+
+/** `document.hidden`, or `false` where there is no document. @see BrowserCameraOptions.hidden */
+function documentHidden(): boolean {
+  return globalThis.document?.hidden === true;
 }
 
 /**
@@ -238,6 +267,7 @@ export function platformMediaDevices(): MediaDevicesLike | undefined {
  */
 export function browserCameraPort(options: BrowserCameraOptions): CameraPort {
   const { devices, grabber, secureContext } = options;
+  const hidden = options.hidden ?? documentHidden;
 
   return {
     async cameraAvailability(): Promise<CameraAvailability> {
@@ -292,12 +322,16 @@ export function browserCameraPort(options: BrowserCameraOptions): CameraPort {
         const kind = problemFor(error);
         throw new CameraCaptureError(kind, cameraProblemMessage(kind));
       }
-      return browserSession(stream, grabber);
+      return browserSession(stream, grabber, hidden);
     },
   };
 }
 
-function browserSession(stream: MediaStreamLike, grabber: FrameGrabber): CameraSession {
+function browserSession(
+  stream: MediaStreamLike,
+  grabber: FrameGrabber,
+  hidden: () => boolean,
+): CameraSession {
   let stopped = false;
   // Made on the first presence check and let go with the camera, so a session
   // that never checks presence never builds one.
@@ -334,6 +368,13 @@ function browserSession(stream: MediaStreamLike, grabber: FrameGrabber): CameraS
     },
     async sampleLuminance(): Promise<LuminanceGrid> {
       if (stopped) {
+        throw new CameraCaptureError('unavailable', cameraProblemMessage('unavailable'));
+      }
+      // #516. A muted track and a hidden page are both a camera that is not
+      // delivering new pictures while every flag says it is running, and a
+      // `<video>` in that state draws its LAST frame — a pair of which reads
+      // as `still`. Refused before the draw, so the answer is `unknown`.
+      if (hidden() || stream.getVideoTracks().some((track) => track.muted === true)) {
         throw new CameraCaptureError('unavailable', cameraProblemMessage('unavailable'));
       }
       sampler ??= grabber.luminance(stream);
@@ -461,15 +502,49 @@ export function videoLuminanceSampler(stream: MediaStreamLike): LuminanceSampler
         started = undefined;
         throw error;
       }
+      // #516. Read immediately before the draw. A frame landing between the
+      // two lines is the only gap, and it can only happen on a camera that IS
+      // delivering frames — which is not the frozen source this is for.
+      const frame = frameProgress(video);
       context.drawImage(video, 0, 0, PRESENCE_GRID_COLUMNS, PRESENCE_GRID_ROWS);
       const pixels = context.getImageData(0, 0, PRESENCE_GRID_COLUMNS, PRESENCE_GRID_ROWS);
-      return lumaGrid(pixels.data, PRESENCE_GRID_COLUMNS, PRESENCE_GRID_ROWS);
+      return { ...lumaGrid(pixels.data, PRESENCE_GRID_COLUMNS, PRESENCE_GRID_ROWS), frame };
     },
     release(): void {
       video.pause();
       video.srcObject = null;
     },
   };
+}
+
+/** The little of a `<video>` {@link frameProgress} reads, so a test can supply one. */
+export interface FrameProgressSource {
+  readonly currentTime: number;
+  getVideoPlaybackQuality?: () => { readonly totalVideoFrames: number };
+}
+
+/**
+ * How far a playing `<video>` has got — the count of frames it has been
+ * handed, or failing that its playback position — #516.
+ *
+ * ⚠️ **Measured rather than assumed**, in the pinned Chromium (revision 1243)
+ * on a DETACHED element, which is what {@link videoLuminanceSampler} holds: a
+ * `canvas.captureStream(0)` that is never asked for another frame — a frozen
+ * source made to order — leaves `totalVideoFrames` at 1 and `currentTime` at 0
+ * across 450 ms, while the same stream driven with `requestFrame()` advances
+ * both, and the synthetic camera advances both by about three frames in
+ * 150 ms. `game.browser.spec.ts` §"a frozen source" holds that in the gate.
+ *
+ * `totalVideoFrames` first because it counts pictures, which is the question;
+ * `currentTime` second because it is on every element. `undefined` only for
+ * an element that reports neither as a number, and then nothing is inferred.
+ */
+export function frameProgress(video: FrameProgressSource): number | undefined {
+  const quality = video.getVideoPlaybackQuality?.();
+  if (quality !== undefined && Number.isFinite(quality.totalVideoFrames)) {
+    return quality.totalVideoFrames;
+  }
+  return Number.isFinite(video.currentTime) ? video.currentTime : undefined;
 }
 
 /**

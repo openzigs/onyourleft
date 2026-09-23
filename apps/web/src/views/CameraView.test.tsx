@@ -460,4 +460,24 @@ describe('the presence switch', () => {
     // And it says what `unknown` does NOT do.
     expect(document.body.textContent).toContain('it will not pause your ride');
   });
+
+  it('says the check has stopped, not "cannot tell yet", once the ladder takes it away — #516', async () => {
+    const { controller } = await onScreen();
+    const on = button('Turn the camera on');
+    if (on === undefined) {
+      expect.unreachable('no control to turn the camera on');
+      return;
+    }
+    await activateWithKeyboard(on);
+    await settle();
+    presenceBox()?.click();
+    await settle();
+    expect(document.body.textContent).toContain('cannot tell yet');
+
+    controller.throttlePresence(false);
+    await settle();
+    expect(document.body.textContent).not.toContain('cannot tell yet');
+    expect(document.body.textContent).toContain('has stopped to spare this device');
+    expect(document.body.textContent).toContain('will not pause your ride');
+  });
 });

@@ -2044,3 +2044,136 @@ describe('#390 — a trainer holding a target at an empty bike', () => {
     rig.controller.dispose();
   });
 });
+
+describe('#516 — what the camera’s answer sends a trainer mid-workout', () => {
+  // ⚠️ **Presence reaches the trainer, and #515 said it did not.** The chain is
+  // `absent` → the recorder counts no reading as movement → the engine's own
+  // auto-pause → `syncPhaseWithEngine` → `tick` pauses the workout →
+  // `workout/session.ts` §`pause` eases to the machine's Supported Power Range
+  // minimum. These pin exactly what that chain writes, on the #44 simulator,
+  // as octets — and what the other two answers write, which is nothing.
+  const FLOOR = watts(30);
+  const OWN_TARGET = 200; // 0.8 × 250 W, the workout's own number
+  const SET_TARGET_POWER = 0x05;
+  const REQUEST_CONTROL = 0x00;
+
+  const longWorkout = (): WorkoutRecord => ({
+    id: workoutId('w1'),
+    createdBy: ATHLETE_A,
+    name: 'Long',
+    workout: {
+      name: 'Long',
+      blocks: [{ kind: 'steady', seconds: seconds(900), target: thresholdShare(0.8) }],
+    },
+    createdAt: unixSeconds(1),
+    updatedAt: unixSeconds(1),
+  });
+
+  /** A workout holding its own target, with the camera answering `answer()`. */
+  async function holdingTarget(answer: (() => RiderPresence) | undefined): Promise<Bench> {
+    const rig = benchWith({
+      machine: { retainsTargetsThroughStop: true, minTargetPower: FLOOR },
+      ...(answer === undefined ? {} : { presence: { riderPresence: answer } }),
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    expect(rig.controller.startWorkout(longWorkout(), watts(250))).toBe(true);
+    await ride(rig, 2);
+    await flushMicrotasks();
+    expect(rig.targetOnTheTrainer()).toBe(OWN_TARGET);
+    return rig;
+  }
+
+  it('absent sends the ease to the machine’s own floor, once, and nothing else', async () => {
+    let presence: RiderPresence = 'present';
+    const rig = await holdingTarget(() => presence);
+    const before = rig.written.length;
+
+    presence = 'absent';
+    await ride(rig, DEFAULT_AUTO_PAUSE_AFTER_SECONDS + 3);
+    await flushMicrotasks(20);
+    expect(rig.controller.getSnapshot().phase).toBe('paused');
+    // Until the engine paused, the workout went on re-asserting its OWN target
+    // as it does on any ride; what the pause added is one Set Target Power at
+    // the floor the machine reported — no Stop, no Reset, no Request Control.
+    const since = rig.written.slice(before);
+    expect(since.at(-1)).toStrictEqual([SET_TARGET_POWER, 30, 0]);
+    for (const write of since.slice(0, -1)) {
+      expect(write).toStrictEqual([SET_TARGET_POWER, OWN_TARGET, 0]);
+    }
+    expect(rig.targetOnTheTrainer()).toBe(30);
+
+    // And it stays one write while nobody is there.
+    const eased = rig.written.length;
+    await ride(rig, 20);
+    await flushMicrotasks(20);
+    expect(rig.written.slice(eased)).toStrictEqual([]);
+    expect(rig.targetOnTheTrainer()).toBe(30);
+    rig.controller.dispose();
+  });
+
+  it('unknown sends nothing: the workout holds its own target and never eases', async () => {
+    const rig = await holdingTarget(() => 'unknown');
+    const before = rig.written.length;
+    await ride(rig, DEFAULT_AUTO_PAUSE_AFTER_SECONDS + 23);
+    await flushMicrotasks(20);
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    // The workout's own re-assertions, and nothing at the floor.
+    expect(rig.written.slice(before).length).toBeGreaterThan(0);
+    for (const write of rig.written.slice(before)) {
+      expect(write).toStrictEqual([SET_TARGET_POWER, OWN_TARGET, 0]);
+    }
+    expect(rig.targetOnTheTrainer()).toBe(OWN_TARGET);
+    rig.controller.dispose();
+  });
+
+  it('unknown and present write exactly what a ride with no camera writes', async () => {
+    const script = async (answer: (() => RiderPresence) | undefined): Promise<number[][]> => {
+      const rig = await holdingTarget(answer);
+      await ride(rig, 40);
+      await flushMicrotasks(20);
+      rig.controller.dispose();
+      return rig.written;
+    };
+    const none = await script(undefined);
+    expect(await script(() => 'unknown')).toStrictEqual(none);
+    expect(await script(() => 'present')).toStrictEqual(none);
+  });
+
+  it('no answer, in any order, raises resistance or takes control', async () => {
+    // Every answer, flipped through twice, including the return from `absent`
+    // — which resumes the WORKOUT's own target through the engine's own
+    // movement rule, never a number above it.
+    let presence: RiderPresence = 'present';
+    const rig = await holdingTarget(() => presence);
+    const controlRequests = rig.written.filter(([op]) => op === REQUEST_CONTROL).length;
+    const before = rig.written.length;
+    const order: readonly RiderPresence[] = [
+      'absent',
+      'unknown',
+      'present',
+      'absent',
+      'present',
+      'unknown',
+      'absent',
+    ];
+    for (const answer of order) {
+      presence = answer;
+      await ride(rig, DEFAULT_AUTO_PAUSE_AFTER_SECONDS + 5);
+      await flushMicrotasks(20);
+    }
+    const after = rig.written.slice(before);
+    // The ease really happened, so this is not a ride in which nothing moved.
+    expect(after).toContainEqual([SET_TARGET_POWER, 30, 0]);
+    for (const write of after) {
+      // Set Target Power and nothing else: no Request Control, no Start or
+      // Resume, no Reset, no simulation parameters.
+      expect(write[0]).toBe(SET_TARGET_POWER);
+      const target = (write[1] ?? 0) | ((write[2] ?? 0) << 8);
+      expect(target).toBeLessThanOrEqual(OWN_TARGET);
+    }
+    expect(rig.written.filter(([op]) => op === REQUEST_CONTROL)).toHaveLength(controlRequests);
+    rig.controller.dispose();
+  });
+});

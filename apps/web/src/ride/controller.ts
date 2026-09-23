@@ -382,6 +382,21 @@ export interface RideControllerOptions {
    *
    * Omitted — no camera on this platform — and every ride is exactly what it
    * was before #390.
+   *
+   * ⚠️ **It can ease a trainer, and #515 said it could not** (#516). The
+   * engine's automatic pause is a pause like any other to {@link tick}: the
+   * phase follows it, and a running workout is paused with it, which writes
+   * the machine's own Supported Power Range minimum through the ERG writer —
+   * `workout/session.ts` §`pause`, #441's ease. So `absent` reaches the
+   * trainer as ONE Set Target Power at the floor. That direction is allowed
+   * because it is the one a rider who has walked away needs and the one #441
+   * already chose for every pause: less resistance, never a Stop, never a
+   * Reset, never a request for control. Nothing here raises a target or takes
+   * control on the camera's answer — `presence` can only withhold movement
+   * (`channels.ts` §`presenceAwareMovement`), so it can cause a pause and
+   * never a resume, and the resume that follows a rider's return is the
+   * engine's own movement rule putting the WORKOUT's own target back.
+   * `controller.test.ts` §"#516" pins what each answer writes, as octets.
    */
   readonly presence?: RiderPresencePort | undefined;
 }

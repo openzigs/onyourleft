@@ -241,6 +241,120 @@ describe('absence is decided on the camera’s side and read on the ride’s', (
   });
 });
 
+describe('a source that stops delivering frames — #516', () => {
+  // A muted track, a stalled webcam, a hidden tab: the <video> draws its last
+  // frame again, so every pair is one picture of a lit room. The grids carry
+  // where the source had got (`LuminanceGrid.frame`), and here it never moves.
+  const FROZEN = (): LuminanceGrid => ({ ...stillRoom(), frame: 7 });
+  /** The same room with frames arriving: a genuinely empty one. */
+  const DELIVERING = (sample: number): LuminanceGrid => ({ ...stillRoom(), frame: sample });
+
+  it('ends unknown, never absent, however long it stays frozen', async () => {
+    const r = rig(FROZEN);
+    await watching(r);
+    for (let check = 0; check < 20; check += 1) {
+      await r.check();
+      expect(r.controller.riderPresence()).toBe('unknown');
+    }
+  });
+
+  it('the control: the same picture with frames arriving is an empty room', async () => {
+    const r = rig(DELIVERING);
+    await watching(r);
+    for (let check = 0; check < 20; check += 1) {
+      await r.check();
+    }
+    expect(r.controller.riderPresence()).toBe('absent');
+  });
+
+  it('breaks an absence that was building when the picture froze', async () => {
+    let frozen = false;
+    const r = rig((sample) => (frozen ? FROZEN() : DELIVERING(sample)));
+    await watching(r);
+    for (let check = 0; check < 5; check += 1) {
+      await r.check();
+    }
+    frozen = true;
+    for (let check = 0; check < 20; check += 1) {
+      await r.check();
+    }
+    expect(r.controller.riderPresence()).toBe('unknown');
+  });
+});
+
+describe('a check in flight when the watch is reset — #516', () => {
+  /** A rig whose pair gap is held open until the test lets it go. */
+  function heldGap(): {
+    readonly controller: CameraController;
+    readonly timers: ReturnType<typeof manualSchedule>;
+    release(): void;
+    readonly held: () => boolean;
+  } {
+    const camera = scriptedCamera({ luminance: PEDALLING });
+    const timers = manualSchedule();
+    let letGo: (() => void) | undefined;
+    const controller = new CameraController({
+      port: camera.port,
+      schedule: timers.schedule,
+      clock: () => 1_000_000,
+      wait: async () =>
+        new Promise<void>((resolve) => {
+          letGo = resolve;
+        }),
+    });
+    return {
+      controller,
+      timers,
+      release: () => {
+        letGo?.();
+        letGo = undefined;
+      },
+      held: () => letGo !== undefined,
+    };
+  }
+
+  async function inTheGap(
+    reset: (controller: CameraController) => void,
+  ): Promise<CameraController> {
+    const h = heldGap();
+    h.controller.agree(AGREED);
+    await h.controller.turnOn();
+    h.controller.watchPresence(true);
+    h.timers.fire();
+    await settle();
+    // The first sample is taken and the check is waiting out the pair gap.
+    expect(h.held()).toBe(true);
+    reset(h.controller);
+    h.release();
+    await settle();
+    return h.controller;
+  }
+
+  it('writes nothing into the tracker a watch off-and-on just reset', async () => {
+    // The pedalling room moves between the two samples, so an observation that
+    // leaked would make the answer `present` at once.
+    const controller = await inTheGap((c) => {
+      c.watchPresence(false);
+      c.watchPresence(true);
+    });
+    expect(controller.state().watchingPresence).toBe(true);
+    expect(controller.riderPresence()).toBe('unknown');
+  });
+
+  it('nor into the one the ladder reset by taking presence away and giving it back', async () => {
+    const controller = await inTheGap((c) => {
+      c.throttlePresence(false);
+      c.throttlePresence(true);
+    });
+    expect(controller.riderPresence()).toBe('unknown');
+  });
+
+  it('the control: a check nobody reset does land', async () => {
+    const controller = await inTheGap(() => undefined);
+    expect(controller.riderPresence()).toBe('present');
+  });
+});
+
 describe('the quality ladder', () => {
   it('makes the answer unknown at once when the rung takes presence away', async () => {
     const r = rig(EMPTY);

@@ -1384,6 +1384,28 @@ test.describe('the world is lit, and can stop being — #286', () => {
     testInfo.annotations.push({ type: 'frame cost of a presence check', description: measured });
     console.log(`frame cost of a presence check — ${measured}`);
   });
+
+  /**
+   * **A frozen source** — #516. A `<video>` whose source has stopped
+   * delivering frames goes on drawing the last one, which used to read as a
+   * still room and, fifteen seconds later, as nobody on the bike. Taken
+   * through the REAL `videoLuminanceSampler` in a real engine, because the
+   * frame marker it reads is a platform number no jsdom suite has: a
+   * `canvas.captureStream(0)` never asked for a second frame must read
+   * `unreadable`, and the same stream with a frame requested between the
+   * samples — the control — must read `still`. The synthetic camera, which
+   * IS delivering frames, must not be refused by the same guard.
+   */
+  test('a frozen source reads as unreadable, and a working camera does not', async ({
+    harnessRun,
+  }) => {
+    const result = await harness(harnessRun, '?shadow-map');
+    const cost = result.presenceCost;
+    expect(cost.measured, `the presence probe did not run: ${cost.why}`).toBe(true);
+    expect(cost.frozenObservation).toBe('unreadable');
+    expect(cost.deliveringObservation).toBe('still');
+    expect(cost.observation).not.toBe('unreadable');
+  });
 });
 
 /**
