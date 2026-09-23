@@ -34,7 +34,8 @@
  * with a **row of shops** at its middle and a **church** at one end, and a
  * **signpost** at each way in. A farmstead is a farmhouse with a **barn** and a
  * **shed** grouped on one side, set further back. Five kinds of building, each
- * with its own silhouette (`three-renderer.ts` §`STRUCTURE_STYLE`).
+ * with its own silhouette (`buildings.ts`, since #500 with its doors and
+ * windows facing the road).
  *
  * ⚠️ **A signpost carries no words.** No real name, no brand, no copied
  * signage: a white board on a post says "a place" and nothing more.
@@ -151,7 +152,7 @@ export const FIELD_DEPTH_METRES = 48;
 
 /**
  * How long one piece of wall, hedge or fence is, in metres: **8** — the length
- * `three-renderer.ts` §`STRUCTURE_STYLE` builds each of them.
+ * `three-renderer.ts` §`BOUNDARY_STYLE` builds each of them.
  */
 export const BOUNDARY_PIECE_METRES = 8;
 
@@ -310,8 +311,10 @@ function samePlace(first: ScatterItem, second: ScatterItem): boolean {
  * width across (`x`) and how far it reaches behind (`back`, negative) and in
  * front (`front`) of where it stands, along the way it faces (`z`).
  *
- * Read off `three-renderer.ts` §`STRUCTURE_STYLE`, the shapes those kinds are
- * built from — the roof and the eaves included, because they overhang — and,
+ * Read off the shapes those kinds are built from — `buildings.ts` for a
+ * building since #500, `three-renderer.ts` §`BOUNDARY_STYLE` for the rest —
+ * the roof, the eaves and a door's step included, because they stand out;
+ * `buildings.test.ts` holds every vertex of every shape inside these. And,
  * for `building`, off the 9 m that `sceneryFitMetres` fits a model's largest
  * extent to, taken as a square because a model's proportions are the pack's.
  * A wall, hedge or fence is one {@link BOUNDARY_PIECE_METRES} piece along `z`.

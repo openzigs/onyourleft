@@ -20,12 +20,14 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { isBuiltKind } from './buildings';
 import { REALISTIC_LADDER, type QualitySettings } from './quality';
 import { REALISTIC_BICYCLE_TRIANGLES, REALISTIC_NEAR_MESHES } from './realistic-budget';
 import {
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
   REALISTIC_SKY,
-  REALISTIC_STRUCTURE_PARTS,
+  REALISTIC_BOUNDARY_PARTS,
+  REALISTIC_BUILDING_SURFACES,
   REALISTIC_STRUCTURE_SURFACES,
   REALISTIC_VEGETATION,
   REALISTIC_VEGETATION_KINDS,
@@ -43,7 +45,7 @@ import {
   realisticResourceUrl,
   RealisticStructureBelts,
   realisticStructureGeometry,
-  realisticStructureParts,
+  realisticStructureSurfaces,
   RealisticVegetationBelt,
   realisticWorldLoaded,
   ScatterBelt,
@@ -493,15 +495,18 @@ function aStructureBelt(): RealisticStructureBelts {
 }
 
 describe('the realistic structures — ADR 0026 D-12 layer 3, #475', () => {
-  it('pairs every part of every structure with a surface to wear', () => {
+  it('dresses every structure only in surfaces its table names', () => {
     for (const kind of STRUCTURE_KINDS) {
-      const parts = realisticStructureParts(kind);
-      expect(parts.length, kind).toBe(REALISTIC_STRUCTURE_PARTS[kind].length);
-      for (const part of parts) part.dispose();
+      const worn = realisticStructureSurfaces(kind);
+      expect(worn.length, kind).toBeGreaterThan(0);
+      const named: readonly StructureSurface[] = isBuiltKind(kind)
+        ? Object.values(REALISTIC_BUILDING_SURFACES[kind])
+        : REALISTIC_BOUNDARY_PARTS[kind];
+      for (const surface of worn) expect(named, `${kind} wears ${surface}`).toContain(surface);
     }
   });
 
-  it('draws a house as brick walls and a tiled roof, placed by one item', () => {
+  it('draws a house as brick walls, a tiled roof, timber frames and glass, placed by one item — #500', () => {
     const belt = aStructureBelt();
     belt.update([item('building', 20, 9)], POSE);
     const walls = belt.beltOf('brick')?.meshesOf('building')[0];
@@ -514,8 +519,16 @@ describe('the realistic structures — ADR 0026 D-12 layer 3, #475', () => {
     );
     // Counted once.
     expect(belt.drawnItems).toBe(1);
+    // #500: its frames and its door are timber, its panes glass, on the same matrix.
+    for (const surface of ['planks', 'glass'] as const) {
+      const mesh = belt.beltOf(surface)?.meshesOf('building')[0];
+      expect(mesh?.count, surface).toBe(1);
+      expect(Array.from(mesh?.instanceMatrix.array.slice(0, 16) ?? []), surface).toEqual(
+        Array.from(walls?.instanceMatrix.array.slice(0, 16) ?? []),
+      );
+    }
     // And no other surface draws a house.
-    for (const surface of ['slate', 'stone', 'planks', 'corrugated', 'hedge', 'painted'] as const) {
+    for (const surface of ['slate', 'stone', 'corrugated', 'hedge', 'painted'] as const) {
       expect(belt.beltOf(surface)?.meshesOf('building') ?? [], surface).toEqual([]);
     }
   });
@@ -537,14 +550,22 @@ describe('the realistic structures — ADR 0026 D-12 layer 3, #475', () => {
       ]),
     );
     const belt = new RealisticStructureBelts(textures);
-    for (const surface of [...PHOTOGRAPHIC_STRUCTURE_SURFACES, 'painted'] as const) {
+    for (const surface of [...PHOTOGRAPHIC_STRUCTURE_SURFACES, 'painted', 'glass'] as const) {
       const meshes = STRUCTURE_KINDS.flatMap((kind) => belt.beltOf(surface)?.meshesOf(kind) ?? []);
       expect(meshes.length, surface).toBeGreaterThan(0);
       for (const mesh of meshes) {
         expect(typeOf(mesh), surface).toBe('MeshStandardMaterial');
         expect(isConstructedMaterial(mesh.material as never), surface).toBe(true);
-        const material = mesh.material as unknown as { map: unknown; normalMap: unknown };
-        if (surface === 'painted') {
+        const material = mesh.material as unknown as {
+          map: unknown;
+          normalMap: unknown;
+          vertexColors: boolean;
+        };
+        // #500: the grounding and each part's shade are in the vertex colour,
+        // which a material that does not read it would silently drop.
+        expect(material.vertexColors, surface).toBe(true);
+        // #500: glass is a material and no photograph — it adds no texture.
+        if (surface === 'painted' || surface === 'glass') {
           expect(material.map).toBeNull();
         } else {
           expect(material.map, surface).toBe(textures.get(surface)?.colour);
@@ -581,8 +602,10 @@ describe('the realistic structures — ADR 0026 D-12 layer 3, #475', () => {
   });
 
   it('has no surface nothing wears, and wears no surface it has no maps for', () => {
-    const worn = new Set<StructureSurface>(Object.values(REALISTIC_STRUCTURE_PARTS).flat());
-    expect([...worn].sort()).toEqual([...PHOTOGRAPHIC_STRUCTURE_SURFACES, 'painted'].sort());
+    const worn = new Set<StructureSurface>(STRUCTURE_KINDS.flatMap(realisticStructureSurfaces));
+    expect([...worn].sort()).toEqual(
+      [...PHOTOGRAPHIC_STRUCTURE_SURFACES, 'painted', 'glass'].sort(),
+    );
   });
 });
 

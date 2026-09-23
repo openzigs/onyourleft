@@ -1032,10 +1032,24 @@ on every device** (D-3). Where each part lives:
 source publishes a water surface, a tiled photograph of ripples is a frozen picture, and on a
 realistic rung the shader reflects the HDRI's own zenith and horizon — `three-renderer.ts`
 §`WaterBelt.update`. **What the soak left open** is filed rather than blocking the offer, because the
-world is whole and off by default: the buildings have no openings
-([#500](https://github.com/openzigs/onyourleft/issues/500)), and the water's banding, bank and bridge
+world is whole and off by default: the buildings had no openings
+([#500](https://github.com/openzigs/onyourleft/issues/500), which cut them — see below), and the water's banding, bank and bridge
 seam, plus a soak route with no lake and no wall
 ([#501](https://github.com/openzigs/onyourleft/issues/501)).
+
+**The buildings' shapes are `apps/web/src/game/buildings.ts` since
+[#500](https://github.com/openzigs/onyourleft/issues/500)**, and a reader who remembers a house as a
+brick block under a gable built in `three-renderer.ts` is reading the old file. It is a pure
+function from a kind and a shape to triangles sorted by what they are made of — walls with doors
+and windows cut in, recessed 9 cm and framed, a plinth, overhanging eaves, a ridge, a house's
+chimney — and **both worlds draw the same triangles**: the stylised belt paints each role
+(`three-renderer.ts` §`STRUCTURE_STYLE`), the realistic belts dress it in #475's photographs and a
+`glass` surface that is a material and no texture (`realistic-assets.ts`
+§`REALISTIC_BUILDING_SURFACES`). Every building has two proportions, chosen by its seeded
+`variant`; every vertex stays inside `settlements.ts` §`STRUCTURE_FOOTPRINTS`, so where anything
+stands did not move. The realistic structures went from 15 meshes to 35 (`realistic-budget.ts`
+§`REALISTIC_STRUCTURE_MESHES`, which says what that costs in draw calls), and a structure's triangle
+budget from 96 to 640, held under the lightest house the stylised world already draws.
 
 ## Spike write-ups
 

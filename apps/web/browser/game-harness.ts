@@ -92,12 +92,14 @@ import { GRADIENT_TINT_FULL_SCALE_PERCENT } from '../src/game/terrain';
 import { structuresAt } from '../src/game/settlements';
 import { waterways } from '../src/game/waterways';
 import { VERGE_DROP_METRES } from '../src/game/landform';
+import { buildingPlan, onFace, OPENING_RECESS_METRES } from '../src/game/buildings';
 import {
   drawnWorldOf,
   loadRealisticWorld,
   loadSceneryModels,
   sceneMaterialsOf,
   sceneryDrawnOf,
+  setBuildingOpenings,
   threeGameRenderer,
   waterSkyOf,
 } from '../src/game/three-renderer';
@@ -2607,6 +2609,15 @@ export interface RealisticMeasurement {
    */
   readonly waterSkyRealistic: readonly number[];
   readonly waterSkyStylised: readonly number[];
+  /**
+   * #500: the mean sRGB of a small square at a house's front ground-floor
+   * window, facing the camera, read back off the drawing buffer — and the
+   * same square on a view built with no openings, which must read the wall
+   * — and a square of that same wall beside the window, for scale.
+   */
+  readonly windowGlass: readonly number[];
+  readonly windowControl: readonly number[];
+  readonly windowWall: readonly number[];
 }
 
 const NO_REALISTIC: RealisticMeasurement = {
@@ -2641,6 +2652,9 @@ const NO_REALISTIC: RealisticMeasurement = {
   stylisedFrameMs: 0,
   waterSkyRealistic: [],
   waterSkyStylised: [],
+  windowGlass: [],
+  windowControl: [],
+  windowWall: [],
 };
 
 /** Relative luminance of an sRGB pixel, WCAG 2.2's own formula. */
@@ -2827,6 +2841,87 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   view.render(withCrank(undefined));
   const held = whole();
 
+  // #500: a house on the road 24 m ahead, turned to face the camera, and its
+  // front ground-floor window read back — then the same square on a view
+  // built with no openings, which must read the wall. Without the control, a
+  // dark square could be a shadow, the fog or a house that was never drawn.
+  const houseFrame = ((): SceneFrame => {
+    const base = riding(level, 400);
+    const at = onTheRoad(base, 24, 0);
+    const towards = onTheRoad(base, 10, 0);
+    const rotation = Math.atan2(towards.x - at.x, towards.z - at.z);
+    const house: ScatterItem = { kind: 'building', ...at, rotation, scale: 1, variant: 0 };
+    return { ...base, markers: [], scatter: [house] };
+  })();
+  const onTheHouse = (u: number, v: number, w: number): { x: number; y: number; z: number } => {
+    const [house] = houseFrame.scatter;
+    const face = buildingPlan('building', 0).openings.find(
+      (opening) => opening.face.normal[2] > 0.999,
+    )?.face;
+    if (house === undefined || face === undefined) return { x: 0, y: 0, z: 0 };
+    const [x, y, z] = onFace(face, u, v, w);
+    const cos = Math.cos(house.rotation);
+    const sin = Math.sin(house.rotation);
+    return { x: house.x + x * cos + z * sin, y: house.y + y, z: house.z - x * sin + z * cos };
+  };
+  const frontWindow = buildingPlan('building', 0).openings.find(
+    (opening) => opening.face.normal[2] > 0.999 && opening.kind === 'window',
+  );
+  const windowCentre = (() => {
+    const us = frontWindow?.outline.map(([u]) => u) ?? [0];
+    const vs = frontWindow?.outline.map(([, v]) => v) ?? [0];
+    return {
+      u: (Math.min(...us) + Math.max(...us)) / 2,
+      v: (Math.min(...vs) + Math.max(...vs)) / 2,
+    };
+  })();
+  const meanRgbAround = (
+    context: WebGL2RenderingContext,
+    point: { readonly x: number; readonly y: number; readonly z: number },
+  ): number[] => {
+    const centre = pixelFor(houseFrame, canvas, point);
+    const half = 1;
+    const side = half * 2 + 1;
+    const pixels = readRegion(
+      context,
+      Math.round(centre.x) - half,
+      Math.round(centre.y) - half,
+      side,
+      side,
+    );
+    let [red, green, blue] = [0, 0, 0];
+    for (let at = 0; at < pixels.length; at += 4) {
+      red += pixels[at] ?? 0;
+      green += pixels[at + 1] ?? 0;
+      blue += pixels[at + 2] ?? 0;
+    }
+    return [red, green, blue].map((channel) => channel / (side * side));
+  };
+  const glassPoint = onTheHouse(windowCentre.u, windowCentre.v, -OPENING_RECESS_METRES);
+  // The wall beside it: half-way between the window and the door, at the same height.
+  const wallPoint = onTheHouse(windowCentre.u / 2, windowCentre.v, 0);
+  view.render(houseFrame);
+  view.render(houseFrame);
+  const windowGlass = meanRgbAround(gl, glassPoint);
+  const windowWall = meanRgbAround(gl, wallPoint);
+  setBuildingOpenings(false);
+  const plainHouseCanvas = canvasOf();
+  let plainHouse: ReturnType<typeof threeGameRenderer.create>;
+  try {
+    plainHouse = threeGameRenderer.create(plainHouseCanvas, top);
+    plainHouse.resize(WIDTH, HEIGHT);
+    plainHouse.render(houseFrame);
+    plainHouse.render(houseFrame);
+  } finally {
+    // Only after it has drawn: whenever a view builds its belts, this one's are
+    // built with none, and every view after it with them again — and in a
+    // `finally`, so a throw above cannot leave every later view with none.
+    setBuildingOpenings(true);
+  }
+  const plainHouseGl = plainHouseCanvas.getContext('webgl2');
+  const windowControl = plainHouseGl === null ? [] : meanRgbAround(plainHouseGl, glassPoint);
+  plainHouse.destroy();
+
   // The same frame in the stylised world, on a view of its own: how much of the
   // picture the realistic world actually changed.
   const plainCanvas = canvasOf();
@@ -2880,7 +2975,9 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     `realistic: loaded in ${loadMs.toFixed(0)} ms; a frame ${realisticFrameMs.toFixed(1)} ms against ` +
       `${stylisedFrameMs.toFixed(1)} ms stylised (SwiftShader); ${String(drawCalls)} draw calls; ` +
       `${String(texturesCreated)} textures; road ${climbLuminance.toFixed(4)} climbing, ` +
-      `${descentLuminance.toFixed(4)} descending`,
+      `${descentLuminance.toFixed(4)} descending; a window ${windowGlass.map((c) => c.toFixed(0)).join('/')} ` +
+      `against ${windowControl.map((c) => c.toFixed(0)).join('/')} with no openings and ` +
+      `${windowWall.map((c) => c.toFixed(0)).join('/')} on the wall beside it`,
   );
 
   return {
@@ -2917,6 +3014,9 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     stylisedFrameMs,
     waterSkyRealistic,
     waterSkyStylised,
+    windowGlass,
+    windowControl,
+    windowWall,
   };
 }
 

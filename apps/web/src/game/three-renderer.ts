@@ -206,6 +206,15 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 
 import {
+  BUILDING_ROLES,
+  BUILDING_VARIANTS,
+  buildingPlan,
+  isBuiltKind,
+  type BuildingPlan,
+  type BuildingRole,
+  type BuiltKind,
+} from './buildings';
+import {
   BICYCLE_COLOURS,
   CRANK_AXIS_Y,
   CRANK_AXIS_Z,
@@ -240,7 +249,9 @@ import {
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
   REALISTIC_RIDER,
   REALISTIC_SKY,
-  REALISTIC_STRUCTURE_PARTS,
+  REALISTIC_BOUNDARY_PARTS,
+  REALISTIC_BUILDING_SURFACES,
+  isPhotographic,
   REALISTIC_STRUCTURE_SURFACES,
   REALISTIC_SURFACES,
   REALISTIC_VEGETATION,
@@ -732,15 +743,12 @@ interface SceneryStyle {
   readonly geometry: () => BufferGeometry;
   /** The coloured solids the shape is made of, where it is more than one. */
   readonly parts?: readonly ShapePart[];
+  /**
+   * Which building `buildings.ts` builds this kind as — #500 — painted by
+   * {@link STRUCTURE_STYLE}, in {@link BUILDING_VARIANTS} shapes.
+   */
+  readonly built?: StylisedBuiltKind;
 }
-
-/**
- * How deep a built shape reaches below the ground it stands on, in metres:
- * **0.6** — a plinth, so a house on a gentle slope is set into it rather than
- * floating off its downhill corner. The ground under a building is never
- * steeper than `settlements.ts` allows.
- */
-const FOUNDATION_METRES = 0.6;
 
 /** A box with its base at `bottom` and centred on `(x, z)`. */
 function block(
@@ -754,100 +762,73 @@ function block(
   return new BoxGeometry(width, height, depth).translate(x, bottom + height / 2, z);
 }
 
-/**
- * A pitched roof: a triangular prism `length` along x, `span` across z and
- * `rise` high, its eaves at `eaves`. Built by hand rather than from three's own
- * classes because none of them is a prism; non-indexed, so its faces are flat.
- */
-function gable(length: number, span: number, rise: number, eaves: number): BufferGeometry {
-  const x = length / 2;
-  const z = span / 2;
-  const top = eaves + rise;
-  const corners = {
-    a: [-x, eaves, z],
-    b: [x, eaves, z],
-    c: [x, eaves, -z],
-    d: [-x, eaves, -z],
-    e: [-x, top, 0],
-    f: [x, top, 0],
-  } as const;
-  const faces: (readonly (keyof typeof corners)[])[] = [
-    ['a', 'b', 'f'],
-    ['a', 'f', 'e'],
-    ['c', 'd', 'e'],
-    ['c', 'e', 'f'],
-    ['a', 'e', 'd'],
-    ['b', 'c', 'f'],
-  ];
-  const positions: number[] = [];
-  for (const face of faces) {
-    for (const corner of face) {
-      positions.push(...corners[corner]);
-    }
-  }
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
-  geometry.computeVertexNormals();
-  return geometry;
-}
+/** The {@link BuiltKind}s the stylised world draws from numbers — every one but `building`. */
+type StylisedBuiltKind = Exclude<BuiltKind, 'building'>;
 
 /**
- * The buildings, the field boundaries and the signpost #460 adds, each built
- * from numbers typed here — nothing is downloaded and nothing traced, ADR 0009.
+ * What colour each part of a stylised building is, by what it is made of —
+ * #460's colours for the walls and the roofs, and #500's for everything it
+ * added: the plinth, the ridge, the chimney, the joinery, the doors and the
+ * glass. `buildings.ts` decides the shapes; this decides the paint.
  *
- * ⚠️ **Every building's front is +z and its long side along x**, because
- * `settlements.ts` turns +z to face the road: a barn or a row of shops lies
- * along the road and a church puts its tower towards it. Every field boundary
- * runs along +z, because a run is turned to follow the road or to leave it.
- * ⚠️ And every one of them is set {@link FOUNDATION_METRES} into the ground.
+ * ⚠️ **Provenance, per #240's BR-1 and ADR 0009 L2**: plain building colours
+ * chosen here, derived from nothing. Every one lands in {@link LIT_COLOURS}
+ * through {@link sceneryColours}, so `three-renderer.test.ts` §"lights no
+ * colour past white" holds each against the sun with no edit there.
  */
-const STRUCTURE_STYLE = {
-  barn: [
-    {
-      colour: 0x8a3b2e,
-      geometry: () => block(14, 4.5 + FOUNDATION_METRES, 8, 0, -FOUNDATION_METRES),
+const STRUCTURE_STYLE: Readonly<Record<StylisedBuiltKind, Readonly<Record<BuildingRole, number>>>> =
+  {
+    barn: {
+      wall: 0x8a3b2e,
+      plinth: 0x5e5a53,
+      roof: 0x4a4038,
+      ridge: 0x3a322c,
+      chimney: 0x7a3a2e,
+      joinery: 0xcfc8b8,
+      door: 0x5b2a22,
+      glass: 0x28323a,
     },
-    { colour: 0x4a4038, geometry: () => gable(14.6, 8.6, 3.2, 4.5) },
-  ],
-  church: [
-    {
-      colour: 0xb8b2a4,
-      geometry: () => block(7, 6 + FOUNDATION_METRES, 14, 0, -FOUNDATION_METRES, -2),
+    church: {
+      wall: 0xb8b2a4,
+      plinth: 0x8e897d,
+      roof: 0x55595e,
+      ridge: 0x44484d,
+      chimney: 0xa9a394,
+      joinery: 0x6b5238,
+      door: 0x4a3524,
+      glass: 0x28323a,
     },
-    {
-      colour: 0x55595e,
-      geometry: () =>
-        gable(14.6, 7.6, 3.8, 6)
-          .rotateY(Math.PI / 2)
-          .translate(0, 0, -2),
+    'shop-row': {
+      wall: 0xb58a68,
+      plinth: 0x7a6b5c,
+      roof: 0x5e6166,
+      ridge: 0x4b4e53,
+      chimney: 0x9a6d52,
+      joinery: 0x2f4a3f,
+      door: 0x3a3f4a,
+      glass: 0x28323a,
     },
-    {
-      colour: 0xa9a394,
-      geometry: () => block(4, 13 + FOUNDATION_METRES, 4, 0, -FOUNDATION_METRES, 6.5),
+    shed: {
+      wall: 0x8c9296,
+      plinth: 0x6c6f70,
+      roof: 0x6f7478,
+      ridge: 0x5f6468,
+      chimney: 0x6f7478,
+      joinery: 0x7b8185,
+      door: 0x5f6468,
+      glass: 0x28323a,
     },
-    {
-      colour: 0x4b4f54,
-      geometry: () => new ConeGeometry(3, 6, 4).rotateY(Math.PI / 4).translate(0, 13 + 3, 6.5),
-    },
-  ],
-  'shop-row': [
-    {
-      colour: 0xb58a68,
-      geometry: () => block(20, 7 + FOUNDATION_METRES, 7, 0, -FOUNDATION_METRES),
-    },
-    { colour: 0x4e4238, geometry: () => block(20.2, 2.8, 7.3, 0, 0) },
-    { colour: 0x6b6b6b, geometry: () => block(20.4, 0.5, 7.4, 0, 7) },
-  ],
-  shed: [
-    {
-      colour: 0x8c9296,
-      geometry: () => block(10, 3.2 + FOUNDATION_METRES, 8, 0, -FOUNDATION_METRES),
-    },
-    {
-      colour: 0x6f7478,
-      geometry: () => new BoxGeometry(10.4, 0.3, 8.8).rotateX(0.12).translate(0, 3.55, 0),
-    },
-  ],
+  };
+
+/**
+ * The field boundaries and the signpost #460 adds, each built from numbers
+ * typed here — nothing is downloaded and nothing traced, ADR 0009. The
+ * buildings are `buildings.ts`'s since #500, painted by {@link STRUCTURE_STYLE}.
+ *
+ * ⚠️ Every field boundary runs along +z, because a run is turned to follow the
+ * road or to leave it, and every one is set half a metre into the ground.
+ */
+const BOUNDARY_STYLE = {
   wall: [{ colour: 0x9b9486, geometry: () => block(0.55, 1.1 + 0.5, 8, 0, -0.5) }],
   hedge: [{ colour: 0x3e5e2e, geometry: () => block(1.1, 1.3 + 0.5, 8, 0, -0.5) }],
   fence: [
@@ -872,10 +853,105 @@ const STRUCTURE_STYLE = {
         merged([block(0.05, 0.28, 1, 0, 2.15, 0.45), block(0.05, 0.28, 1, 0, 1.8, -0.45)]),
     },
   ],
-} as const satisfies Record<StructureKindWithoutModels, readonly ShapePart[]>;
+} as const satisfies Record<BoundaryKind, readonly ShapePart[]>;
 
-/** The structures #460 draws only from numbers — every one but `building`. */
-type StructureKindWithoutModels = Exclude<StructureKind, 'building'>;
+/** The structures that are not buildings: the field boundaries and the signpost. */
+type BoundaryKind = Exclude<StructureKind, BuiltKind>;
+
+/**
+ * Whether #500's openings are cut — the browser gate's control, and nothing
+ * else's. @see setBuildingOpenings
+ */
+let openingsCut = true;
+
+/**
+ * Builds every view created after this call with its buildings' openings cut,
+ * or with the same shapes and none — #500's browser-gate control: the probe
+ * that reads a window's glass must read brick where there is no window, or it
+ * was reading something other than the window.
+ *
+ * @test-facing `apps/web/browser/game-harness.ts` §`realisticProbe` builds a
+ * view with none, for the control; the product never switches them off
+ */
+export function setBuildingOpenings(on: boolean): void {
+  openingsCut = on;
+}
+
+/** One kind's shape in one variant, remembered: {@link buildingPlan} is pure. */
+const plans = new Map<string, BuildingPlan>();
+
+function planOf(kind: BuiltKind, variant: number): BuildingPlan {
+  const key = `${kind}:${String(variant)}:${String(openingsCut)}`;
+  const known = plans.get(key);
+  if (known !== undefined) return known;
+  const plan = buildingPlan(kind, variant, { openings: openingsCut });
+  plans.set(key, plan);
+  return plan;
+}
+
+/** One role of a plan, as a geometry with flat normals — or `undefined` if it has none. */
+function roleGeometry(plan: BuildingPlan, role: BuildingRole): BufferGeometry | undefined {
+  const triangles = plan.triangles[role];
+  if (triangles.length === 0) return undefined;
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(new Float32Array(triangles), 3));
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/**
+ * How much of the light a building's surface keeps, by how high it is — #500's
+ * *"grounding: a darker band where the wall meets the ground"*, which is #426's
+ * contact-shadow argument applied to a wall: without it a building looks
+ * placed rather than built. **0.55** at the ground and below, rising in a
+ * straight line to all of it at {@link GROUNDING_METRES}. Baked into the
+ * vertex colour in both worlds, so it costs no texture and no draw call.
+ */
+export const GROUNDED_SHADE = 0.55;
+
+/** How high the grounding band reaches: **0.8 m**. @see GROUNDED_SHADE */
+export const GROUNDING_METRES = 0.8;
+
+/**
+ * The share of the light a vertex at height `y` keeps. @see GROUNDED_SHADE
+ */
+export function groundingShade(y: number): number {
+  const rise = Math.min(1, Math.max(0, y / GROUNDING_METRES));
+  return GROUNDED_SHADE + (1 - GROUNDED_SHADE) * rise;
+}
+
+/**
+ * Colours every vertex `colour` × its {@link groundingShade}, × `shade` — or,
+ * with `grounded` false, `colour` × `shade` at every height.
+ */
+function paintGrounded(geometry: BufferGeometry, colour: number, shade = 1, grounded = true): void {
+  const found = new Color(colour);
+  const position = geometry.getAttribute('position');
+  const channels = new Float32Array(position.count * 3);
+  for (let at = 0; at < position.count; at += 1) {
+    const light = (grounded ? groundingShade(position.getY(at)) : 1) * shade;
+    channels[at * 3] = found.r * light;
+    channels[at * 3 + 1] = found.g * light;
+    channels[at * 3 + 2] = found.b * light;
+  }
+  geometry.setAttribute('color', new BufferAttribute(channels, 3));
+}
+
+/** A stylised building, every role painted and merged into one geometry: one mesh, one draw call. */
+function paintedBuilding(kind: StylisedBuiltKind, variant: number): BufferGeometry {
+  const plan = planOf(kind, variant);
+  const painted: BufferGeometry[] = [];
+  for (const role of BUILDING_ROLES) {
+    const geometry = roleGeometry(plan, role);
+    if (geometry === undefined) continue;
+    paintGrounded(geometry, STRUCTURE_STYLE[kind][role]);
+    painted.push(geometry);
+  }
+  const joined = mergeGeometries(painted);
+  for (const each of painted) each.dispose();
+  if (joined === null) throw new Error(`${kind}: its parts could not be merged into one geometry`);
+  return joined;
+}
 
 /** Several solids as one geometry: position and normal only, flat-shaded. */
 function merged(parts: readonly BufferGeometry[]): BufferGeometry {
@@ -896,6 +972,15 @@ function merged(parts: readonly BufferGeometry[]): BufferGeometry {
     throw new Error('a built shape could not be merged into one geometry');
   }
   return joined;
+}
+
+/** A building's style — #500: its walls' colour, its whole shape, and which building it is. */
+function buildingStyle(kind: StylisedBuiltKind): SceneryStyle {
+  return {
+    colour: STRUCTURE_STYLE[kind].wall,
+    geometry: () => paintedBuilding(kind, 0),
+    built: kind,
+  };
 }
 
 /** A style from coloured parts: its first part's colour, all of its solids. */
@@ -934,15 +1019,16 @@ const SCATTER_STYLE: Record<SceneryKind, SceneryStyle> = {
     colour: 0xa8968a,
     geometry: () => new BoxGeometry(7, 6, 9).translate(0, 3, 0),
   },
-  // #460. Built from numbers — `STRUCTURE_STYLE` says how, and why they face +z.
-  barn: builtStyle(STRUCTURE_STYLE.barn),
-  church: builtStyle(STRUCTURE_STYLE.church),
-  'shop-row': builtStyle(STRUCTURE_STYLE['shop-row']),
-  shed: builtStyle(STRUCTURE_STYLE.shed),
-  wall: builtStyle(STRUCTURE_STYLE.wall),
-  hedge: builtStyle(STRUCTURE_STYLE.hedge),
-  fence: builtStyle(STRUCTURE_STYLE.fence),
-  signpost: builtStyle(STRUCTURE_STYLE.signpost),
+  // #460, #500. Built from numbers — `buildings.ts` says how, and why they
+  // face +z; `STRUCTURE_STYLE` says what colour each part is.
+  barn: buildingStyle('barn'),
+  church: buildingStyle('church'),
+  'shop-row': buildingStyle('shop-row'),
+  shed: buildingStyle('shed'),
+  wall: builtStyle(BOUNDARY_STYLE.wall),
+  hedge: builtStyle(BOUNDARY_STYLE.hedge),
+  fence: builtStyle(BOUNDARY_STYLE.fence),
+  signpost: builtStyle(BOUNDARY_STYLE.signpost),
 };
 
 /**
@@ -1361,7 +1447,14 @@ export const BRIDGE_COLOUR = 0x8f8a80;
  */
 export function sceneryColours(kind: SceneryKind): readonly number[] {
   const style = SCATTER_STYLE[kind];
-  return [style.colour, ...(style.parts ?? []).map((part) => part.colour)];
+  return [
+    style.colour,
+    ...(style.parts ?? []).map((part) => part.colour),
+    // #500: every part of a building, from the plinth to the glass.
+    ...(style.built === undefined
+      ? []
+      : BUILDING_ROLES.map((role) => STRUCTURE_STYLE[style.built as StylisedBuiltKind][role])),
+  ];
 }
 
 /**
@@ -1660,8 +1753,10 @@ function beltKey(kind: SceneryKind, variant: number): string {
  * `Color` and is converted from sRGB. A model's own factor does **not** take
  * that path, because it is linear already — `scenery-palette.ts` §`LinearRgb`.
  */
-function paintedPrimitive(kind: SceneryKind): BufferGeometry {
+function paintedPrimitive(kind: SceneryKind, variant = 0): BufferGeometry {
   const style = SCATTER_STYLE[kind];
+  // #500: a building is `buildings.ts`'s shape in one of its variants.
+  if (style.built !== undefined) return paintedBuilding(style.built, variant);
   if (style.parts !== undefined) {
     // #460: each part painted in its own colour, then merged — one geometry,
     // so still one mesh and one draw call however many colours it has.
@@ -1805,7 +1900,13 @@ export class ScatterBelt {
         continue;
       }
       const shapes = models.get(kind) ?? [];
-      this.#shapes.set(kind, Math.max(1, Math.min(MAXIMUM_SCENERY_VARIANTS, shapes.length)));
+      // ⚠️ #500: a building drawn from numbers has shapes of its own — two
+      // proportions — so its primitive fallback is one mesh a variant too.
+      const primitives = SCATTER_STYLE[kind].built === undefined ? 1 : BUILDING_VARIANTS;
+      this.#shapes.set(
+        kind,
+        Math.max(1, Math.min(MAXIMUM_SCENERY_VARIANTS, shapes.length || primitives)),
+      );
       for (let variant = 0; variant < (this.#shapes.get(kind) ?? 1); variant += 1) {
         const model = shapes[variant];
         const mesh = new InstancedMesh(
@@ -1815,7 +1916,7 @@ export class ScatterBelt {
           // teardown would leave the next ride's world made of primitives, with
           // nothing to say why. A copy costs about 30 kB for the largest kind,
           // once per view.
-          model === undefined ? paintedPrimitive(kind) : model.clone(),
+          model === undefined ? paintedPrimitive(kind, variant) : model.clone(),
           // ⚠️ **Lit since #286, and this is the file's biggest change of
           // mind.** It used to say *"no lighting means no light budget"* here,
           // which was a performance claim with no measurement behind it —
@@ -5288,31 +5389,85 @@ export function realisticBicycleTriangles(): number {
 }
 
 /**
- * The walls and the roof of a realistic house — ADR 0026 D-12 layer 3, #475.
- *
- * ⚠️ **Built here from numbers because no source in D-4's list publishes a
- * country house**: `realistic-assets.ts` §`REALISTIC_STRUCTURE_SURFACES` says
- * what was looked for. The stylised world draws a Kenney model here and the
- * realistic world's primitives belt drew a 7 × 6 × 9 m box; this is a house —
- * brick walls, a clay-tiled gable — inside the same 9 m square
- * `settlements.ts` §`STRUCTURE_FOOTPRINTS` keeps clear of the road, and like
- * every structure its front is +z and its ridge along x.
+ * How much darker than its neighbour a part of a realistic building is drawn,
+ * by what it is made of — #500. A plinth, a ridge and a door wear the same
+ * photograph as the wall, the roof or the frame beside them
+ * (`realistic-assets.ts` §`REALISTIC_BUILDING_SURFACES`), so what sets them
+ * apart is this, multiplied into the vertex colour with the grounding. **No
+ * texture**, and no mesh: a darker course of brick is the same brick.
  */
-function realisticBuildingParts(): BufferGeometry[] {
-  return [block(8.4, 5 + FOUNDATION_METRES, 7, 0, -FOUNDATION_METRES), gable(9, 7.6, 2.6, 5)];
+const REALISTIC_ROLE_SHADE: Readonly<Record<BuildingRole, number>> = {
+  wall: 1,
+  plinth: 0.62,
+  roof: 1,
+  ridge: 0.72,
+  chimney: 0.9,
+  joinery: 1,
+  door: 0.62,
+  glass: 1,
+};
+
+/** One part of a realistic structure: the surface it wears, how dark, and its triangles. */
+interface StructurePart {
+  readonly surface: StructureSurface;
+  readonly shade: number;
+  /**
+   * Whether its foot is darkened by {@link groundingShade}: a building's parts
+   * are, and a field boundary's or a signpost's are NOT — #500 grounds a
+   * building, and the stylised world paints a boundary one colour top to
+   * bottom (§`builtStyle`), so a hedge is the same in both worlds.
+   */
+  readonly grounded: boolean;
+  readonly geometry: BufferGeometry;
 }
 
 /**
- * One structure's parts, in `REALISTIC_STRUCTURE_PARTS`' order — #475.
+ * One structure's parts in one variant — #475, and since #500 a building's are
+ * `buildings.ts`' roles, each wearing its surface from
+ * `realistic-assets.ts` §`REALISTIC_BUILDING_SURFACES`.
  *
- * Every kind but `building` is {@link STRUCTURE_STYLE}'s own parts, so the
- * realistic shape is the stylised one with a photograph on it: the same
- * triangles, in the same place.
+ * ⚠️ **The realistic house is `buildings.ts`' too**, where it used to be a
+ * brick block under a gable built here. The stylised world still draws a
+ * Kenney model for a house (ADR 0022); every other building is the SAME
+ * triangles in both worlds, dressed differently.
+ *
+ * A field boundary or a signpost is {@link BOUNDARY_STYLE}'s own parts, so the
+ * realistic shape is the stylised one with a photograph on it.
  */
-export function realisticStructureParts(kind: StructureKind): BufferGeometry[] {
-  return kind === 'building'
-    ? realisticBuildingParts()
-    : STRUCTURE_STYLE[kind].map((part) => part.geometry());
+function realisticStructureParts(kind: StructureKind, variant = 0): StructurePart[] {
+  if (isBuiltKind(kind)) {
+    const plan = planOf(kind, variant);
+    const parts: StructurePart[] = [];
+    for (const role of BUILDING_ROLES) {
+      const geometry = roleGeometry(plan, role);
+      if (geometry === undefined) continue;
+      parts.push({
+        surface: REALISTIC_BUILDING_SURFACES[kind][role],
+        shade: REALISTIC_ROLE_SHADE[role],
+        grounded: true,
+        geometry,
+      });
+    }
+    return parts;
+  }
+  const surfaces = REALISTIC_BOUNDARY_PARTS[kind];
+  return BOUNDARY_STYLE[kind].map((part, index) => ({
+    surface: surfaces[index] ?? 'painted',
+    shade: 1,
+    grounded: false,
+    geometry: part.geometry(),
+  }));
+}
+
+/**
+ * Every surface one structure wears, in the order its parts first wear them —
+ * #475, #500. The first is the belt a structure is counted off.
+ */
+export function realisticStructureSurfaces(kind: StructureKind): readonly StructureSurface[] {
+  const parts = realisticStructureParts(kind);
+  const surfaces = [...new Set(parts.map((part) => part.surface))];
+  for (const part of parts) part.geometry.dispose();
+  return surfaces;
 }
 
 /**
@@ -5325,7 +5480,12 @@ export function realisticStructureParts(kind: StructureKind): BufferGeometry[] {
  * coordinates would not give — they stretch one photograph across a whole
  * wall, whatever its size. Position and normal are kept; nothing else is.
  */
-function projectedInMetres(geometry: BufferGeometry, tileMetres: number): BufferGeometry {
+function projectedInMetres(
+  geometry: BufferGeometry,
+  tileMetres: number,
+  shade = 1,
+  grounded = true,
+): BufferGeometry {
   const flat = geometry.index === null ? geometry : geometry.toNonIndexed();
   if (flat !== geometry) geometry.dispose();
   for (const name of Object.keys(flat.attributes)) {
@@ -5357,31 +5517,28 @@ function projectedInMetres(geometry: BufferGeometry, tileMetres: number): Buffer
     }
   }
   flat.setAttribute('uv', new BufferAttribute(uv, 2));
+  // #500: the grounding and the part's own shade, as a vertex colour the
+  // structure materials multiply in. @see groundingShade
+  paintGrounded(flat, 0xffffff, shade, grounded);
   return flat;
 }
 
 /**
- * The parts of one structure that wear one surface, as one geometry, or
- * `undefined` when none do — #475.
+ * The parts of one structure that wear one surface, in one variant, as one
+ * geometry, or `undefined` when none do — #475, #500.
  */
 export function realisticStructureGeometry(
   kind: StructureKind,
   surface: StructureSurface,
+  variant = 0,
 ): BufferGeometry | undefined {
-  const parts = realisticStructureParts(kind);
-  const surfaces = REALISTIC_STRUCTURE_PARTS[kind];
-  if (parts.length !== surfaces.length) {
-    for (const part of parts) part.dispose();
-    throw new Error(
-      `${kind}: ${String(parts.length)} parts and ${String(surfaces.length)} surfaces to wear`,
-    );
-  }
-  const tile = surface === 'painted' ? 1 : REALISTIC_STRUCTURE_SURFACES[surface].tileMetres;
+  const tile = isPhotographic(surface) ? REALISTIC_STRUCTURE_SURFACES[surface].tileMetres : 1;
   const mine: BufferGeometry[] = [];
-  parts.forEach((part, index) => {
-    if (surfaces[index] === surface) mine.push(projectedInMetres(part, tile));
-    else part.dispose();
-  });
+  for (const part of realisticStructureParts(kind, variant)) {
+    if (part.surface === surface)
+      mine.push(projectedInMetres(part.geometry, tile, part.shade, part.grounded));
+    else part.geometry.dispose();
+  }
   if (mine.length === 0) return undefined;
   const joined = mergeGeometries(mine);
   for (const each of mine) each.dispose();
@@ -5418,6 +5575,10 @@ const STRUCTURE_SURFACE_FINISH: Readonly<
   corrugated: { roughness: 0.5, metalness: 0.5, tint: 0xffffff },
   hedge: { roughness: 0.95, metalness: 0, tint: 0x8fcf66 },
   painted: { roughness: 0.6, metalness: 0.2, tint: 0x5a5a5a },
+  // #500: a pane. Smooth and a little metallic, so it gives back the sky the
+  // environment map already holds — the look of glass for no texture at all —
+  // over a dark base, which is what a window reads as from the road by day.
+  glass: { roughness: 0.08, metalness: 0.35, tint: 0x2a3640 },
 };
 
 /**
@@ -5438,12 +5599,26 @@ export const REALISTIC_PRIMITIVE_SKIP: ReadonlySet<SceneryKind> = new Set<Scener
  * @test-facing held by `realistic-budget.test.ts`
  */
 export function realisticStructureTriangles(kind: StructureKind): number {
+  let heaviest = 0;
+  for (let variant = 0; variant < (isBuiltKind(kind) ? BUILDING_VARIANTS : 1); variant += 1) {
+    heaviest = Math.max(heaviest, realisticStructureTrianglesOf(kind, variant));
+  }
+  return heaviest;
+}
+
+/**
+ * How many triangles one shape of a realistic structure is drawn with — #500.
+ *
+ * @test-facing held by `realistic-budget.test.ts` §"the SAME triangles in both
+ * worlds", shape by shape against the stylised belt's mesh
+ */
+export function realisticStructureTrianglesOf(kind: StructureKind, variant: number): number {
   let total = 0;
-  for (const part of realisticStructureParts(kind)) {
-    const flat = part.index === null ? part : part.toNonIndexed();
+  for (const { geometry } of realisticStructureParts(kind, variant)) {
+    const flat = geometry.index === null ? geometry : geometry.toNonIndexed();
     total += flat.getAttribute('position').count / 3;
     flat.dispose();
-    part.dispose();
+    geometry.dispose();
   }
   return total;
 }
@@ -5452,6 +5627,7 @@ export function realisticStructureTriangles(kind: StructureKind): number {
 const STRUCTURE_SURFACES: readonly StructureSurface[] = [
   ...PHOTOGRAPHIC_STRUCTURE_SURFACES,
   'painted',
+  'glass',
 ];
 
 /**
@@ -5463,19 +5639,24 @@ function structureMaterials(
   textures: RealisticWorld['structures'],
 ): ShadedMaterials {
   const finish = STRUCTURE_SURFACE_FINISH[surface];
-  const maps = surface === 'painted' ? undefined : textures.get(surface);
+  const maps = isPhotographic(surface) ? textures.get(surface) : undefined;
+  // ⚠️ `vertexColors` since #500: every structure geometry carries its part's
+  // shade in its vertex colour, and a building's the grounding as well (a
+  // boundary's does not). @see projectedInMetres
   return {
     lit: constructed(
       new MeshStandardMaterial({
         color: finish.tint,
         roughness: finish.roughness,
         metalness: finish.metalness,
+        vertexColors: true,
         ...(maps === undefined ? {} : { map: maps.colour, normalMap: maps.normal }),
       }),
     ),
     flat: constructed(
       new MeshBasicMaterial({
         color: finish.tint,
+        vertexColors: true,
         ...(maps === undefined ? {} : { map: maps.colour }),
       }),
     ),
@@ -5487,33 +5668,54 @@ function structureMaterials(
  *
  * ## Why a belt a surface, and why every belt counts every item
  *
- * A structure wears more than one surface — a house is brick and tile — so
- * it cannot be one mesh with one material the way the stylised world's
- * vertex-coloured structures are. Each surface's belt holds, for each kind
- * that wears it, that kind's parts in it; so a house is two instances, one in
- * the brick belt and one in the tile belt, placed by the SAME matrix because
- * both belts place it from the same item. Every other kind is on the belt's
+ * A structure wears more than one surface — a house is brick, tile, timber
+ * and, since #500, glass — so it cannot be one mesh with one material the way
+ * the stylised world's vertex-coloured structures are. Each surface's belt
+ * holds, for each kind and shape that wears it, that kind's parts in it; so a
+ * house is four instances, one in each of those belts, placed by the SAME
+ * matrix because every belt places it from the same item. Every other kind is on the belt's
  * `skip` list, which is what makes it spend the budget without being drawn
  * (#478): each belt admits exactly the items the stylised belt would, so a
  * house can never be drawn with its walls and without its roof.
  */
 export class RealisticStructureBelts {
   readonly #belts: readonly { readonly surface: StructureSurface; readonly belt: ScatterBelt }[];
+  /** The belt each kind is counted off: the first surface it wears. @see drawnItems */
+  readonly #first = new Map<StructureKind, StructureSurface>();
 
   /** @param textures the world's structure surfaces. @see RealisticWorld.structures */
   constructor(textures: RealisticWorld['structures']) {
+    for (const kind of STRUCTURE_KINDS) {
+      const [first] = realisticStructureSurfaces(kind);
+      if (first !== undefined) this.#first.set(kind, first);
+    }
     this.#belts = STRUCTURE_SURFACES.map((surface) => {
       const models = new Map<SceneryKind, readonly BufferGeometry[]>();
       for (const kind of STRUCTURE_KINDS) {
-        const geometry = realisticStructureGeometry(kind, surface);
-        if (geometry !== undefined) models.set(kind, [geometry]);
+        // #500: a building has one shape a variant, and each is a mesh here.
+        const variants = isBuiltKind(kind) ? BUILDING_VARIANTS : 1;
+        const shapes: BufferGeometry[] = [];
+        for (let variant = 0; variant < variants; variant += 1) {
+          const geometry = realisticStructureGeometry(kind, surface, variant);
+          if (geometry !== undefined) shapes.push(geometry);
+        }
+        if (shapes.length === 0) continue;
+        // ⚠️ A variant without a surface its sibling wears would leave a hole
+        // the belt fills with the stylised primitive — a painted barn in a
+        // photographed village. Every variant wears the same surfaces, and
+        // this is where that stops being an assumption.
+        if (shapes.length !== variants) {
+          for (const shape of shapes) shape.dispose();
+          throw new Error(`${kind}: its variants do not all wear ${surface}`);
+        }
+        models.set(kind, shapes);
       }
       const belt = new ScatterBelt(models, {
         skip: new Set(SCENERY_KINDS.filter((kind) => !models.has(kind))),
         materials: structureMaterials(surface, textures),
       });
       // The belt wears copies. @see ScatterBelt's constructor
-      for (const [geometry] of models.values()) geometry?.dispose();
+      for (const shapes of models.values()) for (const geometry of shapes) geometry.dispose();
       return { surface, belt };
     });
   }
@@ -5546,7 +5748,7 @@ export class RealisticStructureBelts {
   get drawnItems(): number {
     let drawn = 0;
     for (const kind of STRUCTURE_KINDS) {
-      const first = REALISTIC_STRUCTURE_PARTS[kind][0];
+      const first = this.#first.get(kind);
       for (const mesh of first === undefined ? [] : (this.beltOf(first)?.meshesOf(kind) ?? [])) {
         drawn += mesh.count;
       }

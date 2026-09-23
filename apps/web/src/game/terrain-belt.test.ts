@@ -23,7 +23,21 @@ import { hillRoute, valleyRoute } from './route-fixtures-testing';
 import { scatterSeed, type SceneryKind } from './scatter';
 import { corridorOrigin, roadCorridor } from './terrain';
 import {
+  BUILDING_ROLES,
+  BUILDING_VARIANTS,
+  BUILT_KINDS,
+  FOUNDATION_METRES,
+  PLINTH_TOP_METRES,
+  buildingPlan,
+  type BuildingRole,
+} from './buildings';
+import { REALISTIC_BOUNDARY_PARTS, REALISTIC_BUILDING_SURFACES } from './realistic-assets';
+import {
   BridgeBelt,
+  GROUNDED_SHADE,
+  GROUNDING_METRES,
+  groundingShade,
+  realisticStructureGeometry,
   HorizonRing,
   ScatterBelt,
   SKY_GRADIENT_RISE,
@@ -320,11 +334,12 @@ describe('the buildings and the field boundaries a view draws — #460', () => {
     belt.dispose();
   });
 
-  it('paints a built shape in more than one colour, in one mesh', () => {
+  it('paints a built shape in more than one colour, in one mesh a shape', () => {
     const belt = new ScatterBelt(new Map());
     for (const kind of ['barn', 'church', 'shop-row', 'shed', 'signpost'] as const) {
       const meshes = belt.meshesOf(kind);
-      expect(meshes, kind).toHaveLength(1);
+      // #500: a building has two shapes, each one mesh; a signpost has one.
+      expect(meshes, kind).toHaveLength(kind === 'signpost' ? 1 : 2);
       const colours = meshes[0]?.geometry.getAttribute('color') as unknown as Attribute;
       const seen = new Set<string>();
       for (let vertex = 0; vertex < colours.array.length / 3; vertex += 1) {
@@ -360,6 +375,166 @@ describe('the buildings and the field boundaries a view draws — #460', () => {
       expect(meshes[0]?.count, kind).toBe(40);
     }
     belt.dispose();
+  });
+});
+
+describe('the buildings a view draws, since #500', () => {
+  const pose = { x: 0, y: 0, z: 0, headingX: 0, headingZ: 1, eyeRoadY: 0, targetRoadY: 0 };
+
+  it('draws each building in the shape its own variant names, two shapes a kind', () => {
+    const belt = new ScatterBelt(new Map());
+    belt.update(
+      Array.from({ length: 6 }, (_, variant) => ({
+        kind: 'barn' as const,
+        x: -12,
+        y: 0,
+        z: 10 + variant * 20,
+        rotation: 0,
+        scale: 1,
+        variant,
+      })),
+      pose,
+    );
+    const [first, second] = belt.meshesOf('barn');
+    // Six slots folded onto two shapes: three each.
+    expect(first?.count).toBe(3);
+    expect(second?.count).toBe(3);
+    // Non-vacuity: two meshes of one shape would pass the counts.
+    expect(first?.geometry.getAttribute('position').count).not.toBe(
+      second?.geometry.getAttribute('position').count,
+    );
+    belt.dispose();
+  });
+
+  it('grounds a building: darker where its walls meet the ground', () => {
+    expect(groundingShade(-FOUNDATION_METRES)).toBe(GROUNDED_SHADE);
+    expect(groundingShade(0)).toBe(GROUNDED_SHADE);
+    expect(groundingShade(GROUNDING_METRES / 2)).toBeCloseTo((1 + GROUNDED_SHADE) / 2, 9);
+    expect(groundingShade(GROUNDING_METRES)).toBe(1);
+    expect(groundingShade(8)).toBe(1);
+    // In the mesh the stylised world draws: the plinth's own colour at the
+    // foundation is the same colour at its top, darkened by the grounding.
+    const belt = new ScatterBelt(new Map());
+    const mesh = belt.meshesOf('barn')[0];
+    const positions = mesh?.geometry.getAttribute('position') as unknown as Attribute;
+    const colours = mesh?.geometry.getAttribute('color') as unknown as Attribute;
+    let pairs = 0;
+    for (let low = 0; low < positions.array.length / 3; low += 1) {
+      if (Math.abs(positions.getY(low) + FOUNDATION_METRES) > 1e-6) continue;
+      for (let high = 0; high < positions.array.length / 3; high += 1) {
+        if (
+          Math.abs(positions.getY(high) - PLINTH_TOP_METRES) < 1e-6 &&
+          Math.abs(positions.getX(high) - positions.getX(low)) < 1e-6 &&
+          Math.abs(positions.getZ(high) - positions.getZ(low)) < 1e-6
+        ) {
+          expect(colours.getX(low) / colours.getX(high)).toBeCloseTo(
+            GROUNDED_SHADE / groundingShade(PLINTH_TOP_METRES),
+            5,
+          );
+          pairs += 1;
+        }
+      }
+    }
+    expect(pairs).toBeGreaterThan(4);
+    belt.dispose();
+  });
+
+  it('grounds a realistic building the same way, in the vertex colour its materials multiply in', () => {
+    const walls = realisticStructureGeometry('barn', 'planks', 0);
+    const positions = walls?.getAttribute('position') as unknown as Attribute;
+    const colours = walls?.getAttribute('color') as unknown as Attribute;
+    let foundation = 0;
+    for (let vertex = 0; vertex < positions.array.length / 3; vertex += 1) {
+      const y = positions.getY(vertex);
+      // White, darkened by the grounding and by the part's own shade only.
+      expect(colours.getX(vertex)).toBeLessThanOrEqual(groundingShade(y) + 1e-6);
+      if (y < -FOUNDATION_METRES + 1e-6) {
+        expect(colours.getX(vertex)).toBeLessThanOrEqual(GROUNDED_SHADE + 1e-6);
+        foundation += 1;
+      }
+    }
+    expect(foundation).toBeGreaterThan(0);
+    walls?.dispose();
+  });
+
+  it('draws a realistic plinth, ridge, door and chimney darker than the part beside it', () => {
+    // A plinth wears the wall's photograph, a ridge the roof's and a door the
+    // frame's, so without `REALISTIC_ROLE_SHADE` each is the same surface as
+    // its neighbour and does not read as a part at all. Read back out of the
+    // geometry the belts are built from: `realisticStructureGeometry` merges a
+    // surface's roles in `BUILDING_ROLES`' order, so each role's vertices are
+    // a run whose length the plan gives, and its shade is what is left of a
+    // vertex's colour once the grounding is divided out.
+    const PAIRS: readonly (readonly [BuildingRole, BuildingRole])[] = [
+      ['plinth', 'wall'],
+      ['ridge', 'roof'],
+      ['door', 'joinery'],
+      ['chimney', 'wall'],
+    ];
+    let checked = 0;
+    for (const kind of BUILT_KINDS) {
+      for (let variant = 0; variant < BUILDING_VARIANTS; variant += 1) {
+        const plan = buildingPlan(kind, variant);
+        const surfaces = REALISTIC_BUILDING_SURFACES[kind];
+        const shadeOf = (role: BuildingRole): number | undefined => {
+          const surface = surfaces[role];
+          const geometry = realisticStructureGeometry(kind, surface, variant);
+          if (geometry === undefined) return undefined;
+          const positions = geometry.getAttribute('position') as unknown as Attribute;
+          const colours = geometry.getAttribute('color') as unknown as Attribute;
+          let first = 0;
+          for (const earlier of BUILDING_ROLES) {
+            if (earlier === role) break;
+            if (surfaces[earlier] === surface) first += plan.triangles[earlier].length / 3;
+          }
+          const count = plan.triangles[role].length / 3;
+          const shades = new Set<string>();
+          for (let vertex = first; vertex < first + count; vertex += 1) {
+            shades.add((colours.getX(vertex) / groundingShade(positions.getY(vertex))).toFixed(4));
+          }
+          geometry.dispose();
+          // One shade a role, or the run was not that role's.
+          expect(shades.size, `${kind} ${String(variant)} ${role}`).toBe(1);
+          return Number([...shades][0]);
+        };
+        for (const [darker, than] of PAIRS) {
+          if (plan.triangles[darker].length === 0 || plan.triangles[than].length === 0) continue;
+          if (surfaces[darker] !== surfaces[than]) continue;
+          const label = `${kind} ${String(variant)} ${darker} against ${than}`;
+          const dark = shadeOf(darker);
+          const light = shadeOf(than);
+          expect(dark, label).toBeDefined();
+          expect(light, label).toBeDefined();
+          expect(dark ?? 1, label).toBeLessThanOrEqual((light ?? 0) - 0.08);
+          checked += 1;
+        }
+      }
+    }
+    // Every pair on the house, and the plinths of every kind.
+    expect(checked).toBeGreaterThanOrEqual(2 * 4 + 8);
+  });
+
+  it('does not ground a realistic field boundary or signpost, as the stylised world does not', () => {
+    for (const [kind, surfaces] of Object.entries(REALISTIC_BOUNDARY_PARTS) as [
+      keyof typeof REALISTIC_BOUNDARY_PARTS,
+      readonly Parameters<typeof realisticStructureGeometry>[1][],
+    ][]) {
+      let low = 0;
+      for (const surface of new Set(surfaces)) {
+        const geometry = realisticStructureGeometry(kind, surface, 0);
+        expect(geometry, `${kind} ${surface}`).toBeDefined();
+        const positions = geometry?.getAttribute('position') as unknown as Attribute;
+        const colours = geometry?.getAttribute('color') as unknown as Attribute;
+        for (let vertex = 0; vertex < positions.array.length / 3; vertex += 1) {
+          expect(colours.getX(vertex), `${kind} ${surface}`).toBeCloseTo(1, 6);
+          if (positions.getY(vertex) < GROUNDING_METRES / 2) low += 1;
+        }
+        geometry?.dispose();
+      }
+      // Non-vacuity: it has a foot for the grounding to have darkened (a
+      // signpost's is its pole; its board stands above the band).
+      expect(low, kind).toBeGreaterThan(0);
+    }
   });
 });
 

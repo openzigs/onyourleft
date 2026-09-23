@@ -699,14 +699,31 @@ apps/                 AGPL-3.0-or-later, without exception
                         level, low, dry stretches of the route, each building
                         facing the road at one setback; five kinds of building
                         (a house from the pack, and a barn, a church, a row of
-                        shops and a shed built from numbers in
-                        `three-renderer.ts` §`STRUCTURE_STYLE`); walls, hedges
-                        and fences along the fields; blank signposts. ⚠️
+                        shops and a shed built from numbers in `buildings.ts`
+                        and painted by `three-renderer.ts` §`STRUCTURE_STYLE`);
+                        walls, hedges and fences along the fields; blank
+                        signposts. ⚠️
                         **`building` is not a scatter kind since #460**, and a
                         reviewer who remembers six `SCATTER_KINDS` is reading
                         the old file: `StructureKind` and `SCENERY_KINDS` are in
                         `scatter.ts`, and the frame carries the structures FIRST
                         on a budget of their own (`QualitySettings.structureItems`)
+    src/game/buildings.ts
+                        the buildings as SHAPES (#500) — walls with their doors
+                        and windows cut in, recessed and framed, eaves that
+                        overhang, a ridge, a plinth, a house's chimney, and two
+                        proportions a kind; pure, and naming no rendering
+                        library. ⚠️ **Both worlds draw its SAME triangles**, the
+                        stylised painting each role and the realistic dressing
+                        it (`realistic-assets.ts` §`REALISTIC_BUILDING_SURFACES`),
+                        which is what keeps "a realistic structure is no heavier
+                        than the stylised one" true; and every vertex stays in
+                        `settlements.ts` §`STRUCTURE_FOOTPRINTS`, which is why
+                        the arrangement digest did not move. Which shape a
+                        building wears is its seeded `variant`, so windows
+                        cannot vary house by house beyond that: every house of
+                        a shape is one instanced mesh. The realistic HOUSE is
+                        this file's too; the stylised one is still Kenney's
     src/game/seeded.ts  the hash every seeded, stateless placement draws from —
                         moved out of `scatter.ts` by #458, unchanged to the bit
     src/game/route-fixtures-testing.ts
