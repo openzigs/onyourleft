@@ -2509,12 +2509,12 @@ route as Part Z (§"Build and install"), from a `main` that has #500 in it.
 
 | Step | As described? | What was seen, or measured |
 |---|---|---|
-| AA1 | | |
-| AA2 | | |
-| AA3 | | |
-| AA4 | | |
+| AA1 | **Yes** | The first farmstead (about 1 050 m, on the left) reads as a farmstead at 9 m/s: a house with a door and windows, a barn with great doors. The owner missed it on the first pass and it was re-run from the start |
+| AA2 | **Yes, no shimmer** | Held at 1 045 m: the eaves and both chimneys read. The openings do **not** shimmer — six `screencap`s taken back to back were identical, pixel for pixel, over the house, the road and the fence. ⚠️ With `?at=` the scene is static, so this rules out flicker (z-fighting) and not crawl in motion; AA1 is the moving half |
+| AA3 | **Yes** | Held beside the farmstead, buildings in frame: 60 fps (page 16.6 / 16.7 / 16.8 ms), **35 draw calls**, **GPU 5 / 8 / 12 ms**, 0.11 % janky, thermal status 0. The same GPU p90 as Part Z's 8 ms before the detail. From the start of the route, before any building is in view: 35 calls, GPU 4 / 7 / 11 ms. ⚠️ That is ONE view, not [#506](https://github.com/openzigs/onyourleft/issues/506)'s worst case, which is a computed bound |
+| AA4 | **Yes** | The stylised barn has its double doors, and the shed its openings. The stylised house (the Kenney model, which carries its own door and windows) **needs nothing** — the owner's call, #500 §5 |
 
-**Phone (OEM, model, Android, WebView):** ______________  **Build:** ______________
+**Phone (OEM, model, Android, WebView):** Google Pixel Tablet (`tangorpro`), build `CP2A.260705.006`, Android 17, WebView 153.0.8010.36  **Build:** debug, `main` at `a21bdfe`, installed 2026-09-23 14:32, run 14:39–15:07 by the owner at the tablet
 
 ---
 
@@ -2546,19 +2546,19 @@ lake or a stone wall at all. #501 changed each, and each has a gate in CI that s
 |---|---|---|
 | AB1 | Z10 again: `?panel=0&ladder=0`, then hold at the bridge: `location.href = '/harness/realistic.html?at=2815&panel=0'` | Is the **banding** gone from the stream? Is there a **bank** — a drop from grass to water, and a darker margin where they meet? Is the **seam** across the road at the deck's start gone? Do the **parapets** read as stone with a coping? |
 | AB2 | Ride past the lake: `location.href = '/harness/realistic.html?at=1450&panel=0'`, then ride on | Is there a lake beside the road? Does it have the bank and margin AB1 asks about, and does it band? |
-| AB3 | Z9's stone half: `location.href = '/harness/realistic.html?at=2100&panel=0'` | Do the field walls on the climb read as **stone walls**? |
+| AB3 | Z9's stone half: `location.href = '/harness/realistic.html?at=1960&panel=0'` — ⚠️ 1 960 m, not 2 100 m: at 2 100 m the walls stand behind the trees (first run, 2026-09-23) | Do the field walls on the climb read as **stone walls**? |
 | AB4 | Z6's 30-second realistic row, with its `dumpsys` block: `?panel=0&ladder=0` | GPU p50 / p90 / p99 against Part Z's **GPU p90 8 ms** — the water shader now takes two screen-space derivatives a pixel |
 
 ### AB results
 
 | Step | As described? | What was seen, or measured |
 |---|---|---|
-| AB1 | | |
-| AB2 | | |
-| AB3 | | |
-| AB4 | | |
+| AB1 | **Yes, all four** | Held at 2 815 m: the banding is gone from the stream, there is a bank with a darker margin, the seam across the road at the deck is gone, and the parapets read as stone with a coping |
+| AB2 | **Yes** | Held at 1 450 m: a lake on the left, with the bank and margin, and **no banding** — its broad waves are ripples. (The owner first answered "banded" meaning ripples, and corrected it once the two were told apart: evenly spaced parallel lines against uneven crests) |
+| AB3 | **Yes** | The walls read as stone. ⚠️ **At 2 100 m, where this step holds, none is in view** — they stand behind the trees there. `structuresAt` over the route places 128 wall pieces between 1 908 and 2 447 m, 6–42 m from the road; **1 960 m** shows them on both sides of the road, and is the distance this step should use |
+| AB4 | **Yes** | Held at the bridge with the water filling the view: 60 fps, **33 draw calls**, **GPU 4 / 7 / 11 ms**, 0.21 % janky, thermal status 0 — no cost from the two screen-space derivatives against Part Z's GPU p90 8 ms |
 
-**Phone (OEM, model, Android, WebView):** ______________  **Build:** ______________
+**Phone (OEM, model, Android, WebView):** Google Pixel Tablet (`tangorpro`), build `CP2A.260705.006`, Android 17, WebView 153.0.8010.36  **Build:** debug, `main` at `a21bdfe`, installed 2026-09-23 14:32, run 14:39–15:07 by the owner at the tablet
 
 ---
 
@@ -2640,13 +2640,15 @@ adb logcat | grep -i "BluetoothLe"
 
 | Step | Result | `0x00` count / answer | Notes |
 |---|---|---|---|
-| AC1 | picker sentence as described? | | |
-| AC2 | trainer line / count: | | |
-| AC3 | did the climb follow? | | |
-| AC4 | Trainer panel sentence afterwards: | `0x00` after `0x08`? | |
-| AC5 | notice shown? anything written? | | |
-| AC6 | granted or refused? | | |
+| AC1 | **Yes** — *"Your trainer will follow this route’s hills. Pressing Ride asks it for control, and the gradient is sent to it as you ride."* | **0** — no write of any kind | App force-stopped and relaunched at 15:00:31; trainer paired 15:00:44 (`connect`, `getServices`, reads and two `startNotifications` only). ⚠️ The picker has no separate "choose a route" step: each saved route carries its own *Ride* button, so waiting on the list IS AC1 |
+| AC2 | **Yes** — HUD *"Trainer: simulating 6.2% (47 sent)"*, no road notice | **1** `0x00` at 15:03:45.158, **before** the first `0x11` at 15:03:45.409 | The control point answered 196 ms after the `0x00`. ⚠️ The plugin's log names the notification and not its bytes, so the `80 00 01` itself was **not read**; that the gradient writes that followed were honoured is AC3 |
+| AC3 | **Yes** | — | The owner, on the bike: *"resistance and power seem correct for grade"*, with the Ride screen never visited |
+| AC4 | **Yes** — *"This app has control of the trainer."*; the ERG line reads *"ERG, optional: No target set. The trainer is following your effort."* | One `0x08 01` at 15:05:51; **no `0x00` after it** | 47 `0x11` in all, none after the Stop. The panel also says the trainer carries its manufacturer’s own control point and the standard one is used (#370) |
+| AC5 | **Not run** | — | The owner has no saved workout. Open |
+| AC6 | **Not run** | — | Optional; no second app to hand |
 
-**Did pressing Ride on the game feel like the only thing you had to do, in your own words?** ______________
+⚠️ **An earlier attempt at AC1, at 14:58, is not a finding.** The owner pressed *Ride* and went back before reading the picker; the log shows exactly the sequence AC2 and AC4 require (`00`, then `11`, then `08 01` at the return), and the app was restarted for the AC1 above.
 
-**Trainer (make, model, firmware, address):** ______________  **Build:** ______________
+**Did pressing Ride on the game feel like the only thing you had to do, in your own words?** Not asked in so many words; the owner reported AC1–AC4 as correct.
+
+**Trainer (make, model, firmware, address):** make, model and firmware not recorded; address `EB:71:8D:AA:0E:3C`  **Build:** debug, `main` at `a21bdfe`, installed 2026-09-23 14:32, on the Pixel Tablet above
