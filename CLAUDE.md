@@ -1011,8 +1011,9 @@ downstream issue's acceptance criteria depend on these.
 # Exits 0 clean; exits 1 listing each violation by rule id.
 bash scripts/check-repo-rules.sh
 
-# Test the checker itself. Fixture-driven; 182 cases. ⚠️ This said 115 until
-# #357 and 168 until #416, and had been stale for some time — the number is what
+# Test the checker itself. Fixture-driven; 195 cases, printed by the run on
+# 2026-09-22. ⚠️ This said 115 until #357, 168 until #416 and 182 until #378,
+# and has been stale every single time somebody quoted it — the number is what
 # the suite prints, so read the run rather than this line.
 bash scripts/check-repo-rules.test.sh
 
@@ -3361,6 +3362,8 @@ top of an issue **supersedes its body**.
 | Why the privacy boundary walk cannot see a coordinate inside a photograph, and where the strip happens instead | [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) D-9, `apps/web/src/privacy/boundaries.ts` §`coordinatesIn` |
 | Which transport a photograph of a rider may travel down, and the one product rejected by name | [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) D-6 |
 | Why a household member in frame gets a sentence rather than a blur | [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) D-5 |
+| What a shared device gets instead of an access control this program has nowhere else | [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) D-11, §"The threat model", `apps/web/src/local-athlete.ts` |
+| Why two spike write-ups can take one number and merge clean and green | [`docs/architecture.md`](docs/architecture.md) §"Spike write-ups", `scripts/check-repo-rules.sh` §`ADR001`, [#493](https://github.com/openzigs/onyourleft/issues/493) |
 | What decides who is faster in a race, and what the owner answered when asked | [ADR 0028](docs/adr/0028-racing-fairness.md) §Amendments (2026-09-22), [#465](https://github.com/openzigs/onyourleft/issues/465), [#488](https://github.com/openzigs/onyourleft/issues/488) |
 | Why a race has no categories in its first cut, and what that leaves as the only guard | [ADR 0028](docs/adr/0028-racing-fairness.md) §Amendments §"What Q5 costs, said plainly", D-4 |
 | Where a W/kg plausibility ceiling came from, which of the four is sourced first-hand, and the one that sits below a world record | [ADR 0028](docs/adr/0028-racing-fairness.md) §Amendments §"Q3's four ceilings", [ADR 0006](docs/adr/0006-fit-codec-licensing.md) R1 |
