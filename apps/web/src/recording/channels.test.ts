@@ -24,7 +24,9 @@ import {
   isMovingReading,
   MOVEMENT_CADENCE_THRESHOLD_RPM,
   MOVEMENT_SPEED_THRESHOLD_METRES_PER_SECOND,
+  presenceAwareMovement,
   readingFor,
+  type RiderPresence,
 } from './channels';
 
 const AT = unixSeconds(1_700_000_000);
@@ -104,5 +106,43 @@ describe('what counts as movement', () => {
     expect(isMovingReading({ channel: 'heartRate', value: beatsPerMinute(160), at: AT })).toBe(
       false,
     );
+  });
+});
+
+describe('the camera’s answer, folded into movement — #390', () => {
+  const FLYWHEEL = { channel: 'speed', value: metresPerSecond(8), at: AT } as const;
+  const CRANKS = { channel: 'cadence', value: revolutionsPerMinute(85), at: AT } as const;
+  const POWER = { channel: 'power', value: watts(200), at: AT } as const;
+
+  it('takes movement away while the camera is sure nobody is there', () => {
+    const moving = presenceAwareMovement(() => 'absent');
+    // The ERG case: the trainer's own speed and a crank sensor on an empty
+    // bike are not a rider.
+    expect(moving(FLYWHEEL)).toBe(false);
+    expect(moving(CRANKS)).toBe(false);
+  });
+
+  it('changes nothing when the camera cannot tell — unknown never pauses', () => {
+    const moving = presenceAwareMovement(() => 'unknown');
+    expect(moving(FLYWHEEL)).toBe(true);
+    expect(moving(CRANKS)).toBe(true);
+    expect(moving(POWER)).toBe(false);
+  });
+
+  it('never adds movement: a rider in frame does not make power a movement signal', () => {
+    const moving = presenceAwareMovement(() => 'present');
+    expect(moving(FLYWHEEL)).toBe(true);
+    expect(moving(POWER)).toBe(false);
+    expect(moving({ channel: 'speed', value: metresPerSecond(0), at: AT })).toBe(false);
+  });
+
+  it('reads the answer on every reading, because it changes during a ride', () => {
+    let now: RiderPresence = 'present';
+    const moving = presenceAwareMovement(() => now);
+    expect(moving(FLYWHEEL)).toBe(true);
+    now = 'absent';
+    expect(moving(FLYWHEEL)).toBe(false);
+    now = 'present';
+    expect(moving(FLYWHEEL)).toBe(true);
   });
 });

@@ -3292,7 +3292,11 @@ counts speed and cadence as movement and deliberately **not** power: an ERG-mode
 power target while the rider is off the bike getting a drink, and a crank-based meter reports the
 torque of a bike being wheeled. A test that feeds power alone and expects a sixty-second ride gets
 ten seconds of moving time and fifty of automatic pause — which cost an afternoon to diagnose the
-first time. Feed a movement signal, or pass `autoPause: null`.
+first time. Feed a movement signal, or pass `autoPause: null`. ⚠️ **Since [#390](https://github.com/openzigs/onyourleft/issues/390)
+the converse has a fix, and it is not a second pauser**: a recorder handed a `presence` treats no
+reading as movement while the camera says `absent` (`channels.ts` §`presenceAwareMovement`), so the
+engine's own auto-pause fires on an ERG ride nobody is on. `unknown` changes nothing, and
+`recording/one-pauser.test.ts` fails if presence code ever calls a `pause()` itself.
 
 **Web Bluetooth constraints are product constraints, not bugs.** No Safari (desktop or iOS), no
 Firefox, anywhere, ever — `caniuse` `usage_perc_y` was **76.46% when read on 2026-09-02** (a

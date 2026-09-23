@@ -61,6 +61,7 @@ import {
   type ConsentRefusal,
 } from '../camera/consent';
 import { keptSummarySentence } from '../camera/keep';
+import { presenceSentence } from '../camera/presence';
 import type { CameraController, CaptureOutcome } from '../camera/session';
 
 /**
@@ -167,6 +168,19 @@ function Camera({ controller }: { readonly controller: CameraController }): JSX.
     (listener) => controller.subscribe(listener),
     () => controller.state().keptThisSession,
     () => 0,
+  );
+
+  /** #390: whether the rider asked for the ride to pause when nobody is on the bike. */
+  const watchingPresence = useSyncExternalStore(
+    (listener) => controller.subscribe(listener),
+    () => controller.state().watchingPresence,
+    () => false,
+  );
+  /** #390: the one word the ride is being given. A string, so `Object.is` holds. */
+  const presence = useSyncExternalStore(
+    (listener) => controller.subscribe(listener),
+    () => controller.state().presence,
+    () => 'unknown' as const,
   );
 
   const [acknowledged, setAcknowledged] = useState(false);
@@ -337,6 +351,33 @@ function Camera({ controller }: { readonly controller: CameraController }): JSX.
             without a DOM.
           */}
           <p>{keptSummarySentence(captured, keptThisSession)}</p>
+          {/*
+            #390. OFF every time the camera is turned on, like the keep above.
+            It needs no second consent and grants nothing new — the same
+            camera, under the same agreement, with the same indicator showing
+            — and it takes no picture: `camera/presence.ts` compares two tiny
+            brightness grids and keeps one word.
+
+            ⚠️ Rendered only while the camera is on, rather than disabled while
+            it is off: a disabled control leaves the tab order and a keyboard
+            user never hears why (`views/DevicesView.tsx`'s rule), and an
+            enabled one that did nothing would be a way in that is not.
+          */}
+          {live ? (
+            <p>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={watchingPresence}
+                  onChange={(event) => {
+                    controller.watchPresence(event.target.checked);
+                  }}
+                />{' '}
+                Pause my ride when nobody is on the bike
+              </label>
+            </p>
+          ) : null}
+          {live && watchingPresence ? <p>{presenceSentence(presence)}</p> : null}
           {outcome === undefined ? null : (
             <StatusMessage tone={outcome.taken && !outcome.keepFailed ? 'success' : 'warning'} live>
               {/*

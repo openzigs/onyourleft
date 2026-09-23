@@ -1117,6 +1117,10 @@ export function GameView(props: GameViewProps): JSX.Element {
     // `quality.ts` §`QualitySettings.capture` argues why capture is the first
     // thing a warming phone gives up and why this does NOT stop the camera.
     props.camera?.throttle(settings.capture);
+    // #390. The rung's presence figure, from the same place and for the
+    // converse reason: the work that is not the world goes before any of it.
+    // `quality.ts` §`QualitySettings.presence` says why giving it up is safe.
+    props.camera?.throttlePresence(settings.presence);
   }, [qualityLevel, realisticRung, props.camera]);
 
   if (!onTheStage) {

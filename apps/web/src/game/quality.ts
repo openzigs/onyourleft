@@ -419,6 +419,47 @@ export interface QualitySettings {
    * never the argument.
    */
   readonly capture: boolean;
+  /**
+   * Whether the camera may check that anybody is on the bike on this rung —
+   * [#390](https://github.com/openzigs/onyourleft/issues/390).
+   *
+   * ## Why it is on the ladder, when it costs so little
+   *
+   * A presence check is two draws of the camera into a 32 × 24 canvas and a
+   * read-back of 768 pixels, every two seconds — no full-size draw and no
+   * encode, which is what puts {@link capture} on this ladder. It is cheap. It
+   * is not free: the read-back crosses from the GPU on the thread that draws
+   * the world, on a phone that is by definition on this ladder because it is
+   * short of headroom. `game.browser.spec.ts` §"what a presence check costs"
+   * measures it with the renderer running and publishes the figure.
+   *
+   * ## ⚠️ It goes FIRST, with {@link capture}, and the argument is
+   * {@link scatterItems}' from the other end
+   *
+   * #390's criterion is that a rung *"drops presence checking **before** the
+   * world degrades"*. {@link scatterItems} argues that the slice of the world
+   * that costs least to look at goes first; this is the converse — the work
+   * that is **not the world at all** goes before any of it. So `presence` is
+   * `false` from the first step down, at or before the first rung that reduces
+   * anything a rider sees and strictly before the first that caps the frame
+   * rate, and `quality.test.ts` §"#390" is the ordering assertion.
+   *
+   * The reason it cannot go earlier still — a rung of its own, above level 1 —
+   * is {@link capture}'s: the rung indices are owner rulings (#476, #482), and
+   * inserting one would renumber every one of them for a feature that is off
+   * unless a rider turns it on.
+   *
+   * ## ⚠️ What giving it up does to a ride
+   *
+   * **Nothing, and that is why it is safe to give up first.** A withdrawn
+   * check makes `camera/session.ts` §`CameraController.riderPresence` answer
+   * `unknown` at once, and `unknown` is the answer that changes nothing: the
+   * ride's auto-pause goes back to exactly the speed-or-cadence rule it had
+   * before #390. A hot phone loses the ERG false-positive fix; it never gains a
+   * pause. Like {@link capture} it does not turn the camera off, and the live
+   * indicator goes on telling the room the truth.
+   */
+  readonly presence: boolean;
   /** A human-readable name, for the diagnostic line #91 asks to be recorded. */
   readonly label: string;
 }
@@ -458,6 +499,8 @@ const REDUCED_AT_DISPLAY_RATE: QualitySettings = {
   world: 'stylised',
   // ⚠️ The first step down takes it, and takes it whole. @see QualitySettings.capture
   capture: false,
+  // #390, with capture and for the converse reason. @see QualitySettings.presence
+  presence: false,
   label: 'reduced resolution and scenery',
 };
 
@@ -551,6 +594,8 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     world: 'stylised',
     // The only rung that permits it. @see QualitySettings.capture
     capture: true,
+    // #390. @see QualitySettings.presence
+    presence: true,
     label: 'full',
   },
   // ⚠️ The scenery goes here, WITH the first resolution step rather than as a
@@ -578,6 +623,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     riderShadows: 'contact',
     world: 'stylised',
     capture: false,
+    presence: false,
     label: 'reduced resolution, scenery and frame rate',
   },
   // ⚠️ The only rung that is flat. Resolution and frame rate are given up
@@ -603,6 +649,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     riderShadows: 'contact',
     world: 'stylised',
     capture: false,
+    presence: false,
     label: 'minimum',
   },
 ];

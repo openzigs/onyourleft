@@ -82,6 +82,10 @@ import {
   viewOf,
 } from './simulated-trainer-testing';
 import type { OpenTrainer, TrainerConnection } from './trainer';
+import type { RiderPresence, RiderPresencePort } from './presence-port';
+import { CameraController } from '../camera/session';
+import { manualSchedule, scriptedCamera, stillRoom } from '../camera/testing';
+import { PRESENCE_CHECK_MILLISECONDS } from '../camera/presence';
 
 const TRAINER = deviceId('kickr');
 const STRAP = deviceId('strap');
@@ -132,6 +136,8 @@ interface BenchOptions {
   readonly silentTrainer?: boolean;
   /** Give the controller somewhere to save a finished ride. See #14's fourth criterion. */
   readonly rideSave?: RideSavePort | undefined;
+  /** #390: the camera's answer, handed to the controller as production does. */
+  readonly presence?: RiderPresencePort | undefined;
   /** Break one checkpoint-store operation, for the failure paths review found. */
   readonly checkpointStore?: Partial<RecordingCheckpointStore>;
   /**
@@ -263,6 +269,7 @@ function benchWith(options: BenchOptions = {}): Bench {
     now: () => bench.now,
     ...(options.withTrainerControl === false ? {} : { openTrainer }),
     ...(options.rideSave === undefined ? {} : { rideSave: options.rideSave }),
+    ...(options.presence === undefined ? {} : { presence: options.presence }),
   });
 
   return {
@@ -1945,6 +1952,95 @@ describe('what the paired trainer turned out to offer — #370', () => {
     const rig = benchWith();
 
     expect(rig.controller.getSnapshot().trainer.controlChoice).toEqual({ kind: 'none' });
+    rig.controller.dispose();
+  });
+});
+
+describe('#390 — a trainer holding a target at an empty bike', () => {
+  it('keeps recording without a camera, because the trainer streams speed — the defect', async () => {
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 40);
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    rig.controller.dispose();
+  });
+
+  it('pauses through the recorder’s own auto-pause once the camera says nobody is there, and wakes when they return', async () => {
+    let presence: RiderPresence = 'present';
+    const asked: RiderPresence[] = [];
+    const rig = benchWith({
+      presence: {
+        riderPresence: () => {
+          asked.push(presence);
+          return presence;
+        },
+      },
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 5);
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+
+    presence = 'absent';
+    await ride(rig, DEFAULT_AUTO_PAUSE_AFTER_SECONDS + 3);
+    expect(rig.controller.getSnapshot().phase).toBe('paused');
+    // Read by the recorder on the readings it was handed — the controller
+    // itself does not branch on it. @see recording/one-pauser.test.ts
+    expect(asked.length).toBeGreaterThan(0);
+
+    presence = 'present';
+    await ride(rig, 2);
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    rig.controller.dispose();
+  });
+
+  it('never pauses on unknown', async () => {
+    const rig = benchWith({ presence: { riderPresence: () => 'unknown' } });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 40);
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    rig.controller.dispose();
+  });
+
+  it('drives the whole path: the real camera controller, an empty room, a paused ride', async () => {
+    // The camera side as `main.tsx` builds it — a `CameraController` IS the
+    // port — over a scripted camera looking at a room in which nothing moves.
+    const timers = manualSchedule();
+    // The camera's clock is the bench's, once there is a bench.
+    let benchSeconds = (): number => 0;
+    const camera = new CameraController({
+      port: scriptedCamera({ luminance: () => stillRoom() }).port,
+      schedule: timers.schedule,
+      clock: () => benchSeconds() * 1000,
+      wait: async () => Promise.resolve(),
+    });
+    const rig = benchWith({ presence: camera });
+    benchSeconds = () => rig.bench.now;
+    camera.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    await camera.turnOn();
+    camera.watchPresence(true);
+
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    const checkEvery = PRESENCE_CHECK_MILLISECONDS / 1000;
+    for (let second = 0; second < 60; second += 1) {
+      await ride(rig, 1);
+      if (second % checkEvery === 0) {
+        timers.fire();
+        await new Promise((resolve) => {
+          setTimeout(resolve, 0);
+        });
+      }
+    }
+    expect(camera.riderPresence()).toBe('absent');
+    expect(rig.controller.getSnapshot().phase).toBe('paused');
+
+    // And the rider's own switch is what takes it away again.
+    camera.watchPresence(false);
+    await ride(rig, 2);
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
     rig.controller.dispose();
   });
 });

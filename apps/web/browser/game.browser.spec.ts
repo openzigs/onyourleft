@@ -25,8 +25,18 @@ import { test as base, devices, expect } from '@playwright/test';
 import { HARNESS_ORIGIN } from '../playwright.config';
 import { MINIMUM_RIDER_FRAME_SHARE, riderFrameBox } from '../src/game/camera';
 
-import type { LineMeasurement, RealisticMeasurement, RiderExtent } from './game-harness';
+import type {
+  LineMeasurement,
+  PresenceCostMeasurement,
+  RealisticMeasurement,
+  RiderExtent,
+} from './game-harness';
 import { MINIMUM_TINT_CONTRAST_RATIO } from '../src/game/terrain';
+import {
+  PRESENCE_CHECK_MILLISECONDS,
+  PRESENCE_GRID_COLUMNS,
+  PRESENCE_GRID_ROWS,
+} from '../src/camera/presence';
 
 /**
  * Said beside every frame time this spec publishes — #473. Since #473 the
@@ -180,6 +190,8 @@ interface GameHarnessResult {
     readonly mapDrawCalls: number;
     readonly shadowPixels: number;
   };
+  /** #390 — measured only by the `?shadow-map` load. */
+  readonly presenceCost: PresenceCostMeasurement;
   /** ADR 0026 — measured only by the `?realistic` load. */
   readonly realistic: RealisticMeasurement;
   readonly errors: readonly string[];
@@ -1332,6 +1344,45 @@ test.describe('the world is lit, and can stop being — #286', () => {
       description: shadowMeasured,
     });
     console.log(`frame cost of the rider shadow map — ${shadowMeasured}`);
+  });
+
+  /**
+   * **What a presence check costs, with the renderer running** — #390's cost
+   * criterion, and the combined figure rather than the check's own.
+   * `game-harness.ts` §`presenceCostProbe` says how it is taken and what it
+   * does not say; the short of it is that a headless Chromium on a software
+   * rasteriser is not the Pixel Tablet #323's 24 ms p50 was taken on.
+   *
+   * ⚠️ **Published, not bounded**, for the shading measurement's reason. What
+   * IS asserted is that the measurement is of something: the real sampler read
+   * a whole grid off a real camera, and the frames were drawn.
+   */
+  test('what a presence check costs a frame, published beside #323’s 24 ms', async ({
+    harnessRun,
+  }, testInfo) => {
+    const result = await harness(harnessRun, '?shadow-map');
+    const cost = result.presenceCost;
+    expect(cost.measured, `the presence probe did not run: ${cost.why}`).toBe(true);
+    // 32 × 24: the sampler's own canvas, read back whole.
+    expect(cost.cells).toBe(PRESENCE_GRID_COLUMNS * PRESENCE_GRID_ROWS);
+    expect(cost.frameMs).toBeGreaterThan(0);
+    expect(cost.frameWithSampleMs).toBeGreaterThan(0);
+    expect(cost.sampleAloneMs).toBeGreaterThan(0);
+    expect(Number.isFinite(cost.frameWithSampleMs - cost.frameMs)).toBe(true);
+
+    const perSample = cost.frameWithSampleMs - cost.frameMs;
+    // Two samples a check, one check every PRESENCE_CHECK_MILLISECONDS.
+    const perSecond = (perSample * 2 * 1000) / PRESENCE_CHECK_MILLISECONDS;
+    const measured =
+      `renderer alone ${cost.frameMs.toFixed(3)} ms a frame, with one presence sample in every ` +
+      `frame ${cost.frameWithSampleMs.toFixed(3)} ms (difference ` +
+      `${perSample >= 0 ? '+' : ''}${perSample.toFixed(3)} ms), against a same-condition spread ` +
+      `of ${cost.noiseMs.toFixed(3)} ms; a sample alone ${cost.sampleAloneMs.toFixed(3)} ms; at ` +
+      `the production rate that is ${perSecond.toFixed(3)} ms of main thread a second, against ` +
+      `#323's 24 ms p50 frame on the device floor (not this machine); the synthetic camera's ` +
+      `pair read "${cost.observation}"`;
+    testInfo.annotations.push({ type: 'frame cost of a presence check', description: measured });
+    console.log(`frame cost of a presence check — ${measured}`);
   });
 });
 

@@ -87,6 +87,8 @@ import type {
 import {
   DEFAULT_AUTO_PAUSE_AFTER_SECONDS,
   isMovingReading,
+  presenceAwareMovement,
+  type RiderPresence,
   readingFor,
   type RideReading,
 } from './channels';
@@ -178,6 +180,18 @@ export interface RecorderOptions {
    * {@link DEFAULT_AUTO_PAUSE_AFTER_SECONDS}; pass `null` to disable it.
    */
   readonly autoPause?: AutoPausePolicy<StreamChannelValue> | null;
+  /**
+   * Whether anybody is on the bike, from the camera — #390.
+   *
+   * ⚠️ **Advisory to the default auto-pause and to nothing else.** It is folded
+   * into the movement predicate by `channels.ts` §`presenceAwareMovement`, so
+   * the engine's own auto-pause stays the one thing that pauses a ride. An
+   * explicit {@link autoPause} is taken as given and this is not consulted, and
+   * `null` disables auto-pause with it — a camera cannot pause a recording
+   * that has no auto-pause at all. Omitted, the answer is always `unknown`,
+   * which changes nothing.
+   */
+  readonly presence?: (() => RiderPresence) | undefined;
 }
 
 /** A recording being written to disk as it happens. */
@@ -325,7 +339,7 @@ export async function recoverRecorder(
   return { recorder, recovered };
 }
 
-function autoPauseOption(options: Pick<RecorderOptions, 'autoPause'>): {
+function autoPauseOption(options: Pick<RecorderOptions, 'autoPause' | 'presence'>): {
   autoPause?: AutoPausePolicy<StreamChannelValue>;
 } {
   if (options.autoPause === null) {
@@ -334,7 +348,8 @@ function autoPauseOption(options: Pick<RecorderOptions, 'autoPause'>): {
   return {
     autoPause: options.autoPause ?? {
       after: seconds(DEFAULT_AUTO_PAUSE_AFTER_SECONDS),
-      isMoving: isMovingReading,
+      isMoving:
+        options.presence === undefined ? isMovingReading : presenceAwareMovement(options.presence),
     },
   };
 }

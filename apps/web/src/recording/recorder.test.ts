@@ -52,7 +52,7 @@ import {
 } from '@onyourleft/store/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type { RideReading } from './channels';
+import type { RideReading, RiderPresence } from './channels';
 import {
   createRecorder,
   listRecoverableRecordings,
@@ -827,6 +827,97 @@ describe('running out of storage', () => {
     await expect(recorder.start(at(0))).resolves.toBeUndefined();
     expect(recorder.session.state).toBe('recording');
     expect(recorder.storageState).toBe('quota-exceeded');
+  });
+});
+
+describe('#390 — the camera is advisory to the one auto-pause', () => {
+  /** The ERG case: a trainer spinning its flywheel and reporting the speed. */
+  function erg(recorder: Recorder, t: number): void {
+    recorder.observeReading(powerReading(t, 200));
+    recorder.observeReading(speedReading(t, 8));
+  }
+
+  it('pauses an ERG ride the camera says nobody is on, as the engine’s own automatic pause, on disk', async () => {
+    let presence: RiderPresence = 'present';
+    const recorder = newRecorder({ presence: () => presence });
+    await recorder.start(at(0));
+    for (let t = 0; t < 60; t += 1) {
+      // The rider walks away at t = 20; the trainer does not notice.
+      presence = t < 20 ? 'present' : 'absent';
+      erg(recorder, t);
+      await recorder.tick(at(t));
+    }
+    expect(recorder.session.state).toBe('paused');
+    // ⚠️ The ENGINE's pause, not one of the camera's: an automatic pause
+    // backdated to the last movement plus the engine's own interval.
+    expect(recorder.session.pauseReason).toBe('automatic');
+
+    await harness.discard();
+    const listed = await harness.read(async (store) => store.listRecordingSessions(ATHLETE_A));
+    expect(listed[0]?.state).toBe('paused');
+    expect(listed[0]?.pauses).toEqual([{ from: at(29), reason: 'automatic' }]);
+  });
+
+  it('never pauses a ride because the camera cannot tell', async () => {
+    const recorder = newRecorder({ presence: () => 'unknown' });
+    await recorder.start(at(0));
+    for (let t = 0; t < 60; t += 1) {
+      erg(recorder, t);
+      await recorder.tick(at(t));
+    }
+    expect(recorder.session.state).toBe('recording');
+    expect(recorder.session.movingTime).toBe(59);
+  });
+
+  it('lets the rider’s return wake the pause, through the engine’s own wake', async () => {
+    let presence: RiderPresence = 'absent';
+    const recorder = newRecorder({ presence: () => presence });
+    await recorder.start(at(0));
+    for (let t = 0; t < 30; t += 1) {
+      erg(recorder, t);
+      await recorder.tick(at(t));
+    }
+    expect(recorder.session.state).toBe('paused');
+    presence = 'present';
+    erg(recorder, 30);
+    await recorder.tick(at(30));
+    expect(recorder.session.state).toBe('recording');
+  });
+
+  it('cannot pause a recording that has no auto-pause at all', async () => {
+    const recorder = newRecorder({ autoPause: null, presence: () => 'absent' });
+    await recorder.start(at(0));
+    for (let t = 0; t < 60; t += 1) {
+      erg(recorder, t);
+      await recorder.tick(at(t));
+    }
+    expect(recorder.session.state).toBe('recording');
+  });
+
+  it('carries the camera into a recovered recording too', async () => {
+    const first = newRecorder();
+    await first.start(at(0));
+    erg(first, 0);
+    await first.tick(at(0));
+    await first.flush();
+    await harness.discard();
+    const recovered = await recoverRecorder({
+      store: harnessStore(),
+      athleteId: ATHLETE_A,
+      sessionId: first.sessionId,
+      presence: () => 'absent',
+    });
+    const recorder = recovered?.recorder;
+    if (recorder === undefined) {
+      throw new Error('nothing recovered');
+    }
+    await recorder.resume(at(5));
+    for (let t = 5; t < 40; t += 1) {
+      erg(recorder, t);
+      await recorder.tick(at(t));
+    }
+    expect(recorder.session.state).toBe('paused');
+    expect(recorder.session.pauseReason).toBe('automatic');
   });
 });
 

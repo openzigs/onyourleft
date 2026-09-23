@@ -205,8 +205,19 @@ interface ClientPlatform {
  * `docs/validation/0002-android-shell-and-game.md` Parts B–D and L are where
  * that is settled, and their result tables are empty.
  */
-async function buildPlatform(probe: CapabilityProbe): Promise<ClientPlatform> {
+async function buildPlatform(
+  probe: CapabilityProbe,
+  camera: CameraController | undefined,
+): Promise<ClientPlatform> {
   const shared = {
+    // #390. The camera answers "is anybody on the bike" for every recorder the
+    // ride controller builds — advisory to its auto-pause and nothing else,
+    // `recording/channels.ts` §`presenceAwareMovement`. It is `unknown` unless
+    // the rider turned the check on from the Camera screen, which is the only
+    // place it can be turned on. ⚠️ An optional option, so dropping this line
+    // is GREEN in `check:wiring` (§Limits, "an optional parameter nobody
+    // supplies") and in every test — `ride/presence-port.ts` records the gap.
+    ...(camera === undefined ? {} : { presence: camera }),
     store: localStore(),
     athleteId: LOCAL_ATHLETE,
     // `crypto.randomUUID()` rather than a counter: two tabs recording at once
@@ -751,12 +762,13 @@ async function buildCameraController(): Promise<CameraController | undefined> {
 }
 
 async function render(athlete: AthleteRecord | undefined): Promise<void> {
-  const platform = await buildPlatform(capabilities);
+  // Built once per tab, for the reason `buildCameraController` gives — and
+  // before the platform, because the ride controller reads its presence (#390).
+  const camera = await buildCameraController();
+  const platform = await buildPlatform(capabilities, camera);
   const rideController = platform.rideController;
   // Read once: two calls would be two reads of a global for one prop.
   const storage = platformStorage();
-  // Built once per tab, for the reason `buildCameraController` gives.
-  const camera = await buildCameraController();
   const root = createRoot(container);
   const draw = (update: UpdateWatcher | undefined): void => {
     root.render(

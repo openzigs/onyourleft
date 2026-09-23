@@ -26,7 +26,7 @@ import {
   type MediaStreamLike,
   type VideoTrackLike,
 } from './browser-camera';
-import { cleanFrameBytes } from './testing';
+import { cleanFrameBytes, stillRoom } from './testing';
 import { frameLeaksIn } from './notice';
 
 function track(): VideoTrackLike & { stopped: boolean } {
@@ -52,6 +52,10 @@ const GRABBER: FrameGrabber = {
       width: 1920,
       height: 1080,
     }),
+  luminance: () => ({
+    sample: async () => Promise.resolve(stillRoom()),
+    release: () => undefined,
+  }),
 };
 
 function devices(
@@ -238,7 +242,10 @@ describe('what a rider can be shown', () => {
   it('replaces a grabber’s own failure with the fixed wording', async () => {
     const port = browserCameraPort({
       devices: devices(async () => Promise.resolve(streamOf([track()]))),
-      grabber: { grab: () => Promise.reject(new Error('canvas said data:image/png;base64,QQ==')) },
+      grabber: {
+        ...GRABBER,
+        grab: () => Promise.reject(new Error('canvas said data:image/png;base64,QQ==')),
+      },
       secureContext: true,
     });
     const session = await port.startCamera();
@@ -347,5 +354,79 @@ describe('waiting for the first frame', () => {
 
   it('is five seconds by default — long for a camera that works', () => {
     expect(FIRST_FRAME_MILLISECONDS).toBe(5000);
+  });
+});
+
+describe('the presence sampler, behind the session — #390', () => {
+  /** A grabber whose sampler records what was asked of it. */
+  function countingGrabber(fails?: Error): {
+    grabber: FrameGrabber;
+    made: () => number;
+    released: () => number;
+  } {
+    let made = 0;
+    let released = 0;
+    return {
+      grabber: {
+        ...GRABBER,
+        luminance: () => {
+          made += 1;
+          return {
+            sample: async () =>
+              fails === undefined ? Promise.resolve(stillRoom()) : Promise.reject(fails),
+            release: () => {
+              released += 1;
+            },
+          };
+        },
+      },
+      made: () => made,
+      released: () => released,
+    };
+  }
+
+  it('makes one sampler for the session, however many samples are taken, and lets it go with the camera', async () => {
+    const counted = countingGrabber();
+    const port = browserCameraPort({
+      devices: devices(async () => Promise.resolve(streamOf([track()]))),
+      grabber: counted.grabber,
+      secureContext: true,
+    });
+    const session = await port.startCamera();
+    expect(counted.made()).toBe(0);
+    const grid = await session.sampleLuminance();
+    await session.sampleLuminance();
+    expect(grid.values.length).toBe(grid.columns * grid.rows);
+    expect(counted.made()).toBe(1);
+    session.stopCamera();
+    expect(counted.released()).toBe(1);
+  });
+
+  it('refuses a sample once the camera is stopped', async () => {
+    const port = browserCameraPort({
+      devices: devices(async () => Promise.resolve(streamOf([track()]))),
+      grabber: GRABBER,
+      secureContext: true,
+    });
+    const session = await port.startCamera();
+    session.stopCamera();
+    await expect(session.sampleLuminance()).rejects.toBeInstanceOf(CameraCaptureError);
+  });
+
+  it('replaces a sampler’s own failure with the fixed wording — ADR 0029 D-8', async () => {
+    const counted = countingGrabber(new Error('video said blob:https://example/abc'));
+    const port = browserCameraPort({
+      devices: devices(async () => Promise.resolve(streamOf([track()]))),
+      grabber: counted.grabber,
+      secureContext: true,
+    });
+    const session = await port.startCamera();
+    await expect(session.sampleLuminance()).rejects.toSatisfy((error: unknown) => {
+      expect(error).toBeInstanceOf(CameraCaptureError);
+      const message = error instanceof Error ? error.message : String(error);
+      expect(frameLeaksIn(message)).toStrictEqual([]);
+      expect(message).not.toContain('blob:');
+      return true;
+    });
   });
 });

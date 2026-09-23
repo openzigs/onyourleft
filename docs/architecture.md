@@ -986,6 +986,21 @@ catch a duplicate: two wired modules are both wired.**
 | The export (D-3) | `transfer/export-everything.ts` §`CameraManifest` — every kept picture as its own file, untrimmed, named in the manifest with what an activity file cannot carry | `export-everything.test.ts`, including that no ride file contains the picture's bytes |
 | The erase (D-4) | `transfer/erase-device.ts` — `ERASE_REMOVES` names the pictures **and everything derived from one** | `erase-device.test.ts`, reading back through a fresh connection |
 | The walk's blindness (D-9) | `privacy/boundaries.ts`'s header, and it is an acceptance criterion rather than a courtesy | `boundaries.test.ts` §"the walk cannot see inside image bytes", which demonstrates it rather than describing it |
+| Presence (#390) | `camera/presence.ts` — two 32 × 24 brightness grids 150 ms apart, compared and dropped, every two seconds; `present`, `absent` after 15 s of unbroken stillness, or `unknown`. Through the **same** session and consent, off at every switch-on, and given up on the ladder's first step down (`quality.ts` §`QualitySettings.presence`) | `presence.test.ts` for the three states; `presence-session.test.ts` for the one port, the one consent and the indicator; `boundary.test.ts` holds the grid inside `camera/`; `game.browser.spec.ts` §"what a presence check costs" publishes the combined cost |
+
+⚠️ **The camera never pauses a ride — it takes movement away, and the recording engine pauses.**
+Before [#390](https://github.com/openzigs/onyourleft/issues/390) the ONE thing that paused a ride on
+its own was `packages/domain`'s recording engine, when no reading had counted as movement for
+`recording/channels.ts` §`DEFAULT_AUTO_PAUSE_AFTER_SECONDS`; and an ERG-mode trainer holding a target
+at an empty bike reports the speed of its own flywheel, so a ride went on accumulating while the
+rider was off getting a drink. That is still the one pauser. The camera's answer reaches it through
+`channels.ts` §`presenceAwareMovement`, which the recorder uses as its movement predicate: while the
+camera is sure nobody is there no reading is movement, and the engine pauses after its own interval,
+with its own `automatic` reason, and is woken by its own rule when the rider comes back. `unknown` —
+a dark room, a throttled phone, a camera that is off — changes nothing. The ride controller hands the
+port (`ride/presence-port.ts`) to every recorder it builds or recovers and does nothing else with
+it; `recording/one-pauser.test.ts` holds that line by line, because a controller that already has a
+`pause()` is one `if` away from being a second pauser.
 
 ⚠️ **The interface and both implementations are in `apps/web`, and that is CLAUDE.md §4h rather than
 an oversight.** `apps/mobile/capacitor.config.ts` sets `webDir: '../web/dist'`, so a capture

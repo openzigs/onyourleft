@@ -100,3 +100,47 @@ export function isMovingReading(reading: RideReading): boolean {
       return false;
   }
 }
+
+/**
+ * What the camera says about whether anybody is on the bike — #390.
+ *
+ * ⚠️ **Three answers, not two**, and the third is the one that matters most:
+ * `unknown` is *"the camera could not tell"* — a dark room, a lens pointing at
+ * a wall, a camera that is off, throttled or was never allowed — and it is not
+ * `absent`. Collapsing the two is how a rider mid-interval gets paused because
+ * somebody switched a light off.
+ */
+export type RiderPresence = 'present' | 'absent' | 'unknown';
+
+/**
+ * The movement predicate, with the camera's answer folded in — #390.
+ *
+ * ⚠️ **This is advisory to the ONE auto-pause, not a second pauser.** The only
+ * thing in the program that pauses a ride on its own is
+ * `packages/domain`'s recording engine, when no reading has been movement for
+ * {@link DEFAULT_AUTO_PAUSE_AFTER_SECONDS}. This does not pause anything and
+ * holds no timer: it takes one thing away — while the camera is sure nobody is
+ * there, a reading stops *counting* as movement — and the engine then does
+ * what it always does. `recording/one-pauser.test.ts` asserts that shape by
+ * name, because two independent pausers is the arrangement that produces a
+ * ride which pauses and resumes in a loop.
+ *
+ * The defect it answers is `CLAUDE.md` §8's converse: an ERG-mode trainer
+ * holds a power target at a rider who is not there, and reports a speed that
+ * is the flywheel it is spinning, so {@link isMovingReading} says "moving" for
+ * as long as the rider is off getting a drink.
+ *
+ * - `absent` → no reading is movement. The engine pauses after its own
+ *   interval, and an automatic pause is not woken by the trainer's speed.
+ * - `present` and `unknown` → exactly {@link isMovingReading}. ⚠️ **`unknown`
+ *   never pauses**, and `present` never keeps a ride going that the existing
+ *   rule would pause — the camera can only ever remove evidence, never add it.
+ *
+ * `presence` is read on every reading rather than captured once, because it
+ * changes during a ride; it is a function so this module holds no state.
+ */
+export function presenceAwareMovement(
+  presence: () => RiderPresence,
+): (reading: RideReading) => boolean {
+  return (reading) => presence() !== 'absent' && isMovingReading(reading);
+}
