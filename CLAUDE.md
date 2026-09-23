@@ -3080,7 +3080,10 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   prose. ⚠️ A reviewer who remembers this sentence being unenforced is reading the old file:
   deleting an ADR's `- **Status**: Accepted` line used to leave `check-repo-rules.sh` reporting
   clean at exit 0. Numbers are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. **The next free number is 0030.**
+  **and which are claimed by open issues** before you pick one. **The next free number is 0031.**
+  ⚠️ **0030 is [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md)**, taken by
+  [#379](https://github.com/openzigs/onyourleft/issues/379) for what the app may say about a rider's
+  body.
   ⚠️ **0029 is [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md)**, taken by
   [#378](https://github.com/openzigs/onyourleft/issues/378) for camera imagery as its own data class;
   a reviewer who remembers this sentence offering 0029 is reading the old file.
@@ -3339,6 +3342,11 @@ top of an issue **supersedes its body**.
 | What stops a widened endpoint radius or a sparse ride outrunning that margin, and what a ride coarser than the ceiling loses | `packages/domain/src/segment/segment.ts` §`MAXIMUM_ENDPOINT_REACH_METRES`, `packages/domain/src/segment/match.ts` §`GAP_SECONDS` |
 | What a test fixture at latitude 51.5, longitude -0.12 used to break, and what fixed it | `packages/domain/src/segment/cells.test.ts`, `apps/web/src/segments/sweep.store.test.ts` §`ORIGIN_LONGITUDE` |
 | Where a device's capability set comes from, and what happens when a device contradicts itself | [`packages/sensors/README.md`](packages/sensors/README.md) §"What a device says it can do", `packages/sensors/web-bluetooth/src/transport.ts` §`declaredBy`, §`noteUndeclared` |
+| What this app may say about a rider's body, and the two vocabularies every string is in | [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md) D-1, D-2, [#379](https://github.com/openzigs/onyourleft/issues/379) |
+| Why no absolute joint angle is ever rendered, and why a better camera could not change that | [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md) D-3 |
+| Why the frontal plane is banned as a word and a picture as well as a number | [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md) D-4 |
+| When an in-ride coach must say nothing, and why silence is never explained | [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md) D-7, `packages/domain/src/workout/erg-safety.ts` §`assessErgCadence` |
+| Which FDA sentence this repository quoted and could not find in the guidance | [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md) §Context, [ADR 0007](docs/adr/0007-patent-posture.md) D7 |
 | What a captured camera frame IS in this program, and why it is not another sensor channel | [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) D-1, [#378](https://github.com/openzigs/onyourleft/issues/378) |
 | Why an error message may never carry a picture, and why that binds harder than the coordinate rule | [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) D-8, [ADR 0004](docs/adr/0004-privacy-and-location.md) decision D |
 | Why the privacy boundary walk cannot see a coordinate inside a photograph, and where the strip happens instead | [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) D-9, `apps/web/src/privacy/boundaries.ts` §`coordinatesIn` |
