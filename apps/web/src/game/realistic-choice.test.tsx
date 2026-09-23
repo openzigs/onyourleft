@@ -27,7 +27,7 @@ import {
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 
 import { GameView, STANDING_NOTICE_SECONDS, type GamePort, type RidableRoute } from './GameView';
-import type { GameRenderer } from './port';
+import type { GameRenderer, SceneFrame } from './port';
 import {
   FRAME_MS_REDUCE_ABOVE,
   REALISTIC_LADDER,
@@ -42,6 +42,8 @@ import {
   realisticWorldNotice,
   type RealisticWorldOutcome,
 } from './realistic-assets';
+import { REALISTIC_STRUCTURE_ITEMS } from './realistic-budget';
+import { STRUCTURE_KINDS } from './scatter';
 import { REALISTIC_WORLD_STORAGE_KEY } from './world-preference';
 
 function flatRoute(): RidableRoute {
@@ -70,6 +72,8 @@ const PORT: GamePort = {
 
 /** Every rung the renderer was built with or told about, in order. */
 let told: QualitySettings[] = [];
+/** Every frame the renderer was handed, in order. */
+let rendered: SceneFrame[] = [];
 /** How many times the renderer was asked for the realistic world. */
 let asked = 0;
 /** Settles the load the renderer was last asked for. */
@@ -80,7 +84,9 @@ const RENDERER: GameRenderer = {
     told.push(settings);
     return {
       hasContext: true,
-      render: () => undefined,
+      render: (frame) => {
+        rendered.push(frame);
+      },
       setQuality: (next) => {
         told.push(next);
       },
@@ -104,6 +110,7 @@ let clock = 0;
 beforeEach(() => {
   pending = [];
   told = [];
+  rendered = [];
   asked = 0;
   clock = 0;
   answer = () => undefined;
@@ -208,6 +215,33 @@ describe('which world a ride draws — #475', () => {
     expect(told.at(-1)).toEqual(REALISTIC_LADDER[0]);
     expect(told.every((each) => each.riderShadows !== 'map')).toBe(true);
     expect(mounted?.container.textContent).not.toContain('Standard world');
+  });
+
+  it('places no more structures than the realistic rung allows, where the stylised top places more — #506', async () => {
+    // The consumer of `REALISTIC_LADDER`'s structure budget: `GameView` hands
+    // the rung's figure to `sceneFrame`, which is what stops the structures
+    // being PLACED — the renderer's own budget only stops them being drawn.
+    const structuresIn = (frame: SceneFrame | undefined): number =>
+      (frame?.scatter ?? []).filter((item) =>
+        (STRUCTURE_KINDS as readonly string[]).includes(item.kind),
+      ).length;
+    // Non-vacuity: this route, in the stylised world, carries more than the
+    // realistic budget — or the equality below would hold with no budget at all.
+    await ride();
+    await frames(1000 / 60, 5);
+    const stylised = structuresIn(rendered.at(-1));
+    expect(told.every((each) => each.world === 'stylised')).toBe(true);
+    expect(stylised).toBeGreaterThan(REALISTIC_STRUCTURE_ITEMS);
+    mounted?.unmount();
+    mounted = undefined;
+    rendered = [];
+
+    localStorage.setItem(REALISTIC_WORLD_STORAGE_KEY, 'on');
+    await ride();
+    await settleLoad({ loaded: true });
+    await frames(1000 / 60, 5);
+    expect(told.at(-1)).toEqual(REALISTIC_LADDER[0]);
+    expect(structuresIn(rendered.at(-1))).toBe(REALISTIC_STRUCTURE_ITEMS);
   });
 
   it('falls back to the stylised top and says so when the load fails — ADR 0026 D-7', async () => {

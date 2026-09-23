@@ -32,10 +32,10 @@ import {
 import {
   environmentMapBytes,
   estimatedTextureBytes,
-  REALISTIC_BICYCLE_TRIANGLES,
   REALISTIC_BUILD_BYTES,
   REALISTIC_FRAME_TRIANGLES,
   REALISTIC_NEAR_MESHES,
+  REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_TEXTURE_CEILING_PIXELS,
   REALISTIC_TEXTURE_MEMORY_BYTES,
   REALISTIC_TEXTURE_PIXELS,
@@ -46,7 +46,9 @@ import { fileImageSize, modelFacts } from './realistic-bytes-testing';
 import { STRUCTURE_KINDS } from './scatter';
 import { SCENERY_MODELS } from './scenery-models';
 import { BUILT_KINDS } from './buildings';
+import { REALISTIC_LADDER } from './quality';
 import {
+  realisticBicycleTriangles,
   realisticStructureTriangles,
   realisticStructureTrianglesOf,
   ScatterBelt,
@@ -131,24 +133,59 @@ describe('each committed file inside its class’s budget — ADR 0026 D-6', () 
 });
 
 describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
-  // ⚠️ **The bicycle's own count is asserted in `realistic-renderer.test.ts`
+  // ⚠️ **The bicycle's own CEILING is asserted in `realistic-renderer.test.ts`
   // §"the realistic bicycle — #369", NOT here, and #369's first pass put a
   // weaker copy of it in this file on the strength of a claim that turned out
   // to be false.** That copy is deleted rather than kept: it bounded the count
   // below at `> 0` where the existing one bounds it at `> 1 000`, so the two
-  // together were the older assertion plus a line that could not fail. The
-  // frame sum below reads `REALISTIC_BICYCLE_TRIANGLES`, and what holds that
-  // constant to the geometry the renderer actually builds is that other file.
-  it('holds the worst frame the near-mesh caps allow under the frame’s triangles', () => {
+  // together were the older assertion plus a line that could not fail. ⚠️
+  // **Since #506 the frame sum below reads the bicycle AS BUILT**
+  // (`realisticBicycleTriangles`), where it read `REALISTIC_BICYCLE_TRIANGLES`:
+  // every other term is the committed or built asset, and the ceiling alone
+  // overstated three bicycles by about 20 000.
+  const worstFrame = (): {
+    readonly vegetation: number;
+    readonly riders: number;
+    readonly structureItems: number;
+    readonly heaviestStructure: number;
+  } => {
     const heaviest = (kind: (typeof REALISTIC_VEGETATION_KINDS)[number]): number =>
       Math.max(...REALISTIC_VEGETATION[kind].map((model) => modelFacts(at(model.file)).triangles));
-    const vegetation = REALISTIC_VEGETATION_KINDS.reduce(
-      (sum, kind) => sum + REALISTIC_NEAR_MESHES[kind] * heaviest(kind),
-      0,
+    return {
+      vegetation: REALISTIC_VEGETATION_KINDS.reduce(
+        (sum, kind) => sum + REALISTIC_NEAR_MESHES[kind] * heaviest(kind),
+        0,
+      ),
+      // Three riders: the rider, the pacer and the ghost, each a body and a bicycle.
+      riders: 3 * (riderTriangles + realisticBicycleTriangles()),
+      // The most structures ANY realistic rung lets a frame carry, each the
+      // heaviest shape any structure kind is built in. #506
+      structureItems: Math.max(...REALISTIC_LADDER.map((rung) => rung.structureItems)),
+      heaviestStructure: Math.max(...STRUCTURE_KINDS.map(realisticStructureTriangles)),
+    };
+  };
+
+  it('holds the worst frame the caps allow under the frame’s triangles, structures included — #506', () => {
+    const { vegetation, riders, structureItems, heaviestStructure } = worstFrame();
+    // ⚠️ #506: until this the sum stopped at the riders, and 240 structures
+    // at up to 640 triangles each went into no sum at all. This is the line
+    // that is red on the tree #506 was filed against.
+    expect(vegetation + riders + structureItems * heaviestStructure).toBeLessThanOrEqual(
+      REALISTIC_FRAME_TRIANGLES,
     );
-    // Three riders: the rider, the pacer and the ghost, each a body and a bicycle.
-    const riders = 3 * (riderTriangles + REALISTIC_BICYCLE_TRIANGLES);
-    expect(vegetation + riders).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    // Non-vacuity: the structures are a real share of the frame — a village
+    // of detailed buildings — rather than a term that rounds to nothing.
+    expect(structureItems * heaviestStructure).toBeGreaterThan(10_000);
+    expect(heaviestStructure).toBeGreaterThan(300);
+  });
+
+  it('holds it with every structure at its CEILING too, so a building may grow to its budget — #506', () => {
+    const { vegetation, riders, structureItems } = worstFrame();
+    expect(
+      vegetation + riders + structureItems * REALISTIC_TRIANGLES.structure,
+    ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    // And the figure the rungs spend is the one `realistic-budget.ts` states.
+    expect(structureItems).toBe(REALISTIC_STRUCTURE_ITEMS);
   });
 
   it('holds the estimated texture memory under its ceiling', () => {
@@ -247,7 +284,8 @@ describe('the realistic structures — #475, ADR 0026 D-12 layer 3', () => {
   };
 
   it('draws no structure heavier than the stylised world draws at the same place', () => {
-    // Which is why the frame's triangles need not count them. @see REALISTIC_FRAME_TRIANGLES
+    // ⚠️ This used to end "which is why the frame's triangles need not count
+    // them". It was not why, and since #506 they do. @see REALISTIC_FRAME_TRIANGLES
     const stylised = new ScatterBelt(new Map());
     for (const kind of STRUCTURE_KINDS) {
       const packed = SCENERY_MODELS[kind];

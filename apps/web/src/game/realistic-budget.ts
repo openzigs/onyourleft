@@ -139,16 +139,18 @@ export const REALISTIC_TRIANGLES: Readonly<
    * five posts and two rails and a house was 18 triangles. A reviewer who
    * remembers a house cheaper than a fence is reading the old file.
    *
-   * ⚠️ **Why the frame's triangles still do not count the structures**, which
-   * {@link REALISTIC_FRAME_TRIANGLES} says of the stylised world's: a realistic
-   * structure is drawn with **no more** triangles than the stylised world
-   * draws at the same place — the SAME triangles for the four buildings
-   * `buildings.ts` builds in both worlds and for the four boundaries, and for
-   * a house no more than the lightest Kenney house the stylised world draws
-   * there (770) — and `realistic-budget.test.ts` holds that, kind by kind and
-   * shape by shape. The same test holds this figure under that house, so no
-   * built shape costs the stylised world more a building than the pack's own
-   * houses always have.
+   * ⚠️ **The frame's triangles COUNT the structures since
+   * [#506](https://github.com/openzigs/onyourleft/issues/506)**, and a reviewer
+   * who remembers this note saying why they need not is reading the old file.
+   * It argued that a realistic structure is no heavier than the stylised one
+   * at the same place — which is still true, and `realistic-budget.test.ts`
+   * still holds it kind by kind and shape by shape, under the lightest Kenney
+   * house (770) — and concluded that the frame need not count them. The
+   * conclusion did not follow: the stylised world has no triangle budget to be
+   * no heavier than, and 240 buildings at this figure are 153 600 triangles a
+   * frame that {@link REALISTIC_FRAME_TRIANGLES} never saw. It was over before
+   * #500 as well, by less: 240 fences at 84 triangles are 20 160, against
+   * 4 314 of room. {@link REALISTIC_STRUCTURE_ITEMS} is what bounds them now.
    */
   structure: 640,
 };
@@ -159,9 +161,13 @@ export const REALISTIC_TRIANGLES: Readonly<
  * `bicycle.ts`'s parts, so its count is asserted against the geometry the
  * renderer actually builds rather than read off a file.
  *
- * @test-facing held by `realistic-budget.test.ts`, which reads every committed
- * realistic file back off disk against it; the renderer spends it only on the
- * realistic path, which a ride takes only for a rider who chose it (#475)
+ * ⚠️ **A ceiling on the bicycle, and since #506 NOT a term of the frame's
+ * sum**: {@link REALISTIC_FRAME_TRIANGLES}' test counts the bicycle as built
+ * (5 308 today), as it counts every other asset. @see REALISTIC_STRUCTURE_ITEMS
+ *
+ * @test-facing held by `realistic-renderer.test.ts` §"the realistic bicycle —
+ * #369", which holds the geometry the renderer builds to it (until #506 the
+ * frame sum in `realistic-budget.test.ts` read it too)
  */
 export const REALISTIC_BICYCLE_TRIANGLES = 12_000;
 
@@ -187,6 +193,57 @@ export const REALISTIC_NEAR_MESHES: Readonly<Record<RealisticVegetationKind, num
 };
 
 /**
+ * How many structures a realistic frame may carry: **36** — on both
+ * `quality.ts` §`REALISTIC_LADDER` rungs, where the stylised rungs they are
+ * copied from carry 240 and 120. #506, option 2 of the three it names.
+ *
+ * ## Where 36 comes from
+ *
+ * It is what is left of {@link REALISTIC_FRAME_TRIANGLES} once every other
+ * worst case is in, divided by a structure's own ceiling:
+ *
+ * | Part of the worst frame | Triangles |
+ * |---|--:|
+ * | Vegetation, every near slot its heaviest file | 232 692 |
+ * | Three riders, the body's file and the bicycle as built (8 998 + 5 308) | 42 918 |
+ * | Left for the structures | 24 390 |
+ * | ÷ {@link REALISTIC_TRIANGLES}' `structure`, 640 | 38.1 |
+ *
+ * and 36 rather than 38, so the frame holds with 1 350 triangles to spare at
+ * the ceiling — 3 510 at today's heaviest structure, a church at 580. Chosen,
+ * not measured on a device, like every figure here.
+ *
+ * ## Why this option, and what it costs
+ *
+ * - **Option 1**, detail by distance — the nearest buildings detailed and a
+ *   plain block beyond — **does not fit on its own**: the plainest shape
+ *   `buildings.ts` builds is up to 98 triangles (a barn with no openings) and
+ *   a fence is 84, so 240 structures with no detail at all are about 23 500,
+ *   which is the whole of the room, and one detailed building fits beside
+ *   them. It would also add a mesh per surface per plain shape, where #506
+ *   asked for fewer.
+ * - **Option 3**, raising the frame's figure, needs the post-#500 frame's
+ *   WORST case measured on the tablet first. Validation 0002 Part AA's AA3
+ *   measured one view beside a farmstead, which says nothing about a village
+ *   at 240 structures, and its own row says so.
+ * - **So this.** It is one number on two rungs, it moves no mesh, and it
+ *   takes the far field boundaries rather than the houses:
+ *   `settlements.ts` §`structuresAt` lists every building and signpost before
+ *   any wall, hedge or fence, and a village is at most 22 buildings and two
+ *   signposts. What a rider in the realistic world loses is the walls a field
+ *   or two up the road; the stylised world keeps its 240.
+ *
+ * ⚠️ **The riders' bicycle is counted as built, not at its ceiling**, and that
+ * moved with this: the frame sum read {@link REALISTIC_BICYCLE_TRIANGLES}'
+ * 12 000 where every other term was the committed or built asset, which
+ * overstated three bicycles by 20 076. The ceiling still holds the bicycle
+ * (`realistic-renderer.test.ts`); the frame counts what is drawn, so a bicycle
+ * grown towards its ceiling is a red frame test rather than a frame nobody
+ * summed.
+ */
+export const REALISTIC_STRUCTURE_ITEMS = 36;
+
+/**
  * The most instanced meshes the realistic STRUCTURES may cost: **35** — #482,
  * from #481's review (finding 6), which found the figure bounded and stated
  * nowhere; and since #500, which gave every building two shapes and dressed
@@ -210,7 +267,15 @@ export const REALISTIC_NEAR_MESHES: Readonly<Record<RealisticVegetationKind, num
  * and a church is at most 8 + 4 + 4 = 16 where it was 2 + 3 + 2 = 7. The
  * glass is a surface of its own because it is a material of its own, and it
  * costs no texture. What those calls cost on the tablet is validation 0002
- * Part Z step Z9's re-run, which #500 asks for and which needs the tablet.
+ * Part AA step AA3, run on 2026-09-23 with buildings in frame: **35 draw
+ * calls** for the whole frame and **GPU 5 / 8 / 12 ms** at p50 / p90 / p99 —
+ * Part Z's own p90 before #500 added a mesh. That is what #506 asked this
+ * figure to be justified against, and it is why the figure is kept rather
+ * than reduced — **for a farmstead**, which is what that view held and which
+ * spends 7 of these meshes. A village spends up to 16 and was not in it;
+ * validation 0002 Part AE is the row that takes one. #506's cut to the
+ * structures' COUNT ({@link REALISTIC_STRUCTURE_ITEMS}) can only lower the
+ * calls a frame spends, never raise them.
  *
  * ⚠️ **A statement of what is built, not a measurement of what it costs.**
  * What this number buys is that a new structure kind, surface or shape GROWS
@@ -227,11 +292,15 @@ export const REALISTIC_STRUCTURE_MESHES = 35;
  * The most triangles a realistic frame may submit: **300 000**, about 1.2 times
  * the all-on 252 024 #457 drew on the tablet. What it is held against is the
  * worst case the caps above allow — every near slot filled with the heaviest
- * shape of its kind, and three riders — rather than any frame in particular.
- * The stylised world's corridor, terrain and structures sit under it on both
- * worlds and are not counted here, because they do not change with the world
- * — and since #475 the realistic structures are no heavier than the stylised
- * ones at the same place ({@link REALISTIC_TRIANGLES}' `structure`).
+ * shape of its kind, three riders, and since #506
+ * {@link REALISTIC_STRUCTURE_ITEMS} structures each its heaviest shape —
+ * rather than any frame in particular. The corridor, the terrain and the water
+ * sit under it on both worlds and are not counted here, because they do not
+ * change with the world.
+ *
+ * ⚠️ **Until #506 the structures were left out too**, on the argument
+ * {@link REALISTIC_TRIANGLES}' `structure` note now retracts, and the worst
+ * frame since #500 was about 450 000.
  *
  * @test-facing held by `realistic-budget.test.ts`, which reads every committed
  * realistic file back off disk against it; the renderer spends it only on the

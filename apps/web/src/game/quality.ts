@@ -39,6 +39,7 @@
  */
 
 import { TERRAIN_BANDS } from './landform';
+import { REALISTIC_STRUCTURE_ITEMS } from './realistic-budget';
 import { SCATTER_MAX_ITEMS } from './scatter';
 import { STRUCTURE_MAX_ITEMS } from './settlements';
 import { MAXIMUM_SCENERY_VARIANTS } from './scenery-models';
@@ -520,8 +521,9 @@ const REDUCED_AT_DISPLAY_RATE: QualitySettings = {
  * ## Where the realistic rungs sit — ADR 0026 D-3
  *
  * {@link REALISTIC_LADDER} is this ladder's levels 0 and 1 with the world
- * swapped, figure for figure, so both realistic rungs draw at the display's
- * rate and neither needs an exception any more. The heat walk from the
+ * swapped, figure for figure but the structures (#506 — it says why), so
+ * both realistic rungs draw at the display's rate and neither needs an
+ * exception any more. The heat walk from the
  * realistic top is realistic full (display) → realistic reduced (display) →
  * stylised full (display) → stylised reduced (display) → 30 → 24 → 20:
  * realism is given up two steps before any frame rate is, which is D-3's order
@@ -845,11 +847,12 @@ export function readShadowMapChoice(
  * ## The two rungs, and what the second gives up
  *
  * The first is the stylised target rung's every figure with the world
- * swapped, so a measurement of it against level 0 is a measurement of realism
- * and nothing else. The second takes the stylised ladder's first step down —
- * resolution, scenery, the far ground and the water shader — **inside** the
- * realistic world, before the world itself is given up: D-3's *"the realistic
- * rungs reduce within themselves"*. Neither lowers the frame cap, so a hot
+ * swapped — the structure budget apart, below — so a measurement of it
+ * against level 0 is a measurement of realism and nothing else. The second
+ * takes the stylised ladder's first step down — resolution, scenery, the far
+ * ground and the water shader — **inside** the realistic world, before the
+ * world itself is given up: D-3's *"the realistic rungs reduce within
+ * themselves"*. Neither lowers the frame cap, so a hot
  * device gives up realism before it gives up frame rate, which is what the
  * owner's brief for #430's pull request asked of the ladder. ⚠️ **Since #482
  * both are exact copies of stylised levels 0 and 1 with the world swapped.**
@@ -867,17 +870,38 @@ export function readShadowMapChoice(
  * `realistic-offered.test.ts` fails the build if another does. The owner's
  * harness page, `apps/web/browser/realistic.html`, still reaches it too.
  *
- * ⚠️ Provenance: every figure is the stylised rung it is copied from, so it is
- * BR-1 exactly as they are. What realism costs on the tablet is #457's device
- * run and `realistic-budget.ts`; the soak is validation 0002 Part Z.
+ * ⚠️ **Except the structures, since [#506](https://github.com/openzigs/onyourleft/issues/506)**,
+ * and a reviewer who remembers "exact copies … with the world swapped" is
+ * reading the old file. Both realistic rungs carry
+ * `realistic-budget.ts` §`REALISTIC_STRUCTURE_ITEMS` (36) where the stylised
+ * rungs carry 240 and 120: since #500 a realistic building costs up to 640
+ * triangles, and 240 of them put the worst realistic frame at about 450 000
+ * against `REALISTIC_FRAME_TRIANGLES`' 300 000. The houses are not what goes —
+ * `settlements.ts` §`structuresAt` lists every building before any boundary —
+ * so what the realistic world gives up is the far field walls, hedges and
+ * fences. Every OTHER figure is still the stylised rung's.
+ *
+ * ⚠️ Provenance: every other figure is the stylised rung it is copied from, so
+ * it is BR-1 exactly as they are. What realism costs on the tablet is #457's
+ * device run and `realistic-budget.ts`; the soak is validation 0002 Part Z.
  */
 export const REALISTIC_LADDER: readonly QualitySettings[] = [
-  { ...(QUALITY_LADDER[0] as QualitySettings), world: 'realistic', label: 'realistic' },
+  {
+    ...(QUALITY_LADDER[0] as QualitySettings),
+    // #506. @see REALISTIC_STRUCTURE_ITEMS
+    structureItems: REALISTIC_STRUCTURE_ITEMS,
+    world: 'realistic',
+    label: 'realistic',
+  },
   // The stylised first step down, at the display's rate, with the world
   // swapped — #482. The heat walk never raises the cap: realistic 60 → 60 →
   // stylised full 60 → reduced 60 → 30 → 24 → 20.
   {
     ...(QUALITY_LADDER[1] as QualitySettings),
+    // #506: the same figure as the rung above, not a smaller one: 36 is
+    // already a whole village (at most 22 buildings and two signposts) and a
+    // few walls, so a cut here would start taking houses.
+    structureItems: REALISTIC_STRUCTURE_ITEMS,
     world: 'realistic',
     label: 'realistic, reduced resolution and scenery',
   },
