@@ -2305,7 +2305,7 @@ page, the argument above is wrong and #480's third item is open again.
 The page still records the bridge before any other script runs, which is how this was settled:
 
 ```bash
-"$ADB" logcat -d -s chromium | grep -E 'OYL-REALISTIC-(LOAD|BRIDGE|ERROR)'
+"$ADB" logcat -d | grep -E 'OYL-REALISTIC-(LOAD|BRIDGE|ERROR)'
 ```
 
 - `OYL-REALISTIC-LOAD {"bridge":{"capacitorAtStart":…,"androidBridgeAtStart":…,"standIn":…}}` — one
@@ -2343,13 +2343,22 @@ Landscape, full brightness, on charge, nothing else running; let the tablet cool
 | Z9 | Ride past the farmstead and any village: `?panel=0&ladder=0`. Look at a house, a barn, a wall and a hedge from the road | Do the walls read as brick, board and stone, and the roofs as tile, slate and iron? Is a brick the same size on every wall (it should be — the photographs are laid out in metres)? ⚠️ **The hedge is the weakest**: it wears leaf litter tinted green, the nearest photograph any admitted source publishes — say whether it reads as a hedge |
 | Z10 | Ride over the bridge and past the lake | Does the water take the sky's colour — grey under grey cloud, not the stylised world's blue? Any seam where it meets the bank? |
 
+⚠️ **Two corrections from the first run of this Part (2026-09-23), and the commands below carry them.**
+The page's lines reach `logcat` under **`Capacitor/Console`**, not `chromium` as this Part and the
+harness's own header said — `-s chromium` filters every one of them out, so the commands grep the
+whole log instead. And `dumpsys thermalservice`'s first `Temperature{…}` block is **`Cached
+temperatures`**, which did not change once in twenty minutes while the sensors moved by several
+degrees; the soak now reads **`Current temperatures from HAL`**. It also reads a twenty-first
+minute, because the page publishes minute N's line during minute N + 1 and the first run's loop
+ended one line short.
+
 Each 30-second row:
 
 ```bash
 "$ADB" shell dumpsys gfxinfo dev.openzigs.onyourleft reset
 node apps/mobile/tools/webview-probe.mjs "location.href = '/harness/realistic.html?panel=0&ladder=0'"
 sleep 40
-"$ADB" logcat -d -s chromium | grep 'OYL-REALISTIC ' | tail -1
+"$ADB" logcat -d | grep 'OYL-REALISTIC ' | tail -1
 "$ADB" shell dumpsys gfxinfo dev.openzigs.onyourleft | grep -iE "Total frames|Janky|percentile|GPU"
 "$ADB" exec-out screencap -p > realistic-z6.png
 ```
@@ -2359,57 +2368,113 @@ The soak:
 ```bash
 "$ADB" shell dumpsys gfxinfo dev.openzigs.onyourleft reset
 node apps/mobile/tools/webview-probe.mjs "location.href = '/harness/realistic.html?soak=20&panel=0'"
-for minute in $(seq 1 20); do
+for minute in $(seq 1 21); do
   sleep 60
-  "$ADB" logcat -d -s chromium | grep 'OYL-REALISTIC-SOAK ' | tail -1
-  "$ADB" shell dumpsys thermalservice | grep -iE "mThermalStatus|Temperature\{" | head -5
+  "$ADB" logcat -d | grep 'OYL-REALISTIC-SOAK ' | tail -1
+  "$ADB" shell dumpsys thermalservice | grep 'Thermal Status'
+  "$ADB" shell dumpsys thermalservice | awk '/Current temperatures from HAL/{f=1;next} /Current cooling/{f=0} f' \
+    | grep -E 'G3D|BIG|VIRTUAL-SKIN|battery'
 done
 ```
 
 ### Z results
 
+Run **2026-09-23**, 09:22–10:05 local, by the owner at the tablet with the commands driven over
+USB. Debug APK built from `main` at **`0530883`** by §"Build and install", `check:capacitor`
+byte-identical, `public/harness/realistic.html` present in the APK, `install -r` (the rides on the
+tablet kept). Landscape, AC power at 100 %, brightness set to manual full for the run and put back
+to automatic after. Thermal status **0** at the start: CPU LITTLE 57 °C, display 25.2 °C,
+charger skin 28.1 °C, battery 20.2 °C.
+
 | | Z6 — realistic | Z6 — stylised |
 |---|--:|--:|
-| Frame p50 / p90 / p99 (page) | | |
-| Frame p50 / p90 (gfxinfo) | | |
-| **GPU p50 / p90 / p99** | | |
-| Janky (modern) | | |
-| Draw calls (page) | | |
+| Frame p50 / p90 / p99 (page) | 16.6 / 16.7 / 16.7 ms | 16.6 / 16.7 / 16.8 ms |
+| Frame p50 / p90 / p99 (gfxinfo) | 12 / 16 / 20 ms | 12 / 21 / 23 ms |
+| **GPU p50 / p90 / p99** | **5 / 8 / 11 ms** | **4 / 13 / 16 ms** |
+| Janky (modern) | 0.08 % | 0.13 % |
+| Draw calls (page) | 35 | 21 |
 
-**The 20-minute soak** (Z7):
+Both at the display's rate (`frameCap: display`), `?ladder=0`, zero stalls, thermal status 0.
+⚠️ **The stylised world's GPU p90 is higher than the realistic world's**, which is the opposite of
+what the draw calls suggest. It is one 30-second window each, and a second realistic window agreed
+with the first (GPU 4 / 7 / 12 ms, 2 342 frames, whose p99 includes four asset uploads in the
+4 950 ms bucket). It is recorded as observed; nothing here explains it.
 
-| Minute | Frame p50 / p90 / p99 | Rung (`world` · `rung` · `frameCap`) | Thermal status | Skin / CPU temperature |
+**The 20-minute soak** (Z7): `?soak=20&panel=0`, the ladder free, 09:32–09:52.
+
+| Minute | Frame p50 / p90 / p99 | Rung (`world` · `rung` · `frameCap`) | Thermal status | GPU / CPU big / skin (°C) |
 |--:|---|---|---|---|
-| 1 | | | | |
-| 5 | | | | |
-| 10 | | | | |
-| 15 | | | | |
-| 20 | | | | |
+| 1 | 16.6 / 16.7 / 16.8 ms | realistic · realistic · display | 0 | — (see below) |
+| 5 | 16.6 / 16.7 / 16.7 ms | realistic · realistic · display | 0 | 54 / 46 / 29 |
+| 10 | 16.5 / 16.7 / 16.7 ms | realistic · realistic · display | 0 | 55 / 48 / 30 |
+| 15 | 16.5 / 16.7 / 16.7 ms | realistic · realistic · display | 0 | 53 / 47 / 31 |
+| 19 | 16.6 / 16.6 / 16.7 ms | realistic · realistic · display | 0 | 53 / 48 / 31 |
 
-**GPU memory at minute 10 (Z8):** ______________
+Every one of the nineteen minutes captured was the realistic top rung at the display's rate, 32 to
+37 draw calls, zero stalls, thermal status 0. Across the whole soak `gfxinfo` counted **72 275
+frames**, 0.10 % janky, frame 12 / 16 / 21 ms, **GPU 5 / 8 / 12 ms**. From 09:35 the GPU sensor
+(`G3D`) read 51 to 56 °C with no trend, `VIRTUAL-SKIN` rose 29 → 31 °C and the battery 22 → 24 °C.
 
-**Loads and draws realistic (Z1)?** ______________
+⚠️ **Two holes in that table, both the procedure's and both corrected above.** Minute 20's line
+was never captured: the loop read minute N's line at the start of minute N + 1 and stopped after
+twenty reads. And the first three minutes have no temperature: the loop read `Cached
+temperatures`, which stayed at their 09:32 values for the whole run, and a second logger reading
+the HAL's current values was started at 09:35.
 
-**Road: surface or noise; any shimmer, and where (Z2)?** ______________
+**GPU memory at minute 10 (Z8):** `GL mtrack` **317 340 kB (310 MiB)**, `EGL mtrack` 113 764 kB
+(111 MiB), `Graphics` 431 104 kB (421 MiB), `TOTAL PSS` 563 223 kB. ⚠️ **That is about 2.3 times
+the 136 MiB estimate.** The estimate counts texture images; what the driver holds under
+`GL mtrack` also includes, at least, mipmap chains, the 2560 × 1600 render targets and vertex
+buffers, and this run did not separate them. It is a finding for D-6's budget, not a pass or a
+fail: the tablet had the memory, and the device floor's 3 GB would feel it.
 
-**Gradient tint legible (Z3)?** ______________
+**Loads and draws realistic (Z1)?** **Yes.** `realistic world · realistic · display rate`, frame
+p50 16.6 ms, drawing buffer 2560 × 1600, `errors: []`.
 
-**Trees near and far (Z4)?** ______________
+**Road: surface or noise; any shimmer, and where (Z2)?** **A surface.** The owner saw no shimmer
+or crawl near or far at speed.
 
-**Legs follow the pedals, and stop when held (Z5)?** ______________
+**Gradient tint legible (Z3)?** **Yes**: climb and descent are easy to read.
 
-**Structures: brick, board, stone, tile, slate, iron; the hedge (Z9)?** ______________
+**Trees near and far (Z4)?** **Look good.** No sparse near field and no visible switch from mesh to
+picture were reported.
 
-**The water's reflection (Z10)?** ______________
+**Legs follow the pedals, and stop when held (Z5)?** **Yes to both**: they follow the pedals while
+riding and stop with `?at=900`.
+
+**Structures: brick, board, stone, tile, slate, iron; the hedge (Z9)?** Held at 1 045 m, beside
+the first farmstead: **brick, board, tile and corrugated iron read correctly, a brick is one size
+across a wall, and the hedge reads as a hedge.** ⚠️ **But the buildings have no doors, no
+windows and little detail**, so a house reads as a brick box — the owner's verdict was that they
+need more — [#500](https://github.com/openzigs/onyourleft/issues/500). ⚠️ **This route cannot
+answer the stone half**: `structuresAt` over all 4 km places 3 houses, 3 barns, 3 sheds, 242 fence
+and 320 hedge runs and **no wall**, all three farmsteads on the left, 24–30 m back, at about
+1 050, 1 540 and 3 760 m — [#501](https://github.com/openzigs/onyourleft/issues/501). The owner,
+riding at 9 m/s, first reported seeing no buildings at all; they are on screen for seconds.
+
+**The water's reflection (Z10)?** Held at 2 815 m, 30 m before the one crossing (2 846.7 m):
+**the water takes the sky's grey-blue**, not the stylised blue. ⚠️ **Four defects, each confirmed
+by the owner**: fine horizontal banding in the water, a hard straight edge with no bank where water
+meets grass, a light seam across the road where the deck begins, and plain grey block parapets.
+⚠️ **There is no lake on this route**: `waterways()` returns `lakes: []`, although
+`realistic/route.ts` says its valley floor is there for one. All five are
+[#501](https://github.com/openzigs/onyourleft/issues/501).
 
 **`OYL-REALISTIC-LOAD` — `capacitorAtStart` / `androidBridgeAtStart`, and any `OYL-REALISTIC-BRIDGE` or
-`OYL-REALISTIC-ERROR` line (#478):** ______________
+`OYL-REALISTIC-ERROR` line (#478):** five loads, every one
+`{"capacitorAtStart":"object","androidBridgeAtStart":"object","standIn":false,"events":[]}`; **no**
+`BRIDGE` and **no** `ERROR` line.
 
-**Does the realistic top rung hold for twenty minutes, at 60 fps, with headroom?** ______________ — ⚠️ this is
-ADR 0026 D-3's condition for ever changing the default, and D-6's for re-setting
-`realistic-budget.ts` from a soak rather than from 30-second windows. #475 owns acting on it.
+**Does the realistic top rung hold for twenty minutes, at 60 fps, with headroom?** **Yes, on this
+tablet, on charge, in a cool room**: nineteen captured minutes at the top rung and the display's
+rate, GPU p90 8 ms of a 16.7 ms frame, thermal status 0 throughout and the GPU sensor flat. ⚠️
+What it does **not** show: a phone, a warm room, a battery-powered run, or the 60-minute ride
+#247 asks for, and the memory figure above is well over the estimate D-6 set. ADR 0026 D-3's
+default and D-6's budget remain **#475's** to act on; this is the evidence, not the decision.
 
-**Phone (OEM, model, Android, WebView):** ______________  **Build:** ______________
+**Phone (OEM, model, Android, WebView):** Google Pixel Tablet (`tangorpro`), build
+`CP2A.260705.006`, Android 17, WebView `com.google.android.webview` **153.0.8010.36** (Part P read
+151 on 2026-09-20)  **Build:** debug, `main` at `0530883`, installed 2026-09-23 09:22
 
 ---
 
