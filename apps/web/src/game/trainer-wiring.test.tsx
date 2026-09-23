@@ -85,6 +85,8 @@ function pedallingPort(route: RidableRoute): GamePort {
 
 function capturingRenderer(frames: SceneFrame[]): GameRenderer {
   return {
+    // #475: never asked — no ride in this file chose the realistic world.
+    loadRealisticWorld: () => Promise.reject(new Error('no realistic world was chosen')),
     create: () => ({
       hasContext: true,
       render: (frame: SceneFrame) => {

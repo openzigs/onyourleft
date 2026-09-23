@@ -49,18 +49,11 @@ import type { ScatterKind, StructureKind } from './scatter';
 
 /**
  * Where the realistic files are in the build, relative to its root.
- *
- * @test-facing held by `precache.test.ts`, which builds the realistic set's
- * paths from it to show the precache rule excludes them
  */
 export const REALISTIC_DIRECTORY = 'realistic/';
 
 /**
  * The URL one realistic file is served at, under whatever base the build has.
- *
- * @unwired read by `three-renderer.ts` §`loadRealisticWorld` and the owner's
- * harness page, and by nothing the shipped app runs until #475 offers the
- * realistic world to a rider (ADR 0026 D-12)
  */
 export function realisticUrl(file: string): string {
   return `${import.meta.env.BASE_URL}${REALISTIC_DIRECTORY}${file}`;
@@ -68,10 +61,6 @@ export function realisticUrl(file: string): string {
 
 /**
  * The HDR sky: background and environment light at once.
- *
- * @unwired read by `three-renderer.ts` §`loadRealisticWorld` and the owner's
- * harness page, and by nothing the shipped app runs until #475 offers the
- * realistic world to a rider (ADR 0026 D-12)
  */
 export const REALISTIC_SKY = 'farm_field_2k.hdr';
 
@@ -197,10 +186,6 @@ export interface RealisticModel {
  * modulo their count, exactly as `three-renderer.ts` §`ScatterBelt` does for the
  * stylised world — so the same item wears the same variant slot in both worlds
  * and only the shape changes (ADR 0026 D-2).
- *
- * @unwired read by `three-renderer.ts` §`loadRealisticWorld` and the owner's
- * harness page, and by nothing the shipped app runs until #475 offers the
- * realistic world to a rider (ADR 0026 D-12)
  */
 export const REALISTIC_VEGETATION: Readonly<
   Record<RealisticVegetationKind, readonly RealisticModel[]>
@@ -247,10 +232,6 @@ export function isRealisticVegetation(kind: string): kind is RealisticVegetation
 
 /**
  * The rider's body — MakeHuman's CC0 base mesh, rigged and cut down (#369).
- *
- * @unwired read by `three-renderer.ts` §`loadRealisticWorld` and the owner's
- * harness page, and by nothing the shipped app runs until #475 offers the
- * realistic world to a rider (ADR 0026 D-12)
  */
 export const REALISTIC_RIDER = 'rider.glb';
 
@@ -284,10 +265,6 @@ export function realisticFiles(): readonly string[] {
  * What came of asking for the realistic world — `three-renderer.ts`
  * §`loadRealisticWorld`. All of it loaded, or none of it did and the view
  * draws the stylised world.
- *
- * @unwired read by `three-renderer.ts` §`loadRealisticWorld` and the owner's
- * harness page, and by nothing the shipped app runs until #475 offers the
- * realistic world to a rider (ADR 0026 D-12)
  */
 export type RealisticWorldOutcome =
   | { readonly loaded: true }
@@ -322,11 +299,11 @@ export type RealisticWorldOutcome =
  * other sentence. Which one this is running in is `support/capacitor.ts`'s
  * question, asked the one way this client asks it.
  *
+ * Since #475 it is on the ride's stage (`GameView.tsx` §`worldNotice`) as well
+ * as the owner's harness page.
+ *
  * @param inShell whether this is the Android shell; read from the real
  * Capacitor global unless a caller says
- *
- * @unwired reached only from the owner's harness page until #475 offers the
- * realistic world to a rider and puts this in the ride UI.
  */
 export function realisticWorldNotice(
   outcome: RealisticWorldOutcome,
@@ -337,3 +314,39 @@ export function realisticWorldNotice(
     ? 'The realistic world is not kept on this device for use offline, so this ride is in the standard world.'
     : 'The realistic world could not be loaded, so this ride is in the standard world.';
 }
+
+/**
+ * What a rider who chose the realistic world is told BEFORE a ride, on the
+ * route picker — #475's *"the offline fallback stated in the ride UI"*.
+ *
+ * ⚠️ **Before as well as after**, because the after is conditional: a rider who
+ * is offline finds out only once the ride has started, and a rider deciding
+ * whether to ride in a basement should not have to start one to learn it. The
+ * two sentences differ for {@link realisticWorldNotice}'s reason: inside the
+ * Android shell the set ships in the APK (D-7), so "not kept for offline use"
+ * would be false there.
+ *
+ * @param inShell whether this is the Android shell; read from the real
+ * Capacitor global unless a caller says
+ */
+export function realisticWorldChosenText(
+  inShell: boolean = isNativeShell(platformCapacitor()),
+): string {
+  return inShell
+    ? 'Your rides are in the realistic world. If it cannot be loaded, the ride is in the standard world instead and the ride screen says so.'
+    : 'Your rides are in the realistic world. It is fetched when a ride starts and is not kept on this device for use offline, so with no network — or if it cannot be loaded — the ride is in the standard world instead and the ride screen says so.';
+}
+
+/**
+ * What a rider is told when the device ran too hot for the realistic world and
+ * the ride stepped down to the standard one — `quality.ts`
+ * §`nextWorldQuality`, which never climbs back.
+ *
+ * ⚠️ **Said, not silent**, on D-7's argument turned to heat: *"a silent
+ * downgrade is a rider wondering whether the setting broke"*, and a rider who
+ * chose the realistic world and watched it turn into the standard one mid-ride
+ * has exactly that question. It says what happened and that it lasts the ride,
+ * and nothing about temperatures a rider cannot act on.
+ */
+export const REALISTIC_WORLD_LEFT_NOTICE =
+  'This device was working too hard for the realistic world, so the rest of this ride is in the standard world.';

@@ -3749,7 +3749,8 @@ interface RealisticWorld {
  * first and the result is held here. Unlike the stylised models it is loaded
  * ONLY when a caller asks — ADR 0026 D-7: the realistic set is fetched when the
  * rider chooses the realistic world, never on a first visit — and today the
- * only caller is the owner's harness page (D-12).
+ * callers are the owner's harness page and, since #475, `GameView` for a rider
+ * who chose the realistic world (`world-preference.ts`).
  */
 let realisticWorld: RealisticWorld | undefined;
 
@@ -3771,9 +3772,6 @@ export interface RealisticLoaders {
  * embeds its images — so the browser gate cannot see it, and a pipeline change
  * that wrote an external `.png` URI would reach the network with every gate
  * green. That is why it is tested as a function (#478).
- *
- * @test-facing held by `realistic-renderer.test.ts` §"what a realistic model may
- * fetch"; the shipped path calls it only from {@link THREE_LOADERS}
  */
 export function realisticResourceUrl(own: string): (url: string) => string {
   return (url) =>
@@ -3801,9 +3799,6 @@ const THREE_LOADERS: RealisticLoaders = {
  * outcome says why — D-7: *"offline with the realistic world chosen, the game
  * falls back to the stylised world and says so"*. `realistic-assets.ts`
  * §`realisticWorldNotice` is the sentence.
- *
- * @unwired reached only from the owner's harness page until ADR 0026 D-12's
- * layer 3 lands and a rider is offered the realistic world — #475.
  */
 export async function loadRealisticWorld(
   loaders: RealisticLoaders = THREE_LOADERS,
@@ -3960,6 +3955,44 @@ export async function loadRealisticWorld(
   }
 }
 
+/** The load a ride is waiting on, if one is in flight. @see loadRealisticWorldOnce */
+let realisticLoading: Promise<RealisticWorldOutcome> | undefined;
+
+/**
+ * The realistic world for a RIDE: the one already loaded, or the load already
+ * in flight, or a new one — never a second copy. #475's review.
+ *
+ * ⚠️ **`loadRealisticWorld` REPLACES a loaded world and releases the old one**,
+ * which is right for the owner's harness and wrong for a rider: the world is
+ * module state that outlives a view, so a second realistic ride in one visit
+ * builds a view that is already drawing the loaded world (`#applyWorld`), and a
+ * reload would then fetch and decode ~33 MB again, hold two copies while it
+ * did, and release the textures, geometries and materials that view was still
+ * drawing — and offline it would fail and tell the rider the world is not kept
+ * on the device while it sat in memory. So a ride asks through here, and a
+ * world that is loaded is answered at once.
+ *
+ * ⚠️ **A load in flight is JOINED rather than repeated**: a rider who ends a
+ * ride and starts another before ~33 MB have arrived would otherwise start a
+ * second load whose swap releases the first world under whichever view drew it.
+ * A load that FAILED leaves nothing loaded and nothing in flight, so the next
+ * ride tries again — which is D-7's fallback being per ride, not per visit.
+ *
+ * @param loaders the same seam `loadRealisticWorld` takes; only the call that
+ *   starts a load uses it, and a call that joins or finds a world ignores it.
+ */
+export function loadRealisticWorldOnce(
+  loaders: RealisticLoaders = THREE_LOADERS,
+): Promise<RealisticWorldOutcome> {
+  if (realisticWorld !== undefined) {
+    return Promise.resolve({ loaded: true });
+  }
+  realisticLoading ??= loadRealisticWorld(loaders).finally(() => {
+    realisticLoading = undefined;
+  });
+  return realisticLoading;
+}
+
 /** A load started, with a loader that throws rather than rejecting turned into a rejection. */
 function started<T>(load: () => Promise<T>): Promise<T> {
   try {
@@ -4053,10 +4086,6 @@ function skyPixelsOf(texture: DataTexture): SkyPixels {
  *
  * The loader's material is disposed here, and its textures survive only
  * because the new material holds them.
- *
- * @test-facing held by `realistic-renderer.test.ts`, which is D-11's jsdom half;
- * the shipped path calls it only from `loadRealisticWorld`, which nothing the
- * app runs reaches until #475
  */
 export function prepareRealisticShape(
   source: Object3D,
@@ -5695,8 +5724,9 @@ export interface SceneMaterial {
  * Which world a view is drawing — for the owner's harness page, which says so
  * on screen (D-7's "and says so"), and for the browser gate.
  *
- * @unwired reached only from the harness pages under `apps/web/browser/` until
- * #475 offers the realistic world to a rider.
+ * @unwired reached only from the harness pages under `apps/web/browser/`. The
+ * shipped app does not need to ask: `GameView` decides the world a ride is on
+ * and says so itself when a load fails or a hot device leaves realism (#475).
  */
 export function drawnWorldOf(view: GameView): QualitySettings['world'] {
   return view instanceof ThreeGameView ? view.drawnWorld : 'stylised';
@@ -6310,4 +6340,10 @@ export const threeGameRenderer: GameRenderer = {
   create(canvas, settings) {
     return new ThreeGameView(canvas, settings);
   },
+  // #475: the one way the shipped app reaches the realistic world, and only
+  // for a rider who chose it. @see GameRenderer.loadRealisticWorld
+  // ⚠️ Through `loadRealisticWorldOnce`, never the raw loader: a second
+  // realistic ride in one visit must reuse the world, not replace it under a
+  // view that is drawing it — #475's review.
+  loadRealisticWorld: () => loadRealisticWorldOnce(),
 };

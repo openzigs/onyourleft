@@ -355,3 +355,17 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   chosen, the game falls back to the stylised world and says so (ADR 0026 D-7) — today only on the
   owner's harness page, because nothing in the shipped app can choose it yet
   ([#475](https://github.com/openzigs/onyourleft/issues/475)).
+
+- **2026-09-23** — **The 2026-09-22 entry's last sentence is no longer true: a rider can choose
+  the realistic world, so its offline fallback is on the rider's screens, not only on the owner's
+  harness page.** [#475](https://github.com/openzigs/onyourleft/issues/475) offered it, as
+  [ADR 0026](0026-realistic-game-world.md) D-3 and D-12 describe: a **Game world** switch in
+  Settings, kept in the device's `localStorage` and **off by default on every device**. So the
+  world a rider can choose is no longer "still only the stylised one"; the world a rider can
+  choose **offline, in a browser**, still is, and nothing here changed to make that so: the precache
+  (D-2, still less `realistic/` by rule), the worker's strategy and D-4 are all untouched. What
+  #475 added is the "says so": the route picker and the Settings panel both state before a ride
+  that the realistic world is not kept for offline use, and a ride whose load fails falls back to
+  the stylised world's top and says so on the stage (`apps/web/src/game/realistic-assets.ts`
+  §`realisticWorldChosenText`, §`realisticWorldNotice`; `realistic-choice.test.tsx`). Inside the
+  Android shell the set ships in the APK and neither sentence mentions the network.

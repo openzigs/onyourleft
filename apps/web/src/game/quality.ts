@@ -341,13 +341,14 @@ export interface QualitySettings {
    *   by an HDRI's environment and `world.ts`'s one sun, photographic road and
    *   ground, photoscanned vegetation and the MakeHuman rider. **Only the rungs
    *   of {@link REALISTIC_LADDER}**, which sits above the stylised ladder and
-   *   which nothing in the shipped app selects — D-12: *"offered to riders only
-   *   when the world is whole"*, and layer 3 (structures) has not landed.
+   *   which a ride is on only when its rider chose the realistic world in
+   *   Settings (`world-preference.ts`, #475) — D-12: *"offered to riders only
+   *   when the world is whole"*, which it has been since layer 3 landed.
    *
    * ⚠️ **A whole world, never a kind at a time.** No rung draws a pack asset
    * from one world beside a pack asset from the other (D-3): on a realistic
-   * rung the buildings are their own procedural primitives rather than Kenney's
-   * models until layer 3 lands (#475), and stepping down leaves the realistic
+   * rung the buildings are layer 3's own built shapes in photographic surfaces
+   * rather than Kenney's models (#475), and stepping down leaves the realistic
    * ladder for the stylised ladder's TOP, every kind at once —
    * {@link nextWorldQuality}.
    */
@@ -411,9 +412,10 @@ export interface QualitySettings {
    *
    * The reason a flap here costs nothing where the shadow map's cost a ride is
    * that this flag rebuilds no shader and closes no device: `throttle` flips a
-   * boolean and the camera stays open. Nothing in the shipped app selects the
-   * realistic ladder anyway (D-12, #475), so the walk is not reachable today —
-   * which is why this is a note and not a second latch.
+   * boolean and the camera stays open — which is why this is a note and not a
+   * second latch. ⚠️ **The walk is reachable since #475**, for a rider who chose
+   * the realistic world; this note used to add that it was not, and that was
+   * never the argument.
    */
   readonly capture: boolean;
   /** A human-readable name, for the diagnostic line #91 asks to be recorded. */
@@ -857,19 +859,17 @@ export function readShadowMapChoice(
  * reaches its first capped rung two steps after it leaves realism —
  * {@link QUALITY_LADDER} §"Where the realistic rungs sit".
  *
- * ⚠️ **Nothing in the shipped app selects either.** D-12: the realistic world
- * is offered to riders only when it is whole, and layer 3 (structures) has not
- * landed — [#475](https://github.com/openzigs/onyourleft/issues/475). The one
- * way to reach it is the owner's harness page, `apps/web/browser/realistic.html`,
- * and `realistic-offered.test.ts` fails the build if a module the product
- * ships names this ladder.
+ * ⚠️ **Selected only by the rider, since #475.** D-12: the realistic world is
+ * offered to riders only when it is whole, and it has been whole since layer 3
+ * landed. A ride starts on this ladder only when its rider chose the realistic
+ * world in Settings (`world-preference.ts`), off by default on every device
+ * (D-3); `GameView.tsx` is the one module the product ships that names it, and
+ * `realistic-offered.test.ts` fails the build if another does. The owner's
+ * harness page, `apps/web/browser/realistic.html`, still reaches it too.
  *
  * ⚠️ Provenance: every figure is the stylised rung it is copied from, so it is
  * BR-1 exactly as they are. What realism costs on the tablet is #457's device
  * run and `realistic-budget.ts`; the soak is validation 0002 Part Z.
- *
- * @unwired reached only from the owner's harness page until ADR 0026 D-12's
- * layer 3 lands and a rider is offered the realistic world — #475.
  */
 export const REALISTIC_LADDER: readonly QualitySettings[] = [
   { ...(QUALITY_LADDER[0] as QualitySettings), world: 'realistic', label: 'realistic' },
@@ -893,9 +893,6 @@ export interface WorldQualityState {
 
 /**
  * A ride the rider started in the realistic world.
- *
- * @unwired reached only from the owner's harness page until #475 offers the
- * realistic world to a rider; see {@link REALISTIC_LADDER}.
  */
 export const INITIAL_REALISTIC_QUALITY: WorldQualityState = {
   realistic: true,
@@ -915,9 +912,6 @@ export const INITIAL_REALISTIC_QUALITY: WorldQualityState = {
  * argument {@link keepsShadowMap} makes, for the same reason.
  *
  * Pure: the state is the caller's.
- *
- * @unwired reached only from the owner's harness page until #475; see
- * {@link REALISTIC_LADDER}.
  */
 export function nextWorldQuality(
   state: WorldQualityState,
@@ -935,9 +929,6 @@ export function nextWorldQuality(
 
 /**
  * The settings a ride draws with in a {@link WorldQualityState}.
- *
- * @unwired reached only from the owner's harness page until #475; see
- * {@link REALISTIC_LADDER}.
  */
 export function worldRung(state: WorldQualityState): QualitySettings {
   return state.realistic

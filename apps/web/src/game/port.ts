@@ -36,6 +36,7 @@
 
 import type { HorizonRelief, TerrainMesh } from './landform';
 import type { QualitySettings } from './quality';
+import type { RealisticWorldOutcome } from './realistic-assets';
 import type { ScatterItem } from './scatter';
 import type { RoadCorridor } from './terrain';
 import type { BridgePart, WaterSurface } from './waterways';
@@ -245,4 +246,26 @@ export interface GameView {
 /** Creates views. The one thing `three-renderer.ts` exports. */
 export interface GameRenderer {
   create(canvas: HTMLCanvasElement, settings: QualitySettings): GameView;
+  /**
+   * Loads the realistic world, all of it or none of it — #475, ADR 0026 D-7.
+   *
+   * Asked only for a ride whose rider chose the realistic world
+   * (`world-preference.ts`), which is what keeps the realistic set out of every
+   * other visit's download. A view already built is not told: the caller hands
+   * it a realistic rung afterwards, and a view draws the realistic world only
+   * once one is loaded (`three-renderer.ts` §`#applyWorld`). An outcome that
+   * did not load is D-7's fallback, and `realistic-assets.ts`
+   * §`realisticWorldNotice` is what the rider is told.
+   *
+   * ⚠️ **Asked once per RIDE, answered once per VISIT**: a world already
+   * loaded is answered `{ loaded: true }` at once and a load in flight is
+   * joined, because the world outlives the view and a reload would release it
+   * under one (`three-renderer.ts` §`loadRealisticWorldOnce`).
+   *
+   * ⚠️ **Required rather than optional**, on `RiderMarker.crankAngle`'s
+   * reasoning: an optional member nobody supplies is green in every gate here,
+   * and a renderer that could not load the world would then offer a rider a
+   * choice that silently did nothing.
+   */
+  loadRealisticWorld(): Promise<RealisticWorldOutcome>;
 }

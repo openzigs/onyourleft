@@ -1006,26 +1006,36 @@ JavaScript structure for finite numeric `latitude`/`longitude`; an Exif GPS IFD 
 boundary declared over a payload containing a frame is **green for a reason unrelated to the frame**.
 That is why D-9 puts the rule at capture and why the check on it is a refusal rather than a walk.
 
-### The realistic world: what is built, and what is not yet offered
+### The realistic world: what is built, and how a rider chooses it
 
 [ADR 0026](adr/0026-realistic-game-world.md) builds the realistic world in four layers and offers it
 to a rider only when it is whole (D-12). Three of them landed together — #430, #425, #474 and #369,
-asked for as one bundle by the owner — and layer 3 has not, so **nothing in the shipped app can
-reach any of it**. Where each part lives:
+asked for as one bundle by the owner — and layer 3, the structures, with #481.
+⚠️ **Since [#475](https://github.com/openzigs/onyourleft/issues/475) a rider can choose it**, and a
+reader who remembers this section saying *"nothing in the shipped app can reach any of it"* is
+reading the old file: a **Game world** switch in Settings, kept on the device and **off by default
+on every device** (D-3). Where each part lives:
 
 | Part | Where | What holds it |
 |---|---|---|
 | The pipeline (#430) | `apps/web/tools/realistic/` — the sources and their licence pages, the input lock, headless-Blender scripts, `realistic:fetch` / `realistic:process [--check]` / `realistic:stage` | `ASSET007` (a derived asset records its input, input digest, script and pinned tool), `provenance.test.ts` (every committed file is the pipeline's, with the manifest entry its recipe produces), and `--check`, run by hand: every file reproduced **byte for byte** by Blender 4.4.3 twice running — which took one thread for Cycles and an ordered sum in the thinning to get to |
-| The assets | `apps/web/public/realistic/` → `dist/realistic/` — 17 files, 30.8 MiB | `ASSETS.toml` rows, `ASSET001`–`ASSET007`; `realistic-assets.test.ts` in both directions |
-| The budget (D-6) | `apps/web/src/game/realistic-budget.ts`, provisional, from #457's 30-second device windows | `realistic-budget.test.ts`, reading the committed bytes through `realistic-bytes-testing.ts` |
+| The assets | `apps/web/public/realistic/` → `dist/realistic/` — 17 files, 30.8 MiB when layers 1, 2 and 4 landed; 31 files, 33 264 450 bytes (31.7 MiB) with layer 3's structure surfaces, measured for #475 | `ASSETS.toml` rows, `ASSET001`–`ASSET007`; `realistic-assets.test.ts` in both directions |
+| The budget (D-6) | `apps/web/src/game/realistic-budget.ts`, set from #457's 30-second device windows and **re-set from validation 0002 Part Z's twenty-minute soak by #475 — every figure stood**, and the driver's 310 MiB against a 136 MiB estimate is recorded there as the open finding | `realistic-budget.test.ts`, reading the committed bytes through `realistic-bytes-testing.ts` |
 | The ladder (D-3) | `quality.ts` §`REALISTIC_LADDER`, §`nextWorldQuality` — above the stylised ladder, left for the stylised ladder's top and never re-entered | `quality.test.ts` |
 | The renderer (D-9–D-11) | `three-renderer.ts` — both paths in one file: the HDRI as background and PMREM environment, solved against `world.ts`'s ambient share (`realistic-light.ts`); photographic road (the photograph a bounded grain on the gradient tint) and ground; `RealisticVegetationBelt` (nearest-N meshes, impostors beyond); `RealisticRiderBelt` (MakeHuman body posed from `bicycle.ts` §`riderJoints`, bicycle built from `bicycle.ts`'s parts) | `realistic-renderer.test.ts` (jsdom), `game.browser.spec.ts` §"the realistic world" (a real engine: fallback, D-11 over a live scene, one-call road, the tint's contrast after AgX, the legs and the cranks, the step down) |
 | The precache (D-7) | `tools/precache/precache.ts` §`PRECACHE_EXCLUSIONS` — `realistic/` by rule | `precache.test.ts` and `offline.browser.spec.ts`, both ways |
-| Not offered (D-12) | the only way in is `apps/web/browser/realistic.html`, staged into a local debug APK | `realistic-offered.test.ts`: no module the product ships names a way in |
+| The choice (D-3, #475) | `game/world-preference.ts` (the device's `localStorage`, off unless it holds exactly `on`); `views/SettingsView.tsx` §`GameWorldPanel`, the switch; `game/GameView.tsx`, which reads it when a ride starts, asks the renderer's `loadRealisticWorld` only then, and feeds `nextWorldQuality` | `realistic-choice.test.tsx` (no choice, no load; a failed load or a hot device lands on the stylised top and says so; a ride ended before the world arrived is untouched), `SettingsView.test.tsx` §"the game world", and `realistic-offered.test.ts`: `GameView.tsx` is the ONE module the product ships that may name a way in, and it reads the choice |
+| The fallback, said (D-7) | before the ride on the route picker and in Settings (`realistic-assets.ts` §`realisticWorldChosenText`), and on the stage when it happens (§`realisticWorldNotice`, §`REALISTIC_WORLD_LEFT_NOTICE`) for a standing notice's fifteen seconds | `realistic-choice.test.tsx` |
+| The owner's page | `apps/web/browser/realistic.html`, staged into a local debug APK, unchanged | — |
 
-What is left before a rider is offered it is [#475](https://github.com/openzigs/onyourleft/issues/475):
-structures (layer 3), water, the rider-facing control, and the twenty-minute soak —
-[validation 0002](validation/0002-android-shell-and-game.md) Part Z, with its cells empty.
+**Water stays #459's shader on the realistic rungs, argued rather than defaulted** (#481): no D-4
+source publishes a water surface, a tiled photograph of ripples is a frozen picture, and on a
+realistic rung the shader reflects the HDRI's own zenith and horizon — `three-renderer.ts`
+§`WaterBelt.update`. **What the soak left open** is filed rather than blocking the offer, because the
+world is whole and off by default: the buildings have no openings
+([#500](https://github.com/openzigs/onyourleft/issues/500)), and the water's banding, bank and bridge
+seam, plus a soak route with no lake and no wall
+([#501](https://github.com/openzigs/onyourleft/issues/501)).
 
 ## Spike write-ups
 

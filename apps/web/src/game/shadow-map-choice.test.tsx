@@ -62,6 +62,8 @@ const PORT: GamePort = {
 let told: QualitySettings[] = [];
 
 const RENDERER: GameRenderer = {
+  // #475: never asked — no ride in this file chose the realistic world.
+  loadRealisticWorld: () => Promise.reject(new Error('no realistic world was chosen')),
   create: (_canvas, settings) => {
     told.push(settings);
     return {

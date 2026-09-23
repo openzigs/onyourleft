@@ -28,7 +28,7 @@
  * | body | these parts, as solids | MakeHuman's CC0 base mesh, rigged, cut to 24 bones (`tools/realistic/blender/process_rider.py`) |
  * | bicycle | these parts, as solids — a race bike with a drop bar since #369 | **these parts**, drawn round and spoked by `three-renderer.ts` §`RealisticRiderBelt` |
  * | legs | {@link legBones}, as instanced tubes | {@link riderJoints} — the same solve — with each bone of the body aimed at it every frame |
- * | where it ships | every rung | the realistic rungs, which no rider can reach until #475 |
+ * | where it ships | every rung | the realistic rungs, which a rider reaches only by choosing the realistic world (#475) |
  *
  * ⚠️ **The bicycle is these numbers in both worlds, and since #369 it is a
  * RACE bicycle: a drop bar, built here, in the one place that also decides
@@ -105,7 +105,7 @@
  * ⚠️ **What the search bought beyond the bar is the defect it found on the
  * way**: the realistic renderer was drawing a curl of its own from four
  * literals while this file put the hands 50 mm above it and 20 mm behind, and
- * the stylised bicycle — the only one a rider can reach until #475 — had one
+ * the stylised bicycle — the only one a rider could reach until #475 — had one
  * straight tube across, which is a town bike. There is one statement of the
  * bar now and {@link HAND_POSITIONS} is a point on it.
  *

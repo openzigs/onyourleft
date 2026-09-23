@@ -97,6 +97,8 @@ const PORT: GamePort = {
 };
 
 const RENDERER: GameRenderer = {
+  // #475: never asked — no ride in this file chose the realistic world.
+  loadRealisticWorld: () => Promise.reject(new Error('no realistic world was chosen')),
   create: () => ({
     hasContext: true,
     render: () => undefined,

@@ -69,9 +69,10 @@ apps/                 AGPL-3.0-or-later, without exception
                         prose reading measure hid the workout below the fold.
                         ⚠️ Since #430/#425/#474/#369 it also holds realistic.html
                         and realistic-harness.ts — NOT a gate: the OWNER's page,
-                        the one place ADR 0026 D-12 lets the realistic world be
-                        reached until #475, staged into a local debug APK by
-                        `realistic:stage`. The gate is game.html?realistic
+                        the one place ADR 0026 D-12 let the realistic world be
+                        reached until #475 offered it in Settings, staged into
+                        a local debug APK by `realistic:stage`. The gate is
+                        game.html?realistic
     public/             what Vite copies verbatim into `dist` (#405) — the web app
                         manifest and the three icons it names. A `.webmanifest`
                         is on neither LIC001's nor LIC002's extension list and
@@ -531,14 +532,18 @@ apps/                 AGPL-3.0-or-later, without exception
                         BotPacerPlan is built, and therefore the only place the
                         rider's own mass could get into one
     src/game/realistic-*.ts
-                        the realistic world (ADR 0026, #425, #474, #369) that
-                        is NOT OFFERED to a rider until #475 — its asset table,
-                        its provisional D-6 budget, and the arithmetic that
-                        makes its sky and sun one sky. The renderer half is in
-                        `three-renderer.ts` (D-10). ⚠️ `realistic-offered.test.ts`
-                        fails the build if any module the product ships names a
-                        way into it, which is the whole of what keeps a
-                        half-built world from a rider
+                        the realistic world (ADR 0026, #425, #474, #369) — its
+                        asset table, its D-6 budget (re-set from validation
+                        0002 Part Z's soak by #475; every figure stood), and
+                        the arithmetic that makes its sky and sun one sky. The
+                        renderer half is in `three-renderer.ts` (D-10).
+                        ⚠️ **Since #475 a rider CAN choose it**, and a reviewer
+                        who remembers "NOT OFFERED to a rider" is reading the
+                        old file: `world-preference.ts` is the device's choice,
+                        OFF by default everywhere (D-3), set by Settings'
+                        Game world switch and read by `GameView.tsx` when a ride
+                        starts. `realistic-offered.test.ts` now fails the build
+                        if any OTHER module the product ships names a way in
     src/game/gradient.ts
                         the gradient control loop (#362) — where #90's driver
                         meets a real trainer, and the answer to "the game
@@ -3706,10 +3711,12 @@ top of an issue **supersedes its body**.
 | Where the credits screen's rows come from, and why it is generated rather than listed | `apps/web/src/credits/credits.ts`, [ADR 0023](docs/adr/0023-cc-by-assets-and-attribution.md) D-3 |
 | Why a manifest line the client cannot read is shown to a rider rather than skipped | `apps/web/src/credits/manifest.ts`, `apps/web/src/views/CreditsView.tsx` |
 | Why the credits page has no navigation entry, and what that makes the About link | `apps/web/src/shell/routes.ts` §`CREDITS_ROUTE`, `apps/web/src/views/AboutView.tsx` |
-| What the realistic world is, what is built of it, and why no rider can reach it yet | [ADR 0026](docs/adr/0026-realistic-game-world.md), [`docs/architecture.md`](docs/architecture.md) §"The realistic world", `apps/web/src/game/realistic-offered.test.ts`, [#475](https://github.com/openzigs/onyourleft/issues/475) |
+| What the realistic world is, what is built of it, and how a rider chooses it | [ADR 0026](docs/adr/0026-realistic-game-world.md), [`docs/architecture.md`](docs/architecture.md) §"The realistic world", `apps/web/src/game/world-preference.ts`, `apps/web/src/game/realistic-offered.test.ts`, [#475](https://github.com/openzigs/onyourleft/issues/475) |
+| What a rider who chose the realistic world is told offline, and when the device gets too hot for it | `apps/web/src/game/realistic-assets.ts` §`realisticWorldChosenText`, §`realisticWorldNotice`, §`REALISTIC_WORLD_LEFT_NOTICE`, `apps/web/src/game/realistic-choice.test.tsx`, [ADR 0026](docs/adr/0026-realistic-game-world.md) D-7 |
+| Why a view is never built for a ride that ended before the renderer arrived | `apps/web/src/game/GameView.tsx` §"Not after this effect has been cleaned up", `apps/web/src/game/realistic-choice.test.tsx` |
 | How a realistic asset is made, where its input came from, and how to make it again byte for byte | `apps/web/tools/realistic/sources.ts`, `inputs.lock.json`, `process-assets.ts` §"`--check`", `ASSETS.toml` §derived keys, `scripts/check-repo-rules.sh` §`ASSET007` |
 | Why the Blender scripts run on one thread, and what an unordered set did to a shrub | `apps/web/tools/realistic/blender/process_tree.py` §"ONE thread" and §"An ordered de-duplication" |
-| What the realistic world may cost, and why every number is provisional | `apps/web/src/game/realistic-budget.ts`, validation 0002 Part Z |
+| What the realistic world may cost, what the soak re-set it from, and why nothing moved | `apps/web/src/game/realistic-budget.ts`, validation 0002 Part Z |
 | Why the photographic road barely shines, and what the full sheen did to the gradient cue | `apps/web/src/game/three-renderer.ts` §`ROAD_SHEEN`, `game.browser.spec.ts` §"the realistic world" |
 | Why every face of the photographic road is lit as facing up | `apps/web/src/game/three-renderer.ts` §`photographicRoadMaterial`, `terrain.ts` §`roadIndices` |
 | How bright the HDRI's environment is, and which way its sun faces | `apps/web/src/game/realistic-light.ts` §`environmentIntensity`, §`skyRotation` |

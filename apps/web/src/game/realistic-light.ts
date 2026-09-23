@@ -87,9 +87,6 @@ export function halfToFloat(half: number): number {
 
 /**
  * An equirectangular HDR's texels, as three's HDR loader leaves them.
- *
- * @unwired read by `three-renderer.ts` §`loadRealisticWorld`, which nothing the
- * shipped app calls until #475 offers the realistic world to a rider
  */
 export interface SkyPixels {
   readonly width: number;
@@ -119,9 +116,6 @@ function elevationOf(row: number, height: number): number {
  *
  * `step` samples every `step`-th texel in both directions: a 2K sky is two
  * million texels, and the answer is a mean.
- *
- * @unwired read by `three-renderer.ts` §`loadRealisticWorld`, which nothing the
- * shipped app calls until #475 offers the realistic world to a rider
  */
 export function upwardRadiance(sky: SkyPixels, step = 4): number {
   let weighted = 0;
@@ -152,17 +146,11 @@ export type LinearColour = readonly [number, number, number];
  * "sky" and its "horizon" colour — #475. #459's water shader mixes two colours
  * along the reflected ray, reaching the sky's at 0.4 of the way up (about 24°);
  * these are the two bands of the HDRI those two colours stand for.
- *
- * @unwired read by `three-renderer.ts` §`loadRealisticWorld`, which nothing the
- * shipped app calls until #475's rider control follows the soak
  */
 export const WATER_ZENITH_BAND: readonly [number, number] = [30, 90];
 
 /**
  * The horizon's band. @see WATER_ZENITH_BAND
- *
- * @unwired read by `three-renderer.ts` §`loadRealisticWorld`, which nothing the
- * shipped app calls until #475's rider control follows the soak
  */
 export const WATER_HORIZON_BAND: readonly [number, number] = [0, 10];
 
@@ -175,9 +163,6 @@ export const WATER_HORIZON_BAND: readonly [number, number] = [0, 10];
  *
  * Throws when the band holds no finite texel: a water surface reflecting a
  * colour nobody measured is a quieter failure than a world that did not load.
- *
- * @unwired read by `three-renderer.ts` §`loadRealisticWorld`, which nothing the
- * shipped app calls until #475's rider control follows the soak
  */
 export function skyBandRadiance(
   sky: SkyPixels,
@@ -258,9 +243,6 @@ export function reflectedSkyColour(band: LinearColour, targetLuminance: number):
 /**
  * Where in the picture the sky's sun is: the brightest texel of its upper
  * hemisphere, as a horizontal texture coordinate in [0, 1).
- *
- * @unwired read by `three-renderer.ts` §`loadRealisticWorld`, which nothing the
- * shipped app calls until #475 offers the realistic world to a rider
  */
 export function skySunU(sky: SkyPixels, step = 2): number {
   let brightest = -Infinity;

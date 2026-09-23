@@ -13,6 +13,7 @@ import {
   REALISTIC_VEGETATION_KINDS,
   realisticFiles,
   realisticUrl,
+  realisticWorldChosenText,
   realisticWorldNotice,
 } from './realistic-assets';
 import { SCATTER_KINDS } from './scatter';
@@ -120,5 +121,30 @@ describe('what a rider is told inside the Android shell, where the set ships in 
     expect(realisticWorldNotice(offline)).toMatch(/not kept on this device/);
     vi.unstubAllGlobals();
     expect(realisticWorldNotice(offline)).toMatch(/not kept on this device/);
+  });
+});
+
+describe('what a rider who chose the realistic world is told before a ride — #475', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('says in a browser that it is not kept for offline use, and what happens then', () => {
+    const said = realisticWorldChosenText(false);
+    expect(said).toMatch(/not kept on this device for use offline/);
+    expect(said).toMatch(/standard world instead and the ride screen says so/);
+  });
+
+  it('says nothing about the network in the shell, where the set ships in the APK', () => {
+    const said = realisticWorldChosenText(true);
+    expect(said).not.toMatch(/offline|network|not kept/);
+    expect(said).toMatch(/standard world instead and the ride screen says so/);
+  });
+
+  it('asks the shell question the way this client does — the Capacitor global', () => {
+    vi.stubGlobal('Capacitor', { isNativePlatform: () => true, getPlatform: () => 'android' });
+    expect(realisticWorldChosenText()).toBe(realisticWorldChosenText(true));
+    vi.unstubAllGlobals();
+    expect(realisticWorldChosenText()).toBe(realisticWorldChosenText(false));
   });
 });
