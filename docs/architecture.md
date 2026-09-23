@@ -1032,8 +1032,8 @@ on every device** (D-3). Where each part lives:
 source publishes a water surface, a tiled photograph of ripples is a frozen picture, and on a
 realistic rung the shader reflects the HDRI's own zenith and horizon — `three-renderer.ts`
 §`WaterBelt.update`. **What the soak left open** is filed rather than blocking the offer, because the
-world is whole and off by default: the buildings have no openings
-([#500](https://github.com/openzigs/onyourleft/issues/500)), and the water's banding, bank and bridge
+world is whole and off by default: the buildings had no openings
+([#500](https://github.com/openzigs/onyourleft/issues/500), which cut them — see below), and the water's banding, bank and bridge
 seam, plus a soak route with no lake and no wall
 ([#501](https://github.com/openzigs/onyourleft/issues/501)).
 

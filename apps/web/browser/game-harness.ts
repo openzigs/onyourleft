@@ -2906,13 +2906,18 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const windowWall = meanRgbAround(gl, wallPoint);
   setBuildingOpenings(false);
   const plainHouseCanvas = canvasOf();
-  const plainHouse = threeGameRenderer.create(plainHouseCanvas, top);
-  plainHouse.resize(WIDTH, HEIGHT);
-  plainHouse.render(houseFrame);
-  plainHouse.render(houseFrame);
-  // Only after it has drawn: whenever a view builds its belts, this one's are
-  // built with none, and every view after it with them again.
-  setBuildingOpenings(true);
+  let plainHouse: ReturnType<typeof threeGameRenderer.create>;
+  try {
+    plainHouse = threeGameRenderer.create(plainHouseCanvas, top);
+    plainHouse.resize(WIDTH, HEIGHT);
+    plainHouse.render(houseFrame);
+    plainHouse.render(houseFrame);
+  } finally {
+    // Only after it has drawn: whenever a view builds its belts, this one's are
+    // built with none, and every view after it with them again — and in a
+    // `finally`, so a throw above cannot leave every later view with none.
+    setBuildingOpenings(true);
+  }
   const plainHouseGl = plainHouseCanvas.getContext('webgl2');
   const windowControl = plainHouseGl === null ? [] : meanRgbAround(plainHouseGl, glassPoint);
   plainHouse.destroy();

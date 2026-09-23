@@ -22,7 +22,16 @@ import {
 import { hillRoute, valleyRoute } from './route-fixtures-testing';
 import { scatterSeed, type SceneryKind } from './scatter';
 import { corridorOrigin, roadCorridor } from './terrain';
-import { FOUNDATION_METRES, PLINTH_TOP_METRES } from './buildings';
+import {
+  BUILDING_ROLES,
+  BUILDING_VARIANTS,
+  BUILT_KINDS,
+  FOUNDATION_METRES,
+  PLINTH_TOP_METRES,
+  buildingPlan,
+  type BuildingRole,
+} from './buildings';
+import { REALISTIC_BOUNDARY_PARTS, REALISTIC_BUILDING_SURFACES } from './realistic-assets';
 import {
   BridgeBelt,
   GROUNDED_SHADE,
@@ -446,6 +455,86 @@ describe('the buildings a view draws, since #500', () => {
     }
     expect(foundation).toBeGreaterThan(0);
     walls?.dispose();
+  });
+
+  it('draws a realistic plinth, ridge, door and chimney darker than the part beside it', () => {
+    // A plinth wears the wall's photograph, a ridge the roof's and a door the
+    // frame's, so without `REALISTIC_ROLE_SHADE` each is the same surface as
+    // its neighbour and does not read as a part at all. Read back out of the
+    // geometry the belts are built from: `realisticStructureGeometry` merges a
+    // surface's roles in `BUILDING_ROLES`' order, so each role's vertices are
+    // a run whose length the plan gives, and its shade is what is left of a
+    // vertex's colour once the grounding is divided out.
+    const PAIRS: readonly (readonly [BuildingRole, BuildingRole])[] = [
+      ['plinth', 'wall'],
+      ['ridge', 'roof'],
+      ['door', 'joinery'],
+      ['chimney', 'wall'],
+    ];
+    let checked = 0;
+    for (const kind of BUILT_KINDS) {
+      for (let variant = 0; variant < BUILDING_VARIANTS; variant += 1) {
+        const plan = buildingPlan(kind, variant);
+        const surfaces = REALISTIC_BUILDING_SURFACES[kind];
+        const shadeOf = (role: BuildingRole): number | undefined => {
+          const surface = surfaces[role];
+          const geometry = realisticStructureGeometry(kind, surface, variant);
+          if (geometry === undefined) return undefined;
+          const positions = geometry.getAttribute('position') as unknown as Attribute;
+          const colours = geometry.getAttribute('color') as unknown as Attribute;
+          let first = 0;
+          for (const earlier of BUILDING_ROLES) {
+            if (earlier === role) break;
+            if (surfaces[earlier] === surface) first += plan.triangles[earlier].length / 3;
+          }
+          const count = plan.triangles[role].length / 3;
+          const shades = new Set<string>();
+          for (let vertex = first; vertex < first + count; vertex += 1) {
+            shades.add((colours.getX(vertex) / groundingShade(positions.getY(vertex))).toFixed(4));
+          }
+          geometry.dispose();
+          // One shade a role, or the run was not that role's.
+          expect(shades.size, `${kind} ${String(variant)} ${role}`).toBe(1);
+          return Number([...shades][0]);
+        };
+        for (const [darker, than] of PAIRS) {
+          if (plan.triangles[darker].length === 0 || plan.triangles[than].length === 0) continue;
+          if (surfaces[darker] !== surfaces[than]) continue;
+          const label = `${kind} ${String(variant)} ${darker} against ${than}`;
+          const dark = shadeOf(darker);
+          const light = shadeOf(than);
+          expect(dark, label).toBeDefined();
+          expect(light, label).toBeDefined();
+          expect(dark ?? 1, label).toBeLessThanOrEqual((light ?? 0) - 0.08);
+          checked += 1;
+        }
+      }
+    }
+    // Every pair on the house, and the plinths of every kind.
+    expect(checked).toBeGreaterThanOrEqual(2 * 4 + 8);
+  });
+
+  it('does not ground a realistic field boundary or signpost, as the stylised world does not', () => {
+    for (const [kind, surfaces] of Object.entries(REALISTIC_BOUNDARY_PARTS) as [
+      keyof typeof REALISTIC_BOUNDARY_PARTS,
+      readonly Parameters<typeof realisticStructureGeometry>[1][],
+    ][]) {
+      let low = 0;
+      for (const surface of new Set(surfaces)) {
+        const geometry = realisticStructureGeometry(kind, surface, 0);
+        expect(geometry, `${kind} ${surface}`).toBeDefined();
+        const positions = geometry?.getAttribute('position') as unknown as Attribute;
+        const colours = geometry?.getAttribute('color') as unknown as Attribute;
+        for (let vertex = 0; vertex < positions.array.length / 3; vertex += 1) {
+          expect(colours.getX(vertex), `${kind} ${surface}`).toBeCloseTo(1, 6);
+          if (positions.getY(vertex) < GROUNDING_METRES / 2) low += 1;
+        }
+        geometry?.dispose();
+      }
+      // Non-vacuity: it has a foot for the grounding to have darkened (a
+      // signpost's is its pole; its board stands above the band).
+      expect(low, kind).toBeGreaterThan(0);
+    }
   });
 });
 

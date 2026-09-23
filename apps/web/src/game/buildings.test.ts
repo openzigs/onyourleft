@@ -562,3 +562,156 @@ describe('the same shapes with no openings — the browser gate’s control', ()
     }
   });
 });
+
+/**
+ * The supporting geometry #505's review found no test would miss: the wall
+ * back over an arch, the door hood, the door step, the shop sign and the
+ * barn door's batten. A footprint or an extent test passes whether each is
+ * there or not, so each is looked for where it has to be.
+ */
+describe('the supporting detail, each where it has to be — #500', () => {
+  /** Whether a face point is strictly inside a convex, counter-clockwise outline. */
+  const insideOutline = (outline: readonly (readonly [number, number])[], u: number, v: number) =>
+    outline.every(([pu, pv], index) => {
+      const [qu, qv] = outline[(index + 1) % outline.length] as readonly [number, number];
+      return (qu - pu) * (v - pv) - (qv - pv) * (u - pu) > 1e-6;
+    });
+
+  it('closes the wall over an arch, and leaves the arch itself open', () => {
+    // An arched opening is cut as its rectangle and the two corners above the
+    // arch filled back in. Without the fill, each corner is a hole through
+    // the wall that the frame, 8 cm wide, does not cover.
+    const STEPS = 24;
+    let corners = 0;
+    let arched = 0;
+    for (const plan of PLANS) {
+      for (const opening of plan.openings) {
+        const bounds = boundsOf(opening);
+        const label = `${plan.kind} ${String(plan.variant)} ${opening.kind}`;
+        for (let i = 1; i < STEPS; i += 1) {
+          for (let j = 1; j < STEPS; j += 1) {
+            const u = bounds.u0 + ((bounds.u1 - bounds.u0) * i) / STEPS;
+            const v = bounds.v0 + ((bounds.v1 - bounds.v0) * j) / STEPS;
+            const inside = insideOutline(opening.outline, u, v);
+            const outside = !inside && !insideOutline(opening.outline, u, v - 0.02);
+            if (inside) {
+              expect(coveredBy(plan, opening, { u, v }), `${label} open at ${u},${v}`).toBe(false);
+            } else if (outside) {
+              expect(coveredBy(plan, opening, { u, v }), `${label} wall at ${u},${v}`).toBe(true);
+              corners += 1;
+            }
+          }
+        }
+        if (opening.arched) arched += 1;
+      }
+    }
+    // Non-vacuity: the churches' arches are there, and so are their corners.
+    expect(arched).toBeGreaterThanOrEqual(8);
+    expect(corners).toBeGreaterThan(8 * 4);
+  });
+
+  it('puts a step before every door, reaching out past the plinth at its threshold', () => {
+    let doors = 0;
+    for (const plan of PLANS) {
+      for (const opening of plan.openings.filter((each) => each.kind === 'door')) {
+        const bounds = boundsOf(opening);
+        const label = `${plan.kind} ${String(plan.variant)} door at ${bounds.u0.toFixed(2)}`;
+        const tread = trianglesOf(plan, 'joinery')
+          .filter((triangle) => normalOf(triangle)[1] > 0.999)
+          .map((triangle) => triangle.map((point) => inFace(opening, point)))
+          .filter((corners) => corners.every(({ v }) => Math.abs(v - bounds.v0) < 1e-6))
+          .filter((corners) => corners.every(({ w }) => w >= -1e-6 && w <= 0.5))
+          .filter((corners) => corners.some(({ u }) => u > bounds.u0 - 0.5 && u < bounds.u1 + 0.5))
+          .flat();
+        expect(tread.length, label).toBeGreaterThanOrEqual(6);
+        expect(Math.min(...tread.map(({ u }) => u)), label).toBeLessThanOrEqual(bounds.u0);
+        expect(Math.max(...tread.map(({ u }) => u)), label).toBeGreaterThanOrEqual(bounds.u1);
+        expect(Math.max(...tread.map(({ w }) => w)), label).toBeGreaterThanOrEqual(0.3);
+        doors += 1;
+      }
+    }
+    expect(doors).toBeGreaterThanOrEqual(10);
+  });
+
+  it('hangs a hood over the cottage’s door, clear of the door and across it', () => {
+    const cottage = buildingPlan('building', 1);
+    const door = cottage.openings.find((each) => each.kind === 'door' && facesFront(each));
+    expect(door).toBeDefined();
+    if (door === undefined) return;
+    const bounds = boundsOf(door);
+    // The main roof's eaves reach 0.5 m past the wall; the hood is what stands further out.
+    const hood = trianglesOf(cottage, 'roof')
+      .flat()
+      .map((point) => inFace(door, point))
+      .filter(({ w, u }) => w > 0.6 && u > bounds.u0 - 1.5 && u < bounds.u1 + 1.5);
+    expect(hood.length).toBeGreaterThan(0);
+    expect(Math.min(...hood.map(({ u }) => u))).toBeLessThanOrEqual(bounds.u0);
+    expect(Math.max(...hood.map(({ u }) => u))).toBeGreaterThanOrEqual(bounds.u1);
+    expect(Math.max(...hood.map(({ w }) => w))).toBeGreaterThanOrEqual(0.8);
+    // Over the door, not across it: every part of the hood is above its head.
+    for (const { v } of hood) expect(v).toBeGreaterThan(bounds.v1);
+    // And the control: the farmhouse, which has no hood, has nothing out there.
+    const farmhouse = buildingPlan('building', 0);
+    const farmDoor = farmhouse.openings.find((each) => each.kind === 'door' && facesFront(each));
+    if (farmDoor === undefined) throw new Error('the farmhouse has no front door');
+    expect(
+      trianglesOf(farmhouse, 'roof')
+        .flat()
+        .filter((point) => inFace(farmDoor, point).w > 0.6),
+    ).toEqual([]);
+  });
+
+  it('hangs a sign board across each shop’s frontage, between its openings and the first floor', () => {
+    for (const variant of VARIANTS) {
+      const plan = buildingPlan('shop-row', variant);
+      const ground = plan.openings.filter((each) => facesFront(each) && boundsOf(each).v0 < 1.2);
+      expect(ground.length, String(variant)).toBeGreaterThanOrEqual(4);
+      for (const opening of ground) {
+        const bounds = boundsOf(opening);
+        const label = `${String(variant)} ${opening.kind} at ${bounds.u0.toFixed(2)}`;
+        const floor = Math.min(...opening.floors.filter((each) => each > bounds.v1));
+        const board = trianglesOf(plan, 'joinery')
+          .filter((triangle) => dot(normalOf(triangle), opening.face.normal) > 0.999)
+          .map((triangle) => triangle.map((point) => inFace(opening, point)))
+          .filter((corners) =>
+            corners.every(
+              ({ v, w }) =>
+                v > bounds.v1 + FRAME_WIDTH_METRES && v < floor && w > FRAME_PROJECTION_METRES,
+            ),
+          )
+          .filter((corners) => corners.some(({ u }) => u >= bounds.u0 - 1 && u <= bounds.u1 + 1))
+          .flat();
+        expect(board.length, label).toBeGreaterThanOrEqual(6);
+        expect(Math.min(...board.map(({ u }) => u)), label).toBeLessThanOrEqual(bounds.u0);
+        expect(Math.max(...board.map(({ u }) => u)), label).toBeGreaterThanOrEqual(bounds.u1);
+      }
+    }
+  });
+
+  it('divides a barn’s great doors into two leaves with a batten, in both its shapes', () => {
+    for (const variant of VARIANTS) {
+      const plan = buildingPlan('barn', variant);
+      const great = plan.openings.filter(
+        (each) => facesFront(each) && boundsOf(each).u1 - boundsOf(each).u0 >= 3,
+      );
+      expect(great, String(variant)).toHaveLength(1);
+      for (const opening of great) {
+        const bounds = boundsOf(opening);
+        const middle = (bounds.u0 + bounds.u1) / 2;
+        const batten = trianglesOf(plan, 'joinery')
+          .filter((triangle) => dot(normalOf(triangle), opening.face.normal) > 0.999)
+          .map((triangle) => triangle.map((point) => inFace(opening, point)))
+          .filter((corners) =>
+            corners.every(
+              ({ u, w }) =>
+                Math.abs(u - middle) < 0.1 && w > -OPENING_RECESS_METRES + 1e-6 && w < 0,
+            ),
+          )
+          .flat();
+        expect(batten.length, String(variant)).toBeGreaterThanOrEqual(3);
+        expect(Math.min(...batten.map(({ v }) => v))).toBeLessThanOrEqual(bounds.v0 + 1e-6);
+        expect(Math.max(...batten.map(({ v }) => v))).toBeGreaterThanOrEqual(bounds.v1 - 1e-6);
+      }
+    }
+  });
+});

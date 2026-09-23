@@ -920,13 +920,16 @@ export function groundingShade(y: number): number {
   return GROUNDED_SHADE + (1 - GROUNDED_SHADE) * rise;
 }
 
-/** Colours every vertex `colour` × its {@link groundingShade}, × `shade`. */
-function paintGrounded(geometry: BufferGeometry, colour: number, shade = 1): void {
+/**
+ * Colours every vertex `colour` × its {@link groundingShade}, × `shade` — or,
+ * with `grounded` false, `colour` × `shade` at every height.
+ */
+function paintGrounded(geometry: BufferGeometry, colour: number, shade = 1, grounded = true): void {
   const found = new Color(colour);
   const position = geometry.getAttribute('position');
   const channels = new Float32Array(position.count * 3);
   for (let at = 0; at < position.count; at += 1) {
-    const light = groundingShade(position.getY(at)) * shade;
+    const light = (grounded ? groundingShade(position.getY(at)) : 1) * shade;
     channels[at * 3] = found.r * light;
     channels[at * 3 + 1] = found.g * light;
     channels[at * 3 + 2] = found.b * light;
@@ -5408,6 +5411,13 @@ const REALISTIC_ROLE_SHADE: Readonly<Record<BuildingRole, number>> = {
 interface StructurePart {
   readonly surface: StructureSurface;
   readonly shade: number;
+  /**
+   * Whether its foot is darkened by {@link groundingShade}: a building's parts
+   * are, and a field boundary's or a signpost's are NOT — #500 grounds a
+   * building, and the stylised world paints a boundary one colour top to
+   * bottom (§`builtStyle`), so a hedge is the same in both worlds.
+   */
+  readonly grounded: boolean;
   readonly geometry: BufferGeometry;
 }
 
@@ -5434,6 +5444,7 @@ function realisticStructureParts(kind: StructureKind, variant = 0): StructurePar
       parts.push({
         surface: REALISTIC_BUILDING_SURFACES[kind][role],
         shade: REALISTIC_ROLE_SHADE[role],
+        grounded: true,
         geometry,
       });
     }
@@ -5443,6 +5454,7 @@ function realisticStructureParts(kind: StructureKind, variant = 0): StructurePar
   return BOUNDARY_STYLE[kind].map((part, index) => ({
     surface: surfaces[index] ?? 'painted',
     shade: 1,
+    grounded: false,
     geometry: part.geometry(),
   }));
 }
@@ -5472,6 +5484,7 @@ function projectedInMetres(
   geometry: BufferGeometry,
   tileMetres: number,
   shade = 1,
+  grounded = true,
 ): BufferGeometry {
   const flat = geometry.index === null ? geometry : geometry.toNonIndexed();
   if (flat !== geometry) geometry.dispose();
@@ -5506,7 +5519,7 @@ function projectedInMetres(
   flat.setAttribute('uv', new BufferAttribute(uv, 2));
   // #500: the grounding and the part's own shade, as a vertex colour the
   // structure materials multiply in. @see groundingShade
-  paintGrounded(flat, 0xffffff, shade);
+  paintGrounded(flat, 0xffffff, shade, grounded);
   return flat;
 }
 
@@ -5522,7 +5535,8 @@ export function realisticStructureGeometry(
   const tile = isPhotographic(surface) ? REALISTIC_STRUCTURE_SURFACES[surface].tileMetres : 1;
   const mine: BufferGeometry[] = [];
   for (const part of realisticStructureParts(kind, variant)) {
-    if (part.surface === surface) mine.push(projectedInMetres(part.geometry, tile, part.shade));
+    if (part.surface === surface)
+      mine.push(projectedInMetres(part.geometry, tile, part.shade, part.grounded));
     else part.geometry.dispose();
   }
   if (mine.length === 0) return undefined;
@@ -5626,8 +5640,9 @@ function structureMaterials(
 ): ShadedMaterials {
   const finish = STRUCTURE_SURFACE_FINISH[surface];
   const maps = isPhotographic(surface) ? textures.get(surface) : undefined;
-  // ⚠️ `vertexColors` since #500: every structure geometry carries the
-  // grounding and its part's shade in its vertex colour. @see projectedInMetres
+  // ⚠️ `vertexColors` since #500: every structure geometry carries its part's
+  // shade in its vertex colour, and a building's the grounding as well (a
+  // boundary's does not). @see projectedInMetres
   return {
     lit: constructed(
       new MeshStandardMaterial({
