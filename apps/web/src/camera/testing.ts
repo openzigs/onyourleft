@@ -25,6 +25,7 @@ import type {
   CameraProblemKind,
   CameraSession,
   CapturedFrame,
+  LuminanceGrid,
 } from './camera-port';
 import { CameraCaptureError } from './camera-port';
 import { capturedFrame } from './frame';
@@ -40,6 +41,14 @@ export interface ScriptedCameraOptions {
   readonly captureFails?: CameraProblemKind;
   /** The bytes a capture yields. Clean by default; see {@link cleanFrameBytes}. */
   readonly bytes?: Uint8Array;
+  /**
+   * What each presence sample returns, in turn — #390. A function so a test
+   * can change the room mid-ride; the default is one fixed, readable grid,
+   * which reads as "nothing moved".
+   */
+  readonly luminance?: (sample: number) => LuminanceGrid;
+  /** Thrown from `sampleLuminance()`. */
+  readonly sampleFails?: CameraProblemKind;
 }
 
 /** What a scripted camera recorded about how it was used. */
@@ -74,6 +83,7 @@ export function scriptedCamera(options: ScriptedCameraOptions = {}): ScriptedCam
   const calls: string[] = [];
   let live = false;
   let session: CameraSession | undefined;
+  let samples = 0;
 
   const port: CameraPort = {
     cameraAvailability: async () => {
@@ -111,6 +121,18 @@ export function scriptedCamera(options: ScriptedCameraOptions = {}): ScriptedCam
             }),
           );
         },
+        sampleLuminance: async (): Promise<LuminanceGrid> => {
+          calls.push('sample');
+          if (options.sampleFails !== undefined) {
+            throw new CameraCaptureError(
+              options.sampleFails,
+              cameraProblemMessage(options.sampleFails),
+            );
+          }
+          const index = samples;
+          samples += 1;
+          return Promise.resolve((options.luminance ?? (() => stillRoom()))(index));
+        },
         stopCamera: () => {
           calls.push('stop');
           live = false;
@@ -128,6 +150,29 @@ export function scriptedCamera(options: ScriptedCameraOptions = {}): ScriptedCam
       live = false;
     },
   };
+}
+
+/**
+ * A readable room in which nothing moves: a left-to-right ramp of brightness,
+ * well inside `presence.ts`' dark, bright and flat limits — #390.
+ *
+ * `shift` moves the whole picture brighter or darker, and `moved` changes that
+ * many cells by a large step, which is the smallest fixture that is "a thing
+ * moved" rather than "the light changed".
+ */
+export function stillRoom(
+  options: { readonly shift?: number; readonly moved?: number } = {},
+): LuminanceGrid {
+  const columns = 32;
+  const rows = 24;
+  const values = new Uint8Array(columns * rows);
+  for (let cell = 0; cell < values.length; cell += 1) {
+    values[cell] = 60 + (cell % columns) * 4 + (options.shift ?? 0);
+  }
+  for (let cell = 0; cell < (options.moved ?? 0); cell += 1) {
+    values[cell * 7] = (values[cell * 7] ?? 0) + 60;
+  }
+  return { columns, rows, values };
 }
 
 /** A scheduler a test drives by hand. @see CameraControllerOptions.schedule */

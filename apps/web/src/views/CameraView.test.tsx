@@ -404,3 +404,60 @@ function controllerWith(
 ): CameraController {
   return new CameraController({ port: camera.port, schedule: manualSchedule().schedule, keep });
 }
+
+/* --------------------------------------------------------------------------
+ * #390: "pause my ride when nobody is on the bike".
+ * -------------------------------------------------------------------------- */
+
+describe('the presence switch', () => {
+  /** The presence box, found by its label rather than by position. */
+  function presenceBox(): HTMLInputElement | undefined {
+    return (
+      queryAll<HTMLLabelElement>(document, 'label')
+        .find((label) => (label.textContent ?? '').includes('nobody is on the bike'))
+        ?.querySelector('input') ?? undefined
+    );
+  }
+
+  async function onScreen(): Promise<{
+    controller: CameraController;
+    camera: ReturnType<typeof scriptedCamera>;
+  }> {
+    const camera = scriptedCamera();
+    const controller = controllerFor(camera);
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    mounted = await mount(<CameraView controller={controller} />);
+    await settle();
+    return { controller, camera };
+  }
+
+  it('is not offered while the camera is off — not disabled, absent', async () => {
+    await onScreen();
+    expect(presenceBox()).toBeUndefined();
+  });
+
+  it('is OFF when the camera comes on, and switching it on asks for nothing new', async () => {
+    const { controller, camera } = await onScreen();
+    const on = button('Turn the camera on');
+    if (on === undefined) {
+      expect.unreachable('no control to turn the camera on');
+      return;
+    }
+    await activateWithKeyboard(on);
+    await settle();
+    const box = presenceBox();
+    expect(box?.checked).toBe(false);
+    const before = [...camera.calls];
+
+    box?.click();
+    await settle();
+
+    expect(controller.state().watchingPresence).toBe(true);
+    expect(presenceBox()?.checked).toBe(true);
+    // No second request and no second start — the one camera, the one consent.
+    expect(camera.calls).toStrictEqual(before);
+    expect(controller.state().consent).toStrictEqual({ local: true, hosted: false });
+    // And it says what `unknown` does NOT do.
+    expect(document.body.textContent).toContain('it will not pause your ride');
+  });
+});

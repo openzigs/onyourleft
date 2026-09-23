@@ -57,6 +57,16 @@ import { CameraCaptureError } from './camera-port';
 import { consentDecision, NO_CONSENT, type CameraConsent, type ConsentAnswers } from './consent';
 import type { FrameKeep } from './keep';
 import { cameraNotice } from './notice';
+import {
+  nextPresence,
+  observePair,
+  PRESENCE_CHECK_MILLISECONDS,
+  PRESENCE_NOT_OBSERVED,
+  PRESENCE_PAIR_GAP_MILLISECONDS,
+  presenceAt,
+  type PresenceTracker,
+} from './presence';
+import type { RiderPresence, RiderPresencePort } from '../ride/presence-port';
 
 /**
  * How often the controller checks that the camera is still running.
@@ -92,6 +102,8 @@ export const LIVENESS_POLL_MILLISECONDS = 1000;
 export interface CameraThrottle {
   /** @see CameraController.throttle */
   throttle(captureAllowed: boolean): void;
+  /** @see CameraController.throttlePresence */
+  throttlePresence(presenceAllowed: boolean): void;
 }
 
 /** Everything a screen or the indicator needs to know, in one object. */
@@ -141,6 +153,28 @@ export interface CameraState {
    * `true` until a ride steps the ladder down. @see CameraController.throttle
    */
   readonly captureAllowed: boolean;
+  /**
+   * Whether the rider has asked for their ride to pause when nobody is on the
+   * bike — #390.
+   *
+   * **`false` every time the camera is turned on**, for the reason
+   * {@link keeping} is: a camera that decides when a ride stops accumulating
+   * is a thing a rider chooses knowing where it is pointed *this* time.
+   */
+  readonly watchingPresence: boolean;
+  /**
+   * Whether the quality ladder currently permits a presence check —
+   * `quality.ts` §`QualitySettings.presence`. `true` until a ride steps the
+   * ladder down.
+   */
+  readonly presenceAllowed: boolean;
+  /**
+   * The answer the ride is being given right now. @see CameraController.riderPresence
+   *
+   * One of three words, and ⚠️ **the whole of what presence derives** — no
+   * picture, no grid, no count of people and nothing about who.
+   */
+  readonly presence: RiderPresence;
 }
 
 /** What a caller is told about a capture, with nothing of the picture in it. */
@@ -276,6 +310,24 @@ export interface CameraControllerOptions {
    * `keeping` switch nothing reads.
    */
   readonly keep?: FrameKeep | undefined;
+  /**
+   * The clock a presence observation is stamped with, in milliseconds —
+   * #390. `Date.now` in production; injected so a test can walk fifteen
+   * seconds of stillness without waiting for them.
+   */
+  readonly clock?: (() => number) | undefined;
+  /**
+   * How the gap between a presence check's two samples is waited out.
+   * @see presence.ts §`PRESENCE_PAIR_GAP_MILLISECONDS`
+   */
+  readonly wait?: ((milliseconds: number) => Promise<void>) | undefined;
+}
+
+/** A promise that settles after `milliseconds`, on the browser's own timer. */
+export async function browserWait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
 }
 
 /** The browser's own timer, in the shape {@link CameraControllerOptions} wants. */
@@ -292,12 +344,14 @@ export function browserInterval(tick: () => void, everyMilliseconds: number): ()
  * Every method that could reach the hardware checks consent first and refuses
  * without touching the port — see the file header.
  */
-export class CameraController {
+export class CameraController implements CameraThrottle, RiderPresencePort {
   readonly #port: CameraPort;
   readonly #sink: FrameSink;
   readonly #schedule: (tick: () => void, everyMilliseconds: number) => () => void;
   readonly #notices: (kind: CameraProblemKind) => CameraNotice;
   readonly #keep: FrameKeep | undefined;
+  readonly #clock: () => number;
+  readonly #wait: (milliseconds: number) => Promise<void>;
   readonly #listeners = new Set<() => void>();
 
   #consent: CameraConsent = NO_CONSENT;
@@ -307,6 +361,11 @@ export class CameraController {
   #keptThisSession = 0;
   #captureAllowed = true;
   #cancelPoll: (() => void) | undefined;
+  #watchingPresence = false;
+  #presenceAllowed = true;
+  #presenceTracker: PresenceTracker = PRESENCE_NOT_OBSERVED;
+  #presenceChecking = false;
+  #cancelPresence: (() => void) | undefined;
 
   constructor(options: CameraControllerOptions) {
     this.#port = options.port;
@@ -317,6 +376,8 @@ export class CameraController {
     this.#sink = options.sink ?? options.keep ?? discardTheFrame;
     this.#schedule = options.schedule ?? browserInterval;
     this.#notices = options.notices ?? cameraNotice;
+    this.#clock = options.clock ?? Date.now;
+    this.#wait = options.wait ?? browserWait;
   }
 
   /** The current answer. Cheap; call it in a render. */
@@ -329,6 +390,9 @@ export class CameraController {
       keeping: this.#keep?.keeping ?? false,
       keptThisSession: this.#keptThisSession,
       captureAllowed: this.#captureAllowed,
+      watchingPresence: this.#watchingPresence,
+      presenceAllowed: this.#presenceAllowed,
+      presence: this.#presenceNow(),
     };
   }
 
@@ -429,6 +493,12 @@ export class CameraController {
     this.#session?.stopCamera();
     this.#session = undefined;
     this.#stopPolling();
+    // ⚠️ With the camera, not after it: a watch left running over no camera
+    // would go on answering from its last observation until it went stale.
+    // And this — with `#fail`'s — is what makes #390's switch OFF at every
+    // switch-on: every way a camera stops passes through one of the two, so
+    // the next `turnOn` finds it off. @see CameraState.watchingPresence
+    this.#stopWatchingPresence();
     if (this.#problem === undefined) {
       this.#problem = this.#consent.local ? undefined : 'no-consent';
     }
@@ -554,6 +624,95 @@ export class CameraController {
     return removed;
   }
 
+  /**
+   * Turn #390's presence check on or off — "pause my ride when nobody is on
+   * the bike".
+   *
+   * ⚠️ **It asks for nothing new and grants nothing new.** It runs only under
+   * the consent the camera is already on under (`consent.local`), through the
+   * same port and the same session, with the same live indicator showing — and
+   * it touches neither {@link CameraConsent.hosted} nor the frame sink: a
+   * presence check takes no frame, keeps nothing and sends nothing. Consent
+   * for this is not consent for analysis, and `session.test.ts` §"#390"
+   * asserts both halves.
+   *
+   * Refused while the camera is off, for the reason {@link setKeeping} is.
+   */
+  watchPresence(on: boolean): void {
+    if (!on) {
+      this.#stopWatchingPresence();
+      this.#announce();
+      return;
+    }
+    if (this.#session?.live !== true || !this.#consent.local || this.#watchingPresence) {
+      return;
+    }
+    this.#watchingPresence = true;
+    // ⚠️ **The two samples are taken HERE, lexically inside this method, and
+    // not in a private helper — and that is `check:wiring` being made to see
+    // the chain.** The gate splits a class into its methods by name so that a
+    // method nothing calls does not keep what it calls alive, but it does not
+    // split a `#private` one: that body is credited to the class, which is
+    // reached whenever the camera is. Measured on the way in: with the samples
+    // in a `#checkPresence`, deleting the Camera screen's only call of
+    // `watchPresence` left `WIRE003` silent about `sampleLuminance`. Here, it
+    // names it.
+    this.#cancelPresence = this.#schedule(() => {
+      void this.#observePresence(async (session) => {
+        const first = await session.sampleLuminance();
+        await this.#wait(PRESENCE_PAIR_GAP_MILLISECONDS);
+        const second = await session.sampleLuminance();
+        return observePair(first, second);
+      });
+    }, PRESENCE_CHECK_MILLISECONDS);
+    this.#announce();
+  }
+
+  /**
+   * What the quality ladder permits of presence — `quality.ts`
+   * §`QualitySettings.presence`.
+   *
+   * ⚠️ **Withdrawn, the answer becomes `unknown` at once**, not at the next
+   * stale deadline: the ride goes back to exactly the movement rule it had
+   * before #390 on the same frame the ladder stepped down. Like
+   * {@link throttle} it does not turn the camera off.
+   */
+  throttlePresence(presenceAllowed: boolean): void {
+    if (this.#presenceAllowed === presenceAllowed) {
+      return;
+    }
+    this.#presenceAllowed = presenceAllowed;
+    this.#presenceTracker = PRESENCE_NOT_OBSERVED;
+    this.#announce();
+  }
+
+  /**
+   * Whether anybody is on the bike, for the ride — `ride/presence-port.ts`.
+   *
+   * `unknown` unless every one of these holds: the rider has consented, the
+   * camera is running, the rider asked for presence, the ladder permits it —
+   * and the last observation is recent. Cheap, and never throws: it is called
+   * once per sensor reading.
+   */
+  riderPresence(): RiderPresence {
+    return this.#presenceNow();
+  }
+
+  /**
+   * ⚠️ **The same answer under a private name, and the name is the point.**
+   * `check:wiring` matches member names as names, so every call of
+   * `riderPresence` inside this class would keep the port method alive and
+   * `WIRE003` could never fire for `ride/presence-port.ts`. Measured on the way
+   * in: with {@link state} calling `riderPresence()`, deleting the ride
+   * controller's only call left the gate green.
+   */
+  #presenceNow(): RiderPresence {
+    if (!this.#presenceMayRun()) {
+      return 'unknown';
+    }
+    return presenceAt(this.#presenceTracker, this.#clock());
+  }
+
   /** The words for the current problem, or `null` while there is none. */
   notice(): CameraNotice | null {
     return this.#problem === undefined ? null : this.#notices(this.#problem);
@@ -562,9 +721,73 @@ export class CameraController {
   #fail(kind: CameraProblemKind): CameraProblemKind {
     this.#session = undefined;
     this.#stopPolling();
+    this.#stopWatchingPresence();
     this.#problem = kind;
     this.#announce();
     return kind;
+  }
+
+  #presenceMayRun(): boolean {
+    return (
+      this.#consent.local &&
+      this.#session?.live === true &&
+      this.#watchingPresence &&
+      this.#presenceAllowed
+    );
+  }
+
+  #stopWatchingPresence(): void {
+    this.#cancelPresence?.();
+    this.#cancelPresence = undefined;
+    this.#watchingPresence = false;
+    this.#presenceTracker = PRESENCE_NOT_OBSERVED;
+  }
+
+  /**
+   * One presence check: two coarse samples a moment apart, compared, dropped.
+   *
+   * ⚠️ **Neither grid outlives this method.** They are locals; nothing is
+   * handed to the sink, the store, a listener or a message, and what survives
+   * is {@link PresenceTracker} — three primitives. A sample that fails is
+   * `unreadable`, which is `unknown`, which pauses nothing; the error itself is
+   * not read, for ADR 0029 D-8's reason.
+   *
+   * Skipped when the previous check has not finished, so a slow camera cannot
+   * pile up samples behind the timer.
+   *
+   * `look` is what takes the samples; {@link watchPresence} says why it is
+   * passed in rather than written here.
+   */
+  async #observePresence(
+    look: (session: CameraSession) => Promise<ReturnType<typeof observePair>>,
+  ): Promise<void> {
+    const session = this.#session;
+    if (!this.#presenceMayRun() || session === undefined || this.#presenceChecking) {
+      return;
+    }
+    this.#presenceChecking = true;
+    const before = this.#presenceNow();
+    try {
+      let observation: ReturnType<typeof observePair>;
+      try {
+        observation = await look(session);
+      } catch {
+        observation = 'unreadable';
+      }
+      // The world may have changed while the samples were taken: the camera
+      // turned off, the watch stopped, the ladder stepped down. An answer for
+      // a watch that is no longer running would be written into a tracker
+      // that has just been reset.
+      if (!this.#presenceMayRun() || this.#session !== session) {
+        return;
+      }
+      this.#presenceTracker = nextPresence(this.#presenceTracker, observation, this.#clock());
+    } finally {
+      this.#presenceChecking = false;
+    }
+    if (this.#presenceNow() !== before) {
+      this.#announce();
+    }
   }
 
   #startPolling(): void {

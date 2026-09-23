@@ -54,9 +54,11 @@ import type {
   CameraProblemKind,
   CameraSession,
   CapturedFrame,
+  LuminanceGrid,
 } from './camera-port';
 import { capturedFrame, FRAME_MEDIA_TYPE, FRAME_QUALITY } from './frame';
 import { cameraProblemMessage } from './notice';
+import { lumaGrid, PRESENCE_GRID_COLUMNS, PRESENCE_GRID_ROWS } from './presence';
 
 /** The slice of `MediaStreamTrack` this module uses. */
 export interface VideoTrackLike {
@@ -110,6 +112,23 @@ export interface GrabbedFrame {
  */
 export interface FrameGrabber {
   grab(stream: MediaStreamLike): Promise<GrabbedFrame>;
+  /**
+   * A sampler of coarse brightness grids over this stream — #390.
+   *
+   * A second member rather than a use of {@link grab}, because a presence
+   * check must not pay for a full-size draw and a JPEG encode twice every two
+   * seconds; and a sampler rather than a one-shot, because it holds one
+   * playing `<video>` for the session instead of starting one per sample.
+   */
+  luminance(stream: MediaStreamLike): LuminanceSampler;
+}
+
+/** Coarse brightness grids from one stream. @see FrameGrabber.luminance */
+export interface LuminanceSampler {
+  /** @throws {CameraCaptureError} from the fixed table, never a platform message. */
+  sample(): Promise<LuminanceGrid>;
+  /** Lets go of whatever the sampler holds. Idempotent. */
+  release(): void;
 }
 
 /** What a camera is asked for. @see browserCameraPort */
@@ -280,6 +299,9 @@ export function browserCameraPort(options: BrowserCameraOptions): CameraPort {
 
 function browserSession(stream: MediaStreamLike, grabber: FrameGrabber): CameraSession {
   let stopped = false;
+  // Made on the first presence check and let go with the camera, so a session
+  // that never checks presence never builds one.
+  let sampler: LuminanceSampler | undefined;
   return {
     get live(): boolean {
       if (stopped) {
@@ -310,8 +332,25 @@ function browserSession(stream: MediaStreamLike, grabber: FrameGrabber): CameraS
       }
       return capturedFrame(grabbed);
     },
+    async sampleLuminance(): Promise<LuminanceGrid> {
+      if (stopped) {
+        throw new CameraCaptureError('unavailable', cameraProblemMessage('unavailable'));
+      }
+      sampler ??= grabber.luminance(stream);
+      try {
+        return await sampler.sample();
+      } catch (error) {
+        // The same rule as `captureFrame`: the fixed wording or nothing.
+        if (error instanceof CameraCaptureError) {
+          throw error;
+        }
+        throw new CameraCaptureError('unavailable', cameraProblemMessage('unavailable'));
+      }
+    },
     stopCamera(): void {
       stopped = true;
+      sampler?.release();
+      sampler = undefined;
       for (const track of stream.getVideoTracks()) {
         track.stop();
       }
@@ -335,6 +374,7 @@ function browserSession(stream: MediaStreamLike, grabber: FrameGrabber): CameraS
  */
 export function canvasFrameGrabber(): FrameGrabber {
   return {
+    luminance: videoLuminanceSampler,
     async grab(stream: MediaStreamLike): Promise<GrabbedFrame> {
       // The cast is the boundary: above this line the program has a
       // `MediaStreamLike`, and only the browser's own API needs the real thing.
@@ -371,6 +411,63 @@ export function canvasFrameGrabber(): FrameGrabber {
         // element holding the stream alive.
         video.srcObject = null;
       }
+    },
+  };
+}
+
+/**
+ * The real presence sampler: one detached `<video>` playing the stream, drawn
+ * straight into a {@link PRESENCE_GRID_COLUMNS} × {@link PRESENCE_GRID_ROWS}
+ * canvas and read back — #390.
+ *
+ * ⚠️ **The browser does the downscale** — `drawImage` into a canvas that
+ * small is the whole of the resizing — so what crosses back from the GPU is
+ * 768 pixels, not a frame. No encode, no `Blob`, nothing that could be written
+ * anywhere; `lumaGrid` turns the pixels into brightness and the RGBA buffer is
+ * dropped with the call.
+ *
+ * `willReadFrequently`, because this canvas exists to be read back every two
+ * seconds and the hint keeps it off the GPU, which is what makes a readback a
+ * copy rather than a pipeline stall on the thread drawing the world.
+ *
+ * Exported, rather than reached only through {@link canvasFrameGrabber}, for
+ * one caller: `browser/game-harness.ts`, which measures what a sample costs
+ * with the renderer running. Like the rest of this file's platform half it is
+ * reachable from no jsdom suite.
+ */
+export function videoLuminanceSampler(stream: MediaStreamLike): LuminanceSampler {
+  const media = stream as unknown as MediaStream;
+  const video = document.createElement('video');
+  video.srcObject = media;
+  video.muted = true;
+  video.playsInline = true;
+  const canvas = document.createElement('canvas');
+  canvas.width = PRESENCE_GRID_COLUMNS;
+  canvas.height = PRESENCE_GRID_ROWS;
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  let started: Promise<void> | undefined;
+  return {
+    async sample(): Promise<LuminanceGrid> {
+      if (context === null) {
+        throw new CameraCaptureError('unavailable', cameraProblemMessage('unavailable'));
+      }
+      started ??= video.play().then(async () => onceReady(video));
+      try {
+        await started;
+      } catch (error) {
+        // Tried again on the next check rather than failing for the rest of
+        // the session: a video that would not start once may start the next
+        // time, and a sampler that stayed broken would be `unknown` for ever.
+        started = undefined;
+        throw error;
+      }
+      context.drawImage(video, 0, 0, PRESENCE_GRID_COLUMNS, PRESENCE_GRID_ROWS);
+      const pixels = context.getImageData(0, 0, PRESENCE_GRID_COLUMNS, PRESENCE_GRID_ROWS);
+      return lumaGrid(pixels.data, PRESENCE_GRID_COLUMNS, PRESENCE_GRID_ROWS);
+    },
+    release(): void {
+      video.pause();
+      video.srcObject = null;
     },
   };
 }

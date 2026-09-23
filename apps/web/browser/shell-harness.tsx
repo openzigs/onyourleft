@@ -312,6 +312,7 @@ function main(): void {
       startCamera: () =>
         Promise.resolve({
           captureFrame: () => Promise.reject(new Error('this harness does not capture')),
+          sampleLuminance: () => Promise.reject(new Error('this harness does not sample')),
           stopCamera: () => undefined,
           live: true,
         }),

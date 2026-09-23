@@ -105,6 +105,7 @@ import {
   type MetricState,
   type RideMetricId,
 } from './metrics';
+import type { RiderPresence, RiderPresencePort } from './presence-port';
 import { NO_TRAINER_CONTROL, type OpenTrainer, type TrainerConnection } from './trainer';
 import { createWorkoutSession, RELEASE_INCOMPLETE, type WorkoutSession } from '../workout/session';
 import { blockText } from '../workouts/library';
@@ -369,6 +370,20 @@ export interface RideControllerOptions {
   readonly openTrainer?: OpenTrainer | undefined;
   /** @see METRIC_STALE_AFTER_SECONDS */
   readonly staleAfterSeconds?: number;
+  /**
+   * Whether anybody is on the bike, from the camera — #390.
+   *
+   * ⚠️ **Advisory, and only to the recorder's own auto-pause.** It is handed to
+   * every recorder this controller builds or recovers, where
+   * `recording/channels.ts` §`presenceAwareMovement` folds it into the
+   * movement predicate. This controller does not pause on it: {@link
+   * RideController.pause} stays the rider's press, and the engine's automatic
+   * pause stays the only other way a ride stops accumulating.
+   *
+   * Omitted — no camera on this platform — and every ride is exactly what it
+   * was before #390.
+   */
+  readonly presence?: RiderPresencePort | undefined;
 }
 
 export interface RideController {
@@ -507,6 +522,11 @@ interface SensorEntry {
 export function createRideController(options: RideControllerOptions): RideController {
   const { transport, store, athleteId, newSessionId, now, openTrainer } = options;
   const staleAfterSeconds = options.staleAfterSeconds ?? METRIC_STALE_AFTER_SECONDS;
+  // #390. `undefined` with no camera, which leaves every recorder exactly as it
+  // was: `recorder.ts` §`RecorderOptions.presence`. Read afresh on every
+  // reading, because the answer moves during a ride.
+  const port = options.presence;
+  const presence = port === undefined ? undefined : (): RiderPresence => port.riderPresence();
 
   const listeners = new Set<() => void>();
   const sensors = new Map<DeviceId, SensorEntry>();
@@ -936,7 +956,7 @@ export function createRideController(options: RideControllerOptions): RideContro
    */
   const recoverOne = async (id: RecordingSessionId): Promise<Recorder | undefined> => {
     try {
-      const found = await recoverRecorder({ store, athleteId, sessionId: id });
+      const found = await recoverRecorder({ store, athleteId, sessionId: id, presence });
       return found?.recorder;
     } catch {
       return undefined;
@@ -1100,6 +1120,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         athleteId,
         sessionId: newSessionId(),
         sampleInterval: seconds(1),
+        presence,
       });
       phase = 'recording';
       clock = now();

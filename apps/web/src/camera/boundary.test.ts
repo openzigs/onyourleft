@@ -136,6 +136,22 @@ describe('no camera platform type escapes apps/web/src/camera', () => {
       );
     expect(findings).toStrictEqual([]);
   });
+
+  it('does not let a presence grid escape either — #390', () => {
+    // A `LuminanceGrid` is a 32 × 24 downscale of the room, which ADR 0029 D-8
+    // lists on the forbidden side for a message. It is compared and dropped
+    // inside this directory; what leaves is `RiderPresence`, one word. A module
+    // outside `camera/` that named the grid would be holding a picture of
+    // somebody's living room, however small.
+    const findings = sources()
+      .filter((path) => !inCamera(path) && !/\.test\.tsx?$/.test(path))
+      .filter((path) =>
+        /(?<![\w.$])(?:LuminanceGrid|sampleLuminance|lumaGrid)\b/.test(
+          stripComments(readFileSync(join(SOURCE_ROOT, path), 'utf8')),
+        ),
+      );
+    expect(findings).toStrictEqual([]);
+  });
 });
 
 describe('there is exactly one camera port and one consent module', () => {

@@ -172,6 +172,30 @@ export interface CapturedFrame {
 }
 
 /**
+ * A very coarse brightness grid, for one question only: did anything move —
+ * [#390](https://github.com/openzigs/onyourleft/issues/390).
+ *
+ * ⚠️ **It is not a frame and it is never treated as one.** It is
+ * `presence.ts` §`PRESENCE_GRID_COLUMNS` × §`PRESENCE_GRID_ROWS` cells of
+ * luminance and nothing else: no colour, no encoding, no container, so there
+ * is no metadata for `frame.ts` to refuse and nothing a file could be made
+ * of. It is compared with the one taken a moment before and **dropped** — it
+ * never reaches `session.ts` §`FrameSink`, a store, a log or a message, and
+ * `boundary.test.ts` holds it inside this directory the way it holds
+ * {@link CapturedFrame}.
+ *
+ * ADR 0029 D-8 lists *"a downscale"* on the forbidden side of what a MESSAGE
+ * may carry, and this is one; the rule it follows is therefore the frame's —
+ * held in memory for the length of one comparison and formatted into nothing.
+ */
+export interface LuminanceGrid {
+  readonly columns: number;
+  readonly rows: number;
+  /** Row-major, one byte of luminance per cell, 0 black to 255 white. */
+  readonly values: Uint8Array;
+}
+
+/**
  * A camera that is on.
  *
  * ⚠️ Nothing here is bounded, on purpose, and the reason is
@@ -190,6 +214,19 @@ export interface CameraSession {
    * `notice.ts` and carries nothing of the frame — D-8.
    */
   captureFrame(): Promise<CapturedFrame>;
+  /**
+   * One coarse brightness grid, now — #390's presence check.
+   *
+   * ⚠️ **Deliberately not {@link captureFrame}**: a frame is drawn at full
+   * size and JPEG-encoded, which `quality.ts` §`QualitySettings.capture` calls
+   * the most expensive thing this client does during a ride. A presence check
+   * needs neither the size nor the encoding, so it asks the platform for the
+   * few hundred numbers it uses and nothing more.
+   *
+   * @throws never with anything of the picture in it: a sample that cannot be
+   * taken rejects with a {@link CameraCaptureError} from the fixed table.
+   */
+  sampleLuminance(): Promise<LuminanceGrid>;
   /** Releases the hardware. Idempotent: stopping a stopped session is a no-op. */
   stopCamera(): void;
   /**

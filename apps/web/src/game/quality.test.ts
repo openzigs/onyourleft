@@ -785,4 +785,37 @@ describe('the extra display-rate step — the owner’s ruling, #482', () => {
     // stop taking pictures.
     expect(RIDER_SHADOW_MAP_RUNG.capture).toBe(true);
   });
+
+  /**
+   * #390 — presence checking goes before the world does. The same derived
+   * ordering as #382's above, over the same notion of "the world reduced".
+   */
+  it('#390 — no rung degrades the world while presence checking is still allowed', () => {
+    const top = QUALITY_LADDER[0] as QualitySettings;
+    const worldReduced = (rung: QualitySettings): boolean =>
+      rung.renderScale < top.renderScale ||
+      rung.scatterItems < top.scatterItems ||
+      rung.sceneryVariants < top.sceneryVariants ||
+      rung.terrainBands < top.terrainBands ||
+      rung.structureItems < top.structureItems ||
+      rung.surfaceDetail !== top.surfaceDetail ||
+      rung.water !== top.water ||
+      rung.shading !== top.shading;
+    const firstWithout = QUALITY_LADDER.findIndex((rung) => !rung.presence);
+    const firstDegraded = QUALITY_LADDER.findIndex(worldReduced);
+    const firstCapped = QUALITY_LADDER.findIndex((rung) => rung.frameCap < DISPLAY_RATE);
+    // The population: a ladder that never withdrew presence would make both
+    // comparisons below true of nothing.
+    expect(firstWithout).toBeGreaterThanOrEqual(0);
+    expect(firstDegraded).toBeGreaterThan(0);
+    expect(firstWithout).toBeLessThanOrEqual(firstDegraded);
+    expect(firstWithout).toBeLessThan(firstCapped);
+    // And once withdrawn it stays withdrawn down the ladder: a phone getting
+    // hotter does not start checking again.
+    expect(QUALITY_LADDER.slice(firstWithout).every((rung) => !rung.presence)).toBe(true);
+    expect(QUALITY_LADDER[0]?.presence).toBe(true);
+    expect(RIDER_SHADOW_MAP_RUNG.presence).toBe(true);
+    // The realistic ladder inherits it from the two stylised rungs it is built on.
+    expect(REALISTIC_LADDER.map((rung) => rung.presence)).toStrictEqual([true, false]);
+  });
 });

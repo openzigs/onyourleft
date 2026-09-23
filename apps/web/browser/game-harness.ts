@@ -117,6 +117,13 @@ import {
   type SceneryKind,
 } from '../src/game/scatter';
 import { atStartLine } from '../src/game/simulation';
+import {
+  CAMERA_CONSTRAINTS,
+  platformMediaDevices,
+  videoLuminanceSampler,
+  type MediaStreamLike,
+} from '../src/camera/browser-camera';
+import { observePair, PRESENCE_PAIR_GAP_MILLISECONDS } from '../src/camera/presence';
 
 /**
  * A frame this page may hold while it builds others — #469.
@@ -739,6 +746,12 @@ declare global {
         /** Pixels the map shadow darkens under the rider alone, against `'none'`. */
         readonly shadowPixels: number;
       };
+      /**
+       * What a presence check costs with the renderer running — #390.
+       * Measured only under `?shadow-map`, the load that already times rungs.
+       * @see presenceCostProbe
+       */
+      readonly presenceCost: PresenceCostMeasurement;
       /** The realistic world — ADR 0026. Measured only by `?realistic`. @see realisticProbe */
       readonly realistic: RealisticMeasurement;
       readonly errors: readonly string[];
@@ -2194,6 +2207,132 @@ const NO_SHADOW_MAP: ShadowMapMeasurement = {
   shadowPixels: 0,
 };
 
+/** @see presenceCostProbe */
+export interface PresenceCostMeasurement {
+  readonly measured: boolean;
+  /** Why not, when it was not — no camera API, or the synthetic camera did not open. */
+  readonly why: string;
+  /** Cells in one sample: `PRESENCE_GRID_COLUMNS × PRESENCE_GRID_ROWS` when it worked. */
+  readonly cells: number;
+  /** What one real pair taken `PRESENCE_PAIR_GAP_MILLISECONDS` apart showed. */
+  readonly observation: string;
+  /** Mean ms a frame, the renderer alone. */
+  readonly frameMs: number;
+  /** Mean ms a frame that also took one presence sample. */
+  readonly frameWithSampleMs: number;
+  /** Mean ms of one sample with nothing being drawn. */
+  readonly sampleAloneMs: number;
+  /** The widest spread between two rounds of the same condition. */
+  readonly noiseMs: number;
+}
+
+const NO_PRESENCE_COST: PresenceCostMeasurement = {
+  measured: false,
+  why: 'not asked for',
+  cells: 0,
+  observation: '',
+  frameMs: 0,
+  frameWithSampleMs: 0,
+  sampleAloneMs: 0,
+  noiseMs: 0,
+};
+
+/**
+ * **What #390's presence check costs a frame, with the renderer running** — the
+ * issue's cost criterion, and ⚠️ the COMBINED cost rather than the check's own:
+ * #328 records the trap of timing a camera operation in isolation on a thread
+ * that is also drawing the world.
+ *
+ * It opens Chromium's synthetic camera (`playwright.config.ts` §`LAUNCH_ARGS`)
+ * through the **real** `videoLuminanceSampler` — the same `drawImage` into a
+ * 32 × 24 canvas and `getImageData` production runs — and times
+ * {@link SHADING_FRAMES} frames of the real renderer with and without one
+ * sample in each, alternating the order for `run`'s reason and flushing the
+ * GPU before each clock is read. **One sample in every frame** is sixty times
+ * the production rate (two samples every two seconds), so the difference is
+ * a ceiling on what one frame in sixty pays, not a per-frame average.
+ *
+ * ⚠️ **What it does NOT say.** A headless Chromium on a software rasteriser is
+ * not the device floor, and #323's 24 ms p50 is a Pixel Tablet figure; the
+ * spec publishes both numbers side by side and asserts no wall-clock bound, for
+ * the reason `game.browser.spec.ts` §"measures what the shading costs" gives.
+ */
+async function presenceCostProbe(frame: SceneFrame): Promise<PresenceCostMeasurement> {
+  const devices = platformMediaDevices();
+  if (devices === undefined) {
+    return { ...NO_PRESENCE_COST, why: 'no camera API in this browser' };
+  }
+  let stream: MediaStreamLike;
+  try {
+    stream = await devices.getUserMedia(CAMERA_CONSTRAINTS);
+  } catch (error: unknown) {
+    return {
+      ...NO_PRESENCE_COST,
+      why: `the synthetic camera did not open: ${error instanceof Error ? error.name : 'unknown'}`,
+    };
+  }
+  const sampler = videoLuminanceSampler(stream);
+  const canvas = document.createElement('canvas');
+  const view = threeGameRenderer.create(canvas, NO_RIDER_SHADOWS);
+  try {
+    // Warm: the first sample starts the <video> and waits for its first frame.
+    const first = await sampler.sample();
+    await new Promise((resolve) => {
+      setTimeout(resolve, PRESENCE_PAIR_GAP_MILLISECONDS);
+    });
+    const second = await sampler.sample();
+    const observation = observePair(first, second);
+
+    view.resize(600, 400);
+    const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+    const timed = async (withSample: boolean): Promise<number> => {
+      for (let index = 0; index < 5; index += 1) view.render(frame);
+      awaitTheGpu(gl);
+      const started = performance.now();
+      for (let index = 0; index < SHADING_FRAMES; index += 1) {
+        view.render(frame);
+        // An `await` in both, so the difference is the sample and not the
+        // microtask that carries it.
+        await (withSample ? sampler.sample() : Promise.resolve());
+      }
+      awaitTheGpu(gl);
+      return (performance.now() - started) / SHADING_FRAMES;
+    };
+    const plain: number[] = [];
+    const sampled: number[] = [];
+    for (let round = 0; round < SHADING_ROUNDS; round += 1) {
+      const order = round % 2 === 0 ? [false, true] : [true, false];
+      for (const withSample of order) {
+        (withSample ? sampled : plain).push(await timed(withSample));
+      }
+    }
+    const alone: number[] = [];
+    const started = performance.now();
+    for (let index = 0; index < SHADING_FRAMES; index += 1) {
+      await sampler.sample();
+    }
+    alone.push((performance.now() - started) / SHADING_FRAMES);
+
+    const mean = (values: readonly number[]) =>
+      values.reduce((total, each) => total + each, 0) / values.length;
+    const range = (values: readonly number[]) => Math.max(...values) - Math.min(...values);
+    return {
+      measured: true,
+      why: '',
+      cells: first.values.length,
+      observation,
+      frameMs: mean(plain),
+      frameWithSampleMs: mean(sampled),
+      sampleAloneMs: mean(alone),
+      noiseMs: Math.max(range(plain), range(sampled)),
+    };
+  } finally {
+    view.destroy();
+    sampler.release();
+    for (const track of stream.getVideoTracks()) track.stop();
+  }
+}
+
 /**
  * Where two frames differ, and the mean luminance of those pixels in each.
  * @see contactShadowLuminance
@@ -3337,6 +3476,7 @@ function emptyHarness(errors: readonly string[]): NonNullable<Window['__oylGameH
     contactShadowLuminance: {},
     contactShadowNoise: 0,
     shadowMap: NO_SHADOW_MAP,
+    presenceCost: NO_PRESENCE_COST,
     realistic: NO_REALISTIC,
     errors,
   };
@@ -3438,6 +3578,7 @@ async function run(): Promise<void> {
   let contactShadowLuminance: Record<string, readonly [number, number]> = {};
   let contactShadowNoise = 0;
   let shadowMap: ShadowMapMeasurement = NO_SHADOW_MAP;
+  let presenceCost: PresenceCostMeasurement = NO_PRESENCE_COST;
   /** The frame the model comparison is measured on. @see sceneryIndicesByKind */
   let probeFrame: SceneFrame | null = null;
   /** The frame the variant measurements are taken on. @see variantIndices */
@@ -3950,6 +4091,16 @@ async function run(): Promise<void> {
     errors.push(error instanceof Error ? error.message : String(error));
   }
 
+  // #390, on a canvas of its own and outside the block above, because it has
+  // to `await` a camera. Only on the load that already times rungs.
+  try {
+    if (probeFrame !== null && new URLSearchParams(location.search).has('shadow-map')) {
+      presenceCost = await presenceCostProbe(probeFrame);
+    }
+  } catch (error: unknown) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
+
   window.__oylGameHarness = {
     created,
     hasContext,
@@ -4023,6 +4174,7 @@ async function run(): Promise<void> {
     contactShadowLuminance,
     contactShadowNoise,
     shadowMap,
+    presenceCost,
     realistic: NO_REALISTIC,
     errors,
   };
