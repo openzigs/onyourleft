@@ -84,9 +84,23 @@ sentence is not quoted anywhere below.** What the guidance actually says, and wh
 here rests on instead, is the **intended-use** framing at §III, and §520(o)(1)(B) of the FD&C Act as
 the guidance quotes it:
 
-> *"software that is intended 'for maintaining or encouraging a healthy lifestyle and is unrelated
-> to the diagnosis, cure, mitigation, prevention, or treatment of a disease or condition' is not a
-> device under section 201(h) of the FD&C Act."*
+> *"Section 520(o)(1)(B) of the FD&C Act, states that software that is intended 'for maintaining
+> or encouraging a healthy lifestyle and is unrelated to the diagnosis, cure, mitigation,
+> prevention, or treatment of a disease or condition' is not a device under section 201(h) of the
+> FD&C Act."*
+>
+> — §I, *Introduction*. The stray comma after *"FD&C Act"* is the document's own, and the inner
+> quotation marks are the document's own too; they are rendered here as single quotes only because
+> the outer pair already belongs to this citation
+
+⚠️ **The same document renders the same provision a second way at §II, and the two are not a
+contradiction.** This is recorded because a reviewer checked it and read it as a paraphrase, and the
+next reviewer would check it again. §II, *Policy on Low Risk General Wellness Products*, reads
+*"section 520(o)(1)(B) of the FD&C Act excludes software functions that are intended for maintaining
+or encouraging a healthy lifestyle and are unrelated to the diagnosis…"* — **plural and unquoted at
+§II, singular and quoted at §I.** This ADR quotes §I, which is the rendering that puts the statutory
+words inside quotation marks, and it is verbatim. Both were read from the same PDF on **2026-09-22**;
+nothing below turns on which one is used.
 
 and
 
@@ -99,11 +113,11 @@ This correction is the reason to read a primary document rather than inherit a q
 recorded rather than quietly fixed because #377 and #379 both carry it and a future reader will meet
 it there.
 
-### The passage that decides this ADR, and it is new in the 2026 revision
+### The passage that decides this ADR, and it is new in the 2026 revision — checked against the superseded document rather than assumed
 
-The January 2026 revision adds a framework the 2019 version did not have, for products that use
-**non-invasive sensing to estimate or infer physiologic parameters**. A camera estimating a joint
-angle is squarely such a product. Read 2026-09-22, §III, in full where it bears:
+The January 2026 revision adds a framework for products that use **non-invasive sensing to estimate
+or infer physiologic parameters**. A camera estimating a joint angle is squarely such a product.
+Read 2026-09-22, §III, in full where it bears:
 
 > *"FDA may consider certain products that use non-invasive sensing (e.g. optical sensing) to
 > estimate, infer, or output physiologic parameters … to be general wellness products when such
@@ -146,6 +160,27 @@ And the disqualifier list, which is the forbidden half:
 ⚠️ Note that it reaches **the user interface and the functionality**, not only the marketing. A
 string in a report is in scope on the guidance's own terms.
 
+#### "New in the 2026 revision" is a claim about a document, so the document was read
+
+The heading above asserts an **absence** from a version of the guidance this ADR does not otherwise
+rely on, and an asserted absence is only as good as the search that failed to find it. So the
+superseded document was fetched and searched rather than inferred from the 2026 one's supersession
+notice:
+
+| | |
+|---|---|
+| **What** | *General Wellness: Policy for Low Risk Devices*, **document issued on September 27, 2019**, *"originally issued on July 29, 2016"* — the document the January 2026 version names as the one it supersedes |
+| **From where** | `https://web.archive.org/web/20230103192307id_/https://www.fda.gov/media/90652/download`. ⚠️ **Not a first-party copy** — FDA replaced the file at that media id in place, which is why it had to come from an archive at all. The snapshot's `Last-Modified` header is `Fri, 27 Sep 2019 18:21:02 GMT`, matching the issue date on the document's own cover |
+| **Read** | **2026-09-22**, as a PDF, extracted to text and searched. SHA-256 of the bytes fetched: `f3815cfc6ea29346e8d4056418b69588214fef4260f9927fd0df8409824e6047` (the 2026 document read above is `0756013b2a64bfdc23902afad6195edc4e20d2570308845c2138c4b5c8dd2b7e`) |
+| **What the search found** | **Nothing.** No occurrence of *"non-invasive sensing"*, *"noninvasive sensing"*, *"physiologic parameter"*, *"mimic those used clinically"* or *"longitudinal summaries"*, and none of *"diagnostic thresholds"*, *"clinical equivalence"* or *"medical or clinical grade"* from the disqualifier list. Extracted text: 4 038 words for 2019 against 4 970 for 2026 |
+
+So the sensing framework, the sixth bullet D-3 rests on, the permitted-outputs paragraph D-6 rests
+on **and** the five-item disqualifier list are all additions. ⚠️ **What this does not establish** is
+that nothing else moved between the two, that the archived bytes are byte-identical to what FDA
+served in 2019 beyond the header above, or that no intermediate revision existed between them. The
+claim being made is narrow: **these passages are not in the superseded document**, and that was
+checked rather than assumed.
+
 Two further passages are quoted where they are used: the permitted-claims list at §III (D-2), and
 the healthcare-professional notification carve-out with its four conditions (D-6).
 
@@ -159,6 +194,10 @@ the healthcare-professional notification carve-out with its four conditions (D-6
   regime and still be an actionable misrepresentation. Nothing here considers that.
 - **No professional-practice question.** Whether telling somebody to move their saddle is regulated
   practice in any jurisdiction was not looked at.
+- **The superseded 2019 guidance was read only as far as one search.** §"New in the 2026 revision"
+  records what was fetched, from where, and the eight phrases that returned nothing. It was **not**
+  read end to end, it came from a web archive rather than from FDA, and no intermediate revision
+  between 2019 and 2026 was looked for.
 - **No accuracy measurement of our own.** Every accuracy figure this ADR relies on is #377's, from
   published literature, and [#385](https://github.com/openzigs/onyourleft/issues/385) is the spike
   that would measure this device. **D-3 and D-4 are written so that #385's answer cannot make them
