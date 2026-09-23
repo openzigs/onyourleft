@@ -1,4 +1,12 @@
-# Spike 0005 — how realistic the world can look on the Pixel Tablet, measured
+# Spike 0009 — how realistic the world can look on the Pixel Tablet, measured
+
+> ⚠️ **Numbered 0009 rather than 0005.** This write-up was 0005 when it was written on
+> 2026-09-21, and `main` has carried a different 0005 since #486 merged
+> ([`0005-live-racing-patent-read.md`](0005-live-racing-patent-read.md)). Two spikes at one number
+> merge clean, which is exactly the hole #493 was filed for and `SPIKE001` now closes — and this
+> branch was the case that gate caught. A spike is never renumbered once it has landed
+> (`CLAUDE.md` §7); this one never landed, so renumbering it here is the cheap repair rather than
+> the forbidden one.
 
 - **Issue**: [#457](https://github.com/openzigs/onyourleft/issues/457) — refs epic
   [#429](https://github.com/openzigs/onyourleft/issues/429), the pipeline
