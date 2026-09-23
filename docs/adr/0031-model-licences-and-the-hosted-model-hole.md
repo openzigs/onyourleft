@@ -134,7 +134,7 @@ was read, and for the rest it was not.
 | Molmo2-4B | `allenai/Molmo2-4B` | `license:apache-2.0` |
 | InternVL3-8B | `OpenGVLab/InternVL3-8B` | `license:apache-2.0` |
 | Pixtral 12B | `mistralai/Pixtral-12B-2409` | `license:apache-2.0` |
-| Gemma 4 (12B, 31B, E4B `-it`) | `google/gemma-4-12B-it` and siblings | `license:apache-2.0` — ⚠️ this **resolves #377's recorded contradiction in the direction of Apache-2.0 at the tag level**, and the model card's own text was **not** read, so a prohibited-use flow-down in the card is not excluded |
+| Gemma 4 (12B, 31B, E4B `-it`) | `google/gemma-4-12B-it` and siblings | `license:apache-2.0` — ⚠️ this **settles the contradiction recorded on #377 in the direction of Apache-2.0 at the tag level**, and the model card's own text was **not** read, so a prohibited-use flow-down in the card is not excluded |
 | Llama 4 Scout | `meta-llama/Llama-4-Scout-17B-16E-Instruct` | `license:other` — the Llama 4 Community License. **Not OSI** |
 | NVLM 1.0 D 72B | `nvidia/NVLM-D-72B` | `license:cc-by-nc-4.0`. **Not OSI**, and `CC-BY-NC` is refused by name in ADR 0023 D-2 |
 | Kimi K3 | `moonshotai/Kimi-K3` | `license:other`; **licence file read in full**, quoted above |
