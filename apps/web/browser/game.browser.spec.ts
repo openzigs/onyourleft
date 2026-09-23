@@ -303,15 +303,23 @@ const RIDER_BOX_TOLERANCE = 0.02;
 const SCENE_DRAW_CALLS = 1 + 1 + 1 + 1 + 3 + 1;
 
 /**
- * The most meshes the scenery belt may ever hold: **20**.
+ * The most meshes the scenery belt may ever hold: **24**.
  *
  * | kind | shapes |
  * |---|--:|
  * | `tree-broadleaf`, `tree-conifer`, `shrub`, `rock` | 2 each |
  * | `building` | 3 |
  * | `post`, which ADR 0022 D-3 leaves procedural | 1 |
- * | `barn`, `church`, `shop-row`, `shed` — #460, built from numbers | 1 each |
+ * | `barn`, `church`, `shop-row`, `shed` — #460, #500, built from numbers | 2 each |
  * | `wall`, `hedge`, `fence`, `signpost` — #460, built from numbers | 1 each |
+ *
+ * ⚠️ **20 → 24 with #500, deliberately.** Each of the four buildings the
+ * stylised world draws from numbers has two proportions now
+ * (`buildings.ts` §`BUILDING_VARIANTS`), and a shape is a mesh. A mesh with no
+ * instance this frame is not drawn, and the rungs below the top draw one
+ * shape a kind (`QualitySettings.sceneryVariants`), so a village costs at most
+ * four more calls at the top rung and none below it. What that costs on a
+ * phone is the device run #500's last criterion asks for.
  *
  * ⚠️ **12 → 20 with #460, deliberately, and this is the line that says so.**
  * Four kinds of building and four of roadside structure, each one shape and
@@ -332,7 +340,7 @@ const SCENE_DRAW_CALLS = 1 + 1 + 1 + 1 + 3 + 1;
  *
  * ⚠️ **It was 6 before #367**, one mesh a kind, which is what #244 spent.
  */
-const SCATTER_MESH_CEILING = 4 * 2 + 3 + 1 + 4 + 4;
+const SCATTER_MESH_CEILING = 4 * 2 + 3 + 1 + 4 * 2 + 4;
 
 /**
  * One load of the harness page, and every request it made on the way.
@@ -1940,6 +1948,35 @@ test.describe('the realistic world — ADR 0026', () => {
       luminance(measured.waterSkyStylised),
       4,
     );
+  });
+
+  test('draws a window’s glass on a house’s road-facing wall, and the wall where a house has none — #500', async ({
+    harnessRun,
+  }) => {
+    // The house stands on the road 24 m ahead, turned to face the camera, and
+    // the probe is the middle of its first front window, projected from
+    // `buildings.ts`' own outline — so it follows the plan rather than a pixel
+    // somebody picked. Measured on the pinned Chromium: the pane about
+    // 13/23/30, the same square with no openings 114/103/90, and the wall
+    // beside the window 123/110/96.
+    const measured = await realistic(harnessRun);
+    const { windowGlass: glass, windowControl: control, windowWall: wall } = measured;
+    const luminance = (rgb: readonly number[]): number =>
+      0.2126 * (rgb[0] ?? 0) + 0.7152 * (rgb[1] ?? 0) + 0.0722 * (rgb[2] ?? 0);
+    expect(glass).toHaveLength(3);
+    expect(control).toHaveLength(3);
+    expect(wall).toHaveLength(3);
+    // THE CONTROL: with no openings the same square is the wall — brick, warm,
+    // within a few levels of the wall beside the window. Without it, a dark
+    // square could be a shadow, the fog, or a house never drawn at all.
+    for (const channel of [0, 1, 2]) {
+      expect(Math.abs((control[channel] ?? 0) - (wall[channel] ?? 0))).toBeLessThan(30);
+    }
+    expect(control[0] ?? 0).toBeGreaterThan(control[2] ?? 0);
+    // The window: dark glass giving back a little sky — cool where brick is
+    // warm, and well under half the wall's brightness.
+    expect(luminance(glass)).toBeLessThan(luminance(control) / 2);
+    expect(glass[2] ?? 0).toBeGreaterThan(glass[0] ?? 0);
   });
 
   test('fetches the realistic set only when asked — the default world fetches none of it', async ({

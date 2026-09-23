@@ -22,8 +22,13 @@ import {
 import { hillRoute, valleyRoute } from './route-fixtures-testing';
 import { scatterSeed, type SceneryKind } from './scatter';
 import { corridorOrigin, roadCorridor } from './terrain';
+import { FOUNDATION_METRES, PLINTH_TOP_METRES } from './buildings';
 import {
   BridgeBelt,
+  GROUNDED_SHADE,
+  GROUNDING_METRES,
+  groundingShade,
+  realisticStructureGeometry,
   HorizonRing,
   ScatterBelt,
   SKY_GRADIENT_RISE,
@@ -320,11 +325,12 @@ describe('the buildings and the field boundaries a view draws — #460', () => {
     belt.dispose();
   });
 
-  it('paints a built shape in more than one colour, in one mesh', () => {
+  it('paints a built shape in more than one colour, in one mesh a shape', () => {
     const belt = new ScatterBelt(new Map());
     for (const kind of ['barn', 'church', 'shop-row', 'shed', 'signpost'] as const) {
       const meshes = belt.meshesOf(kind);
-      expect(meshes, kind).toHaveLength(1);
+      // #500: a building has two shapes, each one mesh; a signpost has one.
+      expect(meshes, kind).toHaveLength(kind === 'signpost' ? 1 : 2);
       const colours = meshes[0]?.geometry.getAttribute('color') as unknown as Attribute;
       const seen = new Set<string>();
       for (let vertex = 0; vertex < colours.array.length / 3; vertex += 1) {
@@ -360,6 +366,86 @@ describe('the buildings and the field boundaries a view draws — #460', () => {
       expect(meshes[0]?.count, kind).toBe(40);
     }
     belt.dispose();
+  });
+});
+
+describe('the buildings a view draws, since #500', () => {
+  const pose = { x: 0, y: 0, z: 0, headingX: 0, headingZ: 1, eyeRoadY: 0, targetRoadY: 0 };
+
+  it('draws each building in the shape its own variant names, two shapes a kind', () => {
+    const belt = new ScatterBelt(new Map());
+    belt.update(
+      Array.from({ length: 6 }, (_, variant) => ({
+        kind: 'barn' as const,
+        x: -12,
+        y: 0,
+        z: 10 + variant * 20,
+        rotation: 0,
+        scale: 1,
+        variant,
+      })),
+      pose,
+    );
+    const [first, second] = belt.meshesOf('barn');
+    // Six slots folded onto two shapes: three each.
+    expect(first?.count).toBe(3);
+    expect(second?.count).toBe(3);
+    // Non-vacuity: two meshes of one shape would pass the counts.
+    expect(first?.geometry.getAttribute('position').count).not.toBe(
+      second?.geometry.getAttribute('position').count,
+    );
+    belt.dispose();
+  });
+
+  it('grounds a building: darker where its walls meet the ground', () => {
+    expect(groundingShade(-FOUNDATION_METRES)).toBe(GROUNDED_SHADE);
+    expect(groundingShade(0)).toBe(GROUNDED_SHADE);
+    expect(groundingShade(GROUNDING_METRES / 2)).toBeCloseTo((1 + GROUNDED_SHADE) / 2, 9);
+    expect(groundingShade(GROUNDING_METRES)).toBe(1);
+    expect(groundingShade(8)).toBe(1);
+    // In the mesh the stylised world draws: the plinth's own colour at the
+    // foundation is the same colour at its top, darkened by the grounding.
+    const belt = new ScatterBelt(new Map());
+    const mesh = belt.meshesOf('barn')[0];
+    const positions = mesh?.geometry.getAttribute('position') as unknown as Attribute;
+    const colours = mesh?.geometry.getAttribute('color') as unknown as Attribute;
+    let pairs = 0;
+    for (let low = 0; low < positions.array.length / 3; low += 1) {
+      if (Math.abs(positions.getY(low) + FOUNDATION_METRES) > 1e-6) continue;
+      for (let high = 0; high < positions.array.length / 3; high += 1) {
+        if (
+          Math.abs(positions.getY(high) - PLINTH_TOP_METRES) < 1e-6 &&
+          Math.abs(positions.getX(high) - positions.getX(low)) < 1e-6 &&
+          Math.abs(positions.getZ(high) - positions.getZ(low)) < 1e-6
+        ) {
+          expect(colours.getX(low) / colours.getX(high)).toBeCloseTo(
+            GROUNDED_SHADE / groundingShade(PLINTH_TOP_METRES),
+            5,
+          );
+          pairs += 1;
+        }
+      }
+    }
+    expect(pairs).toBeGreaterThan(4);
+    belt.dispose();
+  });
+
+  it('grounds a realistic building the same way, in the vertex colour its materials multiply in', () => {
+    const walls = realisticStructureGeometry('barn', 'planks', 0);
+    const positions = walls?.getAttribute('position') as unknown as Attribute;
+    const colours = walls?.getAttribute('color') as unknown as Attribute;
+    let foundation = 0;
+    for (let vertex = 0; vertex < positions.array.length / 3; vertex += 1) {
+      const y = positions.getY(vertex);
+      // White, darkened by the grounding and by the part's own shade only.
+      expect(colours.getX(vertex)).toBeLessThanOrEqual(groundingShade(y) + 1e-6);
+      if (y < -FOUNDATION_METRES + 1e-6) {
+        expect(colours.getX(vertex)).toBeLessThanOrEqual(GROUNDED_SHADE + 1e-6);
+        foundation += 1;
+      }
+    }
+    expect(foundation).toBeGreaterThan(0);
+    walls?.dispose();
   });
 });
 

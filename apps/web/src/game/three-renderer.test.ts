@@ -77,9 +77,11 @@ import {
 import { MAXIMUM_SCENERY_VARIANTS, SCENERY_MODELS } from './scenery-models';
 import { MAXIMUM_LIT_CHANNEL } from './scenery-palette';
 import { REALISTIC_STRUCTURE_MESHES } from './realistic-budget';
+import { BUILDING_ROLES, BUILDING_VARIANTS, BUILT_KINDS, buildingPlan } from './buildings';
 import {
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
-  REALISTIC_STRUCTURE_PARTS,
+  REALISTIC_BOUNDARY_PARTS,
+  REALISTIC_BUILDING_SURFACES,
   type StructureSurface,
 } from './realistic-assets';
 import {
@@ -222,9 +224,12 @@ describe('the scenery belt is one mesh per kind, not one per item', () => {
 
     // ⚠️ **Fourteen since #460, where it was six**: five scattered kinds, and
     // `building` beside the eight kinds `settlements.ts` added — every one of
-    // them still one mesh, however many items.
-    expect(belt.meshes.size).toBeLessThanOrEqual(SCENERY_KINDS.length);
-    expect(belt.meshes.size).toBe(14);
+    // them still one mesh, however many items. ⚠️ **Eighteen since #500**: the
+    // four buildings the stylised world draws from numbers have two shapes
+    // each, and a shape is a mesh — still none per item.
+    const shaped = BUILT_KINDS.filter((kind) => kind !== 'building').length;
+    expect(belt.meshes.size).toBeLessThanOrEqual(SCENERY_KINDS.length + shaped);
+    expect(belt.meshes.size).toBe(18);
     // Non-vacuity: meshes holding nothing would pass the line above.
     expect(submitted(belt)).toBe(500);
   });
@@ -2946,8 +2951,9 @@ describe('a kind is drawn as several shapes — #367', () => {
 
     expect(belt.meshesOf('rock')).toHaveLength(3);
     expect(belt.meshesOf('shrub')).toHaveLength(1);
-    // Every kind, of which one has three shapes.
-    expect(belt.meshes.size).toBe(SCENERY_KINDS.length + 2);
+    // Every kind, of which one has three shapes — and, since #500, the four
+    // buildings drawn from numbers two each.
+    expect(belt.meshes.size).toBe(SCENERY_KINDS.length + 2 + 4 * (BUILDING_VARIANTS - 1));
     belt.dispose();
   });
 
@@ -3090,24 +3096,39 @@ describe('a kind is drawn as several shapes — #367', () => {
 });
 
 describe('what the realistic structures cost in meshes — #482', () => {
-  it('builds exactly REALISTIC_STRUCTURE_MESHES, one per surface a kind wears', () => {
+  it('builds exactly REALISTIC_STRUCTURE_MESHES, one per surface a kind wears in each shape', () => {
     // #481's review, finding 6: up to fifteen instanced meshes, bounded by
-    // nothing and stated nowhere. Counted off the REAL belts, so a new kind or
-    // surface is a red test here rather than a draw call nobody decided on.
+    // nothing and stated nowhere. Counted off the REAL belts, so a new kind,
+    // surface or — since #500 — shape is a red test here rather than a draw
+    // call nobody decided on.
     const belts = new RealisticStructureBelts(new Map());
-    const surfaces: readonly StructureSurface[] = [...PHOTOGRAPHIC_STRUCTURE_SURFACES, 'painted'];
+    const surfaces: readonly StructureSurface[] = [
+      ...PHOTOGRAPHIC_STRUCTURE_SURFACES,
+      'painted',
+      'glass',
+    ];
     let built = 0;
     for (const surface of surfaces) {
       for (const kind of STRUCTURE_KINDS)
         built += belts.beltOf(surface)?.meshesOf(kind).length ?? 0;
     }
-    // An independent derivation: the distinct (surface, kind) pairs the parts
-    // table names. A church wears stone twice and is one stone mesh.
-    const pairs = new Set(
-      Object.entries(REALISTIC_STRUCTURE_PARTS).flatMap(([kind, parts]) =>
-        parts.map((surface) => `${surface}:${kind}`),
-      ),
-    );
+    // An independent derivation: the distinct (surface, kind) pairs the plans
+    // actually use — a role with triangles, dressed by the table — times the
+    // shapes a building has, and the boundary table's pairs once each.
+    const pairs = new Set<string>();
+    for (const kind of BUILT_KINDS) {
+      for (let variant = 0; variant < BUILDING_VARIANTS; variant += 1) {
+        const plan = buildingPlan(kind, variant);
+        for (const role of BUILDING_ROLES) {
+          if (plan.triangles[role].length > 0) {
+            pairs.add(`${REALISTIC_BUILDING_SURFACES[kind][role]}:${kind}:${String(variant)}`);
+          }
+        }
+      }
+    }
+    for (const [kind, parts] of Object.entries(REALISTIC_BOUNDARY_PARTS)) {
+      for (const surface of parts) pairs.add(`${surface}:${kind}`);
+    }
     expect(built).toBe(pairs.size);
     expect(built).toBe(REALISTIC_STRUCTURE_MESHES);
     belts.dispose();

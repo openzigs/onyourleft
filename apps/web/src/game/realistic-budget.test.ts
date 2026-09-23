@@ -45,7 +45,12 @@ import { readGlb } from './model-bytes-testing';
 import { fileImageSize, modelFacts } from './realistic-bytes-testing';
 import { STRUCTURE_KINDS } from './scatter';
 import { SCENERY_MODELS } from './scenery-models';
-import { realisticStructureTriangles, ScatterBelt } from './three-renderer';
+import { BUILT_KINDS } from './buildings';
+import {
+  realisticStructureTriangles,
+  realisticStructureTrianglesOf,
+  ScatterBelt,
+} from './three-renderer';
 
 const SHIPPED = fileURLToPath(new URL('../../public/realistic/', import.meta.url));
 const at = (file: string): string => join(SHIPPED, file);
@@ -197,8 +202,6 @@ describe('the realistic structures — #475, ADR 0026 D-12 layer 3', () => {
     getAttribute: (name: 'position') => { readonly count: number };
   }): number => (geometry.index?.count ?? geometry.getAttribute('position').count) / 3;
 
-  const NO_GEOMETRY = { index: null, getAttribute: () => ({ count: 0 }) };
-
   /**
    * A Kenney model's triangles, off its own JSON: every primitive's index
    * count, or its vertex count where it has none. The building models carry
@@ -233,19 +236,62 @@ describe('the realistic structures — #475, ADR 0026 D-12 layer 3', () => {
     }
   });
 
+  /** The lightest house the stylised world draws: the Kenney pack's own. */
+  const lightestPackedHouse = (): number => {
+    const models = fileURLToPath(new URL('./models/', import.meta.url));
+    return Math.min(
+      ...(SCENERY_MODELS.building ?? []).map((model) =>
+        glbTriangles(join(models, `${model.name}.glb`)),
+      ),
+    );
+  };
+
   it('draws no structure heavier than the stylised world draws at the same place', () => {
     // Which is why the frame's triangles need not count them. @see REALISTIC_FRAME_TRIANGLES
     const stylised = new ScatterBelt(new Map());
-    const models = fileURLToPath(new URL('./models/', import.meta.url));
     for (const kind of STRUCTURE_KINDS) {
       const packed = SCENERY_MODELS[kind];
-      const heaviestStylised =
+      // #500: a building drawn from numbers has two shapes; the stylised belt
+      // draws each as one mesh, and a realistic structure is held to the
+      // lightest of them, so no shape of it is heavier than its stylised twin.
+      const lightestStylised =
         packed === undefined
-          ? trianglesOf(stylised.meshesOf(kind)[0]?.geometry ?? NO_GEOMETRY)
-          : Math.min(...packed.map((model) => glbTriangles(join(models, `${model.name}.glb`))));
-      expect(heaviestStylised, kind).toBeGreaterThan(0);
-      expect(realisticStructureTriangles(kind), kind).toBeLessThanOrEqual(heaviestStylised);
+          ? Math.min(...stylised.meshesOf(kind).map((mesh) => trianglesOf(mesh.geometry)))
+          : lightestPackedHouse();
+      expect(lightestStylised, kind).toBeGreaterThan(0);
+      expect(realisticStructureTriangles(kind), kind).toBeLessThanOrEqual(
+        packed === undefined
+          ? Math.max(...stylised.meshesOf(kind).map((mesh) => trianglesOf(mesh.geometry)))
+          : lightestStylised,
+      );
     }
+    stylised.dispose();
+  });
+
+  it('draws each building shape with the SAME triangles in both worlds — #500', () => {
+    // The claim above, made exact for the buildings both worlds build from
+    // `buildings.ts`: shape by shape, the realistic surfaces together are the
+    // stylised mesh, triangle for triangle.
+    const stylised = new ScatterBelt(new Map());
+    for (const kind of BUILT_KINDS.filter((each) => each !== 'building')) {
+      stylised.meshesOf(kind).forEach((mesh, variant) => {
+        expect(realisticStructureTrianglesOf(kind, variant), `${kind} ${String(variant)}`).toBe(
+          trianglesOf(mesh.geometry),
+        );
+      });
+    }
+    stylised.dispose();
+  });
+
+  it('holds a structure’s budget under the lightest house the stylised world already draws — #500', () => {
+    // The stylised world has no triangle budget — its budget is draw calls —
+    // so what stops #500 making a village heavier is this: no built shape
+    // costs more than the pack's own houses always have, a village of them
+    // included.
+    expect(REALISTIC_TRIANGLES.structure).toBeLessThanOrEqual(lightestPackedHouse());
+    // Non-vacuity: the detail is really there — a house is hundreds of
+    // triangles, where it was eighteen.
+    expect(realisticStructureTriangles('building')).toBeGreaterThan(300);
   });
 });
 

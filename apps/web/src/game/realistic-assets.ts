@@ -32,8 +32,9 @@
  *   impostor strip for the far band.
  * - {@link REALISTIC_STRUCTURE_SURFACES} are ADR 0026 D-12's third layer
  *   (#475): the photographic surfaces the structures wear. The structures'
- *   SHAPES are built in `three-renderer.ts` from numbers, because no source in
- *   D-4's list publishes a whole country building — see that table.
+ *   SHAPES are built from numbers — a building's in `buildings.ts` since #500,
+ *   with its doors and windows — because no source in D-4's list publishes a
+ *   whole country building — see that table.
  * - {@link REALISTIC_RIDER} is the body; the bicycle under it is built in
  *   `three-renderer.ts` from `bicycle.ts`'s own parts, because no road bicycle
  *   whose own page states CC0 or CC-BY-4.0 was found (spike 0005).
@@ -45,6 +46,7 @@
 
 import { isNativeShell, platformCapacitor } from '../support/capacitor';
 
+import type { BuildingRole, BuiltKind } from './buildings';
 import type { ScatterKind, StructureKind } from './scatter';
 
 /**
@@ -92,13 +94,31 @@ export const REALISTIC_SURFACES: { readonly road: SurfaceMaps; readonly ground: 
 
 /**
  * A photographic surface a realistic structure wears — ADR 0026 D-12 layer 3,
- * #475 — and `painted`, the one that wears no photograph.
+ * #475 — and the two that wear no photograph: `painted`, a signpost's pole,
+ * and — since #500 — `glass`, a window's pane, which takes its look from the
+ * environment the sky already lights the world with and costs no texture.
  */
 export type StructureSurface =
-  'brick' | 'roof-tiles' | 'slate' | 'stone' | 'planks' | 'corrugated' | 'hedge' | 'painted';
+  | 'brick'
+  | 'roof-tiles'
+  | 'slate'
+  | 'stone'
+  | 'planks'
+  | 'corrugated'
+  | 'hedge'
+  | 'painted'
+  | 'glass';
+
+/** A surface that is a photograph. */
+export type PhotographicSurface = Exclude<StructureSurface, 'painted' | 'glass'>;
+
+/** Whether a surface is a photograph — every one but `painted` and `glass`. */
+export function isPhotographic(surface: StructureSurface): surface is PhotographicSurface {
+  return surface !== 'painted' && surface !== 'glass';
+}
 
 /** The surfaces that are a photograph, in a fixed order. */
-export const PHOTOGRAPHIC_STRUCTURE_SURFACES: readonly Exclude<StructureSurface, 'painted'>[] = [
+export const PHOTOGRAPHIC_STRUCTURE_SURFACES: readonly PhotographicSurface[] = [
   'brick',
   'roof-tiles',
   'slate',
@@ -119,15 +139,14 @@ export const PHOTOGRAPHIC_STRUCTURE_SURFACES: readonly Exclude<StructureSurface,
  * D-4; D-4's sources publish no whole country building a rider would pass —
  * Poly Haven's `buildings` category is urban facade kits of 118 000 to 175 000
  * triangles, gates and shutters (read 2026-09-22), and ambientCG publishes
- * materials only. So the shapes are `three-renderer.ts`'s own, from numbers,
- * as the stylised world's are, and what is photographic is what covers them.
+ * materials only. So the shapes are this repository's own, from numbers
+ * (`buildings.ts` since #500), the same triangles the stylised world draws,
+ * and what is photographic is what covers them.
  *
  * `painted` — a signpost's pole — carries no photograph: at 6 cm across there
  * is nothing on it for one to show.
  */
-export const REALISTIC_STRUCTURE_SURFACES: Readonly<
-  Record<Exclude<StructureSurface, 'painted'>, SurfaceMaps>
-> = {
+export const REALISTIC_STRUCTURE_SURFACES: Readonly<Record<PhotographicSurface, SurfaceMaps>> = {
   brick: structureMaps('brick_wall_02', 2),
   'roof-tiles': structureMaps('clay_roof_tiles_02', 2.5),
   slate: structureMaps('grey_roof_tiles_02', 1.5),
@@ -142,19 +161,81 @@ function structureMaps(id: string, tileMetres: number): SurfaceMaps {
 }
 
 /**
- * Which surface each part of each structure wears, in the order
- * `three-renderer.ts` builds the parts — #475. A building's parts are its
- * walls and its roof; every other kind's are `STRUCTURE_STYLE`'s own, part for
- * part, so the realistic shape is the stylised one with a surface on it.
+ * What each part of each BUILDING wears, by what it is made of — #475, and
+ * since #500 by `buildings.ts`' roles rather than by a list of parts, because a
+ * building is walls with openings, a plinth, a roof with a ridge, joinery and
+ * glass now rather than a block and a gable.
+ *
+ * ⚠️ **Every photograph here is one #475 already committed**: #500 adds no
+ * texture. The joinery, the doors and a barn's base wear `planks`; a plinth, a
+ * ridge and a door are the same photograph as their neighbour, darkened in the
+ * vertex colour (`three-renderer.ts` §`REALISTIC_ROLE_SHADE`); and a pane is
+ * `glass`, which is a material and no map at all.
  */
-export const REALISTIC_STRUCTURE_PARTS: Readonly<
-  Record<StructureKind, readonly StructureSurface[]>
+export const REALISTIC_BUILDING_SURFACES: Readonly<
+  Record<BuiltKind, Readonly<Record<BuildingRole, StructureSurface>>>
 > = {
-  building: ['brick', 'roof-tiles'],
-  barn: ['planks', 'corrugated'],
-  church: ['stone', 'slate', 'stone', 'slate'],
-  'shop-row': ['brick', 'planks', 'slate'],
-  shed: ['corrugated', 'corrugated'],
+  building: {
+    wall: 'brick',
+    plinth: 'brick',
+    roof: 'roof-tiles',
+    ridge: 'roof-tiles',
+    chimney: 'brick',
+    joinery: 'planks',
+    door: 'planks',
+    glass: 'glass',
+  },
+  barn: {
+    wall: 'planks',
+    plinth: 'planks',
+    roof: 'corrugated',
+    ridge: 'corrugated',
+    chimney: 'planks',
+    joinery: 'planks',
+    door: 'planks',
+    glass: 'glass',
+  },
+  church: {
+    wall: 'stone',
+    plinth: 'stone',
+    roof: 'slate',
+    ridge: 'slate',
+    chimney: 'stone',
+    joinery: 'planks',
+    door: 'planks',
+    glass: 'glass',
+  },
+  'shop-row': {
+    wall: 'brick',
+    plinth: 'brick',
+    roof: 'slate',
+    ridge: 'slate',
+    chimney: 'brick',
+    joinery: 'planks',
+    door: 'planks',
+    glass: 'glass',
+  },
+  shed: {
+    wall: 'corrugated',
+    plinth: 'corrugated',
+    roof: 'corrugated',
+    ridge: 'corrugated',
+    chimney: 'corrugated',
+    joinery: 'corrugated',
+    door: 'corrugated',
+    glass: 'glass',
+  },
+};
+
+/**
+ * Which surface each part of each field boundary and signpost wears, in the
+ * order `three-renderer.ts` §`BOUNDARY_STYLE` builds the parts — #475. Each is
+ * that table's own parts, part for part, so the realistic shape is the
+ * stylised one with a surface on it.
+ */
+export const REALISTIC_BOUNDARY_PARTS: Readonly<
+  Record<Exclude<StructureKind, BuiltKind>, readonly StructureSurface[]>
+> = {
   wall: ['stone'],
   hedge: ['hedge'],
   fence: ['planks'],

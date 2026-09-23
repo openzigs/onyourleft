@@ -2478,6 +2478,39 @@ default and D-6's budget remain **#475's** to act on; this is the evidence, not 
 
 ---
 
+## Part AA — doors, windows and detail on the buildings ([#500](https://github.com/openzigs/onyourleft/issues/500))
+
+Part Z's Z9 found the surfaces right and the SHAPES wrong: a house was a brick box and a barn a
+board box, with no opening on any face. #500 cut doors and windows into every building's road-facing
+side (recessed, framed, glazed), overhung the eaves, capped the ridges, stood every building on a
+plinth, darkened the foot of its walls, put a chimney on every house and gave every kind two
+proportions — `apps/web/src/game/buildings.ts`, drawn with the same triangles in both worlds. The
+browser gate reads a window's glass back off the drawing buffer with a control
+(`game.browser.spec.ts` §"#500"); what it cannot say is whether any of it reads from a saddle.
+
+**This is #500's last criterion, and nothing in CI can discharge it.** Same tablet, same debug-APK
+route as Part Z (§"Build and install"), from a `main` that has #500 in it.
+
+| Step | What to do | What should happen |
+|---|---|---|
+| AA1 | Z9 again: `?panel=0&ladder=0`, ride past the first farmstead (about 1 050 m) at your usual speed | Does the farmstead read as a farmstead **at 9 m/s** — a house with a door and windows, a barn with great doors? |
+| AA2 | Hold the ride beside it: `location.href = '/harness/realistic.html?at=1045&panel=0'`, then ride slowly past | Do the openings **shimmer or crawl at a grazing angle** — the frames, the sills, the glass's reflection? Do the eaves and the chimney read? |
+| AA3 | Z6's 30-second realistic row, with its `dumpsys` block: `?panel=0&ladder=0` | Draw calls and GPU p50 / p90 / p99, against Part Z's **33–37 calls and GPU p90 8 ms** |
+| AA4 | The stylised world past the same farmstead: `?world=stylised&panel=0&ladder=0` | Do the stylised barn, shed and (in a village) church and shops have their openings? The stylised HOUSE is still the Kenney model — does it need anything? That is the owner's call, #500 §5 |
+
+### AA results
+
+| Step | As described? | What was seen, or measured |
+|---|---|---|
+| AA1 | | |
+| AA2 | | |
+| AA3 | | |
+| AA4 | | |
+
+**Phone (OEM, model, Android, WebView):** ______________  **Build:** ______________
+
+---
+
 ## After the session
 
 1. **Fill the tables in this file and commit it.** An empty table in `main` is the honest state; a

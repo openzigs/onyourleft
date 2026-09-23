@@ -127,19 +127,30 @@ export const REALISTIC_TRIANGLES: Readonly<
   rock: 2_500,
   rider: 9_000,
   /**
-   * One realistic structure, every surface together — #475. Built in
-   * `three-renderer.ts` from numbers rather than read off a file, so it is
-   * held there (`realisticStructureTriangles`), and it is 96 because the
-   * heaviest built shape — a fence's five posts and two rails — is 84.
+   * One realistic structure, every surface together, in its heaviest shape —
+   * #475, and since #500 a building with its doors, windows, eaves and
+   * chimneys: **640**. Built in `three-renderer.ts` from `buildings.ts`'
+   * numbers rather than read off a file, so it is held there
+   * (`realisticStructureTriangles`). The heaviest today is a church at 580:
+   * six arched nave windows, an arched door and window in the tower, each
+   * framed, recessed and glazed.
    *
-   * ⚠️ **Why the frame's triangles do not count the structures**, which
+   * ⚠️ **It was 96 until #500**, when the heaviest built shape was a fence's
+   * five posts and two rails and a house was 18 triangles. A reviewer who
+   * remembers a house cheaper than a fence is reading the old file.
+   *
+   * ⚠️ **Why the frame's triangles still do not count the structures**, which
    * {@link REALISTIC_FRAME_TRIANGLES} says of the stylised world's: a realistic
-   * structure is drawn with **no more** triangles than the stylised world draws
-   * at the same place — the same built shape for eight kinds, and for a house
-   * 18 triangles where the stylised world draws a Kenney model of hundreds —
-   * and `realistic-budget.test.ts` holds that, kind by kind.
+   * structure is drawn with **no more** triangles than the stylised world
+   * draws at the same place — the SAME triangles for the four buildings
+   * `buildings.ts` builds in both worlds and for the four boundaries, and for
+   * a house no more than the lightest Kenney house the stylised world draws
+   * there (770) — and `realistic-budget.test.ts` holds that, kind by kind and
+   * shape by shape. The same test holds this figure under that house, so no
+   * built shape costs the stylised world more a building than the pack's own
+   * houses always have.
    */
-  structure: 96,
+  structure: 640,
 };
 
 /**
@@ -176,29 +187,41 @@ export const REALISTIC_NEAR_MESHES: Readonly<Record<RealisticVegetationKind, num
 };
 
 /**
- * The most instanced meshes the realistic STRUCTURES may cost: **15** — #482,
+ * The most instanced meshes the realistic STRUCTURES may cost: **35** — #482,
  * from #481's review (finding 6), which found the figure bounded and stated
- * nowhere.
+ * nowhere; and since #500, which gave every building two shapes and dressed
+ * its frames in timber and its panes in glass.
  *
  * `three-renderer.ts` §`RealisticStructureBelts` builds one belt a surface and,
- * in each, one mesh for every kind that wears that surface — so the count is
- * the number of (surface, kind) pairs in `realistic-assets.ts`
- * §`REALISTIC_STRUCTURE_PARTS`: building 2, barn 2, church 2, shop-row 3,
- * signpost 2, and shed, wall, hedge and fence 1 each. Each mesh is at most one
- * draw call a frame; the stylised settlements are one mesh and one draw call,
- * so the realistic structures cost up to fourteen more.
+ * in each, one mesh for every kind **and shape** that wears that surface — so
+ * the count is the (surface, kind, shape) triples `buildings.ts` and
+ * `realistic-assets.ts` §`REALISTIC_BUILDING_SURFACES` produce, and the pairs
+ * of §`REALISTIC_BOUNDARY_PARTS`: a house 4 surfaces (brick, tiles, timber,
+ * glass), a church 4 (stone, slate, timber, glass), a row of shops 4 (brick,
+ * slate, timber, glass), a barn 2 (timber, iron) and a shed 1, each in two
+ * shapes — 30 — and a wall, a hedge and a fence 1 each and a signpost 2.
  *
- * ⚠️ **A statement of what is built, not a measurement of what it costs.** What
- * fifteen draw calls cost on the tablet is #457's device run and validation
- * 0002 Part Z, where the harness publishes draw calls. What this number buys is
- * that a new structure kind or surface GROWS it visibly: the test counts the
- * meshes the real belts build, so an added pair is a red test and an edit here,
- * rather than a draw call nobody decided to spend.
+ * ⚠️ **15 → 35 with #500, deliberately, and what it costs is not 20 draw
+ * calls.** A mesh with no instance this frame is not drawn (three's
+ * `renderInstances` returns early on a count of zero), so the calls a frame
+ * spends are the (surface, shape) pairs of the buildings actually in view: a
+ * farmstead of one house, a barn and a shed is 4 + 2 + 1 = 7 where it was
+ * 2 + 2 + 1 = 5, and a village showing both shapes of house, a row of shops
+ * and a church is at most 8 + 4 + 4 = 16 where it was 2 + 3 + 2 = 7. The
+ * glass is a surface of its own because it is a material of its own, and it
+ * costs no texture. What those calls cost on the tablet is validation 0002
+ * Part Z step Z9's re-run, which #500 asks for and which needs the tablet.
+ *
+ * ⚠️ **A statement of what is built, not a measurement of what it costs.**
+ * What this number buys is that a new structure kind, surface or shape GROWS
+ * it visibly: the test counts the meshes the real belts build, so an added one
+ * is a red test and an edit here, rather than a draw call nobody decided to
+ * spend.
  *
  * @test-facing held by `three-renderer.test.ts` §"#482", which counts the
  * meshes `RealisticStructureBelts` actually builds against it
  */
-export const REALISTIC_STRUCTURE_MESHES = 15;
+export const REALISTIC_STRUCTURE_MESHES = 35;
 
 /**
  * The most triangles a realistic frame may submit: **300 000**, about 1.2 times
