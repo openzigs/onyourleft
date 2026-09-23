@@ -66,6 +66,8 @@ const PORT: GamePort = {
 /** A renderer that records every size it is handed. */
 function sizingRenderer(sizes: [number, number][]): GameRenderer {
   return {
+    // #475: never asked — no ride in this file chose the realistic world.
+    loadRealisticWorld: () => Promise.reject(new Error('no realistic world was chosen')),
     create: () => ({
       hasContext: true,
       render: () => undefined,

@@ -13,7 +13,7 @@
  * at 9 m/s, with the cranks turning at the pacer's gear, and lets the product's
  * own two-ladder policy (`quality.ts` §`nextWorldQuality`) move the rung from
  * the frame times, as `GameView` does with `nextQuality`. So what the owner
- * sees on the tablet is what a rider would see if #475 offered it: the same
+ * sees on the tablet is what a rider who chose it in Settings sees (#475): the same
  * code, the same assets, the same step down to the stylised world when the
  * device runs hot — and the same "falls back and says so" when the world
  * cannot load (D-7), shown on the page.

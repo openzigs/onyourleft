@@ -1,31 +1,36 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The realistic world is not offered to a rider — [ADR 0026](../../../../docs/adr/0026-realistic-game-world.md)
- * D-12, until [#475](https://github.com/openzigs/onyourleft/issues/475).
+ * The realistic world is offered to a rider ONLY through their own choice —
+ * [ADR 0026](../../../../docs/adr/0026-realistic-game-world.md) D-3 and D-12,
+ * since [#475](https://github.com/openzigs/onyourleft/issues/475).
  *
- * > *"The realistic world is reachable only from a harness page under
- * > `apps/web/browser/` — built by `vite.browser.config.ts`, which can never
- * > ship — and from no control in the shipped app, until layers 1–3 have
- * > landed."*
+ * ⚠️ **Until #475 this file said the opposite**, and a reviewer who remembers
+ * *"the realistic world is offered to no rider yet"* is reading the old file:
+ * it failed the build if any module the product ships named a way into the
+ * realistic path, because layer 3 had not landed. It has (#481), the
+ * twenty-minute soak has been run (validation 0002 Part Z), and #475 is the
+ * pull request its own header said would change this, on purpose, with the
+ * offer's tests beside it (`realistic-choice.test.tsx`).
  *
- * Layers 1, 2 and 4 are in the product now — the code, and the assets inside
- * `dist` and so inside the APK — and layer 3 is not. So the one thing standing
- * between a rider and a half-built world is that **no module the product ships
- * reaches for it**, and a review note would be the wrong guard for that. This
- * reads every production source file under `apps/` and fails if anything but
- * the modules that DEFINE the realistic path names the way into it: the
- * realistic ladder, the loader, the two-ladder policy, or a rung whose world is
- * `'realistic'`.
+ * What it guards now is the SHAPE of the offer, which D-3 fixes: *"chosen by
+ * the rider … and never entered by the thermal logic on its own"*, and the
+ * default the stylised world on every device. So:
+ *
+ * - **One caller.** Outside the modules that DEFINE the realistic path, only
+ *   `GameView.tsx` may name a way in, and it does so behind
+ *   `world-preference.ts` — which `realistic-choice.test.tsx` holds
+ *   behaviourally: no choice, no load, no realistic rung. A second caller —
+ *   a screen that loaded the world on a first visit, say, which D-7 forbids —
+ *   is a red build here rather than a review note.
+ * - **Off by default.** Nothing stored, a store that throws, and any value but
+ *   the one `world-preference.ts` writes all read as "no".
  *
  * ⚠️ **What it deliberately allows**: the harness pages and the tools, which
  * are not in the product build; tests; and the defining modules themselves.
  * `three-renderer.ts` is a defining module because ADR 0026 D-10 puts both
  * renderer paths there, and it is reached from `main.tsx` — which is exactly
  * why a caller is what this scans for rather than an import.
- *
- * When #475 offers the world to riders, this test is what that pull request
- * changes, on purpose, with the offer's own tests beside it.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
@@ -34,10 +39,18 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import { readRealisticWorldChoice, REALISTIC_WORLD_STORAGE_KEY } from './world-preference';
+
 const APPS = fileURLToPath(new URL('../../../', import.meta.url));
+
+/** The one module the product ships that may offer it, behind the rider's choice. */
+const OFFERED_FROM = 'web/src/game/GameView.tsx';
 
 /** The modules that define the realistic path, and so may name it. */
 const DEFINING = new Set([
+  // The seam: it DECLARES `GameRenderer.loadRealisticWorld` so the renderer can
+  // be asked, and calls nothing.
+  'web/src/game/port.ts',
   'web/src/game/quality.ts',
   'web/src/game/three-renderer.ts',
   'web/src/game/realistic-assets.ts',
@@ -96,7 +109,7 @@ function waysInOf(text: string): readonly string[] {
   return WAYS_IN.filter((pattern) => pattern.test(code)).map((pattern) => pattern.source);
 }
 
-describe('the realistic world is offered to no rider yet — ADR 0026 D-12', () => {
+describe('the realistic world is offered only through the rider’s choice — ADR 0026 D-3, #475', () => {
   const files = productionSources();
 
   it('finds the product’s sources, the game and the app entry among them', () => {
@@ -106,13 +119,42 @@ describe('the realistic world is offered to no rider yet — ADR 0026 D-12', () 
     expect(files).toContain('web/src/game/GameView.tsx');
   });
 
-  it('lets no module the product ships reach for the realistic world', () => {
+  it('lets no module the product ships reach for the realistic world but the one that offers it', () => {
     const offenders = files
-      .filter((file) => !DEFINING.has(file))
+      .filter((file) => !DEFINING.has(file) && file !== OFFERED_FROM)
       .flatMap((file) =>
         waysInOf(readFileSync(join(APPS, file), 'utf8')).map((way) => `${file}: ${way}`),
       );
     expect(offenders).toEqual([]);
+  });
+
+  it('is offered from exactly one place, and that place reads the rider’s choice', () => {
+    // The allowance above is not vacuous: the one module it exempts does reach
+    // for the realistic world, and does it next to the choice. Deleting the
+    // offer turns the first half red; deleting the read, the second.
+    const offer = readFileSync(join(APPS, OFFERED_FROM), 'utf8');
+    expect(waysInOf(offer)).not.toEqual([]);
+    expect(offer).toMatch(/\breadRealisticWorldChoice\(/);
+  });
+
+  it('is off unless the device holds exactly the choice the setting writes', () => {
+    const holding = (value: string | null) => ({
+      getItem: (key: string) => (key === REALISTIC_WORLD_STORAGE_KEY ? value : null),
+      setItem: () => undefined,
+    });
+    expect(readRealisticWorldChoice(undefined)).toBe(false);
+    expect(readRealisticWorldChoice(holding(null))).toBe(false);
+    expect(readRealisticWorldChoice(holding('off'))).toBe(false);
+    expect(readRealisticWorldChoice(holding('true'))).toBe(false);
+    expect(
+      readRealisticWorldChoice({
+        getItem: () => {
+          throw new Error('blocked');
+        },
+        setItem: () => undefined,
+      }),
+    ).toBe(false);
+    expect(readRealisticWorldChoice(holding('on'))).toBe(true);
   });
 
   it('would notice the rider being offered it', () => {

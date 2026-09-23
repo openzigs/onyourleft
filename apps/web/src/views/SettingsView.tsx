@@ -97,6 +97,7 @@ import {
   type CuePreference,
 } from '../game/cue-preference';
 import type { UnitsPort } from '../units/store-port';
+import { readRealisticWorldChoice, writeRealisticWorldChoice } from '../game/world-preference';
 
 /**
  * What a panel is currently telling the rider, or `undefined` for nothing.
@@ -372,6 +373,8 @@ export function SettingsView({
 
       <SoundsPanel storage={announcements === undefined ? deviceStorage() : announcements} />
 
+      <GameWorldPanel storage={announcements === undefined ? deviceStorage() : announcements} />
+
       <PersistenceNotice {...(storage === undefined ? {} : { storage })} />
     </>
   );
@@ -558,6 +561,72 @@ function SoundsPanel({
             if (volume !== undefined) save({ ...preference, volume });
           }}
         />
+      </p>
+      {message === undefined ? null : (
+        <StatusMessage tone={message.tone} live>
+          {message.text}
+        </StatusMessage>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Which world the trainer game draws — #475, ADR 0026 D-3 and D-12: the
+ * realistic world, offered to a rider now that its four layers have landed,
+ * **off by default on every device**.
+ *
+ * ⚠️ **A device choice, not an athlete one** (`world-preference.ts`), and a
+ * checkbox rather than a pair of radios: there is one thing to opt in to, and
+ * "off" is the product as it has always been. ADR 0026 D-3 says the default
+ * changes only on a measurement of a device CLASS, and validation 0002 Part Z
+ * is one tablet — so this is the only way in.
+ *
+ * ⚠️ **What happens offline is said HERE as well as on the ride**, because it
+ * is a property of the choice: in a browser the realistic set is not in the
+ * service worker's precache (D-7), so with no network a ride falls back to the
+ * standard world. The route picker says it again, and the ride's stage says so
+ * when it happens.
+ */
+function GameWorldPanel({
+  storage,
+}: {
+  readonly storage: PreferenceStorage | undefined;
+}): JSX.Element {
+  const [chosen, setChosen] = useState(() => readRealisticWorldChoice(storage));
+  const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
+  return (
+    <section className="oyl-panel oyl-world" aria-labelledby="oyl-world-heading">
+      <h2 id="oyl-world-heading">Game world</h2>
+      <p className="oyl-muted">
+        The trainer game draws a standard world unless you choose the realistic one: photographic
+        road, ground and sky, photoscanned trees and a modelled rider. It asks much more of the
+        device. If the device gets too hot during a ride, the rest of that ride is in the standard
+        world and the ride screen says so. It has been measured on one tablet, not on phones.
+      </p>
+      <p className="oyl-muted">
+        In a browser the realistic world is downloaded when a ride starts — about 33 MB — and is not
+        kept on this device for use offline. With no network, or if it cannot be loaded, the ride is
+        in the standard world instead and the ride screen says so. In the Android app it is already
+        on the device.
+      </p>
+      <p>
+        <label className="oyl-announce__switch">
+          <input
+            type="checkbox"
+            checked={chosen}
+            onChange={(event) => {
+              const next = event.currentTarget.checked;
+              setChosen(next);
+              setMessage(
+                writeRealisticWorldChoice(storage, next)
+                  ? { tone: 'success', text: ANNOUNCEMENTS_SAVED }
+                  : { tone: 'warning', text: ANNOUNCEMENTS_NOT_KEPT },
+              );
+            }}
+          />{' '}
+          Ride in the realistic world
+        </label>
       </p>
       {message === undefined ? null : (
         <StatusMessage tone={message.tone} live>

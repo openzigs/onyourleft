@@ -139,6 +139,8 @@ function pedallingPort(
  */
 function capturingRenderer(frames: SceneFrame[]): GameRenderer {
   return {
+    // #475: never asked — no ride in this file chose the realistic world.
+    loadRealisticWorld: () => Promise.reject(new Error('no realistic world was chosen')),
     create: () => ({
       hasContext: true,
       render: (frame: SceneFrame) => {
@@ -812,6 +814,8 @@ describe('GameView — the world moves rather than steps (#323)', () => {
 
 /** A renderer nothing reaches: this screen never leaves the picker. */
 const NO_RENDERER: GameRenderer = {
+  // #475: never asked — no ride in this file chose the realistic world.
+  loadRealisticWorld: () => Promise.reject(new Error('no realistic world was chosen')),
   create: () => {
     throw new Error('the empty picker must not build a renderer');
   },

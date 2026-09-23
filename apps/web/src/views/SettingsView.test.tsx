@@ -44,6 +44,7 @@ import {
   type PreferenceStorage,
 } from '../game/hud/announce-preference';
 import { DEFAULT_CUES, readCuePreference } from '../game/cue-preference';
+import { readRealisticWorldChoice } from '../game/world-preference';
 
 const OWNER = athleteId('local');
 
@@ -815,6 +816,89 @@ describe('sounds — #400', () => {
         (each) => each.textContent === 'Mute sounds',
       ),
     ).toBe(false);
+    mounted.unmount();
+  });
+});
+
+describe('the game world — #475', () => {
+  function disk(): PreferenceStorage {
+    const values = new Map<string, string>();
+    return {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => {
+        values.set(key, value);
+      },
+    };
+  }
+
+  async function settings(store: PreferenceStorage) {
+    return mount(
+      <SettingsView
+        units="metric"
+        onUnitsChange={() => undefined}
+        onRiderMassChange={() => undefined}
+        announcements={store}
+      />,
+    );
+  }
+
+  it('is the standard world until the rider chooses otherwise, and keeps the choice on this device', async () => {
+    const store = disk();
+    const mounted = await settings(store);
+    const toggle = mounted.container.querySelector<HTMLInputElement>(
+      '.oyl-world input[type="checkbox"]',
+    );
+    expect(toggle?.checked).toBe(false);
+    await act(async () => {
+      toggle?.click();
+      await Promise.resolve();
+    });
+    expect(readRealisticWorldChoice(store)).toBe(true);
+    expect(mounted.container.textContent).toContain(ANNOUNCEMENTS_SAVED);
+    // …and back off again, which is a choice kept too, not a deletion.
+    await act(async () => {
+      toggle?.click();
+      await Promise.resolve();
+    });
+    expect(readRealisticWorldChoice(store)).toBe(false);
+    mounted.unmount();
+
+    // A fresh screen reads what was kept.
+    const on = disk();
+    on.setItem('oyl.game.realisticWorld.v1', 'on');
+    const again = await settings(on);
+    expect(
+      again.container.querySelector<HTMLInputElement>('.oyl-world input[type="checkbox"]')?.checked,
+    ).toBe(true);
+    again.unmount();
+  });
+
+  it('says what happens offline before the rider chooses it — ADR 0026 D-7', async () => {
+    const mounted = await settings(disk());
+    const copy = (mounted.container.querySelector('.oyl-world')?.textContent ?? '').replace(
+      /\s+/g,
+      ' ',
+    );
+    expect(copy).toContain('not kept on this device for use offline');
+    expect(copy).toContain('the ride is in the standard world instead and the ride screen says so');
+    mounted.unmount();
+  });
+
+  it('says so when the device will not keep it', async () => {
+    const refusing: PreferenceStorage = {
+      getItem: () => null,
+      setItem: () => {
+        throw new DOMException('full', 'QuotaExceededError');
+      },
+    };
+    const mounted = await settings(refusing);
+    await act(async () => {
+      mounted.container
+        .querySelector<HTMLInputElement>('.oyl-world input[type="checkbox"]')
+        ?.click();
+      await Promise.resolve();
+    });
+    expect(mounted.container.textContent).toContain(ANNOUNCEMENTS_NOT_KEPT);
     mounted.unmount();
   });
 });

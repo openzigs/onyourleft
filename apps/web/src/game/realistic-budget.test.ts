@@ -8,8 +8,9 @@
  * made heavier than its recipe asked for, a map committed at source resolution,
  * or a set that outgrew its share of the APK is red here, before any device
  * sees it. What it cannot establish is what those numbers cost on a phone —
- * that is the soak in validation 0002 Part Z, which has not been run, and
- * `realistic-budget.ts` says why every constant is provisional until it is.
+ * that is the soak in validation 0002 Part Z, run on the owner's tablet on
+ * 2026-09-23, and `realistic-budget.ts` §"Re-set from the twenty-minute soak"
+ * says what it showed and why every constant stood.
  */
 
 import { statSync } from 'node:fs';

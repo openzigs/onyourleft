@@ -2726,7 +2726,11 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const failedNotice = realisticWorldNotice(failed) ?? '';
 
   const started = performance.now();
-  const outcome = await loadRealisticWorld();
+  // #475: through the renderer the product ships, which is how `GameView`
+  // asks — so a `threeGameRenderer.loadRealisticWorld` that stopped loading
+  // anything would leave every realistic assertion below reading the stylised
+  // world.
+  const outcome = await threeGameRenderer.loadRealisticWorld();
   const loadMs = performance.now() - started;
 
   const steepness = GRADIENT_TINT_FULL_SCALE_PERCENT / 100 + 0.02;

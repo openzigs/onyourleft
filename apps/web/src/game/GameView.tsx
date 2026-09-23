@@ -49,14 +49,23 @@ import {
 } from './wind-choice';
 import {
   INITIAL_QUALITY,
+  INITIAL_REALISTIC_QUALITY,
   keepsShadowMap,
-  nextQuality,
+  nextWorldQuality,
   qualitySettings,
   readShadowMapChoice,
   rungFor,
+  worldRung,
   type QualityLevel,
-  type QualityState,
+  type QualitySettings,
+  type WorldQualityState,
 } from './quality';
+import {
+  REALISTIC_WORLD_LEFT_NOTICE,
+  realisticWorldChosenText,
+  realisticWorldNotice,
+} from './realistic-assets';
+import { readRealisticWorldChoice } from './world-preference';
 import { createGradientSession, type GradientSession, type GradientSessionState } from './gradient';
 import {
   NO_GAME_TRAINER,
@@ -309,6 +318,20 @@ const WIND_PROBLEM_ID = 'oyl-game-wind-problem';
  */
 export const STANDING_NOTICE_SECONDS = 15;
 
+/** A ride on the stylised ladder, at its top — every ride that did not choose realism. */
+const STYLISED_START: WorldQualityState = { realistic: false, quality: INITIAL_QUALITY };
+
+/**
+ * The settings a ride draws with — #475. On the realistic ladder,
+ * `quality.ts` §`worldRung`; on the stylised one, `rungFor` as before, which is
+ * where the rider shadow map lives. ONE function for the view's first rung,
+ * every rung change and the swap once the realistic world has loaded, so the
+ * three cannot disagree about which world a ride is in.
+ */
+function rungOf(world: WorldQualityState, shadowMap: boolean): QualitySettings {
+  return world.realistic ? worldRung(world) : rungFor(world.quality.level, shadowMap);
+}
+
 export function GameView(props: GameViewProps): JSX.Element {
   // ⚠️ Read here rather than inside `WindControls`, because `windChoice` is a
   // pure function and has to be called where its answer can be handed to both
@@ -351,8 +374,38 @@ export function GameView(props: GameViewProps): JSX.Element {
    * lives in {@link qualityRef}, which nothing renders from.
    */
   const [qualityLevel, setQualityLevel] = useState<QualityLevel>(INITIAL_QUALITY.level);
-  /** The ladder's full state, pressure included — {@link qualityLevel} says why it is a ref. */
-  const qualityRef = useRef<QualityState>(INITIAL_QUALITY);
+  /**
+   * Whether the ride is on `quality.ts`'s REALISTIC ladder — #475, ADR 0026
+   * D-3. The other half of the rung, state for {@link qualityLevel}'s reason:
+   * it changes at most twice a ride (chosen at the start; left for good on a
+   * failed load or a hot device), and each change is a whole world.
+   */
+  const [realisticRung, setRealisticRung] = useState(false);
+  /**
+   * The ladders' full state, pressure included — {@link qualityLevel} says why
+   * it is a ref. A {@link WorldQualityState} since #475, so the one policy that
+   * moves a ride between the two worlds, `nextWorldQuality`, is the one this
+   * loop feeds; for a ride that did not choose realism it IS `nextQuality`.
+   */
+  const qualityRef = useRef<WorldQualityState>(STYLISED_START);
+  /**
+   * Whether THIS ride asked for the realistic world — read from the device at
+   * the start of the ride (`world-preference.ts`), off unless the rider chose
+   * it in Settings. The renderer is asked to load it only when this is true,
+   * which is what keeps the realistic set out of every other ride's download
+   * (ADR 0026 D-7).
+   */
+  const realisticWantedRef = useRef(false);
+  /**
+   * What the rider is told about the world they are riding in, and the ride
+   * time at which it was first shown — #475. `undefined` for a ride in the
+   * world it asked for. ADR 0026 D-7: *"offline with the realistic world
+   * chosen, the game falls back to the stylised world and says so"*; and the
+   * same when a hot device steps a ride out of realism.
+   */
+  const [worldNotice, setWorldNotice] = useState<
+    { readonly text: string; readonly from: number } | undefined
+  >(undefined);
   /**
    * What the trainer could be told when this ride started — #362.
    *
@@ -614,7 +667,19 @@ export function GameView(props: GameViewProps): JSX.Element {
       announcerRef.current = INITIAL_ANNOUNCER;
       setAnnouncement('');
       announcementsRef.current = readAnnouncementPreference(deviceStorage());
-      shadowMapRef.current = readShadowMapChoice(deviceStorage());
+      // #475: which world this ride asked for, read from the device like every
+      // other choice here. A ride starts at the top of its ladder — the
+      // realistic one only for a rider who chose it (ADR 0026 D-3) — and the
+      // shadow map is not asked for on a realistic ride: its rung is a
+      // STYLISED one, and a ride that stepped out of realism because it was hot
+      // must land on the stylised top, not on something heavier.
+      const realistic = readRealisticWorldChoice(deviceStorage());
+      realisticWantedRef.current = realistic;
+      qualityRef.current = realistic ? INITIAL_REALISTIC_QUALITY : STYLISED_START;
+      setQualityLevel(INITIAL_QUALITY.level);
+      setRealisticRung(realistic);
+      setWorldNotice(undefined);
+      shadowMapRef.current = !realistic && readShadowMapChoice(deviceStorage());
       slopesRef.current = slopesOf(profile);
       slopeAnnouncedRef.current = undefined;
       // ⚠️ **Read at the start of the ride and held for its length**, which is
@@ -708,6 +773,8 @@ export function GameView(props: GameViewProps): JSX.Element {
     // ladder is told about them. @see FramePacer
     const pacer = new FramePacer();
 
+    /** Whether this run of the effect has been cleaned up. @see the renderer's `then` below */
+    let cancelled = false;
     const canvas = canvasRef.current;
     const load = props.renderer;
     if (canvas !== null && viewRef.current === undefined && load !== undefined) {
@@ -716,12 +783,45 @@ export function GameView(props: GameViewProps): JSX.Element {
       // `simulation.ts` is about. A rider whose GPU is slow to hand over a
       // context still gets a HUD and a ride.
       void load().then((renderer) => {
+        // ⚠️ Not after this effect has been cleaned up — found by #475's
+        // tests. A rider who ends the ride while `three` is still arriving has
+        // had the stage unmounted, and a view built then would hold a GL
+        // context on a detached canvas that nothing destroys — and the NEXT
+        // ride would find `viewRef` set, build no view of its own, and draw
+        // into that detached canvas: a black world. A pause cleans up too, and
+        // the resume's own run of this effect builds the view instead.
+        if (cancelled) {
+          return;
+        }
         if (viewRef.current === undefined) {
-          viewRef.current = renderer.create(
-            canvas,
-            rungFor(qualityRef.current.level, shadowMapRef.current),
-          );
-          viewRef.current.resize(canvas.clientWidth || 320, canvas.clientHeight || 180);
+          const view = renderer.create(canvas, rungOf(qualityRef.current, shadowMapRef.current));
+          viewRef.current = view;
+          view.resize(canvas.clientWidth || 320, canvas.clientHeight || 180);
+          // #475: the realistic world, for a ride that asked for it — AFTER
+          // the view exists, so the rider rides the stylised world while ~33
+          // MiB arrive rather than a black canvas, and the swap is one whole
+          // world for another (ADR 0026 D-3) the moment it is all here.
+          if (realisticWantedRef.current) {
+            void renderer.loadRealisticWorld().then((outcome) => {
+              // The ride this was for may have ended, or stepped out of
+              // realism, while the files arrived.
+              if (viewRef.current !== view || !qualityRef.current.realistic) {
+                return;
+              }
+              if (outcome.loaded) {
+                view.setQuality(rungOf(qualityRef.current, shadowMapRef.current));
+                return;
+              }
+              // D-7: the stylised world's TOP, every kind at once, and said.
+              qualityRef.current = STYLISED_START;
+              setQualityLevel(INITIAL_QUALITY.level);
+              setRealisticRung(false);
+              const text = realisticWorldNotice(outcome);
+              if (text !== undefined) {
+                setWorldNotice({ text, from: simulationRef.current?.state.elapsed ?? 0 });
+              }
+            });
+          }
         }
       });
     }
@@ -947,17 +1047,23 @@ export function GameView(props: GameViewProps): JSX.Element {
       lastFrameAt = at;
       if (frameMs !== undefined) {
         const previous = qualityRef.current;
-        const next = nextQuality(previous, { frameMs });
+        const next = nextWorldQuality(previous, { frameMs });
         qualityRef.current = next;
         // A render only when the RUNG changes — #482. @see qualityLevel
-        if (next.level !== previous.level) {
-          setQualityLevel(next.level);
+        if (next.quality.level !== previous.quality.level) {
+          setQualityLevel(next.quality.level);
+        }
+        // #475: out of realism for the rest of the ride, and said.
+        if (next.realistic !== previous.realistic) {
+          setRealisticRung(next.realistic);
+          setWorldNotice({ text: REALISTIC_WORLD_LEFT_NOTICE, from: simulation.state.elapsed });
         }
       }
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => {
+      cancelled = true;
       cancelAnimationFrame(frame);
       observer?.disconnect();
     };
@@ -976,7 +1082,10 @@ export function GameView(props: GameViewProps): JSX.Element {
     // ride's start re-reads the device's choice. `quality.ts` §`keepsShadowMap`
     // says why a rung that came back would flap.
     shadowMapRef.current = keepsShadowMap(shadowMapRef.current, qualityLevel);
-    const settings = rungFor(qualityLevel, shadowMapRef.current);
+    const settings = rungOf(
+      { realistic: realisticRung, quality: { level: qualityLevel, pressure: 0 } },
+      shadowMapRef.current,
+    );
     // ⚠️ Both halves of the rung, from one place. The renderer stops submitting
     // the instances and `sceneFrame` stops placing them — #245, and
     // `ScatterBelt.setBudget` says why neither alone is the whole of it.
@@ -989,7 +1098,7 @@ export function GameView(props: GameViewProps): JSX.Element {
     // `quality.ts` §`QualitySettings.capture` argues why capture is the first
     // thing a warming phone gives up and why this does NOT stop the camera.
     props.camera?.throttle(settings.capture);
-  }, [qualityLevel, props.camera]);
+  }, [qualityLevel, realisticRung, props.camera]);
 
   if (!onTheStage) {
     // One snapshot read for both notices, so they describe the same moment.
@@ -1003,6 +1112,9 @@ export function GameView(props: GameViewProps): JSX.Element {
         // on the screen they have not left yet. A snapshot read, so it costs a
         // property access per render and never opens a connection.
         trainerNotice={trainerRoadNotice(trainerNow ?? NO_GAME_TRAINER)}
+        // #475: a snapshot read for the trainer notice's reason — a rider who
+        // changes the choice in Settings and comes back sees it here at once.
+        worldChosen={readRealisticWorldChoice(deviceStorage())}
         releaseNotice={trainerNow?.releaseFault}
         withGhost={withGhost}
         onGhost={setWithGhost}
@@ -1133,6 +1245,18 @@ export function GameView(props: GameViewProps): JSX.Element {
               {gradient.fault}
             </StatusMessage>
           ),
+          // #475, ADR 0026 D-7's "and says so". For STANDING_NOTICE_SECONDS of
+          // ride from when it was first shown, on the ride's clock, and then
+          // out of the way: it is a fact about the picture rather than a thing
+          // to act on, and on a phone a notice costs the route panel's cell
+          // (#437). Not `live`: the world is `aria-hidden` above, so what it
+          // looks like is not a thing the HUD's one region speaks about.
+          worldNotice === undefined ||
+          (state?.elapsed ?? 0) - worldNotice.from >= STANDING_NOTICE_SECONDS ? undefined : (
+            <StatusMessage key="world" tone="info" label="Standard world">
+              {worldNotice.text}
+            </StatusMessage>
+          ),
         ]}
       />
     </section>
@@ -1238,6 +1362,8 @@ function RoutePicker(props: {
   /** Where the rider's hands are — #365. @see RIDING_POSITIONS */
   readonly position: RidingPosition;
   readonly onPosition: (value: RidingPosition) => void;
+  /** Whether this device chose the realistic world — #475. @see realisticWorldChosenText */
+  readonly worldChosen: boolean;
   readonly onStart: (
     route: RidableRoute,
     ghost: boolean,
@@ -1311,6 +1437,15 @@ function RoutePicker(props: {
           {props.trainerNotice}
         </StatusMessage>
       )}
+      {props.worldChosen ? (
+        // #475: the offline fallback stated BEFORE the ride, where a rider can
+        // still act on it, and the way back to the choice.
+        // @see realisticWorldChosenText
+        <StatusMessage tone="info" label="Realistic world">
+          {realisticWorldChosenText()}{' '}
+          <a href={hrefFor(routeById('settings'))}>Change this in Settings</a>.
+        </StatusMessage>
+      ) : undefined}
       <PacerControls
         withPacer={props.withPacer}
         onPacer={props.onPacer}
