@@ -3080,7 +3080,9 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   prose. ⚠️ A reviewer who remembers this sentence being unenforced is reading the old file:
   deleting an ADR's `- **Status**: Accepted` line used to leave `check-repo-rules.sh` reporting
   clean at exit 0. Numbers are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. **The next free number is 0031.**
+  **and which are claimed by open issues** before you pick one. **The next free number is 0032.**
+  ⚠️ **0031 is [ADR 0031](docs/adr/0031-model-licences-and-the-hosted-model-hole.md)**, taken by
+  [#380](https://github.com/openzigs/onyourleft/issues/380) for model licences, committed and hosted.
   ⚠️ **0030 is [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md)**, taken by
   [#379](https://github.com/openzigs/onyourleft/issues/379) for what the app may say about a rider's
   body.
@@ -3342,6 +3344,10 @@ top of an issue **supersedes its body**.
 | What stops a widened endpoint radius or a sparse ride outrunning that margin, and what a ride coarser than the ceiling loses | `packages/domain/src/segment/segment.ts` §`MAXIMUM_ENDPOINT_REACH_METRES`, `packages/domain/src/segment/match.ts` §`GAP_SECONDS` |
 | What a test fixture at latitude 51.5, longitude -0.12 used to break, and what fixed it | `packages/domain/src/segment/cells.test.ts`, `apps/web/src/segments/sweep.store.test.ts` §`ORIGIN_LONGITUDE` |
 | Where a device's capability set comes from, and what happens when a device contradicts itself | [`packages/sensors/README.md`](packages/sensors/README.md) §"What a device says it can do", `packages/sensors/web-bluetooth/src/transport.ts` §`declaredBy`, §`noteUndeclared` |
+| Whether a committed model weights file needs a new gate, and why it does not | [ADR 0031](docs/adr/0031-model-licences-and-the-hosted-model-hole.md) D-1, [ASSETS.toml](ASSETS.toml), [#339](https://github.com/openzigs/onyourleft/issues/339) |
+| Why a hosted model is in no licence closure at all, and what is recorded instead of a manifest row | [ADR 0031](docs/adr/0031-model-licences-and-the-hosted-model-hole.md) D-3 |
+| Why a rider may point this app at any model and this app may name none | [ADR 0031](docs/adr/0031-model-licences-and-the-hosted-model-hole.md) D-4 |
+| Why a quantised model is a derived asset, and why conversion is not laundering | [ADR 0031](docs/adr/0031-model-licences-and-the-hosted-model-hole.md) D-8, [ADR 0026](docs/adr/0026-realistic-game-world.md) D-5 |
 | What this app may say about a rider's body, and the two vocabularies every string is in | [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md) D-1, D-2, [#379](https://github.com/openzigs/onyourleft/issues/379) |
 | Why no absolute joint angle is ever rendered, and why a better camera could not change that | [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md) D-3 |
 | Why the frontal plane is banned as a word and a picture as well as a number | [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md) D-4 |
