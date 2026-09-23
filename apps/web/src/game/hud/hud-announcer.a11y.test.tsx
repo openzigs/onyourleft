@@ -316,7 +316,11 @@ function trainerPort(hasControl: boolean): GameTrainerPort {
     letGo: () => Promise.resolve({ kind: 'stopped' as const }),
   };
   const snapshot = { paired: true, controllable: true, canSimulate: true, hasControl };
-  return { readTrainer: () => gameTrainerFrom(snapshot, control, false) };
+  return {
+    readTrainer: () => gameTrainerFrom(snapshot, control, false),
+    // #503: asked when the rider presses Ride, and grants nothing.
+    askForControlOnRide: () => Promise.resolve(),
+  };
 }
 
 describe('the trainer’s sentences go through the same ONE region — #445', () => {

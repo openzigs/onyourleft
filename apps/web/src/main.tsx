@@ -41,7 +41,7 @@ import {
 import { AppShell } from './shell/AppShell';
 import { browserScreenLockSource, platformWakeLock } from './game/hud/wake-lock';
 import type { GamePort, RidableRoute } from './game/GameView';
-import { gameTrainerFrom, type GameTrainerPort } from './game/trainer-port';
+import { gameTrainerPortOver, type GameTrainerPort } from './game/trainer-port';
 import type { GhostTrack } from '@onyourleft/domain';
 import type { GameRenderer } from './game/port';
 import { probeBrowser, type CapabilityProbe } from './support/bluetooth-support';
@@ -569,26 +569,19 @@ function buildGamePort(rideController: RideController | undefined): GamePort {
  * here, and `trainer-port.ts` §`gameTrainerFrom` turns the states a present
  * controller can be in into the sentences a rider is told.
  *
- * ⚠️ **The snapshot's `workout` is read here too**, because a workout already
+ * ⚠️ **The snapshot's `workout` is read too**, because a workout already
  * holds the one control point the machine has. `simulationControl()` refuses
- * the handle and this supplies the sentence that goes with the refusal; see
- * `trainer-port.ts` §`GameTrainerKind` member `workout`.
+ * the handle and `gameTrainerFrom` supplies the sentence that goes with the
+ * refusal; see `trainer-port.ts` §`GameTrainerKind` member `workout`.
+ *
+ * ⚠️ **Since #503 the port can also ask for control** — the rider's press on
+ * *Ride*, through this controller's own `requestTrainerControl`, and never
+ * over a running workout. `trainer-port.ts` §"Who asks for control" argues it.
  */
 function buildGameTrainerPort(controller: RideController | undefined): GameTrainerPort {
-  return {
-    readTrainer: () => {
-      // One snapshot read for both answers, so the workout state and the
-      // trainer state cannot be a tick apart.
-      const snapshot = controller?.getSnapshot();
-      return gameTrainerFrom(
-        snapshot?.trainer,
-        controller?.simulationControl(),
-        snapshot?.workout !== undefined,
-        // #447: read only for the audio, at the end of a game ride.
-        snapshot?.workout?.status === 'finished',
-      );
-    },
-  };
+  // #503: the port — its read AND the Ride press's control request — is built
+  // in `trainer-port.ts` so both halves are tested against a real controller.
+  return gameTrainerPortOver(controller);
 }
 
 function buildTransferPort(): TransferPort | undefined {

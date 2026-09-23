@@ -231,6 +231,8 @@ const WITH_SOUNDS = new URLSearchParams(window.location.search).get('sounds') ==
 
 /** A trainer that accepts every gradient, so the trainer line is on the screen. */
 const TRAINER: GameTrainerPort = {
+  // #503: the Ride press's request for control — this double changes nothing.
+  askForControlOnRide: () => Promise.resolve(),
   readTrainer: () =>
     WITH_A_NOTICE
       ? { kind: 'workout', control: undefined }

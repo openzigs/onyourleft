@@ -423,6 +423,13 @@ export interface RideController {
   discardRecovered(id: RecordingSessionId): Promise<boolean>;
   /** End the workout and release the trainer. The recording is untouched. */
   endWorkout(): void;
+  /**
+   * Ask the trainer for control — always the rider's act, from one of two
+   * presses: *Ask the trainer for control* on the Ride screen, and since #503
+   * *Ride* in the trainer game (`game/trainer-port.ts` §`gameTrainerPortOver`,
+   * which never asks over a running workout). One path to the control point;
+   * a refusal lands on {@link TrainerSnapshot.refusal} for both.
+   */
   requestTrainerControl(): Promise<void>;
   setTargetPower(target: Watts): Promise<void>;
   /**

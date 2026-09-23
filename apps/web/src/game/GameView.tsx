@@ -70,6 +70,7 @@ import { createGradientSession, type GradientSession, type GradientSessionState 
 import {
   NO_GAME_TRAINER,
   trainerRoadNotice,
+  trainerRoadPromise,
   type GameTrainer,
   type GameTrainerPort,
 } from './trainer-port';
@@ -716,10 +717,28 @@ export function GameView(props: GameViewProps): JSX.Element {
       // for a `ready` trainer, so a machine that did not say it accepts
       // simulation parameters is not written to by construction rather than by
       // a guard inside the loop.
-      const found = props.trainer?.readTrainer() ?? NO_GAME_TRAINER;
+      //
+      // ⚠️ #503: **the rider's press on Ride is what asks the trainer for
+      // control**, and this is the only line in the game that does. Only for a
+      // trainer that would take a gradient and has not granted control — a
+      // workout's trainer, a machine without simulation mode and one with no
+      // control point are never asked, because `readTrainer` decides those
+      // first. Never on mount: entering the game screen asks nothing and
+      // writes nothing. A refusal is not thrown; the re-read below is what
+      // says whether it was granted, and `trainerRoadNotice` says so if not.
+      let found = props.trainer?.readTrainer() ?? NO_GAME_TRAINER;
+      if (found.kind === 'no-control' && props.trainer !== undefined) {
+        try {
+          await props.trainer.askForControlOnRide();
+        } catch {
+          // The ride still starts; the re-read reports `no-control` and the
+          // rider is told the hills are not reaching the trainer.
+        }
+        found = props.trainer.readTrainer();
+      }
       setTrainer(found);
       // #445: this ride's notice, for its first frame. @see roadNoticeRef
-      const notice = trainerRoadNotice(found);
+      const notice = trainerRoadNotice(found, 'riding');
       roadNoticeRef.current =
         notice === undefined ? undefined : `The road is not reaching your trainer: ${notice}`;
       gradientFaultRef.current = undefined;
@@ -1106,12 +1125,13 @@ export function GameView(props: GameViewProps): JSX.Element {
     return (
       <RoutePicker
         routes={routes}
-        // ⚠️ Read **here** rather than reusing the ride's captured state, and
-        // that is the whole point of showing it twice: `no-control` tells the
-        // rider to take control *before they start*, which is only actionable
-        // on the screen they have not left yet. A snapshot read, so it costs a
-        // property access per render and never opens a connection.
-        trainerNotice={trainerRoadNotice(trainerNow ?? NO_GAME_TRAINER)}
+        // ⚠️ Read **here** rather than reusing the ride's captured state: a
+        // workout started or ended on the Ride screen changes what is true
+        // before the next press. A snapshot read, so it costs a property access
+        // per render and never opens a connection — and asks nothing (#503).
+        trainerNotice={trainerRoadNotice(trainerNow ?? NO_GAME_TRAINER, 'before-ride')}
+        // #503: what the press on Ride will do to the trainer, said before it.
+        trainerPromise={trainerRoadPromise(trainerNow ?? NO_GAME_TRAINER)}
         // #475: a snapshot read for the trainer notice's reason — a rider who
         // changes the choice in Settings and comes back sees it here at once.
         worldChosen={readRealisticWorldChoice(deviceStorage())}
@@ -1142,7 +1162,7 @@ export function GameView(props: GameViewProps): JSX.Element {
   // ⚠️ Read during render rather than held in state — see {@link gradientRef}.
   // The tick's own `setState` is what schedules this render, so it is fresh.
   const gradient = gradientRef.current?.state();
-  const roadNotice = trainerRoadNotice(trainer);
+  const roadNotice = trainerRoadNotice(trainer, 'riding');
   // #437: open for the first STANDING_NOTICE_SECONDS of ride, then out of the
   // way unless the rider asks for it — on the RIDE's clock, so a paused ride
   // does not put away a notice nobody has had time to read.
@@ -1355,6 +1375,11 @@ function RoutePicker(props: {
    */
   readonly trainerNotice: string | undefined;
   /**
+   * What pressing *Ride* will do to the trainer — #503. `undefined` unless the
+   * route's hills will reach it. @see trainerRoadPromise
+   */
+  readonly trainerPromise: string | undefined;
+  /**
    * The last release the trainer did not confirm — #372. `undefined` almost
    * always. @see GameTrainer.releaseFault
    */
@@ -1426,13 +1451,23 @@ function RoutePicker(props: {
           {props.releaseNotice}
         </StatusMessage>
       )}
+      {props.trainerPromise === undefined ? undefined : (
+        // ⚠️ #503: **the sentence that makes the Ride press the rider's
+        // decision** rather than the screen's. It is above the button, so a
+        // rider reads that the trainer will follow the hills before the press
+        // that asks it for control. Not `live`: nothing changed, it is simply
+        // what this screen says.
+        <StatusMessage tone="info" label="Your trainer">
+          {props.trainerPromise}
+        </StatusMessage>
+      )}
       {props.trainerNotice === undefined ? undefined : (
-        // ⚠️ **Before the ride rather than only during it**, because one of the
-        // four sentences is *"take control on the Ride screen before you
-        // start"* — advice a rider cannot act on once they are riding. It does
-        // not block the ride: a rider who wants to ride a route with no
-        // resistance is allowed to, and #362's criterion is that they are told,
-        // not that they are stopped.
+        // ⚠️ **Before the ride rather than only during it**, because a rider
+        // who can end a workout, or choose to ride without resistance, can only
+        // do so before they start. It does not block the ride: a rider who
+        // wants to ride a route with no resistance is allowed to, and #362's
+        // criterion is that they are told, not that they are stopped. Since
+        // #503 `no-control` is not one of these — the press asks.
         <StatusMessage tone="warning" label="The road will not reach your trainer">
           {props.trainerNotice}
         </StatusMessage>

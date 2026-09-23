@@ -31,6 +31,24 @@
  * old file. A release the trainer did not acknowledge is the one thing said
  * about it, as *Not released*.
  *
+ * ## Control is its own step, and ERG is one thing to do with it — #503
+ *
+ * ⚠️ **Until #503 control lived inside ERG, and a reviewer who remembers this
+ * panel opening with *"Pair a smart trainer to set an ERG target"* is reading
+ * the old file.** The only *Ask the trainer for control* in the app was here,
+ * under an ERG framing, and the form it opened was ERG's — so on the owner's
+ * tablet (2026-09-23) the trainer game looked as though it needed an ERG set
+ * before the hills would reach the trainer. It never did: control alone is
+ * what the game needs, and since #503 the game asks for it itself when the
+ * rider presses *Ride*.
+ *
+ * So the panel is now two things in order: **control**, with its own sentence
+ * ({@link controlSentence}) and its own button, and then **ERG**, labelled
+ * *optional*, as one of the things control is for — beside the workout below
+ * and the game elsewhere. A trainer whose Feature bits refuse a power target used
+ * to get no control step at all, because the ERG early-return came first; it
+ * gets one now, because the game and a workout may still want control of it.
+ *
  * ## Control loss is a notice, not a disabled button
  *
  * `design/Button.tsx` records why a disabled control is not how this shell says
@@ -132,7 +150,7 @@ export function TrainerPanel({
   if (!trainer.paired) {
     return (
       <StatusMessage tone="info" label="No trainer">
-        Pair a smart trainer to set an ERG target from here.
+        Pair a smart trainer to control it from here.
       </StatusMessage>
     );
   }
@@ -141,18 +159,6 @@ export function TrainerPanel({
     return (
       <StatusMessage tone="info" label={NOT_CONTROLLABLE[trainer.controlChoice.kind].label}>
         {NOT_CONTROLLABLE[trainer.controlChoice.kind].text}
-      </StatusMessage>
-    );
-  }
-
-  if (!trainer.canSetPower) {
-    // Target Setting bit 3 is clear. Offering a control the trainer will refuse
-    // is worse than not offering it — the revision block says so in as many
-    // words — so the form is not rendered at all.
-    return (
-      <StatusMessage tone="info" label="No ERG">
-        This trainer reports that it does not accept a power target, so there is no ERG control to
-        offer.
       </StatusMessage>
     );
   }
@@ -194,9 +200,17 @@ export function TrainerPanel({
     onSetTargetPower(watts(parsed));
   }
 
+  /**
+   * ERG, as one thing to do with control — #503. Shown while control is held,
+   * and also after it went while a target may still be on the machine, so the
+   * "may still be holding" sentence is never hidden by a lost link.
+   */
+  const ergShown =
+    trainer.hasControl || trainer.requested !== undefined || trainer.target.kind !== 'none';
+
   return (
     <>
-      <p className="oyl-trainer__state">{targetSentence(trainer)}</p>
+      <p className="oyl-trainer__state">{controlSentence(trainer)}</p>
 
       {/*
         ⚠️ The observable half of the precedence rule (#370).
@@ -263,36 +277,77 @@ export function TrainerPanel({
         </StatusMessage>
       )}
 
-      {trainer.hasControl ? (
-        <form className="oyl-trainer__form" onSubmit={submit}>
-          <label htmlFor="oyl-erg-target">ERG target (W)</label>
-          <input
-            id="oyl-erg-target"
-            className="oyl-input"
-            type="number"
-            inputMode="numeric"
-            min={range?.minimum}
-            max={range?.maximum}
-            step={range?.increment}
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-          />
-          <Button type="submit">Set target</Button>
-          <Button variant="secondary" onClick={onClearTarget}>
-            End ERG
-          </Button>
-          {range === undefined ? null : (
-            <p className="oyl-muted">
-              This trainer accepts {range.minimum} W to {range.maximum} W in steps of{' '}
-              {range.increment} W. A target is quantised to that step before it is written.
-            </p>
-          )}
-        </form>
-      ) : (
+      {trainer.hasControl ? null : (
         <Button onClick={onRequestControl}>Ask the trainer for control</Button>
+      )}
+
+      {!ergShown ? null : !trainer.canSetPower ? (
+        // Target Setting bit 3 is clear. Offering a control the trainer will
+        // refuse is worse than not offering it — the revision block says so in
+        // as many words — so the form is not rendered at all. ⚠️ Since #503
+        // this no longer hides the control step above: a trainer with no ERG
+        // may still be driven by the game.
+        <StatusMessage tone="info" label="No ERG">
+          This trainer reports that it does not accept a power target, so there is no ERG control to
+          offer.
+        </StatusMessage>
+      ) : (
+        // ⚠️ A label on the sentence rather than an `h3`, and that is MEASURED:
+        // an ERG heading and the longer control sentence above it put the
+        // workout's *Ride* 174 px lower at 1280×800 and under the fold inside
+        // the Android shell (`rideview.browser.spec.ts` §"clears the fold"). The
+        // label says the same thing — ERG is optional, one thing control is
+        // for — in the line the target sentence already took.
+        <div>
+          <p className="oyl-trainer__erg">
+            <strong>ERG, optional:</strong> {targetSentence(trainer)}
+          </p>
+          {trainer.hasControl ? (
+            <form className="oyl-trainer__form" onSubmit={submit}>
+              <label htmlFor="oyl-erg-target">ERG target (W)</label>
+              <input
+                id="oyl-erg-target"
+                className="oyl-input"
+                type="number"
+                inputMode="numeric"
+                min={range?.minimum}
+                max={range?.maximum}
+                step={range?.increment}
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+              />
+              <Button type="submit">Set target</Button>
+              <Button variant="secondary" onClick={onClearTarget}>
+                End ERG
+              </Button>
+              {range === undefined ? null : (
+                <p className="oyl-muted">
+                  This trainer accepts {range.minimum} W to {range.maximum} W in steps of{' '}
+                  {range.increment} W. A target is quantised to that step before it is written.
+                </p>
+              )}
+            </form>
+          ) : null}
+        </div>
       )}
     </>
   );
+}
+
+/**
+ * Whether this app holds the trainer, and what that is for — #503.
+ *
+ * ⚠️ **Names all three things control is for**, ERG last, because until #503
+ * the panel spoke of nothing but ERG and a rider read control as ERG's.
+ */
+function controlSentence(trainer: TrainerSnapshot): string {
+  // ⚠️ Short when control is held, because that is the state the Ride screen
+  // is measured in (`rideview.browser.spec.ts`): the longer sentence cost the
+  // workout's *Ride* its place above the fold on a tablet. What control is FOR
+  // is said by what follows it — *ERG, optional* and *Ride a workout*.
+  return trainer.hasControl
+    ? 'This app has control of the trainer.'
+    : 'This app does not have control of the trainer. Ask for it here to ride a workout or hold a fixed power — the trainer game asks for it itself when you press Ride.';
 }
 
 /**
@@ -313,8 +368,10 @@ export function targetSentence(trainer: TrainerSnapshot): string {
     case 'unknown':
       return `The trainer may still be holding ${String(trainer.target.attempted)} W — this app can no longer tell.`;
     case 'none':
+      // #503: control has its own sentence now (`controlSentence`), so this
+      // one speaks only of ERG.
       return trainer.hasControl
         ? 'No target set. The trainer is following your effort.'
-        : 'This app does not have control of the trainer.';
+        : 'No target set.';
   }
 }

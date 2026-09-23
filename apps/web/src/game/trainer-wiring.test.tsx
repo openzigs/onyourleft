@@ -35,7 +35,12 @@ import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GameView, STANDING_NOTICE_SECONDS, type GamePort, type RidableRoute } from './GameView';
-import { gameTrainerFrom, type GameTrainerPort, type GradientTrainer } from './trainer-port';
+import {
+  gameTrainerPortOver,
+  type GameTrainer,
+  type GameTrainerPort,
+  type GradientTrainer,
+} from './trainer-port';
 import type { GameRenderer, SceneFrame } from './port';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 import {
@@ -48,6 +53,13 @@ import {
   type RoutePoint,
 } from '@onyourleft/domain';
 import type { SimulationParameters } from '@onyourleft/sensors/protocol';
+import { deviceId } from '@onyourleft/sensors';
+import { createSimulator, ftmsTrainer } from '@onyourleft/sensors/simulator';
+import { recordingSessionId } from '@onyourleft/store';
+import { ATHLETE_A, createStoreHarness, seedAthletes } from '@onyourleft/store/testing';
+
+import { createRideController } from '../ride/controller';
+import { simulatedOpenTrainer } from '../ride/simulated-trainer-testing';
 
 /**
  * Two kilometres that climb at 4 % and then fall at 4 %.
@@ -103,15 +115,23 @@ function capturingRenderer(frames: SceneFrame[]): GameRenderer {
 interface Commands {
   readonly written: SimulationParameters[];
   readonly releases: number[];
+  /** #503: each request for control, recorded as the write count at the time. */
+  readonly requests: number[];
 }
 
 /**
  * A trainer port built the way `main.tsx` builds one.
  *
- * ⚠️ Through the **real** `gameTrainerFrom` rather than by returning a
- * hand-made `GameTrainer`, so that a case asserting "a machine with no
- * simulation bit is not written to" exercises the production decision rather
- * than a fixture's opinion of it.
+ * ⚠️ Through the **real** `gameTrainerPortOver` — and so the real
+ * `gameTrainerFrom` — rather than by returning a hand-made `GameTrainer`, so
+ * that a case asserting "a machine with no simulation bit is not written to"
+ * or "a workout's trainer is never asked for control" exercises the
+ * production decision rather than a fixture's opinion of it. Only the ride
+ * controller underneath is a double; the last `describe` below rides a real
+ * one against the #44 simulator.
+ *
+ * @param grants whether the trainer grants control when the Ride press asks
+ * for it (#503). A request that is refused leaves `hasControl` as it was.
  */
 function trainerPort(
   snapshot: {
@@ -123,7 +143,9 @@ function trainerPort(
   },
   commands: Commands,
   workoutRunning = false,
+  grants = true,
 ): GameTrainerPort {
+  const facts = { ...snapshot };
   const control: GradientTrainer = {
     setSimulationParameters: async (parameters) => {
       commands.written.push(parameters);
@@ -135,7 +157,20 @@ function trainerPort(
       return Promise.resolve({ kind: 'stopped' as const });
     },
   };
-  return { readTrainer: () => gameTrainerFrom(snapshot, control, workoutRunning) };
+  return gameTrainerPortOver({
+    getSnapshot: () => ({
+      trainer: facts,
+      workout: workoutRunning ? { status: 'running' } : undefined,
+    }),
+    simulationControl: () => control,
+    requestTrainerControl: async () => {
+      commands.requests.push(commands.written.length);
+      if (grants) {
+        facts.hasControl = true;
+      }
+      return Promise.resolve();
+    },
+  });
 }
 
 const READY = {
@@ -228,7 +263,7 @@ async function ride(
 
 describe('the road the game draws reaches the trainer', () => {
   it('writes the route’s gradient while the rider is riding', async () => {
-    const commands: Commands = { written: [], releases: [] };
+    const commands: Commands = { written: [], releases: [], requests: [] };
     const { drawn } = await ride(trainerPort(READY, commands));
 
     // The renderer really was driven, or "no gradient" could be "no ride".
@@ -240,7 +275,7 @@ describe('the road the game draws reaches the trainer', () => {
   });
 
   it('sends the grade at the rider’s distance, climbing', async () => {
-    const commands: Commands = { written: [], releases: [] };
+    const commands: Commands = { written: [], releases: [], requests: [] };
     await ride(trainerPort(READY, commands));
 
     // Every write is on the first kilometre at 300 W, which is the climb — so
@@ -261,7 +296,7 @@ describe('the road the game draws reaches the trainer', () => {
   });
 
   it('does not write faster than the driver allows', async () => {
-    const commands: Commands = { written: [], releases: [] };
+    const commands: Commands = { written: [], releases: [], requests: [] };
     await ride(trainerPort(READY, commands), 60);
     // Thirty seconds of road at one write a second, and a deadband on top —
     // never sixty, which is what a tick with no rate limit would produce.
@@ -270,16 +305,31 @@ describe('the road the game draws reaches the trainer', () => {
 
   it('writes nothing to a trainer that does not offer simulation mode', async () => {
     // #362's fourth criterion. The one case no trainer in this loop can make.
-    const commands: Commands = { written: [], releases: [] };
+    const commands: Commands = { written: [], releases: [], requests: [] };
     const { drawn } = await ride(trainerPort({ ...READY, canSimulate: false }, commands));
     expect(drawn.length).toBeGreaterThan(10);
     expect(commands.written).toHaveLength(0);
   });
 
-  it('writes nothing to a trainer that has not granted control', async () => {
-    const commands: Commands = { written: [], releases: [] };
-    await ride(trainerPort({ ...READY, hasControl: false }, commands));
+  it('writes nothing to a trainer that refused control when Ride asked — #503', async () => {
+    const commands: Commands = { written: [], releases: [], requests: [] };
+    const { drawn } = await ride(
+      trainerPort({ ...READY, hasControl: false }, commands, false, false),
+    );
+    // The ride still starts…
+    expect(drawn.length).toBeGreaterThan(10);
+    // …the press asked, once, before anything was written…
+    expect(commands.requests).toStrictEqual([0]);
+    // …and a refused request writes nothing.
     expect(commands.written).toHaveLength(0);
+  });
+
+  it('tells the rider in a sentence when the trainer refused control — #503', async () => {
+    const commands: Commands = { written: [], releases: [], requests: [] };
+    await ride(trainerPort({ ...READY, hasControl: false }, commands, false, false));
+    const text = mounted?.container.textContent ?? '';
+    expect(text).toContain('did not grant control when you pressed Ride');
+    expect(text).toContain('hills on this route are not being sent to it');
   });
 
   it('writes nothing to a trainer a workout is already driving', async () => {
@@ -288,10 +338,12 @@ describe('the road the game draws reaches the trainer', () => {
     // so a workout started on the Ride screen keeps writing ERG targets to the
     // one control point while the rider is in the game. A second writer at
     // about 1 Hz is the mild half; the sharp half is the release below.
-    const commands: Commands = { written: [], releases: [] };
+    const commands: Commands = { written: [], releases: [], requests: [] };
     const { drawn } = await ride(trainerPort(READY, commands, true));
     expect(drawn.length).toBeGreaterThan(10);
     expect(commands.written).toHaveLength(0);
+    // #503: and the Ride press did not ask for control over it.
+    expect(commands.requests).toHaveLength(0);
   });
 
   it('sends no release when a workout holds the trainer', async () => {
@@ -300,7 +352,7 @@ describe('the road the game draws reaches the trainer', () => {
     // ride that ended while a workout was running would leave the workout's
     // clock going and every one of its targets refused or ignored — the silent
     // failure `startWorkout` refuses to start into, arriving after the guard.
-    const commands: Commands = { written: [], releases: [] };
+    const commands: Commands = { written: [], releases: [], requests: [] };
     await ride(trainerPort(READY, commands, true));
     await act(async () => {
       mounted?.unmount();
@@ -312,7 +364,7 @@ describe('the road the game draws reaches the trainer', () => {
   });
 
   it('tells the rider the workout has the trainer, not that the trainer is broken', async () => {
-    const commands: Commands = { written: [], releases: [] };
+    const commands: Commands = { written: [], releases: [], requests: [] };
     await ride(trainerPort(READY, commands, true));
     const text = mounted?.container.textContent ?? '';
     expect(text).toContain('workout is driving your trainer');
@@ -320,15 +372,14 @@ describe('the road the game draws reaches the trainer', () => {
   });
 
   it('tells the rider, rather than leaving them to believe the road is flat', async () => {
-    const commands: Commands = { written: [], releases: [] };
+    const commands: Commands = { written: [], releases: [], requests: [] };
     await ride(trainerPort({ ...READY, canSimulate: false }, commands));
     const text = mounted?.container.textContent ?? '';
     expect(text).toContain('does not offer simulation mode');
   });
 
-  it('warns before the ride starts, where the advice can still be taken', async () => {
-    // "Take control on the Ride screen" is only actionable on the picker.
-    const commands: Commands = { written: [], releases: [] };
+  it('says on the picker, before the press, that the trainer will follow the hills — #503', async () => {
+    const commands: Commands = { written: [], releases: [], requests: [] };
     mounted = await mount(
       <GameView
         port={pedallingPort(hillRoute())}
@@ -338,13 +389,18 @@ describe('the road the game draws reaches the trainer', () => {
       />,
     );
     await settle();
-    expect(mounted.container.textContent ?? '').toContain('Ride screen');
+    const text = mounted.container.textContent ?? '';
+    expect(text).toContain('Your trainer will follow this route’s hills');
+    expect(text).toContain('Pressing Ride asks it for control');
+    // ⚠️ Not the detour #503 removed, and not a warning that contradicts it.
+    expect(text).not.toContain('Ride screen');
+    expect(text).not.toContain('will not reach your trainer');
   });
 
   it('tells the rider on the picker when the last release was not confirmed — #372', async () => {
     // A game ride ends on the picker, not on the Ride screen, and a trainer
     // that refused the Stop may still be holding the hill.
-    const commands: Commands = { written: [], releases: [] };
+    const commands: Commands = { written: [], releases: [], requests: [] };
     mounted = await mount(
       <GameView
         port={pedallingPort(hillRoute())}
@@ -363,7 +419,7 @@ describe('the road the game draws reaches the trainer', () => {
   });
 
   it('says nothing about a release when there is nothing to say', async () => {
-    const commands: Commands = { written: [], releases: [] };
+    const commands: Commands = { written: [], releases: [], requests: [] };
     mounted = await mount(
       <GameView
         port={pedallingPort(hillRoute())}
@@ -378,7 +434,7 @@ describe('the road the game draws reaches the trainer', () => {
 
   it('says nothing about the road when there is no trainer at all', async () => {
     // A rider on a power meter has not asked to be driven and is not nagged.
-    const commands: Commands = { written: [], releases: [] };
+    const commands: Commands = { written: [], releases: [], requests: [] };
     await ride(trainerPort({ ...READY, paired: false }, commands));
     const text = mounted?.container.textContent ?? '';
     expect(text).not.toContain('will not reach your trainer');
@@ -395,13 +451,13 @@ describe('the road the game draws reaches the trainer', () => {
   it('shows the rider what the trainer is being told', async () => {
     // The rider-visible evidence `docs/validation/0002` Part I asks somebody
     // with a trainer in front of them to read.
-    const commands: Commands = { written: [], releases: [] };
+    const commands: Commands = { written: [], releases: [], requests: [] };
     await ride(trainerPort(READY, commands));
     expect(mounted?.container.textContent ?? '').toContain('Trainer: simulating');
   });
 
   it('releases the trainer when the rider ends the ride', async () => {
-    const commands: Commands = { written: [], releases: [] };
+    const commands: Commands = { written: [], releases: [], requests: [] };
     await ride(trainerPort(READY, commands));
     expect(commands.releases).toHaveLength(0);
 
@@ -417,7 +473,7 @@ describe('the road the game draws reaches the trainer', () => {
     // The effect's cleanup path — validation 0002 L7, a different line of code
     // making the same claim as End ride. A leaked simulation setpoint is
     // resistance left on a machine with nothing on screen to explain it.
-    const commands: Commands = { written: [], releases: [] };
+    const commands: Commands = { written: [], releases: [], requests: [] };
     await ride(trainerPort(READY, commands));
     await act(async () => {
       mounted?.unmount();
@@ -426,6 +482,110 @@ describe('the road the game draws reaches the trainer', () => {
     });
     mounted = undefined;
     expect(commands.releases).toHaveLength(1);
+  });
+});
+
+describe('the Ride press asks the trainer for control — #503', () => {
+  it('asks for nothing and writes nothing until the rider presses Ride', async () => {
+    const commands: Commands = { written: [], releases: [], requests: [] };
+    mounted = await mount(
+      <GameView
+        port={pedallingPort(hillRoute())}
+        trainer={trainerPort({ ...READY, hasControl: false }, commands)}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+    // Re-rendering the picker reads the trainer again; reading is not asking.
+    await settle();
+    expect(commands.requests).toHaveLength(0);
+    expect(commands.written).toHaveLength(0);
+    expect(commands.releases).toHaveLength(0);
+
+    await clickThrough(buttonStarting('Ride '));
+    await pump(20);
+    await settle();
+
+    // Exactly one request, before the first write, and then the road.
+    expect(commands.requests).toStrictEqual([0]);
+    expect(commands.written.length).toBeGreaterThan(0);
+    expect(mounted.container.textContent ?? '').toContain('Trainer: simulating');
+  });
+
+  it('does not ask a trainer that already has control', async () => {
+    const commands: Commands = { written: [], releases: [], requests: [] };
+    await ride(trainerPort(READY, commands));
+    expect(commands.requests).toHaveLength(0);
+    expect(commands.written.length).toBeGreaterThan(0);
+  });
+
+  for (const [state, snapshot] of [
+    ['no-simulation', { ...READY, hasControl: false, canSimulate: false }],
+    ['not-controllable', { ...READY, hasControl: false, controllable: false }],
+  ] as const) {
+    it(`asks nothing of and writes nothing to a ${state} trainer`, async () => {
+      const commands: Commands = { written: [], releases: [], requests: [] };
+      const { drawn } = await ride(trainerPort(snapshot, commands));
+      expect(drawn.length).toBeGreaterThan(10);
+      expect(commands.requests).toHaveLength(0);
+      expect(commands.written).toHaveLength(0);
+    });
+  }
+
+  it('asks nothing when a workout is holding the trainer without control — the workout notice shows', async () => {
+    const commands: Commands = { written: [], releases: [], requests: [] };
+    await ride(trainerPort({ ...READY, hasControl: false }, commands, true));
+    expect(commands.requests).toHaveLength(0);
+    expect(commands.written).toHaveLength(0);
+    expect(mounted?.container.textContent ?? '').toContain('workout is driving your trainer');
+  });
+
+  /**
+   * ⚠️ A port that asks whenever it is asked — NOT `gameTrainerPortOver`,
+   * whose own guard would hide a `GameView` that asked in the wrong state. This
+   * is what holds the component's gate on its own.
+   */
+  function rawPort(kind: GameTrainer['kind'], requests: number[], fails = false): GameTrainerPort {
+    return {
+      readTrainer: () => ({ kind, control: undefined }),
+      askForControlOnRide: async () => {
+        requests.push(requests.length);
+        return fails ? Promise.reject(new Error('Control Not Permitted')) : Promise.resolve();
+      },
+    };
+  }
+
+  for (const kind of ['none', 'workout', 'not-controllable', 'no-simulation'] as const) {
+    it(`GameView itself asks nothing of a ${kind} trainer, whatever the port would do`, async () => {
+      const requests: number[] = [];
+      const { drawn } = await ride(rawPort(kind, requests), 4);
+      expect(drawn.length).toBeGreaterThan(0);
+      expect(requests).toHaveLength(0);
+    });
+  }
+
+  it('starts the ride and says so when the request itself throws', async () => {
+    const requests: number[] = [];
+    const { drawn } = await ride(rawPort('no-control', requests, true), 4);
+    expect(requests).toHaveLength(1);
+    expect(drawn.length).toBeGreaterThan(0);
+    expect(mounted?.container.textContent ?? '').toContain(
+      'did not grant control when you pressed Ride',
+    );
+  });
+
+  it('asks again on the next ride after a refusal, and only on the press', async () => {
+    const commands: Commands = { written: [], releases: [], requests: [] };
+    await ride(trainerPort({ ...READY, hasControl: false }, commands, false, false), 4);
+    expect(commands.requests).toHaveLength(1);
+    await clickThrough(buttonStarting('End ride'));
+    await settle();
+    // Back on the picker: nothing asked by being there.
+    expect(commands.requests).toHaveLength(1);
+    await clickThrough(buttonStarting('Ride '));
+    await settle();
+    expect(commands.requests).toHaveLength(2);
   });
 });
 
@@ -443,7 +603,7 @@ describe('a standing notice gives the route panel back once it has been read —
   }
 
   it('stands open at the start of a ride, with a control that says so', async () => {
-    await ride(trainerPort(READY, { written: [], releases: [] }, true), 4);
+    await ride(trainerPort(READY, { written: [], releases: [], requests: [] }, true), 4);
     const { wrapper, toggle } = noticeParts();
 
     expect(wrapper?.classList.contains('oyl-hud__notices--collapsed')).toBe(false);
@@ -456,7 +616,7 @@ describe('a standing notice gives the route panel back once it has been read —
 
   it(`puts itself away after ${String(STANDING_NOTICE_SECONDS)} s of ride — and the sentence is still there to be read`, async () => {
     await ride(
-      trainerPort(READY, { written: [], releases: [] }, true),
+      trainerPort(READY, { written: [], releases: [], requests: [] }, true),
       framesFor(STANDING_NOTICE_SECONDS) + 4,
     );
     const { wrapper, toggle } = noticeParts();
@@ -485,7 +645,7 @@ describe('a standing notice gives the route panel back once it has been read —
 
   it('is the rider’s to open and close, whatever the clock says', async () => {
     await ride(
-      trainerPort(READY, { written: [], releases: [] }, true),
+      trainerPort(READY, { written: [], releases: [], requests: [] }, true),
       framesFor(STANDING_NOTICE_SECONDS) + 4,
     );
     await clickThrough(noticeParts().toggle);
@@ -511,7 +671,8 @@ describe('a standing notice gives the route panel back once it has been read —
   ] as const) {
     it(`gives the route panel back in the ${state} state`, async () => {
       await ride(
-        trainerPort(snapshot, { written: [], releases: [] }, workoutRunning),
+        // #503: `no-control` stands only once the Ride press has been refused.
+        trainerPort(snapshot, { written: [], releases: [], requests: [] }, workoutRunning, false),
         framesFor(STANDING_NOTICE_SECONDS) + 4,
       );
       const { wrapper, toggle } = noticeParts();
@@ -523,7 +684,7 @@ describe('a standing notice gives the route panel back once it has been read —
 
   it('stands open again at the start of the next ride', async () => {
     // A rider who put the notice away on one ride has not read the next one's.
-    await ride(trainerPort(READY, { written: [], releases: [] }, true), 4);
+    await ride(trainerPort(READY, { written: [], releases: [], requests: [] }, true), 4);
     await clickThrough(noticeParts().toggle);
     expect(noticeParts().toggle?.getAttribute('aria-expanded')).toBe('false');
 
@@ -534,8 +695,120 @@ describe('a standing notice gives the route panel back once it has been read —
   });
 
   it('offers no toggle when there is nothing standing', async () => {
-    await ride(trainerPort(READY, { written: [], releases: [] }), 4);
+    await ride(trainerPort(READY, { written: [], releases: [], requests: [] }), 4);
     expect(noticeParts().toggle).toBeUndefined();
     expect(noticeParts().wrapper).toBeNull();
+  });
+});
+
+describe('pair, open the game, press Ride — the whole path, against the #44 simulator (#503)', () => {
+  /**
+   * The owner's afternoon on 2026-09-23, without the detour: a trainer paired
+   * and never given control, the game opened, *Ride* pressed — and no visit to
+   * the Ride screen. Everything below the port is real: the ride controller
+   * `main.tsx` builds, its `requestTrainerControl`, `createTrainerControl`, and
+   * the simulator's own FTMS state machine, which refuses a gradient from a
+   * client that does not hold control. What is read back is what the MACHINE
+   * holds, not what a double was handed.
+   */
+  async function onTheBench(refuseControl: boolean) {
+    const harness = createStoreHarness();
+    await seedAthletes(harness);
+    const { transport, bench } = createSimulator({
+      devices: [ftmsTrainer({ id: 'kickr', name: 'KICKR 1F2A' })],
+    });
+    const written: number[][] = [];
+    const controller = createRideController({
+      transport,
+      store: {
+        putRecordingSession: async (record) =>
+          harness.write(async (store) => store.putRecordingSession(record)),
+        appendRecordingChunk: async (chunk) =>
+          harness.write(async (store) => store.appendRecordingChunk(chunk)),
+        listRecordingSessions: async (owner) =>
+          harness.write(async (store) => store.listRecordingSessions(owner)),
+        recoverRecording: async (owner, id) =>
+          harness.write(async (store) => store.recoverRecording(owner, id)),
+        deleteRecordingSession: async (owner, id) =>
+          harness.write(async (store) => store.deleteRecordingSession(owner, id)),
+      },
+      athleteId: ATHLETE_A,
+      newSessionId: () => recordingSessionId('ride-1'),
+      now: () => bench.now,
+      openTrainer: simulatedOpenTrainer(bench, { written, refuseControl }),
+    });
+    await controller.pair('trainer');
+    return {
+      controller,
+      written,
+      machine: () => bench.device(deviceId('kickr')).inspect().ftms,
+      done: async () => {
+        controller.dispose();
+        await harness.destroy();
+      },
+    };
+  }
+
+  async function openTheGame(trainer: GameTrainerPort): Promise<void> {
+    mounted = await mount(
+      <GameView
+        port={pedallingPort(hillRoute())}
+        trainer={trainer}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+  }
+
+  /** Let the control point's queue reach its writes and hear their answers. */
+  async function flush(): Promise<void> {
+    for (let index = 0; index < 10; index += 1) {
+      await settle();
+    }
+  }
+
+  it('takes control on the press and the trainer holds the route’s climb', async () => {
+    const rig = await onTheBench(false);
+    expect(rig.controller.getSnapshot().trainer.hasControl).toBe(false);
+
+    await openTheGame(gameTrainerPortOver(rig.controller));
+    // Entering the game screen writes nothing at all to the machine.
+    expect(rig.written).toHaveLength(0);
+
+    await clickThrough(buttonStarting('Ride '));
+    await flush();
+    await pump(30);
+    await flush();
+
+    // One Request Control, first, and it was the rider's press that sent it.
+    expect(rig.written[0]?.[0]).toBe(0x00);
+    expect(rig.written.filter((write) => write[0] === 0x00)).toHaveLength(1);
+    expect(rig.controller.getSnapshot().trainer.hasControl).toBe(true);
+    // ⚠️ Read from the machine: the simulator accepts a gradient only from a
+    // client that holds control, so a grade here is the whole path working.
+    expect(rig.written.some((write) => write[0] === 0x11)).toBe(true);
+    expect(rig.machine()?.simulation?.grade).toBeGreaterThan(0);
+    await rig.done();
+  });
+
+  it('starts the ride, writes no gradient and says so, when the trainer refuses', async () => {
+    const rig = await onTheBench(true);
+    await openTheGame(gameTrainerPortOver(rig.controller));
+
+    await clickThrough(buttonStarting('Ride '));
+    await flush();
+    await pump(30);
+    await flush();
+
+    expect(rig.written.filter((write) => write[0] === 0x00)).toHaveLength(1);
+    expect(rig.written.some((write) => write[0] === 0x11)).toBe(false);
+    expect(rig.machine()?.simulation).toBeUndefined();
+    const text = mounted?.container.textContent ?? '';
+    expect(text).toContain('End ride');
+    expect(text).toContain('did not grant control when you pressed Ride');
+    // The refusal is also where the Ride screen reads it.
+    expect(rig.controller.getSnapshot().trainer.refusal).toBeDefined();
+    await rig.done();
   });
 });

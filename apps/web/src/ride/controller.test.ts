@@ -15,12 +15,13 @@
  * ⚠️ **The bridge from the simulator's typed control point to octets is written
  * out with literal offsets** rather than by calling `encodeControlRequest`, for
  * the reason `fitness-machine-simulator.test.ts` gives: two implementations that
- * share an arithmetic mistake cancel it out invisibly.
+ * share an arithmetic mistake cancel it out invisibly. Since #503 it lives in
+ * `simulated-trainer-testing.ts`, because the game's wiring test rides the same
+ * trainer.
  */
 
 import {
   gradePercent,
-  metresPerSecond,
   revolutionsPerMinute,
   seconds,
   thresholdShare,
@@ -42,12 +43,6 @@ import {
   createSimulator,
   ftmsTrainer,
   hrsStrap,
-  FITNESS_MACHINE_STATUS_OP_CODE,
-  FTMS_CONTROL_OP_CODE,
-  FTMS_RESULT_CODE,
-  type FitnessMachineStatus,
-  type FtmsControlRequest,
-  type FtmsControlResponse,
   type FtmsOptions,
   type SimulatorBench,
 } from '@onyourleft/sensors/simulator';
@@ -79,6 +74,13 @@ import { gameTrainerFrom } from '../game/trainer-port';
 
 import { METRIC_STALE_AFTER_SECONDS } from './metrics';
 import { targetSentence } from './TrainerPanel';
+import {
+  int16,
+  requestFromOctets,
+  responseToOctets,
+  statusToOctets,
+  viewOf,
+} from './simulated-trainer-testing';
 import type { OpenTrainer, TrainerConnection } from './trainer';
 
 const TRAINER = deviceId('kickr');
@@ -110,69 +112,6 @@ function harnessStore(): RecordingCheckpointStore {
     deleteRecordingSession: async (owner, id) =>
       harness.write(async (store) => store.deleteRecordingSession(owner, id)),
   };
-}
-
-// --- The bridge: the simulator's typed control point, as octets --------------
-
-const viewOf = (bytes: readonly number[]): DataView => {
-  const array = Uint8Array.from(bytes);
-  return new DataView(array.buffer, array.byteOffset, array.byteLength);
-};
-
-const int16 = (raw: number): [number, number] => {
-  const unsigned = raw < 0 ? raw + 0x1_0000 : raw;
-  return [unsigned & 0xff, (unsigned >>> 8) & 0xff];
-};
-
-const readInt16 = (bytes: Uint8Array, at: number): number => {
-  const low = bytes[at] ?? 0;
-  const high = bytes[at + 1] ?? 0;
-  const unsigned = low | (high << 8);
-  return unsigned > 0x7fff ? unsigned - 0x1_0000 : unsigned;
-};
-
-/** FTMS Tables 4.15 and 4.20, with literal offsets. */
-function requestFromOctets(bytes: Uint8Array): FtmsControlRequest {
-  switch (bytes[0]) {
-    case 0x00:
-      return { opCode: 'request-control' };
-    case 0x01:
-      return { opCode: 'reset' };
-    case 0x05:
-      return { opCode: 'set-target-power', target: watts(readInt16(bytes, 1)) };
-    case 0x08:
-      return { opCode: 'stop-or-pause', stop: bytes[1] === 0x01 };
-    case 0x11:
-      // Only what a game ride's gradient write carries is read back.
-      return {
-        opCode: 'set-simulation-parameters',
-        parameters: {
-          windSpeed: metresPerSecond(readInt16(bytes, 1) / 1000),
-          grade: gradePercent(readInt16(bytes, 3) / 100),
-          rollingResistanceCoefficient: (bytes[5] ?? 0) / 10_000,
-          windResistanceCoefficient: (bytes[6] ?? 0) / 100,
-        },
-      };
-    default:
-      throw new Error(`the bridge does not encode op code ${String(bytes[0])}`);
-  }
-}
-
-/** FTMS Table 4.23. */
-const responseToOctets = (response: FtmsControlResponse): DataView =>
-  viewOf([0x80, FTMS_CONTROL_OP_CODE[response.requestOpCode], FTMS_RESULT_CODE[response.result]]);
-
-/** FTMS Table 4.26. */
-function statusToOctets(status: FitnessMachineStatus): DataView {
-  const op = FITNESS_MACHINE_STATUS_OP_CODE[status.kind];
-  switch (status.kind) {
-    case 'target-power-changed':
-      return viewOf([op, ...int16(status.target)]);
-    case 'target-resistance-changed':
-      return viewOf([op, Math.round(status.level * 10)]);
-    default:
-      return viewOf([op]);
-  }
 }
 
 interface Bench {

@@ -300,6 +300,8 @@ describe('a canvas that changes shape reaches the renderer — #423', () => {
 describe('a notice is laid out by the HUD — #423', () => {
   /** A trainer that is paired and has not been given control. @see trainer-port.ts */
   const NO_CONTROL: GameTrainerPort = {
+    // #503: the Ride press's request for control — this double changes nothing.
+    askForControlOnRide: () => Promise.resolve(),
     readTrainer: () => ({ kind: 'no-control', control: undefined }),
   };
 

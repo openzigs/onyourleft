@@ -30,10 +30,39 @@
  * {@link GradientTrainer} is `setSimulationParameters` and `letGo` and
  * nothing else — narrowed for exactly the reason `workout/session.ts` narrows
  * `WorkoutTrainer`: **a method that is not on the type cannot be called by a
- * later edit**. `requestControl()` is a thing the *rider* does — a game screen
+ * later edit**. The component that drives gradients cannot ask for control,
+ * and that is unchanged by #503.
+ *
+ * ## Who asks for control, and when — #503
+ *
+ * ⚠️ **This note used to say the game never asks, and a reviewer who remembers
+ * that is reading the old file.** Until [#503](https://github.com/openzigs/onyourleft/issues/503)
+ * it read: *"`requestControl()` is a thing the *rider* does — a game screen
  * that took control on its own would be the screen deciding to apply physical
  * resistance to somebody, which CLAUDE.md §6 rules out and
- * `RideController.startWorkout` already rules out for the workout path.
+ * `RideController.startWorkout` already rules out for the workout path."* So
+ * the game had no way to ask, and its `no-control` notice sent the rider to
+ * the Ride screen — where the only *Ask the trainer for control* lived inside
+ * the ERG panel. On the owner's tablet that read as "set an ERG before the
+ * game will work", which was never true.
+ *
+ * **What changed is who is deciding, not the rule.** §6's concern is a
+ * *screen* deciding by itself to put resistance on a person. Pressing *Ride*
+ * on a picker that has just said *"your trainer will follow this route's
+ * hills"* ({@link trainerRoadPromise}) is the rider asking for resistance, with
+ * the same informed intent the Ride screen's button carries. So
+ * {@link GameTrainerPort.askForControlOnRide} exists, and `GameView` calls it from
+ * the Ride press and from nowhere else — entering the game screen still asks
+ * nothing and writes nothing. It goes through the ride controller's own
+ * `requestTrainerControl`, never a second path to the control point
+ * ({@link gameTrainerPortOver}).
+ *
+ * Every refusal that makes this safe is unchanged: a running workout keeps the
+ * control point and is never asked over (`workout` is decided first, and
+ * {@link gameTrainerPortOver} refuses as well); a machine without simulation
+ * mode, or with no control point, is never asked or written to; a trainer that
+ * refuses is said in a sentence ({@link trainerRoadNotice}, `riding`); and the
+ * one release (#372) is untouched — nothing takes control back after it.
  *
  * ⚠️ **`stop` was on this type until #372, and `letGo` replaced it** — not
  * because it sends something different (both are an FTMS Stop, since #442 was
@@ -105,7 +134,8 @@ export type GameTrainerKind =
   /**
    * It would take a gradient, and the machine has not granted control.
    *
-   * Taking it is the rider's to do, on the Ride screen. See the module note.
+   * Before a ride: the rider's press on *Ride* asks for it (#503). During one:
+   * it was asked for and the trainer did not grant it. See the module note.
    */
   | 'no-control'
   /** Paired, controllable, offers simulation, and control is held. */
@@ -169,7 +199,124 @@ export interface GameTrainerPort {
    * wrong question there — it may have finished while the rider was riding.
    */
   readTrainer(): GameTrainer;
+  /**
+   * Ask the paired trainer for control — #503.
+   *
+   * ⚠️ **Called from the rider's press on *Ride* and from nowhere else**, and
+   * only when {@link readTrainer} says `no-control`: never on mount, never for a
+   * workout's trainer, never for a machine that cannot simulate. Mounting the
+   * game asks nothing — that is the line between the rider deciding and the
+   * screen deciding. See the module note.
+   *
+   * Resolves once the trainer has answered, either way. A refusal is not
+   * thrown: the next {@link readTrainer} is what says whether control was
+   * granted, so there is one source of truth for the ride's trainer state.
+   *
+   * ⚠️ On the port rather than on {@link GradientTrainer} so that `WIRE003`
+   * (CLAUDE.md §4j) goes red if the game stops calling it, and so that the
+   * component driving gradients still cannot ask.
+   *
+   * ⚠️ **Not called `requestControl`, and that is measured rather than a
+   * taste.** `WIRE003` matches a call by NAME (`check-wiring.mjs` §Limits), and
+   * `ride/controller.ts` calls `TrainerControl.requestControl` — so with this
+   * method spelled that way, deleting `GameView`'s call left `check:wiring`
+   * green. A name nothing else in production calls is what makes the gate able
+   * to fire.
+   */
+  askForControlOnRide(): Promise<void>;
 }
+
+/** What {@link gameTrainerFrom} reads of the ride screen's `TrainerSnapshot`. */
+interface TrainerFacts {
+  readonly paired: boolean;
+  readonly controllable: boolean;
+  readonly canSimulate: boolean;
+  readonly hasControl: boolean;
+  readonly releaseFault?: string | undefined;
+}
+
+/**
+ * What {@link gameTrainerPortOver} needs of the ride controller — the one
+ * `main.tsx` builds, so a rider pairs once and the game finds it.
+ */
+interface GameTrainerSource {
+  getSnapshot(): {
+    readonly trainer: TrainerFacts;
+    readonly workout: { readonly status: string } | undefined;
+  };
+  simulationControl(): GradientTrainer | undefined;
+  requestTrainerControl(): Promise<void>;
+}
+
+/**
+ * The game's trainer port over a ride controller, or over none — #362, #503.
+ *
+ * ⚠️ **The SAME controller the Ride screen uses**, so the request is the
+ * controller's existing `requestTrainerControl` — one path to the control
+ * point, with its refusal recorded where the Ride screen reads it too.
+ *
+ * @param controller `undefined` where there is no ride controller at all —
+ * Safari, Firefox, a page served over plain HTTP.
+ */
+export function gameTrainerPortOver(controller: GameTrainerSource | undefined): GameTrainerPort {
+  const readTrainer = (): GameTrainer => {
+    // One snapshot read for both answers, so the workout state and the
+    // trainer state cannot be a tick apart.
+    const snapshot = controller?.getSnapshot();
+    return gameTrainerFrom(
+      snapshot?.trainer,
+      controller?.simulationControl(),
+      snapshot?.workout !== undefined,
+      // #447: read only for the audio, at the end of a game ride.
+      snapshot?.workout?.status === 'finished',
+    );
+  };
+  return {
+    readTrainer,
+    askForControlOnRide: async () => {
+      // ⚠️ Re-decided here rather than trusted from the caller: a workout that
+      // started between the picker's read and this press owns the control
+      // point, and a Request Control over it is a second client taking the
+      // machine from a running workout.
+      if (controller === undefined || readTrainer().kind !== 'no-control') {
+        return;
+      }
+      await controller.requestTrainerControl();
+    },
+  };
+}
+
+/**
+ * What a rider is told, before a ride, that their trainer WILL do — #503.
+ *
+ * The sentence that makes the *Ride* press an informed request for
+ * resistance: it is on the picker, above the button, before anything is asked
+ * of the machine. `undefined` in every state where the hills will not reach the
+ * trainer — {@link trainerRoadNotice} says those.
+ */
+export function trainerRoadPromise(trainer: GameTrainer): string | undefined {
+  switch (trainer.kind) {
+    case 'ready':
+      return 'Your trainer will follow this route’s hills: the gradient is sent to it as you ride.';
+    case 'no-control':
+      return (
+        'Your trainer will follow this route’s hills. Pressing Ride asks it for control, and ' +
+        'the gradient is sent to it as you ride.'
+      );
+    case 'none':
+    case 'workout':
+    case 'not-controllable':
+    case 'no-simulation':
+      return undefined;
+  }
+}
+
+/**
+ * When a notice is read: on the picker before the rider presses *Ride*, or
+ * once the ride has begun. Only `no-control` differs — see
+ * {@link trainerRoadNotice}.
+ */
+export type RoadNoticeMoment = 'before-ride' | 'riding';
 
 /**
  * What a rider is told about the road their trainer is — or is not — simulating.
@@ -178,12 +325,22 @@ export interface GameTrainerPort {
  * the gradient is being written and the session reports it, and `none`, where
  * the rider is not on a trainer this client can drive and has not asked to be.
  *
+ * ⚠️ **`no-control` says nothing before a ride and says a refusal during one**
+ * (#503). Before, the rider's press is what asks — {@link trainerRoadPromise}
+ * says so. During, the press has already asked, so a trainer still without
+ * control is one that did not grant it. Until #503 this sentence sent the rider
+ * to the Ride screen *"before you start"*, which is the detour that issue
+ * removed.
+ *
  * ⚠️ **Not a "trainer control unavailable" message.** Every sentence here is
  * about the *road*, because that is what the rider is about to be misled about:
  * the screen shows a 6 % climb and the legs feel a flat one, and a notice that
  * said only "no trainer control" would leave them to join those up.
  */
-export function trainerRoadNotice(trainer: GameTrainer): string | undefined {
+export function trainerRoadNotice(
+  trainer: GameTrainer,
+  moment: RoadNoticeMoment,
+): string | undefined {
   switch (trainer.kind) {
     case 'ready':
     case 'none':
@@ -205,11 +362,10 @@ export function trainerRoadNotice(trainer: GameTrainer): string | undefined {
         'to it. The road on screen is real; the resistance under you is not.'
       );
     case 'no-control':
-      return (
-        'Your trainer has not granted control, so the hills on this route are not being sent to ' +
-        'it. Take control on the Ride screen before you start, and the gradient will follow the ' +
-        'road.'
-      );
+      return moment === 'before-ride'
+        ? undefined
+        : 'Your trainer did not grant control when you pressed Ride, so the hills on this route ' +
+            'are not being sent to it. End the ride and press Ride again to ask once more.';
   }
 }
 
@@ -217,8 +373,9 @@ export function trainerRoadNotice(trainer: GameTrainer): string | undefined {
  * Decide what the game may say to the trainer the ride screen holds.
  *
  * A pure function of the two things a caller can observe, so every branch above
- * is reachable from a test without a Bluetooth adapter. `main.tsx` is the one
- * production caller and it supplies both halves from **one** `RideController`
+ * is reachable from a test without a Bluetooth adapter.
+ * {@link gameTrainerPortOver} is the one production caller, and `main.tsx`
+ * hands it **one** `RideController`
  * — the same controller `readSensors` reads, because a second transport would
  * be a second pairing flow against an OS-wide budget of about three
  * connections.
@@ -235,15 +392,7 @@ export function trainerRoadNotice(trainer: GameTrainer): string | undefined {
  * as {@link GameTrainer.workoutFinished}, and read only for the audio.
  */
 export function gameTrainerFrom(
-  snapshot:
-    | {
-        readonly paired: boolean;
-        readonly controllable: boolean;
-        readonly canSimulate: boolean;
-        readonly hasControl: boolean;
-        readonly releaseFault?: string | undefined;
-      }
-    | undefined,
+  snapshot: TrainerFacts | undefined,
   control: GradientTrainer | undefined,
   workoutRunning: boolean,
   workoutFinished = false,
