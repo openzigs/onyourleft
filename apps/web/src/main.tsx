@@ -45,6 +45,12 @@ import type { GhostTrack } from '@onyourleft/domain';
 import type { GameRenderer } from './game/port';
 import { probeBrowser, type CapabilityProbe } from './support/bluetooth-support';
 import { capacitorShellSupport } from './support/shell-support';
+import {
+  browserCameraPort,
+  canvasFrameGrabber,
+  platformMediaDevices,
+} from './camera/browser-camera';
+import { CameraController } from './camera/session';
 import { platformStorage, requestPersistenceOnce } from './support/persistent-storage';
 import type { ShellSupportPort } from './support/shell-support-port';
 import { saveWithAnchor, webCryptoDigest } from './transfer/browser';
@@ -668,11 +674,65 @@ function buildUpdateWatcher(
   });
 }
 
+/**
+ * The camera, or nothing (#382).
+ *
+ * ⚠️ **`undefined` is an ordinary state and is the right answer surprisingly
+ * often**: every browser without `navigator.mediaDevices` — which includes
+ * every browser where the page is not a secure context, and a bundle opened
+ * straight off the disk as `file://` is one. `CameraView` then renders an
+ * explanation and **no control at all**, which is `DevicesView`'s rule: a
+ * disabled button is removed from the tab order, so a keyboard user never
+ * reaches it and never hears why.
+ *
+ * ⚠️ **Built once, here, and held by the shell for the life of the tab.**
+ * `shell/AppShell.tsx` §`camera` says why: ADR 0029 D-5 requires the live
+ * indicator to be showing wherever the rider is, so a camera whose lifetime
+ * belonged to a route would go out the moment they navigated away from it.
+ *
+ * ⚠️ **Nothing here asks for a permission.** `CameraController` is constructed
+ * with no consent and reaches the port only once the rider has agreed on the
+ * Camera screen — #383's criterion that the permission is not requested at app
+ * start, which no manifest can enforce and which a camera prompt on first
+ * launch of a cycling app is the thing that gets an app uninstalled.
+ *
+ * ⚠️ **One port for both platforms, and no branch here.** Inside the Capacitor
+ * shell the WebView's own `getUserMedia` is what opens the camera — Capacitor's
+ * bridge answers the WebView's permission request by asking Android for the
+ * runtime grant — so the browser adapter is the implementation on both.
+ *
+ * ⚠️ **The global is read in `camera/browser-camera.ts` rather than here**,
+ * which is the one departure from this file's usual rule that it owns every
+ * platform read. `camera/boundary.test.ts` says why: no camera platform name
+ * may appear outside `apps/web/src/camera/`, and `navigator.mediaDevices` is
+ * one of them.
+ */
+function buildCameraController(): CameraController | undefined {
+  // ⚠️ Not called `mediaDevices`. `camera/boundary.test.ts` forbids that NAME
+  // outside `apps/web/src/camera/`, and a local variable is a name — the scan
+  // is deliberately about the word rather than about an import, because the
+  // failure it prevents is a platform object being passed around under its own
+  // name in a file that has no business holding one.
+  const cameraDevices = platformMediaDevices();
+  if (cameraDevices === undefined) {
+    return undefined;
+  }
+  return new CameraController({
+    port: browserCameraPort({
+      devices: cameraDevices,
+      grabber: canvasFrameGrabber(),
+      secureContext: globalThis.isSecureContext,
+    }),
+  });
+}
+
 async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const platform = await buildPlatform(capabilities);
   const rideController = platform.rideController;
   // Read once: two calls would be two reads of a global for one prop.
   const storage = platformStorage();
+  // Built once per tab, for the reason `buildCameraController` gives.
+  const camera = buildCameraController();
   const root = createRoot(container);
   const draw = (update: UpdateWatcher | undefined): void => {
     root.render(
@@ -682,6 +742,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(update === undefined ? {} : { update })}
           {...(storage === undefined ? {} : { storage })}
           {...(platform.shell === undefined ? {} : { shell: platform.shell })}
+          {...(camera === undefined ? {} : { camera })}
           settings={buildUnitsPort()}
           athleteMass={buildAthleteMassPort()}
           // ⚠️ The **stored** mass, read before the first paint, and passed on

@@ -1,0 +1,412 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * **The browser's camera, behind the port** (#382).
+ *
+ * This is the only file in the client that names `getUserMedia`, a
+ * `MediaStream` or an `HTMLVideoElement`, and `boundary.test.ts` is what keeps
+ * that true. The rule is `packages/sensors`': *"Web Bluetooth types must not
+ * escape above the transport boundary"*, applied to a second platform API — and
+ * for the same reason, which is that #383's Android path and #328's classifier
+ * both have to be satisfiable by the same interface.
+ *
+ * ## The re-encode is the privacy guarantee, and it is one line
+ *
+ * [ADR 0029](../../../../docs/adr/0029-camera-imagery-as-a-data-class.md) D-9:
+ * a frame is *"re-encoded from raw pixels, not filtered"*, at capture, in one
+ * place. That place is {@link canvasFrameGrabber}: the video track is drawn
+ * onto a canvas and the **canvas** is asked for an image. A canvas holds
+ * pixels; it has nowhere to put an Exif GPS IFD, an XMP packet or an IPTC
+ * block, so the output has none — not because they were removed but because
+ * they were never in the pipeline.
+ *
+ * ⚠️ **`frame.ts` refuses anything that came back carrying one anyway**, which
+ * is the check on this guarantee rather than the guarantee itself. A future
+ * adapter that reached for the sensor's own JPEG — `ImageCapture.takePhoto()`
+ * is the obvious candidate and returns exactly that — would leak the rider's
+ * front door, and every test above it would stay green because a JPEG is a
+ * JPEG. `capturedFrame` throws instead.
+ *
+ * ## Why every platform object is injected
+ *
+ * jsdom implements no `getUserMedia`, no `<video>` playback and no canvas 2D
+ * context, so a module that reached for `navigator.mediaDevices` directly could
+ * not be tested at all — and the states that matter most are the refusals,
+ * which no test machine can produce on demand even in a real browser.
+ * `main.tsx` is the one caller that reads the real browser, exactly as it is
+ * for `probeBrowser` and `platformWakeLock`.
+ *
+ * ⚠️ **What the injection does NOT cover is the one line that matters**, and it
+ * is said here rather than left implied: the re-encode itself runs only in a
+ * real engine. `browser/shell.browser.spec.ts` §"the camera, in a real engine"
+ * is where it is exercised — Chromium is launched with
+ * `--use-fake-device-for-media-stream`, which gives a synthetic camera, and the
+ * spec asserts that a real `getUserMedia` → canvas → `toBlob` round trip
+ * produces a JPEG whose bytes carry no metadata marker. Without it, the whole
+ * of D-9 would rest on a fake returning whatever the test author typed.
+ */
+
+import { CameraCaptureError } from './camera-port';
+import type {
+  CameraAvailability,
+  CameraPermission,
+  CameraPort,
+  CameraProblemKind,
+  CameraSession,
+  CapturedFrame,
+} from './camera-port';
+import { capturedFrame, FRAME_MEDIA_TYPE, FRAME_QUALITY } from './frame';
+import { cameraProblemMessage } from './notice';
+
+/** The slice of `MediaStreamTrack` this module uses. */
+export interface VideoTrackLike {
+  /** `'live'` while the camera is running; `'ended'` once it is not. */
+  readonly readyState: string;
+  /**
+   * ⚠️ `stop`, not `stopCamera` — this mirrors `MediaStreamTrack`, whose method
+   * is called `stop`, and a name of our own would stop the real object being
+   * assignable to it. {@link CameraSession.stopCamera} is the one that carries
+   * a distinctive name, and `camera-port.ts` says why.
+   */
+  stop(): void;
+}
+
+/** The slice of `MediaStream` this module uses. */
+export interface MediaStreamLike {
+  getVideoTracks(): readonly VideoTrackLike[];
+}
+
+/** The slice of `navigator.mediaDevices` this module uses. */
+export interface MediaDevicesLike {
+  getUserMedia(constraints: unknown): Promise<MediaStreamLike>;
+  /**
+   * Optional, because a browser may expose `getUserMedia` and not this.
+   *
+   * ⚠️ **It is used for `cameraAvailability()` only, and it is NOT authoritative
+   * about whether a camera exists.** Before any permission is granted, a
+   * browser reports device entries with empty labels and — in some versions —
+   * reports a `videoinput` for a device that has none, or none for a device
+   * that has one. So an empty list is read as `no-camera` and a non-empty one
+   * as `available`, and the real answer comes from `getUserMedia` rejecting,
+   * which is the call that actually knows.
+   */
+  enumerateDevices?: () => Promise<readonly { readonly kind: string }[]>;
+}
+
+/** One frame's worth of pixels, encoded. @see canvasFrameGrabber */
+export interface GrabbedFrame {
+  readonly bytes: Uint8Array;
+  readonly mediaType: string;
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * Turns a live stream into encoded bytes.
+ *
+ * Injected rather than imported so that {@link browserCameraPort} is reachable
+ * from a test with no canvas — see the file header for what that costs and
+ * where the cost is paid.
+ */
+export interface FrameGrabber {
+  grab(stream: MediaStreamLike): Promise<GrabbedFrame>;
+}
+
+/** What a camera is asked for. @see browserCameraPort */
+export interface BrowserCameraOptions {
+  /**
+   * ⚠️ Called `devices` rather than `mediaDevices`, which is the name it has on
+   * `navigator`. `boundary.test.ts` forbids that word outside this directory
+   * and a property key is a word — so a caller writing
+   * `mediaDevices: somethingElse` would be a red test in a file that had done
+   * nothing wrong. Renaming the *key* is cheaper than loosening the scan,
+   * because what the scan is for is a platform object being carried around
+   * under its own name by code with no business holding one.
+   */
+  readonly devices: MediaDevicesLike;
+  readonly grabber: FrameGrabber;
+  /**
+   * Whether this page may use a camera at all.
+   *
+   * `isSecureContext` in production. A camera is gated on a secure context in
+   * every browser that has one, and a page opened from the disk as `file://` is
+   * not one — which is a real state for this product, because the bundle is
+   * something a rider can download and open. `support/bluetooth-support.ts`
+   * makes the same check for the same reason and #48's first criterion is why:
+   * no control that looks like the way in and cannot work.
+   */
+  readonly secureContext: boolean;
+}
+
+/**
+ * What a rejection from `getUserMedia` means.
+ *
+ * ⚠️ **The mapping takes the `name` and throws the `message` away.** A
+ * `DOMException`'s message is written by the browser and can name a device —
+ * *"Requested device not found"* is the harmless end, and Chromium has shipped
+ * messages carrying a device label. ADR 0029 D-8's scope is *"every layer that
+ * formats one"*, and this is the layer where a platform string would otherwise
+ * enter the program.
+ *
+ * The four names are the ones the Media Capture and Streams specification
+ * defines for this call. Anything else is `unavailable`, which is the honest
+ * answer for "the camera did not open and we do not know why".
+ */
+function problemFor(error: unknown): CameraProblemKind {
+  const name = error instanceof Error ? error.name : '';
+  switch (name) {
+    case 'NotAllowedError':
+    case 'SecurityError':
+      return 'not-permitted';
+    case 'NotFoundError':
+    case 'OverconstrainedError':
+      return 'no-camera';
+    default:
+      return 'unavailable';
+  }
+}
+
+/**
+ * What the camera is asked for.
+ *
+ * ⚠️ `facingMode: 'environment'` is an **ideal**, not a requirement: on the
+ * owner's arrangement — a second phone on a tripod, side-on — the rear camera
+ * is the one pointing at the rider, and on a laptop there is only one camera
+ * and an exact constraint would make `getUserMedia` reject with
+ * `OverconstrainedError` rather than use it.
+ *
+ * ⚠️ There is **no resolution constraint**, deliberately. Asking for a
+ * specific size makes the browser scale, which costs a copy per frame for a
+ * property nothing in this milestone reads; `frame.ts` records the actual
+ * dimensions instead, so whatever the device gave is what is written down.
+ */
+export const CAMERA_CONSTRAINTS = {
+  video: { facingMode: { ideal: 'environment' } },
+  audio: false,
+} as const;
+
+/**
+ * This browser's own media devices, or `undefined`.
+ *
+ * ⚠️ **The read lives HERE rather than in `main.tsx`**, which is otherwise
+ * *"the one file that may read a global"*, and the reason is `boundary.test.ts`:
+ * the rule it enforces is that no camera platform name appears outside
+ * `apps/web/src/camera/`, and `navigator.mediaDevices` is one. An exception for
+ * one file would be an exception a second file inherits — `support/capacitor.ts`
+ * and `support/persistent-storage.ts` both make the same move for the same
+ * reason, each owning the one global its own feature needs.
+ *
+ * `undefined` on every browser where the API is absent, which includes every
+ * page that is not a secure context — a bundle opened straight off the disk as
+ * `file://` among them, which is a real state for this product.
+ */
+export function platformMediaDevices(): MediaDevicesLike | undefined {
+  const devices = globalThis.navigator?.mediaDevices as MediaDevicesLike | undefined;
+  return devices === undefined || typeof devices.getUserMedia !== 'function' ? undefined : devices;
+}
+
+/**
+ * A {@link CameraPort} over a browser's own media devices.
+ *
+ * ⚠️ **`requestCameraAccess()` and `startCamera()` are the same platform call**, and that is a
+ * property of the web platform rather than a shortcut here: there is no way to
+ * ask a browser for camera permission without asking for a camera. So
+ * `requestCameraAccess()` opens a stream, **stops it immediately**, and reports the answer;
+ * `startCamera()` opens one and keeps it. The cost is that a rider sees the camera
+ * light blink once when they grant permission, and the alternative — folding
+ * the two into one method — would make the port unimplementable on a platform
+ * where they genuinely are separate, which is every native one.
+ */
+export function browserCameraPort(options: BrowserCameraOptions): CameraPort {
+  const { devices, grabber, secureContext } = options;
+
+  return {
+    async cameraAvailability(): Promise<CameraAvailability> {
+      if (!secureContext) {
+        return { kind: 'unsupported' };
+      }
+      const enumerate = devices.enumerateDevices;
+      if (enumerate === undefined) {
+        // No way to ask in advance. That is not a fault: `startCamera()` is the call
+        // that knows, and reporting `available` here lets the rider reach it.
+        return { kind: 'available' };
+      }
+      try {
+        const listed = await enumerate.call(devices);
+        return listed.some((device) => device.kind === 'videoinput')
+          ? { kind: 'available' }
+          : { kind: 'no-camera' };
+      } catch {
+        // A browser that refuses to enumerate has told us nothing about
+        // whether there is a camera, so `startCamera()` is still worth reaching.
+        return { kind: 'available' };
+      }
+    },
+
+    async requestCameraAccess(): Promise<CameraPermission> {
+      if (!secureContext) {
+        return { kind: 'unsupported' };
+      }
+      try {
+        const stream = await devices.getUserMedia(CAMERA_CONSTRAINTS);
+        // Stopped at once: this call exists to raise the prompt, not to hold
+        // the hardware. Leaving it running would light the camera from the
+        // moment consent was given, which is precisely the thing the indicator
+        // is supposed to mean something about.
+        for (const track of stream.getVideoTracks()) {
+          track.stop();
+        }
+        return { kind: 'granted' };
+      } catch (error) {
+        return { kind: problemFor(error) };
+      }
+    },
+
+    async startCamera(): Promise<CameraSession> {
+      if (!secureContext) {
+        throw new CameraCaptureError('unsupported', cameraProblemMessage('unsupported'));
+      }
+      let stream: MediaStreamLike;
+      try {
+        stream = await devices.getUserMedia(CAMERA_CONSTRAINTS);
+      } catch (error) {
+        const kind = problemFor(error);
+        throw new CameraCaptureError(kind, cameraProblemMessage(kind));
+      }
+      return browserSession(stream, grabber);
+    },
+  };
+}
+
+function browserSession(stream: MediaStreamLike, grabber: FrameGrabber): CameraSession {
+  let stopped = false;
+  return {
+    get live(): boolean {
+      if (stopped) {
+        return false;
+      }
+      // Read from the TRACK rather than from our own flag: a track ends when
+      // the rider revokes the permission from the operating system's own
+      // indicator, or when something else takes the device, and neither goes
+      // through this object. `session.ts` polls this so the live indicator
+      // follows the hardware.
+      return stream.getVideoTracks().some((track) => track.readyState === 'live');
+    },
+    async captureFrame(): Promise<CapturedFrame> {
+      if (stopped) {
+        throw new CameraCaptureError('unavailable', cameraProblemMessage('unavailable'));
+      }
+      let grabbed: GrabbedFrame;
+      try {
+        grabbed = await grabber.grab(stream);
+      } catch (error) {
+        // A `CameraCaptureError` from the grabber already carries a message
+        // from the fixed table; anything else is a platform string and is
+        // replaced rather than wrapped. ADR 0029 D-8.
+        if (error instanceof CameraCaptureError) {
+          throw error;
+        }
+        throw new CameraCaptureError('unavailable', cameraProblemMessage('unavailable'));
+      }
+      return capturedFrame(grabbed);
+    },
+    stopCamera(): void {
+      stopped = true;
+      for (const track of stream.getVideoTracks()) {
+        track.stop();
+      }
+    },
+  };
+}
+
+/**
+ * The real grabber: a `<video>` playing the stream, drawn onto a canvas, asked
+ * for a JPEG.
+ *
+ * ⚠️ **Every step of this is the D-9 guarantee and none of it is reachable from
+ * jsdom**, which implements no media playback and no 2D context. It is
+ * exercised in `browser/shell.browser.spec.ts` against a real Chromium with a
+ * synthetic camera; see the file header.
+ *
+ * ⚠️ The video element is **not** attached to the document. It does not need to
+ * be — `drawImage` reads from the element, not from the layout — and attaching
+ * it would put a live picture of the rider on a screen nobody asked to see it
+ * on, which is ADR 0029 D-11's own concern arriving through a back door.
+ */
+export function canvasFrameGrabber(): FrameGrabber {
+  return {
+    async grab(stream: MediaStreamLike): Promise<GrabbedFrame> {
+      // The cast is the boundary: above this line the program has a
+      // `MediaStreamLike`, and only the browser's own API needs the real thing.
+      const media = stream as unknown as MediaStream;
+      const video = document.createElement('video');
+      video.srcObject = media;
+      video.muted = true;
+      video.playsInline = true;
+      try {
+        await video.play();
+        await onceReady(video);
+        const width = video.videoWidth;
+        const height = video.videoHeight;
+        if (width === 0 || height === 0) {
+          throw new CameraCaptureError('unavailable', cameraProblemMessage('unavailable'));
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext('2d');
+        if (context === null) {
+          throw new CameraCaptureError('unavailable', cameraProblemMessage('unavailable'));
+        }
+        context.drawImage(video, 0, 0, width, height);
+        const blob = await toBlob(canvas);
+        return {
+          bytes: new Uint8Array(await blob.arrayBuffer()),
+          mediaType: FRAME_MEDIA_TYPE,
+          width,
+          height,
+        };
+      } finally {
+        // Detached whatever happened, so a failed capture does not leave an
+        // element holding the stream alive.
+        video.srcObject = null;
+      }
+    },
+  };
+}
+
+/** Resolves once the element has a frame to draw. */
+async function onceReady(video: HTMLVideoElement): Promise<void> {
+  if (video.readyState >= video.HAVE_CURRENT_DATA) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    video.addEventListener('loadeddata', () => {
+      resolve();
+    });
+  });
+}
+
+/**
+ * `canvas.toBlob`, as a promise.
+ *
+ * ⚠️ It hands back `null` rather than rejecting when it cannot encode, which is
+ * the sort of API contract that turns into a `TypeError` three frames later.
+ * The `null` is turned into the same fixed-message error as everything else
+ * here.
+ */
+async function toBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob === null) {
+          reject(new CameraCaptureError('unavailable', cameraProblemMessage('unavailable')));
+          return;
+        }
+        resolve(blob);
+      },
+      FRAME_MEDIA_TYPE,
+      FRAME_QUALITY,
+    );
+  });
+}

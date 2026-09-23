@@ -2254,3 +2254,80 @@ select option {
     scroll-behavior: auto !important;
   }
 }
+
+/*
+ * THE LIVE CAMERA INDICATOR — #382, ADR 0029 D-5.
+ *
+ * `camera/indicator.tsx` is the component and the argument; this is the half
+ * CLAUDE.md §4f says must be *"reviewed by measuring it in the pinned Chromium,
+ * not by reading the CSS"*, and `browser/shell.browser.spec.ts` §"the live
+ * camera indicator" is that measurement.
+ *
+ * ## `position: fixed`
+ *
+ * Scrolling the page must not be able to carry it off the screen. The spec
+ * scrolls a 4000 px document to the bottom and reads the box back, which is the
+ * only way to tell this from `position: sticky` inside a container that has
+ * scrolled away — the mistake `browser/shell-harness.tsx` §`SPACER_PIXELS`
+ * records at length about the header.
+ *
+ * ## `z-index: 30`
+ *
+ * ⚠️ **The largest number in this stylesheet, and it has to be.** The next
+ * largest is `.oyl-game--riding`'s 20, and the camera may well be running
+ * *during* a ride — that is the arrangement the owner chose (ADR 0029's
+ * 2026-09-23 amendment, Q4: a second phone on a tripod, side-on). A bystander
+ * walking in while the stage is up is exactly the case D-5's indicator exists
+ * for, so losing to the stage would lose in the one state that matters.
+ * `camera/indicator.test.ts` reads this file and asserts no other rule declares
+ * a higher one, so a panel added next year at 999 is a red test.
+ *
+ * ## `top`, not `bottom`
+ *
+ * A person entering a room looks at the top of a screen on a tripod at hip
+ * height, and the bottom edge is where a phone's gesture bar and a browser's
+ * own chrome live. `--oyl-safe-top` keeps it clear of a notch.
+ *
+ * ## Colour is not the signal
+ *
+ * The word is (`camera/indicator.tsx`). The tokens are the shipped danger pair,
+ * whose contrast is already declared and measured in `design/tokens.ts` —
+ * `dangerInk` on `dangerSurface` at 8.81, `dangerBorder` on `canvas` at 6.63 —
+ * so this rule adds no new pair and no new margin to erode. Opaque, for the
+ * reason `tokens.ts` §`hudSurface` gives about the HUD: a translucent panel
+ * over a 3D world has no second colour for the contrast suite to check against.
+ */
+.oyl-camera-indicator {
+  align-items: center;
+  background: var(--oyl-color-danger-surface);
+  border: 2px solid var(--oyl-color-danger-border);
+  border-radius: var(--oyl-radius);
+  color: var(--oyl-color-danger-ink);
+  display: flex;
+  font-size: var(--oyl-font-size-sm);
+  font-weight: 600;
+  gap: var(--oyl-space-xs);
+  inset-block-start: calc(var(--oyl-safe-top) + var(--oyl-space-xs));
+  inset-inline-end: calc(var(--oyl-safe-right) + var(--oyl-space-xs));
+  padding: var(--oyl-space-xs) var(--oyl-space-sm);
+  position: fixed;
+  z-index: 30;
+}
+
+/*
+ * The redundant second signal. `aria-hidden` in the component, because the word
+ * beside it says the same thing — `design/StatusMessage.tsx` §`GLYPH` makes the
+ * same call for the same reason.
+ *
+ * It does not blink. A blinking element is a WCAG 2.2 SC 2.2.2 question the
+ * moment it runs for more than five seconds, and this one runs for the length
+ * of a ride; the `prefers-reduced-motion` and `update: slow` blocks at the end
+ * of this file would have to be its exceptions, and an indicator that stops
+ * moving for some readers would then mean two different things on two screens.
+ */
+.oyl-camera-indicator__dot {
+  background: var(--oyl-color-danger-ink);
+  block-size: 0.6rem;
+  border-radius: 50%;
+  inline-size: 0.6rem;
+}

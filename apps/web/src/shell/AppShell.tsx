@@ -43,6 +43,7 @@ import type { Kilograms } from '@onyourleft/domain';
 
 import { GameView } from '../game/GameView';
 import { AboutView } from '../views/AboutView';
+import { CameraView } from '../views/CameraView';
 import { HomeView } from '../views/HomeView';
 import { ActivitiesView } from '../views/ActivitiesView';
 import { ActivityDetailView } from '../views/ActivityDetailView';
@@ -78,6 +79,9 @@ import type { MatchPort } from '../segments/match-port';
 import type { SegmentPort } from '../segments/store-port';
 import type { RoutePort } from '../routes/store-port';
 import type { WorkoutPort } from '../workouts/store-port';
+
+import { CameraIndicator } from '../camera/indicator';
+import type { CameraController } from '../camera/session';
 
 import { UpdateOffer } from '../offline/UpdateOffer';
 import type { UpdateWatcher } from '../offline/update';
@@ -120,6 +124,24 @@ export interface AppShellProps {
    * rendered by the accessibility suite on a machine that is not a phone.
    */
   readonly shell?: ShellSupportPort | undefined;
+  /**
+   * The camera, its consent and whether it is running (#382).
+   *
+   * Optional like every other port here, and `undefined` is an ordinary state:
+   * a browser with no `navigator.mediaDevices`, a page opened from the disk
+   * where there is no secure context, and the accessibility suite's default.
+   * `CameraView` then renders an explanation and no control at all, which is
+   * the rule `views/DevicesView.tsx` states.
+   *
+   * ⚠️ **It is held by the shell rather than by the route**, and that is the
+   * whole reason the controller is not React state inside `CameraView`: ADR
+   * 0029 D-5 requires the live indicator to be showing *"visible from where a
+   * person would enter"*, which means on whatever screen the device happens to
+   * be on — including the ride stage, where every other piece of chrome is
+   * deliberately absent. A camera owned by a route would go out the moment the
+   * rider navigated away from it, and the indicator with it.
+   */
+  readonly camera?: CameraController | undefined;
   /**
    * A new version of the app waiting to take over (#407).
    *
@@ -367,10 +389,15 @@ function viewFor(
           riderMass={riderMass}
           // #423. A ride takes the screen over; this is how the shell hears.
           onImmersive={onImmersive}
+          // #382. The quality ladder's fifth figure reaches the camera through
+          // here and nowhere else — `game/quality.ts` §`QualitySettings.capture`.
+          {...(props.camera === undefined ? {} : { camera: props.camera })}
         />
       );
     case 'segment-detail':
       return <SegmentDetailView port={props.efforts} segment={match.parameter} />;
+    case 'camera':
+      return <CameraView {...(props.camera === undefined ? {} : { controller: props.camera })} />;
     case 'devices':
       return (
         <DevicesView
@@ -500,6 +527,19 @@ export function AppShell(props: AppShellProps): JSX.Element {
         {props.rideController === undefined ? null : (
           <RideSession controller={props.rideController} />
         )}
+
+        {/*
+          ⚠️ **Rendered whatever else is on screen, including mid-ride** — it is
+          NOT behind the `immersive` check every other piece of chrome is behind
+          (#423), and that is ADR 0029 D-5 rather than an oversight: the
+          indicator is *"the one thing in the room that tells somebody walking
+          in that a camera is running"*, and a ride is exactly when one is. It
+          renders `null` unless a camera is actually live, so it costs an absent
+          element the rest of the time. `camera/indicator.tsx` records what
+          "cannot be hidden by a scrolled page or an overlay" means and where it
+          is measured.
+        */}
+        <CameraIndicator {...(props.camera === undefined ? {} : { controller: props.camera })} />
 
         {/* #423: nothing to skip past while a ride has the screen. @see immersive */}
         {immersive ? null : (

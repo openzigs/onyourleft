@@ -952,3 +952,179 @@ test.describe('#397 — the announcement controls', () => {
     expect(input?.height ?? Infinity).toBeLessThan(MINIMUM_TARGET_PIXELS);
   });
 });
+
+/**
+ * The live-camera indicator — #382,
+ * [ADR 0029](../../../docs/adr/0029-camera-imagery-as-a-data-class.md) D-5.
+ *
+ * ## What is being decided, because #382 asks for it to be decided
+ *
+ * *"Cannot be hidden by a scrolled page or an overlay"* is not a property a
+ * `z-index` has. Any element can be drawn over any other by something with a
+ * higher stacking order, and `camera/indicator.tsx` says so in terms. What can
+ * be claimed, and is claimed here, is three things:
+ *
+ * 1. **Scrolling cannot move it.** The page is 4000 px tall — that is
+ *    {@link SPACER_PIXELS} in the harness — and the indicator's box is read
+ *    before and after scrolling to the bottom.
+ * 2. **Nothing this product draws covers it.** The harness lays a full-viewport
+ *    element at `z-index: 20` over the page, which is the ride stage's own
+ *    value and the highest this stylesheet declares — and the ride is exactly
+ *    when a camera is most likely to be running. The indicator must still be
+ *    the element `elementFromPoint` returns at its own centre.
+ * 3. **It is on screen at every viewport measured**, including the 320×256 one
+ *    WCAG 2.2 SC 1.4.10 names, where the chrome has least room.
+ *
+ * ⚠️ **The hit test is the assertion `indicator-style.test.ts` cannot make.**
+ * That suite reads the stylesheet and proves no other rule declares a higher
+ * number; it cannot see that an ancestor's `transform`, `filter` or `opacity`
+ * creates a stacking context and traps a child's `z-index` inside it, however
+ * large the number is. Only a real engine knows.
+ *
+ * ⚠️ **The control is `?camera=live` being absent.** Every other case on this
+ * page loads `/shell.html` with no query string and the indicator is not
+ * rendered at all — so the last case here asserts the absence, and without it
+ * every assertion above would be equally true of a harness that had quietly
+ * stopped switching the camera on.
+ */
+test.describe('the live camera indicator', () => {
+  /** The product's own maximum stacking order, and the overlay's. @see shell-harness */
+  const OVERLAY_STACKING = 20;
+
+  async function openWithCamera(page: Page): Promise<void> {
+    await page.goto('/shell.html?camera=live');
+    await page.waitForSelector('html[data-oyl-shell-ready]');
+    await page.waitForSelector('[data-oyl-camera-indicator]');
+  }
+
+  test('is rendered, on screen, at the viewport WCAG 2.2 names', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 256 });
+    await openWithCamera(page);
+    const box = await page.locator('[data-oyl-camera-indicator]').boundingBox();
+    expect(box, 'the indicator has no box at all').not.toBeNull();
+    expect(box?.y ?? -1).toBeGreaterThanOrEqual(0);
+    expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(256);
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(320);
+  });
+
+  test('a scrolled page cannot carry it off the screen', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openWithCamera(page);
+    const before = await page.locator('[data-oyl-camera-indicator]').boundingBox();
+
+    await page.evaluate(() => {
+      globalThis.scrollTo(0, document.documentElement.scrollHeight);
+    });
+    await settled(page);
+
+    // The control on the control: a page that could not scroll would make the
+    // comparison below trivially true, which is exactly what `SPACER_PIXELS`
+    // in the harness exists to prevent and what the header's own measurement
+    // got wrong first time.
+    expect(await page.evaluate(() => globalThis.scrollY)).toBeGreaterThan(100);
+
+    const after = await page.locator('[data-oyl-camera-indicator]').boundingBox();
+    expect(after?.y).toBeCloseTo(before?.y ?? -1, 0);
+    expect(after?.x).toBeCloseTo(before?.x ?? -1, 0);
+  });
+
+  test('nothing this product draws covers it', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openWithCamera(page);
+
+    const hit = await page.evaluate(() => {
+      const region = document.querySelector('[data-oyl-camera-indicator]');
+      const overlay = document.querySelector('[data-oyl-overlay]');
+      if (region === null || overlay === null) {
+        return { found: false, topmost: '', overlayStacking: '' };
+      }
+      const box = region.getBoundingClientRect();
+      const at = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      return {
+        found: true,
+        // `closest` rather than the element itself: the point lands on the
+        // text node's inline box, whose parent is the region.
+        topmost:
+          at?.closest('[data-oyl-camera-indicator]') === region ? 'indicator' : 'something else',
+        overlayStacking: globalThis.getComputedStyle(overlay).zIndex,
+      };
+    });
+
+    // The overlay is really there and really at the product's maximum: without
+    // this the hit test would be over an empty page and would pass for a
+    // reason unrelated to stacking.
+    expect(hit.found, 'the harness rendered no overlay to be covered by').toBe(true);
+    expect(Number(hit.overlayStacking)).toBe(OVERLAY_STACKING);
+    expect(hit.topmost).toBe('indicator');
+  });
+
+  test('the control — with no camera running there is no indicator at all', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openShell(page);
+    await expect(page.locator('[data-oyl-camera-indicator]')).toHaveCount(0);
+  });
+});
+
+/**
+ * The camera, in a real engine — #382, ADR 0029 D-9.
+ *
+ * ⚠️ **This is the only place in the repository where the re-encode from raw
+ * pixels actually runs.** Everything above it — `frame.ts`'s refusal,
+ * `browser-camera.test.ts`'s scripted devices, `session.test.ts`'s scripted
+ * camera — is green against bytes a test author chose. The guarantee ADR 0029
+ * D-9 rests on is one line in one adapter: the video track is drawn onto a
+ * canvas and the **canvas** is asked for a JPEG, so the output is built from
+ * pixels and has nowhere to put an Exif GPS IFD.
+ *
+ * Chromium is launched with `--use-fake-device-for-media-stream`
+ * (`playwright.config.ts` §`LAUNCH_ARGS`), which supplies a synthetic camera —
+ * a rolling colour pattern — so `getUserMedia` resolves on a runner with no
+ * hardware.
+ *
+ * ⚠️ **What it does NOT prove.** Nothing about a phone's own camera, which is
+ * the device that actually writes Exif — a synthetic stream has no metadata to
+ * carry in the first place, so a green run here says the *pipeline* produces a
+ * clean JPEG and not that a hostile source was cleaned. What defends the second
+ * is the construction: a canvas holds pixels. `docs/validation/0002-…` Part S
+ * is where somebody with a real phone records what the shipped path produced.
+ */
+test.describe('the camera, in a real engine', () => {
+  test('a real getUserMedia, a real canvas encode, and no metadata in the result', async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(['camera']);
+    await page.goto('/shell.html');
+    await page.waitForSelector('html[data-oyl-shell-ready]');
+
+    const result = (await page.evaluate(async () =>
+      (globalThis as unknown as { __oylCamera: () => Promise<unknown> }).__oylCamera(),
+    )) as {
+      opened: boolean;
+      availability?: string;
+      permission?: string;
+      mediaType?: string;
+      bytes?: number;
+      width?: number;
+      height?: number;
+      soi?: number[];
+    };
+
+    expect(result.opened, 'the synthetic camera did not open').toBe(true);
+    expect(result.permission).toBe('granted');
+    // A real frame, not an empty buffer: the fake device is 640×480 by default
+    // and a JPEG of it is thousands of bytes. A zero here would mean the
+    // encode produced nothing and every assertion below would be about nothing.
+    expect(result.width ?? 0).toBeGreaterThan(0);
+    expect(result.height ?? 0).toBeGreaterThan(0);
+    expect(result.bytes ?? 0).toBeGreaterThan(1000);
+    // The browser really produced a JPEG — read from the bytes rather than from
+    // the media type this client asked for. 0xFF 0xD8 is the SOI marker.
+    expect(result.soi).toStrictEqual([0xff, 0xd8]);
+    expect(result.mediaType).toBe('image/jpeg');
+    // And `capturedFrame` accepted it, which is `frame.ts`'s refusal not
+    // firing: a re-encode that had carried a marker through would have thrown
+    // inside the harness and `opened` would be an unhandled rejection rather
+    // than `true`.
+  });
+});

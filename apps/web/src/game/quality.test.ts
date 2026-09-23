@@ -712,4 +712,59 @@ describe('the extra display-rate step — the owner’s ruling, #482', () => {
     const firstCapped = walk.findIndex((rung) => rung.frameCap < DISPLAY_RATE);
     expect(firstCapped - leftRealism).toBe(2);
   });
+  /**
+   * #382 — capture goes before the world does.
+   *
+   * ⚠️ **Stated over the ladder rather than over a rung index**, so it survives
+   * a rung being retuned. What is asserted is an ORDER between two derived
+   * indices, and both are computed from the ladder itself: the first rung that
+   * refuses a capture, and the first rung that gives up anything about the
+   * world. `quality.ts` §`QualitySettings.capture` argues why the two are equal
+   * rather than strictly ordered, and why a rung of its own was rejected.
+   */
+  it('#382 — no rung degrades the world while capture is still allowed', () => {
+    const top = QUALITY_LADDER[0] as QualitySettings;
+    /** Anything about the world that is worse than the target rung's. */
+    const worldReduced = (rung: QualitySettings): boolean =>
+      rung.renderScale < top.renderScale ||
+      rung.scatterItems < top.scatterItems ||
+      rung.sceneryVariants < top.sceneryVariants ||
+      rung.terrainBands < top.terrainBands ||
+      rung.structureItems < top.structureItems ||
+      rung.surfaceDetail !== top.surfaceDetail ||
+      rung.water !== top.water ||
+      rung.shading !== top.shading;
+
+    const firstWithoutCapture = QUALITY_LADDER.findIndex((rung) => !rung.capture);
+    const firstDegraded = QUALITY_LADDER.findIndex(worldReduced);
+    const firstCapped = QUALITY_LADDER.findIndex((rung) => rung.frameCap < DISPLAY_RATE);
+
+    // The population, asserted: a ladder where nothing is ever given up would
+    // make both comparisons below vacuously true.
+    expect(firstWithoutCapture).toBeGreaterThanOrEqual(0);
+    expect(firstDegraded).toBeGreaterThan(0);
+    expect(firstCapped).toBeGreaterThan(0);
+
+    expect(
+      firstWithoutCapture,
+      'the world is degraded on a rung that still permits a capture',
+    ).toBeLessThanOrEqual(firstDegraded);
+    // Strictly before the frame rate, which #245 FR-4's own ordering already
+    // puts after the scenery.
+    expect(firstWithoutCapture).toBeLessThan(firstCapped);
+  });
+
+  it('#382 — the top rung is the only one that permits a capture', () => {
+    expect(QUALITY_LADDER.map((rung) => rung.capture)).toStrictEqual([
+      true,
+      false,
+      false,
+      false,
+      false,
+    ]);
+    // The shadow-map rung is level 0 with one field changed, so it must agree
+    // with level 0 here too — a rider who asked for shadows has not asked to
+    // stop taking pictures.
+    expect(RIDER_SHADOW_MAP_RUNG.capture).toBe(true);
+  });
 });

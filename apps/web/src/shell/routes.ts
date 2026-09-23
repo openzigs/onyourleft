@@ -44,6 +44,7 @@ export type RouteId =
   | 'route-builder'
   | 'workouts'
   | 'game'
+  | 'camera'
   | 'devices'
   | 'transfer'
   | 'settings'
@@ -286,6 +287,23 @@ export const ROUTES: readonly RouteDefinition[] = [
     title: 'Import and export',
     summary:
       'Bring rides in from a FIT, GPX or TCX file, and take your own rides out in any of the three.',
+  },
+  {
+    id: 'camera',
+    group: 'more',
+    // ⚠️ **After Devices and Files rather than before them**, and that is not
+    // alphabetical taste: `groupDestination('more')` is the FIRST route listed
+    // in the group, so a camera route placed at the top of it would silently
+    // make Camera the destination the "More" tab navigates to. It is a niche
+    // screen a rider visits once; Devices is the one they visit when a strap
+    // will not pair.
+    layout: 'prose',
+    path: '/camera',
+    navLabel: 'Camera',
+    title: 'Camera',
+    summary:
+      'Take still pictures of yourself while you ride, from a phone on a tripod beside the bike. ' +
+      'Nothing is sent anywhere, and a picture is thrown away once it has been looked at.',
   },
   {
     id: 'settings',
