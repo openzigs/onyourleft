@@ -28,7 +28,7 @@ import { cameraFrameId } from '@onyourleft/store';
 
 import { stripComments } from '../units/no-inline-units';
 
-import { keepThisRide } from './keep';
+import { keepThisRide, keptSummarySentence } from './keep';
 import { CameraController } from './session';
 import type { CameraStorePort } from './store-port';
 import { cleanFrameBytes, manualSchedule, scriptedCamera } from './testing';
@@ -112,6 +112,12 @@ describe('the default is that nothing is kept', () => {
 
     const outcome = await controller.captureOne();
     expect(outcome.taken).toBe(true);
+    // ⚠️ Reported kept, and then READ BACK on a fresh connection below. The
+    // write-reports-success-while-the-read-cannot-see-it shape (CLAUDE.md §5)
+    // is exactly what this pair together rules out: `kept` alone would be
+    // satisfied by a sink that returned `true` and wrote nothing.
+    expect(outcome.kept).toBe(true);
+    expect(outcome.keepFailed).toBe(false);
 
     const read = await harness.read(async (store) => store.listCameraFrames(ATHLETE_A));
     expect(read).toHaveLength(1);
@@ -124,11 +130,19 @@ describe('the default is that nothing is kept', () => {
   it('stops keeping the moment the rider turns it off again', async () => {
     const { controller } = await controllerWithKeep();
     controller.setKeeping(true);
-    await controller.captureOne();
+    const first = await controller.captureOne();
     controller.setKeeping(false);
-    await controller.captureOne();
+    const second = await controller.captureOne();
 
+    expect(first.kept).toBe(true);
+    expect(second.kept).toBe(false);
     await expect(keptOnDisk()).resolves.toBe(1);
+    // ⚠️ **The switch is off and one picture is on the disk**, which is the
+    // state the Camera screen used to describe as "None of them was kept." The
+    // controller counts what the sink did rather than what the switch says.
+    expect(controller.state().keeping).toBe(false);
+    expect(controller.state().keptThisSession).toBe(1);
+    expect(controller.state().captured).toBe(2);
   });
 
   it('cannot be armed before the camera is on', () => {
@@ -262,5 +276,92 @@ describe('there is no global “always keep”', () => {
       findings,
       'ADR 0029 D-2 forbids a setting: the keep is per ride and is off every time',
     ).toStrictEqual([]);
+  });
+});
+
+describe('a device that will not take it', () => {
+  it('does not report a picture kept when the write was refused', async () => {
+    // ⚠️ **The write-reports-success-while-the-read-cannot-see-it shape
+    // (CLAUDE.md §5), at the one layer that decides the word "kept".** In
+    // production this write is a whole JPEG into IndexedDB, so
+    // `QuotaExceededError` on a full device is the ORDINARY failure — and a
+    // keep that swallowed it and answered `true` anyway would put "It is on
+    // this device." on the screen about a picture that is nowhere, and leave
+    // the account export's manifest counting it.
+    const base = portFor();
+    const keep = keepThisRide({
+      ...base,
+      store: {
+        ...base.store,
+        putCameraFrame: async () =>
+          Promise.reject(new Error('QuotaExceededError: key camera-frame-abc123')),
+      },
+    });
+    keep.setKeeping(true);
+
+    await expect(
+      keep.accept({
+        bytes: cleanFrameBytes(),
+        width: 640,
+        height: 480,
+        mediaType: 'image/jpeg',
+      }),
+    ).rejects.toThrow();
+
+    // Nothing landed, and nothing counted it.
+    await expect(keptOnDisk()).resolves.toBe(0);
+    await expect(keep.count()).resolves.toBe(0);
+  });
+});
+
+describe('what the screen says about the pictures already taken', () => {
+  // ⚠️ **Pure, and separated from the switch on purpose.** The sentence used to
+  // be a ternary on `CameraState.keeping` inside `views/CameraView.tsx`, which
+  // is what the NEXT picture will do — so a rider who kept three and turned the
+  // switch off was told, on the one screen whose job is to say what this device
+  // is holding, that it was holding none. Two counts decide it and neither is
+  // the switch.
+
+  it('says nothing has been taken before anything has', () => {
+    expect(keptSummarySentence(0, 0)).toBe(
+      'No pictures have been taken since the camera was turned on.',
+    );
+  });
+
+  it('does not claim nothing was kept when something was', () => {
+    // The defect, stated as a case: the switch is off, three pictures are on
+    // the disk. The old wording is forbidden by name.
+    const sentence = keptSummarySentence(5, 3);
+    expect(sentence).not.toContain('None of them was kept');
+    expect(sentence).toContain('3 of them are on this device');
+    expect(sentence).toContain('the rest were thrown away');
+    expect(sentence).toContain('5');
+  });
+
+  it('says none was kept only when none was', () => {
+    expect(keptSummarySentence(4, 0)).toContain('None of them was kept.');
+    expect(keptSummarySentence(4, 0)).toContain('4');
+  });
+
+  it('reads as English for one of one, and for one of several', () => {
+    expect(keptSummarySentence(1, 1)).toContain('It is on this device.');
+    expect(keptSummarySentence(3, 1)).toContain('One of them is on this device');
+  });
+
+  it('says all of them when the rider kept the lot', () => {
+    expect(keptSummarySentence(3, 3)).toContain('All of them are on this device.');
+  });
+
+  it('carries a count and never a picture', () => {
+    // ADR 0029 D-11 keeps a kept frame off every screen, and D-8's permitted
+    // column is a count, a byte size, a format name.
+    for (const sentence of [
+      keptSummarySentence(0, 0),
+      keptSummarySentence(4, 0),
+      keptSummarySentence(5, 3),
+      keptSummarySentence(2, 2),
+    ]) {
+      expect(sentence).not.toMatch(/blob:|data:|image\/|\.jpg|src=/i);
+    }
   });
 });

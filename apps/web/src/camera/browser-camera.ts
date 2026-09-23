@@ -375,15 +375,66 @@ export function canvasFrameGrabber(): FrameGrabber {
   };
 }
 
-/** Resolves once the element has a frame to draw. */
-async function onceReady(video: HTMLVideoElement): Promise<void> {
+/**
+ * How long a granted camera is given to produce its first frame.
+ *
+ * ⚠️ **The wait this bounds is NOT the permission prompt**, and conflating the
+ * two is how it came to be unbounded. `requestCameraAccess()` waits for a
+ * person to answer a dialog and has to wait as long as they take; by the time
+ * `grab` runs the rider has already answered and the hardware is open, so a
+ * `loadeddata` that never arrives is a camera that has stopped producing
+ * frames — another application taking the device, a USB camera unplugged, a
+ * driver that has wedged. Waiting for ever on that leaves a listener and a live
+ * stream attached to an element nothing will ever detach, with the operating
+ * system's own camera indicator lit and no notice on the screen.
+ *
+ * Five seconds, which is long for a camera that is working — a webcam's first
+ * frame is tens of milliseconds and a cold phone camera is a few hundred — and
+ * short enough that a rider gets a sentence rather than a spinner.
+ */
+export const FIRST_FRAME_MILLISECONDS = 5000;
+
+/** The little of a `<video>` {@link onceReady} needs, so a test can supply one. */
+export interface FrameReadySource {
+  readonly readyState: number;
+  readonly HAVE_CURRENT_DATA: number;
+  addEventListener(type: 'loadeddata', listener: () => void): void;
+  removeEventListener(type: 'loadeddata', listener: () => void): void;
+}
+
+/**
+ * Resolves once the element has a frame to draw.
+ *
+ * @throws {CameraCaptureError} of kind `unavailable` when no frame arrives
+ * inside {@link FIRST_FRAME_MILLISECONDS}. The message is the fixed one — this
+ * is a message about a frame and ADR 0029 D-8 binds it, so it names no element,
+ * no `blob:` URL and no timing.
+ *
+ * ⚠️ **The listener is removed on every path**, including the timeout, and the
+ * timer is cleared on every path including the event. Either half left behind
+ * is a leak on the one page that holds a camera open.
+ */
+export async function onceReady(
+  video: FrameReadySource,
+  withinMilliseconds = FIRST_FRAME_MILLISECONDS,
+): Promise<void> {
   if (video.readyState >= video.HAVE_CURRENT_DATA) {
     return;
   }
-  await new Promise<void>((resolve) => {
-    video.addEventListener('loadeddata', () => {
+  await new Promise<void>((resolve, reject) => {
+    const settle = (): void => {
+      clearTimeout(timer);
+      video.removeEventListener('loadeddata', onLoaded);
+    };
+    const onLoaded = (): void => {
+      settle();
       resolve();
-    });
+    };
+    const timer = setTimeout(() => {
+      settle();
+      reject(new CameraCaptureError('unavailable', cameraProblemMessage('unavailable')));
+    }, withinMilliseconds);
+    video.addEventListener('loadeddata', onLoaded);
   });
 }
 

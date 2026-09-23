@@ -96,15 +96,20 @@ export function keepThisRide(port: CameraStorePort): FrameKeep {
     setKeeping(on: boolean): void {
       keeping = on;
     },
-    async accept(frame: CapturedFrame): Promise<void> {
+    async accept(frame: CapturedFrame): Promise<boolean> {
       if (!keeping) {
         // ADR 0029 D-2's default. Nothing is written, nothing is counted, and
         // the bytes are held by nothing once this returns —
         // `session.ts` §`discardTheFrame` records why this file does not
         // pretend to wipe them.
-        return;
+        return false;
       }
       await port.store.putCameraFrame(recordFor(port, frame));
+      // ⚠️ **After the write, never before.** `true` here is what the Camera
+      // screen turns into "this device is holding one of them", so returning it
+      // on the way in would make the sentence a statement about an intention.
+      // A rejected write returns nothing at all and `session.ts` catches it.
+      return true;
     },
     async count(): Promise<number> {
       return port.store.countCameraFrames(port.athleteId);
@@ -113,6 +118,40 @@ export function keepThisRide(port: CameraStorePort): FrameKeep {
       return port.store.deleteCameraFrames(port.athleteId);
     },
   };
+}
+
+/**
+ * What the Camera screen says about the pictures taken since switch-on.
+ *
+ * ⚠️ **A function rather than a ternary in the view, because the ternary was
+ * wrong.** The screen read the present-tense keep switch and said *"None of
+ * them was kept."* whenever it was off — including after a rider had kept three
+ * pictures and turned it off again, which this module explicitly supports. Two
+ * numbers decide this sentence and neither of them is the switch.
+ *
+ * ⚠️ **A count, and never a picture** — ADR 0029 D-11 keeps a kept frame off
+ * every screen, and D-8's permitted column is *"a count, a byte size, a format
+ * name"*.
+ *
+ * @param captured how many were taken since the camera was turned on
+ * @param kept how many of those are on this device
+ */
+export function keptSummarySentence(captured: number, kept: number): string {
+  if (captured === 0) {
+    return 'No pictures have been taken since the camera was turned on.';
+  }
+  const taken = `Pictures taken since the camera was turned on: ${String(captured)}.`;
+  if (kept <= 0) {
+    return `${taken} None of them was kept.`;
+  }
+  if (kept >= captured) {
+    return captured === 1
+      ? `${taken} It is on this device.`
+      : `${taken} All of them are on this device.`;
+  }
+  return kept === 1
+    ? `${taken} One of them is on this device; the rest were thrown away.`
+    : `${taken} ${String(kept)} of them are on this device; the rest were thrown away.`;
 }
 
 /**

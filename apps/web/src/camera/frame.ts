@@ -178,8 +178,21 @@ function indexOfSignature(bytes: Uint8Array, signature: string, limit: number): 
  * other message here, and "the picture contained Exif at offset 2" would be a
  * diagnostic about the frame written into a log about the frame.
  *
- * ⚠️ The marker names **are** carried, on `markers`, because a caller inside
- * this module may want them and a name is not a locator. Nothing renders them.
+ * ⚠️ **The marker names are NOT carried anywhere**, and this paragraph used to
+ * say they were — on a `markers` field that no type here declares and nothing
+ * ever returned. `metadataMarkersIn` is exported and `frame.test.ts` reads it
+ * directly, which is where a name is wanted; a `CapturedFrame` carrying a list
+ * of what was found in it would be a diagnostic about the frame travelling with
+ * the frame, which is the shape D-8 exists to refuse.
+ *
+ * ⚠️ **The media type is CHECKED rather than passed through**, and it used to
+ * be passed through. Every layer downstream assumes JPEG — `keep.ts` stores the
+ * bytes untouched, and the account export names the file `.jpg` and labels it
+ * `image/jpeg` — so a grabber that quietly answered with something else would
+ * hand a rider a file whose name and content disagree, and this program would
+ * be the one that made it. There is exactly one encoder here
+ * ({@link FRAME_MEDIA_TYPE}, and `canvasFrameGrabber` asks `toBlob` for it by
+ * name), so anything else is a fault rather than a format to support.
  */
 export function capturedFrame(input: {
   readonly bytes: Uint8Array;
@@ -188,6 +201,9 @@ export function capturedFrame(input: {
   readonly height: number;
 }): CapturedFrame {
   if (input.bytes.length === 0) {
+    throw new CameraCaptureError('unavailable', cameraProblemMessage('unavailable'));
+  }
+  if (input.mediaType !== FRAME_MEDIA_TYPE) {
     throw new CameraCaptureError('unavailable', cameraProblemMessage('unavailable'));
   }
   const markers = metadataMarkersIn(input.bytes);

@@ -113,12 +113,27 @@ export interface CameraState {
   /** How many frames have been taken since the camera was last turned on. */
   readonly captured: number;
   /**
-   * Whether the next picture will be kept — #384, ADR 0029 D-2.
+   * Whether the **next** picture will be kept — #384, ADR 0029 D-2.
    *
    * **`false` every time the camera is turned on**, and there is nowhere it is
    * persisted. `keep.ts` is the whole of it.
+   *
+   * ⚠️ **It says nothing about the pictures already taken**, and reading it as
+   * though it did is the defect this pair of fields exists to stop: the switch
+   * can be turned on and off inside one session, which `keep.ts` argues for
+   * explicitly, so `keeping === false` is perfectly compatible with pictures
+   * being on the disk. {@link keptThisSession} is the one to show a rider.
    */
   readonly keeping: boolean;
+  /**
+   * How many of those {@link captured} frames are **on this device**.
+   *
+   * Counted from what the sink actually did with each frame rather than from
+   * {@link keeping}, and reset with {@link captured} at every switch-on. Never
+   * greater than `captured`; equal to it on a session kept throughout; `0` on
+   * the ordinary session where the rider kept nothing.
+   */
+  readonly keptThisSession: number;
   /**
    * Whether the quality ladder currently permits a capture — `quality.ts`
    * §`QualitySettings.capture`.
@@ -133,6 +148,23 @@ export interface CaptureOutcome {
   readonly taken: boolean;
   /** The refusal, when there was one. @see cameraNotice */
   readonly problem: CameraProblemKind | undefined;
+  /** Whether this picture is on this device. `false` when it was dropped. */
+  readonly kept: boolean;
+  /**
+   * Whether the rider asked for this one to be kept and the device refused.
+   *
+   * ⚠️ **The picture was still taken.** In production the sink is an IndexedDB
+   * write of a whole JPEG, so `QuotaExceededError` is the expected failure and
+   * not an exotic one — and before this field the rejection escaped
+   * {@link CameraController.captureOne} altogether: the screen's
+   * `void …then(setOutcome)` had no `catch`, so a full disk produced an
+   * unhandled rejection, no notice and a counter that did not move.
+   *
+   * ⚠️ **Nothing of the error survives** — not its message, not its name, not a
+   * key. ADR 0029 D-8 binds a message about a frame, and a storage error's text
+   * routinely carries the key it could not write.
+   */
+  readonly keepFailed: boolean;
   /**
    * How big the picture was, in bytes, and how many pixels across and down.
    *
@@ -162,8 +194,22 @@ export interface CaptureOutcome {
  * controller built with no sink cannot keep a frame however it is called.
  */
 export interface FrameSink {
-  /** Takes the frame. Returns when it is done with it. */
-  accept(frame: CapturedFrame): Promise<void>;
+  /**
+   * Takes the frame.
+   *
+   * @returns `true` when the frame is now **on this device** and `false` when
+   * it was dropped.
+   *
+   * ⚠️ **A boolean rather than `void`, and the reason is a sentence that was
+   * false.** The Camera screen used to read the *present-tense* keep switch and
+   * say *"None of them was kept."* of every picture taken since switch-on — so
+   * a rider who kept three and then turned the switch off was told, on the one
+   * screen that exists to say what this device is holding, that it was holding
+   * none. `keeping` is what the next frame will do; this is what **this** frame
+   * did, and only the sink knows it. `CameraState.keptThisSession` is what the
+   * screen reads instead.
+   */
+  accept(frame: CapturedFrame): Promise<boolean>;
 }
 
 /**
@@ -177,8 +223,10 @@ export interface FrameSink {
  * the kind of promise ADR 0029's §"What would make this ADR wrong" warns about.
  */
 export const discardTheFrame: FrameSink = {
-  accept: async (): Promise<void> => {
-    await Promise.resolve();
+  accept: async (): Promise<boolean> => {
+    // `false`: nothing was kept. A controller built with no keep at all can
+    // therefore never report a kept picture, whatever it is called.
+    return Promise.resolve(false);
   },
 };
 
@@ -256,6 +304,7 @@ export class CameraController {
   #session: CameraSession | undefined;
   #problem: CameraProblemKind | undefined = 'no-consent';
   #captured = 0;
+  #keptThisSession = 0;
   #captureAllowed = true;
   #cancelPoll: (() => void) | undefined;
 
@@ -278,6 +327,7 @@ export class CameraController {
       problem: this.#problem,
       captured: this.#captured,
       keeping: this.#keep?.keeping ?? false,
+      keptThisSession: this.#keptThisSession,
       captureAllowed: this.#captureAllowed,
     };
   }
@@ -360,6 +410,9 @@ export class CameraController {
     }
     this.#problem = undefined;
     this.#captured = 0;
+    // Reset with `#captured`, because the two are read as one sentence: "N
+    // taken since the camera was turned on, M of them on this device".
+    this.#keptThisSession = 0;
     // ⚠️ **OFF at every switch-on, which is ADR 0029 D-2's "off every time".**
     // A rider who kept last time is not keeping this time, and this line is the
     // one that makes that true rather than the screen remembering to reset a
@@ -389,6 +442,12 @@ export class CameraController {
    * property #384's keep is then allowed to change in exactly one place. The
    * outcome carries a byte count and a pixel size and no part of the image —
    * ADR 0029 D-8's permitted column.
+   *
+   * ⚠️ **It never rejects.** Every failure — the camera's and the sink's — comes
+   * back as a field on the {@link CaptureOutcome}, so a caller that writes
+   * `void controller.captureOne().then(setOutcome)` cannot produce an unhandled
+   * rejection. That is a promise this method makes to its callers rather than a
+   * habit, and `session.test.ts` §"a sink that rejects" is what holds it.
    */
   async captureOne(): Promise<CaptureOutcome> {
     if (!this.#consent.local) {
@@ -412,12 +471,31 @@ export class CameraController {
     } catch (error) {
       return refused(error instanceof CameraCaptureError ? error.kind : 'unavailable');
     }
-    await this.#sink.accept(frame);
+    // ⚠️ **The sink's rejection is caught here, and this is the one `catch` in
+    // this file that is not about the camera.** In production the sink writes a
+    // whole JPEG to IndexedDB, so a `QuotaExceededError` on a full device is
+    // the expected failure rather than a remote one — and uncaught it escaped
+    // through `captureOne`'s promise into a view that does not `catch`, which
+    // is an unhandled rejection, no notice, and a counter that does not move.
+    // Nothing of the error is read: ADR 0029 D-8, and a storage error's own
+    // message routinely carries the key it could not write.
+    let kept = false;
+    let keepFailed = false;
+    try {
+      kept = await this.#sink.accept(frame);
+    } catch {
+      keepFailed = true;
+    }
     this.#captured += 1;
+    if (kept) {
+      this.#keptThisSession += 1;
+    }
     this.#announce();
     return {
       taken: true,
       problem: undefined,
+      kept,
+      keepFailed,
       bytes: frame.bytes.length,
       width: frame.width,
       height: frame.height,
@@ -515,5 +593,5 @@ export class CameraController {
 }
 
 function refused(problem: CameraProblemKind): CaptureOutcome {
-  return { taken: false, problem, bytes: 0, width: 0, height: 0 };
+  return { taken: false, problem, kept: false, keepFailed: false, bytes: 0, width: 0, height: 0 };
 }

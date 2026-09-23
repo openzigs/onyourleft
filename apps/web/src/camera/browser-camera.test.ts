@@ -17,8 +17,11 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { CameraCaptureError } from './camera-port';
 import {
+  FIRST_FRAME_MILLISECONDS,
   browserCameraPort,
+  onceReady,
   type FrameGrabber,
+  type FrameReadySource,
   type MediaDevicesLike,
   type MediaStreamLike,
   type VideoTrackLike,
@@ -255,5 +258,94 @@ describe('what a rider can be shown', () => {
     });
     await expect(port.startCamera()).rejects.toBeInstanceOf(CameraCaptureError);
     expect(getUserMedia).not.toHaveBeenCalled();
+  });
+});
+
+describe('waiting for the first frame', () => {
+  /**
+   * The little of a `<video>` {@link onceReady} reads, with a hand on the
+   * event.
+   *
+   * ⚠️ `readyState` is **below** `HAVE_CURRENT_DATA`, which is what makes the
+   * wait happen at all — a source that already has a frame returns without
+   * touching the event or the timer, and would pass every assertion here for
+   * the wrong reason.
+   */
+  function source(readyState = 0): FrameReadySource & {
+    fire(): void;
+    listeners: number;
+  } {
+    const listeners = new Set<() => void>();
+    return {
+      readyState,
+      HAVE_CURRENT_DATA: 2,
+      get listeners(): number {
+        return listeners.size;
+      },
+      addEventListener(_type: 'loadeddata', listener: () => void): void {
+        listeners.add(listener);
+      },
+      removeEventListener(_type: 'loadeddata', listener: () => void): void {
+        listeners.delete(listener);
+      },
+      fire(): void {
+        for (const listener of [...listeners]) {
+          listener();
+        }
+      },
+    };
+  }
+
+  it('returns at once when the element already has a frame', async () => {
+    // `2` is `HAVE_CURRENT_DATA`: there is already a frame to draw.
+    const ready = source(2);
+
+    await expect(onceReady(ready, 10)).resolves.toBeUndefined();
+
+    // Nothing was attached, so there is nothing to leak.
+    expect(ready.listeners).toBe(0);
+  });
+
+  it('resolves on the event, and leaves no listener behind', async () => {
+    const waiting = source();
+    const settled = onceReady(waiting, 10_000);
+    expect(waiting.listeners).toBe(1);
+
+    waiting.fire();
+
+    await expect(settled).resolves.toBeUndefined();
+    expect(waiting.listeners).toBe(0);
+  });
+
+  it('gives up on a camera that never produces one', async () => {
+    // ⚠️ The defect this bounds: by the time this runs the rider has already
+    // answered the permission dialog and the hardware is open, so a
+    // `loadeddata` that never arrives is a camera that has stopped — another
+    // application taking the device, a USB camera unplugged. Unbounded, that
+    // left a listener and a LIVE STREAM attached for ever, with the operating
+    // system's camera indicator lit and no notice on the screen.
+    const dead = source();
+
+    await expect(onceReady(dead, 1)).rejects.toBeInstanceOf(CameraCaptureError);
+    // The listener is removed on the timeout path too — either half left
+    // behind is a leak on the one page that holds a camera open.
+    expect(dead.listeners).toBe(0);
+  });
+
+  it('says nothing about the element when it gives up', async () => {
+    // ADR 0029 D-8. A message about a frame names no element, no `blob:` URL
+    // and no timing.
+    const dead = source();
+
+    await expect(onceReady(dead, 1)).rejects.toSatisfy((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      expect(frameLeaksIn(message)).toStrictEqual([]);
+      expect(message).not.toMatch(/video|element|loadeddata|\d/i);
+      return true;
+    });
+  });
+
+  it('is five seconds by default — long for a camera that works', () => {
+    expect(FIRST_FRAME_MILLISECONDS).toBe(5000);
   });
 });

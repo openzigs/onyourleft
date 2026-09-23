@@ -232,14 +232,29 @@ describe('keeping this ride’s pictures', () => {
     return controller;
   }
 
-  it('offers the switch OFF, and says nothing was kept', async () => {
+  /** Presses "Take a picture" `times` times and lets the screen settle. */
+  async function takePictures(times: number): Promise<void> {
+    for (let index = 0; index < times; index += 1) {
+      const take = button('Take a picture');
+      if (take === undefined) {
+        expect.unreachable('no control to take a picture');
+        return;
+      }
+      await activateWithKeyboard(take);
+      await settle();
+    }
+  }
+
+  it('offers the switch OFF, and says nothing has been taken yet', async () => {
     await screenWithKeep(stubKeep());
     const box = queryAll<HTMLInputElement>(document, 'input[type="checkbox"]')[0];
     expect(box?.checked).toBe(false);
-    expect(document.body.textContent).toContain('None of them was kept.');
+    expect(document.body.textContent).toContain(
+      'No pictures have been taken since the camera was turned on.',
+    );
   });
 
-  it('turns the keep on and says so', async () => {
+  it('turns the keep on, and says a picture is on this device once one is', async () => {
     const keep = stubKeep();
     await screenWithKeep(keep);
     const box = queryAll<HTMLInputElement>(document, 'input[type="checkbox"]')[0];
@@ -249,9 +264,67 @@ describe('keeping this ride’s pictures', () => {
     }
     box.click();
     await settle();
-
     expect(keep.keeping).toBe(true);
-    expect(document.body.textContent).toContain('being kept on this device');
+
+    await takePictures(1);
+
+    expect(document.body.textContent).toContain('It is on this device.');
+    // ⚠️ And the section below FOLLOWS, which it did not: `refreshKept` used to
+    // run on mount and after a delete only, so a rider who had just kept a
+    // picture went on reading "holding no pictures" until they navigated away.
+    expect(document.body.textContent).toContain('This device is holding 1 picture.');
+  });
+
+  it('does not claim nothing was kept after the switch is turned back off', async () => {
+    // ⚠️ **The regression this whole pair of fields exists for.** `keeping` is
+    // present tense and the sentence is about every picture since switch-on, so
+    // reading one off the other told a rider who had kept three pictures and
+    // then turned the switch off that NONE of them was kept — on the one screen
+    // whose job is to say what this device is holding, about the most sensitive
+    // thing this program stores. A mid-session toggle is explicitly supported:
+    // `camera/keep.ts` §`keepThisRide` argues for it.
+    const keep = stubKeep();
+    await screenWithKeep(keep);
+    const box = queryAll<HTMLInputElement>(document, 'input[type="checkbox"]')[0];
+    if (box === undefined) {
+      expect.unreachable('no keep switch');
+      return;
+    }
+
+    box.click();
+    await settle();
+    await takePictures(3);
+    box.click();
+    await settle();
+
+    expect(keep.keeping).toBe(false);
+    expect(document.body.textContent).not.toContain('None of them was kept.');
+    expect(document.body.textContent).toContain('Pictures taken since the camera was turned on: 3');
+    expect(document.body.textContent).toContain('All of them are on this device.');
+    expect(document.body.textContent).toContain('This device is holding 3 pictures.');
+  });
+
+  it('counts only the pictures the switch was on for', async () => {
+    // The mixed session: the sentence is arithmetic over what the SINK did,
+    // not over the switch's position at either end.
+    const keep = stubKeep();
+    await screenWithKeep(keep);
+    const box = queryAll<HTMLInputElement>(document, 'input[type="checkbox"]')[0];
+    if (box === undefined) {
+      expect.unreachable('no keep switch');
+      return;
+    }
+
+    await takePictures(1);
+    box.click();
+    await settle();
+    await takePictures(2);
+
+    expect(document.body.textContent).toContain('Pictures taken since the camera was turned on: 3');
+    expect(document.body.textContent).toContain(
+      '2 of them are on this device; the rest were thrown away.',
+    );
+    expect(document.body.textContent).toContain('This device is holding 2 pictures.');
   });
 
   it('shows a COUNT and never a picture', async () => {
@@ -304,7 +377,17 @@ function stubKeep(held = 0): FrameKeep & { forgotten: number } {
     setKeeping(on: boolean): void {
       keeping = on;
     },
-    accept: async () => Promise.resolve(),
+    // The real `keepThisRide`'s shape: write and report kept only while the
+    // switch is on, and make the device count follow, so a test that presses
+    // "Take a picture" sees what a rider would rather than a stub that always
+    // says the same thing.
+    accept: async () => {
+      if (!keeping) {
+        return Promise.resolve(false);
+      }
+      count += 1;
+      return Promise.resolve(true);
+    },
     count: async () => Promise.resolve(count),
     forget: async () => {
       forgotten += 1;

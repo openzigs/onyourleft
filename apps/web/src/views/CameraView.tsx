@@ -60,7 +60,22 @@ import {
   CONSENT_STATEMENT,
   type ConsentRefusal,
 } from '../camera/consent';
+import { keptSummarySentence } from '../camera/keep';
 import type { CameraController, CaptureOutcome } from '../camera/session';
+
+/**
+ * What became of the picture just taken — kept, dropped, or refused a home.
+ *
+ * ⚠️ The third case is not a rarity: in production the keep writes a whole JPEG
+ * to IndexedDB, and a device that is full is the ordinary way that goes wrong.
+ * Before this the rejection escaped the click handler with no notice at all.
+ */
+function captureEnding(outcome: CaptureOutcome): string {
+  if (outcome.keepFailed) {
+    return 'this device could not keep it. There is no room for it.';
+  }
+  return outcome.kept ? 'kept on this device.' : 'thrown away.';
+}
 
 /** The id the outer section is named by. @see CameraView */
 const TITLE_ID = 'oyl-camera-title';
@@ -137,6 +152,21 @@ function Camera({ controller }: { readonly controller: CameraController }): JSX.
     (listener) => controller.subscribe(listener),
     () => controller.state().keeping,
     () => false,
+  );
+
+  /**
+   * ⚠️ **The sixth snapshot, and it is what makes the sentence below true.**
+   * `keeping` is what the NEXT picture will do; this is how many of the ones
+   * already taken are on the disk. The screen used to derive the second from
+   * the first and told a rider who kept three pictures and then turned the
+   * switch off that *"None of them was kept."* — on the one screen whose job is
+   * to say what this device is holding. `camera/session.ts`
+   * §`CameraState.keptThisSession` counts what the sink actually did.
+   */
+  const keptThisSession = useSyncExternalStore(
+    (listener) => controller.subscribe(listener),
+    () => controller.state().keptThisSession,
+    () => 0,
   );
 
   const [acknowledged, setAcknowledged] = useState(false);
@@ -248,7 +278,23 @@ function Camera({ controller }: { readonly controller: CameraController }): JSX.
           <Button
             variant="secondary"
             onClick={() => {
-              void controller.captureOne().then(setOutcome);
+              // ⚠️ `refreshKept` as well as `setOutcome`, because a kept picture
+              // changes what "Pictures on this device" below is counting. It
+              // used to run on mount and after `forgetKept` alone, so a rider
+              // who kept three pictures went on reading "holding no pictures"
+              // until they navigated away and back.
+              //
+              // ⚠️ It is a **fresh store read** rather than an increment of the
+              // number already on screen: this counter is what a rider decides
+              // whether to press "Delete every picture" by, and a count derived
+              // from what this tab believes it wrote is the write-reports-
+              // success-while-the-read-cannot-see-it shape CLAUDE.md §5 names.
+              //
+              // `captureOne` never rejects — see `camera/session.ts`.
+              void controller.captureOne().then((result) => {
+                setOutcome(result);
+                refreshKept();
+              });
             }}
           >
             Take a picture
@@ -282,16 +328,25 @@ function Camera({ controller }: { readonly controller: CameraController }): JSX.
               Keep the pictures from this ride on this device
             </label>
           </p>
-          <p>
-            Pictures taken since the camera was turned on: {captured}.{' '}
-            {keeping ? 'They are being kept on this device.' : 'None of them was kept.'}
-          </p>
+          {/*
+            ⚠️ **Both numbers, because one of them cannot answer this.** The
+            switch above says what the NEXT picture will do; this sentence is
+            about the ones already taken, and a rider may turn the switch on and
+            off inside one session. `camera/keep.ts` §`keptSummarySentence` is
+            the one place the wording lives, and it is pure so that it is tested
+            without a DOM.
+          */}
+          <p>{keptSummarySentence(captured, keptThisSession)}</p>
           {outcome === undefined ? null : (
-            <StatusMessage tone={outcome.taken ? 'success' : 'warning'} live>
+            <StatusMessage tone={outcome.taken && !outcome.keepFailed ? 'success' : 'warning'} live>
+              {/*
+                ⚠️ A size and a count. ADR 0029 D-8 permits exactly this and
+                forbids the thumbnail somebody will ask for — and the failure
+                branch carries nothing of the storage error either, not its
+                message and not the key it could not write.
+              */}
               {outcome.taken
-                ? // ⚠️ A size and a count. ADR 0029 D-8 permits exactly this and
-                  // forbids the thumbnail somebody will ask for.
-                  `A picture was taken — ${String(outcome.width)} by ${String(outcome.height)}, ${String(outcome.bytes)} bytes — and thrown away.`
+                ? `A picture was taken — ${String(outcome.width)} by ${String(outcome.height)}, ${String(outcome.bytes)} bytes — and ${captureEnding(outcome)}`
                 : 'No picture was taken.'}
             </StatusMessage>
           )}

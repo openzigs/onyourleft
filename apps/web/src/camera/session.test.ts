@@ -28,7 +28,9 @@ function controllerFor(camera: ReturnType<typeof scriptedCamera>, sink?: Capture
           sink: {
             accept: async (frame) => {
               sink.push(frame);
-              await Promise.resolve();
+              // `true`: this double stands for a sink that KEPT the frame, so
+              // the session's `keptThisSession` counts it.
+              return Promise.resolve(true);
             },
           },
         }),
@@ -149,10 +151,92 @@ describe('capturing', () => {
     expect(outcome).toStrictEqual({
       taken: false,
       problem: 'unavailable',
+      kept: false,
+      keepFailed: false,
       bytes: 0,
       width: 0,
       height: 0,
     });
+  });
+
+  it('counts what the sink kept, not what the switch said', async () => {
+    // ⚠️ `CameraState.keeping` is what the NEXT frame will do; this is what the
+    // ones already taken did, and the two disagree the moment a rider turns the
+    // switch off mid-session. `views/CameraView.tsx` shows the second.
+    const camera = scriptedCamera();
+    let keeping = false;
+    const { controller } = new (class {
+      readonly controller = new CameraController({
+        port: camera.port,
+        schedule: manualSchedule().schedule,
+        sink: { accept: async () => Promise.resolve(keeping) },
+      });
+    })();
+    controller.agree(AGREED);
+    await controller.turnOn();
+
+    await controller.captureOne();
+    keeping = true;
+    await controller.captureOne();
+    await controller.captureOne();
+    keeping = false;
+    await controller.captureOne();
+
+    expect(controller.state().captured).toBe(4);
+    expect(controller.state().keptThisSession).toBe(2);
+  });
+
+  it('starts the kept count again at every switch-on', async () => {
+    const camera = scriptedCamera();
+    const { controller } = new (class {
+      readonly controller = new CameraController({
+        port: camera.port,
+        schedule: manualSchedule().schedule,
+        sink: { accept: async () => Promise.resolve(true) },
+      });
+    })();
+    controller.agree(AGREED);
+    await controller.turnOn();
+    await controller.captureOne();
+    expect(controller.state().keptThisSession).toBe(1);
+
+    controller.turnOff();
+    await controller.turnOn();
+
+    expect(controller.state().captured).toBe(0);
+    expect(controller.state().keptThisSession).toBe(0);
+  });
+
+  it('reports a sink that rejects rather than letting the rejection escape', async () => {
+    // ⚠️ In production the sink writes a whole JPEG to IndexedDB, so
+    // `QuotaExceededError` on a full device is the ORDINARY failure. Uncaught
+    // it escaped `captureOne`'s promise into a view with no `catch`: an
+    // unhandled rejection, no notice on the screen, and a counter that did not
+    // move. The picture WAS taken, so it is counted.
+    const camera = scriptedCamera();
+    const { controller } = new (class {
+      readonly controller = new CameraController({
+        port: camera.port,
+        schedule: manualSchedule().schedule,
+        sink: {
+          accept: async () =>
+            Promise.reject(new Error('QuotaExceededError: key camera-frame-abc123')),
+        },
+      });
+    })();
+    controller.agree(AGREED);
+    await controller.turnOn();
+
+    const outcome = await controller.captureOne();
+
+    expect(outcome.taken).toBe(true);
+    expect(outcome.kept).toBe(false);
+    expect(outcome.keepFailed).toBe(true);
+    expect(controller.state().captured).toBe(1);
+    expect(controller.state().keptThisSession).toBe(0);
+    // ADR 0029 D-8: nothing of the error survives — not its message, and not
+    // the key it names, which is a locator for a stored picture.
+    expect(JSON.stringify(outcome)).not.toContain('camera-frame-abc123');
   });
 
   it('carries no part of the picture in what it reports', async () => {

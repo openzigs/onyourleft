@@ -106,6 +106,31 @@ describe('constructing a frame', () => {
     expect(() => capturedFrame({ ...clean, bytes: new Uint8Array(0) })).toThrow(CameraCaptureError);
   });
 
+  it('refuses a media type other than the one encoder here', () => {
+    // ⚠️ Every layer downstream assumes JPEG — `keep.ts` stores the bytes
+    // untouched and the account export names the file `.jpg` and labels it
+    // `image/jpeg` — so a grabber that quietly answered with something else
+    // would hand a rider a file whose name and its content disagree, and this
+    // program would be the one that made it.
+    expect(() => capturedFrame({ ...clean, mediaType: 'image/png' })).toThrow(CameraCaptureError);
+    expect(() => capturedFrame({ ...clean, mediaType: 'image/webp' })).toThrow(CameraCaptureError);
+    // A near miss is a miss: the comparison is the whole string.
+    expect(() => capturedFrame({ ...clean, mediaType: 'image/jpg' })).toThrow(CameraCaptureError);
+    expect(() => capturedFrame({ ...clean, mediaType: '' })).toThrow(CameraCaptureError);
+  });
+
+  it('carries no part of the refused media type in what it says', () => {
+    // ADR 0029 D-8 binds a message ABOUT a frame, and the media type a grabber
+    // answered with is a fact about that frame.
+    try {
+      capturedFrame({ ...clean, mediaType: 'image/png' });
+      expect.unreachable('the refusal did not fire');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      expect(message).not.toMatch(/png|image\//i);
+    }
+  });
+
   it('says nothing about the marker, the offset or the file in its message', () => {
     // ADR 0029 D-8. "Exif at offset 6" is a diagnostic about the frame written
     // into a log about the frame, and the rule has no exception for a message
