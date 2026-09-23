@@ -111,6 +111,23 @@ export interface AccountStore {
    * discards a frame unless the rider turned that ride's keep on.
    */
   listCameraFrames(owner: AthleteId, limit?: number): Promise<CameraFrameRecord[]>;
+  /**
+   * How many pictures this athlete has kept — **all of them**, whatever the
+   * export's own budget is.
+   *
+   * ⚠️ **The manifest's `kept` comes from here and never from the length of the
+   * bounded list**, and it used to come from the list: `listCameraFrames` was
+   * read at `ACCOUNT_EXPORT_FRAME_LIMIT + 1` and its length reported, so a
+   * rider holding three hundred pictures was told their archive contained 200
+   * of 201. They would conclude one was missing, erase the device, and have
+   * lost a hundred. The bound on the list is what makes the run finite; the
+   * count is what makes the manifest true, and the two cannot be the same read.
+   *
+   * ⚠️ Counted through the index rather than by reading rows — a count that
+   * decoded every JPEG on the device would be the thing the budget exists to
+   * avoid.
+   */
+  countCameraFrames(owner: AthleteId): Promise<number>;
 }
 
 /**

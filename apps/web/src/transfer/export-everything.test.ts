@@ -785,9 +785,19 @@ describe('exporting the pictures the rider kept (#384)', () => {
   });
 
   it('bounds one run and says in the manifest that it did', async () => {
+    // ⚠️ **`+ 25`, and the margin is the whole point of this case.** It seeded
+    // exactly `LIMIT + 1` — and the implementation it was written against read
+    // `listCameraFrames(LIMIT + 1)` and reported *that list's length* as
+    // `kept`, so the capped answer and the true answer were both 201 and the
+    // assertion could not fail. A rider holding three hundred was told the
+    // archive contained "200 of 201": they conclude one picture is missing,
+    // erase the device, and have lost a hundred. Any seed strictly greater
+    // than `LIMIT + 1` separates the two reads; 25 is far enough clear that a
+    // future off-by-one in the budget cannot close the gap again.
+    const held = ACCOUNT_EXPORT_FRAME_LIMIT + 25;
     await seedLibrary(1);
     await harness.write(async (store) => {
-      for (let index = 0; index <= ACCOUNT_EXPORT_FRAME_LIMIT; index += 1) {
+      for (let index = 0; index < held; index += 1) {
         await store.putCameraFrame(cameraFrameFor(ATHLETE_A, { length: 64 }));
       }
     });
@@ -802,7 +812,72 @@ describe('exporting the pictures the rider kept (#384)', () => {
     // many it contains, so a rider can tell the difference without counting
     // files. `written < kept` is the state, not a failure.
     expect(camera['written']).toBe(ACCOUNT_EXPORT_FRAME_LIMIT);
-    expect(camera['kept']).toBe(ACCOUNT_EXPORT_FRAME_LIMIT + 1);
+    expect(camera['kept']).toBe(held);
+    // Stated as the inequality a rider actually reasons with, so that a `kept`
+    // silently clamped to the budget is red here however the clamp arrives.
+    expect(camera['kept']).toBeGreaterThan(ACCOUNT_EXPORT_FRAME_LIMIT + 1);
+    expect((camera['files'] as string[]).length).toBe(camera['written']);
+  });
+
+  it('writes no picture at all when the rider pressed Stop', async () => {
+    // ⚠️ A Stop used to skip every remaining RIDE and then go on to write up to
+    // two hundred photographs — the opposite of what a rider pressing Stop
+    // asked for, on the most sensitive thing in the archive. `written < kept`
+    // is what says the archive is short, exactly as it does for a budget.
+    await seedLibrary(1);
+    await harness.write(async (store) => {
+      for (let index = 0; index < 3; index += 1) {
+        await store.putCameraFrame(cameraFrameFor(ATHLETE_A, { length: 64 }));
+      }
+    });
+    const controller = new AbortController();
+    controller.abort();
+
+    const { files } = await runExport({ signal: controller.signal });
+    const camera = manifestOf(files)['camera'] as Record<string, unknown>;
+
+    expect(files.filter((file) => file.mediaType === 'image/jpeg')).toHaveLength(0);
+    expect(camera['written']).toBe(0);
+    // Still the truth about the device: a Stop shortens the archive, it does
+    // not change what this device is holding.
+    expect(camera['kept']).toBe(3);
+  });
+
+  it('stops between two pictures, not only before the first', async () => {
+    // ⚠️ **The case the one above cannot make.** Aborting before the run starts
+    // is caught by the read-skipping guard *or* by the loop's own break, so
+    // that test stays green with either one deleted. A rider who presses Stop
+    // is almost never doing it before the first file — they are doing it while
+    // files are going past — and only the break inside the loop answers that.
+    await seedLibrary(1);
+    await harness.write(async (store) => {
+      for (let index = 0; index < 6; index += 1) {
+        await store.putCameraFrame(cameraFrameFor(ATHLETE_A, { length: 64 }));
+      }
+    });
+    const controller = new AbortController();
+    const files: DownloadableFile[] = [];
+
+    await harness.read(async (store) =>
+      exportEverything({
+        store,
+        athleteId: ATHLETE_A,
+        format: 'gpx',
+        signal: controller.signal,
+        onFile: (file) => {
+          files.push(file);
+          // Stop the moment the first picture has been handed over.
+          if (file.mediaType === 'image/jpeg') {
+            controller.abort();
+          }
+        },
+      }),
+    );
+
+    const camera = manifestOf(files)['camera'] as Record<string, unknown>;
+    expect(files.filter((file) => file.mediaType === 'image/jpeg')).toHaveLength(1);
+    expect(camera['written']).toBe(1);
+    expect(camera['kept']).toBe(6);
   });
 
   it('names a file after an instant and an ordinal, never after a ride', () => {
