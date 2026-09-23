@@ -46,6 +46,7 @@ import {
 } from './quality';
 import { TERRAIN_BANDS, TERRAIN_COLUMN_OFFSETS } from './landform';
 import { MAXIMUM_SCENERY_VARIANTS } from './scenery-models';
+import { REALISTIC_STRUCTURE_ITEMS } from './realistic-budget';
 import { STRUCTURE_MAX_ITEMS } from './settlements';
 import { SCATTER_MAX_ITEMS } from './scatter';
 
@@ -576,9 +577,24 @@ describe('the realistic world is a ladder above the stylised one — ADR 0026 D-
 
   it('is the stylised target with the world swapped, so its cost is the world alone', () => {
     const [top] = REALISTIC_LADDER;
-    expect({ ...top, world: 'stylised', label: '' }).toEqual({
+    // …but the structures, #506. @see REALISTIC_STRUCTURE_ITEMS
+    expect({ ...top, world: 'stylised', label: '', structureItems: 0 }).toEqual({
       ...QUALITY_LADDER[0],
       label: '',
+      structureItems: 0,
+    });
+  });
+
+  it('carries fewer structures than the stylised rungs it copies, on both rungs — #506', () => {
+    // Since #500 a realistic building costs up to 640 triangles, and the
+    // stylised top's 240 of them put the worst realistic frame about half as
+    // heavy again as `REALISTIC_FRAME_TRIANGLES` allows —
+    // `realistic-budget.test.ts` §"structures included" is the sum.
+    REALISTIC_LADDER.forEach((rung, level) => {
+      expect(rung.structureItems, rung.label).toBe(REALISTIC_STRUCTURE_ITEMS);
+      expect(rung.structureItems, rung.label).toBeLessThan(
+        QUALITY_LADDER[level]?.structureItems ?? 0,
+      );
     });
   });
 
@@ -685,9 +701,11 @@ describe('the extra display-rate step — the owner’s ruling, #482', () => {
 
   it('keeps D-3: the realistic rungs are stylised 0 and 1 with the world swapped, and realism goes two steps before any frame rate', () => {
     REALISTIC_LADDER.forEach((rung, level) => {
-      expect({ ...rung, world: 'stylised', label: '' }, rung.label).toEqual({
+      // The structures apart — #506, asserted on their own above.
+      expect({ ...rung, world: 'stylised', label: '', structureItems: 0 }, rung.label).toEqual({
         ...QUALITY_LADDER[level],
         label: '',
+        structureItems: 0,
       });
     });
     let state: WorldQualityState = INITIAL_REALISTIC_QUALITY;

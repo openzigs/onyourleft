@@ -1050,6 +1050,12 @@ chimney — and **both worlds draw the same triangles**: the stylised belt paint
 stands did not move. The realistic structures went from 15 meshes to 35 (`realistic-budget.ts`
 §`REALISTIC_STRUCTURE_MESHES`, which says what that costs in draw calls), and a structure's triangle
 budget from 96 to 640, held under the lightest house the stylised world already draws.
+⚠️ **Since [#506](https://github.com/openzigs/onyourleft/issues/506) the realistic rungs carry 36
+structures a frame where the stylised ones carry 240 and 120** (`realistic-budget.ts`
+§`REALISTIC_STRUCTURE_ITEMS`): at 640 triangles a building, 240 of them put the worst realistic
+frame at about 450 000 against a 300 000 budget, and the budget's sum had left structures out. Every
+building is still listed before any field boundary, so what the realistic world gives up is the far
+walls, hedges and fences.
 
 ## Spike write-ups
 

@@ -2700,3 +2700,35 @@ Same tablet, same debug-APK route as Part Z (§"Build and install"), from a `mai
 **Does the line look like a racer's line, in your own words?** ______________
 
 **Phone (OEM, model, Android, WebView):** ______________  **Build:** ______________
+
+---
+
+## Part AE — the realistic structure budget ([#506](https://github.com/openzigs/onyourleft/issues/506))
+
+Since #500 a realistic building is up to 640 triangles, and the realistic top rung carried the
+stylised top's 240 structures: a worst frame of about 450 000 triangles against
+`REALISTIC_FRAME_TRIANGLES`' 300 000, which no gate summed. #506 cut both realistic rungs to **36
+structures** (`realistic-budget.ts` §`REALISTIC_STRUCTURE_ITEMS`, which carries the arithmetic);
+`realistic-budget.test.ts` now sums the structures into the worst frame. Every building is listed
+before any wall, hedge or fence (`settlements.ts` §`structuresAt`), so what should go is the far
+field boundaries and never a house. AA3 measured a farmstead; nothing has measured a **village**,
+which is where the structures' draw calls peak (up to 16 of `REALISTIC_STRUCTURE_MESHES`' 35).
+
+**This is #506's last criterion, and nothing in CI can discharge it.** Same tablet, same debug-APK
+route as Part Z (§"Build and install"), from a `main` that has #506 in it.
+
+| Step | What to do | What should happen |
+|---|---|---|
+| AE1 | Z6's 30-second realistic row, with its `dumpsys` block: `?panel=0&ladder=0`, held beside the first farmstead as AA3 was | Draw calls and GPU p50 / p90 / p99 against AA3's **35 calls and GPU 5 / 8 / 12 ms**. Triangles, if the page reports them |
+| AE2 | The same row in a **village**, with the church and the shops in frame | The same figures. This is the view the 35 structure meshes are justified against |
+| AE3 | Ride the realistic world past a village and on into fields, at your usual speed | Is every house there? Do the **field walls, hedges and fences** end where they did not before — and does that read as wrong from a saddle? |
+
+### AE results
+
+| Step | As described? | What was seen, or measured |
+|---|---|---|
+| AE1 | | |
+| AE2 | | |
+| AE3 | | |
+
+**Phone (OEM, model, Android, WebView):** ______________  **Build:** ______________

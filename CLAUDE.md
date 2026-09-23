@@ -3755,6 +3755,7 @@ top of an issue **supersedes its body**.
 | How a realistic asset is made, where its input came from, and how to make it again byte for byte | `apps/web/tools/realistic/sources.ts`, `inputs.lock.json`, `process-assets.ts` §"`--check`", `ASSETS.toml` §derived keys, `scripts/check-repo-rules.sh` §`ASSET007` |
 | Why the Blender scripts run on one thread, and what an unordered set did to a shrub | `apps/web/tools/realistic/blender/process_tree.py` §"ONE thread" and §"An ordered de-duplication" |
 | What the realistic world may cost, what the soak re-set it from, and why nothing moved | `apps/web/src/game/realistic-budget.ts`, validation 0002 Part Z |
+| Why a realistic frame carries 36 structures where the stylised one carries 240, and what the frame's triangle sum used to leave out | `apps/web/src/game/realistic-budget.ts` §`REALISTIC_STRUCTURE_ITEMS`, `realistic-budget.test.ts` §"structures included", validation 0002 Part AE, [#506](https://github.com/openzigs/onyourleft/issues/506) |
 | Why the photographic road barely shines, and what the full sheen did to the gradient cue | `apps/web/src/game/three-renderer.ts` §`ROAD_SHEEN`, `game.browser.spec.ts` §"the realistic world" |
 | Why every face of the photographic road is lit as facing up | `apps/web/src/game/three-renderer.ts` §`photographicRoadMaterial`, `terrain.ts` §`roadIndices` |
 | How bright the HDRI's environment is, and which way its sun faces | `apps/web/src/game/realistic-light.ts` §`environmentIntensity`, §`skyRotation` |
