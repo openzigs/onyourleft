@@ -29,6 +29,13 @@
 #           date order -- and no unclosed fence hides it
 #   ADR004  an ADR declares Status, Context, Decision and Consequences --
 #           CLAUDE.md section 7's sentence, which nothing enforced (#416)
+#   SPIKE001 no two spike write-ups share a number (#493). A SIBLING of ADR001
+#           rather than a widening of it: a spike is never renumbered, so the
+#           remedy sentence differs
+#   SPIKE002 every spike filename is NNNN-kebab-case.md -- ADR002 for the
+#           directory CLAUDE.md section 7 gives the same convention (#493)
+#   SPIKE003 docs/spikes/ is there and holds a write-up, so the two rules above
+#           cannot pass over an empty or renamed directory (#493)
 #   REL001  no signing key material is committed anywhere (#95)
 #   REL002  the Android build targets at least API 36 (#95)
 #   XML001  no "--" inside an XML comment (#225)
@@ -638,9 +645,29 @@ fi
 # ## What it deliberately does not check
 #
 # Whether the Decision section says anything sensible. This is a shape rule, and
-# #416 says so in as many words. It also does not reach docs/spikes/ or
-# docs/validation/: section 7 scopes the ADR00* rules to docs/adr/ and says a
-# spike "is not an ADR and does not decide anything".
+# #416 says so in as many words.
+#
+# ⚠️ It also does not reach docs/spikes/ or docs/validation/, and until #493 the
+# whole ADR00* family said the same -- which was right for THIS rule and wrong
+# for the numbering one. Section 7 scopes the ADR00* rules to docs/adr/ because a
+# spike "is not an ADR and does not decide anything": it has no Status, no
+# Decision and no Consequences, so asking it for them would be asking a
+# measurement to be a decision. Nothing about that argument reaches number
+# UNIQUENESS. A spike is cited by number exactly as an ADR is, and section 7
+# forbids renumbering one at all, so a collision there is worse than a collision
+# here. So half the family moved and half did not:
+#
+#   ADR003, ADR004   still docs/adr/ only, and deliberately. A spike has none of
+#                    the sections they read.
+#   ADR001, ADR002   have SIBLINGS -- SPIKE001 and SPIKE002 below -- rather than
+#                    a widened scope, because the two failures want different
+#                    words. ADR001 tells the reader to renumber the unmerged
+#                    file; that sentence is wrong for a spike, where the unmerged
+#                    file takes the next free number and NOTHING is renumbered.
+#
+# docs/validation/ is deliberately left out of both (#493's own scope note): its
+# numbers are cited by nothing outside itself, so a collision there is cheap, and
+# widening to it is a decision to take rather than a side effect.
 #
 # ⚠️ Fences are blanked first, for ADR003's reason and with the same
 # consequence. ADR 0013 shows the shape it prescribes inside a fence, and #416's
@@ -701,6 +728,93 @@ check_adr_sections() {
 if [ -d "${ROOT}/docs/adr" ]; then
   check_adr_sections
 fi
+
+# --- SPIKE001 / SPIKE002 / SPIKE003: spike numbering and naming (#493) ---------
+#
+# ADR001 and ADR002 walk docs/adr/ alone, and until #493 nothing replaced the
+# half of that scoping which had no reason behind it. The note above
+# ADR_REQUIRED_SECTIONS says which half moved and why; this is the half that
+# moved.
+#
+# The defect is this repository's own recurring shape, arrived at from a new
+# direction: THE GREEN RESULT IS INDISTINGUISHABLE FROM THE CORRECT ONE. Two
+# spike write-ups at one number are two differently-named NEW files, so git has
+# no conflict to report and merges them clean; no gate read docs/spikes/ at all;
+# and the only accidental signal was an adjacent-row conflict in
+# docs/architecture.md's spike table, which depends on where the rows happen to
+# land. It is not hypothetical -- both live collisions were caught by a person
+# reading two diffs:
+#
+#   0005   main carries 0005-live-racing-patent-read.md (#466); PR #471 adds
+#          0005-realism-on-the-device-floor.md
+#   0006   two branches running in parallel on 2026-09-22 each took 0006
+#
+# And it is STRICTLY WORSE than the ADR case ADR001 exists for. An ADR that
+# collides can be renumbered before it merges; CLAUDE.md section 7 says of a
+# spike "Do not renumber one", full stop, so a collision discovered after merge
+# has no cheap repair at all.
+#
+# ⚠️ SPIKE001 is a new id rather than a widening of ADR001, and the reason is in
+# the two messages. ADR001 says the unmerged file "must be renumbered"; for a
+# spike that sentence is wrong -- the unmerged file takes the NEXT FREE number,
+# and neither file is renumbered. A rule whose message tells a contributor to do
+# the one thing the convention forbids is worse than no message.
+#
+# ⚠️ SPIKE003 is what stops the other two passing over nothing, and it is the
+# LIC006 argument applied to a directory: a rule that walks a path which is not
+# there reports clean for ever. Renaming docs/spikes/ would silence SPIKE001 and
+# SPIKE002 completely while every run stayed green -- which is #142's defect
+# shape (a gate whose selector fails closed against deletion and OPEN against
+# renaming), and check-wiring.mjs's WATCHED_PREFIXES takes the same position for
+# the same reason. So the directory is ASSERTED to exist and to hold at least one
+# write-up, exactly as ASSET005 asserts ASSETS.toml is present rather than
+# treating an absent manifest as nothing to check. The cost is that every fixture
+# tree has to carry one, which check-repo-rules.test.sh's `new_fixture` does in
+# one line -- the same cost ASSET005 already charges.
+#
+# The pairs are accumulated in a space-delimited string for ADR001's reason: this
+# script targets the bash on a bare macOS clone, which is 3.2 and has no
+# associative arrays. Both fields are safe to pack that way because SPIKE002 runs
+# FIRST and `continue`s, so anything reaching the collision test matches
+# NNNN-kebab-case.md and can contain neither a space nor a colon.
+
+SPIKE_DIR="docs/spikes"
+
+check_spikes() {
+  local spike base number rest first seen_pairs found
+
+  if [ ! -d "${ROOT}/${SPIKE_DIR}" ]; then
+    report SPIKE003 "${SPIKE_DIR}/: the directory is not there, so SPIKE001 and SPIKE002 would walk nothing and report clean for ever; if the spike write-ups have moved, move this rule with them (#493)"
+    return
+  fi
+
+  seen_pairs=" "
+  found=0
+  while IFS= read -r spike; do
+    [ -n "${spike}" ] || continue
+    found=$((found + 1))
+    base="$(basename "${spike}")"
+    if ! printf '%s' "${base}" | grep -qE '^[0-9]{4}-[a-z0-9]+(-[a-z0-9]+)*\.md$'; then
+      report SPIKE002 "${SPIKE_DIR}/${base}: filename must be NNNN-kebab-case.md (CLAUDE.md section 7)"
+      continue
+    fi
+    number="${base%%-*}"
+    case "${seen_pairs}" in
+      *" ${number}:"*)
+        rest="${seen_pairs#* "${number}":}"
+        first="${rest%% *}"
+        report SPIKE001 "${SPIKE_DIR}/${first} and ${SPIKE_DIR}/${base} share spike number ${number}; the one that has not merged yet must take the next free number -- a spike is NEVER renumbered once it lands (CLAUDE.md section 7), so neither of these may be renumbered if both have. See the spike table in docs/architecture.md" ;;
+      *)
+        seen_pairs="${seen_pairs}${number}:${base} " ;;
+    esac
+  done < <(find "${ROOT}/${SPIKE_DIR}" -type f -name '*.md' | sort)
+
+  if [ "${found}" -eq 0 ]; then
+    report SPIKE003 "${SPIKE_DIR}/: no write-up found, so SPIKE001 and SPIKE002 checked nothing; a rule that walks an empty directory reports clean whatever is wrong elsewhere (#493)"
+  fi
+}
+
+check_spikes
 
 # --- REL001: no signing key material, anywhere ---------------------------------
 # #95's first acceptance criterion: *"signing keys are in CI secrets and NEVER in

@@ -975,21 +975,29 @@ structures (layer 3), water, the rider-facing control, and the twenty-minute soa
 
 A spike is **not a decision**. It is a dated measurement that a decision may rest on, and it ages the
 way a measurement does — nobody amends one, and a later run that contradicts it is a second
-write-up. They live in `docs/spikes/NNNN-kebab-case.md`, and the `ADR00*` rules are scoped to
-`docs/adr/` and do not apply to them.
+write-up. They live in `docs/spikes/NNNN-kebab-case.md`, and `ADR003` and `ADR004` are scoped to
+`docs/adr/` and do not apply to them — a spike has no Status and no Decision to be missing.
 
-⚠️ **A spike number is not gated by anything, and that is a hole rather than a simplification.**
-`scripts/check-repo-rules.sh` says so where `ADR001` is defined — the uniqueness and filename rules
-walk `docs/adr/` alone. Two numbers cannot collide in `docs/adr/` without `ADR001` failing the
-build; two numbers in `docs/spikes/` collide **silently**, because two differently-named files at
-the same number are two new files and git merges them clean. The only accidental signal is an
-adjacent-row conflict in the table below, which depends on where the rows happen to land.
-**So the table below is the check**: read it, and this repository's open pull requests, before
-taking a number. It has already been hit twice —
-[#471](https://github.com/openzigs/onyourleft/pull/471) proposes a second `0005` against a `main`
-that already has one, and **0006 was proposed twice on 2026-09-22 by two branches running in
-parallel**. Giving the checker a `SPIKE001` is
-[#493](https://github.com/openzigs/onyourleft/issues/493) and is not done here.
+⚠️ **A spike number IS gated now, and a reader who remembers this paragraph saying it is not — and
+that the table below is therefore the only check — is reading the old file.**
+[#493](https://github.com/openzigs/onyourleft/issues/493) gave
+`scripts/check-repo-rules.sh` three rules: **`SPIKE001`** fails the build when two files here share
+an `NNNN` prefix, **`SPIKE002`** when a filename is not `NNNN-kebab-case.md`, and **`SPIKE003`**
+when `docs/spikes/` is absent or empty, which is what stops the first two walking nothing and
+reporting clean for ever. They are **siblings of `ADR001` and `ADR002` rather than a widening** of
+them: `ADR001` tells the reader to renumber the file that has not merged, and `CLAUDE.md` §7 says
+of a spike *"Do not renumber one"* — the unmerged file takes the **next free number** instead, and
+nothing is renumbered.
+
+**The hole those rules close was real and was hit twice**, both live on 2026-09-22 and both caught
+by a person reading two diffs: [#471](https://github.com/openzigs/onyourleft/pull/471) proposes a
+second `0005` against a `main` that already has one, and **0006 was proposed twice by two branches
+running in parallel**. Two differently-named files at one number are two new files, so git merges
+them clean — which is why a uniqueness rule written against filenames rather than prefixes would
+have passed the exact shape that shipped.
+
+**The table below is still what to read before taking a number**, because it is the only thing that
+knows which numbers an *open pull request* has claimed; the rules see the tree, not the branches.
 
 | Spike | Question | Answer | Evidence |
 |---|---|---|---|

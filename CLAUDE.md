@@ -1011,10 +1011,10 @@ downstream issue's acceptance criteria depend on these.
 # Exits 0 clean; exits 1 listing each violation by rule id.
 bash scripts/check-repo-rules.sh
 
-# Test the checker itself. Fixture-driven; 195 cases, printed by the run on
-# 2026-09-22. ⚠️ This said 115 until #357, 168 until #416 and 182 until #378,
-# and has been stale every single time somebody quoted it — the number is what
-# the suite prints, so read the run rather than this line.
+# Test the checker itself. Fixture-driven; 206 cases, printed by the run on
+# 2026-09-23. ⚠️ This said 115 until #357, 168 until #416, 182 until #378 and
+# 195 until #493, and has been stale every single time somebody quoted it —
+# the number is what the suite prints, so read the run rather than this line.
 bash scripts/check-repo-rules.test.sh
 
 # Verify the licence texts are byte-identical to the canonical ones, by
@@ -1326,6 +1326,9 @@ npm view typescript-eslint peerDependencies.typescript
 | `ADR002` | an ADR filename is not `NNNN-kebab-case.md` |
 | `ADR003` | an ADR's `## Amendments` section is followed by **any** heading, or there are two of them, or an entry does not open with a bold ISO date, or an entry is dated **before the one above it**, or an **unclosed code fence** would hide any of those — see §7 and [ADR 0013](docs/adr/0013-adr-amendments.md) |
 | `ADR004` | an ADR under `docs/adr/` declares no **Status**, **Context**, **Decision** or **Consequences** — §7's sentence, which nothing enforced until [#416](https://github.com/openzigs/onyourleft/issues/416). ⚠️ The matcher is **two spellings and no more**, decided rather than guessed: a level-2 heading whose text is the word (`## Decision` and `## Decision: what was chosen` count, `## Decisions` does not), and — for **Status** alone, because it is metadata rather than prose — a bold label opening a line (`- **Status**:` or `**Status**:`). A rule accepting any line that *contains* the word would pass every ADR here without reading one, since each discusses its own consequences in a sentence. Fences are blanked first, so a quoted example is an example; an **unclosed** fence is `ADR003`'s finding and deliberately not a second, misleading one here |
+| `SPIKE001` | two files under `docs/spikes/` declare the same `NNNN` prefix. [#493](https://github.com/openzigs/onyourleft/issues/493). ⚠️ A **new id rather than a widening of `ADR001`**, and the reason is the remedy sentence: `ADR001` tells the reader to renumber the unmerged file, and §7 says of a spike *"Do not renumber one"*. The unmerged file takes the **next free number** and nothing is renumbered — so a collision found after merge has no cheap repair at all, which makes this **strictly worse** than the ADR case `ADR001` exists for. It happened twice, both live on 2026-09-22 (0005 and 0006), and neither was caught by a gate: two differently-named files are two new files and git merges them clean. Both paths are named on one line, for `ADR001`'s own #118 reason |
+| `SPIKE002` | a filename under `docs/spikes/` is not `NNNN-kebab-case.md` — `ADR002`'s check applied to the directory §7 gives the same convention. It runs **first** and `continue`s, which is what makes `SPIKE001`'s string packing safe |
+| `SPIKE003` | `docs/spikes/` is absent, or holds no write-up. ⚠️ This is what stops the two above passing over nothing: a rule that walks a path which is not there reports clean for ever, which is `LIC006`'s reason applied to a directory and #142's shape applied to a selector — failing closed against *deleting* the directory and **open** against *renaming* it. The directory is therefore **asserted**, as `check-wiring.mjs` asserts `WATCHED_PREFIXES` and as `ASSET005` asserts the manifest is present. Measured 2026-09-23: removing its two `report` calls turns exactly two of the suite's 206 cases red and nothing else; pointing the walk at a suffix nothing uses makes it fire on this repository |
 | `REL001` | signing key material is committed anywhere — by name (`.jks`, `.keystore`, `.p12`, `.pfx`, `.key`, `keystore.properties`) **or** by content (a `PRIVATE KEY` block in a file with an innocent name). #95, and the one rule here whose violation cannot be undone by fixing it. ⚠️ Since #229 both halves walk the **same** prune list every other rule walks: it used to keep its own, which excluded `fixtures` and kept `coverage`, so a `.jks` under `packages/fit/fixtures/` was invisible while a PEM beside it was reported |
 | `REL002` | any Gradle file under `apps/mobile/android` declares a target API level below **36**, or the project declares none at all. Checked here rather than in Gradle because CI does not build Android — a rule that only fires inside a build nobody runs never fires. ⚠️ Since #95 it reads **every** Gradle file and follows the value rather than the filename: it used to open `variables.gradle`, take the first match and pass silently when that file was absent, so deleting it, overriding the ext property with a literal in `app/build.gradle`, appending a lower value below a compliant one, and AGP's current `targetSdk` spelling were four green regressions |
 | `XML001` | `--` appears inside an XML comment in a non-generated `.xml` file, which XML 1.0 §2.5 forbids and no parser accepts. #225 — the rule exists because `AndroidManifest.xml` shipped in #87 with three of them and passed every gate here for months, until the first Gradle build ever run failed on it |
@@ -3154,9 +3157,15 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   paragraph telling them to skip 0012 is reading the old one.
 - **Spikes**: `docs/spikes/NNNN-kebab-case.md`. A spike write-up is **not an ADR and does not
   decide anything** — it is a dated measurement that an ADR or an issue may then rest on, and it
-  ages the way a measurement does. `scripts/check-repo-rules.sh`'s `ADR00*` rules are scoped to
-  `docs/adr/` and do not apply. Do not renumber one, and do not edit a finding out of one: if a
-  later run contradicts it, that is a second write-up.
+  ages the way a measurement does. `scripts/check-repo-rules.sh`'s `ADR003` and `ADR004` are scoped
+  to `docs/adr/` and do not apply — a spike has no Status and no Decision to be missing. ⚠️ **The
+  numbering rules DO apply since [#493](https://github.com/openzigs/onyourleft/issues/493), and a
+  reviewer who remembers the whole `ADR00*` family being out is reading the old file**: `SPIKE001`
+  and `SPIKE002` are siblings of `ADR001` and `ADR002` rather than a widening of them, because the
+  remedy differs. Do not renumber one, and do not edit a finding out of one: if a later run
+  contradicts it, that is a second write-up. **A colliding number is resolved by the file that has
+  not merged taking the next free one** — which is why `SPIKE001`'s message says that and `ADR001`'s
+  does not.
 - **Changelog**: there is **no `CHANGELOG.md` and no changelog convention** in this repository. Do
   not add one as a drive-by; if a release needs one, that is its own issue.
 - **Versions**: do not bump any version unless the issue asks for it.
@@ -3383,7 +3392,8 @@ top of an issue **supersedes its body**.
 | Whether the EU or the UK makes this camera analysis a medical device, and the single rule carrying the whole distance | [spike 0008](docs/spikes/0008-eu-uk-medical-device-read.md) §4.3, §6 |
 | Why a guidance citation needs a revision and a date rather than a number | [spike 0008](docs/spikes/0008-eu-uk-medical-device-read.md) §2 |
 | Which product surfaces a regulator reads that no gate here scans | [spike 0008](docs/spikes/0008-eu-uk-medical-device-read.md) §8, [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md) D-8 |
-| Why two spike write-ups can take one number and merge clean and green | [`docs/architecture.md`](docs/architecture.md) §"Spike write-ups", `scripts/check-repo-rules.sh` §`ADR001`, [#493](https://github.com/openzigs/onyourleft/issues/493) |
+| What stops two spike write-ups taking one number, and why it is not `ADR001` widened | `scripts/check-repo-rules.sh` §`SPIKE001`, [#493](https://github.com/openzigs/onyourleft/issues/493) |
+| Why a rule that walks `docs/spikes/` has to assert the directory is there | `scripts/check-repo-rules.sh` §`SPIKE003`, §4a |
 | What decides who is faster in a race, and what the owner answered when asked | [ADR 0028](docs/adr/0028-racing-fairness.md) §Amendments (2026-09-22), [#465](https://github.com/openzigs/onyourleft/issues/465), [#488](https://github.com/openzigs/onyourleft/issues/488) |
 | Why a race has no categories in its first cut, and what that leaves as the only guard | [ADR 0028](docs/adr/0028-racing-fairness.md) §Amendments §"What Q5 costs, said plainly", D-4 |
 | Where a W/kg plausibility ceiling came from, which of the four is sourced first-hand, and the one that sits below a world record | [ADR 0028](docs/adr/0028-racing-fairness.md) §Amendments §"Q3's four ceilings", [ADR 0006](docs/adr/0006-fit-codec-licensing.md) R1 |
