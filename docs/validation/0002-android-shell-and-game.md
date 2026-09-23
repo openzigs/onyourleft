@@ -2652,3 +2652,51 @@ adb logcat | grep -i "BluetoothLe"
 **Did pressing Ride on the game feel like the only thing you had to do, in your own words?** Not asked in so many words; the owner reported AC1–AC4 as correct.
 
 **Trainer (make, model, firmware, address):** make, model and firmware not recorded; address `EB:71:8D:AA:0E:3C`  **Build:** debug, `main` at `a21bdfe`, installed 2026-09-23 14:32, on the Pixel Tablet above
+
+---
+
+## Part AD — a racing line through the bends, and a rider who leans ([#499](https://github.com/openzigs/onyourleft/issues/499))
+
+**Why this part exists.** Until #499 every rider — you, the pacer and the ghost — was drawn on the
+road's centreline and bolt upright through every bend, and two riders level on the road were drawn
+inside each other. Since #499 each rides a **line** (`apps/web/src/game/racing-line.ts`): the line
+of least peak curvature inside the carriageway, 0.6 m in from each edge, which enters a bend wide,
+clips the apex and exits wide. Each **leans** by `tan φ = v² / (g·R)` from that line's own bend and
+its own speed, rolling in over a few metres rather than snapping, and **stops at 38.7°**, the most a
+dry road tyre holds. Two riders level on the road are moved a handlebar and a bit apart. The chase
+camera follows you across the road and does **not** roll.
+
+⚠️ **The cap is a drawing decision, not physics.** The game never slows you for a bend, so at a
+hairpin taken at full speed the lean the bend asks for is past what any tyre holds; you are drawn at
+the cap and are, in truth, going too fast for the corner. AD3 is where that shows.
+
+⚠️ **Nothing measured along the road moved.** Distance, the trainer's grade, the ghost, the pacer's
+gap and *To go* are all still on the centreline — a test holds the grade a trainer is sent through a
+hairpin to be identical with and without the line. So this part is about how it LOOKS and nothing
+else. The browser gate reads the rider off-centre and rolled at a 20 m hairpin's apex, against the
+same rider on the centreline and upright (`game.browser.spec.ts` §"#499"); whether it looks like a
+racer is only here.
+
+Same tablet, same debug-APK route as Part Z (§"Build and install"), from a `main` that has #499 in it.
+
+| Step | What to do | What should happen |
+|---|---|---|
+| AD1 | The owner's soak route through its valley: `?panel=0&ladder=0`, ride the first 3 km at your usual speed | Its bends are sweeping (about 250 m radius), so the line drifts across the road rather than darting and the lean is a few degrees. Does the **line look like a racer's** — wide into a bend, inside at its middle, wide out — and never like a rider wandering? |
+| AD2 | The same, **faster**: a sprint through two or three of those bends | Does the **lean look natural at speed** — rolling in before the bend rather than snapping at it, and back out after? Does it lean **into** the bend every time? |
+| AD3 | Import a route with a real **hairpin** (any GPX of a mountain road) and ride it, then sprint through it | At a hairpin taken hard the rider is drawn at the **cap**, 38.7°, and holds it there. Does anything look **wrong** — the wheels through the road, the rider's shadow somewhere odd, the bicycle leaving the tarmac at the apex? |
+| AD4 | Race your own ghost, or a pacer, and ride **level** with it for a few seconds, then pass | The two bicycles are **side by side**, never inside each other, and ease apart as they draw level rather than jumping sideways. Does the camera stay on **you**? |
+| AD5 | The stylised world (`?world=stylised&panel=0&ladder=0`) through the same bends | The line and the lean are the same in both worlds — the stylised bicycle and the realistic MakeHuman rider lean **together with** their bicycle |
+
+### AD results
+
+| Step | As described? | What was seen |
+|---|---|---|
+| AD1 | | |
+| AD2 | | |
+| AD3 | | |
+| AD4 | | |
+| AD5 | | |
+
+**Does the line look like a racer's line, in your own words?** ______________
+
+**Phone (OEM, model, Android, WebView):** ______________  **Build:** ______________

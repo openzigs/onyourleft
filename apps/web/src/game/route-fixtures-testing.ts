@@ -185,3 +185,78 @@ export function hairpinRoute(radius: number): RouteProfile {
   }
   return routeProfile(points);
 }
+
+/**
+ * An S-bend — #499: 400 m north, a right-hand bend of `radius` through 90°, a
+ * left-hand bend of the same radius back through 90°, and 400 m north again,
+ * level all the way. The two bends meet with no straight between them, which
+ * is the case where a line has to cross the road from one apex to the other.
+ */
+export function sBendRoute(radius: number): RouteProfile {
+  const metresPerDegreeLongitude =
+    METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
+  const points: RoutePoint[] = [];
+  const push = (east: number, north: number): void => {
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(FIXTURE_LATITUDE + north / METRES_PER_DEGREE_LATITUDE),
+        degreesLongitude(-0.12 + east / metresPerDegreeLongitude),
+      ),
+      elevation: altitudeMetres(0),
+    });
+  };
+  for (let north = 0; north < 400; north += 10) {
+    push(0, north);
+  }
+  const steps = Math.max(6, Math.round((Math.PI * radius) / 2 / 5));
+  // Right: about a centre `radius` to the east, from its west point to its north.
+  for (let step = 0; step < steps; step += 1) {
+    const angle = (step / steps) * (Math.PI / 2);
+    push(radius * (1 - Math.cos(angle)), 400 + radius * Math.sin(angle));
+  }
+  // Left: about a centre `radius` north of the first bend's end, from its
+  // south point round to its east — heading north again.
+  for (let step = 0; step <= steps; step += 1) {
+    const angle = (step / steps) * (Math.PI / 2);
+    push(radius + radius * Math.sin(angle), 400 + radius + radius * (1 - Math.cos(angle)));
+  }
+  for (let north = 10; north <= 400; north += 10) {
+    push(2 * radius, 400 + 2 * radius + north);
+  }
+  return routeProfile(points);
+}
+
+/**
+ * A stadium — #499: 400 m north, a right-hand bend of `radius` through 180°,
+ * 400 m south, and a second right-hand 180° bend back to the start, as a LOOP.
+ * Level. A loop whose line is not the same everywhere, so a step at the wrap
+ * would show — `circuitRoute`'s constant bend puts the line at one offset all
+ * the way round.
+ */
+export function stadiumRoute(radius: number): RouteProfile {
+  const metresPerDegreeLongitude =
+    METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
+  const points: RoutePoint[] = [];
+  const push = (east: number, north: number): void => {
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(FIXTURE_LATITUDE + north / METRES_PER_DEGREE_LATITUDE),
+        degreesLongitude(-0.12 + east / metresPerDegreeLongitude),
+      ),
+      elevation: altitudeMetres(0),
+    });
+  };
+  const steps = Math.max(6, Math.round((Math.PI * radius) / 5));
+  for (let north = 0; north < 400; north += 10) push(0, north);
+  for (let step = 0; step < steps; step += 1) {
+    const angle = (step / steps) * Math.PI;
+    push(radius * (1 - Math.cos(angle)), 400 + radius * Math.sin(angle));
+  }
+  for (let north = 400; north > 0; north -= 10) push(2 * radius, north);
+  for (let step = 0; step < steps; step += 1) {
+    const angle = (step / steps) * Math.PI;
+    push(radius * (1 + Math.cos(angle)), -radius * Math.sin(angle));
+  }
+  push(0, 0);
+  return routeProfile(points, { loop: true });
+}

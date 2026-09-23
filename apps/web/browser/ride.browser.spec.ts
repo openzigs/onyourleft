@@ -61,6 +61,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { applyInsets, PIXEL_TABLET_LANDSCAPE_INSETS, resolvedInsets } from './insets';
 
 import { riderFrameBox } from '../src/game/camera';
+import { MAXIMUM_LEAN_RADIANS } from '../src/game/racing-line';
 
 import type { Box, StageItem, StageMeasurement } from './ride-harness';
 
@@ -109,6 +110,18 @@ interface Viewport {
    * cannot honestly fail is worse than none.
    */
   readonly unstagedFails: boolean;
+  /**
+   * #512: a HUD panel here covers a rider leaning at the cap, so this viewport
+   * is held to the UPRIGHT rider box, and the case "#512 is still open" requires
+   * the leaning box to be covered — which goes red the day the layout is
+   * fixed, so the flag cannot outlive the defect.
+   *
+   * ⚠️ A known gap, stated rather than papered over. #499 made the rider lean,
+   * and at 736×360 the corner panels leave about 80 px around the middle of the
+   * frame; a rider leaning past about 20° reaches past it. Every other overlay
+   * viewport clears the leaning box.
+   */
+  readonly leaningRiderCovered?: true;
 }
 
 /**
@@ -128,7 +141,13 @@ const OVERLAY_VIEWPORTS: readonly Viewport[] = [
   { name: 'a 4:3 tablet in landscape — 1024×768', width: 1024, height: 768, unstagedFails: true },
   { name: 'a tablet upright — 800×1280', width: 800, height: 1280, unstagedFails: false },
   { name: 'a phone in landscape — 844×390', width: 844, height: 390, unstagedFails: true },
-  { name: 'the smallest corners layout — 736×360', width: 736, height: 360, unstagedFails: true },
+  {
+    name: 'the smallest corners layout — 736×360',
+    width: 736,
+    height: 360,
+    unstagedFails: true,
+    leaningRiderCovered: true,
+  },
   { name: 'a phone upright — 390×844', width: 390, height: 844, unstagedFails: false },
   {
     name: 'a narrow Android phone upright, in the app — 360×800',
@@ -216,14 +235,22 @@ function describeItem(item: StageItem): string {
 }
 
 /**
- * `game/camera.ts` §`riderFrameBox`, in this viewport's pixels.
+ * `game/camera.ts` §`riderFrameBox`, in this viewport's pixels, for a rider
+ * leaning as far as one is ever drawn (#499).
  *
  * ⚠️ Non-vacuous by construction rather than by luck: it throws on a box too
  * small to overlap anything, because "no panel overlaps a rectangle of no
  * size" is true of every layout there is.
  */
-function riderBox(viewport: Viewport): Box {
-  const rider = riderFrameBox(viewport.width / viewport.height);
+function riderBox(
+  viewport: Viewport,
+  lean: number = viewport.leaningRiderCovered === true ? 0 : MAXIMUM_LEAN_RADIANS,
+): Box {
+  // At the lean cap (#499): the bicycle stays mid-frame on the racing line
+  // because the camera follows it across, but the rider's top rolls up to
+  // 0.95 m to one side. A panel over a leaning rider is over the rider —
+  // except where `Viewport.leaningRiderCovered` records that it is (#512).
+  const rider = riderFrameBox(viewport.width / viewport.height, lean);
   const box: Box = {
     left: rider.left * viewport.width,
     right: rider.right * viewport.width,
@@ -351,6 +378,21 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       const box = riderBox(viewport);
       expect(seen.panels.filter((each) => overlap(each.box, box)).map(describeItem)).toEqual([]);
     });
+
+    if (viewport.leaningRiderCovered === true) {
+      /**
+       * #512, pinned from the other side: here a panel IS over a rider leaning
+       * at the cap. When the layout is fixed this goes red, and the flag and
+       * this case come off together.
+       */
+      test('#512 is still open: a panel covers a rider leaning at the cap', async ({ page }) => {
+        await openRide(page, viewport);
+        const seen = await measure(page);
+
+        const leaning = riderBox(viewport, MAXIMUM_LEAN_RADIANS);
+        expect(seen.panels.filter((each) => overlap(each.box, leaning)).length).toBeGreaterThan(0);
+      });
+    }
 
     test('a primary reading is visibly larger than a secondary one', async ({ page }) => {
       await openRide(page, viewport);

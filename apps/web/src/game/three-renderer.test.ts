@@ -49,6 +49,7 @@ import {
   type RoutePoint,
 } from '@onyourleft/domain';
 
+import { LINE_LIMIT_METRES, racingLine } from './racing-line';
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
 import { corridorOrigin, roadCorridor } from './terrain';
@@ -1246,9 +1247,12 @@ describe('the verge and the camera cone — #355, re-derived for #423 and #424',
   /** How much further out a 6 m verge stands than the 3 m one that ships. */
   const REJECTED_VERGE_EXTRA_METRES = 3;
 
+  /** The straight the near field is measured on. */
+  const levelProfile = routeProfile(levelRoute());
+
   /** The hundred frames, built once: `sceneFrame` is the expensive half. */
   const frames = ((): readonly SceneFrame[] => {
-    const profile = routeProfile(levelRoute());
+    const profile = levelProfile;
     const origin = corridorOrigin(profile);
     const start = atStartLine(profile);
     const built: SceneFrame[] = [];
@@ -1356,6 +1360,67 @@ describe('the verge and the camera cone — #355, re-derived for #423 and #424',
     // header. The arrangement #355 replaced must still FAIL, through this
     // camera, at this aspect.
     expect(share(rejected)).toBeLessThan(floor);
+  });
+
+  /**
+   * #499 moves the camera across the road with the rider's racing line, and
+   * every figure above is for a camera on the centreline. Restated rather than
+   * re-pinned, as #499's camera criterion asks: this block's straight is where
+   * the camera still IS on the centreline, and a bend is where it is not.
+   */
+  it('is measured through a camera the racing line leaves on the centreline of a straight — #499', () => {
+    const line = racingLine(levelProfile);
+    let widest = 0;
+    for (const offset of line.offsets) widest = Math.max(widest, Math.abs(offset));
+    // Non-vacuity: the fixture is long enough to be solved at all.
+    expect(line.offsets.length).toBeGreaterThan(1000);
+    expect(widest).toBeLessThan(0.01);
+    // And the camera the near field is measured through is where that puts
+    // it: on the centreline, measured against the corridor's own centre points.
+    for (const frame of frames) {
+      let nearest = Number.POSITIVE_INFINITY;
+      const centre = frame.corridor.centre;
+      for (let index = 1; index < centre.length; index += 1) {
+        const a = centre[index - 1] as (typeof centre)[number];
+        const b = centre[index] as (typeof centre)[number];
+        const dx = b.x - a.x;
+        const dz = b.z - a.z;
+        const t = Math.max(
+          0,
+          Math.min(
+            1,
+            ((frame.camera.x - a.x) * dx + (frame.camera.z - a.z) * dz) / (dx * dx + dz * dz),
+          ),
+        );
+        nearest = Math.min(
+          nearest,
+          Math.hypot(frame.camera.x - (a.x + t * dx), frame.camera.z - (a.z + t * dz)),
+        );
+      }
+      expect(nearest).toBeLessThan(0.01);
+    }
+  });
+
+  it('moves the verge by as much as the camera moves across in a bend, and says by how much — #499', () => {
+    // At the line's limit, 2.9 m from the middle, the verge on the far side of
+    // the camera is 2.9 m further off and on the near side 2.9 m closer. On a
+    // straight level road, which is what this block's arithmetic is stated
+    // for, those enter a 16 : 9 frame here:
+    expect(entersFrameAt(NEAREST + LINE_LIMIT_METRES, REFERENCE_ASPECT)).toBeCloseTo(3.05, 2);
+    expect(entersFrameAt(NEAREST - LINE_LIMIT_METRES, REFERENCE_ASPECT)).toBeCloseTo(-1.61, 2);
+    expect(entersFrameAt(NEAREST + LINE_LIMIT_METRES, TABLET_ASPECT)).toBeCloseTo(3.89, 2);
+    // ⚠️ The far side is NOT inside the front wheel there, and that is the
+    // figure moving, stated: "in shot before the front wheel is level" holds
+    // on a straight and on the inside of a bend, not on its outside at the
+    // line's widest.
+    expect(entersFrameAt(NEAREST + LINE_LIMIT_METRES, REFERENCE_ASPECT)).toBeGreaterThan(
+      BICYCLE_FRONT_METRES,
+    );
+    // And the production statement agrees at the moved camera too.
+    expect(vergeEntersFrameMetres(NEAREST + LINE_LIMIT_METRES, REFERENCE_ASPECT)).toBeCloseTo(
+      entersFrameAt(NEAREST + LINE_LIMIT_METRES, REFERENCE_ASPECT),
+      10,
+    );
   });
 
   it('is not the reason a frame occasionally carries nothing in the near field', () => {
@@ -1511,7 +1576,7 @@ function frameWithScatter(): SceneFrame {
       quadCount: 1,
     },
     camera: POSE,
-    markers: [{ kind: 'rider', x: 0, y: 0, z: 0, headingX: 0, headingZ: 1 }],
+    markers: [{ kind: 'rider', x: 0, y: 0, z: 0, headingX: 0, headingZ: 1, lean: 0 }],
     world: {
       skyColour: 0x88aaff,
       groundColour: 0x557744,
@@ -2470,6 +2535,7 @@ describe('the riders are bicycles rather than solids — #349, #368', () => {
       z: over.z ?? 0,
       headingX: facing.headingX ?? 0,
       headingZ: facing.headingZ ?? 1,
+      lean: 0,
       ...(crankAngle === undefined ? {} : { crankAngle }),
     };
   }
@@ -3132,5 +3198,83 @@ describe('what the realistic structures cost in meshes — #482', () => {
     expect(built).toBe(pairs.size);
     expect(built).toBe(REALISTIC_STRUCTURE_MESHES);
     belts.dispose();
+  });
+});
+
+describe('the riders lean into a bend — #499', () => {
+  /** A rider facing `heading`, leaning `lean`, cranks at `crankAngle`. */
+  function leaning(
+    lean: number,
+    heading: readonly [number, number] = [0, 1],
+    crankAngle = 0,
+  ): RiderMarker {
+    return {
+      kind: 'rider',
+      x: 5,
+      y: 1,
+      z: 7,
+      headingX: heading[0],
+      headingZ: heading[1],
+      lean,
+      crankAngle,
+    };
+  }
+
+  /** The column of an instance matrix a direction was carried onto: 0 x, 1 y, 2 z. */
+  function axisOf(
+    mesh: { readonly instanceMatrix: { readonly array: ArrayLike<number> } },
+    slot: number,
+    column: number,
+  ): readonly [number, number, number] {
+    const at = slot * 16 + column * 4;
+    const matrix = mesh.instanceMatrix.array;
+    return [matrix[at] ?? NaN, matrix[at + 1] ?? NaN, matrix[at + 2] ?? NaN];
+  }
+
+  it.each([
+    ['north', [0, 1] as const],
+    ['east', [1, 0] as const],
+    ['south-west', [-Math.SQRT1_2, -Math.SQRT1_2] as const],
+  ])('tips the top of the bicycle toward the road’s normal when heading %s', (_, heading) => {
+    const belt = new RiderBelt();
+    belt.place([leaning(0.5, heading)]);
+    const [upX, upY, upZ] = axisOf(belt.meshes.bodies, 0, 1);
+    // Six places: an instance matrix is Float32.
+    // The normal is `(−headingZ, headingX)`; a positive lean tips `+Y` onto it
+    // by sin φ and leaves cos φ of it up.
+    expect(upY).toBeCloseTo(Math.cos(0.5), 6);
+    expect(upX).toBeCloseTo(-heading[1] * Math.sin(0.5), 6);
+    expect(upZ).toBeCloseTo(heading[0] * Math.sin(0.5), 6);
+    // …and still faces down the road: the roll is about the bicycle's own length.
+    const [forwardX, , forwardZ] = axisOf(belt.meshes.bodies, 0, 2);
+    expect(forwardX).toBeCloseTo(heading[0], 6);
+    expect(forwardZ).toBeCloseTo(heading[1], 6);
+    belt.dispose();
+  });
+
+  it('pivots about the tyres’ contact line, so the wheels stay on the road', () => {
+    const belt = new RiderBelt();
+    belt.place([leaning(0.6)]);
+    const at = belt.meshes.bodies.instanceMatrix.array;
+    expect([at[12], at[13], at[14]]).toEqual([5, 1, 7]);
+    belt.dispose();
+  });
+
+  it('rolls the crankset and the legs with the bicycle, even when nothing else moved', () => {
+    // ⚠️ The legs are skipped when nothing in `POSE_KEY` changed, and until
+    // #499 the lean was not in it: a lean that changed on a coasting rider
+    // would roll the frame and leave the legs upright beside it.
+    const belt = new RiderBelt();
+    belt.place([leaning(0)]);
+    const upright = Array.from(belt.meshes.limbs.instanceMatrix.array.slice(0, 16));
+    const cranksUpright = axisOf(belt.meshes.cranksets, 0, 1);
+    belt.place([leaning(0.5)]);
+    const leant = Array.from(belt.meshes.limbs.instanceMatrix.array.slice(0, 16));
+    expect(leant).not.toEqual(upright);
+    // The crankset's own up follows the bicycle's roll: sideways toward −x on a
+    // road heading north.
+    expect(cranksUpright[0]).toBeCloseTo(0, 6);
+    expect(axisOf(belt.meshes.cranksets, 0, 1)[0]).toBeLessThan(-0.3);
+    belt.dispose();
   });
 });

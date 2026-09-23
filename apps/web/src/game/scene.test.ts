@@ -412,7 +412,7 @@ describe('the chase camera', () => {
       indices: new Uint32Array(0),
       quadCount: 0,
     };
-    const pose = cameraPose(corridor, 0);
+    const pose = cameraPose(corridor, 0, 0);
 
     expect(Number.isFinite(pose.headingX)).toBe(true);
     expect(Number.isFinite(pose.headingZ)).toBe(true);
@@ -751,7 +751,7 @@ describe('a marker slides along the road rather than snapping to a corridor poin
     const corridor = roadCorridor(profile, corridorOrigin(profile), 100);
     const farEnd = corridor.centre[corridor.centre.length - 1];
 
-    const pose = cameraPose(corridor, (farEnd?.along ?? 0) + 50);
+    const pose = cameraPose(corridor, (farEnd?.along ?? 0) + 50, 0);
 
     // The route runs due east, and so does the camera at its far end.
     expect(pose.headingX).toBeGreaterThan(0.9);

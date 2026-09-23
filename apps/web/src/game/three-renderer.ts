@@ -382,7 +382,8 @@ const RIDDEN_KINDS = Object.keys(RIDER_TINTS) as readonly RiderMarker['kind'][];
 
 /**
  * Everything one rider's leg pose depends on, in the order {@link RiderBelt}
- * stores it — five numbers a slot.
+ * stores it — six numbers a slot since #499 added the lean, which is as much
+ * the rider's world transform as the heading is.
  *
  * ⚠️ **The four before the angle are the rider's own world transform**, and
  * leaving them out is the defect #366–#368's review found: a leg segment's
@@ -391,7 +392,10 @@ const RIDDEN_KINDS = Object.keys(RIDER_TINTS) as readonly RiderMarker['kind'][];
  * because the reason the position belongs in an *animation* cache is not
  * obvious from the call site. The scale is not here: every rider is drawn at 1.
  */
-const POSE_KEY = ['x', 'y', 'z', 'yaw', 'crankAngle'] as const;
+const POSE_KEY = ['x', 'y', 'z', 'yaw', 'lean', 'crankAngle'] as const;
+
+/** Where the crank angle is in a slot's {@link POSE_KEY}. */
+const POSE_CRANK = POSE_KEY.indexOf('crankAngle');
 
 /**
  * The tints that are not white: the bot's and the ghost's.
@@ -2328,6 +2332,8 @@ export class RiderBelt {
   readonly #tint = new Color();
   readonly #up = new Vector3(0, 1, 0);
   readonly #acrossTheBicycle = new Vector3(1, 0, 0);
+  readonly #alongTheBicycle = new Vector3(0, 0, 1);
+  readonly #roll = new Quaternion();
 
   constructor() {
     const riders = RIDDEN_KINDS.length;
@@ -2507,6 +2513,13 @@ export class RiderBelt {
     // `atan2(headingX, headingZ)` takes `(0, 0, 1)` onto the marker's heading.
     const yaw = Math.atan2(marker.headingX, marker.headingZ);
     this.#turn.setFromAxisAngle(this.#up, yaw);
+    // #499: the lean, about the bicycle's own `+Z` — the line between its tyre
+    // contacts, because `bicycle.ts` puts the origin on the road between them.
+    // Applied in the bicycle's frame, so it rolls about its own length whatever
+    // way it faces. A roll of `+θ` about `+Z` takes `+Y` toward `−X`, and the
+    // model's `−X` is the road's normal (@see RiderMarker.lean) — so a positive
+    // lean tips the rider toward the side the bend turns to.
+    this.#turn.multiply(this.#roll.setFromAxisAngle(this.#alongTheBicycle, marker.lean));
     this.#stretch.setScalar(1);
     this.#rider.compose(this.#position, this.#turn, this.#stretch);
     this.#bodies.setMatrixAt(slot, this.#rider);
@@ -2521,7 +2534,7 @@ export class RiderBelt {
     // "never posed", and it has to become `0` rather than being carried into a
     // matrix — a `NaN` angle composes a `NaN` crankset and three loses the
     // whole mesh.
-    const held = this.#posed[slot * POSE_KEY.length + 4] ?? Number.NaN;
+    const held = this.#posed[slot * POSE_KEY.length + POSE_CRANK] ?? Number.NaN;
     const angle = marker.crankAngle ?? (Number.isNaN(held) ? 0 : held);
     this.#position.set(0, CRANK_AXIS_Y, CRANK_AXIS_Z);
     this.#turn.setFromAxisAngle(this.#acrossTheBicycle, angle);
@@ -2532,7 +2545,7 @@ export class RiderBelt {
     for (let bone = 0; bone < LEG_BONE_COUNT; bone += 1) {
       this.#limbs.setColorAt(slot * LEG_BONE_COUNT + bone, this.#tint);
     }
-    // ⚠️ **All five, not the angle alone.** `#poseLegs` writes world matrices,
+    // ⚠️ **All six, not the angle alone.** `#poseLegs` writes world matrices,
     // so the rider's own place and heading are part of what a pose was solved
     // for; see {@link POSE_KEY}. A `NaN` in the cache never equals anything,
     // which is how a slot's first frame always writes.
@@ -2547,7 +2560,8 @@ export class RiderBelt {
       posed[at + 1] === marker.y &&
       posed[at + 2] === marker.z &&
       posed[at + 3] === yaw &&
-      posed[at + 4] === angle;
+      posed[at + 4] === marker.lean &&
+      posed[at + 5] === angle;
     if (unmoved) {
       return false;
     }
@@ -2556,7 +2570,8 @@ export class RiderBelt {
     posed[at + 1] = marker.y;
     posed[at + 2] = marker.z;
     posed[at + 3] = yaw;
-    posed[at + 4] = angle;
+    posed[at + 4] = marker.lean;
+    posed[at + 5] = angle;
     return true;
   }
 
@@ -4993,6 +5008,8 @@ export class RealisticRiderBelt {
   readonly #e = new Vector3();
   readonly #up = new Vector3(0, 1, 0);
   readonly #acrossTheBicycle = new Vector3(1, 0, 0);
+  readonly #alongTheBicycle = new Vector3(0, 0, 1);
+  readonly #roll = new Quaternion();
   readonly #unit = new Vector3(1, 1, 1);
   #shown = true;
 
@@ -5137,6 +5154,9 @@ export class RealisticRiderBelt {
     rider.root.visible = true;
     rider.root.position.set(marker.x, marker.y, marker.z);
     rider.root.quaternion.setFromAxisAngle(this.#up, Math.atan2(marker.headingX, marker.headingZ));
+    // #499: the MakeHuman rider and its bicycle lean TOGETHER, because both are
+    // posed from this root. @see RiderBelt, where the axis and sign are argued.
+    rider.root.quaternion.multiply(this.#roll.setFromAxisAngle(this.#alongTheBicycle, marker.lean));
     // ⚠️ A frame that carries no angle HOLDS the one this rider had: no
     // cadence is no rotation, which is #349's rule and `advanceCrank`'s.
     rider.angle = marker.crankAngle ?? rider.angle;

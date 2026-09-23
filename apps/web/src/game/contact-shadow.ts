@@ -35,6 +35,14 @@
  * criterion helped for nothing, where the tint (#368) alone has to carry it
  * today. It is a table rather than a branch so that reversing it is one word.
  *
+ * ## Where a leaning rider's shadow goes — #499
+ *
+ * A rider leaning `φ` into a bend has their middle `sin φ` of its height
+ * toward the inside of the bend and `cos φ` of it up, so the blob is thrown
+ * from THERE: toward the inside, shorter along the sun, and wider across the
+ * bicycle by the length of the rider now lying across it. The same sun; the
+ * ghost still casts none.
+ *
  * ## What it gets wrong, stated
  *
  * The bicycle itself is drawn LEVEL on a road that climbs (`port.ts`
@@ -150,15 +158,31 @@ export function placeContactShadow(
   const awayZ = -sun.z / sun.y;
   const acrossX = marker.headingZ;
   const acrossZ = -marker.headingX;
+  // #499: a leaning rider's middle is not over the wheels. It is `sin φ` of its
+  // height toward the road's normal — `−across` — and only `cos φ` of it up, so
+  // it is both displaced and nearer the road, and the rider's whole length now
+  // lies partly ACROSS the bicycle as well as up it.
+  const rise = Math.cos(marker.lean);
+  const tip = Math.sin(marker.lean);
+  const middleX = -acrossX * tip * CAST_HEIGHT_METRES;
+  const middleZ = -acrossZ * tip * CAST_HEIGHT_METRES;
   // The whole rider's shadow, projected onto the bicycle's two axes: how much
   // it lengthens the blob along the bicycle, and how much across it.
-  const throwX = awayX * RIDER_HEIGHT_METRES;
-  const throwZ = awayZ * RIDER_HEIGHT_METRES;
+  const throwX = awayX * RIDER_HEIGHT_METRES * rise - acrossX * tip * RIDER_HEIGHT_METRES;
+  const throwZ = awayZ * RIDER_HEIGHT_METRES * rise - acrossZ * tip * RIDER_HEIGHT_METRES;
   const along = Math.abs(throwX * marker.headingX + throwZ * marker.headingZ);
   const across = Math.abs(throwX * acrossX + throwZ * acrossZ);
-  into.x = marker.x + BICYCLE_MIDDLE_AHEAD_METRES * marker.headingX + awayX * CAST_HEIGHT_METRES;
+  into.x =
+    marker.x +
+    BICYCLE_MIDDLE_AHEAD_METRES * marker.headingX +
+    awayX * CAST_HEIGHT_METRES * rise +
+    middleX;
   into.y = marker.y + CONTACT_SHADOW_LIFT_METRES;
-  into.z = marker.z + BICYCLE_MIDDLE_AHEAD_METRES * marker.headingZ + awayZ * CAST_HEIGHT_METRES;
+  into.z =
+    marker.z +
+    BICYCLE_MIDDLE_AHEAD_METRES * marker.headingZ +
+    awayZ * CAST_HEIGHT_METRES * rise +
+    middleZ;
   into.yaw = Math.atan2(marker.headingX, marker.headingZ);
   into.halfAlong = BICYCLE_LENGTH_METRES / 2 + along / 2;
   into.halfAcross = FOOTPRINT_HALF_WIDTH_METRES + across / 2;

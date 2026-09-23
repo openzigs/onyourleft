@@ -25,7 +25,7 @@ import { test as base, devices, expect } from '@playwright/test';
 import { HARNESS_ORIGIN } from '../playwright.config';
 import { MINIMUM_RIDER_FRAME_SHARE, riderFrameBox } from '../src/game/camera';
 
-import type { RealisticMeasurement, RiderExtent } from './game-harness';
+import type { LineMeasurement, RealisticMeasurement, RiderExtent } from './game-harness';
 import { MINIMUM_TINT_CONTRAST_RATIO } from '../src/game/terrain';
 
 /**
@@ -70,6 +70,11 @@ interface GameHarnessResult {
   readonly roadFarPixel: Pixel;
   readonly roadProbeRows: readonly [number, number];
   readonly riderFrame: { readonly landscape: RiderExtent; readonly portrait: RiderExtent };
+  readonly line: {
+    readonly on: LineMeasurement;
+    readonly onUpright: LineMeasurement;
+    readonly off: LineMeasurement;
+  };
   readonly resourcesAfterFirstFrame: number;
   readonly resourcesAfterAllFrames: number;
   readonly resourcesAfterSecondSweep: number;
@@ -1927,6 +1932,54 @@ test.describe('the rider is prominent — #424', () => {
     expect(fixedLens.bottom - fixedLens.top - (expected.bottom - expected.top)).toBeGreaterThan(
       3 * RIDER_BOX_TOLERANCE,
     );
+  });
+});
+
+/**
+ * The racing line and the lean, read off the drawing buffer — #499.
+ *
+ * `line-on-the-road.test.ts` holds the FRAME to the line: the marker is where
+ * the line says, leaning as `leanAt` says. That is arithmetic about what the
+ * renderer was handed, and a renderer that ignored `RiderMarker.lean` — or
+ * rolled about the wrong axis — would pass it. This reads the rider back.
+ *
+ * Both halves are drawn through the centreline's camera, which is held still
+ * on purpose: `game-harness.ts` §`lineProbe` says why.
+ */
+test.describe('the rider rides a line and leans on it — #499', () => {
+  test('is off-centre and rolled at a hairpin’s apex, and centred and upright without the line', async ({
+    harnessRun,
+  }) => {
+    const { on, onUpright, off } = (await harness(harnessRun)).line;
+    console.info(
+      `#499 at the apex: on the line, centred at ${(on.centre * 100).toFixed(1)} % of the width ` +
+        `with its top ${(on.topShift * 100).toFixed(2)} % from its bottom ` +
+        `(${(onUpright.topShift * 100).toFixed(2)} % drawn upright there); ` +
+        `on the centreline ${(off.centre * 100).toFixed(1)} % and ${(off.topShift * 100).toFixed(2)} %`,
+    );
+    // Non-vacuity: a probe that found no rider would read "centred" and
+    // "upright" for free.
+    for (const each of [on, onUpright, off]) {
+      expect(each.pixels).toBeGreaterThan(500);
+    }
+
+    // The control. The centreline rider is where `riderFrameBox` says — the
+    // middle — and upright: its top third over its bottom third.
+    expect(Math.abs(off.centre - 0.5)).toBeLessThan(0.02);
+    expect(Math.abs(off.topShift)).toBeLessThan(0.005);
+
+    // On the line: 2.9 m to the inside of the bend at the apex, which from the
+    // centreline's camera 4.5 m back is a long way off the middle of the frame.
+    expect(Math.abs(on.centre - 0.5)).toBeGreaterThan(0.1);
+
+    // Rolled, measurably, against the same rider at the same place drawn
+    // upright (`lineProbe` says why that and not the centreline), and with its
+    // top toward the SAME side of the frame it is on — the inside of the bend.
+    // A renderer that rolled the wrong way would lean the rider out of the
+    // corner, and this sign is the whole of that.
+    const roll = on.topShift - onUpright.topShift;
+    expect(Math.abs(roll)).toBeGreaterThan(0.01);
+    expect(Math.sign(roll)).toBe(Math.sign(on.centre - 0.5));
   });
 });
 

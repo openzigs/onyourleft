@@ -64,6 +64,7 @@ import {
   degreesLongitude,
   geographicPosition,
   metres,
+  metresPerSecond,
   routeProfile,
   type RoutePoint,
 } from '@onyourleft/domain';
@@ -84,6 +85,7 @@ import {
 } from '../src/game/quality';
 import {
   circuitRoute,
+  hairpinRoute,
   hillRoute,
   northRoute,
   valleyRoute,
@@ -249,6 +251,22 @@ type ShadowMapMeasurement = NonNullable<Window['__oylGameHarness']>['shadowMap']
 type Pixel = readonly [number, number, number, number];
 
 /** The box the rider's own pixels fill, as fractions of the frame from the top left. */
+/**
+ * The rider at a hairpin's apex, as the renderer drew them — #499. @see lineProbe
+ */
+export interface LineMeasurement {
+  /** Pixels the rider changed. Zero means there was nothing to measure. */
+  readonly pixels: number;
+  /** Where the rider's pixels are centred, as a fraction of the frame's width. */
+  readonly centre: number;
+  /**
+   * How far the top third of the rider's pixels is centred from the bottom
+   * third, as a fraction of the frame's width: nought for an upright rider,
+   * and toward the inside of the bend for one leaning into it.
+   */
+  readonly topShift: number;
+}
+
 export interface RiderExtent {
   /** The canvas's width over its height. */
   readonly aspect: number;
@@ -331,6 +349,15 @@ declare global {
        * buffer — #424's first criterion. @see riderExtent
        */
       readonly riderFrame: { readonly landscape: RiderExtent; readonly portrait: RiderExtent };
+      /**
+       * The rider at the apex of a 20 m hairpin on the line, and — the control —
+       * the same rider on the centreline, upright (#499). @see lineProbe
+       */
+      readonly line: {
+        readonly on: LineMeasurement;
+        readonly onUpright: LineMeasurement;
+        readonly off: LineMeasurement;
+      };
       /**
        * GPU buffers and textures three had created after the first frame, and
        * after {@link FRAMES}. Equal means nothing new was allocated per frame.
@@ -859,6 +886,132 @@ function riderExtent(width: number, height: number): RiderExtent {
     right: (highColumn + 1) / width,
     pixels,
   };
+}
+
+/** What the harness reports for the line before it has measured one. */
+const NO_LINE: LineMeasurement = { pixels: 0, centre: 0, topShift: 0 };
+
+/**
+ * The rider at the apex of a 20 m hairpin, **read back off the drawing
+ * buffer** — #499's browser criterion: measurably off-centre, and measurably
+ * rolled, with the same rider on the centreline and upright as the control.
+ *
+ * ⚠️ **Both are drawn through the CENTRELINE's camera.** The product's camera
+ * follows the rider across the road (`scene.ts` §`cameraPose`), so through its
+ * own camera a rider on the line is in the middle of the frame exactly as one
+ * on the centreline is — which is the point of following them, and would make
+ * "off-centre" unmeasurable. Holding the camera still is what turns the line
+ * into pixels.
+ *
+ * The rider alone is isolated as `riderExtent` isolates it — the same frame
+ * with and without them, and the pixels that differ — at 9 m/s, which at this
+ * bend's apex is about 20° of lean.
+ *
+ * ⚠️ **The roll is measured against the SAME rider at the same place, drawn
+ * upright — `onUpright` — and not against the centreline rider.** Seen 2.9 m
+ * off to one side the bicycle is side-on to the camera by a third of a right
+ * angle, so its wheels and its forward-leaning torso already put the top of
+ * the silhouette off its bottom by an amount that has nothing to do with lean.
+ * The first version of this compared against the centreline and read a 20°
+ * lean as a shift of 0.4 % of the frame — smaller than the geometry it was
+ * confounded with.
+ */
+function lineProbe(
+  width: number,
+  height: number,
+): {
+  readonly on: LineMeasurement;
+  readonly onUpright: LineMeasurement;
+  readonly off: LineMeasurement;
+} {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const view = threeGameRenderer.create(canvas, NO_RIDER_SHADOWS);
+  view.resize(width, height);
+  const profile = hairpinRoute(20);
+  const apex = 400 + (Math.PI * 20) / 2;
+  const start = atStartLine(profile);
+  const state = {
+    ...start,
+    ride: { speed: metresPerSecond(9), distance: metres(apex) },
+  };
+  const origin = corridorOrigin(profile);
+  const onTheLine = sceneFrame({ profile, origin, state });
+  const onTheCentre = sceneFrame({ profile, origin, state, centreline: true });
+  const still = onTheCentre.camera;
+  const riderOnly = (frame: SceneFrame): SceneFrame => ({
+    ...frame,
+    camera: still,
+    scatter: [],
+    markers: frame.markers.filter((marker) => marker.kind === 'rider'),
+  });
+  const nobody: SceneFrame = { ...onTheCentre, scatter: [], markers: [] };
+  const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+  if (gl === null) {
+    view.destroy();
+    return { on: NO_LINE, onUpright: NO_LINE, off: NO_LINE };
+  }
+  const drawn = (frame: SceneFrame): Uint8Array => {
+    // Twice, and only the second read: `riderExtent` says why.
+    view.render(frame);
+    view.render(frame);
+    return readRegion(gl, 0, 0, width, height);
+  };
+  const absent = drawn(nobody);
+  const measured = (present: Uint8Array): LineMeasurement => {
+    let pixels = 0;
+    let columns = 0;
+    const rows: { readonly row: number; readonly column: number }[] = [];
+    for (let row = 0; row < height; row += 1) {
+      for (let column = 0; column < width; column += 1) {
+        const at = (row * width + column) * 4;
+        if (
+          present[at] === absent[at] &&
+          present[at + 1] === absent[at + 1] &&
+          present[at + 2] === absent[at + 2]
+        ) {
+          continue;
+        }
+        pixels += 1;
+        columns += column;
+        rows.push({ row, column });
+      }
+    }
+    if (pixels === 0) {
+      return NO_LINE;
+    }
+    let low = height;
+    let high = -1;
+    for (const each of rows) {
+      low = Math.min(low, each.row);
+      high = Math.max(high, each.row);
+    }
+    const third = (high - low + 1) / 3;
+    const centreOf = (from: number, to: number): number => {
+      let sum = 0;
+      let count = 0;
+      for (const each of rows) {
+        if (each.row >= from && each.row < to) {
+          sum += each.column;
+          count += 1;
+        }
+      }
+      return count === 0 ? 0 : sum / count;
+    };
+    // `readPixels` rows run from the BOTTOM, so the highest rows are the top.
+    const top = centreOf(high + 1 - third, high + 1);
+    const bottom = centreOf(low, low + third);
+    return { pixels, centre: (columns / pixels + 0.5) / width, topShift: (top - bottom) / width };
+  };
+  const leaning = riderOnly(onTheLine);
+  const on = measured(drawn(leaning));
+  const onUpright = measured(
+    drawn({ ...leaning, markers: leaning.markers.map((marker) => ({ ...marker, lean: 0 })) }),
+  );
+  const off = measured(drawn(riderOnly(onTheCentre)));
+  view.destroy();
+  return { on, onUpright, off };
 }
 
 /** What the harness reports for the world before a frame has produced one. */
@@ -1959,6 +2112,7 @@ function colourProbes(probe: SceneFrame): {
           z: pose.z + 8 * pose.headingZ,
           headingX: pose.headingX,
           headingZ: pose.headingZ,
+          lean: 0,
           crankAngle: at,
         },
       ],
@@ -3127,6 +3281,7 @@ function emptyHarness(errors: readonly string[]): NonNullable<Window['__oylGameH
     roadFarPixel: NOWHERE,
     roadProbeRows: [0, 0],
     riderFrame: { landscape: NO_RIDER, portrait: NO_RIDER },
+    line: { on: NO_LINE, onUpright: NO_LINE, off: NO_LINE },
     resourcesAfterFirstFrame: 0,
     resourcesAfterAllFrames: 0,
     resourcesAfterSecondSweep: 0,
@@ -3228,6 +3383,7 @@ async function run(): Promise<void> {
   let roadFarPixel: Pixel = NOWHERE;
   let roadProbeRows: readonly [number, number] = [0, 0];
   let riderFrame = { landscape: NO_RIDER, portrait: NO_RIDER };
+  let line = { on: NO_LINE, onUpright: NO_LINE, off: NO_LINE };
   let resourcesAfterFirstFrame = 0;
   let resourcesAfterAllFrames = 0;
   let resourcesAfterSecondSweep = 0;
@@ -3788,6 +3944,8 @@ async function run(): Promise<void> {
     // #424, on canvases of their own — @see riderExtent. 16 : 9 is the
     // criterion's own frame; 10 : 16 is a tablet held upright.
     riderFrame = { landscape: riderExtent(640, 360), portrait: riderExtent(400, 640) };
+    // #499, on a canvas of its own. @see lineProbe
+    line = lineProbe(640, 360);
   } catch (error: unknown) {
     errors.push(error instanceof Error ? error.message : String(error));
   }
@@ -3809,6 +3967,7 @@ async function run(): Promise<void> {
     roadFarPixel,
     roadProbeRows,
     riderFrame,
+    line,
     resourcesAfterFirstFrame,
     resourcesAfterAllFrames,
     resourcesAfterSecondSweep,
