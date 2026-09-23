@@ -537,3 +537,114 @@ that it is not).
 - **Somebody reads a green `no-inline-units`-shaped scan as compliance.** D-8 says in terms that it
   is not, and the day that sentence is dropped from a PR description is the day the rule starts
   rotting.
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-09-23** — **The owner has answered both questions, and Q1 is answered the WIDER way —
+  against the reading the body chose.** [#495](https://github.com/openzigs/onyourleft/issues/495)
+  carries both verbatim. **Q1 changes this ADR**: the product claims a fitness benefit, so the six
+  non-invasive-sensing conditions quoted in Context become **conditions to satisfy rather than a
+  framing to avoid**, and the guidance's permitted wellness vocabulary is available. **Q2 makes the
+  EU and UK read a gate on camera code** rather than a gap accepted on the record. §"What the owner
+  has not decided" is therefore a record of what was asked rather than a list of what is open. ⚠️ **A
+  reader who remembers this ADR taking the narrow reading is reading the old file — and a reader who
+  concludes from that that a measurement rule has loosened is reading it wrongly: not one of them
+  has.**
+
+  | | Question | Owner's answer | What it changes |
+  |---|---|---|---|
+  | **Q1** | Does this feature make a claim about health at all? | **Claim a fitness benefit** — the wider reading | ⚠️ **D-1 to D-8 are unchanged in substance and the ADR's POSITION is changed.** The product is now a general wellness product making a wellness claim, not "a photograph viewer with a protractor". The six conditions are obligations; the vocabulary opens; the safety margin **narrows**, which is the half that is easy to read backwards |
+  | **Q2** | Is a US-only regulatory read acceptable? | **No — read the EU and UK rules first-hand before any camera code is written** | **A new gate, on D-0.** [Spike 0008](../spikes/0008-eu-uk-medical-device-read.md) is that read and is written in the same pull request as this entry. ⚠️ A spike decides nothing: it does not itself clear the gate |
+
+  ### Q1 — what the wider reading buys
+
+  The claim the product may now make is the guidance's own permitted general-wellness language,
+  quoted in §"What the owner has not decided": *"improve physical fitness, develop or improve
+  endurance, strength or coordination"*. With it comes the permitted-outputs paragraph this ADR
+  already quotes — *"values, ranges, trends, baselines, or longitudinal summaries"*, contextualised
+  *"in relation to sleep, activity, stress, recovery, or similar wellness domains"* — as an
+  **intended-use framing** rather than only as a description of what a picture showed. A report may
+  say it is there to help the rider ride better. Under the narrow reading it could only say it was
+  showing them a photograph.
+
+  ### Q1 — the six conditions, one at a time, and what each now obliges
+
+  Under the narrow reading these were a framing the product stayed outside. Under Q1 the product is
+  **inside** the carve-out, and the carve-out holds only while **every one** of them holds. Each is
+  quoted from the January 6, 2026 guidance as Context quotes it, read 2026-09-22.
+
+  | # | The condition | What it obliges here |
+  |---|---|---|
+  | **1** | *"are non-invasive and not-implanted"* | **Satisfied by construction, and listed so the set is complete.** A camera on a tripod across the room touches nobody. The obligation is to keep it that way: nothing in this feature acquires a contact sensor, a marker attached to the rider, or an instrumented component |
+  | **2** | *"do not involve an intervention or technology that may pose a risk to the safety of users or other persons if specific regulatory controls are not applied"* | **The analysis never reaches a trainer control point.** [ADR 0029](0029-camera-imagery-as-a-data-class.md) D-8's corollary — a model's text response is untrusted input and is never interpolated into anything reaching a control point — was written as a security rule and is now **also** the thing that keeps this condition true. `CLAUDE.md` §6's reason is the same one: *"a smart trainer applies physical resistance to a person who is pedalling"*. It also obliges D-7's S1 and S4: a live utterance to somebody at 400 W is an intervention aimed at a person holding a bicycle |
+  | **3** | *"are not intended for the diagnosis, cure, mitigation, prevention, or treatment of a disease or condition"* | **R5 entire, and it is now load-bearing rather than cautious.** A fitness claim sits one adjective from a prevention claim, and R5 is the line — including its negative form. *"Reduces your risk of"* and *"prevents injury"* were refused when the product claimed nothing; refusing them is what keeps this condition true now that it claims something |
+  | **4** | *"are not intended to substitute for an FDA-authorized, cleared, or approved device"* | **R6**, and D-6's refusal of the healthcare-professional carve-out. No "clinical", "medical grade", "professional fit", "validated", "accurate to". ⚠️ The refusal in D-6 was a choice the body could have gone either way on; under Q1 it is the cheaper side of a condition the whole position rests on |
+  | **5** | *"do not include claims, functionality, or outputs that prompt or guide specific clinical action or medical management"* | **R7 and D-5.** No prompt to act and no alert — *"a report is read; it does not interrupt"* — and no equipment, component, position or direction to move one. ⚠️ Note the word **functionality**: the condition reaches what the software *does*, not only what it says, so a feature that emitted a notification on a reading would breach it even with a permitted sentence in it |
+  | **6** | *"do not include values that mimic those used clinically unless validated (e.g. manufacturer testing, peer-reviewed clinical literature) to reflect those values"* | **D-3 entire, unchanged and unloosened.** No absolute joint angle, ever. ⚠️ **This is the condition the wider claim makes MORE important rather than less**, and it is the one a reader coming to this amendment hoping for a number will reach for first. [#385](https://github.com/openzigs/onyourleft/issues/385) still cannot lift it: validation is something somebody does and publishes, not a property a better camera acquires |
+
+  ### ⚠️ What Q1 does NOT license, stated because the temptation runs the other way
+
+  **A wider claim is a claim about benefit. It is not a change in what can be measured, and not one
+  measurement rule moves.** Every one of these stands exactly as written above:
+
+  - **D-3** — no absolute joint angle, limb angle, torso angle, segment length or body dimension, as
+    a number, ever. Both of its reasons survive Q1 untouched: the accuracy one, and condition 6.
+  - **D-4** — nothing in the frontal plane, as a number, **as a word**, or as a picture with a line
+    drawn on it.
+  - **R1 and R2** — a quantity is reported only as a difference between two things this app
+    observed, with both sides and the conditions named.
+  - **The literature-range rule, D-6** — cited prose only, and the rider is never placed in, against
+    or beside the range.
+  - **D-7's silence rule** — all six conditions, unchanged, with no relaxation for brevity.
+  - **D-8** — the two source scans #388 owes, and its closing sentence: **a green build is not
+    evidence that this ADR was followed.**
+
+  ### ⚠️ What Q1 costs: the safety margin narrows, and it is easy to read this backwards
+
+  Under the narrow reading the product arguably made no claim at all, so a wording slip was a wording
+  slip. Under Q1 the product's whole position is the general-wellness carve-out, and **the carve-out
+  is conditional on all six of the above holding at once**. A single breach — one absolute angle
+  rendered, one alert fired on a reading, one "reduces your risk of" — does not merely produce a bad
+  sentence; it argues the product out of the carve-out it now relies on. **So Q1 raises the cost of
+  eroding D-3, D-4 and R5 rather than lowering it**, which is the opposite of what "the wider
+  reading" sounds like.
+
+  It also **retires lawyer Question A as written.** That question asked whether a product making no
+  health claim is still within a device regime; the product makes one now, so the premise is gone.
+  What replaces it is narrower and more useful: *are the six conditions met in fact, on the outputs
+  this product actually renders?* — which is a question about D-2's table and D-8's scans rather
+  than about the product's posture. Questions B and C are unchanged, and **B is exactly what Q2 is
+  pointed at**.
+
+  ### Q2 — the EU and UK read is a gate, and a spike is not clearance
+
+  The body's §"What was **not** read" records the gap in terms — *"this project ships globally and
+  one jurisdiction was read"* — and Q2 refuses to accept it on the record. So:
+
+  - **[Spike 0008](../spikes/0008-eu-uk-medical-device-read.md)** is that read: EU Regulation
+    2017/745 Article 2(1) and Annex VIII Rule 11, MDCG 2019-11, and the UK MHRA's current position,
+    read first-hand to the standard [spike 0005](../spikes/0005-live-racing-patent-read.md) and
+    [spike 0006](../spikes/0006-camera-bike-fit-patent-read.md) met, and charted against what this
+    product claims **after** Q1.
+  - ⚠️ **A spike decides nothing** (`CLAUDE.md` §7). Writing it does not clear the gate; the owner
+    reading it and deciding does. And if it comes back saying the EU qualifies this as software with
+    a medical purpose, §"What would make this ADR wrong" already says what happens: D-0's block
+    becomes a product question and this ADR is the input to a superseding one rather than the
+    answer.
+  - **No lawyer has been bought**, and Q2 did not buy one. The spike is an engineer reading primary
+    documents, which is the same standing spikes 0005 and 0006 have and the same warning they carry.
+
+  ### What is still blocked
+
+  **D-0's second block — *"two questions are the owner's"* — is discharged by this entry**, and its
+  first is clear on the facts: #377, #378, #379, #380 and #381 are all closed, read 2026-09-23.
+  **Two blocks remain and one is new.**
+
+  | Block | State |
+  |---|---|
+  | The accuracy this device achieves is unmeasured | **Stands.** [#385](https://github.com/openzigs/onyourleft/issues/385). ⚠️ Unchanged by Q1, and it still cannot make D-3 or D-4 looser — under condition 6 it now cannot even in principle |
+  | ⚠️ **New: the EU and UK read** | Spike 0008 exists as of this entry; **the owner's decision on it does not**, and that is what gates [#382](https://github.com/openzigs/onyourleft/issues/382), [#383](https://github.com/openzigs/onyourleft/issues/383), [#384](https://github.com/openzigs/onyourleft/issues/384), [#387](https://github.com/openzigs/onyourleft/issues/387) and [#388](https://github.com/openzigs/onyourleft/issues/388) |
