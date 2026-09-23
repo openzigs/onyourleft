@@ -2076,6 +2076,11 @@ test.describe('the realistic world — ADR 0026', () => {
     const measured = await realistic(harnessRun);
     expect(measured.afterStepDownWorld).toBe('stylised');
     expect(measured.afterStepDownStandard).toBe(0);
+    // #501's review: the bridge wore the loaded stone on the realistic rung —
+    // `#applyWorld`'s one line nothing else here could see — and, the
+    // control, gave it up with the rest of the realistic world.
+    expect(measured.bridgesWearStone).toBe(true);
+    expect(measured.bridgesWearStoneAfterStepDown).toBe(false);
     // Published, never asserted: SwiftShader on a desktop says nothing about a
     // Mali GPU. Validation 0002 Part Z is the tablet.
     console.log(

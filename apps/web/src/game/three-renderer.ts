@@ -3748,6 +3748,11 @@ export class BridgeBelt {
     return this.#mesh;
   }
 
+  /** Whether the bridges wear the photographed stone now. @see bridgesWearStoneOf */
+  get wearsStone(): boolean {
+    return this.#stone !== undefined && this.#mesh.material === this.#stone.material;
+  }
+
   /** @see QualitySettings.shading */
   setShading(shading: QualitySettings['shading']): void {
     this.#shading = shading;
@@ -6100,6 +6105,19 @@ export function filterWaterRipplesOf(view: GameView, on: boolean): void {
 }
 
 /**
+ * Whether a view's bridges wear the realistic world's photographed stone —
+ * #501's review. `#applyWorld` hands `BridgeBelt.setWorld` the loaded stone,
+ * and without it the bridge falls back to a plain material with every other
+ * gate green; the browser gate reads this on a realistic rung.
+ *
+ * @unwired reached only from the browser gate's harness; nothing in the render
+ * path needs to ask.
+ */
+export function bridgesWearStoneOf(view: GameView): boolean {
+  return view instanceof ThreeGameView && view.bridgesWearStone;
+}
+
+/**
  * Every mesh a view's scene holds and the material on it — ADR 0026 D-11's
  * assertion, made by the browser gate over a real scene.
  *
@@ -6404,6 +6422,11 @@ class ThreeGameView implements GameView {
   /** @see filterWaterRipplesOf */
   filterWaterRipples(on: boolean): void {
     this.#water.setRippleFilter(on);
+  }
+
+  /** @see bridgesWearStoneOf */
+  get bridgesWearStone(): boolean {
+    return this.#bridges.wearsStone;
   }
 
   /** The sky the water reflected in the last frame. @see waterSkyOf */

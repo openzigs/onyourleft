@@ -16,6 +16,7 @@ import { scatterSeed } from '../../src/game/scatter';
 import { structuresAt } from '../../src/game/settlements';
 import { corridorOrigin } from '../../src/game/terrain';
 import { waterways } from '../../src/game/waterways';
+import { auditWetGround } from '../../src/game/wet-ground-testing';
 import { realisticRoute } from './route';
 
 const profile = realisticRoute();
@@ -58,5 +59,26 @@ describe('the soak route has something for every Part Z step — #501', () => {
     expect(counts.get('fence') ?? 0).toBeGreaterThan(0);
     // And there is still somewhere to live.
     expect(counts.get('building') ?? 0).toBeGreaterThan(0);
+  });
+
+  // #501's review, measured on this route: at odometer 1650 the ground 200 to
+  // 420 m out on the lake's side sat 6 to 31 m BELOW the lake and wore the
+  // full wet tint on every row from 1590 to 1830 m — a mud-brown hillside in
+  // the scene Z10 asks the owner to judge.
+  it('keeps the lake’s wet margin on its shore — Z10', () => {
+    let fading = 0;
+    for (const odometer of [1_500, 1_650, 1_800]) {
+      const audit = auditWetGround(profile, odometer);
+      // Not vacuous: there IS dry ground below the lake's surface in view.
+      expect(audit.farBelowWater).toBeGreaterThan(0);
+      expect(audit.farTinted).toBe(0);
+      expect(audit.tinted).toBeGreaterThan(0);
+      // And it fades out as it leaves the shore rather than stopping at a line.
+      fading += audit.fading;
+      expect(audit.overShore).toBe(0);
+    }
+    // Not vacuous: somewhere in view the fade is what keeps a vertex drier
+    // than its height alone would make it.
+    expect(fading).toBeGreaterThan(0);
   });
 });

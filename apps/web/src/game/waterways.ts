@@ -334,11 +334,40 @@ export interface WaterShaping {
   /** How much of the invented relief survives here, 0 to 1. */
   readonly relief: number;
   /**
-   * The surface of the water whose banks these are, as a local height, or
+   * The surface of the water whose shore this is, as a local height, or
    * `-Infinity` where no water is near — #501. What `landform.ts` darkens the
    * ground just above it by: the wet margin where water meets grass.
+   *
+   * ⚠️ **Reported on the SHORE only, never across a whole side of the road**
+   * — #501's review. It used to be a lake's level at any distance on the
+   * lake's side, and `wetness` darkens any ground below the level, so on the
+   * soak route a hillside 200 to 420 m past the far shore, falling 6 to 31 m
+   * below the lake, wore the full tint. Ground far from water is dry however
+   * low it lies; {@link shore} is how near the water this point is.
    */
   readonly level: number;
+  /**
+   * How much of the wet margin applies here, 0 to 1 — #501's review: 1 on and
+   * near the water, falling to 0 by {@link WET_REACH_METRES} past its edge.
+   * `landform.ts` multiplies its wetness by this, so the margin fades out
+   * rather than stopping at a line.
+   */
+  readonly shore: number;
+}
+
+/**
+ * How far past the water's edge the wet margin may reach, in metres: **14** —
+ * #501's review. One lake bank ({@link LAKE_BANK_METRES}), which is also how
+ * far a stream's bank rises past its surface
+ * ({@link CHANNEL_BANK_METRES} − {@link STREAM_SURFACE_HALF_WIDTH_METRES}): the
+ * margin lives on the bank the water sits in, and fades out over its outer
+ * half. `WaterShaping.shore`.
+ */
+export const WET_REACH_METRES = LAKE_BANK_METRES;
+
+/** How much of the wet margin applies `outside` metres past the water's edge. */
+function shoreWeight(outside: number): number {
+  return 1 - smoothstep(WET_REACH_METRES / 2, WET_REACH_METRES, outside);
 }
 
 /** No water anywhere near. */
@@ -346,6 +375,7 @@ export const DRY: WaterShaping = {
   ceiling: Number.POSITIVE_INFINITY,
   relief: 1,
   level: Number.NEGATIVE_INFINITY,
+  shore: 0,
 };
 
 /**
@@ -364,6 +394,14 @@ export function waterShaping(
   let ceiling = Number.POSITIVE_INFINITY;
   let relief = 1;
   let level = Number.NEGATIVE_INFINITY;
+  let shore = 0;
+  // The nearest water's level, where more than one is in reach.
+  const wet = (weight: number, surface: number): void => {
+    if (weight > shore) {
+      shore = weight;
+      level = surface;
+    }
+  };
   const lateral = Math.abs(signedLateral);
   for (const crossing of ways.crossings) {
     const u = Math.abs(routeOffset(profile, wrapped, crossing.distance));
@@ -379,7 +417,10 @@ export function waterShaping(
       bankCeiling(bed, road, u - CHANNEL_FLAT_METRES, CHANNEL_BANK_METRES - CHANNEL_FLAT_METRES),
     );
     relief = Math.min(relief, smoothstep(CHANNEL_BANK_METRES, CHANNEL_BANK_METRES * 3, u));
-    level = Math.max(level, crossing.waterElevation - origin.elevation);
+    wet(
+      shoreWeight(u - STREAM_SURFACE_HALF_WIDTH_METRES),
+      crossing.waterElevation - origin.elevation,
+    );
   }
   for (const lake of ways.lakes) {
     if (Math.sign(signedLateral) !== lake.side) {
@@ -393,9 +434,9 @@ export function waterShaping(
     const bed = lake.waterElevation - LAKE_DEPTH_METRES - origin.elevation;
     ceiling = Math.min(ceiling, bankCeiling(bed, road, outside, LAKE_BANK_METRES));
     relief = Math.min(relief, smoothstep(LAKE_BANK_METRES, LAKE_BANK_METRES * 4, outside));
-    level = Math.max(level, lake.waterElevation - origin.elevation);
+    wet(shoreWeight(outside), lake.waterElevation - origin.elevation);
   }
-  return { ceiling, relief, level };
+  return { ceiling, relief, level, shore };
 }
 
 /**

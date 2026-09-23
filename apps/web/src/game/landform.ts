@@ -478,8 +478,9 @@ export function terrainCorridor(
         vertices[at * 3 + 1] = height;
         vertices[at * 3 + 2] = point.z + normalZ * lateral * sign;
         // #501: the wet margin. Column 0 is the road's own edge and is never
-        // wet, so the road's verge stays the road's.
-        const wet = column === 0 ? 0 : wetness(height, shaping.level);
+        // wet, so the road's verge stays the road's. And only on the shore:
+        // ground far from the water is dry however low it lies (#501 review).
+        const wet = column === 0 ? 0 : wetness(height, shaping.level) * shaping.shore;
         colours[at * 3] = tint * (1 + (WET_GROUND_TINT[0] - 1) * wet);
         colours[at * 3 + 1] = tint * (1 + (WET_GROUND_TINT[1] - 1) * wet);
         colours[at * 3 + 2] = tint * (1 + (WET_GROUND_TINT[2] - 1) * wet);

@@ -79,6 +79,18 @@ export function valleyRoute(): RouteProfile {
 }
 
 /**
+ * A valley with a level floor 40 m wide and 12 % walls — #501's review. Its
+ * floor meets its walls 20 m either side of the stream, inside a bridge's
+ * approach (`waterways.ts` §`BRIDGE_HALF_SPAN_METRES` to
+ * §`CHANNEL_BANK_METRES`), which is where an approach piece spans a bend.
+ */
+export function flatFloorValleyRoute(): RouteProfile {
+  return northRoute(2_000, (along) =>
+    Math.min(30, Math.max(0, Math.abs(along - 1_000) - 20) * 0.12),
+  );
+}
+
+/**
  * #459's lake fixture: a road that drops 30 m onto a **kilometre of level
  * valley floor** from 700 m to 1 700 m and climbs out again — a flat, low,
  * enclosed stretch, which is where a lake lies. The descents are too long and

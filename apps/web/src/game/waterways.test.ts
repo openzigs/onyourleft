@@ -30,6 +30,7 @@ import {
 } from './landform';
 import {
   circuitRoute,
+  flatFloorValleyRoute,
   hillRoute,
   lakeValleyRoute,
   northRoute,
@@ -42,6 +43,7 @@ import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
 import { ROAD_WIDTH_METRES, corridorOrigin, roadCorridor } from './terrain';
 import type { GradientTrainer } from './trainer-port';
+import { auditWetGround } from './wet-ground-testing';
 import {
   BRIDGE_CLEARANCE_METRES,
   BRIDGE_HALF_SPAN_METRES,
@@ -414,6 +416,24 @@ describe('the road is continuous across the bridge — #501', () => {
       expect(sampled).toBeGreaterThan(100);
     }
   });
+
+  it('sinks an approach piece that spans a bend under the road — #501 review', () => {
+    // Where a valley's floor meets its wall inside the approach, a straight
+    // piece between two points on the road stands above the road at its
+    // middle by more than the 3 cm the deck keeps under it. Measured with the
+    // sink taken out: the piece's top stood 6.5 mm above the drawn road. Neither
+    // route above bends inside an approach by that much.
+    const profile = flatFloorValleyRoute();
+    const crossing = waysOf(profile).crossings[0]?.distance ?? 0;
+    expect(crossing).toBeCloseTo(1_000, -1);
+    let sampled = 0;
+    for (let rider = crossing - 80; rider <= crossing - 70; rider += 1) {
+      const worst = worstRise(profile, rider);
+      expect(worst.rise, `rider at ${rider.toFixed(0)} m`).toBeLessThanOrEqual(0);
+      sampled += worst.sampled;
+    }
+    expect(sampled).toBeGreaterThan(100);
+  });
 });
 
 describe('the water has a bank — #501', () => {
@@ -519,6 +539,33 @@ describe('the water has a bank — #501', () => {
     const dry = frameAt(hillRoute(), 600).terrain.mesh.colours;
     for (let at = 0; at < dry.length; at += 3) {
       expect(dry[at]).toBe(dry[at + 2]);
+    }
+  });
+});
+
+describe('the wet margin stays on the shore — #501 review', () => {
+  // ⚠️ The control above rides a route with NO water, so it could not see the
+  // tint reach dry ground on a route that HAS water — and on the soak route it
+  // reached a hillside 200 to 420 m past a lake's far shore, because a lake's
+  // level was reported at any distance on its side and every ground below it
+  // was "wet". These ride routes with a lake and with a stream.
+  it('darkens no ground far from a lake, even ground that lies below it', () => {
+    for (const odometer of [1_400, 1_500, 1_600]) {
+      const audit = auditWetGround(lakeValleyRoute(), odometer);
+      expect(audit.far).toBeGreaterThan(50);
+      expect(audit.farTinted).toBe(0);
+      // The margin is still there, by the lake.
+      expect(audit.tinted).toBeGreaterThan(0);
+    }
+  });
+
+  it('darkens no ground far from a stream', () => {
+    for (const profile of [valleyRoute(), rollingRoute()]) {
+      const crossing = waysOf(profile).crossings[0]?.distance ?? 0;
+      const audit = auditWetGround(profile, crossing - 75);
+      expect(audit.far).toBeGreaterThan(50);
+      expect(audit.farTinted).toBe(0);
+      expect(audit.tinted).toBeGreaterThan(0);
     }
   });
 });

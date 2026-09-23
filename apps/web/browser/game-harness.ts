@@ -95,6 +95,7 @@ import { VERGE_DROP_METRES } from '../src/game/landform';
 import { buildingPlan, onFace, OPENING_RECESS_METRES } from '../src/game/buildings';
 import {
   drawnWorldOf,
+  bridgesWearStoneOf,
   loadRealisticWorld,
   loadSceneryModels,
   sceneMaterialsOf,
@@ -2669,6 +2670,13 @@ export interface RealisticMeasurement {
   /** After stepping down to the stylised ladder: which world, and how many physically based meshes remain visible. */
   readonly afterStepDownWorld: string;
   readonly afterStepDownStandard: number;
+  /**
+   * #501's review: whether the bridges wore the photographed stone on the
+   * realistic rung, and — the control — whether they still did after the step
+   * down. @see bridgesWearStoneOf
+   */
+  readonly bridgesWearStone: boolean;
+  readonly bridgesWearStoneAfterStepDown: boolean;
   /** SwiftShader milliseconds a frame — published, never asserted. */
   readonly realisticFrameMs: number;
   readonly stylisedFrameMs: number;
@@ -2718,6 +2726,8 @@ const NO_REALISTIC: RealisticMeasurement = {
   sceneryDrawnBudgeted: 0,
   afterStepDownWorld: '',
   afterStepDownStandard: 0,
+  bridgesWearStone: false,
+  bridgesWearStoneAfterStepDown: false,
   realisticFrameMs: 0,
   stylisedFrameMs: 0,
   waterSkyRealistic: [],
@@ -2851,6 +2861,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     };
   }
   const drawnWorld = drawnWorldOf(view);
+  const bridgesWearStone = bridgesWearStoneOf(view);
   const wooded = riding(valleyRoute(), 900);
 
   let texturesCreated = 0;
@@ -3036,6 +3047,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   view.setQuality(QUALITY_LADDER[0] as QualitySettings);
   view.render(wooded);
   const afterStepDownWorld = drawnWorldOf(view);
+  const bridgesWearStoneAfterStepDown = bridgesWearStoneOf(view);
   const afterStepDownStandard = sceneMaterialsOf(view).filter(
     (each) => each.visible && each.type === 'MeshStandardMaterial',
   ).length;
@@ -3080,6 +3092,8 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     sceneryDrawnBudgeted,
     afterStepDownWorld,
     afterStepDownStandard,
+    bridgesWearStone,
+    bridgesWearStoneAfterStepDown,
     realisticFrameMs,
     stylisedFrameMs,
     waterSkyRealistic,
