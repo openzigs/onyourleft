@@ -50,6 +50,41 @@
  * So {@link coordinatesIn} walks the whole structure and collects **every**
  * position it can find, wherever it sits. A field added tomorrow is covered
  * without anybody remembering this file exists.
+ *
+ * ## ⚠️ It cannot inspect image bytes, and a green walk over a payload with a
+ * picture in it means nothing about the picture
+ *
+ * [ADR 0029](../../../../docs/adr/0029-camera-imagery-as-a-data-class.md) D-9
+ * requires this note to be here, and it is an acceptance criterion of
+ * [#384](https://github.com/openzigs/onyourleft/issues/384) rather than a
+ * courtesy:
+ *
+ * > `coordinatesIn` walks a JavaScript structure for objects carrying finite
+ * > numeric `latitude` and `longitude`; an EXIF GPS IFD is bytes, and the walk
+ * > reports a clean payload over a file that names the rider's front door. So a
+ * > departing boundary declared over a payload containing a frame is **green
+ * > for a reason unrelated to the frame**, which is the shape of green result
+ * > this repository keeps finding.
+ *
+ * This is the same class of blindness the bare-`[longitude, latitude]` warning
+ * on {@link coordinatesIn} already records, one layer down — **and it is
+ * worse**, because the array case looks uncovered and the `Uint8Array` case
+ * looks covered.
+ *
+ * What closes it is not here and could not be: D-9 strips a frame of **all**
+ * metadata **at capture**, by re-encoding it from raw pixels rather than
+ * filtering, in `apps/web/src/camera/frame.ts` — the only placement where the
+ * property holds for every consumer, *"including ones written later by somebody
+ * who never reads this ADR"*. `capturedFrame` then **refuses** bytes that
+ * arrive carrying a marker, which is the check on that guarantee.
+ *
+ * ⚠️ **Do not "fix" this by teaching the walk to parse image formats.** That
+ * would be a second image decoder in a client with no reason to have one, it
+ * would be complete only on the day it was written (JPEG carries a location in
+ * `APP1`/Exif, in `APP1`/XMP as text, and in `APP13`/IPTC; PNG in `eXIf` and in
+ * any `tEXt` chunk), and a scrubber that missed one marker is precisely the
+ * green-result-indistinguishable-from-correct failure this whole file is
+ * written against.
  */
 
 import { distanceBetween, type GeographicPosition } from '@onyourleft/domain';

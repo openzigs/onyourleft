@@ -981,6 +981,11 @@ catch a duplicate: two wired modules are both wired.**
 | No frame in any message (D-8) | `notice.ts` — five fixed sentences, no interpolation, and the platform's own error discarded at the adapter | `notice.test.ts`, `browser-camera.test.ts` §"never carries the platform's own message", `CameraView.test.tsx` |
 | The live indicator (D-5) | `indicator.tsx`, rendered by `AppShell` **above the router and through a ride** | `indicator.test.tsx` both directions; `indicator-style.test.ts` for the stacking order; `shell.browser.spec.ts` §"the live camera indicator" for the scroll and the hit test |
 | The quality rung | `game/quality.ts` §`QualitySettings.capture` — given up on the first step down, before any frame rate | `quality.test.ts` §"#382", stated as an order between two derived indices rather than a rung number |
+| The per-ride keep (D-2) | `camera/keep.ts` — off on construction, off again at every camera switch-on, persisted **nowhere** | `keep.test.ts` over the round-trip harness, including a source scan for a global "always keep" |
+| The record (D-1) | `packages/store` §`CameraFrameRecord`, schema version 10 — its own table, no `activityId` and the gap stated | `camera-frame-store.test.ts`, `activity-store.scoping.test.ts`'s derived probes, `activity-store.erasure.test.ts`'s derived table list |
+| The export (D-3) | `transfer/export-everything.ts` §`CameraManifest` — every kept picture as its own file, untrimmed, named in the manifest with what an activity file cannot carry | `export-everything.test.ts`, including that no ride file contains the picture's bytes |
+| The erase (D-4) | `transfer/erase-device.ts` — `ERASE_REMOVES` names the pictures **and everything derived from one** | `erase-device.test.ts`, reading back through a fresh connection |
+| The walk's blindness (D-9) | `privacy/boundaries.ts`'s header, and it is an acceptance criterion rather than a courtesy | `boundaries.test.ts` §"the walk cannot see inside image bytes", which demonstrates it rather than describing it |
 
 ⚠️ **The interface and both implementations are in `apps/web`, and that is CLAUDE.md §4h rather than
 an oversight.** `apps/mobile/capacitor.config.ts` sets `webDir: '../web/dist'`, so a capture
@@ -988,6 +993,13 @@ pipeline under `apps/mobile/src` would typecheck, test green and never be copied
 `apps/web` already depends on `@onyourleft/mobile`, so the reverse dependency would be a workspace
 cycle. The shape is `support/shell-support-port.ts`'s: the shell supplies what only Android knows,
 as data.
+
+⚠️ **The most sensitive row this program stores is normally absent.** ADR 0029 D-2 discards a frame
+after it has been looked at unless the rider turns on that ride's keep, and the switch is off every
+time — so the ordinary state of a device is one with no pictures on it at all. D-11 rests on that
+rather than on an access control this program does not have anywhere: a housemate scrolling the
+library meets no photograph because there is nothing to meet, and where a rider did keep some, the
+only screen that names them shows **a count**.
 
 ⚠️ **What this seam cannot see is what `privacy/boundaries.ts` cannot see.** `coordinatesIn` walks a
 JavaScript structure for finite numeric `latitude`/`longitude`; an Exif GPS IFD is bytes, so a

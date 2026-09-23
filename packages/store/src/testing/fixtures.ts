@@ -87,6 +87,7 @@ import {
   athleteId,
   lapId,
   recordingSessionId,
+  cameraFrameId,
   routeId,
   segmentEffortId,
   segmentId,
@@ -100,6 +101,7 @@ import {
 import type { DeviceKeyRecord, StoredActivityRecord } from '../identity';
 import type {
   AthleteRecord,
+  CameraFrameRecord,
   NewActivity,
   NewLap,
   RouteRecord,
@@ -164,6 +166,7 @@ export function resetFixtureIds(): void {
   segmentCounter = 0;
   routeCounter = 0;
   workoutCounter = 0;
+  cameraFrameCounter = 0;
 }
 
 /**
@@ -756,4 +759,60 @@ export async function seedRoute(
   const route = routeFor(owner, overrides);
   await harness.write(async (store) => store.putRoute(route));
   return route;
+}
+
+let cameraFrameCounter = 0;
+
+/**
+ * A kept camera frame — #384.
+ *
+ * ⚠️ **The bytes are shaped like a re-encoded JPEG and carry no metadata
+ * marker**, which matters because the client's own
+ * `apps/web/src/camera/frame.ts` refuses anything that does. A fixture full of
+ * random noise would produce a `Exif` signature by coincidence roughly once in
+ * some millions of runs, which is the flake nobody reproduces; a fixture of
+ * zeroes would let a "did anything land" assertion pass against a store that
+ * wrote an empty buffer. So it is structured, non-trivial and deterministic.
+ *
+ * ⚠️ **Different bytes per athlete and per frame**, for the reason
+ * `activity-store.scoping.test.ts` gives a privacy zone a different centre: a
+ * probe that returned the *right number* of pictures belonging to the wrong
+ * athlete would otherwise pass.
+ */
+export function cameraFrameFor(
+  owner: AthleteId,
+  overrides: {
+    readonly capturedAt?: number;
+    readonly width?: number;
+    readonly height?: number;
+    readonly length?: number;
+  } = {},
+): CameraFrameRecord {
+  cameraFrameCounter += 1;
+  const length = overrides.length ?? 512;
+  const bytes = new Uint8Array(length);
+  // SOI, then APP0/JFIF — a JPEG header with no APP1 in it.
+  bytes.set([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00], 0);
+  const salt = owner.length + cameraFrameCounter * 7;
+  for (let index = 32; index < length; index += 1) {
+    bytes[index] = (index * 37 + salt) % 251;
+  }
+  return {
+    id: cameraFrameId(`camera-frame-${String(cameraFrameCounter)}`),
+    athleteId: owner,
+    capturedAt: unixSeconds(overrides.capturedAt ?? FIXTURE_EPOCH + cameraFrameCounter),
+    mediaType: 'image/jpeg',
+    width: overrides.width ?? 640,
+    height: overrides.height ?? 480,
+    bytes,
+  };
+}
+
+/** Writes a kept frame through the public path. @see cameraFrameFor */
+export async function seedCameraFrame(
+  harness: StoreHarness,
+  record: CameraFrameRecord,
+): Promise<CameraFrameRecord> {
+  await harness.write(async (store) => store.putCameraFrame(record));
+  return record;
 }

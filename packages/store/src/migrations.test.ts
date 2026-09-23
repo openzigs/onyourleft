@@ -47,6 +47,7 @@ import {
   type RecordMigration,
 } from './migrations';
 import { SCHEMA_VERSION, SCHEMA_VERSIONS, STORES_V1, STORES_V2, STORES_V3, TABLE } from './schema';
+import { cameraFrameFor } from './testing';
 import { ensureDeviceSigningKey, webCryptoSha256, webCryptoVerifier } from './web-crypto';
 
 /**
@@ -260,9 +261,19 @@ describe('the production registry', () => {
     // absent from a compound index naming it. An index is a way of *finding*
     // records; a migration is a way of *changing* them.
     //
+    // ⚠️ Version 10 (#384) adds `cameraFrames` — a kept still picture — and is
+    // the same case as 5, 6, 7 and 8: a new store with no rows to migrate.
+    // `schema.ts` §`SCHEMA_VERSION` argues it at length and adds the half that
+    // is particular to this one: what stands in for a `down` here is the
+    // runtime rollback this engine actually has, **export → downgrade →
+    // re-import**, and #384 is the issue that makes it real for a picture by
+    // putting every kept frame in the account export (ADR 0029 D-3). A `down`
+    // over a shape that does not change would be an identity function and a
+    // test that it is one.
+    //
     // Asserted rather than left implicit: the day a version does change a
     // record's shape, this test is what says the registry must gain an entry.
-    expect(SCHEMA_VERSION).toBe(9);
+    expect(SCHEMA_VERSION).toBe(10);
     expect(SCHEMA_MIGRATIONS).toEqual([]);
   });
 
@@ -547,6 +558,68 @@ describe('version 8 to version 9 — the first bump that re-declares an existing
     expect(legacyRide?.routeId).toBeUndefined();
     // And the new index answers over rows that predate it.
     expect(attempts.map((ride) => ride.id)).toEqual(['on-a-route']);
+    expect(beforeVersion).toBeLessThan(SCHEMA_VERSION * 10);
+  });
+});
+
+describe('version 9 to version 10 — #384’s kept camera frames', () => {
+  /**
+   * The same claim as versions 2 to 8, proved the same way: write rows at
+   * version 9, reopen at 10, read them back through the public path, and use
+   * the new store.
+   *
+   * ⚠️ **And it is the forward half executed rather than described, which is
+   * what stands in for #384's `up`-then-`down` fixture.** There is no record
+   * migration to write — no existing shape changes — so `SCHEMA_MIGRATIONS`
+   * stays empty and `schema.ts` §`SCHEMA_VERSION` argues why. The *runtime*
+   * rollback on this engine is `migrations.ts`'s: **export → downgrade →
+   * re-import**, and #384 is the issue that makes it real for a picture by
+   * putting every kept frame in the account export (ADR 0029 D-3). A rider who
+   * downgrades has their pictures in a folder; the store cannot give them back
+   * a version, and no `down` in this package would change that.
+   */
+  it('keeps every version-9 record and makes the camera store usable', async () => {
+    const v9 = new Dexie(databaseName);
+    SCHEMA_VERSIONS.slice(0, 9).forEach((stores, index) => {
+      v9.version(index + 1).stores(stores);
+    });
+    await v9.table(TABLE.athletes).put({ id: 'athlete-a', displayName: 'A', createdAt: 1 });
+    await v9.table(TABLE.activities).put({
+      id: 'ride-1',
+      athleteId: 'athlete-a',
+      name: 'before the camera existed',
+      startedAt: 1_700_000_000,
+      startedAtTimeZone: 'UTC',
+      elapsedTime: 60,
+      movingTime: 60,
+      distance: 1_000,
+      visibility: 'private',
+      hasPosition: false,
+      createdAt: 1_700_000_000,
+    });
+    const beforeVersion = v9.backendDB().version;
+    v9.close();
+
+    const store = openActivityStore(databaseName);
+    const owner = athleteId('athlete-a');
+    const stillThere = await store.getActivity(owner, activityId('ride-1'));
+    // The new store answers on a database that predates it, and answers the
+    // only honest thing: nothing kept.
+    const none = await store.countCameraFrames(owner);
+    const frame = cameraFrameFor(owner);
+    await store.putCameraFrame(frame);
+    store.close();
+
+    const reopened = openActivityStore(databaseName);
+    const kept = await reopened.listCameraFrames(owner);
+    reopened.close();
+
+    expect(stillThere?.name).toBe('before the camera existed');
+    expect(none).toBe(0);
+    expect(kept.map((each) => each.id)).toStrictEqual([frame.id]);
+    // Byte for byte across the upgrade, for `assertCameraFrameRoundTrip`'s
+    // reason: a length check would pass against a store that re-encoded.
+    expect(kept[0]?.bytes).toStrictEqual(frame.bytes);
     expect(beforeVersion).toBeLessThan(SCHEMA_VERSION * 10);
   });
 });

@@ -50,7 +50,7 @@
  * of a person shows.
  */
 
-import { useCallback, useState, useSyncExternalStore, type JSX } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore, type JSX } from 'react';
 
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
@@ -133,7 +133,14 @@ function Camera({ controller }: { readonly controller: CameraController }): JSX.
     () => undefined,
   );
 
+  const keeping = useSyncExternalStore(
+    (listener) => controller.subscribe(listener),
+    () => controller.state().keeping,
+    () => false,
+  );
+
   const [acknowledged, setAcknowledged] = useState(false);
+  const [kept, setKept] = useState<number | undefined>(undefined);
   const [refusal, setRefusal] = useState<ConsentRefusal | undefined>(undefined);
   const [outcome, setOutcome] = useState<CaptureOutcome | undefined>(undefined);
 
@@ -142,6 +149,14 @@ function Camera({ controller }: { readonly controller: CameraController }): JSX.
   // D-8 is enforced. `problem` above is what makes this line run again.
   void problem;
   const notice = controller.notice();
+
+  const refreshKept = useCallback(() => {
+    void controller.keptCount().then((count) => {
+      setKept(count);
+    });
+  }, [controller]);
+
+  useEffect(refreshKept, [refreshKept]);
 
   const turnOn = useCallback(() => {
     setOutcome(undefined);
@@ -249,7 +264,28 @@ function Camera({ controller }: { readonly controller: CameraController }): JSX.
           >
             Stop using the camera on this device
           </Button>
-          <p>Pictures taken since the camera was turned on: {captured}. None of them was kept.</p>
+          {/*
+            ADR 0029 D-2's per-ride keep. OFF every time the camera is turned
+            on — `camera/session.ts` §`turnOn` is what makes that true rather
+            than this component remembering to reset a box — and there is
+            deliberately no "always keep" anywhere in this client.
+          */}
+          <p>
+            <label>
+              <input
+                type="checkbox"
+                checked={keeping}
+                onChange={(event) => {
+                  controller.setKeeping(event.target.checked);
+                }}
+              />{' '}
+              Keep the pictures from this ride on this device
+            </label>
+          </p>
+          <p>
+            Pictures taken since the camera was turned on: {captured}.{' '}
+            {keeping ? 'They are being kept on this device.' : 'None of them was kept.'}
+          </p>
           {outcome === undefined ? null : (
             <StatusMessage tone={outcome.taken ? 'success' : 'warning'} live>
               {outcome.taken
@@ -261,6 +297,37 @@ function Camera({ controller }: { readonly controller: CameraController }): JSX.
           )}
         </section>
       ) : null}
+
+      {/*
+        ⚠️ **A COUNT, and never a picture.** ADR 0029 D-11 keeps a kept frame
+        off every screen somebody who did not take it could meet by accident,
+        and D-8's permitted column is *"a count, a byte size, a format name"*.
+        This is how a rider finds out that this device is holding something
+        without being shown what — and how they get rid of it, which is D-2's
+        rider-driven expiry and the only one that works in this milestone.
+      */}
+      <section aria-labelledby="oyl-camera-kept">
+        <h3 id="oyl-camera-kept">Pictures on this device</h3>
+        <p>
+          {kept === undefined
+            ? 'Counting…'
+            : kept === 0
+              ? 'This device is holding no pictures.'
+              : `This device is holding ${String(kept)} picture${kept === 1 ? '' : 's'}.`}
+        </p>
+        {kept === undefined || kept === 0 ? null : (
+          <Button
+            variant="secondary"
+            onClick={() => {
+              void controller.forgetKept().then(() => {
+                refreshKept();
+              });
+            }}
+          >
+            Delete every picture on this device
+          </Button>
+        )}
+      </section>
 
       {notice === null ? null : (
         <section aria-labelledby="oyl-camera-problem">

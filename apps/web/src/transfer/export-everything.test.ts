@@ -11,6 +11,7 @@
 import {
   ATHLETE_A,
   ATHLETE_B,
+  cameraFrameFor,
   createStoreHarness,
   extractableDeviceKey,
   resetFixtureIds,
@@ -38,10 +39,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { coordinatesIn, insideZone } from '../privacy/boundaries';
 
 import {
+  ACCOUNT_EXPORT_FRAME_LIMIT,
   ACCOUNT_EXPORT_VERSION,
+  CAMERA_CANNOT_CARRY,
   MANIFEST_FILE_NAME,
   SIGNED_RECORD_SUFFIX,
   accountManifest,
+  cameraFrameFileName,
   exportEverything,
   signedRecordFileName,
   type AccountExportCursor,
@@ -441,6 +445,7 @@ describe('the manifest names its fields rather than spreading the row', () => {
       routes: [],
       workouts: [],
       activities: [],
+      camera: { kept: 0, written: 0, files: [], cannotCarry: 'nothing kept' },
       exportedAt: 1,
     });
 
@@ -457,6 +462,7 @@ describe('the manifest names its fields rather than spreading the row', () => {
       routes: [],
       workouts: [],
       activities: [],
+      camera: { kept: 0, written: 0, files: [], cannotCarry: 'nothing kept' },
       exportedAt: 1,
     });
     const text = new TextDecoder().decode(file.bytes);
@@ -713,3 +719,128 @@ describe('signedRecordFileName', () => {
     expect(signedRecordFileName('.hidden')).toBe('.hidden.record.json');
   });
 });
+
+/* -------------------------------------------------------------------------- *
+ * #384, ADR 0029 D-3: the athlete's own pictures come back to them.
+ * -------------------------------------------------------------------------- */
+
+describe('exporting the pictures the rider kept (#384)', () => {
+  it('carries every one of them, untrimmed, as its own file', async () => {
+    await seedLibrary(1);
+    const mine = cameraFrameFor(ATHLETE_A);
+    await harness.write(async (store) => store.putCameraFrame(mine));
+
+    const { files } = await runExport();
+
+    const pictures = files.filter((file) => file.mediaType === 'image/jpeg');
+    expect(pictures).toHaveLength(1);
+    // ⚠️ **Byte for byte.** ADR 0029 D-3: *"it is **not** obfuscated, trimmed
+    // or downscaled"* — ADR 0004 E's invariant is that the athlete's own data
+    // comes back whole, and #35 puts it plainly: *"privacy zones protect the
+    // user from others, not from themselves."*
+    expect(pictures[0]?.bytes).toStrictEqual(mine.bytes);
+  });
+
+  it('names them in the manifest, with what an activity file cannot carry', async () => {
+    await seedLibrary(1);
+    await harness.write(async (store) => store.putCameraFrame(cameraFrameFor(ATHLETE_A)));
+
+    const { files } = await runExport();
+    const manifest = manifestOf(files);
+    const camera = manifest['camera'] as Record<string, unknown>;
+
+    expect(camera['kept']).toBe(1);
+    expect(camera['written']).toBe(1);
+    expect(camera['files']).toStrictEqual([cameraFrameFileName(1_700_000_001, 1)]);
+    // ADR 0029 D-3 asks for this line by name.
+    expect(String(camera['cannotCarry'])).toContain('a photograph of you');
+    expect(camera['cannotCarry']).toBe(CAMERA_CANNOT_CARRY);
+  });
+
+  it('says so when a rider kept none, rather than omitting the row', async () => {
+    // Silence is the defect #384 names: *"Either answer, asserted; **silence is
+    // the defect**."* An absent `camera` key and "you kept none" read the same
+    // to a program and completely differently to a rider.
+    await seedLibrary(1);
+    const { files } = await runExport();
+    const camera = manifestOf(files)['camera'] as Record<string, unknown>;
+    expect(camera['kept']).toBe(0);
+    expect(camera['written']).toBe(0);
+    expect(camera['files']).toStrictEqual([]);
+  });
+
+  it('carries no other athlete’s pictures', async () => {
+    // The scoping half, at the boundary rather than at the store. `seedLibrary`
+    // already puts a second athlete on the device.
+    await seedLibrary(1);
+    await harness.write(async (store) => {
+      await store.putCameraFrame(cameraFrameFor(ATHLETE_A));
+      await store.putCameraFrame(cameraFrameFor(ATHLETE_B));
+    });
+
+    const { files } = await runExport();
+
+    expect(files.filter((file) => file.mediaType === 'image/jpeg')).toHaveLength(1);
+    expect((manifestOf(files)['camera'] as Record<string, unknown>)['kept']).toBe(1);
+  });
+
+  it('bounds one run and says in the manifest that it did', async () => {
+    await seedLibrary(1);
+    await harness.write(async (store) => {
+      for (let index = 0; index <= ACCOUNT_EXPORT_FRAME_LIMIT; index += 1) {
+        await store.putCameraFrame(cameraFrameFor(ATHLETE_A, { length: 64 }));
+      }
+    });
+
+    const { files } = await runExport();
+    const camera = manifestOf(files)['camera'] as Record<string, unknown>;
+
+    expect(files.filter((file) => file.mediaType === 'image/jpeg')).toHaveLength(
+      ACCOUNT_EXPORT_FRAME_LIMIT,
+    );
+    // ⚠️ The honest record: the archive says how many this device holds AND how
+    // many it contains, so a rider can tell the difference without counting
+    // files. `written < kept` is the state, not a failure.
+    expect(camera['written']).toBe(ACCOUNT_EXPORT_FRAME_LIMIT);
+    expect(camera['kept']).toBe(ACCOUNT_EXPORT_FRAME_LIMIT + 1);
+  });
+
+  it('names a file after an instant and an ordinal, never after a ride', () => {
+    // ADR 0004 decision D binds every layer that formats location data into a
+    // string, and a ride's name is routinely a place.
+    expect(cameraFrameFileName(1_700_000_000, 3)).toBe('picture-1700000000-3.jpg');
+    expect(cameraFrameFileName(1_700_000_000, 3)).not.toMatch(/ride|morning|home/i);
+  });
+
+  it('puts no picture inside a shared activity file', async () => {
+    // ADR 0029 D-3: *"An activity export to a third party never carries a
+    // frame, whatever the rider's visibility setting says."* The account export
+    // is `retained`; a ride file is what a rider hands to somebody.
+    await seedLibrary(1);
+    const mine = cameraFrameFor(ATHLETE_A);
+    await harness.write(async (store) => store.putCameraFrame(mine));
+
+    const { files } = await runExport();
+
+    const signature = mine.bytes.subarray(32, 48);
+    for (const file of files.filter((each) => each.mediaType !== 'image/jpeg')) {
+      expect(
+        containsBytes(file.bytes, signature),
+        `${file.fileName} contains the picture's bytes`,
+      ).toBe(false);
+    }
+  });
+});
+
+/** Whether `haystack` contains `needle`, as bytes. */
+function containsBytes(haystack: Uint8Array, needle: Uint8Array): boolean {
+  outer: for (let start = 0; start + needle.length <= haystack.length; start += 1) {
+    for (const [offset, byte] of needle.entries()) {
+      if (haystack[start + offset] !== byte) {
+        continue outer;
+      }
+    }
+    return true;
+  }
+  return false;
+}

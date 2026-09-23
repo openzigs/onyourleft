@@ -55,6 +55,7 @@ import type {
 } from './camera-port';
 import { CameraCaptureError } from './camera-port';
 import { consentDecision, NO_CONSENT, type CameraConsent, type ConsentAnswers } from './consent';
+import type { FrameKeep } from './keep';
 import { cameraNotice } from './notice';
 
 /**
@@ -111,6 +112,13 @@ export interface CameraState {
   readonly problem: CameraProblemKind | undefined;
   /** How many frames have been taken since the camera was last turned on. */
   readonly captured: number;
+  /**
+   * Whether the next picture will be kept — #384, ADR 0029 D-2.
+   *
+   * **`false` every time the camera is turned on**, and there is nowhere it is
+   * persisted. `keep.ts` is the whole of it.
+   */
+  readonly keeping: boolean;
   /**
    * Whether the quality ladder currently permits a capture — `quality.ts`
    * §`QualitySettings.capture`.
@@ -204,6 +212,22 @@ export interface CameraControllerOptions {
    * exists to prevent.
    */
   readonly notices?: ((kind: CameraProblemKind) => CameraNotice) | undefined;
+  /**
+   * The per-ride keep — #384, ADR 0029 D-2.
+   *
+   * ⚠️ **Optional, and its absence is the default rather than a degraded
+   * mode.** A controller built without one uses {@link discardTheFrame}, which
+   * has no store in it, so a build with no local store cannot keep a picture
+   * however it is called. `keep.ts` is what a build with one passes.
+   *
+   * ⚠️ **It is the same object as {@link CameraControllerOptions.sink}, and
+   * supplying both is a mistake this type deliberately still permits** —
+   * `keepThisRide` *is* a `FrameSink`, so a caller passes it here and this
+   * class uses it for both. Forbidding it in the type would need a union that
+   * every call site then has to discriminate, for a mistake that costs a
+   * `keeping` switch nothing reads.
+   */
+  readonly keep?: FrameKeep | undefined;
 }
 
 /** The browser's own timer, in the shape {@link CameraControllerOptions} wants. */
@@ -225,6 +249,7 @@ export class CameraController {
   readonly #sink: FrameSink;
   readonly #schedule: (tick: () => void, everyMilliseconds: number) => () => void;
   readonly #notices: (kind: CameraProblemKind) => CameraNotice;
+  readonly #keep: FrameKeep | undefined;
   readonly #listeners = new Set<() => void>();
 
   #consent: CameraConsent = NO_CONSENT;
@@ -236,7 +261,11 @@ export class CameraController {
 
   constructor(options: CameraControllerOptions) {
     this.#port = options.port;
-    this.#sink = options.sink ?? discardTheFrame;
+    this.#keep = options.keep;
+    // ⚠️ The keep IS the sink when there is one. Two objects would be the
+    // arrangement where the rider turns the switch off and the next frame is
+    // written anyway — `keep.ts` §`FrameKeep` records why they are one thing.
+    this.#sink = options.sink ?? options.keep ?? discardTheFrame;
     this.#schedule = options.schedule ?? browserInterval;
     this.#notices = options.notices ?? cameraNotice;
   }
@@ -248,6 +277,7 @@ export class CameraController {
       live: this.#session?.live ?? false,
       problem: this.#problem,
       captured: this.#captured,
+      keeping: this.#keep?.keeping ?? false,
       captureAllowed: this.#captureAllowed,
     };
   }
@@ -330,6 +360,12 @@ export class CameraController {
     }
     this.#problem = undefined;
     this.#captured = 0;
+    // ⚠️ **OFF at every switch-on, which is ADR 0029 D-2's "off every time".**
+    // A rider who kept last time is not keeping this time, and this line is the
+    // one that makes that true rather than the screen remembering to reset a
+    // checkbox. `keep.test.ts` asserts it by turning the keep on, stopping,
+    // starting again and capturing.
+    this.#keep?.setKeeping(false);
     this.#startPolling();
     this.#announce();
     return undefined;
@@ -407,6 +443,37 @@ export class CameraController {
     }
     this.#captureAllowed = captureAllowed;
     this.#announce();
+  }
+
+  /**
+   * Turn this ride's keep on or off — #384.
+   *
+   * ⚠️ **Refused while the camera is off**, so the switch cannot be armed
+   * before a session that would then reset it — which would read to a rider as
+   * a control that does not work. It is a no-op rather than a throw: a view
+   * that renders the switch outside a session is a view bug, not a rider error.
+   */
+  setKeeping(on: boolean): void {
+    if (this.#session?.live !== true) {
+      return;
+    }
+    this.#keep?.setKeeping(on);
+    this.#announce();
+  }
+
+  /** How many pictures this device is holding. A count, never a picture. */
+  async keptCount(): Promise<number> {
+    return this.#keep?.count() ?? Promise.resolve(0);
+  }
+
+  /**
+   * Deletes every picture this device kept — ADR 0029 D-2's rider-driven
+   * expiry, and the only one that works in this milestone.
+   */
+  async forgetKept(): Promise<number> {
+    const removed = (await this.#keep?.forget()) ?? 0;
+    this.#announce();
+    return removed;
   }
 
   /** The words for the current problem, or `null` while there is none. */

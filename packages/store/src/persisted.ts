@@ -43,10 +43,20 @@ import {
 import type { GeographicPosition, RouteProfile, Workout, WorkoutBlock } from '@onyourleft/domain';
 
 import { StoreDecodeError } from './errors';
-import { activityId, athleteId, lapId, privacyZoneId, routeId, segmentId, workoutId } from './ids';
+import {
+  activityId,
+  athleteId,
+  cameraFrameId,
+  lapId,
+  privacyZoneId,
+  routeId,
+  segmentId,
+  workoutId,
+} from './ids';
 import type {
   ActivityRecord,
   AthleteRecord,
+  CameraFrameRecord,
   LapRecord,
   PrivacyZoneRecord,
   OriginalFileReference,
@@ -214,6 +224,28 @@ export interface PersistedWorkout {
   blocks: unknown[];
   createdAt: number;
   updatedAt: number;
+}
+
+/**
+ * A kept camera frame, as it sits on disk — #384.
+ *
+ * ⚠️ **`bytes` is a `Uint8Array` and stays one**, rather than base64 or a
+ * `Blob`. IndexedDB's structured clone stores a typed array natively; base64
+ * would grow the row by a third and make the stored form differ from the
+ * captured one, which is exactly the "a layer above tidied it on its way in"
+ * shape `testing/fakes.ts` is full of. A `Blob` would work too and buys
+ * nothing: this package already reads its own compressed stream blobs as typed
+ * arrays, and a `Blob` would make the round-trip comparison asynchronous for no
+ * gain.
+ */
+export interface PersistedCameraFrame {
+  id: string;
+  athleteId: string;
+  capturedAt: number;
+  mediaType: string;
+  width: number;
+  height: number;
+  bytes: Uint8Array;
 }
 
 export interface PersistedSegment {
@@ -1066,5 +1098,67 @@ export function fromPersistedRoute(row: PersistedRoute): RouteRecord {
       decodedNumber('route.updatedAt', row.updatedAt ?? row.createdAt),
       unixSeconds,
     ),
+  };
+}
+
+/**
+ * A kept camera frame, on its way to disk — #384.
+ *
+ * ⚠️ **The bytes are passed through untouched.** No copy, no re-encode, no
+ * resize, no "normalisation": the picture was stripped of metadata at capture
+ * (ADR 0029 D-9) and anything this layer did to it would be a second producer
+ * of image bytes in a program that is supposed to have exactly one.
+ * `testing/round-trip.ts` §`assertCameraFrameRoundTrip` compares byte for byte
+ * for that reason.
+ */
+export function toPersistedCameraFrame(record: CameraFrameRecord): PersistedCameraFrame {
+  return {
+    id: record.id,
+    athleteId: record.athleteId,
+    capturedAt: record.capturedAt,
+    mediaType: record.mediaType,
+    width: record.width,
+    height: record.height,
+    bytes: record.bytes,
+  };
+}
+
+/**
+ * @throws {StoreDecodeError} naming the field, for anything on disk this
+ * package cannot turn back into a frame.
+ *
+ * ⚠️ **A row whose `bytes` is not a typed array throws rather than being
+ * coerced.** A hand-edited IndexedDB entry, or a row written by a future
+ * adapter that stored base64, would otherwise reach a caller as a string
+ * pretending to be a picture — and the one consumer is an export, which would
+ * then write a file that is not an image and say nothing. The message names the
+ * field and carries **nothing of the value**, which is ADR 0029 D-8 applied to
+ * a decoder: `${typeof}` and a length are a diagnostic, the bytes are the
+ * picture.
+ */
+export function fromPersistedCameraFrame(row: PersistedCameraFrame): CameraFrameRecord {
+  if (!(row.bytes instanceof Uint8Array)) {
+    throw new StoreDecodeError(
+      `cameraFrame.bytes: expected a Uint8Array, found ${typeof row.bytes}`,
+    );
+  }
+  if (row.bytes.length === 0) {
+    // A zero-length picture is not a picture. It reads as present everywhere —
+    // a row, a count, a manifest entry — and produces a file a rider cannot
+    // open, which is the worst shape for an export to have.
+    throw new StoreDecodeError('cameraFrame.bytes: is empty, so it is not a picture');
+  }
+  return {
+    id: cameraFrameId(decodedString('cameraFrame.id', row.id)),
+    athleteId: athleteId(decodedString('cameraFrame.athleteId', row.athleteId)),
+    capturedAt: decoded(
+      'cameraFrame.capturedAt',
+      decodedNumber('cameraFrame.capturedAt', row.capturedAt),
+      unixSeconds,
+    ),
+    mediaType: decodedString('cameraFrame.mediaType', row.mediaType),
+    width: decodedNumber('cameraFrame.width', row.width),
+    height: decodedNumber('cameraFrame.height', row.height),
+    bytes: row.bytes,
   };
 }

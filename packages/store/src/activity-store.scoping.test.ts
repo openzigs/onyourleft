@@ -97,7 +97,12 @@
 import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 
 import { ActivityStore } from './activity-store';
-import type { MatchCheckpointRecord, PrivacyZoneRecord, SegmentEffortRecord } from './records';
+import type {
+  CameraFrameRecord,
+  MatchCheckpointRecord,
+  PrivacyZoneRecord,
+  SegmentEffortRecord,
+} from './records';
 import type { AthleteId } from './ids';
 import { privacyZoneId } from './ids';
 import {
@@ -105,6 +110,7 @@ import {
   ATHLETE_B,
   ATHLETE_C,
   ATHLETES,
+  cameraFrameFor,
   chunksOf,
   createStoreHarness,
   effortFor,
@@ -155,6 +161,7 @@ interface World {
   readonly recording: ReturnType<typeof recordingFor>;
   readonly zone: PrivacyZoneRecord;
   readonly checkpoint: MatchCheckpointRecord;
+  readonly frame: CameraFrameRecord;
 }
 
 /** A distinct 64-character lowercase hex digest per athlete. */
@@ -208,6 +215,11 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
   };
   const { record: deviceKey, key } = await extractableDeviceKey(owner);
   const signed = await signedRecordFor(ride, key);
+  // ⚠️ Distinct bytes per athlete — `cameraFrameFor` salts them with the owner.
+  // A probe that returned the RIGHT NUMBER of pictures belonging to the WRONG
+  // athlete would otherwise pass, which is the shape the different privacy-zone
+  // centre above guards against one field along.
+  const frame = cameraFrameFor(owner);
 
   await harness.write(async (store) => {
     await store.putRoute(route);
@@ -225,13 +237,26 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     await store.putDeviceKey(deviceKey);
     await store.putActivityRecord(signed);
     await store.putMatchCheckpoint(checkpoint);
+    await store.putCameraFrame(frame);
     await store.setActivityLoadSummary(owner, ride.id, {
       effortWeightedPower: watts(210 + ATHLETES.indexOf(owner)),
       loadCoveredTime: seconds(SAMPLE_COUNT),
     });
   });
 
-  return { owner, ride, fileHash, route, workout, segment, effort, recording, zone, checkpoint };
+  return {
+    owner,
+    ride,
+    fileHash,
+    route,
+    workout,
+    segment,
+    effort,
+    recording,
+    zone,
+    checkpoint,
+    frame,
+  };
 }
 
 /**
@@ -586,6 +611,45 @@ const PROBES: readonly ScopingProbe[] = [
         .catch(() => undefined);
       const after = await store.getActivity(theirs.owner, theirs.ride.id);
       expect(after).toStrictEqual(before);
+    },
+  },
+  {
+    member: 'listCameraFrames',
+    leaks:
+      'every picture kept on this device, whoever took it — a photograph of the inside of somebody else’s house',
+    async run(store, mine, theirs) {
+      const rows = await store.listCameraFrames(mine.owner);
+      everyRowBelongsTo(rows, mine.owner);
+      expect(rows.map((row) => row.id)).not.toContain(theirs.frame.id);
+      // And the BYTES are the caller's own. A store that returned the right
+      // number of rows with somebody else's picture in them would pass the two
+      // assertions above, because the id and the owner are metadata and the
+      // payload is what matters here.
+      const first = rows[0];
+      expect(first?.bytes).toStrictEqual(mine.frame.bytes);
+    },
+  },
+  {
+    member: 'countCameraFrames',
+    leaks:
+      'how many pictures everybody on this device has kept, which says that somebody else has been taking them',
+    async run(store, mine, theirs) {
+      expect(theirs.owner).not.toBe(mine.owner);
+      // One each, so a count that ignored the owner would be three.
+      await expect(store.countCameraFrames(mine.owner)).resolves.toBe(1);
+    },
+  },
+  {
+    member: 'deleteCameraFrames',
+    leaks: 'another athlete’s pictures, destroyed — and nothing can re-create one',
+    async run(store, mine, theirs) {
+      await store.deleteCameraFrames(mine.owner);
+      // ⚠️ Read back **as the owner**, because the return value is the weaker
+      // half: a delete that reported the right count and removed the wrong
+      // rows would pass a count assertion. `survivingFrameStoreFactory` in
+      // `testing/fakes.ts` is the store built to fail exactly here.
+      const theirsAfter = await store.listCameraFrames(theirs.owner);
+      expect(theirsAfter.map((row) => row.id)).toContain(theirs.frame.id);
     },
   },
 ];

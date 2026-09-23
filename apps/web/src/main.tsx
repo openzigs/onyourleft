@@ -14,6 +14,7 @@ import { createWebBluetoothTransport } from '@onyourleft/sensors/web-bluetooth';
 import { metres, unixSeconds } from '@onyourleft/domain';
 import {
   activityId,
+  cameraFrameId,
   openActivityStore,
   recordingSessionId,
   routeId,
@@ -50,6 +51,7 @@ import {
   canvasFrameGrabber,
   platformMediaDevices,
 } from './camera/browser-camera';
+import { keepThisRide } from './camera/keep';
 import { shellCameraNotice } from './camera/shell-camera';
 import { CameraController } from './camera/session';
 import { platformStorage, requestPersistenceOnce } from './support/persistent-storage';
@@ -723,8 +725,20 @@ async function buildCameraController(): Promise<CameraController | undefined> {
     grabber: canvasFrameGrabber(),
     secureContext: globalThis.isSecureContext,
   });
+  // #384. The per-ride keep, over the same connection everything else uses.
+  // ⚠️ Passing it is what makes a picture *able* to become durable; ADR 0029
+  // D-2's default is still that it does not, because `keepThisRide` is
+  // constructed off and `CameraController.turnOn` sets it off again at every
+  // switch-on. A build with no local store passes nothing and cannot keep one
+  // however it is called.
+  const keep = keepThisRide({
+    store: localStore(),
+    athleteId: LOCAL_ATHLETE,
+    newFrameId: () => cameraFrameId(globalThis.crypto.randomUUID()),
+    now: browserClock,
+  });
   if (!isNativeShell(platformCapacitor())) {
-    return new CameraController({ port });
+    return new CameraController({ port, keep });
   }
   // #383. The **only** thing the shell changes is what a rider is told when
   // Android refuses: "open this device's settings" is right for a browser and
@@ -738,6 +752,7 @@ async function buildCameraController(): Promise<CameraController | undefined> {
   const mobile = await import('@onyourleft/mobile');
   return new CameraController({
     port,
+    keep,
     notices: (kind) => shellCameraNotice(kind, mobile.ANDROID_CAMERA_DENIED),
   });
 }

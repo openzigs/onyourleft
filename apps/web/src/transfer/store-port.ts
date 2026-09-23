@@ -21,6 +21,7 @@ import type {
   AthleteId,
   AthleteRecord,
   AthleteDeletionCounts,
+  CameraFrameRecord,
   DeviceKeyRecord,
   LapRecord,
   ListActivitiesOptions,
@@ -89,6 +90,27 @@ export interface AccountStore {
    * rider needs in order to find out what happened.
    */
   getActivityRecord(owner: AthleteId, id: ActivityId): Promise<StoredActivityRecord | undefined>;
+  /**
+   * Every picture this athlete kept — #384,
+   * [ADR 0029](../../../../docs/adr/0029-camera-imagery-as-a-data-class.md) D-3.
+   *
+   * ⚠️ **This is the ONE read in the client that returns a picture**, and it is
+   * here rather than on `camera/store-port.ts` deliberately. D-11 keeps a kept
+   * frame off every screen: a camera port that could hand one to a component is
+   * a component somebody writes. An export writes it to a **file the rider
+   * asked for**, which is the one destination D-3 permits — *"it is the
+   * athlete's own data coming back to them, so ADR 0004 E applies unchanged: it
+   * is **not** obfuscated, trimmed or downscaled."*
+   *
+   * ⚠️ **Bounded by the caller**, and more sharply than any other read here:
+   * every row is a whole JPEG, so a rider who kept a hundred is tens of
+   * megabytes decoded by one call. `export-everything.ts`
+   * §`ACCOUNT_EXPORT_FRAME_LIMIT` states the budget.
+   *
+   * Usually **empty**, and that is the ordinary case rather than a fault: D-2
+   * discards a frame unless the rider turned that ride's keep on.
+   */
+  listCameraFrames(owner: AthleteId, limit?: number): Promise<CameraFrameRecord[]>;
 }
 
 /**

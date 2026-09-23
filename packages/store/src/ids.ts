@@ -102,6 +102,19 @@ export type RouteId = EntityId<'route'>;
  */
 export type WorkoutId = EntityId<'workout'>;
 
+/**
+ * Identifies one still picture this device kept from a ride (#384).
+ *
+ * ⚠️ **Its own brand, and that is [ADR 0029](../../../docs/adr/0029-camera-imagery-as-a-data-class.md)
+ * D-1 in the type system**: camera imagery is *"a distinct class in this
+ * program … never modelled as a stream channel beside power, cadence and heart
+ * rate, never stored in a `StreamSet`, and never covered by a rule whose
+ * subject is 'activity data'."* Sharing `ActivityId`'s brand would make "the
+ * ride this picture came from" and "the picture" the same type, which is the
+ * first step toward a rule about one applying to the other.
+ */
+export type CameraFrameId = EntityId<'camera frame'>;
+
 function assertUsableId(value: string, what: string): void {
   if (value.length === 0) {
     throw new StoreValidationError(`${what} must not be empty`);
@@ -166,4 +179,10 @@ export function routeId(value: string): RouteId {
 export function workoutId(value: string): WorkoutId {
   assertUsableId(value, 'workout id');
   return value as WorkoutId;
+}
+
+/** @throws {StoreValidationError} if empty or blank. */
+export function cameraFrameId(value: string): CameraFrameId {
+  assertUsableId(value, 'camera frame id');
+  return value as CameraFrameId;
 }

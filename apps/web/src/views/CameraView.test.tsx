@@ -9,6 +9,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { BYSTANDER_SENTENCE } from '../camera/consent';
+import type { FrameKeep } from '../camera/keep';
 import { frameLeaksIn } from '../camera/notice';
 import { CameraController } from '../camera/session';
 import { manualSchedule, scriptedCamera } from '../camera/testing';
@@ -209,3 +210,114 @@ describe('the refusal screen', () => {
     expect(frameLeaksIn(document.body.innerHTML)).toStrictEqual([]);
   });
 });
+
+/* -------------------------------------------------------------------------- *
+ * #384: the per-ride keep, and the count that replaces a picture.
+ * -------------------------------------------------------------------------- */
+
+describe('keeping this ride’s pictures', () => {
+  async function screenWithKeep(
+    keep: Parameters<typeof controllerWith>[1],
+  ): Promise<CameraController> {
+    const camera = scriptedCamera();
+    const controller = controllerWith(camera, keep);
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    mounted = await mount(<CameraView controller={controller} />);
+    await settle();
+    const on = button('Turn the camera on');
+    if (on !== undefined) {
+      await activateWithKeyboard(on);
+      await settle();
+    }
+    return controller;
+  }
+
+  it('offers the switch OFF, and says nothing was kept', async () => {
+    await screenWithKeep(stubKeep());
+    const box = queryAll<HTMLInputElement>(document, 'input[type="checkbox"]')[0];
+    expect(box?.checked).toBe(false);
+    expect(document.body.textContent).toContain('None of them was kept.');
+  });
+
+  it('turns the keep on and says so', async () => {
+    const keep = stubKeep();
+    await screenWithKeep(keep);
+    const box = queryAll<HTMLInputElement>(document, 'input[type="checkbox"]')[0];
+    expect(box).toBeDefined();
+    if (box === undefined) {
+      return;
+    }
+    box.click();
+    await settle();
+
+    expect(keep.keeping).toBe(true);
+    expect(document.body.textContent).toContain('being kept on this device');
+  });
+
+  it('shows a COUNT and never a picture', async () => {
+    // ADR 0029 D-11: a kept frame is reached from the report the rider opens
+    // deliberately and from nowhere else. A count is D-8's permitted column.
+    await screenWithKeep(stubKeep(3));
+    await settle();
+    expect(document.body.textContent).toContain('holding 3 pictures');
+    expect(queryAll(document, 'img')).toHaveLength(0);
+    expect(frameLeaksIn(document.body.innerHTML)).toStrictEqual([]);
+  });
+
+  it('offers no delete control when this device is holding nothing', async () => {
+    await screenWithKeep(stubKeep(0));
+    await settle();
+    expect(document.body.textContent).toContain('holding no pictures');
+    expect(button('Delete every picture')).toBeUndefined();
+  });
+
+  it('deletes them all, and the count follows', async () => {
+    const keep = stubKeep(2);
+    await screenWithKeep(keep);
+    await settle();
+
+    const remove = button('Delete every picture');
+    expect(remove).toBeDefined();
+    if (remove === undefined) {
+      return;
+    }
+    await activateWithKeyboard(remove);
+    await settle();
+
+    expect(keep.forgotten).toBe(1);
+    expect(document.body.textContent).toContain('holding no pictures');
+  });
+});
+
+/** A `FrameKeep` that records what it was asked, with no store behind it. */
+function stubKeep(held = 0): FrameKeep & { forgotten: number } {
+  let keeping = false;
+  let count = held;
+  let forgotten = 0;
+  return {
+    get keeping(): boolean {
+      return keeping;
+    },
+    get forgotten(): number {
+      return forgotten;
+    },
+    setKeeping(on: boolean): void {
+      keeping = on;
+    },
+    accept: async () => Promise.resolve(),
+    count: async () => Promise.resolve(count),
+    forget: async () => {
+      forgotten += 1;
+      const removed = count;
+      count = 0;
+      return Promise.resolve(removed);
+    },
+  };
+}
+
+function controllerWith(
+  camera: ReturnType<typeof scriptedCamera>,
+  keep: FrameKeep,
+): CameraController {
+  return new CameraController({ port: camera.port, schedule: manualSchedule().schedule, keep });
+}
