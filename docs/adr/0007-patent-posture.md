@@ -625,3 +625,11 @@ enough that two funded companies chose to delete a feature instead. Both halves 
 - #65 recommends a geometric approach after all, on measurements. D2 still binds, but prohibitions 1,
   2 and 3 become live design pressure rather than a description of a design that already avoids them,
   and the Question 1 claim chart becomes more valuable rather than less.
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-09-22** — **D4's third bullet contains a statement of fact that a fuller first-hand reading has shown to be incomplete, and D4 itself is unchanged by this note.** That bullet says that once *"other users"* and *"archived … performance parameters"* are live, *"the remaining distance to the claim is argument rather than construction."* [Spike 0005](../spikes/0005-live-racing-patent-read.md) read eleven granted US patents first-hand on 2026-09-22, including five members of the Peloton family this ADR did not read, and found that **every** claim reciting archived data or a ghost rider also recites an **archived exercise class** — offered for selection, instructor-led in '224, delivered as video and audio content with a synchronizing signal — and, in '026, '521 and '224, a **dynamically updating ranked list**. Both are absent by construction from this project's design, so more remains than that sentence implies. ⚠️ **This changes nothing a reader should do**: D4's ❌ stands in full, D5's three-step procedure is the only way to move it, and [ADR 0021](0021-racing-another-riders-ghost.md) — written for [#330](https://github.com/openzigs/onyourleft/issues/330) — examines the question and **does not relax it**, because D5 step 1 is not satisfied and no owner decision exists. ADR 0021 D-7 is where the decision is put to the owner. Open Question 1, the IPR2020-01541 certificate for '026, is **still unread**: it failed again on 2026-09-22 with the same 404 and 403 recorded on 2026-09-03.
