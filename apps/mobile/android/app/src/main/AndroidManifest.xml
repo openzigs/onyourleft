@@ -103,6 +103,30 @@
         android:maxSdkVersion="30"
         tools:replace="android:maxSdkVersion" />
 
+    <!--
+      The camera (#383).
+
+      Declared so a rider may point a phone at themselves on a trainer and take
+      still pictures on this device. Nothing is uploaded: the WebView's own
+      getUserMedia is what opens it, the frame is re-encoded from raw pixels so
+      it carries no metadata at all, and it is thrown away once it has been
+      looked at unless the rider turns on this ride's keep. ADR 0029 is the
+      whole of that reasoning.
+
+      The permission alone is NOT enough, and the uses-feature below is the
+      half that is easy to forget. Google Play derives implied hardware
+      requirements from a permission, so CAMERA on its own makes this app
+      uninstallable on every device with no camera in it — for a feature that
+      is off by default and that a rider need never switch on.
+      required="false" is what keeps it installable, and it is asserted rather
+      than trusted.
+    -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />

@@ -103,6 +103,43 @@ export function usesPermissions(manifest: string): readonly UsesPermission[] {
   return found;
 }
 
+/** One `uses-feature` element, reduced to what a review needs. */
+export interface UsesFeature {
+  readonly name: string;
+  /**
+   * `android:required`, verbatim, or `null` when the attribute is absent.
+   *
+   * ⚠️ **A string and not a boolean, and `null` and not `true`.** Android's
+   * default when the attribute is omitted is `true`, which is exactly the
+   * dangerous value — a feature implicitly required is an app Google Play
+   * filters off every device without it. Defaulting here would make "the
+   * attribute is missing" and "the attribute says true" indistinguishable to a
+   * reviewer, and only the first is a mistake somebody made by accident.
+   * `Component.exported` is three-valued in this same file for the same reason.
+   */
+  readonly required: string | null;
+}
+
+/** Every `uses-feature` in a manifest, in document order. */
+export function usesFeatures(manifest: string): readonly UsesFeature[] {
+  const found: UsesFeature[] = [];
+  for (const match of withoutComments(manifest).matchAll(
+    /<uses-feature\b[\s\S]*?(?:\/>|<\/uses-feature>)/g,
+  )) {
+    const element = match[0];
+    const name = attribute(element, 'android:name');
+    if (name === null) {
+      // A `uses-feature` may name an OpenGL version rather than a feature
+      // (`android:glEsVersion`), which has no `android:name` at all. It is not
+      // a hardware requirement this review is about, and skipping it is the
+      // same call `usesPermissions` makes for a nameless permission.
+      continue;
+    }
+    found.push({ name, required: attribute(element, 'android:required') });
+  }
+  return found;
+}
+
 /** One declared `service`, reduced the same way. */
 export interface DeclaredService {
   readonly name: string;

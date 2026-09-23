@@ -33,7 +33,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import type { TestContext } from 'vitest';
 
-import { components, definedPermissions, queries, usesPermissions } from './manifest';
+import { components, definedPermissions, queries, usesFeatures, usesPermissions } from './manifest';
 import {
   ANDROID_ROOT,
   APPLICATION_ID,
@@ -44,11 +44,13 @@ import {
   mergedManifests,
   REVIEWED_DEFINED_PERMISSIONS,
   REVIEWED_EXPORTED_COMPONENTS,
+  REVIEWED_FEATURES,
   REVIEWED_PERMISSIONS,
   REVIEWED_QUERIES,
   type BuildVariant,
   type MergedManifest,
 } from './merged-manifest';
+import { ANDROID_ASKS_FOR_CAMERA_AT_START } from '../camera/camera';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -162,9 +164,49 @@ describe('the reviewed list is a review, not a derivation', () => {
       ...REVIEWED_PERMISSIONS,
       ...REVIEWED_DEFINED_PERMISSIONS,
       ...REVIEWED_EXPORTED_COMPONENTS,
+      ...REVIEWED_FEATURES,
     ]) {
       expect(entry.why.length, `${entry.name} carries no reason`).toBeGreaterThan(20);
     }
+  });
+
+  /* ------------------------------------------------------------------------ *
+   * #383's hardware feature, which a permission list cannot see.
+   * ------------------------------------------------------------------------ */
+
+  it('covers every uses-feature the app declares for itself', () => {
+    const ours = REVIEWED_FEATURES.filter((one) => one.contributor === 'ours').map(
+      (one) => one.name,
+    );
+    expect(
+      usesFeatures(APP_MANIFEST)
+        .map((one) => one.name)
+        .sort(),
+    ).toEqual([...ours].sort());
+  });
+
+  it('declares the camera OPTIONAL, which is what keeps the app installable', () => {
+    // ⚠️ The failure this prevents is a store filter rather than a crash.
+    // Google Play derives an *implied* hardware requirement from `CAMERA`, and
+    // an implied requirement is `required="true"` — so declaring the permission
+    // without this line makes the app absent from the listing on every device
+    // with no camera, for a feature that is off by default.
+    const camera = usesFeatures(APP_MANIFEST).find((one) => one.name === 'android.hardware.camera');
+    expect(camera, 'the app declares CAMERA and no uses-feature for it').toBeDefined();
+    // The STRING, not a defaulted boolean: an absent attribute means `true` to
+    // Android, so `null` here must not be allowed to read as "optional".
+    expect(camera?.required).toBe('false');
+  });
+
+  it('asks for the camera permission at no point in start-up', () => {
+    // #383: *"a test asserts the permission is not requested at app start"*.
+    // Nothing in a manifest can prevent that, and what does prevent it is that
+    // the start-up path never reaches the port: `main.tsx` builds a
+    // `CameraController` with no consent, and its `turnOn` refuses before
+    // touching the port at all. `apps/web/src/camera/session.test.ts`
+    // §"the camera is off by default" is the half that could regress, and it
+    // asserts the port recorded no call.
+    expect(ANDROID_ASKS_FOR_CAMERA_AT_START).toBe(false);
   });
 });
 
@@ -318,6 +360,34 @@ describe('the manifest the app actually ships', () => {
           ?.flags,
         `${merged.variant}: BLUETOOTH_SCAN`,
       ).toBe('neverForLocation');
+    }
+  });
+
+  it('carries the reviewed hardware features, with exactly their reviewed requirement', (ctx) => {
+    for (const merged of shipped(ctx)) {
+      const shippedFeatures = usesFeatures(merged.xml);
+      for (const reviewed of REVIEWED_FEATURES) {
+        const actual = shippedFeatures.find((one) => one.name === reviewed.name);
+        expect(
+          actual === undefined ? null : { required: actual.required },
+          `${merged.variant}: ${reviewed.name} is reviewed but not shipped`,
+        ).toEqual({ required: reviewed.required });
+      }
+    }
+  });
+
+  it('carries no hardware feature nobody reviewed', (ctx) => {
+    // The other direction, and the one a merge can produce on its own: a
+    // library's manifest can add a `uses-feature` this repository never wrote,
+    // and an implicitly-required one is an app absent from a store listing.
+    const reviewed = new Set(REVIEWED_FEATURES.map((one) => one.name));
+    for (const merged of shipped(ctx)) {
+      for (const one of usesFeatures(merged.xml)) {
+        expect(
+          reviewed.has(one.name),
+          `${merged.variant}: ${one.name} is in the shipped manifest and in nobody's reviewed list`,
+        ).toBe(true);
+      }
     }
   });
 

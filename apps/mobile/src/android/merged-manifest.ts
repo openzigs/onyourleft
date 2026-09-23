@@ -210,6 +210,13 @@ export const REVIEWED_PERMISSIONS: readonly ReviewedPermission[] = [
     why: 'the same, and bounded although the permission list in #87 does not name it',
   },
   {
+    name: 'android.permission.CAMERA',
+    maxSdkVersion: null,
+    flags: null,
+    contributor: 'ours',
+    why: '#383. A rider points a phone at themselves on a trainer and takes still pictures on this device. It is NOT for scanning, not for a QR code and not for video calling; nothing is uploaded, and the frame is thrown away once it has been looked at unless the rider turns on this ride’s keep (ADR 0029 D-2). Unbounded because a camera is not a legacy permission: there is no API level at which it stops being needed. The uses-feature beside it is required="false" so the app stays installable on a device with no camera — see REVIEWED_FEATURES',
+  },
+  {
     name: 'android.permission.FOREGROUND_SERVICE',
     maxSdkVersion: null,
     flags: null,
@@ -250,6 +257,44 @@ export const REVIEWED_PERMISSIONS: readonly ReviewedPermission[] = [
     flags: null,
     contributor: 'merged-in',
     why: 'androidx.core 1.17.0. Its own signature-level permission, held by this app alone, so that a receiver it registers at runtime is not reachable from another application. Grants nothing outside the app: see REVIEWED_DEFINED_PERMISSIONS for the protection level that makes that true',
+  },
+];
+
+/**
+ * One reviewed `uses-feature` in the shipped manifest.
+ *
+ * ⚠️ **A permission list cannot see this, and the consequence is a store
+ * filter rather than a crash.** Google Play derives *implied* hardware
+ * requirements from permissions — `CAMERA` implies `android.hardware.camera` —
+ * and an implied requirement is `required="true"`, so a permission declared
+ * without an explicit optional feature makes the app **uninstallable** on every
+ * device that lacks the hardware. Nothing fails at build time, nothing fails on
+ * a developer's phone, and the symptom is an app that is simply absent from a
+ * store listing somebody else is looking at.
+ */
+export interface ReviewedFeature {
+  readonly name: string;
+  /** Exactly the `android:required` expected; `null` means the attribute is absent. */
+  readonly required: string | null;
+  readonly contributor: Contributor;
+  readonly why: string;
+}
+
+/**
+ * Every `uses-feature` the shipped app is permitted to declare.
+ *
+ * ⚠️ **`required` is asserted as a STRING, and `null` is a failure rather than
+ * a default.** Android treats an absent `android:required` as `true`, which is
+ * the value that filters the app off devices; so "the attribute is missing" and
+ * "the attribute says true" must be distinguishable here, and only one of them
+ * is a mistake somebody made by accident.
+ */
+export const REVIEWED_FEATURES: readonly ReviewedFeature[] = [
+  {
+    name: 'android.hardware.camera',
+    required: 'false',
+    contributor: 'ours',
+    why: '#383. Declared optional so that adding CAMERA does not make this app uninstallable on a device with no camera — the feature is off by default and a rider need never turn it on. A ride, a trainer and every sensor work exactly as before on such a device',
   },
 ];
 

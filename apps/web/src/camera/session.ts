@@ -188,6 +188,22 @@ export interface CameraControllerOptions {
    * machine with no camera.
    */
   readonly schedule?: ((tick: () => void, everyMilliseconds: number) => () => void) | undefined;
+  /**
+   * Where the words for a problem come from — #383.
+   *
+   * Defaults to `notice.ts`'s shared table, which is right in a browser. Inside
+   * the Android shell `main.tsx` passes `shell-camera.ts`'s
+   * {@link shellCameraNotice} bound to `apps/mobile`'s own wording, because
+   * *"open this device's settings"* is right for a browser and useless to a
+   * rider in a garage — the same reason `support/shell-support.ts` exists.
+   *
+   * ⚠️ **Injected rather than branched on inside this class**, so nothing here
+   * names `@onyourleft/mobile`: a static import of that package from a module
+   * the browser build renders would put Capacitor in the entry chunk for every
+   * visitor, which is what `main.tsx`'s `import()` behind `isNativeShell`
+   * exists to prevent.
+   */
+  readonly notices?: ((kind: CameraProblemKind) => CameraNotice) | undefined;
 }
 
 /** The browser's own timer, in the shape {@link CameraControllerOptions} wants. */
@@ -208,6 +224,7 @@ export class CameraController {
   readonly #port: CameraPort;
   readonly #sink: FrameSink;
   readonly #schedule: (tick: () => void, everyMilliseconds: number) => () => void;
+  readonly #notices: (kind: CameraProblemKind) => CameraNotice;
   readonly #listeners = new Set<() => void>();
 
   #consent: CameraConsent = NO_CONSENT;
@@ -221,6 +238,7 @@ export class CameraController {
     this.#port = options.port;
     this.#sink = options.sink ?? discardTheFrame;
     this.#schedule = options.schedule ?? browserInterval;
+    this.#notices = options.notices ?? cameraNotice;
   }
 
   /** The current answer. Cheap; call it in a render. */
@@ -393,7 +411,7 @@ export class CameraController {
 
   /** The words for the current problem, or `null` while there is none. */
   notice(): CameraNotice | null {
-    return this.#problem === undefined ? null : cameraNotice(this.#problem);
+    return this.#problem === undefined ? null : this.#notices(this.#problem);
   }
 
   #fail(kind: CameraProblemKind): CameraProblemKind {

@@ -55,6 +55,7 @@ import {
   UNNAMED,
   usesPermissions,
   withoutComments,
+  usesFeatures,
 } from './manifest';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -159,10 +160,62 @@ describe('the foreground service permissions and declaration', () => {
   });
 });
 
+describe('reading uses-feature', () => {
+  it('finds a feature and the exact string its required attribute carries', () => {
+    const read = usesFeatures(
+      '<manifest><uses-feature android:name="android.hardware.camera" android:required="false" /></manifest>',
+    );
+    expect(read).toStrictEqual([{ name: 'android.hardware.camera', required: 'false' }]);
+  });
+
+  it('reports an absent required attribute as null rather than as true', () => {
+    // ⚠️ The load-bearing case. Android's own default for an omitted
+    // `android:required` is `true`, which is the value that filters the app off
+    // devices — so defaulting here would make the mistake somebody actually
+    // makes indistinguishable from the correct declaration.
+    expect(usesFeatures('<manifest><uses-feature android:name="a.b" /></manifest>')).toStrictEqual([
+      { name: 'a.b', required: null },
+    ]);
+  });
+
+  it('skips a glEsVersion entry, which names no feature at all', () => {
+    expect(
+      usesFeatures('<manifest><uses-feature android:glEsVersion="0x00030000" /></manifest>'),
+    ).toStrictEqual([]);
+  });
+
+  it('is not fooled by a feature named inside a comment', () => {
+    // The rule `withoutComments` exists for, applied to the third element type
+    // this reader covers: both manifests in this repository carry long prose
+    // comments, and the merged one reproduces every word of them.
+    expect(
+      usesFeatures(
+        '<manifest><!-- <uses-feature android:name="android.hardware.camera" /> --></manifest>',
+      ),
+    ).toStrictEqual([]);
+  });
+
+  it('reads the form with a separate closing tag', () => {
+    expect(
+      usesFeatures(
+        '<manifest><uses-feature android:name="a.b" android:required="true"></uses-feature></manifest>',
+      ),
+    ).toStrictEqual([{ name: 'a.b', required: 'true' }]);
+  });
+});
+
 describe('what the app does NOT ask for', () => {
-  it('declares no permission outside the set #87 allows, plus INTERNET', () => {
+  it('declares no permission outside the set #87 allows, plus INTERNET and CAMERA', () => {
     // A permission creeping in is the thing nobody notices in a diff, and it is
     // the one that costs a store review.
+    //
+    // ⚠️ **This list was widened once, by #383, and the widening is what the
+    // gate is for rather than a defeat of it.** `CAMERA` arrived with a reason,
+    // an ADR behind it (ADR 0029), a `why` in `merged-manifest.ts`
+    // §`REVIEWED_PERMISSIONS`, an optional `uses-feature` beside it so the app
+    // stays installable, and a re-read of the Data Safety declaration recorded
+    // in `data-safety.ts`. A second line added to this set without those five
+    // things is the creep this test is written about.
     const allowed = new Set([
       'android.permission.INTERNET',
       'android.permission.BLUETOOTH_SCAN',
@@ -172,6 +225,8 @@ describe('what the app does NOT ask for', () => {
       'android.permission.FOREGROUND_SERVICE',
       'android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE',
       'android.permission.POST_NOTIFICATIONS',
+      // #383. See the note above: this is the one entry added since #87.
+      'android.permission.CAMERA',
     ]);
     for (const one of usesPermissions(APP_MANIFEST)) {
       expect(allowed, `${one.name} is not in #87's permission set`).toContain(one.name);

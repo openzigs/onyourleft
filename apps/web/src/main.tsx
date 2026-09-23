@@ -50,6 +50,7 @@ import {
   canvasFrameGrabber,
   platformMediaDevices,
 } from './camera/browser-camera';
+import { shellCameraNotice } from './camera/shell-camera';
 import { CameraController } from './camera/session';
 import { platformStorage, requestPersistenceOnce } from './support/persistent-storage';
 import type { ShellSupportPort } from './support/shell-support-port';
@@ -707,7 +708,7 @@ function buildUpdateWatcher(
  * may appear outside `apps/web/src/camera/`, and `navigator.mediaDevices` is
  * one of them.
  */
-function buildCameraController(): CameraController | undefined {
+async function buildCameraController(): Promise<CameraController | undefined> {
   // ⚠️ Not called `mediaDevices`. `camera/boundary.test.ts` forbids that NAME
   // outside `apps/web/src/camera/`, and a local variable is a name — the scan
   // is deliberately about the word rather than about an import, because the
@@ -717,12 +718,27 @@ function buildCameraController(): CameraController | undefined {
   if (cameraDevices === undefined) {
     return undefined;
   }
+  const port = browserCameraPort({
+    devices: cameraDevices,
+    grabber: canvasFrameGrabber(),
+    secureContext: globalThis.isSecureContext,
+  });
+  if (!isNativeShell(platformCapacitor())) {
+    return new CameraController({ port });
+  }
+  // #383. The **only** thing the shell changes is what a rider is told when
+  // Android refuses: "open this device's settings" is right for a browser and
+  // useless in a garage. The capture path is `browserCameraPort` on both
+  // platforms, because inside the WebView that is what opens a camera — and a
+  // native one would hand back the sensor's own JPEG, which is exactly what
+  // ADR 0029 D-9's re-encode exists to avoid.
+  //
+  // Behind the same `import()` as every other reach for `@onyourleft/mobile`,
+  // so a browser downloads no line of Capacitor.
+  const mobile = await import('@onyourleft/mobile');
   return new CameraController({
-    port: browserCameraPort({
-      devices: cameraDevices,
-      grabber: canvasFrameGrabber(),
-      secureContext: globalThis.isSecureContext,
-    }),
+    port,
+    notices: (kind) => shellCameraNotice(kind, mobile.ANDROID_CAMERA_DENIED),
   });
 }
 
@@ -732,7 +748,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   // Read once: two calls would be two reads of a global for one prop.
   const storage = platformStorage();
   // Built once per tab, for the reason `buildCameraController` gives.
-  const camera = buildCameraController();
+  const camera = await buildCameraController();
   const root = createRoot(container);
   const draw = (update: UpdateWatcher | undefined): void => {
     root.render(

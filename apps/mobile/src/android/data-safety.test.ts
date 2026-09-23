@@ -154,6 +154,38 @@ describe('the declaration filed on Play', () => {
     }
   });
 
+  it('answers the photos row #383 added, rather than omitting it', () => {
+    // ⚠️ The row exists because there is now a subject for it: the manifest
+    // declares `CAMERA` and the client has a camera. The ANSWER is `false`
+    // because Play's "collected" means transferred off the device, and nothing
+    // in this client can transfer anything — `no-network.test.ts` is the gate
+    // under that sentence.
+    //
+    // ⚠️ **What this asserts is that somebody looked**, which is the
+    // distinction this repository keeps insisting on. An absent row and a row
+    // answered `false` say the same thing to Play and completely different
+    // things to a reviewer.
+    const photos = DATA_SAFETY_DECLARATION.find((answer) => answer.dataType.startsWith('Photos'));
+    expect(photos, 'the app has a camera and the form has no Photos row').toBeDefined();
+    expect(photos?.collected).toBe(false);
+    expect(photos?.shared).toBe(false);
+    // And the reason names the state that would change the answer, so the
+    // re-filing #387 owes is written down where it will be read.
+    expect(photos?.why).toContain('#387');
+  });
+
+  it('adding the camera permission leaves the location claim untouched', () => {
+    // ⚠️ #383's own criterion: *"`locationClaimFaults` still passes"*. A camera
+    // is not a location permission, and `ACCESS_MEDIA_LOCATION` — which IS one,
+    // and which an app that read images off the device would be tempted by — is
+    // in `FORBIDDEN_LOCATION_PERMISSIONS` and stays out of the manifest. This
+    // app never reads an image it did not just take.
+    const camera = REVIEWED_PERMISSIONS.find((one) => one.name === 'android.permission.CAMERA');
+    expect(camera, 'the reviewed list has no CAMERA entry').toBeDefined();
+    expect(locationClaimFaults(REVIEWED_PERMISSIONS)).toEqual([]);
+    expect(LOCATION_PERMISSIONS).not.toContain('android.permission.CAMERA');
+  });
+
   it('gives a reason for every answer', () => {
     for (const answer of DATA_SAFETY_DECLARATION) {
       expect(answer.why.length, answer.dataType).toBeGreaterThan(20);

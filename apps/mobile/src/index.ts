@@ -37,5 +37,11 @@ export type {
   PluginDeviceRequest,
   PluginService,
 } from './ble/plugin-port';
+export {
+  ANDROID_ASKS_FOR_CAMERA_AT_START,
+  ANDROID_CAMERA_DENIED,
+  ANDROID_CAMERA_MANIFEST,
+} from './camera/camera';
+export type { CameraPermissionNotice } from './camera/camera';
 export { mayShowDeviceList, permissionNotice } from './permission/notice';
 export type { PermissionAction, PermissionNotice } from './permission/notice';
