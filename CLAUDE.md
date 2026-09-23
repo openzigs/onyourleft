@@ -1011,8 +1011,9 @@ downstream issue's acceptance criteria depend on these.
 # Exits 0 clean; exits 1 listing each violation by rule id.
 bash scripts/check-repo-rules.sh
 
-# Test the checker itself. Fixture-driven; 182 cases. ⚠️ This said 115 until
-# #357 and 168 until #416, and had been stale for some time — the number is what
+# Test the checker itself. Fixture-driven; 195 cases, printed by the run on
+# 2026-09-22. ⚠️ This said 115 until #357, 168 until #416 and 182 until #378,
+# and has been stale every single time somebody quoted it — the number is what
 # the suite prints, so read the run rather than this line.
 bash scripts/check-repo-rules.test.sh
 
@@ -3083,7 +3084,7 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   **and which are claimed by open issues** before you pick one. **The next free number is 0033.**
   ⚠️ **0032 is [ADR 0032](docs/adr/0032-external-data-for-the-game-world.md)**, taken by
   [#248](https://github.com/openzigs/onyourleft/issues/248) — the trainer game's world takes **no**
-  external data source. It took 0032 rather than 0029 because **0029, 0030 and 0031 were claimed the
+  external data source. It took 0032 rather than 0029 because **0029, 0030 and 0031 were taken the
   same day** by the camera-decision work
   ([#378](https://github.com/openzigs/onyourleft/issues/378)–[#381](https://github.com/openzigs/onyourleft/issues/381))
   in a parallel pull request, and two branches taking "the next free number" at once collide on a
@@ -3095,6 +3096,14 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   D4's ❌ on a ghost of another rider stands, [#331](https://github.com/openzigs/onyourleft/issues/331)
   stays blocked, and ADR 0021 **D-7** is the question put to the owner. ADR 0007 gained its first
   `## Amendments` entry in the same change.
+  ⚠️ **0031 is [ADR 0031](docs/adr/0031-model-licences-and-the-hosted-model-hole.md)**, taken by
+  [#380](https://github.com/openzigs/onyourleft/issues/380) for model licences, committed and hosted.
+  ⚠️ **0030 is [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md)**, taken by
+  [#379](https://github.com/openzigs/onyourleft/issues/379) for what the app may say about a rider's
+  body.
+  ⚠️ **0029 is [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md)**, taken by
+  [#378](https://github.com/openzigs/onyourleft/issues/378) for camera imagery as its own data class;
+  a reviewer who remembers this sentence offering 0029 is reading the old file.
   ⚠️ **0028 is [ADR 0028](docs/adr/0028-racing-fairness.md)**, taken by
   [#465](https://github.com/openzigs/onyourleft/issues/465) for how a race between riders is fair.
   ⚠️ It was **Accepted with five questions explicitly left to the owner**, which is a shape no other
@@ -3350,6 +3359,25 @@ top of an issue **supersedes its body**.
 | What stops a widened endpoint radius or a sparse ride outrunning that margin, and what a ride coarser than the ceiling loses | `packages/domain/src/segment/segment.ts` §`MAXIMUM_ENDPOINT_REACH_METRES`, `packages/domain/src/segment/match.ts` §`GAP_SECONDS` |
 | What a test fixture at latitude 51.5, longitude -0.12 used to break, and what fixed it | `packages/domain/src/segment/cells.test.ts`, `apps/web/src/segments/sweep.store.test.ts` §`ORIGIN_LONGITUDE` |
 | Where a device's capability set comes from, and what happens when a device contradicts itself | [`packages/sensors/README.md`](packages/sensors/README.md) §"What a device says it can do", `packages/sensors/web-bluetooth/src/transport.ts` §`declaredBy`, §`noteUndeclared` |
+| Whether a camera bike-fit analysis is inside the granted claims of US 12,499,571, and the four elements it is outside on | [`docs/spikes/0006-camera-bike-fit-patent-read.md`](docs/spikes/0006-camera-bike-fit-patent-read.md) §2, [#381](https://github.com/openzigs/onyourleft/issues/381) |
+| Why a patent marking page is not claim scope, demonstrated by one that gets the patent's own title wrong | [`docs/spikes/0006-camera-bike-fit-patent-read.md`](docs/spikes/0006-camera-bike-fit-patent-read.md) §1.3 |
+| How to read a granted claim when Google Patents starts refusing, and why the fallback has to be read by eye | [`docs/spikes/0006-camera-bike-fit-patent-read.md`](docs/spikes/0006-camera-bike-fit-patent-read.md) §1.4, [`docs/spikes/0005-live-racing-patent-read.md`](docs/spikes/0005-live-racing-patent-read.md) §1.3 |
+| Whether a committed model weights file needs a new gate, and why it does not | [ADR 0031](docs/adr/0031-model-licences-and-the-hosted-model-hole.md) D-1, [ASSETS.toml](ASSETS.toml), [#339](https://github.com/openzigs/onyourleft/issues/339) |
+| Why a hosted model is in no licence closure at all, and what is recorded instead of a manifest row | [ADR 0031](docs/adr/0031-model-licences-and-the-hosted-model-hole.md) D-3 |
+| Why a rider may point this app at any model and this app may name none | [ADR 0031](docs/adr/0031-model-licences-and-the-hosted-model-hole.md) D-4 |
+| Why a quantised model is a derived asset, and why conversion is not laundering | [ADR 0031](docs/adr/0031-model-licences-and-the-hosted-model-hole.md) D-8, [ADR 0026](docs/adr/0026-realistic-game-world.md) D-5 |
+| What this app may say about a rider's body, and the two vocabularies every string is in | [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md) D-1, D-2, [#379](https://github.com/openzigs/onyourleft/issues/379) |
+| Why no absolute joint angle is ever rendered, and why a better camera could not change that | [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md) D-3 |
+| Why the frontal plane is banned as a word and a picture as well as a number | [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md) D-4 |
+| When an in-ride coach must say nothing, and why silence is never explained | [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md) D-7, `packages/domain/src/workout/erg-safety.ts` §`assessErgCadence` |
+| Which FDA sentence this repository quoted and could not find in the guidance | [ADR 0030](docs/adr/0030-what-the-app-may-say-about-a-body.md) §Context, [ADR 0007](docs/adr/0007-patent-posture.md) D7 |
+| What a captured camera frame IS in this program, and why it is not another sensor channel | [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) D-1, [#378](https://github.com/openzigs/onyourleft/issues/378) |
+| Why an error message may never carry a picture, and why that binds harder than the coordinate rule | [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) D-8, [ADR 0004](docs/adr/0004-privacy-and-location.md) decision D |
+| Why the privacy boundary walk cannot see a coordinate inside a photograph, and where the strip happens instead | [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) D-9, `apps/web/src/privacy/boundaries.ts` §`coordinatesIn` |
+| Which transport a photograph of a rider may travel down, and the one product rejected by name | [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) D-6 |
+| Why a household member in frame gets a sentence rather than a blur | [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) D-5 |
+| What a shared device gets instead of an access control this program has nowhere else | [ADR 0029](docs/adr/0029-camera-imagery-as-a-data-class.md) D-11, §"The threat model", `apps/web/src/local-athlete.ts` |
+| Why two spike write-ups can take one number and merge clean and green | [`docs/architecture.md`](docs/architecture.md) §"Spike write-ups", `scripts/check-repo-rules.sh` §`ADR001`, [#493](https://github.com/openzigs/onyourleft/issues/493) |
 | What decides who is faster in a race, and what the owner answered when asked | [ADR 0028](docs/adr/0028-racing-fairness.md) §Amendments (2026-09-22), [#465](https://github.com/openzigs/onyourleft/issues/465), [#488](https://github.com/openzigs/onyourleft/issues/488) |
 | Why a race has no categories in its first cut, and what that leaves as the only guard | [ADR 0028](docs/adr/0028-racing-fairness.md) §Amendments §"What Q5 costs, said plainly", D-4 |
 | Where a W/kg plausibility ceiling came from, which of the four is sourced first-hand, and the one that sits below a world record | [ADR 0028](docs/adr/0028-racing-fairness.md) §Amendments §"Q3's four ceilings", [ADR 0006](docs/adr/0006-fit-codec-licensing.md) R1 |
