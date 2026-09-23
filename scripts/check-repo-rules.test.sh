@@ -30,6 +30,20 @@ new_fixture() {
   # case that deletes it again is below, under ASSET005.
   printf '# Committed binary assets. See scripts/check-repo-rules.sh ASSET001.\n' \
     > "${fixture_root}/ASSETS.toml"
+  # SPIKE003 requires docs/spikes/ to be there AND to hold a write-up, for the
+  # reason ASSET005 requires the asset manifest to be present: SPIKE001 and
+  # SPIKE002 walk that directory, and a walk over a path that is not there
+  # reports clean for ever. So every fixture starts with one valid spike, and
+  # the cases that delete it again are below under SPIKE003.
+  #
+  # ⚠️ The name matters. The ADR004 case "a spike write-up is not held to the
+  # ADR sections" writes docs/spikes/0001-segment-matching.md itself; giving
+  # this one any OTHER number would make that case a SPIKE001 collision, and
+  # giving it any other slug at 0001 would too. It writes the same path, so it
+  # overwrites this file rather than joining it.
+  mkdir -p "${fixture_root}/docs/spikes"
+  printf '# Spike 0001\n\nA dated measurement.\n' \
+    > "${fixture_root}/docs/spikes/0001-segment-matching.md"
 }
 
 cleanup_fixture() {
@@ -1075,6 +1089,120 @@ mkdir -p "${fixture_root}/docs/spikes"
 printf '# Spike 0001\n\nA dated measurement.\n' \
   > "${fixture_root}/docs/spikes/0001-segment-matching.md"
 assert_clean "a spike write-up is not held to the ADR sections"
+
+# --- SPIKE001 / SPIKE002 / SPIKE003: spike numbering and naming (#493) --------
+#
+# ADR001 and ADR002 walk docs/adr/ alone, so two spike write-ups at one number
+# merged clean and green. It happened twice, both live on 2026-09-22 (0005 and
+# 0006), and both were caught by a person reading two diffs rather than by a
+# gate.
+#
+# The FIRST case below is the one that decides whether this rule is worth
+# anything. A uniqueness check written against FILENAMES rather than against the
+# NNNN prefix passes it -- the two files are differently named, which is exactly
+# why git merged them without a conflict. It is the shape that shipped.
+
+new_fixture
+printf '# Spike 0005\n' \
+  > "${fixture_root}/docs/spikes/0005-live-racing-patent-read.md"
+printf '# Spike 0005\n' \
+  > "${fixture_root}/docs/spikes/0005-realism-on-the-device-floor.md"
+assert_violation "two differently-named spikes at one number are rejected" SPIKE001 \
+  "share spike number 0005"
+
+# Both paths on ONE line, for ADR001's own #118 reason: this loop walks
+# `find | sort`, so the file it reaches second is whichever slug sorts later,
+# which carries no information at all about which one is new. A message naming
+# one file would be wrong about half the time -- and its wrong half would name
+# the MERGED spike, which CLAUDE.md section 7 forbids renumbering outright.
+# Twice, so that neither sort order is the one that happens to pass.
+
+new_fixture
+printf '# Spike 0006\n' \
+  > "${fixture_root}/docs/spikes/0006-camera-bike-fit-patent-read.md"
+printf '# Spike 0006\n' \
+  > "${fixture_root}/docs/spikes/0006-race-room-under-workerd.md"
+assert_violation_all "a spike collision names BOTH paths when the new file sorts first" SPIKE001 \
+  "docs/spikes/0006-camera-bike-fit-patent-read.md" \
+  "docs/spikes/0006-race-room-under-workerd.md"
+
+new_fixture
+printf '# Spike 0006\n' \
+  > "${fixture_root}/docs/spikes/0006-race-room-under-workerd.md"
+printf '# Spike 0006\n' \
+  > "${fixture_root}/docs/spikes/0006-camera-bike-fit-patent-read.md"
+assert_violation_all "a spike collision names BOTH paths when the new file sorts second" SPIKE001 \
+  "docs/spikes/0006-camera-bike-fit-patent-read.md" \
+  "docs/spikes/0006-race-room-under-workerd.md"
+
+# The remedy sentence is the whole reason SPIKE001 is a new id rather than a
+# widening of ADR001. ADR001 tells the reader to renumber the unmerged file;
+# that instruction is WRONG for a spike, which is never renumbered. If this
+# assertion ever fails because the message was harmonised with ADR001's, the
+# harmonisation is the defect.
+new_fixture
+printf '# Spike 0007\n' > "${fixture_root}/docs/spikes/0007-alpha.md"
+printf '# Spike 0007\n' > "${fixture_root}/docs/spikes/0007-beta.md"
+assert_violation "a spike collision says take the next free number, never renumber" SPIKE001 \
+  "must take the next free number"
+
+new_fixture
+printf '# Spike 0002\n' > "${fixture_root}/docs/spikes/0002-background-recording.md"
+printf '# Spike 0003\n' > "${fixture_root}/docs/spikes/0003-segment-prefilter-margin.md"
+assert_clean "distinct spike numbers pass"
+
+# The two directories are numbered independently and must not contaminate each
+# other. docs/adr/0001-licence.md and docs/spikes/0001-segment-matching.md are
+# both real files in this repository, today.
+new_fixture
+{ printf '# ADR 0002\n\n'; adr_sections; } > "${fixture_root}/docs/adr/0002-local-first.md"
+printf '# Spike 0002\n' > "${fixture_root}/docs/spikes/0002-background-recording.md"
+assert_clean "an ADR and a spike may share a number"
+
+# --- SPIKE002: spike filenames follow NNNN-kebab-case.md ----------------------
+
+new_fixture
+printf '# Spike\n' > "${fixture_root}/docs/spikes/segment-matching.md"
+assert_violation "a spike filename without a number is rejected" SPIKE002 \
+  "docs/spikes/segment-matching.md"
+
+new_fixture
+printf '# Spike\n' > "${fixture_root}/docs/spikes/0005-Live_Racing.md"
+assert_violation "a spike filename that is not kebab-case is rejected" SPIKE002 \
+  "docs/spikes/0005-Live_Racing.md"
+
+# SPIKE002 runs first and `continue`s, which is what makes the collision test's
+# string packing safe -- nothing reaching it can contain a space or a colon. A
+# malformed name at a number that is ALSO taken is therefore reported as
+# SPIKE002 and does not also become half of a SPIKE001 pair.
+new_fixture
+printf '# Spike\n' > "${fixture_root}/docs/spikes/0001-Segment Matching.md"
+assert_violation "a malformed spike name at a taken number is SPIKE002" SPIKE002 \
+  "docs/spikes/0001-Segment Matching.md"
+
+# --- SPIKE003: the two rules above cannot walk nothing and report clean -------
+#
+# LIC006's reason, applied to a directory instead of to a list. SPIKE001 and
+# SPIKE002 name a path; a path that is not there is a rule that can never fire,
+# and every run stays green while nothing is checked. That is #142's shape --
+# a selector failing closed against deletion and OPEN against renaming -- and
+# check-wiring.mjs's WATCHED_PREFIXES takes the same position.
+#
+# ⚠️ Measured on 2026-09-23 rather than asserted: removing SPIKE003's two
+# `report` calls from the checker turns exactly the two cases below red and
+# nothing else in the 206-case suite. Without them, `mv docs/spikes
+# docs/measurements` would be a silent, permanent switch-off of SPIKE001 and
+# SPIKE002 with every run still green.
+
+new_fixture
+rm -f "${fixture_root}/docs/spikes/0001-segment-matching.md"
+assert_violation "an empty docs/spikes is a violation, not a clean run" SPIKE003 \
+  "no write-up found"
+
+new_fixture
+rm -rf "${fixture_root}/docs/spikes"
+assert_violation "a missing docs/spikes is a violation, not a clean run" SPIKE003 \
+  "the directory is not there"
 
 # --- SCOPE001 regressions found in review of PR #98 --------------------------
 #

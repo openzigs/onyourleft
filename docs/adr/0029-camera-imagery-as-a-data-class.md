@@ -614,3 +614,115 @@ answer changes how strong D-5's sentence has to be.
 - **A published policy is written before the code.** Both this ADR and #377's epic criterion say the
   policy changes in the same pull request as the first byte. A policy amended in advance, "so it is
   ready", is a false statement about a shipped app.
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-09-23** — **The owner has answered all four questions, and one of them amends a promise
+  this repository has kept since Phase 0.** [#495](https://github.com/openzigs/onyourleft/issues/495)
+  carries them verbatim. **Q2 and Q3 ratify D-2 and D-5 exactly as written** — they were the
+  author's engineering choices on questions §"What the owner has not decided" names as the owner's,
+  and they are now the owner's decisions rather than the author's. **Q1 amends the no-network
+  promise**, which is the one this ADR calls load-bearing. **Q4 answers
+  [#386](https://github.com/openzigs/onyourleft/issues/386) in substance** and makes D-5's sentence
+  carry more weight than D-5 itself contemplated. §"What the owner has not decided" is therefore no
+  longer a list of open questions but a record of what was asked. ⚠️ **A reader who remembers this
+  ADR having four open questions is reading the old file.**
+
+  | | Question | Owner's answer | What it changes |
+  |---|---|---|---|
+  | **Q1** | Is amending `no-network.test.ts` acceptable at all? | **Yes — amend it to *"no network except a local endpoint the rider configured and switched on"*** | **Nothing above is changed and a great deal below is unblocked.** D-6 and D-7 stop being conditional on a policy question. ⚠️ The amendment is **narrow** and is not made here: §Q1 below is what it permits, what it does **not** permit, and the three artefacts that move together with it |
+  | **Q2** | Is "discarded after analysis, with a per-ride keep" the right default? | **Yes — discarded after analysis, with a per-ride keep the rider turns on** | **D-2 is unchanged and is now owner-ratified.** Its stated cost stands as written: the most useful version of the feature — comparing this week with last month — is a decision the rider takes every single ride |
+  | **Q3** | Is a sentence enough for a bystander? | **A sentence, no blur** | **D-5 is unchanged and is now owner-ratified**, including its refusal to run a second detector and its argument for why a blur that misses is worse. ⚠️ It interacts with Q4 — see below |
+  | **Q4** | Which camera sees the rider, and from where? | **A second phone on a tripod, side-on, at roughly hip height** | **Nothing above is changed and D-5 now carries more than it was written to carry**, because this is the placement D-5 itself names as the one with the larger bystander chance. #386 is answered in substance; the pairing between two devices is not, and that issue stays open for it |
+
+  ### Q1 — the sentence that replaces the promise, and the four things it does not permit
+
+  **The amended promise, in the owner's own words:**
+
+  > **No network except a local endpoint the rider configured and switched on.**
+
+  What that permits is **one destination, typed by the rider, off until the rider turns it on** —
+  D-6's LAN address or WireGuard-class peer, reached because somebody entered it. It permits nothing
+  else, and four exclusions are worth writing down because each is a thing a later reader could
+  reasonably believe follows and none of them does:
+
+  1. **It is not a permission to make a request the rider did not configure.** No analytics, no
+     crash reporting, no telemetry, no update check, no vendor list, no default endpoint. The two
+     halves of the sentence — *configured* and *switched on* — are each a separate condition, and a
+     build that shipped an endpoint pre-filled would satisfy neither.
+  2. **It does not, on its face, cover D-7's hosted model.** ⚠️ This is the one that matters and it
+     is a finding rather than a restatement: the owner's sentence says *"a local endpoint"*, and a
+     hosted model is not local. D-7 already requires its own explicit consent on the rider's own
+     key, so the *consent* is not the gap — the gap is that the **published promise** would still be
+     false for a rider who turned the hosted path on. Either the policy sentence gains a second
+     named exception when [#387](https://github.com/openzigs/onyourleft/issues/387) ships the hosted
+     path, or the hosted path stays unbuilt. **That is a question for the owner and it is not
+     answered here.**
+  3. **It is not a widening of the basemap exception.** `docs/privacy-policy.md` already discloses
+     that a configured basemap host is requested from by the map library, which is a *dependency's*
+     request rather than this client's, and no basemap is configured in this build. The two
+     exceptions are separate sentences about separate things and neither enlarges the other.
+  4. **It is not a deletion of the gate.** `apps/web/src/privacy/no-network.test.ts` is re-stated,
+     not removed: a `fetch` outside the one module that owns the configured endpoint must still fail
+     the build, and the module that owns it must still be a module somebody chose. Its own header
+     already says *"if this test ever goes red, the privacy policy is what needs changing, not the
+     test"*; Q1 is the first time the answer is to change the policy **and** re-state the test, and
+     the re-statement has to keep the scan able to fire. A gate rewritten as *"no network except
+     where we do"* is the vacuous pass this repository keeps finding.
+
+  **What Q1 obliges, and it is three artefacts that move together or not at all:**
+
+  | Artefact | What changes |
+  |---|---|
+  | `apps/web/src/privacy/no-network.test.ts`, and `apps/web/src/game/plan-no-network.test.tsx` beside it | The whole-tree gate is re-stated around one permitted module; the plan view's own "issues no request" assertion is unaffected in substance and must stay exactly as strict |
+  | [`docs/privacy-policy.md`](../privacy-policy.md) | *"We collect nothing … nothing is uploaded"* becomes a statement about what the app does **on its own**, plus the named exception the rider switched on |
+  | `apps/mobile/src/android/data-safety.ts` ([#95](https://github.com/openzigs/onyourleft/issues/95)) | Every row answers `collected: false` today. **Photos and videos** becomes a row, and the Play declaration is re-filed |
+
+  ⚠️ **This pull request moves none of them, and that is deliberate.** #377's epic criterion is that
+  the policy and the Data Safety answers are *"true of the shipped app at every point, not only at
+  the end"*, and the body's own §"What would make this ADR wrong" says a policy amended in advance
+  *"so it is ready"* is a false statement about a shipped app. The three land in the same pull
+  request as the first byte, and that is its own piece of work. **It must not be smuggled into the
+  camera build.**
+
+  ### Q3 and Q4 together — the sentence is unchanged and the room it is read in is not
+
+  D-5's quoted wording is **not edited by this amendment**, and it must not be edited by #382
+  either: the point of quoting it in an ADR was that Phase B implements a sentence somebody ruled on.
+  What changes is which half of it is doing the work.
+
+  - D-5's remedy has two limbs — *"point the camera so they will not be in it, **or leave the camera
+    off**"*. With a bar-mounted tablet the first limb is usually available. With Q4's tripod side-on
+    at hip height, the camera is pointed **across the room**, and in a small room the first limb may
+    not be available at all. **The second limb is then the whole remedy**, and a reviewer of #382
+    should read it that way rather than as a softener.
+  - **The live indicator is now in a different place from the rider.** D-5's second bullet already
+    requires an indicator *"visible from where a person would enter, not only to the rider on the
+    bike"*, and that sentence was written when those were plausibly the same screen. Under Q4 they
+    are not: the capturing device is on a tripod across the room and the rider is on the bike. That
+    is a real constraint on [#382](https://github.com/openzigs/onyourleft/issues/382) and
+    [#383](https://github.com/openzigs/onyourleft/issues/383), and it is recorded here because it
+    follows from the owner's answer rather than from anything the body anticipated.
+  - **Two devices is the one thing Q4 does not settle.** #386 stays open for the pairing design —
+    which device captures, which analyses, how they find each other, and what happens when they
+    disagree — and a comment on that issue records what this answer did and did not resolve.
+  - **Side-on at hip height is a sagittal view**, which is the only plane
+    [ADR 0030](0030-what-the-app-may-say-about-a-body.md) D-4 permits anything to be said about. The
+    placement the owner chose is therefore the one that makes a sagittal-only product possible at
+    all; a frontal arrangement would have produced a view nothing may report on.
+
+  ### What is still blocked
+
+  **D-0's second block — *"four questions are the owner's"* — is discharged by this entry**, and its
+  first block is clear on the facts: #377, #378, #379, #380 and #381 are all closed, read
+  2026-09-23, so Phase A is complete. **What remains is the third block, and a new one.**
+
+  | Block | State |
+  |---|---|
+  | There is no camera code | **Stands.** [#382](https://github.com/openzigs/onyourleft/issues/382) and [#383](https://github.com/openzigs/onyourleft/issues/383) own it, and this amendment writes none, adds no permission, no port and no dependency |
+  | ⚠️ **New: the EU and UK regulatory read** | [ADR 0030](0030-what-the-app-may-say-about-a-body.md)'s amendment of the same date records the owner's Q2 answer, which makes that read a **gate on camera code**. It is [spike 0008](../spikes/0008-eu-uk-medical-device-read.md), written in the same pull request as this entry, and a spike decides nothing — what clears the gate is the owner reading it |
+  | ⚠️ The no-network change itself | **Not started, and named rather than done** — the three artefacts above, in one pull request, with the first byte |
