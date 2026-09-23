@@ -8,8 +8,9 @@
  * through the product's OWN world generators — `landform.ts`, `waterways.ts`
  * and `settlements.ts`, which #468 added — so the realistic world sits in exactly
  * the world the product draws: a valley the road descends into, a level floor
- * long and low enough for `waterways.ts` to put a lake beside it, and level
- * stretches for `settlements.ts` to build on. It meanders, because a straight
+ * long and low enough that `waterways.ts` DOES put a lake beside it, a climb
+ * out of it gentle enough to be farmed and steep enough that `settlements.ts`
+ * walls its fields in stone, and level stretches to build on. It meanders, because a straight
  * road seen from the chase camera is lit from one side for the whole run and
  * hides what an environment map does.
  *
@@ -33,16 +34,27 @@ const METRES_PER_DEGREE = 111_320;
 export const ROUTE_METRES = 4_000;
 
 /**
- * The route's elevation: down 30 m into a valley with a level floor (where
- * `waterways.ts` may lay a lake and `settlements.ts` a farmstead), up again,
- * and then a 12 m V-shaped dip — a stream crossing, which is what makes
- * `waterways.ts` build a bridge.
+ * The route's elevation: down 30 m into a valley with a level floor, up again
+ * at 5 %, and then a 12 m V-shaped dip — a stream crossing, which is what
+ * makes `waterways.ts` build a bridge.
+ *
+ * ⚠️ **Every one of those is a Part Z step, and `route.test.ts` holds the route
+ * to all of them** — #501. Until then this comment said the floor was where
+ * `waterways.ts` *"may lay a lake"*, and it laid none: a lake is seeded per
+ * stretch at `LAKE_CHANCE`, and both of this floor's stretches said no, so
+ * Z10's lake could not be judged on the page Part Z sends the owner to. Nor
+ * could Z9's stone walls: `settlements.ts` walls a field in stone on ground
+ * steeper than `WALL_GRADE_PERCENT` (4 %) but still farmed (no steeper than
+ * `FIELD_GRADE_PERCENT`, 6 %), and the climb out was 7.5 %. So the climb is
+ * 5 % over 600 m, and the descent ends at 780 m rather than 800 m, which is
+ * where this route’s seed lays one. Both
+ * are this route's own arithmetic, not a measurement of anywhere.
  */
 export function realisticElevation(along: number): number {
   if (along <= 500) return 30;
-  if (along <= 800) return 30 - ((along - 500) / 300) * 30;
+  if (along <= 780) return 30 - ((along - 500) / 280) * 30;
   if (along <= 1_900) return 0;
-  if (along <= 2_300) return ((along - 1_900) / 400) * 30;
+  if (along <= 2_500) return ((along - 1_900) / 600) * 30;
   if (along <= 2_700) return 30;
   if (along <= 2_850) return 30 - ((along - 2_700) / 150) * 12;
   if (along <= 3_000) return 18 + ((along - 2_850) / 150) * 12;

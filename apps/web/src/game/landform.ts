@@ -468,20 +468,21 @@ export function terrainCorridor(
         const lateral = column < 2 ? offset : Math.min(offset, limit);
         const at = row * perRow + side * COLUMNS + column;
         vertices[at * 3] = point.x + normalX * lateral * sign;
-        // Column 0 is `point.y` exactly: `groundHeight` drops nothing and adds
-        // no relief at the road's half-width, so the edge needs no special case.
-        vertices[at * 3 + 1] = groundHeight(
-          point.y,
-          relief,
-          lateral,
+        const shaping =
           ways.crossings.length + ways.lakes.length === 0
             ? DRY
-            : waterShaping(ways, profile, origin, point.distance, lateral * sign, point.y),
-        );
+            : waterShaping(ways, profile, origin, point.distance, lateral * sign, point.y);
+        // Column 0 is `point.y` exactly: `groundHeight` drops nothing and adds
+        // no relief at the road's half-width, so the edge needs no special case.
+        const height = groundHeight(point.y, relief, lateral, shaping);
+        vertices[at * 3 + 1] = height;
         vertices[at * 3 + 2] = point.z + normalZ * lateral * sign;
-        colours[at * 3] = tint;
-        colours[at * 3 + 1] = tint;
-        colours[at * 3 + 2] = tint;
+        // #501: the wet margin. Column 0 is the road's own edge and is never
+        // wet, so the road's verge stays the road's.
+        const wet = column === 0 ? 0 : wetness(height, shaping.level);
+        colours[at * 3] = tint * (1 + (WET_GROUND_TINT[0] - 1) * wet);
+        colours[at * 3 + 1] = tint * (1 + (WET_GROUND_TINT[1] - 1) * wet);
+        colours[at * 3 + 2] = tint * (1 + (WET_GROUND_TINT[2] - 1) * wet);
         fields[at * 2] = point.along;
         fields[at * 2 + 1] = lateral * sign;
       }
@@ -657,6 +658,34 @@ function reliefFields(
     mottle: nearOnly ? 0 : field(4 + side),
     tilt: CROSS_SLOPE_PER_GRADE * grade * (side === 0 ? uphill : -uphill),
   };
+}
+
+/**
+ * What the ground is multiplied by where it is wet, linear RGB — #501: darker,
+ * and browner, the colour of the mud at a stream's edge. This repository's
+ * own, like every other ground colour here (`world.ts` §Provenance).
+ */
+export const WET_GROUND_TINT: readonly [number, number, number] = [0.5, 0.44, 0.34];
+
+/**
+ * How far above the water the ground is still wet, in metres: **1.2** — #501.
+ *
+ * ⚠️ **A height, not a distance from the shore**, and that is the point: the
+ * ground's rows are ten metres apart and slide with the rider, so where the
+ * drawn ground comes up out of the water moves with them, and a margin placed
+ * by distance would sit beside the shoreline rather than on it. A margin by
+ * height is wherever the ground IS just above the water, however the rows fall.
+ */
+export const WET_MARGIN_METRES = 1.2;
+
+/**
+ * How wet the ground is at `height`, beside water whose surface is at `level`,
+ * from 1 at the water's surface (and under it) to 0 at {@link WET_MARGIN_METRES}
+ * above it — #501. `level` is `-Infinity` where no water is near: dry.
+ */
+export function wetness(height: number, level: number): number {
+  if (!Number.isFinite(level)) return 0;
+  return 1 - smoothstep01((height - level) / WET_MARGIN_METRES);
 }
 
 /**

@@ -138,6 +138,9 @@ interface GameHarnessResult {
     readonly drawCallsDry: number;
     readonly shadedMs: number;
     readonly flatMs: number;
+    readonly rippleBanding: number;
+    readonly rippleBandingUnfiltered: number;
+    readonly ripplePairs: number;
   };
   readonly gradient: {
     readonly skyHigh: Pixel;
@@ -352,6 +355,12 @@ const SCATTER_MESH_CEILING = 4 * 2 + 3 + 1 + 4 * 2 + 4;
 interface HarnessRun {
   readonly result: GameHarnessResult;
   readonly requested: readonly string[];
+  /**
+   * Every shader three could not compile or link on the load — #501. A GLSL
+   * error is not an exception: three logs it, the mesh draws nothing, and
+   * every other assertion here can stay green over a bridge that vanished.
+   */
+  readonly shaderErrors: readonly string[];
 }
 
 /**
@@ -397,6 +406,12 @@ const test = base.extend<object, { harnessRun: (query?: string) => Promise<Harne
           const page = await context.newPage();
           const requested: string[] = [];
           page.on('request', (request) => requested.push(request.url()));
+          const shaderErrors: string[] = [];
+          page.on('console', (message) => {
+            if (message.type() === 'error' && message.text().includes('THREE.WebGLProgram')) {
+              shaderErrors.push(message.text().slice(0, 400));
+            }
+          });
           await page.goto(`${HARNESS_ORIGIN}/game.html${query}`);
           // The harness publishes at the end of `run()` and nowhere else, so
           // waiting on the property existing is waiting on the run having
@@ -405,7 +420,7 @@ const test = base.extend<object, { harnessRun: (query?: string) => Promise<Harne
           // anything, exactly as `main.tsx` does.
           await page.waitForFunction(() => window.__oylGameHarness !== undefined);
           const result = await page.evaluate(() => window.__oylGameHarness as GameHarnessResult);
-          return { result, requested };
+          return { result, requested, shaderErrors };
         } finally {
           await context.close();
         }
@@ -862,6 +877,23 @@ test.describe('water under a bridge — #459', () => {
     // phone's GPU. Validation 0002 Part W is the phone.
     expect(water.shadedMs).toBeGreaterThan(0);
     expect(water.flatMs).toBeGreaterThan(0);
+  });
+
+  test('the water’s ripples are band-limited at a grazing angle — #501', async ({
+    harnessRun,
+  }, testInfo) => {
+    // Validation 0002 Z10: *"the stream shows fine horizontal banding"*. The
+    // figures are published rather than held to a guessed threshold: the
+    // claim is that the band-limit lowers them, and the CONTROL is that with it
+    // off the banding reads back — without that, "lower" could be a stream
+    // that was never in the frame.
+    const { water } = await harness(harnessRun);
+    const measured = `a water pixel against the one above it, mean squared luminance difference ${water.rippleBanding.toFixed(2)} band-limited and ${water.rippleBandingUnfiltered.toFixed(2)} without, over ${String(water.ripplePairs)} pairs`;
+    testInfo.annotations.push({ type: 'ripple banding', description: measured });
+    console.log(`ripple banding — ${measured}`);
+    expect(water.ripplePairs).toBeGreaterThan(500);
+    expect(water.rippleBandingUnfiltered).toBeGreaterThan(0);
+    expect(water.rippleBanding).toBeLessThan(water.rippleBandingUnfiltered);
   });
 });
 
@@ -1977,6 +2009,14 @@ test.describe('the realistic world — ADR 0026', () => {
     // warm, and well under half the wall's brightness.
     expect(luminance(glass)).toBeLessThan(luminance(control) / 2);
     expect(glass[2] ?? 0).toBeGreaterThan(glass[0] ?? 0);
+  });
+
+  test('compiles every shader it draws with, in both worlds — #501', async ({ harnessRun }) => {
+    // The stone bridge's world-metre projection and the water's band-limit are
+    // both hand-written GLSL spliced into three's own; an error in either is a
+    // log line and an invisible mesh, not a thrown exception.
+    expect((await harnessRun()).shaderErrors).toEqual([]);
+    expect((await harnessRun('?realistic')).shaderErrors).toEqual([]);
   });
 
   test('fetches the realistic set only when asked — the default world fetches none of it', async ({

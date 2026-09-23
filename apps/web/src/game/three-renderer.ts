@@ -3483,6 +3483,24 @@ void main() {
 `;
 
 /**
+ * Over what change of a ripple's phase between neighbouring pixels its normal
+ * fades out, in radians a pixel: from **0.5** to **1.5** — #501.
+ *
+ * ⚠️ **The ripples are band-limited, by hand.** An analytic normal has no
+ * mipmaps: at a grazing angle one pixel spans several ripples, the normal
+ * sampled at each pixel's centre is effectively random, and on the owner's
+ * tablet at 2560×1600 the stream read as *"fine horizontal banding … a stripe
+ * pattern parallel to the road"* (validation 0002 Z10). `fwidth` of the phase
+ * is how far a ripple turns across one pixel; past about π it is aliasing
+ * rather than a ripple (Nyquist), and `fwidth` sums two axes, so the fade is
+ * complete by 1.5 and starts at a third of that. The water there is its
+ * Fresnel reflection of the sky and nothing else, which is what a lake a
+ * hundred metres off looks like anyway. `game.browser.spec.ts` §"the water's
+ * ripples are band-limited" reads the banding back with the fade off.
+ */
+export const RIPPLE_FADE_RADIANS_PER_PIXEL: readonly [number, number] = [0.5, 1.5];
+
+/**
  * The water shader's fragment half: the sky reflected with a Fresnel term,
  * ripples as an analytic normal that scrolls with the ride's clock, and the
  * edges tinted shallow by the geometry's own shore weight.
@@ -3500,16 +3518,22 @@ uniform vec3 horizonColour;
 uniform vec3 deepColour;
 uniform vec3 shallowColour;
 uniform float time;
+uniform float rippleFilter;
 varying vec3 vWorld;
 varying float vShore;
 #include <fog_pars_fragment>
+float oylRippleWeight(float phase) {
+  float fade = 1.0 - smoothstep(${RIPPLE_FADE_RADIANS_PER_PIXEL[0].toFixed(2)}, ${RIPPLE_FADE_RADIANS_PER_PIXEL[1].toFixed(2)}, fwidth(phase));
+  return mix(1.0, fade, rippleFilter);
+}
 void main() {
   vec2 p = vWorld.xz;
   vec2 d1 = vec2(0.83, 0.56);
   vec2 d2 = vec2(-0.47, 0.88);
   float a1 = dot(p, d1) * 1.7 + time * 1.3;
   float a2 = dot(p, d2) * 2.9 - time * 1.9;
-  vec2 slope = 0.06 * cos(a1) * d1 + 0.058 * cos(a2) * d2;
+  vec2 slope = 0.06 * oylRippleWeight(a1) * cos(a1) * d1
+    + 0.058 * oylRippleWeight(a2) * cos(a2) * d2;
   vec3 n = normalize(vec3(-slope.x, 1.0, -slope.y));
   vec3 v = normalize(cameraPosition - vWorld);
   float facing = clamp(dot(n, v), 0.0, 1.0);
@@ -3559,6 +3583,7 @@ export class WaterBelt {
         deepColour: { value: new Color(WATER_DEEP_COLOUR) },
         shallowColour: { value: new Color(WATER_SHALLOW_COLOUR) },
         time: { value: 0 },
+        rippleFilter: { value: 1 },
       },
     ]),
   });
@@ -3588,6 +3613,18 @@ export class WaterBelt {
     const sky = (this.#shaded.uniforms as Record<string, { value: Color } | undefined>)['skyColour']
       ?.value;
     return [sky?.r ?? Number.NaN, sky?.g ?? Number.NaN, sky?.b ?? Number.NaN];
+  }
+
+  /**
+   * Whether the ripples are band-limited — #501. On, always, in the product;
+   * off only for the browser gate's control, which has to read the banding
+   * back to show that the fade is what removed it. @see filterWaterRipplesOf
+   */
+  setRippleFilter(on: boolean): void {
+    const uniform = (this.#shaded.uniforms as Record<string, { value: number } | undefined>)[
+      'rippleFilter'
+    ];
+    if (uniform !== undefined) uniform.value = on ? 1 : 0;
   }
 
   /** @see QualitySettings.water */
@@ -3673,10 +3710,16 @@ export class WaterBelt {
  */
 export class BridgeBelt {
   readonly #materials = vertexColouredMaterials();
-  /** The realistic world's stone — ADR 0026 D-10. @see physicalMaterials */
+  /**
+   * The realistic world's bridge when it has no photograph to wear — ADR 0026
+   * D-10, and a world a test built without textures. @see physicalMaterials
+   */
   readonly #physical = constructed(
     new MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 }),
   );
+  /** The realistic world's photographed stone, once it has been handed one — #501. */
+  #stone: { readonly maps: StoneMaps; readonly material: MeshStandardMaterial } | undefined;
+  #stoneMaps: StoneMaps | undefined;
   #shading: QualitySettings['shading'] = 'lit';
   #world: QualitySettings['world'] = 'stylised';
   readonly #mesh: InstancedMesh;
@@ -3711,15 +3754,36 @@ export class BridgeBelt {
     this.#mount();
   }
 
-  /** Which world's stone the bridges are — ADR 0026 D-10. */
-  setWorld(world: QualitySettings['world']): void {
+  /**
+   * Which world's stone the bridges are — ADR 0026 D-10.
+   *
+   * @param stone the realistic world's photographed stone — #501. Validation
+   * 0002 Z10 found the parapets *"plain grey blocks"* on the tablet: the
+   * structures wore `old_stone_wall` and the bridge beside them wore nothing.
+   * Given it, a realistic rung dresses every block of the bridge in it — the
+   * parapets and their copings included — through {@link stoneBridgeMaterial}.
+   */
+  setWorld(world: QualitySettings['world'], stone?: StoneMaps): void {
     this.#world = world;
+    this.#stoneMaps = stone;
     this.#mount();
   }
 
   #mount(): void {
-    this.#mesh.material =
-      this.#world === 'realistic' ? this.#physical : this.#materials[this.#shading];
+    if (this.#world !== 'realistic') {
+      this.#mesh.material = this.#materials[this.#shading];
+      return;
+    }
+    const maps = this.#stoneMaps;
+    if (maps === undefined) {
+      this.#mesh.material = this.#physical;
+      return;
+    }
+    if (this.#stone?.maps !== maps) {
+      this.#stone?.material.dispose();
+      this.#stone = { maps, material: stoneBridgeMaterial(maps) };
+    }
+    this.#mesh.material = this.#stone.material;
   }
 
   /**
@@ -3751,7 +3815,72 @@ export class BridgeBelt {
     this.#materials.lit.dispose();
     this.#materials.flat.dispose();
     this.#physical.dispose();
+    this.#stone?.material.dispose();
   }
+}
+
+/** A photographed surface's two maps. @see RealisticWorld.structures */
+interface StoneMaps {
+  readonly colour: Texture;
+  readonly normal: Texture;
+}
+
+/**
+ * Texture coordinates in metres of the WORLD, projected along the axis each
+ * face of an instanced box most nearly faces — #501. `projectedInMetres`'s
+ * rule, moved into the vertex shader, because a bridge block is one unit cube
+ * stretched by its instance matrix: its own 0-to-1 coordinates would stretch
+ * one photograph along a whole parapet, and different blocks by different
+ * amounts. In the world's metres a stone is the same size on every block and a
+ * course runs on from one block to the next.
+ */
+const STONE_UV = /* glsl */ `
+{
+  vec4 oylWorld = vec4(transformed, 1.0);
+  vec3 oylFacing = objectNormal;
+#ifdef USE_INSTANCING
+  oylWorld = instanceMatrix * oylWorld;
+  oylFacing = mat3(instanceMatrix) * oylFacing;
+#endif
+  oylWorld = modelMatrix * oylWorld;
+  vec3 oylAxis = abs(oylFacing);
+  vec2 oylStone = oylAxis.x >= oylAxis.y && oylAxis.x >= oylAxis.z
+    ? oylWorld.zy
+    : (oylAxis.y >= oylAxis.z ? oylWorld.xz : oylWorld.xy);
+  oylStone /= tileMetres;
+#ifdef USE_MAP
+  vMapUv = oylStone;
+#endif
+#ifdef USE_NORMALMAP
+  vNormalMapUv = oylStone;
+#endif
+}
+`;
+
+/**
+ * The realistic bridge's material: `old_stone_wall`, as the field walls and a
+ * church wear it — #501. Constructed here (ADR 0026 D-11), from the world's own
+ * textures, with the structures' own finish for stone.
+ */
+function stoneBridgeMaterial(maps: StoneMaps): MeshStandardMaterial {
+  const finish = STRUCTURE_SURFACE_FINISH.stone;
+  const material = constructed(
+    new MeshStandardMaterial({
+      color: finish.tint,
+      roughness: finish.roughness,
+      metalness: finish.metalness,
+      map: maps.colour,
+      normalMap: maps.normal,
+    }),
+  );
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms['tileMetres'] = { value: REALISTIC_STRUCTURE_SURFACES.stone.tileMetres };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float tileMetres;')
+      .replace('#include <project_vertex>', `#include <project_vertex>\n${STONE_UV}`);
+  };
+  material.customProgramCacheKey = () => 'oyl-stone-bridge';
+  return material;
 }
 
 /* ============================================================================
@@ -5959,6 +6088,18 @@ export function waterSkyOf(view: GameView): readonly [number, number, number] {
 }
 
 /**
+ * Turns the water's ripple band-limit off or on in a view — #501. The browser
+ * gate's control: with it off the grazing-angle banding validation 0002 Z10
+ * found must read back, or the measurement with it on proves nothing.
+ *
+ * @unwired reached only from the browser gate's harness; the product never
+ * turns the band-limit off.
+ */
+export function filterWaterRipplesOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.filterWaterRipples(on);
+}
+
+/**
  * Every mesh a view's scene holds and the material on it — ADR 0026 D-11's
  * assertion, made by the browser gate over a real scene.
  *
@@ -6235,7 +6376,7 @@ class ThreeGameView implements GameView {
     this.#realistic?.setShown(realistic);
     this.#road.material = drawing?.road ?? this.#roadMaterial;
     this.#terrain.setPhotographic(drawing?.ground);
-    this.#bridges.setWorld(world);
+    this.#bridges.setWorld(world, realistic ? loaded?.structures.get('stone') : undefined);
     this.#scene.background =
       drawing === undefined || loaded === undefined ? this.#sky : loaded.sky.texture;
     this.#scene.environment = drawing?.environment ?? null;
@@ -6258,6 +6399,11 @@ class ThreeGameView implements GameView {
   /** Which world the last rung this view was given is drawn in. @see drawnWorldOf */
   get drawnWorld(): QualitySettings['world'] {
     return this.#drawing;
+  }
+
+  /** @see filterWaterRipplesOf */
+  filterWaterRipples(on: boolean): void {
+    this.#water.setRippleFilter(on);
   }
 
   /** The sky the water reflected in the last frame. @see waterSkyOf */

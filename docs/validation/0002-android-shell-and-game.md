@@ -2511,6 +2511,50 @@ route as Part Z (§"Build and install"), from a `main` that has #500 in it.
 
 ---
 
+## Part AB — the water, the bridge, the lake and the walls again ([#501](https://github.com/openzigs/onyourleft/issues/501))
+
+Part Z's Z10 found four defects at the bridge and Z9/Z10 found the soak route could not show a
+lake or a stone wall at all. #501 changed each, and each has a gate in CI that says what it can:
+
+- **The banding.** The ripple normal fades as its phase turns faster than about half a radian a
+  pixel (`three-renderer.ts` §`RIPPLE_FADE_RADIANS_PER_PIXEL`). The browser gate reads the banding
+  as a number with the fade on and, as its control, off (`game.browser.spec.ts` §"#501"). What it
+  cannot say is whether 2560×1600 at a grazing angle looks right.
+- **The bank.** The stream's surface runs on under the bank, so its edge is never what is seen: the
+  drawn ground rises out of the water, and the ground just above it is darkened to a wet margin
+  (`waterways.ts` §`STREAM_SURFACE_HALF_WIDTH_METRES`, `landform.ts` §`WET_GROUND_TINT`).
+- **The seam.** Found rather than guessed: the abutment was a LEVEL box under a sloping road, and
+  its top stood up to 9 cm through the road on this route's 8 % approach; the deck's pieces could
+  stand 1 cm through at the foot of a slope. Both now sit under the road drawn over them
+  (`waterways.test.ts` §"the road is continuous across the bridge").
+- **The parapets** wear `old_stone_wall` on the realistic rung, projected in the world's metres, with
+  a coping along each top. Still one draw call; no new belt.
+- **The route** now lays a lake beside its valley floor (right of the road, about 1 410–1 880 m)
+  and walls fields in stone on the 5 % climb out of it (about 1 900–2 500 m).
+  `browser/realistic/route.test.ts` holds it to both. ⚠️ **The farmstead that stood at about
+  1 540 m is gone** — it was on the same floor, and the lake took its place. The one at about
+  1 050 m, which Part AA rides past, is unchanged.
+
+| Step | What to do | What should happen |
+|---|---|---|
+| AB1 | Z10 again: `?panel=0&ladder=0`, then hold at the bridge: `location.href = '/harness/realistic.html?at=2815&panel=0'` | Is the **banding** gone from the stream? Is there a **bank** — a drop from grass to water, and a darker margin where they meet? Is the **seam** across the road at the deck's start gone? Do the **parapets** read as stone with a coping? |
+| AB2 | Ride past the lake: `location.href = '/harness/realistic.html?at=1450&panel=0'`, then ride on | Is there a lake beside the road? Does it have the bank and margin AB1 asks about, and does it band? |
+| AB3 | Z9's stone half: `location.href = '/harness/realistic.html?at=2100&panel=0'` | Do the field walls on the climb read as **stone walls**? |
+| AB4 | Z6's 30-second realistic row, with its `dumpsys` block: `?panel=0&ladder=0` | GPU p50 / p90 / p99 against Part Z's **GPU p90 8 ms** — the water shader now takes two screen-space derivatives a pixel |
+
+### AB results
+
+| Step | As described? | What was seen, or measured |
+|---|---|---|
+| AB1 | | |
+| AB2 | | |
+| AB3 | | |
+| AB4 | | |
+
+**Phone (OEM, model, Android, WebView):** ______________  **Build:** ______________
+
+---
+
 ## After the session
 
 1. **Fill the tables in this file and commit it.** An empty table in `main` is the honest state; a
