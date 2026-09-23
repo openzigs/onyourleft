@@ -22,6 +22,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   BICYCLE_REAR_CONTACT_METRES,
+  RIDER_HALF_WIDTH_METRES,
   RIDER_HEIGHT_METRES,
   RIDER_HELMET_AHEAD_METRES,
 } from './bicycle';
@@ -46,6 +47,7 @@ import {
   type CameraRig,
 } from './camera';
 import type { CameraPose } from './port';
+import { MAXIMUM_LEAN_RADIANS } from './racing-line';
 import { VIEW_AHEAD_METRES } from './terrain';
 
 const tanHalf = (degrees: number): number => Math.tan((degrees / 2) * (Math.PI / 180));
@@ -81,6 +83,25 @@ function downTheFrame(rig: CameraRig, along: number, height: number, aspect: num
   const depth = toPoint.z * forward.z + toPoint.y * forward.y;
   const above = toPoint.z * up.z + toPoint.y * up.y;
   return (1 - above / (depth * verticalHalfTangent(aspect))) / 2;
+}
+
+/**
+ * How far from the middle of the frame, across it, a point `across` metres to
+ * one side lands, as a fraction of the frame's width — the same pinhole, in
+ * the other axis.
+ */
+function offCentre(
+  rig: CameraRig,
+  along: number,
+  height: number,
+  across: number,
+  aspect: number,
+): number {
+  const axisZ = rig.target.z - rig.eye.z;
+  const axisY = rig.target.y - rig.eye.y;
+  const length = Math.hypot(axisZ, axisY);
+  const depth = ((along - rig.eye.z) * axisZ + (height - rig.eye.y) * axisY) / length;
+  return Math.abs(across) / (depth * verticalHalfTangent(aspect) * aspect) / 2;
 }
 
 /** The rig #424 replaced: a level gaze from behind the rider, whatever the road does. */
@@ -216,6 +237,92 @@ describe('the composition — #424', () => {
       expect(box.left, String(aspect)).toBeGreaterThan(0);
       expect(box.right, String(aspect)).toBeLessThan(1);
       expect(box.right - box.left, String(aspect)).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('a leaning rider in the frame — #499', () => {
+  /**
+   * Points on the rider, upright: the helmet and its width, the handlebar's
+   * end, and the rear tyre's contact patch — each at its own distance ahead, because the box is
+   * stated for the rider's whole depth.
+   */
+  const RIDER_POINTS: readonly { along: number; height: number; across: number }[] = [
+    { along: RIDER_HELMET_AHEAD_METRES, height: RIDER_HEIGHT_METRES, across: 0 },
+    {
+      along: RIDER_HELMET_AHEAD_METRES,
+      height: RIDER_HEIGHT_METRES,
+      across: RIDER_HALF_WIDTH_METRES,
+    },
+    // The contact patch is ON the roll axis, so it has no width to roll.
+    { along: BICYCLE_REAR_CONTACT_METRES, height: 0, across: 0 },
+    { along: 0, height: RIDER_HEIGHT_METRES / 2, across: RIDER_HALF_WIDTH_METRES },
+  ];
+
+  /** Rolled about the contact line by `lean`, as `bicycle.ts`'s origin rolls. */
+  const rolled = (
+    point: { along: number; height: number; across: number },
+    lean: number,
+  ): { along: number; height: number; across: number } => ({
+    along: point.along,
+    height: point.height * Math.cos(lean) - point.across * Math.sin(lean),
+    across: point.across * Math.cos(lean) + point.height * Math.sin(lean),
+  });
+
+  const ASPECTS = [
+    WORST_CASE_ASPECT,
+    REFERENCE_ASPECT,
+    16 / 10,
+    4 / 3,
+    1,
+    9 / 19.5,
+    NARROWEST_ASPECT,
+  ];
+
+  it('is the upright box when nobody leans', () => {
+    for (const aspect of ASPECTS) {
+      expect(riderFrameBox(aspect, 0)).toEqual(riderFrameBox(aspect));
+    }
+  });
+
+  it('holds every point of a rider at the lean cap, either way, at every aspect', () => {
+    const rig = cameraRig(poseOn(0));
+    for (const aspect of ASPECTS) {
+      const box = riderFrameBox(aspect, MAXIMUM_LEAN_RADIANS);
+      for (const lean of [MAXIMUM_LEAN_RADIANS, -MAXIMUM_LEAN_RADIANS]) {
+        for (const point of RIDER_POINTS) {
+          const at = rolled(point, lean);
+          const off = offCentre(rig, at.along, at.height, at.across, aspect);
+          expect(0.5 - off, String(aspect)).toBeGreaterThanOrEqual(box.left);
+          expect(0.5 + off, String(aspect)).toBeLessThanOrEqual(box.right);
+          const down = downTheFrame(rig, at.along, at.height, aspect);
+          expect(down, String(aspect)).toBeGreaterThanOrEqual(box.top);
+          expect(down, String(aspect)).toBeLessThanOrEqual(box.bottom);
+        }
+      }
+    }
+  });
+
+  it('quotes the widths `camera.ts` states', () => {
+    const wide = riderFrameBox(REFERENCE_ASPECT, MAXIMUM_LEAN_RADIANS);
+    expect(wide.left).toBeCloseTo(0.393, 3);
+    expect(wide.right).toBeCloseTo(0.607, 3);
+    const phone = riderFrameBox(9 / 19.5, MAXIMUM_LEAN_RADIANS);
+    expect(phone.left).toBeCloseTo(0.211, 3);
+    expect(phone.right).toBeCloseTo(0.789, 3);
+  });
+
+  it('would have missed the leaning helmet with the upright box — the review finding', () => {
+    // Non-vacuity: the defect was a browser gate measuring panels against a
+    // rider who never leans. Against the upright box the leaning helmet is
+    // outside it at every aspect, so a test above that held it inside is a
+    // statement about the lean and not about a box wide enough for anything.
+    const rig = cameraRig(poseOn(0));
+    const helmet = rolled(RIDER_POINTS[0] as (typeof RIDER_POINTS)[number], MAXIMUM_LEAN_RADIANS);
+    for (const aspect of ASPECTS) {
+      const upright = riderFrameBox(aspect);
+      const off = offCentre(rig, helmet.along, helmet.height, helmet.across, aspect);
+      expect(0.5 + off, String(aspect)).toBeGreaterThan(upright.right);
     }
   });
 });

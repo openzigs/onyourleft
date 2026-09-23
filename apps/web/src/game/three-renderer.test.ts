@@ -49,6 +49,7 @@ import {
   type RoutePoint,
 } from '@onyourleft/domain';
 
+import { LINE_LIMIT_METRES, racingLine } from './racing-line';
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
 import { corridorOrigin, roadCorridor } from './terrain';
@@ -1246,9 +1247,12 @@ describe('the verge and the camera cone — #355, re-derived for #423 and #424',
   /** How much further out a 6 m verge stands than the 3 m one that ships. */
   const REJECTED_VERGE_EXTRA_METRES = 3;
 
+  /** The straight the near field is measured on. */
+  const levelProfile = routeProfile(levelRoute());
+
   /** The hundred frames, built once: `sceneFrame` is the expensive half. */
   const frames = ((): readonly SceneFrame[] => {
-    const profile = routeProfile(levelRoute());
+    const profile = levelProfile;
     const origin = corridorOrigin(profile);
     const start = atStartLine(profile);
     const built: SceneFrame[] = [];
@@ -1356,6 +1360,67 @@ describe('the verge and the camera cone — #355, re-derived for #423 and #424',
     // header. The arrangement #355 replaced must still FAIL, through this
     // camera, at this aspect.
     expect(share(rejected)).toBeLessThan(floor);
+  });
+
+  /**
+   * #499 moves the camera across the road with the rider's racing line, and
+   * every figure above is for a camera on the centreline. Restated rather than
+   * re-pinned, as #499's camera criterion asks: this block's straight is where
+   * the camera still IS on the centreline, and a bend is where it is not.
+   */
+  it('is measured through a camera the racing line leaves on the centreline of a straight — #499', () => {
+    const line = racingLine(levelProfile);
+    let widest = 0;
+    for (const offset of line.offsets) widest = Math.max(widest, Math.abs(offset));
+    // Non-vacuity: the fixture is long enough to be solved at all.
+    expect(line.offsets.length).toBeGreaterThan(1000);
+    expect(widest).toBeLessThan(0.01);
+    // And the camera the near field is measured through is where that puts
+    // it: on the centreline, measured against the corridor's own centre points.
+    for (const frame of frames) {
+      let nearest = Number.POSITIVE_INFINITY;
+      const centre = frame.corridor.centre;
+      for (let index = 1; index < centre.length; index += 1) {
+        const a = centre[index - 1] as (typeof centre)[number];
+        const b = centre[index] as (typeof centre)[number];
+        const dx = b.x - a.x;
+        const dz = b.z - a.z;
+        const t = Math.max(
+          0,
+          Math.min(
+            1,
+            ((frame.camera.x - a.x) * dx + (frame.camera.z - a.z) * dz) / (dx * dx + dz * dz),
+          ),
+        );
+        nearest = Math.min(
+          nearest,
+          Math.hypot(frame.camera.x - (a.x + t * dx), frame.camera.z - (a.z + t * dz)),
+        );
+      }
+      expect(nearest).toBeLessThan(0.01);
+    }
+  });
+
+  it('moves the verge by as much as the camera moves across in a bend, and says by how much — #499', () => {
+    // At the line's limit, 2.9 m from the middle, the verge on the far side of
+    // the camera is 2.9 m further off and on the near side 2.9 m closer. On a
+    // straight level road, which is what this block's arithmetic is stated
+    // for, those enter a 16 : 9 frame here:
+    expect(entersFrameAt(NEAREST + LINE_LIMIT_METRES, REFERENCE_ASPECT)).toBeCloseTo(3.05, 2);
+    expect(entersFrameAt(NEAREST - LINE_LIMIT_METRES, REFERENCE_ASPECT)).toBeCloseTo(-1.61, 2);
+    expect(entersFrameAt(NEAREST + LINE_LIMIT_METRES, TABLET_ASPECT)).toBeCloseTo(3.89, 2);
+    // ⚠️ The far side is NOT inside the front wheel there, and that is the
+    // figure moving, stated: "in shot before the front wheel is level" holds
+    // on a straight and on the inside of a bend, not on its outside at the
+    // line's widest.
+    expect(entersFrameAt(NEAREST + LINE_LIMIT_METRES, REFERENCE_ASPECT)).toBeGreaterThan(
+      BICYCLE_FRONT_METRES,
+    );
+    // And the production statement agrees at the moved camera too.
+    expect(vergeEntersFrameMetres(NEAREST + LINE_LIMIT_METRES, REFERENCE_ASPECT)).toBeCloseTo(
+      entersFrameAt(NEAREST + LINE_LIMIT_METRES, REFERENCE_ASPECT),
+      10,
+    );
   });
 
   it('is not the reason a frame occasionally carries nothing in the near field', () => {

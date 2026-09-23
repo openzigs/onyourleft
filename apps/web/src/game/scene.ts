@@ -453,17 +453,17 @@ function ghostSpeed(ghost: GhostTrack, clock: number): number {
 }
 
 /**
- * A simulated rider's crank angle, where its own odometer puts it — #368.
+ * A simulated rider's crank angle, from its own odometer — #368. A named
+ * wrapper for `bicycle.ts` §`simulatedCrankAngle`, which is where the fixed
+ * gear, and no invented rate, is argued.
  *
- * ⚠️ **The rider's odometer, not the position its marker was clamped to.**
+ * ⚠️ **Handed the rider's unwrapped distance, never where its marker ends up.**
  * {@link markerAt} clamps a bot or a ghost far up the road to the corridor's
- * far end, so its drawn position stops moving while the rider it belongs to
- * keeps riding — and cranks taken from that position would freeze with it,
- * which is a claim that a bot beyond the horizon has stopped pedalling. The
- * unwrapped distance is what actually moved.
- *
- * `bicycle.ts` §`simulatedCrankAngle` is where the one thing this asserts — a
- * fixed gear, and no invented rate — is argued.
+ * far end, and since #499 moves it across the road too; cranks taken from the
+ * drawn place would freeze while the rider it belongs to kept riding, which is
+ * a claim that a bot beyond the horizon has stopped pedalling. Until #499 this
+ * took the marker and returned it with its cranks set; it takes the distance
+ * alone now, so the clamped position is not even in reach.
  */
 function pedalling(atDistance: number): number {
   return simulatedCrankAngle(atDistance);

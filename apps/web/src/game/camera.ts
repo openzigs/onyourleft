@@ -76,6 +76,18 @@
  *   That is why the lens is 70° and not the 60° it was — it is solved against
  *   that gate, not chosen for a look.
  *
+ * ⚠️ **#499 moves the camera across the road, and both figures above are
+ * for a camera on the centreline.** The camera follows the rider's racing line
+ * sideways (`scene.ts` §`cameraPose`), up to `racing-line.ts`
+ * §`LINE_LIMIT_METRES` = 2.9 m from the middle. Where it is, the verge on the
+ * FAR side is 2.9 m further off and enters a 16 : 9 frame **3.05 m** ahead of
+ * the rider rather than 0.72 m (3.89 m on the owner's tablet), and the NEAR
+ * side's is in shot **1.61 m behind** them. That is restated, not re-pinned:
+ * the line only moves across in a bend, so on a straight the camera is on the
+ * centreline and the 73.8 % above is still measured through the camera it was
+ * set on. `three-renderer.test.ts` §"the verge and the camera cone" asserts
+ * both halves.
+ *
  * ⚠️ **What the wider lens costs** is stated too: 70° vertical is 102°
  * horizontal at 16 : 9 and 113° on a 19.5 : 9 phone, and a rectilinear lens that
  * wide stretches whatever is at the edge of the frame. That stretch is also
@@ -459,11 +471,32 @@ export interface FrameBox {
  * ⚠️ On a level road. {@link cameraRig} holds the rider in nearly the same
  * place on a hill, and `camera.test.ts` says how nearly.
  *
+ * ⚠️ **Upright unless `leanRadians` says otherwise — #499.** The camera follows
+ * the rider across the road (`scene.ts` §`cameraPose`), so the BICYCLE stays at
+ * the middle of the frame on the racing line; what moves is the top of the
+ * rider, because the bicycle rolls about its tyres' contact line. At
+ * `racing-line.ts` §`MAXIMUM_LEAN_RADIANS` (38.7°) the helmet is 0.95 m to one
+ * side, where the upright box allowed 0.2 m. The box widens and does not move
+ * down, so it still errs tall (a leaning helmet is lower, not higher):
+ *
+ * | frame | upright, left → right | at the lean cap |
+ * |---|--:|--:|
+ * | 16 : 9 | 48.1 % → 51.9 % | **39.3 % → 60.7 %** |
+ * | a phone upright, 9 : 19.5 | 44.8 % → 55.2 % | **21.1 % → 78.9 %** |
+ *
+ * `ride.browser.spec.ts` asks for the box AT THE CAP, because a panel over a
+ * leaning rider is over the rider as much as one over an upright rider is —
+ * at every overlay viewport but one: at 736 × 360 the corner panels DO cover
+ * a rider leaning past about 20°, which is #512, pinned there from the other
+ * side so that it cannot be forgotten;
+ * `game.browser.spec.ts` compares the rendered rider on a straight, where
+ * nobody leans, with the upright box.
+ *
  * @test-facing the renderer never needs to know where the rider ended up — three
  * projects them. It is the composition stated as a rectangle, for the two
  * browser gates above to hold the layout and the renderer to.
  */
-export function riderFrameBox(aspect: number): FrameBox {
+export function riderFrameBox(aspect: number, leanRadians = 0): FrameBox {
   const t = verticalHalfTangent(aspect);
   const pitch = Math.atan2(CAMERA_ABOVE_METRES, CAMERA_BEHIND_METRES + CAMERA_TARGET_AHEAD_METRES);
   // Depth along the view axis and height above it, for a point `height` metres
@@ -481,7 +514,15 @@ export function riderFrameBox(aspect: number): FrameBox {
   };
   const head = project(RIDER_HELMET_AHEAD_METRES, RIDER_HEIGHT_METRES);
   const foot = project(BICYCLE_REAR_CONTACT_METRES, 0);
-  const halfWidth = RIDER_HALF_WIDTH_METRES / (foot.depth * t * aspect);
+  // #499: rolled about the contact line, a point `y` up and `x` across lands
+  // `x · cos φ + y · sin φ` across, so the farthest the rider reaches either
+  // side is the handlebar's half-width rolled plus the helmet's height rolled.
+  // Symmetric, because the rider leans either way; at φ = 0 it is the upright
+  // half-width exactly. Projected at the rear wheel's depth like the upright
+  // width, which is nearer the eye than the helmet — so it errs wide.
+  const lean = Math.abs(leanRadians);
+  const reach = RIDER_HALF_WIDTH_METRES * Math.cos(lean) + RIDER_HEIGHT_METRES * Math.sin(lean);
+  const halfWidth = reach / (foot.depth * t * aspect);
   return {
     left: 0.5 - halfWidth / 2,
     right: 0.5 + halfWidth / 2,

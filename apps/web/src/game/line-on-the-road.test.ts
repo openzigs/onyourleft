@@ -287,11 +287,31 @@ describe('the camera follows the rider across the road — #499', () => {
 });
 
 describe('nothing measured along the road moves — #499', () => {
+  it('leaves the route it solves exactly as it was', () => {
+    // A FRESH route, not the file's shared `hairpin`: the line is cached per
+    // profile object, so by the time this test runs every earlier test has
+    // already solved `hairpin`, and anything a solve did to it is done on both
+    // sides of any comparison made afterwards. Against a fresh one the solve
+    // happens HERE, between the two reads.
+    const pristine = hairpinRoute(RADIUS);
+    const solved = hairpinRoute(RADIUS);
+    racingLine(solved);
+    expect(solved.grades).toEqual(pristine.grades);
+    expect(solved.elevations).toEqual(pristine.elevations);
+    expect(solved.positions).toEqual(pristine.positions);
+  });
+
   it('sends a trainer exactly the same grades through the hairpin with and without the line', async () => {
     const ride = async (centreline: boolean): Promise<readonly SimulationParameters[]> => {
+      // A fresh route per ride, never the shared `hairpin` — see the test
+      // above. With the shared one the line was solved (and any damage done)
+      // by an earlier test in this file, before either ride began, so the two
+      // rides agreed and this passed with the solve writing into the grades.
+      // It went red for that mutation only when run alone.
+      const route = hairpinRoute(RADIUS);
       const written: SimulationParameters[] = [];
       const session = createGradientSession({
-        profile: hairpin,
+        profile: route,
         control: {
           setSimulationParameters: async (parameters) => {
             written.push(parameters);
@@ -301,17 +321,17 @@ describe('nothing measured along the road moves — #499', () => {
         },
       });
       const simulation = new GameSimulation({
-        profile: hairpin,
+        profile: route,
         conditions: { totalMass: kilograms(80), airDensityKilogramsPerCubicMetre: 1.2 },
       });
-      const origin = corridorOrigin(hairpin);
+      const origin = corridorOrigin(route);
       // Two minutes at 300 W through the hairpin, advanced and drawn in the
       // order `GameView`'s loop does it, a frame every 200 ms — a slow phone's
       // rate, so the suite stays fast under the coverage run.
       for (let now = 0; now <= 120_000; now += 200) {
         simulation.advanceTo(now, { power: watts(300), live: true });
         session.sample(simulation.state.elapsed, simulation.state.ride.distance);
-        sceneFrame({ profile: hairpin, origin, state: simulation.state, centreline });
+        sceneFrame({ profile: route, origin, state: simulation.state, centreline });
         await session.settled();
       }
       // Well past the apex, so the ride went through the bend.
