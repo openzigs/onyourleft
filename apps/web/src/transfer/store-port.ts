@@ -21,6 +21,7 @@ import type {
   AthleteId,
   AthleteRecord,
   AthleteDeletionCounts,
+  CameraFrameRecord,
   DeviceKeyRecord,
   LapRecord,
   ListActivitiesOptions,
@@ -89,6 +90,44 @@ export interface AccountStore {
    * rider needs in order to find out what happened.
    */
   getActivityRecord(owner: AthleteId, id: ActivityId): Promise<StoredActivityRecord | undefined>;
+  /**
+   * Every picture this athlete kept — #384,
+   * [ADR 0029](../../../../docs/adr/0029-camera-imagery-as-a-data-class.md) D-3.
+   *
+   * ⚠️ **This is the ONE read in the client that returns a picture**, and it is
+   * here rather than on `camera/store-port.ts` deliberately. D-11 keeps a kept
+   * frame off every screen: a camera port that could hand one to a component is
+   * a component somebody writes. An export writes it to a **file the rider
+   * asked for**, which is the one destination D-3 permits — *"it is the
+   * athlete's own data coming back to them, so ADR 0004 E applies unchanged: it
+   * is **not** obfuscated, trimmed or downscaled."*
+   *
+   * ⚠️ **Bounded by the caller**, and more sharply than any other read here:
+   * every row is a whole JPEG, so a rider who kept a hundred is tens of
+   * megabytes decoded by one call. `export-everything.ts`
+   * §`ACCOUNT_EXPORT_FRAME_LIMIT` states the budget.
+   *
+   * Usually **empty**, and that is the ordinary case rather than a fault: D-2
+   * discards a frame unless the rider turned that ride's keep on.
+   */
+  listCameraFrames(owner: AthleteId, limit?: number): Promise<CameraFrameRecord[]>;
+  /**
+   * How many pictures this athlete has kept — **all of them**, whatever the
+   * export's own budget is.
+   *
+   * ⚠️ **The manifest's `kept` comes from here and never from the length of the
+   * bounded list**, and it used to come from the list: `listCameraFrames` was
+   * read at `ACCOUNT_EXPORT_FRAME_LIMIT + 1` and its length reported, so a
+   * rider holding three hundred pictures was told their archive contained 200
+   * of 201. They would conclude one was missing, erase the device, and have
+   * lost a hundred. The bound on the list is what makes the run finite; the
+   * count is what makes the manifest true, and the two cannot be the same read.
+   *
+   * ⚠️ Counted through the index rather than by reading rows — a count that
+   * decoded every JPEG on the device would be the thing the budget exists to
+   * avoid.
+   */
+  countCameraFrames(owner: AthleteId): Promise<number>;
 }
 
 /**

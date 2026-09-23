@@ -7,15 +7,22 @@
  * observing the test go red. A harness that passes against a no-op write is
  * worthless, and this is the only way to know it does not."*
  *
- * There are **twelve** fakes here, and there are twelve on purpose: a harness
+ * There are **fourteen** fakes here, and there are fourteen on purpose: a harness
  * that catches one failure shape is calibrated to that shape. They stand for the
  * causes CLAUDE.md section 5 names, and they fail for different reasons at
  * different points in the read. The fourth arrived with #46's write path, the
  * fifth with #61's, the sixth with #64's, the seventh with #66's, the eighth
  * with #89's, the ninth with #73's, the tenth with #14's, the eleventh with
- * #93's and the twelfth with #238's, which is the rule this file exists to
- * enforce: a new path may not ship without a fake proving the harness catches
- * its failure.
+ * #93's, the twelfth with #238's, the thirteenth with #325's and the
+ * fourteenth with #384's, which is the rule this file exists to enforce: a new
+ * path may not ship without a fake proving the harness catches its failure.
+ *
+ * ⚠️ **The fourteenth breaks a DELETE, and every one before it breaks a write
+ * or a read.** That is not a third category for its own sake: #384's payload is
+ * a photograph of the inside of somebody's house, and the failure that matters
+ * most for it is not a write that never lands — it is *"a frame the rider
+ * believes was erased, and was not"*, in that issue's own words. A write-path
+ * fake cannot catch that, because the write was perfect.
  *
  * ⚠️ **The eleventh breaks a *read*, and every one before it breaks a write.**
  * That is not a category error, it is #93's fifth acceptance criterion: a ghost
@@ -38,6 +45,7 @@
  * | `unscopedAttemptStoreFactory` | *cross-athlete exposure* — a **read** that matched on route and forgot the rider | every ride is written and read back correctly, and the ghost list contains a stranger's ride |
  * | `staleUnitsStoreFactory` | *wrong layer* — the narrow write computed the row and returned it without persisting it | the call answers with a row saying `imperial`, and a fresh connection still says metric |
  * | `roundedMassStoreFactory` | *wrong layer* — a layer above tidied a mass to a whole kilogram on its way in | the row comes back with a mass, a plausible one, and a pound reading that is no longer what the rider typed |
+ * | `survivingFrameStoreFactory` | *wrong time* — a **delete** that reports how many it removed and removes nothing | the erase says "2 pictures removed", and a fresh connection still has both |
  *
  * The second and third are the ones a naive harness misses. Both write to the
  * **real** IndexedDB, inside a **real** transaction that **really commits**, and
@@ -160,6 +168,10 @@ function bindStore(real: ActivityStore): PersistentStore {
     getWorkout: async (owner, id) => real.getWorkout(owner, id),
     listWorkouts: async (owner, limit) => real.listWorkouts(owner, limit),
     deleteWorkout: async (owner, id) => real.deleteWorkout(owner, id),
+    putCameraFrame: async (record) => real.putCameraFrame(record),
+    listCameraFrames: async (owner, limit) => real.listCameraFrames(owner, limit),
+    countCameraFrames: async (owner) => real.countCameraFrames(owner),
+    deleteCameraFrames: async (owner) => real.deleteCameraFrames(owner),
   };
 }
 
@@ -816,6 +828,52 @@ export function roundedMassStoreFactory(): StoreFactory {
           // Clearing is left alone: the defect this stands for is a tidy
           // applied to a number, and there is no number to tidy.
           real.setAthleteMass(id, mass === undefined ? undefined : kilograms(Math.round(mass))),
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository that **reports an erase as complete and leaves the rows behind**.
+ *
+ * The fourteenth fake, for #384's kept camera frames, and it is the one whose
+ * failure mode this repository has never modelled before: `deleteCameraFrames`
+ * returns a **true** count — it really counts what it would have removed — and
+ * removes nothing. Every signal a caller has says it worked.
+ *
+ * ⚠️ **What it stands for is the worst version of this bug the app could
+ * ship.** #384: *"The counterpart here is worse than a lost setting: a frame
+ * the rider believes was erased, and was not."* And every cheap assertion
+ * passes against it:
+ *
+ * - the return value is right, so `expect(removed).toBe(2)` passes;
+ * - `eraseSentence` says "Removed 2 pictures", so a UI test passes;
+ * - a read **through the same handle** inside the same transaction scope would
+ *   be tempting to write and would still find the rows, so even a naive
+ *   read-back would fail *loudly* rather than silently — which is why the
+ *   assertion that catches it has to discard every connection first.
+ *
+ * Only a round trip that closes the writer, opens a fresh connection and reads
+ * through the public path notices. That is CLAUDE.md §5's *wrong time* and
+ * *wrong layer* causes in one store, and `camera-frame-store.test.ts` is the
+ * red/green pair — beside the property it is about, for
+ * `roundedClaimStoreFactory`'s reason.
+ */
+export function survivingFrameStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        deleteCameraFrames: async (owner: AthleteId): Promise<number> =>
+          // The count is honest and the delete never happens. A fake that
+          // returned zero would be caught by the return value alone, which is
+          // a weaker proof: what is being calibrated is the *round trip*, not
+          // the arithmetic.
+          real.countCameraFrames(owner),
       };
     },
     destroy: async (name) => {

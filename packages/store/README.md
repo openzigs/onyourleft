@@ -25,6 +25,7 @@ erDiagram
     ACTIVITY ||--o| ACTIVITY_RECORD : "has at most one signed record"
     ATHLETE ||--o{ ROUTE : "saves"
     ATHLETE ||--o{ WORKOUT : "saves"
+    ATHLETE ||--o{ CAMERA_FRAME : "kept, if they asked"
 
     ATHLETE {
         string  id                  PK "opaque; #61 keys it to the device keypair"
@@ -586,6 +587,59 @@ right; the list renders. A rider opens their hour-long session and it is fifty-t
 workout is sensitive. It cascades because an erasure that leaves rows behind under an athlete id
 that no longer exists is an erasure that did not happen — and the next athlete created with a
 recycled id would inherit them.
+
+## Kept camera frames — #384, decided in [ADR 0029](../../docs/adr/0029-camera-imagery-as-a-data-class.md)
+
+`cameraFrames` is schema version 10 and it is the only table in this store that is **normally
+empty**. ADR 0029 D-2, ratified by the owner on 2026-09-23:
+
+> The default is that a frame is destroyed as soon as the analysis that consumed it has produced its
+> result, and never written to durable storage at all. A rider may turn on *"keep the frames from
+> this ride"* for **one ride at a time**; the switch does not persist across rides, and there is no
+> global "always keep".
+
+So a row here means a rider asked for it, that ride, on purpose. `apps/web/src/camera/keep.ts` is the
+one production writer and the switch is off at every camera switch-on.
+
+### It is its own record, and that is D-1 rather than a modelling preference
+
+> Camera imagery … is never modelled as a stream channel beside power, cadence and heart rate, never
+> stored in a `StreamSet`, and never covered by a rule whose subject is "activity data".
+
+The operative reason is the third D-1 gives: *"a shared rule is a rule that gets widened by
+accident."* A frame inside a `StreamSet` would inherit the recorder's writes, the detail view's
+reads, the chart downsampler, the FIT exporter and the account export — and each of those is a path
+ADR 0029 forbids.
+
+### ⚠️ There is no `activityId` on it, and D-2 names one
+
+D-2 says a kept frame is written *"with the activity id it belongs to"*, and this record has none.
+That is a gap stated rather than a nullable column nobody sets: an `ActivityRecord` exists only once
+a ride is finished and saved, and a picture is taken while the rider is pedalling. The consequence
+is precise — D-2's *"deleting the activity deletes its frames in the same transaction"* is **vacuous
+today**, and the two expiries that do work are `deleteCameraFrames` (the rider) and `deleteAthlete`
+(the device). [#388](https://github.com/openzigs/onyourleft/issues/388) is the first issue with a
+report tied to a ride; it adds the column, its index and its cascade.
+
+### What the read surface deliberately does not have
+
+There is **no `getCameraFrame(owner, id)`**, and `listCameraFrames` is reached from exactly one
+place in the client: the account export. ADR 0029 D-11 keeps a kept frame off every screen somebody
+who did not take it could meet by accident, and a point lookup is a read a screen gets built on. What
+a screen may have is `countCameraFrames` — a count, which D-8's permitted column names alongside a
+byte size and a format name.
+
+⚠️ **The bytes are passed through untouched, in both directions.** They were stripped of all metadata
+at capture (D-9) by being re-encoded from raw pixels, and this package re-encoding, resizing or
+"normalising" them would be a second producer of image bytes in a program that is supposed to have
+exactly one. `assertCameraFrameRoundTrip` compares **byte for byte** rather than by length, for the
+reason `gapFillingStoreFactory` already taught this repository.
+
+⚠️ **And `survivingFrameStoreFactory` is the fake for the failure that matters here.** #384:
+*"the counterpart is worse than a lost setting: a frame the rider believes was erased, and was
+not."* That store's `deleteCameraFrames` returns a **true** count and removes nothing, so the return
+value, the sentence a rider reads and any read through the writing handle all say it worked. Only a
+round trip that discards every connection first notices.
 
 ## Not in this package
 

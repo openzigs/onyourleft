@@ -95,6 +95,27 @@ export const ERASE_REMOVES: readonly string[] = [
   // nothing. It is listed here because it goes, and {@link eraseDevice} is
   // what makes that true.
   'a route you were part-way through drawing',
+  // ⚠️ **ADR 0029 D-4, by name, and the second half is the half that is easy to
+  // drop.** The ADR spells the line out:
+  //
+  //   > every photograph this device kept from a ride, and everything derived
+  //   > from one
+  //
+  // A frame's *derivatives* — a pose skeleton, a set of joint coordinates, a
+  // model's description of the rider, a thumbnail generated for a report — are
+  // each a smaller artefact that says the same thing about the same person, and
+  // a purge that removed the frame and left the skeleton would be exactly
+  // ADR 0004 F's *"a deletion that leaves a derived artefact is not a
+  // deletion"*.
+  //
+  // ⚠️ **There are no derivatives yet, and the line says so anyway.** Nothing
+  // in this milestone analyses a frame — that is #387 and #388 — so today the
+  // enumeration `activity-store.erasure.test.ts` derives from `SCHEMA_VERSIONS`
+  // covers one table. The wording is written for the schema the ADR describes
+  // rather than for the one that exists, because a line added later is a line
+  // added by somebody who remembered, and #35's own criteria already require
+  // the enumeration to be derived for exactly that reason.
+  'every photograph this device kept from a ride, and everything derived from one',
 ];
 
 /**
@@ -109,6 +130,30 @@ export const ERASE_REMOVES: readonly string[] = [
 export const ERASE_CANNOT_REACH: readonly string[] = [
   'files you have already exported — they are yours, and they are wherever you put them',
   'a ride you have already shared with somebody, which is a copy they hold',
+  // ⚠️ **ADR 0029 D-4's two lines are NOT here, and their absence is the rule
+  // this list states about itself being obeyed.** The ADR writes them:
+  //
+  //   > a photograph you sent to your own machine to be analysed, which is a
+  //   > copy that machine holds
+  //   > a photograph you sent to a hosted model, which is a copy that service
+  //   > holds
+  //
+  // Both describe a frame that **left the device**, and nothing in this build
+  // can send one anywhere: `privacy/no-network.test.ts` asserts this client
+  // contains no `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource` or
+  // `sendBeacon` at all. Putting them here now would be this list ageing into a
+  // lie in the *frightening* direction — telling a rider that copies of their
+  // photographs are on machines that have never received one.
+  //
+  // The header above is the rule: *"If one stops being true — the day there is
+  // an instance, or a second device — the line changes in the same pull request
+  // that makes it false."* #387 is that pull request, it is the one that lands
+  // the first byte, and it lands both lines.
+  //
+  // What IS true today and is worth a rider reading before they press
+  // anything: a picture that never left still had a moment on this device's
+  // disk, and an erase is what removes it — which is the line above it.
+  'a photograph you copied off this device yourself, which is wherever you copied it to',
 ];
 
 /** The reason an erase is refused, or `undefined` when it is not. */
@@ -154,6 +199,8 @@ export interface EraseStore {
     readonly routes: number;
     readonly workouts: number;
     readonly segments: number;
+    /** #384. Usually zero — ADR 0029 D-2 keeps nothing unless the rider asked. */
+    readonly cameraFrames: number;
   }>;
   /**
    * Puts the athlete row back.
@@ -184,6 +231,16 @@ export interface EraseOutcome {
   readonly routes: number;
   readonly workouts: number;
   readonly segments: number;
+  /**
+   * Kept pictures removed — #384.
+   *
+   * ⚠️ **Counted and reported, because a rider who kept photographs of
+   * themselves in their house is the rider most entitled to see the number go
+   * to zero.** `eraseSentence` below names it only when it is non-zero, which
+   * is how every other count here behaves and is right: a device that kept none
+   * should not be told about a feature it never used.
+   */
+  readonly cameraFrames: number;
 }
 
 /**
@@ -229,6 +286,7 @@ export async function eraseDevice(
     routes: counts.routes,
     workouts: counts.workouts,
     segments: counts.segments,
+    cameraFrames: counts.cameraFrames,
   };
 }
 
@@ -243,6 +301,11 @@ export function eraseSentence(outcome: EraseOutcome): string {
   }
   if (outcome.segments > 0) {
     parts.push(`${String(outcome.segments)} segment${outcome.segments === 1 ? '' : 's'}`);
+  }
+  if (outcome.cameraFrames > 0) {
+    // ⚠️ "picture", not "camera frame". The list a rider reads before pressing
+    // is in their words, and so is the sentence afterwards.
+    parts.push(`${String(outcome.cameraFrames)} picture${outcome.cameraFrames === 1 ? '' : 's'}`);
   }
   // ⚠️ No ride name, no route name, no date. ADR 0004 decision D binds every
   // layer that formats location data into a string, and a route's name is

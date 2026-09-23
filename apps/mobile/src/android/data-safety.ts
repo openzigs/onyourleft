@@ -101,6 +101,41 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     why: 'no analytics SDK, no crash reporter and no telemetry of any kind is linked into this app',
   },
   {
+    // ⚠️ **The row #383 added, and it is a RE-READ recorded rather than an
+    // answer changed.**
+    //
+    // The manifest gained `CAMERA` (#383) and the client gained a camera
+    // (#382), so the question "does this app collect photos or videos?" now has
+    // a subject where before it had none. Play's definition of *collected* is
+    // **data transferred off the device**, and nothing here transfers anything:
+    // `apps/web/src/privacy/no-network.test.ts` asserts the client contains no
+    // `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource` or `sendBeacon` at
+    // all, and it is green on the commit that added the camera. A picture is
+    // held in memory for one analysis and thrown away — ADR 0029 D-2, which the
+    // owner ratified on 2026-09-23 — unless the rider turns on this ride's
+    // keep, and then it is a row in IndexedDB on the phone.
+    //
+    // ⚠️ **So the answers are `false`, and the state that would change them is
+    // named rather than left to be discovered.** ADR 0029's 2026-09-23
+    // amendment: *"**Photos and videos** becomes a row. Under Play's taxonomy
+    // the honest answers are collected: yes / shared: yes for the hosted path,
+    // optional, user can request deletion — and the shared answer is the one
+    // that changes the listing's face."* That is
+    // [#387](https://github.com/openzigs/onyourleft/issues/387)'s pull request,
+    // which lands the first byte, this re-filing, and the privacy-policy change
+    // **together or not at all** — #377's epic criterion that the declaration is
+    // true of the shipped app *at every point, not only at the end*.
+    //
+    // The row is declared rather than omitted for the reason the two health
+    // rows above are: this repository insists on telling *"we checked and
+    // nothing changed"* apart from *"nobody looked"*, and only one of those has
+    // a row in it.
+    dataType: 'Photos and videos',
+    collected: false,
+    shared: false,
+    why: 'the camera (#382, #383) takes still pictures on the device and nothing transmits them — the client contains no network primitive at all. A picture is discarded after it has been looked at unless the rider turns on this ride’s keep (ADR 0029 D-2), and a kept one is a row in IndexedDB on the phone. This answer becomes collected: yes / shared: yes on the day a frame first leaves, which is #387 and which re-files this declaration in the same pull request',
+  },
+  {
     dataType: 'Device or other IDs',
     collected: false,
     shared: false,

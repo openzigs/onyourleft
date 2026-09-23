@@ -35,7 +35,7 @@
  * whose name does not match is still a reviewer's job.
  */
 
-import { readdirSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { decodeGpx } from '@onyourleft/fit';
@@ -109,7 +109,7 @@ const BOUNDARIES: readonly Boundary[] = [
   },
   {
     module: 'transfer/export-everything.ts',
-    what: 'every ride this athlete has, plus a manifest of everything else',
+    what: 'every ride this athlete has, every picture they kept, and a manifest of everything else',
     // ⚠️ This entry was written because the registry demanded it. The file was
     // added in the same pull request as this test, and the "declares every
     // boundary module that exists" case went red the moment it landed — which
@@ -359,5 +359,42 @@ describe("a retained payload keeps the athlete's own coordinates", () => {
       ...written.map((each) => distanceBetween(each.position, zone.centre) as number),
     );
     expect(nearest).toBeLessThan(1);
+  });
+});
+
+/* -------------------------------------------------------------------------- *
+ * #384, ADR 0029 D-9: what this walk cannot see.
+ * -------------------------------------------------------------------------- */
+
+describe('the walk cannot see inside image bytes, and says so', () => {
+  it('finds a coordinate in a field', () => {
+    // The control. Without it, the assertion below would be equally true of a
+    // walker that had stopped finding anything at all.
+    const payload = {
+      takenAt: geographicPosition(degreesLatitude(51.5), degreesLongitude(-0.12)),
+    };
+    expect(coordinatesIn(payload)).toHaveLength(1);
+  });
+
+  it('finds NOTHING in a buffer that spells one out', () => {
+    // ⚠️ This is the blindness, demonstrated rather than described. The bytes
+    // below are an Exif header followed by an ASCII latitude and longitude —
+    // far cruder than a real GPS IFD, and already invisible. A `departing`
+    // boundary over this payload is green, and it is green for a reason
+    // entirely unrelated to the picture.
+    const text = 'Exif\0\0GPSLatitude 51.500000 GPSLongitude -0.120000';
+    const bytes = Uint8Array.from(text, (character) => character.charCodeAt(0));
+    expect(coordinatesIn({ picture: bytes })).toStrictEqual([]);
+  });
+
+  it('is what ADR 0029 D-9 says, and this file’s header says it', () => {
+    // #384's criterion is that `boundaries.ts` *"must say in its own header
+    // that it cannot inspect image bytes, so that a future reader does not take
+    // a green walk as evidence about a frame"*, and that it is an acceptance
+    // criterion rather than a courtesy. A note nobody checks is a note somebody
+    // deletes while tidying.
+    const header = readFileSync(fileURLToPath(new URL('./boundaries.ts', import.meta.url)), 'utf8');
+    expect(header).toContain('cannot inspect image bytes');
+    expect(header).toContain('frame.ts');
   });
 });

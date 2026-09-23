@@ -352,6 +352,70 @@ export interface QualitySettings {
    * {@link nextWorldQuality}.
    */
   readonly world: 'stylised' | 'realistic';
+  /**
+   * Whether the camera may take a picture on this rung — #382,
+   * [ADR 0029](../../../../docs/adr/0029-camera-imagery-as-a-data-class.md).
+   *
+   * ## Why capture is on this ladder at all
+   *
+   * Encoding a frame is the most expensive thing this client can be asked to do
+   * during a ride that is not drawing the world: a canvas `drawImage` of a
+   * 1080p video followed by a JPEG encode is tens of milliseconds on the device
+   * floor, on the main thread, competing for the same GPU and the same thermal
+   * budget as {@link renderScale} and {@link frameCap}. A phone that is already
+   * shedding scenery cannot also be re-encoding photographs.
+   *
+   * ## ⚠️ It goes FIRST, and the argument is the one {@link scatterItems} makes
+   * from the other end
+   *
+   * #382's criterion is that a rung *"drops capture **before** the world is
+   * degraded"*, and `quality.test.ts` §"#382" is the ordering assertion: the
+   * first rung with `capture: false` is at or before the first rung that
+   * reduces anything about the world, and **strictly before** the first rung
+   * that caps the frame rate. That is the strongest ordering this ladder can
+   * actually carry, and the reason it is not stronger is worth writing down
+   * rather than leaving as a near miss:
+   *
+   * **A rung of its own — level 0 with capture and level 1 identical without it
+   * — was considered and rejected.** The rung *indices* on this ladder are
+   * owner rulings: #476 chose the 60 fps top rung, #482 chose *"the extra 60
+   * fps step"* and made level 2 a frame-rate step and nothing else, and
+   * {@link QUALITY_LADDER}'s own table and three comments name those levels by
+   * number. Inserting a rung would renumber every one of them, so a feature
+   * this milestone does not yet analyse anything with would be rewriting a
+   * ladder the owner has ruled on twice. It is dropped on the first step down
+   * instead, alongside the resolution — which is the first thing given up, and
+   * is given up whole rather than progressively.
+   *
+   * ## What it does NOT do
+   *
+   * It does not turn the camera off. `camera/session.ts`
+   * §`CameraController.throttle` says why: stopping a track means a second
+   * hardware open, and on Android a second permission check, the moment the
+   * device cools enough to climb a rung — and an indicator that flickers on the
+   * one screen where that is worst. The rung takes away the *work*, not the
+   * *permission*, and the live indicator goes on telling the room the truth.
+   *
+   * ## ⚠️ The realistic ladder, and the one place this is not monotonic
+   *
+   * {@link REALISTIC_LADDER}'s two rungs are stylised levels 0 and 1 with the
+   * world swapped, so they inherit `true` and `false` from them — and the heat
+   * walk `nextWorldQuality` takes is realistic full → realistic reduced →
+   * **stylised full** → stylised reduced, which means capture comes back on the
+   * third step. That is stated rather than smoothed over, and it is not the
+   * flap {@link keepsShadowMap} exists to prevent: leaving realism is a larger
+   * saving than the reduced-resolution step inside it — ADR 0026 D-3's own
+   * ordering, *"a hot device gives up realism before it gives up frame rate"* —
+   * so stylised full is a cheaper configuration than realistic reduced, and
+   * this flag is `true` at *full quality on whichever ladder the ride is on*.
+   *
+   * The reason a flap here costs nothing where the shadow map's cost a ride is
+   * that this flag rebuilds no shader and closes no device: `throttle` flips a
+   * boolean and the camera stays open. Nothing in the shipped app selects the
+   * realistic ladder anyway (D-12, #475), so the walk is not reachable today —
+   * which is why this is a note and not a second latch.
+   */
+  readonly capture: boolean;
   /** A human-readable name, for the diagnostic line #91 asks to be recorded. */
   readonly label: string;
 }
@@ -389,6 +453,8 @@ const REDUCED_AT_DISPLAY_RATE: QualitySettings = {
   shading: 'lit',
   riderShadows: 'contact',
   world: 'stylised',
+  // ⚠️ The first step down takes it, and takes it whole. @see QualitySettings.capture
+  capture: false,
   label: 'reduced resolution and scenery',
 };
 
@@ -479,6 +545,8 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     shading: 'lit',
     riderShadows: 'contact',
     world: 'stylised',
+    // The only rung that permits it. @see QualitySettings.capture
+    capture: true,
     label: 'full',
   },
   // ⚠️ The scenery goes here, WITH the first resolution step rather than as a
@@ -505,6 +573,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     shading: 'lit',
     riderShadows: 'contact',
     world: 'stylised',
+    capture: false,
     label: 'reduced resolution, scenery and frame rate',
   },
   // ⚠️ The only rung that is flat. Resolution and frame rate are given up
@@ -529,6 +598,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     shading: 'flat',
     riderShadows: 'contact',
     world: 'stylised',
+    capture: false,
     label: 'minimum',
   },
 ];

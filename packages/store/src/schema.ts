@@ -33,7 +33,7 @@
 /**
  * The current schema version.
  *
- * **9** since #93. Version 2 added `streamSets` and `streamBlobs`; version 3
+ * **10** since #384. Version 2 added `streamSets` and `streamBlobs`; version 3
  * added `recordingSessions` and `recordingChunks`; version 4 added `deviceKeys`
  * and `activityRecords`; version 5 added `segments`; version 6 added
  * `segmentEfforts` and `matchCheckpoints`; version 7 added `routes`; version 8
@@ -57,10 +57,29 @@
  * at the current version, and asserts every row came through and the new stores
  * are usable.
  *
+ * ⚠️ **Version 10 is #384's `cameraFrames`, and it is additive like versions 2
+ * to 8 rather than a record migration like the one `migrations.ts` is waiting
+ * for.** No existing record's shape changes, so `SCHEMA_MIGRATIONS` stays
+ * empty — and that is the same call `migrations.ts` argues for at length:
+ * *"writing a speculative one to have something to demonstrate would put a
+ * schema change into the athlete's upgrade path that no issue asked for."* An
+ * `up`/`down` pair over a shape that does not change is two identity functions
+ * and a test that they are identities.
+ *
+ * ⚠️ **So what stands in for #384's rollback criterion is the one this storage
+ * engine can actually have**, and `migrations.ts` states it: IndexedDB has no
+ * downgrade event, so the runtime rollback is **export → downgrade →
+ * re-import**. #384 is the issue that makes that real for a frame rather than
+ * aspirational — the account export carries every kept picture as its own file
+ * (ADR 0029 D-3), so a rider who downgrades has them. `migrations.test.ts`
+ * opens a version-1 database, writes rows into it, reopens at the current
+ * version and asserts every row came through **and** that the new store is
+ * usable, which is the forward half executed rather than described.
+ *
  * Bumping this for a change that *does* alter a record's shape means adding a
  * migration pair.
  */
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 /**
  * Dexie stores its schema version in IndexedDB multiplied by ten, leaving room
@@ -103,6 +122,15 @@ export const TABLE = {
   routes: 'routes',
   /** #14: one row per saved workout — the blocks, not a rendering of them. */
   workouts: 'workouts',
+  /**
+   * #384: one row per still picture the rider chose to keep from a ride.
+   *
+   * ⚠️ **Empty on an ordinary device.** ADR 0029 D-2 discards a frame after it
+   * has been looked at unless the rider turns on this ride's keep, and the
+   * switch is off every time. A device with rows here is one whose owner asked
+   * for them.
+   */
+  cameraFrames: 'cameraFrames',
 } as const;
 
 /**
@@ -237,6 +265,18 @@ export const INDEX = {
   /** #14: `listWorkouts`, newest first — and `deleteAthlete`'s cascade. */
   workoutByOwnerAndCreatedAt: '[createdBy+createdAt]',
   workoutByOwner: 'createdBy',
+  /**
+   * #384: `listCameraFrames`, newest first — the account export's read.
+   *
+   * ⚠️ **`athleteId`, not `createdBy`.** The three stores above call their
+   * owning column `createdBy` because that is what their records call it; this
+   * one calls it `athleteId` because that is what *its* record calls it, and an
+   * index names a key path literally. Same scoping column, third spelling in
+   * this file — `segmentByCreatorAndId` records the same point.
+   */
+  cameraFrameByAthleteAndCapturedAt: '[athleteId+capturedAt]',
+  /** #384: `deleteCameraFrames`, and `deleteAthlete`'s cascade. */
+  cameraFrameByAthlete: 'athleteId',
 } as const;
 
 /**
@@ -554,6 +594,35 @@ export const STORES_V9: Readonly<Record<string, string>> = {
   ].join(', '),
 };
 
+/**
+ * Version 10 — #384's kept camera frames, added beside the fourteen stores that
+ * exist.
+ *
+ * Keyed on `id`, with every index leading with `athleteId`, so there is no
+ * index that answers "the picture with this id" without also being told whose
+ * it is. That is the shape CLAUDE.md §6 asks for, and it matters more here than
+ * anywhere else in this file: the payload is a photograph of the inside of
+ * somebody's house.
+ *
+ * ⚠️ **There is deliberately no index on an activity, because there is no such
+ * column** — `records.ts` §`CameraFrameRecord` says why at length, and names
+ * the issue that adds one.
+ *
+ * ⚠️ **And no index on `capturedAt` alone.** A "every picture on this device,
+ * newest first" query is exactly the list ADR 0029 D-11 forbids: *"No frame,
+ * thumbnail, crop or filmstrip appears on the activity library row … or in any
+ * list."* An index that answered it would be a query somebody writes a screen
+ * against.
+ */
+export const STORES_V10: Readonly<Record<string, string>> = {
+  // The fourteen stores of versions 1 to 9 are inherited unchanged.
+  [TABLE.cameraFrames]: [
+    'id',
+    INDEX.cameraFrameByAthlete,
+    INDEX.cameraFrameByAthleteAndCapturedAt,
+  ].join(', '),
+};
+
 export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V1,
   STORES_V2,
@@ -564,4 +633,5 @@ export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V7,
   STORES_V8,
   STORES_V9,
+  STORES_V10,
 ];

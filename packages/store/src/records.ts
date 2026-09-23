@@ -45,6 +45,7 @@ import type {
 import type {
   ActivityId,
   AthleteId,
+  CameraFrameId,
   LapId,
   PrivacyZoneId,
   SegmentEffortId,
@@ -735,4 +736,96 @@ export interface RouteRecord {
    * decision rests on, which is the same division `visibility` has.
    */
   readonly updatedAt: UnixSeconds;
+}
+
+/**
+ * One still picture this device kept from a ride — #384,
+ * [ADR 0029](../../../docs/adr/0029-camera-imagery-as-a-data-class.md) D-1 and
+ * D-2.
+ *
+ * ## The default is that this record does not exist
+ *
+ * D-2, which the owner ratified on 2026-09-23:
+ *
+ * > The default is that a frame is destroyed as soon as the analysis that
+ * > consumed it has produced its result, and never written to durable storage
+ * > at all. A rider may turn on *"keep the frames from this ride"* for **one
+ * > ride at a time**; the switch does not persist across rides, and there is no
+ * > global "always keep".
+ *
+ * So an ordinary device has **no rows in this table**, and that is not an empty
+ * state to design around — it is the state D-2 chose, and D-11 rests on it:
+ * *"the ordinary state of a shared device is one with no frames on it at all."*
+ *
+ * ## It is its own record and never a column on another
+ *
+ * D-1, and the third of its three reasons is the operative one: *"a shared rule
+ * is a rule that gets widened by accident."* A frame that rode inside a
+ * `StreamSet` would inherit five behaviours nobody chose for it — the
+ * recorder's writes, the detail view's reads, the chart downsampler, the FIT
+ * exporter and the account export — and each is a path ADR 0029 forbids.
+ *
+ * ## ⚠️ There is deliberately no `activityId`, and D-2 names one
+ *
+ * D-2's table says a kept frame is written *"with the activity id it belongs
+ * to"*, and this record has none. That is a **gap stated rather than a column
+ * left null**, and the reason is that there is nothing to put in it: an
+ * `ActivityRecord` exists only once a ride has been finished and saved
+ * (`apps/web/src/recording/finish.ts`), and a frame is captured while the rider
+ * is on the bike. A nullable foreign key that no production writer ever sets is
+ * the shape `SegmentRecord` above refuses for its own source activity, and it
+ * would arrive looking like a feature.
+ *
+ * What it costs, precisely: D-2's *"deleting the activity deletes its frames in
+ * the same transaction"* is **vacuous today** — `deleteActivity` cascades
+ * nothing here because nothing links. The two expiries that do work are the
+ * rider deleting the pictures and the rider erasing the device, and both are
+ * implemented and tested. [#388](https://github.com/openzigs/onyourleft/issues/388)
+ * is the first issue with a report tied to a ride; it adds the column, its
+ * index and its cascade, and this paragraph is what tells it to.
+ *
+ * ## What is NOT on this record, and each absence is a decision
+ *
+ * - **No file name, no path, no object URL.** ADR 0029 D-8 forbids a locator in
+ *   any message, and the cheapest way to keep that true for every future caller
+ *   is for there to be nothing here to put in one.
+ * - **No position, no heart rate, no ride name.** A frame is not activity data
+ *   (D-1) and joining it to any would make it so.
+ * - **No thumbnail.** D-11: a kept frame must not be reachable from a list, a
+ *   row or a default render, and a thumbnail column is what a list renders.
+ */
+export interface CameraFrameRecord {
+  readonly id: CameraFrameId;
+  /** The athlete who took it. **Every read of this record filters on it.** */
+  readonly athleteId: AthleteId;
+  readonly capturedAt: UnixSeconds;
+  /**
+   * `image/jpeg`, always, because the encoder is fixed.
+   *
+   * Stored rather than assumed so that a row written by a future adapter with a
+   * different encoder is readable rather than mis-decoded — and so that a
+   * reader can tell what it has without sniffing bytes.
+   */
+  readonly mediaType: string;
+  readonly width: number;
+  readonly height: number;
+  /**
+   * The picture.
+   *
+   * ⚠️ **Already stripped of every scrap of metadata when it arrives, and this
+   * package is not what strips it.** ADR 0029 D-9 puts that at capture, inside
+   * `apps/web/src/camera/frame.ts`, because it is the only placement where the
+   * property holds for every consumer — *"including ones written later by
+   * somebody who never reads this ADR"*. What this package must not do is
+   * re-encode, resize or "tidy" these bytes on the way in or out:
+   * `testing/fakes.ts` §`survivingFrameStoreFactory` is the fake for the
+   * neighbouring failure, and `assertCameraFrameRoundTrip` compares **byte for
+   * byte** for this one.
+   *
+   * ⚠️ **And `privacy/boundaries.ts` cannot see inside it.** `coordinatesIn`
+   * walks a JavaScript structure for finite numeric `latitude`/`longitude`; a
+   * GPS IFD is bytes, so a boundary declared over a payload holding one of
+   * these is green for a reason unrelated to the picture.
+   */
+  readonly bytes: Uint8Array;
 }

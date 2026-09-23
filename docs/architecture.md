@@ -80,6 +80,19 @@ apps/                 AGPL-3.0-or-later, without exception
                         kilogram, and the narrow write that puts it on the
                         athlete row. The mass here is the ATHLETE's — the bicycle
                         is added by src/game/rider.ts and only there
+    src/camera/         the camera: its port, its consent and the sign that says it
+                        is on (#382). ADR 0029 is the whole of why this is its
+                        own directory rather than a sensor channel: a frame is
+                        its OWN data class (D-1), it is discarded after it has
+                        been looked at unless the rider keeps this ride's (D-2),
+                        it is stripped at capture by being re-encoded from raw
+                        pixels rather than filtered (D-9), and no message this
+                        module produces may carry a frame, a crop, a thumbnail
+                        or a locator for one (D-8). The bystander sentence in
+                        consent.ts is D-5's, VERBATIM, and consent.test.ts reads
+                        the ADR off disk to keep it so. No platform camera type
+                        leaves the directory — boundary.test.ts, in the shape
+                        packages/sensors states about Web Bluetooth
     src/credits/        the in-app attribution, generated from ASSETS.toml (#358):
                         the reader for the manifest's own TOML subset, which
                         entries are credited and why, and the one line that
@@ -949,6 +962,49 @@ the rider never starts. There is no "hide the first 200 m" that leaves a usable 
 there is no lock to take, so an editor keeps the `updatedAt` it read and hands it back; a mismatch
 is refused. The comparison is on the value read rather than on which timestamp is newer, because two
 saves inside one second is exactly what a second tab produces.
+
+### The camera seam: one port, one consent, and where each guarantee is actually kept
+
+[#382](https://github.com/openzigs/onyourleft/issues/382) built the camera, and
+[ADR 0029](adr/0029-camera-imagery-as-a-data-class.md) is the document every part of it implements.
+Owner decision D-C on [#377](https://github.com/openzigs/onyourleft/issues/377) is why there is
+exactly one of everything here — *"ONE camera-capture pipeline and ONE consent flow, built once,
+used by both"* — and `boundary.test.ts` is what keeps that a fact, because **`check:wiring` cannot
+catch a duplicate: two wired modules are both wired.**
+
+| Part | Where | What holds it |
+|---|---|---|
+| The port (D-1) | `apps/web/src/camera/camera-port.ts` — availability, request, start, capture, stop | the `*-port.ts` suffix puts it in `check:wiring`'s watched set (§4j); `boundary.test.ts` asserts it is the only one |
+| The consent (D-5) | `consent.ts` — a pure decision, two independent answers, and D-5's sentence **verbatim** | `consent.test.ts` reads `docs/adr/0029-…` off disk and compares word for word. An ADR body is never edited in place, so a difference means the code changed |
+| The camera being **off** by default (D-2) | `session.ts` §`CameraController.turnOn` refuses **without calling the port** | `session.test.ts` asserts the port recorded no call — an assertion a disabled-button test cannot make |
+| Stripping at capture (D-9) | `browser-camera.ts` §`canvasFrameGrabber` re-encodes from pixels; `frame.ts` §`capturedFrame` **refuses** bytes that carry a marker | `frame.test.ts` for the refusal; `shell.browser.spec.ts` §"the camera, in a real engine" for the re-encode, against Chromium's synthetic camera |
+| No frame in any message (D-8) | `notice.ts` — five fixed sentences, no interpolation, and the platform's own error discarded at the adapter | `notice.test.ts`, `browser-camera.test.ts` §"never carries the platform's own message", `CameraView.test.tsx` |
+| The live indicator (D-5) | `indicator.tsx`, rendered by `AppShell` **above the router and through a ride** | `indicator.test.tsx` both directions; `indicator-style.test.ts` for the stacking order; `shell.browser.spec.ts` §"the live camera indicator" for the scroll and the hit test |
+| The quality rung | `game/quality.ts` §`QualitySettings.capture` — given up on the first step down, before any frame rate | `quality.test.ts` §"#382", stated as an order between two derived indices rather than a rung number |
+| The per-ride keep (D-2) | `camera/keep.ts` — off on construction, off again at every camera switch-on, persisted **nowhere** | `keep.test.ts` over the round-trip harness, including a source scan for a global "always keep" |
+| The record (D-1) | `packages/store` §`CameraFrameRecord`, schema version 10 — its own table, no `activityId` and the gap stated | `camera-frame-store.test.ts`, `activity-store.scoping.test.ts`'s derived probes, `activity-store.erasure.test.ts`'s derived table list |
+| The export (D-3) | `transfer/export-everything.ts` §`CameraManifest` — every kept picture as its own file, untrimmed, named in the manifest with what an activity file cannot carry | `export-everything.test.ts`, including that no ride file contains the picture's bytes |
+| The erase (D-4) | `transfer/erase-device.ts` — `ERASE_REMOVES` names the pictures **and everything derived from one** | `erase-device.test.ts`, reading back through a fresh connection |
+| The walk's blindness (D-9) | `privacy/boundaries.ts`'s header, and it is an acceptance criterion rather than a courtesy | `boundaries.test.ts` §"the walk cannot see inside image bytes", which demonstrates it rather than describing it |
+
+⚠️ **The interface and both implementations are in `apps/web`, and that is CLAUDE.md §4h rather than
+an oversight.** `apps/mobile/capacitor.config.ts` sets `webDir: '../web/dist'`, so a capture
+pipeline under `apps/mobile/src` would typecheck, test green and never be copied into the APK — and
+`apps/web` already depends on `@onyourleft/mobile`, so the reverse dependency would be a workspace
+cycle. The shape is `support/shell-support-port.ts`'s: the shell supplies what only Android knows,
+as data.
+
+⚠️ **The most sensitive row this program stores is normally absent.** ADR 0029 D-2 discards a frame
+after it has been looked at unless the rider turns on that ride's keep, and the switch is off every
+time — so the ordinary state of a device is one with no pictures on it at all. D-11 rests on that
+rather than on an access control this program does not have anywhere: a housemate scrolling the
+library meets no photograph because there is nothing to meet, and where a rider did keep some, the
+only screen that names them shows **a count**.
+
+⚠️ **What this seam cannot see is what `privacy/boundaries.ts` cannot see.** `coordinatesIn` walks a
+JavaScript structure for finite numeric `latitude`/`longitude`; an Exif GPS IFD is bytes, so a
+boundary declared over a payload containing a frame is **green for a reason unrelated to the frame**.
+That is why D-9 puts the rule at capture and why the check on it is a refusal rather than a walk.
 
 ### The realistic world: what is built, and what is not yet offered
 

@@ -29,6 +29,7 @@ export type {
   ActivityRecord,
   ActivitySummary,
   AthleteRecord,
+  CameraFrameRecord,
   LapRecord,
   NewActivity,
   NewLap,
@@ -50,6 +51,7 @@ export { DEFAULT_PRIVACY_ZONE_RADIUS_METRES } from './records';
 export type {
   ActivityId,
   AthleteId,
+  CameraFrameId,
   EntityId,
   LapId,
   PrivacyZoneId,
@@ -62,6 +64,7 @@ export type {
 export {
   activityId,
   athleteId,
+  cameraFrameId,
   lapId,
   privacyZoneId,
   recordingSessionId,

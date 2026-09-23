@@ -52,6 +52,7 @@ import type { UnitsPort } from '../units/store-port';
 import type { AthleteMassPort } from '../athlete/store-port';
 
 import type { CapabilityProbe } from '../support/bluetooth-support';
+import { CameraController } from '../camera/session';
 import {
   activateWithKeyboard,
   mount,
@@ -255,6 +256,33 @@ function matchPort(): MatchPort {
   });
 }
 
+/**
+ * A camera controller whose port never opens anything, so the **controls** on
+ * `/camera` are what get audited (#382).
+ *
+ * ⚠️ The vacuous pass `settingsPort` above records, a fourth time. With no
+ * controller `CameraView` renders {@link CAMERA_NO_PORT} — a paragraph with
+ * nothing interactive in it — and the route loop below would report `/camera`
+ * clean while the consent tick box, its label and every button had never been
+ * rendered under the audit.
+ *
+ * The port refuses at `cameraAvailability()`, which is what a machine with no camera
+ * genuinely answers, so the screen reaches its consent controls and then its
+ * refusal screen — both of which have something to get wrong.
+ */
+function cameraController(): CameraController {
+  return new CameraController({
+    port: {
+      cameraAvailability: () => Promise.resolve({ kind: 'no-camera' as const }),
+      requestCameraAccess: () => Promise.resolve({ kind: 'no-camera' as const }),
+      startCamera: () => Promise.reject(new Error('no camera in a test')),
+    },
+    // No timer in an audit: the controller only schedules one once a camera is
+    // actually running, and this port never lets one run.
+    schedule: () => () => undefined,
+  });
+}
+
 async function open(
   path: string,
   capabilities: CapabilityProbe = CAPABLE,
@@ -269,6 +297,7 @@ async function open(
       athleteMass={athleteMassPort()}
       segments={segmentsPort()}
       match={matchPort()}
+      camera={cameraController()}
       {...(units === undefined ? {} : { units })}
     />,
   );

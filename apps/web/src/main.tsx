@@ -14,6 +14,7 @@ import { createWebBluetoothTransport } from '@onyourleft/sensors/web-bluetooth';
 import { metres, unixSeconds } from '@onyourleft/domain';
 import {
   activityId,
+  cameraFrameId,
   openActivityStore,
   recordingSessionId,
   routeId,
@@ -45,6 +46,14 @@ import type { GhostTrack } from '@onyourleft/domain';
 import type { GameRenderer } from './game/port';
 import { probeBrowser, type CapabilityProbe } from './support/bluetooth-support';
 import { capacitorShellSupport } from './support/shell-support';
+import {
+  browserCameraPort,
+  canvasFrameGrabber,
+  platformMediaDevices,
+} from './camera/browser-camera';
+import { keepThisRide } from './camera/keep';
+import { shellCameraNotice } from './camera/shell-camera';
+import { CameraController } from './camera/session';
 import { platformStorage, requestPersistenceOnce } from './support/persistent-storage';
 import type { ShellSupportPort } from './support/shell-support-port';
 import { saveWithAnchor, webCryptoDigest } from './transfer/browser';
@@ -668,11 +677,93 @@ function buildUpdateWatcher(
   });
 }
 
+/**
+ * The camera, or nothing (#382).
+ *
+ * ⚠️ **`undefined` is an ordinary state and is the right answer surprisingly
+ * often**: every browser without `navigator.mediaDevices` — which includes
+ * every browser where the page is not a secure context, and a bundle opened
+ * straight off the disk as `file://` is one. `CameraView` then renders an
+ * explanation and **no control at all**, which is `DevicesView`'s rule: a
+ * disabled button is removed from the tab order, so a keyboard user never
+ * reaches it and never hears why.
+ *
+ * ⚠️ **Built once, here, and held by the shell for the life of the tab.**
+ * `shell/AppShell.tsx` §`camera` says why: ADR 0029 D-5 requires the live
+ * indicator to be showing wherever the rider is, so a camera whose lifetime
+ * belonged to a route would go out the moment they navigated away from it.
+ *
+ * ⚠️ **Nothing here asks for a permission.** `CameraController` is constructed
+ * with no consent and reaches the port only once the rider has agreed on the
+ * Camera screen — #383's criterion that the permission is not requested at app
+ * start, which no manifest can enforce and which a camera prompt on first
+ * launch of a cycling app is the thing that gets an app uninstalled.
+ *
+ * ⚠️ **One port for both platforms, and no branch here.** Inside the Capacitor
+ * shell the WebView's own `getUserMedia` is what opens the camera — Capacitor's
+ * bridge answers the WebView's permission request by asking Android for the
+ * runtime grant — so the browser adapter is the implementation on both.
+ *
+ * ⚠️ **The global is read in `camera/browser-camera.ts` rather than here**,
+ * which is the one departure from this file's usual rule that it owns every
+ * platform read. `camera/boundary.test.ts` says why: no camera platform name
+ * may appear outside `apps/web/src/camera/`, and `navigator.mediaDevices` is
+ * one of them.
+ */
+async function buildCameraController(): Promise<CameraController | undefined> {
+  // ⚠️ Not called `mediaDevices`. `camera/boundary.test.ts` forbids that NAME
+  // outside `apps/web/src/camera/`, and a local variable is a name — the scan
+  // is deliberately about the word rather than about an import, because the
+  // failure it prevents is a platform object being passed around under its own
+  // name in a file that has no business holding one.
+  const cameraDevices = platformMediaDevices();
+  if (cameraDevices === undefined) {
+    return undefined;
+  }
+  const port = browserCameraPort({
+    devices: cameraDevices,
+    grabber: canvasFrameGrabber(),
+    secureContext: globalThis.isSecureContext,
+  });
+  // #384. The per-ride keep, over the same connection everything else uses.
+  // ⚠️ Passing it is what makes a picture *able* to become durable; ADR 0029
+  // D-2's default is still that it does not, because `keepThisRide` is
+  // constructed off and `CameraController.turnOn` sets it off again at every
+  // switch-on. A build with no local store passes nothing and cannot keep one
+  // however it is called.
+  const keep = keepThisRide({
+    store: localStore(),
+    athleteId: LOCAL_ATHLETE,
+    newFrameId: () => cameraFrameId(globalThis.crypto.randomUUID()),
+    now: browserClock,
+  });
+  if (!isNativeShell(platformCapacitor())) {
+    return new CameraController({ port, keep });
+  }
+  // #383. The **only** thing the shell changes is what a rider is told when
+  // Android refuses: "open this device's settings" is right for a browser and
+  // useless in a garage. The capture path is `browserCameraPort` on both
+  // platforms, because inside the WebView that is what opens a camera — and a
+  // native one would hand back the sensor's own JPEG, which is exactly what
+  // ADR 0029 D-9's re-encode exists to avoid.
+  //
+  // Behind the same `import()` as every other reach for `@onyourleft/mobile`,
+  // so a browser downloads no line of Capacitor.
+  const mobile = await import('@onyourleft/mobile');
+  return new CameraController({
+    port,
+    keep,
+    notices: (kind) => shellCameraNotice(kind, mobile.ANDROID_CAMERA_DENIED),
+  });
+}
+
 async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const platform = await buildPlatform(capabilities);
   const rideController = platform.rideController;
   // Read once: two calls would be two reads of a global for one prop.
   const storage = platformStorage();
+  // Built once per tab, for the reason `buildCameraController` gives.
+  const camera = await buildCameraController();
   const root = createRoot(container);
   const draw = (update: UpdateWatcher | undefined): void => {
     root.render(
@@ -682,6 +773,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(update === undefined ? {} : { update })}
           {...(storage === undefined ? {} : { storage })}
           {...(platform.shell === undefined ? {} : { shell: platform.shell })}
+          {...(camera === undefined ? {} : { camera })}
           settings={buildUnitsPort()}
           athleteMass={buildAthleteMassPort()}
           // ⚠️ The **stored** mass, read before the first paint, and passed on

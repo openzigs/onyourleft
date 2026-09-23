@@ -55,6 +55,12 @@ import { StrictMode, type JSX } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 
+import {
+  browserCameraPort,
+  canvasFrameGrabber,
+  platformMediaDevices,
+} from '../src/camera/browser-camera';
+import { CameraController } from '../src/camera/session';
 import { Button } from '../src/design/Button';
 import { AppShell } from '../src/shell/AppShell';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
@@ -183,19 +189,150 @@ function TouchTargets(): JSX.Element {
   );
 }
 
+/**
+ * The camera half of this page — #382, and it is **opt-in through the query
+ * string**.
+ *
+ * ⚠️ **Why not simply always**: the live indicator is `position: fixed` at the
+ * top of the viewport, and half the assertions on this page are about what is
+ * at the top of the viewport — the header's height, where a fragment jump lands
+ * the `h1`, and whether the focused skip link is the topmost thing at its own
+ * centre. An indicator rendered unconditionally would be a new element inside
+ * every one of those measurements, and the first symptom would be an existing
+ * gate going red for a reason unrelated to the thing it guards. So
+ * `?camera=live` is what turns it on, and every pre-existing case goes on
+ * loading the page it was written against.
+ *
+ * What is real here is everything: the shipping `CameraController`, the
+ * shipping `browserCameraPort`, the shipping `CameraIndicator` rendered by the
+ * shipping `AppShell`, under the shipping stylesheet. The only thing the
+ * harness supplies is the decision to switch it on.
+ */
+const CAMERA_LIVE = 'live';
+
+/** The `z-index` the ride stage declares — `theme.css` §"THE STAGE". */
+const PRODUCT_MAXIMUM_STACKING = 20;
+
+/**
+ * A full-viewport element at the product's own maximum stacking order.
+ *
+ * ⚠️ **This is the "or an overlay" half of #382's requirement, made
+ * measurable.** There is no `z-index` that wins against a hostile page and the
+ * component's own header says so; what can be claimed and checked is that
+ * nothing *this product draws* covers the indicator, and the highest thing this
+ * product draws is the ride stage at 20 — which is precisely the state the
+ * camera is most likely to be running in.
+ *
+ * `pointer-events: none` so it cannot swallow a click the rest of the page
+ * needs; `elementFromPoint` ignores that property, so the hit test still sees
+ * it and the assertion is unaffected.
+ */
+function StackingOverlay(): JSX.Element {
+  return (
+    <div
+      data-oyl-overlay="true"
+      aria-hidden="true"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: PRODUCT_MAXIMUM_STACKING,
+        pointerEvents: 'none',
+        background: 'rgba(0, 0, 0, 0.1)',
+      }}
+    />
+  );
+}
+
+/**
+ * The one thing on this page that runs the **real** capture path.
+ *
+ * ⚠️ **It is the only place in this repository where ADR 0029 D-9 is exercised
+ * rather than asserted.** `frame.ts`'s refusal is a check on a guarantee, and
+ * the guarantee is that `canvasFrameGrabber` re-encodes from raw pixels — one
+ * line, in one adapter, reachable from no jsdom suite because jsdom implements
+ * neither media playback nor a 2D canvas context. Everything above it could be
+ * green against a fake returning bytes the test author typed.
+ *
+ * So this opens a real `getUserMedia` against the synthetic camera Chromium
+ * provides under `--use-fake-device-for-media-stream`, draws it, encodes it,
+ * and publishes what came out. `shell.browser.spec.ts` §"the camera, in a real
+ * engine" is what reads it.
+ *
+ * ⚠️ It is a function on `window` rather than something this page runs on load,
+ * because opening a camera on every visit would slow every other case here and
+ * would put a media device in the middle of a layout gate.
+ */
+async function probeTheRealCamera(): Promise<unknown> {
+  const devices = platformMediaDevices();
+  if (devices === undefined) {
+    return { opened: false, why: 'no mediaDevices in this browser' };
+  }
+  const port = browserCameraPort({
+    devices,
+    grabber: canvasFrameGrabber(),
+    secureContext: globalThis.isSecureContext,
+  });
+  const availability = await port.cameraAvailability();
+  const permission = await port.requestCameraAccess();
+  const session = await port.startCamera();
+  try {
+    const frame = await session.captureFrame();
+    return {
+      opened: true,
+      availability: availability.kind,
+      permission: permission.kind,
+      mediaType: frame.mediaType,
+      bytes: frame.bytes.length,
+      width: frame.width,
+      height: frame.height,
+      // The first two bytes of a JPEG, so the spec can say the browser really
+      // produced one rather than trusting `mediaType`, which this code chose.
+      soi: [frame.bytes[0], frame.bytes[1]],
+    };
+  } finally {
+    session.stopCamera();
+  }
+}
+
 function main(): void {
   const host = document.querySelector('#shell');
   if (host === null) {
     throw new Error('shell harness: #shell is missing from shell.html');
   }
 
+  const wantsCamera = new URLSearchParams(globalThis.location.search).get('camera') === CAMERA_LIVE;
+  const camera = new CameraController({
+    // A port that never opens anything: what this page measures is where the
+    // INDICATOR is drawn, and a real camera would be a media device in the
+    // middle of a layout gate. `probeTheRealCamera` below is where a real one
+    // is opened, on demand.
+    port: {
+      cameraAvailability: () => Promise.resolve({ kind: 'available' as const }),
+      requestCameraAccess: () => Promise.resolve({ kind: 'granted' as const }),
+      startCamera: () =>
+        Promise.resolve({
+          captureFrame: () => Promise.reject(new Error('this harness does not capture')),
+          stopCamera: () => undefined,
+          live: true,
+        }),
+    },
+    // No timer: nothing here ends the track, and an interval left running in a
+    // gate is a gate that never settles.
+    schedule: () => () => undefined,
+  });
+
   flushSync(() => {
     createRoot(host).render(
       <StrictMode>
-        <AppShell capabilities={NO_BLUETOOTH} />
+        <AppShell capabilities={NO_BLUETOOTH} camera={camera} />
       </StrictMode>,
     );
   });
+
+  if (wantsCamera) {
+    camera.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    void camera.turnOn();
+  }
 
   const region = document.querySelector('.oyl-main');
   if (region === null) {
@@ -223,6 +360,22 @@ function main(): void {
   spacer.style.height = `${String(SPACER_PIXELS)}px`;
   spacer.setAttribute('aria-hidden', 'true');
   region.append(spacer);
+
+  if (wantsCamera) {
+    const overlay = document.createElement('div');
+    document.body.append(overlay);
+    flushSync(() => {
+      createRoot(overlay).render(
+        <StrictMode>
+          <StackingOverlay />
+        </StrictMode>,
+      );
+    });
+  }
+
+  // #382's real-engine probe, reachable by name from the spec. @see probeTheRealCamera
+  (globalThis as unknown as { __oylCamera?: () => Promise<unknown> }).__oylCamera =
+    probeTheRealCamera;
 
   document.documentElement.setAttribute(READY_ATTRIBUTE, 'true');
 }

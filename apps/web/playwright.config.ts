@@ -111,6 +111,20 @@ export const LAUNCH_ARGS = [
   // Chromium's sandbox refuses to start. It is a test browser loading a
   // page from the loopback interface with no credentials of any kind.
   '--no-sandbox',
+  // #382. A synthetic camera — a rolling colour pattern — so that the one line
+  // ADR 0029 D-9 rests on is EXERCISED rather than asserted: `getUserMedia`,
+  // then a canvas draw, then a `toBlob` encode, in a real engine.
+  // `shell.browser.spec.ts` §"the camera, in a real engine" is the reader.
+  //
+  // ⚠️ **Given to every browser this gate launches, and that is safe rather
+  // than lazy**: nothing else here touches a media device, and the flags change
+  // nothing for a page that never asks for one. A second launch configuration
+  // for one spec is the drift this array exists to prevent — see above.
+  '--use-fake-device-for-media-stream',
+  // Auto-answers the permission prompt. Without it `getUserMedia` waits for a
+  // dialog nobody is there to press, and the spec times out with no reason
+  // attached — the shape #165 recorded.
+  '--use-fake-ui-for-media-stream',
 ];
 
 export default defineConfig({

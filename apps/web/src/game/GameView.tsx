@@ -30,6 +30,7 @@
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 
 import { riderMassFor } from '../athlete/mass';
+import type { CameraThrottle } from '../camera/session';
 import { StatusMessage } from '../design/StatusMessage';
 import { NO_ROUTES_YET } from '../routes/two-importers';
 import { hrefFor, routeById, ROUTE_BUILDER_ROUTE } from '../shell/routes';
@@ -158,6 +159,18 @@ export interface GamePort {
 
 export interface GameViewProps {
   readonly port?: GamePort | undefined;
+  /**
+   * The camera, so a phone that has run out of headroom stops encoding
+   * photographs before it starts thinning the world (#382).
+   *
+   * ⚠️ **Narrowed to one method on purpose** — `camera/session.ts`
+   * §`CameraThrottle`. The game may say "not now"; it may not turn a camera on,
+   * off, or take a picture with one.
+   *
+   * `undefined` wherever there is no camera port, which is every browser
+   * without one, every page opened from the disk, and the accessibility suite.
+   */
+  readonly camera?: CameraThrottle | undefined;
   /**
    * Loads the renderer, lazily.
    *
@@ -972,7 +985,11 @@ export function GameView(props: GameViewProps): JSX.Element {
     // #476: the loop reads this on its next animation frame.
     frameCapRef.current = settings.frameCap;
     viewRef.current?.setQuality(settings);
-  }, [qualityLevel]);
+    // #382. The rung's fifth figure, and the only one that leaves this file —
+    // `quality.ts` §`QualitySettings.capture` argues why capture is the first
+    // thing a warming phone gives up and why this does NOT stop the camera.
+    props.camera?.throttle(settings.capture);
+  }, [qualityLevel, props.camera]);
 
   if (!onTheStage) {
     // One snapshot read for both notices, so they describe the same moment.

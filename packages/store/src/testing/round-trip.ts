@@ -37,7 +37,13 @@ import type { RecoveredRecording } from '../recording';
 import type { StreamChannel, StreamChannels, StreamSet } from '../streams';
 import { STREAM_CHANNELS, type NewStreamSet } from '../streams';
 
-import type { RouteRecord, SegmentEndpointRecord, SegmentRecord, WorkoutRecord } from '../records';
+import type {
+  CameraFrameRecord,
+  RouteRecord,
+  SegmentEndpointRecord,
+  SegmentRecord,
+  WorkoutRecord,
+} from '../records';
 import type { StoreHarness } from './harness';
 
 /**
@@ -545,4 +551,62 @@ export async function assertWorkoutRoundTrip(
     }
   }
   return read;
+}
+
+/**
+ * Keep a camera frame, close every connection, read it back through a fresh
+ * one, and compare **byte for byte** — #384.
+ *
+ * ⚠️ **The byte comparison is the assertion, and a length check is not a
+ * substitute.** `gapFillingStoreFactory` is the precedent this repository
+ * already learned from: a round trip that only asked *whether* something came
+ * back passed against a store that rewrote every gap as a zero, and a mutation
+ * run found that removing the sample-by-sample comparison left the whole suite
+ * green. A picture has exactly the same hole in it — a store that re-encoded,
+ * resized or "normalised" the bytes returns a plausible JPEG of the right
+ * length that is no longer the file the camera produced, and in this program
+ * that file is the one thing nothing else can reconstruct.
+ *
+ * ⚠️ **The read is `listCameraFrames`, which is the path the account export
+ * uses.** There is no point lookup to read through (`activity-store.ts` says
+ * why: a point lookup is a read a screen could be built on, and ADR 0029 D-11
+ * forbids the screen), so the round trip goes through the one real consumer —
+ * which is what CLAUDE.md §5 asks for anyway.
+ *
+ * @throws {RoundTripFailure}
+ */
+export async function assertCameraFrameRoundTrip(
+  harness: StoreHarness,
+  frame: CameraFrameRecord,
+): Promise<CameraFrameRecord> {
+  const read = await harness.roundTrip(
+    async (store) => store.putCameraFrame(frame),
+    async (store) => store.listCameraFrames(frame.athleteId),
+  );
+
+  const found = read.find((each) => each.id === frame.id);
+  if (found === undefined) {
+    throw new RoundTripFailure(
+      `camera frame ${frame.id} was kept and reported success, and a fresh connection cannot see it`,
+    );
+  }
+
+  requireEqual('cameraFrame.athleteId', frame.athleteId, found.athleteId);
+  requireEqual('cameraFrame.capturedAt', frame.capturedAt, found.capturedAt);
+  requireEqual('cameraFrame.mediaType', frame.mediaType, found.mediaType);
+  requireEqual('cameraFrame.width', frame.width, found.width);
+  requireEqual('cameraFrame.height', frame.height, found.height);
+  requireEqual('cameraFrame.bytes.length', frame.bytes.length, found.bytes.length);
+
+  for (const [index, expected] of frame.bytes.entries()) {
+    if (found.bytes[index] !== expected) {
+      // ⚠️ The index, and **not** the byte values. ADR 0029 D-8 forbids a
+      // message about imagery from carrying the image or any part of it, and a
+      // failure message is exactly the string somebody pastes into an issue.
+      throw new RoundTripFailure(
+        `cameraFrame.bytes[${String(index)}]: the picture that came back is not the one kept`,
+      );
+    }
+  }
+  return found;
 }

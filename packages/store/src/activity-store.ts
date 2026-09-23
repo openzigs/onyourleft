@@ -66,6 +66,7 @@ import {
 import type {
   ActivityId,
   AthleteId,
+  CameraFrameId,
   LapId,
   PrivacyZoneId,
   RecordingSessionId,
@@ -94,12 +95,15 @@ import {
   toPersistedPrivacyZone,
   fromPersistedSegment,
   toPersistedSegment,
+  fromPersistedCameraFrame,
   fromPersistedRoute,
   fromPersistedWorkout,
+  toPersistedCameraFrame,
   toPersistedRoute,
   toPersistedWorkout,
   type PersistedActivity,
   type PersistedAthlete,
+  type PersistedCameraFrame,
   type PersistedLap,
   type PersistedPrivacyZone,
   type PersistedRoute,
@@ -110,6 +114,7 @@ import type {
   ActivityRecord,
   ActivitySummary,
   AthleteRecord,
+  CameraFrameRecord,
   LapRecord,
   NewActivity,
   NewLap,
@@ -285,6 +290,19 @@ export interface AthleteDeletionCounts {
    * rest; it is the athlete's data and it holds a GPS trace.
    */
   readonly recordings: number;
+  /**
+   * Kept camera frames removed (#384).
+   *
+   * ⚠️ **Counted, and the count is what a rider is told rather than the
+   * pictures.** `apps/web/src/transfer/erase-device.ts` §`eraseSentence` says
+   * why nothing here names anything: a count says what happened, a name puts
+   * the thing back on the screen after the athlete asked for it to be gone.
+   *
+   * Usually **zero**, and that is not an empty state to design around: ADR 0029
+   * D-2 discards a frame after it has been looked at unless the rider turned on
+   * that ride's keep, and the switch is off every time.
+   */
+  readonly cameraFrames: number;
 }
 
 /**
@@ -439,6 +457,10 @@ export class ActivityStore {
 
   get #workouts(): Table<PersistedWorkout, string> {
     return this.#db.table<PersistedWorkout, string>(TABLE.workouts);
+  }
+
+  get #cameraFrames(): Table<PersistedCameraFrame, string> {
+    return this.#db.table<PersistedCameraFrame, string>(TABLE.cameraFrames);
   }
 
   // --- Athletes -------------------------------------------------------------
@@ -715,6 +737,7 @@ export class ActivityStore {
         this.#matchCheckpoints,
         this.#routes,
         this.#workouts,
+        this.#cameraFrames,
       ],
       async () => {
         // The signed records and the device key go with the athlete. The key is
@@ -762,6 +785,17 @@ export class ActivityStore {
         // that no longer exists is an erasure that did not happen, and the next
         // athlete to be created with a recycled id would inherit them.
         const workouts = await this.#workouts.where(INDEX.workoutByOwner).equals(id).delete();
+        // ⚠️ **The most sensitive rows this store holds, and the reason the
+        // cascade is not optional** — ADR 0029 D-11: an erase is *"the remedy
+        // and it is honest about being the only one"*, and the case it is for
+        // is a rider handing a device on. A kept frame left behind under an
+        // athlete id that no longer exists is a photograph of the inside of
+        // somebody's house that no scoped read can reach and nothing can
+        // delete.
+        const cameraFrames = await this.#cameraFrames
+          .where(INDEX.cameraFrameByAthlete)
+          .equals(id)
+          .delete();
         await this.#athletes.delete(id);
         return {
           activities,
@@ -773,6 +807,7 @@ export class ActivityStore {
           efforts,
           routes,
           workouts,
+          cameraFrames,
         };
       },
     );
@@ -1349,6 +1384,106 @@ export class ActivityStore {
       await this.#workouts.delete(id);
       return true;
     });
+  }
+
+  // --- Kept camera frames (#384) --------------------------------------------
+
+  /**
+   * Keeps one still picture from a ride —
+   * [ADR 0029](../../../docs/adr/0029-camera-imagery-as-a-data-class.md) D-2.
+   *
+   * ⚠️ **Called only when the rider turned this ride's keep on.** The default
+   * is that a frame is destroyed as soon as it has been looked at and never
+   * reaches durable storage at all, so an ordinary device has no rows here.
+   * `apps/web/src/camera/keep.ts` is the one production caller and is what
+   * decides.
+   *
+   * **Refuses a frame whose athlete does not exist**, inside the same
+   * transaction as the write, for `putRoute`'s reason: checked outside it, a
+   * concurrent `deleteAthlete` between the check and the write produces exactly
+   * the orphan the check exists to prevent — and here the orphan is a
+   * photograph nothing can ever delete.
+   *
+   * @throws {StoreReferentialError} if `record.athleteId` names no athlete, or
+   * if a frame with this id already belongs to a different athlete.
+   */
+  async putCameraFrame(record: CameraFrameRecord): Promise<CameraFrameId> {
+    await this.#db.transaction('rw', [this.#athletes, this.#cameraFrames], async () => {
+      await this.#requireAthlete(record.athleteId);
+      const existing = await this.#cameraFrames.get(record.id);
+      if (existing !== undefined && existing.athleteId !== record.athleteId) {
+        throw new StoreReferentialError(
+          `cannot overwrite camera frame ${record.id}: it belongs to a different athlete`,
+        );
+      }
+      await this.#cameraFrames.put(toPersistedCameraFrame(record));
+    });
+    return record.id;
+  }
+
+  /**
+   * This athlete's kept pictures, **newest first**.
+   *
+   * ⚠️ **Bounded by `limit`, and the bound is the caller's**, for `listRoutes`'
+   * reason and far more sharply: every row carries a whole JPEG, so a rider who
+   * kept a hundred is tens of megabytes decoded into memory by one call. The
+   * account export states its own budget and pages;
+   * `apps/web/src/camera/store-port.ts` §`countCameraFrames` is what a screen
+   * uses instead, because a screen must not render one of these at all
+   * (D-11).
+   *
+   * ⚠️ **There is no `getCameraFrame(owner, id)` and that is deliberate.** The
+   * only production consumer is the export, which wants them all; a point
+   * lookup would be a read a screen could be built on, and D-11's first rule is
+   * that a kept frame is reached from the report the rider opens deliberately
+   * and from nowhere else.
+   */
+  async listCameraFrames(owner: AthleteId, limit?: number): Promise<CameraFrameRecord[]> {
+    let query = this.#cameraFrames
+      .where(INDEX.cameraFrameByAthleteAndCapturedAt)
+      .between([owner, Dexie.minKey], [owner, Dexie.maxKey], true, true)
+      .reverse();
+    if (limit !== undefined) {
+      query = query.limit(limit);
+    }
+    const rows = await query.toArray();
+    return rows.map(fromPersistedCameraFrame);
+  }
+
+  /**
+   * How many pictures this athlete has kept.
+   *
+   * ⚠️ **A count, because a count is the only thing a screen may show.**
+   * ADR 0029 D-11 forbids a frame, a thumbnail, a crop or a filmstrip on any
+   * list; D-8's permitted column is *"a count, a byte size, a format name"*.
+   * This is what lets the Camera screen tell a rider that this device is
+   * holding something without showing them what.
+   *
+   * Counted through the index rather than by reading rows: `listCameraFrames`
+   * would decode every JPEG on the device to produce a number.
+   */
+  async countCameraFrames(owner: AthleteId): Promise<number> {
+    return this.#cameraFrames.where(INDEX.cameraFrameByAthlete).equals(owner).count();
+  }
+
+  /**
+   * Deletes **every** picture this athlete has kept.
+   *
+   * ⚠️ **All of them, not one — and that is ADR 0029 D-2's expiry rather than a
+   * coarse API.** D-2 says a kept frame lives *"until the rider deletes it, the
+   * activity, or the device"*, and of those three this is the one that works
+   * today: there is no activity link yet (`records.ts` §`CameraFrameRecord`
+   * says why and names the issue that adds one), and the device is
+   * `deleteAthlete`. A per-picture delete would need a screen that listed them,
+   * which D-11 forbids.
+   *
+   * @returns how many were removed, for the sentence afterwards. Zero on a
+   * device that kept none, which is the ordinary case and is not an error.
+   */
+  async deleteCameraFrames(owner: AthleteId): Promise<number> {
+    return this.#db.transaction('rw', [this.#cameraFrames], async () =>
+      this.#cameraFrames.where(INDEX.cameraFrameByAthlete).equals(owner).delete(),
+    );
   }
 
   // --- Segment efforts (#66) ------------------------------------------------

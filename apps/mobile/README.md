@@ -214,6 +214,29 @@ Still open from the Definition of Done: **tested on at least two OEMs**, and the
 procedure run by somebody. ⚠️ **A build is not a run, and a part that has been run is not this whole
 document.**
 
+### ⚠️ #383's camera: what was verified here, and what was not
+
+Added by [#383](https://github.com/openzigs/onyourleft/issues/383), whose own criteria ask for
+this to be recorded rather than assumed. **This work landed in an environment with no Android SDK,
+no emulator and no device**, which is the state the top of this section describes for #87 rather
+than the 2026-09-09 one.
+
+| Claim | Verified here? |
+|---|---|
+| `AndroidManifest.xml` declares `CAMERA` and an **optional** `android.hardware.camera` | ✅ read as a document, by `src/android/manifest.test.ts` — including that `android:required` is the **string** `false` rather than an absent attribute, which Android would read as `true` |
+| The manifest is well-formed and passes `XML001`–`XML004` | ✅ `bash scripts/check-repo-rules.sh`, which is where the `--`-in-a-comment defect above is now caught |
+| The **merged** manifest ships that permission and that feature | ❌ **not verified.** No Gradle build ran here, so `src/android/merged-manifest.test.ts` **skipped**, loudly, naming the paths it looked in and the command that would produce one. ⚠️ Do not read this pull request's green CI as evidence about the shipped manifest: CI does not build Android at all |
+| Google Play still filters the app onto no fewer devices | ❌ **not verified, and it cannot be from a repository.** What is asserted is the declaration that governs it. The measurement is a store listing's device count, which needs an upload |
+| A rider can actually take a picture on a phone | ❌ **not verified.** A real `getUserMedia` inside a Capacitor WebView, the Android permission dialog it raises, and whether a frame comes back at all are [validation 0002](../../docs/validation/0002-android-shell-and-game.md) Part S, whose result cells are empty |
+| The permission is **not** requested at app start | ⚠️ **verified as code, not as behaviour.** `apps/web/src/camera/session.test.ts` asserts the port is never touched without consent, which is what prevents it; nobody has watched a cold start on a phone |
+| The Data Safety declaration is still true | ✅ re-read, and recorded as a re-read rather than an unchanged file — `src/android/data-safety.ts` gains a **Photos and videos** row answered `collected: false`, because Play's *collected* means transferred off the device and nothing in this client can transmit anything |
+
+⚠️ **The honest summary is that #383 is a manifest change and a wording change, and both halves of
+the thing a rider would notice — the permission dialog and the picture — are unmeasured.** The
+capture path itself is `apps/web`'s and is exercised against a real Chromium with a synthetic
+camera (`browser/shell.browser.spec.ts` §"the camera, in a real engine"); what no gate here can
+say is whether the WebView inside the APK behaves the same way.
+
 ## 6. What the shipped manifest actually contains
 
 Added by [#318](https://github.com/openzigs/onyourleft/issues/318), which is the issue that said the
@@ -238,9 +261,17 @@ Measured 2026-09-16 from `:app:processDebugMainManifest`, with provenance from
 | `FOREGROUND_SERVICE` | — | us |
 | `FOREGROUND_SERVICE_CONNECTED_DEVICE` | — | us |
 | `POST_NOTIFICATIONS` | — | us |
+| `CAMERA` (#383) | — | us — ⚠️ **added after this table was measured**, so the merged manifest has NOT been re-read with it in. The count below still says 8 and 11 because that is what was measured on 2026-09-16 |
 | `BLUETOOTH` | **30** | `@capacitor-community/bluetooth-le` 8.3.0 |
 | `BLUETOOTH_ADMIN` | **30** | `@capacitor-community/bluetooth-le` 8.3.0 |
 | `${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` | — | `androidx.core` 1.17.0 |
+
+Plus, since #383, one `<uses-feature>`: `android.hardware.camera` at `required="false"`. It is
+**not** a permission and appears in no permission list, which is exactly why it is easy to omit —
+Google Play derives an *implied, required* hardware feature from `CAMERA`, so the permission alone
+makes the app uninstallable on every device without a camera. `REVIEWED_FEATURES` in
+`src/android/merged-manifest.ts` is the list that says so and `merged-manifest.test.ts` checks both
+directions of it.
 
 Plus one `<permission>` **definition** — the same `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`, at
 `protectionLevel="signature"`, which is the whole of why it grants nothing outside this app — and

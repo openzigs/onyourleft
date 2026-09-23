@@ -183,6 +183,37 @@ export const MANIFEST_FILE_NAME = 'on-your-left-account.json';
  */
 export const ACCOUNT_EXPORT_LIMIT = 500;
 
+/**
+ * How many kept pictures one run carries — #384, ADR 0029 D-3.
+ *
+ * ⚠️ **Its own budget rather than a share of {@link ACCOUNT_EXPORT_LIMIT}**,
+ * because the two are counted in different things: a ride is a few hundred
+ * kilobytes re-encoded from packed streams, and a picture is a whole JPEG read
+ * straight off the disk. Two hundred 1080p frames is of the order of a hundred
+ * megabytes handed to the browser's download machinery, which
+ * `exportEverything`'s own header already records as the **sink's** problem
+ * rather than this function's — and a budget is how this function avoids
+ * making it worse.
+ *
+ * ⚠️ **It is a bound on a RUN and not a cap on a rider's data.** A run that hit
+ * it says so in the manifest (`camera.written` below is less than
+ * `camera.kept`), which is the honest record #35's *"a ride is yours and this
+ * archive does not contain it"* rule already applies to a ride. Unlike a ride
+ * there is no cursor for it, and that is stated rather than hidden: the
+ * archive's completeness for pictures is a count in the manifest, and a rider
+ * with more than this has to delete some or wait for the issue that pages them.
+ */
+export const ACCOUNT_EXPORT_FRAME_LIMIT = 200;
+
+/** What a kept picture's file is called, after its capture instant. */
+export function cameraFrameFileName(capturedAt: number, ordinal: number): string {
+  // ⚠️ No ride name, no place, no id of anything. ADR 0004 decision D binds
+  // every layer that formats location data into a string and a ride's name is
+  // routinely a place; an instant and an ordinal name the file uniquely and say
+  // nothing. The ordinal is what separates two pictures taken in one second.
+  return `picture-${String(capturedAt)}-${String(ordinal)}.jpg`;
+}
+
 /** Everything the exporter needs. @see AccountStore */
 export type AccountExportStore = TransferStore & AccountStore;
 
@@ -364,6 +395,8 @@ export function accountManifest(input: {
   readonly routes: readonly unknown[];
   readonly workouts: readonly unknown[];
   readonly activities: readonly ManifestEntry[];
+  /** #384. @see CameraManifest */
+  readonly camera: CameraManifest;
   readonly exportedAt: number;
 }): DownloadableFile {
   const manifest = {
@@ -396,12 +429,66 @@ export function accountManifest(input: {
     // Which file holds which ride, so the archive is navigable without opening
     // every file to find out what is in it.
     activities: input.activities,
+    // #384, ADR 0029 D-3: the manifest **names** the pictures, and says in
+    // words what an activity file cannot carry.
+    camera: input.camera,
   };
   return {
     fileName: MANIFEST_FILE_NAME,
     bytes: new TextEncoder().encode(`${JSON.stringify(manifest, undefined, 2)}\n`),
     mediaType: 'application/json',
   };
+}
+
+/**
+ * What the archive says about the pictures in it — #384, ADR 0029 D-3.
+ *
+ * ⚠️ **Fields, not a spread row**, like everything else `accountManifest`
+ * writes: *"a field added to `AthleteRecord` is absent from this export until
+ * somebody adds it here on purpose"*. Here that matters more than anywhere
+ * else in the file — a spread of a `CameraFrameRecord` would put the JPEG's
+ * bytes into the manifest as a JSON array of numbers, which is both a
+ * hundred-megabyte text file and a picture in the one file that also carries
+ * the privacy zones.
+ *
+ * ⚠️ **`cannotCarry` is the line ADR 0029 D-3 asks for by name**: *"lists **"a
+ * photograph of you"** in the *what an activity file cannot carry* list by
+ * name. It is the most extreme member of that list: a FIT, GPX or TCX file has
+ * no field for an image at all, so unlike a lap or a signed record this is not
+ * a lossy carry, it is no carry."*
+ */
+export interface CameraManifest {
+  /**
+   * How many pictures this device is holding for the athlete — **all of them**.
+   *
+   * ⚠️ Read with `countCameraFrames`, never taken from the length of the
+   * bounded list this run wrote from. See `transfer/store-port.ts`
+   * §`AccountStore.countCameraFrames` for what a capped `kept` cost a rider.
+   */
+  readonly kept: number;
+  /**
+   * How many of them this archive contains. Fewer when a run hit its budget,
+   * and **zero when the rider pressed Stop**.
+   */
+  readonly written: number;
+  /** The files, in the order they were written. Names only — never bytes. */
+  readonly files: readonly string[];
+  /** What no activity file can hold, said in words. @see CameraManifest */
+  readonly cannotCarry: string;
+}
+
+/** ADR 0029 D-3's sentence, in the manifest, in the rider's own archive. */
+export const CAMERA_CANNOT_CARRY =
+  'a photograph of you. A FIT, GPX or TCX file has no field for an image at all, so a picture ' +
+  'travels as its own file beside the ride rather than inside it. A ride you share with somebody ' +
+  'else never carries one.';
+
+/** A kept picture as the file it travels in — ADR 0029 D-3. */
+export function cameraFrameFile(fileName: string, bytes: Uint8Array): DownloadableFile {
+  // ⚠️ The bytes, untouched. D-3: *"it is **not** obfuscated, trimmed or
+  // downscaled"* — this is the athlete's own data coming back to them, and
+  // ADR 0004 E's invariant is that it comes back whole.
+  return { fileName, bytes, mediaType: 'image/jpeg' };
 }
 
 /**
@@ -572,6 +659,53 @@ export async function exportEverything(
     store.listWorkouts(athleteId),
   ]);
 
+  // #384, ADR 0029 D-3.
+  //
+  // ⚠️ **The COUNT and the LIST are two different reads, and conflating them is
+  // the defect this pair replaced.** The count is the truth about the device
+  // and goes in the manifest; the list is bounded, because every row is a whole
+  // JPEG and the budget is what stops one run handing a hundred megabytes to
+  // the browser's download machinery. Reading `limit + 1` and reporting its
+  // length — which is what this did — caps `kept` at 201 however many a rider
+  // holds, so an archive of 200 out of 300 reported "200 of 201" and invited
+  // the rider to erase a device holding a hundred pictures this archive does
+  // not contain.
+  const keptCameraFrames = await store.countCameraFrames(athleteId);
+  const cameraFiles: string[] = [];
+  // ⚠️ A function rather than a `const`, and not only for the typechecker's
+  // sake: the signal can be aborted between any two `await`s here, so a value
+  // read once is a stale answer by the time the loop below consults it.
+  const stopped = (): boolean => options.signal?.aborted === true;
+  // ⚠️ A Stop skips the pictures too. It used to skip every remaining ride and
+  // then write up to two hundred photographs anyway, which is the opposite of
+  // what a rider pressing Stop asked for — and `written < kept` in the manifest
+  // is what says the archive is short, exactly as it does for a budget.
+  //
+  // ⚠️ **This outer guard saves the READ; the `break` inside the loop is what
+  // makes the behaviour true, and that was measured rather than assumed.**
+  // Deleting this `if` leaves every test in `export-everything.test.ts` green,
+  // because the break catches the same case one iteration later. What it is
+  // worth is the read it skips: `listCameraFrames` pulls up to two hundred
+  // whole JPEGs into memory, and a rider who has pressed Stop should not wait
+  // for that. `…test.ts` §"stops between two pictures" is the case that holds
+  // the break, because aborting before the first file is answered by either
+  // one alone.
+  if (!stopped()) {
+    const carried = await store.listCameraFrames(athleteId, ACCOUNT_EXPORT_FRAME_LIMIT);
+    for (const [ordinal, frame] of carried.entries()) {
+      if (stopped()) {
+        break;
+      }
+      const name = cameraFrameFileName(frame.capturedAt, ordinal + 1);
+      // ⚠️ Not inside the `try` any ride is exported in, and not guarded by
+      // `ActivityExportError`: a failure to hand over a picture is not a ride
+      // failing to encode, it is this client being broken, and it belongs
+      // uncaught — the same call the signed record beside it makes.
+      await onFile(cameraFrameFile(name, frame.bytes));
+      cameraFiles.push(name);
+    }
+  }
+
   await onFile(
     accountManifest({
       athleteId,
@@ -582,6 +716,12 @@ export async function exportEverything(
       routes,
       workouts,
       activities: listed,
+      camera: {
+        kept: keptCameraFrames,
+        written: cameraFiles.length,
+        files: cameraFiles,
+        cannotCarry: CAMERA_CANNOT_CARRY,
+      },
       exportedAt: Math.trunc(Date.now() / 1000),
     }),
   );

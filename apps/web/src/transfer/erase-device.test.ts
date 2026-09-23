@@ -12,6 +12,7 @@
 
 import {
   ATHLETE_A,
+  cameraFrameFor,
   ATHLETE_B,
   createStoreHarness,
   resetFixtureIds,
@@ -106,6 +107,31 @@ describe('what the rider is told before they press it', () => {
     expect(text).toContain('laps');
   });
 
+  it('names the pictures AND everything derived from one — #384, ADR 0029 D-4', () => {
+    // ⚠️ The second half is the half that is easy to drop, and the ADR spells
+    // it out: a pose skeleton, a set of joint coordinates, a model's
+    // description of the rider, a thumbnail generated for a report — each is a
+    // smaller artefact saying the same thing about the same person, and
+    // *"a deletion that leaves a derived artefact is not a deletion"*.
+    const text = ERASE_REMOVES.join(' ');
+    expect(text).toContain('photograph');
+    expect(text).toContain('everything derived from one');
+  });
+
+  it('does NOT claim a copy left the device, because none can', () => {
+    // ADR 0029 D-4 writes two `ERASE_CANNOT_REACH` lines about a frame sent to
+    // a rider's own machine and to a hosted model. Neither is reachable from
+    // this build — `privacy/no-network.test.ts` is the gate under that — and a
+    // list that claimed otherwise would age into a lie in the *frightening*
+    // direction. #387 is the pull request that lands the first byte and both
+    // lines; `erase-device.ts` records that at the declaration.
+    const text = ERASE_CANNOT_REACH.join(' ');
+    expect(text).not.toContain('hosted');
+    expect(text).not.toContain('sent to your own machine');
+    // What IS true today: a picture the rider copied off the device themselves.
+    expect(text).toContain('copied off this device');
+  });
+
   it('says an exported file is out of reach, and that a shared ride is a copy', () => {
     const text = ERASE_CANNOT_REACH.join(' ');
     expect(text).toContain('already exported');
@@ -116,7 +142,7 @@ describe('what the rider is told before they press it', () => {
     // The list is short on purpose and every entry is a fact about the
     // architecture. If it ever grows a "we will ask other instances" line, that
     // line must arrive with the instance that makes it true.
-    expect(ERASE_CANNOT_REACH.length).toBeLessThanOrEqual(3);
+    expect(ERASE_CANNOT_REACH.length).toBeLessThanOrEqual(4);
   });
 });
 
@@ -132,6 +158,9 @@ describe('erasing, against the real store', () => {
     await harness.write(async (store) => {
       await store.putRoute(routeFor(owner));
       await store.putWorkout(workoutFor(owner));
+      // #384. The most sensitive row the store holds, and the one ADR 0029
+      // D-11 makes the erase the only remedy for.
+      await store.putCameraFrame(cameraFrameFor(owner));
     });
   }
 
@@ -144,10 +173,16 @@ describe('erasing, against the real store', () => {
     expect(outcome.activities).toBe(2);
     expect(outcome.routes).toBe(1);
     expect(outcome.workouts).toBe(1);
+    expect(outcome.cameraFrames).toBe(1);
     // Read back through a fresh connection: the erase has to have reached disk,
     // not just the handle that ran it.
     const left = await harness.read(async (store) => store.listActivitySummaries(ATHLETE_A));
     expect(left).toStrictEqual([]);
+    // ⚠️ **The assertion #384 calls the worst version of this bug** — *"a frame
+    // the rider believes was erased, and was not"*. Read on a connection
+    // nothing wrote through, which is the only read that can tell.
+    const pictures = await harness.read(async (store) => store.listCameraFrames(ATHLETE_A));
+    expect(pictures).toStrictEqual([]);
   });
 
   it('leaves another athlete alone', async () => {
@@ -157,6 +192,8 @@ describe('erasing, against the real store', () => {
 
     await harness.write(async (store) => eraseDevice(store, ATHLETE_A));
 
+    const theirPictures = await harness.read(async (store) => store.listCameraFrames(ATHLETE_B));
+    expect(theirPictures).toHaveLength(1);
     const theirs = await harness.read(async (store) => store.listActivitySummaries(ATHLETE_B));
     expect(theirs).toHaveLength(2);
   });
@@ -251,22 +288,28 @@ describe('erasing, against the real store', () => {
 
 describe('the sentence afterwards', () => {
   it('counts what went', () => {
-    expect(eraseSentence({ activities: 4, routes: 2, workouts: 0, segments: 1 })).toBe(
-      'Removed 4 rides, 2 routes, 1 segment. This device now holds nothing about you.',
-    );
+    expect(
+      eraseSentence({ activities: 4, routes: 2, workouts: 0, segments: 1, cameraFrames: 0 }),
+    ).toBe('Removed 4 rides, 2 routes, 1 segment. This device now holds nothing about you.');
   });
 
   it('says one ride rather than 1 rides', () => {
-    expect(eraseSentence({ activities: 1, routes: 0, workouts: 0, segments: 0 })).toContain(
-      '1 ride.',
-    );
+    expect(
+      eraseSentence({ activities: 1, routes: 0, workouts: 0, segments: 0, cameraFrames: 0 }),
+    ).toContain('1 ride.');
   });
 
   it('names nothing that could be a place', () => {
     // ADR 0004 decision D, applied to the one screen that runs immediately
     // after an athlete asked for their location history to be gone. A route is
     // routinely named after where it goes.
-    const sentence = eraseSentence({ activities: 3, routes: 1, workouts: 1, segments: 1 });
+    const sentence = eraseSentence({
+      activities: 3,
+      routes: 1,
+      workouts: 1,
+      segments: 1,
+      cameraFrames: 2,
+    });
     expect(sentence).toMatch(/^Removed [\d\s,a-z]+\. This device now holds nothing about you\.$/);
   });
 });
