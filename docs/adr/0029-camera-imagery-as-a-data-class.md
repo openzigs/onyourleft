@@ -60,7 +60,30 @@ So the tempting move is to take ADR 0004's threat-model table and swap the noun.
 forbids it, and it is right to: every row of ADR 0004's table is about an **adversary reading a
 published artefact**, and in Phase 1 of this epic nothing is published. The rows that matter here
 are about artefacts that are never published and leak anyway — a cache, a log line, a crash report,
-a third party's TLS terminator, a second person walking behind the bike.
+a third party's TLS terminator, a second person walking behind the bike. **So this ADR has its own
+threat-model table, in ADR 0004's shape and with none of its rows**, and it is below.
+
+### The threat model
+
+Stated up front, for ADR 0004's own reason — *"a privacy model without a threat model is a mood"* —
+and in its shape: the left column is the thing that could happen, the right is whether this document
+defends against it and by what. ⚠️ **The rows are paths a frame could take, not adversaries reading
+a published page**, because in this epic nothing is published: the exposure is a byte that was never
+meant to be durable and became durable anyway.
+
+| What could happen to a frame | Defended? |
+|---|---|
+| **It reaches durable storage** — IndexedDB, a file, a temporary directory — as a side effect of being analysed | **Yes, by default** — D-2 discards after analysis and writes nothing. A frame becomes durable only when the rider turns on a per-ride keep, which is off every time |
+| **It reaches a cache** — Cache Storage, `localStorage`, an HTTP cache, the service worker's fetch path | **Yes** — D-10 forbids all four by name, and D-7's hosted request is a `POST` for that reason. ⚠️ This is the row most likely to fail *later*: ADR 0024 precaches by URL and a future handler written by somebody who never read this ADR is the failure mode |
+| **It reaches a log line or a crash report** | **Yes, by rule; partly, in fact** — D-8 forbids the frame, a crop, a thumbnail and a locator in every layer that formats one, and the standing constraint against a transmitting crash-reporting SDK is inherited from ADR 0004 D. ⚠️ **A rule about what goes into a log is only as good as the review that reads the diff**; D-8 is not machine-checkable today and says so |
+| **It reaches an error message** | **Yes** — D-8. This is ADR 0004 D extended, and it binds **harder**: that rule lets a non-coordinate quantity keep its value because *"the value is most of the diagnostic"*, and nothing about an image is diagnosed by having the image in the message |
+| **It crosses a third party in plaintext** because the transport's operator terminates TLS | **Yes** — D-6 rejects Cloudflare Tunnel **by name** for this payload, on a dated finding, and permits only a LAN or a WireGuard-class overlay that relays ciphertext. This is the row the whole transport decision exists for, because the failure arrives looking like plumbing |
+| **It carries the rider's front door in EXIF** to wherever it goes next | **Yes, by construction** — D-9 strips at capture by re-encoding from raw pixels, in one place. ⚠️ **Not by the privacy walk**: `coordinatesIn` cannot see inside a `Blob`, so a departing boundary over a payload with a frame in it is green for a reason unrelated to the frame |
+| **A bystander is in frame** | **No, and deliberately** — D-5 refuses to blur and tells the rider so before the camera is switched on, because a detector that misses is worse than a sentence that was honest. The bystander's only signal is the live-camera indicator. **This is the row this ADR defends least and says so most plainly** |
+| **The device is shared between people** — a partner, a housemate, a child, a repair shop, a resale | **No access control exists**, and D-11 is what limits the blast radius rather than preventing it. Under D-2's default there is nothing on the disk to find; where the rider kept frames, anyone with the unlocked device can reach them, and D-11 keeps them off every screen somebody would meet by accident. ⚠️ **Materially worse than ADR 0004's own "No" for the same row**, because a trace says where the athlete went and a kept frame is a photograph of the room the device is sitting in |
+| **A hosted model keeps a copy** the rider cannot delete | **No, and it is said before the fact** — D-7 makes it opt-in, on the rider's own key, on a press, never default and never silent, and the consent wording says *"we cannot delete it for you afterwards"*. D-4 puts the same sentence in `ERASE_CANNOT_REACH`. There is no mechanism to compel a vendor's deletion and this document does not pretend there is |
+| **An account export becomes a set of photographs of a house**, and is then handed on | **Partly** — D-3 carries kept frames untrimmed, because ADR 0004 E's invariant is that the athlete's own data comes back whole. What defends it is the delivery rule (authenticated, single-use, short-lived, never by email) and the export screen saying in words that the archive contains frames. **A rider who forwards it has made a disclosure decision**, exactly as ADR 0004 says of approving a follower |
+| **A shared activity file carries one** to whoever the rider sends it to | **Yes, absolutely** — D-3 forbids it with no per-export opt-out, because a photograph inside a FIT, GPX or TCX file is a disclosure the format gives the recipient no way to notice and the sender no way to see |
 
 ### What the owner has already decided, quoted so it is not re-litigated
 
@@ -117,9 +140,10 @@ rather than by asking the walk to parse image formats.**
 
 ## Decision
 
-Ten rules. **D-0** says nothing is built yet. **D-1** to **D-5** are about the bytes on the device;
-**D-6** and **D-7** are about the bytes leaving it; **D-8** and **D-9** are the two rules that bind
-every other layer.
+Eleven rules. **D-0** says nothing is built yet. **D-1** to **D-5** are about the bytes on the
+device; **D-6** and **D-7** are about the bytes leaving it; **D-8** and **D-9** are the two rules
+that bind every other layer; **D-10** and **D-11** are the two rows of the threat model above that
+nothing else in the list answers.
 
 ### D-0 — Nothing is built until Phase A lands and four questions are answered, and this ADR builds nothing
 
@@ -410,13 +434,58 @@ The same rule is why D-7's hosted request is a `POST` to an origin the rider typ
 `GET` of a URL — a `GET` is cacheable by every layer between here and there, and some of them are
 not ours.
 
+### D-11 — A device shared between people: there is no access control, and a kept frame is never on a screen somebody could meet by accident
+
+ADR 0004's threat model answers *"Someone with the athlete's unlocked device"* with a flat **No**,
+and that answer is inherited here rather than improved on. It is worth saying exactly how little
+stands in the way, because the reader's instinct is that *something* does:
+
+- **There is no sign-in and no device lock in this program.** `apps/web/src/local-athlete.ts` says
+  it in terms — *"There is no server and no sign-in in Phase 1 (owner decision D6), so every ride
+  belongs to a fixed local identity"*. There is **one** athlete on a device, so two people sharing
+  it are not two profiles; they are the same row.
+- **The athlete scoping in `packages/store` is not an access control.**
+  `activity-store.scoping.test.ts` exists to stop a query matching an entity id without also
+  filtering on its owner. That is a correctness boundary against cross-athlete *reads in code*, and
+  it defends nothing at all against a person holding the unlocked device.
+- **IndexedDB is readable by anything running in the origin.** So is Cache Storage. The defence
+  against a second person is the operating system's screen lock, which is not ours and which this
+  document cannot assume is on.
+
+> **The rule.** This ADR does not invent an access control, and Phase B must not either. What it
+> does instead is keep the blast radius at what D-2 already chose, and keep a kept frame off every
+> surface a person who did not take it would meet without asking for it:
+>
+> 1. **No frame, thumbnail, crop or filmstrip appears on the activity library row, in the ride
+>    detail view's default render, in the workout or route screens, in a share sheet's preview, or
+>    in any list.** A kept frame is reached from the report the rider opens deliberately, and from
+>    nowhere else.
+> 2. **The per-ride keep is off every time** (D-2), so the ordinary state of a shared device is one
+>    with no frames on it at all. That is not a mitigation bolted on; it is the reason D-2 chose the
+>    narrower default, stated for the row it protects.
+> 3. **The erase is the remedy and it is honest about being the only one** — D-4's `ERASE_REMOVES`
+>    line covers frames and their derivatives, and a rider handing a device on is the case it is
+>    for.
+
+**Why a rule about screens rather than a lock.** A per-feature PIN is the obvious answer and it is
+the wrong one at this size: it would be the only credential in a program that has deliberately none
+(ADR 0014 — the device keypair is an identity, not an authenticator), it protects nothing from
+anybody who can open the browser's storage inspector, and it would read to a rider as a promise the
+software cannot keep. Keeping frames off incidental surfaces is a smaller claim that is **true**,
+and it is checkable in review of #384 and #388 rather than argued about.
+
+⚠️ **This defends against the accidental case and not against a person who is looking.** A
+housemate scrolling the library will not meet a photograph; a person who opens the rider's report,
+or the browser's storage, will. The ADR says so rather than implying otherwise, and the owner's
+Q2 — widening D-2 to keep by default — is the decision that makes this row materially worse.
+
 ---
 
 ## Consequences
 
 ### What this enables
 
-- **#382, #383 and #384 can be written**, against ten rules rather than an intention. #384 in
+- **#382, #383 and #384 can be written**, against eleven rules rather than an intention. #384 in
   particular has its record shape (D-1), its retention (D-2), its export (D-3) and its erase (D-4)
   decided before a schema version is picked, which is the whole reason ADR 0004 was written in
   Phase 0.
@@ -437,6 +506,15 @@ not ours.
   expect, and the honest reading is that the protection is the rider's aim rather than the
   software's. Somebody will find that insufficient, and the ADR does not argue that they are wrong —
   it argues that a blur that misses is worse.
+- **A shared device gets a screen rule and not a lock.** D-11 keeps a kept frame off every
+  incidental surface and refuses to invent an access control this program does not have anywhere
+  else. A partner who opens the rider's own report, or the browser's storage inspector, sees the
+  photographs; the rider is not told otherwise. The honest summary is that the defence against a
+  second person in the house is the operating system's screen lock, which is not ours.
+- **A kept frame is one press further away for the rider too.** D-11's first rule costs the
+  obvious, useful thing — a filmstrip on the ride's row, so a rider can see at a glance which rides
+  have frames. That affordance is exactly the one that shows a photograph to somebody who did not
+  ask for it, so it is refused rather than made smaller.
 - **Remote use is second-class.** D-6 makes the LAN the path and a WireGuard overlay the fallback,
   both of which the rider has to set up. The thing that would have made it one click is the thing
   that is rejected.
@@ -455,9 +533,9 @@ not ours.
 |---|---|
 | [#382](https://github.com/openzigs/onyourleft/issues/382) | D-1, D-5's wording verbatim, D-9's strip-at-capture, and D-10 |
 | [#383](https://github.com/openzigs/onyourleft/issues/383) | D-9 (the Android capture path strips too — a platform camera writes EXIF by default) and D-5's indicator |
-| [#384](https://github.com/openzigs/onyourleft/issues/384) | D-1, D-2, D-3, D-4, and D-9's note in `boundaries.ts` |
+| [#384](https://github.com/openzigs/onyourleft/issues/384) | D-1, D-2, D-3, D-4, D-9's note in `boundaries.ts`, and **D-11** — the record it adds must not be reachable from any list, row or default render |
 | [#387](https://github.com/openzigs/onyourleft/issues/387) | D-6 entire, D-7 entire, D-8's untrusted-response rule, and [ADR 0031](0031-model-licences-and-the-hosted-model-hole.md) D-4 |
-| [#388](https://github.com/openzigs/onyourleft/issues/388) | D-8 — a report that cannot render a frame it failed to read says so without showing it |
+| [#388](https://github.com/openzigs/onyourleft/issues/388) | D-8 — a report that cannot render a frame it failed to read says so without showing it — and **D-11**: the report is the one screen a kept frame may appear on, which makes it the screen that must not be linked from a list |
 | [#328](https://github.com/openzigs/onyourleft/issues/328) | All of it, by owner decision D-C |
 | [#35](https://github.com/openzigs/onyourleft/issues/35) | D-3's manifest line and D-4's two lists |
 | [#95](https://github.com/openzigs/onyourleft/issues/95) | The Data Safety re-filing and the privacy-policy rewrite named below |
@@ -523,6 +601,12 @@ answer changes how strong D-5's sentence has to be.
 - **Cloudflare stops terminating TLS**, or ships a mode that demonstrably does not. D-6's table row
   is a dated finding, not a position about a company, and a superseding ADR that showed the operator
   could not read the payload would be a good ADR.
+- **This program gains a sign-in or a device lock.** D-11 is written for a client with neither, and
+  its argument against a per-feature PIN — *"it would be the only credential in a program that has
+  deliberately none"* — stops being true the day accounts arrive (Phase 3,
+  [#7](https://github.com/openzigs/onyourleft/issues/7)). Then the screen rule is still right and it
+  is no longer the whole answer, and a successor should say what a second profile on one device
+  means for a kept frame.
 - **EXIF stripping turns out to be insufficient.** D-9 assumes a re-encode from raw pixels removes
   everything that identifies a device or a place. If a format ships something that survives that —
   a sensor-noise fingerprint is the obvious candidate and is a real research area — D-9 is a weaker
