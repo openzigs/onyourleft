@@ -19,6 +19,7 @@ import { CameraCaptureError } from './camera-port';
 import {
   FIRST_FRAME_MILLISECONDS,
   browserCameraPort,
+  frameProgress,
   onceReady,
   type FrameGrabber,
   type FrameReadySource,
@@ -26,7 +27,9 @@ import {
   type MediaStreamLike,
   type VideoTrackLike,
 } from './browser-camera';
-import { cleanFrameBytes, stillRoom } from './testing';
+import { CameraController } from './session';
+import { cleanFrameBytes, manualSchedule, stillRoom } from './testing';
+import { PRESENCE_CHECK_MILLISECONDS } from './presence';
 import { frameLeaksIn } from './notice';
 
 function track(): VideoTrackLike & { stopped: boolean } {
@@ -428,5 +431,122 @@ describe('the presence sampler, behind the session — #390', () => {
       expect(message).not.toContain('blob:');
       return true;
     });
+  });
+});
+
+describe('a camera that has stopped delivering pictures — #516', () => {
+  // `readyState` stays 'live' through all of these, and a <video> goes on
+  // drawing its last frame: two grids of one lit picture, which is `still`.
+  function mutedTrack(): VideoTrackLike {
+    return { ...track(), muted: true };
+  }
+
+  /**
+   * Twenty checks of a real controller over this adapter, and its answer.
+   *
+   * ⚠️ A fresh track per `getUserMedia`, because `requestCameraAccess()` stops
+   * the one it is handed — sharing one would leave the camera not live, and
+   * `unknown` would then be true for a reason unrelated to muting.
+   */
+  async function answerAfterTwentyChecks(
+    makeTrack: () => VideoTrackLike,
+    hidden?: () => boolean,
+  ): Promise<string> {
+    const port = browserCameraPort({
+      devices: devices(async () => Promise.resolve(streamOf([makeTrack()]))),
+      grabber: GRABBER, // an empty, readable room, identical every sample
+      secureContext: true,
+      ...(hidden === undefined ? {} : { hidden }),
+    });
+    const timers = manualSchedule();
+    let now = 0;
+    const controller = new CameraController({
+      port,
+      schedule: timers.schedule,
+      clock: () => now,
+      wait: async () => Promise.resolve(),
+    });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    await controller.turnOn();
+    controller.watchPresence(true);
+    // Live and watching, so an `unknown` below is the guard and not a camera
+    // that never came on.
+    expect(controller.state().live).toBe(true);
+    expect(controller.state().watchingPresence).toBe(true);
+    for (let check = 0; check < 20; check += 1) {
+      now += PRESENCE_CHECK_MILLISECONDS;
+      timers.fire();
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+    }
+    return controller.riderPresence();
+  }
+
+  it('refuses a sample from a muted track, without drawing anything', async () => {
+    let made = 0;
+    const port = browserCameraPort({
+      devices: devices(async () => Promise.resolve(streamOf([mutedTrack()]))),
+      grabber: {
+        ...GRABBER,
+        luminance: (stream) => {
+          made += 1;
+          return GRABBER.luminance(stream);
+        },
+      },
+      secureContext: true,
+    });
+    const session = await port.startCamera();
+    // Still live: muting is not ending, which is the whole trap.
+    expect(session.live).toBe(true);
+    await expect(session.sampleLuminance()).rejects.toBeInstanceOf(CameraCaptureError);
+    expect(made).toBe(0);
+  });
+
+  it('refuses a sample while the page is hidden', async () => {
+    const port = browserCameraPort({
+      devices: devices(async () => Promise.resolve(streamOf([track()]))),
+      grabber: GRABBER,
+      secureContext: true,
+      hidden: () => true,
+    });
+    const session = await port.startCamera();
+    await expect(session.sampleLuminance()).rejects.toBeInstanceOf(CameraCaptureError);
+  });
+
+  it('a muted track ends unknown, not absent', async () => {
+    expect(await answerAfterTwentyChecks(mutedTrack)).toBe('unknown');
+  });
+
+  it('a hidden page ends unknown, not absent', async () => {
+    expect(await answerAfterTwentyChecks(track, () => true)).toBe('unknown');
+  });
+
+  it('the control: the same room, unmuted and visible, is absent', async () => {
+    expect(await answerAfterTwentyChecks(track, () => false)).toBe('absent');
+  });
+});
+
+describe('how far a video has got — #516', () => {
+  it('counts frames where the element can', () => {
+    expect(
+      frameProgress({
+        currentTime: 3.2,
+        getVideoPlaybackQuality: () => ({ totalVideoFrames: 96 }),
+      }),
+    ).toBe(96);
+  });
+
+  it('falls back to the playback position', () => {
+    expect(frameProgress({ currentTime: 3.2 })).toBe(3.2);
+  });
+
+  it('says nothing rather than guess, when neither is a number', () => {
+    expect(
+      frameProgress({
+        currentTime: Number.NaN,
+        getVideoPlaybackQuality: () => ({ totalVideoFrames: Number.NaN }),
+      }),
+    ).toBeUndefined();
   });
 });

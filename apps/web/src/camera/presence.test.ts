@@ -85,6 +85,21 @@ describe('observing a pair of grids', () => {
     expect(observePair(uniform(128), uniform(128))).toBe('unreadable');
   });
 
+  it('reads a pair of one frame as unreadable, never as still — #516', () => {
+    // A <video> whose source stopped delivering frames draws its last one
+    // again: the same picture of a lit room, twice.
+    const frozen = { ...stillRoom(), frame: 41 };
+    expect(observePair(frozen, frozen)).toBe('unreadable');
+    // Nor a second grid from BEHIND the first, which a restarted element is.
+    expect(observePair({ ...stillRoom(), frame: 41 }, { ...stillRoom(), frame: 40 })).toBe(
+      'unreadable',
+    );
+    // The control: the same pictures, one frame apart, are a still room.
+    expect(observePair({ ...stillRoom(), frame: 41 }, { ...stillRoom(), frame: 42 })).toBe('still');
+    // And a platform that cannot say where the video had got infers nothing.
+    expect(observePair({ ...stillRoom(), frame: 41 }, stillRoom())).toBe('still');
+  });
+
   it('reads two grids of different sizes as unreadable', () => {
     const small: LuminanceGrid = { columns: 2, rows: 2, values: new Uint8Array([90, 30, 200, 60]) };
     expect(observePair(stillRoom(), small)).toBe('unreadable');
@@ -228,5 +243,22 @@ describe('what the Camera screen says', () => {
     expect(presenceSentence('unknown')).toMatch(/will not pause/);
     expect(presenceSentence('absent')).toMatch(/pause/);
     expect(presenceSentence('present')).not.toMatch(/pause/);
+  });
+
+  it('does not promise a pause when nothing may be recording — #516', () => {
+    // The screen does not know whether a ride is recording, so the sentence
+    // may not assert that "your ride" exists.
+    expect(presenceSentence('absent')).not.toMatch(/your ride will pause/i);
+    expect(presenceSentence('absent')).toMatch(/if a ride is recording/i);
+  });
+
+  it('does not say "yet" of a check the quality ladder has taken away — #516', () => {
+    const throttled = presenceSentence('unknown', false);
+    expect(throttled).not.toMatch(/\byet\b/);
+    expect(throttled).toMatch(/stopped/);
+    expect(throttled).toMatch(/will not pause/);
+    // The control: while the ladder allows it, "yet" is still the truth.
+    expect(presenceSentence('unknown', true)).toMatch(/\byet\b/);
+    expect(presenceSentence('unknown')).toBe(presenceSentence('unknown', true));
   });
 });

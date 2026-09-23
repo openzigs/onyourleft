@@ -193,6 +193,20 @@ export interface LuminanceGrid {
   readonly rows: number;
   /** Row-major, one byte of luminance per cell, 0 black to 255 white. */
   readonly values: Uint8Array;
+  /**
+   * How far the source had got when this grid was drawn — a count of the
+   * frames it had delivered, or its playback position — or `undefined` where
+   * the platform cannot say. #516.
+   *
+   * ⚠️ **What stops a frozen picture reading as an empty room.** A `<video>`
+   * that has stopped receiving frames — a muted track, a stalled USB webcam, a
+   * hidden tab whose video Chrome stopped decoding — still draws its last
+   * frame, so two grids of a pair are the same picture and would read as
+   * `still`. `presence.ts` §`observePair` reads a pair whose second grid is no
+   * further on than its first as `unreadable` instead. A number that only ever
+   * goes up and says nothing about what is in the picture.
+   */
+  readonly frame?: number | undefined;
 }
 
 /**

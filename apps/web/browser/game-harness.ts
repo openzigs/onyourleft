@@ -2224,6 +2224,18 @@ export interface PresenceCostMeasurement {
   readonly sampleAloneMs: number;
   /** The widest spread between two rounds of the same condition. */
   readonly noiseMs: number;
+  /**
+   * #516: what a pair drawn from a source that has STOPPED delivering frames
+   * showed — a `canvas.captureStream(0)` never asked for a second frame, read
+   * through the real sampler. `unreadable` is the guard working.
+   */
+  readonly frozenObservation: string;
+  /**
+   * #516's control: the same picture, the same stream, with a new frame
+   * requested between the samples. `still` — the room did not change, and the
+   * source said it had moved on.
+   */
+  readonly deliveringObservation: string;
 }
 
 const NO_PRESENCE_COST: PresenceCostMeasurement = {
@@ -2235,7 +2247,73 @@ const NO_PRESENCE_COST: PresenceCostMeasurement = {
   frameWithSampleMs: 0,
   sampleAloneMs: 0,
   noiseMs: 0,
+  frozenObservation: '',
+  deliveringObservation: '',
 };
+
+/**
+ * **A frozen source, through the real sampler** — #516.
+ *
+ * A muted track, a stalled webcam and a hidden tab all leave a `<video>`
+ * drawing its last frame, and no test machine can produce one of those on
+ * demand. A `canvas.captureStream(0)` can: it delivers a frame only when
+ * `requestFrame()` is called, so never calling it again IS a source that has
+ * stopped. The picture is a left-to-right ramp, readable by every one of
+ * `presence.ts`' dark, bright and flat limits, so what decides the answer is
+ * the frame marker and nothing else.
+ */
+async function frozenSourceProbe(): Promise<{ frozen: string; delivering: string }> {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 48;
+  const context = canvas.getContext('2d');
+  if (context === null) {
+    return { frozen: 'no 2D context', delivering: 'no 2D context' };
+  }
+  const ramp = context.createLinearGradient(0, 0, canvas.width, 0);
+  ramp.addColorStop(0, '#202020');
+  ramp.addColorStop(1, '#e0e0e0');
+  context.fillStyle = ramp;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  const stream = canvas.captureStream(0);
+  const [track] = stream.getVideoTracks() as (MediaStreamTrack & { requestFrame?: () => void })[];
+  if (track?.requestFrame === undefined) {
+    return { frozen: 'no requestFrame', delivering: 'no requestFrame' };
+  }
+  track.requestFrame();
+  const sampler = videoLuminanceSampler(stream);
+  const pause = async (milliseconds: number): Promise<void> =>
+    new Promise((resolve) => {
+      setTimeout(resolve, milliseconds);
+    });
+  try {
+    const first = await sampler.sample();
+    await pause(PRESENCE_PAIR_GAP_MILLISECONDS);
+    const second = await sampler.sample();
+    const frozen = observePair(first, second);
+    // The control. A requested frame reaches the element within a frame or
+    // two; polled rather than waited for once, so a slow runner is not a
+    // false red. ⚠️ The SAME ramp is painted again before each request:
+    // measured on the way in, `requestFrame()` over a canvas nothing has
+    // drawn on since delivers no new frame at all, and the control read
+    // `unreadable` for that reason rather than the guard's.
+    let third = second;
+    for (
+      let attempt = 0;
+      attempt < 40 && observePair(second, third) === 'unreadable';
+      attempt += 1
+    ) {
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      track.requestFrame();
+      await pause(50);
+      third = await sampler.sample();
+    }
+    return { frozen, delivering: observePair(second, third) };
+  } finally {
+    sampler.release();
+    track.stop();
+  }
+}
 
 /**
  * **What #390's presence check costs a frame, with the renderer running** — the
@@ -2316,6 +2394,7 @@ async function presenceCostProbe(frame: SceneFrame): Promise<PresenceCostMeasure
     const mean = (values: readonly number[]) =>
       values.reduce((total, each) => total + each, 0) / values.length;
     const range = (values: readonly number[]) => Math.max(...values) - Math.min(...values);
+    const frozenSource = await frozenSourceProbe();
     return {
       measured: true,
       why: '',
@@ -2325,6 +2404,8 @@ async function presenceCostProbe(frame: SceneFrame): Promise<PresenceCostMeasure
       frameWithSampleMs: mean(sampled),
       sampleAloneMs: mean(alone),
       noiseMs: Math.max(range(plain), range(sampled)),
+      frozenObservation: frozenSource.frozen,
+      deliveringObservation: frozenSource.delivering,
     };
   } finally {
     view.destroy();

@@ -19,6 +19,27 @@
  *
  * The shape is `camera/boundary.test.ts`'s: strip comments, fail closed on a
  * walk that finds nothing.
+ *
+ * ## Two guards, and which one is the tripwire (#516)
+ *
+ * ⚠️ **The vocabulary scan alone could not see the likeliest second pauser**,
+ * and #515's review showed it: `PRESENCE_NAMES` matched `riderPresence` and
+ * `watchPresence` but not `state().presence`, which is how a VIEW reads the
+ * answer, and a new file doing
+ * `if (camera.state().presence === 'absent') { ride.pause(); }` left this
+ * suite 5/5 green. So the vocabulary now includes the bare word `presence`,
+ * and — the stronger half — §"every pause and resume in the client" does not
+ * depend on vocabulary at all: it enumerates every production call of
+ * `.pause(` and `.resume(`, file by file, and requires the ride controller's
+ * own `pause()` to have exactly one caller, the rider's Pause button. A second
+ * pauser anywhere, whatever it is named after, is a new entry in that table.
+ *
+ * ⚠️ **The line-by-line allowlists below are a TRIPWIRE, not a proof.** They
+ * pin exact source lines of `ride/controller.ts` and `recording/recorder.ts`
+ * as Prettier formats them, so an unrelated reflow — a longer name, a wrapped
+ * argument list — turns them red with nothing wrong. When that happens, read
+ * the new line, decide whether it branches on the answer, and re-pin it; do
+ * not loosen the patterns until they match anything.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
@@ -57,9 +78,15 @@ const PAUSES = /\.(?:pause|resume)\s*\(/;
 /** The one thing that is not a ride: a `<video>` element, in the camera adapter. */
 const MEDIA_PAUSE = /\bvideo\.pause\s*\(/g;
 
-/** The presence vocabulary, as code rather than prose. */
+/**
+ * The presence vocabulary, as code rather than prose.
+ *
+ * ⚠️ Includes the bare word `presence` since #516 — `CameraState.presence` is
+ * how a screen reads the answer, and a file that paused on it matched none of
+ * the longer names.
+ */
 const PRESENCE_NAMES =
-  /\b(?:riderPresence|RiderPresence|presenceAwareMovement|watchPresence|throttlePresence)\b/;
+  /\b(?:presence|riderPresence|RiderPresence|presenceAwareMovement|watchPresence|throttlePresence)\b/;
 
 describe('the scan itself', () => {
   it('finds source, and the presence code in it', () => {
@@ -70,6 +97,62 @@ describe('the scan itself', () => {
   it('would fire on a pause reached for from the presence side', () => {
     expect(PAUSES.test('if (camera.riderPresence() === "absent") void controller.pause();')).toBe(
       true,
+    );
+  });
+
+  it('knows a view reading the answer off the camera’s state as presence code — #516', () => {
+    // #515's review mutation, as a string: this is how a screen reads it.
+    const reviewers = "if (camera.state().presence === 'absent') { ride.pause(); }";
+    expect(PRESENCE_NAMES.test(reviewers)).toBe(true);
+    expect(PAUSES.test(reviewers)).toBe(true);
+  });
+});
+
+/**
+ * Every call of `.pause(` and `.resume(` in production code, per file — #516.
+ *
+ * Counted rather than pattern-matched on a receiver, because the receiver is
+ * what a second pauser would rename. A new file, or a second call in a file
+ * already here, is a red test whatever it is named after.
+ */
+const PAUSE_AND_RESUME_CALLS: Readonly<Record<string, { pause: number; resume: number }>> = {
+  // A detached <video>, released with the camera. Not a ride.
+  [join('camera', 'browser-camera.ts')]: { pause: 1, resume: 0 },
+  // The Web Audio context, resumed inside a press. Not a ride.
+  [join('game', 'audio-cues.ts')]: { pause: 0, resume: 1 },
+  [join('game', 'web-audio.ts')]: { pause: 0, resume: 1 },
+  // The recorder delegating the rider's pause to the engine.
+  [join('recording', 'recorder.ts')]: { pause: 1, resume: 1 },
+  // The controller's own pause() delegating to the recorder, and `tick`
+  // pausing the WORKOUT when the phase already says paused.
+  [join('ride', 'controller.ts')]: { pause: 2, resume: 2 },
+  // The workout session delegating to its player.
+  [join('workout', 'session.ts')]: { pause: 1, resume: 1 },
+  // The rider's Pause and Resume buttons — the ONLY callers of the ride's.
+  [join('views', 'RideView.tsx')]: { pause: 1, resume: 1 },
+};
+
+describe('every pause and resume in the client — #516', () => {
+  it('is one of the calls this table names, and nothing else calls one', () => {
+    const found: Record<string, { pause: number; resume: number }> = {};
+    for (const path of sources()) {
+      const text = code(path);
+      const pause = (text.match(/\.pause\s*\(/g) ?? []).length;
+      const resume = (text.match(/\.resume\s*\(/g) ?? []).length;
+      if (pause + resume > 0) {
+        found[path] = { pause, resume };
+      }
+    }
+    expect(found).toStrictEqual(PAUSE_AND_RESUME_CALLS);
+  });
+
+  it('gives the ride controller’s pause() exactly one caller: the rider’s own Pause button', () => {
+    const callers = sources().filter((path) => /\bcontroller\.pause\s*\(/.test(code(path)));
+    expect(callers).toStrictEqual([join('views', 'RideView.tsx')]);
+    // Inside the button's press, and nowhere else in that file.
+    const view = code(join('views', 'RideView.tsx'));
+    expect(view).toMatch(
+      /onClick=\{\(\)\s*=>\s*\{\s*void controller\.pause\(\);\s*\}\}\s*>\s*Pause\s*</,
     );
   });
 });

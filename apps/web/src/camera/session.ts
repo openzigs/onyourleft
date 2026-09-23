@@ -365,6 +365,18 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
   #presenceAllowed = true;
   #presenceTracker: PresenceTracker = PRESENCE_NOT_OBSERVED;
   #presenceChecking = false;
+  /**
+   * Which watch a presence check belongs to — #516.
+   *
+   * Moved on by everything that resets {@link #presenceTracker}: stopping the
+   * watch, starting it, and the ladder taking presence away or giving it back.
+   * A check reads it before its first sample and throws its answer away when it
+   * has moved, because comparing the SESSION is not enough: a
+   * `watchPresence(false)` → `(true)` inside the 150 ms between the two
+   * samples leaves the same session, a running watch and a freshly reset
+   * tracker, and the old watch's observation would be written into it.
+   */
+  #presenceGeneration = 0;
   #cancelPresence: (() => void) | undefined;
 
   constructor(options: CameraControllerOptions) {
@@ -648,6 +660,7 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
       return;
     }
     this.#watchingPresence = true;
+    this.#presenceGeneration += 1;
     // ⚠️ **The two samples are taken HERE, lexically inside this method, and
     // not in a private helper — and that is `check:wiring` being made to see
     // the chain.** The gate splits a class into its methods by name so that a
@@ -683,6 +696,7 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
     }
     this.#presenceAllowed = presenceAllowed;
     this.#presenceTracker = PRESENCE_NOT_OBSERVED;
+    this.#presenceGeneration += 1;
     this.#announce();
   }
 
@@ -741,6 +755,7 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
     this.#cancelPresence = undefined;
     this.#watchingPresence = false;
     this.#presenceTracker = PRESENCE_NOT_OBSERVED;
+    this.#presenceGeneration += 1;
   }
 
   /**
@@ -766,6 +781,7 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
       return;
     }
     this.#presenceChecking = true;
+    const generation = this.#presenceGeneration;
     const before = this.#presenceNow();
     try {
       let observation: ReturnType<typeof observePair>;
@@ -777,8 +793,14 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
       // The world may have changed while the samples were taken: the camera
       // turned off, the watch stopped, the ladder stepped down. An answer for
       // a watch that is no longer running would be written into a tracker
-      // that has just been reset.
-      if (!this.#presenceMayRun() || this.#session !== session) {
+      // that has just been reset — and so would one for a watch that was
+      // stopped and started again inside the pair gap, which the session
+      // comparison alone cannot see (#516).
+      if (
+        !this.#presenceMayRun() ||
+        this.#session !== session ||
+        this.#presenceGeneration !== generation
+      ) {
         return;
       }
       this.#presenceTracker = nextPresence(this.#presenceTracker, observation, this.#clock());
