@@ -77,6 +77,8 @@ const GAME: GamePort = {
 
 /** A paired trainer with no control, so the notice slot is in the document. */
 const NO_CONTROL: GameTrainerPort = {
+  // #503: the Ride press's request for control — this double changes nothing.
+  askForControlOnRide: () => Promise.resolve(),
   readTrainer: () => ({ kind: 'no-control', control: undefined }),
 };
 

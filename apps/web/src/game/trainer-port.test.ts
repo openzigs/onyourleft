@@ -16,7 +16,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   NO_GAME_TRAINER,
   gameTrainerFrom,
+  gameTrainerPortOver,
   trainerRoadNotice,
+  trainerRoadPromise,
   type GameTrainer,
   type GameTrainerKind,
   type GradientTrainer,
@@ -205,14 +207,16 @@ describe('trainerRoadNotice', () => {
   ];
 
   it('says nothing for a ready trainer and for no trainer', () => {
-    expect(trainerRoadNotice({ kind: 'ready', control: silentControl() })).toBeUndefined();
-    expect(trainerRoadNotice(NO_GAME_TRAINER)).toBeUndefined();
+    expect(
+      trainerRoadNotice({ kind: 'ready', control: silentControl() }, 'riding'),
+    ).toBeUndefined();
+    expect(trainerRoadNotice(NO_GAME_TRAINER, 'riding')).toBeUndefined();
   });
 
   it('says something distinct about the road for each of the four refusals', () => {
-    const said = KINDS.map((kind) => trainerRoadNotice({ kind, control: undefined })).filter(
-      (text) => text !== undefined,
-    );
+    const said = KINDS.map((kind) =>
+      trainerRoadNotice({ kind, control: undefined }, 'riding'),
+    ).filter((text) => text !== undefined);
     expect(said).toHaveLength(4);
     // Distinct, because four refusals a rider can act on differently must not
     // read alike — and a `switch` that fell through would still return a
@@ -226,16 +230,32 @@ describe('trainerRoadNotice', () => {
     }
   });
 
-  it('tells a rider whose trainer has not granted control where to fix it', () => {
-    const text = trainerRoadNotice({ kind: 'no-control', control: undefined }) ?? '';
-    expect(text).toContain('Ride screen');
-    // "before you start" is only actionable on the picker, which is why
-    // `GameView` renders this notice there as well as during the ride.
-    expect(text).toContain('before you start');
+  it('says nothing about control before the ride, because the Ride press asks — #503', () => {
+    // ⚠️ Until #503 this sentence sent the rider to the Ride screen "before
+    // you start". The picker now says what the press will do instead
+    // (`trainerRoadPromise`), so a warning here would contradict it.
+    expect(trainerRoadNotice({ kind: 'no-control', control: undefined }, 'before-ride')).toBe(
+      undefined,
+    );
+  });
+
+  it('tells a rider whose trainer refused control that the hills are not reaching it — #503', () => {
+    const text = trainerRoadNotice({ kind: 'no-control', control: undefined }, 'riding') ?? '';
+    expect(text).toContain('did not grant control when you pressed Ride');
+    expect(text).toContain('hills');
+    // Not the detour #503 removed.
+    expect(text).not.toContain('Ride screen');
+  });
+
+  it('says the same thing before and during a ride for every other state', () => {
+    for (const kind of KINDS.filter((each) => each !== 'no-control')) {
+      const trainer: GameTrainer = { kind, control: undefined };
+      expect(trainerRoadNotice(trainer, 'before-ride')).toBe(trainerRoadNotice(trainer, 'riding'));
+    }
   });
 
   it('tells a rider whose workout holds the trainer why, and how to get it back', () => {
-    const text = trainerRoadNotice({ kind: 'workout', control: undefined }) ?? '';
+    const text = trainerRoadNotice({ kind: 'workout', control: undefined }, 'riding') ?? '';
     expect(text).toContain('workout');
     expect(text).toContain('Ride screen');
     // ⚠️ It must not read as a fault in the trainer. The machine is fine; the
@@ -245,7 +265,7 @@ describe('trainerRoadNotice', () => {
   });
 
   it('never claims a machine that cannot simulate merely needs control', () => {
-    const text = trainerRoadNotice({ kind: 'no-simulation', control: undefined }) ?? '';
+    const text = trainerRoadNotice({ kind: 'no-simulation', control: undefined }, 'riding') ?? '';
     expect(text).not.toContain('Take control');
   });
 
@@ -256,8 +276,114 @@ describe('trainerRoadNotice', () => {
     const answered: GameTrainer[] = KINDS.map((kind) => ({ kind, control: undefined }));
     expect(answered).toHaveLength(6);
     for (const trainer of answered) {
-      const text = trainerRoadNotice(trainer);
-      expect(text === undefined || text.length > 40).toBe(true);
+      for (const moment of ['before-ride', 'riding'] as const) {
+        const text = trainerRoadNotice(trainer, moment);
+        expect(text === undefined || text.length > 40).toBe(true);
+      }
     }
+  });
+});
+
+describe('trainerRoadPromise — what the Ride press will do, said before it (#503)', () => {
+  it('promises the hills to a trainer that will take them, and to one the press will ask', () => {
+    for (const kind of ['ready', 'no-control'] as const) {
+      expect(trainerRoadPromise({ kind, control: undefined })).toContain(
+        'Your trainer will follow this route’s hills',
+      );
+    }
+    // The press asks only where there is something to ask, and says so.
+    expect(trainerRoadPromise({ kind: 'no-control', control: undefined })).toContain(
+      'Pressing Ride asks it for control',
+    );
+    expect(trainerRoadPromise({ kind: 'ready', control: silentControl() })).not.toContain(
+      'asks it for control',
+    );
+  });
+
+  it('promises nothing where the hills will not reach the trainer', () => {
+    for (const kind of ['none', 'workout', 'not-controllable', 'no-simulation'] as const) {
+      expect(trainerRoadPromise({ kind, control: undefined })).toBeUndefined();
+    }
+  });
+});
+
+describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
+  type Facts = {
+    paired: boolean;
+    controllable: boolean;
+    canSimulate: boolean;
+    hasControl: boolean;
+  };
+
+  /** A ride controller reduced to what the port reads, counting requests. */
+  function controllerWith(facts: Facts, workout: 'running' | 'finished' | 'none' = 'none') {
+    const requests: number[] = [];
+    const controller = {
+      getSnapshot: () => ({
+        trainer: facts,
+        workout: workout === 'none' ? undefined : { status: workout },
+      }),
+      simulationControl: () =>
+        workout === 'none' && facts.controllable ? silentControl() : undefined,
+      requestTrainerControl: async () => {
+        requests.push(requests.length);
+        facts.hasControl = true;
+        return Promise.resolve();
+      },
+    };
+    return { controller, requests };
+  }
+
+  const NO_CONTROL: Facts = {
+    paired: true,
+    controllable: true,
+    canSimulate: true,
+    hasControl: false,
+  };
+
+  it('asks the controller for control on a trainer that has not granted it, and reads it back', async () => {
+    const { controller, requests } = controllerWith({ ...NO_CONTROL });
+    const port = gameTrainerPortOver(controller);
+    expect(port.readTrainer().kind).toBe('no-control');
+
+    await port.askForControlOnRide();
+
+    expect(requests).toHaveLength(1);
+    expect(port.readTrainer().kind).toBe('ready');
+  });
+
+  it('never asks over a running workout, even if the caller does', async () => {
+    // ⚠️ The safety state #362 argued for. A workout that started between the
+    // picker's read and the press owns the control point.
+    const { controller, requests } = controllerWith({ ...NO_CONTROL }, 'running');
+    await gameTrainerPortOver(controller).askForControlOnRide();
+    expect(requests).toHaveLength(0);
+  });
+
+  it('never asks a machine that cannot simulate, has no control point, or already has control', async () => {
+    for (const facts of [
+      { ...NO_CONTROL, canSimulate: false },
+      { ...NO_CONTROL, controllable: false },
+      { ...NO_CONTROL, hasControl: true },
+      { ...NO_CONTROL, paired: false },
+    ]) {
+      const { controller, requests } = controllerWith(facts);
+      await gameTrainerPortOver(controller).askForControlOnRide();
+      expect(requests, JSON.stringify(facts)).toHaveLength(0);
+    }
+  });
+
+  it('is a trainer nothing can be said to where there is no controller', async () => {
+    const port = gameTrainerPortOver(undefined);
+    expect(port.readTrainer()).toEqual(NO_GAME_TRAINER);
+    await expect(port.askForControlOnRide()).resolves.toBeUndefined();
+  });
+
+  it('reads a finished workout for the audio, as main.tsx did — #447', () => {
+    const { controller } = controllerWith({ ...NO_CONTROL, hasControl: true }, 'finished');
+    expect(gameTrainerPortOver(controller).readTrainer()).toMatchObject({
+      kind: 'workout',
+      workoutFinished: true,
+    });
   });
 });

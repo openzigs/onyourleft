@@ -43,6 +43,11 @@ resolution and scenery **at the display's rate** — only the three below it cap
 reader who remembers "one rung down" meaning 30 fps is reading the #476 file; "one rung down" (Y5, T5)
 is 60 fps with less detail now. The floor rung is unchanged in every figure. Part Z's frame-rate note
 has the table.
+**Part AC added 2026-09-23** by [#503](https://github.com/openzigs/onyourleft/issues/503): the
+game's own *Ride* press now asks the trainer for control, so L1's *"take control on the Ride screen
+first"* is no longer the way in, and AC is the hardware step that says whether the press does it.
+Checked with `grep '^## Part'` for a duplicate letter first — AB was the last, and AC was free. It
+**changes resistance** and runs with L, before D (Safety rule 2).
 **Discharges, when run:** [#87](https://github.com/openzigs/onyourleft/issues/87) criteria 2, 3, 5
 and 6 and its two-OEM line; the Android half of
 [#85](https://github.com/openzigs/onyourleft/issues/85); and
@@ -89,14 +94,16 @@ resistance to a person who is pedalling*.
    ([#364](https://github.com/openzigs/onyourleft/issues/364)) and the whole document had no
    simulation-mode step before it — which is why an afternoon spent filling in Part D truthfully
    would have left every cell green and the game sending nothing (#362).
-   ⚠️ **Parts R ([#372](https://github.com/openzigs/onyourleft/issues/372)) and S
-   ([#441](https://github.com/openzigs/onyourleft/issues/441)) run between them: L, then R, then S,
-   then D.** S deliberately lets cadence collapse under an ERG target, which is the most
+   ⚠️ **Parts AC ([#503](https://github.com/openzigs/onyourleft/issues/503)), R
+   ([#372](https://github.com/openzigs/onyourleft/issues/372)) and S
+   ([#441](https://github.com/openzigs/onyourleft/issues/441)) run between them: L, then AC, then R,
+   then S, then D.** AC is L's road with the control taken by the game's own *Ride* press rather than
+   on the Ride screen, so it follows L while the rider is warm to the same route. S deliberately lets cadence collapse under an ERG target, which is the most
    uncomfortable thing in this document short of D4 — do it fresh, and not after D. R is the ERG half of the release test and it needs a target set, so it is not a
    no-resistance part. ⚠️ It used to say every step of it ends by *removing* resistance; on the
    owner's trainer none does (Part R says what was measured), so ride R as if the target stays —
    and D4 stays the last thing done all day.
-3. **Have the trainer's power switch within reach for Parts L, R, S and D.**
+3. **Have the trainer's power switch within reach for Parts L, AC, R, S and D.**
 4. **Do not clip in for D4, and use flat pedals for L5, L7 and Part R.** D4: flat pedals or bare
    feet, or stand beside the bike. ⚠️ **L5, L7 and R are ridden**, and this item used to say not to
    clip in for L5 because L5 was *"off the bike, turn the cranks by hand"* — a reviewer who remembers
@@ -972,7 +979,7 @@ adb logcat | grep -i "BluetoothLe"
 
 | Step | What to do | What should happen |
 |---|---|---|
-| L1 | On the Ride screen, pair the trainer and **take control**. Then open the game and choose a route | If the machine does not offer simulation mode, the picker says so in words about the **road** — *"does not offer simulation mode … the road on screen is real; the resistance under you is not"* — and **nothing is written**. If control was not taken, it says to take it on the Ride screen. Either way, record which and stop here |
+| L1 | On the Ride screen, pair the trainer and **take control**. Then open the game and choose a route | If the machine does not offer simulation mode, the picker says so in words about the **road** — *"does not offer simulation mode … the road on screen is real; the resistance under you is not"* — and **nothing is written**; record it and stop here. Otherwise the picker says *"Your trainer will follow this route’s hills"*. ⚠️ **Since [#503](https://github.com/openzigs/onyourleft/issues/503) it no longer sends a rider without control to the Ride screen** — the *Ride* press asks for it, and Part AC is the step for that path; a reader who remembers L1 stopping on *"take it on the Ride screen"* is reading the old procedure |
 | L2 | ⚠️ **On the bike, low gear, seated.** Start the ride on a route with a gentle climb and pedal. Scroll the HUD down until *Pause* is on screen | Within a second or two the HUD's trainer line — just above the controls — reads `Trainer: simulating …%` with a **non-zero** count beside it, and the resistance increases as the climb starts. ⚠️ Do this in **landscape as well as portrait** and say which orientations you read it in; that is what #373 was about |
 | L3 | Ride through the steepest section of the route you chose | The percentage on that line **tracks the route's own gradient** — compare it against the gradient field on the HUD, which is read from the same profile. They should agree to a tenth or so |
 | L4 | Ride over the crest and onto the descent | The percentage goes **negative** and the resistance drops away. A sign lost between the profile and the control point shows up here and nowhere else |
@@ -2588,3 +2595,58 @@ lake or a stone wall at all. #501 changed each, and each has a gate in CI that s
   observable from here. `apps/web/src/game/gradient.ts` §"What is deliberately NOT sent" records
   that only the **grade** is written and that the protocol client's own defaults stand for the other
   three simulation parameters.
+
+---
+
+## Part AC — the game takes control when the rider presses Ride ([#503](https://github.com/openzigs/onyourleft/issues/503)) ⚠️ run after L, before D
+
+**Why this part exists.** On 2026-09-23 the owner opened the trainer game on the Pixel Tablet and was
+told they did not have control of the trainer. The only *Ask the trainer for control* was on the Ride
+screen, inside the ERG panel, so the game looked as though it needed an ERG set first. It never did.
+Since #503 the game's picker says *"Your trainer will follow this route’s hills. Pressing Ride asks
+it for control…"*, and the **Ride press** sends the one Request Control, through the same controller
+the Ride screen uses. Entering the game screen asks nothing and writes nothing.
+
+⚠️ **No test in the repository can say what a real trainer does.** `game/trainer-wiring.test.tsx`
+rides this path against the #44 simulator — pair, open the game, press *Ride*, `0x00` then `0x11` —
+and reads the grade back off the simulated machine. Whether a real FTMS trainer grants the request
+and follows the climb is only here.
+
+### ⚠️ Read this before starting
+
+- **Start with control NOT held.** Force-stop the app and reopen it, or pair the trainer fresh, so the
+  Ride screen's Trainer panel reads *"This app does not have control of the trainer."* — and **do not
+  press *Ask the trainer for control*** anywhere. That is the whole point of the part.
+- **End any workout first** — L's bullet says why. With a workout running, *Ride* must ask for
+  nothing (AC5 checks that).
+- Flat pedals, low gear, seated, power switch within reach (Safety items 3 and 4). A route with a
+  gentle climb whose maximum gradient you know — Safety item 5.
+
+```bash
+adb logcat -c
+adb logcat | grep -i "BluetoothLe"
+```
+
+| Step | What to do | What should happen |
+|---|---|---|
+| AC1 | Pair the trainer on the Ride screen and **do not** take control. Open the game and choose the route. Wait ten seconds on the picker | The picker reads *"Your trainer will follow this route’s hills. Pressing Ride asks it for control…"*, above the *Ride* button. ⚠️ **No `0x00` in logcat yet, and no write at all** — entering the game asks nothing |
+| AC2 | ⚠️ **On the bike, low gear, seated.** Press ***Ride*** and pedal | **One `0x00` Request Control**, answered `80 00 01`, **before** the first `0x11`. Within a second or two the HUD's trainer line reads `Trainer: simulating …%` with a non-zero count, and **no road notice** is on the stage |
+| AC3 | Ride into the climb | The resistance **follows the climb**, and the trainer line's percentage tracks the HUD's gradient as in L3 — without the Ride screen having been visited |
+| AC4 | Press *End ride*, return to the Ride screen | One `0x08` Stop as in L5, and **no `0x00` after it**. The Trainer panel reads *"This app has control of the trainer…"*: the game's request is the Ride screen's control, not a second one. The ERG line is labelled *ERG, optional* — one of the things control is for, not the thing it is |
+| AC5 | Start a saved workout on the Ride screen, then open the game and press *Ride* | The picker shows the *"A workout is driving your trainer…"* notice, and ⚠️ **no `0x00` and no `0x11`** follow the Ride press — a workout keeps the control point |
+| AC6 | *(Only if you have a second app that can take control, e.g. the manufacturer's.)* Take control with the other app, then press *Ride* in this one | Either this app is granted control (AC2's result) or the trainer refuses — in which case the ride still starts and the stage says *"Your trainer did not grant control when you pressed Ride…"*. Record which, and the `80 00 xx` answer |
+
+### AC results
+
+| Step | Result | `0x00` count / answer | Notes |
+|---|---|---|---|
+| AC1 | picker sentence as described? | | |
+| AC2 | trainer line / count: | | |
+| AC3 | did the climb follow? | | |
+| AC4 | Trainer panel sentence afterwards: | `0x00` after `0x08`? | |
+| AC5 | notice shown? anything written? | | |
+| AC6 | granted or refused? | | |
+
+**Did pressing Ride on the game feel like the only thing you had to do, in your own words?** ______________
+
+**Trainer (make, model, firmware, address):** ______________  **Build:** ______________

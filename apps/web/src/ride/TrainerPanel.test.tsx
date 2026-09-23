@@ -18,6 +18,8 @@
 
 import { describe, expect, it, afterEach } from 'vitest';
 
+import { watts } from '@onyourleft/domain';
+
 import { mount, type Mounted } from '../testing/mount';
 
 import type { TrainerSnapshot } from './controller';
@@ -197,5 +199,76 @@ describe('after a release — #372', () => {
 
     expect(text).toContain('Not released');
     expect(text).toContain('It may still be holding resistance.');
+  });
+});
+
+describe('control is its own step, and ERG is one thing to do with it — #503', () => {
+  const driven = {
+    controllable: true,
+    canSetPower: true,
+    canSimulate: true,
+    controlChoice: {
+      kind: 'fitness-machine' as const,
+      service: '00001826-0000-1000-8000-00805f9b34fb',
+      controlPoint: '00002ad9-0000-1000-8000-00805f9b34fb',
+      vendorAlsoPresent: false,
+    },
+  };
+
+  it('does not frame pairing as being for ERG', async () => {
+    const text = await render(snapshot({ paired: false }));
+    expect(text).toContain('Pair a smart trainer to control it');
+    // The sentence the owner read on 2026-09-23.
+    expect(text).not.toContain('ERG');
+  });
+
+  it('asks for control as its own step, without showing an ERG form', async () => {
+    const text = await render(snapshot({ ...driven, hasControl: false }));
+    expect(text).toContain('This app does not have control of the trainer');
+    // And says the game does not need this detour.
+    expect(text).toContain('the trainer game asks for it itself when you press Ride');
+    expect(text).toContain('Ask the trainer for control');
+    expect(mounted?.container.querySelector('#oyl-erg-target')).toBeNull();
+    expect(text).not.toContain('ERG, optional');
+  });
+
+  it('offers control to a trainer that takes no power target — the game may still drive it', async () => {
+    // ⚠️ Until #503 the "No ERG" early return came first, so a machine without
+    // Target Setting bit 3 had no way to be given control on this screen at
+    // all — and the game, which never needs ERG, could not have it either.
+    const text = await render(snapshot({ ...driven, canSetPower: false, hasControl: false }));
+    expect(text).toContain('Ask the trainer for control');
+  });
+
+  it('says control is held, and shows ERG as optional — one thing to do with it', async () => {
+    const text = await render(snapshot({ ...driven, hasControl: true }));
+    expect(text).toContain('This app has control of the trainer.');
+    expect(text).toContain('ERG, optional: No target set. The trainer is following your effort.');
+    expect(mounted?.container.querySelector('#oyl-erg-target')).not.toBeNull();
+    expect(text).not.toContain('Ask the trainer for control');
+  });
+
+  it('still says a target is outstanding when control went while it was asked for', async () => {
+    // "Requested is not confirmed" survives the loss: the write is still in
+    // flight, and hiding it with the ERG section would hide the one sentence
+    // that says the machine may be about to change.
+    const text = await render(
+      snapshot({ ...driven, hasControl: false, lost: 'permission-lost', requested: watts(220) }),
+    );
+    expect(text).toContain('Asked for 220 W — waiting for the trainer to confirm');
+  });
+
+  it('still says a target may be held after control went', async () => {
+    const text = await render(
+      snapshot({
+        ...driven,
+        hasControl: false,
+        lost: 'link-lost',
+        target: { kind: 'unknown', attempted: watts(250) },
+      }),
+    );
+    expect(text).toContain('may still be holding 250 W');
+    expect(text).toContain('Ask the trainer for control');
+    expect(mounted?.container.querySelector('#oyl-erg-target')).toBeNull();
   });
 });

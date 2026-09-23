@@ -987,6 +987,19 @@ h3:first-child {
   font-size: var(--oyl-font-size-lg);
 }
 
+/*
+ * #503: the ERG line under the control sentence. Control and ERG were one
+ * sentence until then; as two, the paragraph gap between them cost the
+ * workout's Ride its margin to the fold inside the Android shell
+ * (`rideview.browser.spec.ts` §"clears the fold", 1280×800 edge-to-edge,
+ * measured in the pinned Chromium on macOS: 93.9 px on main, 53.1 px with a
+ * full paragraph gap, 61.1 px with this). They read as one block, so the gap
+ * between them is half a paragraph's.
+ */
+.oyl-trainer__erg {
+  margin-top: calc(-1 * var(--oyl-space-sm));
+}
+
 .oyl-trainer__form {
   display: flex;
   flex-wrap: wrap;

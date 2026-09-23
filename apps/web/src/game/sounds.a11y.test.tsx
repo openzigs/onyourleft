@@ -301,6 +301,8 @@ describe('the audio may stop once nothing is riding — #447', () => {
     // A workout holds the trainer: `rejoin` will look for a context that is
     // still awake when the rider goes back to it.
     const workoutOwnsIt: GameTrainerPort = {
+      // #503: the Ride press's request for control — this double changes nothing.
+      askForControlOnRide: () => Promise.resolve(),
       readTrainer: () =>
         gameTrainerFrom(
           { paired: true, controllable: true, canSimulate: true, hasControl: true },
@@ -321,6 +323,8 @@ describe('the audio may stop once nothing is riding — #447', () => {
   /** A port whose workout is whatever `workoutNow` says at the moment it is read. */
   let workoutNow: 'running' | 'finished' | 'none' = 'running';
   const liveWorkout: GameTrainerPort = {
+    // #503: the Ride press's request for control — this double changes nothing.
+    askForControlOnRide: () => Promise.resolve(),
     readTrainer: () =>
       gameTrainerFrom(
         { paired: true, controllable: true, canSimulate: true, hasControl: true },
