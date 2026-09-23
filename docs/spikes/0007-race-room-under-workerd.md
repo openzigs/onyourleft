@@ -1,4 +1,4 @@
-# Spike 0006: One 50-rider race room, measured under `workerd`
+# Spike 0007: One 50-rider race room, measured under `workerd`
 
 - **Date measured**: **2026-09-22.** Every figure below was produced on that day on the machine in
   §2. Nothing here is quoted from a rate card except where it says so, and nothing here is an invoice
@@ -134,6 +134,18 @@ defect shape `CLAUDE.md` §5 names — reproduced faithfully in a networked room
 **The repair is that the stats URL is derived from the same string the sockets use**, and the
 cross-check above is what would now make a recurrence loud rather than silent.
 
+⚠️ **One thing that cross-check does NOT establish, recorded rather than reconciled.** The **inbound**
+total decomposes exactly — 179 850 positions + 36 000 pings + 50 joins + 1 start = **215 901**, which
+is the counter. The **outbound** total does not. Frames plus ping replies plus the 50 join answers
+plus the `go` broadcast predict about **215 950**; the counter says **214 850**, a residual of roughly
+**1 100 messages, 0.5 % of outbound**. The likeliest cause is the run's edges — pings sent in the last
+seconds with no reply before the sockets closed, or ticks that did not complete a fan-out at
+shutdown — but **nobody instrumented it and it is not known**, so it is written down as an open
+discrepancy rather than as an explanation. It moves no figure in §4, §5, §8 or §9: those are read from
+their own counters and from per-process accounting, not derived from this decomposition. The room-side
+and client-side totals still agree to one message over 430 751, which is what says nothing was lost
+**in flight**; it says nothing about what was never sent.
+
 ### 3.2 What the memory figure is, and what it is not
 
 The resident set does not sit flat: it climbs from **30.2 MiB** with an idle room to a peak of
@@ -176,8 +188,11 @@ so local `workerd` does not freeze it here; and the figure lands **below** the o
 independent per-process total in a plausible proportion, which is the only reason it is quoted.
 
 **And it scales close to linearly in riders, but the fan-out does not.** At **200 riders** for 300 s
-the process used **15.73 s** of CPU — **5.17 % of a core**, against 1.61 % for 50 riders in the same
-window. That is 3.2× the CPU for 4× the riders. **The bytes are the opposite story**: 200 riders
+the process used **15.73 s** of CPU — **5.17 % of a core** — against **5.32 s** and **1.75 %** for
+50 riders over the same 300 s window. That is **3.0× the CPU for 4× the riders**. ⚠️ **Both figures
+are §9's table rows D and A, read from the runs' own counters, and this paragraph is quoted from
+there rather than restating it**: a draft of it said *1.61 %* and *3.2×*, which reconciled with
+nothing in §9 and was caught in review before this document landed. **The bytes are the opposite story**: 200 riders
 produced **178.0 MB of fan-out in 300 seconds** against **11.6 MB** for 50 — **15.4×, which is
 n^1.97**. A frame per rider, each carrying every rider, is **O(n²) in bytes** and there is no way to
 make it otherwise without sending each rider less than the whole field.
