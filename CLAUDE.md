@@ -3080,7 +3080,21 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   prose. ⚠️ A reviewer who remembers this sentence being unenforced is reading the old file:
   deleting an ADR's `- **Status**: Accepted` line used to leave `check-repo-rules.sh` reporting
   clean at exit 0. Numbers are unique and `ADR001` enforces it. Check `docs/architecture.md` for which numbers are taken
-  **and which are claimed by open issues** before you pick one. **The next free number is 0029.**
+  **and which are claimed by open issues** before you pick one. **The next free number is 0033.**
+  ⚠️ **0032 is [ADR 0032](docs/adr/0032-external-data-for-the-game-world.md)**, taken by
+  [#248](https://github.com/openzigs/onyourleft/issues/248) — the trainer game's world takes **no**
+  external data source. It took 0032 rather than 0029 because **0029, 0030 and 0031 were claimed the
+  same day** by the camera-decision work
+  ([#378](https://github.com/openzigs/onyourleft/issues/378)–[#381](https://github.com/openzigs/onyourleft/issues/381))
+  in a parallel pull request, and two branches taking "the next free number" at once collide on a
+  document that cannot be renumbered. ⚠️ **0021 is now WRITTEN and is no longer a live
+  reservation** — [ADR 0021](docs/adr/0021-racing-another-riders-ghost.md),
+  [#330](https://github.com/openzigs/onyourleft/issues/330), 2026-09-22 — and a reviewer who
+  remembers the paragraph below calling it reserved-and-unwritten is reading the old file. ⚠️ **It
+  does NOT supersede [ADR 0007](docs/adr/0007-patent-posture.md) D4**, whatever #330's title says:
+  D4's ❌ on a ghost of another rider stands, [#331](https://github.com/openzigs/onyourleft/issues/331)
+  stays blocked, and ADR 0021 **D-7** is the question put to the owner. ADR 0007 gained its first
+  `## Amendments` entry in the same change.
   ⚠️ **0028 is [ADR 0028](docs/adr/0028-racing-fairness.md)**, taken by
   [#465](https://github.com/openzigs/onyourleft/issues/465) for how a race between riders is fair.
   ⚠️ It was **Accepted with five questions explicitly left to the owner**, which is a shape no other
@@ -3107,10 +3121,10 @@ Never open a public issue with vulnerability details — use GitHub private vuln
   [#357](https://github.com/openzigs/onyourleft/issues/357) for the CC-BY asset ruling, and a reviewer who
   remembers this sentence offering 0023 is reading the old file.
   ⚠️ This sentence said *"every number from 0001 to 0020 is now written and the next free number is
-  0021 — there is no live reservation"*, and a reviewer who remembers that is reading the old file:
-  **0021 is a live reservation**, claimed by
-  [#330](https://github.com/openzigs/onyourleft/issues/330) for the ghost-racing ADR and not yet
-  written. **0022 is [ADR 0022](docs/adr/0022-game-scenery-model-pack.md)**, taken by
+  0021 — there is no live reservation"*, and then that **0021 was a live reservation** claimed by
+  [#330](https://github.com/openzigs/onyourleft/issues/330) and not yet written. **Both are now the
+  old file**: #330 wrote it on 2026-09-22 and the reservation is consumed — see the 0032 paragraph
+  above for what it does and does not decide. **0022 is [ADR 0022](docs/adr/0022-game-scenery-model-pack.md)**, taken by
   [#340](https://github.com/openzigs/onyourleft/issues/340) for the game's CC0 model pack — it took
   0022 rather than 0021 precisely because this paragraph was stale, and a written ADR cannot be
   renumbered without breaking citations, so the `ADR001` collision would have landed on #330. The
@@ -3347,6 +3361,15 @@ top of an issue **supersedes its body**.
 | Why a public race room is blocked rather than merely wanting moderation | [ADR 0028](docs/adr/0028-racing-fairness.md) D-6, [ADR 0014](docs/adr/0014-portable-identity.md), [#83](https://github.com/openzigs/onyourleft/issues/83) |
 | Whether a LIVE race between riders is inside the claims ADR 0007 read, and the one limitation carrying the whole distance | [`docs/spikes/0005-live-racing-patent-read.md`](docs/spikes/0005-live-racing-patent-read.md) §3.1, §6, [#466](https://github.com/openzigs/onyourleft/issues/466) |
 | Why ADR 0007 D4's ghost line does not answer the live-racing question, and what does | [ADR 0007](docs/adr/0007-patent-posture.md) D4, D5, [`docs/spikes/0005-live-racing-patent-read.md`](docs/spikes/0005-live-racing-patent-read.md) §6 |
+| Why racing another rider's ghost is still forbidden after a fuller patent read, and who has to decide otherwise | [ADR 0021](docs/adr/0021-racing-another-riders-ghost.md) D-1, D-7, [ADR 0007](docs/adr/0007-patent-posture.md) D5, [#330](https://github.com/openzigs/onyourleft/issues/330) |
+| What a replayed cross-rider ghost fails that a live race also fails, and what it meets that a live race does not | [ADR 0021](docs/adr/0021-racing-another-riders-ghost.md) D-2, D-3, [`docs/spikes/0005-live-racing-patent-read.md`](docs/spikes/0005-live-racing-patent-read.md) §3.3 |
+| Why sharing a ride is not consent to being raced, and what a privacy-zone trim does to a ghost | [ADR 0021](docs/adr/0021-racing-another-riders-ghost.md) D-5, [ADR 0004](docs/adr/0004-privacy-and-location.md), `apps/web/src/routes/share.ts` §`RouteShare.usable` |
+| What replaces the one test that is both a cross-athlete control and a patent control, and in what order | [ADR 0021](docs/adr/0021-racing-another-riders-ghost.md) D-5.3, `packages/store/src/activity-store.ghost-scope.test.ts` |
+| Whether the game world may fetch anything from outside the athlete's own route | [ADR 0032](docs/adr/0032-external-data-for-the-game-world.md) D-1, D-4, [#248](https://github.com/openzigs/onyourleft/issues/248) |
+| Why the hillside beside the road is invented rather than the real one, and what a real one would cost | [ADR 0032](docs/adr/0032-external-data-for-the-game-world.md) D-2, `apps/web/src/game/three-renderer.ts`, [#458](https://github.com/openzigs/onyourleft/issues/458) |
+| Why the ROUTE's elevation is not the WORLD's, and the issue shape that crosses the line without noticing | [ADR 0032](docs/adr/0032-external-data-for-the-game-world.md) D-3, [ADR 0010](docs/adr/0010-map-tiles-and-routing.md) D-5 |
+| What Mapterhorn's terrain data is actually licensed under, after two failed reads and one that worked | [ADR 0032](docs/adr/0032-external-data-for-the-game-world.md) D-6, [ADR 0010](docs/adr/0010-map-tiles-and-routing.md) §"Open questions" 6 |
+| Which side of ODbL §4.5(b) a rendered world falls on, and why that answer decides nothing | [ADR 0032](docs/adr/0032-external-data-for-the-game-world.md) D-5, [ADR 0012](docs/adr/0012-data-licence.md) D-3 |
 | What a segment matcher may not do, and the prior art the design-around cites | [ADR 0007](docs/adr/0007-patent-posture.md) D-2 and D-6, `docs/spikes/0001-segment-matching.md` §7 |
 | Which time basis a segment board ranks by, and why moving time is not it | `packages/domain/src/segment/effort.ts` §`RANKING_BASIS` |
 | How two efforts recorded at different rates are compared without truncating either | `packages/domain/src/segment/comparison.ts`, §`overlayEfforts` |
