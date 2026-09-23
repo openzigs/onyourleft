@@ -629,6 +629,22 @@ describe('your own computer — #387', () => {
     expect(document.body.textContent).toContain('Nothing is sent');
   });
 
+  it('switches off even when the address box has been cleared, and then sends nothing', async () => {
+    // #520's review: clearing the address is how a rider stops sending, and a
+    // refused address used to return before the switch-off was written — the
+    // box read off, storage said on, and the check still went to the OLD address.
+    const { send, urls } = replying('ready');
+    await wired(send);
+    await saveComputer('http://192.168.1.20:8080', 'vision-4b', true);
+    expect(readAnalysisEndpoint()?.switchedOn).toBe(true);
+    await saveComputer('', '', false);
+    expect(readAnalysisEndpoint()?.switchedOn ?? false).toBe(false);
+    expect(document.body.textContent).toContain('Switched off. Nothing is sent.');
+    await turnOn();
+    expect(button('check the connection')).toBeUndefined();
+    expect(urls).toStrictEqual([]);
+  });
+
   it('shows nothing a hostile answer said — no markup, no words', async () => {
     const hostile =
       '<img src=x onerror="window.__pwned=1"> Your knee angle is 142 degrees. Raise your saddle.';

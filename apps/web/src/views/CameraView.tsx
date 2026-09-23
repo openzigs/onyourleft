@@ -516,6 +516,23 @@ function AnalysisSection({
 
   const save = (): void => {
     const decision = endpointDecision({ address, model, switchedOn });
+    if (decision.endpoint === undefined && !switchedOn) {
+      // ⚠️ Switching off must take effect whatever the boxes hold. Clearing
+      // the address is exactly how a rider stops sending, and a refused
+      // address used to return before anything was written, leaving the
+      // stored row switched ON — the box read off while the check was still
+      // offered, to the OLD address. The privacy policy says "To stop it,
+      // switch it off"; this is the line that makes that true.
+      const stored = readAnalysisEndpoint();
+      const kept = stored === undefined || writeAnalysisEndpoint({ ...stored, switchedOn: false });
+      if (!kept) {
+        forgetAnalysisEndpoint();
+      }
+      setRefusal(undefined);
+      setConfigured(false);
+      setMessage('Switched off. Nothing is sent.');
+      return;
+    }
     setRefusal(decision.refusal);
     if (decision.endpoint === undefined) {
       setMessage(undefined);
