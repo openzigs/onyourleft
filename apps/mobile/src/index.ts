@@ -44,4 +44,6 @@ export {
 } from './camera/camera';
 export type { CameraPermissionNotice } from './camera/camera';
 export { mayShowDeviceList, permissionNotice } from './permission/notice';
+export { capacitorThermalPlugin, readCapacitorThermalHeadroom } from './thermal/thermal';
+export type { ThermalPlugin, ThermalReply } from './thermal/thermal';
 export type { PermissionAction, PermissionNotice } from './permission/notice';

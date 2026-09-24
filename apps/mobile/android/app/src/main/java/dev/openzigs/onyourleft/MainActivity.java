@@ -7,7 +7,8 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
 
     /**
-     * ⚠️ {@link RecordingServicePlugin} is registered here, BEFORE {@code super.onCreate}. Capacitor
+     * ⚠️ {@link RecordingServicePlugin} and {@link ThermalPlugin} (#247) are registered here, BEFORE
+     * {@code super.onCreate}. Capacitor
      * auto-discovers plugins that ship as packages; one that lives in the application's own source
      * tree has to be registered by hand, and registering it after the bridge is built is a silent
      * no-op -- the web layer gets "plugin not implemented" at the moment a rider presses record.
@@ -15,6 +16,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(android.os.Bundle savedInstanceState) {
         registerPlugin(RecordingServicePlugin.class);
+        registerPlugin(ThermalPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }
