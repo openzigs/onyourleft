@@ -274,6 +274,10 @@ async function buildPlatform(
     const rideController = createRideController({
       ...shared,
       transport,
+      // #524. The connectedDevice foreground service, asked for while a ride
+      // is active. Until this line nothing started it, so no ride on Android
+      // ran with the service that keeps it alive with the screen off.
+      keepAlive: mobile.recordingServiceKeepAlive(mobile.capacitorRecordingServicePlugin()),
       // ⚠️ The **same** `plugin` object the transport holds, deliberately.
       // Building a second one would give the trainer control path its own
       // subscriptions and its own view of which links are up, and the first

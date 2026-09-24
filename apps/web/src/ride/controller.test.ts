@@ -83,6 +83,7 @@ import {
 } from './simulated-trainer-testing';
 import type { OpenTrainer, TrainerConnection } from './trainer';
 import type { RiderPresence, RiderPresencePort } from './presence-port';
+import type { RideKeepAlivePort } from './keep-alive-port';
 import { CameraController } from '../camera/session';
 import { manualSchedule, scriptedCamera, stillRoom } from '../camera/testing';
 import { PRESENCE_CHECK_MILLISECONDS } from '../camera/presence';
@@ -138,6 +139,8 @@ interface BenchOptions {
   readonly rideSave?: RideSavePort | undefined;
   /** #390: the camera's answer, handed to the controller as production does. */
   readonly presence?: RiderPresencePort | undefined;
+  /** #524: the foreground service, as `main.tsx` hands it over on Android. */
+  readonly keepAlive?: RideKeepAlivePort | undefined;
   /** Break one checkpoint-store operation, for the failure paths review found. */
   readonly checkpointStore?: Partial<RecordingCheckpointStore>;
   /**
@@ -270,6 +273,7 @@ function benchWith(options: BenchOptions = {}): Bench {
     ...(options.withTrainerControl === false ? {} : { openTrainer }),
     ...(options.rideSave === undefined ? {} : { rideSave: options.rideSave }),
     ...(options.presence === undefined ? {} : { presence: options.presence }),
+    ...(options.keepAlive === undefined ? {} : { keepAlive: options.keepAlive }),
   });
 
   return {
@@ -2174,6 +2178,110 @@ describe('#516 — what the camera’s answer sends a trainer mid-workout', () =
       expect(target).toBeLessThanOrEqual(OWN_TARGET);
     }
     expect(rig.written.filter(([op]) => op === REQUEST_CONTROL)).toHaveLength(controlRequests);
+    rig.controller.dispose();
+  });
+});
+
+/**
+ * #524 — the Android foreground service is asked for while a ride is active.
+ *
+ * `RecordingServicePlugin` was registered and never called, so no ride on
+ * Android ever ran with the service that keeps it alive with the screen off.
+ * These read what the controller asked of a port handed over as `main.tsx`
+ * hands it, across every way a ride starts and ends.
+ */
+describe('#524 — the ride keeps the process alive while it is active', () => {
+  /** A port that records every call, and can be told to refuse them. */
+  function recordingPort(refuse = false): RideKeepAlivePort & { readonly calls: string[] } {
+    const calls: string[] = [];
+    const answer = (): Promise<void> =>
+      refuse
+        ? Promise.reject(new Error('SecurityException: BLUETOOTH_CONNECT'))
+        : Promise.resolve();
+    return {
+      calls,
+      keepRideAlive: () => {
+        calls.push('keep');
+        return answer();
+      },
+      letRideSleep: () => {
+        calls.push('sleep');
+        return answer();
+      },
+    };
+  }
+
+  it('asks for nothing before a ride starts', async () => {
+    const port = recordingPort();
+    const rig = benchWith({ keepAlive: port });
+    await rig.controller.pair('trainer');
+    await ride(rig, 3);
+    expect(port.calls).toEqual([]);
+    rig.controller.dispose();
+  });
+
+  it('keeps the process alive from start, through a pause, until the ride stops', async () => {
+    const port = recordingPort();
+    const rig = benchWith({ keepAlive: port });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    expect(port.calls).toEqual(['keep']);
+
+    await ride(rig, 3);
+    await rig.controller.pause();
+    await ride(rig, 3);
+    await rig.controller.resume();
+    await ride(rig, 3);
+    // Once per transition, never per tick, and a pause is not a stop.
+    expect(port.calls).toEqual(['keep']);
+
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(port.calls).toEqual(['keep', 'sleep']);
+    rig.controller.dispose();
+    // Letting go twice would be harmless on the device; it is still not asked.
+    expect(port.calls).toEqual(['keep', 'sleep']);
+  });
+
+  it('keeps a recovered ride alive when it is continued', async () => {
+    const first = benchWith();
+    await first.controller.pair('trainer');
+    await first.controller.start();
+    await ride(first, 4);
+    first.controller.dispose();
+    const id = first.sessionIds[0] ?? '';
+
+    const port = recordingPort();
+    const next = benchWith({ keepAlive: port });
+    await next.controller.refreshRecoverable();
+    expect(await next.controller.continueRecovered(recordingSessionId(id))).toBe(true);
+    expect(port.calls).toEqual(['keep']);
+    next.controller.dispose();
+  });
+
+  it('lets the process sleep when the controller goes away mid-ride', async () => {
+    const port = recordingPort();
+    const rig = benchWith({ keepAlive: port });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    rig.controller.dispose();
+    expect(port.calls).toEqual(['keep', 'sleep']);
+  });
+
+  it('records the ride anyway when the platform refuses', async () => {
+    // A refusal is a degraded ride, not a broken one: the phone may cut it
+    // short in the background, but refusing to record would lose it for sure.
+    const port = recordingPort(true);
+    const rig = benchWith({ keepAlive: port });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 5);
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    expect(rig.controller.getSnapshot().movingSeconds).toBeGreaterThan(0);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().phase).toBe('stopped');
+    expect(port.calls).toEqual(['keep', 'sleep']);
     rig.controller.dispose();
   });
 });

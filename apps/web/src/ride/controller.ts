@@ -106,6 +106,7 @@ import {
   type RideMetricId,
 } from './metrics';
 import type { RiderPresence, RiderPresencePort } from './presence-port';
+import type { RideKeepAlivePort } from './keep-alive-port';
 import { NO_TRAINER_CONTROL, type OpenTrainer, type TrainerConnection } from './trainer';
 import { createWorkoutSession, RELEASE_INCOMPLETE, type WorkoutSession } from '../workout/session';
 import { blockText } from '../workouts/library';
@@ -399,6 +400,14 @@ export interface RideControllerOptions {
    * `controller.test.ts` §"#516" pins what each answer writes, as octets.
    */
   readonly presence?: RiderPresencePort | undefined;
+  /**
+   * Keep the process alive while a ride is active — #524. The Android
+   * foreground service; absent in a browser. @see keep-alive-port.ts
+   *
+   * ⚠️ An optional option, so a `main.tsx` that stopped passing it is green in
+   * `check:wiring` (§Limits) and in every test here.
+   */
+  readonly keepAlive?: RideKeepAlivePort | undefined;
 }
 
 export interface RideController {
@@ -568,7 +577,31 @@ export function createRideController(options: RideControllerOptions): RideContro
   let snapshot: RideSnapshot | undefined;
   let disposed = false;
 
+  /** Whether {@link RideControllerOptions.keepAlive} was last asked to keep. */
+  let keptAlive = false;
+
+  /**
+   * #524: ask the platform to keep the process alive exactly while a ride is
+   * active, and let it go when it is not. Driven from the PHASE, here, rather
+   * than from each of `start`, `continueRecovered`, `confirmStop` and `dispose`,
+   * so no way into or out of a ride can forget it — every one of them already
+   * ends in {@link changed}.
+   *
+   * ⚠️ Fire and forget, and a rejection is swallowed: a ride recorded without
+   * the service is degraded, not broken. `keep-alive-port.ts` says why.
+   */
+  const syncKeepAlive = (): void => {
+    const wanted = !disposed && rideInProgress(phase);
+    if (wanted === keptAlive || options.keepAlive === undefined) {
+      return;
+    }
+    keptAlive = wanted;
+    const call = wanted ? options.keepAlive.keepRideAlive() : options.keepAlive.letRideSleep();
+    call.catch(() => undefined);
+  };
+
   const changed = (): void => {
+    syncKeepAlive();
     // The cache is dropped rather than recomputed: nothing has asked for a
     // snapshot yet and building one per measurement would be four allocations
     // a second for four hours with nobody reading three of them.
@@ -1438,6 +1471,8 @@ export function createRideController(options: RideControllerOptions): RideContro
         return;
       }
       disposed = true;
+      // #524: the controller that asked for the service is gone.
+      syncKeepAlive();
       for (const entry of sensors.values()) {
         detach(entry);
       }
