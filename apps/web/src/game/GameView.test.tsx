@@ -1384,7 +1384,12 @@ describe('GameView — a hot forecast steps the world down (#247)', () => {
       });
     }
 
-    const LONG_AFTER = 20 * SUSTAINED_SAMPLES;
+    /**
+     * Long enough for a reading that was NOT spent to take three more steps,
+     * which is what these tests catch. ⚠️ It was twenty times the sample count
+     * until CI's coverage run timed two of these out at Vitest's 5 s default.
+     */
+    const LONG_AFTER = 4 * SUSTAINED_SAMPLES;
 
     it('steps down one rung on one hot reading, however many frames it is held for', async () => {
       await startRiding({ pacer: false, thermal: settable(0.95) });
