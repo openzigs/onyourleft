@@ -1838,8 +1838,27 @@ select option {
   flex-wrap: nowrap;
 }
 
+/* ⚠️ #512: the mute keeps its one line and the SLIDER gives up width, not the
+   other way round. When the short corners layout's actions panel went to
+   16 rem, the runner's wider Linux glyphs squeezed this button to 101 px, its
+   label wrapped to two lines, the row grew from 44 px to 70 px and the panel
+   overflowed a 736×360 stage by 10 px — green on a Mac's fonts, red in CI.
+   A row that is one control tall is what the comment above promises, and a
+   label that cannot wrap is what makes it true on any font. The slider keeps
+   its 2.75 rem floor; at 16 rem it still has about 100 px. */
+.oyl-hud .oyl-sound__mute {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .oyl-hud .oyl-sound__volume {
   flex: 1;
+  /* `0`, not the flex default of `auto`: a flex item's automatic minimum is
+     its content's min-content width, and a range input's is its intrinsic
+     129 px. With the mute no longer shrinking, that minimum ran the slider
+     12 px past a 736 px stage. The slider's own 2.75 rem floor (above) is
+     what keeps it a target. Measured in the pinned Chromium. */
+  min-width: 0;
 }
 
 .oyl-hud .oyl-sound__volume input[type='range'] {

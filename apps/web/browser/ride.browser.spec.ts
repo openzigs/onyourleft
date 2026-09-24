@@ -597,6 +597,24 @@ test.describe('a ride with sounds on', () => {
       // The apparatus: both controls were rendered. Without this every
       // assertion below is true of a ride where sounds stayed off.
       expect(sound.map((each) => each.name)).toEqual(['sound: Mute sounds', 'sound: Sound volume']);
+      // #512: the mute is ONE line tall, and the room the actions panel has
+      // above it is published — because the first CI run of the 16 rem panel
+      // found the label wrapped on the runner's fonts, the panel taller than
+      // its row, and its bottom 10 px past a 736×360 stage, green on a Mac.
+      // The panel is anchored to the stage's bottom, so what a taller panel
+      // eats is the gap to whatever is above it. Read it off the run rather
+      // than assuming a desktop's fonts are the runner's.
+      const mute = named(seen.items, 'sound: Mute sounds').box;
+      const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'))?.box;
+      const above = seen.panels
+        .filter((each) => each.box !== actions && each.box.bottom <= (actions?.top ?? 0) + 1)
+        .map((each) => (actions?.top ?? 0) - each.box.bottom);
+      const headroom = above.length === 0 ? Number.NaN : Math.min(...above);
+      console.log(
+        `sounds on — ${viewport.name} — mute ${mute.height.toFixed(0)} px tall; actions panel ` +
+          `${(actions?.height ?? 0).toFixed(0)} px tall with ${Number.isNaN(headroom) ? 'nothing above it' : `${headroom.toFixed(0)} px to the panel above`}`,
+      );
+      expect(mute.height).toBeLessThan(60);
       const lost = [
         ...sound,
         named(seen.items, 'control: Pause'),
