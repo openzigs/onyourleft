@@ -15,15 +15,17 @@
  * a timer: `thermal.test.ts` drives the schedule by hand.
  */
 
+import { HEADROOM_REDUCE_ABOVE, HEADROOM_RESTORE_BELOW } from './quality';
 import type { ThermalPort } from './thermal-port';
 
 /**
  * How often the forecast is re-read, in milliseconds.
  *
  * ⚠️ **Ten seconds, and deliberately conservative.** The forecast looks ahead
- * ({@link THERMAL_FORECAST_SECONDS}) and the ladder needs a sustained run of hot
- * samples before it moves, so a reading that is up to ten seconds old costs the
- * ladder nothing it can use. A faster poll risks the rate limit, and a limited
+ * ({@link THERMAL_FORECAST_SECONDS}), and a step down takes time to show in
+ * it, so `GameView` lets each reading move the ladder one rung at most (see
+ * {@link HeadroomReading.reading}): a phone that stays hot steps down about
+ * once a poll. A faster poll risks the rate limit, and a limited
  * call returns `NaN`: the ladder would read that as "no opinion" and the
  * thermal half would go quiet exactly when the device was busiest. Whether the
  * limit on a given device is looser is a question validation 0002 Part E can
@@ -43,10 +45,25 @@ export const THERMAL_FORECAST_SECONDS = THERMAL_POLL_MILLISECONDS / 1000;
 /** Run `task` every `milliseconds` until the returned function is called. */
 export type Every = (task: () => void, milliseconds: number) => () => void;
 
+/** One answer from the platform, and which answer it was. */
+export interface HeadroomReading {
+  /** The forecast, or `undefined` where there is none. @see ThermalPort */
+  readonly headroom: number | undefined;
+  /**
+   * Which answer this is, counting from 1; 0 before any has arrived.
+   *
+   * ⚠️ **What a frame needs as well as the value.** The ladder counts pressure
+   * per frame and a reading lasts ten seconds, so one reading handed to every
+   * frame is hundreds of samples. `GameView` uses this to let one reading move
+   * the ladder one rung at most.
+   */
+  readonly reading: number;
+}
+
 /** The forecast a frame reads, and the way to stop reading it. */
 export interface HeadroomWatch {
-  /** The latest forecast, or `undefined` until one has arrived or where none exists. */
-  latest(): number | undefined;
+  /** The latest answer. @see HeadroomReading */
+  latest(): HeadroomReading;
   /** Stops the poll. A read in flight when this is called is discarded. */
   stop(): void;
 }
@@ -71,7 +88,7 @@ export const everyInterval: Every = (task, milliseconds) => {
  * in flight across the bridge at once, and the older one can come back last.
  */
 export function watchThermalHeadroom(port: ThermalPort, every: Every): HeadroomWatch {
-  let latest: number | undefined;
+  let latest: HeadroomReading = { headroom: undefined, reading: 0 };
   let stopped = false;
   let asked = 0;
   let answered = 0;
@@ -83,7 +100,7 @@ export function watchThermalHeadroom(port: ThermalPort, every: Every): HeadroomW
         return;
       }
       answered = sequence;
-      latest = value;
+      latest = { headroom: value, reading: latest.reading + 1 };
     };
     port.readThermalHeadroom().then(settle, () => {
       settle(undefined);
@@ -98,4 +115,39 @@ export function watchThermalHeadroom(port: ThermalPort, every: Every): HeadroomW
       cancel();
     },
   };
+}
+
+/**
+ * A forecast that is neither hot nor cool to the ladder: halfway between
+ * {@link HEADROOM_RESTORE_BELOW} and {@link HEADROOM_REDUCE_ABOVE}.
+ */
+export const SPENT_HEADROOM = (HEADROOM_RESTORE_BELOW + HEADROOM_REDUCE_ABOVE) / 2;
+
+/**
+ * What one frame tells the ladder about heat, given the reading it holds and
+ * the last reading that already moved the ladder.
+ *
+ * ⚠️ **One reading moves the ladder one rung at most.** The ladder counts
+ * pressure per frame and a reading lasts a poll, so one reading handed to every
+ * frame is hundreds of samples: one hot answer walked a ride to the floor, and
+ * one cool answer climbed it straight back — the review finding on #523.
+ *
+ * ⚠️ **A spent reading becomes NEUTRAL, not `undefined`.** `undefined` means "no
+ * opinion", and with no opinion the ladder climbs on comfortable frames alone,
+ * which a hot phone keeping up has. So the first fix flapped: down on the
+ * reading, back up thirty frames later, down again on the next poll. Neutral
+ * still blocks a climb on frame time alone, and it still lets slow frames step
+ * the ride down, as they always could.
+ *
+ * `undefined` and `NaN` pass through as they are: there is nothing to spend.
+ */
+export function forecastForFrame(
+  latest: HeadroomReading,
+  spentReading: number,
+): number | undefined {
+  const { headroom } = latest;
+  if (headroom === undefined || !Number.isFinite(headroom)) {
+    return headroom;
+  }
+  return latest.reading > spentReading ? headroom : SPENT_HEADROOM;
 }

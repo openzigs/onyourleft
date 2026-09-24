@@ -32,7 +32,7 @@ import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import { riderMassFor } from '../athlete/mass';
 import type { CameraThrottle } from '../camera/session';
 import { BROWSER_THERMAL, type ThermalPort } from './thermal-port';
-import { everyInterval, watchThermalHeadroom } from './thermal';
+import { everyInterval, forecastForFrame, watchThermalHeadroom } from './thermal';
 import { StatusMessage } from '../design/StatusMessage';
 import { NO_ROUTES_YET } from '../routes/two-importers';
 import { hrefFor, routeById, ROUTE_BUILDER_ROUTE } from '../shell/routes';
@@ -891,6 +891,10 @@ export function GameView(props: GameViewProps): JSX.Element {
     // #247. Read on its own slow clock and held for the frame, because the
     // forecast is a bridge round trip that Android rate-limits. @see thermal.ts
     const headroom = watchThermalHeadroom(props.thermal ?? BROWSER_THERMAL, everyInterval);
+    // The last reading held when the ladder moved. One reading moves it one
+    // rung at most — `thermal.ts` §`forecastForFrame` says why, and why a
+    // spent reading is neutral rather than absent.
+    let spentReading = 0;
 
     /** Whether this run of the effect has been cleaned up. @see the renderer's `then` below */
     let cancelled = false;
@@ -1168,7 +1172,17 @@ export function GameView(props: GameViewProps): JSX.Element {
       lastFrameAt = at;
       if (frameMs !== undefined) {
         const previous = qualityRef.current;
-        const next = nextWorldQuality(previous, { frameMs, thermalHeadroom: headroom.latest() });
+        const forecast = headroom.latest();
+        const next = nextWorldQuality(previous, {
+          frameMs,
+          thermalHeadroom: forecastForFrame(forecast, spentReading),
+        });
+        if (
+          next.quality.level !== previous.quality.level ||
+          next.realistic !== previous.realistic
+        ) {
+          spentReading = forecast.reading;
+        }
         qualityRef.current = next;
         // A render only when the RUNG changes — #482. @see qualityLevel
         if (next.quality.level !== previous.quality.level) {

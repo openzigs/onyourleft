@@ -1344,6 +1344,76 @@ describe('GameView — a hot forecast steps the world down (#247)', () => {
     expect(rungs[rungs.length - 1]).toEqual(QUALITY_LADDER[1]);
   });
 
+  /**
+   * The review finding on #523. The forecast is read every ten seconds and the
+   * ladder counts pressure per FRAME, so one reading handed to every frame
+   * until the next was hundreds of samples: one hot reading walked the ride to
+   * the floor, and one cool one climbed it straight back. A reading may now
+   * move the ladder one rung at most.
+   */
+  describe('one reading moves the ladder one rung at most', () => {
+    /** The poll `GameView` starts, run by the test. @see thermal.ts §everyInterval */
+    let polls: (() => void)[] = [];
+    beforeEach(() => {
+      polls = [];
+      vi.stubGlobal('setInterval', (task: () => void) => {
+        polls.push(task);
+        return polls.length;
+      });
+      vi.stubGlobal('clearInterval', () => undefined);
+    });
+
+    /** A port answering whatever the test last set. */
+    function settable(first: number): ThermalPort & { set: (next: number) => void } {
+      let headroom = first;
+      return {
+        readThermalHeadroom: () => Promise.resolve(headroom),
+        set: (next) => {
+          headroom = next;
+        },
+      };
+    }
+
+    /** Take the next reading, as the ten-second poll would. */
+    async function poll(): Promise<void> {
+      await act(async () => {
+        for (const task of polls) {
+          task();
+        }
+        await Promise.resolve();
+      });
+    }
+
+    const LONG_AFTER = 20 * SUSTAINED_SAMPLES;
+
+    it('steps down one rung on one hot reading, however many frames it is held for', async () => {
+      await startRiding({ pacer: false, thermal: settable(0.95) });
+      await pump(LONG_AFTER, COMFORTABLE_MS);
+      expect(rungs).toEqual([QUALITY_LADDER[1]]);
+    });
+
+    it('steps down one more rung on the next hot reading', async () => {
+      const port = settable(0.95);
+      await startRiding({ pacer: false, thermal: port });
+      await pump(LONG_AFTER, COMFORTABLE_MS);
+      await poll();
+      await pump(LONG_AFTER, COMFORTABLE_MS);
+      expect(rungs).toEqual([QUALITY_LADDER[1], QUALITY_LADDER[2]]);
+    });
+
+    it('climbs one rung, not all of them, on one cool reading', async () => {
+      const port = settable(0.95);
+      await startRiding({ pacer: false, thermal: port });
+      await pump(LONG_AFTER, COMFORTABLE_MS);
+      await poll();
+      await pump(LONG_AFTER, COMFORTABLE_MS);
+      port.set(0.2);
+      await poll();
+      await pump(LONG_AFTER, COMFORTABLE_MS);
+      expect(rungs).toEqual([QUALITY_LADDER[1], QUALITY_LADDER[2], QUALITY_LADDER[1]]);
+    });
+  });
+
   it('stays on the top rung under a cool forecast', async () => {
     // The control: the same ride, the same frames, a forecast well clear.
     await startRiding({ pacer: false, thermal: forecasting(0.2) });

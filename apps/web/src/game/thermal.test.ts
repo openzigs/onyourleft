@@ -3,7 +3,10 @@
 import { describe, expect, it } from 'vitest';
 
 import { BROWSER_THERMAL, type ThermalPort } from './thermal-port';
+import { HEADROOM_REDUCE_ABOVE, HEADROOM_RESTORE_BELOW } from './quality';
 import {
+  SPENT_HEADROOM,
+  forecastForFrame,
   THERMAL_FORECAST_SECONDS,
   THERMAL_POLL_MILLISECONDS,
   watchThermalHeadroom,
@@ -86,14 +89,16 @@ describe('watchThermalHeadroom (#247)', () => {
     expect(schedule.ms()).toBe(THERMAL_POLL_MILLISECONDS);
     expect(THERMAL_FORECAST_SECONDS).toBe(THERMAL_POLL_MILLISECONDS / 1000);
 
-    expect(watch.latest()).toBeUndefined();
+    expect(watch.latest()).toEqual({ headroom: undefined, reading: 0 });
     await port.answer(0.4);
-    expect(watch.latest()).toBe(0.4);
+    expect(watch.latest()).toEqual({ headroom: 0.4, reading: 1 });
 
     schedule.tick();
     expect(port.reads()).toBe(2);
     await port.answer(0.9);
-    expect(watch.latest()).toBe(0.9);
+    // Each answer is a new reading, even when the value repeats — that is what
+    // lets GameView tell "the next reading" from "the same one, held".
+    expect(watch.latest()).toEqual({ headroom: 0.9, reading: 2 });
   });
 
   it('passes a NaN from the platform through unchanged', async () => {
@@ -104,7 +109,7 @@ describe('watchThermalHeadroom (#247)', () => {
     const port = scriptedPort();
     const watch = watchThermalHeadroom(port, schedule.every);
     await port.answer(Number.NaN);
-    expect(Number.isNaN(watch.latest())).toBe(true);
+    expect(Number.isNaN(watch.latest().headroom)).toBe(true);
   });
 
   it('forgets a hot reading when the next read is refused, rather than holding it', async () => {
@@ -114,7 +119,7 @@ describe('watchThermalHeadroom (#247)', () => {
     await port.answer(0.95);
     schedule.tick();
     await port.refuse();
-    expect(watch.latest()).toBeUndefined();
+    expect(watch.latest().headroom).toBeUndefined();
   });
 
   it('drops an older answer that arrives after a newer one', async () => {
@@ -132,7 +137,7 @@ describe('watchThermalHeadroom (#247)', () => {
     await flush();
     reads[0]?.(0.95);
     await flush();
-    expect(watch.latest()).toBe(0.3);
+    expect(watch.latest()).toEqual({ headroom: 0.3, reading: 1 });
   });
 
   it('stops polling, and discards a read in flight, when stopped', async () => {
@@ -142,6 +147,26 @@ describe('watchThermalHeadroom (#247)', () => {
     watch.stop();
     expect(schedule.cancelled()).toBe(true);
     await port.answer(0.95);
-    expect(watch.latest()).toBeUndefined();
+    expect(watch.latest().headroom).toBeUndefined();
+  });
+});
+
+describe('forecastForFrame — one reading moves the ladder one rung at most (#523 review)', () => {
+  it('hands an unspent reading to the frame as it is', () => {
+    expect(forecastForFrame({ headroom: 0.95, reading: 3 }, 2)).toBe(0.95);
+    expect(forecastForFrame({ headroom: 0.2, reading: 3 }, 2)).toBe(0.2);
+  });
+
+  it('turns a spent reading neutral, which is neither hot nor cool to the ladder', () => {
+    expect(forecastForFrame({ headroom: 0.95, reading: 3 }, 3)).toBe(SPENT_HEADROOM);
+    expect(forecastForFrame({ headroom: 0.2, reading: 3 }, 3)).toBe(SPENT_HEADROOM);
+    expect(SPENT_HEADROOM).toBeGreaterThanOrEqual(HEADROOM_RESTORE_BELOW);
+    expect(SPENT_HEADROOM).toBeLessThanOrEqual(HEADROOM_REDUCE_ABOVE);
+  });
+
+  it('leaves no forecast and a NaN forecast as they are', () => {
+    expect(forecastForFrame({ headroom: undefined, reading: 0 }, 0)).toBeUndefined();
+    expect(forecastForFrame({ headroom: undefined, reading: 4 }, 4)).toBeUndefined();
+    expect(Number.isNaN(forecastForFrame({ headroom: Number.NaN, reading: 4 }, 4))).toBe(true);
   });
 });
