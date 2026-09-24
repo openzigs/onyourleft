@@ -42,8 +42,10 @@
  * request and in its own commit, because #382's own scope says *"until it lands
  * nothing is persisted"*.
  *
- * And it sends nothing. There is no `fetch` in this client at all and
- * `privacy/no-network.test.ts` is the gate that keeps it that way.
+ * And it sends nothing on its own. Since #387 there is exactly one way a
+ * picture leaves this device — {@link CameraController.askAboutPicture}, to an
+ * address the rider typed and switched on, on a press — and
+ * `privacy/no-network.test.ts` is the gate that keeps it the only one.
  */
 
 import type {
@@ -55,6 +57,13 @@ import type {
 } from './camera-port';
 import { CameraCaptureError } from './camera-port';
 import { consentDecision, NO_CONSENT, type CameraConsent, type ConsentAnswers } from './consent';
+import type {
+  AnalysisCall,
+  AnalysisFailure,
+  AnalysisOutcome,
+  AnalysisPort,
+  AnalysisQuestion,
+} from './analysis-port';
 import type { FrameKeep } from './keep';
 import { cameraNotice } from './notice';
 import {
@@ -321,6 +330,23 @@ export interface CameraControllerOptions {
    * @see presence.ts §`PRESENCE_PAIR_GAP_MILLISECONDS`
    */
   readonly wait?: ((milliseconds: number) => Promise<void>) | undefined;
+  /**
+   * The rider's own computer, looked up afresh on every press — #387.
+   *
+   * A function rather than a port, because the rider configures, switches on
+   * and switches off their computer on the Camera screen while this controller
+   * lives on, and a port captured at construction would go on sending to an
+   * address the rider had just switched off. `main.tsx` passes
+   * `analysis-transport.ts` §`riderAnalysisPort` over the stored endpoint.
+   *
+   * ⚠️ **Omitted, and every answer is `not-configured`** — no picture is taken
+   * and nothing is sent. So is an answer of `undefined`, which is what an
+   * unconfigured or switched-off device gives. ⚠️ And omitting it is **green**
+   * under `check:wiring`, because an optional option nobody supplies is well
+   * typed: `analysis-port.ts` records that limit and `CameraView.test.tsx`
+   * drives the branch.
+   */
+  readonly analysis?: (() => AnalysisPort | undefined) | undefined;
 }
 
 /** A promise that settles after `milliseconds`, on the browser's own timer. */
@@ -352,6 +378,7 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
   readonly #keep: FrameKeep | undefined;
   readonly #clock: () => number;
   readonly #wait: (milliseconds: number) => Promise<void>;
+  readonly #analysis: (() => AnalysisPort | undefined) | undefined;
   readonly #listeners = new Set<() => void>();
 
   #consent: CameraConsent = NO_CONSENT;
@@ -390,6 +417,7 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
     this.#notices = options.notices ?? cameraNotice;
     this.#clock = options.clock ?? Date.now;
     this.#wait = options.wait ?? browserWait;
+    this.#analysis = options.analysis;
   }
 
   /** The current answer. Cheap; call it in a render. */
@@ -581,6 +609,97 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
       bytes: frame.bytes.length,
       width: frame.width,
       height: frame.height,
+    };
+  }
+
+  /**
+   * Take one picture and ask the rider's own computer about it — #387.
+   *
+   * The order is the privacy argument, and each step refuses without doing the
+   * next:
+   *
+   * 1. **Consent** — `consent.local`, exactly as {@link captureOne}. No port is
+   *    touched without it.
+   * 2. **Configuration** — the rider's computer, looked up NOW. Nothing
+   *    configured, or configured and switched off, is `not-configured`
+   *    **before the camera is asked for anything**: a picture taken only to be
+   *    thrown away because there was nowhere to send it would still have been a
+   *    picture of somebody's room.
+   * 3. **The camera** — running, and permitted by the quality ladder.
+   * 4. **One picture, one question** — and then the picture goes through the
+   *    same {@link FrameSink} {@link captureOne} uses, so this ride's keep means
+   *    what it says for an analysed picture too: kept if the rider asked,
+   *    dropped otherwise. ADR 0029 D-2's *"discarded after analysis"* is this
+   *    line.
+   *
+   * ⚠️ **Nothing the computer said reaches this controller's state.** The
+   * outcome is returned to the caller and not stored, not announced, and not
+   * compared with anything — in particular it touches neither the presence
+   * tracker nor anything the ride reads through `ride/presence-port.ts`, which
+   * is the one path from this class to a trainer (a paused ride eases one).
+   * A model's words are attacker-influenceable through the image, and
+   * `analysis-safety.test.ts` holds this by running a hostile answer through
+   * and comparing the whole state before and after.
+   *
+   * ⚠️ **The port's method is called lexically inside this method**, not in a
+   * private helper, for the reason {@link watchPresence} gives: `check:wiring`
+   * credits a `#private` body to the class and would keep `askAboutFrame`
+   * alive whatever called this.
+   *
+   * Never rejects. {@link AnalysisCall.cancel} stops the request, if one has
+   * been made, and settles the outcome as `cancelled`.
+   */
+  askAboutPicture(question: AnalysisQuestion): AnalysisCall {
+    let cancelled = false;
+    let inFlight: AnalysisCall | undefined;
+    const failed = (failure: AnalysisFailure): AnalysisOutcome => ({ kind: 'failed', failure });
+
+    const outcome = (async (): Promise<AnalysisOutcome> => {
+      if (!this.#consent.local) {
+        return failed('no-picture');
+      }
+      const port = this.#analysis?.();
+      if (port === undefined) {
+        return failed('not-configured');
+      }
+      const session = this.#session;
+      if (!this.#captureAllowed || session === undefined || !session.live) {
+        return failed('no-picture');
+      }
+      let frame: CapturedFrame;
+      try {
+        frame = await session.captureFrame();
+      } catch {
+        return failed('no-picture');
+      }
+      if (cancelled) {
+        return failed('cancelled');
+      }
+      inFlight = port.askAboutFrame({ frame, question });
+      const answer = await inFlight.outcome;
+      // The picture is done with. Kept if the rider asked, dropped otherwise —
+      // and a keep that fails is not the analysis's failure, so it is swallowed
+      // here exactly as `captureOne` swallows it, with nothing of the error read.
+      let kept: boolean;
+      try {
+        kept = await this.#sink.accept(frame);
+      } catch {
+        kept = false;
+      }
+      this.#captured += 1;
+      if (kept) {
+        this.#keptThisSession += 1;
+      }
+      this.#announce();
+      return answer;
+    })();
+
+    return {
+      outcome,
+      cancel: () => {
+        cancelled = true;
+        inFlight?.cancel();
+      },
     };
   }
 

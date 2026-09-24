@@ -43,11 +43,14 @@
  * so {@link CameraConsent} has two independent members and
  * {@link consentDecision} never infers one from the other.
  *
- * ⚠️ **The hosted answer is modelled here and is NOT offered on any screen in
- * this pull request, deliberately.** There is no hosted path —
- * [#387](https://github.com/openzigs/onyourleft/issues/387) owns it, nothing in
- * this client can make a network request of any kind, and
- * `privacy/no-network.test.ts` is still the gate. A control granting something
+ * ⚠️ **The hosted answer is modelled here and is NOT offered on any screen,
+ * deliberately.** There is no hosted path. ⚠️ **This paragraph said #387 owned
+ * it, and #387 did not build it**: ADR 0029's 2026-09-23 amendment found that
+ * the owner's amended promise — *"no network except a LOCAL endpoint the rider
+ * configured and switched on"* — does not cover a hosted model, and left
+ * whether the policy may gain a second exception to the owner. #387 built the
+ * local path only, and its address rule refuses anything off the rider's own
+ * network, so `hosted` has nothing to grant. A control granting something
  * no code can act on is a control that *"looks like the way in and is not"*,
  * which is #48's first criterion; and D-7's own consent wording is quoted in
  * the ADR precisely so that the issue which ships the path implements the
@@ -77,9 +80,15 @@ export const BYSTANDER_SENTENCE =
  *
  * 1. **what is captured** — stills, from the camera the rider points, only
  *    while the indicator is showing (D-5's second bullet);
- * 2. **where it goes** — nowhere. Not a rule this client follows, a property of
- *    its source: `privacy/no-network.test.ts` asserts there is no `fetch`,
- *    `XMLHttpRequest`, `WebSocket`, `EventSource` or `sendBeacon` in it;
+ * 2. **where it goes** — nowhere, unless the rider sets up a computer of their
+ *    own and switches it on (#387). That is a property of the source rather
+ *    than a rule this client follows: `privacy/no-network.test.ts` permits one
+ *    network call in the whole client, in `analysis-transport.ts`, and
+ *    `analysis-endpoint.ts` builds no port at all until an address on the
+ *    rider's own network is saved and switched on. ⚠️ This line said *"there is
+ *    no code in it that can"* until #387 made that false; the sentence changed
+ *    in the same pull request as the code, which is the only order in which a
+ *    consent screen stays true;
  * 3. **what is kept** — nothing, unless the rider turns on this ride's keep
  *    (D-2), and then until they delete it (D-4);
  * 4. **what an erase cannot reach** — D-4's honest half, said **before** the
@@ -96,7 +105,7 @@ export const BYSTANDER_SENTENCE =
  */
 export const CONSENT_STATEMENT: readonly string[] = [
   'The camera takes still pictures of you while you ride, and only while the "Camera on" sign is showing.',
-  'Nothing is sent anywhere. This app cannot send anything anywhere: there is no code in it that can.',
+  'Nothing is sent anywhere unless you set up a computer of your own below and switch it on. Then a picture goes to that one computer, only when you press the button that sends it, and nowhere else.',
   'A picture is thrown away as soon as it has been looked at, unless you turn on "keep this ride’s pictures" first. There is no setting that keeps them always.',
   'A picture you kept stays on this device until you delete it, delete the ride, or erase this device. A copy you have already exported is yours and is wherever you put it.',
 ];

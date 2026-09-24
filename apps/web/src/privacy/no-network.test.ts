@@ -28,6 +28,33 @@
  * ⚠️ **If this test ever goes red, the privacy policy is what needs changing**,
  * not the test. Phase 4's instance ([#7](https://github.com/openzigs/onyourleft/issues/7))
  * is exactly that moment.
+ *
+ * ## Since #387 it permits ONE call, in ONE module, and is red for any other
+ *
+ * [#387](https://github.com/openzigs/onyourleft/issues/387) was the first time
+ * the answer to a red run was to change the policy **and** re-state the test,
+ * and ADR 0029's 2026-09-23 amendment says how narrowly:
+ *
+ * > **No network except a local endpoint the rider configured and switched on.**
+ *
+ * and, of this file: *"a `fetch` outside the one module that owns the
+ * configured endpoint must still fail the build, and the module that owns it
+ * must still be a module somebody chose. […] A gate rewritten as 'no network
+ * except where we do' is the vacuous pass this repository keeps finding."*
+ *
+ * So the rule is not "no network" any more and it is not "no network except
+ * where we do" either. It is {@link PERMITTED_NETWORK_CALLS}: **one module,
+ * one primitive, an exact count** — and every other primitive, in that module
+ * or anywhere else, is a finding. {@link networkFindingsOutside} is the rule as
+ * a pure function, and the "narrowed gate" cases run it over fixture trees so
+ * that it is shown to go red for a `fetch` added elsewhere, for a second
+ * `fetch` in the permitted module, for a different primitive there, and for
+ * the permitted call vanishing — which would leave this gate describing a
+ * module that no longer does what the policy says it does.
+ *
+ * `docs/privacy-policy.md` and `apps/mobile/src/android/data-safety.ts` changed
+ * in the same pull request. The rider's computer is the RIDER's — not #7's
+ * instance, which is ours and does not exist — and the policy says so by name.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
@@ -126,6 +153,131 @@ function scannable(): readonly string[] {
   return found;
 }
 
+/**
+ * The ONE place this client may call a network primitive, and how many times.
+ *
+ * ⚠️ **A path and a count, not a directory and not a pattern.** A directory
+ * would let a second file beside the transport send; a pattern would let a
+ * rename widen it. Moving the transport is an edit here in the same commit,
+ * which is the point: the module that sends is a module somebody chose.
+ */
+export const PERMITTED_NETWORK_CALLS: readonly {
+  readonly module: string;
+  readonly primitive: string;
+  readonly count: number;
+}[] = [{ module: join('camera', 'analysis-transport.ts'), primitive: 'fetch', count: 1 }];
+
+/** One source file, by its path relative to `apps/web/src`. */
+export interface ScannedFile {
+  readonly path: string;
+  readonly source: string;
+}
+
+/**
+ * Every network call the policy does not permit, as readable lines — empty
+ * when the tree is exactly what {@link PERMITTED_NETWORK_CALLS} says.
+ *
+ * Three kinds of finding, and each is a different way for the policy to be
+ * false:
+ *
+ * 1. **a primitive anywhere else** — a second way off the device;
+ * 2. **a different primitive, or more of the permitted one, in the permitted
+ *    module** — a second way off the device that happens to share a file;
+ * 3. **fewer of the permitted one than stated** — the policy describes a
+ *    request the code no longer makes, and this gate describes a module that
+ *    is not there. ⚠️ Not a leak, and still red: a count that could fall to
+ *    nought silently is how this list would outlive the thing it pins.
+ */
+export function networkFindingsOutside(
+  files: readonly ScannedFile[],
+  permitted: typeof PERMITTED_NETWORK_CALLS,
+): readonly string[] {
+  const findings: string[] = [];
+  const counted = new Map<string, number>();
+  for (const file of files) {
+    for (const finding of networkCallsIn(file.source)) {
+      const rule = permitted.find(
+        (each) => each.module === file.path && each.primitive === finding.primitive,
+      );
+      if (rule === undefined) {
+        findings.push(
+          `${file.path}:${String(finding.line)} ${finding.primitive} — ${finding.text}`,
+        );
+        continue;
+      }
+      counted.set(file.path, (counted.get(file.path) ?? 0) + 1);
+    }
+  }
+  for (const rule of permitted) {
+    const seen = counted.get(rule.module) ?? 0;
+    if (seen !== rule.count) {
+      findings.push(
+        `${rule.module} — ${String(seen)} ${rule.primitive} call(s) where the policy describes ${String(rule.count)}`,
+      );
+    }
+  }
+  return findings;
+}
+
+describe('the narrowed gate itself — #387', () => {
+  const TRANSPORT = join('camera', 'analysis-transport.ts');
+  const transport: ScannedFile = {
+    path: TRANSPORT,
+    source: 'const send = options.send ?? (async (url, init) => fetch(url, init));',
+  };
+  const quiet: ScannedFile = { path: join('views', 'CameraView.tsx'), source: 'const x = 1;' };
+
+  it('is clean over a tree that is exactly what the policy describes', () => {
+    expect(networkFindingsOutside([transport, quiet], PERMITTED_NETWORK_CALLS)).toEqual([]);
+  });
+
+  it('goes red for a fetch added anywhere else under apps/web/src', () => {
+    // The fixture #387 asks for by name: the narrowed gate must still fire on
+    // the change somebody makes without thinking about the policy.
+    const elsewhere: ScannedFile = {
+      path: join('views', 'CameraView.tsx'),
+      source: "const r = await fetch('https://example.invalid/upload', { method: 'POST' });",
+    };
+    const findings = networkFindingsOutside([transport, elsewhere], PERMITTED_NETWORK_CALLS);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain(join('views', 'CameraView.tsx'));
+  });
+
+  it('goes red for a fetch in a file BESIDE the transport', () => {
+    // A directory rule would have passed this; a path rule does not.
+    const sibling: ScannedFile = {
+      path: join('camera', 'analysis-helpers.ts'),
+      source: 'void fetch(url);',
+    };
+    expect(networkFindingsOutside([transport, sibling], PERMITTED_NETWORK_CALLS)).toHaveLength(1);
+  });
+
+  it('goes red for a second fetch inside the permitted module', () => {
+    const twice: ScannedFile = {
+      path: TRANSPORT,
+      source: `${transport.source}\nvoid fetch('https://example.invalid/telemetry');`,
+    };
+    expect(networkFindingsOutside([twice], PERMITTED_NETWORK_CALLS)).toHaveLength(1);
+  });
+
+  it('goes red for a different primitive inside the permitted module', () => {
+    const socket: ScannedFile = {
+      path: TRANSPORT,
+      source: `${transport.source}\nconst s = new WebSocket(url);`,
+    };
+    const findings = networkFindingsOutside([socket], PERMITTED_NETWORK_CALLS);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain('WebSocket');
+  });
+
+  it('goes red when the permitted call is gone, so the list cannot outlive it', () => {
+    const emptied: ScannedFile = { path: TRANSPORT, source: 'const send = options.send;' };
+    const findings = networkFindingsOutside([emptied], PERMITTED_NETWORK_CALLS);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain('0 fetch');
+  });
+});
+
 describe('the client', () => {
   it('has source to scan', () => {
     // The population, asserted. A walk that returned nothing would make the
@@ -134,18 +286,16 @@ describe('the client', () => {
     expect(scannable().length).toBeGreaterThan(100);
   });
 
-  it('contains no call that could transmit an athlete’s data', () => {
-    const findings: string[] = [];
-    for (const file of scannable()) {
-      for (const finding of networkCallsIn(readFileSync(file, 'utf8'))) {
-        findings.push(
-          `${relative(SOURCE_ROOT, file)}:${String(finding.line)} ${finding.primitive} — ${finding.text}`,
-        );
-      }
-    }
+  it('makes no network call but the one the policy describes', () => {
+    const files = scannable().map((file) => ({
+      path: relative(SOURCE_ROOT, file),
+      source: readFileSync(file, 'utf8'),
+    }));
     expect(
-      findings,
-      'docs/privacy-policy.md says this client transmits nothing; that is now false, and the policy and the Data Safety form are what must change',
+      networkFindingsOutside(files, PERMITTED_NETWORK_CALLS),
+      'docs/privacy-policy.md says this client sends nothing except one picture to a computer the ' +
+        'rider configured and switched on; that is now false, and the policy and the Data Safety ' +
+        'form are what must change',
     ).toEqual([]);
   });
 });

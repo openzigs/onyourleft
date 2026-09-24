@@ -46,4 +46,23 @@ describe('the published privacy policy', () => {
     expect(text.toLowerCase()).toContain('heart rate');
     expect(text).toContain('Last updated:');
   });
+
+  it('says what the one network call does, and whose computer it reaches — #387', () => {
+    // The Data Safety form now answers Photos and videos `collected: true`,
+    // optional, not shared (`apps/mobile/src/android/data-safety.ts`). A policy
+    // that did not say so would contradict the form — and a policy that did
+    // not say WHOSE computer would let a reader conclude the app had started
+    // uploading to a server of ours.
+    const text = readFileSync(POLICY, 'utf8');
+    expect(text).toContain('Pictures sent to your own computer');
+    expect(text).toContain('on its own the app uploads');
+    // By name, and distinguished from the instance this project may one day run.
+    expect(text).toContain('That computer is yours, not ours');
+    expect(text).toContain('https://github.com/openzigs/onyourleft/issues/7');
+    // The honest half: plain http on a home network is not encrypted.
+    expect(text).toContain('not encrypted on the way');
+    // And the claim the old policy made about the source, which #387 made
+    // false, is gone rather than left standing beside the new one.
+    expect(text).not.toContain('`sendBeacon` call at all');
+  });
 });

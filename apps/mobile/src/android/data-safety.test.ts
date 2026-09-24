@@ -154,24 +154,30 @@ describe('the declaration filed on Play', () => {
     }
   });
 
-  it('answers the photos row #383 added, rather than omitting it', () => {
-    // ⚠️ The row exists because there is now a subject for it: the manifest
-    // declares `CAMERA` and the client has a camera. The ANSWER is `false`
-    // because Play's "collected" means transferred off the device, and nothing
-    // in this client can transfer anything — `no-network.test.ts` is the gate
-    // under that sentence.
-    //
-    // ⚠️ **What this asserts is that somebody looked**, which is the
-    // distinction this repository keeps insisting on. An absent row and a row
-    // answered `false` say the same thing to Play and completely different
-    // things to a reviewer.
+  it('answers the photos row as collected, optional and not shared — #387', () => {
+    // ⚠️ **Re-filed in the same pull request as the first byte**, which is
+    // #377's epic criterion: the declaration is true of the shipped app at
+    // every point, not only at the end. `apps/web/src/privacy/no-network.test.ts`
+    // permits exactly one network call in the client, and it sends a picture
+    // to the rider's own computer — so this row cannot say `false` any more.
     const photos = DATA_SAFETY_DECLARATION.find((answer) => answer.dataType.startsWith('Photos'));
     expect(photos, 'the app has a camera and the form has no Photos row').toBeDefined();
-    expect(photos?.collected).toBe(false);
+    expect(photos?.collected).toBe(true);
+    expect(photos?.optional).toBe(true);
+    // Not a third party: the rider's own machine, on a press. A hosted path
+    // would make this `true`, and is not built.
     expect(photos?.shared).toBe(false);
-    // And the reason names the state that would change the answer, so the
-    // re-filing #387 owes is written down where it will be read.
     expect(photos?.why).toContain('#387');
+  });
+
+  it('collects nothing else — the camera change moved one row and only one', () => {
+    const collected = DATA_SAFETY_DECLARATION.filter((answer) => answer.collected).map(
+      (answer) => answer.dataType,
+    );
+    expect(collected).toStrictEqual(['Photos and videos']);
+    for (const answer of DATA_SAFETY_DECLARATION) {
+      expect(answer.shared, answer.dataType).toBe(false);
+    }
   });
 
   it('adding the camera permission leaves the location claim untouched', () => {

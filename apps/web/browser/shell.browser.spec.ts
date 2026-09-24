@@ -1129,3 +1129,151 @@ test.describe('the camera, in a real engine', () => {
     // than `true`.
   });
 });
+
+/**
+ * The rider's own computer, in a real engine — #387.
+ *
+ * ⚠️ **The origin this client contacts, asserted where it is contacted.**
+ * `map/basemap.ts` §`styleOrigins` and `map.browser.spec.ts` constrain which
+ * hosts the MAP may reach; the analysis endpoint is not in the map's context
+ * and neither needs to change for it (#387 checked: the map is built from
+ * `basemapStyle`, which names no analysis address, and the analysis request is
+ * issued by `camera/analysis-transport.ts`, which names no map). So this block
+ * is the analysis's own version of #63's criterion 3 — every request the page
+ * makes is recorded, and the only one leaving the harness origin must be the
+ * one POST to the one address the rider typed.
+ *
+ * The endpoint is served by `page.route` rather than a process, because a
+ * gate that needs a model server running fails on every runner. What the
+ * route stands in for is the rider's machine; what is REAL is everything on
+ * this side of it — the synthetic camera, the canvas encode, the controller,
+ * the transport and Chromium's own `fetch`, CORS preflight included.
+ *
+ * ⚠️ **The control is `address === null`**: the same page and the same
+ * controller with nothing configured, which must make no request at all.
+ * Without it, "exactly one request, to the right place" could not be told from
+ * a page that sent to every address it knew.
+ */
+test.describe('the rider’s own computer, in a real engine', () => {
+  const ENDPOINT = 'http://127.0.0.1:4399';
+  const COMPLETIONS = `${ENDPOINT}/v1/chat/completions`;
+
+  async function probe(page: Page, address: string | null): Promise<Record<string, unknown>> {
+    return (await page.evaluate(
+      async (value) =>
+        (
+          globalThis as unknown as {
+            __oylAnalysis: (address: string | null) => Promise<unknown>;
+          }
+        ).__oylAnalysis(value),
+      address,
+    )) as Record<string, unknown>;
+  }
+
+  test('sends one POST to the address the rider typed, and contacts nothing else', async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(['camera']);
+    const posted: { method: string; body: string | null; headers: Record<string, string> }[] = [];
+    await page.route(`${ENDPOINT}/**`, async (route) => {
+      const request = route.request();
+      const cors = {
+        'access-control-allow-origin': '*',
+        'access-control-allow-methods': 'POST, OPTIONS',
+        'access-control-allow-headers': 'content-type',
+      };
+      if (request.method() === 'OPTIONS') {
+        await route.fulfill({ status: 204, headers: cors });
+        return;
+      }
+      posted.push({
+        method: request.method(),
+        body: request.postData(),
+        headers: request.headers(),
+      });
+      await route.fulfill({
+        status: 200,
+        headers: { ...cors, 'content-type': 'application/json' },
+        body: JSON.stringify({ choices: [{ message: { content: 'ready' } }] }),
+      });
+    });
+
+    await page.goto('/shell.html');
+    await page.waitForSelector('html[data-oyl-shell-ready]');
+    const harnessOrigin = new URL(page.url()).origin;
+    const elsewhere: string[] = [];
+    page.on('request', (request) => {
+      if (new URL(request.url()).origin !== harnessOrigin) {
+        elsewhere.push(`${request.method()} ${request.url()}`);
+      }
+    });
+
+    const result = await probe(page, ENDPOINT);
+    expect(result['kind'], JSON.stringify(result)).toBe('described');
+    expect(result['captured']).toBe(1);
+
+    // Exactly one request left the harness origin, and it is the one.
+    expect(elsewhere.filter((line) => !line.startsWith('OPTIONS '))).toStrictEqual([
+      `POST ${COMPLETIONS}`,
+    ]);
+    expect(posted).toHaveLength(1);
+    const sent = posted[0];
+    expect(sent?.method).toBe('POST');
+    // No cookie and no credential of the page's rode along.
+    expect(sent?.headers['cookie']).toBeUndefined();
+    expect(sent?.headers['authorization']).toBeUndefined();
+    // No referrer: the rider's machine learns nothing about the page.
+    expect(sent?.headers['referer']).toBeUndefined();
+
+    // ADR 0029 D-7: the picture, a fixed prompt, and nothing else.
+    const body = JSON.parse(sent?.body ?? '{}') as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toStrictEqual(['max_tokens', 'messages', 'model', 'stream']);
+    const text = sent?.body ?? '';
+    expect(text).not.toMatch(/latitude|longitude/);
+    // The picture really is a JPEG the browser encoded: /9j/ is base64 for
+    // FF D8 FF, the start of one. A real frame, not an empty string.
+    const picture = /data:image\/jpeg;base64,([A-Za-z0-9+/=]+)/.exec(text)?.[1] ?? '';
+    expect(picture.startsWith('/9j/')).toBe(true);
+    expect(picture.length).toBeGreaterThan(1000);
+  });
+
+  test('the control — with nothing configured it makes no request at all', async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(['camera']);
+    await page.goto('/shell.html');
+    await page.waitForSelector('html[data-oyl-shell-ready]');
+    const harnessOrigin = new URL(page.url()).origin;
+    const elsewhere: string[] = [];
+    page.on('request', (request) => {
+      if (new URL(request.url()).origin !== harnessOrigin) {
+        elsewhere.push(`${request.method()} ${request.url()}`);
+      }
+    });
+
+    const result = await probe(page, null);
+    expect(result['failure'], JSON.stringify(result)).toBe('not-configured');
+    // No picture was taken either: there was nowhere to send one.
+    expect(result['captured']).toBe(0);
+    expect(elsewhere).toStrictEqual([]);
+  });
+
+  test('refuses an address on the internet before anything is sent', async ({ page, context }) => {
+    await context.grantPermissions(['camera']);
+    await page.goto('/shell.html');
+    await page.waitForSelector('html[data-oyl-shell-ready]');
+    const harnessOrigin = new URL(page.url()).origin;
+    const elsewhere: string[] = [];
+    page.on('request', (request) => {
+      if (new URL(request.url()).origin !== harnessOrigin) {
+        elsewhere.push(`${request.method()} ${request.url()}`);
+      }
+    });
+
+    const result = await probe(page, 'https://api.example.com');
+    expect(result['failure'], JSON.stringify(result)).toBe('not-configured');
+    expect(elsewhere).toStrictEqual([]);
+  });
+});

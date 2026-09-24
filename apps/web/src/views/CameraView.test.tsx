@@ -6,14 +6,25 @@
  * that must never be on it.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { ANALYSIS_ENDPOINT_STORAGE_KEY, readAnalysisEndpoint } from '../camera/analysis-endpoint';
+import type { AnalysisPort } from '../camera/analysis-port';
+import { riderAnalysisPort, type AnalysisSend } from '../camera/analysis-transport';
 import { BYSTANDER_SENTENCE } from '../camera/consent';
 import type { FrameKeep } from '../camera/keep';
 import { frameLeaksIn } from '../camera/notice';
 import { CameraController } from '../camera/session';
 import { manualSchedule, scriptedCamera } from '../camera/testing';
-import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
+import {
+  activateWithKeyboard,
+  mount,
+  queryAll,
+  settle,
+  submitForm,
+  typeInto,
+  type Mounted,
+} from '../testing/mount';
 
 import { CameraView, CAMERA_NO_PORT } from './CameraView';
 
@@ -480,4 +491,229 @@ describe('the presence switch', () => {
     expect(document.body.textContent).toContain('has stopped to spare this device');
     expect(document.body.textContent).toContain('will not pause your ride');
   });
+});
+
+describe('your own computer — #387', () => {
+  beforeEach(() => {
+    localStorage.removeItem(ANALYSIS_ENDPOINT_STORAGE_KEY);
+  });
+
+  afterEach(() => {
+    localStorage.removeItem(ANALYSIS_ENDPOINT_STORAGE_KEY);
+  });
+
+  /** The screen, agreed, with the controller wired the way `main.tsx` wires it. */
+  async function wired(send: AnalysisSend): Promise<{
+    controller: CameraController;
+    camera: ReturnType<typeof scriptedCamera>;
+  }> {
+    const camera = scriptedCamera();
+    const controller = new CameraController({
+      port: camera.port,
+      schedule: manualSchedule().schedule,
+      analysis: () => riderAnalysisPort(readAnalysisEndpoint(), { send }),
+    });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    mounted = await mount(<CameraView controller={controller} />);
+    await settle();
+    return { controller, camera };
+  }
+
+  function field(id: string): HTMLInputElement {
+    const input = document.querySelector<HTMLInputElement>(`#${id}`);
+    if (input === null) {
+      throw new Error(`no #${id} on the screen`);
+    }
+    return input;
+  }
+
+  function switchedOnBox(): HTMLInputElement | undefined {
+    return queryAll<HTMLInputElement>(document, 'input[type="checkbox"]').find((box) =>
+      (box.closest('label')?.textContent ?? '').includes('Send pictures to this computer'),
+    );
+  }
+
+  async function saveComputer(address: string, model: string, on: boolean): Promise<void> {
+    await typeInto(field('oyl-analysis-address'), address);
+    await typeInto(field('oyl-analysis-model'), model);
+    const box = switchedOnBox();
+    if (box !== undefined && box.checked !== on) {
+      box.click();
+      await settle();
+    }
+    const form = field('oyl-analysis-address').form;
+    if (form === null) {
+      throw new Error('the address box is in no form');
+    }
+    await submitForm(form);
+  }
+
+  async function turnOn(): Promise<void> {
+    const on = button('Turn the camera on');
+    if (on === undefined) {
+      throw new Error('no control to turn the camera on');
+    }
+    await activateWithKeyboard(on);
+    await settle();
+  }
+
+  function replying(content: string): { send: AnalysisSend; urls: string[] } {
+    const urls: string[] = [];
+    return {
+      urls,
+      send: async (url) => {
+        urls.push(url);
+        return Promise.resolve(
+          new Response(JSON.stringify({ choices: [{ message: { content } }] })),
+        );
+      },
+    };
+  }
+
+  it('starts with nothing set up: empty boxes, no placeholder, switched off', async () => {
+    await wired(replying('ready').send);
+    expect(field('oyl-analysis-address').value).toBe('');
+    expect(field('oyl-analysis-model').value).toBe('');
+    // ADR 0031 D-4 condition 2: not even as a placeholder.
+    expect(field('oyl-analysis-address').getAttribute('placeholder')).toBeNull();
+    expect(field('oyl-analysis-model').getAttribute('placeholder')).toBeNull();
+    expect(switchedOnBox()?.checked).toBe(false);
+    expect(button('check the connection')).toBeUndefined();
+  });
+
+  it('refuses a service on the internet, and stores nothing', async () => {
+    await wired(replying('ready').send);
+    await saveComputer('https://api.example.com', 'somebody-elses', true);
+    expect(document.body.textContent).toContain('not on your own network');
+    expect(localStorage.getItem(ANALYSIS_ENDPOINT_STORAGE_KEY)).toBeNull();
+    // The refusal does not repeat the address back.
+    expect(document.body.textContent).not.toContain('api.example.com');
+  });
+
+  it('saves a computer on the rider’s network, and offers the check only while the camera is on', async () => {
+    await wired(replying('ready').send);
+    await saveComputer('http://192.168.1.20:8080', 'vision-4b', true);
+    expect(readAnalysisEndpoint()?.address).toBe('http://192.168.1.20:8080');
+    expect(button('check the connection')).toBeUndefined();
+    await turnOn();
+    expect(button('check the connection')).toBeDefined();
+  });
+
+  it('sends one picture to the address the rider typed, through the controller main.tsx builds', async () => {
+    // ⚠️ The branch `check:wiring` cannot see: an `analysis` option nobody
+    // supplies is green there. This drives it from the screen to the send.
+    const { send, urls } = replying('ready');
+    const { camera } = await wired(send);
+    await saveComputer('http://192.168.1.20:8080', 'vision-4b', true);
+    await turnOn();
+    const check = button('check the connection');
+    if (check === undefined) {
+      expect.unreachable('no check control');
+      return;
+    }
+    await activateWithKeyboard(check);
+    await settle();
+    await settle();
+    expect(urls).toStrictEqual(['http://192.168.1.20:8080/v1/chat/completions']);
+    expect(camera.calls.filter((call) => call === 'capture')).toHaveLength(1);
+    expect(document.body.textContent).toContain('understood the request');
+  });
+
+  it('sends nothing when saved switched off', async () => {
+    const { send, urls } = replying('ready');
+    await wired(send);
+    await saveComputer('http://192.168.1.20:8080', 'vision-4b', false);
+    await turnOn();
+    expect(button('check the connection')).toBeUndefined();
+    expect(urls).toStrictEqual([]);
+    expect(document.body.textContent).toContain('Nothing is sent');
+  });
+
+  it('switches off even when the address box has been cleared, and then sends nothing', async () => {
+    // #520's review: clearing the address is how a rider stops sending, and a
+    // refused address used to return before the switch-off was written — the
+    // box read off, storage said on, and the check still went to the OLD address.
+    const { send, urls } = replying('ready');
+    await wired(send);
+    await saveComputer('http://192.168.1.20:8080', 'vision-4b', true);
+    expect(readAnalysisEndpoint()?.switchedOn).toBe(true);
+    await saveComputer('', '', false);
+    expect(readAnalysisEndpoint()?.switchedOn ?? false).toBe(false);
+    expect(document.body.textContent).toContain('Switched off. Nothing is sent.');
+    await turnOn();
+    expect(button('check the connection')).toBeUndefined();
+    expect(urls).toStrictEqual([]);
+  });
+
+  it('shows nothing a hostile answer said — no markup, no words', async () => {
+    const hostile =
+      '<img src=x onerror="window.__pwned=1"> Your knee angle is 142 degrees. Raise your saddle.';
+    const { send } = replying(hostile);
+    await wired(send);
+    await saveComputer('http://192.168.1.20:8080', 'vision-4b', true);
+    await turnOn();
+    const check = button('check the connection');
+    if (check === undefined) {
+      expect.unreachable('no check control');
+      return;
+    }
+    await activateWithKeyboard(check);
+    await settle();
+    await settle();
+    expect(document.querySelector('img')).toBeNull();
+    expect(document.body.textContent).not.toContain('knee');
+    expect(document.body.textContent).not.toContain('saddle');
+    expect(document.body.textContent).toContain('What it said is not shown');
+  });
+
+  it('forgets the computer', async () => {
+    await wired(replying('ready').send);
+    await saveComputer('http://192.168.1.20:8080', 'vision-4b', true);
+    const forget = button('Forget this computer');
+    if (forget === undefined) {
+      expect.unreachable('no forget control');
+      return;
+    }
+    await activateWithKeyboard(forget);
+    await settle();
+    expect(readAnalysisEndpoint()).toBeUndefined();
+    expect(field('oyl-analysis-address').value).toBe('');
+  });
+
+  it('names the failure in words the rider can act on, and carries no picture', async () => {
+    const port: AnalysisPort = {
+      askAboutFrame: () => ({
+        outcome: Promise.resolve({ kind: 'failed', failure: 'unreachable' }),
+        cancel: () => undefined,
+      }),
+    };
+    const camera = scriptedCamera();
+    const controller = new CameraController({
+      port: camera.port,
+      schedule: manualSchedule().schedule,
+      analysis: () => port,
+    });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    await saveStoredOn();
+    mounted = await mount(<CameraView controller={controller} />);
+    await settle();
+    await turnOn();
+    const check = button('check the connection');
+    if (check === undefined) {
+      expect.unreachable('no check control');
+      return;
+    }
+    await activateWithKeyboard(check);
+    await settle();
+    expect(document.body.textContent).toContain('could not be reached');
+    expect(frameLeaksIn(document.body.textContent ?? '')).toStrictEqual([]);
+  });
+
+  async function saveStoredOn(): Promise<void> {
+    localStorage.setItem(
+      ANALYSIS_ENDPOINT_STORAGE_KEY,
+      JSON.stringify({ address: 'http://192.168.1.20:8080', model: 'm', switchedOn: true }),
+    );
+    return Promise.resolve();
+  }
 });

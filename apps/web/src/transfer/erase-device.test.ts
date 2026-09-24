@@ -118,17 +118,18 @@ describe('what the rider is told before they press it', () => {
     expect(text).toContain('everything derived from one');
   });
 
-  it('does NOT claim a copy left the device, because none can', () => {
-    // ADR 0029 D-4 writes two `ERASE_CANNOT_REACH` lines about a frame sent to
-    // a rider's own machine and to a hosted model. Neither is reachable from
-    // this build — `privacy/no-network.test.ts` is the gate under that — and a
-    // list that claimed otherwise would age into a lie in the *frightening*
-    // direction. #387 is the pull request that lands the first byte and both
-    // lines; `erase-device.ts` records that at the declaration.
+  it('names the copy on the rider’s own machine, and NOT a hosted one — #387', () => {
+    // ADR 0029 D-4 writes two `ERASE_CANNOT_REACH` lines. #387 made the first
+    // true — a picture can now be sent to the rider's own computer — and it is
+    // there verbatim. The second is about a hosted model, which #387 did not
+    // build and the address rule refuses; claiming it would be the list ageing
+    // into a lie in the *frightening* direction.
     const text = ERASE_CANNOT_REACH.join(' ');
+    expect(ERASE_CANNOT_REACH).toContain(
+      'a photograph you sent to your own machine to be analysed, which is a copy that machine holds',
+    );
     expect(text).not.toContain('hosted');
-    expect(text).not.toContain('sent to your own machine');
-    // What IS true today: a picture the rider copied off the device themselves.
+    // And what was already true: a picture the rider copied off the device.
     expect(text).toContain('copied off this device');
   });
 

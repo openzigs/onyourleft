@@ -84,6 +84,16 @@ describe('what the consent screen states', () => {
     expect(all).toContain('until you delete it');
   });
 
+  it('says where a picture CAN go since #387, and no longer that nothing can send one', () => {
+    // #387 gave the client one network call. A consent screen that went on
+    // saying "there is no code in it that can" would be false for every rider
+    // who set up their own computer — the sentence changes with the code.
+    const all = CONSENT_STATEMENT.join(' ');
+    expect(all).toContain('a computer of your own');
+    expect(all).toContain('only when you press the button');
+    expect(all).not.toContain('there is no code in it that can');
+  });
+
   it('promises no expiry timer, which ADR 0029 D-2 refuses', () => {
     // *"A deletion that depends on the program running is not a deletion, it is
     // a hope."* A line here promising "deleted after 30 days" would be the

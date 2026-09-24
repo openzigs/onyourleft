@@ -35,16 +35,22 @@
  * where somebody with a tripod records whether that is good enough.
  *
  * ⚠️ **No hosted-model control.** `camera/consent.ts` says why at length: there
- * is no hosted path, nothing in this client can make a network request, and a
- * control granting something no code can act on is one that *"looks like the
- * way in and is not"* — #48's first criterion.
+ * is no hosted path, and a control granting something no code can act on is one
+ * that *"looks like the way in and is not"* — #48's first criterion. Since
+ * [#387](https://github.com/openzigs/onyourleft/issues/387) there IS a way for a
+ * picture to leave — to the rider's OWN computer, at an address they type and
+ * switch on — and {@link AnalysisSection} is where. Its address box refuses
+ * anything not on the rider's own network (`camera/analysis-endpoint.ts`), which
+ * is what keeps a hosted model out of it: ADR 0029's 2026-09-23 amendment leaves
+ * whether the hosted path may be built to the owner.
  *
  * ⚠️ **No claim about a body anywhere on this screen.**
  * [ADR 0030](../../../../docs/adr/0030-what-the-app-may-say-about-a-body.md)
  * binds every string here, and its 2026-09-23 amendment makes the six
  * general-wellness conditions obligations rather than a framing to avoid. This
- * screen shows no analysis at all — that is
- * [#387](https://github.com/openzigs/onyourleft/issues/387) and
+ * screen shows no analysis — #387's connection check reports whether the
+ * computer answered and understood, and never its words
+ * (`camera/useAnalysis.ts` says why), and the report is
  * [#388](https://github.com/openzigs/onyourleft/issues/388) — so the safest
  * thing it can do is describe the camera and say nothing about what a picture
  * of a person shows.
@@ -60,7 +66,17 @@ import {
   CONSENT_STATEMENT,
   type ConsentRefusal,
 } from '../camera/consent';
+import { ANALYSIS_FAILURE_TEXT } from '../camera/analysis-port';
+import {
+  endpointDecision,
+  ENDPOINT_REFUSAL_TEXT,
+  forgetAnalysisEndpoint,
+  readAnalysisEndpoint,
+  writeAnalysisEndpoint,
+  type EndpointRefusal,
+} from '../camera/analysis-endpoint';
 import { keptSummarySentence } from '../camera/keep';
+import { useAnalysis, type AnalysisState } from '../camera/useAnalysis';
 import { presenceSentence } from '../camera/presence';
 import type { CameraController, CaptureOutcome } from '../camera/session';
 
@@ -400,6 +416,8 @@ function Camera({ controller }: { readonly controller: CameraController }): JSX.
         </section>
       ) : null}
 
+      {agreed ? <AnalysisSection controller={controller} live={live} /> : null}
+
       {/*
         ⚠️ **A COUNT, and never a picture.** ADR 0029 D-11 keeps a kept frame
         off every screen somebody who did not take it could meet by accident,
@@ -443,6 +461,205 @@ function Camera({ controller }: { readonly controller: CameraController }): JSX.
           <p>{notice.explanation}</p>
           {notice.instruction === null ? null : <p>{notice.instruction}</p>}
         </section>
+      )}
+    </section>
+  );
+}
+
+/**
+ * What the screen says about a connection check. One sentence each, and none
+ * of them carries anything the computer said — see `camera/useAnalysis.ts`.
+ */
+export function analysisSentence(state: AnalysisState): string | undefined {
+  switch (state.kind) {
+    case 'idle':
+      return undefined;
+    case 'asking':
+      return 'A picture was sent to your computer. Waiting for its answer…';
+    case 'answered':
+      return state.understood
+        ? 'Your computer answered, and understood the request. The picture was not kept unless this ride’s keep is on.'
+        : `Your computer answered (${String(state.characters)} characters), but not with the one word it was asked for. Check that the model can read pictures. What it said is not shown.`;
+    case 'failed':
+      return ANALYSIS_FAILURE_TEXT[state.failure];
+  }
+}
+
+/**
+ * The rider's own computer — #387.
+ *
+ * ⚠️ **Rendered only once the camera is agreed to**, and the check control only
+ * while it is running, rather than disabled otherwise — `views/DevicesView.tsx`'s
+ * rule, for the reason the presence switch above gives.
+ *
+ * ⚠️ **Nothing is pre-filled and there is no placeholder address.** ADR 0031 D-4
+ * condition 2: *"not in a placeholder, not in a dropdown"*. The boxes start
+ * empty on a device that has never been set up, and hold what the rider saved
+ * on one that has.
+ */
+function AnalysisSection({
+  controller,
+  live,
+}: {
+  readonly controller: CameraController;
+  readonly live: boolean;
+}): JSX.Element {
+  const saved = readAnalysisEndpoint();
+  const [address, setAddress] = useState(saved?.address ?? '');
+  const [model, setModel] = useState(saved?.model ?? '');
+  const [switchedOn, setSwitchedOn] = useState(saved?.switchedOn ?? false);
+  const [refusal, setRefusal] = useState<EndpointRefusal | undefined>(undefined);
+  const [message, setMessage] = useState<string | undefined>(undefined);
+  const [configured, setConfigured] = useState(saved?.switchedOn === true);
+  const { state, ask } = useAnalysis(controller);
+  const sentence = analysisSentence(state);
+
+  const save = (): void => {
+    const decision = endpointDecision({ address, model, switchedOn });
+    if (decision.endpoint === undefined && !switchedOn) {
+      // ⚠️ Switching off must take effect whatever the boxes hold. Clearing
+      // the address is exactly how a rider stops sending, and a refused
+      // address used to return before anything was written, leaving the
+      // stored row switched ON — the box read off while the check was still
+      // offered, to the OLD address. The privacy policy says "To stop it,
+      // switch it off"; this is the line that makes that true.
+      const stored = readAnalysisEndpoint();
+      const kept = stored === undefined || writeAnalysisEndpoint({ ...stored, switchedOn: false });
+      if (!kept) {
+        forgetAnalysisEndpoint();
+      }
+      setRefusal(undefined);
+      setConfigured(false);
+      setMessage('Switched off. Nothing is sent.');
+      return;
+    }
+    setRefusal(decision.refusal);
+    if (decision.endpoint === undefined) {
+      setMessage(undefined);
+      return;
+    }
+    const kept = writeAnalysisEndpoint(decision.endpoint);
+    setConfigured(kept && decision.endpoint.switchedOn);
+    setMessage(
+      kept
+        ? decision.endpoint.switchedOn
+          ? 'Saved. Pictures are sent to this computer only when you press the button below.'
+          : 'Saved, and switched off. Nothing is sent.'
+        : 'This device would not keep the address, so nothing is sent.',
+    );
+  };
+
+  return (
+    <section aria-labelledby="oyl-camera-analysis">
+      <h3 id="oyl-camera-analysis">Your own computer</h3>
+      <p>
+        A computer of yours on the same network can look at your pictures, running a model server
+        you install on it. Nothing is set up to begin with, and nothing is sent until you enter its
+        address and switch it on. A picture then goes to that one address, only when you press the
+        button, and is not kept here afterwards unless this ride’s keep is on. It goes over your own
+        network, and is not encrypted on the way unless your computer’s address starts with
+        https://.
+      </p>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          save();
+        }}
+      >
+        <p>
+          <label htmlFor="oyl-analysis-address">Your computer’s address and port</label>{' '}
+          <input
+            id="oyl-analysis-address"
+            className="oyl-input"
+            type="url"
+            inputMode="url"
+            autoComplete="off"
+            spellCheck={false}
+            value={address}
+            onChange={(event) => {
+              setAddress(event.target.value);
+            }}
+          />
+        </p>
+        <p>
+          <label htmlFor="oyl-analysis-model">The model’s name on that computer</label>{' '}
+          <input
+            id="oyl-analysis-model"
+            className="oyl-input"
+            type="text"
+            autoComplete="off"
+            spellCheck={false}
+            value={model}
+            onChange={(event) => {
+              setModel(event.target.value);
+            }}
+          />
+        </p>
+        <p>
+          <label className="oyl-announce__switch">
+            <input
+              type="checkbox"
+              checked={switchedOn}
+              onChange={(event) => {
+                setSwitchedOn(event.target.checked);
+              }}
+            />{' '}
+            Send pictures to this computer when I ask
+          </label>
+        </p>
+        <Button type="submit">Save this computer</Button>{' '}
+        {saved === undefined && !configured ? null : (
+          <Button
+            variant="secondary"
+            onClick={() => {
+              forgetAnalysisEndpoint();
+              setAddress('');
+              setModel('');
+              setSwitchedOn(false);
+              setConfigured(false);
+              setRefusal(undefined);
+              setMessage('Forgotten. Nothing is sent anywhere.');
+            }}
+          >
+            Forget this computer
+          </Button>
+        )}
+      </form>
+      {refusal === undefined ? null : (
+        <StatusMessage tone="warning" live>
+          {ENDPOINT_REFUSAL_TEXT[refusal]}
+        </StatusMessage>
+      )}
+      {message === undefined ? null : (
+        <StatusMessage tone="info" live>
+          {message}
+        </StatusMessage>
+      )}
+      {live && configured ? (
+        <p>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              ask('connection-check');
+            }}
+          >
+            Send one picture to check the connection
+          </Button>
+        </p>
+      ) : null}
+      {sentence === undefined ? null : (
+        <StatusMessage
+          tone={
+            state.kind === 'failed'
+              ? 'warning'
+              : state.kind === 'answered' && state.understood
+                ? 'success'
+                : 'info'
+          }
+          live
+        >
+          {sentence}
+        </StatusMessage>
       )}
     </section>
   );
