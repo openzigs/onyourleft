@@ -164,7 +164,10 @@ const ANDROID_TRAITS: TransportTraits = {
   // `reconnecting` a state this transport can actually reach.
   canReconnectWithoutUserGesture: true,
   // With the connectedDevice foreground service holding the process up.
-  // ⚠️ True *because* `RecordingService` exists; it would be a lie without it.
+  // ⚠️ True *because* `RecordingService` exists AND is started; it would be a
+  // lie without either. Until #524 it existed and nothing started it, so this
+  // was a lie: `ride/keep-alive-port.ts` is what starts it now, while a ride is
+  // active. Validation 0002 A5 and Part C are where it is first seen working.
   canRestoreConnectionsInBackground: true,
   // Three, not the seven Android is reported to manage. The budget is OS-wide
   // and shared with whatever else the rider has paired — earbuds and a watch

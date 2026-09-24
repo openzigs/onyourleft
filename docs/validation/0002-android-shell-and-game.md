@@ -268,6 +268,11 @@ against any of them, and the results table below stays empty to say so.
 
 ## Part C — background recording (#87 criterion 3)
 
+⚠️ **Run this on a build that contains [#524](https://github.com/openzigs/onyourleft/issues/524).**
+Before it, nothing in the client started `RecordingService`: the plugin was registered and never
+called, so A5 showed no notification and this part ran with no service at all. A result taken on
+such a build measures a ride with no foreground service, and says nothing about one with it.
+
 ```bash
 # Before: confirm the service is up and typed.
 adb shell dumpsys activity services dev.openzigs.onyourleft | grep -iE "RecordingService|foreground"
@@ -352,7 +357,9 @@ Two consequences, both of which shape this part:
   timing alone** (`FRAME_MS_REDUCE_ABOVE = 45`, `SUSTAINED_SAMPLES = 30`). The
   `HEADROOM_REDUCE_ABOVE`/`HEADROOM_RESTORE_BELOW` hysteresis **cannot fire at all**.
 - ⚠️ CLAUDE.md §4h describes the thermal port as having "Capacitor implementations in
-  `apps/mobile`". For the foreground service that is true; **for thermal headroom it describes the
+  `apps/mobile`". For the foreground service that has been true since
+  [#524](https://github.com/openzigs/onyourleft/issues/524) — before it the service existed and
+  nothing started it; **for thermal headroom it describes the
   design and not the tree.**
 
 So thermal state is measured **externally, with `adb`**, which needs no app change:

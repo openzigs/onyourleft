@@ -78,11 +78,22 @@ public class RecordingService extends Service {
 
         // The three-argument form is required from API 29 and is the one that carries the type; the
         // two-argument form on 34+ throws rather than defaulting.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
-        } else {
-            startForeground(NOTIFICATION_ID, notification);
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
+            } else {
+                startForeground(NOTIFICATION_ID, notification);
+            }
+        } catch (SecurityException | IllegalStateException refused) {
+            // #524. RecordingServicePlugin checks the Bluetooth permission first, so this is the
+            // second guard, not the first: uncaught, either exception takes the whole app down,
+            // and with it the WebView that IS the recorder. Without the service the ride is
+            // degraded, not lost.
+            stopSelf();
+            return Service.START_NOT_STICKY;
         }
 
         // NOT START_STICKY. A restarted service would come back with a null intent and no ride: it
@@ -140,10 +151,15 @@ public class RecordingService extends Service {
         context.startForegroundService(intent);
     }
 
-    /** Stop helper. Idempotent: stopping a service that is not running is not an error. */
+    /**
+     * Stop helper. Idempotent: stopping a service that is not running is not an error.
+     *
+     * <p>{@code stopService} rather than a {@code startService} carrying {@link #ACTION_STOP}
+     * (#524): {@code startService} is refused from the background since Android 8, and a ride can
+     * end while the app is not on screen. Stopping a foreground service removes its notification.
+     * {@link #ACTION_STOP} is still honoured, for any intent already in flight.
+     */
     public static void stop(Context context) {
-        final Intent intent = new Intent(context, RecordingService.class);
-        intent.setAction(ACTION_STOP);
-        context.startService(intent);
+        context.stopService(new Intent(context, RecordingService.class));
     }
 }
