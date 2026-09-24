@@ -56,6 +56,8 @@ import { riderAnalysisPort } from './camera/analysis-transport';
 import { keepThisRide } from './camera/keep';
 import { shellCameraNotice } from './camera/shell-camera';
 import { CameraController } from './camera/session';
+import type { ThermalPort } from './game/thermal-port';
+import { THERMAL_FORECAST_SECONDS } from './game/thermal';
 import { platformStorage, requestPersistenceOnce } from './support/persistent-storage';
 import type { ShellSupportPort } from './support/shell-support-port';
 import { saveWithAnchor, webCryptoDigest } from './transfer/browser';
@@ -181,6 +183,12 @@ interface ClientPlatform {
   readonly rideController: RideController | undefined;
   /** `undefined` in a browser, where `DevicesView` reads {@link capabilities}. */
   readonly shell: ShellSupportPort | undefined;
+  /**
+   * Android's thermal forecast for the game's ladder (#247). `undefined` in a
+   * browser, where `GameView` falls back to `BROWSER_THERMAL`'s honest
+   * `undefined`.
+   */
+  readonly thermal: ThermalPort | undefined;
 }
 
 /**
@@ -280,11 +288,19 @@ async function buildPlatform(
         resolvedUuids: async (deviceId) => mobile.readCapacitorResolvedUuids(plugin, deviceId),
       }),
     });
-    return { rideController, shell };
+    // #247. Its own plugin, not the BLE one: the forecast has nothing to do
+    // with a link, and `ThermalPlugin.java` is registered beside the recording
+    // service in `MainActivity`.
+    const thermalPlugin = mobile.capacitorThermalPlugin();
+    const thermal: ThermalPort = {
+      readThermalHeadroom: async () =>
+        mobile.readCapacitorThermalHeadroom(thermalPlugin, THERMAL_FORECAST_SECONDS),
+    };
+    return { rideController, shell, thermal };
   }
 
   if (probe.bluetooth === undefined || !probe.secureContext) {
-    return { rideController: undefined, shell: undefined };
+    return { rideController: undefined, shell: undefined, thermal: undefined };
   }
   const browserTransport = createWebBluetoothTransport({
     profiles: rideProfiles(),
@@ -300,6 +316,7 @@ async function buildPlatform(
     // absence is the decision, taken here, in the one file that may read a
     // global.
     shell: undefined,
+    thermal: undefined,
   };
 }
 
@@ -787,6 +804,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(storage === undefined ? {} : { storage })}
           {...(platform.shell === undefined ? {} : { shell: platform.shell })}
           {...(camera === undefined ? {} : { camera })}
+          {...(platform.thermal === undefined ? {} : { thermal: platform.thermal })}
           settings={buildUnitsPort()}
           athleteMass={buildAthleteMassPort()}
           // ⚠️ The **stored** mass, read before the first paint, and passed on

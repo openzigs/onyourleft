@@ -25,6 +25,7 @@ import { athleteId, type AthleteRecord } from '@onyourleft/store';
 
 import type { AthleteMassPort } from '../athlete/store-port';
 import type { GamePort, RidableRoute } from '../game/GameView';
+import type { ThermalPort } from '../game/thermal-port';
 import { activateWithKeyboard, mount, settle, typeInto, type Mounted } from '../testing/mount';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import type { ShellSupport } from '../support/shell-support-port';
@@ -499,5 +500,76 @@ describe('the weight reaches the ride (#325)', () => {
     const heavy = await hudSpeedAt(kilograms(105));
 
     expect(light).not.toBe(heavy);
+  });
+});
+
+/**
+ * …and the thermal forecast reaches the game's ladder (#247).
+ *
+ * The same hole the block above closes, one prop along: `thermal` is an
+ * optional prop threaded through JSX, so deleting it from the shell's
+ * `<GameView>` would be green in `check:wiring` and in `GameView.test.tsx`,
+ * which supplies it itself. A ride started through the shell must ask the
+ * port the shell was handed.
+ */
+describe('the thermal forecast reaches the ride (#247)', () => {
+  it('asks the port it was handed once a ride starts', async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal('cancelAnimationFrame', () => undefined);
+    let asked = 0;
+    const thermal: ThermalPort = {
+      readThermalHeadroom: () => {
+        asked += 1;
+        return Promise.resolve(0.3);
+      },
+    };
+    const route: RidableRoute = {
+      id: 'route-1',
+      name: 'Flat',
+      profile: routeProfile(
+        [0, 1, 2].map((index) => ({
+          position: geographicPosition(
+            degreesLatitude(51.5 + (index * 500) / 111_320),
+            degreesLongitude(-0.12),
+          ),
+          elevation: altitudeMetres(0),
+        })),
+      ),
+      attempts: 0,
+    };
+    const game: GamePort = {
+      listRoutes: () => Promise.resolve([route]),
+      loadGhost: () => Promise.resolve(undefined),
+      readSensors: () => ({
+        rider: { power: watts(200), live: true, paired: true },
+        cadence: { value: 85, live: true, paired: true },
+        heartRate: { value: 140, live: true, paired: true },
+      }),
+    };
+
+    globalThis.location.hash = '#/game';
+    const shell = await mount(
+      <AppShell capabilities={NO_BLUETOOTH} game={game} thermal={thermal} />,
+    );
+    await settle();
+    // Nothing is asked before a ride: the picker has no ladder.
+    expect(asked).toBe(0);
+
+    const ride = [...document.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+      (button.textContent ?? '').startsWith('Ride '),
+    );
+    await act(async () => {
+      ride?.click();
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect(asked).toBeGreaterThan(0);
+    shell.unmount();
+    vi.unstubAllGlobals();
   });
 });

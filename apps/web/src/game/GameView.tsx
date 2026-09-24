@@ -31,6 +31,8 @@ import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 
 import { riderMassFor } from '../athlete/mass';
 import type { CameraThrottle } from '../camera/session';
+import { BROWSER_THERMAL, type ThermalPort } from './thermal-port';
+import { everyInterval, forecastForFrame, watchThermalHeadroom } from './thermal';
 import { StatusMessage } from '../design/StatusMessage';
 import { NO_ROUTES_YET } from '../routes/two-importers';
 import { hrefFor, routeById, ROUTE_BUILDER_ROUTE } from '../shell/routes';
@@ -181,6 +183,15 @@ export interface GameViewProps {
    * without one, every page opened from the disk, and the accessibility suite.
    */
   readonly camera?: CameraThrottle | undefined;
+  /**
+   * The platform's thermal forecast — #247. @see thermal-port.ts
+   *
+   * `BROWSER_THERMAL` when absent, which answers `undefined`: the honest answer
+   * everywhere but the Android shell. ⚠️ An optional prop threaded through JSX,
+   * so a `main.tsx` that stopped passing the Android port is GREEN in
+   * `check:wiring` (§Limits); `GameView.test.tsx` §"#247" drives this half.
+   */
+  readonly thermal?: ThermalPort | undefined;
   /**
    * Loads the renderer, lazily.
    *
@@ -877,6 +888,13 @@ export function GameView(props: GameViewProps): JSX.Element {
     // #476: which animation frames are drawn under the rung's cap, and what the
     // ladder is told about them. @see FramePacer
     const pacer = new FramePacer();
+    // #247. Read on its own slow clock and held for the frame, because the
+    // forecast is a bridge round trip that Android rate-limits. @see thermal.ts
+    const headroom = watchThermalHeadroom(props.thermal ?? BROWSER_THERMAL, everyInterval);
+    // The last reading held when the ladder moved. One reading moves it one
+    // rung at most — `thermal.ts` §`forecastForFrame` says why, and why a
+    // spent reading is neutral rather than absent.
+    let spentReading = 0;
 
     /** Whether this run of the effect has been cleaned up. @see the renderer's `then` below */
     let cancelled = false;
@@ -1145,14 +1163,26 @@ export function GameView(props: GameViewProps): JSX.Element {
       // render, by which time the line below has already moved it to `at`. The
       // ladder was therefore fed `frameMs: 0` on every frame of every ride:
       // always "cool", never hot, so the reduction path #91 asks for could not
-      // fire at all. `thermalHeadroom` is `undefined` in the shipped app
-      // (`docs/validation/0002-android-shell-and-game.md` Part E), so this was
-      // the only live input to the whole policy.
+      // fire at all. `thermalHeadroom` was `undefined` in the shipped app
+      // until #247 (`docs/validation/0002-android-shell-and-game.md` Part E),
+      // so this was the only live input to the whole policy. Since #247 the
+      // Android shell supplies the forecast too, and outside it this is still
+      // the only live input.
       const frameMs = paced.frameMs;
       lastFrameAt = at;
       if (frameMs !== undefined) {
         const previous = qualityRef.current;
-        const next = nextWorldQuality(previous, { frameMs });
+        const forecast = headroom.latest();
+        const next = nextWorldQuality(previous, {
+          frameMs,
+          thermalHeadroom: forecastForFrame(forecast, spentReading),
+        });
+        if (
+          next.quality.level !== previous.quality.level ||
+          next.realistic !== previous.realistic
+        ) {
+          spentReading = forecast.reading;
+        }
         qualityRef.current = next;
         // A render only when the RUNG changes — #482. @see qualityLevel
         if (next.quality.level !== previous.quality.level) {
@@ -1171,6 +1201,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       cancelled = true;
       cancelAnimationFrame(frame);
       observer?.disconnect();
+      headroom.stop();
     };
     // ⚠️ The quality level is read inside `tick` and is deliberately NOT a
     // dependency. Re-running this effect on every quality change would cancel
@@ -1179,7 +1210,7 @@ export function GameView(props: GameViewProps): JSX.Element {
     // through `qualityRef`, which does not go stale (#482; it was `setQuality`'s
     // updater form until then), and the level is applied to the live renderer
     // by the effect below instead.
-  }, [phase, chosen, port, props.renderer, props.now]);
+  }, [phase, chosen, port, props.renderer, props.now, props.thermal]);
 
   useEffect(() => {
     // #426, the latch: a step down takes the shadow map away for the rest of
@@ -1208,6 +1239,22 @@ export function GameView(props: GameViewProps): JSX.Element {
     // `quality.ts` §`QualitySettings.presence` says why giving it up is safe.
     props.camera?.throttlePresence(settings.presence);
   }, [qualityLevel, realisticRung, props.camera]);
+
+  useEffect(() => {
+    // #514 part 3. The ladder is the game's and no other screen runs one, so
+    // what it withdrew is handed back when the game lets go of the camera —
+    // on unmount, and to the OLD camera when the prop is replaced (the effect
+    // above then throttles the new one from the rung the ride is on). Until
+    // #514 a phone that stepped down in a game ride left presence `unknown`
+    // for a workout on the Ride screen afterwards, with nothing saying so.
+    // That was the safe direction — `unknown` never pauses — but it silently
+    // undid #390 for the next ride.
+    const camera = props.camera;
+    return () => {
+      camera?.throttle(true);
+      camera?.throttlePresence(true);
+    };
+  }, [props.camera]);
 
   if (!onTheStage) {
     // One snapshot read for both notices, so they describe the same moment.

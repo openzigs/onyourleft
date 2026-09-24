@@ -41,6 +41,8 @@ import { NO_READING, type SensorReading } from './hud/fields';
 import { NO_SENSORS } from './sensors';
 import { NO_ROUTES_YET } from '../routes/two-importers';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
+import type { CameraThrottle } from '../camera/session';
+import type { ThermalPort } from './thermal-port';
 import {
   altitudeMetres,
   buildGhostTrack,
@@ -245,6 +247,10 @@ async function startRiding(options: {
   readonly track?: GhostTrack;
   /** What the cadence channel is reporting — #349. @see LIVE_CADENCE */
   readonly cadence?: () => SensorReading;
+  /** The camera the ladder throttles — #514. @see recordingCamera */
+  readonly camera?: CameraThrottle;
+  /** The platform's thermal forecast — #247. */
+  readonly thermal?: ThermalPort;
 }): Promise<SceneFrame[]> {
   const route = options.ghost === true ? { ...testRoute(), attempts: 1 } : testRoute();
   const frames: SceneFrame[] = [];
@@ -257,6 +263,8 @@ async function startRiding(options: {
       )}
       renderer={() => Promise.resolve(capturingRenderer(frames))}
       now={() => nowMs}
+      camera={options.camera}
+      thermal={options.thermal}
     />,
   );
   await settle();
@@ -1214,5 +1222,217 @@ describe('GameView — the cranks turn at the rider’s own cadence (#349)', () 
     const afterwards = crankAngles(frames).slice(whilePedalling.length);
     expect(afterwards.length).toBeGreaterThan(4);
     expect(new Set(afterwards)).toEqual(new Set([stoppedAt]));
+  });
+});
+
+/**
+ * A camera that remembers what the ladder last allowed it — #514.
+ *
+ * Only the latest answer to each question is kept, because that is the state a
+ * `CameraController` is left in: `throttle` and `throttlePresence` each set one
+ * flag, and the next screen inherits whatever the last call said.
+ */
+function recordingCamera(): CameraThrottle & {
+  readonly captureAllowed: () => boolean | undefined;
+  readonly presenceAllowed: () => boolean | undefined;
+} {
+  let capture: boolean | undefined;
+  let presence: boolean | undefined;
+  return {
+    throttle: (allowed) => {
+      capture = allowed;
+    },
+    throttlePresence: (allowed) => {
+      presence = allowed;
+    },
+    captureAllowed: () => capture,
+    presenceAllowed: () => presence,
+  };
+}
+
+/**
+ * What a game ride's throttle leaves behind — #514 part 3.
+ *
+ * The ladder withdraws capture and presence when the phone steps down. Until
+ * #514 nothing handed them back when the game unmounted, so a rider whose
+ * phone warmed up during a game ride and who then rode an ERG workout on the
+ * Ride screen had presence read `unknown` for that workout, with nothing on
+ * screen to say so. Leaving the game now returns both to `true`: the ladder is
+ * the game's, and no other screen runs one.
+ */
+describe('GameView — leaving the game hands the camera back (#514)', () => {
+  it('withdraws capture and presence when a hot phone steps down during the ride', async () => {
+    // The control. Without it, the test below would pass against a view that
+    // never throttled anything, because a camera nobody touched is also "true".
+    const camera = recordingCamera();
+    await startRiding({ pacer: false, camera });
+    expect(camera.captureAllowed()).toBe(true);
+    expect(camera.presenceAllowed()).toBe(true);
+
+    await pump(SUSTAINED_SAMPLES + 2, FRAME_MS_REDUCE_ABOVE + 5);
+
+    expect(rungs[rungs.length - 1]).toEqual(QUALITY_LADDER[1]);
+    expect(QUALITY_LADDER[1]?.capture).toBe(false);
+    expect(QUALITY_LADDER[1]?.presence).toBe(false);
+    expect(camera.captureAllowed()).toBe(false);
+    expect(camera.presenceAllowed()).toBe(false);
+  });
+
+  it('returns both to true when the game unmounts after a step down', async () => {
+    const camera = recordingCamera();
+    await startRiding({ pacer: false, camera });
+    await pump(SUSTAINED_SAMPLES + 2, FRAME_MS_REDUCE_ABOVE + 5);
+    expect(camera.presenceAllowed()).toBe(false);
+
+    mounted?.unmount();
+    mounted = undefined;
+
+    expect(camera.captureAllowed()).toBe(true);
+    expect(camera.presenceAllowed()).toBe(true);
+  });
+
+  it('hands a replaced camera back, and throttles the new one from the current rung', async () => {
+    // The other way the effect's cleanup runs: the camera prop changes under a
+    // live view. The old camera must not be left withdrawn, and the new one
+    // must be told the rung the ride is actually on rather than the top one.
+    const first = recordingCamera();
+    const frames: SceneFrame[] = [];
+    const view = (camera: CameraThrottle) => (
+      <GameView
+        port={pedallingPort(testRoute())}
+        renderer={() => Promise.resolve(capturingRenderer(frames))}
+        now={() => nowMs}
+        camera={camera}
+      />
+    );
+    mounted = await mount(view(first));
+    await settle();
+    await clickThrough(rideButton());
+    await pump(2, 1000 / 30);
+    await settle();
+    await pump(SUSTAINED_SAMPLES + 2, FRAME_MS_REDUCE_ABOVE + 5);
+    expect(first.presenceAllowed()).toBe(false);
+
+    const second = recordingCamera();
+    await mounted.rerender(view(second));
+
+    expect(first.captureAllowed()).toBe(true);
+    expect(first.presenceAllowed()).toBe(true);
+    expect(second.captureAllowed()).toBe(false);
+    expect(second.presenceAllowed()).toBe(false);
+  });
+});
+
+/**
+ * The thermal forecast reaches the ladder — #247.
+ *
+ * Until #247 `quality.ts`'s headroom half had no caller: the ladder was asked
+ * `{ frameMs }` and nothing else, so `HEADROOM_REDUCE_ABOVE` could not fire on
+ * any device. These drive the real loop at comfortable frame times, so frame
+ * time alone would never step down, and read the rung the renderer was told.
+ */
+describe('GameView — a hot forecast steps the world down (#247)', () => {
+  /** A port that always answers the same forecast. */
+  const forecasting = (headroom: number | undefined): ThermalPort => ({
+    readThermalHeadroom: () => Promise.resolve(headroom),
+  });
+  const COMFORTABLE_MS = 1000 / 60;
+
+  it('steps down on a hot forecast even though every frame is comfortable', async () => {
+    await startRiding({ pacer: false, thermal: forecasting(0.95) });
+    await pump(SUSTAINED_SAMPLES + 2, COMFORTABLE_MS);
+    expect(rungs[rungs.length - 1]).toEqual(QUALITY_LADDER[1]);
+  });
+
+  /**
+   * The review finding on #523. The forecast is read every ten seconds and the
+   * ladder counts pressure per FRAME, so one reading handed to every frame
+   * until the next was hundreds of samples: one hot reading walked the ride to
+   * the floor, and one cool one climbed it straight back. A reading may now
+   * move the ladder one rung at most.
+   */
+  describe('one reading moves the ladder one rung at most', () => {
+    /** The poll `GameView` starts, run by the test. @see thermal.ts §everyInterval */
+    let polls: (() => void)[] = [];
+    beforeEach(() => {
+      polls = [];
+      vi.stubGlobal('setInterval', (task: () => void) => {
+        polls.push(task);
+        return polls.length;
+      });
+      vi.stubGlobal('clearInterval', () => undefined);
+    });
+
+    /** A port answering whatever the test last set. */
+    function settable(first: number): ThermalPort & { set: (next: number) => void } {
+      let headroom = first;
+      return {
+        readThermalHeadroom: () => Promise.resolve(headroom),
+        set: (next) => {
+          headroom = next;
+        },
+      };
+    }
+
+    /** Take the next reading, as the ten-second poll would. */
+    async function poll(): Promise<void> {
+      await act(async () => {
+        for (const task of polls) {
+          task();
+        }
+        await Promise.resolve();
+      });
+    }
+
+    /**
+     * Long enough for a reading that was NOT spent to take three more steps,
+     * which is what these tests catch. ⚠️ It was twenty times the sample count
+     * until CI's coverage run timed two of these out at Vitest's 5 s default.
+     */
+    const LONG_AFTER = 4 * SUSTAINED_SAMPLES;
+
+    it('steps down one rung on one hot reading, however many frames it is held for', async () => {
+      await startRiding({ pacer: false, thermal: settable(0.95) });
+      await pump(LONG_AFTER, COMFORTABLE_MS);
+      expect(rungs).toEqual([QUALITY_LADDER[1]]);
+    });
+
+    it('steps down one more rung on the next hot reading', async () => {
+      const port = settable(0.95);
+      await startRiding({ pacer: false, thermal: port });
+      await pump(LONG_AFTER, COMFORTABLE_MS);
+      await poll();
+      await pump(LONG_AFTER, COMFORTABLE_MS);
+      expect(rungs).toEqual([QUALITY_LADDER[1], QUALITY_LADDER[2]]);
+    });
+
+    it('climbs one rung, not all of them, on one cool reading', async () => {
+      const port = settable(0.95);
+      await startRiding({ pacer: false, thermal: port });
+      await pump(LONG_AFTER, COMFORTABLE_MS);
+      await poll();
+      await pump(LONG_AFTER, COMFORTABLE_MS);
+      port.set(0.2);
+      await poll();
+      await pump(LONG_AFTER, COMFORTABLE_MS);
+      expect(rungs).toEqual([QUALITY_LADDER[1], QUALITY_LADDER[2], QUALITY_LADDER[1]]);
+    });
+  });
+
+  it('stays on the top rung under a cool forecast', async () => {
+    // The control: the same ride, the same frames, a forecast well clear.
+    await startRiding({ pacer: false, thermal: forecasting(0.2) });
+    await pump(SUSTAINED_SAMPLES + 2, COMFORTABLE_MS);
+    // The renderer is told a rung only when it changes, so "no rung at all" is
+    // "never left the top one" — the same reading the threshold test above makes.
+    expect(rungs).toEqual([]);
+  });
+
+  it('reads a NaN forecast as no opinion, so comfortable frames keep the top rung', async () => {
+    await startRiding({ pacer: false, thermal: forecasting(Number.NaN) });
+    await pump(SUSTAINED_SAMPLES + 2, COMFORTABLE_MS);
+    // The renderer is told a rung only when it changes, so "no rung at all" is
+    // "never left the top one" — the same reading the threshold test above makes.
+    expect(rungs).toEqual([]);
   });
 });

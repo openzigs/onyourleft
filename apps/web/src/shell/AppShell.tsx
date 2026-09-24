@@ -82,6 +82,7 @@ import type { WorkoutPort } from '../workouts/store-port';
 
 import { CameraIndicator } from '../camera/indicator';
 import type { CameraController } from '../camera/session';
+import type { ThermalPort } from '../game/thermal-port';
 
 import { UpdateOffer } from '../offline/UpdateOffer';
 import type { UpdateWatcher } from '../offline/update';
@@ -142,6 +143,11 @@ export interface AppShellProps {
    * rider navigated away from it, and the indicator with it.
    */
   readonly camera?: CameraController | undefined;
+  /**
+   * Android's thermal forecast, for the game's quality ladder (#247). Absent
+   * in a browser. @see game/thermal-port.ts
+   */
+  readonly thermal?: ThermalPort | undefined;
   /**
    * A new version of the app waiting to take over (#407).
    *
@@ -392,6 +398,8 @@ function viewFor(
           // #382. The quality ladder's fifth figure reaches the camera through
           // here and nowhere else — `game/quality.ts` §`QualitySettings.capture`.
           {...(props.camera === undefined ? {} : { camera: props.camera })}
+          // #247. The forecast half of the ladder; only the shell supplies one.
+          {...(props.thermal === undefined ? {} : { thermal: props.thermal })}
         />
       );
     case 'segment-detail':
