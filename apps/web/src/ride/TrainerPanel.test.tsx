@@ -225,8 +225,9 @@ describe('control is its own step, and ERG is one thing to do with it — #503',
   it('asks for control as its own step, without showing an ERG form', async () => {
     const text = await render(snapshot({ ...driven, hasControl: false }));
     expect(text).toContain('This app does not have control of the trainer');
-    // And says the game does not need this detour.
-    expect(text).toContain('the trainer game asks for it itself when you press Ride');
+    // And says the game does not need this detour — in the #509 wording.
+    expect(text).toContain('the trainer game asks when you press Ride');
+    expect(text).not.toContain('asks for it itself');
     expect(text).toContain('Ask the trainer for control');
     expect(mounted?.container.querySelector('#oyl-erg-target')).toBeNull();
     expect(text).not.toContain('ERG, optional');

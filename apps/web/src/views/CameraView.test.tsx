@@ -373,6 +373,125 @@ describe('keeping this ride’s pictures', () => {
   });
 });
 
+/**
+ * #498 — what the rider is told when the device refuses a picture, cannot
+ * count its pictures, or cannot delete them. The first used to be untested and
+ * the other two were unhandled rejections.
+ *
+ * ⚠️ Every error the stubs throw carries a distinctive token, and every case
+ * asserts that token is NOT on the screen: ADR 0029 D-8 forbids carrying a
+ * storage error's text into a message about a frame, because that text
+ * routinely carries the key it could not write.
+ */
+describe('when the device says no — #498', () => {
+  const LEAK = 'QuotaExceededError key=oyl-frame-0042';
+
+  /** A keep whose store fails in exactly one way. */
+  function failingKeep(
+    held: number,
+    fails: 'accept' | 'count' | 'forget',
+  ): FrameKeep & { readonly counted: number } {
+    let keeping = fails === 'accept';
+    let counted = 0;
+    return {
+      get keeping(): boolean {
+        return keeping;
+      },
+      get counted(): number {
+        return counted;
+      },
+      setKeeping(on: boolean): void {
+        keeping = on;
+      },
+      accept: async () =>
+        fails === 'accept' ? Promise.reject(new Error(LEAK)) : Promise.resolve(keeping),
+      count: async () => {
+        counted += 1;
+        return fails === 'count' ? Promise.reject(new Error(LEAK)) : Promise.resolve(held);
+      },
+      forget: async () =>
+        fails === 'forget' ? Promise.reject(new Error(LEAK)) : Promise.resolve(held),
+    };
+  }
+
+  async function agreedAndOn(keep: FrameKeep): Promise<void> {
+    const controller = controllerWith(scriptedCamera(), keep);
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    mounted = await mount(<CameraView controller={controller} />);
+    await settle();
+    const on = button('Turn the camera on');
+    if (on !== undefined) {
+      await activateWithKeyboard(on);
+      await settle();
+    }
+  }
+
+  it('says the picture was taken and could not be kept, and names no cause', async () => {
+    await agreedAndOn(failingKeep(0, 'accept'));
+    const take = button('Take a picture');
+    if (take === undefined) {
+      expect.unreachable('no control to take a picture');
+      return;
+    }
+    await activateWithKeyboard(take);
+    await settle();
+
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('A picture was taken');
+    expect(text).toContain('this device could not keep it.');
+    // A refusal is a warning, not a success — and the sentence on it is neither
+    // "kept" nor "thrown away": the rider asked for it and was refused.
+    const warning =
+      queryAll<HTMLElement>(document, '.oyl-status--warning')
+        .map((each) => each.textContent ?? '')
+        .find((each) => each.includes('A picture was taken')) ?? '';
+    expect(warning).toContain('could not keep it.');
+    expect(warning).not.toContain('kept on this device');
+    expect(warning).not.toContain('thrown away');
+    // The cause the code cannot establish — a bare `catch` lands a closed
+    // connection and a transaction abort here too — is not claimed.
+    expect(text).not.toContain('no room');
+    expect(text).not.toContain(LEAK);
+    expect(text).not.toContain('QuotaExceeded');
+  });
+
+  it('says it could not count the pictures when the read fails, and still offers the delete', async () => {
+    await agreedAndOn(failingKeep(3, 'count'));
+    await settle();
+
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('could not count the pictures');
+    expect(text).not.toContain('Counting…');
+    expect(text).not.toContain('holding no pictures');
+    expect(text).not.toContain(LEAK);
+    // A rider who cannot be told how many can still get rid of them.
+    expect(button('Delete every picture')).toBeDefined();
+  });
+
+  it('says the pictures are still there when the delete fails, and re-counts them', async () => {
+    const keep = failingKeep(2, 'forget');
+    await agreedAndOn(keep);
+    await settle();
+    const before = keep.counted;
+    const remove = button('Delete every picture');
+    if (remove === undefined) {
+      expect.unreachable('no delete control');
+      return;
+    }
+    await activateWithKeyboard(remove);
+    await settle();
+
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('could not be deleted');
+    expect(text).toContain('still on this device');
+    expect(text).not.toContain(LEAK);
+    // The count is read again rather than trusted — it is what the rider
+    // decides by, and the delete did not happen.
+    expect(keep.counted).toBeGreaterThan(before);
+    expect(text).toContain('This device is holding 2 pictures.');
+  });
+});
+
 /** A `FrameKeep` that records what it was asked, with no store behind it. */
 function stubKeep(held = 0): FrameKeep & { forgotten: number } {
   let keeping = false;

@@ -3763,9 +3763,22 @@ export class BridgeBelt {
     return this.#mesh;
   }
 
-  /** Whether the bridges wear the photographed stone now. @see bridgesWearStoneOf */
+  /**
+   * Whether the bridges wear the photographed stone now. @see bridgesWearStoneOf
+   *
+   * ⚠️ #509: the material on the mesh must be the stone one AND carry a colour
+   * map. The first half alone is what `#applyWorld`'s second argument buys —
+   * without it the mesh wears `#physical` — and the second is what
+   * {@link stoneBridgeMaterial}'s `map:` line buys: a stone material built with
+   * no map is still "the stone material" to the identity check, and the
+   * browser gate reads this on a realistic rung.
+   */
   get wearsStone(): boolean {
-    return this.#stone !== undefined && this.#mesh.material === this.#stone.material;
+    return (
+      this.#stone !== undefined &&
+      this.#mesh.material === this.#stone.material &&
+      this.#stone.material.map !== null
+    );
   }
 
   /** @see QualitySettings.shading */

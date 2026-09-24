@@ -35,6 +35,7 @@ import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GameView, STANDING_NOTICE_SECONDS, type GamePort, type RidableRoute } from './GameView';
+import { createGradientSession } from './gradient';
 import {
   gameTrainerPortOver,
   type GameTrainer,
@@ -42,6 +43,18 @@ import {
   type GradientTrainer,
 } from './trainer-port';
 import type { GameRenderer, SceneFrame } from './port';
+import type { ScreenLockSource } from './hud/wake-lock';
+
+/**
+ * #509: the real `createGradientSession`, counted. A session built and never
+ * sampled writes nothing, so "one gradient session per press" is not visible
+ * on the wire — this is what makes it visible. Every call still goes through
+ * to the real implementation; nothing about the sessions changes.
+ */
+vi.mock('./gradient', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./gradient')>();
+  return { ...actual, createGradientSession: vi.fn(actual.createGradientSession) };
+});
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 import {
   altitudeMetres,
@@ -807,8 +820,258 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
     const text = mounted?.container.textContent ?? '';
     expect(text).toContain('End ride');
     expect(text).toContain('did not grant control when you pressed Ride');
-    // The refusal is also where the Ride screen reads it.
-    expect(rig.controller.getSnapshot().trainer.refusal).toBeDefined();
+    // The refusal is also where the Ride screen reads it — and, since #509,
+    // the game's own sentence carries the same reason.
+    const reason = rig.controller.getSnapshot().trainer.refusal;
+    expect(reason).toBeDefined();
+    expect(text).toContain(reason ?? '<no reason recorded>');
     await rig.done();
+  });
+});
+
+describe('a press on Ride while the trainer is being asked — #509', () => {
+  /**
+   * A trainer whose answer to the Ride press is the TEST's to give. Until
+   * `grant()` the request stays pending — the FTMS procedure is bounded at
+   * five seconds after the write, and the write itself can take longer — and
+   * `readTrainer` goes on saying `no-control`, so a second press that reached
+   * `askForControlOnRide` would be a second request.
+   */
+  function deferredPort(commands: Commands): {
+    readonly port: GameTrainerPort;
+    grant(): void;
+    reads(): number;
+  } {
+    let granted = false;
+    let reads = 0;
+    const waiting: (() => void)[] = [];
+    const control: GradientTrainer = {
+      setSimulationParameters: async (parameters) => {
+        commands.written.push(parameters);
+        return Promise.resolve();
+      },
+      letGo: async () => {
+        commands.releases.push(commands.written.length);
+        return Promise.resolve({ kind: 'stopped' as const });
+      },
+    };
+    return {
+      port: {
+        readTrainer: () => {
+          reads += 1;
+          return granted ? { kind: 'ready', control } : { kind: 'no-control', control: undefined };
+        },
+        askForControlOnRide: () => {
+          commands.requests.push(commands.written.length);
+          return new Promise<void>((resolve) => {
+            waiting.push(resolve);
+          });
+        },
+      },
+      grant: () => {
+        granted = true;
+        for (const resolve of waiting.splice(0)) resolve();
+      },
+      reads: () => reads,
+    };
+  }
+
+  /** A screen lock that records every acquire and every release. */
+  function lockSource(defer = false): {
+    readonly source: ScreenLockSource;
+    readonly acquired: number[];
+    readonly released: number[];
+    settle(): void;
+  } {
+    const acquired: number[] = [];
+    const released: number[] = [];
+    const waiting: (() => void)[] = [];
+    return {
+      source: {
+        acquire: async () => {
+          const id = acquired.length + 1;
+          acquired.push(id);
+          if (defer) {
+            await new Promise<void>((resolve) => {
+              waiting.push(resolve);
+            });
+          }
+          return {
+            held: true,
+            release: async () => {
+              released.push(id);
+              return Promise.resolve();
+            },
+          };
+        },
+      },
+      acquired,
+      released,
+      settle: () => {
+        for (const resolve of waiting.splice(0)) resolve();
+      },
+    };
+  }
+
+  async function openTheGame(trainer: GameTrainerPort, lock: ScreenLockSource): Promise<void> {
+    mounted = await mount(
+      <GameView
+        port={pedallingPort(hillRoute())}
+        trainer={trainer}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+        now={() => nowMs}
+        screenLock={lock}
+      />,
+    );
+    await settle();
+  }
+
+  beforeEach(() => {
+    vi.mocked(createGradientSession).mockClear();
+  });
+
+  it('says it is asking, marks Ride unavailable, and starts ONE ride however often Ride is pressed', async () => {
+    const commands: Commands = { written: [], releases: [], requests: [] };
+    const trainer = deferredPort(commands);
+    const lock = lockSource();
+    await openTheGame(trainer.port, lock.source);
+
+    await clickThrough(buttonStarting('Ride '));
+    // Pending: the picker says so, and the control says it is unavailable.
+    const picker = mounted?.container.textContent ?? '';
+    expect(picker).toContain('Asking your trainer for control');
+    expect(buttonStarting('Ride ')?.getAttribute('aria-disabled')).toBe('true');
+    expect(commands.requests).toHaveLength(1);
+
+    // ⚠️ `aria-disabled` is a promise to a screen reader and nothing to a
+    // click, so the presses are made anyway.
+    await clickThrough(buttonStarting('Ride '));
+    await clickThrough(buttonStarting('Ride '));
+    expect(commands.requests).toHaveLength(1);
+
+    trainer.grant();
+    await settle();
+    await pump(10);
+    await settle();
+
+    const text = mounted?.container.textContent ?? '';
+    expect(text).toContain('End ride');
+    expect(text).not.toContain('Asking your trainer for control');
+    // One request, one session, one lock — and the road reached the trainer.
+    expect(commands.requests).toHaveLength(1);
+    expect(vi.mocked(createGradientSession)).toHaveBeenCalledTimes(1);
+    expect(lock.acquired).toHaveLength(1);
+    expect(commands.written.length).toBeGreaterThan(0);
+  });
+
+  it('is ready for the next press once the trainer has answered', async () => {
+    const commands: Commands = { written: [], releases: [], requests: [] };
+    const trainer = deferredPort(commands);
+    const lock = lockSource();
+    await openTheGame(trainer.port, lock.source);
+    await clickThrough(buttonStarting('Ride '));
+    trainer.grant();
+    await settle();
+    await pump(4);
+    await clickThrough(buttonStarting('End ride'));
+    await settle();
+
+    expect(buttonStarting('Ride ')?.getAttribute('aria-disabled')).toBeNull();
+    await clickThrough(buttonStarting('Ride '));
+    await pump(4);
+    expect(mounted?.container.textContent ?? '').toContain('End ride');
+    expect(vi.mocked(createGradientSession)).toHaveBeenCalledTimes(2);
+  });
+
+  it('leaving the screen while the trainer is being asked acquires no lock and builds no session', async () => {
+    const commands: Commands = { written: [], releases: [], requests: [] };
+    const trainer = deferredPort(commands);
+    const lock = lockSource();
+    await openTheGame(trainer.port, lock.source);
+    await clickThrough(buttonStarting('Ride '));
+    expect(commands.requests).toHaveLength(1);
+
+    mounted?.unmount();
+    mounted = undefined;
+    // `teardown` itself reads the trainer once, for the audio (#447); what is
+    // counted from here is whether `start` reads it AGAIN after the answer.
+    const readsAfterLeaving = trainer.reads();
+    trainer.grant();
+    await settle();
+    await settle();
+
+    // Nothing after the answer ran: the trainer was not re-read, no session
+    // was built, no lock was taken — the control, if it was granted, is simply
+    // kept (#372). Without the check, `start` resumes into a component that
+    // is gone and acquires a lock nothing will ever release.
+    expect(lock.acquired).toHaveLength(0);
+    expect(vi.mocked(createGradientSession)).not.toHaveBeenCalled();
+    expect(trainer.reads()).toBe(readsAfterLeaving);
+    expect(commands.written).toHaveLength(0);
+  });
+
+  it('releases a lock that arrives after the rider has left', async () => {
+    // The same shape one await later: the lock's own `acquire` is in flight
+    // when the rider navigates away, and `teardown` has already released the
+    // placeholder. The lock that then arrives is released on the spot.
+    const commands: Commands = { written: [], releases: [], requests: [] };
+    const lock = lockSource(true);
+    await openTheGame(trainerPort(READY, commands), lock.source);
+    await clickThrough(buttonStarting('Ride '));
+    expect(lock.acquired).toHaveLength(1);
+    expect(lock.released).toHaveLength(0);
+
+    mounted?.unmount();
+    mounted = undefined;
+    lock.settle();
+    await settle();
+    await settle();
+
+    expect(lock.released).toEqual([1]);
+  });
+
+  it('leaving the screen while the ghost loads builds no session and takes no lock', async () => {
+    // The shape #509 names as older than the control request: `start` awaited
+    // `loadGhost` before it awaited anything else, and a rider who left during
+    // that load got the same leaked lock. One await earlier, same check.
+    const commands: Commands = { written: [], releases: [], requests: [] };
+    const lock = lockSource();
+    let releaseGhost: () => void = () => undefined;
+    const route: RidableRoute = { ...hillRoute(), attempts: 1 };
+    mounted = await mount(
+      <GameView
+        port={{
+          ...pedallingPort(route),
+          loadGhost: () =>
+            new Promise((resolve) => {
+              releaseGhost = () => {
+                resolve(undefined);
+              };
+            }),
+        }}
+        trainer={trainerPort(READY, commands)}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+        now={() => nowMs}
+        screenLock={lock.source}
+      />,
+    );
+    await settle();
+    const ghost = queryAll<HTMLInputElement>(
+      mounted.container,
+      'input[type="checkbox"]:not([disabled])',
+    ).find((box) => (box.parentElement?.textContent ?? '').includes('Race your own best attempt'));
+    expect(ghost).toBeDefined();
+    await clickThrough(ghost);
+    await clickThrough(buttonStarting('Ride '));
+
+    mounted.unmount();
+    mounted = undefined;
+    releaseGhost();
+    await settle();
+    await settle();
+
+    expect(lock.acquired).toHaveLength(0);
+    expect(vi.mocked(createGradientSession)).not.toHaveBeenCalled();
+    expect(commands.written).toHaveLength(0);
   });
 });

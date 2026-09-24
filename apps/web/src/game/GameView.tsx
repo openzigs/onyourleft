@@ -551,6 +551,38 @@ export function GameView(props: GameViewProps): JSX.Element {
   const crankRef = useRef<number>(0);
   const lockRef = useRef<ScreenLock>(NO_SCREEN_LOCK);
   /**
+   * Whether a press on *Ride* is still on its way to a ride — #509.
+   *
+   * ⚠️ **The guard against a second press, and it is a ref rather than the
+   * `asking` state below on purpose.** `start` awaits a full FTMS control
+   * procedure for a `no-control` trainer — bounded at five seconds after the
+   * write, and the write can take longer — and until #509 *Ride* stayed live
+   * for all of it: a second press ran `start` again, `readTrainer` still said
+   * `no-control`, a second Request Control was queued, and two `start`s then
+   * raced — two gradient sessions, two simulations, two screen locks with one
+   * of them leaked. State would re-render the button `aria-disabled`, which is
+   * a promise to a screen reader and nothing to a click, and it could not
+   * refuse a press that lands before that render. This refuses in `start`.
+   */
+  const startingRef = useRef(false);
+  /**
+   * Whether the trainer has been asked for control and has not yet answered —
+   * #509. The picker says so and marks *Ride* unavailable while it is true.
+   * The refusal itself is {@link startingRef}; this is what the rider sees.
+   */
+  const [asking, setAsking] = useState(false);
+  /**
+   * Whether this component has been unmounted — #509.
+   *
+   * `start` checks it after each of its awaits and returns rather than
+   * carrying on into a component that is gone: `teardown` has already run by
+   * then, so a session built or a lock acquired afterwards would be released
+   * by nothing. Reset in the effect's body rather than only set in its
+   * cleanup, because `main.tsx` mounts under `StrictMode`, which runs the
+   * cleanup once on mount and mounts again.
+   */
+  const unmountedRef = useRef(false);
+  /**
    * The gradient control loop, while one is running — #362.
    *
    * ⚠️ **A ref rather than state, and the reason is the same as
@@ -634,7 +666,15 @@ export function GameView(props: GameViewProps): JSX.Element {
 
   useEffect(() => teardown, [teardown]);
 
-  const start = useCallback(
+  useEffect(() => {
+    unmountedRef.current = false;
+    return () => {
+      unmountedRef.current = true;
+    };
+  }, []);
+
+  /** The ride itself, once {@link start} has let the press through. */
+  const begin = useCallback(
     async (
       route: RidableRoute,
       ghost: boolean,
@@ -653,6 +693,10 @@ export function GameView(props: GameViewProps): JSX.Element {
       cuesRef.current = new RideCues(soundsOut ?? sharedCueOutput(), soundChoice);
       cuesRef.current.begin();
       ghostRef.current = ghost && port !== undefined ? await port.loadGhost(route.id) : undefined;
+      // #509: the rider may have left while the ghost loaded. @see unmountedRef
+      if (unmountedRef.current) {
+        return;
+      }
       // ⚠️ **A new ride settles its own result, and this is the only line that
       // makes that true.** `ghost-outcome.ts` returns a settled answer
       // unchanged for ever — that latch is its whole defence against a rider
@@ -728,11 +772,23 @@ export function GameView(props: GameViewProps): JSX.Element {
       // says whether it was granted, and `trainerRoadNotice` says so if not.
       let found = props.trainer?.readTrainer() ?? NO_GAME_TRAINER;
       if (found.kind === 'no-control' && props.trainer !== undefined) {
+        // #509: said on the picker for as long as the machine takes to answer.
+        setAsking(true);
         try {
           await props.trainer.askForControlOnRide();
         } catch {
           // The ride still starts; the re-read reports `no-control` and the
           // rider is told the hills are not reaching the trainer.
+        } finally {
+          setAsking(false);
+        }
+        // #509: the rider may have left while the trainer was being asked.
+        // `teardown` has run; a session built now would be stopped by nothing
+        // and a lock acquired now released by nothing. If control was granted
+        // in that window it is simply kept, which is #372's rule: nothing
+        // takes control back after a release, and nothing releases here.
+        if (unmountedRef.current) {
+          return;
         }
         found = props.trainer.readTrainer();
       }
@@ -755,9 +811,39 @@ export function GameView(props: GameViewProps): JSX.Element {
       setState(simulation.state);
       setChosen(route);
       setPhase('riding');
-      lockRef.current = (await props.screenLock?.acquire()) ?? NO_SCREEN_LOCK;
+      const lock = (await props.screenLock?.acquire()) ?? NO_SCREEN_LOCK;
+      // #509: the same shape one await later. `teardown` has released the
+      // placeholder already; this lock would keep the screen awake with
+      // nothing on it.
+      if (unmountedRef.current) {
+        void lock.release();
+        return;
+      }
+      lockRef.current = lock;
     },
     [port, props.screenLock, props.riderMass, props.trainer, soundsOut],
+  );
+
+  const start = useCallback(
+    async (
+      route: RidableRoute,
+      ghost: boolean,
+      pacer: BotPacerPlan | undefined,
+      air: Wind | undefined,
+      sitting: RidingPosition,
+    ): Promise<void> => {
+      // #509: one press is one ride. @see startingRef
+      if (startingRef.current) {
+        return;
+      }
+      startingRef.current = true;
+      try {
+        await begin(route, ghost, pacer, air, sitting);
+      } finally {
+        startingRef.current = false;
+      }
+    },
+    [begin],
   );
 
   // #423. Whether the ride has the screen — @see GameViewProps.onImmersive.
@@ -1134,6 +1220,8 @@ export function GameView(props: GameViewProps): JSX.Element {
         // before the next press. A snapshot read, so it costs a property access
         // per render and never opens a connection — and asks nothing (#503).
         trainerNotice={trainerRoadNotice(trainerNow ?? NO_GAME_TRAINER, 'before-ride')}
+        // #509: whether the press has asked and the trainer has not answered.
+        asking={asking}
         // #503: what the press on Ride will do to the trainer, said before it.
         trainerPromise={trainerRoadPromise(trainerNow ?? NO_GAME_TRAINER)}
         // #475: a snapshot read for the trainer notice's reason — a rider who
@@ -1384,6 +1472,13 @@ function RoutePicker(props: {
    */
   readonly trainerPromise: string | undefined;
   /**
+   * Whether *Ride* has been pressed and the trainer has not yet answered the
+   * request for control — #509. The picker says so in place of the promise,
+   * and every *Ride* is marked unavailable. The refusal of a second press is
+   * `GameView`'s own (§`startingRef`); this is only what the rider is told.
+   */
+  readonly asking: boolean;
+  /**
    * The last release the trainer did not confirm — #372. `undefined` almost
    * always. @see GameTrainer.releaseFault
    */
@@ -1455,7 +1550,14 @@ function RoutePicker(props: {
           {props.releaseNotice}
         </StatusMessage>
       )}
-      {props.trainerPromise === undefined ? undefined : (
+      {props.asking ? (
+        // #509: the press has asked, and the machine has up to the FTMS
+        // procedure's timeout to answer. Said here, in the promise's place,
+        // and `live` because it is a change the rider caused.
+        <StatusMessage tone="info" label="Your trainer" live>
+          Asking your trainer for control. The ride starts when it answers.
+        </StatusMessage>
+      ) : props.trainerPromise === undefined ? undefined : (
         // ⚠️ #503: **the sentence that makes the Ride press the rider's
         // decision** rather than the screen's. It is above the button, so a
         // rider reads that the trainer will follow the hills before the press
@@ -1545,7 +1647,11 @@ function RoutePicker(props: {
             */}
             <button
               type="button"
-              aria-disabled={refused ? true : undefined}
+              // #509: unavailable while the trainer is being asked, as well
+              // as while a box refuses. The click is not guarded on `asking`
+              // here — `GameView` §`startingRef` refuses it, so the refusal
+              // holds for a press that lands before this re-renders.
+              aria-disabled={refused || props.asking ? true : undefined}
               aria-describedby={describedBy}
               onClick={() => {
                 if (refused) {
