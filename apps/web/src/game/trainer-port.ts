@@ -163,6 +163,21 @@ export interface GameTrainer {
    */
   readonly releaseFault?: string | undefined;
   /**
+   * Why the trainer did not grant control when the Ride press asked — #509.
+   * The ride controller's `TrainerSnapshot.refusal`, which is the same text
+   * the Ride screen shows: for example the Control Not Permitted guidance when
+   * another app holds the machine, or a timeout. Present **only** when
+   * {@link GameTrainerKind} is `no-control`, because that field is "why the
+   * last setpoint was refused" and on a trainer that holds control it is about
+   * an ERG target, not the road.
+   *
+   * ⚠️ A string the controller already rendered from the error's message —
+   * never the error itself, and never anything a coordinate could be in.
+   * `trainerRoadNotice` puts it in the in-ride sentence, because "press Ride
+   * again" is the wrong instruction while another app has the trainer.
+   */
+  readonly refusal?: string | undefined;
+  /**
    * `true` when {@link GameTrainerKind} is `workout` and that workout has
    * reached its END — #447, and #448's review. Absent otherwise.
    *
@@ -233,6 +248,8 @@ interface TrainerFacts {
   readonly canSimulate: boolean;
   readonly hasControl: boolean;
   readonly releaseFault?: string | undefined;
+  /** Why the last request was refused — #509. @see GameTrainer.refusal */
+  readonly refusal?: string | undefined;
 }
 
 /**
@@ -362,10 +379,20 @@ export function trainerRoadNotice(
         'to it. The road on screen is real; the resistance under you is not.'
       );
     case 'no-control':
-      return moment === 'before-ride'
-        ? undefined
-        : 'Your trainer did not grant control when you pressed Ride, so the hills on this route ' +
-            'are not being sent to it. End the ride and press Ride again to ask once more.';
+      if (moment === 'before-ride') {
+        return undefined;
+      }
+      // #509: with the reason the controller recorded, where there is one. If
+      // another app holds the trainer, "press Ride again" on its own will not
+      // help; the reason is what says what to put right first. Bracketed by
+      // dashes whatever its own punctuation, and never anything but the string
+      // the ride controller already rendered — no error object, no coordinate.
+      return (
+        'Your trainer did not grant control when you pressed Ride' +
+        (trainer.refusal === undefined ? '' : ` — ${trainer.refusal} —`) +
+        ', so the hills on this route are not being sent to it. End the ride and press Ride ' +
+        'again to ask once more.'
+      );
   }
 }
 
@@ -401,8 +428,13 @@ export function gameTrainerFrom(
     return NO_GAME_TRAINER;
   }
   const kind = trainerKindFrom(snapshot, control, workoutRunning);
-  const found: GameTrainer =
+  const finished: GameTrainer =
     kind.kind === 'workout' && workoutFinished ? { ...kind, workoutFinished: true } : kind;
+  // #509: the reason travels only with the state it explains.
+  const found: GameTrainer =
+    finished.kind === 'no-control' && snapshot.refusal !== undefined
+      ? { ...finished, refusal: snapshot.refusal }
+      : finished;
   return snapshot.releaseFault === undefined
     ? found
     : { ...found, releaseFault: snapshot.releaseFault };

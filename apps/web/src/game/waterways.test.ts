@@ -50,12 +50,16 @@ import {
   CHANNEL_BANK_METRES,
   COPING_DEPTH_METRES,
   COPING_OVERHANG_METRES,
+  LAKE_FAR_METRES,
+  LAKE_NEAR_METRES,
   PARAPET_HEIGHT_METRES,
   PARAPET_THICKNESS_METRES,
   STREAM_DEPTH_METRES,
   STREAM_SURFACE_HALF_WIDTH_METRES,
+  WET_REACH_METRES,
   bridgeParts,
   inWater,
+  waterShaping,
   waterSurface,
   waterways,
   type Waterways,
@@ -600,5 +604,60 @@ describe('the parapets are a country bridge’s — #501', () => {
         Math.abs(parapet.x) + parapet.width / 2,
       );
     }
+  });
+});
+
+describe('where two waters are in reach of one point, the nearer one wins — #509', () => {
+  // ⚠️ No route fixture puts a lake and a stream within `WET_REACH_METRES` of
+  // the same ground, so "nearest water wins" in `waterShaping` was a rule that
+  // could be swapped for "last water wins" with every test green — #507's
+  // review. This builds the two waters by hand: a stream crossing the road at
+  // 500 m, and a lake beside the road from 300 m to 900 m on the left, with
+  // different surfaces so the answer says which one was chosen.
+  const profile = northRoute(1_500, () => 100);
+  const origin = corridorOrigin(profile);
+  const STREAM = 96;
+  const LAKE = 92;
+  const ways: Waterways = {
+    crossings: [{ distance: 500, waterElevation: STREAM }],
+    lakes: [{ from: 300, to: 900, side: 1, waterElevation: LAKE }],
+  };
+
+  it('reports the lake where the point is on the lake’s shore and only near the stream', () => {
+    // 9 m past the stream's surface (weight ≈ 0.8) and 5 m inside the lake's
+    // near shore (weight 1): both in reach, the lake nearer.
+    const along = 500 + STREAM_SURFACE_HALF_WIDTH_METRES + 9;
+    const shaping = waterShaping(ways, profile, origin, along, LAKE_NEAR_METRES - 5, 0);
+    expect(shaping.shore).toBe(1);
+    expect(shaping.level).toBeCloseTo(LAKE - origin.elevation, 9);
+  });
+
+  it('reports the stream where the point is on the stream’s bank and only near the lake', () => {
+    // 3 m past the stream's surface (weight 1) and 10 m past the lake's far
+    // shore (weight ≈ 0.6): both in reach, the stream nearer — and the stream
+    // is visited FIRST, so "last water wins" reports the lake here.
+    const along = 500 + STREAM_SURFACE_HALF_WIDTH_METRES + 3;
+    const shaping = waterShaping(ways, profile, origin, along, LAKE_FAR_METRES + 10, 0);
+    expect(shaping.shore).toBe(1);
+    expect(shaping.level).toBeCloseTo(STREAM - origin.elevation, 9);
+  });
+
+  it('is in reach of both at each point — the apparatus', () => {
+    // Each water on its own reaches both points, or the cases above are about
+    // one water and prove nothing about the choice between two.
+    const streamOnly: Waterways = { crossings: ways.crossings, lakes: [] };
+    const lakeOnly: Waterways = { crossings: [], lakes: ways.lakes };
+    for (const [along, lateral] of [
+      [500 + STREAM_SURFACE_HALF_WIDTH_METRES + 9, LAKE_NEAR_METRES - 5],
+      [500 + STREAM_SURFACE_HALF_WIDTH_METRES + 3, LAKE_FAR_METRES + 10],
+    ] as const) {
+      for (const only of [streamOnly, lakeOnly]) {
+        const shaping = waterShaping(only, profile, origin, along, lateral, 0);
+        expect(shaping.shore).toBeGreaterThan(0);
+        expect(shaping.shore).toBeLessThanOrEqual(1);
+      }
+    }
+    // And beyond the reach of either, the point is dry.
+    expect(waterShaping(ways, profile, origin, 500 + WET_REACH_METRES * 4, 200, 0).shore).toBe(0);
   });
 });

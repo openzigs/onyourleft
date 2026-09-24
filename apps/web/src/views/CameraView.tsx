@@ -86,10 +86,16 @@ import type { CameraController, CaptureOutcome } from '../camera/session';
  * ⚠️ The third case is not a rarity: in production the keep writes a whole JPEG
  * to IndexedDB, and a device that is full is the ordinary way that goes wrong.
  * Before this the rejection escaped the click handler with no notice at all.
+ *
+ * ⚠️ **The refusal names no cause** — #498. It used to add *"There is no room
+ * for it."*, under a bare `catch` that also lands a transaction abort, a
+ * `DataCloneError` and a closed connection, so "no room" was a claim the code
+ * could not make. ADR 0029 D-8 forbids the other repair — carrying the error's
+ * own text into the sentence — so the second sentence is simply gone.
  */
 function captureEnding(outcome: CaptureOutcome): string {
   if (outcome.keepFailed) {
-    return 'this device could not keep it. There is no room for it.';
+    return 'this device could not keep it.';
   }
   return outcome.kept ? 'kept on this device.' : 'thrown away.';
 }
@@ -206,7 +212,13 @@ function Camera({ controller }: { readonly controller: CameraController }): JSX.
   );
 
   const [acknowledged, setAcknowledged] = useState(false);
-  const [kept, setKept] = useState<number | undefined>(undefined);
+  /**
+   * How many pictures this device is holding — or `'unknown'` when the store
+   * could not say (#498). `undefined` until the first read answers.
+   */
+  const [kept, setKept] = useState<number | 'unknown' | undefined>(undefined);
+  /** Whether the last delete was refused by the store (#498). */
+  const [deleteFailed, setDeleteFailed] = useState(false);
   const [refusal, setRefusal] = useState<ConsentRefusal | undefined>(undefined);
   const [outcome, setOutcome] = useState<CaptureOutcome | undefined>(undefined);
 
@@ -217,9 +229,18 @@ function Camera({ controller }: { readonly controller: CameraController }): JSX.
   const notice = controller.notice();
 
   const refreshKept = useCallback(() => {
-    void controller.keptCount().then((count) => {
-      setKept(count);
-    });
+    // ⚠️ #498: a read that fails is SAID rather than left as a stale count and
+    // an unhandled rejection. The count is what a rider decides to delete by,
+    // and "Counting…" for ever is indistinguishable from a slow store. Nothing
+    // of the error is read — ADR 0029 D-8.
+    void controller
+      .keptCount()
+      .then((count) => {
+        setKept(count);
+      })
+      .catch(() => {
+        setKept('unknown');
+      });
   }, [controller]);
 
   useEffect(refreshKept, [refreshKept]);
@@ -431,17 +452,42 @@ function Camera({ controller }: { readonly controller: CameraController }): JSX.
         <p>
           {kept === undefined
             ? 'Counting…'
-            : kept === 0
-              ? 'This device is holding no pictures.'
-              : `This device is holding ${String(kept)} picture${kept === 1 ? '' : 's'}.`}
+            : kept === 'unknown'
+              ? 'This device could not count the pictures it is holding.'
+              : kept === 0
+                ? 'This device is holding no pictures.'
+                : `This device is holding ${String(kept)} picture${kept === 1 ? '' : 's'}.`}
         </p>
+        {deleteFailed ? (
+          // #498: a delete the store refused. The true count is re-read below,
+          // and this says the one thing the count cannot: that a press happened
+          // and did nothing. Nothing of the error — ADR 0029 D-8.
+          <StatusMessage tone="warning" live>
+            The pictures could not be deleted. They are still on this device.
+          </StatusMessage>
+        ) : null}
+        {/*
+          Offered while the count is UNKNOWN as well as while it is positive
+          (#498): a rider the store cannot count for is the rider most likely
+          to want the pictures gone, and a control withheld for a count that
+          never arrives is no control at all.
+        */}
         {kept === undefined || kept === 0 ? null : (
           <Button
             variant="secondary"
             onClick={() => {
-              void controller.forgetKept().then(() => {
-                refreshKept();
-              });
+              setDeleteFailed(false);
+              void controller
+                .forgetKept()
+                .then(() => {
+                  refreshKept();
+                })
+                .catch(() => {
+                  // #498: said, and the count re-read — it is the true count
+                  // that a failed delete leaves, and the rider decides by it.
+                  setDeleteFailed(true);
+                  refreshKept();
+                });
             }}
           >
             Delete every picture on this device

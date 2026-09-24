@@ -110,18 +110,6 @@ interface Viewport {
    * cannot honestly fail is worse than none.
    */
   readonly unstagedFails: boolean;
-  /**
-   * #512: a HUD panel here covers a rider leaning at the cap, so this viewport
-   * is held to the UPRIGHT rider box, and the case "#512 is still open" requires
-   * the leaning box to be covered — which goes red the day the layout is
-   * fixed, so the flag cannot outlive the defect.
-   *
-   * ⚠️ A known gap, stated rather than papered over. #499 made the rider lean,
-   * and at 736×360 the corner panels leave about 80 px around the middle of the
-   * frame; a rider leaning past about 20° reaches past it. Every other overlay
-   * viewport clears the leaning box.
-   */
-  readonly leaningRiderCovered?: true;
 }
 
 /**
@@ -141,12 +129,20 @@ const OVERLAY_VIEWPORTS: readonly Viewport[] = [
   { name: 'a 4:3 tablet in landscape — 1024×768', width: 1024, height: 768, unstagedFails: true },
   { name: 'a tablet upright — 800×1280', width: 800, height: 1280, unstagedFails: false },
   { name: 'a phone in landscape — 844×390', width: 844, height: 390, unstagedFails: true },
+  { name: 'the smallest corners layout — 736×360', width: 736, height: 360, unstagedFails: true },
+  /**
+   * #512: the TALLEST of the short corners layout (`theme.css` §"A SHORT
+   * corners layout", `max-height: 30rem`). A leaning rider's box grows with
+   * the viewport's height while the panels, in rem, do not, so this is where
+   * the bottom row is nearest a rider leaning at the cap — 12 px, measured.
+   * Until #512 it was measured nowhere, and a 20 rem actions panel here was
+   * over the rider by about 50 px.
+   */
   {
-    name: 'the smallest corners layout — 736×360',
+    name: 'the tallest short corners layout — 736×480',
     width: 736,
-    height: 360,
+    height: 480,
     unstagedFails: true,
-    leaningRiderCovered: true,
   },
   { name: 'a phone upright — 390×844', width: 390, height: 844, unstagedFails: false },
   {
@@ -242,14 +238,13 @@ function describeItem(item: StageItem): string {
  * small to overlap anything, because "no panel overlaps a rectangle of no
  * size" is true of every layout there is.
  */
-function riderBox(
-  viewport: Viewport,
-  lean: number = viewport.leaningRiderCovered === true ? 0 : MAXIMUM_LEAN_RADIANS,
-): Box {
+function riderBox(viewport: Viewport, lean: number = MAXIMUM_LEAN_RADIANS): Box {
   // At the lean cap (#499): the bicycle stays mid-frame on the racing line
   // because the camera follows it across, but the rider's top rolls up to
-  // 0.95 m to one side. A panel over a leaning rider is over the rider —
-  // except where `Viewport.leaningRiderCovered` records that it is (#512).
+  // 0.95 m to one side. A panel over a leaning rider is over the rider, at
+  // EVERY overlay viewport — #512 closed the one (736×360) that used to be
+  // held to the upright box, by narrowing the short corners layout's bottom
+  // row rather than by moving the camera.
   const rider = riderFrameBox(viewport.width / viewport.height, lean);
   const box: Box = {
     left: rider.left * viewport.width,
@@ -379,20 +374,38 @@ for (const viewport of OVERLAY_VIEWPORTS) {
       expect(seen.panels.filter((each) => overlap(each.box, box)).map(describeItem)).toEqual([]);
     });
 
-    if (viewport.leaningRiderCovered === true) {
-      /**
-       * #512, pinned from the other side: here a panel IS over a rider leaning
-       * at the cap. When the layout is fixed this goes red, and the flag and
-       * this case come off together.
-       */
-      test('#512 is still open: a panel covers a rider leaning at the cap', async ({ page }) => {
-        await openRide(page, viewport);
-        const seen = await measure(page);
+    /**
+     * ⚠️ The control for the case above — #512. The same page, with the rider
+     * UPRIGHT: the box is narrower by the helmet's roll, so a layout that only
+     * ever measured this one was green over a rider who leaned. Reported
+     * rather than asserted, so a reader of the run sees both widths.
+     */
+    test('the rider’s box, upright and at the lean cap, is a measurement', async ({
+      page,
+    }, testInfo) => {
+      await openRide(page, viewport);
+      const seen = await measure(page);
 
-        const leaning = riderBox(viewport, MAXIMUM_LEAN_RADIANS);
-        expect(seen.panels.filter((each) => overlap(each.box, leaning)).length).toBeGreaterThan(0);
-      });
-    }
+      const upright = riderBox(viewport, 0);
+      const leaning = riderBox(viewport);
+      expect(leaning.width).toBeGreaterThan(upright.width * 2);
+      // How much room the bottom row leaves, either side: the panels that share
+      // the box's rows, and their horizontal clearance from it.
+      const nearest = Math.min(
+        ...seen.panels
+          .filter((each) => each.box.bottom > leaning.top && each.box.top < leaning.bottom)
+          .map((each) => Math.max(leaning.left - each.box.right, each.box.left - leaning.right)),
+      );
+      const clearance = Number.isFinite(nearest)
+        ? `nearest panel edge on its rows ${nearest.toFixed(0)} px clear`
+        : 'no panel on its rows';
+      const measured = `leaning box ${leaning.left.toFixed(0)}–${leaning.right.toFixed(0)} px (upright ${upright.left.toFixed(0)}–${upright.right.toFixed(0)}); ${clearance}`;
+      testInfo.annotations.push({ type: '#512', description: measured });
+      console.log(`#512 — ${viewport.name} — ${measured}`);
+      expect(seen.panels.filter((each) => overlap(each.box, upright)).map(describeItem)).toEqual(
+        [],
+      );
+    });
 
     test('a primary reading is visibly larger than a secondary one', async ({ page }) => {
       await openRide(page, viewport);
@@ -538,7 +551,9 @@ test.describe('a ride with a standing notice', () => {
       const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
       expect(notice?.box.height ?? 0).toBeGreaterThan(40);
       const laidOut = seen.panels.filter((each) => each.box.height > 0);
-      const onAPhone = Math.min(viewport.width, viewport.height) < 480;
+      // `theme.css`'s short corners layout is `max-height: 30rem`, which is
+      // 480 px INCLUSIVE — #512's 736×480 is on it.
+      const onAPhone = Math.min(viewport.width, viewport.height) <= 480;
       expect(laidOut).toHaveLength(onAPhone ? 4 : 5);
 
       expect(laidOut.filter((each) => !inside(each.box, viewport)).map(describeItem)).toEqual([]);
@@ -616,8 +631,9 @@ test.describe('a ride with sounds on', () => {
  */
 test.describe('a ride with a standing notice, once it is put away — #437', () => {
   const QUERY = '?trainer=workout';
+  // `<= 480`: the short corners layout's `max-height: 30rem` is inclusive.
   const PHONES = OVERLAY_VIEWPORTS.filter(
-    (each) => Math.min(each.width, each.height) < 480 && each.height !== 752,
+    (each) => Math.min(each.width, each.height) <= 480 && each.height !== 752,
   );
 
   for (const viewport of PHONES) {

@@ -82,6 +82,27 @@ describe('gameTrainerFrom', () => {
     ).toEqual({ kind: 'no-control', control: undefined, releaseFault: fault });
   });
 
+  it('carries the refusal reason on a trainer that did not grant control, and nowhere else — #509', () => {
+    const reason = 'the machine did not answer op code 0x0 within 5 s';
+    expect(
+      gameTrainerFrom(
+        { ...PAIRED_AND_READY, hasControl: false, refusal: reason },
+        silentControl(),
+        false,
+      ),
+    ).toEqual({ kind: 'no-control', control: undefined, refusal: reason });
+    // A refusal on the snapshot is "why the last setpoint was refused", which
+    // for a trainer that HOLDS control is about an ERG target, not the road.
+    expect(
+      gameTrainerFrom({ ...PAIRED_AND_READY, refusal: reason }, silentControl(), false).refusal,
+    ).toBeUndefined();
+    // And a workout's trainer was never asked, so there is no reason to carry.
+    expect(
+      gameTrainerFrom({ ...PAIRED_AND_READY, hasControl: false, refusal: reason }, undefined, true)
+        .refusal,
+    ).toBeUndefined();
+  });
+
   it('is `none` where there is no ride controller at all', () => {
     // Safari, Firefox, a page served over plain HTTP. `main.tsx` builds the
     // port unconditionally and the controller is what is absent.
@@ -247,6 +268,45 @@ describe('trainerRoadNotice', () => {
     expect(text).not.toContain('Ride screen');
   });
 
+  it('carries the reason the trainer gave, for Control Not Permitted and for a timeout — #509', () => {
+    // The two refusals `fitness-machine-control.ts` produces for a Request
+    // Control, as the ride controller records them (`describe(error)` is the
+    // message). If another app holds the trainer, "press Ride again" alone
+    // will not help; the reason is what says what to do first.
+    const notPermitted =
+      'the machine refused op code 0x0 with Control Not Permitted: another app is controlling ' +
+      'this trainer, so it is ignoring this one. Close or disconnect the other one, then ' +
+      'reconnect here.';
+    const timedOut = 'the machine did not answer op code 0x0 within 5 s';
+    for (const refusal of [notPermitted, timedOut]) {
+      const text =
+        trainerRoadNotice({ kind: 'no-control', control: undefined, refusal }, 'riding') ?? '';
+      expect(text).toContain('did not grant control when you pressed Ride');
+      expect(text).toContain(refusal);
+      expect(text).toContain('hills');
+      // A string, never an error object or its stack.
+      expect(text).not.toContain('[object');
+      expect(text).not.toContain('Error:');
+      expect(text).not.toMatch(/\bat\s+\w+\s*\(/);
+    }
+    // The two are told apart.
+    expect(
+      trainerRoadNotice(
+        { kind: 'no-control', control: undefined, refusal: notPermitted },
+        'riding',
+      ),
+    ).not.toBe(
+      trainerRoadNotice({ kind: 'no-control', control: undefined, refusal: timedOut }, 'riding'),
+    );
+    // Before the ride the reason is not a notice either: the press asks.
+    expect(
+      trainerRoadNotice(
+        { kind: 'no-control', control: undefined, refusal: timedOut },
+        'before-ride',
+      ),
+    ).toBeUndefined();
+  });
+
   it('says the same thing before and during a ride for every other state', () => {
     for (const kind of KINDS.filter((each) => each !== 'no-control')) {
       const trainer: GameTrainer = { kind, control: undefined };
@@ -358,6 +418,29 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
     const { controller, requests } = controllerWith({ ...NO_CONTROL }, 'running');
     await gameTrainerPortOver(controller).askForControlOnRide();
     expect(requests).toHaveLength(0);
+  });
+
+  it('reads back the reason the controller recorded when the request was refused — #509', async () => {
+    // The ride controller does not throw a refusal; it records `describe(error)`
+    // on `TrainerSnapshot.refusal` and leaves `hasControl` false. The game
+    // reads the same field the Ride screen shows.
+    const facts: Facts & { refusal?: string } = { ...NO_CONTROL };
+    const controller = {
+      getSnapshot: () => ({ trainer: facts, workout: undefined }),
+      simulationControl: () => silentControl(),
+      requestTrainerControl: async () => {
+        facts.refusal = 'the machine did not answer op code 0x0 within 5 s';
+        return Promise.resolve();
+      },
+    };
+    const port = gameTrainerPortOver(controller);
+    expect(port.readTrainer().refusal).toBeUndefined();
+    await port.askForControlOnRide();
+    expect(port.readTrainer()).toEqual({
+      kind: 'no-control',
+      control: undefined,
+      refusal: 'the machine did not answer op code 0x0 within 5 s',
+    });
   });
 
   it('never asks a machine that cannot simulate, has no control point, or already has control', async () => {

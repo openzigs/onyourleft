@@ -2032,6 +2032,25 @@ select option {
  * x = 342, a notice in the first column reaches x = 328, and there is no width
  * at which a sentence that long both fits and stops short of them. A phone
  * narrower than 736 px on its side gets the stacked layout.
+ *
+ * ⚠️ **The bottom row's panels are 16 rem here, where the taller corners
+ * layout gives the route 18 and the actions 20** — #512. #499 made the rider
+ * lean, up to `racing-line.ts` §`MAXIMUM_LEAN_RADIANS`, and `camera.ts`
+ * §`riderFrameBox` says how far a leaning rider reaches across the frame: the
+ * bicycle stays mid-frame because the camera follows it, and the helmet rolls
+ * out to either side, so the box's half-width in PIXELS is about 0.19 × the
+ * viewport's HEIGHT — a landscape frame's vertical field is fixed, so the box
+ * scales with height and the panels, in rem, do not. Measured in the pinned
+ * Chromium at the lean cap (`ride.browser.spec.ts`): at 736×360 the box is
+ * x = 299 to 437, and the 20 rem actions panel began at x = 408; at this
+ * layout's tallest, 736×480, the box is x = 276 to 460, so even an 18 rem
+ * panel (from x = 440) is over it and so is the 18 rem route panel (to
+ * x = 296). Its bottom is y = 288 at 360 tall and 383 at 480, which is the
+ * bottom row of panels — so it is WIDTH that has to clear it. 16 rem puts the
+ * actions panel at x = 472 and the route panel at x = 264: 12 px clear at 480
+ * tall and 35 px at 360, either side. The taller corners layout is untouched,
+ * because a tablet's bottom row sits below the rider's box. The owner chose
+ * this over moving #499's camera and over accepting the overlap.
  */
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem) {
   .oyl-game--riding .oyl-hud__plan-svg {
@@ -2040,6 +2059,11 @@ select option {
 
   .oyl-game--riding .oyl-hud__profile-svg {
     height: 2rem;
+  }
+
+  .oyl-game--riding .oyl-hud__actions,
+  .oyl-game--riding .oyl-hud__route {
+    width: min(100%, 16rem);
   }
 }
 
@@ -2110,9 +2134,12 @@ select option {
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem) {
   .oyl-game--riding .oyl-hud__notices {
     align-self: end;
-    /* 20 rem and not the 22 a taller screen gives it: at 736 px the rider is
-       drawn from x = 347 and this ends at x = 328. */
-    max-width: min(100%, 20rem);
+    /* 16 rem and not the 22 a taller screen gives it — #512, the arithmetic
+       under "A SHORT corners layout" above: at 736 px a rider leaning at the
+       cap is drawn from x = 299 (360 tall) or x = 276 (480 tall), and this
+       ends at x = 264. It was 20 rem, which ended at x = 328 and cleared only
+       an UPRIGHT rider, drawn from x = 347. */
+    max-width: min(100%, 16rem);
   }
 }
 

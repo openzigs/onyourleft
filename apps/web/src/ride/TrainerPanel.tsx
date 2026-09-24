@@ -345,9 +345,11 @@ function controlSentence(trainer: TrainerSnapshot): string {
   // is measured in (`rideview.browser.spec.ts`): the longer sentence cost the
   // workout's *Ride* its place above the fold on a tablet. What control is FOR
   // is said by what follows it — *ERG, optional* and *Ride a workout*.
+  // #509: shortened. It used to run on "…here to ride a workout or hold a
+  // fixed power — the trainer game asks for it itself when you press Ride."
   return trainer.hasControl
     ? 'This app has control of the trainer.'
-    : 'This app does not have control of the trainer. Ask for it here to ride a workout or hold a fixed power — the trainer game asks for it itself when you press Ride.';
+    : 'This app does not have control of the trainer. Ask for it to ride a workout or set ERG; the trainer game asks when you press Ride.';
 }
 
 /**
