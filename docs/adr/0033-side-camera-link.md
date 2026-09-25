@@ -2,8 +2,8 @@
 
 - **Status**: Accepted. ⚠️ **D-1's choice of WebRTC is conditional on
   [#532](https://github.com/openzigs/onyourleft/issues/532)**, a measurement that has not been
-  taken. D-2 is the owner's chosen fallback and is decided here too, so neither outcome of #532
-  needs a new decision. It needs only an appended amendment recording which one happened
+  taken. D-2 is the owner's chosen fallback and is decided here too, so none of #532's three
+  outcomes needs a new decision. It needs only an appended amendment recording which one happened
   ([ADR 0013](0013-adr-amendments.md): a statement of fact that has become true or false)
 - **Date**: 2026-09-25
 - **Deciders**: **the owner, on every product question**. The owner ruled in
@@ -140,7 +140,7 @@ it.
 | **A stranger on the same Wi-Fi learns that filming is happening** | **No, and it is stated.** Traffic volume and timing show that two devices are exchanging about five encrypted messages a second. Encryption hides the content and not the fact |
 | **A stranger disrupts the link** (jamming, flooding, deauthentication) | **No, and it fails in the safe direction.** A dropped link is D-5's case: the phone stops filming within 30 seconds on its own timer, and the tablet says the link is lost |
 | **Someone photographs the offer QR code** | **Partly.** D-4: the offer is single-use and the tablet accepts only the answer it reads with its own camera. A photograph of the offer alone does not get an attacker onto the tablet. Someone standing in the room who can show the tablet a QR code of their own can do things that no link design stops, and this ADR does not claim otherwise |
-| **A picture leaves the LAN** — a STUN or TURN server, a relay, an ICE server | **Yes, by construction.** D-1 configures no ICE server of any kind, and D-4 refuses a scanned candidate whose address is not on the rider's own network. [#532](https://github.com/openzigs/onyourleft/issues/532) is where this is **measured** rather than configured |
+| **A picture leaves the LAN** — a STUN or TURN server, a relay, an ICE server | **Yes, by construction.** D-1 configures no ICE server of any kind, and D-4 leaves every candidate that is not local out of the QR code and refuses a scanned one that is not. [#532](https://github.com/openzigs/onyourleft/issues/532) is where this is **measured** rather than configured |
 | **A picture reaches durable storage on the tablet** | **Yes.** D-6: each picture is analysed as it arrives and discarded. The per-ride keep is not offered on this path |
 | **A picture reaches durable storage on the phone** | **Yes.** D-8: side-camera mode writes nothing durable about the rider |
 | **A picture is shown on the tablet** where someone else could see it | **Yes.** No preview (owner). The tablet shows state words only |
@@ -152,7 +152,7 @@ it.
 
 ## Decision
 
-Eleven rules. **D-0** states what this ADR builds and what it waits on. **D-1** and **D-2** are the
+Twelve rules. **D-0** states what this ADR builds and what it waits on. **D-1** and **D-2** are the
 transport and its fallback. **D-3** is what crosses the link. **D-4** is pairing. **D-5** is the
 30-second camera. **D-6** to **D-8** are where the bytes go on each device. **D-9** and **D-10**
 are the gate and the published statements. **D-11** is the rider's own computer on this path.
@@ -205,6 +205,16 @@ either end. #532 says which, and whatever it finds is recorded as an amendment h
 > through `crypto.subtle`. A plain TCP socket has no DTLS, and plaintext pictures of the rider on a
 > home network are refused.
 
+The key in the QR code is used as it arrives for nothing. Four rules make *"sealed with AES-GCM"*
+exact, because each one left out breaks confidentiality or integrity in a way that still decrypts:
+
+| | |
+|---|---|
+| **One key per direction** | Two AES-GCM keys are derived from the QR code's key with HKDF-SHA-256 (in `crypto.subtle`), one with the info label `tablet-to-phone` and one with `phone-to-tablet`. A key never seals messages in both directions, so the two sides can never pick the same nonce under the same key |
+| **The nonce is a counter and never repeats** | The 96-bit nonce is a fixed 32-bit direction prefix followed by a 64-bit counter, starting at zero for each direction and incremented once per message sent. Nothing random goes into it. A sender that would reach the counter's maximum ends the session instead, and the rider scans again |
+| **Direction and order are bound, and a replay is rejected** | The direction label and the counter are the additional authenticated data of every message, so a message reflected back to its sender fails to authenticate. The receiver keeps the last counter it accepted in each direction and **rejects any message whose counter is not strictly greater**. A rejected or unauthenticated message closes the socket and ends the session. It is not skipped, because D-3's reordered *start* and *stop* do real harm |
+| **One connection per pairing** | The phone's listening socket accepts **exactly one** connection and closes the listener as soon as it has, before reading anything. If the first message on that connection does not authenticate, the connection is closed and the pairing is over: nothing listens any more, and the rider scans a new code. A stranger on the LAN who connects first can therefore spoil one pairing, which fails in the safe direction, and can never hold a second connection beside the real one |
+
 What this costs, stated so that a failed #532 is not treated as a small change:
 
 - **It is Android on both ends.** A browser cannot listen on a socket, so the side camera would not
@@ -245,9 +255,16 @@ Two data channels on one connection, because commands and pictures need opposite
 **Never across the link, in either direction**: an athlete id, an activity id, a signed record, a
 device key, a name, any reading from the ride (power, cadence, heart rate, speed), a position, the
 wall-clock time, a picture from the tablet's own camera, and any analysis result other than the
-framing verdict. *"The camera stands alone"* is the owner's ruling, and the missing wall clock is
-what makes it hold in practice. A session-relative counter is enough to order frames and cannot be
-aligned with a ride.
+framing verdict.
+
+*"The camera stands alone"* is the owner's ruling, and **what makes it hold is a rule on the tablet,
+not the frame format.** The tablet runs the ride and receives each frame live, so it knows roughly
+when each one arrived and could align it with the ride to within network latency whatever the frame
+carries. The rule is therefore: **the tablet stores pose numbers keyed only by the frame's
+session-relative sequence number and milliseconds, and never with an arrival time, a wall-clock
+time or an offset into the ride**, and nothing on the tablet joins them to a ride reading. This
+binds #530. Leaving the wall clock off the wire is the smaller half: it only stops the phone
+volunteering a timestamp the tablet would then have to discard.
 
 **Why frames and not a clip, and not a video track.** Three reasons, and each is enough on its own:
 
@@ -274,11 +291,11 @@ differently on different engines.
 
 | | |
 |---|---|
-| **What authenticates the peer** | The DTLS fingerprints. Each one crossed by sight, so a device that did not appear in front of the other's camera cannot present a matching certificate. Then **a one-time secret** from the offer QR is sent as the first `control` message. If it does not match, the connection is closed before any other message is read. It is redundant with the fingerprint on D-1. It is **not** redundant on D-2, and it makes the application check the same on both transports |
+| **What authenticates the peer** | The DTLS fingerprints. Each one crossed by sight, so a device that did not appear in front of the other's camera cannot present a matching certificate. Then **a one-time secret** from the QR code is sent as the first `control` message. If it does not match, the connection is closed before any other message is read. It is redundant on both transports: on D-1 with the fingerprints, and on D-2 with the AES-GCM key, which crosses in the same QR code and is proved by every message that authenticates. It proves nothing on D-2 beyond possession of that key. It is kept only so that the application's first check is the same code on both transports |
 | **How long the offer is valid** | **Single use.** It is void once an answer is accepted and when the pairing screen closes. #529 also bounds it with a constant, and writes the provenance of that constant beside it |
 | **What a pairing lasts** | **One session.** It ends when either device stops the session, when the connection fails, or 30 seconds after the link is lost (D-5). A later session scans again |
 | **Revoking** | Ending the session, from either device. #529's *"pairing can be revoked from either device"* means this, and nothing needs to persist for it to work |
-| **Which candidates are accepted** | **Host candidates on the rider's own network only.** A scanned candidate that is server-reflexive, a relay, or at a public address **refuses the whole pairing** rather than being skipped. The address rule is `camera/analysis-endpoint.ts` §`addressSpaceOf`'s, reused rather than written a second time. A `.local` mDNS name is accepted |
+| **Which candidates are accepted** | **Host candidates whose address `camera/analysis-endpoint.ts` §`addressSpaceOf` classifies as `local`, and nothing else.** That is exactly: IPv4 `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, link-local `169.254.0.0/16` and the shared address space `100.64.0.0/10` (which that rule admits for overlays such as WireGuard, so it is wider than *"the rider's own network"*); IPv6 unique-local `fc00::/7` and link-local `fe80::/10`; and an mDNS `.local` name. **`loopback` is not accepted**, and neither are the other names that rule admits (`localhost`, `.home.arpa`, `.internal`), which are never ICE candidates. **The encoder omits** every candidate that is not accepted before it builds the QR code, so a global IPv6 host candidate on an ordinary dual-stack home network is left out rather than fatal. **The decoder still refuses the whole pairing** if a scanned code carries a server-reflexive or relay candidate, or an address that is not accepted, because an honest encoder never writes one. If omission leaves no candidate, the pairing screen says so in words. ⚠️ **A requirement on #529**: an ICE candidate carries an IPv6 address **without brackets**, and `addressSpaceOf` reads IPv6 only inside brackets, so called on a raw candidate it returns `undefined` for every IPv6 address. #529 reuses the rule through an adapter that brackets the address, rather than writing a second classifier |
 | **What a received message may do** | Only the messages D-3 lists. Each is **untrusted input**, bounded in size and checked for type before it is used. An unknown message type closes the session. Nothing received, on either device, reaches a trainer control point, a URL, a path or a command (ADR 0029 D-8's corollary) |
 
 **The tablet's camera during pairing.** D-1 needs the tablet to read the answer QR, so the tablet's
@@ -323,12 +340,15 @@ reasoning did not anticipate, told to the rider before it happens. It does not r
 D-5 made.
 
 **What happens to frames during the gap.** This is the author's choice, and it is the narrower
-option. Frames captured while the link is down are **held in the phone's memory only**, for at most
-the 30 seconds. They are never written anywhere. If the connection recovers on its own inside the
-window, which an ICE connection can do after a short outage without signalling, they are delivered
-and the session continues. If it does not recover, they are **discarded when the camera stops**. A
-failed connection cannot be re-established without a new pair of QR codes (D-1), so the session and
-its pairing end there.
+option. The camera keeps running for up to the 30 seconds, which is the owner's rule, but **a frame
+captured while the link is down is discarded at once**. It is not buffered and never written
+anywhere, so the phone holds at most the one frame it is encoding. If the connection recovers on its
+own inside the window, which an ICE connection can do after a short outage without signalling,
+streaming resumes with the next frame captured and the session continues. A buffer would have bought
+nothing: frames sent on recovery go over `frames`, which has no ordering and no retransmission, and
+arrive in a burst into D-6's one-slot buffer, where all but about one of some 150 would be dropped.
+If the connection does not recover, the camera stops at 30 seconds. A failed connection cannot be
+re-established without a new pair of QR codes (D-1), so the session and its pairing end there.
 
 ### D-6 — Pictures on the tablet: analysed as they arrive, discarded at once, never stored, never shown
 
@@ -514,7 +534,7 @@ this path it means:
 | [#532](https://github.com/openzigs/onyourleft/issues/532) | D-1's condition and its three outcomes. Also test D-1's expectation about mDNS hiding once camera access is granted. The result is appended here as an amendment |
 | [#528](https://github.com/openzigs/onyourleft/issues/528) | D-5's timer and sentence. D-7: **the reference is numbers, not a picture**, and this replaces #528's *"the stored reference is a picture of the rider"* criterion. The framing verdict comes **from the tablet**. D-8: the phone keeps nothing |
 | [#529](https://github.com/openzigs/onyourleft/issues/529) | D-0's order, D-1 or D-2 after #532 and not before, D-3's control channel and acknowledgements, D-4 entire, D-9 entire, and D-10's policy change for the link |
-| [#530](https://github.com/openzigs/onyourleft/issues/530) | D-3's frames channel, D-6 entire, D-7's record of whether the check passed, D-10's Data Safety re-read, and D-11. ⚠️ **Two of its criteria are replaced by the owner's later rulings**: analysis runs **during** the ride (nothing is shown), and pictures are discarded after analysis **with no keep** |
+| [#530](https://github.com/openzigs/onyourleft/issues/530) | D-3's frames channel and its storage rule (pose numbers keyed by sequence number only, never by arrival time or ride offset), D-6 entire, D-7's record of whether the check passed, D-10's Data Safety re-read, and D-11. ⚠️ **Two of its criteria are replaced by the owner's later rulings**: analysis runs **during** the ride (nothing is shown), and pictures are discarded after analysis **with no keep** |
 | [#385](https://github.com/openzigs/onyourleft/issues/385) | The picture rate and size (an amendment here if either moves), the tablet's thermal budget with the model running during a ride, and the repeatability of a passed framing check between sessions |
 | [#388](https://github.com/openzigs/onyourleft/issues/388) | D-7's reporting rule: a cross-session difference only when the framing check passed, the fallback sentence when it did not, and R8 in the same sentence |
 | [#389](https://github.com/openzigs/onyourleft/issues/389) | Unchanged, and still separate. Analysis during a ride that says nothing is not coaching (D-6) |
@@ -542,6 +562,10 @@ this path it means:
   overlay between them. Host-only ICE assumes one LAN. A router that isolates clients from each
   other will fail, and that is #532's to find.
 - **IPv6-only home networks**, beyond D-4 reusing an address rule that already classifies IPv6.
+  On such a network with no unique-local prefix, the only on-link candidate may be a global IPv6
+  address, which D-4 omits, so pairing would find no candidate. **Dual-stack** networks were
+  considered to the extent that D-4 omits their global IPv6 candidate rather than refusing the
+  pairing, and relies on the private IPv4 candidate beside it.
 - **A QR code shown on one device and photographed by a third device** for later use. D-4's
   single-use offer is the defence, and it was not analysed further.
 - **The legal reach of the 30-second camera** in any jurisdiction, for example recording a person
