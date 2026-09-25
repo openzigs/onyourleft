@@ -10,11 +10,12 @@
  *
  * ## ⚠️ This is not the basemap, and the distinction is the whole point
  *
- * A map with roads, labels and terrain shading needs tiles. There are none:
- * `VITE_BASEMAP_PMTILES_URL` is empty, #53 has published nothing, and #63's
- * MapLibre seam has never had an archive to point at. That version is blocked,
- * and it would drag ADR 0012's OSM attribution obligation onto a panel a rider
- * looks at for one second.
+ * A map with roads, labels and terrain shading needs tiles. When #285 was
+ * written there were none; since #534 the ride-detail map draws #53's published
+ * archive, which covers the contiguous United States only, carries no labels,
+ * and is a request to a host while somebody rides. Using it here would still
+ * drag ADR 0012's OSM attribution obligation onto a panel a rider looks at for
+ * one second, and make the game's first outbound request.
  *
  * **This needs none of it.** `RouteProfile.positions` is already in memory — the
  * game reads the same profile for its corridor — so every number here is a

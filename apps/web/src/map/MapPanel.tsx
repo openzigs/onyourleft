@@ -9,14 +9,29 @@
  *    case rather than the exception — most Phase 1 rides are indoor. Renders
  *    nothing at all: no container, no attribution, no broken tile grid. The
  *    detail view has already said "Indoor — no GPS track" in words.
- * 2. **No basemap is configured.** There is no published archive yet — #53 owns
- *    that — so this is the *normal* state of a build today. Says so plainly.
+ * 2. **No basemap is configured.** Since #534 a build with nothing set draws
+ *    the archive #53 published, so this is a build somebody told `none`, or
+ *    gave a value that is not an `https:` URL. Says so plainly.
  * 3. **No renderer.** The accessibility suite, and any browser without WebGL.
  *    Says so, and the trace and the table above are unaffected.
  *
  * An empty map centred on 0°, 0° is the failure all three exist to avoid, and
  * it is worth naming because it is what a map component does by default when
  * you give it nothing.
+ *
+ * ## A ride outside the archive's coverage is a line on a plain background
+ *
+ * The published archive covers the contiguous United States (`basemap.ts`
+ * §`PUBLISHED_BASEMAP_URL`). A ride anywhere else gets the map container, the
+ * style's background colour, the ride's own line fitted to its bounds, and the
+ * attribution beneath — and no tiles, because MapLibre asks for none outside
+ * the bounds the archive's header declares. No error, no retry, no spinner:
+ * there is no loading state on this panel to get stuck in. It is deliberately
+ * NOT a fourth message: whether the line falls inside coverage is a question
+ * about the archive's header, and answering it here would mean fetching that
+ * header for a panel that has already drawn everything it can.
+ * `map.browser.spec.ts` §"a ride outside the archive's coverage" is the
+ * measurement.
  *
  * ## The attribution is a licence obligation
  *
@@ -59,7 +74,7 @@ export interface MapPanelProps {
    * can render this panel on a machine with no WebGL.
    */
   readonly port?: MapPort | undefined;
-  /** Where the basemap is, or `undefined` until #53 publishes one. */
+  /** Where the basemap is, or `undefined` for a build configured with none (#534). */
   readonly basemap?: BasemapConfig | undefined;
   /**
    * The ride's line, already segmented and already trimmed if it is going to

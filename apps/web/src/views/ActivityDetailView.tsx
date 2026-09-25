@@ -106,7 +106,7 @@ export interface ActivityDetailViewProps {
    * accessibility suite and the view's own tests pass a resolved stub.
    */
   readonly map?: (() => Promise<MapPort>) | undefined;
-  /** Where the basemap is, or `undefined` until #53 publishes an archive. */
+  /** Where the basemap is, or `undefined` for a build configured with none (#534). */
   readonly basemap?: BasemapConfig | undefined;
 }
 

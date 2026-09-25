@@ -82,6 +82,42 @@
 /** The file the harness build emits, and the path the gate asks for. */
 export const FIXTURE_ARCHIVE_FILE = 'basemap-fixture.pmtiles';
 
+/** The area an archive's header says it covers, in degrees. */
+export interface FixtureBounds {
+  readonly west: number;
+  readonly south: number;
+  readonly east: number;
+  readonly north: number;
+}
+
+/**
+ * The second fixture: the same tiles, declaring only the published archive's
+ * coverage (#534).
+ *
+ * ⚠️ **It still HOLDS every tile everywhere** — its one directory entry runs
+ * over the whole pyramid, exactly as {@link FIXTURE_ARCHIVE_FILE}'s does. Only
+ * the header's bounds differ. So a map of a ride outside those bounds that
+ * painted a tile colour would be MapLibre ignoring the bounds, and one that
+ * paints none is MapLibre honouring them — which is the property "a ride
+ * outside the US fails quietly" rests on, isolated from whether the tile
+ * exists. The real archive holds no tile outside its box either, and
+ * `pmtiles`' protocol answers a missing vector tile with an empty one rather
+ * than an error; this fixture tests the stricter of the two.
+ */
+export const FIXTURE_BOUNDED_ARCHIVE_FILE = 'basemap-fixture-us.pmtiles';
+
+/**
+ * The coverage the archive #53 published declares, read off its own header on
+ * 2026-09-25 — the contiguous United States. `src/map/basemap.ts`
+ * §`PUBLISHED_BASEMAP_URL` records the same reading.
+ */
+export const PUBLISHED_ARCHIVE_BOUNDS: FixtureBounds = {
+  west: -125,
+  south: 24,
+  east: -66,
+  north: 50,
+};
+
 /**
  * The deepest zoom the archive claims to hold.
  *
@@ -166,6 +202,14 @@ const COORDINATE_SCALE = 10_000_000;
  * these into the source's `bounds` and clips against them.
  */
 const MERCATOR_LATITUDE_LIMIT = 85.0511287;
+
+/** The whole of Web Mercator: what the original fixture has always declared. */
+const MERCATOR_WORLD: FixtureBounds = {
+  west: -180,
+  south: -MERCATOR_LATITUDE_LIMIT,
+  east: 180,
+  north: MERCATOR_LATITUDE_LIMIT,
+};
 
 /** A point in a tile's own coordinate space. */
 interface TilePoint {
@@ -486,7 +530,7 @@ function scaled(degrees: number): number {
  * margin. That prefetch is the reason the cold-load number below is two round
  * trips rather than three.
  */
-export function buildFixtureArchive(): Uint8Array {
+export function buildFixtureArchive(bounds: FixtureBounds = MERCATOR_WORLD): Uint8Array {
   const tile = fixtureTile();
   const metadata = new TextEncoder().encode(metadataJson());
   const runLength = pyramidTileCount(FIXTURE_MAX_ZOOM);
@@ -537,10 +581,10 @@ export function buildFixtureArchive(): Uint8Array {
   view.setUint8(99, TILE_TYPE_MVT);
   view.setUint8(100, 0);
   view.setUint8(101, FIXTURE_MAX_ZOOM);
-  view.setInt32(102, scaled(-180), true);
-  view.setInt32(106, scaled(-MERCATOR_LATITUDE_LIMIT), true);
-  view.setInt32(110, scaled(180), true);
-  view.setInt32(114, scaled(MERCATOR_LATITUDE_LIMIT), true);
+  view.setInt32(102, scaled(bounds.west), true);
+  view.setInt32(106, scaled(bounds.south), true);
+  view.setInt32(110, scaled(bounds.east), true);
+  view.setInt32(114, scaled(bounds.north), true);
   view.setUint8(118, 0);
   view.setInt32(119, 0, true);
   view.setInt32(123, 0, true);

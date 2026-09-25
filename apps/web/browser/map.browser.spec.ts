@@ -75,7 +75,7 @@ import {
   type ArchiveBounds,
   type ArchiveResponseFact,
 } from './hosted-archive';
-import { FIXTURE_ARCHIVE_FILE } from './pmtiles-fixture';
+import { FIXTURE_ARCHIVE_FILE, FIXTURE_BOUNDED_ARCHIVE_FILE } from './pmtiles-fixture';
 
 /** Where the harness asks for its archive. Same origin as the page. */
 const ARCHIVE_PATH = '/basemap.pmtiles';
@@ -95,6 +95,13 @@ const ARCHIVE_PATH = '/basemap.pmtiles';
  */
 const FIXTURE_PATH = `/${FIXTURE_ARCHIVE_FILE}`;
 const FIXTURE_URL = `${HARNESS_ORIGIN}${FIXTURE_PATH}`;
+
+/**
+ * The same tiles, declaring only the published archive's coverage (#534).
+ * `pmtiles-fixture.ts` §`FIXTURE_BOUNDED_ARCHIVE_FILE` says why it still holds
+ * every tile.
+ */
+const BOUNDED_FIXTURE_URL = `${HARNESS_ORIGIN}/${FIXTURE_BOUNDED_ARCHIVE_FILE}`;
 
 /**
  * How long the control page waits before reporting that nothing painted.
@@ -545,6 +552,67 @@ function watchArchiveResponses(
   });
   return facts;
 }
+
+/**
+ * **A ride outside the archive's coverage — #534.**
+ *
+ * The archive every build now draws by default covers the contiguous United
+ * States, and a rider anywhere else opens a ride over it. #534 asks that this
+ * *"fails quietly: no error loop and no stuck spinner"*, and to record what the
+ * rider sees. The harness's default track is in London; the bounded fixture
+ * declares the published archive's box.
+ *
+ * ⚠️ **The fixture holds every tile everywhere**, so a tile colour on this page
+ * would mean MapLibre ignored the header's bounds and fetched London anyway.
+ * `paints the archive’s own tiles` above is this case's positive control: the
+ * same page, the same track and the same tiles, with world bounds, paints.
+ *
+ * What a rider sees, recorded: the style's background colour, their own line,
+ * and the OpenStreetMap credit beneath (`map.a11y.test.tsx`) — no tiles, no
+ * message, no loading state, because the panel has none to get stuck in.
+ */
+test.describe('a ride outside the archive’s coverage — #534', () => {
+  test('draws the line on a plain background, reads the header once, and raises nothing', async ({
+    page,
+  }) => {
+    const seen = watch(page);
+    const problems: string[] = [];
+    page.on('pageerror', (error) => {
+      problems.push(`pageerror: ${error.message}`);
+    });
+    page.on('console', (message) => {
+      // MapLibre reports an unhandled map `error` event through console.error,
+      // so an error loop is visible here even though no listener is attached.
+      if (message.type() === 'error') {
+        problems.push(`console.error: ${message.text()}`);
+      }
+    });
+    await page.goto(
+      `/?archive=${encodeURIComponent(BOUNDED_FIXTURE_URL)}&paintDeadline=${String(CONTROL_DEADLINE_MS)}`,
+    );
+    const load = await mapLoad(page);
+
+    // The map rendered real frames, and what was on them was the background.
+    expect(load.frames).toBeGreaterThan(0);
+    expect(load.samples).toContain(load.backgroundColour);
+    expect(
+      load.painted,
+      `a tile colour reached the screen outside the archive's declared bounds: ${load.samples.join(', ')}`,
+    ).toBe(false);
+
+    // One read of the header and root directory, then nothing: a request per
+    // tile would be MapLibre asking outside the bounds, and a count still
+    // rising after the paint deadline would be a retry loop.
+    const archiveReads = (): number =>
+      seen.requests.filter((url) => url.startsWith(BOUNDED_FIXTURE_URL)).length;
+    expect(archiveReads()).toBe(1);
+    await page.waitForTimeout(1000);
+    expect(archiveReads(), 'the archive was asked for again after the map settled').toBe(1);
+
+    expect(seen.failures).toEqual([]);
+    expect(problems).toEqual([]);
+  });
+});
 
 test.describe('a hosted archive, rendered and timed over the internet', () => {
   test.skip(

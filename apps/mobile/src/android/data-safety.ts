@@ -78,10 +78,28 @@ export interface DataSafetyAnswer {
  */
 export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
   {
+    // ⚠️ **Re-read by #534, and the answer is UNCHANGED — but it now rests on
+    // a condition a person has to keep true.** Since #534 every build that is
+    // not told otherwise draws a ride's map from tiles.openzigs.com, and a tile
+    // request says roughly where the ride was — MapLibre makes it inside the
+    // app's own WebView, which Play's definition of *collect* counts ("data
+    // transmitted by libraries/SDKs and from webviews under app control",
+    // Google Play Console Help, "Provide information for Google Play's Data
+    // safety section", read 2026-09-25).
+    //
+    // It stays `collected: false` on Play's *ephemeral processing* exemption:
+    // the host is a static object on Cloudflare R2 that answers a byte range
+    // and keeps nothing this project reads, and this project does not use the
+    // requests to derive a location — Play's own test for an IP address.
+    // ⚠️ **That is true only while nothing retains those requests for us**: an
+    // R2 access log, a Logpush job or an analytics product turned on for that
+    // host makes the exemption false, and this row becomes
+    // `collected: true` for approximate location. Checking the bucket's
+    // configuration needs the Cloudflare account, which no pull request has.
     dataType: 'Location (approximate or precise)',
     collected: false,
     shared: false,
-    why: 'a recorded ride carries positions and they stay in IndexedDB on the device. The location permissions in the manifest exist only so that a BLE scan works below API 31, which Android required, and they are bounded at API 30 — see locationClaimFaults',
+    why: 'a recorded ride carries positions and they stay in IndexedDB on the device. The location permissions in the manifest exist only so that a BLE scan works below API 31, which Android required, and they are bounded at API 30 — see locationClaimFaults. Since #534 the ride map requests tiles from tiles.openzigs.com by default, and which tiles are asked for says roughly where the ride was; that request is processed ephemerally by a static file host that keeps nothing this project reads, and is not used to derive a location — see the comment above this row for the condition that keeps this answer true',
   },
   {
     dataType: 'Health and fitness — health info',

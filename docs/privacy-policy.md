@@ -1,13 +1,13 @@
 # On Your Left — privacy policy
 
-**Last updated: 2026-09-23.** This is the policy for the On Your Left Android app
+**Last updated: 2026-09-25.** This is the policy for the On Your Left Android app
 (`dev.openzigs.onyourleft`) and for the web client it is built from. It is the policy linked from the
 app's About page and from the Google Play listing, and those two links point at this file
 ([#95](https://github.com/openzigs/onyourleft/issues/95)).
 
 ## The short version
 
-**We collect nothing.** There is no account, no server and no analytics, and nothing reaches us.
+**We collect nothing.** There is no account, no server and no analytics, and nothing you record reaches us.
 Everything the app records stays on the device that recorded it, and **on its own the app uploads
 nothing** — not a ride, not a heart rate, not a position, not a crash report, not a page view.
 
@@ -28,10 +28,11 @@ service, not an account, and not the future sync server this project may one day
 ([#7](https://github.com/openzigs/onyourleft/issues/7)), which does not exist. We never see the
 picture, and we cannot see what your computer does with it.
 
-The other exception is a map, and it is described under **What leaves the device** below: if a
-basemap is configured, the map library the app uses requests tiles from the host it is configured
-with. That is a request the map library makes, not this app's code, and no basemap is configured in
-this build.
+The other exception is a map, and it is described under **What leaves the device** below: when a
+ride with a GPS track is shown on a map, the map library the app uses requests map tiles from
+`tiles.openzigs.com`, which is where this project keeps its basemap. That is a request the map
+library makes, not this app's code, and it is **on by default** — it carries no account, cookie or
+identifier of ours, but the host can see your IP address and roughly which area you are looking at.
 
 ## What the app holds, and where
 
@@ -82,10 +83,18 @@ Only these, and only when you do them:
   put it and it is then out of the app's hands.
 - **A ride or route you choose to share.** A copy, trimmed by your privacy zones.
 - **A picture sent to your own computer, if you set one up and switch it on.** See the next section.
-- **Map tiles, if a basemap is configured.** The map is off by default and no tile host is configured
-  in this build. If one is configured, your device requests tiles from it and that host can see your
-  IP address and which tiles you asked for — which is roughly the area you are looking at. That is a
-  request your device makes to a third party.
+- **Map tile requests, when a map is on screen.** The map is **on by default**. To draw a ride that has
+  a GPS track, your device requests map tiles from `tiles.openzigs.com` — a single static
+  file this project keeps on Cloudflare R2 storage, served through Cloudflare. Nothing is sent with
+  the request but the request itself: no ride, no account, no cookie and no identifier. But the host
+  sees your IP address and which tiles you asked for, and for your own ride that is roughly **where
+  you rode** — including inside your privacy zones, because your own view of your own ride is never
+  trimmed. Cloudflare, which operates that host for us, handles those requests under its own
+  privacy policy; this project does not use them to identify you or to work out where you are.
+  Indoor rides, and the map drawn during a game ride, request nothing. The tiles cover the
+  contiguous United States; elsewhere the map shows your line on a plain background, and after
+  reading the file's index the app requests no tiles at all. A build of the app can be pointed at another tile
+  host, or at none.
 
 ## Pictures sent to your own computer
 
@@ -126,7 +135,8 @@ built in, suggested or named.
 - No analytics, no telemetry, no crash reporting, no session recording.
 - No third-party SDK of any kind is linked into the app.
 - No sale or sharing of personal information — none is held by us, and nothing is transmitted to us
-  or to anybody else except the picture you choose to send to your own computer.
+  or to anybody else except the picture you choose to send to your own computer and the map tile
+  requests described above.
 - No tracking across apps or sites.
 
 ## Deleting your data

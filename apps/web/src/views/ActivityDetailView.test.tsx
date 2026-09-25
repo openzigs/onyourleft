@@ -426,7 +426,8 @@ describe('#63 — the map on the detail screen', () => {
   });
 
   it('says no basemap is configured rather than drawing an empty grid', async () => {
-    // The state of every build today: #53 has not published an archive.
+    // A build told `none`, or given a value that is not an `https:` URL.
+    // Since #534 an unconfigured build defaults to the published archive.
     const port = outdoorRide([]);
     mounted = await open(port, RIDE, { map: stubMapPort(), basemap: undefined });
     expect(document.body.textContent).toContain('No basemap is configured');

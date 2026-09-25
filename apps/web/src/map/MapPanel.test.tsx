@@ -74,7 +74,7 @@ describe('the states where there is a track but no map', () => {
     expect(queryAll(document, '.oyl-map')).toHaveLength(0);
   });
 
-  it('says so when no basemap is configured, which is every build until #53 lands', async () => {
+  it('says so when a build has no basemap — one told `none`, since #534 defaulted it', async () => {
     const port = stubMapPort();
     mounted = await mount(<MapPanel port={port} basemap={undefined} track={aTrack()} />);
     await settle();

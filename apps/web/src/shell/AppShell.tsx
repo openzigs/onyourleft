@@ -251,7 +251,7 @@ export interface AppShellProps {
    * accessibility suite passes a resolved stub, or nothing at all.
    */
   readonly map?: (() => Promise<MapPort>) | undefined;
-  /** Where the basemap archive is, or `undefined` until #53 publishes one. */
+  /** Where the basemap archive is, or `undefined` for a build configured with none (#534). */
   readonly basemap?: BasemapConfig | undefined;
   /** Segments (#64), or `undefined` where this browser has no local store. */
   readonly segments?: SegmentPort | undefined;
