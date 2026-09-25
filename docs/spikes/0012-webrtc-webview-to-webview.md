@@ -22,7 +22,7 @@ host-only data channel directly, in both directions, with nothing to resolve.**
 | | Tablet offers, phone answers (ADR 0033 D-1's roles) | Phone offers, tablet answers |
 |---|---|---|
 | Data channel opens? | **Yes**, in all 8 runs that were meant to | **Yes**, in all 7 runs |
-| Offerer's channels open after it applies the answer | 110–120 ms | 72–130 ms |
+| Offerer's channels open after it applies the answer, over every opened run in this column (§4.1) | 74–158 ms, all 8 runs (110–120 ms over the plain and stream runs alone) | 72–138 ms, all 7 runs (72–130 ms over the plain and stream runs alone) |
 | What each end offered | One UDP IPv4 host candidate, **its raw private address**, on both ends. No `.local` name, no IPv6, no TCP | The same |
 | Candidate pair used | Tablet `192.168.68.69` ↔ phone `192.168.68.51`, **`host` ↔ `host`** on both ends' view. The only pair either end formed | The same |
 | Only the tablet can dial (the phone never sees the tablet's candidate) | **Opens** | **Opens** |
@@ -46,7 +46,9 @@ one end is desktop Chrome.
 
 ⚠️ **One of #532's five acceptance criteria is still not met**: *"a packet capture or a router log
 shows no third-party host"*. There was no capture (§5). So the pull request that lands this says
-`Refs #532`, not a closing keyword, and **no amendment is appended to ADR 0033** here.
+`Refs #532`, not a closing keyword, and **no amendment is appended to ADR 0033** here. #532 itself
+was closed by accident when #539 merged; the remainder, this criterion included, is tracked in
+[#541](https://github.com/openzigs/onyourleft/issues/541).
 
 ---
 
@@ -60,7 +62,7 @@ shows no third-party host"*. There was no capture (§5). So the pull request tha
 | **The app, both** | `dev.openzigs.onyourleft` versionName 1.0, a **debug** build (`DEBUGGABLE`) reported as built from `main` at `2b84996` and installed that day, serving the client at `https://localhost/`. Not reinstalled, not restarted, not navigated |
 | **App permissions** | Tablet: `CAMERA` **granted**. Phone: `CAMERA` **not granted**. Both: `INTERNET` only otherwise. No multicast permission on either |
 | **Router** | TP-Link (MAC OUI `3c:52:a1`), gateway `192.168.68.1`, a `/22`. **The model was not read.** Both devices were associated to **the same access point on its 5 GHz radio** (5200 MHz, Wi-Fi 6), RSSI −29 dBm (tablet) and −43 dBm (phone) at the start. No client isolation, since the link opened. No global IPv6 on this LAN. The SSID and BSSID are deliberately not recorded here |
-| **DNS** | The Wi-Fi network hands both devices **the ISP's two public resolvers directly**, not the router. §5 says why that matters |
+| **DNS** | The Wi-Fi network hands the phone **the ISP's two public resolvers directly**, not the router: read from the phone's `dumpsys connectivity`, the `DnsAddresses` of `wlan0`'s LinkProperties (two public IPv4 addresses, not recorded here; `ServerAddress` was the router). **The tablet's resolvers were not read**; it is on the same network, so the same answer is likely but is not measured. **Whether Android Private DNS was on, on either device, was not recorded.** Its default is *Automatic*, which uses DNS over TLS on port 853 when the resolver offers it. §5 says why both matter |
 | **Mac** (driver only) | macOS 26.6.2, `192.168.68.65/22`. It carried DevTools traffic and nothing else. **No Mac browser took part in any run** |
 
 The owner was not using either app during the runs. The tablet's app was on `#/camera` **with the
@@ -271,26 +273,38 @@ tablet ↔ phone traffic at all. What there is:
    and the echoes (§4.4).
 3. **Both devices' socket tables for the app's own uid**, read from `/proc/net/{udp,udp6,tcp,tcp6}`
    every 30 s through both 10-minute streams (23 samples per device per stream). The WebView's
-   network service runs in the app's process, so its WebRTC sockets carry the app's uid. Throughout,
-   the app held **exactly two sockets per device: one unconnected UDP socket on `0.0.0.0` and one on
-   `::`, on the ports its SDP advertised, and no TCP socket of any kind** — so no HTTPS, no QUIC and
-   no connected UDP from the app during the streams. Between runs it held none. ⚠️ An unconnected
-   UDP socket can send to anyone, and `/proc` cannot show where it sent; item 2 is the evidence for
-   the destinations, as the Mac's WebRTC log was in 0011.
-4. **No name was looked up.** No `.local` candidate was ever offered by either end (§4.2), and
-   `logcat` shows no resolution attempt from the app (§4.3). So spike 0011 §5's open question, whether
+   network service runs in the app's process, so its WebRTC sockets carry the app's uid. **At each
+   of the 23 sampled instants** the app held **exactly two sockets per device: one unconnected UDP
+   socket on `0.0.0.0` and one on `::`, on the ports its SDP advertised, and no TCP socket of any
+   kind** — so no HTTPS, no QUIC and no connected UDP from the app at those instants. Between runs
+   it held none. ⚠️ Three limits. Samples 30 s apart **cannot exclude a short-lived socket** opened
+   and closed between two of them. An unconnected UDP socket can send to anyone, and `/proc` cannot
+   show where it sent; item 2 is the evidence for the destinations, as the Mac's WebRTC log was in
+   0011. And Android's DNS lookups go through `netd`'s resolver, whose sockets are not under the
+   app's uid, so **this table could never show a name lookup at all**.
+4. **No name was looked up, as far as `logcat` shows**, and that is the only evidence for it: item 3
+   cannot see a lookup (see its limits). No `.local` candidate was ever offered by either end
+   (§4.2), and `logcat` shows no resolution attempt from the app (§4.3). So spike 0011 §5's open question, whether
    a failed `.local` lookup falls back to unicast DNS and leaves the LAN, **does not arise for this
    pair**.
 
-⚠️ **That open question is sharper than 0011 knew, for pairs that do carry a name.** This Wi-Fi hands
-its clients the **ISP's public resolvers directly** (§2), not the router. So if an Android end ever
-does try a `.local` candidate name by unicast DNS, the query goes straight to a third party off the
-LAN, not to a router that might answer it. It does not happen for Android ↔ Android. It could for a
-desktop-Chrome end whose name an Android end tries to resolve, and only a capture of port 53 settles
-it (§7).
+⚠️ **That open question is sharper than 0011 knew, for pairs that do carry a name, and this refines
+— and may contradict — spike 0011.** 0011 §2, §4.4 and §5 say *"the router's unicast DNS"* answered
+`NXDOMAIN` for `MacBook-Pro.local`, and §5 reasons that an Android fallback lookup *"asked the
+router"*. But this Wi-Fi hands the phone the **ISP's public resolvers directly** (§2), not the
+router. 0011 does not record which resolver it queried. If it asked the Mac's default resolver, the
+`NXDOMAIN` may have come from the ISP rather than the router, which would mean a `.local` query had
+already left the LAN in 0011 (from the OS resolver, not from the app). If it asked `192.168.68.1`
+explicitly, the router does answer, but an Android client is not pointed at it. **Either way, 0011
+§5's premise that an Android end would ask the router is wrong for this network**: if an Android end
+ever tries a `.local` candidate name by unicast DNS, the query goes straight to a third party off
+the LAN. It does not happen for Android ↔ Android. It could for a desktop-Chrome end whose name an
+Android end tries to resolve. Only a capture settles it, and it must cover **port 853 as well as
+port 53**, because if Private DNS was on in its default *Automatic* mode the lookup travels as DNS
+over TLS, which a port-53-only capture would miss (§7).
 
 **A capture on the router, or with root on either device, is still owed** for #532's third
-criterion.
+criterion, now tracked in [#541](https://github.com/openzigs/onyourleft/issues/541).
 
 ---
 
@@ -303,7 +317,7 @@ work**.
 the evidence points to *works with a named condition*.** The condition:
 
 > **The router must pass unicast traffic between two Wi-Fi clients**, that is, it must not isolate
-> them. This router does. A router with client isolation on was not tested, and a host-only link
+> them. This router passes it. A router with client isolation on was not tested, and a host-only link
 > cannot work across it by construction (so neither could D-2's local socket).
 
 Spike 0011's condition, **at least one end must publish a raw private address**, was met by **both**
@@ -319,13 +333,18 @@ spikes together read:
 
 **Consequences for #529, noted and not decided here:**
 
-- **The candidate the decoder will see from an Android end is a raw private IPv4 UDP host
-  candidate, and nothing else.** No `.local` name, no TCP candidate and no IPv6 candidate appeared in
-  any SDP from either WebView. ADR 0033 D-4's accepted set covers it, and D-4's encoder rule (omit
-  what is not accepted) has nothing to omit on this pair.
+- **On Android 17 with WebView 153, on a LAN without global IPv6, the candidate the decoder saw
+  from an Android end was a raw private IPv4 UDP host candidate, and nothing else.** No `.local`
+  name, no TCP candidate and no IPv6 candidate appeared in any SDP from either WebView. ADR 0033
+  D-4's accepted set covers it, and D-4's encoder rule (omit what is not accepted) had nothing to
+  omit on this pair. **That does not generalise**: §7.4 notes the raw-address behaviour may be a
+  property of the build (Chromium's `enable_mdns` flag), and a network with global IPv6 was not
+  measured. #529 still needs D-4's IPv6 omission rule, and still has to handle a `.local` name from
+  an Android end on other builds or networks.
 - **The TCP question 0011 §6 raised is a desktop-Chrome question only.** A WebView end never offered
   a TCP candidate, even with camera access. #529 still has to decide it before the decoder is written,
-  because a desktop-Chrome phone always offers one.
+  because a desktop-Chrome end offers one once its page has camera access (0011 §4.2), which D-1
+  gives the phone.
 - **Camera order does not matter on the WebView.** The tablet gathering its offer before its camera
   opens (D-1) produced the same candidate as the other orders.
 - **No new permission.** Both apps opened the link under their existing permissions, and the phone
@@ -336,7 +355,8 @@ spikes together read:
 
 **Why no amendment is appended to ADR 0033 here.** D-1 says #532's result is appended as an
 amendment. This spike measures the pair #532 is about, but #532's third criterion (a capture or a
-router log) is still open, and so is the one condition named above. The amendment can cite this
+router log) is still open, and so is the one condition named above; both are tracked in
+[#541](https://github.com/openzigs/onyourleft/issues/541). The amendment can cite this
 spike and 0011 once those are in, or earlier if the owner chooses to record the result as it
 stands.
 
@@ -345,8 +365,10 @@ stands.
 ## 7. What remains
 
 1. **A packet capture** on the router, or with root on either device, during a pairing and a stream:
-   anything not in `192.168.68.0/22`, UDP 3478/19302, port 5353, and DNS on port 53 for `*.local`.
-   This is #532's third criterion, and it is still the only one not met. For a pair with a
+   anything not in `192.168.68.0/22`, UDP 3478/19302, port 5353, and DNS for `*.local` on **port 53
+   and on port 853** (DNS over TLS, which Android's default *Automatic* Private DNS uses when it can;
+   §2 and §5). This is #532's third criterion, and it is still the only one not met; the remainder of
+   #532 is tracked in [#541](https://github.com/openzigs/onyourleft/issues/541). For a pair with a
    desktop-Chrome end it also settles §5's unicast-`.local` question, which this pair never reaches.
 2. **A router with client isolation on** (a guest network will usually do). Expected to fail; the
    failure is the wording the pairing screen owes the rider, and it turns this spike's condition from
@@ -397,4 +419,7 @@ phone off USB, the screen has to be kept on some other way than `stay_on_while_p
 page; both `adb forward` rules removed and no `adb reverse` rule ever set; `stay_on_while_plugged_in`
 put back to `0` on both after being set to `7` for the runs; the phone's screen timeout unchanged;
 neither app reinstalled, restarted or navigated; nothing pressed on either screen. **The phone was
-left on `adb` over Wi-Fi at `192.168.68.51:5555`**, as the move in §3.2 was meant to be lasting.
+left on `adb` over Wi-Fi at `192.168.68.51:5555`**, at the owner's request, as the move in §3.2 was
+meant to be lasting. That leaves a debug port listening on the home LAN (adb still requires the
+host's key to be authorised). `adb -s 192.168.68.51:5555 usb`, or a reboot of the phone, turns it
+off.
