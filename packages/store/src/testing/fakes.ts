@@ -7,14 +7,14 @@
  * observing the test go red. A harness that passes against a no-op write is
  * worthless, and this is the only way to know it does not."*
  *
- * There are **fourteen** fakes here, and there are fourteen on purpose: a harness
+ * There are **fifteen** fakes here, and there are fifteen on purpose: a harness
  * that catches one failure shape is calibrated to that shape. They stand for the
  * causes CLAUDE.md section 5 names, and they fail for different reasons at
  * different points in the read. The fourth arrived with #46's write path, the
  * fifth with #61's, the sixth with #64's, the seventh with #66's, the eighth
  * with #89's, the ninth with #73's, the tenth with #14's, the eleventh with
- * #93's, the twelfth with #238's, the thirteenth with #325's and the
- * fourteenth with #384's, which is the rule this file exists to enforce: a new
+ * #93's, the twelfth with #238's, the thirteenth with #325's, the
+ * fourteenth with #384's and the fifteenth with #528's, which is the rule this file exists to enforce: a new
  * path may not ship without a fake proving the harness catches its failure.
  *
  * ⚠️ **The fourteenth breaks a DELETE, and every one before it breaks a write
@@ -46,6 +46,7 @@
  * | `staleUnitsStoreFactory` | *wrong layer* — the narrow write computed the row and returned it without persisting it | the call answers with a row saying `imperial`, and a fresh connection still says metric |
  * | `roundedMassStoreFactory` | *wrong layer* — a layer above tidied a mass to a whole kilogram on its way in | the row comes back with a mass, a plausible one, and a pound reading that is no longer what the rider typed |
  * | `survivingFrameStoreFactory` | *wrong time* — a **delete** that reports how many it removed and removes nothing | the erase says "2 pictures removed", and a fresh connection still has both |
+ * | `firstReferenceStoreFactory` | *wrong time* — a put that kept the row already there instead of replacing it | every put succeeds and the reference comes back well-formed — **from the first session**, not the last |
  *
  * The second and third are the ones a naive harness misses. Both write to the
  * **real** IndexedDB, inside a **real** transaction that **really commits**, and
@@ -75,6 +76,7 @@ import { SCHEMA_VERSIONS, TABLE } from '../schema';
 import type { NewRecordingChunk, NewRecordingSession } from '../recording';
 import type {
   ActivityRecord,
+  FramingReferenceRecord,
   RouteRecord,
   SegmentEffortRecord,
   SegmentRecord,
@@ -172,6 +174,9 @@ function bindStore(real: ActivityStore): PersistentStore {
     listCameraFrames: async (owner, limit) => real.listCameraFrames(owner, limit),
     countCameraFrames: async (owner) => real.countCameraFrames(owner),
     deleteCameraFrames: async (owner) => real.deleteCameraFrames(owner),
+    putFramingReference: async (record) => real.putFramingReference(record),
+    getFramingReference: async (owner) => real.getFramingReference(owner),
+    deleteFramingReference: async (owner) => real.deleteFramingReference(owner),
   };
 }
 
@@ -874,6 +879,44 @@ export function survivingFrameStoreFactory(): StoreFactory {
           // a weaker proof: what is being calibrated is the *round trip*, not
           // the arithmetic.
           real.countCameraFrames(owner),
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository whose framing-reference put **keeps the row already there**.
+ *
+ * The fifteenth fake, for #528. The owner's ruling is a reference *"from the
+ * rider's last session"*, and this store answers every put with success and
+ * goes on holding the FIRST reference it was ever given — so the framing check
+ * compares every later session with a placement the rider abandoned long ago,
+ * and says so with complete confidence.
+ *
+ * Every cheap assertion passes against it: the put resolves, a read returns a
+ * well-formed reference with the right athlete and the right number of
+ * landmarks, and a single-session test is indistinguishable from the real
+ * store. Only a round trip that writes TWO references and compares the one that
+ * comes back with the second notices — which is what
+ * `assertFramingReferenceRoundTrip` does when it is handed a store that already
+ * holds one. `framing-reference-store.test.ts` is the red/green pair.
+ */
+export function firstReferenceStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        putFramingReference: async (record: FramingReferenceRecord): Promise<void> => {
+          if ((await real.getFramingReference(record.athleteId)) !== undefined) {
+            // Reported as success, and nothing is written.
+            return;
+          }
+          await real.putFramingReference(record);
+        },
       };
     },
     destroy: async (name) => {

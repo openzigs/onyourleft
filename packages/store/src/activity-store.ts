@@ -96,14 +96,18 @@ import {
   fromPersistedSegment,
   toPersistedSegment,
   fromPersistedCameraFrame,
+  fromPersistedFramingReference,
+  framingReferenceProblem,
   fromPersistedRoute,
   fromPersistedWorkout,
   toPersistedCameraFrame,
+  toPersistedFramingReference,
   toPersistedRoute,
   toPersistedWorkout,
   type PersistedActivity,
   type PersistedAthlete,
   type PersistedCameraFrame,
+  type PersistedFramingReference,
   type PersistedLap,
   type PersistedPrivacyZone,
   type PersistedRoute,
@@ -115,6 +119,7 @@ import type {
   ActivitySummary,
   AthleteRecord,
   CameraFrameRecord,
+  FramingReferenceRecord,
   LapRecord,
   NewActivity,
   NewLap,
@@ -303,6 +308,12 @@ export interface AthleteDeletionCounts {
    * that ride's keep, and the switch is off every time.
    */
   readonly cameraFrames: number;
+  /**
+   * The side camera's framing reference removed — `0` or `1`, because there
+   * is at most one per athlete (#528, ADR 0033 D-7). Numbers read off a
+   * picture of the rider, so ADR 0029 D-4's *"everything derived from one"*.
+   */
+  readonly framingReferences: number;
 }
 
 /**
@@ -461,6 +472,10 @@ export class ActivityStore {
 
   get #cameraFrames(): Table<PersistedCameraFrame, string> {
     return this.#db.table<PersistedCameraFrame, string>(TABLE.cameraFrames);
+  }
+
+  get #framingReferences(): Table<PersistedFramingReference, string> {
+    return this.#db.table<PersistedFramingReference, string>(TABLE.framingReferences);
   }
 
   // --- Athletes -------------------------------------------------------------
@@ -738,6 +753,7 @@ export class ActivityStore {
         this.#routes,
         this.#workouts,
         this.#cameraFrames,
+        this.#framingReferences,
       ],
       async () => {
         // The signed records and the device key go with the athlete. The key is
@@ -796,6 +812,12 @@ export class ActivityStore {
           .where(INDEX.cameraFrameByAthlete)
           .equals(id)
           .delete();
+        // #528. Where the rider's knees and hips were in the side camera's
+        // picture — derived from a photograph of them, so it goes with them
+        // (ADR 0029 D-4, ADR 0033 D-7). A count rather than a boolean so the
+        // shape matches every other line of the sentence an erase produces.
+        const framingReferences = (await this.#framingReferences.get(id)) === undefined ? 0 : 1;
+        await this.#framingReferences.delete(id);
         await this.#athletes.delete(id);
         return {
           activities,
@@ -808,6 +830,7 @@ export class ActivityStore {
           routes,
           workouts,
           cameraFrames,
+          framingReferences,
         };
       },
     );
@@ -1484,6 +1507,69 @@ export class ActivityStore {
     return this.#db.transaction('rw', [this.#cameraFrames], async () =>
       this.#cameraFrames.where(INDEX.cameraFrameByAthlete).equals(owner).delete(),
     );
+  }
+
+  // --- The side camera's framing reference (#528) ---------------------------
+
+  /**
+   * Keeps where the rider was in the side camera's picture, **replacing** the
+   * one this athlete had — #528,
+   * [ADR 0033](../../../docs/adr/0033-side-camera-link.md) D-7.
+   *
+   * ⚠️ **Replacing, and that is the owner's *"from the rider's last session"*.**
+   * The table is keyed on the athlete, so a second put cannot add a row; it
+   * overwrites the first. `testing/fakes.ts` §`firstReferenceStoreFactory` is a
+   * store that kept the first instead, and
+   * `framing-reference-store.test.ts` is the round trip that catches it.
+   *
+   * ⚠️ **Nothing calls this in production yet.** The landmarks come from the
+   * pose model on the tablet
+   * ([#530](https://github.com/openzigs/onyourleft/issues/530)); #528 builds the
+   * record, its erase and its export so that the writer lands into rules that
+   * already hold.
+   *
+   * Refuses a reference whose athlete does not exist, inside the same
+   * transaction as the write, for `putCameraFrame`'s reason.
+   *
+   * @throws {StoreReferentialError} if `record.athleteId` names no athlete.
+   * @throws {StoreValidationError} naming the field and the constraint — never
+   * the value, because a landmark is a position in a picture of a person.
+   */
+  async putFramingReference(record: FramingReferenceRecord): Promise<void> {
+    const problem = framingReferenceProblem(record);
+    if (problem !== undefined) {
+      throw new StoreValidationError(problem);
+    }
+    await this.#db.transaction('rw', [this.#athletes, this.#framingReferences], async () => {
+      await this.#requireAthlete(record.athleteId);
+      await this.#framingReferences.put(toPersistedFramingReference(record));
+    });
+  }
+
+  /**
+   * This athlete's framing reference, or `undefined` when there is none — the
+   * ordinary state before a first side-camera session whose check passed.
+   */
+  async getFramingReference(owner: AthleteId): Promise<FramingReferenceRecord | undefined> {
+    const row = await this.#framingReferences.get(owner);
+    return row === undefined ? undefined : fromPersistedFramingReference(row);
+  }
+
+  /**
+   * Forgets this athlete's framing reference, so the next session has nothing
+   * to be compared with.
+   *
+   * @returns whether there was one.
+   */
+  async deleteFramingReference(owner: AthleteId): Promise<boolean> {
+    return this.#db.transaction('rw', [this.#framingReferences], async () => {
+      const existing = await this.#framingReferences.get(owner);
+      if (existing === undefined) {
+        return false;
+      }
+      await this.#framingReferences.delete(owner);
+      return true;
+    });
   }
 
   // --- Segment efforts (#66) ------------------------------------------------

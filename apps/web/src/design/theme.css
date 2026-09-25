@@ -2390,3 +2390,153 @@ select option {
   border-radius: 50%;
   inline-size: 0.6rem;
 }
+
+/*
+ * THE SIDE CAMERA — #528, ADR 0033.
+ *
+ * `views/SideCameraView.tsx` is the component. Two things are drawn here: the
+ * framing picture a rider lines the bike up by, and the full-screen sign the
+ * tripod phone shows while it films. The sign is the half CLAUDE.md §4f says is
+ * *"reviewed by measuring it in the pinned Chromium, not by reading the CSS"*,
+ * and `browser/sidecamera.browser.spec.ts` is that measurement.
+ *
+ * ## The sign fills the screen, and the word is as big as the screen allows
+ *
+ * #528: *"unmistakable from across the room: full screen, readable from where
+ * a person would enter"*. So the stage is `position: fixed` over the whole
+ * viewport, and the word is sized from the VIEWPORT rather than from the type
+ * scale — `min(22vw, 36vh)`, the largest that keeps seven letters on one line
+ * across a phone in landscape with the countdown and the stop control still
+ * below it. It never falls below `--oyl-font-size-metric`, so a reader who
+ * enlarged their text is not given smaller words by a small window.
+ *
+ * ⚠️ **What "readable from across the room" is measured against.** The sign
+ * trade's rule of thumb, repeated by every vendor that publishes a chart and
+ * attributed to the United States Sign Council, is about an inch of capital
+ * height per ten feet — roughly 1 : 120. ⚠️ It was read second-hand, from
+ * vendors quoting it, not from the Council's own publication. The spec's floor
+ * is a word whose em is a fifth of the screen's short side, and it measured
+ * 22 % upright and 36 % in landscape (the side-on tripod's likely way up). On
+ * a phone about 70 mm across its short side, and with capitals about 0.7 of an
+ * em, that is capitals of roughly 11 mm upright and 18 mm in landscape — about
+ * 1.3 m and 2.1 m by that rule. **That is a phone's limit, stated rather than
+ * hidden**: a person in the doorway of a bigger room reads the colour and the
+ * shape of a lit screen before they can read the word on it.
+ *
+ * ## `z-index: 25`
+ *
+ * Above the ride stage's 20 and below the shell's own indicator at 30, which
+ * `camera/indicator-style.test.ts` requires to stay the largest in this file.
+ * The indicator pill is in a top corner and the stop control at the bottom, so
+ * neither covers the other — the spec hit-tests the stop control's centre.
+ *
+ * ## Not colour alone
+ *
+ * The danger surface and ink are the pair the indicator already uses and the
+ * contrast gate already checks. The WORD carries the meaning; the colour is the
+ * second signal.
+ */
+.oyl-side-camera__stage {
+  align-items: center;
+  background: var(--oyl-color-danger-surface);
+  border: 0.5rem solid var(--oyl-color-danger-border);
+  box-sizing: border-box;
+  color: var(--oyl-color-danger-ink);
+  display: flex;
+  flex-direction: column;
+  gap: var(--oyl-space-sm);
+  inset: 0;
+  justify-content: center;
+  padding: max(var(--oyl-space-md), var(--oyl-safe-top))
+    max(var(--oyl-space-md), var(--oyl-safe-right)) max(var(--oyl-space-md), var(--oyl-safe-bottom))
+    max(var(--oyl-space-md), var(--oyl-safe-left));
+  position: fixed;
+  text-align: center;
+  z-index: 25;
+}
+
+.oyl-side-camera__sign {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oyl-space-xs);
+  margin: 0;
+}
+
+.oyl-side-camera__word {
+  font-size: max(var(--oyl-font-size-metric), min(22vw, 36vh));
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.oyl-side-camera__detail {
+  font-size: var(--oyl-font-size-lg);
+  font-weight: 600;
+}
+
+.oyl-side-camera__countdown {
+  font-size: var(--oyl-font-size-xl);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  margin: 0;
+}
+
+/*
+ * The one stop control. Bigger than the 44 px floor `.oyl-button` declares,
+ * because it is reached by somebody who has walked over to a tripod, perhaps
+ * in a hurry — and `.oyl-button`'s own `min-height`/`min-width` still hold
+ * under it, so the floor is kept if this rule is ever deleted.
+ */
+.oyl-side-camera__stop .oyl-button {
+  font-size: var(--oyl-font-size-lg);
+  font-weight: 700;
+  min-height: 3.5rem;
+  min-width: 12rem;
+}
+
+/*
+ * The framing picture. Its box takes the camera's own shape (the component
+ * sets `aspect-ratio` from the video's size), and the outline is drawn in a
+ * `viewBox` of that shape, so a circle is a circle whichever way the phone is
+ * held. `max-block-size` keeps a portrait picture from pushing the controls
+ * off a landscape screen.
+ */
+.oyl-framing {
+  margin: 0 0 var(--oyl-space-md);
+}
+
+.oyl-framing__picture {
+  background: var(--oyl-color-ink);
+  max-block-size: 70vh;
+  max-inline-size: 100%;
+  position: relative;
+}
+
+.oyl-framing__video,
+.oyl-framing__overlay {
+  block-size: 100%;
+  inline-size: 100%;
+  inset: 0;
+  position: absolute;
+}
+
+.oyl-framing__video {
+  object-fit: contain;
+}
+
+.oyl-framing__overlay * {
+  fill: none;
+  stroke-width: 3px;
+  vector-effect: non-scaling-stroke;
+}
+
+/* The guide is SOLID and the ghost is DASHED: the dash, not the colour, is what tells them apart. */
+.oyl-framing__guide * {
+  stroke: var(--oyl-color-canvas);
+}
+
+.oyl-framing__ghost * {
+  stroke: var(--oyl-color-accent);
+  stroke-dasharray: 8 6;
+}

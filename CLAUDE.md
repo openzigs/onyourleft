@@ -74,7 +74,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         the one place ADR 0026 D-12 let the realistic world be
                         reached until #475 offered it in Settings, staged into
                         a local debug APK by `realistic:stage`. The gate is
-                        game.html?realistic
+                        game.html?realistic. Since #528 it also holds
+                        sidecamera.html and sidecamera-harness.tsx — the
+                        tripod phone's filming sign at a phone's size, driven
+                        through the real shell with a scripted link, because
+                        the real one (#529) does not exist yet
     public/             what Vite copies verbatim into `dist` (#405) — the web app
                         manifest and the three icons it names. A `.webmanifest`
                         is on neither LIC001's nor LIC002's extension list and
@@ -1982,6 +1986,7 @@ browser runs**.
 | `rideview.html`, `rideview-harness.tsx` | since [#422](https://github.com/openzigs/onyourleft/issues/422), the **Ride SCREEN** — `views/RideView.tsx` at `#/`, which is not the game. On the owner's tablet in landscape a prose reading measure cut it off at the ride controls with `WorkoutPanel` below the fold, and a rider testing whether ERG releases (#372) started a plain recording instead: **a layout defect produced a false answer to a safety question.** The fixture is the screen at its fullest — control granted, a saved workout, a threshold — because the control the owner could not see only renders then |
 | `rideview.browser.spec.ts` | its spec — every ride control on screen with no scrolling at 1280×800 and 1024×768, the trainer BESIDE the live metrics, and nothing wider than a phone. Its control puts the measure and the single column back and requires the workout to be below the fold again, which is the defect itself. ⚠️ **Since #436's review it also measures at 1280×720 and 1024×720, and a reviewer who remembers two tablet viewports is reading the old file**: 1280×800 is the tablet's *display*, the Android shell configures no fullscreen mode, and the WebView is shorter by the system bars — at 728 px *Pause* / *Stop* were below the fold behind a green gate. ⚠️ **720 was assumed, and was the wrong mechanism — since #439 `TABLET_IN_THE_SHELL` is 1280×800 with edge-to-edge insets 36/32, read off the device, and applied to the ENGINE through `browser/insets.ts`** (`Emulation.setSafeAreaInsetsOverride`, so `env()` itself reports them): at API 35+ the bars are drawn over the WebView rather than taken off it, and the fold is `height − bottom inset`. The upright insets are the landscape ones reused, and say so. Every tablet case now **publishes its margin to the fold** and holds it to a 50 px floor rather than to zero, because a control that clears by 3 px in this Chromium's fonts has not been shown to clear anywhere else. **The rule it leaves behind: a browser-gate "device" viewport is the display's CSS size, not the WebView's — report the margin, and treat one under about 50 px as unproven on that device** |
 | `loop.html`, `loop-harness.ts`, `loop.browser.spec.ts` | since #440, the start of a LOOP drawn by the real renderer at the real chase camera, with the road isolated by rendering each frame with and without its index list. It asserts the far road converges on the middle of the frame — the camera looks down the road it is on, measured through the centreline's camera since #499 put the product's on the rider's line — and its **control is a profile exactly as a pre-#440 build stored one** (the line, marked `loop` afterwards), which must look across the road instead. ⚠️ The cause was in `packages/domain`'s `routeProfile`, not the camera: see §9 |
+| `sidecamera.html`, `sidecamera-harness.tsx`, `sidecamera.browser.spec.ts` | since [#528](https://github.com/openzigs/onyourleft/issues/528), the tripod phone's **filming sign**, driven into the filming state through the real `AppShell` and the screen's own controls, with the scripted link the unit tests use handed in through `AppShellProps.sideCameraLink` (there is no production link: #529, held by ADR 0033 D-0). At five phone viewports, both ways up, down to 320 px: the stage's box is the viewport and a 7 × 7 hit-test grid finds nothing but the sign and the shell's own camera indicator; the shell's header and navigation are absent; the word's em is at least a fifth of the short side and twice any other text, on one line; and exactly **one** control is on the page, 44 × 44, inside the viewport and topmost at its centre — also with the link lost and the countdown showing. Its **control** strips the stage's class from the live element and requires the same markup NOT to cover the screen. ⚠️ It measures CSS pixels, not a doorway: `theme.css` §"THE SIDE CAMERA" says what the floor comes to in millimetres on a typical phone, and that the legibility rule it is set against was read second-hand |
 | `insets.ts` | since #439, edge-to-edge safe-area insets applied to the ENGINE through `Emulation.setSafeAreaInsetsOverride`, so `env()` itself reports them, plus the one inset reading taken off the owner's tablet. Every #439 case also reads the insets back, so a Playwright bump that drops the protocol call fails rather than measuring a page with none |
 | `../playwright.config.ts` | Chromium only, no retries, the SwiftShader flags without which a GPU-less runner gives MapLibre no context at all — and since #408 **two `webServer` entries**, because the product and the harness are different builds |
 | `../vite.browser.config.ts` | the harness build. A second Vite config, so the harness cannot reach a shipped bundle |
@@ -2110,11 +2115,12 @@ command and its own CI step.
 ⚠️ **`vite.browser.config.ts` names every entry explicitly, and must.** Vite's multi-page mode
 discovers only `index.html`; a page added without a line in `build.rollupOptions.input` is simply
 not built, and the failure is a 404 while the spec runs rather than a build error — which reads
-like a server fault and sends the next person to `playwright.config.ts`. There are **ten** entries
+like a server fault and sends the next person to `playwright.config.ts`. There are **eleven** entries
 today, not two — the map, the game, the HUD, the app shell, the game's stage (#373, #423), the
-Ride screen (#422), the loop start (#440), the home screen (#428), the owner's realistic page
-(ADR 0026 D-12) and the capture tool — and this sentence said *four* until #373 and *seven* until
-#430's pull request, when it had been stale for two entries already, so read
+Ride screen (#422), the loop start (#440), the home screen (#428), the side camera's filming sign
+(#528), the owner's realistic page (ADR 0026 D-12) and the capture tool — and this sentence said
+*four* until #373, *seven* until #430's pull request, when it had been stale for two entries
+already, and *ten* until #528, so read
 `build.rollupOptions.input` rather than this line. ⚠️ Since that pull request the harness build's
 `publicDir` is the app's own `public/`, so the realistic world is served to both builds at the
 same path. #266 confirmed the trap by

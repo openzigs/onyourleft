@@ -45,6 +45,7 @@ export type RouteId =
   | 'workouts'
   | 'game'
   | 'camera'
+  | 'side-camera'
   | 'devices'
   | 'transfer'
   | 'settings'
@@ -383,6 +384,26 @@ export const CREDITS_ROUTE: RouteDefinition = {
 };
 
 /**
+ * The tripod phone's side-camera screen (#528, ADR 0033).
+ *
+ * **Not in {@link ROUTES}**, for {@link CREDITS_ROUTE}'s reason: it is a mode
+ * a rider puts a spare phone into, reached from the Camera screen, and a
+ * top-level entry beside "Camera" would read as a second, different feature.
+ * In {@link ALL_ROUTES}, so the accessibility gate audits it unasked.
+ */
+export const SIDE_CAMERA_ROUTE: RouteDefinition = {
+  id: 'side-camera',
+  group: 'more',
+  layout: 'prose',
+  path: '/camera/side',
+  navLabel: 'Side camera',
+  title: 'Side camera',
+  summary:
+    'Use this phone on a tripod beside the bike, side-on at hip height, as the camera your ' +
+    'tablet starts and stops. This phone keeps nothing about you afterwards.',
+};
+
+/**
  * One stored ride, in full (#50).
  *
  * **Not in {@link ROUTES}**, for the reason {@link NOT_FOUND_ROUTE} is not:
@@ -461,6 +482,7 @@ export const NOT_FOUND_ROUTE: RouteDefinition = {
 export const ALL_ROUTES: readonly RouteDefinition[] = [
   ...ROUTES,
   CREDITS_ROUTE,
+  SIDE_CAMERA_ROUTE,
   ROUTE_BUILDER_ROUTE,
   ACTIVITY_DETAIL_ROUTE,
   SEGMENT_DETAIL_ROUTE,

@@ -118,6 +118,11 @@ export default defineConfig({
         loop: 'browser/loop.html',
         // #428: the home screen, laid out at a tablet's width and at 320 px.
         home: 'browser/home.html',
+        // #528: the tripod phone's filming sign, at a phone's size — whether
+        // it is the dominant thing on the screen, and whether the one stop
+        // control is 44 × 44 and uncovered. `sidecamera-harness.tsx` says what
+        // it does and does not prove.
+        sidecamera: 'browser/sidecamera.html',
         // ADR 0026 D-12: the ONE place the realistic world can be reached until
         // #475 offers it to riders — the owner's page, ridden automatically,
         // with the stylised world a tap away and a twenty-minute soak.

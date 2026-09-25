@@ -99,6 +99,7 @@ import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 import { ActivityStore } from './activity-store';
 import type {
   CameraFrameRecord,
+  FramingReferenceRecord,
   MatchCheckpointRecord,
   PrivacyZoneRecord,
   SegmentEffortRecord,
@@ -112,6 +113,7 @@ import {
   ATHLETES,
   cameraFrameFor,
   chunksOf,
+  framingReferenceFor,
   createStoreHarness,
   effortFor,
   extractableDeviceKey,
@@ -162,6 +164,7 @@ interface World {
   readonly zone: PrivacyZoneRecord;
   readonly checkpoint: MatchCheckpointRecord;
   readonly frame: CameraFrameRecord;
+  readonly reference: FramingReferenceRecord;
 }
 
 /** A distinct 64-character lowercase hex digest per athlete. */
@@ -220,6 +223,9 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
   // athlete would otherwise pass, which is the shape the different privacy-zone
   // centre above guards against one field along.
   const frame = cameraFrameFor(owner);
+  // #528. Different numbers per athlete, so a probe that handed back the
+  // wrong athlete's reference cannot pass on shape alone.
+  const reference = framingReferenceFor(owner);
 
   await harness.write(async (store) => {
     await store.putRoute(route);
@@ -238,6 +244,7 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     await store.putActivityRecord(signed);
     await store.putMatchCheckpoint(checkpoint);
     await store.putCameraFrame(frame);
+    await store.putFramingReference(reference);
     await store.setActivityLoadSummary(owner, ride.id, {
       effortWeightedPower: watts(210 + ATHLETES.indexOf(owner)),
       loadCoveredTime: seconds(SAMPLE_COUNT),
@@ -256,6 +263,7 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     zone,
     checkpoint,
     frame,
+    reference,
   };
 }
 
@@ -650,6 +658,35 @@ const PROBES: readonly ScopingProbe[] = [
       // `testing/fakes.ts` is the store built to fail exactly here.
       const theirsAfter = await store.listCameraFrames(theirs.owner);
       expect(theirsAfter.map((row) => row.id)).toContain(theirs.frame.id);
+    },
+  },
+  {
+    member: 'getFramingReference',
+    leaks:
+      'where somebody else’s knees and hips were in their own side camera’s picture, which is a set of numbers read off a photograph of them',
+    async run(store, mine, theirs) {
+      const read = await store.getFramingReference(mine.owner);
+      expect(read?.athleteId).toBe(mine.owner);
+      // The numbers are the caller's own, not merely the owner field: a store
+      // that relabelled another athlete's row would pass the line above.
+      expect(read?.landmarks).toStrictEqual(mine.reference.landmarks);
+      expect(read?.landmarks).not.toStrictEqual(theirs.reference.landmarks);
+      // ⚠️ And read as THEM too. The caller is always ATHLETE_A, whose row
+      // sorts first, so a read that ignored the owner and returned the table's
+      // first row would pass every line above by coincidence — a mutation
+      // doing exactly that stayed green until this line.
+      const theirsRead = await store.getFramingReference(theirs.owner);
+      expect(theirsRead?.landmarks).toStrictEqual(theirs.reference.landmarks);
+    },
+  },
+  {
+    member: 'deleteFramingReference',
+    leaks:
+      'another athlete’s framing reference, destroyed — their next session is compared with nothing and they are not told why',
+    async run(store, mine, theirs) {
+      await store.deleteFramingReference(mine.owner);
+      const theirsAfter = await store.getFramingReference(theirs.owner);
+      expect(theirsAfter?.landmarks).toStrictEqual(theirs.reference.landmarks);
     },
   },
 ];

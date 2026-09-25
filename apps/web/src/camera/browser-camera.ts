@@ -55,6 +55,7 @@ import type {
   CameraSession,
   CapturedFrame,
   LuminanceGrid,
+  PreviewSurface,
 } from './camera-port';
 import { capturedFrame, FRAME_MEDIA_TYPE, FRAME_QUALITY } from './frame';
 import { cameraProblemMessage } from './notice';
@@ -387,6 +388,23 @@ function browserSession(
         }
         throw new CameraCaptureError('unavailable', cameraProblemMessage('unavailable'));
       }
+    },
+    attachCameraPreview(surface: PreviewSurface): () => void {
+      // The stream itself, played by the platform: nothing is drawn, encoded
+      // or read, so no pixel of it passes through this program's code.
+      surface.muted = true;
+      surface.playsInline = true;
+      surface.srcObject = stream;
+      // A refused autoplay leaves an empty box rather than an error the rider
+      // can act on; the framing words beside it still say where they stand.
+      surface.play().catch(() => undefined);
+      let attached = true;
+      return () => {
+        if (attached) {
+          attached = false;
+          surface.srcObject = null;
+        }
+      };
     },
     stopCamera(): void {
       stopped = true;

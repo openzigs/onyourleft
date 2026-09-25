@@ -57,6 +57,7 @@ import type {
   ActivityRecord,
   AthleteRecord,
   CameraFrameRecord,
+  FramingReferenceRecord,
   LapRecord,
   PrivacyZoneRecord,
   OriginalFileReference,
@@ -1160,5 +1161,134 @@ export function fromPersistedCameraFrame(row: PersistedCameraFrame): CameraFrame
     width: decodedNumber('cameraFrame.width', row.width),
     height: decodedNumber('cameraFrame.height', row.height),
     bytes: row.bytes,
+  };
+}
+
+/**
+ * A framing reference, as it sits on disk — #528. The same fields as
+ * {@link FramingReferenceRecord}, in plain types.
+ */
+export interface PersistedFramingReference {
+  athleteId: string;
+  aspect: number;
+  landmarks: { name: string; x: number; y: number }[];
+}
+
+/**
+ * The most landmarks a reference may carry.
+ *
+ * The two common single-person keypoint sets are COCO's 17 points and
+ * BlazePose's 33, and which model this program runs is
+ * [#385](https://github.com/openzigs/onyourleft/issues/385)'s to decide — so
+ * the bound admits the larger with one to spare. What it is for is the other
+ * direction: a hand-edited row, or a future writer that put a whole skeleton
+ * sequence here, is refused rather than decoded into an outline with thousands
+ * of points.
+ */
+export const MAXIMUM_FRAMING_LANDMARKS = 34;
+
+/** The longest landmark name accepted. A name is a word, not a sentence. */
+export const MAXIMUM_FRAMING_LANDMARK_NAME = 32;
+
+/**
+ * What is wrong with a framing reference's numbers, or `undefined` when
+ * nothing is.
+ *
+ * One rule for both directions: `putFramingReference` refuses what this names
+ * on the way in, and {@link fromPersistedFramingReference} refuses it on the
+ * way out, so a row that could not have been written cannot be read either.
+ *
+ * ⚠️ **The message names the field and the constraint and never the value.**
+ * A landmark is a position in a photograph of a person, and ADR 0029 D-8
+ * binds a message about imagery harder than ADR 0004 D binds one about a
+ * coordinate. A number here says where somebody's knee was.
+ */
+export function framingReferenceProblem(reference: {
+  readonly aspect: unknown;
+  readonly landmarks: unknown;
+}): string | undefined {
+  if (
+    typeof reference.aspect !== 'number' ||
+    !Number.isFinite(reference.aspect) ||
+    reference.aspect <= 0
+  ) {
+    return 'framingReference.aspect: must be a finite number above zero';
+  }
+  const landmarks = reference.landmarks;
+  if (!Array.isArray(landmarks)) {
+    return 'framingReference.landmarks: must be a list';
+  }
+  if (landmarks.length === 0 || landmarks.length > MAXIMUM_FRAMING_LANDMARKS) {
+    return `framingReference.landmarks: must hold between 1 and ${String(MAXIMUM_FRAMING_LANDMARKS)} landmarks`;
+  }
+  const names = new Set<string>();
+  for (const [index, landmark] of (landmarks as unknown[]).entries()) {
+    const field = `framingReference.landmarks[${String(index)}]`;
+    if (typeof landmark !== 'object' || landmark === null) {
+      return `${field}: must be a landmark`;
+    }
+    const { name, x, y } = landmark as { name?: unknown; x?: unknown; y?: unknown };
+    if (
+      typeof name !== 'string' ||
+      name.trim().length === 0 ||
+      name.length > MAXIMUM_FRAMING_LANDMARK_NAME
+    ) {
+      return `${field}.name: must be a word of at most ${String(MAXIMUM_FRAMING_LANDMARK_NAME)} characters`;
+    }
+    if (names.has(name)) {
+      return `${field}.name: names a landmark twice`;
+    }
+    names.add(name);
+    for (const [axis, value] of [
+      ['x', x],
+      ['y', y],
+    ] as const) {
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
+        return `${field}.${axis}: must be a share of the picture, from 0 to 1`;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * A framing reference, on its way to disk — #528.
+ *
+ * Copied field by field rather than spread, so a field added to the record
+ * later is absent from disk until somebody adds it here on purpose.
+ */
+export function toPersistedFramingReference(
+  record: FramingReferenceRecord,
+): PersistedFramingReference {
+  return {
+    athleteId: record.athleteId,
+    aspect: record.aspect,
+    landmarks: record.landmarks.map((landmark) => ({
+      name: landmark.name,
+      x: landmark.x,
+      y: landmark.y,
+    })),
+  };
+}
+
+/**
+ * @throws {StoreDecodeError} naming the field and the constraint, and never
+ * the value — see {@link framingReferenceProblem}.
+ */
+export function fromPersistedFramingReference(
+  row: PersistedFramingReference,
+): FramingReferenceRecord {
+  const problem = framingReferenceProblem(row);
+  if (problem !== undefined) {
+    throw new StoreDecodeError(problem);
+  }
+  return {
+    athleteId: athleteId(decodedString('framingReference.athleteId', row.athleteId)),
+    aspect: row.aspect,
+    landmarks: row.landmarks.map((landmark) => ({
+      name: landmark.name,
+      x: landmark.x,
+      y: landmark.y,
+    })),
   };
 }
