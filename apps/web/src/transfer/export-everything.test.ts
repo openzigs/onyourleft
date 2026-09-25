@@ -14,6 +14,7 @@ import {
   cameraFrameFor,
   createStoreHarness,
   extractableDeviceKey,
+  framingReferenceFor,
   resetFixtureIds,
   rideFor,
   routeFor,
@@ -446,6 +447,7 @@ describe('the manifest names its fields rather than spreading the row', () => {
       workouts: [],
       activities: [],
       camera: { kept: 0, written: 0, files: [], cannotCarry: 'nothing kept' },
+      framingReference: undefined,
       exportedAt: 1,
     });
 
@@ -463,6 +465,7 @@ describe('the manifest names its fields rather than spreading the row', () => {
       workouts: [],
       activities: [],
       camera: { kept: 0, written: 0, files: [], cannotCarry: 'nothing kept' },
+      framingReference: undefined,
       exportedAt: 1,
     });
     const text = new TextDecoder().decode(file.bytes);
@@ -904,6 +907,39 @@ describe('exporting the pictures the rider kept (#384)', () => {
         `${file.fileName} contains the picture's bytes`,
       ).toBe(false);
     }
+  });
+});
+
+/* -------------------------------------------------------------------------- *
+ * #528, ADR 0033 D-7: the side camera's framing reference comes back too.
+ * -------------------------------------------------------------------------- */
+
+describe('exporting the side camera’s framing reference (#528)', () => {
+  it('carries it in the manifest, every number, read through the real store', async () => {
+    await seedLibrary(1);
+    const mine = framingReferenceFor(ATHLETE_A);
+    await harness.write(async (store) => store.putFramingReference(mine));
+
+    const { files } = await runExport();
+    const reference = manifestOf(files)['framingReference'] as Record<string, unknown>;
+
+    expect(reference['aspect']).toBe(mine.aspect);
+    expect(reference['landmarks']).toStrictEqual(mine.landmarks);
+    // Fields, not the row: the athlete is the manifest's own, not repeated.
+    expect(Object.keys(reference).sort()).toStrictEqual(['aspect', 'landmarks']);
+  });
+
+  it('says there is none rather than omitting the key', async () => {
+    await seedLibrary(1);
+    const { files } = await runExport();
+    expect(manifestOf(files)).toHaveProperty('framingReference', null);
+  });
+
+  it('carries no other athlete’s', async () => {
+    await seedLibrary(1);
+    await harness.write(async (store) => store.putFramingReference(framingReferenceFor(ATHLETE_B)));
+    const { files } = await runExport();
+    expect(manifestOf(files)['framingReference']).toBeNull();
   });
 });
 

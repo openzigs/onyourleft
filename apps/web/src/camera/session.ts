@@ -54,6 +54,7 @@ import type {
   CameraProblemKind,
   CameraSession,
   CapturedFrame,
+  PreviewSurface,
 } from './camera-port';
 import { CameraCaptureError } from './camera-port';
 import { consentDecision, NO_CONSENT, type CameraConsent, type ConsentAnswers } from './consent';
@@ -546,6 +547,29 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
   }
 
   /**
+   * Play the running camera, live, into `surface` — the side camera's framing
+   * screen (#528, ADR 0033 D-7).
+   *
+   * ⚠️ **Only a camera that is already running**, which is only ever one the
+   * rider agreed to and turned on: this never opens a camera and never asks
+   * the port for anything else. With no running camera it attaches nothing and
+   * returns a detach that does nothing.
+   *
+   * ⚠️ The port's method is called lexically here, not in a private helper, for
+   * `watchPresence`'s reason — `check:wiring` credits a `#private` body to the
+   * class.
+   *
+   * @returns the detach. Call it when the element goes away.
+   */
+  showPreview(surface: PreviewSurface): () => void {
+    const session = this.#session;
+    if (session === undefined || !session.live) {
+      return noPreview;
+    }
+    return session.attachCameraPreview(surface);
+  }
+
+  /**
    * Take one frame and hand it to the sink.
    *
    * ⚠️ **Nothing here holds the frame after this returns**, which is the
@@ -958,4 +982,9 @@ export class CameraController implements CameraThrottle, RiderPresencePort {
 
 function refused(problem: CameraProblemKind): CaptureOutcome {
   return { taken: false, problem, kept: false, keepFailed: false, bytes: 0, width: 0, height: 0 };
+}
+
+/** The detach for a preview that was never attached. */
+function noPreview(): void {
+  /* nothing was attached, so there is nothing to detach */
 }

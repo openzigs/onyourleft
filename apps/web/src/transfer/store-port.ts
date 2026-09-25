@@ -23,6 +23,7 @@ import type {
   AthleteDeletionCounts,
   CameraFrameRecord,
   DeviceKeyRecord,
+  FramingReferenceRecord,
   LapRecord,
   ListActivitiesOptions,
   NewActivity,
@@ -128,6 +129,12 @@ export interface AccountStore {
    * avoid.
    */
   countCameraFrames(owner: AthleteId): Promise<number>;
+  /**
+   * The side camera's framing reference — #528, ADR 0033 D-7: *"carried in
+   * the account export under ADR 0004 E, because it is the athlete's own
+   * data."* Numbers, never a picture, and at most one.
+   */
+  getFramingReference(owner: AthleteId): Promise<FramingReferenceRecord | undefined>;
 }
 
 /**

@@ -44,6 +44,7 @@ import type { Kilograms } from '@onyourleft/domain';
 import { GameView } from '../game/GameView';
 import { AboutView } from '../views/AboutView';
 import { CameraView } from '../views/CameraView';
+import { SideCameraView } from '../views/SideCameraView';
 import { HomeView } from '../views/HomeView';
 import { ActivitiesView } from '../views/ActivitiesView';
 import { ActivityDetailView } from '../views/ActivityDetailView';
@@ -82,6 +83,7 @@ import type { WorkoutPort } from '../workouts/store-port';
 
 import { CameraIndicator } from '../camera/indicator';
 import type { CameraController } from '../camera/session';
+import type { SideCameraLinkPort } from '../camera/side-camera-link-port';
 import type { ThermalPort } from '../game/thermal-port';
 
 import { UpdateOffer } from '../offline/UpdateOffer';
@@ -143,6 +145,18 @@ export interface AppShellProps {
    * rider navigated away from it, and the indicator with it.
    */
   readonly camera?: CameraController | undefined;
+  /**
+   * The tripod phone's link to the tablet — #528, ADR 0033.
+   *
+   * ⚠️ **`main.tsx` supplies none, and that is the state of the product, not
+   * an omission.** The link is [#529](https://github.com/openzigs/onyourleft/issues/529),
+   * which ADR 0033 D-0 holds until [#532](https://github.com/openzigs/onyourleft/issues/532)
+   * has measured a transport; until then the side-camera screen says in words
+   * that this phone cannot be paired. The prop exists so that the browser
+   * gate can drive the real shell into the filming state and measure it, and
+   * so #529's pairing has one place to arrive.
+   */
+  readonly sideCameraLink?: SideCameraLinkPort | undefined;
   /**
    * Android's thermal forecast, for the game's quality ladder (#247). Absent
    * in a browser. @see game/thermal-port.ts
@@ -406,6 +420,17 @@ function viewFor(
       return <SegmentDetailView port={props.efforts} segment={match.parameter} />;
     case 'camera':
       return <CameraView {...(props.camera === undefined ? {} : { controller: props.camera })} />;
+    case 'side-camera':
+      // #528. `main.tsx` hands over no link: pairing is #529, which ADR 0033
+      // D-0 holds until #532 has measured a transport. The screen says so.
+      return (
+        <SideCameraView
+          {...(props.camera === undefined ? {} : { controller: props.camera })}
+          {...(props.sideCameraLink === undefined ? {} : { link: props.sideCameraLink })}
+          // #423's mechanism: while the phone films, the sign has the screen.
+          onImmersive={onImmersive}
+        />
+      );
     case 'devices':
       return (
         <DevicesView

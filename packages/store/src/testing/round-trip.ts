@@ -39,6 +39,7 @@ import { STREAM_CHANNELS, type NewStreamSet } from '../streams';
 
 import type {
   CameraFrameRecord,
+  FramingReferenceRecord,
   RouteRecord,
   SegmentEndpointRecord,
   SegmentRecord,
@@ -609,4 +610,56 @@ export async function assertCameraFrameRoundTrip(
     }
   }
   return found;
+}
+
+/**
+ * Keep a framing reference, close every connection, read it back through a
+ * fresh one and compare every number — #528.
+ *
+ * ⚠️ **Run it on a harness that already holds an older reference for the same
+ * athlete**, and it is also the test of *"from the last session"*: the read
+ * must return THIS reference, not the one before it.
+ * `testing/fakes.ts` §`firstReferenceStoreFactory` passes every other check
+ * and fails exactly there.
+ *
+ * ⚠️ The failure names the field and never the value — a landmark is where a
+ * person's knee was in a photograph of them (ADR 0029 D-8).
+ *
+ * @throws {RoundTripFailure}
+ */
+export async function assertFramingReferenceRoundTrip(
+  harness: StoreHarness,
+  reference: FramingReferenceRecord,
+): Promise<FramingReferenceRecord> {
+  const read = await harness.roundTrip(
+    async (store) => store.putFramingReference(reference),
+    async (store) => store.getFramingReference(reference.athleteId),
+  );
+  if (read === undefined) {
+    throw new RoundTripFailure(
+      `the framing reference for ${reference.athleteId} was kept and reported success, and a fresh connection cannot see it`,
+    );
+  }
+  if (read.athleteId !== reference.athleteId || read.aspect !== reference.aspect) {
+    throw new RoundTripFailure(
+      'framingReference: the reference that came back is not the one kept',
+    );
+  }
+  if (read.landmarks.length !== reference.landmarks.length) {
+    throw new RoundTripFailure('framingReference.landmarks: a different number came back');
+  }
+  for (const [index, expected] of reference.landmarks.entries()) {
+    const found = read.landmarks[index];
+    if (
+      found === undefined ||
+      found.name !== expected.name ||
+      found.x !== expected.x ||
+      found.y !== expected.y
+    ) {
+      throw new RoundTripFailure(
+        `framingReference.landmarks[${String(index)}]: is not the landmark kept`,
+      );
+    }
+  }
+  return read;
 }

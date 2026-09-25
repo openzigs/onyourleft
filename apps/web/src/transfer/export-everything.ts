@@ -397,6 +397,21 @@ export function accountManifest(input: {
   readonly activities: readonly ManifestEntry[];
   /** #384. @see CameraManifest */
   readonly camera: CameraManifest;
+  /**
+   * #528, ADR 0033 D-7: where the rider was in the side camera's picture the
+   * last time the framing check passed — numbers, never a picture — or
+   * `undefined` when there is none.
+   */
+  readonly framingReference:
+    | {
+        readonly aspect: number;
+        readonly landmarks: readonly {
+          readonly name: string;
+          readonly x: number;
+          readonly y: number;
+        }[];
+      }
+    | undefined;
   readonly exportedAt: number;
 }): DownloadableFile {
   const manifest = {
@@ -432,6 +447,21 @@ export function accountManifest(input: {
     // #384, ADR 0029 D-3: the manifest **names** the pictures, and says in
     // words what an activity file cannot carry.
     camera: input.camera,
+    // #528, ADR 0033 D-7 and ADR 0004 E: the athlete's own numbers coming back
+    // to them. Fields, not the row: the record's `athleteId` is already the
+    // manifest's own, and a spread would carry whatever the record grows next.
+    // `null` rather than omitted, so "there was none" is written down.
+    framingReference:
+      input.framingReference === undefined
+        ? null
+        : {
+            aspect: input.framingReference.aspect,
+            landmarks: input.framingReference.landmarks.map((landmark) => ({
+              name: landmark.name,
+              x: landmark.x,
+              y: landmark.y,
+            })),
+          },
   };
   return {
     fileName: MANIFEST_FILE_NAME,
@@ -650,14 +680,16 @@ export async function exportEverything(
     options.onProgress?.({ completed: outcomes.length, total: wanted.length, outcome });
   }
 
-  const [athlete, deviceKey, privacyZones, segments, routes, workouts] = await Promise.all([
-    store.getAthlete(athleteId),
-    store.getDeviceKey(athleteId),
-    store.listPrivacyZones(athleteId),
-    store.listSegments(athleteId),
-    store.listRoutes(athleteId),
-    store.listWorkouts(athleteId),
-  ]);
+  const [athlete, deviceKey, privacyZones, segments, routes, workouts, framingReference] =
+    await Promise.all([
+      store.getAthlete(athleteId),
+      store.getDeviceKey(athleteId),
+      store.listPrivacyZones(athleteId),
+      store.listSegments(athleteId),
+      store.listRoutes(athleteId),
+      store.listWorkouts(athleteId),
+      store.getFramingReference(athleteId),
+    ]);
 
   // #384, ADR 0029 D-3.
   //
@@ -722,6 +754,7 @@ export async function exportEverything(
         files: cameraFiles,
         cannotCarry: CAMERA_CANNOT_CARRY,
       },
+      framingReference,
       exportedAt: Math.trunc(Date.now() / 1000),
     }),
   );

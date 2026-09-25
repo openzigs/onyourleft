@@ -63,6 +63,7 @@ import {
   ATHLETES,
   cameraFrameFor,
   chunksOf,
+  framingReferenceFor,
   createStoreHarness,
   effortFor,
   extractableDeviceKey,
@@ -184,6 +185,10 @@ async function seedEverything(harness: StoreHarness, owner: AthleteId): Promise<
     // fixture has to put one there, or "empty afterwards" is true of a table
     // nothing ever filled.
     await store.putCameraFrame(cameraFrameFor(owner));
+    // #528. Numbers read off a picture of the rider, and ADR 0029 D-4's
+    // "everything derived from one" — seeded so "empty afterwards" is checked
+    // against a table something filled.
+    await store.putFramingReference(framingReferenceFor(owner));
   });
 }
 
@@ -217,7 +222,8 @@ describe('the erasure enumeration comes from the schema', () => {
     // Twelve stores existed at version 7; two arrived after it and #384's
     // `cameraFrames` is the fifteenth. A derivation that returned nothing would
     // make every assertion below vacuous.
-    expect(tablesInSchema().length).toBeGreaterThanOrEqual(15);
+    // #528's `framingReferences` is the sixteenth.
+    expect(tablesInSchema().length).toBeGreaterThanOrEqual(16);
   });
 
   it('claims no table is unscoped without that being checked', () => {

@@ -829,3 +829,76 @@ export interface CameraFrameRecord {
    */
   readonly bytes: Uint8Array;
 }
+
+/**
+ * One landmark of a {@link FramingReferenceRecord}: a name and where it was in
+ * the picture, as a share of the picture's width and height — #528.
+ */
+export interface FramingLandmarkRecord {
+  /**
+   * Which point of the body this is, in the pose model's own vocabulary
+   * (`'hip'`, `'knee'` …). A string rather than a closed union because this
+   * package does not know which model the client runs;
+   * `apps/web/src/camera/framing.ts` is what refuses a name it does not know.
+   */
+  readonly name: string;
+  /** 0 is the left edge of the picture and 1 the right. */
+  readonly x: number;
+  /** 0 is the top edge of the picture and 1 the bottom. */
+  readonly y: number;
+}
+
+/**
+ * Where the rider was in the side camera's picture, the last time the framing
+ * check passed — #528,
+ * [ADR 0033](../../../docs/adr/0033-side-camera-link.md) D-7.
+ *
+ * ## It is numbers, and it is not a picture
+ *
+ * D-7, which replaced #528's own criterion that *"the stored reference is a
+ * picture of the rider"*:
+ *
+ * > The reference is the image-plane positions and scale of the landmarks the
+ * > pose model reports, plus the frame's dimensions. It is enough to draw a
+ * > ghost outline and to test placement against a tolerance. It is **not** a
+ * > photograph.
+ *
+ * So there is no byte array on this record and there must never be one: a
+ * photographic reference kept from session to session would be the *"always
+ * keep"* ADR 0029 D-2 refuses in terms. The owner's ruling on #527 is the
+ * other half — *"no picture is ever stored on the tablet"*.
+ *
+ * ## ⚠️ It is still the athlete's, and it is still derived from a picture
+ *
+ * Numbers read off a photograph of a person are *"everything derived from
+ * one"* in ADR 0029 D-4's line, so this record goes with an erase
+ * (`deleteAthlete`'s cascade, and `apps/web/src/transfer/erase-device.ts`
+ * §`ERASE_REMOVES` names it) and travels in the account export (ADR 0004 E),
+ * exactly like a kept frame.
+ *
+ * ## One per athlete, and the newest wins
+ *
+ * Keyed on `athleteId` and nothing else. The owner's ruling is a reference
+ * *"from the rider's last session"*, not a history of them, so a put replaces
+ * the row and there is no list to page. A store that kept the FIRST reference
+ * ever written would compare every later session against a placement the rider
+ * abandoned months ago; `testing/fakes.ts` §`firstReferenceStoreFactory` is the
+ * store built to fail exactly there.
+ *
+ * ⚠️ **Nothing writes one yet.** The landmarks come from the pose model on the
+ * tablet ([#530](https://github.com/openzigs/onyourleft/issues/530)); #528
+ * builds the phone that draws the outline and this record for #530 to fill.
+ */
+export interface FramingReferenceRecord {
+  /** Whose reference this is. It is also the primary key. */
+  readonly athleteId: AthleteId;
+  /**
+   * The picture's width divided by its height.
+   *
+   * ⚠️ Stored because `x` and `y` are shares of the picture: two pictures of
+   * different shapes put the same point at different shares, so a reference is
+   * only comparable with a picture of the same shape.
+   */
+  readonly aspect: number;
+  readonly landmarks: readonly FramingLandmarkRecord[];
+}

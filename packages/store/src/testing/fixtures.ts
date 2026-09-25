@@ -102,6 +102,7 @@ import type { DeviceKeyRecord, StoredActivityRecord } from '../identity';
 import type {
   AthleteRecord,
   CameraFrameRecord,
+  FramingReferenceRecord,
   NewActivity,
   NewLap,
   RouteRecord,
@@ -815,4 +816,36 @@ export async function seedCameraFrame(
 ): Promise<CameraFrameRecord> {
   await harness.write(async (store) => store.putCameraFrame(record));
   return record;
+}
+
+/**
+ * A framing reference — #528.
+ *
+ * ⚠️ **Different numbers per athlete and per `session`**, for
+ * `cameraFrameFor`'s reason: a scoping probe that returned somebody else's
+ * reference, or a store that kept the first of two, would otherwise hand back
+ * something indistinguishable from the right answer.
+ *
+ * The landmarks are a rider seen side-on, facing right, roughly where the
+ * side camera's outline puts one — not because the store cares, but so a
+ * reader of a failing test is not also reading nonsense.
+ */
+export function framingReferenceFor(owner: AthleteId, session = 1): FramingReferenceRecord {
+  const shift = (ATHLETES.indexOf(owner) + 1) * 0.01 + session * 0.001;
+  const at = (x: number, y: number): { x: number; y: number } => ({
+    x: Math.min(1, x + shift),
+    y: Math.min(1, y + shift),
+  });
+  return {
+    athleteId: owner,
+    aspect: 16 / 9,
+    landmarks: [
+      { name: 'shoulder', ...at(0.52, 0.3) },
+      { name: 'elbow', ...at(0.6, 0.42) },
+      { name: 'wrist', ...at(0.66, 0.5) },
+      { name: 'hip', ...at(0.42, 0.45) },
+      { name: 'knee', ...at(0.52, 0.62) },
+      { name: 'ankle', ...at(0.47, 0.82) },
+    ],
+  };
 }
