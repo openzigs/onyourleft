@@ -61,7 +61,14 @@ export interface SideCameraMeasurement {
   readonly word: Box | undefined;
   /** The big word's resolved font size, in pixels. */
   readonly wordFontSize: number;
-  /** The largest resolved font size of any OTHER visible text on the page. */
+  /**
+   * The largest resolved font size of any OTHER visible text on the page.
+   *
+   * ⚠️ Visible means drawn: the shell keeps the route's `h1` in the document
+   * while the chrome is absent, clipped to a 1 px box for screen readers
+   * (`oyl-visually-hidden`), and a 1 px box is not text anybody in the room
+   * can see, so it is not a rival to the sign.
+   */
   readonly largestOtherFontSize: number;
   /** Every visible control on the page — the criterion is that there is one. */
   readonly controls: readonly {
@@ -121,8 +128,9 @@ function textOf(element: Element): string {
 function visible(element: Element): boolean {
   const box = element.getBoundingClientRect();
   const style = getComputedStyle(element);
+  // More than a pixel each way: `oyl-visually-hidden` leaves exactly one.
   return (
-    box.width > 0 && box.height > 0 && style.visibility !== 'hidden' && style.display !== 'none'
+    box.width > 1 && box.height > 1 && style.visibility !== 'hidden' && style.display !== 'none'
   );
 }
 

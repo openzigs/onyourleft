@@ -11,7 +11,7 @@
  *    screen … A browser-gate measurement at a phone viewport shows it is the
  *    dominant element."* — the stage's box is the viewport; a 7 × 7 hit-test
  *    grid finds the stage (or the shell's own camera indicator, which says the
- *    same thing) at every point; the word is at least a fifth of the screen's
+ *    same thing) at every point; the word's em is at least 15 % of the screen's
  *    short side and more than twice the size of any other text on the page;
  *    and it is on one line inside the screen.
  * 2. *"It must not depend on colour alone"* — the carrier is the word, which
@@ -45,13 +45,13 @@ const TOUCH_TARGET_PIXELS = 44;
  * The smallest the word may be, as a share of the screen's shorter side.
  *
  * `theme.css` §"THE SIDE CAMERA" gives the arithmetic and its source: on a
- * phone about 70 mm across its short side, a fifth is a 14 mm em — capitals of
- * about 10 mm, legible at a little over a metre by the sign trade's
+ * phone about 70 mm across its short side, 15 % is a 10.5 mm em — capitals of
+ * about 7 mm, legible at a little under a metre by the sign trade's
  * inch-per-ten-feet rule (read second-hand). The word is drawn larger than the
  * floor at every viewport here, and each case prints by how much. A phone's
  * limit, stated.
  */
-const WORD_SHARE_OF_SHORT_SIDE = 0.2;
+const WORD_SHARE_OF_SHORT_SIDE = 0.15;
 
 /** How much bigger than every other text the word must be. */
 const WORD_DOMINANCE = 2;

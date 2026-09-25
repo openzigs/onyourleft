@@ -2405,21 +2405,33 @@ select option {
  * #528: *"unmistakable from across the room: full screen, readable from where
  * a person would enter"*. So the stage is `position: fixed` over the whole
  * viewport, and the word is sized from the VIEWPORT rather than from the type
- * scale — `min(22vw, 36vh)`, the largest that keeps seven letters on one line
- * across a phone in landscape with the countdown and the stop control still
- * below it. It never falls below `--oyl-font-size-metric`, so a reader who
- * enlarged their text is not given smaller words by a small window.
+ * scale — `min(17vw, 36vh)`. The height term decides in a wide landscape,
+ * where it leaves room below for the countdown and the stop control; the width
+ * term decides upright, where it is what keeps seven letters on one line.
+ *
+ * ⚠️ **The width term is set for the WIDEST font this runs under, and was
+ * found by CI rather than chosen.** The first version was `22vw`, uppercase,
+ * with a floor of `--oyl-font-size-metric`. It fitted on macOS and ran 11 to
+ * 13 px off both edges of every upright phone on the Linux runner, where the
+ * fallback sans is wider — the word measured about 4.9 em across there. At
+ * `17vw` that worst case is 83 % of the width, which clears the stage's
+ * padding and border at 320 px, and mixed case — which it is now — is
+ * narrower still. The rem floor went too, because at 320 px it was itself
+ * wider than the screen: this is a sign sized to its screen, not reading text,
+ * and the lines under it — the detail, the countdown and the stop control —
+ * stay on the type scale, so they do grow with a reader's text size.
  *
  * ⚠️ **What "readable from across the room" is measured against.** The sign
  * trade's rule of thumb, repeated by every vendor that publishes a chart and
  * attributed to the United States Sign Council, is about an inch of capital
  * height per ten feet — roughly 1 : 120. ⚠️ It was read second-hand, from
  * vendors quoting it, not from the Council's own publication. The spec's floor
- * is a word whose em is a fifth of the screen's short side, and it measured
- * 22 % upright and 36 % in landscape (the side-on tripod's likely way up). On
+ * is a word whose em is 15 % of the screen's short side; it measured 17 %
+ * upright and 30 to 36 % in landscape, the side-on tripod's likely way up. On
  * a phone about 70 mm across its short side, and with capitals about 0.7 of an
- * em, that is capitals of roughly 11 mm upright and 18 mm in landscape — about
- * 1.3 m and 2.1 m by that rule. **That is a phone's limit, stated rather than
+ * em, that is capitals of roughly 8 mm upright and 15 to 18 mm in landscape —
+ * about 1 m and 2 m by that rule. The fit was also checked locally with the
+ * word forced into Verdana Bold, a wider face than the runner's fallback. **That is a phone's limit, stated rather than
  * hidden**: a person in the doorway of a bigger room reads the colour and the
  * shape of a lit screen before they can read the word on it.
  *
@@ -2463,11 +2475,9 @@ select option {
 }
 
 .oyl-side-camera__word {
-  font-size: max(var(--oyl-font-size-metric), min(22vw, 36vh));
+  font-size: min(17vw, 36vh);
   font-weight: 800;
-  letter-spacing: 0.02em;
   line-height: 1;
-  text-transform: uppercase;
 }
 
 .oyl-side-camera__detail {
